@@ -1449,6 +1449,7 @@ class ShiftedTestSetResult(SolverResult):
     gap_median: Optional[float] = None  # percentage points, all models (added 2026-10-20)
     slope: float                       # least-squares fit: new = slope * original + intercept
     intercept: float
+    network_rank_correlation: Optional[float] = None  # Spearman, original against new, non-baseline models (added 2026-10-20)
 
 
 class ProxyDriftResult(SolverResult):

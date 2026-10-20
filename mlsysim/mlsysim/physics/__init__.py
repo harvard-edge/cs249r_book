@@ -901,3 +901,25 @@ __all__ += [
     "calc_mm1_max_utilization",
     "calc_batch_formation_wait",
 ]
+
+
+# --- Benchmark run statistics (added 2026-10-20) ---
+from .statistics import (
+    calc_t_critical,
+    calc_welch_interval,
+    calc_mean_half_width,
+    calc_samples_per_arm_for_difference,
+    calc_mcnemar_max_discordant,
+    calc_expected_calibration_error,
+    calc_spearman_rank_correlation,
+)
+
+__all__ += [
+    "calc_t_critical",
+    "calc_welch_interval",
+    "calc_mean_half_width",
+    "calc_samples_per_arm_for_difference",
+    "calc_mcnemar_max_discordant",
+    "calc_expected_calibration_error",
+    "calc_spearman_rank_correlation",
+]

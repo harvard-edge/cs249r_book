@@ -829,3 +829,108 @@ def calc_sprt_expected_samples(upper: float, lower: float, drift: float, upper_p
     if drift == 0:
         raise ValueError("drift must be nonzero")
     return (upper_probability * upper + (1 - upper_probability) * lower) / drift
+
+
+# --- Benchmark run statistics: Welch intervals, run counts, paired gaps, calibration (added 2026-10-20) ---
+# Repeated benchmark runs are a small sample of a noisy measurement. These are
+# the closed forms a benchmark comparison reports: the Student t critical value
+# for few runs, Welch's interval on a difference of means with unequal spreads,
+# the half-width of a mean of n runs, the runs a two-sample comparison needs at
+# a stated power, the largest disagreement count at which McNemar's test flags
+# a fixed net gap, and the expected calibration error of binned predictions.
+
+
+def calc_t_critical(degrees_of_freedom, confidence):
+    """Two-sided Student t critical value: the ``(1 + confidence) / 2`` quantile (2.78 at 4 dof, 0.95).
+
+    Non-integer degrees of freedom (Welch-Satterthwaite) are allowed.
+    """
+    if degrees_of_freedom <= 0 or not 0.0 < confidence < 1.0:
+        raise ValueError("degrees_of_freedom must be positive and confidence in (0, 1)")
+    from scipy.stats import t
+    return float(t.ppf(0.5 + confidence / 2, degrees_of_freedom))
+
+
+def calc_welch_interval(mean_a, sd_a, n_a, mean_b, sd_b, n_b, confidence):
+    """Welch's interval on ``mean_a - mean_b`` for two samples with unequal spreads (Welch 1947).
+
+    ``se = sqrt(s_a^2 / n_a + s_b^2 / n_b)``; the Welch-Satterthwaite degrees
+    of freedom are ``se^4 / ((s_a^2/n_a)^2 / (n_a - 1) + (s_b^2/n_b)^2 / (n_b - 1))``.
+    Returns ``dict(difference, se, dof, t, low, high)``.
+    """
+    if n_a < 2 or n_b < 2:
+        raise ValueError("each sample needs at least two values")
+    va, vb = sd_a ** 2 / n_a, sd_b ** 2 / n_b
+    se = math.sqrt(va + vb)
+    dof = (va + vb) ** 2 / (va ** 2 / (n_a - 1) + vb ** 2 / (n_b - 1))
+    t = calc_t_critical(dof, confidence)
+    d = mean_a - mean_b
+    return dict(difference=d, se=se, dof=dof, t=t, low=d - t * se, high=d + t * se)
+
+
+def calc_mean_half_width(sd, n_samples, confidence):
+    """Half-width of a ``confidence`` interval on a mean of ``n_samples`` values: ``t_{n-1} sd / sqrt(n)``."""
+    if n_samples < 2:
+        raise ValueError("n_samples must be at least 2")
+    return calc_t_critical(n_samples - 1, confidence) * calc_standard_error(sd, n_samples)
+
+
+def calc_samples_per_arm_for_difference(sd, difference, z_alpha, z_beta):
+    """Samples per arm for a two-sided two-sample test of a mean difference: ``2 (z_a + z_b)^2 sd^2 / d^2``.
+
+    The normal-approximation power formula; ``z_alpha`` is the two-sided
+    critical value (1.96 at 95 percent) and ``z_beta`` the power quantile
+    (0.84 at 80 percent power). Not rounded up.
+    """
+    if difference == 0:
+        raise ValueError("difference must be nonzero")
+    return 2 * (z_alpha + z_beta) ** 2 * sd ** 2 / difference ** 2
+
+
+def calc_mcnemar_max_discordant(net_gap, critical):
+    """Largest disagreement count ``b + c`` at which McNemar's statistic still exceeds ``critical``.
+
+    The statistic (no continuity correction) is ``(b - c)^2 / (b + c)``; with
+    the net gap ``b - c`` fixed, it exceeds the 1-dof chi-square critical value
+    only when ``b + c <= floor(gap^2 / critical)`` (McNemar 1947).
+    """
+    if critical <= 0:
+        raise ValueError("critical must be positive")
+    return math.floor(net_gap ** 2 / critical)
+
+
+def calc_expected_calibration_error(bins):
+    """Expected calibration error of binned predictions: ``sum |B_i| / n * |acc_i - conf_i|``.
+
+    ``bins`` is a sequence of ``(count, confidence, accuracy)``; the weight of
+    each bin is its share of the predictions (Pakdaman Naeini et al. 2015;
+    Guo et al. 2017, eq. 3).
+    """
+    total = sum(n for n, _, _ in bins)
+    if total <= 0:
+        raise ValueError("bins must hold at least one prediction")
+    return sum(n / total * abs(acc - conf) for n, conf, acc in bins)
+
+
+def calc_spearman_rank_correlation(xs, ys):
+    """Spearman's rank correlation: Pearson correlation of the average ranks (ties share a rank)."""
+    if len(xs) != len(ys) or len(xs) < 2:
+        raise ValueError("xs and ys must have the same length, at least 2")
+
+    def _ranks(v):
+        order = sorted(range(len(v)), key=lambda i: v[i])
+        ranks = [0.0] * len(v)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and v[order[j + 1]] == v[order[i]]:
+                j += 1
+            for k in range(i, j + 1):
+                ranks[order[k]] = (i + j) / 2 + 1
+            i = j + 1
+        return ranks
+
+    rx, ry = _ranks(xs), _ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    cov = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    return cov / math.sqrt(sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry))

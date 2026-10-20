@@ -5116,3 +5116,43 @@ def test_single_machine_serving_scenarios():
     assert Scenarios.ServingFanout10Leaves.all_up == pytest.approx(0.99 ** 10)
     assert Scenarios.RecommenderTrafficSurge.surge_factor == pytest.approx(10)
     assert Scenarios.ImageServiceLittlesLaw.in_flight == pytest.approx(50)
+
+
+def test_benchmark_decision_scenarios():
+    """Run noise, Welch intervals, run and sample counts, paired accuracy, run order, gates (added 2026-10-20)."""
+    from pytest import approx
+    from mlsysim.core.units import Q_
+    from mlsysim.physics import calc_t_critical, calc_spearman_rank_correlation
+    eos, dell = Scenarios.EosEightH100ResNetMLPerfV40, Scenarios.DellEightH100ResNetMLPerfV40
+    assert dell.published_score.m_as("minute") == approx(13.218366, rel=1e-6)
+    assert eos.cv == approx(0.0047512, rel=1e-4) and dell.failed_run_minutes == [13.94403]
+    w = Scenarios.EosAgainstDellResNetMLPerfV40
+    assert w.difference.m_as("minute") == approx(0.103846, rel=1e-5)
+    assert w.dof == approx(4.175281, rel=1e-5) and w.t_critical == approx(2.731076, rel=1e-5)
+    assert w.low.m_as("minute") == approx(0.026040, rel=1e-4) and w.verdict == "real, below threshold"
+    assert Scenarios.EosAgainstDellAllRunsResNetMLPerfV40.verdict == "unresolved"
+    h = Scenarios.EosAgainstH200ResNetMLPerfV40
+    assert h.fraction_of_base(h.low) == approx(0.0872504, rel=1e-5) and h.verdict == "real and useful"
+    assert w.half_width_with_spread(Q_(eos.sd_minutes, "minute")).m_as("minute") == approx(0.101306, rel=1e-5)
+    p = Scenarios.EosResNetRunCountPlanning
+    assert p.half_width_fraction(5) == approx(0.0058993, rel=1e-4) and p.runs_per_system(0.005) == approx(14.17417, rel=1e-5)
+    assert Scenarios.ImageNetValidationSamplingNoise.half_width == approx(0.0037425, rel=1e-4)
+    assert Scenarios.AccuracyWithinOnePointSampleSize.samples_needed == 1825
+    assert Scenarios.MLPerfP90QuerySampleSize.samples_needed == 23886
+    assert Scenarios.MLPerfP99QuerySampleSize.samples_needed == 262742
+    c = Scenarios.NinetyFiveAgainstNinetyFourOnSameImages
+    assert c.net_gap == 10 and c.max_discordant == 26 and c.independent_interval[0] < 0
+    s = Scenarios.EosResNetTwoSeedsSameValidationSet
+    assert s.net_gap == 153 and s.max_discordant == 6093
+    o = Scenarios.WarmingPhoneRunOrder
+    assert o.blocked_bias == approx(0.195580, rel=1e-4) and o.interleaved_bias == approx(0.041013, rel=1e-4)
+    b = Scenarios.WiderBeamSearchTranslation
+    assert b.slowdown == approx(4.0) and b.budget_ratio == approx(2.0) and b.metric_gain == approx(0.5)
+    assert Scenarios.ThreeBinReliabilityDiagram.ece == approx(0.09)
+    g = Scenarios.MobileNetV2Int8CameraTrapGates
+    assert g.edge_images == 50 and g.edge_half_width == approx(12.908294, rel=1e-5)
+    assert g.top1_loss == approx(0.9) and g.ece_ratio == approx(0.089 / 0.031)
+    assert calc_t_critical(4, 0.95) == approx(2.776445, rel=1e-6)
+    assert calc_spearman_rank_correlation([1, 2, 2, 3], [1, 3, 2, 4]) == approx(0.948683, rel=1e-5)
+    r = Scenarios.ImageNetV2Shift.result
+    assert r.network_rank_correlation == approx(0.996634, rel=1e-5)

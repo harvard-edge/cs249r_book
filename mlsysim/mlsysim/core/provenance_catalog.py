@@ -4735,3 +4735,62 @@ MLPERF_INFERENCE_RULES_V50 = Provenance(
     notes="Server latency constraint for Resnet50-v1.5: 15 ms at the 99th percentile; Llama2-70b "
           "conversational TTFT/TPOT 2000 ms/200 ms, interactive 450 ms/40 ms.",
 )
+# --- Benchmarking, deciding from measurements (added 2026-10-20) ---
+MLPERF_INFERENCE_RULES_QUERY_COUNTS = Provenance(
+    id="prov:mlperf-inference-rules-query-counts",
+    kind=ProvenanceKind.DATASHEET,
+    ref="MLCommons, MLPerf Inference rules, inference_rules.adoc, table of tail-latency percentile, confidence, "
+        "margin of error, and minimum inferences",
+    url="https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc",
+    verified="2026-10-17",
+    notes="The rules size a latency run by n = z^2 p (1 - p) / m^2 and round up to a multiple of 2^13: the 90th "
+          "percentile at 99 percent confidence and a 0.50 percent margin needs 23,886 inferences, rounded to "
+          "24,576; the 99th percentile at 99 percent confidence and a 0.05 percent margin needs 262,742, "
+          "rounded to 270,336.",
+)
+ANANDTECH_GALAXY_S4_2013 = Provenance(
+    id="prov:anandtech-galaxy-s4-2013",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Klug and Lal Shimpi, Looking at CPU/GPU Benchmark Optimizations in Galaxy S 4, AnandTech, July 30, 2013",
+    url="https://web.archive.org/web/2013/http://www.anandtech.com/show/7187/looking-at-cpugpu-benchmark-optimizations-galaxy-s-4",
+    verified="2026-10-17",
+    notes="International Galaxy S 4 (Exynos 5410): the GPU ran at 480 MHz in games and in GFXBench 2.7.0 and at "
+          "532 MHz in GLBenchmark 2.5.1, AnTuTu, and Quadrant. The identical low-level triangle test scored "
+          "37.9 million triangles/s in GFXBench 2.7.0 and 43.2 million in GLBenchmark 2.5.1 (mean of 5 runs). "
+          "Samsung's statement, as reported: 533 MHz is the maximum GPU frequency. Read through the Internet "
+          "Archive.",
+)
+ZHANG_2024_GSM1K = _lit(
+    "prov:zhang-2024-gsm1k",
+    "Zhang et al. (2024), A Careful Examination of Large Language Model Performance on Grade School "
+    "Arithmetic, NeurIPS 2024 Datasets and Benchmarks",
+    url="https://arxiv.org/abs/2405.00332",
+    verified="2026-10-17",
+    notes="Abstract: on GSM1k, new problems matched to GSM8k, leading models show accuracy drops of up to 8 percent.",
+)
+GUO_2017_CALIBRATION_FIGURE1 = _lit(
+    "prov:guo-2017-calibration-figure1",
+    "Guo, Pleiss, Sun, and Weinberger (2017), On Calibration of Modern Neural Networks, ICML 2017, Figure 1",
+    url="https://arxiv.org/abs/1706.04599",
+    verified="2026-10-17",
+    notes="Reliability diagrams on CIFAR-100: LeNet 5 (1998) error 44.9 percent, ResNet 110 (2016) error 30.6 "
+          "percent, as printed in the figure panels.",
+)
+KOH_WILDS_IWILDCAM_TABLE4 = _lit(
+    "prov:koh-wilds-iwildcam-table4",
+    "Koh et al. (2021), WILDS: A Benchmark of in-the-Wild Distribution Shifts, ICML 2021, Table 4",
+    url="https://arxiv.org/abs/2012.07421",
+    verified="2026-10-17",
+    notes="iWildCam2020-WILDS, ResNet-50, standard (ERM) training, 3 replicates: in-distribution macro F1 47.0 "
+          "(standard deviation 1.4) and average accuracy 75.7 (0.3); out-of-distribution (camera traps unseen "
+          "in training) macro F1 31.0 (1.3) and average accuracy 71.6 (2.5).",
+)
+TUMMALAPALLI_2026_RTX4050 = _lit(
+    "prov:tummalapalli-2026-rtx4050",
+    "Tummalapalli, Arayakandy, Pal, and Kundan (2026), LLM Inference at the Edge: Mobile, NPU, and GPU "
+    "Performance Efficiency Trade-offs Under Sustained Load, arXiv 2603.23640v2 (preprint), Section 4.1 and Table 5",
+    url="https://arxiv.org/abs/2603.23640",
+    verified="2026-10-20",
+    notes="NVIDIA RTX 4050, runs 2 to 20: mean decode throughput 131.70 tok/s, standard deviation 2.87 tok/s; the "
+          "text states CV = 2.2 percent.",
+)

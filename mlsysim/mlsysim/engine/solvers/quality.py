@@ -13,6 +13,7 @@ from typing import Optional
 import numpy as np
 
 from ..results import ProxyDriftResult, ShiftedTestSetResult
+from ...physics.statistics import calc_spearman_rank_correlation
 from .base import ForwardModel
 
 
@@ -36,8 +37,9 @@ class ShiftedTestSetModel(ForwardModel):
         # A series without a published gap column: gap = original - new (added 2026-10-20).
         gap = (lambda r: r[gap_key]) if gap_key else (lambda r: r[original_key] - r[new_key])
         gaps = [gap(r) for r in rows]
-        nets = [gap(r) for r in rows
-                if not (baseline_prefix and str(r["model"]).startswith(baseline_prefix))]
+        networks = [r for r in rows
+                    if not (baseline_prefix and str(r["model"]).startswith(baseline_prefix))]
+        nets = [gap(r) for r in networks]
         slope, intercept = np.polyfit(orig, new, 1)
         return ShiftedTestSetResult(
             model_count=len(rows), baseline_count=len(rows) - len(nets),
@@ -46,6 +48,8 @@ class ShiftedTestSetModel(ForwardModel):
             mean_gap=sum(gaps) / len(gaps),
             gap_median=float(np.median(gaps)),
             slope=float(slope), intercept=float(intercept),
+            network_rank_correlation=calc_spearman_rank_correlation(
+                [r[original_key] for r in networks], [r[new_key] for r in networks]),
         )
 
 
