@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🗺️ The Blueprint — Instructor Site</h1>
+  <h1>🗺️ The AI Engineering Blueprint: Instructor Site</h1>
 </div>
 
 <!-- EARLY-RELEASE-CALLOUT:START -->
@@ -15,7 +15,7 @@
 
 ## 📖 What This Is
 
-"The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
+"The AI Engineering Blueprint" is the instructor-facing companion site for the [Machine Learning Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI engineering as a university course.
 
 <table width="100%" style="width:100%">
   <thead>
