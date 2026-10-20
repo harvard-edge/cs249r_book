@@ -92,14 +92,12 @@ class InductiveBiasLocalityCalc:
     """ImageNet-sized locality-bias parameter reduction for one feature detector."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    img_dim = 224
-    img_channels = 3
-    kernel = 3
+    layer = Scenarios.ImageNetRgbFilterVersusDense  # 224x224 RGB, one 3x3 filter
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_input_weights = img_dim * img_dim * img_channels
-    local_filter_weights = kernel * kernel * img_channels
-    spatial_locality_reduction = dense_input_weights / local_filter_weights
+    dense_input_weights = layer.dense_weights
+    local_filter_weights = layer.weights
+    spatial_locality_reduction = layer.sharing_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(spatial_locality_reduction > 5_000, f"Expected ImageNet locality reduction above 5,000x, got {spatial_locality_reduction:.1f}x.")
@@ -456,11 +454,12 @@ class MLPDefinitionCosts:
     """Quantitative anchor for dense layer scaling in the MLP definition."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    layer_width = 1024
+    layer = Scenarios.Dense1024LayerFp16
+    layer_width = layer.in_features
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_params = layer_width * layer_width
-    dense_fp16_memory = dense_params * BYTES_FP16
+    dense_params = layer.weights
+    dense_fp16_memory = layer.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(dense_params == 1_048_576, f"1024x1024 dense layer should have 1,048,576 weights, got {dense_params}.")
@@ -569,33 +568,25 @@ class MLPvsCNN:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    mnist_train_examples = int(Datasets.MNIST.training_examples.to(count).magnitude)
-    img_w = Datasets.MNIST.image_width
-    img_h = Datasets.MNIST.image_height
-    mlp_in = img_w * img_h
-    mlp_out = Datasets.MNIST.num_classes
     # The 784-128-64-10 network used throughout @sec-neural-computation.
-    mlp_h1, mlp_h2 = 128, 64
-
+    mlp = Scenarios.MnistMlpLayerStack
+    # First layer: 32 features as 3x3 filters or as dense units.
+    first = Scenarios.MnistFirstConvLayer
     # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
-    c1_in_ch = 1  # MNIST grayscale input channel
-    c1_k, c1_out = 3, 32
-    c2_k, c2_out = 3, 64
-    fc1_spatial = 7  # feature-map side after two 2x2 pools (28 -> 14 -> 7)
-    fc1_in, fc1_out = c2_out * fc1_spatial * fc1_spatial, 128
+    cnn = Scenarios.MnistSmallCnn
+    c1_out = first.out_channels
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: First layer at equal feature count (c1_out features)
-    dense_first_w = mlp_in * c1_out  # one weight per pixel per feature
-    conv_first_w = c1_k * c1_k * c1_in_ch * c1_out  # one 3x3 filter per feature
-    ratio = dense_first_w / conv_first_w
-    conv_positions = img_w * img_h  # same-padded filter positions
+    dense_first_w = first.dense_weights  # one weight per pixel per feature
+    conv_first_w = first.weights  # one 3x3 filter per feature
+    ratio = first.sharing_ratio
+    conv_positions = first.positions  # same-padded filter positions
 
     # Step 2: Whole-network weights (biases omitted)
-    mlp_p = (mlp_in * mlp_h1) + (mlp_h1 * mlp_h2) + (mlp_h2 * mlp_out)
-    cnn_head_p = (fc1_in * fc1_out) + (fc1_out * mlp_out)
-    cnn_p = (c1_k * c1_k * c1_in_ch * c1_out) + (c2_k * c2_k * c1_out * c2_out) + cnn_head_p
-    cnn_head_share = cnn_head_p / cnn_p
+    mlp_p = mlp.weights
+    cnn_p = cnn.weights
+    cnn_head_share = cnn.dense_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio >= 10, f"Dense first layer ({dense_first_w}) is not significantly larger than conv ({conv_first_w}). Ratio: {ratio:.1f}x")
@@ -856,18 +847,19 @@ class MLPLayerStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    input_dim = Datasets.MNIST.image_width * Datasets.MNIST.image_height  # 784
-    hidden_dim = 128  # first hidden layer of the Neural Computation running network
+    layer = Scenarios.MnistMlpFirstLayer  # 784 -> 128, FP32, batch one
+    input_dim = layer.in_features  # 784
+    hidden_dim = layer.out_features  # first hidden layer of the Neural Computation running network
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # MACs = Input * Output
-    macs = input_dim * hidden_dim
+    macs = layer.macs_per_example
 
     # Memory Accesses per Neuron = Input (read) + Weight (read)
     # Note: Output write is negligible compared to reads
     mem_acc_per_neuron = input_dim + input_dim  # 2 * input_dim
-    dense_batch1_intensity = (2 * macs) / (4 * macs)  # FP32, batch size 1
-    weight_mem = macs * BYTES_FP32  # one FP32 weight per MAC
+    dense_batch1_intensity = layer.intensity  # FP32, batch size 1
+    weight_mem = layer.weight_bytes  # one FP32 weight per MAC
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(macs == 100_352, f"MLP single dense layer MAC mismatch: {macs}")
@@ -1010,11 +1002,12 @@ class LargeMLP:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    width = 2048
+    layer = Scenarios.Dense2048Layer
+    width = layer.in_features
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params = width * width
-    mem = params * BYTES_FP32
+    params = layer.weights
+    mem = layer.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params >= MILLION, f"{width}x{width} layer should be large (>1M params).")
@@ -1557,22 +1550,18 @@ class CNNSharing:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # ImageNet input dimensions
-    img_dim = 224
-    img_channels = 3  # RGB
-
-    # CNN: 3x3 filter
-    cnn_k = 3
+    # ImageNet RGB input, one 3x3 filter against one dense unit
+    layer = Scenarios.ImageNetRgbFilterVersusDense
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # MLP: fully connected to all pixels
-    mlp_img_params = img_dim * img_dim * img_channels
+    mlp_img_params = layer.dense_weights
 
     # CNN: 3x3 filter across all input channels
-    cnn_filter_params = cnn_k * cnn_k * img_channels
+    cnn_filter_params = layer.weights
 
     # Parameter reduction
-    reduction = mlp_img_params / cnn_filter_params
+    reduction = layer.sharing_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(reduction) == 5575, f"Parameter reduction mismatch: {reduction}")
@@ -1797,31 +1786,27 @@ class CNNSysImpl:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    img_dim = IMAGE_DIM_RESNET  # 224
-    kernel_size = 3
-    c_out = 64  # output channels
-    c_in_single = 1  # single input channel (for weight illustration)
-    c_in = 64  # input channels of the full layer
+    layer = Scenarios.ImageNet64ChannelConv  # 224x224x64 -> 64, 3x3, FP32
+    c_in = layer.in_channels  # input channels of the full layer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Weight parameters for single input channel: K × K × C_in × C_out
-    weights_single_ch = kernel_size * kernel_size * c_in_single * c_out  # 576
+    weights_single_ch = layer.variant(in_channels=1).weights  # 576
 
     # Step 2: Spatial positions in the output feature map
-    spatial_positions = img_dim * img_dim  # 50,176
+    spatial_positions = layer.positions  # 50,176
 
     # Step 3: Activation values: H × W × C_out
-    activations = img_dim * img_dim * c_out  # 3,211,264
+    activations = layer.outputs  # 3,211,264
 
     # Step 4: Layer MACs: H x W x K x K x C_in x C_out
-    layer_macs = spatial_positions * kernel_size * kernel_size * c_in * c_out
+    layer_macs = layer.macs
     layer_gmac = layer_macs / BILLION
 
     # Step 5: Bytes for the full layer's weights and one sample's output activations
-    weights_full = kernel_size * kernel_size * c_in * c_out  # 36,864
-    weights_full_memory = weights_full * BYTES_FP32
-    activation_memory = activations * BYTES_FP32
+    weights_full = layer.weights  # 36,864
+    weights_full_memory = layer.weight_bytes
+    activation_memory = layer.activation_bytes
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(weights_single_ch == 576, f"Expected 576 weight params, got {weights_single_ch}")
@@ -1913,9 +1898,7 @@ class CNNLighthouseProfile:
     mobilenet_fp32 = mobilenet.size_in_bytes(BYTES_FP32)
     mobilenet_size_ratio = resnet.parameters.to(param).magnitude / mobilenet.parameters.to(param).magnitude
     mobilenet_flops_ratio = (resnet.inference_flops / mobilenet.inference_flops).to("").magnitude
-    resnet_3x3_macs_g = 1.850
-    resnet_total_macs_g = 3.858
-    resnet_3x3_share_pct = resnet_3x3_macs_g / resnet_total_macs_g * 100
+    resnet_3x3_share_pct = Scenarios.ResNet50ConvKernelShare.share * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(resnet_gflops - 8.2 * GFLOPs) <= 0.1 * GFLOPs, f"Expected ResNet-50 around 8.2 GFLOPs, got {resnet_gflops.to(GFLOPs).magnitude:.1f}.")
@@ -2188,11 +2171,11 @@ class ResidualAddIntensity:
     """Arithmetic intensity of an unfused elementwise residual addition."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    operands_moved = 3  # two reads and one write per addition
+    add = Scenarios.ResidualAddFp32  # two reads and one write per addition
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bytes_per_add = (operands_moved * BYTES_FP32).to(byte)
-    intensity = (1 * flop) / bytes_per_add
+    bytes_per_add = add.bytes_per_element.to(byte)
+    intensity = add.intensity * flop / byte
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(intensity < 0.1 * flop / byte, "An unfused residual add should sit far below 1 FLOP/byte.")
@@ -2444,17 +2427,16 @@ class RNNCompute:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    input_dim = 100
-    hidden_dim = 128
+    step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Recurrent: h_prev x W_hh (H x H)
-    macs_recurrent = hidden_dim * hidden_dim
+    macs_recurrent = step.recurrent_macs
 
     # Step 2: Input: x_t x W_hx (I x H)
-    macs_input = input_dim * hidden_dim
+    macs_input = step.input_macs
 
-    macs_total = macs_recurrent + macs_input
+    macs_total = step.macs_per_step
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(macs_recurrent > macs_input, f"Recurrent cost ({macs_recurrent}) should dominate Input cost ({macs_input}) for large hidden states.")
@@ -2537,10 +2519,11 @@ class RecurrentStateSize:
     """Fixed inference state of a recurrent network."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hidden_dim = 512  # illustrative hidden-state width
+    state = Scenarios.RecurrentState512Fp32  # illustrative hidden-state width
+    hidden_dim = state.hidden_dim
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state_memory = (hidden_dim * BYTES_FP32).to(KiB)
+    state_memory = state.state_bytes.to(KiB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(state_memory < 1 * MiB, "A single recurrent state should be kilobytes.")
@@ -4891,21 +4874,21 @@ class ThroughputCeilingCalc:
     """Evaluate real-time vision feasibility: ResNet-50 at 30 FPS leaves ample headroom."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fps = 30  # target frame rate
-    midrange_gpu_throughput = 10 * (TFLOP / second)  # reference mid-range GPU
-    objdet_gflops = 100  # object detection model
-    util_low, util_high = 0.50, 0.60  # planning utilization range
+    stream = Scenarios.ResNet50ThirtyFpsStream
+    fps = round(stream.frame_rate.to("Hz").magnitude)  # target frame rate
+    midrange_gpu_throughput = stream.peak_rate  # reference mid-range GPU
+    util_low, util_high = stream.utilization_low, stream.utilization_high  # planning utilization range
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    resnet_flops = Models.Vision.ResNet50.inference_flops.to(GFLOPs)
-    objdet_flops = objdet_gflops * GFLOPs
-    sustained_throughput = fps * resnet_flops / second
-    effective_throughput_low = midrange_gpu_throughput * util_low
-    effective_throughput_high = midrange_gpu_throughput * util_high
-    headroom = (effective_throughput_low / sustained_throughput).to("").magnitude
+    resnet_flops = stream.flops_per_frame.to(GFLOPs)
+    objdet_flops = stream.alternative_flops.to(GFLOPs)
+    sustained_throughput = stream.required_rate.to(GFLOPs / second)
+    effective_throughput_low = stream.sustained_low
+    effective_throughput_high = stream.sustained_high
+    headroom = stream.headroom
 
-    objdet_sustained_throughput = fps * objdet_flops / second
-    objdet_headroom = (effective_throughput_low / objdet_sustained_throughput).to("").magnitude
+    objdet_sustained_throughput = stream.alternative_required_rate.to(GFLOPs / second)
+    objdet_headroom = stream.alternative_headroom
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(headroom > 1, "ResNet-50 at 30 FPS must leave compute headroom on a mid-range GPU.")
