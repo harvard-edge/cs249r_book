@@ -5116,3 +5116,60 @@ def test_single_machine_serving_scenarios():
     assert Scenarios.ServingFanout10Leaves.all_up == pytest.approx(0.99 ** 10)
     assert Scenarios.RecommenderTrafficSurge.surge_factor == pytest.approx(10)
     assert Scenarios.ImageServiceLittlesLaw.in_flight == pytest.approx(50)
+
+
+def test_token_serving_scenarios():
+    """Serving a stream of tokens on one machine: decode batches, speculation, KV budgets, stall,
+    schedules, vLLM's pool, disaggregation, energy per token, Little's law on MLPerf (added 2026-10-20)."""
+    from mlsysim.core.units import Q_
+    g = Scenarios.Gpt2XlChatDecodeBatchesH100
+    assert g.kv_per_token.m_as("byte") == pytest.approx(307200)
+    assert g.step_time(1).m_as("ms") == pytest.approx(0.989425, rel=1e-5)
+    assert g.token_rate(32).m_as("1/s") == pytest.approx(8204.293, rel=1e-6)
+    assert g.cache_share(32) == pytest.approx(0.770402, rel=1e-5)
+    assert g.rate_ceiling.m_as("1/s") == pytest.approx(10649.36, rel=1e-6)
+    assert g.max_batch_within(Q_(20, "ms")) == 203 and g.max_batch_in_memory == 263
+    assert g.prefill_time.m_as("ms") == pytest.approx(3.882710, rel=1e-6)
+    assert g.ridge.m_as("flop/byte") == pytest.approx(295.2239, rel=1e-6)
+    sp = Scenarios.Gpt2XlSpeculativeGpt2SmallH100
+    assert sp.round_time.m_as("ms") == pytest.approx(1.191642, rel=1e-6)
+    assert sp.expected_tokens == pytest.approx(2.7731) and sp.tpot_gain == pytest.approx(2.083993, rel=1e-6)
+    k8 = Scenarios.Llama3_8BFp16ConversationsH100.result
+    assert k8.kv_per_token.m_as("byte") == 131072 and k8.max_requests == 65
+    assert k8.kv_budget.m_as("GB") == pytest.approx(69.83935, rel=1e-6)
+    k70 = Scenarios.Llama3_70BInt4KvBudgetH100
+    assert k70.result.kv_budget.m_as("GB") == pytest.approx(50.59935, rel=1e-6)
+    assert k70.context_fit() == pytest.approx(4825.530, rel=1e-6)
+    cs = Scenarios.Llama3_8BInt4ChatServiceH100
+    assert cs.ttft.m_as("ms") == pytest.approx(41.93186, rel=1e-6)
+    assert cs.tpot.m_as("ms") == pytest.approx(1.567650, rel=1e-5)
+    assert cs.kv_capacity_tokens == 589_824 and cs.resident_requests == 469
+    assert cs.request_rate.m_as("1/s") == pytest.approx(10)
+    assert cs.cost_per_million_tokens.m_as("dollar") == pytest.approx(0.0663482, rel=1e-5)
+    st = Scenarios.Llama3_8BInt4PrefillStallH100
+    assert st.decode_step.m_as("ms") == pytest.approx(2.771058, rel=1e-6)
+    assert st.stalled_step.m_as("ms") == pytest.approx(44.70292, rel=1e-6)
+    assert st.chunked_step.m_as("ms") == pytest.approx(13.25402, rel=1e-6)
+    assert st.largest_safe_chunk == pytest.approx(410.8795, rel=1e-6)
+    sch = Scenarios.RequestLevelVersusContinuousBatching
+    assert [s for s, _ in sch.continuous_spans()][4:] == [10, 40, 40, 60]
+    assert sch.request_level_iterations == 150 and sch.continuous_iterations == 100
+    assert sch.continuous_utilization == pytest.approx(0.875)
+    p = Scenarios.Llama3_8BSharedSystemPrompt
+    assert p.kv_shared.m_as("MB") == pytest.approx(262.144) and p.prefill_tokens_skipped == 198_000
+    assert Scenarios.Llama3_8BConversationReloadPcieGen4.transfer_time("PCIe Gen4 x16").m_as("ms") == \
+        pytest.approx(33.554432)
+    pool = Scenarios.VllmKvPoolLlama3_8BH100
+    assert pool.pool_bytes.m_as("GiB") == pytest.approx(51.388672, rel=1e-6)
+    assert pool.workspace.m_as("GiB") == pytest.approx(5.6504, rel=1e-5)
+    assert pool.blocks_per_request == 79 and pool.pool_paged_requests == 333
+    assert pool.paged_requests(k8.kv_budget) == 421
+    ds = Scenarios.DistServe13BPoolsA100
+    assert ds.prefill_accelerators == 2 and ds.gain == pytest.approx(2.083333, rel=1e-6)
+    assert ds.kv_traffic.m_as("GB/s") == pytest.approx(11.3)
+    e = Scenarios.H100ChatEnergyPerToken
+    assert e.joules_per_token.m_as("J") == pytest.approx(1.096491, rel=1e-6) and e.low_use_ratio == pytest.approx(6)
+    assert Scenarios.Llama2_70BConversationalDecodeStreams.in_flight == pytest.approx(6180.72)
+    assert Scenarios.Llama2_70BInteractiveDecodeStreams.in_flight == pytest.approx(519.176)
+    syn = Scenarios.Llama3_70BFp16ConversationsEightH100.result
+    assert syn.max_requests == 1326 and Scenarios.Llama3_70BInt8ConversationsEightH100.result.max_requests == 2996
