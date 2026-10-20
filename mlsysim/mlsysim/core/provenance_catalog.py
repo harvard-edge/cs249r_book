@@ -2648,3 +2648,13 @@ ESA_SCHIAPARELLI_INQUIRY = _lit(
         "ended in an impact at about 540 km/h."
     ),
 )
+# --- Workload-aware cluster schedulers (added 2026-10-20) --------------------
+QIAO_POLLUX_2021 = _lit(
+    "prov:qiao-pollux-2021",
+    "Qiao et al. (2021), Pollux: Co-adaptive Cluster Scheduling for Goodput-Optimized Deep "
+    "Learning (OSDI 21)",
+    url="https://arxiv.org/abs/2008.12260",
+    verified="2026-10-20",
+    notes=("Abstract: Pollux reduces average job completion times by 37-50% relative to "
+           "state-of-the-art DL schedulers, on its testbed and trace."),
+)

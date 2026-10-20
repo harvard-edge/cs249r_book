@@ -1176,3 +1176,98 @@ def test_drive_bus_campaign_and_throttle():
     t = Scenarios.ThrottledNavigationBackbone.result
     assert t.added_age.to("ms").magnitude == approx(11)
     assert t.added_travel.to("mm").magnitude == approx(16.5)
+
+
+# --- Fleet orchestration (added 2026-10-20) ---
+
+def test_mg1_queue_wait():
+    assert Scenarios.Mg1ExponentialJobQueueAt80.wait_ratio == approx(4)
+    assert Scenarios.Mg1MixedJobQueueAt80.wait_ratio == approx(20)
+    assert Scenarios.Mg1MixedJobQueueAt80.variability_factor == approx(5)
+    assert Scenarios.Mg1ExponentialJobQueueAt80.variant(utilization=0.98).wait_ratio == approx(49)
+    assert Scenarios.Mg1ExponentialJobQueueAt80.variant(utilization=0.60).wait_ratio == approx(1.5)
+
+
+def test_kalos_job_size_mix():
+    r = Scenarios.KalosJobSizeMix.result
+    assert r.job_count == 19907
+    assert r.classes["single"]["job_share"] == approx(0.86281)
+    assert r.classes["single"]["time_share"] == approx(0.0014040)
+    assert r.classes["large"]["job_share"] == approx(0.043201)
+    assert r.classes["large"]["time_share"] == approx(0.96253)
+    assert r.classes["single"]["mean_gpu_hours"] == approx(0.12110)
+    assert r.classes["large"]["mean_gpu_hours"] == approx(1658.06)
+    assert r.service_cv_lower_bound == approx(5.0175)
+    assert r.state_time_shares["completed"] == approx(0.31270)
+    assert r.state_time_shares["failed"] == approx(0.062880)
+    assert r.state_time_shares["canceled"] == approx(0.60737)
+
+
+def test_drf_and_packing():
+    d = Scenarios.DrfTwoTenantExample.result
+    assert d["bundle_counts"] == {"A": 4, "B": 2}
+    assert d["tenants"]["A"]["dominant_share"] == approx(0.5)
+    assert d["tenants"]["B"]["dominant_share"] == approx(0.5)
+    assert d["tenants"]["B"]["shares"]["cpu_cores"] == approx(0.125)
+    assert Scenarios.SixGpuJobsOnDgxH100Nodes.usable_share == approx(0.75)
+    assert Scenarios.FragmentedEightNodeSnapshot.free_share == approx(0.296875)
+
+
+def test_idle_capacity_and_policy_gain():
+    assert Scenarios.ReservedGpusIdleThreeWeeks.cost == approx(504000)
+    assert Scenarios.PartialGangHold.cost == approx(1800)
+    assert Scenarios.PartialGangHold.missing_gpus == 124
+    assert Scenarios.Training10KIdleHour.cost == approx(20000)
+    u = Scenarios.MixedFleetPolicyFix1K
+    assert u.productive_gain == approx(245.76)
+    assert u.raw_gpu_equivalent == approx(409.6)
+    assert u.annual_value == approx(7176192)
+
+
+def test_preemption_and_spot():
+    p = Scenarios.ForcedPreemption175BFineTune64.result
+    assert p.reload.to("s").magnitude == approx(24.5)
+    assert p.per_event.to("minute").magnitude == approx(20.4083)
+    assert p.cost_per_event == approx(43.5378)
+    assert p.lost_per_day.to("hour").magnitude == approx(4.08167)
+    assert p.gpu_hours_per_day == approx(261.227)
+    s = Scenarios.SpotInterruptionEffectiveCost
+    assert s.nominal_discount == approx(0.65)
+    assert s.effective_cost_ratio == approx(0.48125)
+    r = Scenarios.Llama2_70BSpotRun512
+    assert r.on_demand_cost == approx(344064)
+    assert r.spot_total_hours == approx(450.8)
+    assert r.spot_total_cost == approx(161566.72)
+    assert r.savings_share == approx(0.53042)
+    assert r.longer_share == approx(0.34167)
+
+
+def test_elastic_sharing_and_lending():
+    e = Scenarios.ElasticResizeDecision
+    assert e.start_small_epochs == approx(24)
+    assert e.wait_epochs == approx(64)
+    assert e.step_up_epochs == approx(39.7)
+    assert e.gpu_hours == {"start_small": approx(3072), "wait": approx(10240), "step_up": approx(5632)}
+    assert e.epochs_per_gpu_hour["step_up"] == approx(0.0070490)
+    assert e.rescale_break_even_h == approx(8.8889)
+    c = Scenarios.ServingConsolidationA100
+    assert c.exclusive_unused == approx(0.675)
+    assert (c.exclusive_gpus, c.shared_gpus) == (180, 130)
+    assert c.saved_share == approx(0.27778)
+    assert c.annual_value == approx(876000)
+    assert c.min_devices_large == 5
+    d = Scenarios.DiurnalServingLending1K
+    assert (d.peak_demand, d.lent, d.static_active, d.dynamic_active, d.headroom) == (283, 133, 768, 901, 6)
+    assert d.annual_value == approx(2330160)
+    t = Scenarios.TensorParallelExchange1GB.result.times
+    assert t["NVLink"].to("ms").magnitude == approx(2.2222)
+    assert t["InfiniBand NDR"].to("ms").magnitude == approx(20)
+
+
+def test_quota_replica_and_saturated_queue():
+    q = Scenarios.TeamQuotaLending500
+    assert (q.used, q.lendable) == (300, 200)
+    r = Scenarios.Gpt3SelfContainedReplicaDgxH100
+    assert (r.tensor_parallel, r.pipeline_depth, r.replica_gpus) == (8, 8, 64)
+    assert Scenarios.Mg1ExponentialJobQueueAt98.wait_ratio == approx(49)
+    assert Scenarios.MixedFleetPolicyFix1K.job_memory_need.to("GB").magnitude == approx(35)

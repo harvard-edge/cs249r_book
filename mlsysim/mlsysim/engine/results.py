@@ -122,6 +122,9 @@ __all__ = [
     "DriveBusResult",
     "ZeroFailureResult",
     "ThrottledStageResult",
+    # Fleet orchestration (added 2026-10-20)
+    "JobSizeMixResult",
+    "PreemptionTaxResult",
 ]
 
 
@@ -1522,3 +1525,32 @@ class ThrottledStageResult(SolverResult):
     throttled: Quantity
     added_age: Quantity
     added_travel: Quantity
+
+
+# --- Fleet orchestration (added 2026-10-20) ---
+
+class JobSizeMixResult(SolverResult):
+    """Result from JobSizeMixModel: a cluster trace's jobs and GPU time by job-size class.
+
+    Each class dict holds ``jobs``, ``gpu_seconds``, ``job_share``,
+    ``time_share``, and ``mean_gpu_hours`` (GPU-hours per job).
+    """
+    job_count: float
+    gpu_seconds: float
+    classes: Dict[str, Dict[str, float]]
+    service_cv_lower_bound: float    # spread of GPU time per job, between size rows only
+    state_time_shares: Dict[str, float]
+
+
+class PreemptionTaxResult(SolverResult):
+    """Result from PreemptionTaxModel: what one forced preemption, and a day of them, costs."""
+    lost_work: Quantity
+    restart: Quantity
+    reload: Quantity
+    warmup: Quantity
+    relaunch: Quantity               # restart + reload + warmup, no detection
+    per_event: Quantity              # lost work + relaunch
+    cost_per_event: float            # USD
+    events_per_day: float
+    lost_per_day: Quantity
+    gpu_hours_per_day: float

@@ -85,3 +85,38 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
     p50_wait = 0.0 if p_wait < 0.5 else max(0.0, -math.log(0.5 / p_wait) / rate_param)
     p99_wait = 0.0 if p_wait < 0.01 else max(0.0, -math.log(0.01 / p_wait) / rate_param)
     return rho, p50_wait * ureg.second, p99_wait * ureg.second
+
+
+def calc_mg1_wait_ratio(utilization, service_cv):
+    """Mean M/G/1 queue wait as a multiple of the mean service time.
+
+    The Pollaczek-Khinchine formula for one server with Poisson arrivals and a
+    general service-time distribution:
+
+        W_q / (1/mu) = rho / (1 - rho) * (1 + C_s^2) / 2
+
+    The first factor (load) grows without bound as ``utilization`` approaches 1;
+    the second (variability) scales the whole curve by the spread of service
+    times, ``service_cv`` being their coefficient of variation (1 for
+    exponential service). Added 2026-10-20 for scheduler queueing, where a
+    fleet is modeled as one server working through jobs.
+
+    Parameters
+    ----------
+    utilization : float
+        Offered load rho, in [0, 1).
+    service_cv : float
+        Coefficient of variation of service time, C_s >= 0.
+
+    Returns
+    -------
+    float
+        Mean queue wait divided by the mean service time (``inf`` at rho >= 1).
+    """
+    rho = float(utilization)
+    cv = float(service_cv)
+    if rho < 0 or cv < 0:
+        raise ValueError("utilization and service_cv must be nonnegative")
+    if rho >= 1:
+        return float("inf")
+    return rho / (1 - rho) * (1 + cv * cv) / 2

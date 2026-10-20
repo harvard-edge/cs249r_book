@@ -2724,3 +2724,568 @@ class ThrottledStageScenario(BaseScenario):
     def result(self):
         from .solvers import ThrottledStageModel
         return ThrottledStageModel().solve(self.site.t_backbone, self.clock_ratio, self.speed)
+
+
+# --- Fleet orchestration: queueing, packing, interruption, and sharing (added 2026-10-20) ---
+
+def _usd_per_hour(rate) -> float:
+    """A GPU-hour price as a plain number of dollars per hour."""
+    return rate.to("USD/hour").magnitude
+
+
+class QueueWaitScenario(BaseScenario):
+    """A fleet modeled as one M/G/1 server at offered load ``utilization``.
+
+    The mean queue wait, as a multiple of the mean job, is a load factor
+    ``rho/(1-rho)`` times a variability factor ``(1 + C_s^2)/2``. The model
+    ignores gang packing and parallel admission; it isolates the effect of
+    load and of spread in job durations.
+    """
+    utilization: float
+    service_cv: float                       # coefficient of variation of job duration
+
+    @property
+    def load_factor(self) -> float:
+        return self.utilization / (1 - self.utilization)
+
+    @property
+    def variability_factor(self) -> float:
+        return (1 + self.service_cv ** 2) / 2
+
+    @property
+    def wait_ratio(self) -> float:
+        """Mean queue wait divided by the mean job duration."""
+        from ..physics.serving import calc_mg1_wait_ratio
+        return calc_mg1_wait_ratio(self.utilization, self.service_cv)
+
+
+class JobSizeMixScenario(BaseScenario):
+    """A cluster trace's jobs and GPU time split at ``large_threshold`` GPUs per job."""
+    series: Any                             # TrendSeries with gpu_num, jobs, gpu_seconds rows
+    large_threshold: int
+
+    @property
+    def result(self):
+        from .solvers import JobSizeMixModel
+        return JobSizeMixModel().solve(self.series.entries, self.large_threshold)
+
+
+class DominantShareScenario(BaseScenario):
+    """Dominant-resource fairness by progressive filling of indivisible ``bundles`` on ``capacity``.
+
+    Resources are accelerators, CPU cores, memory (GB), and network (Gb/s).
+    Each tenant's dominant share is its largest share of any one resource;
+    progressive filling grants the next bundle to the tenant with the lowest
+    dominant share until no bundle fits.
+    """
+    capacity: Dict[str, float]
+    bundles: Dict[str, Dict[str, float]]
+
+    @property
+    def result(self) -> Dict[str, Any]:
+        from ..labs.experiments.v2_08_experiments import dominant_resource_fairness
+        return dominant_resource_fairness(self.capacity, self.bundles)
+
+
+class NodePackingScenario(BaseScenario):
+    """Jobs of ``job_gpus`` GPUs packed on ``nodes`` nodes of ``gpus_per_node``.
+
+    A job must sit in one node, so each node runs ``gpus_per_node //
+    job_gpus`` jobs and strands the remainder. ``free_slots`` (optional)
+    records a fragmented snapshot: free GPUs scattered so that no node is
+    whole.
+    """
+    nodes: int
+    gpus_per_node: int
+    job_gpus: int
+    free_slots: Optional[int] = None
+
+    @property
+    def total_gpus(self) -> int:
+        return self.nodes * self.gpus_per_node
+
+    @property
+    def stranded_per_node(self) -> int:
+        return self.gpus_per_node - (self.gpus_per_node // self.job_gpus) * self.job_gpus
+
+    @property
+    def usable_share(self) -> float:
+        return 1 - self.stranded_per_node / self.gpus_per_node
+
+    @property
+    def free_share(self) -> float:
+        return self.free_slots / self.total_gpus
+
+
+class IdleCapacityCostScenario(BaseScenario):
+    """``gpus`` accelerators held idle for ``duration`` at ``device_hour_rate``.
+
+    ``gang_gpus`` (optional) is the gang the held GPUs belong to, for a
+    partial gang that waits for its missing members.
+    """
+    gpus: int
+    duration: Quantity
+    device_hour_rate: Quantity
+    gang_gpus: Optional[int] = None
+
+    @property
+    def gpu_hours(self) -> float:
+        return self.gpus * self.duration.to("hour").magnitude
+
+    @property
+    def cost(self) -> float:
+        """USD."""
+        return self.gpu_hours * _usd_per_hour(self.device_hour_rate)
+
+    @property
+    def missing_gpus(self) -> int:
+        return self.gang_gpus - self.gpus
+
+
+class UtilizationGainScenario(BaseScenario):
+    """A fleet of ``fleet_gpus`` raised from ``utilization_before`` to ``utilization_after``.
+
+    The gain in fully active GPU-equivalents is ``N (u_after - u_before)``.
+    Buying that capacity under the old policy would take ``gain / u_before``
+    raw GPUs, which is what the gain is worth. ``pools`` and ``pool_metrics``
+    optionally record the GPU pools and each pool's measured shares.
+    """
+    fleet_gpus: int
+    utilization_before: float
+    utilization_after: float
+    device_hour_rate: Quantity
+    pools: Dict[str, int] = {}                          # GPUs per pool
+    pool_metrics: Dict[str, Dict[str, float]] = {}      # per pool: allocated/active, before/after
+    pending_jobs: Optional[int] = None                  # queue depth before the fix
+    job_memory_need: Optional[Quantity] = None          # peak memory of the jobs queued on the largest pool
+
+    @property
+    def improvement(self) -> float:
+        return self.utilization_after - self.utilization_before
+
+    @property
+    def productive_gain(self) -> float:
+        return self.fleet_gpus * self.improvement
+
+    @property
+    def raw_gpu_equivalent(self) -> float:
+        return self.productive_gain / self.utilization_before
+
+    @property
+    def annual_value(self) -> float:
+        """USD a year for the raw-GPU equivalent at the scenario rate."""
+        from ..core.units import HOURS_PER_YEAR
+        return self.raw_gpu_equivalent * _usd_per_hour(self.device_hour_rate) * HOURS_PER_YEAR
+
+
+class PreemptionTaxScenario(BaseScenario):
+    """Forced preemptions of an ``n_devices`` job whose checkpoint is ``checkpoint_bytes``."""
+    n_devices: int
+    checkpoint_bytes: Quantity
+    lost_work: Quantity
+    preemption_rate: Quantity               # forced preemptions per unit time
+    recovery: Any                           # RecoveryProfile (Systems.Reliability.Recovery)
+    device_hour_rate: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PreemptionTaxModel
+        return PreemptionTaxModel().solve(self.n_devices, self.checkpoint_bytes, self.lost_work,
+                                          self.preemption_rate, self.recovery, self.device_hour_rate)
+
+
+class SpotEffectiveCostScenario(BaseScenario):
+    """Spot capacity priced per hour of retained progress.
+
+    Each interruption bills ``checkpoint_overhead + restart_overhead`` that
+    retain no progress, once per ``retained_interval`` of progress, so the
+    effective price is the spot price times billed time over retained time.
+    """
+    on_demand_rate: Quantity
+    spot_rate: Quantity
+    checkpoint_overhead: Quantity
+    restart_overhead: Quantity
+    retained_interval: Quantity
+
+    @property
+    def nominal_discount(self) -> float:
+        return 1 - _usd_per_hour(self.spot_rate) / _usd_per_hour(self.on_demand_rate)
+
+    @property
+    def lost_per_interruption(self) -> Quantity:
+        return (self.checkpoint_overhead + self.restart_overhead).to("minute")
+
+    @property
+    def billed_over_retained(self) -> float:
+        interval = self.retained_interval.to("minute").magnitude
+        return (interval + self.lost_per_interruption.magnitude) / interval
+
+    @property
+    def effective_rate(self) -> float:
+        """USD per GPU-hour of retained progress."""
+        return _usd_per_hour(self.spot_rate) * self.billed_over_retained
+
+    @property
+    def effective_cost_ratio(self) -> float:
+        """Effective spot price over the on-demand price."""
+        return self.effective_rate / _usd_per_hour(self.on_demand_rate)
+
+    @property
+    def effective_savings(self) -> float:
+        return 1 - self.effective_cost_ratio
+
+
+class SpotRunScenario(BaseScenario):
+    """A training run of ``run_duration`` on ``fleet``, on demand against spot capacity.
+
+    Spot adds ``checkpoint_overhead_fraction`` of the run for checkpoints and
+    ``restart_per_interruption`` for each of ``interruptions_per_day`` per day
+    of the run.
+    """
+    fleet: Fleet
+    workload: Optional[Workload] = None
+    run_duration: Quantity
+    on_demand_rate: Quantity
+    spot_rate: Quantity
+    checkpoint_overhead_fraction: float
+    interruptions_per_day: int
+    restart_per_interruption: Quantity
+
+    @property
+    def gpus(self) -> int:
+        return self.fleet.total_accelerators
+
+    @property
+    def run_hours(self) -> float:
+        return self.run_duration.to("hour").magnitude
+
+    @property
+    def run_days(self) -> float:
+        return self.run_duration.to("day").magnitude
+
+    @property
+    def on_demand_cost(self) -> float:
+        return self.gpus * self.run_hours * _usd_per_hour(self.on_demand_rate)
+
+    @property
+    def spot_base_cost(self) -> float:
+        return self.gpus * self.run_hours * _usd_per_hour(self.spot_rate)
+
+    @property
+    def checkpoint_extra_hours(self) -> float:
+        return self.checkpoint_overhead_fraction * self.run_hours
+
+    @property
+    def interruptions(self) -> float:
+        return self.interruptions_per_day * (self.run_hours // 24)
+
+    @property
+    def restart_total_hours(self) -> float:
+        return self.interruptions * self.restart_per_interruption.to("hour").magnitude
+
+    @property
+    def spot_total_hours(self) -> float:
+        return self.run_hours + self.checkpoint_extra_hours + self.restart_total_hours
+
+    @property
+    def spot_total_cost(self) -> float:
+        return self.gpus * self.spot_total_hours * _usd_per_hour(self.spot_rate)
+
+    @property
+    def savings(self) -> float:
+        return self.on_demand_cost - self.spot_total_cost
+
+    @property
+    def savings_share(self) -> float:
+        return self.savings / self.on_demand_cost
+
+    @property
+    def longer_share(self) -> float:
+        return self.spot_total_hours / self.run_hours - 1
+
+
+class ElasticResizeScenario(BaseScenario):
+    """Three ways to run one job over ``window``: start small, wait for the full size, or step up.
+
+    Start small runs ``small_gpus`` for the whole window. Wait queues
+    ``queue_wait`` for ``full_gpus``. Step up starts on ``small_gpus`` and,
+    when the full allocation would free, pauses ``rescale_overhead`` and grows
+    to ``step_up_gpus``, leaving the rest to queued jobs. Throughputs are
+    epochs per hour at each size. GPU-hours count the step-up size through
+    its resize pause.
+    """
+    window: Quantity
+    queue_wait: Quantity
+    rescale_overhead: Quantity
+    small_gpus: int
+    step_up_gpus: int
+    full_gpus: int
+    small_throughput: float
+    step_up_throughput: float
+    full_throughput: float
+
+    def _h(self, q) -> float:
+        return q.to("hour").magnitude
+
+    @property
+    def window_h(self) -> float:
+        return self._h(self.window)
+
+    @property
+    def wait_h(self) -> float:
+        return self._h(self.queue_wait)
+
+    @property
+    def rescale_h(self) -> float:
+        return self.rescale_overhead.to("minute").magnitude / 60
+
+    @property
+    def start_small_epochs(self) -> float:
+        return self.window_h * self.small_throughput
+
+    @property
+    def wait_run_h(self) -> float:
+        return self.window_h - self.wait_h
+
+    @property
+    def wait_epochs(self) -> float:
+        return self.wait_run_h * self.full_throughput
+
+    @property
+    def step_up_phase1_epochs(self) -> float:
+        return self.wait_h * self.small_throughput
+
+    @property
+    def step_up_phase2_h(self) -> float:
+        return self.window_h - self.wait_h - self.rescale_h
+
+    @property
+    def step_up_phase2_epochs(self) -> float:
+        return self.step_up_phase2_h * self.step_up_throughput
+
+    @property
+    def step_up_epochs(self) -> float:
+        return self.step_up_phase1_epochs + self.step_up_phase2_epochs
+
+    @property
+    def step_up_trails_wait(self) -> float:
+        return (self.wait_epochs - self.step_up_epochs) / self.wait_epochs
+
+    @property
+    def step_up_over_small(self) -> float:
+        return self.step_up_epochs / self.start_small_epochs
+
+    @property
+    def rescale_break_even_h(self) -> float:
+        """Resize overhead at which stepping up only matches starting small."""
+        return self.window_h - self.wait_h - (self.start_small_epochs - self.step_up_phase1_epochs) / self.step_up_throughput
+
+    @property
+    def step_up_efficiency(self) -> float:
+        return self.step_up_throughput / (self.step_up_gpus / self.small_gpus * self.small_throughput)
+
+    @property
+    def full_efficiency(self) -> float:
+        return self.full_throughput / (self.full_gpus / self.small_gpus * self.small_throughput)
+
+    @property
+    def gpu_hours(self) -> Dict[str, float]:
+        return {"start_small": self.small_gpus * self.window_h,
+                "wait": self.full_gpus * self.wait_run_h,
+                "step_up": self.small_gpus * self.wait_h + self.step_up_gpus * self.wait_run_h}
+
+    @property
+    def epochs_per_gpu_hour(self) -> Dict[str, float]:
+        epochs = {"start_small": self.start_small_epochs, "wait": self.wait_epochs, "step_up": self.step_up_epochs}
+        return {k: epochs[k] / h for k, h in self.gpu_hours.items()}
+
+
+class ServingConsolidationScenario(BaseScenario):
+    """Small and large serving models on whole devices, exclusive against shared in pairs.
+
+    Each small model occupies ``small_footprint`` (weights, KV cache, and
+    activations) of a ``device_memory`` budget; ``tenants`` small models share
+    one device when load tests allow. Each large model takes
+    ``gpus_per_large`` devices for tensor parallelism either way.
+    """
+    device_memory: Quantity                 # branded decimal budget per device
+    partition_memory: Optional[Quantity] = None   # a hardware partition (MIG profile) for comparison
+    small_model: Workload
+    small_footprint: Quantity
+    tenants: int
+    n_small: int
+    large_model: Workload
+    n_large: int
+    gpus_per_large: int
+    bytes_per_param: Quantity
+    device_hour_rate: Quantity
+
+    def _ratio(self, a, b) -> float:
+        return (a / b).to("").magnitude
+
+    @property
+    def exclusive_unused(self) -> float:
+        return self._ratio(self.device_memory - self.small_footprint, self.device_memory)
+
+    @property
+    def shared_footprint(self) -> Quantity:
+        return self.tenants * self.small_footprint
+
+    @property
+    def shared_unused(self) -> float:
+        return self._ratio(self.device_memory - self.shared_footprint, self.device_memory)
+
+    @property
+    def partition_unused(self) -> float:
+        return self._ratio(self.partition_memory - self.small_footprint, self.partition_memory)
+
+    @property
+    def large_weights(self) -> Quantity:
+        return self.large_model.parameters * self.bytes_per_param
+
+    @property
+    def min_devices_large(self) -> int:
+        import math
+        return math.ceil(self._ratio(self.large_weights, self.device_memory))
+
+    @property
+    def large_gpus(self) -> int:
+        return self.n_large * self.gpus_per_large
+
+    @property
+    def exclusive_gpus(self) -> int:
+        return self.n_small + self.large_gpus
+
+    @property
+    def shared_small_gpus(self) -> int:
+        return self.n_small // self.tenants
+
+    @property
+    def shared_gpus(self) -> int:
+        return self.shared_small_gpus + self.large_gpus
+
+    @property
+    def saved_gpus(self) -> int:
+        return self.exclusive_gpus - self.shared_gpus
+
+    @property
+    def saved_share(self) -> float:
+        return self.saved_gpus / self.exclusive_gpus
+
+    @property
+    def exclusive_utilization(self) -> float:
+        return self._ratio(self.small_footprint, self.device_memory)
+
+    @property
+    def shared_utilization(self) -> float:
+        return self._ratio(self.shared_footprint, self.device_memory)
+
+    @property
+    def annual_value(self) -> float:
+        """USD a year for the released GPUs at the scenario rate."""
+        from ..core.units import HOURS_PER_YEAR
+        return self.saved_gpus * _usd_per_hour(self.device_hour_rate) * HOURS_PER_YEAR
+
+
+class DiurnalLendingScenario(BaseScenario):
+    """A fleet split between a serving reservation and a training base, static against lent.
+
+    The reservation is the forecast serving peak plus ``surge_buffer``.
+    Lending gives training whatever the reservation holds above average
+    demand plus the buffer; the GPUs left after the reservation and the
+    training base are maintenance headroom.
+    """
+    fleet_gpus: int
+    serving_reservation: int
+    serving_average: int
+    surge_buffer: int
+    training_base: int
+    device_hour_rate: Quantity
+
+    @property
+    def peak_demand(self) -> int:
+        return self.serving_reservation - self.surge_buffer
+
+    @property
+    def serving_reclaimable(self) -> int:
+        return self.serving_reservation - self.serving_average
+
+    @property
+    def lent(self) -> int:
+        """GPUs lent to training on average."""
+        return self.serving_reclaimable - self.surge_buffer
+
+    @property
+    def headroom(self) -> int:
+        return self.fleet_gpus - self.serving_reservation - self.training_base
+
+    @property
+    def static_active(self) -> int:
+        return self.serving_average + self.training_base
+
+    @property
+    def dynamic_active(self) -> int:
+        return self.static_active + self.lent
+
+    @property
+    def static_utilization(self) -> float:
+        return self.static_active / self.fleet_gpus
+
+    @property
+    def dynamic_utilization(self) -> float:
+        return self.dynamic_active / self.fleet_gpus
+
+    @property
+    def annual_value(self) -> float:
+        """USD a year for the lent GPUs at the scenario rate."""
+        from ..core.units import HOURS_PER_YEAR
+        return self.lent * _usd_per_hour(self.device_hour_rate) * HOURS_PER_YEAR
+
+
+class QuotaLendingScenario(BaseScenario):
+    """A team guaranteed ``guarantee`` GPUs that uses ``used_share`` of them; the rest can be lent.
+
+    Lent GPUs stay reclaimable: borrowers run them as lower-priority,
+    preemptible work and return them when the owner's demand comes back.
+    """
+    guarantee: int
+    used_share: float
+    borrower_guarantee: Optional[int] = None
+
+    @property
+    def used(self) -> int:
+        return round(self.guarantee * self.used_share)
+
+    @property
+    def lendable(self) -> int:
+        return self.guarantee - self.used
+
+
+class SelfContainedReplicaScenario(BaseScenario):
+    """The smallest model replica of ``workload`` whose training state fits without sharding.
+
+    Tensor parallelism spans one node of ``fleet``; the pipeline depth is the
+    smallest power of two at which each accelerator's share of the
+    ``bytes_per_param`` training state fits its memory. An elastic job that
+    keeps this layout fixed grows or shrinks one whole replica at a time.
+    """
+    workload: Workload
+    fleet: Fleet
+    bytes_per_param: Quantity
+
+    @property
+    def tensor_parallel(self) -> int:
+        return self.fleet.node.accelerators_per_node
+
+    @property
+    def pipeline_depth(self) -> int:
+        hbm = self.fleet.node.accelerator.memory.capacity
+        state = self.workload.parameters.magnitude * self.bytes_per_param
+        pp = 1
+        while (state / (self.tensor_parallel * pp)).to("GiB") > hbm:
+            pp *= 2
+        return pp
+
+    @property
+    def replica_gpus(self) -> int:
+        return self.tensor_parallel * self.pipeline_depth
