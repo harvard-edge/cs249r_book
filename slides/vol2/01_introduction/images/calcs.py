@@ -1,144 +1,243 @@
 #!/usr/bin/env python3
-"""Every derived number in Volume II, Lecture 1 (Introduction), computed from
-sourced inputs. Run from this folder: python3 calcs.py
+"""Every number on the Volume II Lecture 1 slides and notes, read from MLSysIM.
 
-Each printed line is "<slide label>: <value>", and the slide or note carries
-the printed value. Inputs name their source in a comment.
+MLSysIM holds the inputs (registry, Literature) and the calculations
+(Scenarios.*, each backed by a solver); the chapter reads the same scenarios.
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex.
+
+Run from this folder: python3 calcs.py
 """
 
 import math
+import sys
+from pathlib import Path
 
-rows = []
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Hardware, Models, Systems = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems
+Literature, Scenarios, ReferenceStats = mlsysim.Literature, mlsysim.Scenarios, mlsysim.ReferenceStats
+Q_ = mlsysim.core.units.Q_
+GPT3, LLAMA405 = Models.Language.GPT3, Models.Language.Llama3_405B
+RUNS, CHIN = Literature.TrainingRuns, Literature.Chinchilla
+HDR, NDR, ETH = (Systems.Fabrics.InfiniBand_HDR.bandwidth, Systems.Fabrics.InfiniBand_NDR.bandwidth,
+                 Systems.Fabrics.Ethernet_100G.bandwidth)
+REF = Systems.Clusters.Training_1K
+
+SYNC, FAST = Scenarios.Gpt3GradientSync, Scenarios.Gpt3GradientSyncFasterAccelerator
+CI = Scenarios.Gpt3DataParallelIntensity
+OPT = Scenarios.Gpt3ComputeOptimal
+PROFILE, DOUBLE = Scenarios.FleetLawProfileExample, Scenarios.FleetLawDoublingExample
+PLAN = Scenarios.CoordinationOverheadExample
+A1K, A10K, A4N = Scenarios.NodeAvailability1K, Scenarios.NodeAvailability10K, Scenarios.FourNinesAvailability10K
+GROW = Scenarios.NotableRunGrowth2012to2024
+LFAIL = Scenarios.GpuFailuresLlama3Run
 
 
-def show(label, value):
-    rows.append((label, value))
-    print(f"{label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-# --- Hook and Napkin Math 1.1 (Introduction, Sec. 1.5.5) -------------------
-ring_gb = 700.0          # GB sent per endpoint per step, FP16 ring (Napkin Math 1.1)
-ib_gbps = 200.0          # Gb/s InfiniBand link (Napkin Math 1.1)
-eth_gbps = 100.0         # Gb/s Ethernet link (Napkin Math 1.1)
-compute_s = 1.2          # s local compute per step, scenario input (Napkin Math 1.1)
-pj_per_bit = 35.0        # pJ per bit on the InfiniBand fabric (Napkin Math 1.1)
-steps = 1_000_000        # steps in the run (Napkin Math 1.1)
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
-ib_gbs = ib_gbps / 8
-eth_gbs = eth_gbps / 8
-t_ib = ring_gb / ib_gbs
-t_eth = ring_gb / eth_gbs
-show("hook: InfiniBand GB/s", f"{ib_gbs:g}")
-show("hook: transfer over InfiniBand (s)", f"{t_ib:.0f}")
-show("hook: step over InfiniBand (s)", f"{compute_s + t_ib:.1f}")
-show("hook: compute fraction over InfiniBand", f"{compute_s / (compute_s + t_ib):.1%}")
-show("napkin: Ethernet GB/s", f"{eth_gbs:g}")
-show("napkin: transfer over Ethernet (s)", f"{t_eth:.0f}")
-show("napkin: step over Ethernet (s)", f"{compute_s + t_eth:.1f}")
-show("napkin: compute fraction over Ethernet", f"{compute_s / (compute_s + t_eth):.1%}")
-show("napkin: exposed share over InfiniBand", f"{t_ib / (compute_s + t_ib):.0%}")
-energy_j = ring_gb * 1e9 * 8 * pj_per_bit * 1e-12
-show("napkin: energy per worker per step (J)", f"{energy_j:.0f}")
-show("napkin: energy per worker over the run (MJ)", f"{energy_j * steps / 1e6:.0f}")
 
-# --- Failure clock (Introduction, Sec. 1.1; Lecture 0's failure slide) ------
-mttf_h = 50_000          # assumed per-GPU MTTF, hours (Sec. 1.1)
-gpus = 16_384            # H100s in the Llama 3 405B run (Dubey et al. 2024), the
-                         # job Lecture 0's failure-clock vote used
-mtbf = mttf_h / gpus
-show("recall: system MTBF at 16,384 GPUs (h)", f"{mtbf:.2f}")
-show("recall: interruptions per day", f"{24 / mtbf:.1f}")
+print("== Hook and Napkin Math 1.1 (gradient-sync scenario)")
+s, f = SYNC.result, FAST.result
+v("gpt3_params_b", m(GPT3.parameters, "Gparam"), "{:.0f}", "running model, billions of parameters")
+v("sync_gb", m(s.sync_bytes, "GB"), "{:.0f}", "16-bit ring traffic per worker per step, GB")
+v("ib_gbps", m(HDR, "Gbps"), "{:.0f}", "InfiniBand HDR, Gb/s")
+v("ib_gbs", m(HDR, "GB/s"), "{:.0f}", "InfiniBand HDR, GB/s")
+v("eth_gbps", m(ETH, "Gbps"), "{:.0f}", "Ethernet, Gb/s")
+v("eth_gbs", m(ETH, "GB/s"), "{:.1f}", "Ethernet, GB/s")
+v("compute_s", m(SYNC.compute_time, "s"), "{:.1f}", "stated compute per step, s")
+v("t_ib", m(s.transfer_times["InfiniBand"], "s"), "{:.0f}", "transfer over InfiniBand, s")
+v("step_ib", m(s.step_times["InfiniBand"], "s"), "{:.1f}", "step over InfiniBand, s")
+v("step_ib_round", m(s.step_times["InfiniBand"], "s"), "{:.0f}", "the same, whole seconds (vote answer)")
+v("frac_ib", 100 * s.compute_fractions["InfiniBand"], "{:.1f}", "compute fraction over InfiniBand, %")
+v("exposed_ib", 100 * (1 - s.compute_fractions["InfiniBand"]), "{:.0f}", "exposed communication over InfiniBand, %")
+v("t_eth", m(s.transfer_times["Ethernet"], "s"), "{:.0f}", "transfer over Ethernet, s")
+v("step_eth", m(s.step_times["Ethernet"], "s"), "{:.1f}", "step over Ethernet, s")
+v("frac_eth", 100 * s.compute_fractions["Ethernet"], "{:.1f}", "compute fraction over Ethernet, %")
+v("pj_bit", m(SYNC.energy_per_bit, "pJ/bit"), "{:.0f}", "InfiniBand energy, pJ/bit")
+v("energy_j", m(s.energy_per_step, "J"), "{:.0f}", "network energy per worker per step, J")
+v("energy_mj", m(s.energy_total, "MJ"), "{:.0f}", "the same over the run, MJ")
+v("steps_m", SYNC.steps / 10 ** 6, "{:.0f}", "steps in the run, millions")
+v("fast_compute_s", m(f.compute_time, "s"), "{:.1f}", "compute on 2x accelerators, s")
+v("fast_step_s", m(f.step_times["InfiniBand"], "s"), "{:.1f}", "step on 2x accelerators, s")
+v("fast_speedup", FAST.compute_speedup, "{:.0f}", "accelerator speedup")
+v("fast_reduction", 100 * (1 - ratio(f.step_times["InfiniBand"], s.step_times["InfiniBand"])), "{:.1f}",
+  "step reduction from 2x accelerators, %")
 
-# --- Scaling law (Sec. 1.3.3; Hoffmann et al. 2022 fit via MLSysIM) ----------
-alpha = 0.34             # parameter exponent of the Chinchilla parametric fit
-show("powerlaw: 2^(1/alpha) at alpha = 0.34", f"{2 ** (1 / alpha):.1f}")
-show("powerlaw note: 2^(1/0.1)", f"{2 ** (1 / 0.1):,.0f}")
-gopher_n, gopher_d = 63e9, 1.4e12   # Sec. 1.3.2 projection
-show("isoflop note: tokens per parameter at the Gopher budget", f"{gopher_d / gopher_n:.0f}")
-show("isoflop note: 6ND at the Gopher budget (FLOPs)", f"{6 * gopher_n * gopher_d:.1e}")
+print("== Recall: failure clock (Llama 3 405B size)")
+lf = LFAIL.result
+v("gpu_mttf_h", m(LFAIL.component_mtbf, "hour"), "{:,.0f}", "per-GPU MTTF, h")
+v("llama_gpus", LFAIL.n_components, "{:,.0f}", "Llama 3 405B GPUs")
+v("llama_interval_h", m(lf.interval, "hour"), "{:.2f}", "system MTBF at 16,384 GPUs, h")
+v("llama_per_day", lf.failures_per_day, "{:.1f}", "interruptions per day")
 
-# --- GPT-3 allocation (Sec. 1.3.2; Brown et al. 2020, Table 2.1) -------------
-n_gpt3, d_gpt3 = 175e9, 300e9
-tpp = 20.0               # compute-optimal tokens per parameter (Sec. 1.3.2)
-c_gpt3 = 6 * n_gpt3 * d_gpt3
-show("estimate: GPT-3 budget C = 6ND (FLOPs)", f"{c_gpt3:.2e}")
-show("estimate: GPT-3 tokens per parameter", f"{d_gpt3 / n_gpt3:.1f}")
-show("estimate note: how far below 20 (times)", f"{tpp / (d_gpt3 / n_gpt3):.0f}")
-n_opt = math.sqrt(c_gpt3 / (6 * tpp))
-show("estimate: optimal N at 20 tokens per parameter (B)", f"{n_opt / 1e9:.0f}")
-show("estimate: optimal D at 20 tokens per parameter (T)", f"{tpp * n_opt / 1e12:.1f}")
+print("== Goals and running case")
+state = (ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter * GPT3.parameters).to("TB")
+v("ref_gpus", REF.total_accelerators, "{:,.0f}", "reference cluster GPUs")
+v("ref_nodes", REF.count, "{:.0f}", "reference cluster nodes")
+v("state_bytes_param", m(ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter, "byte/param"), "{:.0f}",
+  "training state, bytes per parameter")
+v("state_tb", m(state, "TB"), "{:.1f}", "training state, TB")
+v("opt_gpus", RUNS.Opt175BGpus, "{:.0f}", "OPT-175B GPUs")
 
-# --- Bandwidth step (Sec. 1.2) ------------------------------------------------
-nvlink, ndr = 450.0, 50.0   # GB/s per accelerator per direction (Sec. 1.2)
-show("node: NVLink over NDR", f"{nvlink / ndr:.0f}x")
-show("node: NDR 400 Gb/s in GB/s", f"{400 / 8:.0f}")
+print("== Growth decomposition (Epoch AI via MLSysIM)")
+g = GROW.result
+v("growth_runs", g.run_count, "{:.0f}", "runs reporting count and duration")
+v("growth_compute", g.compute_factor, "{:.1f}", "compute growth per year")
+v("growth_count", g.count_factor, "{:.1f}", "accelerator count growth per year")
+v("growth_duration", g.duration_factor, "{:.1f}", "duration growth per year")
+v("growth_rate", g.rate_factor, "{:.1f}", "delivered rate growth per year")
+v("growth_share", 100 * g.fleet_share, "{:.0f}", "share from count and duration, %")
+v("alexnet_gpus", RUNS.AlexNetGpus, "{:.0f}", "AlexNet GPUs")
 
-nvlink_over_hdr = nvlink / ib_gbs   # hook link: 200 Gb/s InfiniBand HDR (25 GB/s)
-show("synthesis: NVLink over the hook's HDR link", f"{nvlink_over_hdr:.0f}x")
+print("== Scaling laws (Chinchilla fit)")
+v("chin_alpha", CHIN.ParametricLossAlpha, "{:.2f}", "parameter exponent")
+v("chin_a", CHIN.ParametricLossA, "{:.1f}", "parameter coefficient A")
+v("chin_e", CHIN.ParametricLossE, "{:.2f}", "irreducible loss E")
+v("chin_b", CHIN.ParametricLossB, "{:.1f}", "token coefficient B")
+v("chin_beta", CHIN.ParametricLossBeta, "{:.2f}", "token exponent")
+v("halving_mult", Scenarios.ChinchillaParameterPowerLaw.halving_multiple, "{:.1f}", "2^(1/alpha) at the fit's alpha")
+v("shallow_alpha", Scenarios.ShallowPowerLawExample.exponent, "{:.1f}", "illustrative shallow exponent")
+v("shallow_inverse", 1 / Scenarios.ShallowPowerLawExample.exponent, "{:.0f}", "1 / that exponent")
+v("shallow_mult", Scenarios.ShallowPowerLawExample.halving_multiple, "{:,.0f}", "its halving multiple")
+v("gopher_params_b", CHIN.GopherBudgetOptimalParams / 10 ** 9, "{:.0f}", "Gopher-budget optimal parameters, B")
+v("gopher_tokens_t", CHIN.GopherBudgetOptimalTokens / 10 ** 12, "{:.1f}", "Gopher-budget optimal tokens, T")
+v("gopher_tpp", CHIN.GopherBudgetOptimalTokens / CHIN.GopherBudgetOptimalParams, "{:.0f}", "tokens per parameter there")
+v("chin_tpp", CHIN.TokensPerParam, "{:.0f}", "Chinchilla tokens per parameter")
+v("chin_k", CHIN.ComputeConstant, "{:.0f}", "FLOPs per parameter per token")
+v("chin_kr", CHIN.ComputeConstant * CHIN.TokensPerParam, "{:.0f}", "the product, C = k r N^2")
 
-# --- Ring AllReduce traffic (Sec. 1.2.3) -------------------------------------
-params = 175e9
-grad_fp32_gb = params * 4 / 1e9
-show("ring: FP32 gradient (GB)", f"{grad_fp32_gb:.0f}")
-show("ring: FP32 ring traffic, large N (GB)", f"{2 * grad_fp32_gb:,.0f}")
-show("ring: FP16 ring traffic, large N (GB)", f"{2 * params * 2 / 1e9:,.0f}")
-for n in (512, 1024):
-    show(f"ring note: 2(N-1)/N at N = {n}", f"{2 * (n - 1) / n:.3f}")
+print("== GPT-3 allocation (compute-optimal scenario)")
+n_opt, d_opt = OPT.optimal
+v("gpt3_params_1d", m(GPT3.parameters, "Gparam"), "{:.1f}", "GPT-3 parameters, B (model card)")
+v("gpt3_layers", GPT3.layers, "{:.0f}", "GPT-3 layers")
+v("gpt3_hidden", GPT3.hidden_dim, "{:.0f}", "GPT-3 width (model card, no comma)")
+v("gpt3_hidden_c", GPT3.hidden_dim, "{:,.0f}", "GPT-3 width")
+v("gpt3_batch_m", RUNS.Gpt3BatchTokens / 10 ** 6, "{:.1f}", "GPT-3 batch, M tokens")
+v("gpt3_tokens_b", m(GPT3.training_tokens, "count") / 10 ** 9, "{:.0f}", "GPT-3 training tokens, B")
+v("gpt3_budget_mant", OPT.budget_flops / 10 ** 23, "{:.2f}", "GPT-3 budget, x 10^23 FLOPs")
+v("gpt3_tpp", OPT.actual_tokens_per_param, "{:.1f}", "GPT-3 tokens per parameter")
+v("gpt3_tpp_gap", OPT.tokens_per_param / OPT.actual_tokens_per_param, "{:.0f}", "how far below Chinchilla")
+v("gpt3_tpp_gap_word", round(OPT.tokens_per_param / OPT.actual_tokens_per_param), "words", "the same, in prose")
+v("opt_params_b", n_opt / 10 ** 9, "{:.0f}", "optimal N at the same budget, B")
+v("opt_tokens_t", d_opt / 10 ** 12, "{:.1f}", "optimal D at the same budget, T")
 
-# --- Communication intensity (Sec. 1.2.4) ------------------------------------
-tokens = 8192
-flops_worker = 6 * params * tokens
-ci = ring_gb * 1e9 / flops_worker
-a100_peak = 312e12       # A100 16-bit peak FLOP/s (Sec. 1.1, footnote 6)
-balance = ib_gbs * 1e9 / a100_peak
-show("ci: FLOPs per worker per step", f"{flops_worker:.1e}")
-show("ci: 175B worker CI (B/FLOP)", f"{ci:.1e}")
-show("ci: FLOPs per byte", f"{1 / ci:,.0f}")
-show("ci: fabric balance A100 + 200 Gb/s (B/FLOP)", f"{balance:.1e}")
-show("ci note: compute time at peak (s)", f"{flops_worker / a100_peak:.1f}")
-alpha_ci = 10e6 / 1e14   # Workload Alpha, Sec. 1.2 self-check 6
-beta_ci = 1e9 / 1e13     # Workload Beta
-show("estimate: Alpha CI (B/FLOP)", f"{alpha_ci:.0e}")
-show("estimate: Beta CI (B/FLOP)", f"{beta_ci:.0e}")
-show("estimate: Beta over Alpha", f"{beta_ci / alpha_ci:,.0f}x")
+print("== Bandwidth step")
+nvlink = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+v("nvlink_gbs", m(nvlink, "GB/s"), "{:.0f}", "NVLink per direction, GB/s")
+v("ndr_gbps", m(NDR, "Gbps"), "{:.0f}", "InfiniBand NDR, Gb/s")
+v("ndr_gbs", m(NDR, "GB/s"), "{:.0f}", "InfiniBand NDR, GB/s")
+v("nvlink_ndr", ratio(nvlink, NDR), "{:.0f}", "NVLink over NDR")
+v("nvlink_hdr", ratio(nvlink, HDR), "{:.0f}", "NVLink over the hook's HDR")
 
-# --- Llama 3 405B (Dubey et al. 2024, Table 4) -------------------------------
-t8k, t16k = 430.0, 400.0  # BF16 TFLOP/s per GPU at 8,192 and 16,384 GPUs
-show("llama: per-GPU throughput drop", f"{1 - t16k / t8k:.0%}")
-show("llama: GPUs ratio", f"{16384 / 8192:.0f}x")
-show("llama: tokens per GPU per step at 8,192 (K)", f"{16e6 / 8192 / 1e3:.1f}")
-show("llama: tokens per GPU per step at 16,384 (K)", f"{16e6 / 16384 / 1e3:.2f}")
+print("== Ring traffic")
+ring = float(Literature.Communication.RingAllreduceFactor)
+grad32 = GPT3.size_in_bytes("fp32")
+v("grad32_gb", m(grad32, "GB"), "{:.0f}", "FP32 gradient, GB")
+v("ring32_gb", m(ring * grad32, "GB"), "{:,.0f}", "FP32 ring traffic, large N, GB")
+v("ring16_gb", m(ring * GPT3.size_in_bytes("fp16"), "GB"), "{:.0f}", "FP16 ring traffic, large N, GB")
+v("ring_n_small", Systems.Clusters.Training_512_H100.total_accelerators, "{:.0f}", "smaller worker count")
+v("ring_n_large", REF.total_accelerators, "{:,.0f}", "larger worker count")
 
-# --- Fleet Law timeline (illustrative units, figure) -------------------------
-t_n, t_2n = 10.0, 8.0
-show("fleetlaw: ideal step at 2N (units)", f"{t_n / 2:g}")
-show("fleetlaw: speedup N to 2N", f"{t_n / t_2n:.2f}")
-show("fleetlaw: efficiency of the doubling", f"{(t_n / t_2n) / 2:.2f}")
+print("== Communication intensity (data-parallel intensity scenario)")
+c = CI.result
+a100 = Hardware.Cloud.A100
+v("ci_tokens", c.local_tokens, "{:,.0f}", "tokens per worker per step")
+v("ci_flops_mant", m(c.flops_per_step, "flop") / 10 ** 15, "{:.1f}", "FLOPs per worker per step, x 10^15")
+v("ci_mant", c.intensity * 10 ** 5, "{:.1f}", "175B worker CI, x 10^-5 B/FLOP")
+v("ci_balance_mant", c.balance * 10 ** 5, "{:.1f}", "fabric balance, x 10^-5 B/FLOP")
+v("a100_tflops", m(a100.compute.peak_flops, "TFLOP/s"), "{:.0f}", "A100 16-bit peak, TFLOP/s")
+v("ci_peak_s", m(c.compute_time_at_peak, "s"), "{:.1f}", "compute time at peak, s")
+alpha_w, beta_w = Scenarios.WorkloadAlphaIntensity, Scenarios.WorkloadBetaIntensity
+v("alpha_mb", m(alpha_w.bytes_per_step, "MB"), "{:.0f}", "Alpha bytes sent, MB")
+v("alpha_flops_exp", math.log10(m(alpha_w.flops_per_step, "flop")), "{:.0f}", "Alpha FLOPs, power of ten")
+v("beta_gb", m(beta_w.bytes_per_step, "GB"), "{:.0f}", "Beta bytes sent, GB")
+v("beta_flops_exp", math.log10(m(beta_w.flops_per_step, "flop")), "{:.0f}", "Beta FLOPs, power of ten")
+v("alpha_ci_exp", math.log10(alpha_w.intensity), "{:.0f}", "Alpha CI, power of ten")
+v("beta_ci_exp", math.log10(beta_w.intensity), "{:.0f}", "Beta CI, power of ten")
+v("alpha_ci_neg", -math.log10(alpha_w.intensity), "{:.0f}", "Alpha CI, negative exponent (spoken)")
+v("beta_ci_neg", -math.log10(beta_w.intensity), "{:.0f}", "Beta CI, negative exponent (spoken)")
+v("beta_over_alpha", beta_w.intensity / alpha_w.intensity, "{:,.0f}", "Beta over Alpha")
 
-# --- Diagnose (Sec. 1.5 self-check 3) -----------------------------------------
-tc, tm, ts = 0.8, 1.0, 0.2
-step = tc + tm + ts
-show("diagnose: step (s)", f"{step:.1f}")
-show("diagnose: compute fraction f", f"{tc / step:.2f}")
-show("diagnose: step with 2x compute (s)", f"{tc / 2 + tm + ts:.1f}")
-show("diagnose: most option A saves (s)", f"{tc / 2:.1f}")
+print("== Llama 3 405B (Dubey et al. 2024, Table 4)")
+t8, t16 = RUNS.Llama3_405B_TflopsPerGpu8K, RUNS.Llama3_405B_TflopsPerGpu16K
+v("llama_t8k", t8, "{:.0f}", "BF16 TFLOP/s per GPU at 8,192")
+v("llama_t16k", t16, "{:.0f}", "BF16 TFLOP/s per GPU at 16,384")
+v("llama_mfu8k", 100 * RUNS.Llama3_405B_Mfu8K, "{:.0f}", "MFU at 8,192, %")
+v("llama_mfu16k", 100 * RUNS.Llama3_405B_Mfu16K, "{:.0f}", "MFU at 16,384, %")
+v("llama_gpus8k", RUNS.Llama3_405B_Gpus8K, "{:,.0f}", "first-stage GPUs")
+v("llama_dp8k", RUNS.Llama3_405B_DataParallel8K, "{:.0f}", "DP at 8,192")
+v("llama_dp16k", RUNS.Llama3_405B_DataParallel16K, "{:.0f}", "DP at 16,384")
+v("llama_batch_m", RUNS.Llama3_405B_BatchTokens / 10 ** 6, "{:.0f}", "global batch, M tokens")
+v("llama_drop", 100 * (1 - t16 / t8), "{:.0f}", "per-GPU throughput drop, %")
+v("llama_gpu_ratio", LFAIL.n_components / RUNS.Llama3_405B_Gpus8K, "{:.0f}", "GPU ratio")
 
-# --- Fallacies (Sec. 1.8) -----------------------------------------------------
-fast = compute_s / 2 + t_ib
-show("fallacy: step with 2x accelerators (s)", f"{fast:.1f}")
-show("fallacy: step reduction", f"{1 - fast / (compute_s + t_ib):.1%}")
-show("pitfall: 3x times (1 - 0.40)", f"{3 * (1 - 0.40):.1f}x")
+print("== Fleet Law (illustrative scenarios)")
+v("fl_step_n", DOUBLE.step_at_n, "{:.0f}", "step at N, units")
+v("fl_ideal_2n", DOUBLE.ideal_step, "{:.0f}", "ideal step at 2N, units")
+v("fl_step_2n", DOUBLE.step_at_scaled, "{:.0f}", "step at 2N, units")
+v("fl_speedup", DOUBLE.speedup, "{:.2f}", "speedup N to 2N")
+v("fl_eff", DOUBLE.efficiency, "{:.2f}", "efficiency of the doubling")
+v("dg_compute", m(PROFILE.compute_time, "s"), "{:.1f}", "profile compute, s")
+v("dg_comm", m(PROFILE.communication_time, "s"), "{:.1f}", "profile communication, s")
+v("dg_sync", m(PROFILE.synchronization_time, "s"), "{:.1f}", "profile sync, s")
+v("dg_overlap", m(PROFILE.overlap_time, "s"), "{:.0f}", "profile overlap, s")
+v("dg_step", m(PROFILE.step_time, "s"), "{:.1f}", "profile step, s")
+v("dg_f", PROFILE.compute_fraction, "{:.2f}", "compute fraction f")
+v("dg_f_pct", 100 * PROFILE.compute_fraction, "{:.0f}", "the same, percent")
+fast_profile = PROFILE.variant(compute_speedup=FAST.compute_speedup)
+v("dg_fast_step", m(fast_profile.step_time, "s"), "{:.1f}", "step with 2x compute, s")
+v("dg_saving", m(PROFILE.step_time - fast_profile.step_time, "s"), "{:.1f}", "most option A saves, s")
+v("pl_planned", PLAN.planned_speedup, "{:.0f}", "planned speedup")
+v("pl_overhead_pct", 100 * PLAN.overhead_fraction, "{:.0f}", "overhead share, %")
+v("pl_keep", 1 - PLAN.overhead_fraction, "{:.1f}", "share kept")
+v("pl_realized", PLAN.realized_speedup, "{:.1f}", "realized speedup")
 
-# --- Reliability gap (Sec. 1.4.1) ---------------------------------------------
-show("aN: 0.999^1,000", f"{0.999 ** 1000:.1%}")
-show("aN: 0.999^10,000", f"{0.999 ** 10000:.4%}")
-show("aN: 0.9999^10,000", f"{0.9999 ** 10000:.1%}")
-show("aN note: minutes down per year at 99.99%", f"{(1 - 0.9999) * 365 * 24 * 60:.1f}")
+print("== Efficiency measures")
+v("gpt3_peak_pct", 100 * Scenarios.Gpt3PublishedRun.peak_fraction, "{:.0f}", "GPT-3 run-average share of V100 peak, %")
+v("megatron_pct", 100 * RUNS.MegatronLm2021PeakFraction, "{:.0f}", "Megatron-LM percent of peak")
+v("megatron_gpus", RUNS.MegatronLm2021Gpus, "{:,.0f}", "Megatron-LM A100s")
+v("llama_effective_pct", 100 * RUNS.Llama3_405B_EffectiveTrainingTimeFraction, "{:.0f}", "Llama 3 effective training time, %")
 
-# --- OPT-175B and Llama 3 cadence ---------------------------------------------
-opt_restarts = 35 + 70   # lower bounds, Zhang et al. 2022, Sec. 2.5
-opt_days = 60            # "2 months", taken as 60 days
-show("opt: restarts (lower bound)", f"{opt_restarts}")
-show("opt: hours between restarts (upper bound)", f"{opt_days * 24 / opt_restarts:.0f}")
-show("opt: hosts in 992 GPUs at 8 per host", f"{992 / 8:.0f}")
-show("llama: hours between interruptions", f"{54 * 24 / 419:.1f}")  # Dubey et al. 2024
+print("== Reliability gap (availability scenarios)")
+v("avail_node_pct", 100 * A1K.availability, "{:.1f}", "per-node availability, %")
+v("avail_node", A1K.availability, "{:.3f}", "the same, fraction")
+v("avail_n_small", A1K.n_components, "{:,.0f}", "smaller job, nodes")
+v("avail_n_large", A10K.n_components, "{:,.0f}", "larger job, nodes")
+v("avail_1k", A1K.all_up, "{:.3f}", "all-up availability at 1,000")
+v("avail_1k_pct", 100 * A1K.all_up, "{:.1f}", "the same, percent")
+v("avail_10k_pct", 100 * A10K.all_up, "{:.4f}", "all-up availability at 10,000, %")
+v("avail_4n_node_pct", 100 * A4N.availability, "{:.2f}", "four-nines per node, %")
+v("avail_4n_pct", 100 * A4N.all_up, "{:.1f}", "all-up at 10,000 with four nines, %")
+v("downtime_min", m(A4N.downtime_per_year, "minute"), "{:.1f}", "four nines, minutes down per year")
+
+print("== OPT-175B and Llama 3 cadence")
+opt_restarts = RUNS.Opt175BManualRestarts + RUNS.Opt175BAutomaticRestarts
+v("opt_manual", RUNS.Opt175BManualRestarts, "{:.0f}", "manual restarts (lower bound)")
+v("opt_auto", RUNS.Opt175BAutomaticRestarts, "{:.0f}", "automatic restarts (estimate)")
+v("opt_restarts", opt_restarts, "{:.0f}", "restarts (lower bound)")
+v("opt_days", RUNS.Opt175BTrainingDays, "{:.0f}", "training days (about two months)")
+v("opt_hosts", RUNS.Opt175BHostsCycled, "{:.0f}", "hosts cycled out")
+v("opt_hours", m(Q_(RUNS.Opt175BTrainingDays, "day"), "hour") / opt_restarts, "{:.0f}", "hours between restarts (bound)")
+v("llama_interruptions", RUNS.Llama3_405B_UnexpectedInterruptions, "{:.0f}", "Llama 3 unexpected interruptions")
+v("llama_days", RUNS.Llama3_405B_SnapshotDays, "{:.0f}", "Llama 3 snapshot days")
+v("llama_cadence_h", m(Q_(RUNS.Llama3_405B_SnapshotDays, "day"), "hour") / RUNS.Llama3_405B_UnexpectedInterruptions,
+  "{:.1f}", "hours between Llama 3 interruptions")
+
+print("== Archetypes")
+v("rec_table_tb", m(ReferenceStats.RecommenderAtScaleProfile.EmbeddingTableSize, "TB"), "{:.0f}", "Archetype B tables, TB")
+v("phone_low_w", m(ReferenceStats.MobilePower.MobileMlSustainedLow, "W"), "{:.0f}", "Archetype C sustained low, W")
+v("phone_high_w", m(ReferenceStats.MobilePower.MobileMlBurstHigh, "W"), "{:.0f}", "Archetype C burst high, W")
+v("campus_mw", m(ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower, "MW"), "{:.0f}", "facility that can bind, MW")
+
+if __name__ == "__main__":
+    write(__file__)

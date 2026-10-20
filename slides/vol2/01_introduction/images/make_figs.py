@@ -50,6 +50,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle, Circle  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402  (records every value from MLSysIM; figures read them)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -64,51 +67,22 @@ RED, REDL = "#dc2626", "#fee2e2"
 GRAY = "#64748b"
 
 
-def mlsysim_root():
-    return Path(__file__).resolve().parents[4] / "mlsysim"
-
-
-def epoch_rows():
-    sys.path.insert(0, str(mlsysim_root()))
-    from mlsysim import Literature  # noqa: E402
-    rows = [r for r in Literature.Series.NotableModelTrainingRuns.entries
-            if r["training_compute_flop"] and "2012" <= r["date"][:4] <= "2024"]
-    return [r for r in rows if r["hardware_quantity"] and r["training_time_hours"]]
-
-
-def chinchilla():
-    """The Hoffmann et al. 2022 parametric loss fit, L = E + A/N^alpha +
-    B/D^beta (Chinchilla paper, section D.2, equation 10). Read from the
-    MLSysIM registry when this checkout carries the fit; otherwise use the
-    paper's published constants."""
-    import yaml
-    f = mlsysim_root() / "mlsysim" / "literature" / "data" / "chinchilla.yaml"
-    if f.exists():
-        d = yaml.safe_load(f.read_text())
-        if "ParametricLossE" in d:
-            return {k: float(d[k]["value"]) for k in
-                    ("ParametricLossE", "ParametricLossA", "ParametricLossB",
-                     "ParametricLossAlpha", "ParametricLossBeta")}
-    return {"ParametricLossE": 1.69, "ParametricLossA": 406.4,
-            "ParametricLossB": 410.7, "ParametricLossAlpha": 0.34,
-            "ParametricLossBeta": 0.28}
-
-
 # 1. Hook: one synchronized step -------------------------------------------
 def hook(path, k, size=(3.4, 1.3), fs=11, stack=False):
     """stack=True puts the compute label on its own line above the step label."""
     fig, ax = plt.subplots(figsize=size)
-    ax.barh(0, 1.2, color=C1, height=0.55)
-    ax.text(0, 1.0 if stack else 0.5, "compute 1.2 s", ha="left", fontsize=fs,
+    comp, comm, step = num("compute_s"), num("t_ib"), num("step_ib")
+    ax.barh(0, comp, color=C1, height=0.55)
+    ax.text(0, 1.0 if stack else 0.5, f"compute {val('compute_s')} s", ha="left", fontsize=fs,
             fontweight="bold", color=C1T)
     if k >= 2:
-        ax.barh(0, 28, left=1.2, color=C2, height=0.55)
-        ax.text(15.2, 0, "AllReduce 28 s", va="center", ha="center",
+        ax.barh(0, comm, left=comp, color=C2, height=0.55)
+        ax.text(comp + comm / 2, 0, f"AllReduce {val('t_ib')} s", va="center", ha="center",
                 fontsize=fs, fontweight="bold", color="white")
-        ax.text(29.2, 0.5, "step 29.2 s", ha="right",
+        ax.text(step, 0.5, f"step {val('step_ib')} s", ha="right",
                 fontsize=fs, fontweight="bold", color=C2T)
     else:
-        ax.text(29.2, 0.5, "step = ?", ha="right", fontsize=fs,
+        ax.text(step, 0.5, "step = ?", ha="right", fontsize=fs,
                 fontweight="bold", color=C2T)
     ax.set_xlim(0, 30)
     ax.set_ylim(-0.45, 1.45 if stack else 0.95)
@@ -125,27 +99,8 @@ hook(out / "hook_step2.svg", 2)
 hook(out / "hook_synth.svg", 2, size=(3.1, 1.8), fs=15, stack=True)
 
 # 2. Growth decomposition (Epoch AI via MLSysIM) ----------------------------
-runs = epoch_rows()
-
-
-def _year(s):
-    import datetime as dt
-    d = dt.date.fromisoformat(s)
-    return d.year + (d.timetuple().tm_yday - 1) / 365.25
-
-
-def _factor(value):
-    xs = [_year(r["date"]) for r in runs]
-    return 10 ** np.polyfit(xs, np.log10([value(r) for r in runs]), 1)[0]
-
-
-g_compute = _factor(lambda r: r["training_compute_flop"])
-g_count = _factor(lambda r: r["hardware_quantity"])
-g_dur = _factor(lambda r: r["training_time_hours"])
-g_rate = _factor(lambda r: r["training_compute_flop"]
-                 / (r["hardware_quantity"] * r["training_time_hours"] * 3600))
-share = (np.log(g_count) + np.log(g_dur)) / np.log(g_compute)
-assert len(runs) == 146 and abs(g_compute - 3.9) < 0.05 and abs(share - 0.51) < 0.01
+_g = calcs.GROW.result  # Scenarios.NotableRunGrowth2012to2024
+g_compute, g_count, g_dur, g_rate = _g.compute_factor, _g.count_factor, _g.duration_factor, _g.rate_factor
 
 fig, ax = plt.subplots(figsize=(4.4, 2.1))
 rows = [("Training compute", g_compute, C["neutral"]),
@@ -159,7 +114,7 @@ for i, (lab, v, col) in enumerate(rows):
             fontweight="bold", color=C["text"])
     ax.text(np.log10(v) + 0.01, y, f"{v:.1f}× per year", va="center",
             fontsize=13, fontweight="bold", color=col)
-ax.text(0, -0.95, f"blue bars together give {share:.0%} of the growth",
+ax.text(0, -0.95, f"blue bars together give {val('growth_share')}% of the growth",
         color=C1, fontsize=12, fontweight="bold", ha="left", va="center")
 ax.set_xlim(0, 0.95)
 ax.set_ylim(-1.4, 3.5)
@@ -170,9 +125,8 @@ ax.spines["bottom"].set_visible(False)
 sp.save(fig, out / "growth_bars.svg")
 
 # 3. Power law: each halving of the parameter term costs 7.7x ---------------
-fit = chinchilla()
-A, alpha = fit["ParametricLossA"], fit["ParametricLossAlpha"]
-mult = 2 ** (1 / alpha)
+A, alpha = num("chin_a"), num("chin_alpha")
+mult = calcs.Scenarios.ChinchillaParameterPowerLaw.halving_multiple
 fig, ax = plt.subplots(figsize=(3.7, 2.05))
 ns = np.geomspace(1e8, 1e12, 200)
 ax.plot(ns, A / ns ** alpha, color=C1, lw=3)
@@ -183,7 +137,7 @@ for i in range(4):
     ax.plot([n0, n1], [y0, y0], color=C["compute"], lw=1.8, ls="--")
     ax.plot([n1, n1], [y0, y1], color=C["compute"], lw=1.8, ls="--")
     ax.plot([n0], [y0], "o", color=C1, ms=8)
-    ax.text(np.sqrt(n0 * n1), y0 * 1.06, f"×{mult:.1f}", ha="center",
+    ax.text(np.sqrt(n0 * n1), y0 * 1.06, f"×{val('halving_mult')}", ha="center",
             va="bottom", fontsize=11, fontweight="bold", color=C["compute"])
     n0 = n1
 ax.plot([n0], [A / n0 ** alpha], "o", color=C1, ms=8)
@@ -193,20 +147,28 @@ ax.set_xlabel("parameters N", fontsize=11)
 ax.set_ylabel("A/N$^{\\alpha}$ (reducible loss)", fontsize=11)
 ax.tick_params(labelsize=10)
 ax.text(1.2e8, 0.016, "each halving costs\n"
-        f"{mult:.1f}× the parameters", fontsize=11, color=C1,
+        f"{val('halving_mult')}× the parameters", fontsize=11, color=C1,
         fontweight="bold", va="bottom")
 ax.set_ylim(0.012, 0.8)
 ax.minorticks_off()
 sp.save(fig, out / "powerlaw.svg")
 
 # 4. IsoFLOP valleys -----------------------------------------------------------
-E, B, beta = fit["ParametricLossE"], fit["ParametricLossB"], fit["ParametricLossBeta"]
+E, B, beta = num("chin_e"), num("chin_b"), num("chin_beta")
+K = num("chin_k")  # FLOPs per parameter per token
+lo, hi = float(calcs.CHIN.IsoFlopBudgetMinFlops), float(calcs.CHIN.IsoFlopBudgetMaxFlops)
+mid = np.sqrt(lo * hi)  # one budget between the paper's extremes
+
+
+def _sci(x):
+    e = int(np.floor(np.log10(x)))
+    return f"{x / 10 ** e:.1f}".rstrip("0").rstrip(".") + "×10$^{" + str(e) + "}$"
 fig, ax = plt.subplots(figsize=(5.8, 2.0))
 params = np.geomspace(1e7, 1e11, 400)
-for budget, shade, lab in [(6e18, C1L, "6×10$^{18}$ FLOPs"),
-                           (1.3e20, "#93b0d6", "1.3×10$^{20}$"),
-                           (3e21, C1, "3×10$^{21}$")]:
-    loss = E + A / params ** alpha + B / (budget / (6 * params)) ** beta
+for budget, shade, lab in [(lo, C1L, _sci(lo) + " FLOPs"),
+                           (mid, "#93b0d6", _sci(mid)),
+                           (hi, C1, _sci(hi))]:
+    loss = E + A / params ** alpha + B / (budget / (K * params)) ** beta
     col = shade if shade != C1L else "#7aa0cc"
     ax.plot(params, loss, color=col, lw=3)
     i = loss.argmin()
@@ -225,13 +187,13 @@ sp.save(fig, out / "isoflop.svg")
 
 # 5. Inside the node against out of it -----------------------------------------
 fig, ax = plt.subplots(figsize=(3.4, 1.5))
-for y, lab, v, col in [(1, "NVLink", 450, C1), (0, "InfiniBand", 50, C2)]:
+for y, lab, v, col in [(1, "NVLink", int(num("nvlink_gbs")), C1), (0, "InfiniBand", int(num("ndr_gbs")), C2)]:
     ax.barh(y, v, color=col, height=0.55)
     ax.text(-8, y, lab, ha="right", va="center", fontsize=12, fontweight="bold",
             color=C["text"])
     ax.text(v + 8, y, f"{v} GB/s", va="center", fontsize=12, fontweight="bold",
             color=col)
-ax.text(300, 0.0, "about 9× less", fontsize=12, fontweight="bold",
+ax.text(300, 0.0, f"about {val('nvlink_ndr')}× less", fontsize=12, fontweight="bold",
         color=RED, va="center")
 ax.set_xlim(0, 560)
 ax.set_ylim(-0.6, 1.6)
@@ -359,9 +321,9 @@ coupling(out / "coupling_step2.svg", 2)
 
 # 8. Ring traffic ------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(3.8, 1.45))
-for y, lab, v, col, txt in [(2, "FP32 gradient", 700, C["memory"], "700 GB"),
-                            (1, "ring, FP32", 1400, C["network"], "1,400 GB"),
-                            (0, "ring, FP16", 700, C["network"], "700 GB")]:
+for y, lab, v, col, txt in [(2, "FP32 gradient", num("grad32_gb"), C["memory"], f"{val('grad32_gb')} GB"),
+                            (1, "ring, FP32", num("ring32_gb"), C["network"], f"{val('ring32_gb')} GB"),
+                            (0, "ring, FP16", num("ring16_gb"), C["network"], f"{val('ring16_gb')} GB")]:
     ax.barh(y, v, color=col, height=0.6)
     ax.text(-20, y, lab, ha="right", va="center", fontsize=11, fontweight="bold")
     ax.text(v + 20, y, txt, va="center", fontsize=11, fontweight="bold", color=col)
@@ -377,14 +339,15 @@ sp.save(fig, out / "ring_bars.svg")
 # 9. Napkin Math 1.1: two fabrics ---------------------------------------------
 def napkin(path, k):
     fig, ax = plt.subplots(figsize=(3.3, 1.25))
-    data = [("InfiniBand", 28), ("Ethernet", 56)]
-    for i, (lab, comm) in enumerate(data):
+    comp = num("compute_s")
+    data = [("InfiniBand", num("t_ib"), val("step_ib")), ("Ethernet", num("t_eth"), val("step_eth"))]
+    for i, (lab, comm, step) in enumerate(data):
         y = 1 - i
         a = 1.0 if i < k else 0.0
-        ax.barh(y, 1.2, color=C1, height=0.55, alpha=a)
-        ax.barh(y, comm, left=1.2, color=C2, height=0.55, alpha=a)
+        ax.barh(y, comp, color=C1, height=0.55, alpha=a)
+        ax.barh(y, comm, left=comp, color=C2, height=0.55, alpha=a)
         ax.text(-1, y, lab, ha="right", va="center", fontsize=11, fontweight="bold")
-        ax.text(1.2 + comm + 1, y, f"{1.2 + comm:.1f} s", va="center",
+        ax.text(comp + comm + 1, y, f"{step} s", va="center",
                 fontsize=11, fontweight="bold", color=C2T, alpha=a)
     ax.set_xlim(0, 72)
     ax.set_ylim(-0.6, 1.6)
@@ -399,8 +362,8 @@ napkin(out / "napkin_step1.svg", 1)
 napkin(out / "napkin_step2.svg", 2)
 
 # 10. Communication intensity and the fabric balance point --------------------
-BAL = 25e9 / 312e12          # A100 with one 200 Gb/s link, B/FLOP
-OURS = 700e9 / (8192 * 6 * 175e9)
+_ci = calcs.CI.result  # Scenarios.Gpt3DataParallelIntensity
+BAL, OURS = _ci.balance, _ci.intensity  # B/FLOP: A100 on one HDR link; the 175B worker
 
 
 def ci(path, k):
@@ -409,18 +372,19 @@ def ci(path, k):
     y = np.maximum(1.0, x / BAL)
     ax.plot(x, y, color=C["text"], lw=3)
     ax.axvline(BAL, color=RED, lw=1.6, ls="--")
-    ax.text(BAL / 1.4, 150, "fabric balance\n8.0\u00d710$^{-5}$ B/FLOP\n(A100, one 200 Gb/s link)",
+    ax.text(BAL / 1.4, 150, f"fabric balance\n{val('ci_balance_mant')}\u00d710$^{{-5}}$ B/FLOP\n(A100, one {val('ib_gbps')} Gb/s link)",
             color=RED, fontsize=10, fontweight="bold", va="top", ha="right")
     ax.text(3e-7, 1.45, "compute sets the step", color=C1, fontsize=10.5, fontweight="bold", ha="center")
     ax.text(1.5e-3, 2.2, "network\nsets the\nstep", color=C2T, fontsize=10.5, fontweight="bold",
             ha="left")
     if k >= 2:
         ax.plot([OURS], [max(1, OURS / BAL)], "o", ms=11, color=C2, mec="white", mew=1.5, zorder=5)
-        ax.annotate("175B worker\n8.1\u00d710$^{-5}$", (OURS, 1.0), xytext=(-60, 26),
+        ax.annotate(f"{val('gpt3_params_b')}B worker\n{val('ci_mant')}\u00d710$^{{-5}}$", (OURS, 1.0), xytext=(-60, 26),
                     textcoords="offset points", fontsize=10, fontweight="bold", color=C2T,
                     ha="right", arrowprops=dict(arrowstyle="-", color=C2T, lw=1))
     if k >= 3:
-        for lab, v, off in [("Alpha 10$^{-7}$", 1e-7, (0, -9)), ("Beta 10$^{-4}$", 1e-4, (10, -6))]:
+        for lab, v, off in [(f"Alpha 10$^{{{val('alpha_ci_exp')}}}$", calcs.Scenarios.WorkloadAlphaIntensity.intensity, (0, -9)),
+                            (f"Beta 10$^{{{val('beta_ci_exp')}}}$", calcs.Scenarios.WorkloadBetaIntensity.intensity, (10, -6))]:
             yy = max(1, v / BAL)
             ax.plot([v], [yy], "s", ms=10, color=C3, mec="white", mew=1.5, zorder=5)
             ax.annotate(lab, (v, yy), xytext=off, textcoords="offset points",
@@ -443,7 +407,8 @@ for k in (1, 2, 3):
 
 # 11. Llama 3: same batch over twice the GPUs -------------------------------
 fig, ax = plt.subplots(figsize=(3.4, 1.55))
-for y, lab, v, mfu in [(1, "8,192", 430, "43% MFU"), (0, "16,384", 400, "41% MFU")]:
+for y, lab, v, mfu in [(1, val("llama_gpus8k"), int(num("llama_t8k")), f"{val('llama_mfu8k')}% MFU"),
+                       (0, val("llama_gpus"), int(num("llama_t16k")), f"{val('llama_mfu16k')}% MFU")]:
     ax.barh(y, v, color=C1, height=0.55)
     ax.text(-10, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
     ax.text(v + 8, y, f"{v}, {mfu}", va="center", fontsize=11, fontweight="bold", color=C1)
@@ -515,10 +480,10 @@ fleetlaw(out / "fleetlaw_step2.svg", 2)
 
 # 14. Four efficiency numbers, four measures --------------------------------
 fig, ax = plt.subplots(figsize=(5.8, 1.85))
-meas = [("GPT-3 run", 20, "% of peak, run average", C["neutral"]),
-        ("Megatron-LM", 52, "% of peak, 3,072 A100s", C["neutral"]),
-        ("Llama 3 405B", 41, "% MFU, 16,384 H100s", C1),
-        ("Llama 3 405B", 90, "%+ effective training time", C["data"])]
+meas = [("GPT-3 run", int(num("gpt3_peak_pct")), "% of peak, run average", C["neutral"]),
+        ("Megatron-LM", int(num("megatron_pct")), f"% of peak, {val('megatron_gpus')} A100s", C["neutral"]),
+        ("Llama 3 405B", int(num("llama_mfu16k")), f"% MFU, {val('llama_gpus')} H100s", C1),
+        ("Llama 3 405B", int(num("llama_effective_pct")), "%+ effective training time", C["data"])]
 for i, (lab, v, m, col) in enumerate(meas):
     y = len(meas) - 1 - i
     ax.barh(y, v, color=col, height=0.6)
@@ -537,20 +502,21 @@ sp.save(fig, out / "measures.svg")
 def anplot(path, k):
     fig, ax = plt.subplots(figsize=(3.9, 2.05))
     n = np.geomspace(1, 3e5, 400)
-    ax.plot(n, 100 * 0.999 ** n, color=C1, lw=3)
-    ax.text(4, 62, "a = 99.9%", color=C1, fontsize=11, fontweight="bold")
-    ax.plot([1000], [36.8], "o", color=C1, ms=8)
-    ax.text(1000 * 0.75, 30, "36.8% at 1,000", ha="right", va="top", fontsize=11,
+    a1, n1, n2 = num("avail_node"), num("avail_n_small"), num("avail_n_large")
+    ax.plot(n, 100 * a1 ** n, color=C1, lw=3)
+    ax.text(4, 62, f"a = {val('avail_node_pct')}%", color=C1, fontsize=11, fontweight="bold")
+    ax.plot([n1], [num("avail_1k_pct")], "o", color=C1, ms=8)
+    ax.text(n1 * 0.75, 30, f"{val('avail_1k_pct')}% at {val('avail_n_small')}", ha="right", va="top", fontsize=11,
             color=C1, fontweight="bold")
-    ax.plot([10000], [0.0045], "o", color=RED, ms=8)
-    ax.annotate("0.0045% at 10,000", (10000, 0.0045), xytext=(2, 10), textcoords="data",
+    ax.plot([n2], [num("avail_10k_pct")], "o", color=RED, ms=8)
+    ax.annotate(f"{val('avail_10k_pct')}% at {val('avail_n_large')}", (n2, num("avail_10k_pct")), xytext=(2, 10), textcoords="data",
                 fontsize=11, color=RED, fontweight="bold", va="center",
                 arrowprops=dict(arrowstyle="-", color=RED, lw=1))
     if k >= 2:
-        ax.plot(n, 100 * 0.9999 ** n, color=C["compute"], lw=3)
-        ax.plot([10000], [36.8], "o", color=C["compute"], ms=8)
-        ax.text(1.4e4, 86, "a = 99.99%", fontsize=11, color=C["compute"], fontweight="bold")
-        ax.text(1.4e4, 48, "36.8% at\n10,000", fontsize=11, color=C["compute"],
+        ax.plot(n, 100 * calcs.A4N.availability ** n, color=C["compute"], lw=3)
+        ax.plot([n2], [num("avail_4n_pct")], "o", color=C["compute"], ms=8)
+        ax.text(1.4e4, 86, f"a = {val('avail_4n_node_pct')}%", fontsize=11, color=C["compute"], fontweight="bold")
+        ax.text(1.4e4, 48, f"{val('avail_4n_pct')}% at\n{val('avail_n_large')}", fontsize=11, color=C["compute"],
                 fontweight="bold", va="center")
     ax.set_xscale("log")
     ax.set_xlim(1, 3e5)

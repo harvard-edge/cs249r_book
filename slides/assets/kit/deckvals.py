@@ -27,8 +27,23 @@ _REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "mlsysim"))
 import mlsysim  # noqa: E402,F401
 
-# Whole numbers below ten read as words in prose (house style).
-_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+# Running prose spells out whole numbers from zero to one hundred (house
+# style, after the MIT Press style sheet: lego-numbers-in-prose.md).
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+         "eighteen", "nineteen")
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+
+
+def _words(n):
+    if n < 20:
+        return _ONES[n]
+    if n == 100:
+        return "one hundred"
+    tens, ones = divmod(n, 10)
+    return _TENS[tens] + ("-" + _ONES[ones] if ones else "")
+
+
 _KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 _values = {}
 
@@ -36,7 +51,7 @@ _values = {}
 def v(key, value, fmt="{:,.3g}", label=""):
     """Record one value, print it, and return the formatted string.
 
-    fmt is a format string, or "words" to spell a whole number below ten.
+    fmt is a format string, or "words" to spell a whole number from 0 to 100.
     """
     if not _KEY.match(key):
         raise ValueError(f"key {key!r}: use lowercase letters, digits, underscores")
@@ -44,9 +59,9 @@ def v(key, value, fmt="{:,.3g}", label=""):
         raise ValueError(f"key {key!r} recorded twice")
     if fmt == "words":
         n = round(value)
-        if abs(value - n) > 0.05 or not 0 <= n < len(_WORDS):
-            raise ValueError(f"key {key!r}: {value} is not a small whole number")
-        text = _WORDS[n]
+        if abs(value - n) > 0.05 or not 0 <= n <= 100:
+            raise ValueError(f"key {key!r}: {value} is not a whole number from 0 to 100")
+        text = _words(n)
     else:
         text = _format(fmt, value)
     _values[key] = text
