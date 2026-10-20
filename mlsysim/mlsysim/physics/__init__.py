@@ -593,3 +593,18 @@ __all__ += [
     "calc_rent_crossover",
     "calc_ownership_breakeven_utilization",
 ]
+
+# --- Security and privacy: Laplace scale, composition, membership ceiling (added 2026-10-20) ---
+from .privacy import (
+    calc_laplace_scale,
+    calc_basic_composition,
+    calc_membership_tpr_ceiling,
+    calc_level_bits,
+)
+
+__all__ += [
+    "calc_laplace_scale",
+    "calc_basic_composition",
+    "calc_membership_tpr_ceiling",
+    "calc_level_bits",
+]

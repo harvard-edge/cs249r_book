@@ -10186,3 +10186,343 @@ class DeploymentPathScenario(BaseScenario):
     @property
     def passing(self) -> List[str]:
         return [k for k in self.paths if self.passes(k)]
+# --- Security and privacy of a fleet (added 2026-10-20) ---------------------
+
+class QueryExtractionBudgetScenario(BaseScenario):
+    """An extractor that needs ``extraction_queries`` answers from a priced API, under three
+    billing regimes: pay per query, a paid tier capped per day, and a lifetime per-principal
+    allowance after which every query is billed at the per-query price."""
+    training_cost: Quantity          # USD to train the victim model
+    extraction_queries: float        # answers for the target fidelity
+    target_fidelity: float           # agreement with the victim the extractor aims for
+    price_per_query: Quantity        # USD, pay-as-you-go
+    tier_price: Quantity             # USD per billing period
+    tier_daily_quota: float          # queries per day on the paid tier
+    billing_period: Quantity         # days per tier billing period
+    lifetime_allowance: float        # queries per principal before overage billing
+
+    def _tier_fee_per_day(self) -> Quantity:
+        return (self.tier_price / self.billing_period.to("day").magnitude).to("USD")
+
+    def tier_days(self, queries) -> float:
+        return queries / self.tier_daily_quota
+
+    def pay_per_query_cost(self, queries) -> Quantity:
+        return (queries * self.price_per_query).to("USD")
+
+    def tier_cost(self, queries) -> Quantity:
+        """Daily quota only: the tier fee for every day of collection."""
+        return (self.tier_days(queries) * self._tier_fee_per_day()).to("USD")
+
+    def lifetime_cost(self, queries) -> Quantity:
+        """Tier fees up to the allowance, then every query billed per query."""
+        within = min(queries, self.lifetime_allowance)
+        overage = max(queries - self.lifetime_allowance, 0)
+        return (self.tier_cost(within) + self.pay_per_query_cost(overage)).to("USD")
+
+    @property
+    def collection_days(self) -> float:
+        return self.tier_days(self.extraction_queries)
+
+    @property
+    def full_set_pay_per_query(self) -> Quantity:
+        return self.pay_per_query_cost(self.extraction_queries)
+
+    @property
+    def full_set_tier(self) -> Quantity:
+        return self.tier_cost(self.extraction_queries)
+
+    @property
+    def allowance_fees(self) -> Quantity:
+        return self.tier_cost(self.lifetime_allowance)
+
+    @property
+    def overage_cost(self) -> Quantity:
+        return self.pay_per_query_cost(max(self.extraction_queries - self.lifetime_allowance, 0))
+
+    @property
+    def full_set_lifetime(self) -> Quantity:
+        return self.lifetime_cost(self.extraction_queries)
+
+    @property
+    def tier_share_of_training(self) -> float:
+        return (self.full_set_tier / self.training_cost).to("").magnitude
+
+
+class OutputShapingScenario(BaseScenario):
+    """An API that returns the top ``top_k`` of ``class_count`` scores, rounded from
+    ``from_decimals`` to ``to_decimals`` decimal places."""
+    class_count: int
+    top_k: int
+    from_decimals: int
+    to_decimals: int
+
+    @property
+    def scores_reduction(self) -> float:
+        """Times fewer scores per answer than returning every class."""
+        return self.class_count / self.top_k
+
+    @property
+    def entries_removed(self) -> float:
+        return 1 - self.top_k / self.class_count
+
+    @property
+    def decimal_digits_removed(self) -> int:
+        return self.from_decimals - self.to_decimals
+
+    @property
+    def bits_removed(self) -> float:
+        """Bits per score removed under a decimal-bin count."""
+        from ..physics.privacy import calc_level_bits
+        return calc_level_bits(10 ** self.decimal_digits_removed)
+
+    @property
+    def retained_bits(self) -> float:
+        """Bits left in a score in [0, 1] at ``to_decimals`` places (10^d + 1 levels)."""
+        from ..physics.privacy import calc_level_bits
+        return calc_level_bits(10 ** self.to_decimals + 1)
+
+
+class DataParallelAttackSurfaceScenario(BaseScenario):
+    """``workload`` trained on ``fleet`` with ``dp_degree`` data-parallel replicas: the gradient
+    each step exchanges, the checkpoint it writes, and the traffic of a robust aggregate that
+    gathers every replica's gradient instead of a ring AllReduce of their sum."""
+    workload: Workload
+    fleet: Fleet
+    dp_degree: int
+    gradient_bytes_per_param: Quantity
+    checkpoint_bytes_per_param: Quantity
+    weight_bytes_per_param: Optional[Quantity] = None   # serving weights, when quoted
+
+    @property
+    def accelerators(self) -> int:
+        return self.fleet.total_accelerators
+
+    @property
+    def nodes(self) -> int:
+        return self.fleet.count
+
+    @property
+    def accelerators_per_node(self) -> int:
+        return self.fleet.node.accelerators_per_node
+
+    @property
+    def accelerators_per_replica(self) -> float:
+        return self.accelerators / self.dp_degree
+
+    @property
+    def gradient_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.gradient_bytes_per_param).to("byte")
+
+    @property
+    def checkpoint_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.checkpoint_bytes_per_param).to("byte")
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.weight_bytes_per_param).to("byte")
+
+    @property
+    def allreduce_factor(self) -> float:
+        """Bytes each worker moves in a ring AllReduce, per byte of gradient."""
+        from ..physics.communication import calc_ring_allreduce_data_factor
+        return calc_ring_allreduce_data_factor(self.dp_degree)
+
+    @property
+    def gather_factor(self) -> float:
+        """Bytes each worker receives when it gathers every other replica's gradient."""
+        return self.dp_degree - 1
+
+    @property
+    def gather_traffic_ratio(self) -> float:
+        """Gather over ring AllReduce traffic; equals ``dp_degree / 2``."""
+        return self.gather_factor / self.allreduce_factor
+
+
+class MeanBreakdownScenario(BaseScenario):
+    """``workers`` contributions, all honest ones equal to ``honest_value`` and one chosen by an
+    attacker: the mean follows the attacker, the median does not."""
+    workers: int
+    honest_value: float
+    attacker_value: float
+
+    def mean(self, attacker_value=None) -> float:
+        v = self.attacker_value if attacker_value is None else attacker_value
+        return ((self.workers - 1) * self.honest_value + v) / self.workers
+
+    def median(self, attacker_value=None) -> float:
+        import statistics
+        v = self.attacker_value if attacker_value is None else attacker_value
+        return float(statistics.median([self.honest_value] * (self.workers - 1) + [v]))
+
+
+class ThroughputCostScenario(BaseScenario):
+    """The same workload and resource budget served at ``baseline_rate`` without a set of
+    controls and at ``controlled_rate`` with them."""
+    baseline_rate: Quantity
+    controlled_rate: Quantity
+
+    @property
+    def rate_lost(self) -> Quantity:
+        return (self.baseline_rate - self.controlled_rate).to(self.baseline_rate.units)
+
+    @property
+    def overhead(self) -> float:
+        return (1 - self.controlled_rate / self.baseline_rate).to("").magnitude
+
+
+class ProtectedMemoryFitScenario(BaseScenario):
+    """``workload``'s weights at ``bytes_per_weight`` against ``hardware``'s protected memory
+    (an enclave page cache), before activations."""
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_weight: Quantity
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_weight / Q_(1, "param")).to("byte")
+
+    @property
+    def capacity(self) -> Quantity:
+        return self.hardware.memory.capacity
+
+    @property
+    def capacity_share(self) -> float:
+        return (self.weight_bytes / self.capacity).to("").magnitude
+
+
+class EncryptedInferenceLatencyScenario(BaseScenario):
+    """One inference at ``plaintext_latency``, with symmetric encryption around it
+    (``encryption_overhead``) and computed under homomorphic encryption (``fhe_multiplier``)."""
+    plaintext_latency: Quantity
+    encryption_overhead: Quantity
+    fhe_multiplier: float
+
+    @property
+    def encrypted_transport_latency(self) -> Quantity:
+        return (self.plaintext_latency + self.encryption_overhead).to("ms")
+
+    @property
+    def fhe_latency(self) -> Quantity:
+        return (self.plaintext_latency * self.fhe_multiplier).to("second")
+
+
+class ByteWiseSearchScenario(BaseScenario):
+    """Guessing a ``secret_bytes``-byte secret whole, against one byte at a time when a side
+    channel reveals how many leading bytes are correct."""
+    secret_bytes: int
+    bits_per_symbol: int
+
+    @property
+    def symbols(self) -> int:
+        return 2 ** self.bits_per_symbol
+
+    @property
+    def brute_force_guesses(self) -> int:
+        return self.symbols ** self.secret_bytes
+
+    @property
+    def bytewise_guesses(self) -> int:
+        return self.secret_bytes * self.symbols
+
+
+class LaplaceMeanReleaseScenario(BaseScenario):
+    """The mean of a public roster of ``group_size`` values in ``[0, value_range]`` released
+    under ``epsilon``-DP by one Laplace draw on the sum (replace-one adjacency)."""
+    value_range: Quantity
+    epsilon: float
+    group_size: int
+    small_group_size: Optional[int] = None
+
+    @property
+    def sensitivity(self) -> Quantity:
+        """The most one person can move the sum."""
+        return self.value_range
+
+    @property
+    def noise_scale(self) -> Quantity:
+        from ..physics.privacy import calc_laplace_scale
+        return calc_laplace_scale(self.sensitivity, self.epsilon)
+
+    def mean_error(self, group_size=None) -> Quantity:
+        """Expected absolute error of the released mean (the Laplace scale over the group)."""
+        n = self.group_size if group_size is None else group_size
+        return self.noise_scale / n
+
+    @property
+    def small_group_error(self) -> Quantity:
+        return self.mean_error(self.small_group_size)
+
+
+class BasicCompositionScenario(BaseScenario):
+    """``releases`` data-dependent releases about one population, each at ``epsilon_per_release``."""
+    releases: int
+    epsilon_per_release: float
+
+    @property
+    def total_epsilon(self) -> float:
+        from ..physics.privacy import calc_basic_composition
+        return calc_basic_composition([self.epsilon_per_release] * self.releases)
+
+
+class PrivacyAccountingComparisonScenario(BaseScenario):
+    """Two accountants' epsilon for the same DP-SGD run at several lengths (epochs -> epsilon)."""
+    sampling_rate: float
+    noise_multiplier: float
+    delta: float
+    accountant: Dict[int, float]      # tight accountant
+    strong_composition: Dict[int, float]
+
+    def tightening(self, epochs) -> float:
+        """Strong-composition epsilon over the accountant's, same run and length."""
+        return self.strong_composition[epochs] / self.accountant[epochs]
+
+
+class MembershipAuditScenario(BaseScenario):
+    """A membership-inference audit on the ROC plane against the ceiling a pure
+    ``epsilon``-DP release allows; the audit curve ``FPR + a FPR (1 - FPR)`` is illustrative."""
+    epsilon: float
+    audit_shape: float
+
+    def ceiling(self, fpr) -> float:
+        from ..physics.privacy import calc_membership_tpr_ceiling
+        return calc_membership_tpr_ceiling(fpr, self.epsilon)
+
+    def audit(self, fpr) -> float:
+        return fpr + self.audit_shape * fpr * (1 - fpr)
+
+
+class DpSgdRunScenario(BaseScenario):
+    """Inputs a DP-SGD privacy accountant needs for one Poisson-sampled run on ``dataset_size``
+    examples; this type does not estimate epsilon."""
+    dataset_size: int
+    batch_size: int
+    clip_norm: float
+    noise_multiplier: float
+    epochs: int
+    target_epsilon: float
+    delta: float
+
+    @property
+    def sampling_rate(self) -> float:
+        return self.batch_size / self.dataset_size
+
+    @property
+    def steps(self) -> int:
+        return int(self.epochs * self.dataset_size / self.batch_size)
+
+
+class PoisonableShareScenario(BaseScenario):
+    """A ``poisoned_fraction`` of a ``dataset_size``-item web-scale dataset an attacker could
+    control for ``cost``."""
+    dataset_size: float
+    poisoned_fraction: float
+    cost: Quantity
+
+    @property
+    def poisoned_items(self) -> float:
+        return self.dataset_size * self.poisoned_fraction

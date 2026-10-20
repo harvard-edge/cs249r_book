@@ -34,6 +34,7 @@ from ..core.units import BYTES_ADAM_MOMENTS as _BYTES_ADAM_MOMENTS  # neural com
 from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as _INT16_BITS  # added 2026-10-20
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
+from ..core.units import BITS_PER_BYTE as _BITS_PER_BYTE  # security and privacy (added 2026-10-20)
 # Deployment paradigms block (added 2026-10-20)
 from ..systems.registry import Pods as _Pods
 from ..systems.registry import Systems as _Systems  # own against rent (added 2026-10-20)
@@ -5551,4 +5552,135 @@ class Scenarios(Registry):
             "PyTorch to ONNX Runtime": {"latency": Q_(18, "ms"), "memory": Q_(140, "MB")},  # scenario assumption
             "TensorFlow to TensorFlow Lite": {"latency": Q_(15, "ms"), "memory": Q_(90, "MB")},  # scenario assumption
         },
+    )
+
+    # --- Security and privacy of a fleet (added 2026-10-20) -----------------
+    ResNet50ApiExtractionBudget = _st.QueryExtractionBudgetScenario(
+        name="Copying a ResNet-50 image API to 90 percent fidelity under three billing regimes",
+        description="5 million answers against a $5K training cost: $0.001 per query, a $50-a-month tier "
+                    "capped at 10,000 queries a day, or a 100,000-query lifetime allowance per principal "
+                    "with every later query billed per query (constructed values).",
+        training_cost=Q_(5000, "USD"),  # scenario assumption
+        extraction_queries=5e6,  # scenario assumption: answers for 90 percent fidelity
+        target_fidelity=0.90,  # scenario assumption
+        price_per_query=Q_(0.001, "USD"),  # scenario assumption
+        tier_price=Q_(50, "USD"),  # scenario assumption: per billing period
+        tier_daily_quota=1e4,  # scenario assumption
+        billing_period=Q_(_DAYS_PER_MONTH, "day"),
+        lifetime_allowance=1e5,  # scenario assumption
+    )
+    ImageNetTop5RoundedScores = _st.OutputShapingScenario(
+        name="ImageNet classifier API returning the top 5 scores rounded to two decimals",
+        description="Output contract: top-k truncation of 1,000 class scores and rounding from six "
+                    "decimal places to two.",
+        class_count=int(_Datasets.ImageNet.num_classes),
+        top_k=5,  # scenario assumption
+        from_decimals=6,  # scenario assumption
+        to_decimals=2,  # scenario assumption
+    )
+    ReferenceJobAttackSurface = _st.DataParallelAttackSurfaceScenario(
+        name="175B pretraining on the 1,024-GPU reference cluster with 64 data-parallel replicas",
+        description="FP16 gradients exchanged each step, the 14-byte-per-parameter checkpoint, and a "
+                    "gather of every replica's gradient for a robust aggregate.",
+        workload=DenseLLMPretrainingReference.workload,
+        fleet=DenseLLMPretrainingReference.system,
+        dp_degree=64,  # scenario assumption: two 8-GPU nodes of tensor parallelism per replica
+        gradient_bytes_per_param=(_ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
+                                  - _ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter),
+        checkpoint_bytes_per_param=_ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter,
+        weight_bytes_per_param=_BYTES_FP16 / _param,
+    )
+    ByzantineMeanOnReferenceJob = _st.MeanBreakdownScenario(
+        name="One of 64 replicas sends 10,000 while the rest send 1.0",
+        description="Illustrative values: the mean follows the attacker; the median does not.",
+        workers=ReferenceJobAttackSurface.dp_degree,
+        honest_value=1.0,  # scenario assumption
+        attacker_value=1e4,  # scenario assumption
+    )
+    SecureMultiTenantServing = _st.ThroughputCostScenario(
+        name="A matched serving configuration at 1,000 tokens/s, 850 with tenant isolation",
+        description="Assumed throughputs for the same workload and resource budget; the loss splits "
+                    "into stranded partitions, scrubbing time, and lost cache hits.",
+        baseline_rate=Q_(1000, "1/s"),  # scenario assumption: tokens per second
+        controlled_rate=Q_(850, "1/s"),  # scenario assumption: tokens per second
+    )
+    ResNet50Fp32InSgxEnclave = _st.ProtectedMemoryFitScenario(
+        name="ResNet-50 FP32 weights in a 128 MiB SGX enclave page cache",
+        description="Weights only, before activations, against an older SGX configuration's EPC.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.IntelSGX,
+        bytes_per_weight=_BYTES_FP32,
+    )
+    ResNet50Int8InSgxEnclave = ResNet50Fp32InSgxEnclave.variant(
+        name="ResNet-50 INT8 weights in the same enclave page cache", bytes_per_weight=_BYTES_INT8)
+    ResNet18Fp32InSgxEnclave = ResNet50Fp32InSgxEnclave.variant(
+        name="ResNet-18 FP32 weights in the same enclave page cache", workload=_Models.Vision.ResNet18)
+    ResNet18Int8InSgxEnclave = ResNet50Fp32InSgxEnclave.variant(
+        name="ResNet-18 INT8 weights in the same enclave page cache", workload=_Models.Vision.ResNet18,
+        bytes_per_weight=_BYTES_INT8)
+    HealthMonitoringEncryptedInference = _st.EncryptedInferenceLatencyScenario(
+        name="A 20 ms health-monitoring inference, with AES around it or under FHE",
+        description="Assumed overheads: AES-NI adds 0.5 ms; FHE runs at the conservative 10,000x slowdown.",
+        plaintext_latency=Q_(20, "ms"),  # scenario assumption
+        encryption_overhead=Q_(0.5, "ms"),  # scenario assumption: AES-NI accelerated
+        fhe_multiplier=float(_Literature.Crypto.FheOverheadMultiplier),
+    )
+    FiveBytePasswordPowerAnalysis = _st.ByteWiseSearchScenario(
+        name="A 5-byte password checked one byte at a time under power analysis",
+        description="The power trace reveals the first wrong byte, so the search runs byte by byte.",
+        secret_bytes=5,  # scenario assumption, as in the measured trace
+        bits_per_symbol=_BITS_PER_BYTE,
+    )
+    SalaryMeanLaplaceRelease = _st.LaplaceMeanReleaseScenario(
+        name="Mean salary of 1,000 employees on a public roster at epsilon 1",
+        description="Salaries from 0 to $200,000; one Laplace draw on the sum, divided by the public count.",
+        value_range=Q_(200000, "USD"),  # scenario assumption
+        epsilon=1.0,  # scenario assumption
+        group_size=1000,  # scenario assumption
+        small_group_size=100,  # scenario assumption
+    )
+    TenReleasesBasicComposition = _st.BasicCompositionScenario(
+        name="Ten models trained on one cohort at epsilon 1 each",
+        description="Basic composition adds the budgets.",
+        releases=10,  # scenario assumption
+        epsilon_per_release=1.0,  # scenario assumption
+    )
+    DpSgdAccountantComparison = _st.PrivacyAccountingComparisonScenario(
+        name="Moments accountant against strong composition for one DP-SGD run (Abadi et al. 2016)",
+        description="q = 0.01, sigma = 4, delta = 1e-5, after 100 and 400 epochs.",
+        sampling_rate=float(_Literature.DifferentialPrivacy.AbadiSamplingRate),
+        noise_multiplier=float(_Literature.DifferentialPrivacy.AbadiNoiseMultiplier),
+        delta=float(_Literature.DifferentialPrivacy.AbadiDelta),
+        accountant={int(_Literature.DifferentialPrivacy.AbadiShortRunEpochs):
+                    float(_Literature.DifferentialPrivacy.AbadiAccountantEpsilonShortRun),
+                    int(_Literature.DifferentialPrivacy.AbadiLongRunEpochs):
+                    float(_Literature.DifferentialPrivacy.AbadiAccountantEpsilonLongRun)},
+        strong_composition={int(_Literature.DifferentialPrivacy.AbadiShortRunEpochs):
+                            float(_Literature.DifferentialPrivacy.AbadiStrongCompositionEpsilonShortRun),
+                            int(_Literature.DifferentialPrivacy.AbadiLongRunEpochs):
+                            float(_Literature.DifferentialPrivacy.AbadiStrongCompositionEpsilonLongRun)},
+    )
+    MembershipAuditAtEpsilonOne = _st.MembershipAuditScenario(
+        name="A membership audit below the pure epsilon = 1 DP ceiling",
+        description="Illustrative audit curve; the ceiling follows from the DP definition with delta = 0.",
+        epsilon=1.0,  # scenario assumption
+        audit_shape=0.6,  # scenario assumption: must stay under the ceiling (needs <= 1 - e^-eps)
+    )
+    Cifar10DpSgdRun = _st.DpSgdRunScenario(
+        name="DP-SGD on CIFAR-10: batch 4,000, 60 epochs, clip 1, sigma 1.3, target epsilon 3",
+        description="Inputs a sampled-Gaussian accountant needs; epsilon itself comes from the accountant.",
+        dataset_size=int(_Datasets.CIFAR10.training_examples.to("count").magnitude),
+        batch_size=4000,  # scenario assumption
+        clip_norm=1.0,  # scenario assumption
+        noise_multiplier=1.3,  # scenario assumption
+        epochs=60,  # scenario assumption
+        target_epsilon=3.0,  # scenario assumption
+        delta=1e-5,  # scenario assumption
+    )
+    LaionWebScalePoisoning = _st.PoisonableShareScenario(
+        name="The share of LAION-400M an attacker could have poisoned through expired domains",
+        description="Carlini et al. 2024: 0.01 percent for about $60.",
+        dataset_size=float(_Literature.DataPoisoning.Laion400mImageTextPairs),
+        poisoned_fraction=float(_Literature.DataPoisoning.WebScalePoisonableFraction),
+        cost=Q_(float(_Literature.DataPoisoning.WebScalePoisoningCostUsd), "USD"),
     )

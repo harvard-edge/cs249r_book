@@ -3492,3 +3492,88 @@ DAO_2022_FLASHATTENTION = _lit(
     notes=("Figure 2 (left), GPT-2 medium on an A100: HBM reads and writes 40.3 GB for standard "
            "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses."),
 )
+
+# Attacks on and defenses of learned systems (added 2026-10-20).
+CARLINI_STEALING_LM_2024 = Provenance(
+    id="prov:carlini-stealing-production-lm-2024",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Carlini, N. et al. (2024), Stealing Part of a Production Language Model, ICML 2024",
+    url="https://arxiv.org/abs/2403.06634",
+    verified="2026-10-20",
+    notes=("Abstract: under $20 extracts the entire projection matrix of OpenAI's ada and babbage; under "
+           "$2,000 estimated for gpt-3.5-turbo. Table: ada width 1024, < 2e6 queries, RMS 5e-4; babbage "
+           "2048, < 4e6, 7e-4; babbage-002 1536, < 4e6; gpt-3.5-turbo-instruct and -1106 < 4e7 queries."),
+)
+CARLINI_EXTRACTING_GPT2_2021 = Provenance(
+    id="prov:carlini-extracting-training-data-2021",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Carlini, N. et al. (2021), Extracting Training Data from Large Language Models, USENIX Security 2021",
+    url="https://www.usenix.org/conference/usenixsecurity21/presentation/carlini-extracting",
+    verified="2026-10-20",
+    notes="600,000 GPT-2 samples generated; 1,800 top-ranked inspected; 604 confirmed memorized training text.",
+)
+SHAN_NIGHTSHADE_2024 = Provenance(
+    id="prov:shan-nightshade-2024",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Shan, S. et al. (2024), Nightshade: Prompt-Specific Poisoning Attacks on Text-to-Image Generative Models, IEEE S&P 2024",
+    url="https://arxiv.org/abs/2310.13828",
+    verified="2026-10-20",
+    notes="Stable Diffusion XL fine-tuned with 50, 100, and 300 poison images per concept (dose-response figure).",
+)
+CARLINI_WEB_SCALE_POISONING_2024 = Provenance(
+    id="prov:carlini-web-scale-poisoning-2024",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Carlini, N. et al. (2024), Poisoning Web-Scale Training Datasets is Practical, IEEE S&P 2024",
+    url="https://arxiv.org/abs/2302.10149",
+    verified="2026-10-20",
+    notes="Abstract: for $60 an attacker could have poisoned 0.01 percent of the LAION-400M or COYO-700M datasets.",
+)
+SCHUHMANN_LAION_400M_2021 = Provenance(
+    id="prov:schuhmann-laion-400m-2021",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Schuhmann, C. et al. (2021), LAION-400M: Open Dataset of CLIP-Filtered 400 Million Image-Text Pairs",
+    url="https://arxiv.org/abs/2111.02114",
+    verified="2026-10-20",
+)
+ABADI_DPSGD_2016 = Provenance(
+    id="prov:abadi-deep-learning-dp-2016",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Abadi, M. et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016",
+    url="https://arxiv.org/abs/1607.00133",
+    verified="2026-10-20",
+    notes=("q = 0.01, sigma = 4, delta = 1e-5: moments accountant epsilon 1.26 after 100 epochs and 2.55 after "
+           "400; strong composition 9.34 and 24.22. MNIST nonprivate baseline 98.3 percent; CIFAR-10 73 "
+           "percent at epsilon 8."),
+)
+DE_DP_IMAGE_CLASSIFICATION_2022 = Provenance(
+    id="prov:de-dp-image-classification-2022",
+    kind=ProvenanceKind.LITERATURE,
+    ref="De, S. et al. (2022), Unlocking High-Accuracy Differentially Private Image Classification through Scale",
+    url="https://arxiv.org/abs/2204.13650",
+    verified="2026-10-20",
+    notes="CIFAR-10 from scratch, WRN-16-4: 81.4 percent at epsilon 8; the chapter's nonprivate reference is 93 percent.",
+)
+NARAYANAN_NETFLIX_DEANON_2008 = Provenance(
+    id="prov:narayanan-shmatikov-netflix-2008",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Narayanan, A. and Shmatikov, V. (2008), Robust De-anonymization of Large Sparse Datasets, IEEE S&P 2008",
+    url="https://arxiv.org/abs/cs/0610105",
+    verified="2026-10-20",
+    notes="8 movie ratings (2 may be wrong) with dates within 14 days uniquely identify 99 percent of records.",
+)
+ANTONAKAKIS_MIRAI_2017 = Provenance(
+    id="prov:antonakakis-mirai-2017",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Antonakakis, M. et al. (2017), Understanding the Mirai Botnet, USENIX Security 2017",
+    url="https://www.usenix.org/conference/usenixsecurity17/technical-sessions/presentation/antonakakis",
+    verified="2026-10-20",
+    notes="Mirai peaked at about 600,000 infected devices.",
+)
+FARWELL_STUXNET_2011 = Provenance(
+    id="prov:farwell-rohozinski-stuxnet-2011",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Farwell, J. P. and Rohozinski, R. (2011), Stuxnet and the Future of Cyber War, Survival 53(1)",
+    url="https://doi.org/10.1080/00396338.2011.555586",
+    verified="2026-10-20",
+    notes="Stuxnet exploited four zero-day vulnerabilities.",
+)
