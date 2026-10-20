@@ -141,6 +141,16 @@ __all__ = [
     "DecoderFamiliesResult",
     "ProposerTrafficResult",
     "EvidenceHorizonResult",
+    # Retrieval from long-term memory (added 2026-10-20)
+    "RetrievalPayloadResult",
+    "Bm25PairResult",
+    "ExactScanFloorResult",
+    "AnnFootprintResult",
+    "GraphNeighborhoodResult",
+    "IndexMaintenanceResult",
+    "StorageAmplificationResult",
+    "MaintainedPolicyCostResult",
+    "WordOverlapResult",
 ]
 
 
@@ -1994,3 +2004,121 @@ class EvidenceHorizonResult(SolverResult):
     error_at_chunk_end: Quantity             # initial error + drift at chunk end
     outlast: Quantity                        # chunk span - horizon
     setpoints_within_horizon: float
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ------------------------
+# Staging whole records in a token allowance, BM25 ranking, the exact-scan
+# bandwidth floor, approximate-index bytes, typed traversal depth, keeping an
+# index current, auxiliary bytes per store, and word overlap.
+
+class RetrievalPayloadResult(SolverResult):
+    """Result from RetrievalPayloadModel: whole serialized records in a retrieval allowance."""
+    allowance: int                       # window - output reserve - other input
+    record: int                          # body + metadata, tokens per serialized record
+    records: int                         # whole records that fit after the envelope
+    used: int                            # envelope + records x record
+    remaining: int                       # allowance - used
+    body_only: int                       # records a body-only count admits
+    body_only_used: int                  # those records serialized with metadata and envelope
+    overshoot: int                       # body_only_used - allowance
+    overcount: int                       # body_only - records
+    scaled_metadata: Optional[int] = None          # metadata after the stated scale
+    scaled_metadata_records: Optional[int] = None  # whole records at that metadata size
+
+
+class Bm25PairResult(SolverResult):
+    """Result from Bm25PairModel: one query term scored in a short and a long document."""
+    idf: float
+    short_normalizer: float              # k1 (1 - b + b |D| / avgdl), short document
+    long_normalizer: float
+    short_score: float
+    long_score: float
+
+
+class ExactScanFloorResult(SolverResult):
+    """Result from ExactScanFloorModel: the bandwidth floor of an exact vector scan."""
+    footprint: Quantity                  # bytes streamed per scan
+    bytes_per_vector: Quantity
+    flops: Quantity                      # 2 N d
+    intensity: Quantity                  # FLOP per byte
+    ridge: Quantity                      # host peak / bandwidth, FLOP per byte
+    stream_time: Quantity                # footprint / bandwidth
+    math_time: Quantity                  # flops / peak
+    trajectory_time: Optional[Quantity] = None     # searches x stream time
+    filtered_time: Optional[Quantity] = None       # stream time of the filtered set
+    budget_vectors: Optional[float] = None         # vectors the budget can stream
+
+
+class AnnFootprintResult(SolverResult):
+    """Result from AnnFootprintModel: resident bytes of a graph index and of PQ codes."""
+    raw: Quantity                        # full-precision vectors
+    graph: Quantity                      # graph links
+    graph_total: Quantity                # vectors + links
+    codes: Quantity                      # PQ codes
+    compression: float                   # raw / codes
+    lookup_table: Quantity               # subvectors x centroids x entry
+    sub_dim: int                         # components per subvector
+    bytes_per_vector: Quantity           # full precision
+    code_bytes_per_vector: Quantity
+
+
+class GraphNeighborhoodResult(SolverResult):
+    """Result from GraphNeighborhoodModel: an exact tree's neighborhood against an allowance."""
+    allowance: int
+    nodes_by_depth: List[int]            # cumulative nodes through depth 0, 1, ..., depth
+    tokens_by_depth: List[int]           # serialized tokens through each depth
+    nodes: int                           # through the stated depth
+    required: int                        # tokens through the stated depth
+    fit: int                             # most whole nodes the allowance holds
+    packed: int                          # tokens of that packing
+    shallow_nodes: int                   # one level less
+    shallow_required: int
+
+
+class IndexMaintenanceResult(SolverResult):
+    """Result from IndexMaintenanceModel: re-indexing an edit against excluding stale entries."""
+    chunks: int
+    batches: int
+    local_time: Quantity                 # parse + postings + local embedding batches
+    remote_batch_time: Quantity          # parse + postings + one remote request per batch
+    remote_per_file_time: Quantity       # parse + postings + one remote request per file
+    exclusion_write_time: Quantity       # one exclusion entry per changed file
+    exclusion_check_time: Quantity       # one lookup per candidate
+    write_path_ratio: float              # local re-index / exclusion write
+
+
+class StorageAmplificationResult(SolverResult):
+    """Result from StorageAmplificationModel: auxiliary bytes and re-index time of two stores."""
+    raw: Quantity                        # source bytes
+    postings: Quantity
+    graph: Quantity                      # structural edges
+    chunks: int
+    vectors: Quantity
+    vector_links: Quantity               # graph-index links over the vectors
+    aux_lexical_graph: Quantity          # postings + edges
+    aux_lexical_dense: Quantity          # postings + vectors + links
+    ratio_lexical_graph: float           # auxiliary / source
+    ratio_lexical_dense: float
+    edited_chunks: int
+    reindex_lexical_graph: Quantity
+    reindex_lexical_dense: Quantity
+    bytes_ratio: float                   # dense store / graph store, auxiliary bytes
+    time_ratio: float                    # dense store / graph store, re-index time
+
+
+class MaintainedPolicyCostResult(SolverResult):
+    """Result from MaintainedPolicyCostModel: cost per accepted task with and without upkeep."""
+    baseline_cost: float                 # cost per accepted task, units of the baseline attempt
+    maintained_cost: float
+    change: float                        # maintained / baseline - 1
+    break_even_acceptance: float         # acceptance at which the two match
+
+
+class WordOverlapResult(SolverResult):
+    """Result from WordOverlapModel: distinct words two texts share."""
+    shared: int
+    union: int
+    first_words: int
+    second_words: int
+    jaccard: float                       # shared / union
+

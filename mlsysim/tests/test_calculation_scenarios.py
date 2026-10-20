@@ -1691,3 +1691,78 @@ def test_quantization_ensemble_confidence_and_mlperf():
     assert m.latest("gptj-99").to("s").magnitude == approx(4.17663)
     assert m.earliest("gptj-99").to("s").magnitude == approx(10.2045)
     assert m.span == approx(15566.8)
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ------------------------
+
+def test_retrieval_records_in_allowance():
+    r = Scenarios.RetrievalRecordsInAllowance.result
+    assert r.allowance == 6144 and r.record == 576 and r.records == 10
+    assert r.used == 5888 and r.remaining == 256
+    assert r.body_only == 12 and r.body_only_used == 7040 and r.overshoot == 896 and r.overcount == 2
+    assert r.scaled_metadata == 128 and r.scaled_metadata_records == 9
+
+
+def test_bm25_short_against_long_file():
+    r = Scenarios.Bm25ShortAgainstLongFile.result
+    assert r.idf == approx(9.808187) and r.short_normalizer == approx(0.48)
+    assert r.long_normalizer == approx(9.3)
+    assert r.short_score == approx(14.579738) and r.long_score == approx(8.461966)
+
+
+def test_exact_scan_ten_million_vectors():
+    r = Scenarios.ExactScanTenMillionVectors.result
+    assert r.footprint.to("GB").magnitude == approx(15.36) and r.bytes_per_vector.to("byte").magnitude == 1536
+    assert r.flops.to("GFLOP").magnitude == approx(15.36)
+    assert r.intensity.to("flop/byte").magnitude == approx(1.0) and r.ridge.to("flop/byte").magnitude == approx(20.0)
+    assert r.stream_time.to("ms").magnitude == approx(307.2) and r.math_time.to("ms").magnitude == approx(15.36)
+    assert r.trajectory_time.to("s").magnitude == approx(6.144)
+    assert r.filtered_time.to("ms").magnitude == approx(0.3072)
+    assert r.budget_vectors == approx(325520.83)
+
+
+def test_ann_indexes_ten_million_vectors():
+    r = Scenarios.AnnIndexesTenMillionVectors.result
+    assert r.graph.to("GB").magnitude == approx(2.56) and r.graph_total.to("GB").magnitude == approx(17.92)
+    assert r.codes.to("GB").magnitude == approx(0.64) and r.compression == approx(24.0)
+    assert r.lookup_table.to("KB").magnitude == approx(65.536) and r.sub_dim == 12
+
+
+def test_typed_traversal_depth_three():
+    r = Scenarios.TypedTraversalDepthThree.result
+    assert r.nodes_by_depth == [1, 4, 13, 40] and r.tokens_by_depth == [280, 820, 2440, 7300]
+    assert r.allowance == 6144 and r.fit == 33 and r.packed == 6040
+    assert r.shallow_nodes == 13 and r.shallow_required == 2440
+
+
+def test_repair_edit_index_maintenance():
+    r = Scenarios.RepairEditIndexMaintenance.result
+    assert r.chunks == 16 and r.batches == 1
+    assert r.local_time.to("ms").magnitude == approx(88.0)
+    assert r.remote_batch_time.to("ms").magnitude == approx(210.0)
+    assert r.remote_per_file_time.to("s").magnitude == approx(1.26)
+    assert r.exclusion_write_time.to("us").magnitude == approx(0.4)
+    assert r.exclusion_check_time.to("us").magnitude == approx(1.5)
+    assert r.write_path_ratio == approx(220000.0)
+
+
+def test_lexical_graph_against_dense_store():
+    r = Scenarios.LexicalGraphAgainstDenseStore.result
+    assert r.chunks == 100000 and r.edited_chunks == 30
+    assert r.ratio_lexical_graph == approx(0.36) and r.ratio_lexical_dense == approx(8.52)
+    assert r.reindex_lexical_graph.to("ms").magnitude == approx(34.0588)
+    assert r.reindex_lexical_dense.to("ms").magnitude == approx(612.0)
+    assert r.bytes_ratio == approx(23.6667) and r.time_ratio == approx(17.9689)
+
+
+def test_maintained_memory_policy_cost():
+    r = Scenarios.MaintainedMemoryPolicyCost.result
+    assert r.baseline_cost == approx(2.0) and r.maintained_cost == approx(1.833333)
+    assert r.change == approx(-0.083333) and r.break_even_acceptance == approx(0.55)
+
+
+def test_word_overlap_scenarios():
+    d = Scenarios.ConditionNotifyDocstrings.result
+    assert d.shared == 7 and d.union == 13 and d.jaccard == approx(7 / 13)
+    p = Scenarios.MeetingPreferenceRevision.result
+    assert p.shared == 5 and p.first_words == 6 and p.union == 7

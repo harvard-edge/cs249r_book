@@ -258,3 +258,28 @@ __all__ += [
     "ProposerTrafficModel",
     "EvidenceHorizonModel",
 ]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    RetrievalPayloadModel,
+    Bm25PairModel,
+    ExactScanFloorModel,
+    AnnFootprintModel,
+    GraphNeighborhoodModel,
+    IndexMaintenanceModel,
+    StorageAmplificationModel,
+    MaintainedPolicyCostModel,
+    WordOverlapModel,
+)
+
+__all__ += [
+    "RetrievalPayloadModel",
+    "Bm25PairModel",
+    "ExactScanFloorModel",
+    "AnnFootprintModel",
+    "GraphNeighborhoodModel",
+    "IndexMaintenanceModel",
+    "StorageAmplificationModel",
+    "MaintainedPolicyCostModel",
+    "WordOverlapModel",
+]

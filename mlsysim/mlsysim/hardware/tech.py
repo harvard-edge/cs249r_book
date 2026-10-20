@@ -53,6 +53,10 @@ class MemoryTier(BaseModel):
     # bandwidth comparison between memory technologies turns on (one HBM stack,
     # one DDR DIMM channel).
     interface_width: Optional[Quantity] = None
+    # Added 2026-10-20: per-pin data rate of a speed grade (one bit per
+    # transfer, so DDR5-4800 is 4.8 Gb/s per pin). Peak bandwidth is
+    # interface_width x pin_data_rate (physics.retrieval.calc_interface_bandwidth).
+    pin_data_rate: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("latency", "t_ck", "t_rcd", "t_rp", "t_rcd_min", "t_rp_min", "t_rpab_min",
@@ -78,10 +82,10 @@ class MemoryTier(BaseModel):
     def _validate_energy_per_byte(cls, v):
         return require_unit_family(v, ureg.joule / ureg.byte, "energy_per_byte", "data")
 
-    @field_validator("bandwidth", mode="after")
+    @field_validator("bandwidth", "pin_data_rate", mode="after")
     @classmethod
-    def _validate_bandwidth(cls, v):
-        return require_unit_family(v, ureg.byte / ureg.second, "bandwidth", "data")
+    def _validate_bandwidth(cls, v, info):
+        return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")
 
 
 class StorageTier(BaseModel):

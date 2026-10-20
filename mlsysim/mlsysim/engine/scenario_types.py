@@ -4475,3 +4475,174 @@ class SingleStreamLatencyScenario(BaseScenario):
     def span(self) -> float:
         lat = self.latencies
         return (max(lat) / min(lat)).to("").magnitude
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ----------------------
+# What a read stages, ranks, streams, and maintains: the solvers live in
+# engine/solvers/retrieval.py. Token counts are serialized-request counts.
+
+class RetrievalPayloadScenario(BaseScenario):
+    """Whole serialized records staged in what a call's window leaves for retrieval."""
+    window: int
+    output_reserve: int
+    other_input: int                 # system prompt, tool schemas, history
+    envelope: int                    # response envelope, paid once
+    body: int                        # body tokens per record
+    metadata: int                    # provenance tokens per record
+    metadata_scale: Optional[int] = None     # a metadata multiple to compare
+
+    @property
+    def result(self):
+        from .solvers import RetrievalPayloadModel
+        return RetrievalPayloadModel().solve(self.window, self.output_reserve, self.other_input,
+                                             self.envelope, self.body, self.metadata,
+                                             self.metadata_scale)
+
+
+class Bm25PairScenario(BaseScenario):
+    """One query term scored by BM25 in a short and a long document of one corpus."""
+    documents: int
+    matching_documents: int
+    average_length: float            # analyzer terms
+    short_length: float
+    short_frequency: float
+    long_length: float
+    long_frequency: float
+    k1: float
+    b: float
+
+    @property
+    def result(self):
+        from .solvers import Bm25PairModel
+        return Bm25PairModel().solve(self.documents, self.matching_documents, self.average_length,
+                                     self.short_length, self.short_frequency, self.long_length,
+                                     self.long_frequency, self.k1, self.b)
+
+
+class ExactScanScenario(BaseScenario):
+    """An exact vector scan on one host: bytes, intensity, and the bandwidth floor."""
+    host: HardwareNode
+    vectors: int
+    dimension: int
+    bytes_per_value: Quantity
+    searches: Optional[int] = None           # searches in one trajectory
+    filtered_vectors: Optional[int] = None   # eligible set after a scope filter
+    budget: Optional[Quantity] = None        # per-search latency budget
+
+    @property
+    def result(self):
+        from .solvers import ExactScanFloorModel
+        return ExactScanFloorModel().solve(self.host, self.vectors, self.dimension, self.bytes_per_value,
+                                           self.searches, self.filtered_vectors, self.budget)
+
+
+class AnnFootprintScenario(BaseScenario):
+    """Resident bytes of a graph index and of product-quantization codes over one corpus."""
+    vectors: int
+    dimension: int
+    bytes_per_value: Quantity
+    links_per_node: int
+    link_bytes: Quantity
+    subvectors: int
+    centroids: int
+    code_bytes: Quantity
+    table_entry_bytes: Quantity
+
+    @property
+    def result(self):
+        from .solvers import AnnFootprintModel
+        return AnnFootprintModel().solve(self.vectors, self.dimension, self.bytes_per_value,
+                                         self.links_per_node, self.link_bytes, self.subvectors,
+                                         self.centroids, self.code_bytes, self.table_entry_bytes)
+
+
+class GraphNeighborhoodScenario(BaseScenario):
+    """A typed traversal's exact-tree neighborhood against a call's retrieval allowance."""
+    window: int
+    output_reserve: int
+    other_input: int
+    children: int
+    depth: int                       # the seed is depth zero
+    node_tokens: int                 # serialized tokens per node, provenance included
+    envelope_tokens: int             # edges and envelope, paid once
+
+    @property
+    def result(self):
+        from .solvers import GraphNeighborhoodModel
+        return GraphNeighborhoodModel().solve(self.window, self.output_reserve, self.other_input,
+                                              self.children, self.depth, self.node_tokens,
+                                              self.envelope_tokens)
+
+
+class IndexMaintenanceScenario(BaseScenario):
+    """One edit's synchronous re-indexing against exclusion of the stale entries."""
+    files: int
+    chunks_per_file: int
+    parse_time: Quantity             # per file
+    postings_time: Quantity          # per chunk
+    local_batch_time: Quantity       # one local embedding batch
+    batch: int                       # chunks per embedding batch
+    remote_request_time: Quantity    # one remote embedding request
+    exclusion_write_time: Quantity   # per exclusion entry
+    candidates: int                  # candidates checked per query
+    exclusion_check_time: Quantity   # per candidate
+
+    @property
+    def result(self):
+        from .solvers import IndexMaintenanceModel
+        return IndexMaintenanceModel().solve(self.files, self.chunks_per_file, self.parse_time,
+                                             self.postings_time, self.local_batch_time, self.batch,
+                                             self.remote_request_time, self.exclusion_write_time,
+                                             self.candidates, self.exclusion_check_time)
+
+
+class StorageAmplificationScenario(BaseScenario):
+    """Auxiliary bytes and re-index time of a lexical-plus-graph and a lexical-plus-dense store."""
+    files: int
+    tokens_per_file: int
+    bytes_per_file: Quantity
+    postings_per_token: Quantity     # bytes of postings per token
+    edges_per_file: int
+    edge_bytes: Quantity
+    passage_tokens: int              # tokens per dense chunk
+    dimension: int
+    bytes_per_value: Quantity
+    links_per_node: int
+    link_bytes: Quantity
+    edited_files: int
+    lexical_rate: float              # files per second
+    parse_rate: float                # files per second
+    embed_rate: float                # chunks per second
+
+    @property
+    def result(self):
+        from .solvers import StorageAmplificationModel
+        return StorageAmplificationModel().solve(
+            self.files, self.tokens_per_file, self.bytes_per_file, self.postings_per_token,
+            self.edges_per_file, self.edge_bytes, self.passage_tokens, self.dimension,
+            self.bytes_per_value, self.links_per_node, self.link_bytes, self.edited_files,
+            self.lexical_rate, self.parse_rate, self.embed_rate)
+
+
+class MaintainedPolicyCostScenario(BaseScenario):
+    """A memory policy that pays upkeep (a share of the baseline attempt) to raise acceptance."""
+    baseline_acceptance: float
+    maintained_acceptance: float
+    maintenance_share: float         # upkeep per attempt, fraction of the baseline attempt cost
+
+    @property
+    def result(self):
+        from .solvers import MaintainedPolicyCostModel
+        return MaintainedPolicyCostModel().solve(self.baseline_acceptance, self.maintained_acceptance,
+                                                 self.maintenance_share)
+
+
+class WordOverlapScenario(BaseScenario):
+    """Two texts compared by the distinct words they share."""
+    first: str
+    second: str
+
+    @property
+    def result(self):
+        from .solvers import WordOverlapModel
+        return WordOverlapModel().solve(self.first, self.second)
