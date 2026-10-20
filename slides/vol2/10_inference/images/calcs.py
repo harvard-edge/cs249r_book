@@ -26,7 +26,7 @@ HOOK = Scenarios.LlmServingFirstYear
 VOTE = Scenarios.SloGoodputTwoConfigurations
 TAX = Scenarios.InteractiveRequestServingTax
 KNEE_VIS, KNEE_LLM = Scenarios.VisionBatchingKnee, Scenarios.LlmDecodeBatchingKnee
-DECODE = Scenarios.Llama3_70B_DecodeH100
+DECODE = Scenarios.Llama2_70B_DecodeH100  # the reference replica (Llama-2 70B)
 LITTLE, CHAT_LITTLE = Scenarios.VisionServingLittlesLaw, Scenarios.LlmChatLittlesLaw
 CHAT, CODE = Scenarios.LlmChatTrace2023, Scenarios.LlmCodeTrace2023
 WEEK = Scenarios.LlmChatWeekTraffic2024
@@ -89,8 +89,9 @@ v("llama3_hidden", LLAMA3.hidden_dim, "{:.0f}", "hidden size")
 v("llama3_head_dim", LR.head_dim, "{:.0f}", "head width")
 v("llama3_context", LLAMA3.context_length, "{:,.0f}", "context window, tokens")
 v("gqa_ratio", LLAMA3.heads / LLAMA3.kv_heads, "{:.0f}", "query heads per KV head")
-v("replica_weights_gb", m(LR.weights, "GB"), "{:.1f}", "FP16 weights, GB")
-v("replica_weights_per_gpu", m(LR.weights, "GB") / LONG.accelerators, "{:.2f}", "FP16 weights per GPU, GB")
+v("replica_weights_gb", m(LLAMA2.size_in_bytes(BYTES_FP16), "GB"), "{:.0f}", "reference replica (Llama-2 70B) FP16 weights, GB")
+v("lc_weights_gb", m(LR.weights, "GB"), "{:.1f}", "128K-context 70B model (Llama-3.1 70B) FP16 weights, GB")
+v("replica_weights_per_gpu", m(LLAMA2.size_in_bytes(BYTES_FP16), "GB") / LONG.accelerators, "{:.1f}", "reference replica FP16 weights per GPU, GB")
 v("hbm_total_gb", m(LR.hbm_total, "GB"), "{:.1f}", "replica HBM, decimal GB")
 v("hbm_trap_gb", LONG.accelerators * m(H100.memory.capacity, "GiB"), "{:.0f}", "8 x 80 read as decimal, GB")
 v("min_shards", math.ceil(ratio(LR.weights, H100.memory.capacity)), "{:.0f}", "GPUs the FP16 weights need")

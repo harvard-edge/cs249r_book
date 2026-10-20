@@ -1,367 +1,255 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 10 (The Agent Harness), one block per slide.
+"""Every number on the Volume III Lecture 10 slides and notes, read from MLSysIM.
 
-Inputs are typed with their source. Sources:
-  AH    = the rendered chapter, The Agent Harness (Volume III), dev text 2026-10-18.
-  NM    = a Napkin Math notebook of that chapter (scenario values the chapter
-          labels hypothetical; slides say "illustrative").
-  MLSysIM Literature.SweBenchTrajectories = 2,100 public SWE-bench Verified
-          trajectories of five agent configurations (calls, outcome, cost as
-          each agent recorded it); Literature.OSWorldStepBudget = OSWorld
-          success at 15, 50, 100 steps (Xie et al. 2024, via Epoch AI).
-  data/ = files measured or fetched for this deck (scripts beside them).
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: the rule kept per turn (Scenarios.FreezeRuleOverStepBudget), the
+pause behind one call's output allowance (CanceledStreamDecodeSavings
+.allowance_decode_time), approval escrow, weighted deficit round-robin,
+bounded-liability admission, and the budget meter are Scenarios.* backed by
+the solvers in engine/solvers/harness.py; the public runs are Literature
+series read through Scenarios.SweBenchCallCeilingP90,
+MiniSweAgentOpus46RunCost, and OSWorldStepCeilingReturn. The one other source
+is the deck's own data (data/): a pause measured on a laptop
+(pause_latency.json, written by pause_latency.py) and one public trajectory
+(trajectory_django16263.json, fetched by fetch_trajectory.py), read as
+recorded. This file only selects values, converts units, and formats them; it
+types no numbers. Each value is recorded with v() under the key the deck
+prints as \\val{key}; running this file writes images/numbers.tex.
 
-Run from this folder:
-  /Users/.../MLSysBook/.venv/bin/python calcs.py   (prints "label: value")
-make_figs.py imports these functions so figures and slides agree.
+Run from this folder: python3 calcs.py
 """
 
 import json
+import math
+import statistics
 import sys
 from pathlib import Path
 
-import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.physics.agents import calc_step_error_for_target, calc_unchecked_success  # noqa: E402
 
+Scenarios = mlsysim.Scenarios
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-from mlsysim import Literature  # noqa: E402
+
+RULE = Scenarios.FreezeRuleOverStepBudget
+CALL = Scenarios.CanceledStreamDecodeSavings
+ESCROW = Scenarios.RepairRemediationApprovalEscrow
+ESCROW_FAST = Scenarios.RepairRemediationEscrowFasterReview
+DRR_S = Scenarios.InteractiveMaintenanceDrr
+DRR_C = Scenarios.InteractiveMaintenanceDrrCompacted
+ADMIT_S = Scenarios.RepairNextCallAdmission
+METER_S = Scenarios.RepairTrajectoryBudgetMeter
+CEIL_S = Scenarios.SweBenchCallCeilingP90
+RUN_S = Scenarios.MiniSweAgentOpus46RunCost
+STEPS_S = Scenarios.OSWorldStepCeilingReturn
+
+CEIL = CEIL_S.result
+CONFIGS = CEIL.configurations
+PICK = next(c for c in CONFIGS if c["submission"] == RUN_S.submission)
+RUN = RUN_S.result
+STEPS = STEPS_S.result
+DRR = DRR_S.result
+ADMIT = ADMIT_S.result
+METER = METER_S.result
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def mag(q, unit):
+    return q.to(unit).magnitude
 
 
-# ------------------------------------------------- horizon compounding
-# AH Sec. 10.10 (fallacy, equation 1.1): a rule honored with probability
-# 0.99 on each turn, over a 30-turn trajectory.
-P_TURN = 0.99
-H_RUN = 30
+def pct(x):
+    return x * 100
 
 
-def compounding(p=P_TURN, h=H_RUN):
-    return p ** h
+print("== A rule kept per turn (Scenarios.FreezeRuleOverStepBudget)")
+hold = RULE.result.success[RULE.short_horizon]
+v("fr_step", RULE.step_success, "{:.2f}", "per-turn compliance")
+v("fr_step_pct", pct(RULE.step_success), "{:.0f}", "per-turn compliance, %")
+v("fr_turns", RULE.short_horizon, "{:.0f}", "turns in the run")
+v("fr_hold", hold, "{:.2f}", "rule held on every turn")
+v("fr_break_pct", pct(1 - hold), "{:.0f}", "runs that break it at least once, %")
+v("fr_target_pct", pct(RULE.target_success), "{:.0f}", "share of runs that must keep it, %")
 
+print("== Median calls of five public configurations (Scenarios.SweBenchCallCeilingP90)")
+v("swe_runs", CEIL.runs, "{:,.0f}", "public trajectories")
+v("swe_configs_words", len(CONFIGS), "words", "configurations")
+v("swe_tasks", max(c["runs"] for c in CONFIGS), "{:.0f}", "tasks in a full submission")
+v("med_lo", CEIL.median_calls_low, "{:.0f}", "lowest median calls")
+v("med_hi", CEIL.median_calls_high, "{:.0f}", "highest median calls")
+v("fr_hold_hi_pct", pct(calc_unchecked_success(RULE.step_success, CEIL.median_calls_high)), "{:.0f}",
+  "rule held on every one of the highest median calls, %")
+v("fr_need_pct", pct(1 - calc_step_error_for_target(RULE.target_success, CEIL.median_calls_high)),
+  "{:.2f}", "per-turn compliance that keeps the target there, %")
+v("mini_runs", sum(c["runs"] for c in CONFIGS if c["scaffold"].startswith("mini-SWE-agent")),
+  "{:,.0f}", "public runs by mini-SWE-agent 2.x")
 
-def real_horizons():
-    """Median and 90th-percentile model calls per trajectory, per config."""
-    runs = Literature.SweBenchTrajectories.entries
-    out = {}
-    for s in sorted({r["submission"] for r in runs}):
-        g = [r for r in runs if r["submission"] == s]
-        c = np.array([r["n_model_calls"] for r in g])
-        out[s] = dict(label=f"{g[0]['scaffold']}, {g[0]['model']}", n=len(g),
-                      median=float(np.median(c)), p90=float(np.quantile(c, 0.9)),
-                      hold_at_median=P_TURN ** float(np.median(c)))
-    return out
+print("== One public trajectory (data/trajectory_django16263.json)")
+TRAJ = json.loads((DATA / "trajectory_django16263.json").read_text())
+cum = TRAJ["cumulative_cost"]
+limit = TRAJ["limits"]["cost_limit"]
+assert limit == mag(RUN_S.cost_limit, "USD"), "the run's limit is the scenario's"
+v("tj_cost_full", TRAJ["info"]["model_stats"]["instance_cost"], "{:.7f}", "instance_cost, 7 decimals")
+v("tj_calls", len(cum), "{:.0f}", "model calls")
+v("tj_msgs", TRAJ["n_messages"], "{:.0f}", "messages saved")
+v("tj_limit", limit, "{:.2f}", "cost limit, $")
+v("tj_limit_cfg", limit, "{:.1f}", "cost limit as configured")
+*_, _before, _final = cum
+v("tj_before", _before, "{:.3f}", "settled before the last call, $")
+v("tj_last", TRAJ["call_costs"][-1], "{:.2f}", "last call, $")
+v("tj_final", _final, "{:.2f}", "final cost, $")
+v("tj_over_pct", pct((_final - limit) / limit), "{:.1f}", "over the limit, %")
 
+print("== Runs of that configuration over the limit (Scenarios.MiniSweAgentOpus46RunCost)")
+v("ov_runs", RUN.tasks, "{:.0f}", "runs")
+v("ov_n", RUN.over_limit_runs, "{:.0f}", "runs that ended above the limit")
+v("ov_mean", RUN.mean_overshoot, "{:.2f}", "mean overshoot, $")
+v("ov_max", RUN.max_overshoot, "{:.2f}", "largest overshoot, $")
+v("ov_max_cents", pct(RUN.max_overshoot), "{:.0f}", "largest overshoot, cents")
 
-# ------------------------------------------- turn-boundary control
-# AH Sec. 10.5.1: output allowance 4,096 tokens at 21.075 ms per token (the
-# chapter's single-accelerator, single-request reference floor).
-K_MAX = 4096
-T_DEC_MS = 21.075
+print("== Pause behind one call (CanceledStreamDecodeSavings; data/pause_latency.json)")
+v("bw_tdec", mag(CALL.floors.result.memory_time, "ms"), "{:.3f}", "decode floor, ms per token")
+v("bw_kmax", CALL.output_allowance, "{:,.0f}", "output allowance, tokens")
+v("bw_wait", mag(CALL.allowance_decode_time, "s"), "{:.1f}", "boundary wait, s")
+_pause = json.loads((DATA / "pause_latency.json").read_text())
+_rows = _pause["rows"]
+PAUSE = {"k": sorted({r["k"] for r in _rows}), "end": {}, "cancel": {}}
+for _k in PAUSE["k"]:
+    for _pol, _key in (("end-check", "end"), ("cancel", "cancel")):
+        _e = [r["pause_effect_s"] for r in _rows if r["k"] == _k and r["policy"] == _pol]
+        PAUSE[_key][_k] = (min(_e), statistics.mean(_e), max(_e))
+_kmin, _kmax = PAUSE["k"][0], PAUSE["k"][-1]
+_reps = {sum(1 for r in _rows if r["k"] == _k and r["policy"] == _p)
+         for _k in PAUSE["k"] for _p in ("end-check", "cancel")}
+assert len(_reps) == 1, "every allowance and policy ran the same number of times"
+_ms_tok = statistics.mean(r["eval_duration_s"] / r["eval_count"] for r in _rows
+                          if r["policy"] == "end-check" and r.get("eval_duration_s"))
+_cancel_max = max(c[2] for c in PAUSE["cancel"].values())
+v("ps_at", _pause["meta"]["pause_at_s"], "{:.1f}", "pause sent after the call, s")
+_n_reps = _reps.pop()
+v("ps_reps", _n_reps, "{:.0f}", "runs per allowance and policy")
+v("ps_reps_words", _n_reps, "words", "the same, in words")
+v("ps_k_lo", _kmin, "{:,.0f}", "smallest allowance, tokens")
+v("ps_k_hi", _kmax, "{:,.0f}", "largest allowance, tokens")
+v("ps_wait_lo", PAUSE["end"][_kmin][1], "{:.1f}", "wait for the reply, smallest allowance, s")
+v("ps_wait_hi", PAUSE["end"][_kmax][1], "{:.1f}", "wait for the reply, largest allowance, mean s")
+v("ps_wait_hi_round", PAUSE["end"][_kmax][1], "{:.0f}", "the same, whole seconds")
+v("ps_wait_hi_min", PAUSE["end"][_kmax][0], "{:.1f}", "fastest of the runs, s")
+v("ps_wait_hi_max", PAUSE["end"][_kmax][2], "{:.1f}", "slowest of the runs, s")
+v("ps_ms_tok", _ms_tok * 10 ** 3, "{:.0f}", "measured decode, ms per token")
+v("ps_cancel_ms", math.ceil(_cancel_max * 10 ** 3), "{:.0f}", "cancel held within, ms (ceiling)")
+v("ps_next_first", max(r["next_call_first_token_s"] for r in _rows
+                       if r["policy"] == "cancel" and r.get("next_call_first_token_s") is not None),
+  "{:.2f}", "first token of the next call after a cancel, s (max)")
 
+print("== Approval escrow (Scenarios.RepairRemediationApprovalEscrow)")
+e, ef = ESCROW.result, ESCROW_FAST.result
+v("es_rate", mag(ESCROW.repair_rate, "1/hour"), "{:.0f}", "repair review requests per hour")
+v("es_wait", mag(ESCROW.repair_wait, "hour"), "{:.0f}", "mean decision, h")
+v("es_lease", mag(ESCROW.lease, "MiB"), "{:.0f}", "workspace lease, MiB")
+v("es_held", e.held, "{:.0f}", "held repair trajectories")
+v("es_mem", mag(e.retained_memory, "GiB"), "{:.0f}", "retained workspaces, GiB")
+v("es_mem_fast", mag(ef.retained_memory, "GiB"), "{:.0f}", "the same at half the decision time, GiB")
+v("rm_rate", mag(ESCROW.remediation_rate, "1/hour"), "{:.0f}", "remediation requests per hour")
+v("rm_wait", mag(ESCROW.remediation_wait, "minute"), "{:.0f}", "remediation decision, min")
+v("rm_wait_h", mag(ESCROW.remediation_wait, "hour"), "{:.2f}", "remediation decision, h")
+v("rm_diag", mag(ESCROW.diagnosis, "minute"), "{:.0f}", "diagnosis, min")
+v("rm_apply", mag(ESCROW.apply_verify, "minute"), "{:.0f}", "apply and verify, min")
+v("rm_held", e.remediation_held, "{:.1f}", "held remediation trajectories")
+v("rm_ttm", mag(e.time_to_mitigate, "minute"), "{:.0f}", "time to mitigate, min")
+v("rm_share", pct(e.approval_share), "{:.0f}", "approval share of time to mitigate, %")
+v("rm_saved", mag(e.time_to_mitigate - ef.time_to_mitigate, "minute"), "{:.1f}",
+  "minutes removed by twice-as-fast decisions")
 
-def boundary_delay_s(k=K_MAX, t_ms=T_DEC_MS):
-    return k * t_ms / 1000
+print("== Weighted deficit round-robin (Scenarios.InteractiveMaintenanceDrr)")
+_i, _m = DRR_S.classes["interactive"], DRR_S.classes["maintenance"]
+v("dr_w_int", _i["weight"], "{:.0f}", "interactive weight")
+v("dr_w_mnt", _m["weight"], "{:.0f}", "maintenance weight")
+v("dr_quantum", DRR_S.quantum, "{:,.0f}", "quantum per unit weight, tokens")
+v("dr_credit_int", DRR.credit_per_round["interactive"], "{:,.0f}", "interactive credit per round")
+v("dr_c_int", DRR.charge_per_call["interactive"], "{:,.0f}", "interactive charge per call")
+v("dr_c_mnt", DRR.charge_per_call["maintenance"], "{:,.0f}", "maintenance charge per call")
+v("dr_calls_int", DRR.calls_per_round["interactive"], "{:.1f}", "interactive calls per round")
+v("dr_rounds_mnt", DRR.rounds_per_call["maintenance"], "{:.2f}", "rounds per maintenance call")
+v("dr_share_int", pct(DRR.charge_share["interactive"]), "{:.0f}", "interactive charge share, %")
+v("dr_ratio", DRR.call_ratio, "{:.0f}", "interactive / maintenance calls")
+v("dr_call_share", pct(DRR.call_share["interactive"]), "{:.0f}", "interactive call share, %")
+v("dr_rounds", DRR.simulated_rounds, "{:,.0f}", "simulated rounds")
+v("dr_compact_in", DRR_C.classes["maintenance"]["input"], "{:,.0f}", "compacted maintenance input")
+v("dr_compact_rounds", DRR_C.result.rounds_per_call["maintenance"], "{:.2f}",
+  "rounds per compacted maintenance call")
 
+print("== Bounded-liability admission (Scenarios.RepairNextCallAdmission)")
+v("ad_allow", mag(ADMIT_S.allowance, "USD"), "{:.2f}", "allowance, $")
+v("ad_settled", mag(ADMIT_S.settled, "USD"), "{:.2f}", "settled, $")
+v("ad_reserved", mag(ADMIT_S.reserved, "USD"), "{:.2f}", "test job reservation, $")
+v("ad_final", mag(ADMIT_S.finalization_reserve, "USD"), "{:.2f}", "finalization reserve, $")
+v("ad_in", ADMIT_S.input_tokens, "{:,.0f}", "next call input, tokens")
+v("ad_out", ADMIT_S.output_allowance, "{:,.0f}", "next call output allowance, tokens")
+v("ad_p_in", mag(ADMIT_S.input_price, "USD/Mtoken"), "{:.0f}", "$ per million input tokens")
+v("ad_p_out", mag(ADMIT_S.output_price, "USD/Mtoken"), "{:.0f}", "$ per million output tokens")
+v("ad_liab_in", ADMIT.input_liability, "{:.2f}", "input liability, $")
+v("ad_liab_out", ADMIT.output_liability, "{:.2f}", "output liability, $")
+v("ad_liab", ADMIT.liability, "{:.2f}", "liability, $")
+v("ad_spend_head", ADMIT.spend_headroom, "{:.2f}", "spend-check headroom, $")
+v("ad_head", ADMIT.headroom, "{:.2f}", "headroom after reservations, $")
+v("ad_short", ADMIT.finalization_shortfall, "{:.2f}", "finalization shortfall if admitted, $")
+v("ad_in_share", pct(ADMIT.input_share), "{:.0f}", "input share of liability, %")
+v("ad_max_in", round(ADMIT.max_input_tokens, -2), "{:,.0f}", "largest input that fits, to 100 tokens")
+v("ad_res_share", pct(ADMIT.reservation_share), "{:.0f}", "reservation share of the allowance, %")
 
-def measured_pause():
-    """data/pause_latency.json, written by data/pause_latency.py."""
-    d = json.loads((DATA / "pause_latency.json").read_text())
-    rows = d["rows"]
-    ks = sorted({r["k"] for r in rows})
-    out = {"meta": d["meta"], "k": ks, "end": {}, "cancel": {}, "next_first": [],
-           "ms_per_token": []}
-    for k in ks:
-        e = [r["pause_effect_s"] for r in rows if r["k"] == k and r["policy"] == "end-check"]
-        c = [r["pause_effect_s"] for r in rows if r["k"] == k and r["policy"] == "cancel"]
-        out["end"][k] = (min(e), float(np.mean(e)), max(e))
-        out["cancel"][k] = (min(c), float(np.mean(c)), max(c))
-    for r in rows:
-        if r["policy"] == "end-check" and r.get("eval_duration_s"):
-            out["ms_per_token"].append(1000 * r["eval_duration_s"] / r["eval_count"])
-        if r["policy"] == "cancel" and r.get("next_call_first_token_s") is not None:
-            out["next_first"].append(r["next_call_first_token_s"])
-    out["ms_per_token_mean"] = float(np.mean(out["ms_per_token"]))
-    out["cancel_max_s"] = max(v[2] for v in out["cancel"].values())
-    out["idle_first"] = d["meta"].get("idle_first_token_s", [])
-    return out
+print("== The budget meter (Scenarios.RepairTrajectoryBudgetMeter)")
+T = METER_S.trajectory
+v("mt_turns", T.turns, "{:.0f}", "turns done")
+v("mt_first", T.first_prompt, "{:,.0f}", "first prompt, tokens")
+v("mt_append", T.appended, "{:,.0f}", "appended per turn, tokens")
+v("mt_out", T.output_per_turn, "{:.0f}", "output per turn, tokens")
+v("mt_in", METER.input_tokens, "{:,.0f}", "input tokens over the run")
+v("mt_cached", METER.cached_tokens, "{:,.0f}", "cached input tokens")
+v("mt_h_max", METER_S.turn_allowance, "{:.0f}", "turn allowance")
+v("mt_n_max_m", METER_S.token_allowance / 10 ** 6, "{:.0f}", "token allowance, millions")
+v("mt_t_max", mag(METER_S.time_allowance, "s"), "{:.0f}", "time allowance, s")
+v("mt_c_max", mag(METER_S.dollar_allowance, "USD"), "{:.2f}", "dollar allowance")
+v("mt_clock", mag(METER_S.elapsed, "s"), "{:.0f}", "clock at the readout, s")
+v("mt_cost", METER.cost_with_reuse, "{:.2f}", "cost with reuse, $")
+v("mt_cost_none", METER.cost_without_reuse, "{:.2f}", "cost billed uncached, $")
+v("mt_turns_pct", pct(METER.used_with_reuse["turns"]), "{:.0f}", "turns used, %")
+v("mt_tokens_pct", pct(METER.used_with_reuse["tokens"]), "{:.1f}", "tokens used, %")
+v("mt_time_pct", pct(METER.used_with_reuse["time"]), "{:.1f}", "time used, %")
+v("mt_dollars_pct", pct(METER.used_with_reuse["dollars"]), "{:.1f}", "dollars used, %")
+v("mt_dollars_none_pct", pct(METER.used_without_reuse["dollars"]), "{:.1f}", "dollars used uncached, %")
 
+print("== Choosing a ceiling (Scenarios.SweBenchCallCeilingP90)")
+_same = sorted(c["cap"] for c in CONFIGS if c["model"] == "Claude Sonnet 4")
+v("ce_q", pct(CEIL.quantile), "{:.0f}", "ceiling quantile of accepted runs, %")
+v("ce_fail_lo", pct(CEIL.failed_halted_low), "{:.0f}", "failed runs halted, lowest, %")
+v("ce_fail_hi", pct(CEIL.failed_halted_high), "{:.0f}", "failed runs halted, highest, %")
+v("ce_ok_hi", pct(CEIL.accepted_halted_high), "{:.0f}", "accepted runs halted, at most, %")
+v("ce_cap_lo", CEIL.cap_low, "{:.0f}", "lowest ceiling, calls")
+v("ce_cap_hi", CEIL.cap_high, "{:.0f}", "highest ceiling, calls")
+v("ce_same_lo", _same[0], "{:.0f}", "same model, first ceiling")
+v("ce_same_hi", _same[-1], "{:.0f}", "same model, second ceiling")
+v("ce_pick_ok_med", PICK["median_accepted"], "{:.0f}", "one configuration: accepted median calls")
+v("ce_pick_bad_med", PICK["median_failed"], "{:.0f}", "failed median calls")
+v("ce_pick_cap", PICK["cap"], "{:.0f}", "its ceiling, calls")
+v("ce_pick_ok", pct(PICK["accepted_halted"]), "{:.0f}", "accepted runs halted, %")
+v("ce_pick_bad", pct(PICK["failed_halted"]), "{:.0f}", "failed runs halted, %")
+v("ce_pick_cpa", RUN.cost_per_resolved, "{:.2f}", "cost per accepted task, $")
 
-# ------------------------------------------------- approval escrow
-# AH Lighthouse 10.1 (scenario inputs): repair review requests 6 per hour,
-# mean decision 2 h, workspace lease 512 MiB; remediation 2 per hour,
-# 15-minute decision, 6 min diagnosis, 9 min apply and verify.
-REPAIR_RATE_PER_H = 6
-REPAIR_WAIT_H = 2
-LEASE_MIB = 512
-REMED_RATE_PER_H = 2
-REMED_WAIT_MIN = 15
-REMED_DIAG_MIN = 6
-REMED_APPLY_MIN = 9
-
-
-def escrow():
-    held = REPAIR_RATE_PER_H * REPAIR_WAIT_H                      # Little's law
-    mem_gib = held * LEASE_MIB / 1024
-    remed_held = REMED_RATE_PER_H * REMED_WAIT_MIN / 60
-    ttm = REMED_DIAG_MIN + REMED_WAIT_MIN + REMED_APPLY_MIN
-    return dict(held=held, mem_gib=mem_gib, held_half_wait=held / 2,
-                mem_half_wait_gib=mem_gib / 2, remed_held=remed_held,
-                ttm_min=ttm, approval_share=REMED_WAIT_MIN / ttm)
-
-
-# --------------------------------------- deficit round-robin (NM 10.1)
-# AH NM 10.1: weights 3 (interactive) and 1 (maintenance), quantum 8,000
-# charge tokens per unit weight per round; interactive call 2,000 input +
-# 500 output allowance; maintenance 40,000 + 2,000.
-QUANTUM = 8000
-CLASSES = {"interactive": (3, 2000 + 500), "maintenance": (1, 40000 + 2000)}
-
-
-def drr_formula():
-    per_round = {c: w * QUANTUM / charge for c, (w, charge) in CLASSES.items()}
-    tot_w = sum(w for w, _ in CLASSES.values())
-    charge_share = {c: w / tot_w for c, (w, _) in CLASSES.items()}
-    tot_calls = sum(per_round.values())
-    call_share = {c: v / tot_calls for c, v in per_round.items()}
-    return dict(per_round=per_round, charge_share=charge_share, call_share=call_share,
-                ratio=per_round["interactive"] / per_round["maintenance"],
-                rounds_per_maint=CLASSES["maintenance"][1] / QUANTUM,
-                rounds_per_maint_20k=(20000 + 2000) / QUANTUM)
-
-
-def drr_simulate(rounds=10000):
-    """Run weighted deficit round-robin with both classes backlogged."""
-    credit = {c: 0.0 for c in CLASSES}
-    calls = {c: 0 for c in CLASSES}
-    charge = {c: 0.0 for c in CLASSES}
-    for _ in range(rounds):
-        for c, (w, size) in CLASSES.items():
-            credit[c] += w * QUANTUM
-            while credit[c] >= size:
-                credit[c] -= size
-                calls[c] += 1
-                charge[c] += size
-    tc, tg = sum(calls.values()), sum(charge.values())
-    return dict(calls=calls, call_share={c: calls[c] / tc for c in calls},
-                charge_share={c: charge[c] / tg for c in charge})
-
-
-# ------------------------------------ bounded-liability admission (NM 10.2)
-# AH NM 10.2 (illustrative): allowance $3.50, settled $2.58, test-job
-# reservation $0.50, finalization reserve $0.30; next call 50,000 input
-# tokens, 4,096 output allowance, $3 and $15 per million tokens.
-ALLOW = 3.50
-SETTLED = 2.58
-RESERVED = 0.50
-FINAL_RESERVE = 0.30
-IN_TOK = 50000
-OUT_ALLOW = 4096
-P_IN = 3.0 / 1e6
-P_OUT = 15.0 / 1e6
-P_CACHED = 0.30 / 1e6
-
-
-def admission():
-    liab_in = P_IN * IN_TOK
-    liab_out = P_OUT * OUT_ALLOW
-    liab = liab_in + liab_out
-    spend_headroom = ALLOW - SETTLED
-    true_headroom = ALLOW - SETTLED - RESERVED - FINAL_RESERVE
-    max_input = (true_headroom - liab_out) / P_IN
-    return dict(liab_in=liab_in, liab_out=liab_out, liab=liab,
-                spend_headroom=spend_headroom, true_headroom=true_headroom,
-                shortfall=true_headroom - liab, input_share=liab_in / liab,
-                max_input_tokens=max_input, tokens_per_dime=0.10 / P_IN,
-                reservation_share=RESERVED / ALLOW)
-
-
-# ------------------------------------------ the meter (NM 10.3)
-# AH NM 10.3 (illustrative): 30 turns done; allowances 40 turns, 2 million
-# tokens, 900 s, $3.50; clock 460 s; base prompt 8,000, 1,500 appended per
-# turn, 200 output per turn; $3 uncached, $0.30 cached, $15 output per M.
-TURNS = 30
-B_TURNS, B_TOKENS, B_TIME, B_DOLLARS = 40, 2_000_000, 900, 3.50
-CLOCK = 460
-BASE, APPEND, OUT_PER_TURN = 8000, 1500, 200
-
-
-def meter():
-    inputs = [BASE + APPEND * t for t in range(TURNS)]          # equation 2.9
-    total_in = sum(inputs)
-    total_out = OUT_PER_TURN * TURNS
-    # with reuse, each turn's earlier prefix is cached: turn t's prompt minus
-    # the newly appended tokens (the first turn has nothing cached)
-    cached = sum(inputs[t - 1] for t in range(1, TURNS))
-    uncached = total_in - cached
-    cost_reuse = P_IN * uncached + P_CACHED * cached + P_OUT * total_out
-    cost_none = P_IN * total_in + P_OUT * total_out
-    used = dict(turns=TURNS / B_TURNS, tokens=(total_in + total_out) / B_TOKENS,
-                time=CLOCK / B_TIME)
-    return dict(total_in=total_in, total_tokens=total_in + total_out, cached=cached,
-                uncached=uncached, cost_reuse=cost_reuse, cost_none=cost_none,
-                ratio=cost_none / cost_reuse,
-                used_reuse=dict(used, dollars=cost_reuse / B_DOLLARS),
-                used_none=dict(used, dollars=cost_none / B_DOLLARS))
-
-
-# ------------------------------ a real harness overshoots its cost limit
-# data/trajectory_django16263.json (fetch_trajectory.py): mini-SWE-agent
-# 2.1.0, Claude Opus 4.6, SWE-bench Verified django__django-16263,
-# cost_limit 3.0, step_limit 250. The limit check runs before each call
-# against settled cost only (minisweagent/agents/default.py, v2.1.0, l. 105).
-def overshoot():
-    d = json.loads((DATA / "trajectory_django16263.json").read_text())
-    cum = d["cumulative_cost"]
-    limit = d["limits"]["cost_limit"]
-    runs = [r for r in Literature.SweBenchTrajectories.entries
-            if r["submission"] == "20260217_mini-v2.0.0_claude-4-6-opus"]
-    over = sorted(r["rep_cost_usd"] for r in runs if r["rep_cost_usd"] > limit)
-    return dict(limit=limit, calls=len(cum), before_last=cum[-2], final=cum[-1],
-                last_call=d["call_costs"][-1], over_by=cum[-1] - limit,
-                over_pct=(cum[-1] - limit) / limit, n_runs=len(runs), n_over=len(over),
-                max_over=max(over) - limit, mean_over=float(np.mean(over)) - limit,
-                cumulative=cum, n_messages=d["n_messages"],
-                step_limit=d["limits"]["step_limit"])
-
-
-# ------------------------------------------- choosing a ceiling
-# AH Sec. 10.9.5 and figures 5 and 6: a call ceiling at the accepted runs'
-# 90th percentile, applied post hoc to five public configurations.
-Q = 0.90
-
-
-def ceiling_evidence():
-    runs = Literature.SweBenchTrajectories.entries
-    rows = []
-    for s in sorted({r["submission"] for r in runs}):
-        g = [r for r in runs if r["submission"] == s]
-        ok = np.array([r["n_model_calls"] for r in g if r["resolved"]])
-        bad = np.array([r["n_model_calls"] for r in g if not r["resolved"]])
-        cap = float(np.quantile(ok, Q))
-        costs = [r["rep_cost_usd"] for r in g if r["rep_cost_usd"]]
-        rows.append(dict(sub=s, scaffold=g[0]["scaffold"], model=g[0]["model"],
-                         n=len(g), accepted=len(ok), cap=cap,
-                         fail_halt=float((bad > cap).mean()),
-                         ok_halt=float((ok > cap).mean()),
-                         med_ok=float(np.median(ok)), med_bad=float(np.median(bad)),
-                         ok_calls=np.sort(ok), bad_calls=np.sort(bad),
-                         cost_per_accepted=(sum(costs) / len(ok)) if costs else None,
-                         mean_cost=(sum(costs) / len(g)) if costs else None))
-    return rows
-
-
-def osworld():
-    by = {}
-    for r in Literature.OSWorldStepBudget.entries:
-        by.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
-    flat = [m for m, v in by.items() if v[100] <= v[50]]
-    gains = {m: v[100] - v[15] for m, v in by.items()}
-    return dict(by=by, n_flat=len(flat), best_gain=max(gains.values()),
-                best=max(gains, key=gains.get))
-
-
-# ---------------------------------------------------------------- print
-def main():
-    print("Hook and continuation (AH Sec. 10.10):")
-    show("0.99^30 (rule holds on all 30 turns)", f"{compounding():.4f}")
-    show("runs that break it at least once", f"{1 - compounding():.4f}")
-    for s, v in real_horizons().items():
-        show(f"median calls {v['label']}", f"{v['median']:.0f} (p90 {v['p90']:.0f}); "
-             f"0.99^median = {v['hold_at_median']:.3f}")
-
-    print("Turn-boundary control (AH Sec. 10.5.1):")
-    show("4,096 x 21.075 ms", f"{boundary_delay_s():.1f} s")
-    try:
-        m = measured_pause()
-        show("measured ms per output token (end-check runs)", f"{m['ms_per_token_mean']:.1f}")
-        for k in m["k"]:
-            e, c = m["end"][k], m["cancel"][k]
-            show(f"K={k}: wait for reply (min/mean/max s)", f"{e[0]:.1f} / {e[1]:.1f} / {e[2]:.1f}")
-            show(f"K={k}: cancel (max s)", f"{c[2]:.3f}")
-        show("cancel max over all runs (s)", f"{m['cancel_max_s']:.3f}")
-        show("first token after cancel (s, max)", f"{max(m['next_first']):.3f}")
-        show("first token on idle server (s, max)", f"{max(m['idle_first']):.3f}" if m["idle_first"] else "n/a")
-    except FileNotFoundError:
-        show("measured pause", "run data/pause_latency.py first")
-
-    print("Approval escrow (AH Lighthouse 10.1):")
-    e = escrow()
-    show("repair held trajectories (6/h x 2 h)", f"{e['held']:.0f}")
-    show("repair retained memory", f"{e['mem_gib']:.0f} GiB")
-    show("half the decision time", f"{e['held_half_wait']:.0f} held, {e['mem_half_wait_gib']:.0f} GiB")
-    show("remediation held (2/h x 0.25 h)", f"{e['remed_held']:.1f}")
-    show("remediation time to mitigate", f"{e['ttm_min']} min; approval share {e['approval_share']:.0%}")
-
-    print("Fair scheduling (AH NM 10.1):")
-    f = drr_formula()
-    show("interactive calls per round", f"{f['per_round']['interactive']:.2f}")
-    show("maintenance calls per round", f"{f['per_round']['maintenance']:.4f}")
-    show("rounds per maintenance call", f"{f['rounds_per_maint']:.2f}")
-    show("rounds per maintenance call at 20,000 input", f"{f['rounds_per_maint_20k']:.2f}")
-    show("charge share interactive", f"{f['charge_share']['interactive']:.0%}")
-    show("call share interactive", f"{f['call_share']['interactive']:.1%}")
-    show("interactive : maintenance calls", f"{f['ratio']:.1f}")
-    sim = drr_simulate()
-    show("simulated 10,000 rounds: call share interactive", f"{sim['call_share']['interactive']:.1%}")
-    show("simulated charge share interactive", f"{sim['charge_share']['interactive']:.1%}")
-
-    print("Bounded-liability admission (AH NM 10.2):")
-    a = admission()
-    show("liability input", f"${a['liab_in']:.2f}")
-    show("liability output", f"${a['liab_out']:.4f}")
-    show("liability", f"${a['liab']:.4f}")
-    show("spend-check headroom", f"${a['spend_headroom']:.2f}")
-    show("headroom after reservations", f"${a['true_headroom']:.2f}")
-    show("shortfall if admitted", f"${a['shortfall']:.2f}")
-    show("input share of liability", f"{a['input_share']:.1%}")
-    show("largest input that fits", f"{a['max_input_tokens']:,.0f} tokens")
-    show("input tokens per $0.10 of unsettled liability", f"{a['tokens_per_dime']:,.0f}")
-    show("test reservation as share of allowance", f"{a['reservation_share']:.1%}")
-
-    print("Metering (AH NM 10.3):")
-    mt = meter()
-    show("total input tokens", f"{mt['total_in']:,}")
-    show("input + output tokens", f"{mt['total_tokens']:,}")
-    show("cached input tokens", f"{mt['cached']:,}")
-    show("uncached input tokens", f"{mt['uncached']:,}")
-    show("cost with reuse", f"${mt['cost_reuse']:.4f}")
-    show("cost without reuse", f"${mt['cost_none']:.4f}")
-    show("no-reuse / reuse", f"{mt['ratio']:.2f}")
-    for k, v in mt["used_reuse"].items():
-        show(f"used fraction with reuse, {k}", f"{v:.1%}")
-    show("used fraction without reuse, dollars", f"{mt['used_none']['dollars']:.1%}")
-
-    print("A real harness overshoots (data/trajectory_django16263.json):")
-    o = overshoot()
-    show("model calls", o["calls"])
-    show("messages in the saved trajectory", o["n_messages"])
-    show("cost before the last call", f"${o['before_last']:.4f}")
-    show("last call", f"${o['last_call']:.4f}")
-    show("final cost", f"${o['final']:.4f}")
-    show("over the limit", f"${o['over_by']:.4f} ({o['over_pct']:.1%})")
-    show("runs of 500 ending above the limit", f"{o['n_over']} of {o['n_runs']}")
-    show("largest overshoot", f"${o['max_over']:.4f}")
-    show("mean overshoot of those runs", f"${o['mean_over']:.4f}")
-
-    print("Choosing a ceiling (AH Sec. 10.9.5):")
-    rows = ceiling_evidence()
-    for r in rows:
-        cpa = f"${r['cost_per_accepted']:.2f}" if r["cost_per_accepted"] else "n/a"
-        show(f"{r['scaffold']}, {r['model']}",
-             f"p90 cap {r['cap']:.0f}; halts {r['fail_halt']:.0%} failed, {r['ok_halt']:.0%} accepted; "
-             f"median calls {r['med_ok']:.0f} accepted vs {r['med_bad']:.0f} failed; "
-             f"accepted {r['accepted']}/{r['n']}; cost per accepted task {cpa}")
-    show("failed halted range", f"{min(r['fail_halt'] for r in rows):.0%} to {max(r['fail_halt'] for r in rows):.0%}")
-    show("accepted halted max", f"{max(r['ok_halt'] for r in rows):.0%}")
-    show("p90 cap range", f"{min(r['cap'] for r in rows):.0f} to {max(r['cap'] for r in rows):.0f}")
-    ow = osworld()
-    show("OSWorld models flat or lower from 50 to 100 steps", ow["n_flat"])
-    show("largest gain 15 -> 100 steps", f"{ow['best_gain']:.1f} points ({ow['best']})")
-
+print("== Raising the step ceiling (Scenarios.OSWorldStepCeilingReturn)")
+_lo, _hi = min(STEPS.steps), max(STEPS.steps)
+_mid = next(s for s in STEPS.steps if _lo < s < _hi)  # the middle ceiling
+_o3 = next(m for m in STEPS.scores if m.startswith("o3"))
+v("ow_lo", _lo, "{:.0f}", "lowest ceiling, steps")
+v("ow_mid", _mid, "{:.0f}", "middle ceiling, steps")
+v("ow_hi", _hi, "{:.0f}", "highest ceiling, steps")
+v("ow_extra", _hi - _mid, "{:.0f}", "steps added from the middle to the highest ceiling")
+v("ow_flat_words", STEPS.flat_after_middle, "words", "models flat or lower after the middle ceiling")
+v("ow_gain_words", len(STEPS.scores) - STEPS.flat_after_middle, "words", "models still gaining")
+v("ow_top", max(s[_hi] for s in STEPS.scores.values()), "{:.0f}", "top model at the highest ceiling, %")
+v("ow_o3", STEPS.scores[_o3][_hi], "{:.0f}", "o3 at the highest ceiling, %")
+v("ow_best_gain", STEPS.best_gain, "{:.0f}", "largest gain, lowest to highest ceiling, points")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

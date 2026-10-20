@@ -994,6 +994,22 @@ class Series:
         "Communication rounds to 99% MNIST CNN accuracy for FedSGD and FedAvg, IID and non-IID.",
         numeric=("local_epochs", "updates_per_round", "iid_rounds", "non_iid_rounds"),
     )
+    # Added 2026-10-20: MNIST accuracy against epsilon for @fig-privacy-utility-frontier.
+    GaussianDpMnistNoisySgd = TrendSeries(
+        "bu_gdp_mnist_noisysgd",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Bu, Dong, Long, and Su (2020), Deep Learning with Gaussian Differential Privacy, Harvard "
+                       "Data Science Review 2(3), Table 1 (Experimental results for NoisySGD and their privacy "
+                       "analyses on MNIST)",
+                   url="https://pmc.ncbi.nlm.nih.gov/articles/PMC7695347/", verified="2026-10-20",
+                   notes="Columns transcribed exactly from Table 1: learning rate eta, clipping norm R, noise "
+                         "multiplier sigma, epochs, test accuracy (%), CLT mu, CLT epsilon, and moments-accountant "
+                         "epsilon; both epsilon columns are with respect to delta = 1e-5. The table has no "
+                         "nonprivate row."),
+        "MNIST NoisySGD test accuracy against privacy budget under the Gaussian DP central limit theorem.",
+        numeric=("learning_rate", "clip_norm", "noise_multiplier", "epochs", "test_accuracy_pct", "clt_mu",
+                 "clt_epsilon", "ma_epsilon"),
+    )
     GeminiPromptEnergy = TrendSeries(
         "gemini_prompt_energy",
         _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "
@@ -1117,6 +1133,102 @@ class Series:
         "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
         numeric=("year", "normalized"),
     )
+    # --- Responsible AI (added 2026-10-20) ----------------------------------
+    OfqualGradeMatrix2020 = TrendSeries(
+        "ofqual_2020_grade_matrix",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 1 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "one row per centre assessment grade (CAG): entries is N for that CAG grade; columns A* to U "
+             "are the row percentages of entries by calculated grade as printed; cells printed as '~' "
+             "(under 0.5 percent) are entered as 0, so a row may not sum to exactly 100"),
+        "A level entries by teacher-assessed grade against the grade the 2020 standardization calculated.",
+        numeric=("entries", "A*", "A", "B", "C", "D", "E", "U"),
+    )
+    OfqualCandidatesLowered2020 = TrendSeries(
+        "ofqual_2020_candidates_lowered",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 2 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "candidates by the number of their A levels whose CAG exceeded the calculated grade, as "
+             "printed (rounded to the nearest 10)"),
+        "A level candidates by how many of their grades the 2020 standardization lowered.",
+        numeric=("grades_lowered", "candidates"),
+    )
+    CompasTwoYearConfusion = TrendSeries(
+        "compas_two_year_confusion",
+        _lit("ProPublica, compas-analysis, compas-scores-two-years.csv (Angwin et al. 2016), recomputed "
+             "2026-10-18", "https://github.com/propublica/compas-analysis",
+             "ProPublica's filters: |days_b_screening_arrest| <= 30, is_recid != -1, c_charge_degree != 'O', "
+             "score_text != 'N/A'; flagged = score_text Medium or High; outcome two_year_recid; "
+             "tp flagged and reoffended, fp flagged and did not, fn not flagged and reoffended, tn neither; "
+             "race as coded in the file"),
+        "COMPAS decile-score flags against two-year recidivism, by race, from ProPublica's released data.",
+        numeric=("tp", "fp", "fn", "tn"),
+    )
+    AbadiDpSgdAccuracy = TrendSeries(
+        "abadi_dpsgd_accuracy",
+        _lit("Abadi et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016, Sec. 5.2 and Fig. 6",
+             "https://arxiv.org/abs/1607.00133",
+             "test accuracy (%) of DP-SGD at each reported (epsilon, delta): MNIST 90, 95, 97 percent at "
+             "epsilon 0.5, 2, 8; CIFAR-10 67, 70, 73 percent at epsilon 2, 4, 8; nonprivate baselines in "
+             "Literature.DifferentialPrivacy"),
+        "Differentially private training accuracy by privacy budget on MNIST and CIFAR-10.",
+        numeric=("epsilon", "delta", "accuracy_pct"),
+    )
+
+    # --- Training and fleet footprints (added 2026-10-20) ---------------------
+    PattersonTrainingFootprints = TrendSeries(
+        "patterson_training_footprints",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Patterson et al. (2021), Carbon Emissions and Large Neural Network Training, Table 4 "
+                       "(arXiv:2104.10350)",
+                   url="https://arxiv.org/abs/2104.10350", verified="2026-10-20",
+                   notes=("Final-run figures for the five NLP models (the Evolved Transformer NAS column is "
+                          "omitted); kg_per_kwh is the data center's CO2e per kWh when the model ran, gross "
+                          "and net of carbon-free purchases; measured_w is the measured system average power "
+                          "per accelerator including memory, network interface, fans, and host CPU; "
+                          "activated_pct is the percent of the model activated on every token; transcribed "
+                          "exactly from the PDF table.")),
+        "Final-run energy, grid factor, PUE, measured power, and emissions of five NLP models (2021).",
+        numeric=("params_b", "activated_pct", "gross_kg_per_kwh", "net_kg_per_kwh", "pue", "tdp_w",
+                 "measured_w", "chips", "days", "energy_mwh", "gross_tco2e", "net_tco2e"),
+    )
+    BloomProjectEmissions = TrendSeries(
+        "bloom_project_emissions",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B "
+                       "Parameter Language Model, JMLR 24(253), Table 5 (arXiv:2211.02001)",
+                   url="https://arxiv.org/abs/2211.02001", verified="2026-10-20",
+                   notes=("Dynamic-power emissions of the BigScience project by process, t CO2eq, French grid "
+                          "at 57 gCO2eq/kWh, GPU energy on a TDP basis; transcribed for the Sustainable AI "
+                          "lecture and moved into MLSysIM 2026-10-20.")),
+        "Dynamic-power emissions of the BLOOM project by model and process.",
+        numeric=("tco2e",),
+    )
+    CsoIrelandDatacenterElectricity = TrendSeries(
+        "cso_ireland_datacenter_electricity",
+        Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,
+                   ref="Central Statistics Office (Ireland), Data Centres Metered Electricity Consumption 2023, "
+                       "statistical release of 23 July 2024, Table 1",
+                   url="https://www.cso.ie/en/releasesandpublications/ep/p-dcmec/datacentresmeteredelectricityconsumption2023/",
+                   verified="2026-10-20",
+                   notes=("share_pct is data centers' percent of total metered electricity consumption; gwh is "
+                          "their consumption, transcribed for 2015 and 2023 only (other years left empty).")),
+        "Irish data centers' share of metered electricity, 2015 to 2023.",
+        numeric=("year", "share_pct", "gwh"),
+    )
+    EuropeGenerationWeek47 = TrendSeries(
+        "europe_generation_2023w47",
+        Provenance(kind=ProvenanceKind.DATASHEET,
+                   ref="Energy-Charts (Fraunhofer ISE), public net electricity generation and load, EU, "
+                       "20 to 26 November 2023, hourly (api.energy-charts.info/public_power, country=eu)",
+                   url="https://api.energy-charts.info/public_power?country=eu",
+                   verified="2026-10-20",
+                   notes=("Hourly generation by source class in MW (time_cet is the hour start in CET); "
+                          "coal_oil groups hard coal, lignite, and oil; copied from the Sustainable AI "
+                          "chapter's data file, which this series replaces.")),
+        "Hourly EU electricity generation by source and load, one week of November 2023 (MW).",
+        numeric=("nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil", "load"),
+    )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
@@ -1209,6 +1321,24 @@ PagedAttentionMemoryBreakdown = _Series(
     "KV memory holding token states, reservations, internal and external fragmentation (percent).",
 )
 
+# --- Network architectures (added 2026-10-20) ---------------------------------
+FlashAttentionBenchmark = _Series(
+    "flashattention_a100_benchmark",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Dao et al. (2022), FlashAttention: Fast and Memory-Efficient Exact Attention with "
+            "IO-Awareness, NeurIPS 2022, Tables 20 and 21",
+        url="https://arxiv.org/abs/2205.14135",
+        verified="2026-10-20",
+        notes=(
+            "arXiv 2205.14135v2: forward plus backward runtime (ms, no dropout or masking, Table 20) and "
+            "memory (MB, Table 21) of standard PyTorch attention and FlashAttention on one A100 40 GB, "
+            "batch 16, 8 heads of 64, FP16. PyTorch runs out of memory beyond 4,096 tokens (empty cells)."
+        ),
+    ),
+    "Attention runtime and memory against sequence length, standard PyTorch and FlashAttention (A100).",
+)
+
 ToolInterceptionTimes = _Series(
     "infercept_interception_times",
     Provenance(
@@ -1241,4 +1371,22 @@ AttentionSinkPerplexity = _Series(
         ),
     ),
     "Sliding-window perplexity with and without the first four tokens kept (PG19).",
+)
+
+MetastableFailures = _Series(
+    "metastable_failures_in_the_wild",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Huang et al. (2022), Metastable Failures in the Wild, OSDI 2022, Table 1",
+        url="https://www.usenix.org/conference/osdi22/presentation/huang-lexiang",
+        verified="2026-10-20",
+        notes=(
+            "One row per incident of Table 1 (21 rows): date and duration in hours as printed "
+            "(empty where the table prints NA), and whether 'retry' is listed among its sustaining "
+            "effects (12 rows). The text names 11 of them (GGL2, GGL3, AWS1, AWS2, AWS3, AZR2, AZR4, "
+            "IBM1, SPF1, SPF2, CAS2) and omits AWS4, whose row lists retry; it describes the share as "
+            "'more than 50% of the studied incidents'. Read from the paper PDF."
+        ),
+    ),
+    "Metastable failures from public sources: duration and whether retries sustained them.",
 )

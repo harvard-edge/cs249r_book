@@ -25,6 +25,10 @@ class DatasetProfile(BaseModel):
     total_duration: Optional[Quantity] = None
     embodiments: Optional[int] = None
     tasks: Optional[int] = None
+    # Tabular click-log feature counts (added 2026-10-20): integer-valued
+    # (dense) and categorical columns per example, e.g. Criteo's 13 and 26.
+    dense_features: Optional[int] = Field(default=None, ge=1)
+    categorical_features: Optional[int] = Field(default=None, ge=1)
     # Size of the distributed (compressed) training-split archive, e.g. the
     # ILSVRC-2012 training tarball (added 2026-09-28).
     training_archive_size: Optional[Quantity] = None

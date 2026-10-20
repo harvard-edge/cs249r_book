@@ -288,20 +288,24 @@ The first term in @eq-vol3-group-commit-latency captures queueing and batch aggr
 # │ Show: Amortized storage work per event and the first arrival's wait.
 # │ How:  (t_ack - t_start) / N_batch for work; timer + (t_ack - t_start)
 # │       for the first arrival.
-# │ Note: Scenario timings, not measurements of a particular store.
+# │ Note: Scenario timings, not measurements of a particular store
+# │       (Scenarios.IntentQuorumGroupCommit, GroupCommitModel).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, check
 
 class GroupCommit:
     # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
-    timer_ms = 2.0  # maximum aggregation wait before the batch starts
-    quorum_ack_ms = 4.0  # shared storage duration t_ack - t_start for a quorum
-    batch = 16  # events covered by one acknowledgment
+    scenario = Scenarios.IntentQuorumGroupCommit
+    timer_ms = scenario.batch_timer.to("ms").magnitude  # maximum aggregation wait before the batch starts
+    quorum_ack_ms = scenario.flush_time.to("ms").magnitude  # shared storage duration t_ack - t_start for a quorum
+    batch = scenario.batch_size  # events covered by one acknowledgment
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    work_per_event_ms = quorum_ack_ms / batch
-    first_wait_ms = timer_ms + quorum_ack_ms
-    last_wait_ms = quorum_ack_ms
+    _r = scenario.result
+    work_per_event_ms = _r.work_per_record.to("ms").magnitude
+    first_wait_ms = _r.first_wait.to("ms").magnitude
+    last_wait_ms = _r.last_wait.to("ms").magnitude
 
     # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
     check(abs(work_per_event_ms - 0.25) < 1e-9, "Amortized work is 0.25 ms")
@@ -392,23 +396,26 @@ As @eq-vol3-snapshot-bytes illustrates, full snapshots cause write volume to sca
 # │ Goal: Make the quadratic-versus-linear write volume of @eq-vol3-snapshot-bytes
 # │       concrete for one hypothetical monotonically growing trajectory.
 # │ Show: Total bytes written by full snapshots and by deltas, and their ratio.
-# │ How:  Direct evaluation of the closed forms; all inputs are scenario values.
+# │ How:  Direct evaluation of the closed forms; all inputs are scenario values
+# │       (Scenarios.GrowingTrajectorySnapshots, SnapshotVolumeModel).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import byte, GB
+from mlsysim import Scenarios, byte, GB
 from mlsysim.fmt import fmt, fmt_int, fmt_memory, check
 
 class SnapshotBytes:
     # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
-    turns = 500  # hypothetical trajectory length
-    stride = 5  # checkpoint every stride turns
-    growth_kb = 128  # state growth per turn, decimal kilobytes
+    scenario = Scenarios.GrowingTrajectorySnapshots
+    turns = scenario.turns  # hypothetical trajectory length
+    stride = scenario.stride  # checkpoint every stride turns
+    growth_kb = scenario.state_growth.to("kB").magnitude  # state growth per turn, decimal kilobytes
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    n = turns // stride
-    growth_bytes = growth_kb * 1e3
-    full_bytes = growth_bytes * stride * n * (n + 1) / 2
-    delta_bytes = growth_bytes * stride * n
-    ratio = full_bytes / delta_bytes
+    _r = scenario.result
+    n = _r.checkpoints
+    growth_bytes = scenario.state_growth.to(byte).magnitude
+    full_bytes = _r.full_bytes.to(byte).magnitude
+    delta_bytes = _r.delta_bytes.to(byte).magnitude
+    ratio = _r.ratio
 
     # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
     check(n == 100, "One hundred checkpoints")
@@ -462,26 +469,29 @@ Classical checkpointing models address a harsher failure regime: one where a cra
 # │ Show: T*_ckpt, overhead at T*_ckpt, and overhead when T*_ckpt is missed.
 # │ How:  w(T_ckpt) = T_save/T_ckpt + T_ckpt/(2 M); T*_ckpt = sqrt(2 T_save M);
 # │       w(x T*_ckpt) / w(T*_ckpt) = (x + 1/x) / 2.
-# │ Note: Scenario pause and failure rate, not measured values.
+# │ Note: Scenario pause and failure rate, not measured values
+# │       (Scenarios.ReexecutedWorkCheckpointInterval, CheckpointIntervalModel).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
+from mlsysim.physics.reliability import calc_checkpoint_waste
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class YoungInterval:
     # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
-    t_save_s = 2.0  # pause per checkpoint, including durable publication
-    mtbf_min = 10  # mean time between work-losing failures, minutes
-    miss_small = 2  # interval off by this factor in either direction
-    miss_big = 10  # interval off by an order of magnitude
+    scenario = Scenarios.ReexecutedWorkCheckpointInterval
+    t_save_s = scenario.t_write.to("second").magnitude  # pause per checkpoint, including durable publication
+    mtbf_min = scenario.mtbf.to("minute").magnitude  # mean time between work-losing failures, minutes
+    miss_small, miss_big = scenario.miss_factors  # interval off by 2, and by an order of magnitude
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    mtbf_s = mtbf_min * 60
-    tau_star_s = math.sqrt(2 * t_save_s * mtbf_s)
+    mtbf_s = scenario.mtbf.to("second").magnitude
+    tau_star_s = scenario.result.interval.to("second").magnitude
 
     def overhead(tau, t_save=t_save_s, mtbf=mtbf_s):
-        return t_save / tau + tau / (2 * mtbf)
+        return calc_checkpoint_waste(t_save, tau, mtbf)
 
-    w_star = overhead(tau_star_s)
+    w_star = scenario.result.waste
     w_small = overhead(tau_star_s * miss_small)
     w_big = overhead(tau_star_s / miss_big)
     small_penalty = w_small / w_star - 1
@@ -547,42 +557,40 @@ with every term in seconds. Charging reconstruction per turn simplifies the mode
 # Goal: Compare three cadences on a fixed illustrative failure trace and check
 #       them against the logged square-root balance.
 # Scope: Serial capture pauses and reconstruction only; no resampled model calls.
+# Source: Scenarios.TwoCrashCheckpointTrace (CheckpointTraceModel).
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_multiple, check
 
 class CheckpointCadence:
     # 1. LOAD: hypothetical inputs, not measured system performance.
-    turns = 100
-    crashes = (37, 83)  # after these completed turns; independent of cadence
-    strides = (10, 25, 50)
-    checkpoint_s = 0.5  # serial pause including durable publication
-    base_restore_s = 1.0  # per crash, fixed across these three policies
-    suffix_turn_s = 0.1  # read/validate/fold/apply per turn's recorded changes
-    reexec_turn_s = 20.0  # re-execute one turn's model call and tools if unlogged
+    scenario = Scenarios.TwoCrashCheckpointTrace
+    turns = scenario.turns
+    crashes = tuple(scenario.crashes)  # after these completed turns; independent of cadence
+    strides = tuple(scenario.strides)
+    checkpoint_s = scenario.pause.to("second").magnitude  # serial pause including durable publication
+    base_restore_s = scenario.restore.to("second").magnitude  # per crash, fixed across these three policies
+    suffix_turn_s = scenario.rebuild_per_turn.to("second").magnitude  # read/validate/fold/apply per turn's recorded changes
+    reexec_turn_s = scenario.reexecute_per_turn.to("second").magnitude  # re-execute one turn's model call and tools if unlogged
 
     # 2. EXECUTE: checkpoint at each multiple, including final handoff at 100.
+    _r = scenario.result
     rows = []
     for stride in strides:
-        checkpoints = turns // stride
-        suffixes_list = []
-        for crash in crashes:
-            suffixes_list.append(crash % stride)
-        suffixes = tuple(suffixes_list)
-        suffix_turns = sum(suffixes)
-        capture_s = checkpoints * checkpoint_s
-        recovery_s = len(crashes) * base_restore_s + suffix_turns * suffix_turn_s
-        total_s = capture_s + recovery_s
-        rows.append((stride, checkpoints, suffixes, capture_s, recovery_s, total_s))
-    best = min(rows, key=lambda row: row[5])
+        rows.append((stride, _r.checkpoints[stride], _r.lost_turns[stride],
+                     _r.capture_time[stride].to("second").magnitude,
+                     _r.recovery_time[stride].to("second").magnitude,
+                     _r.total_time[stride].to("second").magnitude))
+    best = rows[strides.index(_r.best_stride)]
 
     # Logged square-root balance: per-turn cost c/k + lam * r * k / 2.
-    crash_rate = len(crashes) / turns  # crashes per completed turn
-    k_star_logged = math.sqrt(2 * checkpoint_s / (crash_rate * suffix_turn_s))
-    k_star_reexec = math.sqrt(2 * checkpoint_s / (crash_rate * reexec_turn_s))
-    stride_gain = math.sqrt(reexec_turn_s / suffix_turn_s)
+    crash_rate = _r.crash_rate  # crashes per completed turn
+    k_star_logged = _r.stride_logged
+    k_star_reexec = _r.stride_reexecuted
+    stride_gain = _r.stride_gain
 
     # Checkpoint after every turn (used by the fallacies section).
-    every_turn_total_s = turns * checkpoint_s + len(crashes) * base_restore_s
+    every_turn_total_s = _r.every_turn_time.to("second").magnitude
 
     # 3. GUARD: independent arithmetic checks for this finite worksheet.
     for stride in strides:
@@ -592,7 +600,7 @@ class CheckpointCadence:
     check(all(abs(row[5] - expected) < 1e-9 for row, expected in zip(rows, (8.0, 6.0, 10.0))), "Included seconds")
     check(best[0] == 25, "Best of three on this trace, not a universal optimum")
     check(20 < k_star_logged < 25, "Logged balance lands near the winning stride")
-    check(abs(k_star_logged / k_star_reexec - stride_gain) < 1e-9, "Stride gain is sqrt of cost ratio")
+    check(abs(stride_gain - math.sqrt(reexec_turn_s / suffix_turn_s)) < 1e-9, "Stride gain is sqrt of cost ratio")
     check(abs(every_turn_total_s - 52.0) < 1e-9, "Every-turn policy costs 52 s")
     check(every_turn_total_s > 8 * best[5], "Every-turn policy is far worse than the best stride")
 
@@ -733,21 +741,21 @@ which accounts for acquiring the ownership fence, fetching and verifying the che
 # │ Show: Arithmetic floor, in seconds, for prefilling a long agent context.
 # │ How:  2 * params / peak 8-bit rate per prompt token, times the context
 # │       length; same model, accelerator, and context length as the
-# │       reference serving quantities in @sec-vol3-appendix-inference-roofline.
+# │       reference serving quantities in @sec-vol3-appendix-inference-roofline
+# │       (Scenarios.ResumedContextColdPrefill, ModelCallModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import flop, second, count
 
 class ResumePrefill:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    context_tokens = 32_768  # scenario: recovered context of a long trajectory
+    scenario = Scenarios.ResumedContextColdPrefill  # 8-bit Llama-3 70B floors on one H100
+    model = scenario.floors.workload
+    accel = scenario.floors.hardware
+    context_tokens = scenario.prompt_tokens  # scenario: recovered context of a long trajectory
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    params = model.parameters.to(count).magnitude
-    peak = accel.compute.precision_flops["fp8"].to(flop / second).magnitude
-    t_prefill_s = 2 * params * context_tokens / peak
+    t_prefill_s = scenario.result.prefill_time.to(second).magnitude
 
     # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
     check(2.0 < t_prefill_s < 2.7, f"Prefill floor should be about 2.3 s, got {t_prefill_s:.2f}")
@@ -921,32 +929,36 @@ Upon retrieval, the runtime validates cryptographic integrity and checks tenant 
 # │       and the workspace's share of the bytes.
 # │ How:  turns * (envelope + payload) + workspace snapshot, times the
 # │       object-storage rate and retention months.
-# │ Note: Turn count and storage price from the registry; byte sizes and the
-# │       attempt cost are scenario inputs, not measurements.
+# │ Note: Turn count and storage price from the registry; byte sizes are
+# │       scenario inputs, not measurements; the attempt cost is the repair
+# │       attempt of the introduction (Scenarios.RepairTrajectoryRetention,
+# │       RetentionCostModel).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents, Infrastructure, USD, GB, ureg
+from mlsysim import Scenarios, USD, GB, MB, ureg
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 from mlsysim.core.units import TB, month
 
 class RetentionCost:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────
-    turns = Agents.Coding.SWE_Bench_Runner.max_trajectory_steps  # registry
-    rate = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate  # registry
-    envelope_kb = 4  # scenario: event envelopes per turn, decimal KB
-    payload_kb = 128  # scenario: delivered inputs and result bodies per turn
-    workspace_mb = 50  # scenario: one immutable workspace snapshot
-    months = 12  # scenario: promised replay horizon
-    attempt_usd = 2.10  # scenario: expected cost of one attempt
+    scenario = Scenarios.RepairTrajectoryRetention
+    turns = scenario.turns  # registry: the coding harness's step limit
+    rate = scenario.rate  # registry: standard object storage
+    envelope_kb = scenario.envelope.to("kB").magnitude  # scenario: event envelopes per turn, decimal KB
+    payload_kb = scenario.payload.to("kB").magnitude  # scenario: delivered inputs and result bodies per turn
+    workspace_mb = scenario.workspace.to(MB).magnitude  # scenario: one immutable workspace snapshot
+    months = scenario.period.to(month).magnitude  # scenario: promised replay horizon
+    attempt_usd = scenario.attempt_cost.to(USD).magnitude  # expected cost of one repair attempt
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    _r = scenario.result
     usd_per_gb_month = rate.to(USD / (GB * month)).magnitude
-    log_mb = turns * (envelope_kb + payload_kb) / 1e3
-    total_mb = log_mb + workspace_mb
-    cost_usd = total_mb / 1e3 * usd_per_gb_month * months
-    log_cost_usd = log_mb / 1e3 * usd_per_gb_month * months
-    attempt_share = cost_usd / attempt_usd
-    log_share = log_cost_usd / attempt_usd
-    workspace_bytes_share = workspace_mb / total_mb
+    log_mb = _r.log_bytes.to(MB).magnitude
+    total_mb = _r.total_bytes.to(MB).magnitude
+    cost_usd = _r.cost.to(USD).magnitude
+    log_cost_usd = _r.log_cost.to(USD).magnitude
+    attempt_share = _r.attempt_share
+    log_share = _r.log_share
+    workspace_bytes_share = _r.workspace_share
 
     # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
     check(turns == 30, "Reference coding harness runs 30 steps")
@@ -1039,16 +1051,17 @@ Building durable agentic systems demands clarity about what persistent state act
 # │ Note: q is a hypothetical per-call reproduction rate, not a measurement;
 # │       H is the reference coding harness's step limit from the registry.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class RerunReproduction:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────
-    q = 0.99  # scenario: chance one greedy call reproduces its recorded reply
-    horizon = Agents.Coding.SWE_Bench_Runner.max_trajectory_steps  # registry
+    scenario = Scenarios.GreedyRerunReproduction
+    q = scenario.step_success  # scenario: chance one greedy call reproduces its recorded reply
+    horizon = scenario.short_horizon  # registry: the coding harness's step limit
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    p_all = q**horizon
+    p_all = scenario.result.success[horizon]
     p_diverge = 1 - p_all
 
     # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────

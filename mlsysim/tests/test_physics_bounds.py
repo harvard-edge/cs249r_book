@@ -177,7 +177,9 @@ def test_transformer_attention_geometry(model):
     h, nh = model.hidden_dim, model.heads
     assert h > 0 and nh > 0, f"{model.name}: non-positive hidden_dim/heads ({h}/{nh})"
     assert h % nh == 0, f"{model.name}: hidden_dim {h} not divisible by heads {nh}"
-    head_dim = h // nh
+    # An explicit head_dim (PaLM: 48 heads of 256 at d_model 18,432) overrides
+    # the hidden_dim // heads convention (added 2026-10-20).
+    head_dim = model.head_dim or h // nh
     assert 32 <= head_dim <= 256, (
         f"{model.name}: head_dim {head_dim} outside the sane 32-256 range "
         f"(hidden_dim {h} / heads {nh})"

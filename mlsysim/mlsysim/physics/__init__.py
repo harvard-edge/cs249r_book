@@ -69,12 +69,18 @@ from .transformer import (
     calc_transformer_training_flops,
     calc_transformer_decode_flops,
     calc_transformer_prefill_flops,
+    calc_transformer_block_weights,
+    calc_attention_score_macs,
+    calc_attention_crossover,
     calc_vla_inference_latency,
 )
 from .serving import calc_queue_latency_mmc, calc_mg1_wait_ratio
 from .statistics import (
     calc_population_stability_index,
     calc_two_proportion_sample_size,
+    calc_two_proportion_z,
+    calc_proportion_gap_interval,
+    calc_equal_n_for_z,
     calc_monte_carlo_sample_size,
     calc_importance_sampling_exponential,
     calc_optimal_exponential_proposal_mean,
@@ -240,6 +246,9 @@ __all__ = [
     "calc_transformer_training_flops",
     "calc_transformer_decode_flops",
     "calc_transformer_prefill_flops",
+    "calc_transformer_block_weights",
+    "calc_attention_score_macs",
+    "calc_attention_crossover",
     "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
     "calc_mg1_wait_ratio",
@@ -255,6 +264,9 @@ __all__ = [
     "calc_ks_critical_value",
     "calc_ks_normal_location_shift",
     "calc_two_proportion_sample_size",
+    "calc_two_proportion_z",
+    "calc_proportion_gap_interval",
+    "calc_equal_n_for_z",
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",
     "calc_step_error_for_target",
@@ -444,9 +456,15 @@ from .tool_calls import (
     calc_pending_polls,
     calc_selection_break_even,
     calc_integration_adapters,
+    calc_layered_retry_attempts,
+    calc_jitter_expected_arrivals,
+    calc_bulkhead_admission,
 )
 
 __all__ += [
+    "calc_layered_retry_attempts",
+    "calc_jitter_expected_arrivals",
+    "calc_bulkhead_admission",
     "calc_timeout_probability",
     "calc_blind_retry_duplicate_probability",
     "calc_pending_polls",
@@ -524,6 +542,7 @@ from .layers import (
     calc_layers_for_receptive_field,
     calc_separable_cost_fraction,
     calc_gradient_product,
+    calc_resnet_bottleneck_macs,
 )
 
 __all__ += [
@@ -531,6 +550,7 @@ __all__ += [
     "calc_layers_for_receptive_field",
     "calc_separable_cost_fraction",
     "calc_gradient_product",
+    "calc_resnet_bottleneck_macs",
 ]
 
 # --- Neural computation and number formats (added 2026-10-20) ---
@@ -584,4 +604,154 @@ __all__ += [
     "calc_error_budget_spent",
     "calc_rent_crossover",
     "calc_ownership_breakeven_utilization",
+]
+
+# --- Security and privacy: Laplace scale, composition, membership ceiling (added 2026-10-20) ---
+from .privacy import (
+    calc_laplace_scale,
+    calc_basic_composition,
+    calc_membership_tpr_ceiling,
+    calc_level_bits,
+)
+
+__all__ += [
+    "calc_laplace_scale",
+    "calc_basic_composition",
+    "calc_membership_tpr_ceiling",
+    "calc_level_bits",
+]
+
+# --- Robustness: drift tests, conformal ranks, certified radii, bit flips (added 2026-10-20) ---
+from .statistics import (
+    calc_ks_coefficient,
+    calc_standard_error,
+    calc_gaussian_kl_terms,
+    calc_gaussian_kl,
+    calc_split_conformal_rank,
+    calc_smoothing_radius,
+    calc_linf_corner_l2,
+)
+from .numerics import calc_float32_bit_flip
+
+__all__ += [
+    "calc_ks_coefficient",
+    "calc_standard_error",
+    "calc_gaussian_kl_terms",
+    "calc_gaussian_kl",
+    "calc_split_conformal_rank",
+    "calc_smoothing_radius",
+    "calc_linf_corner_l2",
+    "calc_float32_bit_flip",
+]
+# --- Injection exposure (added 2026-10-20) ---
+from .agents import calc_injection_exposure, calc_injection_read_budget
+
+__all__ += ["calc_injection_exposure", "calc_injection_read_budget"]
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+from .agents import calc_bounded_liability, calc_drr_calls_per_round, calc_used_fraction
+
+# --- Failure recovery (added 2026-10-20) ---
+from .agents import (
+    calc_repair_break_even,
+    calc_repair_first_expected_cost,
+    calc_expected_irreversible_loss,
+    calc_cleanup_critical_path,
+)
+
+__all__ += [
+    "calc_repair_break_even",
+    "calc_repair_first_expected_cost",
+    "calc_expected_irreversible_loss",
+    "calc_cleanup_critical_path",
+]
+
+__all__ += [
+    "calc_bounded_liability",
+    "calc_drr_calls_per_round",
+    "calc_used_fraction",
+]
+
+# --- Closed-loop evaluation statistics (added 2026-10-20) ---
+from .robotics.assurance import (
+    calc_clopper_pearson_lower_bound,
+    calc_rule_of_three_bound,
+    calc_rule_of_three_trials,
+    calc_zero_failure_mission_count,
+)
+from .statistics import (
+    calc_sprt_increments,
+    calc_sprt_boundaries,
+    calc_fisher_exact_two_sided,
+    calc_cohens_h,
+    calc_arcsine_two_arm_sample_size,
+    calc_poisson_exact_interval,
+)
+
+__all__ += [
+    "calc_clopper_pearson_lower_bound",
+    "calc_rule_of_three_bound",
+    "calc_rule_of_three_trials",
+    "calc_zero_failure_mission_count",
+    "calc_sprt_increments",
+    "calc_sprt_boundaries",
+    "calc_fisher_exact_two_sided",
+    "calc_cohens_h",
+    "calc_arcsine_two_arm_sample_size",
+    "calc_poisson_exact_interval",
+]
+
+# --- Durable execution (added 2026-10-20) ---
+from .reliability import (
+    calc_group_commit_waits,
+    calc_snapshot_write_volume,
+    calc_checkpoint_stride,
+    calc_stride_overhead,
+)
+
+__all__ += [
+    "calc_group_commit_waits",
+    "calc_snapshot_write_volume",
+    "calc_checkpoint_stride",
+    "calc_stride_overhead",
+]
+
+# --- Spatial memory: estimation, belief expiry, clearance queries (added 2026-10-20) ---
+from .robotics import (
+    calc_sphere_scan_cells,
+    calc_octree_depth,
+    calc_voxel_quantization_error,
+    calc_scalar_kalman_update,
+    calc_inertial_coast_errors,
+    calc_belief_error_bound,
+    calc_quadratic_invalidation_horizon,
+)
+from .statistics import calc_chi2_gate, calc_chi2_mean_band, calc_noncentral_gate_detection
+
+__all__ += [
+    "calc_sphere_scan_cells",
+    "calc_octree_depth",
+    "calc_voxel_quantization_error",
+    "calc_scalar_kalman_update",
+    "calc_inertial_coast_errors",
+    "calc_belief_error_bound",
+    "calc_quadratic_invalidation_horizon",
+    "calc_chi2_gate",
+    "calc_chi2_mean_band",
+    "calc_noncentral_gate_detection",
+]
+
+# --- Data selection (added 2026-10-20) ---
+from .retrieval import calc_lsh_candidate_probability, calc_lsh_threshold
+from .scaling import calc_allocation_growth
+
+__all__ += [
+    "calc_lsh_candidate_probability",
+    "calc_lsh_threshold",
+    "calc_allocation_growth",
+]
+
+from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
+
+__all__ += [
+    "calc_loss_reduction_compute_multiple",
 ]

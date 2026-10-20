@@ -2835,12 +2835,13 @@ class QKVProjectionCosts:
     """MAC count for a 6-token GPT-2-style combined QKV projection."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tokens = 6
-    d_model = 768
-    qkv_dim = 2304
+    projection = Scenarios.Gpt2SmallSixTokenQkvProjection  # GPT-2 Small, six tokens
+    tokens = projection.tokens
+    d_model = projection.width
+    qkv_dim = projection.packed_width
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    qkv_macs = tokens * d_model * qkv_dim
+    qkv_macs = projection.macs
     qkv_macs_m = qkv_macs / MILLION
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -3132,19 +3133,19 @@ class AttentionMemory:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    seq_len = 100_000
-    bytes_per_element = BYTES_FP16.to(byte).magnitude
-    num_layers = 32
-    num_heads = 12
+    scores = Scenarios.TwelveHeadScoresAt100kTokens  # 12 heads, 32 layers, FP16
+    seq_len = scores.seq_len
+    bytes_per_element = scores.bytes_per_score.to(byte).magnitude
+    num_layers = scores.layers
+    num_heads = scores.heads
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: S^2 * heads
-    elements = seq_len * seq_len * num_heads
+    elements = scores.scores_per_layer
 
-    # Step 2: Memory
-    single_layer_memory = elements * BYTES_FP16
-    # Step 3: Use decimal GB for standard model size quotes.
-    total_memory = single_layer_memory * num_layers
+    # Step 2: Memory, in decimal GB for standard model size quotes.
+    single_layer_memory = scores.layer_bytes
+    total_memory = scores.total_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_memory >= 100 * GB, f"Materialized score memory ({total_memory.to(GB).magnitude:.1f} GB) is too small for a 'bottleneck'.")
@@ -3206,15 +3207,18 @@ class TransformerComplexityAnchor:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    base_seq_len = 512
-    doubled_seq_len = 1024
-    mid_seq_len = 2048
-    long_seq_len = 4096
+    doubled = Scenarios.BertWindowToOneK  # from BERT's 512 learned positions
+    mid = Scenarios.BertWindowToTwoK
+    long = Scenarios.BertWindowToFourK
+    base_seq_len = long.base_tokens
+    doubled_seq_len = doubled.tokens
+    mid_seq_len = mid.tokens
+    long_seq_len = long.tokens
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    scaling_ratio = (doubled_seq_len / base_seq_len) ** 2
-    mid_context_ratio = (mid_seq_len / base_seq_len) ** 2
-    long_context_ratio = (long_seq_len / base_seq_len) ** 2
+    scaling_ratio = doubled.score_ratio
+    mid_context_ratio = mid.score_ratio
+    long_context_ratio = long.score_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(scaling_ratio == 4.0, f"Doubling context should cost 4x materialized score memory, got {scaling_ratio}.")
@@ -3549,12 +3553,13 @@ class AttentionCrossover:
     """Sequence length where dense attention overtakes the block's dense products."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    width = Models.Language.GPT2.hidden_dim
-    ffn_multiple = 4  # feed-forward width = 4 x model width
+    block = Scenarios.Gpt2XlBlockFullWindow  # GPT-2 XL, feed-forward width 4d
+    width = block.width
+    ffn_multiple = block.ffn_multiple
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_coeff = 4 + 2 * ffn_multiple  # projections (4) + FFN (2 x 4) => 12
-    crossover = dense_coeff * width / 2  # 12*S*d^2 = 2*S^2*d  =>  S = 6d
+    dense_coeff = block.block_coefficient  # projections (4) + FFN (2 x 4) => 12
+    crossover = block.crossover  # 12*S*d^2 = 2*S^2*d  =>  S = 6d
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(crossover == 6 * width, "Crossover should be six times the model width.")
@@ -3606,10 +3611,11 @@ class DecodeWeightStream:
     """Weight traffic per decoded token for a 70B-parameter model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model = Models.Language.Llama2_70B
+    stream = Scenarios.Llama2_70B_DecodeH100  # FP16 weights, batch one
+    model = stream.workload
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weight_bytes = model.size_in_bytes(BYTES_FP16)
+    weight_bytes = stream.result.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(weight_bytes > 100 * GB, "A 70B model in FP16 should stream over 100 GB per token.")
@@ -3643,19 +3649,17 @@ class KVCacheSizing:
     """FP16 KV-cache memory for a 32-layer, 32-head transformer serving request."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    layers = 32
-    kv_tensors = 2
-    heads = 32
-    seq_len = 2048
-    head_dim = 128
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    request = Scenarios.Llama2_7BKvAt2048Tokens  # Llama 2 7B, FP16, one request
+    layers = request.workload.layers
+    kv_tensors = 2  # keys and values
+    heads = request.workload.heads
+    seq_len = request.tokens
+    head_dim = request.workload.head_width
+    bytes_per_elem = request.bytes_per_value.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from mlsysim.physics import calc_kv_cache_size
-
-    per_request_memory = calc_kv_cache_size(
-        n_layers=layers, n_heads=heads, head_dim=head_dim, seq_len=seq_len, batch_size=1, bytes_per_elem=BYTES_FP16
-    )
+    weights = request.weights
+    per_request_memory = request.total
     concurrent_2_memory = per_request_memory * 2
     concurrent_4_memory = per_request_memory * 4
     concurrent_8_memory = per_request_memory * 8
@@ -3673,6 +3677,7 @@ class KVCacheSizing:
     heads_str = fmt(heads, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     per_request_gb_str = fmt_memory(per_request_memory, unit=GB, precision=2, commas=False)
     concurrent_2_gb_str = fmt_memory(concurrent_2_memory, unit=GB, precision=2, commas=False)
     concurrent_4_gb_str = fmt_memory(concurrent_4_memory, unit=GB, precision=2, commas=False)
@@ -3706,15 +3711,11 @@ class ContextMemoryCrossings:
     """Where the linear KV cache and the quadratic score matrix cross fixed budgets."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    device_memory = Hardware.Cloud.H100.memory.capacity
+    memories = Scenarios.Gpt2XlContextMemoryOnH100  # GPT-2 XL, FP16, one H100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = gpt2.size_in_bytes(BYTES_FP16)
-    kv_per_token = 2 * gpt2.layers * gpt2.hidden_dim * BYTES_FP16  # keys + values, all layers
-    score_per_pair = gpt2.heads * BYTES_FP16  # one layer, all heads
-    kv_crossing = (weights / kv_per_token).to("").magnitude
-    score_crossing = ((device_memory / score_per_pair).to("").magnitude) ** 0.5
+    kv_crossing = memories.kv_crossing  # KV cache (keys + values, all layers) equals the weights
+    score_crossing = memories.score_crossing  # one layer's scores (all heads) fill the device
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(5_000 < kv_crossing < 20_000, f"KV cache should pass the weights near ten thousand tokens, got {kv_crossing:.0f}")
@@ -3761,8 +3762,8 @@ hbm_gb = Hardware.Cloud.H100.memory.capacity.to(GB).magnitude
 ctx = np.logspace(np.log10(512), np.log10(131072), 200)
 kv_gb = 2 * n_layers * ctx * width * bytes_fp16 / 1e9  # keys + values, all layers, one request
 scores_gb = n_heads * ctx**2 * bytes_fp16 / 1e9  # one layer's materialized score matrix
-cross_kv = weights_gb * 1e9 / (2 * n_layers * width * bytes_fp16)
-cross_scores = np.sqrt(hbm_gb * 1e9 / (n_heads * bytes_fp16))
+cross_kv = Scenarios.Gpt2XlContextMemoryOnH100.kv_crossing
+cross_scores = Scenarios.Gpt2XlContextMemoryOnH100.score_crossing
 
 # ┌── 3. RENDER ──────────────────────────────────────────────────────────────────
 ax.plot(ctx, np.full_like(ctx, weights_gb), color=COLORS["BlueLine"], lw=2.2, label="Weights (FP16), fixed")
@@ -3804,7 +3805,7 @@ plt.close()
 
 :::
 
-[^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
+[^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~`{python} KVCacheSizing.weights_gb_str`; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
 
 ```{python}
 #| echo: false
@@ -3872,12 +3873,12 @@ class GPT2ModernContext:
     """Where GPT-2 XL sits relative to current decoder-only serving."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    bw = Hardware.Cloud.H100.memory.bandwidth
+    decode = Scenarios.Gpt2XlDecodeH100  # GPT-2 XL, FP16 weights, batch one, one H100
+    cache = Scenarios.Gpt2XlKvFullWindow
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kv_per_token = (2 * gpt2.layers * gpt2.hidden_dim * BYTES_FP16).to(KB)  # keys + values, every layer
-    weight_read = (gpt2.size_in_bytes(BYTES_FP16) / bw).to(millisecond)
+    kv_per_token = cache.per_token.to(KB)  # keys + values, every layer
+    weight_read = decode.result.memory_time.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.5 * millisecond < weight_read < 2 * millisecond, f"Expected about a millisecond per weight read, got {weight_read}")
@@ -3993,14 +3994,15 @@ class DLRMEmbedding:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    num_users = 1_000_000_000
-    embed_dim = 128
-    bytes_per_param = BYTES_FP32
-    a100_capacity = Hardware.Cloud.A100.memory.capacity
+    table = Scenarios.BillionUserTable  # 128 FP32 values per row
+    num_users = table.rows
+    embed_dim = table.width
+    bytes_per_param = table.bytes_per_value
+    a100_capacity = table.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    table_memory = num_users * embed_dim * bytes_per_param
-    row_memory = (embed_dim * bytes_per_param).to(byte)
+    table_memory = table.table_bytes
+    row_memory = table.row_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -4206,16 +4208,17 @@ class CapacityWall:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    num_items = 100_000_000
-    embed_dim = 128
-    bytes_per_param = BYTES_FP32
-    a100_capacity = Hardware.Cloud.A100.memory.capacity
+    table = Scenarios.HundredMillionItemTableOnA100  # 128 FP32 values per row
+    num_items = table.rows
+    embed_dim = table.width
+    bytes_per_param = table.bytes_per_value
+    a100_capacity = table.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    table_memory = num_items * embed_dim * bytes_per_param
+    table_memory = table.table_bytes
     # The prose shows the reader `table size / nominal capacity = share`,
     # dividing decimal GB by the vendor-labeled 80 GB capacity.
-    utilization_pct = (table_memory.to(GB).magnitude / a100_capacity.to(GiB).magnitude) * 100
+    utilization_pct = table.labeled_share * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(50 <= utilization_pct <= 70, f"Capacity-wall example should consume roughly 60% of an 80 GB A100, got {utilization_pct:.1f}%.")
@@ -4440,7 +4443,7 @@ class LighthouseMemory:
     mobilenet = Models.Vision.MobileNetV2
     kws = Models.Tiny.DS_CNN
     device = Hardware.Cloud.H100.memory.capacity
-    training_copies = 4  # FP32 weights, gradients, and Adam's two moments
+    training_copies = Scenarios.Gpt2Fp32AdamOnH100.copies  # FP32 weights, gradients, and Adam's two moments
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
@@ -5258,19 +5261,16 @@ class KVCacheServingPitfall:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     device_memory = Hardware.Cloud.A100.memory.capacity
-    layers = 32
-    kv_tensors = 2
-    heads = 32
-    seq_len = 2048
-    head_dim = 128
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    request = Scenarios.Llama2_7BKvAt2048Tokens  # Llama 2 7B, FP16, one request
+    layers = request.workload.layers
+    kv_tensors = 2  # keys and values
+    heads = request.workload.heads
+    seq_len = request.tokens
+    head_dim = request.workload.head_width
+    bytes_per_elem = request.bytes_per_value.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from mlsysim.physics import calc_kv_cache_size
-
-    per_request_memory = calc_kv_cache_size(
-        n_layers=layers, n_heads=heads, head_dim=head_dim, seq_len=seq_len, batch_size=1, bytes_per_elem=BYTES_FP16
-    )
+    per_request_memory = request.total
     concurrent_2_memory = per_request_memory * 2
     concurrent_4_memory = per_request_memory * 4
 

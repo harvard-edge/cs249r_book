@@ -1,271 +1,280 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 10 (Grounded Intent), Volume IV.
+"""Every number on the Lecture 10 slides and notes (Grounded Intent), read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment
-("ch" is the rendered chapter, Grounded Intent; "RM" and "AISLE" are the
-running machine and its aisle scenario in the MLSysIM registry, which the
-chapter's LEGO cells print from). Each printed line is a value the slide or
-its note shows, under the label used there. make_figs.py imports from this
-file so figures and slides share one computation.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle
+record, Literature.* for AutoRT, OK-Robot, KnowNo, the published action
+models, and Bohannon's walking speeds) and the calculations (Scenarios.*,
+backed by the solvers in engine/solvers/grounding.py); the chapter reads the
+same scenarios. This file only selects values, converts units, and formats
+them; it types no numbers. Each value is recorded with v() under the key the
+deck prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the scenario objects and the published rows.
 
 Run from this folder: python3 calcs.py
 """
-import math
+
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-from mlsysim import Embodied  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Q_ = mlsysim.core.units.Q_
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+AUTORT = Literature.RobotGrounding
+VLA = Literature.VlaSystems
+WALK = Literature.HumanMotion
+
+CADENCE = Scenarios.ConveyorMugIntentCadence
+SETTLING = Scenarios.ConveyorMugSettlingDrift
+SLOW_BELT = Scenarios.ConveyorMugSlowBelt
+REACH = Scenarios.ConveyorMugDynamicReach
+OCCUPANCY = Scenarios.AisleCoworkerForwardOccupancy
+EXPIRY = Scenarios.ConveyorMugIntentLeaseExpiry
+GOAL_SET = Scenarios.ConveyorMugGoalSetOffsets
+BESIDE = Scenarios.MugJarReferentSet
+LOW_JAR = Scenarios.MugJarReferentSetLowJar
+ALONE = Scenarios.JarAloneReferentSet
+REGION = Scenarios.DistantHandleConfidenceRegion
+LATCH = Scenarios.LatchUnbrakedStall
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-def head(title):
-    print(f"\n[{title}]")
-
-
-def mag(q, unit):
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
     return q.to(unit).magnitude
 
 
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-# AutoRT (Ahn et al. 2024, arXiv 2401.12963), as quoted in ch War Story 10.1
-AUTORT_PROPOSED = 259
-AUTORT_ACCEPTABLE = 228
-AUTORT_KEPT = 214
-AUTORT_KEPT_ACCEPTABLE = 200
-AUTORT_REJECTED_UNSUITABLE = 17
-
-# Running machine and aisle scenario (MLSysIM registry; ch prints these)
-R_TOL = mag(AISLE.grasp_tolerance, "mm")          # 15 mm grasp tolerance
-E0 = mag(AISLE.grasp_initial_error, "mm")         # 3 mm initial handle error
-V_BELT = mag(AISLE.v_conveyor, "mm/s")            # 200 mm/s conveyor
-A_SLIP = mag(AISLE.a_conveyor_slip, "mm/s**2")    # 500 mm/s^2 residual slip
-T_TICK = mag(AISLE.t_tick, "ms")                  # 1 ms permission tick
-T_BUS = mag(AISLE.t_bus, "ms")                    # 1 ms fieldbus cycle
-T_BRAKE = mag(AISLE.t_brake_onset, "ms")          # 20 ms brake onset
-V_HUMAN = mag(AISLE.v_human_approach, "m/s")      # 1.6 m/s, ISO 13855 design value
-AISLE_W = mag(AISLE.aisle_width, "m")             # 1.30 m aisle
-K_LATCH = mag(AISLE.k_latch, "N/mm")              # 400 N/mm plate stiffness
-V_LATCH = mag(AISLE.v_latch_approach, "mm/s")     # 30 mm/s guarded approach
-F_TRIP = mag(AISLE.f_latch_tripwire, "N")         # 15 N tripwire
-F_LIMIT = mag(AISLE.f_latch_limit, "N")           # 100 N latch limit
-T_CONTACT = mag(AISLE.t_contact_response, "ms")   # 2 ms contact loop
-T_CHUNK_LEASE = mag(AISLE.t_lease, "ms")          # 60 ms chunk lease (Lecture 4)
-T_INFER = mag(RM.intent_inference_latency, "ms")  # 335.6 ms intent inference (derived in the book)
-F_INTENT = mag(RM.intent_rate, "Hz")              # 2 Hz intent rate
-V_TCP = mag(RM.tcp_speed_limit, "mm/s")           # 1,000 mm/s TCP speed ceiling
-
-# ch scenario inputs (illustrative, Napkin Math 10.1 to 10.3 and Sec. 10.1, 10.3)
-D_GOAL_IN, D_GOAL_OUT = 10.0, 20.0     # mm, terminal TCP offsets along x
-SCORE_MUG, SCORE_JAR, SCORE_JAR_LOW = 0.62, 0.48, 0.10   # raw box scores
-N_CAL, ALPHA, QHAT = 200, 0.10, 0.60   # calibration scenes, miscoverage, assumed score
-SIGMA = (4.0, 5.0, 12.0)               # mm, wrist-camera principal std devs
-CHI2_3DOF_95 = 7.815                   # ch Sec. 10.3.3 (chi-square, 3 dof, 0.95)
-T_STALL = 200.0                        # ms, host or contact stall
-V_DRIFT_SLOW = 20.0                    # mm/s, settling drift
-V_DRIFT_CHECK = 50.0                   # mm/s, Checkpoint 10.1
-D_TARGET = 300.0                       # mm, gripper-to-handle distance at proposal
-T_FORECAST = 2.0                       # s, multi-second planning horizon
-
-# ---------------------------------------------------------------------------
-head("Hook: AutoRT filter (War Story 10.1)")
-unsuitable = AUTORT_PROPOSED - AUTORT_ACCEPTABLE
-passed = AUTORT_KEPT - AUTORT_KEPT_ACCEPTABLE
-show("unsuitable proposed", unsuitable)
-show("acceptable share of proposed (%)", f"{100 * AUTORT_ACCEPTABLE / AUTORT_PROPOSED:.0f}")
-show("acceptable share of kept (%)", f"{100 * AUTORT_KEPT_ACCEPTABLE / AUTORT_KEPT:.0f}")
-show("unsuitable passed by the filter", passed)
-show("rejected + passed (check = unsuitable)", AUTORT_REJECTED_UNSUITABLE + passed)
-show("filter recall (%)", f"{100 * AUTORT_REJECTED_UNSUITABLE / unsuitable:.0f}")
-show("share of unsuitable passed (%)", f"{100 * passed / unsuitable:.0f}")
-show("tasks the filter removed", AUTORT_PROPOSED - AUTORT_KEPT)
-show("acceptable tasks removed", AUTORT_ACCEPTABLE - AUTORT_KEPT_ACCEPTABLE)
-
-# ---------------------------------------------------------------------------
-head("Two-speed brain recall (Lecture 3)")
-t_period = 1000.0 / F_INTENT
-show("intent inference (ms)", f"{T_INFER:.1f} -> {T_INFER:.0f}")
-show("intent period (ms)", f"{t_period:.0f}")
-
-# ---------------------------------------------------------------------------
-head("Goal set is a specification (Sec. 10.1)")
-norm_in = D_GOAL_IN / R_TOL
-norm_out = D_GOAL_OUT / R_TOL
-show("normalized distance, 10 mm offset", f"{norm_in:.2f}")
-show("normalized distance, 20 mm offset", f"{norm_out:.2f}")
-
-# ---------------------------------------------------------------------------
-head("Conformal refusal: the jar beside the mug (Sec. 10.3.1)")
-tot = SCORE_MUG + SCORE_JAR
-p_mug, p_jar = SCORE_MUG / tot, SCORE_JAR / tot
-entropy = -(p_mug * math.log(p_mug) + p_jar * math.log(p_jar))
-rank = math.ceil((N_CAL + 1) * (1 - ALPHA))
-thresh = 1 - QHAT
-show("normalized mug", f"{p_mug:.2f}")
-show("normalized jar", f"{p_jar:.2f}")
-show("entropy (nats)", f"{entropy:.3f}")
-show("two-candidate maximum ln 2 (nats)", f"{math.log(2):.3f}")
-show("calibration rank of qhat", rank)
-show("inclusion threshold 1 - qhat", f"{thresh:.2f}")
-set_size = sum(p >= thresh for p in (p_mug, p_jar))
-show("prediction-set size", set_size)
-tot_low = SCORE_MUG + SCORE_JAR_LOW
-p_mug_low, p_jar_low = SCORE_MUG / tot_low, SCORE_JAR_LOW / tot_low
-show("low jar case: normalized mug", f"{p_mug_low:.2f}")
-show("low jar case: normalized jar", f"{p_jar_low:.2f}")
-show("low jar case: set size", sum(p >= thresh for p in (p_mug_low, p_jar_low)))
-# The jar in place of the mug: one retained candidate normalizes to 1.
-show("jar alone: normalized score", f"{SCORE_JAR / SCORE_JAR:.2f}")
-
-# ---------------------------------------------------------------------------
-head("Imprecise estimate: the distant view (Sec. 10.3.3)")
-k = math.sqrt(CHI2_3DOF_95)
-semi = [k * s for s in SIGMA]
-show("chi radius sqrt(7.815)", f"{k:.3f}")
-show("95% semi-axes (mm)", ", ".join(f"{s:.1f}" for s in semi))
-show("depth semi-axis over tolerance", f"{semi[2] / R_TOL:.2f}")
-show("axes inside 15 mm", sum(s <= R_TOL for s in semi))
-
-# ---------------------------------------------------------------------------
-head("Latch ceilings (Napkin Math 10.1)")
-f_brake = F_TRIP + K_LATCH * V_LATCH * T_CONTACT / 1000.0   # N/mm * mm/s * s
-x_stall = V_LATCH * T_STALL / 1000.0
-f_stall = K_LATCH * x_stall
-show("force at brake command (N)", f"{f_brake:.0f}")
-show("stall travel (mm)", f"{x_stall:.0f}")
-show("stall force (N)", f"{f_stall:,.0f}")
-show("stall force over limit (x)", f"{f_stall / F_LIMIT:.0f}")
-show("force rise rate (N per ms)", f"{K_LATCH * V_LATCH / 1000.0:.0f}")
-x_left = (F_LIMIT - f_brake) / K_LATCH
-show("compression left after brake command (mm)", f"{x_left:.2f}")
-
-# ---------------------------------------------------------------------------
-head("Cadence gap (Napkin Math 10.2)")
-budget = R_TOL - E0
-tau_u = budget / V_BELT * 1000.0
-tau_t = math.sqrt(2 * budget / A_SLIP) * 1000.0
-err_period = E0 + V_BELT * t_period / 1000.0
-overrun = T_INFER - tau_u
-age_renew = t_period + T_INFER
-v_renew = budget / (age_renew / 1000.0)
-show("error budget (mm)", f"{budget:.0f}")
-show("untracked horizon (ms)", f"{tau_u:.0f}")
-show("tracked horizon (ms)", f"{tau_t:.2f} -> {tau_t:.0f}")
-show("error at one period (mm)", f"{err_period:.0f}")
-show("past the tolerance at one period (mm)", f"{err_period - R_TOL:.0f}")
-show("inference overruns horizon by (ms)", f"{overrun:.1f} -> {overrun:.0f}")
-show("evidence age at model-only renewal (ms)", f"{age_renew:.1f} -> {age_renew:.0f}")
-show("model-only renewal ceiling (mm/s)", f"{v_renew:.1f}")
-show("as share of belt speed (%)", f"{100 * v_renew / V_BELT:.1f}")
-tau_slow = budget / V_DRIFT_SLOW * 1000.0
-show("settling-drift horizon (ms)", f"{tau_slow:.0f}")
-show("inference / untracked horizon (x)", f"{T_INFER / tau_u:.1f}")
-
-# ---------------------------------------------------------------------------
-head("Host stall against both horizons (Sec. 10.5)")
-err_u = E0 + V_BELT * T_STALL / 1000.0
-err_t = E0 + 0.5 * A_SLIP * (T_STALL / 1000.0) ** 2
-onset = T_TICK + T_BUS + T_BRAKE
-show("untracked target error after 200 ms (mm)", f"{err_u:.0f}")
-show("tracked target error after 200 ms (mm)", f"{err_t:.0f}")
-show("stop onset after expiry (ms)", f"{onset:.0f}")
-show("untracked expiry + onset (ms)", f"{tau_u + onset:.0f}")
-show("tracked expiry + onset (ms)", f"{tau_t + onset:.0f}")
-
-# ---------------------------------------------------------------------------
-head("Checkpoint estimate: 50 mm/s drift")
-tau_chk = budget / V_DRIFT_CHECK * 1000.0
-show("untracked horizon at 50 mm/s (ms)", f"{tau_chk:.0f}")
-show("model-only renewal age (ms)", f"{age_renew:.0f}")
-show("renewal fits", age_renew < tau_chk)
-
-# ---------------------------------------------------------------------------
-head("Dynamic reachability (Sec. 10.6, Definition 10.2)")
-reach_t = V_TCP * tau_t / 1000.0
-reach_u = V_TCP * tau_u / 1000.0
-t_transit = D_TARGET / V_TCP * 1000.0
-n_capt = math.ceil(t_transit / tau_t)
-show("reach in tracked window (mm)", f"{reach_t:.0f}")
-show("reach in untracked window (mm)", f"{reach_u:.0f}")
-show("transit floor for 300 mm (ms)", f"{t_transit:.0f}")
-show("shortfall against tracked window (ms)", f"{t_transit - tau_t:.0f}")
-show("fresh captures needed", n_capt)
-
-# ---------------------------------------------------------------------------
-head("Freezing radius (Napkin Math 10.3)")
-d_u = V_HUMAN * tau_u
-d_t = V_HUMAN * tau_t
-d_long = V_HUMAN * T_FORECAST
-t_block = AISLE_W / V_HUMAN
-show("growth over untracked horizon (mm)", f"{d_u:.0f}")
-show("growth over tracked horizon (mm)", f"{d_t:.1f} -> {d_t:.0f}")
-show("growth over 2 s (m)", f"{d_long:.1f}")
-show("2 s set over aisle width (x)", f"{d_long / AISLE_W:.1f}")
-show("horizon at which one person spans the aisle (s)", f"{t_block:.4f} -> {t_block:.2f}")
-
-# ---------------------------------------------------------------------------
-head("Lease expiry, chunk lease contrast (Sec. 10.4, 10.8)")
-show("chunk lease (ms)", f"{T_CHUNK_LEASE:.0f}")
-show("tracked evidence term over chunk lease (x)", f"{tau_t / T_CHUNK_LEASE:.1f}")
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-# ---------------------------------------------------------------------------
-head("OK-Robot failure analysis (Liu et al. 2024, Fig. 4 counts)")
-OKR = dict(trials=375, success=254, nav_wrong_object=35, nav_other=7,
-           grasp_model=45, hardware=28, placing=6)   # Fig. 4, three cleanup levels
-parts = OKR["success"] + OKR["nav_wrong_object"] + OKR["nav_other"] + OKR["grasp_model"] \
-    + OKR["hardware"] + OKR["placing"]
-show("categories sum (check = 375)", parts)
-for k in ("success", "nav_wrong_object", "grasp_model", "hardware"):
-    show(f"{k} share (%)", f"{100 * OKR[k] / OKR['trials']:.1f}")
+def period_ms(rate_hz):
+    """Period in ms of a published rate in Hz."""
+    return m(1 / Q_(float(rate_hz), "Hz"), "ms")
 
-# ---------------------------------------------------------------------------
-head("KnowNo hardware result (Ren et al. 2023, Table 2, target 0.85)")
-KN = dict(knowno_succ=0.76, knowno_help=0.67, simple_succ=0.75, simple_help=0.81,
-          nohelp_succ=0.51)
-show("help-rate reduction vs simple set (points)", f"{100 * (KN['simple_help'] - KN['knowno_help']):.0f}")
 
-# ---------------------------------------------------------------------------
-head("Published action-model rates as periods (ms)")
-VLA = [  # (label, low period ms, high period ms, source)
-    ("RT-2 55B", 1000 / 3, 1000 / 1, "Brohan et al. 2023, Sec. 3.3: 1-3 Hz, cloud TPUs"),
-    ("RT-1", 1000 / 3, 1000 / 3, "Brohan et al. 2023 (RT-1), Sec. 5.1: 3 Hz"),
-    ("RT-2 5B", 1000 / 5, 1000 / 5, "Sec. 3.3: about 5 Hz"),
-    ("OpenVLA 7B", 1000 / 6, 1000 / 6, "Kim et al. 2024, Sec. 3.5: about 6 Hz, RTX 4090, bf16"),
-    ("pi0 chunk", 73.0, 73.0, "Black et al. 2024, Table I: 73 ms on-board, RTX 4090"),
+cad, reach, occ, exp = CADENCE.result, REACH.result, OCCUPANCY.result, EXPIRY.result
+beside, low_jar, alone, region = BESIDE.result, LOW_JAR.result, ALONE.result, REGION.result
+
+print("== Hook: AutoRT's task filter (Ahn et al. 2024, Sec. 5.3)")
+passed = AUTORT.AutoRtKeptTasks - AUTORT.AutoRtKeptAcceptableTasks
+assert passed == AUTORT.AutoRtUnsuitableTasks - AUTORT.AutoRtRejectedUnsuitable
+assert AUTORT.AutoRtUnsuitableTasks == AUTORT.AutoRtSampledTasks - AUTORT.AutoRtAcceptableTasks
+v("autort_sampled", AUTORT.AutoRtSampledTasks, "{:.0f}", "tasks in the human-judged sample")
+v("autort_acceptable", AUTORT.AutoRtAcceptableTasks, "{:.0f}", "acceptable before the filter")
+v("autort_kept", AUTORT.AutoRtKeptTasks, "{:.0f}", "tasks the filter kept")
+v("autort_kept_ok", AUTORT.AutoRtKeptAcceptableTasks, "{:.0f}", "acceptable among the kept")
+v("autort_unsuitable", AUTORT.AutoRtUnsuitableTasks, "{:.0f}", "unsuitable tasks")
+v("autort_rejected", AUTORT.AutoRtRejectedUnsuitable, "{:.0f}", "unsuitable tasks the filter rejected")
+v("autort_passed", passed, "{:.0f}", "unsuitable tasks the filter passed")
+v("autort_pct_before", 100 * AUTORT.AutoRtAcceptableTasks / AUTORT.AutoRtSampledTasks, "{:.0f}",
+  "acceptable share before the filter, %")
+v("autort_pct_after", 100 * AUTORT.AutoRtKeptAcceptableTasks / AUTORT.AutoRtKeptTasks, "{:.0f}",
+  "acceptable share of the kept, %")
+v("autort_recall", 100 * AUTORT.AutoRtRejectedUnsuitable / AUTORT.AutoRtUnsuitableTasks, "{:.0f}",
+  "filter recall, %")
+v("autort_miss_pct", 100 * passed / AUTORT.AutoRtUnsuitableTasks, "{:.0f}", "filter miss rate, %")
+
+print("== The conveyor mug and the intent model (Napkin Math 10.2, Sec. 10.5)")
+v("e0", m(AISLE.grasp_initial_error, "mm"), "{:.0f}", "initial handle error, mm")
+v("r_tol", m(AISLE.grasp_tolerance, "mm"), "{:.0f}", "grasp tolerance, mm")
+v("budget", m(cad.margin, "mm"), "{:.0f}", "error budget, mm")
+v("v_belt_m", m(AISLE.v_conveyor, "m/s"), "{:.2f}", "belt speed, m/s")
+v("v_belt_mm", m(AISLE.v_conveyor, "mm/s"), "{:.0f}", "belt speed, mm/s")
+v("v_belt_mm_per_ms", m(AISLE.v_conveyor, "mm/ms"), "{:.1f}", "belt speed, mm per ms")
+v("a_slip", m(AISLE.a_conveyor_slip, "m/s**2"), "{:.1f}", "residual slip, m/s^2")
+v("tau_u", m(cad.untracked_horizon, "ms"), "{:.0f}", "untracked evidence horizon, ms")
+v("tau_t", m(cad.tracked_horizon, "ms"), "{:.0f}", "tracked evidence horizon, ms")
+v("t_infer", m(RM.intent_inference_latency, "ms"), "{:.0f}", "intent inference, ms (computed)")
+v("f_intent", m(RM.intent_rate, "Hz"), "{:.0f}", "intent rate, Hz")
+v("n_intent_values_words", RM.intent_model.action_dim, "words", "values one intent inference decodes")
+v("t_period", m(cad.intent_period, "ms"), "{:.0f}", "intent period, ms")
+v("err_period", m(cad.error_at_period, "mm"), "{:.0f}", "untracked error at one period, mm")
+v("infer_over_tau", cad.inference_over_horizon, "{:.1f}", "inference over the untracked horizon")
+v("overrun", m(cad.inference_overrun, "ms"), "{:.0f}", "inference overruns the horizon by, ms")
+v("t_stall", m(cad.stall, "ms"), "{:.0f}", "host stall, ms")
+v("err_stall_u", m(cad.stall_error_untracked, "mm"), "{:.0f}", "untracked error after the stall, mm")
+v("err_stall_t", m(cad.stall_error_tracked, "mm"), "{:.0f}", "tracked error after the stall, mm")
+v("t_onset", m(cad.stop_onset, "ms"), "{:.0f}", "stop onset after expiry, ms")
+v("t_brake", m(AISLE.t_brake_onset, "ms"), "{:.0f}", "brake onset, ms")
+v("f_tick_khz", m(RM.permission_rate, "kHz"), "{:.0f}", "permission tick rate, kHz")
+v("t_chunk_lease", m(AISLE.t_lease, "ms"), "{:.0f}", "chunk lease, ms")
+
+print("== Estimate: model-only renewal (Napkin Math 10.2, Checkpoint 10.1)")
+v("renew_age", m(cad.renewal_age, "ms"), "{:.0f}", "oldest evidence behind a model-only target, ms")
+v("renew_age_s", m(cad.renewal_age, "s"), "{:.3f}", "the same, s")
+v("v_renew", m(cad.renewal_speed_ceiling, "mm/s"), "{:.1f}", "drift a model-only renewal can follow, mm/s")
+v("renew_pct", 100 * cad.renewal_share, "{:.1f}", "as a share of the belt speed, %")
+v("v_settling", m(SETTLING.target_speed, "mm/s"), "{:.0f}", "settling drift, mm/s")
+v("tau_settling", m(SETTLING.result.untracked_horizon, "ms"), "{:.0f}", "its horizon, ms")
+v("v_slow_belt", m(SLOW_BELT.target_speed, "mm/s"), "{:.0f}", "slowed belt, mm/s")
+v("tau_slow_belt", m(SLOW_BELT.result.untracked_horizon, "ms"), "{:.0f}", "its horizon, ms")
+
+print("== Goal set is a specification (Sec. 10.1, equation 1)")
+d_in, d_out = GOAL_SET.offsets
+n_in, n_out = GOAL_SET.norms
+v("d_goal_in", m(d_in, "mm"), "{:.0f}", "inside offset, mm")
+v("d_goal_out", m(d_out, "mm"), "{:.0f}", "outside offset, mm")
+v("norm_in", n_in, "{:.2f}", "normalized distance, inside")
+v("norm_out", n_out, "{:.2f}", "normalized distance, outside")
+
+print("== Conformal refusal: the jar beside the mug (Sec. 10.3.1)")
+v("score_mug", BESIDE.scores[0], "{:.2f}", "raw mug score")
+v("score_jar", BESIDE.scores[1], "{:.2f}", "raw jar score")
+v("score_jar_low", LOW_JAR.scores[1], "{:.2f}", "raw jar score, contrast case")
+v("n_cal", BESIDE.calibration_count, "{:.0f}", "calibration scenes")
+v("n_cal_plus", BESIDE.calibration_count + 1, "{:.0f}", "calibration scenes plus one")
+v("alpha", BESIDE.alpha, "{:.2f}", "allowed miscoverage")
+v("one_minus_alpha", 1 - BESIDE.alpha, "{:.1f}", "coverage level")
+v("rank", beside.rank, "{:.0f}", "calibration rank of qhat")
+v("qhat", BESIDE.threshold_score, "{:.2f}", "assumed qhat")
+v("thresh", beside.threshold, "{:.2f}", "inclusion threshold 1 - qhat")
+v("p_mug", beside.normalized[0], "{:.2f}", "normalized mug")
+v("p_jar", beside.normalized[1], "{:.2f}", "normalized jar")
+v("set_size", beside.set_size, "{:.0f}", "prediction-set size")
+v("set_size_words", beside.set_size, "words", "the same, in words")
+v("p_mug_low", low_jar.normalized[0], "{:.2f}", "normalized mug, contrast case")
+v("p_jar_low", low_jar.normalized[1], "{:.2f}", "normalized jar, contrast case")
+v("set_size_low", low_jar.set_size, "{:.0f}", "prediction-set size, contrast case")
+v("entropy", beside.entropy, "{:.3f}", "entropy, nats")
+v("max_entropy", beside.max_entropy, "{:.3f}", "two-candidate maximum, nats")
+v("p_jar_alone", alone.normalized[0], "{:.2f}", "the jar alone, normalized")
+
+print("== KnowNo on hardware (Ren et al. 2023, Table 2 and Fig. 1)")
+KN = Literature.RobotGrounding
+v("knowno_thresh", KN.KnowNoExampleThreshold, "{:.2f}", "calibrated threshold in the example")
+v("knowno_target", KN.KnowNoTargetSuccess, "{:.2f}", "target success level")
+v("knowno_succ", KN.KnowNoSuccess, "{:.2f}", "KnowNo task success")
+v("knowno_help_pct", 100 * KN.KnowNoHelpRate, "{:.0f}", "KnowNo help rate, %")
+v("simple_succ", KN.SimpleSetSuccess, "{:.2f}", "Simple Set task success")
+v("simple_help_pct", 100 * KN.SimpleSetHelpRate, "{:.0f}", "Simple Set help rate, %")
+v("nohelp_succ", KN.NoHelpSuccess, "{:.2f}", "No Help task success")
+v("help_gap_pts", 100 * (KN.SimpleSetHelpRate - KN.KnowNoHelpRate), "{:.0f}",
+  "help-rate reduction against the simple set, points")
+
+print("== Imprecise estimate: the distant view (Sec. 10.3.3)")
+sx, sy, sz = REGION.sigmas
+ax_x, ax_y, ax_z = region.semi_axes
+v("sigma_x", m(sx, "mm"), "{:.0f}", "lateral std. dev., mm")
+v("sigma_y", m(sy, "mm"), "{:.0f}", "lateral std. dev., mm")
+v("sigma_z", m(sz, "mm"), "{:.0f}", "depth std. dev., mm")
+v("chi2", region.quantile, "{:.3f}", "chi-square quantile, 3 dof, 0.95")
+v("coverage_pct", 100 * REGION.coverage, "{:.0f}", "region coverage, %")
+v("semi_x", m(ax_x, "mm"), "{:.1f}", "95% semi-axis, mm")
+v("semi_y", m(ax_y, "mm"), "{:.1f}", "95% semi-axis, mm")
+v("semi_z", m(ax_z, "mm"), "{:.1f}", "95% depth semi-axis, mm")
+v("depth_over_tol", region.worst_over_tolerance, "{:.1f}", "depth semi-axis over the tolerance")
+v("axes_within_words", region.axes_within, "words", "axes inside the tolerance")
+
+print("== Action tokens (RT-1 Sec. 5.1; OpenVLA Sec. 3.2)")
+assert VLA.Rt1ActionBins == VLA.OpenVlaActionBins
+v("n_bins", VLA.OpenVlaActionBins, "{:.0f}", "bin edges per action dimension")
+v("n_bin_intervals", VLA.OpenVlaActionBins - 1, "{:.0f}", "bins between the edges")
+
+print("== Latch ceilings (Napkin Math 10.1)")
+v("f_trip", m(AISLE.f_latch_tripwire, "N"), "{:.0f}", "tripwire, N")
+v("v_latch", m(LATCH.guarded_speed, "m/s"), "{:.2f}", "guarded approach, m/s")
+v("k_latch", m(AISLE.k_latch, "N/mm"), "{:.0f}", "plate stiffness, N/mm")
+v("t_contact", m(AISLE.t_contact_response, "ms"), "{:.0f}", "contact loop, ms")
+v("f_limit", m(AISLE.f_latch_limit, "N"), "{:.0f}", "latch limit, N")
+v("force_rate", m(LATCH.force_rate(LATCH.guarded_speed), "N/ms"), "{:.0f}", "force rise, N per ms")
+v("f_rise", m(LATCH.force_rate(LATCH.guarded_speed) * AISLE.t_contact_response, "N"), "{:.0f}",
+  "rise during the contact loop, N")
+v("f_brake", m(LATCH.force_at_brake_onset_guarded, "N"), "{:.0f}", "force at the brake command, N")
+v("t_stall_arm", m(LATCH.stall, "ms"), "{:.0f}", "unbraked stall, ms")
+v("x_stall", m(LATCH.stall_travel, "mm"), "{:.0f}", "stall travel, mm")
+v("f_stall", m(LATCH.stall_force, "N"), "{:,.0f}", "stall force, N")
+v("stall_over_limit", LATCH.stall_over_limit, "{:.0f}", "stall force over the limit")
+
+print("== Dynamic reachability (Sec. 10.6, Definition 10.2)")
+v("d_target", m(REACH.target_distance, "mm"), "{:.0f}", "gripper-to-handle distance, mm")
+v("t_transit", m(reach.transit_floor, "ms"), "{:.0f}", "transit floor, ms")
+v("v_tcp", m(REACH.speed_ceiling, "m/s"), "{:.0f}", "TCP speed ceiling, m/s")
+v("reach_u", m(reach.reach_untracked, "mm"), "{:.0f}", "reach inside the untracked window, mm")
+v("shortfall", m(reach.shortfall, "ms"), "{:.0f}", "shortfall against the tracked window, ms")
+v("n_captures_words", reach.fresh_captures, "words", "fresh captures a staged approach needs")
+
+print("== Forward occupancy and the freezing robot (Napkin Math 10.3)")
+v("v_human", m(AISLE.v_human_approach, "m/s"), "{:.1f}", "ISO 13855 approach speed, m/s")
+v("v_human_mm", m(AISLE.v_human_approach, "mm/s"), "{:,.0f}", "the same, mm/s")
+v("d_occ_u", m(occ.growth_untracked, "mm"), "{:.0f}", "growth over the untracked horizon, mm")
+v("d_occ_t", m(occ.growth_tracked, "mm"), "{:.0f}", "growth over the tracked horizon, mm")
+v("d_occ_long", m(occ.growth_forecast, "m"), "{:.1f}", "growth over the forecast, m")
+v("forecast_words", m(OCCUPANCY.forecast, "s"), "words", "forecast horizon, s")
+v("forecast_s", m(OCCUPANCY.forecast, "s"), "{:.0f}", "the same, figure label")
+v("occ_over_aisle", occ.forecast_over_aisle, "{:.1f}", "forecast set over the aisle width")
+v("aisle_w", m(AISLE.aisle_width, "m"), "{:.2f}", "aisle width, m")
+v("t_block", m(occ.aisle_span_horizon, "s"), "{:.2f}", "horizon at which one set spans the aisle, s")
+
+print("== Measured walking speeds (Bohannon 1997, reference table)")
+WALK_ROWS = [  # (group, comfortable m/s, maximum m/s)
+    ("men 20s", WALK.WalkComfortableMen20sCmS, WALK.WalkMaximumMen20sCmS),
+    ("men 50s", WALK.WalkComfortableMen50sCmS, WALK.WalkMaximumMen50sCmS),
+    ("women 20s", WALK.WalkComfortableWomen20sCmS, WALK.WalkMaximumWomen20sCmS),
+    ("women 50s", WALK.WalkComfortableWomen50sCmS, WALK.WalkMaximumWomen50sCmS)]
+WALK_ROWS = [(g, m(Q_(float(c), "cm/s"), "m/s"), m(Q_(float(x), "cm/s"), "m/s")) for g, c, x in WALK_ROWS]
+comfortable = [c for _, c, _ in WALK_ROWS]
+fastest = [x for _, _, x in WALK_ROWS]
+v("walk_comf", sum(comfortable) / len(comfortable), "{:.1f}", "comfortable walking, mean of the groups, m/s")
+v("walk_max_lo", min(fastest), "{:.1f}", "maximum walking, slowest group, m/s")
+v("walk_max_hi", max(fastest), "{:.1f}", "maximum walking, fastest group, m/s")
+v("walk_max_over_iso", max(fastest) / m(AISLE.v_human_approach, "m/s"), "{:.2f}",
+  "fastest maximum over the ISO design speed")
+
+print("== Published action-model rates as periods")
+VLA_ROWS = [  # (label, low period ms, high period ms)
+    ("RT-2 55B", period_ms(VLA.Rt2LargeRateHighHz), period_ms(VLA.Rt2LargeRateLowHz)),
+    ("RT-1", period_ms(VLA.Rt1RateHz), period_ms(VLA.Rt1RateHz)),
+    ("RT-2 5B", period_ms(VLA.Rt2SmallRateHz), period_ms(VLA.Rt2SmallRateHz)),
+    ("OpenVLA 7B", period_ms(VLA.OpenVlaRtx4090RateHz), period_ms(VLA.OpenVlaRtx4090RateHz)),
+    ("pi0 chunk", float(VLA.Pi0OnboardLatencyMs), float(VLA.Pi0OnboardLatencyMs)),
 ]
-for lab, lo, hi, _ in VLA:
-    show(f"{lab} period (ms)", f"{lo:.0f}" if lo == hi else f"{lo:.0f} to {hi:.0f}")
-show("pi0 chunk over untracked horizon (x)", f"{73.0 / tau_u:.2f}")
+v("rt1_hz", VLA.Rt1RateHz, "{:.0f}", "RT-1 rate, Hz")
+v("rt2l_lo_hz", VLA.Rt2LargeRateLowHz, "{:.0f}", "RT-2 55B rate, low end, Hz")
+v("rt2l_hi_hz", VLA.Rt2LargeRateHighHz, "{:.0f}", "RT-2 55B rate, high end, Hz")
+v("rt2s_hz", VLA.Rt2SmallRateHz, "{:.0f}", "RT-2 5B rate, Hz")
+v("openvla_hz", VLA.OpenVlaRtx4090RateHz, "{:.0f}", "OpenVLA rate, Hz")
+v("pi0_chunk", VLA.Pi0ChunkHorizon, "{:.0f}", "pi0 chunk, steps")
+v("pi0_ms", VLA.Pi0OnboardLatencyMs, "{:.0f}", "pi0 chunk inference, ms")
+v("pi0_rate", VLA.Pi0ControlRateHz, "{:.0f}", "pi0 streaming rate, Hz")
+v("rt2l_period_lo", VLA_ROWS[0][1], "{:,.0f}", "RT-2 55B period, low, ms")
+v("rt2l_period_hi", VLA_ROWS[0][2], "{:,.0f}", "RT-2 55B period, high, ms")
+v("rt1_period", VLA_ROWS[1][1], "{:,.0f}", "RT-1 period, ms")
+v("rt2s_period", VLA_ROWS[2][1], "{:,.0f}", "RT-2 5B period, ms")
+v("openvla_period", VLA_ROWS[3][1], "{:,.0f}", "OpenVLA period, ms")
+v("pi0_over_tau", ratio(Q_(float(VLA.Pi0OnboardLatencyMs), "ms"), cad.untracked_horizon), "{:.1f}",
+  "pi0 chunk inference over the untracked horizon")
 
-# ---------------------------------------------------------------------------
-head("Walking speeds (Bohannon 1997, reference table)")
-WALK = [  # (group, comfortable cm/s, maximum cm/s)
-    ("men 20s", 139.3, 253.3), ("men 50s", 139.3, 206.9),
-    ("women 20s", 140.7, 246.7), ("women 50s", 139.5, 201.0)]
-for g, c, m in WALK:
-    show(f"{g} comfortable / max (m/s)", f"{c / 100:.2f} / {m / 100:.2f}")
-show("fastest max over ISO 1.6 m/s (x)", f"{max(m for _, _, m in WALK) / 100 / V_HUMAN:.2f}")
+print("== OK-Robot failure analysis (Liu et al. 2024, Figs. 1 and 4)")
+OKR = Literature.RobotGrounding
+OKR_ROWS = dict(trials=OKR.OkRobotTrials, success=OKR.OkRobotSuccesses,
+                nav_wrong_object=OKR.OkRobotWrongOrNoObject, nav_other=OKR.OkRobotOtherNavigation,
+                grasp_model=OKR.OkRobotGraspModel, hardware=OKR.OkRobotHardware, placing=OKR.OkRobotPlacing)
+assert sum(x for k, x in OKR_ROWS.items() if k != "trials") == OKR_ROWS["trials"]
+v("okr_trials", OKR.OkRobotTrials, "{:.0f}", "trials")
+v("okr_success", OKR.OkRobotSuccesses, "{:.0f}", "successes")
+v("okr_success_pct", 100 * OKR.OkRobotSuccesses / OKR.OkRobotTrials, "{:.1f}", "success share, %")
+v("okr_wrong", OKR.OkRobotWrongOrNoObject, "{:.0f}", "wrong or no object")
+v("okr_wrong_pct", 100 * OKR.OkRobotWrongOrNoObject / OKR.OkRobotTrials, "{:.1f}", "its share, %")
+v("okr_grasp", OKR.OkRobotGraspModel, "{:.0f}", "grasp-model failures")
+v("okr_grasp_seg", OKR.OkRobotGraspWrongSegment, "{:.0f}", "of which the segmenter picked the wrong object")
+v("okr_homes_pct", OKR.OkRobotHomesSuccessPct, "{:.1f}", "success in homes as found, %")
+v("okr_declutter_pct", OKR.OkRobotDeclutteredSuccessPct, "{:.1f}", "success in decluttered homes, %")
 
-# Values make_figs.py reuses
-VALUES = dict(
-    tau_u=tau_u, tau_t=tau_t, t_infer=T_INFER, t_period=t_period, onset=onset,
-    err_u=err_u, err_t=err_t, f_brake=f_brake, f_stall=f_stall, f_trip=F_TRIP,
-    f_limit=F_LIMIT, semi=semi, r_tol=R_TOL, e0=E0, v_belt=V_BELT, a_slip=A_SLIP,
-    d_u=d_u, d_t=d_t, d_long=d_long, aisle_w=AISLE_W, t_transit=t_transit,
-    reach_t=reach_t, v_human=V_HUMAN, tau_slow=tau_slow, norm_in=norm_in,
-    norm_out=norm_out, p_mug=p_mug, p_jar=p_jar, thresh=thresh,
-    p_mug_low=p_mug_low, p_jar_low=p_jar_low, age_renew=age_renew,
-    okr=OKR, vla=VLA, walk=WALK,
-)
+print("== The red-mug intent lease (Sec. 10.8, equation 9)")
+v("t_admin", m(EXPIRY.administrative_lease, "ms"), "{:.0f}", "administrative lease, ms")
+v("d_clear_arm", m(EXPIRY.clearance, "mm"), "{:.0f}", "clearance ahead of the gripper, mm")
+v("a_arm", m(exp.credible_deceleration, "m/s**2"), "{:.1f}", "credible arm deceleration, m/s^2")
+v("d_stop_arm", m(exp.stop_distance, "mm"), "{:.0f}", "stop from the TCP ceiling, mm")
+v("t_stop_deadline", m(exp.stopping_deadline, "ms"), "{:.0f}", "stopping deadline after admission, ms")
+v("t_expiry_t", m(exp.expiry_tracked, "ms"), "{:.0f}", "tracked expiry, ms")
+v("t_expiry_u", m(exp.expiry_untracked, "ms"), "{:.0f}", "untracked expiry, ms")
+print(f"   binding term: untracked {exp.binding_untracked}, tracked {exp.binding_tracked}")
+
 
 if __name__ == "__main__":
-    pass
+    write(__file__)

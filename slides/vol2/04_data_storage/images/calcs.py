@@ -106,6 +106,8 @@ v("dram_gbs", m(TECH.HostDram.bandwidth, "GB/s"), "{:.0f}", "host DRAM, GB/s")
 v("gen4_gbs", m(TECH.NvmeGen4.bandwidth, "GB/s"), "{:.0f}", "Gen4 NVMe drive, GB/s")
 v("gen5_gbs", m(TECH.NvmeGen5.bandwidth, "GB/s"), "{:.0f}", "Gen5 NVMe drive, GB/s")
 v("nvme_lat_us", m(TECH.NvmeGen4.latency, "microsecond"), "{:.0f}", "NVMe latency, us")
+v("hbm_lat_ns", m(Hardware.Tech.Memory.HopperGlobalMemory.latency, "ns"), "{:.0f}", "accelerator HBM access latency, ns")
+v("dram_lat_ns", m(Hardware.Tech.Memory.HostDram_Latency2009.latency, "ns"), "{:.0f}", "host DRAM access latency, ns")
 raid = STORE.LocalNvmeGen4_7T68x4.aggregate_bandwidth
 v("raid_gbs", m(raid, "GB/s"), "{:.0f}", "four-drive stripe, GB/s")
 v("pfs_tbs", m(STORE.PfsOneTbPerSecond.bandwidth, "TB/s"), "{:.0f}", "parallel file system, TB/s")

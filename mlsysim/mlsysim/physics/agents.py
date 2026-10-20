@@ -272,3 +272,128 @@ def calc_setup_share(setup, work):
 def calc_work_for_setup_cap(setup, cap: float):
     """Useful work per call that holds setup to a share ``phi``: ``W >= T_setup (1 - phi) / phi``."""
     return setup * (1 - cap) / cap
+
+
+# --- Injection exposure (added 2026-10-20) -----------------------------------
+# How often a task meets attacker text: the complement of every untrusted read
+# being clean. The same form counts turns when the per-turn chance is known.
+
+
+def calc_injection_exposure(payload_fraction: float, reads: float) -> float:
+    """
+    Chance that a task reading ``reads`` independent untrusted items meets a payload.
+
+        Pr(exp) = 1 - (1 - q)^n
+
+    ``q`` is the fraction of items carrying a payload. While q n is small,
+    Pr(exp) ~ q n; a screen that misses a fraction m of payloads replaces q
+    with q m. Counted in turns, q is the per-turn chance and n the horizon.
+    """
+    return 1 - (1 - payload_fraction) ** reads
+
+
+def calc_injection_read_budget(payload_fraction: float, target_exposure: float) -> int:
+    """
+    Most untrusted reads a task may make and keep exposure at or below ``target_exposure``.
+
+        n_max = floor(ln(1 - target) / ln(1 - q))
+    """
+    return _math.floor(_math.log(1 - target_exposure) / _math.log(1 - payload_fraction))
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+# Closed forms the harness evaluates before it admits work: the most one model
+# call can bill, the long-run call rate a weighted deficit round-robin gives a
+# backlogged class, and an allowance's used fraction. The solvers in
+# engine/solvers/harness.py compose them.
+
+
+def calc_bounded_liability(input_tokens, output_allowance, input_price, output_price):
+    """
+    Most one model call can bill before it settles.
+
+        L = n_in p_in + K_out p_out
+
+    Every input token is priced at the undiscounted input rate (a cache hit is
+    not guaranteed before dispatch) and the whole output allowance at the
+    output rate. Prices are per token, in any one currency unit.
+    """
+    return input_tokens * input_price + output_allowance * output_price
+
+
+def calc_drr_calls_per_round(weight: float, quantum: float, charge: float) -> float:
+    """
+    Long-run calls per round of a backlogged class under weighted deficit round-robin.
+
+        calls/round = w q / c
+
+    The class earns ``w q`` charge units of credit per round and spends ``c``
+    per call; unspent credit carries over, so the rate holds on average even
+    when one call needs several rounds of credit (Shreedhar and Varghese 1995).
+    """
+    return weight * quantum / charge
+
+
+def calc_used_fraction(used, allowance) -> float:
+    """Share of one budget dimension consumed: ``rho = used / allowance``."""
+    ratio = used / allowance
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+# --- Failure recovery: repair, irreversible loss, cleanup order (added 2026-10-20) ---
+# Closed forms the runtime evaluates when an effect has failed or must be
+# undone: the break-even success rate of one bounded repair attempt, the
+# expected cost of trying repair first, the expected irreversible loss of a
+# plan whose checks precede or follow its pivot, and the elapsed time of a
+# cleanup graph. The solvers in engine/solvers/recovery.py compose them.
+
+
+def calc_repair_break_even(repair_cost, fallback_cost):
+    """
+    Success probability above which one repair attempt beats the fallback.
+
+        p* = C_repair / C_fallback
+
+    Holds when a failed attempt leaves the fallback available at unchanged
+    cost; evaluate it separately for each resource axis (seconds, dollars).
+    """
+    ratio = repair_cost / fallback_cost
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+def calc_repair_first_expected_cost(repair_cost, fallback_cost, success_probability: float):
+    """Expected cost of attempting repair first: ``C_repair + (1 - p) C_fallback``."""
+    return repair_cost + (1 - success_probability) * fallback_cost
+
+
+def calc_expected_irreversible_loss(defect_probability: float, consequence, recoverable_fraction: float):
+    """
+    Expected loss that no recovery action can undo.
+
+        L = P(defect) x consequence x (1 - r)
+
+    ``r`` is the fraction of a defect's consequence that recovery avoids; a
+    check ahead of the pivot that catches a fraction ``v`` and reverts with
+    fidelity ``rho`` gives ``r = v rho``.
+    """
+    return defect_probability * consequence * (1 - recoverable_fraction)
+
+
+def calc_cleanup_critical_path(durations, depends_on):
+    """
+    Elapsed time of a cleanup graph run with unlimited parallelism.
+
+    ``durations`` maps each operation to its time once admitted; ``depends_on``
+    maps it to the operations that must settle first. The elapsed time is the
+    longest path through the acyclic graph; a reverse stack runs the same
+    operations one at a time and takes their sum.
+    """
+    finish = {}
+
+    def _finish(op, trail=()):
+        if op in trail:
+            raise ValueError(f"cleanup graph has a cycle through {op!r}")
+        if op not in finish:
+            start = max((_finish(d, trail + (op,)) for d in depends_on.get(op, ())), default=0 * durations[op])
+            finish[op] = start + durations[op]
+        return finish[op]
+
+    return max(_finish(op) for op in durations)

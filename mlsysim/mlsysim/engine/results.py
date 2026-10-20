@@ -1432,6 +1432,7 @@ class ShiftedTestSetResult(SolverResult):
     network_gap_min: float             # percentage points, models without the baseline prefix
     network_gap_max: float
     mean_gap: float
+    gap_median: Optional[float] = None  # percentage points, all models (added 2026-10-20)
     slope: float                       # least-squares fit: new = slope * original + intercept
     intercept: float
 
@@ -1595,6 +1596,10 @@ class ZeroFailureResult(SolverResult):
     coefficient: float               # -ln(1 - C)
     rate_upper: float
     one_in: float
+    # Exact binomial bound and the campaign a target needs (added 2026-10-20).
+    rate_upper_exact: Optional[float] = None         # 1 - (1 - C)^(1/n)
+    trials_for_target: Optional[int] = None          # ceil(ln(1 - C) / ln(1 - target))
+    trials_for_target_approx: Optional[float] = None  # -ln(1 - C) / target (rule of three)
 
 
 class ThrottledStageResult(SolverResult):
@@ -1816,6 +1821,11 @@ class RecordedRunCostResult(SolverResult):
     unresolved_share: float          # share of spend on attempts that failed
     input_output_ratio: float
     median_calls: float
+    # Optional (added 2026-10-20): runs that ended above a recorded cost limit.
+    cost_limit: Optional[float] = None       # dollars
+    over_limit_runs: Optional[int] = None
+    mean_overshoot: Optional[float] = None   # dollars above the limit, over those runs
+    max_overshoot: Optional[float] = None
 # --- Context engineering (added 2026-10-20) ----------------------------------
 # What one agent request carries: a budget by role, the softmax cost of
 # admitted keys, measured comprehension by length, a zoned layout's input bill,
@@ -2453,6 +2463,7 @@ class LeaseBudgetResult(SolverResult):
     stall_last_admission: Quantity           # second renewal completes, then the proposer stalls
     stall_lease_expiry: Quantity
     stall_brake_onset: Quantity
+    renewal_lateness_limit: Optional[Quantity] = None  # lease - renewal period: a renewal this late lapses the lease (added 2026-10-20)
 
 
 class LatencyTailResult(SolverResult):
@@ -2685,3 +2696,861 @@ class ParameterGrowthResult(SolverResult):
 
 
 __all__ += ["ParameterGrowthResult"]
+
+
+# --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
+class InjectionExposureResult(SolverResult):
+    """Result from InjectionExposureModel: per-task payload exposure by read volume."""
+    exposure: Dict[str, float]        # 1 - (1 - q)^n per workload
+    linear: Dict[str, float]          # q n, the small-exposure estimate
+    screened_rate: float              # q m, payload rate behind the screen
+    screened: Dict[str, float]        # 1 - (1 - q m)^n per workload
+    screened_per_cohort: Dict[str, float]  # screened exposure x cohort tasks
+
+
+class TurnExposureResult(SolverResult):
+    """Result from TurnExposureModel: exposure counted in turns, and the same reads counted as items."""
+    per_turn: float                   # 1 - (1 - q)^r
+    trajectory: float                 # 1 - (1 - p_turn)^H
+    reads: int                        # r H
+    same_reads: float                 # 1 - (1 - q)^(r H); equals trajectory
+
+
+class PolicyComparisonResult(SolverResult):
+    """Result from PolicyComparisonModel: attack success and benign acceptance for two policies."""
+    baseline_lower: float             # confirmed harm / attacked
+    candidate_lower: float
+    baseline_upper: float             # (confirmed + unresolved) / attacked
+    candidate_upper: float
+    reduction_observed: float         # 1 - candidate_lower / baseline_lower
+    reduction_upper: float            # both arms at their upper rates
+    reduction_least_favorable: float  # candidate upper against baseline lower
+    baseline_acceptance: float        # accepted benign / benign
+    candidate_acceptance: float
+    lost_benign: int
+    extra_false_blocks: int
+    cost_rise: float                  # p_acc(baseline) / p_acc(candidate) - 1
+    baseline_cost_per_accepted: Optional[float] = None   # attempt cost / p_acc, when priced
+    candidate_cost_per_accepted: Optional[float] = None
+
+
+__all__ += [
+    "InjectionExposureResult",
+    "TurnExposureResult",
+    "PolicyComparisonResult",
+]
+
+# --- The agent harness (added 2026-10-20) -------------------------------------
+# Approval escrow by Little's law, weighted deficit round-robin, bounded-liability
+# admission, a trajectory metered against its budget vector, and call or step
+# ceilings read from public runs.
+
+class ApprovalEscrowResult(SolverResult):
+    """Result from ApprovalEscrowModel: what approval escrow holds for two workloads."""
+    held: float                              # repair trajectories in escrow, Little's law
+    retained_memory: Quantity                # held x workspace lease, GiB
+    remediation_held: float                  # remediation trajectories in escrow
+    time_to_mitigate: Quantity               # diagnosis + decision + apply and verify
+    approval_share: float                    # decision / time to mitigate
+
+
+class DeficitRoundRobinResult(SolverResult):
+    """Result from DeficitRoundRobinModel: charge shares against call shares, per class."""
+    credit_per_round: Dict[str, float]       # weight x quantum
+    charge_per_call: Dict[str, float]        # input + output allowance
+    calls_per_round: Dict[str, float]        # long-run, backlogged
+    rounds_per_call: Dict[str, float]
+    charge_share: Dict[str, float]           # weight / total weight
+    call_share: Dict[str, float]
+    call_ratio: float                        # most calls per round / fewest
+    simulated_rounds: int
+    simulated_call_share: Dict[str, float]
+    simulated_charge_share: Dict[str, float]
+
+
+class BoundedLiabilityAdmissionResult(SolverResult):
+    """Result from BoundedLiabilityAdmissionModel: a spend check against the reservation test (dollars)."""
+    input_liability: float
+    output_liability: float
+    liability: float                         # most the call can bill
+    spend_headroom: float                    # allowance - settled
+    headroom: float                          # allowance - settled - reserved - finalization reserve
+    spend_check_admits: bool
+    admitted: bool
+    finalization_shortfall: float            # reserve left unfunded if the call were admitted
+    input_share: float                       # input liability / liability
+    max_input_tokens: float                  # largest input that fits beside the output allowance
+    tokens_per_probe: float                  # input tokens one probe amount of unsettled spend costs
+    reservation_share: float                 # outstanding reservation / allowance
+
+
+class TrajectoryBudgetMeterResult(SolverResult):
+    """Result from TrajectoryBudgetMeterModel: one trajectory's used fractions, with and without prefix reuse."""
+    input_tokens: int
+    cached_tokens: int
+    uncached_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_with_reuse: float                   # dollars
+    cost_without_reuse: float
+    cost_ratio: float                        # without / with
+    used_with_reuse: Dict[str, float]        # turns, tokens, time, dollars
+    used_without_reuse: Dict[str, float]
+    leading_with_reuse: str                  # dimension with the largest used fraction
+    leading_without_reuse: str
+
+
+class CallCeilingResult(SolverResult):
+    """Result from CallCeilingModel: a call ceiling at the accepted runs' quantile, per configuration."""
+    quantile: float
+    runs: int
+    configurations: List[Dict[str, Any]]     # one row per submission, sorted by submission id
+    failed_halted_low: float
+    failed_halted_high: float
+    accepted_halted_high: float
+    cap_low: float
+    cap_high: float
+    median_calls_low: float
+    median_calls_high: float
+    longer_when_failed: bool                 # failed median above accepted median everywhere
+
+
+class StepCeilingReturnResult(SolverResult):
+    """Result from StepCeilingReturnModel: success of the same model at several enforced step ceilings."""
+    steps: List[int]
+    scores: Dict[str, Dict[int, float]]      # model -> step ceiling -> percent completed
+    gain: Dict[str, float]                   # points from the lowest to the highest ceiling
+    flat_after_middle: int                   # models no better at the highest than the middle ceiling
+    best_gain: float
+    best_model: str
+
+
+__all__ += [
+    "ApprovalEscrowResult",
+    "DeficitRoundRobinResult",
+    "BoundedLiabilityAdmissionResult",
+    "TrajectoryBudgetMeterResult",
+    "CallCeilingResult",
+    "StepCeilingReturnResult",
+]
+# --- Sensor perception: capture timing, age, and error scales (added 2026-10-20) ---
+
+class ObservationAgeResult(SolverResult):
+    """Result from ObservationAgeModel: a camera observation's age from exposure midpoint to dispatch."""
+    stages: List[Tuple[str, Quantity, Quantity]]  # (stage, duration, age after the stage)
+    age: Quantity                    # exposure midpoint to dispatch
+    age_travel: Quantity
+    arrival_offset: Quantity         # exposure midpoint to DMA completion (an arrival stamp's error)
+    arrival_travel: Quantity
+    trigger_offset: Quantity         # exposure start to midpoint (a trigger stamp's error)
+    trigger_travel: Quantity
+    exposure_travel: Quantity        # travel during the exposure itself (blur scale)
+    capture_before_compute: Quantity  # half the exposure plus the readout: top-row sensor age
+    sensor_age_middle_row: Quantity  # half the exposure plus half the readout
+    top_row_excess: Quantity         # top-row sensor age minus one frame period
+    capture_share: float             # capture_before_compute / age
+    backbone_share: float            # backbone stage / age
+    frame_period: Quantity
+    frame_travel: Quantity           # travel during one frame period (one dropped frame)
+    batch_frames: int
+    batch_waits: List[Quantity]      # wait of each batched frame but the newest, oldest first
+    batch_wait: Quantity             # the oldest frame's wait, (n - 1) frame periods
+    batch_wait_travel: Quantity
+    batched_age: Quantity            # age + batch_wait
+    batched_age_ratio: float
+
+
+class RollingShutterSkewResult(SolverResult):
+    """Result from RollingShutterSkewModel: row timing and the skew a moving camera records."""
+    row_interval: Quantity
+    midpoint_lag: Quantity           # half the exposure
+    skew: Quantity                   # along-track travel between the first and last rows
+    skew_over_allowance: float
+    lateral_skew: Quantity           # sideways shift of a target at range while turning
+    lateral_share: float             # of the side clearance
+    exposure_travel: Quantity        # blur: travel during one row's exposure
+
+
+class TimingAttitudeErrorResult(SolverResult):
+    """Result from TimingAttitudeErrorModel: position errors from a timing error and an angle error."""
+    timing_travel: Quantity          # v dt
+    misorientation: Quantity         # omega dt
+    timing_lateral: Quantity         # d omega dt
+    angle_lateral: Quantity          # d theta (small angle)
+    angle_lateral_share: Optional[float] = None  # of the stated reference distance
+
+
+class LidarSweepAgeResult(SolverResult):
+    """Result from LidarSweepAgeModel: one sweep's motion and a sector's age, streamed or whole."""
+    sweep_period: Quantity
+    sweep_travel: Quantity
+    sweep_rotation: Quantity
+    sector_angle: Quantity
+    sector_time: Quantity
+    age_streamed: Quantity           # sector time + data latency + sync bound
+    age_full: Quantity               # sweep period + data latency + sync bound
+    travel_streamed: Quantity
+    travel_full: Quantity
+    slack_streamed: Quantity         # reference age - streamed age
+
+
+class StereoDepthErrorResult(SolverResult):
+    """Result from StereoDepthErrorModel: one-sigma depth error against range and the clearances it spends."""
+    sigma_near: Quantity
+    sigma_far: Quantity
+    sigma_target: Quantity
+    range_ratio: float               # far / near
+    sigma_growth: float              # sigma_far / sigma_near = range_ratio ** 2
+    inset_near: Quantity             # ray clearance + one sigma (the shortcut inset)
+    inset_far: Quantity
+    range_at_loc_allowance: Quantity
+    range_at_side_clearance: Quantity
+    range_at_side_clearance_half_baseline: Quantity
+    baseline_bias: Quantity
+
+
+class DelayPhaseMarginResult(SolverResult):
+    """Result from DelayPhaseMarginModel: the delay a loop's phase margin can absorb."""
+    phase_margin: Quantity           # radians
+    crossover_frequency: Quantity    # Hz
+    delay_ceiling: Quantity
+    delay: Quantity
+    share_used: float
+
+
+class ConformalInsetResult(SolverResult):
+    """Result from ConformalInsetModel: the calibration rank behind a split-conformal bound."""
+    alpha: float
+    calibration_count: int
+    min_count: int
+    rank: int
+    rank_from_top: int
+
+
+class ClockConversionResult(SolverResult):
+    """Result from ClockConversionModel: drift between syncs and the dispatch limit a conversion bound sets."""
+    drift_per_interval: Quantity
+    dispatch_age_limit: Quantity
+    bound_travel: Quantity
+
+
+class VisibilityRangeResult(SolverResult):
+    """Result from VisibilityRangeModel: the range at which fog erases contrast."""
+    visibility_range: Quantity
+
+
+class ThermalExpansionResult(SolverResult):
+    """Result from ThermalExpansionModel: a heated member's length change."""
+    expansion: Quantity
+
+
+# --- Durable execution (added 2026-10-20) ---------------------------------------
+
+class GroupCommitResult(SolverResult):
+    """Result from GroupCommitModel: storage work per record against the wait each record sees."""
+    work_per_record: Quantity                # flush / batch size
+    first_wait: Quantity                     # batch timer + flush
+    last_wait: Quantity                      # flush alone
+
+
+class SnapshotVolumeResult(SolverResult):
+    """Result from SnapshotVolumeModel: bytes written by full snapshots against deltas."""
+    checkpoints: int
+    full_bytes: Quantity
+    delta_bytes: Quantity
+    ratio: float                             # full / delta = (n + 1) / 2
+
+
+class CheckpointTraceResult(SolverResult):
+    """Result from CheckpointTraceModel: checkpoint strides priced on one crash trace."""
+    checkpoints: Dict[int, int]              # per stride
+    lost_turns: Dict[int, Tuple[int, ...]]   # per stride, turns since the last checkpoint at each crash
+    capture_time: Dict[int, Quantity]        # checkpoints x pause
+    recovery_time: Dict[int, Quantity]       # restores + lost turns rebuilt from the log
+    total_time: Dict[int, Quantity]
+    best_stride: int                         # least total on this trace
+    every_turn_time: Quantity                # checkpoint after every turn
+    crash_rate: float                        # crashes per turn
+    stride_logged: float                     # balance stride when lost turns are rebuilt from the log
+    stride_reexecuted: float                 # balance stride when lost turns are re-executed
+    stride_gain: float                       # logged / re-executed
+
+
+class RetentionCostResult(SolverResult):
+    """Result from RetentionCostModel: bytes kept for recovery and replay, and what keeping them costs."""
+    log_bytes: Quantity
+    total_bytes: Quantity
+    cost: Quantity                           # USD over the retention period
+    log_cost: Quantity
+    attempt_share: float                     # cost / attempt cost
+    log_share: float
+    workspace_share: float                   # workspace snapshot share of the bytes
+
+
+__all__ += ["GroupCommitResult", "SnapshotVolumeResult", "CheckpointTraceResult", "RetentionCostResult"]
+# --- Failure recovery: repair, irreversible loss, loops, containment (added 2026-10-20) ---
+# What the runtime decides once an effect has failed: repair against unwind,
+# checks ahead of a pivot, how late a loop is stopped, and the bounds retries,
+# jitter, bulkheads, and breakers give a shared dependency.
+
+class RepairBreakEvenResult(SolverResult):
+    """Result from RepairBreakEvenModel: one bounded repair against unwinding and rebuilding."""
+    fallback_time: Quantity                  # compensation + rebuild to the same endpoint
+    fallback_cost: Quantity                  # USD, model tokens of the rebuild
+    repair_time: Quantity                    # startup + output at the decode rate + validation
+    repair_cost: Quantity                    # USD, the whole isolated request and its output
+    break_even_time: float                   # p* on the time axis
+    break_even_cost: float                   # p* on the dollar axis
+    expected_time: Quantity                  # repair first at the assumed success probability
+    expected_cost: Quantity
+    time_saved_fraction: float               # 1 - expected / fallback
+    cost_saved_fraction: float
+    one_in: int                              # one success in this many attempts clears both axes
+
+
+class IrreversibleLossResult(SolverResult):
+    """Result from IrreversibleLossModel: expected loss with the check after or before the pivot."""
+    loss_without_check: Quantity             # P(defect) x consequence, nothing recovers
+    loss_caught: Quantity                    # caught before the pivot, the part a revert misses
+    loss_missed: Quantity                    # crossed the pivot undetected
+    loss_with_check: Quantity
+    reduction: float                         # without / with
+    missed_share: float                      # missed / with
+    loss_per_catch_step: Quantity            # loss removed by raising the catch rate one step
+    raised_catch_rate: float
+    loss_caught_raised: Quantity
+    loss_missed_raised: Quantity
+    loss_with_check_raised: Quantity
+    attempt_cost: Quantity
+    loss_vs_attempt: float                   # residual loss / attempt cost
+    step_vs_attempt: float                   # one catch step / attempt cost
+
+
+class UndetectedLoopResult(SolverResult):
+    """Result from UndetectedLoopModel: an append-only loop run to its ceiling or stopped early."""
+    appended_per_turn: int                   # output + observation added to the next input
+    ceiling_input: int                       # input tokens resent over the ceiling's turns
+    stop_input: int
+    ceiling_cost: Quantity
+    stop_cost: Quantity
+    ceiling_time: Quantity
+    stop_time: Quantity
+    cost_ratio: float
+    avoided_cost: Quantity
+    peak_request: int                        # largest input plus its output
+    fits_context: bool
+    half_turns: int
+    half_ratio: float                        # input at the ceiling / input at half the ceiling
+    input_by_turn: List[int]                 # cumulative input after 0..ceiling turns
+
+
+class RetryAmplificationResult(SolverResult):
+    """Result from RetryAmplificationModel: attempts one failing operation sends through nested layers."""
+    by_layer: List[int]                      # attempts reaching each depth, from the caller down
+    layered: int                             # attempts at the dependency
+    coordinated: int                         # one owner with the same allowance
+
+
+class BulkheadAdmissionResult(SolverResult):
+    """Result from BulkheadAdmissionModel: one burst of blocking calls, uncapped and capped."""
+    uncapped_occupied: int
+    uncapped_free: int
+    occupied: int
+    queued: int
+    rejected: int
+    protected_workers: int
+
+
+class RetryJitterResult(SolverResult):
+    """Result from RetryJitterModel: a retry cohort released together, synchronized or jittered."""
+    synchronized_rate: Quantity              # all retries inside the burst window
+    jittered_mean_rate: Quantity             # spread uniformly over the jitter span
+    spread_ratio: float
+    expected_in_window: float                # expected count in one burst-sized window
+
+
+class CleanupGraphResult(SolverResult):
+    """Result from CleanupGraphModel: cleanup as a reverse stack against a dependency graph."""
+    stack_time: Quantity                     # one at a time
+    graph_time: Quantity                     # unlimited parallelism, the longest path
+    saved_time: Quantity
+    blocked: List[str]                       # transitive dependents of the unresolved operation
+    settleable: List[str]                    # everything else, apart from the unresolved one
+
+
+class BreakerWindowResult(SolverResult):
+    """Result from BreakerWindowModel: one breaker window classified two ways."""
+    outcomes: int
+    classified_failures: int
+    classified_fraction: float
+    classified_trips: bool
+    naive_failures: int
+    naive_fraction: float
+    naive_trips: bool
+
+
+class RetrySustainedOutagesResult(SolverResult):
+    """Result from RetrySustainedOutagesModel: incidents a table lists as sustained by retries."""
+    incidents: int
+    retry_sustained: int
+    share: float
+    with_duration: List[Tuple[str, float]]   # (incident, hours), longest first
+    without_duration: List[str]
+    over_hours: int                          # retry-sustained incidents longer than the threshold
+
+
+__all__ += [
+    "RepairBreakEvenResult",
+    "IrreversibleLossResult",
+    "UndetectedLoopResult",
+    "RetryAmplificationResult",
+    "BulkheadAdmissionResult",
+    "RetryJitterResult",
+    "CleanupGraphResult",
+    "BreakerWindowResult",
+    "RetrySustainedOutagesResult",
+]
+# --- Spatial memory: estimation, belief expiry, and map queries (added 2026-10-20) ---
+
+class RangeFusionResult(SolverResult):
+    """Result from RangeFusionModel: one predict and two updates of a scalar range, and a misdated update."""
+    process_sigma: Quantity          # speed disturbance x interval
+    predicted_sigma: Quantity
+    first_gain: float
+    first_sigma: Quantity            # spread after the first update
+    second_sensor_sigma: Quantity
+    second_gain: float
+    fused_sigma: Quantity            # spread after both updates
+    innovation_variance: Quantity    # second update's predicted innovation variance
+    misdating_bias: Quantity         # reading-to-pose offset of the misdated update
+    misdated_shift: Quantity         # gain x bias: how far the estimate moves off
+    misdated_shift_sigmas: float     # that shift in reported standard deviations
+    nis_expected: float              # 1 + bias^2 / S
+    noncentrality: float             # bias^2 / S
+    comparison_gain: float           # second update with its spread scaled
+    comparison_sigma: Quantity
+
+
+class EstimatorConsistencyResult(SolverResult):
+    """Result from EstimatorConsistencyModel: acceptance band for mean NEES or NIS, and single-update gates."""
+    band_low: float
+    band_high: float
+    gates: List[float]               # chi-square thresholds, one per gate confidence
+    detection: List[float]           # probability each gate rejects the biased update
+    nis_expected: float
+
+
+class ReplayBufferResult(SolverResult):
+    """Result from ReplayBufferModel: slots a rewind buffer needs to cover an observation age."""
+    sample_period: Quantity
+    slots: int
+
+
+class InertialCoastResult(SolverResult):
+    """Result from InertialCoastModel: an IMU integrated open loop between fixes."""
+    heading_noise: Quantity
+    heading_bias: Quantity
+    lateral_bias: Quantity           # heading bias seen at the target range
+    position_noise: Quantity
+    position_bias: Quantity
+    bias_over_reference: float       # position bias / reference bound
+    bias_over_noise: float
+
+
+class OdometryDriftResult(SolverResult):
+    """Result from OdometryDriftModel: a benchmark return error as a drift rate against a bound."""
+    path_length: Quantity
+    rate_uncalibrated: float         # error per distance driven
+    rate_calibrated: float
+    distance_uncalibrated: Quantity  # distance that spends the bound
+    distance_calibrated: Quantity
+    time_uncalibrated: Quantity      # that distance at the operating speed
+    time_calibrated: Quantity
+    segment_error_uncalibrated: Quantity
+    segment_error_calibrated: Quantity
+    segment_over_bound_uncalibrated: float
+    calibration_gain: float
+    speed_ratio: float               # operating speed / benchmark speed
+
+
+class OdometryLeaderboardResult(SolverResult):
+    """Result from OdometryLeaderboardModel: ranked odometry drift rates against a bound."""
+    count: int
+    stereo_count: int
+    laser_count: int
+    best_pct: float
+    stereo_median_pct: float
+    laser_median_pct: float
+    distance_best: Quantity
+    distance_stereo_median: Quantity
+    distance_laser_median: Quantity
+    segment_threshold_pct: float     # rate that spends the bound in exactly one segment
+    count_below_threshold: int
+
+
+class BeliefExpiryResult(SolverResult):
+    """Result from BeliefExpiryModel: a belief's error growth, its invalidation horizon, and an admission check."""
+    initial_error: Quantity
+    growth_rate: Quantity
+    growth_acceleration: Quantity
+    tolerance: Quantity
+    horizon: Quantity
+    constant_velocity_horizon: Quantity   # the horizon if the acceleration term is dropped
+    error_at_constant_velocity_horizon: Quantity
+    overshoot: float                      # that error / tolerance - 1
+    overrun: Quantity                     # constant-velocity horizon - horizon
+    use_age_upper: Optional[Quantity] = None  # stated use age plus the clock-conversion bound
+    error_at_use: Optional[Quantity] = None
+    margin_at_use: Optional[Quantity] = None
+    time_left: Optional[Quantity] = None
+    latest_use_age: Optional[Quantity] = None
+
+    @property
+    def quadratic_coefficient(self) -> Quantity:
+        """The ``a / 2`` that multiplies ``dt^2`` in the error bound."""
+        return self.growth_acceleration / 2
+
+    def error_after(self, elapsed: Quantity) -> Quantity:
+        """Error bound after ``elapsed`` without new evidence."""
+        from ..physics.robotics.estimation import calc_belief_error_bound
+        return calc_belief_error_bound(self.initial_error, self.growth_rate, elapsed, self.growth_acceleration)
+
+
+class StaleTransformResult(SolverResult):
+    """Result from StaleTransformModel: a cached edge composed with a current pose, one frame stale."""
+    interval: Quantity
+    drift_term: Quantity
+    lever_term: Quantity
+    total: Quantity                       # initial error + drift + lever arm
+    over_tolerance: float                 # total / tolerance - 1
+    lever_over_drift: float
+    same_epoch_error: Quantity            # the belief's own bound over one interval
+
+
+class FreeSpaceExpiryResult(SolverResult):
+    """Result from FreeSpaceExpiryModel: occluded free space eroding at an approach speed."""
+    certified_depth_ahead: Quantity       # d_free - delta_loc - delta_margin, floored at zero
+    certified_depth_abreast: Quantity
+    horizon_ahead: Quantity
+    horizon_abreast: Quantity
+    time_left_at_dispatch: Quantity
+    frames_bridged: float
+    depth_eroded_by_age: Quantity
+    time_per_depth: Quantity              # 1 / v_h
+    walker_intrusion: Quantity            # v_h (tau_delay + v / a_brake)
+    timeout_refused: Optional[Quantity] = None  # horizon ahead minus a uniform staleness timeout
+
+
+class EpochGapResult(SolverResult):
+    """Result from EpochGapModel: travel across the gap between two acquisition epochs."""
+    gap: Quantity
+    speed: Quantity
+    travel: Quantity
+    slack: Optional[Quantity] = None      # separation less the committed terms
+
+
+class SensorBiasDriftResult(SolverResult):
+    """Result from SensorBiasDriftModel: an unobservable bias drifting under a steady reading."""
+    shift: Quantity
+    true_value: Quantity
+    lost_share: float
+
+
+class FrozenTransformResult(SolverResult):
+    """Result from FrozenTransformModel: a republished stale transform passing a publish-time check."""
+    republish_rate: Quantity
+    error: Quantity
+    passes_freshness: bool
+    exceeds_tolerance: bool
+
+
+class TrackConfirmationResult(SolverResult):
+    """Result from TrackConfirmationModel: the wait before a tracker outputs a new track."""
+    frame_period: Quantity
+    held_frames: int
+    wait: Quantity
+    travel: Quantity
+
+
+class ClearanceQueryRow(SolverResult):
+    """One voxel pitch in ClearanceQueryResult."""
+    pitch: Quantity
+    occupancy_reads: float
+    octree_depth: int
+    octree_reads: float
+    esdf_reads: int
+    esdf_bytes: Quantity
+    occupancy_bytes: Quantity
+    quantization: Quantity
+
+
+class ClearanceQueryResult(SolverResult):
+    """Result from ClearanceQueryModel: read budget per sphere query, and reads and snapshot bytes per representation."""
+    tick: Quantity
+    query_time: Quantity
+    tick_spare_share: float
+    reads_budget: float
+    reach: Quantity
+    slab_volume: Quantity
+    rows: Dict[int, ClearanceQueryRow]    # keyed by pitch in whole centimeters
+    wcet_share: Optional[float] = None
+
+
+class HostMapSizingResult(SolverResult):
+    """Result from HostMapSizingModel: a dense grid against a hashed narrow band."""
+    workspace_volume: Quantity
+    dense_voxels: float
+    dense_bytes: Quantity
+    band_volume: Quantity
+    band_share: float
+    blocks: float
+    block_bytes: Quantity
+    hashed_bytes: Quantity
+    ratio: float
+
+
+class RaymarchTrafficResult(SolverResult):
+    """Result from RaymarchTrafficModel: naive per-ray map-update traffic against DRAM bandwidth."""
+    rays: int
+    steps: float
+    traffic: Quantity
+    share: float
+
+
+class EncoderRateResult(SolverResult):
+    """Result from EncoderRateModel: a per-frame encoder's sustained rate against a peak."""
+    required: Quantity
+    peak: Quantity
+    shortfall: float
+# ── Grounded intent: the intent lease and its gates (added 2026-10-20) ─────────
+
+class IntentCadenceResult(SolverResult):
+    """Result from IntentCadenceModel: a target's evidence horizons against a slow proposer's cadence."""
+    margin: Quantity                         # tolerance - initial error
+    untracked_horizon: Quantity              # margin / target speed
+    tracked_horizon: Quantity                # sqrt(2 margin / a_slip)
+    intent_period: Quantity                  # 1 / intent rate
+    error_at_period: Quantity                # initial error + speed x period
+    excess_at_period: Quantity               # error at period - tolerance
+    inference_overrun: Quantity              # inference - untracked horizon
+    inference_over_horizon: float            # inference / untracked horizon
+    renewal_age: Quantity                    # period + inference: oldest evidence behind a model-only target
+    renewal_speed_ceiling: Quantity          # margin / renewal age
+    renewal_share: float                     # ceiling / target speed
+    stall: Quantity
+    stall_error_untracked: Quantity          # initial error + speed x stall
+    stall_error_tracked: Quantity            # initial error + a_slip stall^2 / 2
+    stop_onset: Quantity                     # tick + bus + brake onset after expiry
+    untracked_expiry_to_onset: Quantity      # untracked horizon + stop onset
+    tracked_expiry_to_onset: Quantity        # tracked horizon + stop onset
+
+
+class DynamicReachResult(SolverResult):
+    """Result from DynamicReachModel: the transit lower bound against a target's evidence windows."""
+    transit_floor: Quantity                  # distance / speed ceiling
+    reach_tracked: Quantity                  # speed ceiling x tracked horizon
+    reach_untracked: Quantity                # speed ceiling x untracked horizon
+    shortfall: Quantity                      # transit floor - tracked horizon
+    fits: bool                               # transit floor <= tracked horizon
+    fresh_captures: int                      # ceil(transit floor / tracked horizon)
+
+
+class ForwardOccupancyResult(SolverResult):
+    """Result from ForwardOccupancyModel: growth of a person's speed-bound set against an aisle."""
+    growth_untracked: Quantity               # v_h x untracked horizon
+    growth_tracked: Quantity                 # v_h x tracked horizon
+    growth_forecast: Quantity                # v_h x forecast horizon
+    forecast_over_aisle: float               # growth over forecast / aisle width
+    aisle_span_horizon: Quantity             # aisle width / v_h
+
+
+class IntentLeaseExpiryResult(SolverResult):
+    """Result from IntentLeaseExpiryModel: the three terms of the intent lease's expiry bound."""
+    credible_deceleration: Quantity          # velocity limit / worst-case stop time
+    stop_distance: Quantity                  # v t_onset + v^2 / (2 a)
+    stopping_deadline: Quantity              # (clearance - stop distance) / v
+    expiry_untracked: Quantity               # min(untracked horizon, lease, deadline)
+    expiry_tracked: Quantity                 # min(tracked horizon, lease, deadline)
+    binding_untracked: str                   # "evidence", "administrative", or "stopping"
+    binding_tracked: str
+
+
+class ReferentSetResult(SolverResult):
+    """Result from ReferentSetModel: normalized candidate scores and the conformal prediction set."""
+    normalized: List[float]                  # raw scores over their sum
+    entropy: float                           # Shannon entropy of the normalized scores, nats
+    max_entropy: float                       # ln(number of candidates)
+    rank: int                                # calibration rank ceil((n + 1)(1 - alpha))
+    threshold: float                         # 1 - qhat: the normalized score a candidate needs
+    set_size: int                            # candidates at or above the threshold
+    refuse: bool                             # set size other than one
+
+
+class ConfidenceRegionResult(SolverResult):
+    """Result from ConfidenceRegionModel: a Gaussian estimate's confidence region against a tolerance."""
+    quantile: float                          # chi-square quantile r^2
+    radius: float                            # r, in standard deviations
+    semi_axes: List[Quantity]                # r sigma_i
+    axes_within: int                         # semi-axes at or under the tolerance
+    worst_over_tolerance: float              # largest semi-axis / tolerance
+# --- Sustainability (added 2026-10-20) ---------------------------------------
+
+class FacilityPowerResult(SolverResult):
+    """Result from FacilityPowerModel: accelerator, IT, and facility power."""
+    accelerator_power: Quantity
+    it_power: Quantity
+    facility_power: Quantity
+    support_power: Quantity          # IT minus accelerators (hosts, switches, conversion)
+    overhead_power: Quantity         # facility minus IT (PUE overhead)
+
+
+class WaterUseResult(SolverResult):
+    """Result from WaterUseModel: water consumed at each named WUE."""
+    water: Dict[str, Quantity]
+
+
+class RunFootprintResult(SolverResult):
+    """Result from RunFootprintModel: one run's energy, carbon, embodied carbon, and water."""
+    power: FacilityPowerResult
+    duration: Quantity               # device-hours / devices (every device running throughout)
+    accelerator_energy: Quantity
+    it_energy: Quantity
+    facility_energy: Quantity
+    carbon: Dict[str, Quantity]      # operational, per named grid
+    embodied_manufactured: Quantity  # every device, at manufacture
+    embodied_allocated: Quantity     # the run's time share of a service life
+    embodied_share: Dict[str, float]  # allocated / (operational + allocated), per grid
+    water: Dict[str, Quantity]       # per named WUE
+
+
+class PueRetrofitResult(SolverResult):
+    """Result from PueRetrofitModel: facility power before and after, and what the change saves."""
+    facility_power_before: Quantity
+    facility_power_after: Quantity
+    saved_power: Quantity
+    saved_energy: Quantity
+    saved_cost: Quantity
+
+
+class FacilityCarbonRateResult(SolverResult):
+    """Result from FacilityCarbonRateModel: operational carbon per hour of each site."""
+    rates: Dict[str, Quantity]
+
+
+class GridPlacementResult(SolverResult):
+    """Result from GridPlacementModel: emissions of one energy on each grid."""
+    emissions: Dict[str, Quantity]
+    emissions_after_cut: Dict[str, Quantity]
+    lowest: str
+    highest: str
+    spread: float                    # highest / lowest intensity
+
+
+class EmbodiedPaybackResult(SolverResult):
+    """Result from EmbodiedPaybackModel: carbon a replacement avoids per day and its payback time."""
+    saved_power: Quantity
+    saved_energy_per_day: Quantity
+    avoided_per_day: Dict[str, Quantity]
+    payback: Dict[str, Quantity]
+
+
+class ServiceLifeExtensionResult(SolverResult):
+    """Result from ServiceLifeExtensionModel: cut in embodied carbon charged per year."""
+    annual_charge_reduction: float
+
+
+class PowerCapResult(SolverResult):
+    """Result from PowerCapModel: the concurrency a feed allows and the stretched duration."""
+    concurrency: float
+    stretched_duration: Quantity
+
+
+class RepeatedWorkEnergyResult(SolverResult):
+    """Result from RepeatedWorkEnergyModel: energy repeated per named rollback."""
+    energy: Dict[str, Quantity]
+
+
+class ServingCrossoverResult(SolverResult):
+    """Result from ServingCrossoverModel: daily serving energy and the day it passes a one-time energy."""
+    daily_energy: Quantity
+    crossover_days: float
+
+
+class CascadeEnergyResult(SolverResult):
+    """Result from CascadeEnergyModel: mean energy per input of an edge-first cascade."""
+    escalated_energy: Quantity
+    mean_energy: Quantity
+    cloud_only_energy: Quantity
+    saving: float
+
+
+class DutyCycledPowerResult(SolverResult):
+    """Result from DutyCycledPowerModel: each stage's average contribution and the total."""
+    contributions: Dict[str, Quantity]
+    average_power: Quantity
+    reduction: float                 # reference power / average power
+
+
+class DataMovementEnergyResult(SolverResult):
+    """Result from DataMovementEnergyModel: arithmetic against data-movement energy per weight."""
+    compute_energy: Quantity
+    movement_energy: Quantity
+    movement_share: float
+    movement_over_compute: float
+    intensity: float                 # FLOP/byte of the access pattern
+    crossover_intensity: float       # FLOP/byte at which the two energies match
+    balance_batch: float
+    operand_energy: Quantity
+    operand_over_flop: float
+
+
+class DemandReboundResult(SolverResult):
+    """Result from DemandReboundModel: fleet energy multiple after efficiency and volume change."""
+    net_factor: float
+
+
+class DevelopmentSweepResult(SolverResult):
+    """Result from DevelopmentSweepModel: final-run equivalents a sweep consumes."""
+    final_run_equivalents: float
+
+
+class RollingWindowResult(SolverResult):
+    """Result from RollingWindowModel: window means and their extremes."""
+    means: List[float]
+    low_index: int
+    high_index: int
+    low: float
+    high: float
+    ratio: float
+
+
+class CarbonPricedPlacementResult(SolverResult):
+    """Result from CarbonPricedPlacementModel: region ranking with and without a carbon price."""
+    duration_days: float
+    best_region: str
+    best_region_untaxed: str
+    objective_value: float
+    objective: Dict[str, float]
+    objective_untaxed: Dict[str, float]
+
+
+__all__ += [
+    "FacilityPowerResult",
+    "WaterUseResult",
+    "RunFootprintResult",
+    "PueRetrofitResult",
+    "FacilityCarbonRateResult",
+    "GridPlacementResult",
+    "EmbodiedPaybackResult",
+    "ServiceLifeExtensionResult",
+    "PowerCapResult",
+    "RepeatedWorkEnergyResult",
+    "ServingCrossoverResult",
+    "CascadeEnergyResult",
+    "DutyCycledPowerResult",
+    "DataMovementEnergyResult",
+    "DemandReboundResult",
+    "DevelopmentSweepResult",
+    "RollingWindowResult",
+    "CarbonPricedPlacementResult",
+]

@@ -385,3 +385,187 @@ from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation 
 __all__ += ["DenseNetworkModel", "EpochOverheadModel"]
 from .trends import ParameterGrowthModel  # added 2026-10-20
 __all__ += ["ParameterGrowthModel"]
+
+# --- Agent security (added 2026-10-20) ---
+from .security import InjectionExposureModel, TurnExposureModel, PolicyComparisonModel
+
+__all__ += ["InjectionExposureModel", "TurnExposureModel", "PolicyComparisonModel"]
+# --- The agent harness (added 2026-10-20) ---
+from .harness import (
+    ApprovalEscrowModel,
+    DeficitRoundRobinModel,
+    BoundedLiabilityAdmissionModel,
+    TrajectoryBudgetMeterModel,
+    CallCeilingModel,
+    StepCeilingReturnModel,
+)
+
+__all__ += [
+    "ApprovalEscrowModel",
+    "DeficitRoundRobinModel",
+    "BoundedLiabilityAdmissionModel",
+    "TrajectoryBudgetMeterModel",
+    "CallCeilingModel",
+    "StepCeilingReturnModel",
+]
+
+# --- Sensor perception (added 2026-10-20) ---
+from .perception import (
+    ObservationAgeModel,
+    RollingShutterSkewModel,
+    TimingAttitudeErrorModel,
+    LidarSweepAgeModel,
+    StereoDepthErrorModel,
+    DelayPhaseMarginModel,
+    ConformalInsetModel,
+    ClockConversionModel,
+    VisibilityRangeModel,
+    ThermalExpansionModel,
+)
+
+__all__ += [
+    "ObservationAgeModel",
+    "RollingShutterSkewModel",
+    "TimingAttitudeErrorModel",
+    "LidarSweepAgeModel",
+    "StereoDepthErrorModel",
+    "DelayPhaseMarginModel",
+    "ConformalInsetModel",
+    "ClockConversionModel",
+    "VisibilityRangeModel",
+    "ThermalExpansionModel",
+]
+
+# --- Durable execution (added 2026-10-20) ---
+from .durability import GroupCommitModel, SnapshotVolumeModel, CheckpointTraceModel, RetentionCostModel
+
+__all__ += ["GroupCommitModel", "SnapshotVolumeModel", "CheckpointTraceModel", "RetentionCostModel"]
+# --- Failure recovery (added 2026-10-20) ---
+from .recovery import (
+    RepairBreakEvenModel,
+    IrreversibleLossModel,
+    UndetectedLoopModel,
+    RetryAmplificationModel,
+    BulkheadAdmissionModel,
+    RetryJitterModel,
+    CleanupGraphModel,
+    BreakerWindowModel,
+    RetrySustainedOutagesModel,
+)
+
+__all__ += [
+    "RepairBreakEvenModel",
+    "IrreversibleLossModel",
+    "UndetectedLoopModel",
+    "RetryAmplificationModel",
+    "BulkheadAdmissionModel",
+    "RetryJitterModel",
+    "CleanupGraphModel",
+    "BreakerWindowModel",
+    "RetrySustainedOutagesModel",
+]
+
+# --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
+from .estimation import (
+    RangeFusionModel,
+    EstimatorConsistencyModel,
+    ReplayBufferModel,
+    InertialCoastModel,
+    OdometryDriftModel,
+    OdometryLeaderboardModel,
+    BeliefExpiryModel,
+    StaleTransformModel,
+    FreeSpaceExpiryModel,
+    EpochGapModel,
+    SensorBiasDriftModel,
+    FrozenTransformModel,
+    TrackConfirmationModel,
+)
+from .mapping import (
+    ClearanceQueryModel,
+    HostMapSizingModel,
+    RaymarchTrafficModel,
+    EncoderRateModel,
+)
+
+__all__ += [
+    "RangeFusionModel",
+    "EstimatorConsistencyModel",
+    "ReplayBufferModel",
+    "InertialCoastModel",
+    "OdometryDriftModel",
+    "OdometryLeaderboardModel",
+    "BeliefExpiryModel",
+    "StaleTransformModel",
+    "FreeSpaceExpiryModel",
+    "EpochGapModel",
+    "SensorBiasDriftModel",
+    "FrozenTransformModel",
+    "TrackConfirmationModel",
+    "ClearanceQueryModel",
+    "HostMapSizingModel",
+    "RaymarchTrafficModel",
+    "EncoderRateModel",
+]
+
+# --- Grounded intent: cadence, reach, occupancy, lease expiry, referent sets (added 2026-10-20) ---
+from .grounding import (
+    IntentCadenceModel,
+    DynamicReachModel,
+    ForwardOccupancyModel,
+    IntentLeaseExpiryModel,
+    ReferentSetModel,
+    ConfidenceRegionModel,
+)
+
+__all__ += [
+    "IntentCadenceModel",
+    "DynamicReachModel",
+    "ForwardOccupancyModel",
+    "IntentLeaseExpiryModel",
+    "ReferentSetModel",
+    "ConfidenceRegionModel",
+]
+
+# --- Sustainability (added 2026-10-20) ---
+from .sustainability import (
+    FacilityPowerModel,
+    WaterUseModel,
+    RunFootprintModel,
+    PueRetrofitModel,
+    FacilityCarbonRateModel,
+    GridPlacementModel,
+    EmbodiedPaybackModel,
+    ServiceLifeExtensionModel,
+    PowerCapModel,
+    RepeatedWorkEnergyModel,
+    ServingCrossoverModel,
+    CascadeEnergyModel,
+    DutyCycledPowerModel,
+    DataMovementEnergyModel,
+    DemandReboundModel,
+    DevelopmentSweepModel,
+    RollingWindowModel,
+    CarbonPricedPlacementModel,
+)
+
+__all__ += [
+    "FacilityPowerModel",
+    "WaterUseModel",
+    "RunFootprintModel",
+    "PueRetrofitModel",
+    "FacilityCarbonRateModel",
+    "GridPlacementModel",
+    "EmbodiedPaybackModel",
+    "ServiceLifeExtensionModel",
+    "PowerCapModel",
+    "RepeatedWorkEnergyModel",
+    "ServingCrossoverModel",
+    "CascadeEnergyModel",
+    "DutyCycledPowerModel",
+    "DataMovementEnergyModel",
+    "DemandReboundModel",
+    "DevelopmentSweepModel",
+    "RollingWindowModel",
+    "CarbonPricedPlacementModel",
+]

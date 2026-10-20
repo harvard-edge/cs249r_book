@@ -1,236 +1,216 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 12 (Failure Recovery), one block per slide.
+"""Every number on the Volume III Lecture 12 slides and notes, read from MLSysIM.
 
-Inputs are typed with their source. Sources:
-  FR  = the rendered chapter, Failure Recovery (Volume III), dev text 2026-10-17.
-  NM  = a Napkin Math notebook of that chapter (scenario values the chapter
-        labels hypothetical; slides say "illustrative").
-  Ex  = an end-of-chapter exercise of that chapter (hypothetical givens).
-  SEC = U.S. SEC, Release No. 34-70694 (Knight Capital Americas LLC), 2013.
-  Huang 2024 = Huang et al., "Large Language Models Cannot Self-Correct
-        Reasoning Yet," ICLR 2024, Tables 2 and 3 (arXiv 2310.01798v2).
-  Cemri 2025 = Cemri et al., "Why Do Multi-Agent LLM Systems Fail?" (MAST),
-        arXiv 2503.13657v3, Figure 1.
-  Huang OSDI 2022 = Huang et al., "Metastable Failures in the Wild,"
-        OSDI 2022, Table 1.
-  CrowdStrike PIR = CrowdStrike, Preliminary Post Incident Review, executive
-        summary, July 24, 2024. Microsoft blog, July 20, 2024.
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: one repair against unwinding and rebuilding
+(Scenarios.TestConfigRepairVsRebuild), the remediation agent's pivot loss
+(Scenarios.RemediationCanaryPivotLoss, from Agents.Remediation.OnCall), the
+undetected loop (Scenarios.RepairLoopToTurnCeiling), layered retries
+(Scenarios.ThreeLayerRetryAmplification), the bulkhead and the jittered
+retry cohort (Scenarios.BlockingCallBulkhead, RetryCohortJitter), the
+cleanup graph and the breaker window of the chapter's Exercises 1 and 4
+(Scenarios.TestEnvironmentCleanupGraph, TestServiceBreakerWindow), all backed
+by engine/solvers/recovery.py. Cited figures are Literature entries: the SEC
+order on Knight Capital and the CrowdStrike review (IncidentReports), the
+MAST traces (MultiAgentFailures), and Table 1 of Metastable Failures in the
+Wild (MetastableFailures, counted by Scenarios.RetrySustainedMetastableOutages).
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex.
 
-Run from this folder: python3 calcs.py   (prints "label: value")
-make_figs.py imports these values so figures and slides agree.
+Run from this folder: python3 calcs.py
 """
 
+import sys
+from pathlib import Path
 
-def show(label, value):
-    print(f"  {label}: {value}")
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+Scenarios = mlsysim.Scenarios
+Literature = mlsysim.Literature
 
-# ------------------------------------------------------------- hook (SEC)
-# SEC para. 15 to 17 and 27: 8 servers, one missed by the deployment; the
-# 212 parent orders; 4 million executions, 397 million shares, about 45 min;
-# $460 million realized loss.
-KNIGHT_SERVERS = 8
-KNIGHT_MISSED = 1
-KNIGHT_MINUTES = 45
-KNIGHT_LOSS_M = 460
-KNIGHT_SHARES_M = 397
+REPAIR_S = Scenarios.TestConfigRepairVsRebuild
+PIVOT_S = Scenarios.RemediationCanaryPivotLoss
+LOOP_S = Scenarios.RepairLoopToTurnCeiling
+RETRY_S = Scenarios.ThreeLayerRetryAmplification
+POOL_S = Scenarios.BlockingCallBulkhead
+COHORT_S = Scenarios.RetryCohortJitter
+CLEAN_S = Scenarios.TestEnvironmentCleanupGraph
+BREAKER_S = Scenarios.TestServiceBreakerWindow
+OUTAGES_S = Scenarios.RetrySustainedMetastableOutages
 
-
-def knight():
-    return dict(
-        correct_servers=KNIGHT_SERVERS - KNIGHT_MISSED,          # 7 uninstalled
-        loss_per_min_m=KNIGHT_LOSS_M / KNIGHT_MINUTES,            # $M per minute
-        shares_per_min_m=KNIGHT_SHARES_M / KNIGHT_MINUTES,
-    )
-
-
-# --------------------------------------------- cleanup graph (Ex 1, FR 12.13)
-# Durations once admitted (s): end test 30; preserve artifacts 20; release
-# 40 (needs both); revoke credential 5 (needs release); scratch 10 (none).
-CLEAN = dict(end_test=30, preserve=20, release=40, revoke=5, scratch=10)
-
-
-def cleanup():
-    c = CLEAN
-    stack = sum(c.values())
-    graph = max(max(c["end_test"], c["preserve"]) + c["release"] + c["revoke"],
-                c["scratch"])
-    return dict(stack_s=stack, graph_s=graph, saved_s=stack - graph)
+REPAIR = REPAIR_S.result
+PIVOT = PIVOT_S.result
+LOOP = LOOP_S.result
+RETRY = RETRY_S.result
+POOL = POOL_S.result
+COHORT = COHORT_S.result
+CLEAN = CLEAN_S.result
+BREAKER = BREAKER_S.result
+OUTAGES = OUTAGES_S.result
+INC = Literature.IncidentReports
+MAST = Literature.MultiAgentFailures
 
 
-# ---------------------------------------------- repair vs unwind (NM 12.1)
-# FR 12.4.3: compensation 40.6 s; rebuild 46 s; rebuild tokens 38,500 in and
-# 3,100 out at $3 and $15 per million; repair request 2,390 in, 180 out;
-# 0.09 s pre-output, 50 tokens/s, 0.4 s validation; assumed p = 0.5.
-P_IN, P_OUT = 3e-6, 15e-6
+def mag(q, unit):
+    return q.to(unit).magnitude
 
 
-def repair():
-    cf_t = 40.6 + 46.0
-    cf_d = 38_500 * P_IN + 3_100 * P_OUT
-    cr_t = 0.09 + 180 / 50 + 0.4
-    cr_d = 2_390 * P_IN + 180 * P_OUT
-    p = 0.5
-    e_t = cr_t + (1 - p) * cf_t
-    e_d = cr_d + (1 - p) * cf_d
-    return dict(cf_t=cf_t, cf_d=cf_d, cr_t=cr_t, cr_d=cr_d,
-                pstar_t=cr_t / cf_t, pstar_d=cr_d / cf_d,
-                e_t=e_t, e_d=e_d, cut_t=1 - e_t / cf_t, cut_d=1 - e_d / cf_d,
-                one_in=1 / 16)
+def pct(x):
+    return x * 100
 
 
-# ------------------------------------------- self-correction (Huang 2024)
-# GPT-3.5, Table 3 (intrinsic, round 2) and Table 2 (oracle labels).
-HUANG = {
-    "GSM8K": dict(standard=75.9, self_r2=74.7, oracle=84.3),
-    "CommonSenseQA": dict(standard=75.8, self_r2=41.8, oracle=89.7),
-    "HotpotQA": dict(standard=26.0, self_r2=25.0, oracle=29.0),
-}
+def usd(q):
+    return mag(q, "USD")
 
 
-def huang():
-    return {k: dict(drop=v["standard"] - v["self_r2"],
-                    gain=v["oracle"] - v["standard"]) for k, v in HUANG.items()}
+print("== Knight Capital, 1 August 2012 (Literature.IncidentReports, SEC order)")
+_servers, _missed = INC.KnightSmarsServers, INC.KnightServersMissed
+v("kn_servers", _servers, "{:.0f}", "SMARS servers")
+v("kn_servers_words", _servers, "words", "the same, in words")
+v("kn_missed", _missed, "{:.0f}", "servers the deployment missed")
+v("kn_correct", _servers - _missed, "{:.0f}", "servers that received the new code")
+v("kn_correct_words", _servers - _missed, "words", "the same, in words")
+v("kn_parents", INC.KnightParentOrders, "{:.0f}", "incoming parent orders")
+v("kn_exec_m", INC.KnightExecutions / 10 ** 6, "{:.0f}", "executions, millions")
+v("kn_stocks", INC.KnightStocks, "{:.0f}", "stocks")
+v("kn_shares_m", INC.KnightShares / 10 ** 6, "{:.0f}", "shares, millions")
+v("kn_minutes", INC.KnightTradingMinutes, "{:.0f}", "minutes of erroneous trading")
+v("kn_loss_m", INC.KnightRealizedLossUsd / 10 ** 6, "{:.0f}", "realized loss, $ millions")
+v("kn_emails", INC.KnightAlertEmails, "{:.0f}", "'Power Peg disabled' e-mails")
 
+print("== Cleanup graph (Scenarios.TestEnvironmentCleanupGraph; Exercise 1)")
+_d = {k: mag(t, "s") for k, t in CLEAN_S.durations.items()}
+v("cl_ops_words", len(_d), "words", "registered cleanup operations")
+for _k in _d:
+    v(f"cl_{_k}", _d[_k], "{:.0f}", f"{_k}, s")
+v("cl_stack", mag(CLEAN.stack_time, "s"), "{:.0f}", "reverse stack, s")
+v("cl_graph", mag(CLEAN.graph_time, "s"), "{:.0f}", "cleanup graph, s")
 
-# ------------------------------------- CrowdStrike exposure (PIR, Microsoft)
-# Published 04:09 UTC, reverted 05:27 UTC, 19 July 2024; 8.5 million devices.
-def crowdstrike():
-    return dict(window_min=(5 * 60 + 27) - (4 * 60 + 9))
+print("== Repair against unwind (Scenarios.TestConfigRepairVsRebuild)")
+v("rp_unwind", mag(REPAIR_S.unwind_time, "s"), "{:.1f}", "compensation, s")
+v("rp_rebuild", mag(REPAIR_S.rebuild_time, "s"), "{:.0f}", "rebuild, s")
+v("rp_rebuild_in", REPAIR_S.rebuild_input, "{:,.0f}", "rebuild input tokens")
+v("rp_rebuild_out", REPAIR_S.rebuild_output, "{:,.0f}", "rebuild output tokens")
+v("rp_startup", mag(REPAIR_S.startup_time, "s"), "{:.2f}", "pre-output startup, s")
+v("rp_out", REPAIR_S.repair_output, "{:.0f}", "repair output tokens")
+v("rp_rate", mag(REPAIR_S.output_rate, "token/s"), "{:.0f}", "decode rate, tokens/s")
+v("rp_validate", mag(REPAIR_S.validation_time, "s"), "{:.1f}", "validation, s")
+v("rp_price_in", mag(REPAIR_S.input_price, "USD/Mtoken"), "{:.0f}", "input price, $ per million")
+v("rp_price_out", mag(REPAIR_S.output_price, "USD/Mtoken"), "{:.0f}", "output price, $ per million")
+v("rp_back_s", mag(REPAIR.fallback_time, "s"), "{:.1f}", "C_fallback, s")
+v("rp_back_usd", usd(REPAIR.fallback_cost), "{:.3f}", "C_fallback, $")
+v("rp_rep_s", mag(REPAIR.repair_time, "s"), "{:.2f}", "C_repair, s")
+v("rp_rep_usd", usd(REPAIR.repair_cost), "{:.5f}", "C_repair, $")
+v("rp_pstar_s", pct(REPAIR.break_even_time), "{:.1f}", "p*, seconds, %")
+v("rp_pstar_usd", pct(REPAIR.break_even_cost), "{:.1f}", "p*, dollars, %")
+v("rp_p", REPAIR_S.assumed_success, "{:.1f}", "assumed repair success")
+v("rp_exp_s", mag(REPAIR.expected_time, "s"), "{:.2f}", "expected time at the assumed p, s")
+v("rp_save", pct(REPAIR.time_saved_fraction), "{:.1f}", "time saved against unwinding now, %")
+v("rp_one_in", REPAIR.one_in, "{:.0f}", "one success in this many clears both axes")
+v("rp_one_in_pct", pct(1 / REPAIR.one_in), "{:.2f}", "the same, %")
 
+print("== CrowdStrike, 19 July 2024 (Literature.IncidentReports)")
+_t0 = mlsysim.Q_(INC.CrowdStrikeReleaseUtcHour, "hour") + mlsysim.Q_(INC.CrowdStrikeReleaseUtcMinute, "minute")
+_t1 = mlsysim.Q_(INC.CrowdStrikeRevertUtcHour, "hour") + mlsysim.Q_(INC.CrowdStrikeRevertUtcMinute, "minute")
+v("cs_t0_h", INC.CrowdStrikeReleaseUtcHour, "{:02.0f}", "released, hour UTC")
+v("cs_t0_m", INC.CrowdStrikeReleaseUtcMinute, "{:02.0f}", "released, minute")
+v("cs_t1_h", INC.CrowdStrikeRevertUtcHour, "{:02.0f}", "reverted, hour UTC")
+v("cs_t1_m", INC.CrowdStrikeRevertUtcMinute, "{:02.0f}", "reverted, minute")
+v("cs_window", mag(_t1 - _t0, "min"), "{:.0f}", "exposure window, min")
+v("cs_devices_m", INC.CrowdStrikeAffectedWindowsDevices / 10 ** 6, "{:.1f}", "Windows devices, millions")
 
-# ---------------------------------- expected irreversible loss (NM 12.2)
-# FR 12.5.2: p_bad 4 percent, consequence $12,000, catch 80 percent,
-# revert fidelity 90 percent, attempt cost $20.
-P_BAD, CONSEQ, CATCH, FIDELITY, ATTEMPT = 0.04, 12_000, 0.80, 0.90, 20
+print("== Pivot loss (Scenarios.RemediationCanaryPivotLoss, Agents.Remediation.OnCall)")
+_w = PIVOT_S.workload
+v("pl_pbad_pct", pct(_w.wrong_change_probability), "{:.0f}", "change wrong, %")
+v("pl_pbad", _w.wrong_change_probability, "{:.2f}", "the same, probability")
+v("pl_impact", usd(_w.wrong_change_impact), "{:,.0f}", "consequence, $")
+v("pl_catch_pct", pct(_w.canary_catch_rate), "{:.0f}", "canary catch rate, %")
+v("pl_catch", _w.canary_catch_rate, "{:.1f}", "the same, fraction")
+v("pl_miss", 1 - _w.canary_catch_rate, "{:.1f}", "missed fraction")
+v("pl_revert_pct", pct(_w.canary_recovery_fraction), "{:.0f}", "revert avoids, %")
+v("pl_residue", 1 - _w.canary_recovery_fraction, "{:.1f}", "share a revert cannot avoid")
+v("pl_residue_pct", pct(1 - _w.canary_recovery_fraction), "{:.0f}", "the same, %")
+v("pl_first", usd(PIVOT.loss_without_check), "{:.0f}", "rollout first, $")
+v("pl_caught", usd(PIVOT.loss_caught), "{:.2f}", "caught changes, $")
+v("pl_missed", usd(PIVOT.loss_missed), "{:.0f}", "missed changes, $")
+v("pl_total", usd(PIVOT.loss_with_check), "{:.2f}", "canary first, $")
+v("pl_ratio", PIVOT.reduction, "{:.1f}", "reduction, x")
+v("pl_missed_share", pct(PIVOT.missed_share), "{:.1f}", "remaining loss from missed changes, %")
+v("pl_step_pts", pct(PIVOT_S.catch_step), "{:.0f}", "catch-rate step, points")
+v("pl_raised_pct", pct(PIVOT.raised_catch_rate), "{:.0f}", "raised catch rate, %")
+v("pl_per_step", usd(PIVOT.loss_per_catch_step), "{:.2f}", "loss removed by the step, $")
+v("pl_raised_total", usd(PIVOT.loss_with_check_raised), "{:.2f}", "loss at the raised catch rate, $")
+v("pl_attempt", usd(PIVOT.attempt_cost), "{:.0f}", "attempt cost, $")
+v("pl_step_vs_attempt", PIVOT.step_vs_attempt, "{:.1f}", "step / attempt cost, x")
+v("pl_loss_vs_attempt", PIVOT.loss_vs_attempt, "{:.1f}", "remaining loss / attempt cost, x")
 
+print("== Loop cost (Scenarios.RepairLoopToTurnCeiling)")
+v("lp_first", LOOP_S.first_input, "{:,.0f}", "first input, tokens")
+v("lp_grow", LOOP.appended_per_turn, "{:,.0f}", "appended per turn, tokens")
+v("lp_out", LOOP_S.output_per_turn, "{:.0f}", "output per turn, tokens")
+v("lp_cap", LOOP_S.ceiling, "{:.0f}", "turn ceiling")
+v("lp_stop", LOOP_S.stop_after, "{:.0f}", "stop after turn")
+v("lp_turn_s", mag(LOOP_S.turn_time, "s"), "{:.0f}", "seconds per turn")
+v("lp_cap_in", LOOP.ceiling_input, "{:,.0f}", "input at the ceiling, tokens")
+v("lp_cap_usd", usd(LOOP.ceiling_cost), "{:.2f}", "charge at the ceiling, $")
+v("lp_cap_min", mag(LOOP.ceiling_time, "min"), "{:.2f}", "time at the ceiling, min")
+v("lp_stop_in", LOOP.stop_input, "{:,.0f}", "input stopped early, tokens")
+v("lp_stop_usd", usd(LOOP.stop_cost), "{:.3f}", "charge stopped early, $")
+v("lp_stop_s", mag(LOOP.stop_time, "s"), "{:.0f}", "time stopped early, s")
+v("lp_ratio", LOOP.cost_ratio, "{:.1f}", "ceiling / early stop, x")
+v("lp_ratio_round", LOOP.cost_ratio, "{:.0f}", "the same, whole")
+v("lp_turn_ratio", LOOP_S.ceiling / LOOP_S.stop_after, "{:.1f}", "turns ratio (the linear guess), x")
+v("lp_half", LOOP.half_turns, "{:.0f}", "half the ceiling, turns")
+v("lp_half_ratio", LOOP.half_ratio, "{:.1f}", "input cut by stopping at half, x")
 
-def pivot_loss(catch=CATCH):
-    first = P_BAD * CONSEQ
-    caught = P_BAD * catch * CONSEQ * (1 - FIDELITY)
-    missed = P_BAD * (1 - catch) * CONSEQ
-    total = caught + missed
-    return dict(rollout_first=first, caught=caught, missed=missed, total=total,
-                ratio=first / total, missed_share=missed / total,
-                per_10pp=P_BAD * CONSEQ * 0.10 * FIDELITY,
-                per_10pp_vs_attempt=P_BAD * CONSEQ * 0.10 * FIDELITY / ATTEMPT,
-                total_vs_attempt=total / ATTEMPT)
+print("== Multi-agent traces (Literature.MultiAgentFailures, MAST)")
+v("ma_traces", MAST.MastTraces, "{:,.0f}", "annotated traces")
+v("ma_steprep", MAST.MastStepRepetitionPct, "{:.1f}", "step repetition, %")
 
+print("== Layered retries (Scenarios.ThreeLayerRetryAmplification)")
+v("rt_attempts", RETRY_S.attempts_per_layer, "{:.0f}", "attempts per layer")
+v("rt_layered", RETRY.layered, "{:.0f}", "requests at the dependency")
+v("rt_coord", RETRY.coordinated, "{:.0f}", "one owner, same allowance")
 
-# --------------------------------------------- loop cost (NM 12.3)
-# FR 12.6.2: first input 1,000 tokens; each turn appends 1,100 (300 output +
-# 800 observation); 300 output tokens per turn; 10 s per turn; $3 and $15 per
-# million; ceiling 50 turns, stop after turn 4.
-BASE, APPEND, OUT, TURN_S = 1_000, 1_100, 300, 10
+print("== Bulkhead and jitter (Scenarios.BlockingCallBulkhead, RetryCohortJitter)")
+v("bh_arrivals", POOL_S.arrivals, "{:.0f}", "blocking calls")
+v("bh_workers", POOL_S.workers, "{:.0f}", "workers")
+v("bh_cap", POOL_S.worker_cap, "{:.0f}", "dependency cap, workers")
+v("bh_queue", POOL_S.queue_cap, "{:.0f}", "dependency queue")
+v("bh_free_uncapped", POOL.uncapped_free, "{:.0f}", "free workers uncapped")
+v("bh_rejected", POOL.rejected, "{:.0f}", "rejected at admission")
+v("bh_free", POOL.protected_workers, "{:.0f}", "workers kept free")
+v("jt_retries", COHORT_S.retries, "{:.0f}", "retries in the cohort")
+v("jt_burst_ms", mag(COHORT_S.burst_window, "ms"), "{:.0f}", "synchronized window, ms")
+v("jt_span_s", mag(COHORT_S.jitter_span, "s"), "{:.0f}", "jitter span, s")
+v("jt_sync", mag(COHORT.synchronized_rate, "1/s"), "{:,.0f}", "synchronized rate, per s")
+v("jt_mean", mag(COHORT.jittered_mean_rate, "1/s"), "{:.0f}", "jittered mean rate, per s")
+v("jt_spread", COHORT.spread_ratio, "{:,.0f}", "spread ratio")
+v("jt_expected", COHORT.expected_in_window, "{:.3f}", "expected retries in one window")
 
+print("== Retry-sustained outages (Scenarios.RetrySustainedMetastableOutages)")
+_ms = dict(OUTAGES.with_duration)
+v("ms_incidents", OUTAGES.incidents, "{:.0f}", "incidents in Table 1")
+v("ms_retry", OUTAGES.retry_sustained, "{:.0f}", "sustained by retries")
+v("ms_share", pct(OUTAGES.share), "{:.0f}", "share, %")
+v("ms_over_words", OUTAGES.over_hours, "words", "retry-sustained outages over the threshold")
+v("ms_threshold", OUTAGES_S.threshold_hours, "{:.0f}", "threshold, hours")
+v("ms_ibm1", _ms["IBM1"], "{:.2f}", "IBM1, hours")
+v("ms_aws1", _ms["AWS1"], "{:.1f}", "AWS1, hours")
 
-def prompt_tokens(h):
-    return h * BASE + APPEND * h * (h - 1) // 2
-
-
-def loop_cost(h):
-    return prompt_tokens(h) * P_IN + h * OUT * P_OUT
-
-
-def loop():
-    hi, lo = 50, 4
-    return dict(ceiling_in=prompt_tokens(hi), stop_in=prompt_tokens(lo),
-                ceiling_usd=loop_cost(hi), stop_usd=loop_cost(lo),
-                ceiling_min=hi * TURN_S / 60, stop_s=lo * TURN_S,
-                ratio=loop_cost(hi) / loop_cost(lo),
-                saved_usd=loop_cost(hi) - loop_cost(lo),
-                turn25_ratio=prompt_tokens(hi) / prompt_tokens(25),
-                largest_call=BASE + APPEND * (hi - 1) + OUT)
-
-
-# -------------------------------------------- loop data (Cemri 2025, MAST)
-# Figure 1 prevalence, 1,642 traces, 7 frameworks: the five largest modes.
-MAST = [("Step repetition", 15.7), ("Reasoning-action mismatch", 13.2),
-        ("Unaware of termination", 12.4), ("Disobey task specification", 11.8),
-        ("Incorrect verification", 9.1)]
-
-
-# --------------------------------------------- retry layers (FR 12.7.2)
-def retries(layers=3, attempts=3):
-    return dict(layered=attempts ** layers, single=attempts)
-
-
-# --------------------------------------------- capacity and jitter (NM 12.4)
-# 256 blocking calls, 300 workers; cap 64 occupied + 32 queued; 128 retries
-# in a 2 ms burst or spread over 2 s.
-def jitter():
-    burst = 128 / 0.002
-    spread = 128 / 2.0
-    return dict(free_uncapped=300 - 256, rejected=256 - (64 + 32),
-                free_capped=300 - 64, burst_rate=burst, mean_rate=spread,
-                ratio=burst / spread, expected_in_2ms=128 * 0.002 / 2.0)
-
-
-# --------------------------------------- metastable incidents (OSDI 2022)
-# Table 1: 21 incidents; sustaining effect "retry" listed for 12 of them;
-# duration in hours as printed (SPF1 has no duration).
-RETRY_SUSTAINED = [("IBM1", 73.53), ("AWS1", 66.7), ("GGL2", 21.5),
-                   ("AWS4", 9.3), ("SPF2", 8.33), ("AZR4", 7.92),
-                   ("AWS3", 4.55), ("AWS2", 4.23), ("GGL3", 3.2),
-                   ("AZR2", 1.15), ("CAS2", 0.16)]
-N_INCIDENTS, N_RETRY = 21, 12
-
-
-def metastable():
-    hrs = sorted(h for _, h in RETRY_SUSTAINED)
-    return dict(share=N_RETRY / N_INCIDENTS, median_h=hrs[len(hrs) // 2],
-                over_4h=sum(h > 4 for h in hrs))
-
-
-# ------------------------------------------ breaker window (Ex 4, FR 12.13)
-# 50 outcomes: 14 timeouts, 6 server errors, 12 endpoint validation
-# rejections, 3 authorization denials, 15 successes; n_min 20, r_trip 0.5.
-def breaker():
-    n = 14 + 6 + 12 + 3 + 15
-    classified = (14 + 6) / n
-    naive = (n - 15) / n
-    return dict(n=n, classified=classified, naive=naive)
-
+print("== Breaker window (Scenarios.TestServiceBreakerWindow; Exercise 4)")
+_o = BREAKER_S.outcomes
+v("br_n", BREAKER.outcomes, "{:.0f}", "outcomes in the window")
+for _k in _o:
+    v(f"br_{_k}", _o[_k], "{:.0f}", f"{_k} outcomes")
+v("br_threshold", BREAKER_S.threshold, "{:.2f}", "trip fraction")
+v("br_min", BREAKER_S.min_outcomes, "{:.0f}", "minimum outcomes")
+v("br_classified", BREAKER.classified_failures, "{:.0f}", "failures, classified")
+v("br_classified_f", BREAKER.classified_fraction, "{:.2f}", "failure fraction, classified")
+v("br_naive", BREAKER.naive_failures, "{:.0f}", "failures, every non-success")
+v("br_naive_f", BREAKER.naive_fraction, "{:.2f}", "failure fraction, every non-success")
 
 if __name__ == "__main__":
-    print("hook (SEC):")
-    for k, v in knight().items():
-        show(k, round(v, 2))
-    print("cleanup graph (Ex 1):")
-    for k, v in cleanup().items():
-        show(k, v)
-    print("repair vs unwind (NM 12.1):")
-    r = repair()
-    show("C_fallback time s", round(r["cf_t"], 2))
-    show("C_fallback $", round(r["cf_d"], 4))
-    show("C_repair time s", round(r["cr_t"], 2))
-    show("C_repair $", round(r["cr_d"], 5))
-    show("p* time %", round(100 * r["pstar_t"], 1))
-    show("p* dollars %", round(100 * r["pstar_d"], 1))
-    show("E at p=0.5 s", round(r["e_t"], 2))
-    show("E at p=0.5 $", round(r["e_d"], 5))
-    show("time cut %", round(100 * r["cut_t"], 1))
-    show("dollar cut %", round(100 * r["cut_d"], 1))
-    show("one in 16 %", round(100 * r["one_in"], 2))
-    print("self-correction (Huang 2024, GPT-3.5):")
-    for k, v in huang().items():
-        show(k, {a: round(b, 1) for a, b in v.items()})
-    print("CrowdStrike:")
-    show("window min", crowdstrike()["window_min"])
-    print("pivot loss (NM 12.2):")
-    for k, v in pivot_loss().items():
-        show(k, round(v, 3))
-    print("loop (NM 12.3):")
-    for k, v in loop().items():
-        show(k, round(v, 3))
-    print("retries:")
-    show("layers", retries())
-    print("jitter (NM 12.4):")
-    for k, v in jitter().items():
-        show(k, round(v, 3))
-    print("metastable (OSDI 2022):")
-    for k, v in metastable().items():
-        show(k, round(v, 3))
-    print("breaker (Ex 4):")
-    for k, v in breaker().items():
-        show(k, round(v, 3))
+    write(__file__)

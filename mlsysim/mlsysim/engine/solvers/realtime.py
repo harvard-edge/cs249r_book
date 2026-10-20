@@ -200,6 +200,7 @@ class LeaseBudgetModel(ForwardModel):
             fits=bool(floor < lease <= at_admission),
             stall_last_admission=last, stall_lease_expiry=(last + lease).to(_MS),
             stall_brake_onset=(last + to_onset).to(_MS),
+            renewal_lateness_limit=(lease - renewal_period).to(_MS),
         )
 
 

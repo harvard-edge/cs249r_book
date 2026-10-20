@@ -8,16 +8,16 @@ calcs.py (which names its source). AS = the Agent Security chapter.
 
   echo_step1-3      EchoLeak chain (AS War Story 9.1; Reddy and Gujral 2025)
   seq_step1-3       AS Sec. 9.2.1 figure 1 (one token sequence), redrawn
-  exp_step1-2       NM 9.1, equation 1 (illustrative inputs; calcs)
+  exp_step1-2       NM 9.1, equation 1 (Scenarios.InjectionExposureByReadVolume; calcs)
   checks_step1-2    AS Sec. 9.3.1 and 9.4.1 (four checks on one proposal)
   approval_step1-3  AS Sec. 9.7.3 (approval bound to a digest), schematic
   reader_step1-2    AS Sec. 9.5 figure 3 (quarantined reader), redrawn
   labels_step1-3    AS Sec. 9.6.3 figure 4 (two labels, two checks), redrawn
   launder_step1-3   AS Sec. 9.8.2 (a blocked attack survives in memory)
   ladder            AS Sec. 9.9.1 (outcome ladder of one attacked episode)
-  dojo_step1-2      measured: AgentDojo results table (calcs.agentdojo)
-  nm92              NM 9.2 table 4 (illustrative counts; calcs)
-  zero_bound        AS Sec. 9.9.3 footnote 11 (calcs.bound)
+  dojo_step1-2      measured: AgentDojo results table (calcs.dojo_row)
+  nm92              NM 9.2 table 4 (Scenarios.FixtureReleasePolicyComparison; calcs)
+  zero_bound        AS Sec. 9.9.3 footnote 11 (MLSysIM zero-failure bound; calcs)
   thumb_*           text-free pictograms for the goals and takeaways slides
 
 Run from this folder: python3 make_figs.py
@@ -33,6 +33,34 @@ sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics import (  # noqa: E402
+    calc_clopper_pearson_zero_failure_bound,
+    calc_injection_exposure,
+    calc_zero_failure_rate_upper_bound,
+)
+
+# Inputs of the exposure and zero-success figures, from the scenarios calcs reads
+Q = calcs.EXPOSURE.payload_fraction
+MISS = calcs.EXPOSURE.miss_rate
+READS = calcs.EXPOSURE.reads
+CONF = calcs.CLEAN50.confidence
+
+
+def exposure(q, n):
+    return calc_injection_exposure(q, n)
+
+
+def bound(n):
+    """Exact 95 percent zero-success upper bound, for a scalar or an array of n."""
+    return 1 - np.vectorize(calc_clopper_pearson_zero_failure_bound)(n, CONF)
+
+
+def agentdojo():
+    """The AgentDojo rows the dojo figures draw, selected by calcs."""
+    return dict(plain=calcs.DOJO_PLAIN, early=calcs.dojo_row(calcs.EARLY),
+                late=calcs.dojo_row(calcs.LATE), base=calcs.dojo_row(calcs.ABLATED),
+                defenses={d: calcs.dojo_row(calcs.ABLATED, d) for d in calcs.DEFENSES})
 
 C = sp.C
 plt = sp.plt
@@ -220,29 +248,30 @@ def seq():
 
 # ------------------------------------------------ 3. exposure plot
 def exposure_plot():
-    e = calcs.nm91()
     n = np.arange(0, 121)
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(4.1, 2.5))
-        ax.plot(n, 100 * calcs.exposure(calcs.PAYLOAD, n), color=C["danger"], lw=2.4)
+        ax.plot(n, 100 * exposure(Q, n), color=C["danger"], lw=2.4)
         ax.axhline(100, color=C["neutral"], lw=1, ls="--")
         pos = {"repair": (2, 72, "left"), "research": (118, 92, "right")}
         for key in ("repair", "research"):
-            r = calcs.READS[key]
-            v = 100 * e[key]
+            r = READS[key]
+            v = num(f"exp_{key}")
             ax.plot([r], [v], "o", color=C["text"], ms=7)
             x, y, ha = pos[key]
-            ax.text(x, y, f"{key}, {r} reads: {v:.1f}%", fontsize=12, ha=ha, va="center",
+            ax.text(x, y, f"{key}, {val('exp_n_' + key)} reads: {val('exp_' + key)}%", fontsize=12,
+                    ha=ha, va="center",
                     color=C["text"])
             if key == "repair":
                 ax.annotate("", (r, v + 2), (10, y - 5),
                             arrowprops=dict(arrowstyle="-", color=C["text"], lw=1))
         if k == 2:
-            ax.plot(n, 100 * calcs.exposure(calcs.PAYLOAD * calcs.MISS, n),
+            ax.plot(n, 100 * exposure(Q * MISS, n),
                     color=C["memory"], lw=2.4)
-            v1, v2 = 100 * e["repair_screened"], 100 * e["research_screened"]
-            ax.plot([20, 100], [v1, v2], "o", color=C["memory"], ms=7)
-            ax.text(118, 12, f"screen missing 5%: {v1:.1f}%, {v2:.1f}%",
+            v1, v2 = num("exp_repair_scr"), num("exp_research_scr")
+            ax.plot([READS["repair"], READS["research"]], [v1, v2], "o", color=C["memory"], ms=7)
+            ax.text(118, 12, f"screen missing {val('exp_miss')}%: {val('exp_repair_scr')}%, "
+                    f"{val('exp_research_scr')}%",
                     fontsize=12, ha="right", color=C["memory"])
         ax.set_xlim(0, 120)
         ax.set_ylim(0, 105)
@@ -456,7 +485,7 @@ SHORT = {"spotlighting_with_delimiting": "delimiters", "transformers_pi_detector
 
 
 def dojo():
-    a = calcs.agentdojo()
+    a = agentdojo()
     base = a["base"]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.75))
@@ -465,7 +494,7 @@ def dojo():
         ax.scatter(xs, ys, s=38, color=C["neutral"], alpha=0.75, zorder=2)
         e, l = a["early"], a["late"]
         if k == 1:
-            ax.annotate("same model family, same utility:\n34% vs 1% attack success",
+            ax.annotate(f"same model family, same utility:\n{val('dj_early')}% vs {val('dj_late')}% attack success",
                         (e["utility_pct"], e["targeted_asr_pct"]), xytext=(40, 52),
                         fontsize=11, ha="center", color=C["text"],
                         arrowprops=dict(arrowstyle="-", color=C["text"], lw=1))
@@ -500,11 +529,11 @@ def dojo():
 
 # ------------------------------------------------ 11. NM 9.2 bars
 def nm92():
-    n = calcs.nm92()
+    n = calcs.POLICY.result
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 1.45))
     pols = ["A", "B"]
-    conf = [100 * n["a_lo"], 100 * n["b_lo"]]
-    unres = [100 * (n["a_hi"] - n["a_lo"]), 100 * (n["b_hi"] - n["b_lo"])]
+    conf = [100 * n.baseline_lower, 100 * n.candidate_lower]
+    unres = [100 * (n.baseline_upper - n.baseline_lower), 100 * (n.candidate_upper - n.candidate_lower)]
     a1.barh(pols, conf, color=C["danger"], height=0.55)
     a1.barh(pols, unres, left=conf, color=C["neutral_l"], height=0.55, edgecolor=C["neutral"],
             hatch="//")
@@ -514,10 +543,10 @@ def nm92():
     a1.set_xlim(0, 45)
     a1.invert_yaxis()
     a1.set_title("attacked: disclosures", fontsize=12)
-    acc = [100 * n["p_a"], 100 * n["p_b"]]
+    acc = [100 * n.baseline_acceptance, 100 * n.candidate_acceptance]
     a2.barh(pols, acc, color=C["data"], height=0.55)
     for i in range(2):
-        a2.text(acc[i] + 1, i, f"{acc[i]:.0f} of 100", va="center", fontsize=11)
+        a2.text(acc[i] + 1, i, f"{acc[i]:.0f} of {val('pc_benign')}", va="center", fontsize=11)
     a2.set_xlim(0, 125)
     a2.invert_yaxis()
     a2.set_title("benign: accepted repairs", fontsize=12)
@@ -529,16 +558,17 @@ def nm92():
 def zero_bound():
     n = np.logspace(1, 3, 100)
     fig, ax = plt.subplots(figsize=(3.3, 2.4))
-    ax.loglog(n, 100 * calcs.bound(n), color=C["network"], lw=2.4)
-    ax.loglog(n, 100 * 3 / n, color=C["neutral"], lw=1.2, ls="--")
+    ax.loglog(n, 100 * bound(n), color=C["network"], lw=2.4)
+    ax.loglog(n, 100 * np.vectorize(calc_zero_failure_rate_upper_bound)(n, CONF), color=C["neutral"],
+              lw=1.2, ls="--")
     for m in (10, 50, 100, 1000):
-        v = 100 * calcs.bound(m)
+        v = 100 * float(bound(m))
         ax.plot([m], [v], "o", color=C["network"], ms=6)
         ax.text(m * 1.12, v * 1.12, f"{v:.1f}%" if v < 10 else f"{v:.0f}%", fontsize=11,
                 color=C["network"])
     ax.text(400, 1.4, "3/n", fontsize=11, color=C["neutral"])
     ax.set_xlabel("attacked episodes, zero successes")
-    ax.set_ylabel("95% bound (%)")
+    ax.set_ylabel(f"{val('zb_conf')}% bound (%)")
     ax.set_yticks([0.3, 1, 3, 10, 30])
     ax.set_yticklabels(["0.3", "1", "3", "10", "30"])
     ax.set_xticks([10, 50, 100, 1000])
@@ -556,10 +586,10 @@ def thumbs():
     s = Svg(W, H)
     s.line(20, 90, 250, 90, GRAY, sw=3)
     s.line(20, 90, 20, 8, GRAY, sw=3)
-    pts = " ".join(f"{20 + 2 * n:.0f},{90 - 80 * calcs.exposure(calcs.PAYLOAD, n):.1f}"
+    pts = " ".join(f"{20 + 2 * n:.0f},{90 - 80 * exposure(Q, n):.1f}"
                    for n in range(0, 116, 5))
     s.add(f'<polyline points="{pts}" fill="none" stroke="{ROLE["fault"][1]}" stroke-width="6"/>')
-    pts = " ".join(f"{20 + 2 * n:.0f},{90 - 80 * calcs.exposure(calcs.PAYLOAD * calcs.MISS, n):.1f}"
+    pts = " ".join(f"{20 + 2 * n:.0f},{90 - 80 * exposure(Q * MISS, n):.1f}"
                    for n in range(0, 116, 5))
     s.add(f'<polyline points="{pts}" fill="none" stroke="{ROLE["model"][1]}" stroke-width="6"/>')
     s.save("thumb_exp")
@@ -606,7 +636,7 @@ def thumbs():
     s.rect(6, 78, 244, 16, "sys", rx=4)
     s.save("thumb_launder")
     # AgentDojo: dots and four arrows from one point
-    a = calcs.agentdojo()
+    a = agentdojo()
     s = Svg(W, H)
 
     def xy(u, v):

@@ -1,424 +1,330 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 9 (Spatial Memory), Volume IV.
+"""Every number on the Lecture 9 slides and notes (Spatial Memory), read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment:
-"ch" is the rendered chapter (Spatial Memory, chapter_text_dev 2026-10-18),
-"NM" a Napkin Math box in it. Each printed line is a value the slide or its
-note shows, under the label used there. make_figs.py imports from this file so
-figures and slides share one computation.
+MLSysIM holds the inputs (the Embodied.* machine and its site record, the
+Literature.RobotPerception and Literature.KittiOdometry figures) and the
+calculations (Scenarios.*, each backed by a solver in
+engine/solvers/estimation.py or mapping.py); the chapter reads the same
+scenarios. This file only selects values, converts units, and formats them;
+it types no numbers. Each value is recorded with v() under the key the deck
+prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the scenario results.
 
 Run from this folder: python3 calcs.py
 """
+
 import math
 import sys
 from pathlib import Path
 
-from scipy import stats
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
-sys.path.insert(0, str(MLSYSIM))
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Q_ = mlsysim.core.units.Q_
 
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+LIT = Literature.RobotPerception
 
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-def head(title):
-    print(f"\n[{title}]")
-
-
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-V_DRIVE = 1.5            # m/s, drive limit (ch 9.4, machine card)
-FRAME_MS = 16.7          # ms, navigation and wrist camera frame period (ch NM 9.2, 9.5)
-T_AGE_MS = 51.6          # ms, frame age at dispatch (ch NM 9.2, from the latency waterfall)
-DELTA_LOC = 0.050        # m, localization bound (ch 9.7.1, illustrative)
-DELTA_MARGIN = 0.100     # m, protective clearance (ch 9.7.1, chosen)
-V_WALK = 1.6             # m/s, ISO 13855 walking approach speed (ch 9.7.1)
-D_CLEAR = 1.10           # m, clear distance to the rack end (ch 9.7.1)
-SIDE_CLEAR = 0.150       # m, side clearance abreast of the rack end (ch NM 9.2)
-TAU_DELAY = 0.1336       # s, pre-brake delay (machine card, ch 9.7.1 uses it)
-A_BRAKE = 2.0            # m/s^2, credible deceleration (machine card)
-
-# Segment 1: estimation (ch 9.2)
-SIG0 = 20.0              # mm, prior range std (ch 9.2)
-V_DIST = 0.1             # m/s, illustrative odometry speed disturbance (ch 9.2)
-DT_SWEEP = 0.050         # s, lidar sweep interval (ch 9.2)
-SIG_LIDAR = 30.0         # mm, Ouster OS1-64 worst-case datasheet range precision (ch 9.2)
-LIDAR_BIAS = 25.0        # mm, Ouster systematic accuracy offset (ch 9.2)
-SIG_STEREO = 3.8         # mm, stereo at 1.10 m (ch 9.2)
-MISDATE = 39.9           # mm, arrival-stamp travel (ch 9.2, from the observation contract)
-N_TRIALS = 50            # trials for the NEES/NIS band (ch 9.2.1)
-GATE95, GATE99 = 3.84, 6.63   # chi-square(1) 95 and 99 percent gates (ch 9.2.1)
-# BMI088 datasheet values (Bosch Sensortec 2024, via ch 9.2)
-GYRO_ND = 0.014          # deg/s/sqrt(Hz)
-GYRO_BIAS = 1.0          # deg/s
-ACC_ND = 160e-6          # g/sqrt(Hz)
-ACC_BIAS = 20e-3         # g
-G = 9.81                 # m/s^2
-T_IMU = 1.0              # s, coasting interval (ch 9.2)
-RANGE_UPRIGHT = 1.10     # m (ch 9.2)
-IMU_RATE_MS = 1.0        # ms, IMU sample period, 1 kHz (ch 9.2.3)
-SORT_MIN_HITS = 3        # abewley/sort sort.py, Sort.__init__ default min_hits
-
-# Segment 2: records and frames (ch 9.4, 9.5)
-SYNC_MS = 0.2            # ms, clock-conversion bound (ch 9.4)
-T_TACT, T_CAM, T_ENC = 12.0, 18.5, 21.0   # ms, illustrative epochs (ch 9.4)
-V_ARM = 1.7              # m/s, arm Cartesian speed limit (ch 9.4)
-E0_SLOT = 0.1            # mm, initial calibration error (ch 9.5)
-V_DRIFT = 12.0           # mm/s, unobserved lateral velocity bound (ch 9.5)
-R_ARM = 0.15             # m, wrist-to-fingertip lever arm (ch 9.5)
-OMEGA = 0.30             # rad/s, wrist alignment rate (ch 9.5)
-R_TOL = 1.0              # mm, latch-slot tolerance (ch 9.5)
-UMB_PATH = 16.0          # m, UMBmark 4 m square path (Borenstein and Feng 1996, via ch 9.5.1)
-UMB_UNCAL, UMB_CAL = 317.0, 21.0   # mm, average return error (Borenstein and Feng 1996)
-V_AISLE = 1.3            # m/s, aisle cruising speed (ch 9.5.1)
-AISLE_M = 30.0           # m, one aisle (ch 9.5.1)
-UMB_LAB_SPEED = 0.2      # m/s, benchmark speed (ch 9.5.1)
-
-# Segment 3: maps (ch 9.6)
-F_TICK_US = 1000.0       # us, 1 kHz permission loop (ch 9.6.1)
-T_REFLEX_US = 100.0      # us, collision-check allocation (ch 9.6.1)
-N_HULLS = 50             # evaluation spheres (ch 9.6.1)
-WCET_US = 250.0          # us, declared WCET of the permission job (ch 9.6.1)
-SRAM_BW = 3.2e9          # B/s, permission MCU SRAM bandwidth (ch 9.6.1)
-SRAM_CAP_MB = 1.05       # MB, permission MCU SRAM (ch 9.6.1)
-CELL_B = 8               # B per ESDF cell (ch 9.6.1)
-OCC_B = 4                # B per occupancy cell (book figure, ch 9.6.1)
-R_HULL = 0.25            # m, sphere-hull radius (ch 9.6.1)
-L_MAP = 10.0             # m, host map edge for octree depth (book calc cell)
-SLAB_M3 = 2.86           # m^3, stopping-corridor snapshot (ch 9.6.1)
-PITCHES_CM = (2, 5, 10)
-N_TRILINEAR = 8
-WORKCELL_M3 = 300.0      # m^3 (ch NM 9.1)
-PITCH_HOST = 0.01        # m (ch NM 9.1)
-SURFACE_M2 = 120.0       # m^2 (ch NM 9.1)
-BAND_HALF = 0.04         # m (ch NM 9.1)
-BLOCK_EDGE = 8           # voxels, nvblox layout (ch NM 9.1)
-RAYS = 640 * 480         # VGA depth (ch 9.6.1)
-DEPTH_HZ = 30
-RAY_LEN, RAY_PITCH = 2.0, 0.02
-SOC_BW = 204e9           # B/s host SoC peak (ch 9.6.1)
-FM_TFLOP, ORIN_TFLOPS, CAM_HZ = 3.0, 43.0, 60   # ch 9.6.2
-# nvblox paper (Millane et al., ICRA 2024, arXiv 2311.00626), Table II,
-# "Average" row: incremental ESDF runtime in ms
-ESDF_MS = {"nvblox (GPU)": 1.9, "Fiesta (CPU)": 13.0, "voxblox (CPU)": 58.0}
-NVBLOX_QUERY_NS = 3      # Table III caption: Jetson, uncorrelated queries
-
-# Segment 4: expiry (ch 9.7 to 9.10)
-A_DIST = 50.0            # mm/s^2, disturbance acceleration bound (ch 9.7.3)
-R_TOL_TIGHT = 0.30       # mm (ch 9.7.3)
-E0_COWORKER, TOL_COWORKER = 15.0, 150.0   # mm (ch table 4)
-BIAS_RATE = 0.2          # N/min (ch 9.8)
-T_DRIFT_MIN = 15.0       # min (ch 9.8)
-F_READ = 5.0             # N (ch 9.8)
-E0_MUG = 3.0             # mm (ch NM 9.3)
-V_BELT = 0.20            # m/s (ch NM 9.3)
-TOL_MUG = 15.0           # mm (ch NM 9.3)
-T_USE_MS = 35.0          # ms (ch NM 9.3)
-FROZEN_MS = 100.0        # ms (ch 9.9)
-SKEW_MS = 20.0           # ms (ch 9.11)
-SEP_PITFALL = 0.200      # m (ch 9.11)
+AGE = Scenarios.WarehouseNavCameraAge.result
+FUSION = Scenarios.WarehouseRackEndRangeFusion
+FUSED = FUSION.result
+CONSISTENCY = Scenarios.RackEndMisdatedUpdateConsistency
+BUFFER = Scenarios.WarehouseObservationReplayBuffer.result
+IMU = Scenarios.WarehouseImuOneSecondCoast
+TRACK = Scenarios.WarehouseTrackConfirmationDelay.result
+CLOCK = Scenarios.WarehouseLidarClockConversion.result
+EPOCHS = Scenarios.ArmSensorEpochGap
+STALE = Scenarios.LatchSlotStaleWristTransform
+LATCH = Scenarios.LatchSlotFingerBelief
+LATCH_TIGHT = Scenarios.LatchSlotFingerBeliefTightSlot
+UMB = Scenarios.WarehouseUmbmarkOdometryDrift
+KITTI = Scenarios.WarehouseKittiOdometryDrift
+QUERY = Scenarios.WarehousePermissionClearanceQuery
+HOST = Scenarios.WorkcellHostMapSizing
+FREE = Scenarios.WarehouseRackEndFreeSpace
+COWORKER = Scenarios.CoworkerBesideArmBelief
+MUG = Scenarios.ConveyorMugHandleBelief
+FROZEN = Scenarios.ConveyorMugFrozenTransform
+BIAS = Scenarios.WristForceBiasDrift
+SKEW = Scenarios.WarehouseSkewedRecordPair
 
 
-def kalman():
-    head("Predict and update (slide: The filter predicts, then each update narrows)")
-    sig_odo = V_DIST * DT_SWEEP * 1000
-    sig_pred = math.hypot(SIG0, sig_odo)
-    g_l = sig_pred**2 / (sig_pred**2 + SIG_LIDAR**2)
-    sig_l = math.sqrt((1 - g_l) * sig_pred**2)
-    g_s = sig_l**2 / (sig_l**2 + SIG_STEREO**2)
-    sig_s = math.sqrt((1 - g_s) * sig_l**2)
-    show("odometry std over one sweep (mm)", f"{sig_odo:.1f}")
-    show("predicted std (mm)", f"{sig_pred:.1f}")
-    show("lidar gain", f"{g_l:.2f}")
-    show("after lidar std (mm)", f"{sig_l:.1f}")
-    show("stereo gain", f"{g_s:.2f}")
-    show("after stereo std (mm)", f"{sig_s:.1f}")
-    return dict(sig_odo=sig_odo, sig_pred=sig_pred, g_l=g_l, sig_l=sig_l,
-                g_s=g_s, sig_s=sig_s)
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def misdated(k):
-    head("Misdated update (slide: A misdated update moves the mean, not the spread)")
-    shift = k["g_s"] * MISDATE
-    nsig = shift / k["sig_s"]
-    show("estimate pulled away (mm)", f"{shift:.1f}")
-    show("error in reported std", f"{nsig:.1f}")
-    # Checkpoint: stereo std doubled
-    s2 = 2 * SIG_STEREO
-    g2 = k["sig_l"]**2 / (k["sig_l"]**2 + s2**2)
-    f2 = math.sqrt((1 - g2) * k["sig_l"]**2)
-    show("checkpoint: stereo 7.6 mm -> gain", f"{g2:.2f}")
-    show("checkpoint: fused std (mm)", f"{f2:.1f}")
-    return dict(shift=shift, nsig=nsig)
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-def gates(k):
-    head("NIS gates (slide: Does one gate catch a misdated update?)")
-    s_innov = k["sig_l"]**2 + SIG_STEREO**2
-    lam = MISDATE**2 / s_innov
-    p95 = stats.ncx2.sf(GATE95, 1, lam)
-    p99 = stats.ncx2.sf(GATE99, 1, lam)
-    lo = stats.chi2.ppf(0.025, N_TRIALS) / N_TRIALS
-    hi = stats.chi2.ppf(0.975, N_TRIALS) / N_TRIALS
-    show("noncentrality (bias^2 / S)", f"{lam:.2f}")
-    show("expected NIS", f"{1 + lam:.2f}")
-    show("P(caught at 3.84)", f"{p95:.2f}")
-    show("P(caught at 6.63)", f"{p99:.2f}")
-    show("50-trial mean band", f"{lo:.2f} to {hi:.2f}")
-    return dict(p95=p95, p99=p99, lo=lo, hi=hi, nis=1 + lam)
+print("== The running machine at the rack end")
+v("v_drive", m(RM.base.max_velocity, "m/s"), "{:.1f}", "drive limit, m/s")
+v("v_walk", m(AISLE.v_human_approach, "m/s"), "{:.1f}", "ISO 13855 walking speed, m/s")
+v("d_clear", m(AISLE.d_clear, "m"), "{:.2f}", "rack-end clear distance, m")
+v("d_clear_fig", m(AISLE.d_clear, "m"), "{:.1f}", "the same, figure label")
+v("side_clearance", m(AISLE.side_clearance, "mm"), "{:.0f}", "side clearance, mm")
+v("side_clearance_m", m(AISLE.side_clearance, "m"), "{:.2f}", "side clearance, m")
+v("delta_loc", m(AISLE.delta_loc, "mm"), "{:.0f}", "localization bound, mm")
+v("delta_loc_m", m(AISLE.delta_loc, "m"), "{:.2f}", "localization bound, m")
+v("delta_margin", m(AISLE.delta_margin, "mm"), "{:.0f}", "protective clearance, mm")
+v("delta_margin_m", m(AISLE.delta_margin, "m"), "{:.2f}", "protective clearance, m")
+v("aisle_m", m(AISLE.aisle_length, "m"), "{:.0f}", "aisle length, m")
+v("v_aisle", m(AISLE.v_aisle, "m/s"), "{:.1f}", "aisle speed, m/s")
 
+print("== Recall: the observation age (Scenarios.WarehouseNavCameraAge)")
+v("t_age", m(AGE.age, "ms"), "{:.1f}", "frame age at dispatch, ms")
+v("d_age", m(AGE.age_travel, "mm"), "{:.1f}", "base travel during the age, mm")
+v("t_frame", m(AGE.frame_period, "ms"), "{:.1f}", "navigation and wrist frame period, ms")
 
-def imu():
-    head("Dead reckoning (slide: Over one second, the IMU's bias outgrows its noise)")
-    gyro_noise = GYRO_ND * math.sqrt(T_IMU)
-    gyro_bias = GYRO_BIAS * T_IMU
-    lateral = RANGE_UPRIGHT * math.tan(math.radians(gyro_bias)) * 1000
-    acc_bias = 0.5 * ACC_BIAS * G * T_IMU**2 * 1000
-    acc_noise = ACC_ND * G * math.sqrt(T_IMU**3 / 3) * 1000
-    show("gyro noise heading (deg)", f"{gyro_noise:.3f}")
-    show("gyro bias heading (deg)", f"{gyro_bias:.0f}")
-    show("lateral at 1.10 m (mm)", f"{lateral:.1f}")
-    show("accel bias position (mm)", f"{acc_bias:.1f}")
-    show("accel noise position (mm)", f"{acc_noise:.1f}")
-    show("bias / localization bound", f"{acc_bias / (DELTA_LOC * 1000):.1f}x")
-    return dict(gyro_noise=gyro_noise, lateral=lateral, acc_bias=acc_bias,
-                acc_noise=acc_noise)
+print("== Kalman predict and update (Scenarios.WarehouseRackEndRangeFusion)")
+v("sig_prior", m(FUSION.prior_sigma, "mm"), "{:.0f}", "prior spread, mm")
+v("sig_prior_fig", m(FUSION.prior_sigma, "mm"), "{:.1f}", "prior spread, mm, figure label")
+v("speed_sigma", m(FUSION.speed_sigma, "m/s"), "{:.1f}", "odometry speed disturbance, m/s")
+v("t_sweep", m(1 / RM.lidar.scan_rate, "ms"), "{:.0f}", "lidar sweep interval, ms")
+v("sig_odo", m(FUSED.process_sigma, "mm"), "{:.0f}", "odometry spread over one sweep, mm")
+v("sig_pred", m(FUSED.predicted_sigma, "mm"), "{:.1f}", "predicted spread, mm")
+v("sig_lidar", m(RM.lidar.range_precision_max, "mm"), "{:.0f}", "OS1-64 range precision, worst case, mm")
+v("lidar_bias", m(RM.lidar.range_accuracy, "mm"), "{:.0f}", "OS1-64 systematic accuracy offset, mm")
+v("g_lidar", FUSED.first_gain, "{:.2f}", "lidar gain")
+v("sig_l", m(FUSED.first_sigma, "mm"), "{:.1f}", "spread after lidar, mm")
+v("sig_stereo", m(FUSED.second_sensor_sigma, "mm"), "{:.1f}", "stereo spread at the rack end, mm")
+v("g_stereo", FUSED.second_gain, "{:.2f}", "stereo gain")
+v("sig_s", m(FUSED.fused_sigma, "mm"), "{:.1f}", "fused spread, mm")
+v("sig_stereo_x2", m(FUSION.comparison_scale * FUSED.second_sensor_sigma, "mm"), "{:.1f}",
+  "checkpoint: stereo spread doubled, mm")
+v("g_stereo_x2", FUSED.comparison_gain, "{:.2f}", "checkpoint: stereo gain")
+v("sig_s_x2", m(FUSED.comparison_sigma, "mm"), "{:.1f}", "checkpoint: fused spread, mm")
 
+print("== Misdated update and replay buffer")
+v("misdate", m(FUSED.misdating_bias, "mm"), "{:.1f}", "arrival-stamp travel, mm")
+v("shift", m(FUSED.misdated_shift, "mm"), "{:.1f}", "estimate pulled away, mm")
+v("nsig_words", round(FUSED.misdated_shift_sigmas), "words", "error in reported standard deviations, about")
+v("slots", BUFFER.slots, "{:.0f}", "ring-buffer slots")
+v("f_imu_khz", m(RM.imu.sample_rate, "kHz"), "{:.0f}", "IMU sample rate, kHz")
 
-def tracker():
-    head("Occupancy before identity (slide: SORT code)")
-    wait_ms = (SORT_MIN_HITS - 1) * FRAME_MS
-    travel = V_DRIVE * wait_ms
-    show("frames before confirmation", SORT_MIN_HITS)
-    show("wait after first detection (ms)", f"{wait_ms:.1f}")
-    show("travel at drive limit (mm)", f"{travel:.1f}")
-    slots = math.ceil(T_AGE_MS / IMU_RATE_MS)
-    show("ring buffer slots for 51.6 ms at 1 kHz", slots)
-    return dict(wait=wait_ms, travel=travel, slots=slots)
+print("== NIS gates (Scenarios.RackEndMisdatedUpdateConsistency)")
+cons = CONSISTENCY.result
+v("nis", cons.nis_expected, "{:.2f}", "expected NIS of the misdated update")
+v("gate95", cons.gates[0], "{:.2f}", "95 percent gate")
+v("gate99", cons.gates[1], "{:.2f}", "99 percent gate")
+v("gate95_pct", 100 * CONSISTENCY.gate_confidences[0], "{:.0f}", "first gate level, percent")
+v("gate99_pct", 100 * CONSISTENCY.gate_confidences[1], "{:.0f}", "second gate level, percent")
+v("p95", cons.detection[0], "{:.2f}", "probability caught at the 95 percent gate")
+v("p99", cons.detection[1], "{:.2f}", "probability caught at the 99 percent gate")
+v("n_runs", CONSISTENCY.runs, "{:.0f}", "innovations averaged")
+v("band_lo", cons.band_low, "{:.2f}", "honest mean-NIS band, low")
+v("band_hi", cons.band_high, "{:.2f}", "honest mean-NIS band, high")
+v("nees_band_pct", 100 * CONSISTENCY.confidence, "{:.0f}", "band confidence, percent")
 
+print("== IMU coasting (Scenarios.WarehouseImuOneSecondCoast)")
+imu = IMU.result
+v("t_coast", m(IMU.duration, "s"), "{:.0f}", "coasting interval, s")
+v("t_coast_words", m(IMU.duration, "s"), "words", "the same, in words")
+v("gyro_bias", m(RM.imu.gyro_zero_rate_offset, "deg/s"), "{:.0f}", "BMI088 gyro zero-rate offset, deg/s")
+v("acc_bias_mg", m(RM.imu.accel_zero_g_offset, "milligravity"), "{:.0f}", "BMI088 zero-g offset, mg")
+v("gyro_noise_deg", m(imu.heading_noise, "deg"), "{:.3f}", "gyro-noise heading after the interval, deg")
+v("imu_lateral", m(imu.lateral_bias, "mm"), "{:.1f}", "gyro-offset lateral error at the upright, mm")
+v("acc_bias_mm", m(imu.position_bias, "mm"), "{:.1f}", "accelerometer-offset position error, mm")
+v("acc_noise_mm", m(imu.position_noise, "mm"), "{:.1f}", "accelerometer-noise position error, mm")
 
-def epochs():
-    head("Three epochs (slide: A stamped pose carries one time)")
-    gap = T_ENC - T_CAM
-    show("camera-to-encoder gap (ms)", f"{gap:.1f}")
-    show("tool travel at 1.7 m/s (mm)", f"{V_ARM * gap:.2f}")
-    show("sync margin at drive limit (mm)", f"{V_DRIVE * SYNC_MS:.1f}")
+print("== SORT confirmation (Scenarios.WarehouseTrackConfirmationDelay)")
+v("min_hits_words", LIT.SortMinHits, "words", "SORT min_hits, in words")
+v("held_words", TRACK.held_frames, "words", "frame periods withheld, in words")
+v("min_hits", LIT.SortMinHits, "{:.0f}", "SORT min_hits")
+v("max_age", LIT.SortMaxAge, "{:.0f}", "SORT max_age, frames")
+v("sort_wait", m(TRACK.wait, "ms"), "{:.1f}", "wait after the first detection, ms")
+v("sort_travel", m(TRACK.travel, "mm"), "{:.1f}", "travel at the drive limit meanwhile, mm")
 
+print("== Epochs and clocks (Scenarios.WarehouseLidarClockConversion, ArmSensorEpochGap)")
+v("eps_sync", m(AISLE.clock_conversion_bound, "ms"), "{:.1f}", "clock-conversion bound, ms")
+v("d_sync", m(CLOCK.bound_travel, "mm"), "{:.1f}", "its travel at the drive limit, mm")
+gap = EPOCHS.result
+v("epoch_gap", m(gap.gap, "ms"), "{:.1f}", "camera-to-encoder gap, ms")
+v("d_gap", m(gap.travel, "mm"), "{:.2f}", "tool travel across it, mm")
+v("v_arm", m(EPOCHS.speed, "m/s"), "{:.1f}", "arm Cartesian speed limit, m/s")
 
-def lever():
-    head("Frames age (slide: A stale camera edge misses the slot)")
-    e_tr = V_DRIFT * FRAME_MS / 1000
-    e_rot = R_ARM * 1000 * OMEGA * FRAME_MS / 1000
-    tot = E0_SLOT + e_tr + e_rot
-    show("drift term (mm)", f"{e_tr:.2f}")
-    show("lever-arm term (mm)", f"{e_rot:.2f}")
-    show("total (mm)", f"{tot:.2f}")
-    show("over tolerance (percent)", f"{(tot / R_TOL - 1) * 100:.0f}")
-    show("lever / drift", f"{e_rot / e_tr:.1f}")
-    return dict(e_tr=e_tr, e_rot=e_rot, tot=tot)
+print("== Stale edge at the latch slot (Scenarios.LatchSlotStaleWristTransform)")
+stale = STALE.result
+v("lever", m(STALE.lever, "m"), "{:.2f}", "wrist-to-fingertip lever arm, m")
+v("omega", m(STALE.angular_rate, "rad/s"), "{:.2f}", "wrist rate, rad/s")
+v("v_drift", m(LATCH.growth_rate, "mm/s"), "{:.0f}", "unseen drift bound, mm/s")
+v("e0_slot", m(LATCH.initial_error, "mm"), "{:.1f}", "initial error, mm")
+v("e0_slot_fig", m(LATCH.initial_error, "mm"), "{:.2f}", "the same, figure label")
+v("r_tol", m(LATCH.tolerance, "mm"), "{:.0f}", "slot tolerance, mm")
+v("e_drift", m(stale.drift_term, "mm"), "{:.2f}", "drift term, mm")
+v("e_lever", m(stale.lever_term, "mm"), "{:.2f}", "lever-arm term, mm")
+v("e_total", m(stale.total, "mm"), "{:.2f}", "total, mm")
+v("over_pct", 100 * stale.over_tolerance, "{:.0f}", "over the tolerance, percent")
+v("e_same", m(stale.same_epoch_error, "mm"), "{:.2f}", "same-epoch chain, mm")
 
+print("== UMBmark (Scenarios.WarehouseUmbmarkOdometryDrift)")
+umb = UMB.result
+v("umb_side", m(UMB.square_side, "m"), "{:.0f}", "square side, m")
+v("umb_path", m(umb.path_length, "m"), "{:.0f}", "path per run, m")
+v("umb_uncal", m(UMB.return_error_uncalibrated, "mm"), "{:.0f}", "return error, uncalibrated, mm")
+v("umb_cal", m(UMB.return_error_calibrated, "mm"), "{:.0f}", "return error, calibrated, mm")
+v("umb_sigma", m(UMB.run_sigma, "mm"), "{:.0f}", "run-to-run spread, mm")
+v("umb_speed", m(UMB.test_speed, "m/s"), "{:.1f}", "benchmark speed, m/s")
+v("r_unc_pct", 100 * umb.rate_uncalibrated, "{:.1f}", "uncalibrated rate, percent")
+v("r_cal_pct", 100 * umb.rate_calibrated, "{:.2f}", "calibrated rate, percent")
+v("d_unc", m(umb.distance_uncalibrated, "m"), "{:.1f}", "uncalibrated: bound spent after, m")
+v("t_unc", m(umb.time_uncalibrated, "s"), "{:.1f}", "uncalibrated: seconds at the aisle speed")
+v("e_aisle_unc", m(umb.segment_error_uncalibrated, "mm"), "{:.1f}", "uncalibrated: drift over one aisle, mm")
+v("aisle_over_bound", umb.segment_over_bound_uncalibrated, "{:.1f}", "uncalibrated: times the bound")
+v("cal_gain", umb.calibration_gain, "{:.1f}", "calibration gain")
+v("d_cal", m(umb.distance_calibrated, "m"), "{:.1f}", "calibrated: bound spent after, m")
+v("speed_ratio", umb.speed_ratio, "{:.1f}", "production over lab speed")
 
-def umbmark():
-    head("Odometry drift (slide: UMBmark)")
-    r_unc = UMB_UNCAL / (UMB_PATH * 1000)
-    r_cal = UMB_CAL / (UMB_PATH * 1000)
-    d_unc = DELTA_LOC / r_unc
-    d_cal = DELTA_LOC / r_cal
-    show("uncalibrated rate (percent)", f"{r_unc * 100:.1f}")
-    show("calibrated rate (percent)", f"{r_cal * 100:.2f}")
-    show("calibration gain", f"{UMB_UNCAL / UMB_CAL:.1f}x")
-    show("uncalibrated: bound spent after (m)", f"{d_unc:.1f}")
-    show("uncalibrated: seconds at 1.3 m/s", f"{d_unc / V_AISLE:.1f}")
-    show("uncalibrated: drift over 30 m (mm)", f"{r_unc * AISLE_M * 1000:.1f}")
-    show("uncalibrated: times the bound", f"{r_unc * AISLE_M / DELTA_LOC:.1f}x")
-    show("calibrated: bound spent after (m)", f"{d_cal:.1f}")
-    show("calibrated: seconds at 1.3 m/s", f"{d_cal / V_AISLE:.1f}")
-    show("calibrated: drift over 30 m (mm)", f"{r_cal * AISLE_M * 1000:.1f}")
-    show("production / lab speed", f"{V_AISLE / UMB_LAB_SPEED:.1f}x")
-    return dict(r_unc=r_unc, r_cal=r_cal, d_unc=d_unc, d_cal=d_cal)
+print("== KITTI (Scenarios.WarehouseKittiOdometryDrift)")
+kit = KITTI.result
+v("kitti_n", kit.count, "{:.0f}", "ranked methods")
+v("kitti_best", kit.best_pct, "{:.2f}", "best, percent")
+v("kitti_laser", kit.laser_median_pct, "{:.2f}", "median lidar, percent")
+v("kitti_stereo", kit.stereo_median_pct, "{:.2f}", "median stereo, percent")
+v("kitti_d_best", m(kit.distance_best, "m"), "{:.1f}", "best: meters to spend the bound")
+v("kitti_d_laser", m(kit.distance_laser_median, "m"), "{:.1f}", "median lidar: meters")
+v("kitti_d_stereo", m(kit.distance_stereo_median, "m"), "{:.1f}", "median stereo: meters")
 
+print("== Read budget and reads per query (Scenarios.WarehousePermissionClearanceQuery)")
+q = QUERY.result
+v("hulls", QUERY.hulls, "{:.0f}", "body spheres")
+v("f_tick_khz", m(RM.permission_rate, "kHz"), "{:.0f}", "permission tick rate, kHz")
+v("t_tick_ms", m(q.tick, "ms"), "{:.0f}", "permission tick, ms")
+v("t_reflex", m(QUERY.collision_allocation, "us"), "{:.0f}", "collision allocation, us")
+v("t_query", m(q.query_time, "us"), "{:.0f}", "per-sphere allocation, us")
+v("sram_bw", m(RM.permission_mcu.memory.sram_bandwidth, "GB/s"), "{:.1f}", "permission MCU SRAM bandwidth, GB/s")
+v("cell_b", m(QUERY.esdf_cell_bytes, "B"), "{:.0f}", "bytes per ESDF cell")
+v("reads", q.reads_budget, "{:.0f}", "read budget per query")
+v("wcet", m(AISLE.enforcer_wcet, "us"), "{:.0f}", "declared WCET of the permission job, us")
+v("wcet_pct", 100 * q.wcet_share, "{:.0f}", "collision share of the WCET, percent")
+v("spare_pct", 100 * q.tick_spare_share, "{:.0f}", "tick left for other work, percent")
+v("r_hull", m(QUERY.hull_radius, "m"), "{:.2f}", "sphere radius, m")
+v("reach", m(q.reach, "m"), "{:.2f}", "radius plus clearance, m")
+v("map_edge", m(QUERY.map_edge, "m"), "{:.0f}", "host map edge, m")
+v("trilinear", QUERY.trilinear_reads, "{:.0f}", "corner reads of one interpolation")
+for cm, row in q.rows.items():
+    v(f"pitch{cm}", cm, "{:.0f}", f"pitch, cm")
+    v(f"occ{cm}", row.occupancy_reads, "{:,.0f}", f"{cm} cm: occupancy reads")
+    v(f"oct{cm}", row.octree_reads, "{:,.0f}", f"{cm} cm: octree reads")
+    v(f"depth{cm}", row.octree_depth, "{:.0f}", f"{cm} cm: octree depth")
+    v(f"quant{cm}", m(row.quantization, "mm"), "{:.0f}", f"{cm} cm: quantization, mm")
+    v(f"esdf{cm}_kb", m(row.esdf_bytes, "kB"), "{:,.0f}", f"{cm} cm: ESDF snapshot, kB")
+v("esdf2_mb", m(q.rows[2].esdf_bytes, "MB"), "{:.2f}", "2 cm snapshot, MB")
+v("sram_mb", m(RM.permission_mcu.memory.sram_capacity, "MB"), "{:.2f}", "permission MCU SRAM, MB")
+v("slab", m(q.slab_volume, "m**3"), "{:.2f}", "stopping-corridor snapshot volume, m^3")
+v("slab_h", m(QUERY.slab_height, "m"), "{:.0f}", "snapshot height, m")
 
-def kitti():
-    head("KITTI (slide: Every ranked odometry method spends 50 mm within one aisle)")
-    from mlsysim import Literature
-    import statistics
-    rows = Literature.KittiOdometry.entries
-    st = [r["translation_err_pct"] for r in rows if r["sensor_group"] == "stereo"]
-    la = [r["translation_err_pct"] for r in rows if r["sensor_group"] == "laser"]
-    best = min(min(st), min(la))
-    allv = [r["translation_err_pct"] for r in rows]
-    show("ranked methods", len(rows))
-    show("stereo / lidar / other counts", f"{len(st)} / {len(la)} / {len(rows) - len(st) - len(la)}")
-    show("best (percent)", best)
-    show("median stereo (percent)", round(statistics.median(st), 2))
-    show("median lidar (percent)", round(statistics.median(la), 2))
-    show("best: meters to spend 50 mm", f"{DELTA_LOC / (best / 100):.1f}")
-    show("median lidar: meters", f"{DELTA_LOC / (statistics.median(la) / 100):.1f}")
-    show("median stereo: meters", f"{DELTA_LOC / (statistics.median(st) / 100):.1f}")
-    show("aisle error threshold (percent)", f"{100 * DELTA_LOC / AISLE_M:.3f}")
-    show("methods below that threshold", sum(1 for v in allv if v < 100 * DELTA_LOC / AISLE_M))
-    return rows
+print("== nvblox (Literature.RobotPerception, Millane et al. 2024, Table II)")
+v("esdf_nvblox", LIT.NvbloxEsdfUpdateMs, "{:g}", "nvblox ESDF update, ms")
+v("esdf_fiesta", LIT.FiestaEsdfUpdateMs, "{:g}", "Fiesta ESDF update, ms")
+v("esdf_voxblox", LIT.VoxbloxEsdfUpdateMs, "{:g}", "voxblox ESDF update, ms")
 
+print("== Host map (Scenarios.WorkcellHostMapSizing)")
+host = HOST.result
+lx, ly, lz = HOST.extent
+v("ws_x", m(lx, "m"), "{:.0f}", "workcell length, m")
+v("ws_y", m(ly, "m"), "{:.0f}", "workcell width, m")
+v("ws_z", m(lz, "m"), "{:.0f}", "workcell height, m")
+v("ws_m3", m(host.workspace_volume, "m**3"), "{:.0f}", "workcell volume, m^3")
+v("host_pitch", m(HOST.pitch, "cm"), "{:.0f}", "host pitch, cm")
+DENSE_EXP = math.floor(math.log10(host.dense_voxels))
+v("dense_mant", host.dense_voxels / 10 ** DENSE_EXP, "{:.0f}", "dense voxels, mantissa")
+v("dense_exp", DENSE_EXP, "{:.0f}", "dense voxels, power of ten")
+v("dense_gb", m(host.dense_bytes, "GB"), "{:.1f}", "dense grid, GB")
+v("surface", m(HOST.surface_area, "m**2"), "{:.0f}", "surface area, m^2")
+v("band_cm", m(HOST.band_half_width, "cm"), "{:.0f}", "band half-width, cm")
+v("band_pct", 100 * host.band_share, "{:.1f}", "band share of the volume, percent")
+v("hashed_mb", m(host.hashed_bytes, "MB"), "{:.1f}", "hashed band, MB")
+v("dense_over_hashed", host.ratio, "{:.0f}", "dense over hashed")
+v("block_edge", HOST.block_edge, "{:.0f}", "voxels per block edge")
 
-def budget():
-    head("Read budget (slide: The permission controller gets 2 us per hull)")
-    t_q = T_REFLEX_US / N_HULLS
-    reads = SRAM_BW * t_q * 1e-6 / CELL_B
-    show("per-hull allocation (us)", f"{t_q:.0f}")
-    show("read budget per query", f"{reads:.0f}")
-    show("collision share of WCET (percent)", f"{100 * T_REFLEX_US / WCET_US:.0f}")
-    show("tick left for other work (percent)", f"{100 * (1 - T_REFLEX_US / F_TICK_US):.0f}")
-    return dict(t_q=t_q, reads=reads)
+print("== Free-space expiry at the rack end (Scenarios.WarehouseRackEndFreeSpace)")
+free = FREE.result
+v("t_ahead", m(free.horizon_ahead, "ms"), "{:.2f}", "ahead, ms")
+v("t_ahead_whole", m(free.horizon_ahead, "ms"), "{:.0f}", "ahead, whole ms")
+v("t_ahead_s", m(free.horizon_ahead, "s"), "{:.1f}", "ahead, s")
+v("t_abreast", m(free.horizon_abreast, "ms"), "{:.0f}", "abreast, ms")
+v("depth_ahead_m", m(free.certified_depth_ahead, "m"), "{:.2f}", "certified depth ahead, m")
+v("depth_ahead_mm", m(free.certified_depth_ahead, "mm"), "{:.0f}", "certified depth ahead, mm")
+v("depth_abreast_m", m(free.certified_depth_abreast, "m"), "{:.0f}", "certified depth abreast, m")
+v("ms_per_mm", m(free.time_per_depth, "ms/mm"), "{:.3f}", "ms per mm of depth")
+v("d_age_eroded", m(free.depth_eroded_by_age, "mm"), "{:.1f}", "depth spent by the frame age, mm")
+v("t_left", m(free.time_left_at_dispatch, "ms"), "{:.2f}", "left after the frame age, ms")
+v("frames_left", free.frames_bridged, "{:.0f}", "frame periods left, about")
+v("walk_intrusion", m(free.walker_intrusion, "m"), "{:.2f}", "walker during delay plus stop, m")
+v("timeout_ms", m(FREE.uniform_timeout, "ms"), "{:.0f}", "one staleness timeout, ms")
+v("timeout_refused_s", m(free.timeout_refused, "s"), "{:.2f}", "certified time the timeout refuses ahead, s")
 
+print("== Latch slot (Scenarios.LatchSlotFingerBelief, LatchSlotFingerBeliefTightSlot)")
+lat = LATCH.result
+v("a_dist", m(LATCH.growth_acceleration, "mm/s**2"), "{:.0f}", "disturbance acceleration bound, mm/s^2")
+v("a_half", m(lat.quadratic_coefficient, "mm/s**2"), "{:.0f}", "half of it, the dt^2 coefficient, mm/s^2")
+v("slot_slack", m(LATCH.tolerance - LATCH.initial_error, "mm"), "{:.1f}", "tolerance less initial error, mm")
+v("t_latch", m(lat.horizon, "ms"), "{:.0f}", "horizon, ms")
+v("t_lin", m(lat.constant_velocity_horizon, "ms"), "{:.0f}", "constant-velocity horizon, ms")
+v("e_at_lin", m(lat.error_at_constant_velocity_horizon, "mm"), "{:.2f}", "bounded error there, mm")
+v("lin_over_pct", 100 * lat.overshoot, "{:.1f}", "over the tolerance, percent")
+v("overrun", m(lat.overrun, "ms"), "{:.0f}", "blind overrun, ms")
+v("r_tight", m(LATCH_TIGHT.tolerance, "mm"), "{:.2f}", "tight slot, mm")
+v("t_tight", m(LATCH_TIGHT.result.horizon, "ms"), "{:.1f}", "tight-slot horizon, ms")
+v("horizon_ratio", ratio(lat.horizon, LATCH_TIGHT.result.horizon), "{:.1f}", "horizon ratio")
+v("tol_ratio", ratio(LATCH.tolerance, LATCH_TIGHT.tolerance), "{:.1f}", "tolerance ratio")
 
-def reads():
-    head("Reads per query (slide: Only a distance field answers in eight reads)")
-    reach = R_HULL + DELTA_MARGIN
-    out = {}
-    for cm in PITCHES_CM:
-        r = cm / 100
-        scan = 4 / 3 * math.pi * (reach / r) ** 3
-        depth = math.ceil(math.log2(L_MAP / r))
-        cells = SLAB_M3 / r**3
-        out[cm] = dict(occ=scan, depth=depth, oct=scan * depth, esdf=N_TRILINEAR,
-                       esdf_kb=cells * CELL_B / 1e3, occ_kb=cells * OCC_B / 1e3,
-                       quant=math.sqrt(3) / 2 * r * 1000)
-        show(f"{cm} cm: occupancy reads", f"{scan:,.0f}")
-        show(f"{cm} cm: octree depth / reads", f"{depth} / {scan * depth:,.0f}")
-        show(f"{cm} cm: ESDF snapshot (kB)", f"{cells * CELL_B / 1e3:,.0f}")
-        show(f"{cm} cm: quantization (mm)", f"{math.sqrt(3) / 2 * r * 1000:.0f}")
-    return out
+print("== Frozen transform (Scenarios.ConveyorMugFrozenTransform)")
+frz = FROZEN.result
+v("t_loss", m(FROZEN.loss_time, "ms"), "{:.0f}", "camera lost at, ms")
+v("f_repub_khz", m(frz.republish_rate, "kHz"), "{:.0f}", "republish rate, kHz")
+v("t_repub", m(FROZEN.republish_period, "ms"), "{:.0f}", "republish period, ms")
+v("tau_max", m(FROZEN.freshness_threshold, "ms"), "{:.0f}", "freshness threshold, ms")
+v("v_belt", m(AISLE.v_conveyor, "m/s"), "{:.2f}", "belt speed, m/s")
+v("frozen_err", m(frz.error, "mm"), "{:.0f}", "mug moved, mm")
+v("frozen_window", m(FROZEN.window, "ms"), "{:.0f}", "frozen window, ms")
+v("grasp_tol", m(AISLE.grasp_tolerance, "mm"), "{:.0f}", "grasp tolerance, mm")
 
+print("== Four beliefs (Scenarios.CoworkerBesideArmBelief and its tight variant)")
+v("cw_e0", m(COWORKER.initial_error, "mm"), "{:.0f}", "coworker initial error, mm")
+v("cw_tol", m(COWORKER.tolerance, "mm"), "{:.0f}", "coworker tolerance, mm")
+v("t_cw", m(COWORKER.result.horizon, "ms"), "{:.0f}", "coworker horizon, ms")
+tight = Scenarios.CoworkerBesideArmBeliefTightTolerance
+v("cw_tol_tight", m(tight.tolerance, "mm"), "{:.0f}", "checkpoint: tighter tolerance, mm")
+v("t_cw_tight", m(tight.result.horizon, "ms"), "{:.0f}", "checkpoint: coworker horizon, ms")
 
-def empty_air():
-    head("Empty-air tax (NM 9.1)")
-    vox = WORKCELL_M3 / PITCH_HOST**3
-    dense = vox * CELL_B
-    band = 2 * BAND_HALF * SURFACE_M2
-    blocks = band / (BLOCK_EDGE * PITCH_HOST) ** 3
-    hashed = blocks * BLOCK_EDGE**3 * CELL_B
-    show("voxels", f"{vox:.1e}")
-    show("dense (GB)", f"{dense / 1e9:.1f}")
-    show("band (m^3)", f"{band:.1f}")
-    show("band share (percent)", f"{100 * band / WORKCELL_M3:.1f}")
-    show("blocks", f"{blocks:,.0f}")
-    show("hashed (MB)", f"{hashed / 1e6:.1f}")
-    show("ratio", f"{dense / hashed:.0f}x")
-    bw = RAYS * DEPTH_HZ * (RAY_LEN / RAY_PITCH) * CELL_B
-    show("ray-marching traffic (GB/s)", f"{bw / 1e9:.2f}")
-    show("share of 204 GB/s (percent)", f"{100 * bw / SOC_BW:.1f}")
-    show("foundation model at 60 Hz (TFLOP/s)", f"{FM_TFLOP * CAM_HZ:.0f}")
-    show("vs Orin peak", f"{FM_TFLOP * CAM_HZ / ORIN_TFLOPS:.1f}x")
-    show("nvblox / voxblox ESDF speedup", f"{ESDF_MS['voxblox (CPU)'] / ESDF_MS['nvblox (GPU)']:.1f}x")
-    return dict(dense=dense, hashed=hashed)
+print("== Mug admission (Scenarios.ConveyorMugHandleBelief)")
+mug = MUG.result
+v("mug_e0", m(MUG.initial_error, "mm"), "{:.0f}", "initial error, mm")
+v("v_belt_mm_ms", m(AISLE.v_conveyor, "mm/ms"), "{:.2f}", "belt, mm per ms")
+v("v_belt_mm_ms_short", m(AISLE.v_conveyor, "mm/ms"), "{:.1f}", "belt, mm per ms, one decimal")
+v("t_use", m(MUG.use_age, "ms"), "{:.0f}", "use age after capture, ms")
+v("eps_sync_short", m(MUG.age_bound, "ms"), "{:.1f}", "conversion bound, ms")
+v("age_upper", m(mug.use_age_upper, "ms"), "{:.1f}", "upper age, ms")
+v("e_use", m(mug.error_at_use, "mm"), "{:.2f}", "error at use, mm")
+v("mug_margin", m(mug.margin_at_use, "mm"), "{:.2f}", "margin, mm")
+v("mug_left", m(mug.time_left, "ms"), "{:.1f}", "lifetime left, ms")
+v("mug_horizon", m(mug.horizon, "ms"), "{:.0f}", "mug horizon, ms")
+v("mug_latest", m(mug.latest_use_age, "ms"), "{:.1f}", "latest use age, ms")
 
+print("== Force bias (Scenarios.WristForceBiasDrift)")
+bias = BIAS.result
+v("f_read", m(BIAS.reading, "N"), "{:.0f}", "reading, N")
+v("f_sigma", m(BIAS.reported_sigma, "N"), "{:.2f}", "reported spread, N")
+v("bias_rate", m(BIAS.drift_rate, "N/min"), "{:.1f}", "drift, N per minute")
+v("bias_span", m(BIAS.span, "min"), "{:.0f}", "drift interval, minutes")
+v("bias_shift", m(bias.shift, "N"), "{:.0f}", "bias shift, N")
+v("f_true", m(bias.true_value, "N"), "{:.0f}", "true force, N")
+v("grip_lost", 100 * bias.lost_share, "{:.0f}", "grip lost, percent")
 
-def erosion():
-    head("Rack end (NM 9.2)")
-    t_ab = (SIDE_CLEAR - DELTA_LOC - DELTA_MARGIN) / V_WALK
-    t_ah = (D_CLEAR - DELTA_LOC - DELTA_MARGIN) / V_WALK
-    left = t_ah * 1000 - T_AGE_MS
-    show("abreast (ms)", f"{t_ab * 1000:.2f}")
-    show("ahead (ms)", f"{t_ah * 1000:.2f}")
-    show("left after frame age (ms)", f"{left:.2f}")
-    show("frame periods left", f"{left / FRAME_MS:.1f}")
-    show("depth spent by frame age (mm)", f"{V_WALK * T_AGE_MS:.1f}")
-    show("recall: base travel during frame age at 1.5 m/s (mm)", f"{V_DRIVE * T_AGE_MS:.1f}")
-    show("ms per mm of depth", f"{1 / V_WALK:.3f}")
-    show("initial certified depth (mm)", f"{(D_CLEAR - DELTA_LOC - DELTA_MARGIN) * 1000:.0f}")
-    t_stop = V_DRIVE / A_BRAKE
-    intr = V_WALK * (TAU_DELAY + t_stop)
-    show("walking intrusion over delay + stop (m)", f"{intr:.2f}")
-    return dict(t_ah=t_ah * 1000, t_ab=t_ab * 1000)
-
-
-def quad_root(e0, v, a_half, tol):
-    # a_half * t^2 + v * t + (e0 - tol) = 0, t in s, e in mm
-    c = e0 - tol
-    return (-v + math.sqrt(v * v - 4 * a_half * c)) / (2 * a_half)
-
-
-def latch():
-    head("Latch slot (ch 9.7.3)")
-    t = quad_root(E0_SLOT, V_DRIFT, A_DIST / 2, R_TOL)
-    t_lin = (R_TOL - E0_SLOT) / V_DRIFT
-    e_at = E0_SLOT + V_DRIFT * t_lin + A_DIST / 2 * t_lin**2
-    t_tight = quad_root(E0_SLOT, V_DRIFT, A_DIST / 2, R_TOL_TIGHT)
-    one = E0_SLOT + V_DRIFT * FRAME_MS / 1000 + A_DIST / 2 * (FRAME_MS / 1000) ** 2
-    show("horizon (ms)", f"{t * 1000:.1f}")
-    show("constant-velocity horizon (ms)", f"{t_lin * 1000:.1f}")
-    show("bounded error at 75 ms (mm)", f"{e_at:.3f}")
-    show("over tolerance (percent)", f"{(e_at / R_TOL - 1) * 100:.1f}")
-    show("blind overrun (ms)", f"{(t_lin - t) * 1000:.1f}")
-    show("tight slot horizon (ms)", f"{t_tight * 1000:.1f}")
-    show("tolerance ratio", f"{R_TOL / R_TOL_TIGHT:.1f}x")
-    show("horizon ratio", f"{t / t_tight:.1f}x")
-    show("error over one frame, common epoch (mm)", f"{one:.2f}")
-    return dict(t=t * 1000, t_lin=t_lin * 1000, e_at=e_at, one=one)
-
-
-def beliefs():
-    head("Four beliefs (ch table 4)")
-    cw = (TOL_COWORKER - E0_COWORKER) / (V_WALK * 1000) * 1000
-    cw100 = (100 - E0_COWORKER) / (V_WALK * 1000) * 1000
-    show("coworker (ms)", f"{cw:.1f}")
-    show("checkpoint: coworker at 100 mm (ms)", f"{cw100:.1f}")
-    ahead = (D_CLEAR - DELTA_LOC - DELTA_MARGIN) / V_WALK
-    show("100 ms timeout: certified time refused ahead (s)", f"{ahead - 0.100:.2f}")
-
-
-def observability():
-    head("Force bias (ch 9.8)")
-    shift = BIAS_RATE * T_DRIFT_MIN
-    true = F_READ - shift
-    show("bias shift (N)", f"{shift:.0f}")
-    show("true force (N)", f"{true:.0f}")
-    show("grip lost (percent)", f"{100 * shift / F_READ:.0f}")
-
-
-def mug():
-    head("Mug admission (NM 9.3)")
-    t_inv = (TOL_MUG - E0_MUG) / (V_BELT)            # mm / (m/s) -> ms
-    up = T_USE_MS + SYNC_MS
-    e = E0_MUG + V_BELT * up
-    show("horizon (ms)", f"{t_inv:.0f}")
-    show("upper age (ms)", f"{up:.1f}")
-    show("error at use (mm)", f"{e:.2f}")
-    show("margin (mm)", f"{TOL_MUG - e:.2f}")
-    show("lifetime left (ms)", f"{t_inv - up:.1f}")
-    show("limiting use age (ms)", f"{t_inv - SYNC_MS:.1f}")
-
-
-def frozen():
-    head("Frozen transform (ch 9.9) and skew pitfall (ch 9.11)")
-    show("mug error after 100 ms (mm)", f"{V_BELT * FROZEN_MS:.0f}")
-    closing = V_DRIVE + V_WALK
-    env = closing * SKEW_MS
-    slack = (SEP_PITFALL - DELTA_LOC - DELTA_MARGIN) * 1000
-    show("closing speed (m/s)", f"{closing:.1f}")
-    show("skew envelope (mm)", f"{env:.0f}")
-    show("slack (mm)", f"{slack:.0f}")
+print("== Skewed records (Scenarios.WarehouseSkewedRecordPair)")
+sk = SKEW.result
+v("skew", m(SKEW.skew, "ms"), "{:.0f}", "skew, ms")
+v("v_close", m(sk.speed, "m/s"), "{:.1f}", "closing speed, m/s")
+v("d_skew", m(sk.travel, "mm"), "{:.0f}", "envelope, mm")
+v("sep_slack", m(sk.slack, "mm"), "{:.0f}", "slack, mm")
+v("separation", m(SKEW.separation, "mm"), "{:.0f}", "separation, mm")
 
 
 if __name__ == "__main__":
-    k = kalman()
-    misdated(k)
-    gates(k)
-    imu()
-    tracker()
-    epochs()
-    lever()
-    umbmark()
-    kitti()
-    budget()
-    reads()
-    empty_air()
-    erosion()
-    latch()
-    beliefs()
-    observability()
-    mug()
-    frozen()
+    write(__file__)
