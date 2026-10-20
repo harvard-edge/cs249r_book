@@ -1,96 +1,95 @@
 #!/usr/bin/env python3
-"""Every derived number Lecture 0 (Volume III) shows, computed from sourced inputs.
+"""Every number on the Volume III Lecture 0 slides and notes, read from MLSysIM.
 
-Run from this folder: python3 calcs.py
-Each line prints the value with the slide (or note) that shows it. Copy the
-printed values onto the slides; never compute a slide number by hand.
-make_figs.py imports the functions below so plots and slides agree.
+Lecture 0 previews the course, so each number it shares with a later lecture is
+read from the same Literature entry or scenario that lecture's deck reads: the
+repair run (Lecture 1, Scenarios.MiniSweAgentSonnet4Run's series), the horizon
+question (Lecture 1, Scenarios.UncheckedRepairHorizon), the resend question
+(Lecture 2, Scenarios.CodingAgentResend30Turns), and the six incident cards
+(Lectures 2, 6, 17, and 18). Lecture 0 reveals no Lecture 1 or 2 answer on a
+slide; the notes carry them for the instructor.
 
-Lecture 0 reveals no Lecture 1 or Lecture 2 result on a slide. The two
-first-taste questions (horizon and resend) are computed here only so the
-answer choices and the instructor's note are right; the slides do not show
-the answers.
+Sources behind the values
+  Hook run          Literature.SweBenchMiniSonnet4Run (django__django-12050)
+  Its calls         Literature.SweBenchMiniSonnet4Django12050Calls
+  Leaderboard       Scenarios.SweBenchVerifiedLeaderboardOneAttempt
+                    (Literature.SweBenchVerifiedLeaderboard)
+  Incident cards    Literature.ServingIncidents, IncidentReports, AgentEvaluation,
+                    MultiAgentSystems; Scenarios.ResearchSystemTokenBreakEven
+
+This file only selects values, converts units, and formats them; it types no
+numbers. Run from this folder: python3 calcs.py (writes images/numbers.tex).
 """
 
-import csv
-import json
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).parent
-TASKS = 500  # SWE-bench Verified tasks (Chowdhury et al. 2024)
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
+LB = Scenarios.SweBenchVerifiedLeaderboardOneAttempt
+HORIZON, RESEND = Scenarios.UncheckedRepairHorizon, Scenarios.CodingAgentResend30Turns
+BE = Scenarios.ResearchSystemTokenBreakEven
+HOOK_ID = "django__django-12050"
+HOOK = Literature.SweBenchMiniSonnet4Run.where(instance_id=HOOK_ID)[0]
+CALLS = Literature.SweBenchMiniSonnet4Django12050Calls.entries
+# Same model, same day (2 April 2024): retrieval baseline (one call) and SWE-agent (loop)
+PAIRS = [("gpt4", "GPT-4 (1106)", "20240402_rag_gpt4", "20240402_sweagent_gpt4"),
+         ("opus", "Claude 3 Opus", "20240402_rag_claude3opus", "20240402_sweagent_claude3opus")]
 
 
-# --- The hook: one real repair (SWE-bench Verified submission
-#     20250726_mini-v1.0.0_claude-sonnet-4-20250514, per_instance_details.json)
-def hook_run():
-    det = json.loads((HERE / "swebench_per_instance.json").read_text())["django__django-12050"]
-    return dict(cost=det["cost"], calls=det["api_calls"], resolved=det["resolved"])
+def pct(x):
+    return 100 * x
 
 
-# --- Why now: SWE-bench Verified leaderboard (swebench_trend.py writes the CSV
-#     from github.com/SWE-bench/experiments, evaluation/verified/*)
-def trend():
-    rows = list(csv.DictReader(open(HERE / "swebench_verified_trend.csv")))
-    one = [r for r in rows if r["attempts"] == "1"]
-    one.sort(key=lambda r: r["date"])
-    first = one[0]
-    best = max(one, key=lambda r: int(r["resolved"]))
-    frontier, top = [], -1
-    for r in one:
-        v = int(r["resolved"])
-        if v > top:
-            top = v
-            frontier.append((r["date"], v / TASKS))
-    return dict(points=[(r["date"], int(r["resolved"]) / TASKS) for r in one],
-                n=len(one), n_all=len(rows), first=first, best=best,
-                first_share=int(first["resolved"]) / TASKS,
-                best_share=int(best["resolved"]) / TASKS, frontier=frontier)
+print("== Hook: one real repair (django__django-12050)")
+v("hook_calls", HOOK["model_calls"], "{:.0f}", "model calls")
+v("hook_cost", HOOK["cost_usd"], "{:.2f}", "cost of the model calls, $")
 
+print("== Leaderboard (one attempt per task)")
+first, best = LB.first, LB.best
+v("swe_tasks", LB.tasks, "{:.0f}", "SWE-bench Verified tasks")
+v("lb_n", len(LB.comparable), "{:.0f}", "one-attempt submissions plotted")
+v("lb_n_all", len(LB.submissions), "{:.0f}", "submissions with results files")
+v("lb_first", first["resolved"], "{:.0f}", "best in October 2023, resolved")
+v("lb_first_pct", pct(LB.share(first["resolved"])), "{:.1f}", "the same, %")
+v("lb_best", best["resolved"], "{:.0f}", "best by December 2025, resolved")
+v("lb_best_pct", pct(LB.share(best["resolved"])), "{:.1f}", "the same, %")
 
-# --- The same model with and without a loop (same leaderboard, 2 April 2024):
-#     SWE-bench's retrieval baseline (retrieved files in, one patch out)
-#     against SWE-agent's loop, for GPT-4 (1106) and Claude 3 Opus.
-PAIRS = [("GPT-4 (1106)", "20240402_rag_gpt4", "20240402_sweagent_gpt4"),
-         ("Claude 3 Opus", "20240402_rag_claude3opus", "20240402_sweagent_claude3opus")]
+print("== Loop against one call, same model")
+for key, _, one, loop in PAIRS:
+    v(f"{key}_one", LB.resolved(one), "{:.0f}", "retrieval baseline, resolved")
+    v(f"{key}_loop", LB.resolved(loop), "{:.0f}", "SWE-agent loop, resolved")
+    v(f"{key}_ratio", LB.ratio(loop, one), "{:.1f}", "loop over one call, x")
 
+print("== Incident cards")
+v("pm_worst_pct", pct(Literature.ServingIncidents.Anthropic2025MisroutedShareWorstHour), "{:.0f}",
+  "requests corrupted at the worst hour, %")
+v("mof_damages", Literature.IncidentReports.MoffattDamagesCad, "{:.2f}", "damages, CA$")
+v("metr_hacks", Literature.AgentEvaluation.MetrO3ReBenchHackRuns, "{:.0f}", "RE-Bench runs that hacked")
+v("metr_runs", Literature.AgentEvaluation.MetrO3ReBenchRuns, "{:.0f}", "RE-Bench runs")
+v("ra_subagents", Literature.MultiAgentSystems.ResearchSystemEarlySubagents, "{:.0f}", "subagents for simple queries")
+v("multi_chat_mult", BE.multi_agent_tokens_vs_chat, "{:.0f}", "multi-agent tokens over chat, x")
 
-def loop_vs_one_call():
-    rows = {r["folder"]: int(r["resolved"]) for r in csv.DictReader(open(HERE / "swebench_verified_trend.csv"))}
-    out = []
-    for name, rag, agent in PAIRS:
-        out.append(dict(model=name, one=rows[rag], loop=rows[agent], ratio=rows[agent] / rows[rag],
-                        one_share=rows[rag] / TASKS, loop_share=rows[agent] / TASKS))
-    return out
+print("== First taste 1: horizon (notes only)")
+h = HORIZON.result
+v("hz_step", HORIZON.step_success, "{:.2f}", "per-step success")
+v("hz_step_pct", pct(HORIZON.step_success), "{:.0f}", "the same, %")
+v("hz_long", HORIZON.long_horizon, "{:.0f}", "steps")
+v("hz_long_pct", pct(h.success[HORIZON.long_horizon]), "{:.1f}", "task success at that horizon, %")
+v("hz_long_pct0", pct(h.success[HORIZON.long_horizon]), "{:.0f}", "the same, whole percent (answer choice)")
 
+print("== First taste 2: resend (notes only)")
+v("rs_turns", RESEND.turns, "{:.0f}", "turns")
+v("rs_s0", RESEND.first_prompt, "{:,.0f}", "first prompt, tokens")
+v("rs_delta", RESEND.appended, "{:,.0f}", "appended per turn, tokens")
+v("rs_resent", RESEND.result.resent_tokens, "{:,.0f}", "input tokens sent over the run")
 
-# --- First taste 1: horizon (Introduction, Napkin Math 1.1; Lecture 1 owns it)
-STEP_OK, H_LONG = 0.99, 100
-
-
-def horizon_answer():
-    return STEP_OK ** H_LONG
-
-
-# --- First taste 2: resend (The Foundation Model, Napkin Math 2.2; Lecture 2 owns it)
-TURNS, FIRST_PROMPT, APPEND = 30, 8_000, 1_500
-
-
-def resend_answer():
-    return TURNS * FIRST_PROMPT + APPEND * TURNS * (TURNS - 1) // 2
-
+print("== The hook run's context, per call (characters)")
+v("ctx_first_k", CALLS[0]["context_chars"] / 10 ** 3, "{:.1f}", "call 1 context, thousand characters")
+v("ctx_last_k", CALLS[-1]["context_chars"] / 10 ** 3, "{:.1f}", "last call context, thousand characters")
+v("ctx_last_call", CALLS[-1]["call"], "{:.0f}", "last call")
 
 if __name__ == "__main__":
-    h = hook_run()
-    print("[Hook / predict cost] django__django-12050: calls", h["calls"], " cost $", f"{h['cost']:.2f}",
-          " resolved", h["resolved"])
-    t = trend()
-    print("[Trend] one-attempt submissions plotted", t["n"], "of", t["n_all"], "with results files")
-    print("[Trend] first", t["first"]["date"], t["first"]["name"], t["first"]["resolved"], "of", TASKS,
-          f"= {t['first_share']:.1%}")
-    print("[Trend] best", t["best"]["date"], t["best"]["name"], t["best"]["resolved"], "of", TASKS,
-          f"= {t['best_share']:.1%}")
-    for p in loop_vs_one_call():
-        print(f"[Loop bars] {p['model']}: one call {p['one']} ({p['one_share']:.1%}), loop {p['loop']} "
-              f"({p['loop_share']:.1%}), ratio {p['ratio']:.1f}x")
-    print("[First taste, notes only] 0.99^100 =", f"{horizon_answer():.1%}")
-    print("[First taste, notes only] 30-turn resent input tokens =", f"{resend_answer():,}")
+    write(__file__)
