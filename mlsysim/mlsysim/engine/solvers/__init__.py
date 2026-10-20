@@ -43,6 +43,9 @@ from .storage import (
     StorageBenchmarkDemandModel,
 )
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
+from .embodied import TakeoverBudgetModel  # supervisory intervention (added 2026-10-20)
+from .trajectory import BrakingBlendModel  # added 2026-10-20
+from .realtime import CommandAuthenticationModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
                      HorizonCompoundingModel, TaskHorizonTrendModel)
@@ -95,6 +98,9 @@ __all__ = [
     "TrainingGrowthModel",
     "DomainComputeGapModel",
     "StoppingBudgetModel",
+    "TakeoverBudgetModel",
+    "BrakingBlendModel",
+    "CommandAuthenticationModel",
     "TractionLossModel",
     "ScalingSeriesModel",
     "MemoryWallModel",

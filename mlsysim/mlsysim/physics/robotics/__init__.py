@@ -14,6 +14,8 @@ from .stopping import (
     calc_stopping_crossover_speed,
     calc_braking_time,
     calc_travel_between_speeds,
+    calc_smoothstep_braking_blend,  # added 2026-10-20
+    calc_blend_reserve_use,  # added 2026-10-20
 )
 from .actuation import (
     calc_kinetic_energy,
@@ -30,6 +32,7 @@ from .actuation import (
     calc_transient_contact_speed_limit,
     calc_tripwire_contact_force_accumulation,
     calc_quintic_blend_duration,
+    calc_smoothstep_blend_window,  # added 2026-10-20
     calc_quasistatic_spill_acceleration,
 )
 from .control import (
@@ -193,3 +196,6 @@ __all__ += [
 from .kinematics import calc_two_link_singular_values, calc_dls_joint_rate
 
 __all__ += ["calc_two_link_singular_values", "calc_dls_joint_rate"]
+
+# Bumpless transfer into braking (added 2026-10-20)
+__all__ += ["calc_smoothstep_braking_blend", "calc_blend_reserve_use", "calc_smoothstep_blend_window"]

@@ -508,6 +508,26 @@ CaliforniaDisengagements = _Series(
     "Autonomous testing miles and reported disengagements filed with the California DMV.",
 )
 
+TakeoverTimeMeta = _Series(
+    "zhang2019_mean_takeover_times",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Zhang, B., de Winter, J., Varotto, S., Happee, R., and Martens, M. (2019), Determinants of "
+            "take-over time from automated driving: A meta-analysis of 129 studies, Transportation "
+            "Research Part F 64:285-307; supplementary data (CC0), mastersheet.xlsx",
+        url="https://doi.org/10.4121/uuid:75c28abe-6559-4273-85f4-927e969c1c59",
+        verified="2026-10-19",
+        notes=(
+            "The 520 mean take-over times (column MTOT, sheet 1 rows 2 to 521), in file order. "
+            "Reproduces the paper's mean 2.72 s and SD 1.45 s, range 0.69 to 19.79 s, and the "
+            "inverted-CDF percentiles p50 2.37 s, p90 4.33 s, p99 7.0 s stored on "
+            "Embodied.Scenario.WarehouseAisle (prov:zhang-2019-takeover-meta-analysis). "
+            "Added 2026-10-20 (data.4tu.nl item 12704915, version 1)."
+        ),
+    ),
+    "Mean take-over time of each of 520 study conditions in 129 automated-driving studies.",
+)
+
 WaymoSafetyImpact = _Series(
     "waymo_safety_impact_headline",
     Provenance(

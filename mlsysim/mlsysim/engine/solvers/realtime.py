@@ -17,6 +17,7 @@ import numpy as np
 
 from ..results import (
     CanFdBusResult,
+    CommandAuthenticationResult,
     EtherCatCycleResult,
     LatencyTailResult,
     LeaseBudgetResult,
@@ -325,4 +326,42 @@ class ThermalThrottleModel(ForwardModel):
             ticks_exposed_from_loaded=int(math.floor((rec_loaded / tick).to("").magnitude)),
             heat_capacity=(time_constant / theta).to(ureg.joule / k),
             theta_never_trips=((trip.to(k) - ambient.to(k)) / loaded_power).to(k / ureg.watt),
+        )
+
+
+class CommandAuthenticationModel(ForwardModel):
+    """
+    Authentication of a remote command as one more pre-brake delay, and a flood of forgeries.
+
+    A published cycle count divided by the permission processor's clock gives
+    the time of one signature verification and of a MAC over a frame of
+    ``mac_blocks`` cipher blocks. Verification adds to the delay before a
+    remote stop can act, so each millisecond is travel at ``speed`` against
+    the finished budget's spare; a replay at the edge of the freshness window
+    carries the machine v x tau_fresh. Verified serially, n forged signed
+    packets queued ahead of a genuine veto finish it at (n + 1) t_verify; the
+    fewest that push it past the deadline is n = floor(T_latest / t_verify),
+    sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
+    """
+    requires = ("clock", "verify_cycles", "speed", "spare", "deadline")
+    produces = CommandAuthenticationResult
+
+    def solve(self, clock: Quantity, verify_cycles: float, mac_block_cycles: float, mac_blocks: int,
+              speed: Quantity, spare: Quantity, deadline: Quantity, deadline_after_admission: Quantity,
+              freshness_window: Quantity) -> CommandAuthenticationResult:
+        t_sig = (verify_cycles / clock).to(_MS)
+        t_mac = (mac_blocks * mac_block_cycles / clock).to(_US)
+        n = math.floor((deadline / t_sig).to("").magnitude)
+        admit = ((n + 1) * t_sig).to(_MS)
+        fresh = (speed * freshness_window).to(_MM)
+        return CommandAuthenticationResult(
+            verify_time=t_sig, mac_time=t_mac, verify_travel=(speed * t_sig).to(_MM),
+            spare_after_verify=(spare - speed * t_sig).to(_MM), mac_travel=(speed * t_mac).to(_MM),
+            freshness_window=freshness_window.to(_MS), freshness_travel=fresh,
+            spare_after_freshness=(spare - fresh).to(_MM),
+            deadline=deadline.to(_MS), deadline_after_admission=deadline_after_admission.to(_MS),
+            forged_to_miss=n, veto_verified_at=admit,
+            forged_rate=math.ceil((n / admit).to(1 / ureg.second).magnitude),
+            forged_mac_to_miss=math.floor((deadline / t_mac).to("").magnitude),
+            forged_to_miss_after_admission=math.floor((deadline_after_admission / t_sig).to("").magnitude),
         )

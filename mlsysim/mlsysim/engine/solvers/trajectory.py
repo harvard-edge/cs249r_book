@@ -16,6 +16,7 @@ from typing import Optional
 import numpy as np
 
 from ..results import (
+    BrakingBlendResult,
     ChunkReplacementResult,
     DynamicWindowResult,
     HandoffExposureResult,
@@ -31,6 +32,7 @@ from ...core.types import Quantity
 from ...core.units import ureg
 from ...physics.agents import calc_unchecked_success
 from ...physics.robotics.actuation import calc_quasistatic_spill_acceleration, calc_seam_acceleration_torque_jump
+from ...physics.robotics.actuation import calc_smoothstep_blend_window
 from ...physics.robotics.kinematics import calc_dls_joint_rate, calc_two_link_singular_values
 from ...physics.robotics.stopping import (
     calc_c2_stop_suffix,
@@ -38,6 +40,8 @@ from ...physics.robotics.stopping import (
     calc_scurve_rest_to_rest_time,
     calc_scurve_stop_distance,
     calc_scurve_stop_time,
+    calc_blend_reserve_use,
+    calc_smoothstep_braking_blend,
 )
 from .base import ForwardModel
 
@@ -390,3 +394,52 @@ class StaleAnchorModel(ForwardModel):
         gap = (joint_speed * delay).to(ureg.radian)
         return StaleAnchorResult(gap=gap, gap_degrees=gap.to(ureg.degree),
                                  tool_displacement=(gap.magnitude * lever_arm).to(_MM))
+
+
+class BrakingBlendModel(ForwardModel):
+    """
+    A bumpless transfer from cruise into braking, beside the step and the resident stop.
+
+    At a change of authority the enforcer may blend the base's command from
+    cruise to the braking deceleration a with the fixed-endpoint quintic
+    smoothstep. Its slope peaks at 1.875, so under the resident stop's jerk
+    bound j the window is T = 1.875 a / j (``calc_smoothstep_blend_window``),
+    rounded up to whole permission ticks. The same change taken in one tick
+    asks a jerk of a / tick. During the blend the speed falls by a T / 2 and
+    the base travels v0 T - a T^2 / 7 (``calc_smoothstep_braking_blend``);
+    full braking follows. The blended stop is set against an ideal step
+    (v0^2 / 2a) and the resident S-curve stop; the reserve a blend uses is the
+    largest growth of travel plus resident stop over its ticks
+    (``calc_blend_reserve_use``). An arm joint's torque change under a
+    torque-rate ceiling gives its own window the same way (added 2026-10-20).
+    """
+    requires = ("speed", "deceleration", "jerk", "tick")
+    produces = BrakingBlendResult
+
+    def solve(self, speed: Quantity, deceleration: Quantity, jerk: Quantity, tick: Quantity,
+              torque_change: Optional[Quantity] = None,
+              torque_rate_limit: Optional[Quantity] = None) -> BrakingBlendResult:
+        m, s = ureg.meter, ureg.second
+        window = calc_smoothstep_blend_window(deceleration, jerk).to(s)
+        n = math.ceil((window / tick).to("").magnitude - 1e-9)
+        blend = calc_smoothstep_braking_blend(speed, deceleration, window)
+        v1 = blend["exit_speed"]
+        after = (v1 ** 2 / (2 * deceleration)).to(m)
+        total = (blend["travel"] + after).to(m)
+        step = (speed ** 2 / (2 * deceleration)).to(m)
+        resident = calc_scurve_stop_distance(speed, deceleration, jerk).to(m)
+        out = dict(
+            speed=speed, deceleration=deceleration, jerk=jerk, tick=tick, window=window,
+            window_ticks=n, window_budget=(n * tick).to(_MS),
+            step_jerk=(deceleration / tick).to(m / s ** 3), ramp_time=(deceleration / jerk).to(_MS),
+            exit_speed=v1, blend_travel=blend["travel"], after_travel=after, blended_stop=total,
+            step_stop=step, scurve_travel=resident, penalty_over_step=(total - step).to(m),
+            excess_over_scurve=(total - resident).to(m),
+            reserve_use=calc_blend_reserve_use(speed, deceleration, jerk, window, tick),
+        )
+        if torque_change is not None and torque_rate_limit is not None:
+            arm = calc_smoothstep_blend_window(torque_change, torque_rate_limit).to(_MS)
+            k = math.ceil((arm / tick).to("").magnitude - 1e-9)
+            out.update(torque_change=torque_change, torque_rate_limit=torque_rate_limit,
+                       arm_window=arm, arm_window_ticks=k, arm_window_budget=(k * tick).to(_MS))
+        return BrakingBlendResult(**out)

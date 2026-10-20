@@ -101,6 +101,7 @@ TrajectoryGeneration = _load("trajectory_generation", "TrajectoryGeneration", "C
 SharedHardwareInterference = _load("shared_hardware_interference", "SharedHardwareInterference", "Measured victim slowdowns from co-runners on shared multicore hardware (Valsan et al. 2016, Bechtel and Yun 2019).")  # added 2026-10-20
 PlatformConfigurations = _load("platform_configurations", "PlatformConfigurations", "Values read from published platform configurations (a Bao hypervisor demo, the Jetson AGX Orin device tree).")  # added 2026-10-20
 RobotOffload = _load("robot_offload", "RobotOffload", "Measured results of offloading robot computation (FogROS2, Ichnowski et al. 2023).")  # added 2026-10-20
+HumanTakeover = _load("human_takeover", "HumanTakeover", "Cited figures on human takeover: filed disengagement records, Sirius, Merat et al. 2014, UN R157 limits, ISO 10218-1 reduced speed.")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +424,7 @@ class Literature(Registry):
     SharedHardwareInterference = SharedHardwareInterference  # added 2026-10-20
     PlatformConfigurations = PlatformConfigurations  # added 2026-10-20
     RobotOffload = RobotOffload  # added 2026-10-20
+    HumanTakeover = HumanTakeover  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -464,4 +466,5 @@ class Literature(Registry):
     EdgeInferenceOrin = _series.EdgeInferenceOrin
     KittiOdometry = _series.KittiOdometry
     CaliforniaDisengagements = _series.CaliforniaDisengagements
+    TakeoverTimeMeta = _series.TakeoverTimeMeta  # added 2026-10-20
     WaymoSafetyImpact = _series.WaymoSafetyImpact

@@ -8,9 +8,10 @@ them for one stated situation (added 2026-10-20).
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
-from ..results import StoppingBudgetResult, TractionLossResult
+from ..results import StoppingBudgetResult, TakeoverBudgetResult, TractionLossResult
 from ...core.types import Quantity
 from ...core.units import ureg
 from ...physics.drivetrain import calc_required_friction, calc_traction_deceleration_limit
@@ -98,7 +99,7 @@ class StoppingBudgetModel(ForwardModel):
             crossover_speed=calc_stopping_crossover_speed(delay, deceleration),
         )
         if jerk is not None:
-            out.update(jerk=jerk, jerk_ramp_travel=ramp, stop_time=stop_time,
+            out.update(jerk=jerk, jerk_ramp_travel=ramp, stop_time=stop_time, scurve_travel=(braking + ramp).to(m),
                        jerk_plateau_speed=(deceleration ** 2 / jerk).to(m / ureg.second),
                        ramp_delay=(deceleration / (2 * jerk)).to(ureg.millisecond))
         if tracking_bound is not None:
@@ -122,6 +123,15 @@ class StoppingBudgetModel(ForwardModel):
                                                                    loc_margin=loc,
                                                                    physical_margin=margin + inset)
             room = (clear_distance - overhead - inset).to(m)
+            if delay_positive and approach_speed is None:
+                out["rigid_speed_ceiling"] = (room / delay).to(m / ureg.second)
+            if jerk is not None and approach_speed is None:
+                # Above a^2/j the S-curve root solves v^2/(2a) + b v - room = 0 with
+                # b = delay + a/(2j): v = a (sqrt(b^2 + 2 room / a) - b).
+                if out["speed_ceiling"] >= out["jerk_plateau_speed"]:
+                    lead = (delay + out["ramp_delay"]).to(ureg.second)
+                    out.update(ceiling_lead_time=lead,
+                               ceiling_root=((lead ** 2 + 2 * room / deceleration) ** 0.5).to(ureg.second))
             if jerk is not None and approach_speed is None and speed_at_delay_end is None:
                 ceiling = ((room - braking - ramp) / speed).to(ureg.millisecond)
                 out.update(delay_ceiling=ceiling, delay_spare=(ceiling - delay).to(ureg.millisecond))
@@ -156,3 +166,85 @@ class TractionLossModel(ForwardModel):
             required_friction=required,
             premise_holds=mu_after >= required,
         )
+
+
+class TakeoverBudgetModel(ForwardModel):
+    """
+    A request for a person to take over, priced against the finished stopping budget.
+
+    The takeover T_Sigma (the human response plus the console transport) adds
+    to the machine's pre-brake delay tau: until the person commits, the
+    machine keeps moving at the request speed. Four finished budgets
+    (``StoppingBudgetModel`` with the S-curve jerk bound and the tracking
+    inset) are solved at that speed: the machine alone, the machine with the
+    dispatch-to-admission allocation Delta_da charged, and each with the
+    takeover waited out before braking. The fallback deadline T_latest is the
+    machine-alone delay spare: the longest wait after the request before the
+    machine's own stop must begin,
+
+        T_latest = (D_clear - delta - d_S(v)) / v - tau.
+
+    Configured timeouts are clipped to it, T = max(0, min(T_cfg, T_latest)),
+    and dispatched on the last whole permission tick. Once the operator holds
+    the channel, a manual lease longer than the chunk lease adds its excess to
+    the delay as travel at the request speed (added 2026-10-20).
+    """
+    requires = ("speed", "delay", "deceleration", "clear_distance", "takeover")
+    produces = TakeoverBudgetResult
+
+    def solve(self, speed: Quantity, delay: Quantity, deceleration: Quantity, clear_distance: Quantity,
+              takeover: Quantity, loc_margin: Optional[Quantity] = None,
+              physical_margin: Optional[Quantity] = None, jerk: Optional[Quantity] = None,
+              tracking_bound: Optional[Quantity] = None,
+              dispatch_to_admission: Optional[Quantity] = None,
+              configured_timeout: Optional[Quantity] = None, tick: Optional[Quantity] = None,
+              manual_lease: Optional[Quantity] = None,
+              chunk_lease: Optional[Quantity] = None) -> TakeoverBudgetResult:
+        ms, mm = ureg.millisecond, ureg.millimeter
+        da = 0 * ms if dispatch_to_admission is None else dispatch_to_admission.to(ms)
+        stop = StoppingBudgetModel()
+
+        def budget(d):
+            return stop.solve(speed, d.to(ms), deceleration, clear_distance, loc_margin=loc_margin,
+                              physical_margin=physical_margin, jerk=jerk, tracking_bound=tracking_bound)
+
+        machine = budget(delay)
+        machine_da = budget(delay + da)
+        with_takeover = budget(delay + takeover)
+        with_both = budget(delay + da + takeover)
+        deadline = machine.delay_spare.to(ms)
+        deadline_da = machine_da.delay_spare.to(ms)
+        travel = (speed * takeover).to(mm)
+        admission = (speed * da).to(mm)
+        after_takeover = (machine.spare - travel).to(mm)
+        after_admission = (after_takeover - admission).to(mm)
+        out = dict(
+            speed=speed, takeover=takeover.to(ms), dispatch_to_admission=da,
+            machine=machine, machine_with_dispatch=machine_da,
+            with_takeover=with_takeover, with_takeover_and_dispatch=with_both,
+            deadline=deadline, deadline_after_admission=deadline_da,
+            takeover_travel=travel, admission_travel=admission,
+            time_left=(deadline - takeover).to(ms), time_left_after_admission=(deadline_da - takeover).to(ms),
+            spare_after_takeover=after_takeover, spare_after_admission=after_admission,
+            takeover_over_spare=_ratio(travel, machine.spare),
+            takeover_over_spare_after_admission=_ratio(travel, machine_da.spare),
+        )
+        if manual_lease is not None and chunk_lease is not None:
+            extension = (manual_lease - chunk_lease).to(ms)
+            extension_travel = (speed * extension).to(mm)
+            out.update(lease_extension=extension, lease_extension_travel=extension_travel,
+                       spare_after_lease=(after_admission - extension_travel).to(mm))
+        if configured_timeout is not None and tick is not None:
+            zero = 0 * ms
+
+            def clip(limit):
+                t = min(configured_timeout.to(ms), limit)
+                return max(zero, t).to(ms)
+
+            def ticks(t):
+                return int(math.floor(round((t / tick).to("").magnitude, 9)))
+
+            t_cfg, t_cfg_da = clip(deadline), clip(deadline_da)
+            out.update(configured_timeout=configured_timeout.to(ms), timeout=t_cfg, timeout_ticks=ticks(t_cfg),
+                       timeout_after_admission=t_cfg_da, timeout_ticks_after_admission=ticks(t_cfg_da))
+        return TakeoverBudgetResult(**out)
