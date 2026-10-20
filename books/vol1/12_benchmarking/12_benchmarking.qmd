@@ -1460,24 +1460,26 @@ A representative workload can still mislead if the evaluation metric fails to re
 # │          fix the 4x slowdown and 10x beam expansion.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_multiple
 
 class GoodhartBLEUCalc:
     """BLEU leaderboard gain that violates the serving latency budget."""
 
     # LOAD
-    original_bleu = 28.0
-    optimized_bleu = 28.5
-    original_latency_ms = 50
-    optimized_latency_ms = 200
-    original_beam_size = 1
-    optimized_beam_size = 10
-    latency_budget_ms = 100
+    _beam = Scenarios.WiderBeamSearchTranslation
+    original_bleu = _beam.original_metric
+    optimized_bleu = _beam.optimized_metric
+    original_latency_ms = _beam.original_latency.to("ms").magnitude
+    optimized_latency_ms = _beam.optimized_latency.to("ms").magnitude
+    original_beam_size = _beam.original_width
+    optimized_beam_size = _beam.optimized_width
+    latency_budget_ms = _beam.latency_budget.to("ms").magnitude
 
     # EXECUTE
-    bleu_gain = optimized_bleu - original_bleu
-    candidate_ratio = optimized_beam_size / original_beam_size
-    latency_slowdown = optimized_latency_ms / original_latency_ms
+    bleu_gain = _beam.metric_gain
+    candidate_ratio = _beam.width_ratio
+    latency_slowdown = _beam.slowdown
 
     # GUARD
     check(latency_slowdown == 4.0, f"Expected 4x latency slowdown, got {latency_slowdown:.1f}x")
@@ -3398,31 +3400,29 @@ Even when run-to-run execution variance is fully controlled, benchmarking encoun
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: The statistical confidence trap callout below.
 # │ Goal: Binomial uncertainty for 95 percent vs 94 percent on 1,000 images.
-from math import sqrt, ceil
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_pp, check
 
 class StatisticalConfidenceTrap:
     """Binomial uncertainty for a 95% vs. 94% accuracy comparison on 1,000 images."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_images = 1000
-    baseline_accuracy = 0.95
-    compressed_accuracy = 0.94
-    z_95 = 1.96
-    target_margin = 0.01
-    ci_confidence_pct_value = 95
+    _cmp = Scenarios.NinetyFiveAgainstNinetyFourOnSameImages
+    _size = Scenarios.AccuracyWithinOnePointSampleSize
+    n_images = _cmp.n_samples
+    baseline_accuracy = _cmp.baseline_accuracy
+    compressed_accuracy = _cmp.candidate_accuracy
+    z_95 = _cmp.z
+    target_margin = _size.half_width
+    ci_confidence_pct_value = _cmp.confidence * 100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    baseline_error_rate = 1 - baseline_accuracy
-    compressed_error_rate = 1 - compressed_accuracy
-    baseline_errors = n_images * baseline_error_rate
-    compressed_errors = n_images * compressed_error_rate
-    sigma_errors = sqrt(n_images * baseline_error_rate * baseline_accuracy)
-    accuracy_diff = baseline_accuracy - compressed_accuracy
-    se_diff_independent = sqrt(baseline_accuracy * (1 - baseline_accuracy) / n_images + compressed_accuracy * (1 - compressed_accuracy) / n_images)
-    diff_ci_low = accuracy_diff - z_95 * se_diff_independent
-    diff_ci_high = accuracy_diff + z_95 * se_diff_independent
-    one_prop_n = ceil((z_95**2 * baseline_accuracy * (1 - baseline_accuracy)) / (target_margin**2))
+    baseline_errors = _cmp.baseline_errors
+    compressed_errors = _cmp.candidate_errors
+    sigma_errors = _cmp.baseline_error_sd
+    accuracy_diff = _cmp.accuracy_difference
+    diff_ci_low, diff_ci_high = _cmp.independent_interval
+    one_prop_n = _size.samples_needed
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(baseline_errors) == 50, f"Expected 50 baseline errors, got {baseline_errors:.1f}")
@@ -3452,21 +3452,21 @@ class StatisticalConfidenceTrap:
 # │ Context: The statistical confidence trap callout below (paired-test step).
 # │ Goal: Largest disagreement count at which McNemar's test still flags the
 # │       10-error gap between the two models as significant at 95 percent.
-from math import floor
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 class McNemarThreshold:
     """McNemar's test (no continuity correction) on the 95 vs. 94 percent same-image comparison."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    error_gap = round(StatisticalConfidenceTrap.compressed_errors - StatisticalConfidenceTrap.baseline_errors)
-    z_95 = StatisticalConfidenceTrap.z_95
+    _cmp = Scenarios.NinetyFiveAgainstNinetyFourOnSameImages
+    error_gap = _cmp.net_gap
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Statistic (n_base - n_comp)^2 / (n_base + n_comp) with n_base - n_comp = error_gap;
     # significant when it exceeds the 1-dof chi-square critical value z_95^2.
-    chi2_crit = z_95**2
-    max_discordant = floor(error_gap**2 / chi2_crit)
+    chi2_crit = _cmp.chi2_critical
+    max_discordant = _cmp.max_discordant
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(error_gap == 10, f"Expected a 10-error gap, got {error_gap}")
@@ -4048,7 +4048,7 @@ Pareto optimality identifies nondominated choices, but it does not establish tha
 # │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Scenarios
 from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB, lux
 from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
 
@@ -4056,26 +4056,27 @@ class MobileNetINT8Calc:
     """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_v2 = Models.Vision.MobileNetV2
-    acc_fp32 = 71.8
+    _gates = Scenarios.MobileNetV2Int8CameraTrapGates
+    _mobilenet_v2 = _gates.workload
+    acc_fp32 = _gates.float_top1
     params = _mobilenet_v2.parameters
     size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
     size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
-    acc_int8 = 70.9
-    top5_fp32 = 91.0
-    top5_int8 = 90.4
-    ece_fp32 = 0.031
-    ece_int8 = 0.089
-    edge_fp32 = 68.2
-    edge_int8 = 61.4
-    edge_occlusion_pct = 50
-    edge_lux = 100
-    edge_rotation_deg = 30
-    real_world_edge_pct = 5
-    confidence_threshold_pct = 85
+    acc_int8 = _gates.int_top1
+    top5_fp32 = _gates.float_top5
+    top5_int8 = _gates.int_top5
+    ece_fp32 = _gates.float_ece
+    ece_int8 = _gates.int_ece
+    edge_fp32 = _gates.float_edge
+    edge_int8 = _gates.int_edge
+    edge_occlusion_pct = _gates.edge_occlusion * 100
+    edge_lux = _gates.edge_illuminance.to(lux).magnitude
+    edge_rotation_deg = _gates.edge_rotation_deg
+    real_world_edge_pct = _gates.edge_share * 100
+    confidence_threshold_pct = _gates.confidence_threshold * 100
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    acc_drop = acc_fp32 - acc_int8
-    edge_drop = edge_fp32 - edge_int8
+    acc_drop = _gates.top1_loss
+    edge_drop = _gates.edge_drop
     size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")

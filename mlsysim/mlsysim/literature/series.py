@@ -1396,6 +1396,26 @@ class Series:
         "Per-run time to the ResNet-50 quality target in MLPerf Training v4.0 for four 8- and 64-accelerator systems.",
         numeric=("run", "minutes", "top1", "epochs", "seed"),
     )
+    SandlerMobileNetV2Pixel1 = TrendSeries(
+        "sandler2018_mobilenetv2_pixel1",
+        _lit("Sandler et al. (2018), MobileNetV2: Inverted Residuals and Linear Bottlenecks, CVPR, Table 4",
+             "https://arxiv.org/abs/1801.04381",
+             "ImageNet top-1 (%) and latency (ms) on one large core of a Google Pixel 1 with TF-Lite; the rows "
+             "of Table 4 that report a latency (ShuffleNet has none). Transcribed from the table (added "
+             "2026-10-20)."),
+        "Accuracy against single-core phone latency for four ImageNet mobile models.",
+        numeric=("top1", "latency_ms"),
+    )
+    ChuPixel4CpuDspLatency = TrendSeries(
+        "chu2021_pixel4_cpu_dsp",
+        _lit("Chu et al. (2021), Discovering Multi-Hardware Mobile Models via Architecture Search, CVPRW, Table 1",
+             "https://arxiv.org/abs/2008.08178",
+             "ImageNet top-1 (%) and latency (ms) on a Pixel 4: CPU in floating point and the DSP, for "
+             "four models of similar accuracy. Transcribed from the table, retrieved 2026-10-17 (added "
+             "2026-10-20)."),
+        "Latency of four mobile models on a Pixel 4 CPU (float) and DSP.",
+        numeric=("top1", "cpu_float_ms", "dsp_ms"),
+    )
     MLPerfTrainingV40EosResNetEvals = TrendSeries(
         "mlperf_training_v4_0_eos_resnet_result0_evals",
         _lit("MLCommons, MLPerf Training v4.0 results (Apache-2.0), closed/NVIDIA/results/"

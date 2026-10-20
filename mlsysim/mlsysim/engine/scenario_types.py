@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math as _math
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17771,6 +17771,42 @@ class MLPerfTrainingResultScenario(BaseScenario):
     def published_score(self) -> Quantity:
         return Q_(self.score_minutes * self.scaling_factor, "minute")
 
+    # Run statistics (added 2026-10-20, Lecture 12b).
+    @property
+    def all_run_minutes(self) -> List[float]:
+        """Every run's time, including runs that missed the quality target."""
+        return [r["minutes"] for r in self.rows]
+
+    @property
+    def failed_run_minutes(self) -> List[float]:
+        return [r["minutes"] for r in self.rows if r["status"] != "success"]
+
+    @property
+    def top1(self) -> List[float]:
+        """Top-1 at each run's last evaluation, percent."""
+        return [r["top1"] for r in self.rows]
+
+    @property
+    def mean_minutes(self) -> float:
+        """Mean of the converged runs (unscaled)."""
+        return sum(self.run_minutes) / len(self.run_minutes)
+
+    @property
+    def median_minutes(self) -> float:
+        import statistics as _stats
+        return _stats.median(self.run_minutes)
+
+    @property
+    def sd_minutes(self) -> float:
+        """Sample standard deviation of the converged runs."""
+        import statistics as _stats
+        return _stats.stdev(self.run_minutes)
+
+    @property
+    def cv(self) -> float:
+        """Coefficient of variation of the converged runs (fraction)."""
+        return self.sd_minutes / self.mean_minutes
+
     @property
     def epochs(self) -> float:
         return self.rows[0]["epochs"]
@@ -17810,6 +17846,371 @@ class StrongScalingPairScenario(BaseScenario):
     @property
     def efficiency(self) -> float:
         return self.speedup / self.device_ratio
+# --- Benchmarking: deciding from measurements (added 2026-10-20) --------------
+# Run-to-run noise in repeated MLPerf runs, Welch intervals on a difference,
+# run and sample counts, the paired accuracy comparison, run order on a
+# warming device, a proxy metric against a latency budget, binned calibration,
+# and a compressed model's acceptance gates.
+
+def _z_two_sided(confidence: float) -> float:
+    from statistics import NormalDist
+    return NormalDist().inv_cdf(0.5 + confidence / 2)
+
+
+class RunTimeComparisonScenario(BaseScenario):
+    """Welch's interval on ``base`` minus ``other`` mean run time (MLPerfTrainingResultScenario runs).
+
+    Positive differences mean ``other`` finished faster. Fractions are of
+    ``base``'s mean converged run. ``include_failed`` times a run that missed
+    the quality target as if it were a run. ``minimum_useful`` is a speedup
+    (fraction of ``base``) set before the measurement; the verdict compares the
+    interval with zero and with it.
+    """
+    base: MLPerfTrainingResultScenario
+    other: MLPerfTrainingResultScenario
+    confidence: float
+    include_failed: bool = False
+    minimum_useful: Optional[float] = None
+
+    def _sample(self, s: MLPerfTrainingResultScenario) -> List[float]:
+        return s.all_run_minutes if self.include_failed else s.run_minutes
+
+    def _welch(self, sd_base: Optional[float] = None, sd_other: Optional[float] = None):
+        from ..physics.statistics import calc_welch_interval
+        import statistics as _stats
+        a, b = self._sample(self.base), self._sample(self.other)
+        return calc_welch_interval(_stats.mean(a), _stats.stdev(a) if sd_base is None else sd_base, len(a),
+                                   _stats.mean(b), _stats.stdev(b) if sd_other is None else sd_other, len(b),
+                                   self.confidence)
+
+    @property
+    def difference(self) -> Quantity:
+        return Q_(self._welch()["difference"], "minute")
+
+    @property
+    def standard_error(self) -> Quantity:
+        return Q_(self._welch()["se"], "minute")
+
+    @property
+    def dof(self) -> float:
+        """Welch-Satterthwaite degrees of freedom."""
+        return self._welch()["dof"]
+
+    @property
+    def t_critical(self) -> float:
+        return self._welch()["t"]
+
+    @property
+    def low(self) -> Quantity:
+        return Q_(self._welch()["low"], "minute")
+
+    @property
+    def high(self) -> Quantity:
+        return Q_(self._welch()["high"], "minute")
+
+    def fraction_of_base(self, x: Quantity) -> float:
+        """A time as a fraction of ``base``'s mean converged run."""
+        return (x / Q_(self.base.mean_minutes, "minute")).to("").magnitude
+
+    def half_width_with_spread(self, sd: Quantity) -> Quantity:
+        """The interval's half-width if both sides had standard deviation ``sd`` (same run counts)."""
+        s = sd.to("minute").magnitude
+        w = self._welch(s, s)
+        return Q_(w["t"] * w["se"], "minute")
+
+    @property
+    def verdict(self) -> str:
+        """'unresolved' (spans zero), 'real, below threshold', or 'real and useful'."""
+        lo, hi = self.fraction_of_base(self.low), self.fraction_of_base(self.high)
+        if lo <= 0 <= hi:
+            return "unresolved"
+        if self.minimum_useful is not None and lo >= self.minimum_useful:
+            return "real and useful"
+        return "real, below threshold"
+
+
+class RunCountPlanningScenario(BaseScenario):
+    """How many runs a mean, or a two-system comparison, needs at ``reference``'s run-to-run spread.
+
+    The half-width of a mean of ``n`` runs is ``t_{n-1} s / sqrt(n)``; the runs
+    per system to detect a difference ``d`` (a fraction of the mean) at
+    ``power`` are ``2 (z_a + z_b)^2 s^2 / d^2``.
+    """
+    reference: MLPerfTrainingResultScenario
+    confidence: float
+    power: float
+    run_counts: List[int]
+    differences: List[float]            # fractions of the reference mean
+
+    @property
+    def z_alpha(self) -> float:
+        return _z_two_sided(self.confidence)
+
+    @property
+    def z_beta(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(self.power)
+
+    def half_width_fraction(self, n_runs: int) -> float:
+        from ..physics.statistics import calc_mean_half_width
+        r = self.reference
+        return calc_mean_half_width(r.sd_minutes, n_runs, self.confidence) / r.mean_minutes
+
+    def runs_per_system(self, difference: float) -> float:
+        from ..physics.statistics import calc_samples_per_arm_for_difference
+        r = self.reference
+        return calc_samples_per_arm_for_difference(r.sd_minutes, difference * r.mean_minutes,
+                                                   self.z_alpha, self.z_beta)
+
+
+class ProportionSampleSizeScenario(BaseScenario):
+    """Samples that pin a pass fraction ``rate`` to within ``half_width`` at ``confidence``: ``z^2 p (1 - p) / m^2``.
+
+    ``published_minimum`` is a suite's rounded-up count for the same target.
+    """
+    rate: float
+    half_width: float
+    confidence: float
+    published_minimum: Optional[int] = None
+
+    @property
+    def z(self) -> float:
+        return _z_two_sided(self.confidence)
+
+    @property
+    def samples(self) -> float:
+        """Unrounded sample count."""
+        return self.z ** 2 * self.rate * (1 - self.rate) / self.half_width ** 2
+
+    @property
+    def samples_needed(self) -> int:
+        from ..physics.statistics import calc_samples_for_half_width
+        return calc_samples_for_half_width(self.rate, self.half_width, self.z)
+
+
+class ProportionPrecisionScenario(BaseScenario):
+    """The normal-approximation half-width of a pass fraction ``rate`` measured on ``n_samples``."""
+    rate: float
+    n_samples: int
+    confidence: float
+
+    @property
+    def half_width(self) -> float:
+        from ..physics.statistics import calc_proportion_half_width
+        return calc_proportion_half_width(self.rate, self.n_samples, _z_two_sided(self.confidence))
+
+
+class SameTestSetAccuracyComparisonScenario(BaseScenario):
+    """Two models scored on the same ``n_samples`` test items: independent-set interval and McNemar's limit.
+
+    The scores fix the net gap ``b - c`` (items only the baseline gets right
+    minus items only the candidate gets right) but not the disagreements
+    ``b + c``; McNemar's statistic (no continuity correction) exceeds the
+    chi-square critical value ``z^2`` only when ``b + c <= floor(gap^2 / z^2)``.
+    """
+    n_samples: int
+    baseline_accuracy: float
+    candidate_accuracy: float
+    confidence: float
+
+    @property
+    def z(self) -> float:
+        return _z_two_sided(self.confidence)
+
+    @property
+    def baseline_errors(self) -> float:
+        return self.n_samples * (1 - self.baseline_accuracy)
+
+    @property
+    def candidate_errors(self) -> float:
+        return self.n_samples * (1 - self.candidate_accuracy)
+
+    @property
+    def baseline_error_sd(self) -> float:
+        """Binomial standard deviation of the baseline's error count."""
+        p = self.baseline_accuracy
+        return _math.sqrt(self.n_samples * p * (1 - p))
+
+    @property
+    def accuracy_difference(self) -> float:
+        return self.baseline_accuracy - self.candidate_accuracy
+
+    @property
+    def independent_interval(self):
+        """(low, high) of the accuracy difference had the scores come from independent test sets."""
+        from ..physics.statistics import calc_proportion_gap_interval
+        return calc_proportion_gap_interval(self.baseline_accuracy, self.candidate_accuracy,
+                                            self.n_samples, self.n_samples, self.z)
+
+    @property
+    def net_gap(self) -> int:
+        """b - c: items the baseline alone gets right, net."""
+        return round(self.n_samples * self.accuracy_difference)
+
+    @property
+    def chi2_critical(self) -> float:
+        return self.z ** 2
+
+    @property
+    def max_discordant(self) -> int:
+        from ..physics.statistics import calc_mcnemar_max_discordant
+        return calc_mcnemar_max_discordant(self.net_gap, self.chi2_critical)
+
+    @property
+    def max_discordant_share(self) -> float:
+        return self.max_discordant / self.n_samples
+
+
+class WarmingDeviceRunOrderScenario(BaseScenario):
+    """Two arms of the same code timed on a device whose latency drifts from ``start`` toward ``end``.
+
+    Latency is ``start + (end - start) (1 - exp(-t / time_constant))``. Runs
+    happen at ``first_time + i spacing``; blocked order runs every A then every
+    B, interleaved alternates. The bias is B's mean over A's, minus one.
+    """
+    start: Quantity
+    end: Quantity
+    time_constant: Quantity
+    first_time: Quantity
+    spacing: Quantity
+    runs_per_arm: int
+
+    def latency(self, t: Quantity) -> Quantity:
+        x = (t / self.time_constant).to("").magnitude
+        return (self.start + (self.end - self.start) * (1 - _math.exp(-x))).to(self.start.units)
+
+    @property
+    def times(self) -> List[Quantity]:
+        return [self.first_time + i * self.spacing for i in range(2 * self.runs_per_arm)]
+
+    @property
+    def blocked_order(self) -> List[str]:
+        return ["A"] * self.runs_per_arm + ["B"] * self.runs_per_arm
+
+    @property
+    def interleaved_order(self) -> List[str]:
+        return ["A", "B"] * self.runs_per_arm
+
+    def bias(self, order: List[str]) -> float:
+        def arm(label):
+            v = [self.latency(t).magnitude for t, a in zip(self.times, order) if a == label]
+            return sum(v) / len(v)
+        return arm("B") / arm("A") - 1
+
+    @property
+    def blocked_bias(self) -> float:
+        return self.bias(self.blocked_order)
+
+    @property
+    def interleaved_bias(self) -> float:
+        return self.bias(self.interleaved_order)
+
+
+class ProxyMetricLatencyScenario(BaseScenario):
+    """A search-width change that buys an offline metric gain with latency, against a serving budget."""
+    original_metric: float
+    optimized_metric: float
+    original_width: int
+    optimized_width: int
+    original_latency: Quantity
+    optimized_latency: Quantity
+    latency_budget: Quantity
+
+    @property
+    def metric_gain(self) -> float:
+        return self.optimized_metric - self.original_metric
+
+    @property
+    def width_ratio(self) -> float:
+        return self.optimized_width / self.original_width
+
+    @property
+    def slowdown(self) -> float:
+        return (self.optimized_latency / self.original_latency).to("").magnitude
+
+    @property
+    def budget_ratio(self) -> float:
+        """Optimized latency over the budget (above 1: the budget is broken)."""
+        return (self.optimized_latency / self.latency_budget).to("").magnitude
+
+
+class ReliabilityBinsScenario(BaseScenario):
+    """Predictions grouped by confidence: ``bins`` of (count, mean confidence, accuracy); the ECE."""
+    bins: List[Tuple[int, float, float]]
+
+    @property
+    def total(self) -> int:
+        return sum(n for n, _, _ in self.bins)
+
+    @property
+    def gaps(self) -> List[float]:
+        """Confidence minus accuracy, per bin (positive: overconfident)."""
+        return [c - a for _, c, a in self.bins]
+
+    @property
+    def weights(self) -> List[float]:
+        return [n / self.total for n, _, _ in self.bins]
+
+    @property
+    def ece(self) -> float:
+        from ..physics.statistics import calc_expected_calibration_error
+        return calc_expected_calibration_error(self.bins)
+
+
+class QuantizedAcceptanceGatesScenario(BaseScenario):
+    """A float model and its quantized copy against acceptance gates set before compression.
+
+    Accuracies are percent; ECE is a fraction. Edge cases are ``edge_share``
+    of inputs, so a ``test_images`` test set holds ``edge_share * test_images``
+    of them, and the float edge-case accuracy is known only to the binomial
+    half-width at ``confidence`` on that count.
+    """
+    workload: Workload
+    float_top1: float
+    int_top1: float
+    float_top5: float
+    int_top5: float
+    float_ece: float
+    int_ece: float
+    float_edge: float
+    int_edge: float
+    accuracy_loss_limit: float          # percentage points
+    edge_share: float
+    edge_occlusion: float               # fraction of the object hidden
+    edge_illuminance: Quantity
+    edge_rotation_deg: float
+    confidence_threshold: float         # the deployment acts above this confidence
+    test_images: int
+    confidence: float
+
+    @property
+    def top1_loss(self) -> float:
+        return self.float_top1 - self.int_top1
+
+    @property
+    def top5_loss(self) -> float:
+        return self.float_top5 - self.int_top5
+
+    @property
+    def edge_drop(self) -> float:
+        return self.float_edge - self.int_edge
+
+    @property
+    def ece_ratio(self) -> float:
+        return self.int_ece / self.float_ece
+
+    @property
+    def edge_images(self) -> int:
+        return round(self.edge_share * self.test_images)
+
+    @property
+    def edge_half_width(self) -> float:
+        """Binomial half-width of the float edge-case accuracy on ``edge_images``, in points."""
+        from ..physics.statistics import calc_proportion_half_width
+        return 100 * calc_proportion_half_width(self.float_edge / 100, self.edge_images,
+                                                _z_two_sided(self.confidence))
+
+
 # --- Model serving on one machine (added 2026-10-20) --------------------------
 # A request's latency budget, the one-server queue that sizes a fleet, the
 # batch a request waits for, a replica's startup, and the cost per request.

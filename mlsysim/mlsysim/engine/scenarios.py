@@ -39,6 +39,9 @@ from ..core.units import BYTES_ADAM_MOMENTS as _BYTES_ADAM_MOMENTS  # neural com
 from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as _INT16_BITS  # added 2026-10-20
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
+# iPhone XS GPU drift on a warming phone (Lee et al. 2019, Figure 8; added 2026-10-20)
+_LEE_XS_GPU = next(r for r in _Literature.Series.LeeSustainedLatency.entries
+                   if r["device"] == "iPhone XS" and r["processor"] == "GPU")
 from ..core.units import BITS_PER_BYTE as _BITS_PER_BYTE  # security and privacy (added 2026-10-20)
 from ..physics.statistics import calc_ks_coefficient as _calc_ks_coefficient  # robust AI (added 2026-10-20)
 # Deployment paradigms block (added 2026-10-20)
@@ -9290,6 +9293,138 @@ class Scenarios(Registry):
         base_time=Q_(24, "hour"),  # scenario assumption: single-GPU training time
         scaled_devices=8,
         scaled_time=Q_(4, "hour"),  # scenario assumption: eight-GPU training time
+    )
+    # --- Benchmarking: deciding from measurements (added 2026-10-20) --------
+    DellEightH100ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="Dell XE9680, 8x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU server, one of which missed the quality target.",
+        system="XE9680x8H100-SXM-80GB",
+    )
+    NvidiaEightH200ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="NVIDIA, 8x H200, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU H200 server with Eos's host and software.",
+        system="h200_ngc24.04_mxnet",
+    )
+    EosAgainstDellResNetMLPerfV40 = _st.RunTimeComparisonScenario(
+        name="Eos against Dell, 8x H100 each, converged runs (MLPerf Training v4.0 ResNet-50)",
+        description="Welch 95 percent interval on the difference in mean run time; Dell's missed run excluded.",
+        base=EosEightH100ResNetMLPerfV40,
+        other=DellEightH100ResNetMLPerfV40,
+        confidence=0.95,        # scenario assumption: interval confidence
+        minimum_useful=0.02,    # scenario assumption: a 2 percent speedup set before the test (illustrative)
+    )
+    EosAgainstDellAllRunsResNetMLPerfV40 = EosAgainstDellResNetMLPerfV40.variant(
+        name="Eos against Dell, every run timed as a run (MLPerf Training v4.0 ResNet-50)",
+        description="The same interval with Dell's run that missed the target counted at its stop time.",
+        include_failed=True,
+    )
+    EosAgainstH200ResNetMLPerfV40 = EosAgainstDellResNetMLPerfV40.variant(
+        name="Eos (8x H100) against 8x H200, same host and software (MLPerf Training v4.0 ResNet-50)",
+        description="Welch 95 percent interval on the difference in mean run time.",
+        other=NvidiaEightH200ResNetMLPerfV40,
+    )
+    EosResNetRunCountPlanning = _st.RunCountPlanningScenario(
+        name="Runs a ResNet-50 time-to-train mean needs at Eos's run-to-run spread",
+        description="Half-width of a mean of 5, 10, and 20 runs; runs per system to detect 0.5 and 1 percent.",
+        reference=EosEightH100ResNetMLPerfV40,
+        confidence=0.95,          # scenario assumption
+        power=0.80,               # scenario assumption: standard 80 percent power
+        run_counts=[5, 10, 20],   # scenario assumption: run counts compared (MLPerf's minimum is five)
+        differences=[0.005, 0.01],  # scenario assumption: differences to resolve, fraction of the mean
+    )
+    ImageNetValidationSamplingNoise = _st.ProportionPrecisionScenario(
+        name="A 76 percent top-1 measured on a fresh draw of 50,000 validation images",
+        description="Binomial 95 percent half-width at the mean top-1 of the 20 MLPerf Training v4.0 ResNet-50 runs.",
+        rate=(sum(r["top1"] for r in _Literature.Series.MLPerfTrainingV40ResNetRuns.entries)
+              / len(_Literature.Series.MLPerfTrainingV40ResNetRuns.entries) / 100),
+        n_samples=int(_Datasets.ImageNet.validation_examples.to("count").magnitude),
+        confidence=0.95,          # scenario assumption
+    )
+    AccuracyWithinOnePointSampleSize = _st.ProportionSampleSizeScenario(
+        name="Test images that pin a 95 percent accuracy to within one point",
+        description="n = z^2 p (1 - p) / m^2 at 95 percent confidence.",
+        rate=0.95,         # scenario assumption: accuracy being estimated
+        half_width=0.01,   # scenario assumption: one point
+        confidence=0.95,   # scenario assumption
+    )
+    MLPerfP90QuerySampleSize = _st.ProportionSampleSizeScenario(
+        name="Queries that pin a 90th-percentile latency (MLPerf Inference rule)",
+        description="The 90th percentile's rank to within 0.5 percent at 99 percent confidence.",
+        rate=0.90,
+        half_width=float(_Literature.Benchmarks.MLPerfInferenceP90QueryMargin),
+        confidence=float(_Literature.Benchmarks.MLPerfInferenceQueryConfidence),
+        published_minimum=int(_Literature.Benchmarks.MLPerfInferenceP90MinQueries),
+    )
+    MLPerfP99QuerySampleSize = MLPerfP90QuerySampleSize.variant(
+        name="Queries that pin a 99th-percentile latency (MLPerf Inference rule)",
+        description="The 99th percentile's rank to within 0.05 percent at 99 percent confidence.",
+        rate=0.99,
+        half_width=float(_Literature.Benchmarks.MLPerfInferenceP99QueryMargin),
+        published_minimum=int(_Literature.Benchmarks.MLPerfInferenceP99MinQueries),
+    )
+    NinetyFiveAgainstNinetyFourOnSameImages = _st.SameTestSetAccuracyComparisonScenario(
+        name="A 95 percent baseline against a 94 percent compressed model on the same 1,000 images",
+        description="Independent-set interval on the one-point drop, and McNemar's disagreement limit.",
+        n_samples=1000,               # scenario assumption: test images
+        baseline_accuracy=0.95,       # scenario assumption
+        candidate_accuracy=0.94,      # scenario assumption
+        confidence=0.95,              # scenario assumption
+    )
+    EosResNetTwoSeedsSameValidationSet = _st.SameTestSetAccuracyComparisonScenario(
+        name="Two seeds of one ResNet-50 recipe on the same 50,000 ImageNet validation images",
+        description="Eos's most and least accurate MLPerf Training v4.0 runs: the net gap and McNemar's limit.",
+        n_samples=int(_Datasets.ImageNet.validation_examples.to("count").magnitude),
+        baseline_accuracy=max(EosEightH100ResNetMLPerfV40.top1) / 100,
+        candidate_accuracy=min(EosEightH100ResNetMLPerfV40.top1) / 100,
+        confidence=0.95,              # scenario assumption
+    )
+    WarmingPhoneRunOrder = _st.WarmingDeviceRunOrderScenario(
+        name="Two arms of the same code timed in blocked or interleaved order on a warming phone GPU",
+        description="Latency drifts from the iPhone XS GPU's start toward its value after 200 s of sustained "
+                    "inference (Lee et al. 2019, Figure 8); ten runs, ten seconds in and 18 s apart.",
+        start=Q_(_LEE_XS_GPU["start_ms"], "ms"),
+        end=Q_(_LEE_XS_GPU["end_ms"], "ms"),
+        time_constant=Q_(70, "second"),  # scenario assumption: smooth warming curve, not fitted
+        first_time=Q_(10, "second"),     # scenario assumption
+        spacing=Q_(18, "second"),        # scenario assumption
+        runs_per_arm=5,                  # scenario assumption
+    )
+    WiderBeamSearchTranslation = _st.ProxyMetricLatencyScenario(
+        name="Beam search widened from 1 to 10 candidates for half a BLEU point",
+        description="An offline metric gain that breaks a 100 ms serving deadline (illustrative).",
+        original_metric=28.0,            # scenario assumption: BLEU
+        optimized_metric=28.5,           # scenario assumption: BLEU
+        original_width=1,                # scenario assumption: beam size
+        optimized_width=10,              # scenario assumption: beam size
+        original_latency=Q_(50, "ms"),   # scenario assumption
+        optimized_latency=Q_(200, "ms"),  # scenario assumption
+        latency_budget=Q_(100, "ms"),    # scenario assumption: serving deadline
+    )
+    ThreeBinReliabilityDiagram = _st.ReliabilityBinsScenario(
+        name="100 overconfident predictions in three confidence bins",
+        description="Constructed bins for computing expected calibration error by hand (illustrative).",
+        bins=[(20, 0.65, 0.60), (30, 0.85, 0.80), (50, 0.97, 0.84)],  # scenario assumption
+    )
+    MobileNetV2Int8CameraTrapGates = _st.QuantizedAcceptanceGatesScenario(
+        name="MobileNetV2 FP32 against INT8 for a camera trap, against gates set before compression",
+        description="Assumed top-1, top-5, ECE, and edge-case accuracy; edge cases are about 5 percent of inputs.",
+        workload=_Models.Vision.MobileNetV2,
+        float_top1=71.8,             # scenario assumption: FP32 top-1, percent
+        int_top1=70.9,               # scenario assumption: INT8 top-1, percent
+        float_top5=91.0,             # scenario assumption
+        int_top5=90.4,               # scenario assumption
+        float_ece=0.031,             # scenario assumption
+        int_ece=0.089,               # scenario assumption
+        float_edge=68.2,             # scenario assumption: edge-case accuracy, percent
+        int_edge=61.4,               # scenario assumption
+        accuracy_loss_limit=1.0,     # scenario assumption: gate, percentage points
+        edge_share=0.05,             # scenario assumption: edge cases among real inputs
+        edge_occlusion=0.50,         # scenario assumption: edge-case definition
+        edge_illuminance=Q_(100, "lux"),  # scenario assumption: edge-case definition
+        edge_rotation_deg=30,        # scenario assumption: edge-case definition
+        confidence_threshold=0.85,   # scenario assumption: the trap acts above this confidence
+        test_images=1000,            # scenario assumption: lab test set
+        confidence=0.95,             # scenario assumption
     )
 
     # --- Model serving on one machine (added 2026-10-20) ----------------------
