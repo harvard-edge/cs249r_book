@@ -1834,6 +1834,12 @@ class RecordedRunCostResult(SolverResult):
     over_limit_runs: Optional[int] = None
     mean_overshoot: Optional[float] = None   # dollars above the limit, over those runs
     max_overshoot: Optional[float] = None
+    # Optional (added 2026-10-20): per-run token medians as the agent recorded them,
+    # and output tokens as a share of all recorded tokens, pooled over the runs.
+    median_input_tokens: Optional[float] = None    # input tokens summed over a run's calls
+    median_output_tokens: Optional[float] = None
+    median_input_output_ratio: Optional[float] = None   # median of per-run input / output
+    output_token_share: Optional[float] = None     # pooled output / (input + output)
 # --- Context engineering (added 2026-10-20) ----------------------------------
 # What one agent request carries: a budget by role, the softmax cost of
 # admitted keys, measured comprehension by length, a zoned layout's input bill,
@@ -3941,4 +3947,114 @@ __all__ += [
     "TwoLinkJointRateResult", "HandoffExposureResult", "ChunkReplacementResult", "JerkLimitedStopResult",
     "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
     "DynamicWindowResult", "StaleAnchorResult",
+]
+
+
+# --- Fine-tuning on trajectories (added 2026-10-20) ---------------------------
+# Serialized training examples, loss masks and weighting, packing, preference
+# pairs, distillation economics, and a release comparison; solvers in
+# engine/solvers/fine_tuning.py.
+
+class TargetMaskResult(SolverResult):
+    """Result from TargetMaskModel: one serialized example's positions under two target masks."""
+    stored: int                          # every stored token
+    predicted: int                       # stored - 1: the first position has no prediction
+    selected_response: int               # responses minus the unselected ones
+    targets_with_rationale: int          # selected responses plus the rationale
+    targets_without_rationale: int       # selected responses only
+    observation_share: float             # observations / stored
+    share_with_rationale: float          # targets / stored, rationale selected
+    share_without_rationale: float
+    context_with_rationale: int          # stored positions that are context only
+    context_without_rationale: int
+    other_context_share: float           # non-observation context / stored, rationale as context
+    dilution_without_rationale: float    # predicted / targets: weight lost by an unmasked token average
+    dilution_with_rationale: float
+    unselected_vs_selected: float        # unselected responses / selected responses
+    unselected_share_of_responses: float # unselected responses / all responses
+
+
+class PerInvocationSerializationResult(SolverResult):
+    """Result from PerInvocationSerializationModel: one example per call against one transcript."""
+    per_invocation_tokens: int           # sum over calls of each call's delivered prefix
+    transcript_tokens: int               # the whole trajectory once
+    expansion: float                     # per-invocation / transcript = (H + 1) / 2
+
+
+class TrajectoryRoleShareResult(SolverResult):
+    """Result from TrajectoryRoleShareModel: transcript characters by role, per configuration."""
+    runs: int
+    configurations: List[Dict[str, Any]]  # scaffold, model, runs, prompt/observation/model shares
+    observation_low: float
+    observation_high: float
+    model_low: float
+    model_high: float
+
+
+class LossNormalizationResult(SolverResult):
+    """Result from LossNormalizationModel: one long trajectory's weight in a batch, two averages."""
+    examples: int                        # records in the batch, the trajectory's pieces included
+    total_targets: int
+    focus_token_share: float             # token averaging
+    other_token_share: float             # one other example, token averaging
+    focus_example_share: float           # example averaging, all of the trajectory's pieces
+    other_example_share: float           # one other example, example averaging
+    focus_over_other: float              # target-count ratio: the token-averaging weight ratio
+
+
+class SequencePackingResult(SolverResult):
+    """Result from SequencePackingModel: padding every example to the longest against packing."""
+    examples: int
+    stored: int
+    longest: int
+    mean_length: float
+    padded_positions: int                # examples x longest
+    buffers: int                         # fixed-capacity buffers after first-fit decreasing
+    buffer_loads: List[int]              # stored tokens per buffer
+    packed_positions: int                # buffers x capacity
+    padded_occupancy: float              # stored / padded positions
+    packed_occupancy: float              # stored / packed positions
+    position_ratio: float                # padded / packed positions
+
+
+class PreferencePairResult(SolverResult):
+    """Result from PreferencePairModel: one preference pair under the DPO loss."""
+    score_preferred: float               # z_w: policy minus reference log-probability sum
+    score_dispreferred: float            # z_l
+    margin: float                        # beta (z_w - z_l)
+    preference_score: float              # sigma(margin)
+    loss: float                          # -log sigma(margin)
+    initial_loss: float                  # ln 2, at a zero margin
+    saturation_factor: float             # sigma(-margin)
+    initial_saturation_factor: float     # 1/2
+    gradient_coefficient: float          # beta sigma(-margin)
+    initial_gradient_coefficient: float  # beta / 2
+
+
+class ContextDistillationResult(SolverResult):
+    """Result from ContextDistillationModel: a per-turn prefix read every turn against distilling it."""
+    monthly_prefix_tokens: float
+    uncached_spend: Quantity             # USD per month the prefix costs at the full input price
+    cached_spend: Quantity               # USD per month with the prefix billed as cached reads
+    net_uncached: Quantity               # uncached spend minus redistillation per month
+    net_cached: Quantity
+    break_even_revisions: float          # redistillations per month that cancel the uncached saving
+
+
+class CandidateReleaseResult(SolverResult):
+    """Result from CandidateReleaseModel: a candidate policy against the baseline on separate trials."""
+    baseline_cost_per_accepted: Quantity
+    candidate_cost_per_accepted: Quantity
+    break_even_attempt_cost: Quantity    # candidate attempt cost that matches the baseline's C_eff
+    cost_rise: float                     # candidate / baseline C_eff - 1
+    gap: float                           # candidate - baseline acceptance
+    gap_se: float                        # unpooled, trials treated as independent
+    gap_z: float                         # gap / gap_se
+    recall_error_ratio: float            # candidate / baseline PRE on renamed schemas
+
+
+__all__ += [
+    "TargetMaskResult", "PerInvocationSerializationResult", "TrajectoryRoleShareResult",
+    "LossNormalizationResult", "SequencePackingResult", "PreferencePairResult",
+    "ContextDistillationResult", "CandidateReleaseResult",
 ]

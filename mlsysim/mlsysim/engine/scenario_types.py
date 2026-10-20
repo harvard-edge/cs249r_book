@@ -6675,14 +6675,44 @@ class CorrelatedLogScenario(BaseScenario):
 class ImitationBoundScenario(BaseScenario):
     """Worst-case imitation cost over one ``episode`` at ``control_rate`` with per-step error
     ``per_step_error``: open loop, behavioral cloning, and aggregation with recoverability ``u``."""
-    episode: Quantity
-    control_rate: Quantity
+    episode: Optional[Quantity] = None
+    control_rate: Optional[Quantity] = None
     per_step_error: float
     recoverability: float = 1.0
+    # Optional (added 2026-10-20): a horizon stated in decision steps (an agent's
+    # turns), used when there is no episode duration and control rate.
+    horizon: Optional[int] = None
 
     @property
     def horizon_steps(self) -> int:
+        if self.horizon is not None:
+            return self.horizon
         return int(round((self.episode * self.control_rate).to("").magnitude))
+
+    # Capped bounds (added 2026-10-20): with per-step cost in [0, 1], excess cost
+    # never exceeds the horizon, so each bound is min(S, bound).
+    @property
+    def cloning_capped(self) -> float:
+        return min(self.horizon_steps, self.cloning)
+
+    @property
+    def aggregation_capped(self) -> float:
+        return min(self.horizon_steps, self.aggregation)
+
+    @property
+    def capped_gap(self) -> float:
+        """Cloning bound over aggregation bound, both capped: S / u below saturation."""
+        return self.cloning_capped / self.aggregation_capped
+
+    @property
+    def matching_error(self) -> float:
+        """Per-step error on reference states whose cloning bound equals the aggregation bound."""
+        return self.aggregation_capped / self.horizon_steps ** 2
+
+    @property
+    def saturation_horizon(self) -> float:
+        """Horizon at which S^2 eps reaches the cap S: 1 / eps."""
+        return 1.0 / self.per_step_error
 
     @property
     def open_loop(self) -> float:
@@ -9245,6 +9275,25 @@ class TrainingStateFitScenario(BaseScenario):
     # adapter parameter carries weights, gradients, master copy, and
     # optimizer state.
     adapter_parameters: Optional[int] = None
+    # Optional (added 2026-10-20): low-rank adapters stated by shape instead of
+    # a count: rank r on ``adapted_matrices`` d_out-by-d_in matrices in each of
+    # the workload's layers, r (d_in + d_out) parameters per matrix. Used when
+    # ``adapter_parameters`` is None.
+    adapter_rank: Optional[int] = None
+    adapted_matrices: Optional[int] = None
+    adapter_in_dim: Optional[int] = None
+    adapter_out_dim: Optional[int] = None
+
+    @property
+    def adapter_count(self) -> Optional[int]:
+        """Trainable adapter parameters, stated or from the adapter shape."""
+        if self.adapter_parameters is not None:
+            return self.adapter_parameters
+        if self.adapter_rank is None:
+            return None
+        from ..physics.memory import calc_low_rank_update_params
+        return self.workload.layers * self.adapted_matrices * calc_low_rank_update_params(
+            self.adapter_in_dim, self.adapter_out_dim, self.adapter_rank)
 
     def activations_at(self, batch_size: int) -> Quantity:
         """Saved activations at another batch size, scaled linearly from ``activations``."""
@@ -9296,15 +9345,62 @@ class TrainingStateFitScenario(BaseScenario):
     @property
     def adapter_state(self) -> Quantity:
         """Everything the adapters hold: weights, gradients, master copy, optimizer state."""
-        return (self.adapter_parameters * self.bytes_per_trained_parameter).to("byte")
+        return (self.adapter_count * self.bytes_per_trained_parameter).to("byte")
+
+    # Adapter state by array (added 2026-10-20): one resident copy of each.
+    @property
+    def adapter_weights(self) -> Quantity:
+        return (self.adapter_count * self.bytes_per_value).to("byte")
+
+    @property
+    def adapter_gradients(self) -> Quantity:
+        return (self.adapter_count * self.bytes_per_value).to("byte")
+
+    @property
+    def adapter_master(self) -> Quantity:
+        master = Q_(0, "byte") if self.master_bytes_per_parameter is None else self.master_bytes_per_parameter
+        return (self.adapter_count * master).to("byte")
+
+    @property
+    def adapter_optimizer_state(self) -> Quantity:
+        return (self.adapter_count * self.optimizer_bytes_per_parameter).to("byte")
 
     @property
     def adapter_fraction(self) -> float:
-        return self.adapter_parameters / self.workload.parameters.to("count").magnitude
+        return self.adapter_count / self.workload.parameters.to("count").magnitude
+
+    # Adapter run against full fine-tuning (added 2026-10-20), state before activations.
+    @property
+    def full_state(self) -> Quantity:
+        """State if every parameter trained: the same recipe with no adapters."""
+        return self.variant(adapter_parameters=None, adapter_rank=None).total
+
+    @property
+    def adapter_saved(self) -> Quantity:
+        return (self.full_state - self.total).to("byte")
+
+    @property
+    def adapter_reduction(self) -> float:
+        """Full-state bytes over adapter-run bytes."""
+        return (self.full_state / self.total).to("").magnitude
+
+    @property
+    def adapter_kept_share(self) -> float:
+        return (self.total / self.full_state).to("").magnitude
+
+    @property
+    def frozen_share(self) -> float:
+        """The frozen base's share of the adapter run's state."""
+        return (self.weights / self.total).to("").magnitude
+
+    @property
+    def adapter_reduction_ceiling(self) -> float:
+        """The reduction as adapters shrink to nothing: bytes per trained over bytes per frozen parameter."""
+        return (self.bytes_per_trained_parameter / self.bytes_per_value).to("").magnitude
 
     @property
     def total(self) -> Quantity:
-        if self.adapter_parameters is not None:
+        if self.adapter_count is not None:
             return (self.weights + self.adapter_state).to("byte")
         return sum(self._state()[1:], self._state()[0]) + self.master_weights
 
@@ -16025,3 +16121,134 @@ class StaleAnchorScenario(BaseScenario):
         from .solvers import StaleAnchorModel
         arm = self.machine.arm
         return StaleAnchorModel().solve(self.joint_speed, self.delay, arm.upper_arm_length + arm.forearm_length)
+
+
+
+# --- Fine-tuning on trajectories (added 2026-10-20) ---------------------------
+# One serialized example's target mask, one example per call, recorded role
+# shares, loss weighting, packing, a preference pair, context distillation,
+# and a release comparison; solvers in engine/solvers/fine_tuning.py.
+
+class TargetMaskScenario(BaseScenario):
+    """One serialized training example by segment, and the responses kept as context only."""
+    prompt: int                   # includes the initial boundary position
+    task: int
+    rationale: int                # optional reviewed rationale
+    response: int                 # policy responses with their stop tokens
+    observation: int
+    unselected_response: int      # responses retained as context, not targets
+
+    @property
+    def result(self):
+        from .solvers import TargetMaskModel
+        return TargetMaskModel().solve(self.prompt, self.task, self.rationale, self.response,
+                                       self.observation, self.unselected_response)
+
+
+class PerInvocationSerializationScenario(BaseScenario):
+    """A ``turns``-turn trajectory stored as one example per model call, each turn adding ``tokens_per_turn``."""
+    turns: int
+    tokens_per_turn: int
+
+    @property
+    def result(self):
+        from .solvers import PerInvocationSerializationModel
+        return PerInvocationSerializationModel().solve(self.turns, self.tokens_per_turn)
+
+
+class TrajectoryRoleShareScenario(BaseScenario):
+    """Transcript characters by role, per configuration, over a per-trajectory ``Literature`` series."""
+    series_name: str
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryRoleShareModel
+        return TrajectoryRoleShareModel().solve(self.rows)
+
+
+class LossNormalizationScenario(BaseScenario):
+    """A long trajectory split into ``focus_pieces`` records, batched with ``other_examples`` short ones."""
+    focus_targets: int
+    other_examples: int
+    other_targets: int
+    focus_pieces: int = 1
+
+    @property
+    def result(self):
+        from .solvers import LossNormalizationModel
+        return LossNormalizationModel().solve(self.focus_targets, self.other_examples,
+                                              self.other_targets, self.focus_pieces)
+
+
+class SequencePackingScenario(BaseScenario):
+    """Stored example lengths against ``capacity``-token buffers."""
+    lengths: List[int]
+    capacity: int
+
+    @property
+    def result(self):
+        from .solvers import SequencePackingModel
+        return SequencePackingModel().solve(self.lengths, self.capacity)
+
+
+class PreferencePairScenario(BaseScenario):
+    """Log-probability sums over a preferred and a dispreferred record's selected tokens."""
+    policy_preferred: float
+    reference_preferred: float
+    policy_dispreferred: float
+    reference_dispreferred: float
+    beta: float
+
+    @property
+    def result(self):
+        from .solvers import PreferencePairModel
+        return PreferencePairModel().solve(self.policy_preferred, self.reference_preferred,
+                                           self.policy_dispreferred, self.reference_dispreferred,
+                                           self.beta)
+
+
+class ContextDistillationScenario(BaseScenario):
+    """A procedural prefix read every turn, against distilling it and redistilling per revision."""
+    prefix_tokens: int
+    turns_per_session: int
+    sessions_per_month: float
+    input_price: Quantity          # USD per token
+    cached_fraction: float         # cached reads billed at this share of the input price
+    redistill_cost: Quantity       # USD per redistillation
+    revisions_per_month: float
+
+    @property
+    def result(self):
+        from .solvers import ContextDistillationModel
+        return ContextDistillationModel().solve(self.prefix_tokens, self.turns_per_session,
+                                                self.sessions_per_month, self.input_price,
+                                                self.cached_fraction, self.redistill_cost,
+                                                self.revisions_per_month)
+
+
+class CandidateReleaseScenario(BaseScenario):
+    """A fine-tuned candidate against the baseline: acceptance, attempt cost, and schema metrics."""
+    trials: int                              # per arm
+    baseline_acceptance: float
+    baseline_attempt_cost: Quantity
+    candidate_acceptance: float
+    candidate_attempt_cost: Quantity
+    baseline_sfa_familiar: float             # schema-following accuracy, familiar schemas
+    candidate_sfa_familiar: float
+    baseline_sfa_renamed: float              # the same on renamed schemas
+    candidate_sfa_renamed: float
+    baseline_pre_renamed: float              # parametric recall error on renamed schemas
+    candidate_pre_renamed: float
+
+    @property
+    def result(self):
+        from .solvers import CandidateReleaseModel
+        return CandidateReleaseModel().solve(self.trials, self.baseline_acceptance,
+                                             self.baseline_attempt_cost, self.candidate_acceptance,
+                                             self.candidate_attempt_cost, self.baseline_pre_renamed,
+                                             self.candidate_pre_renamed)

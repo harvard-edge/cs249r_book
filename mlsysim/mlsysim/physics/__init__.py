@@ -834,3 +834,19 @@ __all__ += [
     "calc_csr_bytes",
     "calc_pareto_frontier",
 ]
+# --- Fine-tuning on trajectories: weighting, packing, preference pairs (added 2026-10-20) ---
+from .fine_tuning import (
+    calc_token_average_shares,
+    calc_example_average_share,
+    calc_first_fit_decreasing,
+    calc_preference_pair,
+)
+from .statistics import calc_proportion_gap_se
+
+__all__ += [
+    "calc_token_average_shares",
+    "calc_example_average_share",
+    "calc_first_fit_decreasing",
+    "calc_preference_pair",
+    "calc_proportion_gap_se",
+]

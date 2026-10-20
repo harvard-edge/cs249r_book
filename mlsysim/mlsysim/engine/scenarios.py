@@ -5,6 +5,7 @@ from ..core.units import DAYS_PER_YEAR as _DAYS_PER_YEAR  # added 2026-10-20
 from ..core.units import HOURS_PER_YEAR as _HOURS_PER_YEAR  # sustainability (added 2026-10-20)
 from ..core.types import Quantity
 from ..models.types import Workload
+from ..models.types import TransformerWorkload as _TransformerWorkload  # fine-tuning (added 2026-10-20)
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
@@ -8331,4 +8332,145 @@ class Scenarios(Registry):
         machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
         joint_speed=Q_(0.50, "rad/s"),  # scenario assumption: constant joint speed
         delay=Q_(80.0, "ms"),  # scenario assumption: compute and transport of the replacement
+    )
+
+    # --- Fine-tuning on trajectories (added 2026-10-20) ------------------------
+    # The repair agent's recovery record turned into training examples, a weight
+    # update, and a release decision. Token counts, log-probabilities, prices,
+    # and trial outcomes are hypothetical stipulations, not measurements.
+    RepairTrajectoryPerCallExamples = _st.PerInvocationSerializationScenario(
+        name="A repair trajectory stored as one training example per model call",
+        description="The repair harness's step budget in turns, each turn adding about the same tokens; "
+                    "every call's delivered prefix stored separately against one transcript.",
+        turns=_Agents.Coding.SWE_Bench_Runner.max_trajectory_steps,
+        tokens_per_turn=CodingAgentResend30Turns.appended,
+    )
+    RecoveryRecordTargetMask = _st.TargetMaskScenario(
+        name="One serialized repair recovery record and its selected targets",
+        description="16,384 stored tokens: 1,200 of prompt, 184 of task, 1,400 of reviewed rationale, 960 "
+                    "of policy response, and 12,640 of observation; the refused proposal's 160 response "
+                    "tokens stay context.",
+        prompt=1_200,  # scenario assumption: includes the initial boundary position
+        task=184,  # scenario assumption
+        rationale=1_400,  # scenario assumption: available, authorized, reviewed text
+        response=960,  # scenario assumption: response content and authentic stop tokens
+        observation=12_640,  # scenario assumption
+        unselected_response=160,  # scenario assumption: the refused proposal, kept as context
+    )
+    RecoveryRecordTargetMaskDoubledObservations = RecoveryRecordTargetMask.variant(
+        name="The same recovery record with its observations doubled",
+        description="Every other segment unchanged.",
+        observation=2 * RecoveryRecordTargetMask.observation,  # scenario assumption: doubled observations
+    )
+    RecoveryRecordTargetMaskLongObservations = RecoveryRecordTargetMask.variant(
+        name="The same recovery record with 30,000 observation tokens",
+        description="Every other segment unchanged.",
+        observation=30_000,  # scenario assumption: longer observations
+    )
+    SweBenchVerifiedRoleShares = _st.TrajectoryRoleShareScenario(
+        name="Transcript characters by role in five public SWE-bench Verified configurations",
+        description="Prompt, observation, and model-output shares pooled per configuration over "
+                    "Literature.SweBenchTrajectories; each message counted once.",
+        series_name="SweBenchTrajectories",
+    )
+    RepairTraceWithLookupWeighting = _st.LossNormalizationScenario(
+        name="A long repair trace and a one-turn file lookup in one batch",
+        description="8,192 selected targets against 256: token averaging against example averaging.",
+        focus_targets=8_192,  # scenario assumption
+        other_examples=1,  # scenario assumption
+        other_targets=256,  # scenario assumption
+    )
+    RepairTraceWithFifteenLookups = _st.LossNormalizationScenario(
+        name="One repair trajectory of 6,000 targets with 15 file lookups of 200",
+        description="The trajectory's share of the batch objective, token against example averaging.",
+        focus_targets=6_000,  # scenario assumption
+        other_examples=15,  # scenario assumption
+        other_targets=200,  # scenario assumption
+    )
+    RepairTraceSplitIntoTwentyRecords = RepairTraceWithFifteenLookups.variant(
+        name="The same batch with the repair trajectory split into 20 per-call records",
+        description="Each record selects only its own turn's response.",
+        focus_pieces=20,  # scenario assumption: per-invocation records
+    )
+    EightExamplePackingBatch = _st.SequencePackingScenario(
+        name="Eight independent examples, 512 to 32,768 tokens, against 32,768-token buffers",
+        description="Padding every row to the longest against first-fit decreasing packing.",
+        lengths=[32_768, 8_192, 4_096, 2_048, 1_024, 1_024, 512, 512],  # scenario assumption
+        capacity=32_768,  # scenario assumption: buffer positions
+    )
+    RepairPolicyImitationBounds = _st.ImitationBoundScenario(
+        name="Imitation cost bounds over the repair harness's 30-turn horizon",
+        description="A 2 percent disagreement rate on reference states against the same rate on learner "
+                    "states with deviation disadvantage u = 1.",
+        horizon=RepairTrajectoryPerCallExamples.turns,
+        per_step_error=0.02,  # scenario assumption
+        recoverability=1.0,  # scenario assumption: one slip costs at most one unit
+    )
+    RepairPreferencePair = _st.PreferencePairScenario(
+        name="Two passing repair continuations scored against a frozen reference",
+        description="Natural-log probability sums over the selected tokens: preferred -8 against a "
+                    "reference -10, dispreferred -11 against -10, beta 0.2.",
+        policy_preferred=-8.0,  # scenario assumption
+        reference_preferred=-10.0,  # scenario assumption
+        policy_dispreferred=-11.0,  # scenario assumption
+        reference_dispreferred=-10.0,  # scenario assumption
+        beta=0.2,  # scenario assumption
+    )
+    RepairPreferencePairDoubledBeta = RepairPreferencePair.variant(
+        name="The same preference pair at twice the beta",
+        description="Identical log-probabilities; only the preference scale changes.",
+        beta=2 * RepairPreferencePair.beta,  # scenario assumption: doubled preference scale
+    )
+    SupportChecklistDistillation = _st.ContextDistillationScenario(
+        name="A 3,000-token support checklist read every turn, against distilling it",
+        description="Four turns per session, 2 million sessions a month, a hypothetical $2 per million "
+                    "input tokens, cached reads at one tenth, and a $15,000 redistillation per monthly "
+                    "revision.",
+        prefix_tokens=3_000,  # scenario assumption
+        turns_per_session=4,  # scenario assumption
+        sessions_per_month=2e6,  # scenario assumption
+        input_price=Q_(2.00, "USD / Mtoken"),  # scenario assumption: hypothetical input price
+        cached_fraction=RepairPrefixLayoutBill.cached_fraction,
+        redistill_cost=Q_(15_000, "USD"),  # scenario assumption: training run plus release evaluation
+        revisions_per_month=1,  # scenario assumption
+    )
+    Rank16AdaptersOnHypothetical8B = _st.TrainingStateFitScenario(
+        name="Rank-16 low-rank adapters on a hypothetical 8B-parameter transformer, mixed-precision Adam",
+        description="Two 4,096-by-4,096 matrices adapted in each of 32 layers; 2 B per frozen parameter, "
+                    "16 B per trained parameter, before activations.",
+        workload=_TransformerWorkload(
+            name="Hypothetical 8B-parameter transformer",
+            architecture="Transformer",
+            parameters=Q_(8e9, "param"),  # scenario assumption: exact illustrative size
+            layers=32,  # scenario assumption
+            hidden_dim=4_096,  # scenario assumption
+        ),
+        bytes_per_value=_BYTES_FP16,
+        optimizer_bytes_per_parameter=_BYTES_ADAM_MOMENTS,
+        master_bytes_per_parameter=_BYTES_FP32,
+        adapter_rank=16,  # scenario assumption
+        adapted_matrices=2,  # scenario assumption: matrices adapted per layer
+        adapter_in_dim=4_096,  # scenario assumption
+        adapter_out_dim=4_096,  # scenario assumption
+    )
+    Rank32AdaptersOnHypothetical8B = Rank16AdaptersOnHypothetical8B.variant(
+        name="The same adapters at rank 32",
+        description="Adapter state is linear in the rank; the frozen base is unchanged.",
+        adapter_rank=2 * Rank16AdaptersOnHypothetical8B.adapter_rank,  # scenario assumption: doubled rank
+    )
+    RepairCandidateRelease = _st.CandidateReleaseScenario(
+        name="A fine-tuned repair candidate against the baseline on 500 trials each",
+        description="Acceptance 60 percent at $1.20 per attempt against 66 percent at $1.50; schema-"
+                    "following accuracy and parametric recall error on familiar and renamed schemas.",
+        trials=500,  # scenario assumption: per arm
+        baseline_acceptance=0.60,  # scenario assumption
+        baseline_attempt_cost=Q_(1.20, "USD"),  # scenario assumption
+        candidate_acceptance=0.66,  # scenario assumption
+        candidate_attempt_cost=Q_(1.50, "USD"),  # scenario assumption
+        baseline_sfa_familiar=0.92,  # scenario assumption
+        candidate_sfa_familiar=0.95,  # scenario assumption
+        baseline_sfa_renamed=0.90,  # scenario assumption
+        candidate_sfa_renamed=0.81,  # scenario assumption
+        baseline_pre_renamed=0.02,  # scenario assumption
+        candidate_pre_renamed=0.12,  # scenario assumption
     )
