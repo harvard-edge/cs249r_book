@@ -22,6 +22,7 @@ from ..literature.registry import Literature as _Literature
 from ..systems.reliability import Reliability as _Reliability
 from ..infrastructure.registry import Infrastructure as _Infrastructure
 from ..ops import Ops as _Ops
+from ..embodied.registry import Embodied as _Embodied  # embodied stopping scenarios (2026-10-20)
 from . import scenario_types as _st
 
 class Scenario(BaseModel):
@@ -972,3 +973,100 @@ class Scenarios(Registry):
         decode_rates={"light": Q_(1.5, "GB/s"), "dense": Q_(0.5, "GB/s")},  # scenario assumption, per core
     )
 
+
+    # --- Embodied stopping, floor traction, and domain compute (added 2026-10-20)
+    # The running machine's elementary stop (Embodied.MobileManipulator and
+    # Embodied.Scenario hold every input), the Tempe record read through the
+    # same budget (Literature.IncidentReports), a floor-friction drop, and
+    # robot-policy training compute against the language frontier.
+    WarehouseAisleStopAtDriveLimit = _st.StoppingBudgetScenario(
+        name="Warehouse mobile manipulator stopping at its drive limit",
+        description="The loaded base at its drive limit, its pre-brake delay, and its credible "
+                    "deceleration, against the rack-end clear distance (illustrative inputs).",
+        speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity,
+        delay=_Embodied.Scenario.WarehouseAisle.tau_delay,
+        deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+        clear_distance=_Embodied.Scenario.WarehouseAisle.d_clear,
+    )
+
+    WarehouseAisleStopHalfSpeed = WarehouseAisleStopAtDriveLimit.variant(
+        name="Warehouse mobile manipulator stopping at half its drive limit",
+        description="The drive-limit stop with the speed halved; the delay and deceleration are unchanged.",
+        speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity / 2,  # scenario assumption: half speed
+    )
+
+    WarehouseAisleStopDoubledLease = WarehouseAisleStopAtDriveLimit.variant(
+        name="Warehouse mobile manipulator stopping with its chunk lease doubled",
+        description="The drive-limit stop with a second chunk lease added to the pre-brake delay.",
+        delay=(_Embodied.Scenario.WarehouseAisle.tau_delay
+               + _Embodied.Scenario.WarehouseAisle.t_lease).to("ms"),  # scenario assumption: lease doubled
+    )
+
+    WarehouseScannerSkippedDelay = _st.StoppingBudgetScenario(
+        name="Delay terms a certified scanner stop skips on the warehouse base",
+        description="A stop triggered by a safety scanner wired to the drives bypasses the "
+                    "perception backbone and the chunk lease; their travel at the drive limit.",
+        speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity,
+        delay=(_Embodied.Scenario.WarehouseAisle.t_backbone
+               + _Embodied.Scenario.WarehouseAisle.t_lease).to("ms"),
+        deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+    )
+
+    WarehouseInferenceHiccup = _st.StoppingBudgetScenario(
+        name="A 100 ms inference stall on the warehouse base at its drive limit",
+        description="The base repeats its last forward-velocity command while the policy stalls; "
+                    "delay_travel is the distance driven with nothing checking it.",
+        speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity,
+        delay=Q_(100, "ms"),  # scenario assumption: inference stall
+        deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+    )
+
+    TempeActionSuppression = _st.StoppingBudgetScenario(
+        name="Tempe: the one-second action suppression at the recorded speeds",
+        description="NTSB HAR-19/03: emergency recognized at 43.2 mph, braking withheld for 1 s "
+                    "until 40.5 mph; braking from the recognition speed at the road's 0.92 g.",
+        speed=Q_(float(_Literature.IncidentReports.TempeEmergencyRecognitionSpeedMph), "mph"),
+        speed_at_delay_end=Q_(float(_Literature.IncidentReports.TempeSuppressionEndSpeedMph), "mph"),
+        delay=Q_(float(_Literature.IncidentReports.TempeActionSuppressionS), "s"),
+        deceleration=(_Literature.IncidentReports.TempeRoadDecelerationG * Q_(1, "standard_gravity")).to("m/s**2"),
+    )
+
+    TempeActionSuppressionAdsCap = TempeActionSuppression.variant(
+        name="Tempe: the action suppression with braking at the ADS's own cap",
+        description="The suppression scenario with braking at the 7 m/s^2 the ADS allowed itself.",
+        deceleration=Q_(float(_Literature.IncidentReports.TempeAdsBrakingCapMps2), "m/s**2"),
+    )
+
+    TempeFirstDetectionStop = _st.StoppingBudgetScenario(
+        name="Tempe: a full stop at first detection",
+        description="NTSB HAR-19/03: about 350 ft from the pedestrian at the initial 44 mph; "
+                    "braking at the road's 0.92 g with no delay.",
+        speed=Q_(float(_Literature.IncidentReports.TempeInitialSpeedMph), "mph"),
+        delay=Q_(0, "s"),
+        deceleration=(_Literature.IncidentReports.TempeRoadDecelerationG * Q_(1, "standard_gravity")).to("m/s**2"),
+        clear_distance=Q_(float(_Literature.IncidentReports.TempeFirstDetectionDistanceFt), "ft"),
+    )
+
+    HydraulicFluidSlickTraction = _st.TractionLossScenario(
+        name="Hydraulic fluid on a dry concrete floor under the warehouse base",
+        description="Illustrative tire-floor pair, about 0.8 dry and 0.2 with hydraulic fluid, "
+                    "against the running machine's credible deceleration with all weight on the "
+                    "driven wheels.",
+        mu_before=0.8,  # scenario assumption: tire on dry concrete (illustrative)
+        mu_after=0.2,  # scenario assumption: tire on spilled hydraulic fluid (illustrative)
+        deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+    )
+
+    OpenVlaComputeGap = _st.DomainComputeGapScenario(
+        name="OpenVLA against the largest language model of 2024",
+        description="Epoch AI training-compute estimates (Literature.ModelsByDomain).",
+        series_name="ModelsByDomain",
+        model="OpenVLA",
+    )
+
+    Gr00tN1ComputeGap = _st.DomainComputeGapScenario(
+        name="GR00T N1 2B against the largest language model of 2025",
+        description="Epoch AI training-compute estimates (Literature.ModelsByDomain).",
+        series_name="ModelsByDomain",
+        model="GR00T N1 2B",
+    )

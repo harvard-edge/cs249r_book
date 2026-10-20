@@ -871,3 +871,47 @@ class StorageBenchmarkResult(SolverResult):
     result_count: int
     medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
     generation_ratios: Dict[str, float]    # workload -> newer / older accelerator
+
+
+# --- Embodied stopping, traction, and domain compute (added 2026-10-20) -----
+
+class StoppingBudgetResult(SolverResult):
+    """Result from StoppingBudgetModel: the elementary stop against a clear distance."""
+    speed: Quantity                          # speed when the hazard appears; braking starts from it
+    delay: Quantity
+    deceleration: Quantity
+    delay_travel: Quantity
+    braking_travel: Quantity
+    stop_distance: Quantity
+    braking_time: Quantity
+    crossover_speed: Quantity                # 2 a tau: delay travel equals braking travel there
+    braking_over_delay: Optional[float] = None
+    delay_share_of_braking: Optional[float] = None
+    clear_distance: Optional[Quantity] = None
+    spare: Optional[Quantity] = None
+    fits: Optional[bool] = None
+    clear_over_stop: Optional[float] = None
+    speed_ceiling: Optional[Quantity] = None  # fastest speed whose elementary stop fits
+
+    def travel_over(self, duration: Quantity) -> Quantity:
+        """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
+        return (self.speed * duration).to("meter")
+
+
+class TractionLossResult(SolverResult):
+    """Result from TractionLossModel: what a drop in floor friction does to braking."""
+    braking_distance_ratio: float            # braking distance at the traction limit, after / before
+    traction_ceiling: Quantity               # deceleration the lower friction can support
+    required_friction: float                 # friction the stated deceleration needs
+    premise_holds: bool                      # the lower friction still supports it
+
+
+class DomainComputeGapResult(SolverResult):
+    """Result from DomainComputeGapModel: one model against the largest of another domain that year."""
+    model: str
+    year: str
+    model_flop: float
+    reference_model: str
+    reference_flop: float
+    gap: float                               # reference_flop / model_flop
+    domain_models_with_compute: int          # rows of the model's domain that carry a compute estimate

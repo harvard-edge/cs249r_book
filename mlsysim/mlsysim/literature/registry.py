@@ -31,6 +31,8 @@ FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-o
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
+# Incident investigation reports (added 2026-10-20)
+IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover).")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +297,7 @@ class Literature(Registry):
     DatacenterElectricity = DatacenterElectricity
     AcceleratorLifecycle = AcceleratorLifecycle
     StorageSystems = StorageSystems
+    IncidentReports = IncidentReports
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

@@ -11,6 +11,9 @@ from .stopping import (
     calc_scurve_max_permitted_velocity,
     calc_scurve_rest_to_rest_time,
     calc_latch_contact_stopping_profile,
+    calc_stopping_crossover_speed,
+    calc_braking_time,
+    calc_travel_between_speeds,
 )
 from .actuation import (
     calc_kinetic_energy,
@@ -70,6 +73,9 @@ __all__ = [
     "calc_scurve_max_permitted_velocity",
     "calc_scurve_rest_to_rest_time",
     "calc_latch_contact_stopping_profile",
+    "calc_stopping_crossover_speed",
+    "calc_braking_time",
+    "calc_travel_between_speeds",
     "calc_kinetic_energy",
     "calc_reflected_inertia",
     "calc_seam_acceleration_torque_jump",

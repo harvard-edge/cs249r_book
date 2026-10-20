@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from ..results import TrainingGrowthResult
+from ..results import DomainComputeGapResult, TrainingGrowthResult
 from .base import ForwardModel
 
 
@@ -51,4 +51,33 @@ class TrainingGrowthModel(ForwardModel):
             duration_factor=duration, rate_factor=rate,
             fleet_share=(math.log(count) + math.log(duration)) / math.log(compute),
             span_orders=math.log10(max(r["training_compute_flop"] for r in window) / origin),
+        )
+
+
+# --- Training compute by domain (added 2026-10-20) --------------------------
+
+class DomainComputeGapModel(ForwardModel):
+    """
+    How far one model's training compute sits below the largest model of another domain that year.
+
+    Rows are the Epoch AI models-by-domain series (``domain_group``,
+    ``publication_date``, ``training_flop``). The gap is the largest
+    ``reference_group`` compute published in the model's year over the
+    model's own compute.
+    """
+    requires = ("series",)
+    produces = DomainComputeGapResult
+
+    def solve(self, rows, model: str, reference_group: str = "Language") -> DomainComputeGapResult:
+        row = next(r for r in rows if r["model"] == model)
+        year = str(row["publication_date"])[:4]
+        ref = max((r for r in rows if r["domain_group"] == reference_group and r["training_flop"]
+                   and str(r["publication_date"]).startswith(year)),
+                  key=lambda r: r["training_flop"])
+        return DomainComputeGapResult(
+            model=model, year=year, model_flop=row["training_flop"],
+            reference_model=ref["model"], reference_flop=ref["training_flop"],
+            gap=ref["training_flop"] / row["training_flop"],
+            domain_models_with_compute=sum(1 for r in rows if r["domain_group"] == row["domain_group"]
+                                           and r["training_flop"]),
         )

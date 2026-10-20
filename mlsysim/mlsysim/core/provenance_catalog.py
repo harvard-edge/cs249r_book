@@ -2487,3 +2487,34 @@ DEEPSEEK_3FS_README = _lit(
         "throughput about 6.6 TiB/s with background traffic from training jobs."
     ),
 )
+
+# --- Incident investigation reports (added 2026-10-20) ----------------------
+NTSB_HAR_19_03 = _lit(
+    "prov:ntsb-har-19-03",
+    "NTSB, Collision Between Vehicle Controlled by Developmental Automated Driving System and "
+    "Pedestrian, Tempe, Arizona, March 18, 2018, Highway Accident Report NTSB/HAR-19/03 (2019)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Read from the report PDF: emergency threshold and braking cap 7 m/s2 (0.71 g) and the "
+        "1-second action suppression (p. 13); TPD average deceleration capability 0.92 g "
+        "(footnote 33, p. 13; footnote 91, p. 43); table of selected ADS parameters "
+        "(pp. 15-16): first radar detection at -5.6 s, emergency and suppression at -1.2 s and "
+        "43.2 mph, suppression end at -0.2 s and 40.5 mph, operator takes the wheel at -0.02 s; "
+        "impact at 39 mph (p. v and p. 2); about 350 ft from the pedestrian at first detection (2.1.2); "
+        "footnote 91 states 2.1 s to stop from an initial 44 mph at 0.92 g."
+    ),
+)
+QUINN_EMANUEL_CRUISE_2024 = _lit(
+    "prov:quinn-emanuel-cruise-2024",
+    "Quinn Emanuel Urquhart & Sullivan, Report to the Boards of Directors of Cruise LLC, GM "
+    "Cruise Holdings LLC, and General Motors Holdings LLC regarding the October 2, 2023 "
+    "accident in San Francisco (2024)",
+    url="https://assets.ctfassets.net/95kuvdv8zn1v/1mb55pLYkkXVn0nXxEXz7w/9fb0e4938a89dc5cc09bf39e86ce5b9c/2024.01.24_Quinn_Emanuel_Report_re_Cruise.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Pullover after the collision: the vehicle moved about 20 ft at up to 7.7 mph with the "
+        "pedestrian beneath it (p. 10). Transcribed from the Volume IV chapter's citation; "
+        "not re-read against the report in this pass."
+    ),
+)
