@@ -185,7 +185,7 @@ v("ladder_fp32_x", rate(LADDER[3], "fp32") / rate(LADDER[0], "fp32"), "{:.1f}", 
 v("ladder_fp16_x", rate(LADDER[3], "fp16_dense") / rate(LADDER[0], "fp16_dense"), "{:.0f}",
   "B200 over V100, 16-bit tensor")
 v("h100_fp32", rate(H100, "fp32"), "{:.0f}", "H100 FP32, TFLOP/s")
-v("h100_tf32", rate(H100, "tf32"), "{:.0f}", "H100 TF32 dense, TFLOP/s")
+v("h100_tf32", rate(H100, "tf32"), "{:.1f}", "H100 TF32 dense, TFLOP/s")
 v("h100_peak", m(H100.compute.peak_flops, "TFLOP/s"), "{:.0f}", "H100 16-bit dense, TFLOP/s")
 v("h100_peak_sparse", rate(H100, "fp16_sparse"), "{:,.0f}", "H100 16-bit with sparsity, TFLOP/s")
 v("h100_tf32_sparse", rate(H100, "tf32_sparse"), "{:.0f}", "H100 TF32 with sparsity, TFLOP/s")
