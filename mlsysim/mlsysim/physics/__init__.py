@@ -635,3 +635,11 @@ __all__ += [
 from .agents import calc_injection_exposure, calc_injection_read_budget
 
 __all__ += ["calc_injection_exposure", "calc_injection_read_budget"]
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+from .agents import calc_bounded_liability, calc_drr_calls_per_round, calc_used_fraction
+
+__all__ += [
+    "calc_bounded_liability",
+    "calc_drr_calls_per_round",
+    "calc_used_fraction",
+]

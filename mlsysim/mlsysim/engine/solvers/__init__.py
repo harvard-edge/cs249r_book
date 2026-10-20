@@ -390,3 +390,21 @@ __all__ += ["ParameterGrowthModel"]
 from .security import InjectionExposureModel, TurnExposureModel, PolicyComparisonModel
 
 __all__ += ["InjectionExposureModel", "TurnExposureModel", "PolicyComparisonModel"]
+# --- The agent harness (added 2026-10-20) ---
+from .harness import (
+    ApprovalEscrowModel,
+    DeficitRoundRobinModel,
+    BoundedLiabilityAdmissionModel,
+    TrajectoryBudgetMeterModel,
+    CallCeilingModel,
+    StepCeilingReturnModel,
+)
+
+__all__ += [
+    "ApprovalEscrowModel",
+    "DeficitRoundRobinModel",
+    "BoundedLiabilityAdmissionModel",
+    "TrajectoryBudgetMeterModel",
+    "CallCeilingModel",
+    "StepCeilingReturnModel",
+]

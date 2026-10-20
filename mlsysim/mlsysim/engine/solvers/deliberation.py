@@ -466,12 +466,13 @@ class RecordedRunCostModel(ForwardModel):
 
     Cohort cost per resolved task is the run's total over its resolved tasks;
     the unresolved share is the fraction of that spend on attempts that
-    failed. Runs that record no cost are rejected.
+    failed. Runs that record no cost are rejected. With a ``cost_limit``
+    (dollars), it also counts the runs that ended above it and by how much.
     """
     requires = ("series",)
     produces = RecordedRunCostResult
 
-    def solve(self, rows) -> RecordedRunCostResult:
+    def solve(self, rows, cost_limit: Optional[float] = None) -> RecordedRunCostResult:
         costs = [r["rep_cost_usd"] for r in rows]
         if any(c is None or c != c for c in costs):
             raise ValueError("this run records no cost")
@@ -488,4 +489,14 @@ class RecordedRunCostModel(ForwardModel):
             unresolved_share=sum(r["rep_cost_usd"] for r in rows if not r["resolved"]) / total,
             input_output_ratio=inp / out,
             median_calls=statistics.median(r["n_model_calls"] for r in rows),
+            **self._over_limit(costs, cost_limit),
         )
+
+    @staticmethod
+    def _over_limit(costs, cost_limit):
+        if cost_limit is None:
+            return {}
+        over = [c - cost_limit for c in costs if c > cost_limit]
+        return dict(cost_limit=cost_limit, over_limit_runs=len(over),
+                    mean_overshoot=sum(over) / len(over) if over else 0.0,
+                    max_overshoot=max(over, default=0.0))
