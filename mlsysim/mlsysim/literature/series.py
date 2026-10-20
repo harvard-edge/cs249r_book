@@ -145,6 +145,24 @@ CybenchSolveRate = _Series(
     "Fraction of Cybench CTF tasks solved without subtask hints, by model release.",
 )
 
+FirecrackerBootPreconfigured = _Series(
+    "firecracker_boot_preconfigured",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Agache et al. (2020), Firecracker: Lightweight Virtualization for Serverless "
+             "Applications (NSDI '20), released boot-time CDFs, pre-configured microVMs on m5d.metal"),
+        url="https://github.com/firecracker-microvm/nsdi2020-data",
+        verified="2026-10-20",
+        notes=(
+            "Second data block (gnuplot index 1, plotted as 'FC-pre') of "
+            "data/m5d.metal/boot-serial-fc-api-cdf.dat, boot-parallel-50-fc-api-cdf.dat, and "
+            "boot-parallel-100-fc-api-cdf.dat, copied row for row: boot time in ms and the "
+            "cumulative fraction booted. Concurrency 1 is the serial run. Apache-2.0."
+        ),
+    ),
+    "Firecracker pre-configured microVM boot-time CDF (ms) by number booting at once.",
+)
+
 OSWorldStepBudget = _Series(
     "osworld_step_budget",
     Provenance(

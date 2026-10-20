@@ -364,3 +364,20 @@ __all__ += [
     "LeaseBudgetModel",
     "LatencyTailModel",
 ]
+
+# --- Agent sandboxes (added 2026-10-20) ---
+from .sandboxes import (
+    SyscallTaxModel,
+    EnvelopeAmortizationModel,
+    WorkspaceProvisioningModel,
+    SandboxPoolReserveModel,
+    BootTimeCdfModel,
+)
+
+__all__ += [
+    "SyscallTaxModel",
+    "EnvelopeAmortizationModel",
+    "WorkspaceProvisioningModel",
+    "SandboxPoolReserveModel",
+    "BootTimeCdfModel",
+]

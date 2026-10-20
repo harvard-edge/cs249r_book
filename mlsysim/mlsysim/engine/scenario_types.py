@@ -7262,3 +7262,87 @@ class IntegrationAdaptersScenario(BaseScenario):
     def result(self):
         from .solvers import IntegrationAdaptersModel
         return IntegrationAdaptersModel().solve(self.hosts, self.services)
+
+
+# --- Agent sandboxes (added 2026-10-20) ---
+class SyscallTaxScenario(BaseScenario):
+    """``calls`` ordinary system calls priced by the terms each isolation envelope pays."""
+    calls: int
+    trap: Quantity                   # trap into a kernel
+    filter: Quantity                 # in-kernel filter (shared-kernel container)
+    emulate: Quantity                # user-space kernel emulation
+    switch: Quantity                 # switch to the emulator
+
+    @property
+    def result(self):
+        from .solvers import SyscallTaxModel
+        return SyscallTaxModel().solve(self.calls, self.trap, self.filter, self.emulate, self.switch)
+
+
+class EnvelopeAmortizationScenario(BaseScenario):
+    """``calls`` sequential calls of ``work_per_call``, with envelope setup paid per call or once."""
+    calls: int
+    setup: Quantity                  # envelope preparation through readiness for useful work
+    work_per_call: Quantity
+    overhead_cap: float              # largest acceptable setup share of a fresh call
+
+    @property
+    def result(self):
+        from .solvers import EnvelopeAmortizationModel
+        return EnvelopeAmortizationModel().solve(self.calls, self.setup, self.work_per_call,
+                                                 self.overhead_cap)
+
+
+class WorkspaceProvisioningScenario(BaseScenario):
+    """``workspaces`` on one pinned base, provisioned by copy or copy-on-write, then a first write."""
+    workspaces: int
+    base_image: Quantity             # repository, toolchain, and dependencies
+    written: Quantity                # edits and build outputs per workspace
+    bandwidth: Quantity              # one drive's sequential rate
+    fixture: Quantity                # a large shared file each task modifies
+    block: Quantity                  # block-granular copying unit
+    modified: Quantity               # bytes each task changes in the fixture
+
+    @property
+    def result(self):
+        from .solvers import WorkspaceProvisioningModel
+        return WorkspaceProvisioningModel().solve(self.workspaces, self.base_image, self.written,
+                                                  self.bandwidth, self.fixture, self.block,
+                                                  self.modified)
+
+
+class SandboxPoolReserveScenario(BaseScenario):
+    """A warm sandbox pool under steady arrivals: active leases, a standby reserve, and memory."""
+    arrival_rate: Quantity
+    hold: Quantity                   # lease held for the whole trajectory
+    restore: Quantity                # one clean instance from its snapshot
+    guest_memory: Quantity           # full private guest image
+    dirty: Quantity                  # private pages written per active lease
+    standby: Quantity                # private state per standby instance
+    target_miss: float               # request-level miss target
+    initial_reserve: int = 1         # candidate evaluated before the minimum
+    slow_factor: float = 10          # a cold boot this many times slower than restore
+
+    @property
+    def result(self):
+        from .solvers import SandboxPoolReserveModel
+        return SandboxPoolReserveModel().solve(self.arrival_rate, self.hold, self.restore,
+                                               self.guest_memory, self.dirty, self.standby,
+                                               self.target_miss, self.initial_reserve,
+                                               self.slow_factor)
+
+
+class BootTimeCdfScenario(BaseScenario):
+    """Median and tail boot time of ``booting`` microVMs started at once, from a released CDF series."""
+    series: Any                      # a Literature series with concurrency, boot_ms, booted_fraction
+    booting: int
+    median_fraction: float = 0.5
+    tail_fraction: float = 0.99
+
+    @property
+    def result(self):
+        from .solvers import BootTimeCdfModel
+        rows = [r for r in self.series.entries if r["concurrency"] == self.booting]
+        times = [Q_(r["boot_ms"], "ms") for r in rows]
+        return BootTimeCdfModel().solve(self.booting, times, [r["booted_fraction"] for r in rows],
+                                        self.median_fraction, self.tail_fraction)

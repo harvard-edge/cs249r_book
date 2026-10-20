@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 8 (Agent Sandboxes, Volume III).
 
-Every number comes from calcs.py (which sources the rendered chapter and the
-cited papers) or is a measured value read from data/. Diagrams are SVG,
+Every number comes from calcs.py, which reads MLSysIM (the chapter's
+scenarios and the cited results) and the deck's own runs in data/; labels use
+val() so a figure prints the digits the slide prints. Diagrams are SVG,
 plots are matplotlib SVG; the slides Makefile turns both into PDF.
 
 Legibility rule (slides/visuals.md §2): every figure is drawn at the shape
@@ -26,11 +27,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics import calc_poisson_tail  # noqa: E402
 
 plt = sp.plt
 C = sp.C
 out = Path(__file__).parent
-DATA = out / "data"
 AME = "#581C87"      # Volume III accent, amethyst
 AME_L = "#E7DAF2"
 INK = "#1A1A2E"
@@ -107,7 +109,7 @@ def boundaries_steps():
 # 2. In-process reach (ch §8.3.1), 2 steps
 # ===========================================================================
 def reach_steps():
-    items = ["module globals", "API_KEY", "251 classes", "open files"]
+    items = ["module globals", "API_KEY", f"{val('esc_classes')} classes", "open files"]
     for step in (1, 2):
         g = SVG(900, 320)
         g.rect(8, 8, 884, 304, fill="#F7F5FA", stroke=C["neutral"], sw=2)
@@ -322,37 +324,39 @@ def cbars(path, rows, xlabel, log=False, height=2.6, xmax=None):
 
 
 def syscall_plots():
-    t = calcs.syscall_tax()
+    sup = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
     cbars(out / "tax.svg",
-          [("Container", t["container"], "memory", f"{t['container']:.2f} s"),
-           ("MicroVM", t["microvm"], "compute", f"{t['microvm']:.2f} s"),
-           ("User-space", t["userspace"], "network", f"{t['userspace']:.1f} s")],
-          "Added s per 10⁶ calls", height=3.0, xmax=5.0)
-    # gVisor measured (Young et al. 2019, figure 3): gettimeofday latency
+          [("Container", num("tax_container"), "memory", f"{val('tax_container')} s"),
+           ("MicroVM", num("tax_microvm"), "compute", f"{val('tax_microvm')} s"),
+           ("User-space", num("tax_userspace"), "network", f"{val('tax_userspace')} s")],
+          f"Added s per 10{val('tax_calls_exp').translate(sup)} calls", height=3.0, xmax=5.0)
+    # gVisor measured (Young et al. 2019, figure 3; Literature.SandboxIsolation)
     cbars(out / "gvisor.svg",
-          [("native", 0.22, "neutral", "0.22"),
-           ("runc", 0.29, "memory", "0.29"),
-           ("Sentry", 0.63, "network", "0.63"),
-           ("via host", 5.96, "network", "5.96"),
-           ("via gofer", 45.5, "danger", "45.5")],
+          [("native", num("gv_native"), "neutral", val("gv_native")),
+           ("runc", num("gv_runc"), "memory", val("gv_runc")),
+           ("Sentry", num("gv_sentry"), "network", val("gv_sentry")),
+           ("via host", num("gv_host"), "network", val("gv_host")),
+           ("via gofer", num("gv_gofer"), "danger", val("gv_gofer"))],
           "µs per call (log)", log=True, height=3.0)
 
 
 def setup_plot():
-    s = calcs.setup_amortization()
-    setup = s["setup"]
+    setup = num("su_setup")
+    cap = num("su_cap")
     with plt.rc_context(COL):
         fig, ax = plt.subplots(figsize=(5.4, 3.4))
         work = np.linspace(0.5, 200, 400)
         ax.plot(work, setup / (setup + work) * 100, color=AME, lw=3.5)
-        ax.axhline(10, color=C["danger"], lw=2, ls="--")
-        ax.text(198, 14, "10% cap", color=C["danger"], fontsize=17,
+        ax.axhline(cap, color=C["danger"], lw=2, ls="--")
+        ax.text(198, cap + 4, f"{val('su_cap')}% cap", color=C["danger"], fontsize=17,
                 fontweight="bold", ha="right")
-        ax.plot([3], [83.3], "o", ms=12, color=C["danger"], mec="white", mew=1.5)
-        ax.text(14, 80, "3 ms work: 83%", fontsize=17, fontweight="bold",
-                color=C["danger"], va="center")
-        ax.plot([s["cap_work"]], [10], "o", ms=12, color=AME, mec="white", mew=1.5)
-        ax.text(135, 30, "135 ms", fontsize=17, fontweight="bold", color=AME, ha="center")
+        ax.plot([num("su_work")], [num("su_share")], "o", ms=12, color=C["danger"],
+                mec="white", mew=1.5)
+        ax.text(14, 80, f"{val('su_work')} ms work: {val('su_share')}%", fontsize=17,
+                fontweight="bold", color=C["danger"], va="center")
+        ax.plot([num("su_cap_work")], [cap], "o", ms=12, color=AME, mec="white", mew=1.5)
+        ax.text(num("su_cap_work"), 30, f"{val('su_cap_work')} ms", fontsize=17,
+                fontweight="bold", color=AME, ha="center")
         ax.set_xlabel("Useful work per call (ms)")
         ax.set_ylabel("Setup share (%)")
         ax.set_xlim(0, 200)
@@ -363,58 +367,57 @@ def setup_plot():
 
 
 def cow_plots():
-    p = calcs.provisioning()
     cbars(out / "provision.svg",
-          [("Full copy", p["full"], "danger", f"{p['full']:.1f} GB"),
-           ("Copy-on-write", p["cow"], "data", f"{p['cow']:.2f} GB")],
-          "GB moved, 32 workspaces (log)", log=True, height=2.4)
-    c = calcs.our_runs()["clone"]
+          [("Full copy", num("wk_full"), "danger", f"{val('wk_full')} GB"),
+           ("Copy-on-write", num("wk_cow"), "data", f"{val('wk_cow')} GB")],
+          f"GB moved, {val('wk_n')} workspaces (log)", log=True, height=2.4)
     cbars(out / "clone.svg",
-          [("Full copy", c["full copy"], "danger", f"{c['full copy']:.0f} ms"),
-           ("Clone", c["copy-on-write clone (cp -c)"], "data",
-            f"{c['copy-on-write clone (cp -c)']:.0f} ms"),
-           ("1-byte write", c["1-byte change to the clone"], "compute",
-            f"{c['1-byte change to the clone']:.1f} ms")],
-          "ms, 2.4 GB base (log)", log=True, height=2.4)
+          [("Full copy", num("cl_full"), "danger", f"{val('cl_full')} ms"),
+           ("Clone", num("cl_clone"), "data", f"{val('cl_clone')} ms"),
+           ("1-byte write", num("cl_write"), "compute", f"{val('cl_write')} ms")],
+          f"ms, {val('cl_base')} GB base (log)", log=True, height=2.4)
 
 
 def pool_plots():
-    import math
-    lam, target = 2.0, 1e-3
+    pool = calcs.POOL
+    res = pool.result
+    lam = pool.arrival_rate.to("1/ms").magnitude      # arrivals per ms of restore
+    target, reserve = pool.target_miss, res.reserve
+    restore = num("pl_restore")
 
-    def tail(S, mean):
-        return 1 - sum(math.exp(-mean) * mean**k / math.factorial(k) for k in range(S))
+    def tail(x_ms):
+        return calc_poisson_tail(lam * x_ms, reserve)
 
-    p = calcs.pool_sizing()
     with plt.rc_context(COL):
         fig, ax = plt.subplots(figsize=(5.4, 3.4))
         r = np.linspace(2, 80, 400)
-        ax.plot(r, [tail(2, lam * x / 1000) for x in r], color=AME, lw=3.5)
+        ax.plot(r, [tail(x) for x in r], color=AME, lw=3.5)
         ax.axhline(target, color=C["danger"], lw=2, ls="--")
-        ax.text(78, target * 1.6, "0.1% target", color=C["danger"], fontsize=17,
+        ax.text(78, target * 1.6, f"{val('pl_target')}% target", color=C["danger"], fontsize=17,
                 fontweight="bold", ha="right")
-        ax.plot([15], [tail(2, lam * 0.015)], "o", ms=12, color=C["data"], mec="white")
-        ax.annotate("15 ms", (15, tail(2, lam * 0.015)), xytext=(32, 1.2e-5),
+        ax.plot([restore], [tail(restore)], "o", ms=12, color=C["data"], mec="white")
+        ax.annotate(f"{val('pl_restore')} ms", (restore, tail(restore)), xytext=(32, 1.2e-5),
                     color=C["data"], fontsize=17, fontweight="bold",
                     arrowprops=dict(arrowstyle="->", color=C["data"], lw=1.5))
-        ax.axvline(23, color=C["neutral"], lw=1.5, ls=":")
-        ax.text(26, 3e-2, "fails past 23 ms", color=C["neutral"], fontsize=16)
+        ax.axvline(res.max_restore.to("ms").magnitude, color=C["neutral"], lw=1.5, ls=":")
+        ax.text(26, 3e-2, f"fails past {val('pl_max_restore')} ms", color=C["neutral"],
+                fontsize=16)
         ax.set_yscale("log")
         ax.set_xlabel("Restore time (ms)")
-        ax.set_ylabel("Miss, 2 standby")
+        ax.set_ylabel(f"Miss, {reserve} standby")
         ax.set_xlim(0, 80)
         ax.set_ylim(1e-6, 1)
         ax.grid(color=C["grid"], lw=0.6)
         ax.set_axisbelow(True)
         sp.save(fig, str(out / "pool_miss.svg"))
     cbars(out / "pool_mem.svg",
-          [("Private", p["private"], "danger", f"{p['private']:.0f} GB"),
-           ("Shared", p["cow"], "data", f"{p['cow']:.0f} GB")],
-          "GB for 600 leases", height=2.3)
+          [("Private", num("pl_private"), "danger", f"{val('pl_private')} GB"),
+           ("Shared", num("pl_cow"), "data", f"{val('pl_cow')} GB")],
+          f"GB for {val('pl_active')} leases", height=2.3)
 
 
 def cybench_plot():
-    rows = calcs.cybench()
+    rows = [(r["release_date"], r["unguided_solved"], r["source"]) for r in calcs.CYBENCH]
     with plt.rc_context(COL):
         fig, ax = plt.subplots(figsize=(5.4, 3.6))
         yrs = [int(d[:4]) + (int(d[5:7]) - 1) / 12 + (int(d[8:10]) - 1) / 365 for d, v, s in rows]
@@ -429,10 +432,10 @@ def cybench_plot():
             bx.append(yy)
             by.append(best * 100)
         ax.step(bx, by, where="post", color=C["neutral"], lw=2, ls="--")
-        ax.text(2024.5, 27, "17.5%", fontsize=18, color=C["memory"], fontweight="bold",
-                ha="center")
-        ax.text(2025.95, 93, "93%", fontsize=18, color=C["danger"], fontweight="bold",
-                va="center", ha="right")
+        ax.text(2024.5, 27, f"{val('cy_best_2024')}%", fontsize=18, color=C["memory"],
+                fontweight="bold", ha="center")
+        ax.text(2025.95, num("cy_best_latest"), f"{val('cy_best_latest')}%", fontsize=18,
+                color=C["danger"], fontweight="bold", va="center", ha="right")
         ax.set_ylabel("Solved unhinted (%)")
         ax.set_ylim(0, 105)
         ax.set_xlim(2023.95, 2026.25)
@@ -444,14 +447,14 @@ def cybench_plot():
 
 
 def firecracker_plot():
-    def preconf(fn):
-        blocks = (DATA / fn).read_text().strip().split("\n\n")
-        return np.array([[float(x) for x in l.split()]
-                         for l in blocks[1].strip().splitlines() if l.strip()])
+    def preconf(booting):
+        # Literature.FirecrackerBootPreconfigured: Agache et al. 2020 released CDF
+        series = calcs.BOOT1.series
+        return np.array([[r["boot_ms"], r["booted_fraction"]]
+                         for r in series.entries if r["concurrency"] == booting])
 
-    s = preconf("boot-serial-fc-api-cdf.dat")
-    p = preconf("boot-parallel-100-fc-api-cdf.dat")
-    f = calcs.firecracker_boot()
+    s = preconf(calcs.BOOT1.booting)
+    p = preconf(calcs.BOOTN.booting)
     with plt.rc_context(COL):
         fig, ax = plt.subplots(figsize=(5.4, 3.4))
         ax.plot(s[:, 0], s[:, 1] * 100, color=C["data"], lw=3.5)
@@ -459,10 +462,11 @@ def firecracker_plot():
         ax.annotate("one at a time", (111.5, 45), xytext=(127, 10), color=C["data"],
                     fontsize=17, fontweight="bold",
                     arrowprops=dict(arrowstyle="->", color=C["data"], lw=1.5))
-        ax.text(126, 40, "100 at once", color=C["network"], fontsize=17, fontweight="bold")
-        ax.axvline(f["p99"], color=C["neutral"], lw=1.5, ls="--")
-        ax.text(f["p99"] - 1, 75, f"p99 {f['p99']:.0f}", color=C["neutral"], fontsize=16,
-                ha="right")
+        ax.text(126, 40, f"{val('fc_par_n')} at once", color=C["network"], fontsize=17,
+                fontweight="bold")
+        ax.axvline(num("fc_par_p99"), color=C["neutral"], lw=1.5, ls="--")
+        ax.text(num("fc_par_p99") - 1, 75, f"p99 {val('fc_par_p99')}", color=C["neutral"],
+                fontsize=16, ha="right")
         ax.set_xlabel("Boot time (ms)")
         ax.set_ylabel("Booted (%)")
         ax.set_xlim(100, 165)

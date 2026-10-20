@@ -262,3 +262,13 @@ def calc_pruned_tree_nodes(branching: int, rejection_rate: float, depth: int):
         unpruned += branching ** d
         pruned += branching * surviving ** (d - 1)
     return unpruned, pruned
+
+
+def calc_setup_share(setup, work):
+    """Share of a fresh call spent on setup: ``T_setup / (T_setup + W)``."""
+    return float((setup / (setup + work)).to("").magnitude)
+
+
+def calc_work_for_setup_cap(setup, cap: float):
+    """Useful work per call that holds setup to a share ``phi``: ``W >= T_setup (1 - phi) / phi``."""
+    return setup * (1 - cap) / cap

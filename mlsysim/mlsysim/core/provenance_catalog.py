@@ -3169,3 +3169,24 @@ NASA_MCO_PHASE1_1999 = _report(
     "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
     notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
 )
+
+# Agent sandboxes (added 2026-10-20)
+ZHANG_2024_CYBENCH = _lit(
+    "prov:zhang-2024-cybench",
+    "Zhang et al. (2024), Cybench: A Framework for Evaluating Cybersecurity Capabilities and "
+    "Risks of Language Models",
+    url="https://cybench.github.io/",
+    verified="2026-10-12",
+    notes="40 professional-level capture-the-flag tasks from four competitions (cybench.github.io).",
+)
+
+YOUNG_2019_GVISOR = _lit(
+    "prov:young-2019-gvisor",
+    "Young et al. (2019), The True Cost of Containing: A gVisor Case Study, HotCloud '19, "
+    "Figure 3 (System Call Overhead)",
+    url="https://www.usenix.org/system/files/hotcloud19-paper-young.pdf",
+    verified="2026-10-20",
+    notes=("Average gettimeofday latency over 100M executions, microseconds, as labeled on "
+           "Figure 3: native 0.22, runc 0.29; gVisor on KVM: Sentry only 0.63, invoke on host "
+           "5.96, help from the Gofer 45.5 (ptrace: 9.23, 9.71, 51.1). Read from the PDF."),
+)
