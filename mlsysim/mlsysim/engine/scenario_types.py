@@ -7681,3 +7681,438 @@ class SeriesSpreadScenario(BaseScenario):
 
     def spread(self, name: str) -> float:
         return self.highest(name)[self.value_key] / self.lowest(name)[self.value_key]
+
+
+# --- Policy training: discounting, decoders, trial campaigns, contact exploits (added 2026-10-20) ---
+
+class DiscountHorizonScenario(BaseScenario):
+    """One ``rollout`` of decisions ``step`` apart under discount ``discount``: how far the return
+    reaches, in decisions and in seconds, and the discount that keeps ``retained_weight`` of the
+    final reward at the first decision."""
+    step: Quantity
+    rollout: Quantity
+    discount: float
+    retained_weight: float = 0.5
+
+    @property
+    def decisions(self) -> int:
+        return int(round((self.rollout / self.step).to("").magnitude))
+
+    @property
+    def terminal_weight(self) -> float:
+        from ..physics.robotics.learning import calc_discounted_weight
+        return calc_discounted_weight(self.discount, self.decisions)
+
+    @property
+    def horizon_steps(self) -> float:
+        from ..physics.robotics.learning import calc_discount_effective_horizon
+        return calc_discount_effective_horizon(self.discount)
+
+    @property
+    def horizon_time(self) -> Quantity:
+        return (self.horizon_steps * self.step).to("second")
+
+    @property
+    def retaining_discount(self) -> float:
+        from ..physics.robotics.learning import calc_discount_for_retained_weight
+        return calc_discount_for_retained_weight(self.decisions, self.retained_weight)
+
+
+class IterativeDecoderBudgetScenario(BaseScenario):
+    """``machine``'s one-pass chunk decoder against an iterative head that encodes once and runs
+    ``denoising_steps`` dependent evaluations in ``denoising_latency``, and a ``flow_steps`` head at
+    the same cost per evaluation, on the setpoint step and the renewal period with
+    ``renewal_jitter`` held free."""
+    machine: Any                   # EmbodiedMobileManipulator (chunk step, period, p99 latency)
+    denoising_steps: int
+    flow_steps: int
+    encode: Quantity
+    denoising_latency: Quantity
+    renewal_jitter: Quantity
+
+    @property
+    def setpoint_step(self) -> Quantity:
+        return self.machine.chunk_step.to("ms")
+
+    @property
+    def renewal_period(self) -> Quantity:
+        return self.machine.chunk_period.to("ms")
+
+    @property
+    def one_pass_latency(self) -> Quantity:
+        return self.machine.chunk_inference_latency.to("ms")
+
+    @property
+    def per_evaluation(self) -> Quantity:
+        return ((self.denoising_latency - self.encode) / self.denoising_steps).to("ms")
+
+    @property
+    def flow_latency(self) -> Quantity:
+        from ..physics.robotics.learning import calc_iterative_decoder_latency
+        return calc_iterative_decoder_latency(self.encode, self.per_evaluation, self.flow_steps)
+
+    @property
+    def one_pass_slack(self) -> Quantity:
+        return (self.renewal_period - self.one_pass_latency).to("ms")
+
+    @property
+    def denoising_slack(self) -> Quantity:
+        return (self.renewal_period - self.denoising_latency).to("ms")
+
+    @property
+    def one_pass_end_under_jitter(self) -> Quantity:
+        return (self.one_pass_latency + self.renewal_jitter).to("ms")
+
+    @property
+    def denoising_overrun_under_jitter(self) -> Quantity:
+        """How far a jitter-sized stretch carries the iterative head past its renewal."""
+        return (self.denoising_latency + self.renewal_jitter - self.renewal_period).to("ms")
+
+    @property
+    def renewal_less_jitter(self) -> Quantity:
+        return (self.renewal_period - self.renewal_jitter).to("ms")
+
+    def evaluation_room(self, budget: Quantity) -> float:
+        """Evaluations that fit ``budget`` after encoding, unrounded."""
+        return ((budget - self.encode) / self.per_evaluation).to("").magnitude
+
+    def max_evaluations(self, budget: Quantity) -> int:
+        from ..physics.robotics.learning import calc_max_decoder_evaluations
+        return calc_max_decoder_evaluations(budget, self.encode, self.per_evaluation)
+
+    def latency_at(self, evaluations: int) -> Quantity:
+        from ..physics.robotics.learning import calc_iterative_decoder_latency
+        return calc_iterative_decoder_latency(self.encode, self.per_evaluation, evaluations)
+
+    @property
+    def evaluations_within_step(self) -> int:
+        return self.max_evaluations(self.setpoint_step)
+
+    @property
+    def evaluations_within_renewal(self) -> int:
+        """Evaluations that fit the renewal period with the jitter allowance kept free."""
+        return self.max_evaluations(self.renewal_less_jitter)
+
+
+class ParallelSimRunScenario(BaseScenario):
+    """A GPU-parallel on-policy run: ``robots`` environments each stepping ``steps_per_update`` times
+    per update for ``updates`` updates within ``training_time``, at ``policy_rate``."""
+    robots: int
+    steps_per_update: int
+    updates: int
+    training_time: Quantity        # an upper bound ("under 20 minutes")
+    policy_rate: Quantity
+
+    @property
+    def batch(self) -> int:
+        return self.robots * self.steps_per_update
+
+    @property
+    def samples(self) -> int:
+        return self.batch * self.updates
+
+    @property
+    def throughput(self) -> Quantity:
+        """Policy steps per second, a lower bound because the time is an upper bound."""
+        return (self.samples / self.training_time).to("1/s")
+
+    @property
+    def simulated_experience(self) -> Quantity:
+        return (self.samples / self.policy_rate).to("day")
+
+    def time_for(self, steps: float) -> Quantity:
+        """Wall-clock time for ``steps`` policy steps at this run's throughput."""
+        return (steps / self.throughput).to("minute")
+
+
+class TrialCampaignScenario(BaseScenario):
+    """``trials`` hardware trials of ``rollout`` each, decisions ``decision_step`` apart, with automated
+    and manual resets, on one machine and on a farm; what a demonstration-seeded ``seeded_budget``
+    allows; and the same trials in ``simulator`` at its published throughput."""
+    trials: int
+    rollout: Quantity
+    decision_step: Quantity
+    automated_reset: Quantity
+    manual_reset: Quantity
+    farm_rigs: int
+    reversals_per_trial: int
+    seeded_budget: Quantity
+    simulator: Optional[ParallelSimRunScenario] = None
+
+    def _wall(self, reset, rigs=1) -> Quantity:
+        from ..physics.robotics.learning import calc_trial_campaign_wall_time
+        return calc_trial_campaign_wall_time(self.trials, self.rollout, reset, rigs)
+
+    @property
+    def execution_time(self) -> Quantity:
+        return self._wall(Q_(0, "s"))
+
+    @property
+    def automated_time(self) -> Quantity:
+        return self._wall(self.automated_reset)
+
+    @property
+    def manual_time(self) -> Quantity:
+        return self._wall(self.manual_reset)
+
+    @property
+    def farm_manual_time(self) -> Quantity:
+        return self._wall(self.manual_reset, self.farm_rigs).to("day")
+
+    @property
+    def manual_reset_share(self) -> float:
+        return (self.manual_reset / (self.rollout + self.manual_reset)).to("").magnitude
+
+    @property
+    def reversals(self) -> int:
+        return self.trials * self.reversals_per_trial
+
+    @property
+    def seeded_trials(self) -> int:
+        """Trials with automated resets that fit the seeded budget."""
+        return int(_math.floor((self.seeded_budget / (self.rollout + self.automated_reset)).to("").magnitude))
+
+    @property
+    def seeded_reversals(self) -> int:
+        return self.seeded_trials * self.reversals_per_trial
+
+    @property
+    def trial_ratio(self) -> float:
+        return self.trials / self.seeded_trials
+
+    @property
+    def decisions_per_trial(self) -> int:
+        return int(round((self.rollout / self.decision_step).to("").magnitude))
+
+    @property
+    def simulated_steps(self) -> int:
+        return self.trials * self.decisions_per_trial
+
+    @property
+    def simulated_time(self) -> Quantity:
+        return self.simulator.time_for(self.simulated_steps)
+
+    @property
+    def simulation_speedup(self) -> float:
+        return (self.automated_time / self.simulated_time).to("").magnitude
+
+
+class ContactDeadlineScenario(BaseScenario):
+    """A constant-speed drive into ``site``'s latch plate: when the force ramp k v t reaches the
+    tripwire and the limit, when braking can begin, and the time left, at both approaches."""
+    site: Any                      # EmbodiedScenario (latch stiffness, limit, tripwire, contact response)
+
+    def deadline(self, speed: Quantity) -> Quantity:
+        from ..physics.robotics.actuation import calc_contact_yield_deadline
+        s = self.site
+        return calc_contact_yield_deadline(s.f_latch_limit, s.k_latch, speed).to("ms")
+
+    def tripwire_time(self, speed: Quantity) -> Quantity:
+        return (self.site.f_latch_tripwire / (self.site.k_latch * speed)).to("ms")
+
+    def brake_onset(self, speed: Quantity) -> Quantity:
+        return (self.tripwire_time(speed) + self.site.t_contact_response).to("ms")
+
+    def time_left(self, speed: Quantity) -> Quantity:
+        return (self.deadline(speed) - self.brake_onset(speed)).to("ms")
+
+    @property
+    def guarded_speed(self) -> Quantity:
+        return self.site.v_latch_approach
+
+    @property
+    def fast_speed(self) -> Quantity:
+        return self.site.v_latch_high
+
+    @property
+    def deadline_guarded(self) -> Quantity:
+        return self.deadline(self.guarded_speed)
+
+    @property
+    def deadline_fast(self) -> Quantity:
+        return self.deadline(self.fast_speed)
+
+    @property
+    def tripwire_guarded(self) -> Quantity:
+        return self.tripwire_time(self.guarded_speed)
+
+    @property
+    def tripwire_fast(self) -> Quantity:
+        return self.tripwire_time(self.fast_speed)
+
+    @property
+    def brake_onset_guarded(self) -> Quantity:
+        return self.brake_onset(self.guarded_speed)
+
+    @property
+    def brake_onset_fast(self) -> Quantity:
+        return self.brake_onset(self.fast_speed)
+
+    @property
+    def time_left_guarded(self) -> Quantity:
+        return self.time_left(self.guarded_speed)
+
+    @property
+    def time_left_fast(self) -> Quantity:
+        return self.time_left(self.fast_speed)
+
+    @property
+    def fast_margin_ratio(self) -> float:
+        return (self.deadline_fast / self.brake_onset_fast).to("").magnitude
+
+
+class SoftContactExploitScenario(BaseScenario):
+    """``machine``'s arm coasting into ``site``'s latch plate at the fast approach: the peak force a
+    penalty spring that lets the gripper sink ``penalty_penetration`` reports, the peak the real
+    plate imposes on a rigid arm, and the arm stiffness at which the series chain reaches the limit.
+    The moving mass is the arm's effective contact mass without its payload capacity (the gripper
+    holds no object at the door)."""
+    machine: Any                   # EmbodiedMobileManipulator (arm contact mass, payload capacity)
+    site: Any                      # EmbodiedScenario (latch stiffness, limit, approach speeds)
+    penalty_penetration: Quantity
+
+    @property
+    def moving_mass(self) -> Quantity:
+        return (self.machine.arm_effective_contact_mass - self.machine.arm.payload_capacity).to("kg")
+
+    @property
+    def penalty_stiffness(self) -> Quantity:
+        from ..physics.robotics.learning import calc_penalty_stiffness_from_penetration
+        return calc_penalty_stiffness_from_penetration(self.moving_mass, self.site.v_latch_high,
+                                                       self.penalty_penetration)
+
+    def peak_force(self, stiffness: Quantity, speed: Optional[Quantity] = None) -> Quantity:
+        from ..physics.robotics.actuation import calc_transient_impact_force
+        v = self.site.v_latch_high if speed is None else speed
+        return calc_transient_impact_force(v, self.moving_mass, stiffness).to("N")
+
+    def chain_peak_force(self, arm_stiffness: Quantity) -> Quantity:
+        """Fast-approach peak with the arm in series with the plate."""
+        from ..physics.robotics.learning import calc_series_stiffness
+        return self.peak_force(calc_series_stiffness(self.site.k_latch, arm_stiffness))
+
+    @property
+    def simulated_peak(self) -> Quantity:
+        return self.peak_force(self.penalty_stiffness)
+
+    @property
+    def rigid_peak(self) -> Quantity:
+        return self.peak_force(self.site.k_latch)
+
+    @property
+    def guarded_rigid_peak(self) -> Quantity:
+        return self.peak_force(self.site.k_latch, self.site.v_latch_approach)
+
+    @property
+    def break_even_series_stiffness(self) -> Quantity:
+        from ..physics.robotics.learning import calc_impact_stiffness_for_force
+        return calc_impact_stiffness_for_force(self.site.f_latch_limit, self.site.v_latch_high,
+                                               self.moving_mass)
+
+    @property
+    def break_even_arm_stiffness(self) -> Quantity:
+        from ..physics.robotics.learning import calc_complementary_series_stiffness
+        return calc_complementary_series_stiffness(self.break_even_series_stiffness, self.site.k_latch)
+
+    @property
+    def plate_over_penalty(self) -> float:
+        return (self.site.k_latch / self.penalty_stiffness).to("").magnitude
+
+    @property
+    def rigid_over_limit(self) -> float:
+        return (self.rigid_peak / self.site.f_latch_limit).to("").magnitude
+
+    @property
+    def penalty_timescale(self) -> Quantity:
+        from ..physics.robotics.learning import calc_contact_timescale
+        return calc_contact_timescale(self.moving_mass, self.penalty_stiffness)
+
+    @property
+    def plate_timescale(self) -> Quantity:
+        from ..physics.robotics.learning import calc_contact_timescale
+        return calc_contact_timescale(self.moving_mass, self.site.k_latch)
+
+    @property
+    def timescale_ratio(self) -> float:
+        return (self.penalty_timescale / self.plate_timescale).to("").magnitude
+
+
+class ForceRiseGapScenario(BaseScenario):
+    """An illustrative linear drive regulating ``target_force`` against a surface, in simulation and on
+    hardware, with one stated discrepancy in each reality-gap channel: dynamics (force-rise rate and
+    drive delay), timing (p99 actuation delay against the simulator's), sensing (range bias and
+    dropout), and appearance (pixel difference hiding a contact-patch shift)."""
+    approach_speed: Quantity
+    target_force: Quantity
+    simulated_rise_rate: Quantity
+    physical_rise_rate: Quantity
+    p99_delay: Quantity
+    simulated_delay: Quantity
+    simulator_step: Quantity       # integration period, not pipeline latency
+    drive_delay: Quantity
+    overtravel: Quantity
+    range_bias: Quantity
+    dropout_frames: int
+    pixel_difference: float        # fraction of the image
+    patch_shift: Quantity
+    chamfer_tolerance: Quantity
+
+    @property
+    def simulated_time_to_target(self) -> Quantity:
+        return (self.target_force / self.simulated_rise_rate).to("ms")
+
+    @property
+    def physical_time_to_target(self) -> Quantity:
+        return (self.target_force / self.physical_rise_rate).to("ms")
+
+    @property
+    def unmodeled_travel(self) -> Quantity:
+        """Travel before correction that the simulator's delay does not predict."""
+        return (self.approach_speed * (self.p99_delay - self.simulated_delay)).to("mm")
+
+
+class OnRobotFineTuneScenario(BaseScenario):
+    """``interaction_steps`` setpoints ``step`` apart collected on the machine to absorb a
+    ``plate_offset``, of which ``exceed_fraction`` cross the contact tripwire."""
+    step: Quantity
+    interaction_steps: int
+    exceed_fraction: float
+    plate_offset: Quantity
+
+    @property
+    def setpoint_rate(self) -> Quantity:
+        return (1 / self.step).to("Hz")
+
+    @property
+    def active_time(self) -> Quantity:
+        return (self.interaction_steps * self.step).to("second")
+
+    @property
+    def exceed_samples(self) -> int:
+        return int(round(self.interaction_steps * self.exceed_fraction))
+
+
+class PhysicalTrialAblationScenario(BaseScenario):
+    """Per-trial physical results by training condition (a Literature series with ``table``,
+    ``condition``, ``rotations``, and ``printed_median`` columns): the trials, their median, and
+    the table's own median."""
+    series: Any
+
+    def trials(self, condition: str, table: Optional[str] = None) -> List[float]:
+        rows = [e for e in self.series.entries if e["condition"] == condition
+                and (table is None or str(int(e["table"])) == table)]
+        return [e["rotations"] for e in rows]
+
+    def median(self, condition: str) -> float:
+        import statistics
+        return float(statistics.median(self.trials(condition)))
+
+    def printed_median(self, condition: str) -> float:
+        return next(e["printed_median"] for e in self.series.entries if e["condition"] == condition)
+
+    def conditions(self, table: str) -> List[str]:
+        seen: List[str] = []
+        for e in self.series.entries:
+            if str(int(e["table"])) == table and e["condition"] not in seen:
+                seen.append(e["condition"])
+        return seen

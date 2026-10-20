@@ -3223,3 +3223,53 @@ MCMAHAN_2017_FEDAVG = _lit(
     verified="2026-10-20",
     notes="Read from the arXiv PDF; 100 clients, C = 0.1; u = E n / (K B) expected local updates per round.",
 )
+
+# --- Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20) ---
+ANDRYCHOWICZ_DACTYL_2020 = _lit(
+    "prov:andrychowicz-dactyl-2020",
+    "OpenAI: Andrychowicz, M. et al. (2020), Learning Dexterous In-Hand Manipulation, "
+    "International Journal of Robotics Research 39(1), arXiv:1808.00177v5",
+    url="https://arxiv.org/abs/1808.00177",
+    verified="2026-10-18",
+    notes=("24-DoF Shadow Dexterous Hand. Table 3: block (state), simulation median 50 consecutive "
+           "rotations over 100 trials (the cap), locked wrist on the physical hand median 28.5. "
+           "Tables 4 and 5: 10 physical trials per condition, sorted values as published. Sec. 6.3: "
+           "no randomization trained in about 1.5 h (3 simulated years), all randomizations in about "
+           "50 h (100 simulated years)."),
+)
+RUDIN_LEGGED_GYM_2022 = _lit(
+    "prov:rudin-legged-gym-2022",
+    "Rudin, N., Hoeller, D., Reist, P., and Hutter, M. (2022), Learning to Walk in Minutes Using "
+    "Massively Parallel Deep Reinforcement Learning, CoRL 2021 (PMLR 164), arXiv:2109.11978",
+    url="https://arxiv.org/abs/2109.11978",
+    verified="2026-10-18",
+    notes=("4,096 simulated ANYmal robots, 24 steps per robot per PPO update, 1,500 updates, under "
+           "20 minutes on one RTX A6000; policy at 50 Hz."),
+)
+LUO_HILSERL_2025 = _lit(
+    "prov:luo-hil-serl-2025",
+    "Luo, J., Xu, C., Wu, J., and Levine, S. (2025), Precise and Dexterous Robotic Manipulation via "
+    "Human-in-the-Loop Reinforcement Learning, Science Robotics, arXiv:2410.21845",
+    url="https://arxiv.org/abs/2410.21845",
+    verified="2026-10-18",
+    notes=("1 to 2.5 h of real-world training per task; 20 to 30 teleoperated demonstrations seed the "
+           "replay buffer. Figure 5 (top row) plots success as a running average over 20 episodes; "
+           "RAM insertion reaches 100% within about 90 minutes and USB grasp-insert within about 150 "
+           "(read from the figure)."),
+)
+LEVINE_GRASPING_FARM_2018 = _lit(
+    "prov:levine-grasping-farm-2018",
+    "Levine, S., Pastor, P., Krizhevsky, A., Ibarz, J., and Quillen, D. (2018), Learning Hand-Eye "
+    "Coordination for Robotic Grasping with Deep Learning and Large-Scale Data Collection, IJRR 37(4-5)",
+    url="https://arxiv.org/abs/1603.02199",
+    verified="2026-10-18",
+    notes="Between 6 and 14 manipulators at a time collected over 800,000 grasp attempts over two months.",
+)
+KALASHNIKOV_QTOPT_2018 = _lit(
+    "prov:kalashnikov-qt-opt-2018",
+    "Kalashnikov, D. et al. (2018), QT-Opt: Scalable Deep Reinforcement Learning for Vision-Based "
+    "Robotic Manipulation, CoRL 2018, arXiv:1806.10293",
+    url="https://arxiv.org/abs/1806.10293",
+    verified="2026-10-18",
+    notes="Over 580,000 real-world grasp attempts.",
+)

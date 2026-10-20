@@ -66,6 +66,8 @@ RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figure
 OnDeviceLearning = _load("on_device_learning", "OnDeviceLearning", "Cited results of on-device and federated learning systems (Gboard, Google FL system, TinyTL).")  # added 2026-10-20
 EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
+# Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
+RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +359,7 @@ class Literature(Registry):
     RobotDataSystems = RobotDataSystems  # added 2026-10-20
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
     OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
+    RobotLearning = RobotLearning  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -387,6 +390,7 @@ class Literature(Registry):
     OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
     LeRobotHubMonthly = _series.LeRobotHubMonthly
     LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
+    DactylPhysicalTrials = _series.DactylPhysicalTrials  # added 2026-10-20
     EdgeInferenceOrin = _series.EdgeInferenceOrin
     KittiOdometry = _series.KittiOdometry
     CaliforniaDisengagements = _series.CaliforniaDisengagements
