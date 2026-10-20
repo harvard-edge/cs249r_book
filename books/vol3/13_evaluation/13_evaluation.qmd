@@ -91,37 +91,29 @@ Engineering decisions are also comparative. A new configuration, `candidate_v2`,
 # │       more than sampling noise.
 # │ Show: Widest and median within-model spread; the median reported
 # │       standard error; the widest model's range and scaffold count.
-# │ How:  Literature.TerminalBenchHarness, models with >= 5 scaffolds.
+# │ How:  Scenarios.TerminalBenchScaffoldSpread (Literature.TerminalBenchHarness,
+# │       models with >= 5 scaffolds; ScaffoldSpreadModel).
 # └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ScaffoldSpread:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = Literature.TerminalBenchHarness.entries
-    min_scaffolds = 5
+    scenario = Scenarios.TerminalBenchScaffoldSpread
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    by_model, spreads = {}, {}
-    for _r in rows:
-        by_model.setdefault(_r["model"], []).append(_r["accuracy"])
-    for _m in list(by_model):
-        if len(by_model[_m]) < min_scaffolds:
-            del by_model[_m]
-        else:
-            spreads[_m] = max(by_model[_m]) - min(by_model[_m])
-    widest = max(spreads, key=spreads.get)
-    widest_lo, widest_hi, widest_n = min(by_model[widest]), max(by_model[widest]), len(by_model[widest])
-    median_spread = float(np.median(list(spreads.values())))
-    median_se = float(np.median([r["accuracy_se"] for r in rows if r["accuracy_se"]]))
+    result = scenario.result
+    widest = result.widest
+    widest_lo, widest_hi, widest_n = result.widest_low, result.widest_high, result.widest_count
+    median_spread = result.median_spread
+    median_se = result.median_se
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_spread > 4 * median_se, "Prose says the typical spread is several standard errors")
     check(widest_hi - widest_lo > 0.2, "Prose says the widest spread exceeds 20 points")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_models_str = fmt_int(len(by_model))
+    n_models_str = fmt_int(result.models)
     widest_lo_str = fmt_percent(round(widest_lo, 2), precision=0, style="prose")
     widest_hi_str = fmt_percent(round(widest_hi, 2), precision=0, style="prose")
     widest_n_str = fmt_int(widest_n)
@@ -438,17 +430,20 @@ Here $\ObservedAnnotatorAgreement$ is the observed agreement fraction, and $\Cha
 # CHANCE AGREEMENT UNDER A CONCENTRATED BASE RATE (LEGO)
 # Goal: Show raw agreement produced with zero agreement beyond chance.
 # Scope: Two raters labeling "pass" independently of the case, same marginal rate.
+# How: Scenarios.IndependentJudgesNinetyPercent and its 80 percent variant.
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, check
 
 class KappaChance:
     # 1. LOAD: hypothetical marginal pass rate shared by both raters.
-    pass_rate = 0.90
-    chk_rate = 0.80  # checkpoint exercise: a second hypothetical marginal rate
+    raters = Scenarios.IndependentJudgesNinetyPercent
+    pass_rate = raters.class_shares[0]
+    chk_rate = Scenarios.IndependentJudgesEightyPercent.class_shares[0]  # checkpoint exercise
 
     # 2. EXECUTE: independence makes observed agreement equal chance agreement.
-    p_o = pass_rate**2 + (1 - pass_rate) ** 2
-    p_e = pass_rate * pass_rate + (1 - pass_rate) * (1 - pass_rate)
-    kappa = (p_o - p_e) / (1 - p_e)
+    p_o = raters.agreement
+    p_e = raters.chance_agreement
+    kappa = raters.kappa
 
     # 3. GUARD: textbook arithmetic.
     check(abs(p_o - 0.82) < 1e-12, "Raw agreement from chance alone")
@@ -519,37 +514,31 @@ These binary examples assume complete verdicts. If an evaluation sweep leaves tr
 # │ Context: @fig-vol3-leaderboard-rank-ties and the paragraph after it.
 # │ Goal: Show that adjacent leaderboard ranks are rarely distinguishable.
 # │ Show: Tied neighbors among the top 25; the gap a pair needs.
-# │ How:  Literature.SweBenchVerifiedRuns; independent-samples z test on
+# │ How:  Scenarios.SweBenchVerifiedRankTies (Literature.SweBenchVerifiedRuns;
+# │       LeaderboardTiesModel): independent-samples z test at 95 percent on
 # │       the reported standard errors (conservative relative to pairing).
 # └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int
 
 class RankTies:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = sorted(Literature.SweBenchVerifiedRuns.entries, key=lambda r: -r["mean_score"])
-    top_n = 25
-    z = 1.96  # two-sided 95 percent
+    scenario = Scenarios.SweBenchVerifiedRankTies
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    top = rows[:top_n]
-    pairs = list(zip(top[:-1], top[1:]))
-    tied = 0
-    for _a, _b in pairs:
-        tied += abs(_a["mean_score"] - _b["mean_score"]) < z * np.hypot(_a["stderr"], _b["stderr"])
-    typical_se = float(np.median([r["stderr"] for r in top]))
-    needed_gap = z * np.sqrt(2) * typical_se
+    result = scenario.result
+    tied = result.tied
+    needed_gap = result.needed_gap
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(tied >= len(pairs) - 2, "Prose says nearly every neighboring pair is tied")
+    check(tied >= result.pairs - 2, "Prose says nearly every neighboring pair is tied")
     check(0.04 < needed_gap < 0.07, "Prose says a pair needs about five points to separate")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_models_str = fmt_int(len(rows))
-    top_n_str = fmt_int(top_n)
+    n_models_str = fmt_int(result.models)
+    top_n_str = fmt_int(result.top)
     tied_str = fmt_int(tied)
-    n_pairs_str = fmt_int(len(pairs))
+    n_pairs_str = fmt_int(result.pairs)
     needed_gap_str = fmt_int(round(100 * needed_gap))
 ```
 
@@ -628,65 +617,41 @@ A release decision usually asks a magnitude question instead of an equality ques
 # PAIRED ACCEPTANCE DIFFERENCE (LEGO)
 # Goal: Estimate one rate and compare paired configurations at a fixed endpoint.
 # Scope: Illustrative independent task pairs, complete verdicts, fixed protocol.
-from math import sqrt, comb, ceil
-from statistics import NormalDist
+# How: Scenarios.RepairCandidatePairedComparison (PairedComparisonModel: Newcombe
+#      method 10, exact McNemar) and Scenarios.FiftyTaskIntervals (Wilson at 0 of 50).
+from mlsysim import Scenarios
+from mlsysim.physics import calc_newcombe_paired_difference
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
-
-def evaluation_wilson(x, n, z):
-    if not isinstance(x, int) or not isinstance(n, int) or not 0 <= x <= n or n <= 0:
-        raise ValueError("Require integer counts 0 <= x <= n and n > 0")
-    center = (x + z * z / 2) / (n + z * z)
-    spread = z * sqrt(x * (n - x) / n + z * z / 4) / (n + z * z)
-    return max(0.0, center - spread), min(1.0, center + spread)
-
-def evaluation_paired_score(n11, b, c, n00, z):
-    # Newcombe (1998), method 10. b=baseline-only; c=candidate-only.
-    cells = (n11, b, c, n00)
-    if any(not isinstance(v, int) or v < 0 for v in cells) or sum(cells) <= 0:
-        raise ValueError("Require nonnegative integer cells and positive total")
-    n = sum(cells)
-    pc, pb = (n11 + c) / n, (n11 + b) / n
-    lc, uc = evaluation_wilson(n11 + c, n, z)
-    lb, ub = evaluation_wilson(n11 + b, n, z)
-    denominator = sqrt((n11 + c) * (b + n00) * (n11 + b) * (c + n00))
-    numerator = n11 * n00 - b * c
-    if numerator > 0:
-        numerator = max(numerator - n / 2, 0)
-    rho = numerator / denominator if denominator else 0.0
-    lower_width = sqrt(max(0.0, (pc - lc) ** 2 + (ub - pb) ** 2 - 2 * rho * (pc - lc) * (ub - pb)))
-    upper_width = sqrt(max(0.0, (uc - pc) ** 2 + (pb - lb) ** 2 - 2 * rho * (uc - pc) * (pb - lb)))
-    return pc - pb, pc - pb - lower_width, pc - pb + upper_width
 
 class PairedAcceptance:
     # 1. LOAD: prespecified illustrative counts, nominal level, and tolerance.
-    n11, b, c, n00 = 70, 12, 18, 50
-    z = NormalDist().inv_cdf(0.975)
-    tolerance = 0.02  # acceptable loss chosen before seeing outcomes
+    scenario = Scenarios.RepairCandidatePairedComparison
+    n11, b, c, n00 = scenario.both, scenario.baseline_only, scenario.candidate_only, scenario.neither
+    tolerance = scenario.tolerance  # acceptable loss chosen before seeing outcomes
+    intervals = Scenarios.FiftyTaskIntervals
 
     # 2. EXECUTE: two-sided interval and exact conditional equality test.
-    n = n11 + b + c + n00
-    delta, lower, upper = evaluation_paired_score(n11, b, c, n00, z)
-    discordant = b + c
-    tail_count = 0
-    for j in range(min(b, c) + 1):
-        tail_count += comb(discordant, j)
-    exact_p = min(1.0, 2 * tail_count / 2**discordant) if discordant else 1.0
-    noninferiority = lower > -tolerance
-    zero_upper = evaluation_wilson(0, 50, z)[1]
+    result = scenario.result
+    z = intervals.result.z_critical
+    n = result.pairs
+    delta, lower, upper = result.difference, result.lower, result.upper
+    exact_p = result.exact_p
+    noninferiority = result.noninferior
+    zero_upper = intervals.result.wilson[0][1]
     # Planning: lower half-width scales as 1/sqrt(N); what N clears the margin?
-    lower_width = delta - lower
-    n_if_gain_holds = ceil(n * (lower_width / (delta + tolerance)) ** 2)
-    n_if_no_gain = ceil(n * (lower_width / tolerance) ** 2)
+    lower_width = result.lower_width
+    n_if_gain_holds = result.pairs_if_gain_holds
+    n_if_no_gain = result.pairs_if_no_gain
 
     # 3. GUARD: arithmetic plus independent published method-10 examples.
     check(n == 150 and n11 + b == 82 and n11 + c == 88, "Paired totals")
     check(abs(delta - 0.04) < 1e-12, "Candidate-minus-baseline direction")
     check(abs(lower - (-0.032062854)) < 1e-8 and abs(upper - 0.111211210) < 1e-8, "Worksheet interval")
     check(not noninferiority and lower < 0 < upper, "Inconclusive gate and superiority")
-    check(abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
+    check(intervals.trials == 50 and abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
     check(n < n_if_gain_holds < 2 * n < n_if_no_gain, "Planning counts ordered")
     for cells, expected in [((20, 2, 12, 16), (0.0562, 0.3292)), ((27, 0, 0, 27), (-0.0351, 0.0351))]:
-        _, lo, hi = evaluation_paired_score(*cells, z)
+        _, lo, hi = calc_newcombe_paired_difference(cells[0], cells[2], cells[1], cells[3], z)
         check(abs(lo - expected[0]) < 0.00005 and abs(hi - expected[1]) < 0.00005, "Newcombe Table III")
 
     # 4. OUTPUT: all formatted exports are consumed below.
@@ -728,39 +693,37 @@ $$\TasksPerComparisonArm\approx\frac{2\,(\ConfidenceCriticalQuantile+\PowerCriti
 # HOW MANY TASKS A CLAIM NEEDS (LEGO)
 # Goal: Give the magnitude of one-rate precision, two-arm detection, and pairing.
 # Scope: Planning approximations at hypothetical rates; independent tasks.
-from math import sqrt, ceil
+# How: Scenarios.AcceptanceRatePlanning (ProportionPlanningModel) and the paired
+#      variance of Scenarios.RepairCandidatePairedComparison.
 from statistics import NormalDist
-from mlsysim.physics.statistics import calc_two_proportion_sample_size
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
 
 class SampleSizeScale:
     # 1. LOAD: worst-case rate, targets, and the worked paired table's cells.
-    p_half = 0.5
-    z95 = NormalDist().inv_cdf(0.975)
-    small_n = 100
-    target_half_width = 0.02
-    alpha, power = 0.05, 0.80
-    z_alpha, z_beta = 1.96, 0.84  # rounded quantiles for these targets
-    delta_large, delta_small = 0.04, 0.02
-    n11, b, c, n00 = 70, 12, 18, 50  # the worked paired-outcome table
+    plan = Scenarios.AcceptanceRatePlanning
+    paired = Scenarios.RepairCandidatePairedComparison  # the worked paired-outcome table
+    p_half = plan.rate
+    small_n = plan.planning_tasks
+    target_half_width = plan.target_half_width
+    alpha, power = plan.significance, plan.power
+    z_alpha, z_beta = plan.z_alpha, plan.z_beta  # rounded quantiles for these targets
+    delta_large, delta_small = plan.differences
 
     # 2. EXECUTE: one-rate half-widths, two-arm counts, paired variance.
-    half_small = z95 * sqrt(p_half * (1 - p_half) / small_n)
-    wilson_lo, wilson_hi = evaluation_wilson(50, small_n, z95)
-    wilson_half_small = (wilson_hi - wilson_lo) / 2
-    n_for_target = ceil(z95**2 * p_half * (1 - p_half) / target_half_width**2)
-    arm_large = calc_two_proportion_sample_size(p_half, delta_large, z_alpha=z_alpha, z_beta=z_beta)
-    arm_small = calc_two_proportion_sample_size(p_half, delta_small, z_alpha=z_alpha, z_beta=z_beta)
+    planned = plan.result
+    half_small = planned.half_width
+    wilson_half_small = planned.wilson_half_width
+    n_for_target = planned.samples_for_target
+    arm_large = planned.per_arm[delta_large]
+    arm_small = planned.per_arm[delta_small]
     arm_large_n, arm_small_n = round(arm_large), round(arm_small)
-    pairs = n11 + b + c + n00
-    p_cand, p_base = (n11 + c) / pairs, (n11 + b) / pairs
-    discordant = (b + c) / pairs
-    diff = p_cand - p_base
-    var_paired = discordant - diff**2
-    var_independent = p_cand * (1 - p_cand) + p_base * (1 - p_base)
-    paired_share = var_paired / var_independent
-    paired_half = z95 * sqrt(var_paired / pairs)
-    independent_mult = var_independent / var_paired
+    compared = paired.result
+    discordant = compared.discordant_fraction
+    diff = compared.difference
+    paired_share = compared.paired_share
+    paired_half = compared.paired_half_width
+    independent_mult = compared.independent_multiple
 
     # 3. GUARD: scaling law, published-formula arithmetic, and pairing algebra.
     check(abs(NormalDist().inv_cdf(1 - alpha / 2) - z_alpha) < 0.005, "Rounded significance quantile")
@@ -818,24 +781,35 @@ Permitting multiple attempts means one thing when a repair agent can generate ei
 # REPEATED-RUN CONSISTENCY ON ONE TASK (LEGO)
 # Goal: Show how quickly all-k consistency falls below single-run success.
 # Scope: One fixed task, independent runs under the declared reset.
+# How: Scenarios.RecurringTaskConsistency and its variants (recurrences compound
+#      as turns do: HorizonCompoundingModel); tau-bench bounds from
+#      Literature.AgentEvaluation (Yao et al. 2024 abstract).
+from mlsysim import Literature, Scenarios
+from mlsysim.physics import calc_independent_success
 from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
 
 class PassPowK:
     # 1. LOAD: hypothetical single-run acceptance probabilities and recurrences.
-    p_hi, p_lo = 0.90, 0.80
-    p_better = 0.95  # after halving the single-run failure rate
-    k = 8
-    target = 0.90  # consistency the recurring work must hold
-    chk_p, chk_k = 0.95, 5  # checkpoint exercise givens
-    # Point-in-time values reported in the tau-bench abstract (Yao et al. 2024,
-    # arXiv:2406.12045): best tested agent <50% task success, pass^8 <25% (retail).
-    taubench_success_bound, taubench_pow_bound, taubench_k = 0.50, 0.25, 8
+    recurring = Scenarios.RecurringTaskConsistency
+    lower_rate = Scenarios.RecurringTaskConsistencyLowerRate
+    halved = Scenarios.RecurringTaskConsistencyHalvedFailure  # single-run failure rate halved
+    checkpoint = Scenarios.RefundAnswerFiveSessions  # checkpoint exercise givens
+    p_hi, p_lo, p_better = recurring.step_success, lower_rate.step_success, halved.step_success
+    k = recurring.long_horizon
+    target = recurring.target_success  # consistency the recurring work must hold
+    chk_p, chk_k = checkpoint.step_success, checkpoint.long_horizon
+    # Point-in-time upper bounds reported in the tau-bench abstract.
+    tau = Literature.AgentEvaluation
+    taubench_success_bound = tau.TauBenchSuccessUpperBoundPct / 100
+    taubench_pow_bound = tau.TauBenchRetailPassPowUpperBoundPct / 100
+    taubench_k = int(tau.TauBenchPassPowK)
 
     # 2. EXECUTE
-    pow_hi, pow_lo, pow_better = p_hi**k, p_lo**k, p_better**k
-    at_k_hi = 1 - (1 - p_hi) ** k
-    p_needed = target ** (1 / k)
-    fail_cut = (1 - p_hi) / (1 - p_needed)
+    result = recurring.result
+    pow_hi, pow_lo, pow_better = result.success[k], lower_rate.result.success[k], halved.result.success[k]
+    at_k_hi = calc_independent_success(p_hi, k)
+    p_needed = 1 - result.required_step_error
+    fail_cut = result.error_ratio
 
     # 3. GUARD
     check(0.42 < pow_hi < 0.44 and 0.16 < pow_lo < 0.18, "Eight-run consistency")
@@ -908,32 +882,33 @@ The divergence between near-certain availability and an eight-run consistency of
 # METRIC UNITS AND BOUNDED SELECTION COST (LEGO)
 # Goal: Separate same-task consistency from new-task sequences, then price selection.
 # Scope: Hypothetical probabilities, exact stipulated checker, equal fixed unit costs.
-from mlsysim import USD
+# How: Scenarios.TwoTaskTypeConsistency (TaskMixConsistencyModel) and
+#      Scenarios.CappedCandidateSelection (CappedSelectionCostModel).
+from mlsysim import Scenarios, USD
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_usd, check
 
 class SelectionMetrics:
     # 1. LOAD: two equally weighted task types; separate fixed-task cost scenario.
-    task_probabilities = (0.5, 0.9)
-    repetitions = 2
-    p = 0.4
-    k = 3
-    generation = 0.03 * USD
-    verification = 0.01 * USD
+    mix = Scenarios.TwoTaskTypeConsistency
+    selection = Scenarios.CappedCandidateSelection
+    task_probabilities = tuple(mix.task_pass_rates)
+    repetitions = mix.repetitions
+    p = selection.pass_rate
+    k = selection.cap
+    generation = selection.generation_cost.to(USD)
+    verification = selection.check_cost.to(USD)
 
     # 2. EXECUTE: population thought experiment, not observed benchmark data.
-    mean_p = sum(task_probabilities) / len(task_probabilities)
-    same_all = 0.0
-    for task_p in task_probabilities:
-        same_all += task_p**repetitions / len(task_probabilities)
-    new_all = mean_p**repetitions
-    q = 1 - (1 - p) ** k
-    expected_n = q / p
-    unit = generation + verification
-    batch = k * unit
-    sequential = expected_n * unit
-    batch_per_accepted = batch / q
-    sequential_per_accepted = sequential / q
-    doubled_p_per_accepted = unit / (2 * p)  # sequential policy, generator twice as good
+    same_all = mix.result.same_task_all
+    new_all = mix.result.new_tasks_all
+    cost = selection.result
+    q = cost.availability
+    expected_n = cost.expected_candidates
+    batch = cost.batch_trial_cost
+    sequential = cost.sequential_trial_cost
+    batch_per_accepted = cost.batch_per_accepted
+    sequential_per_accepted = cost.sequential_per_accepted
+    doubled_p_per_accepted = cost.doubled_rate_per_accepted  # sequential policy, generator twice as good
 
     # 3. GUARD: endpoints, path cap, and independent arithmetic identities.
     check(0 < p < 1 and k >= 1, "Finite positive acceptance probability")
@@ -958,7 +933,7 @@ class SelectionMetrics:
     batch_accepted_str = fmt_usd(batch_per_accepted, precision=3)
     sequential_accepted_str = fmt_usd(sequential_per_accepted, precision=2)
     doubled_p_accepted_str = fmt_usd(doubled_p_per_accepted, precision=2)
-    batch_premium_str = fmt_percent(round(float((batch_per_accepted / sequential_per_accepted).to("").magnitude) - 1, 2), precision=0, style="prose")
+    batch_premium_str = fmt_percent(round(cost.batch_premium, 2), precision=0, style="prose")
 ```
 
 A sequence of $\IndependentAttemptCount$ independently drawn *new tasks* has all-success probability $(\mathbb{E}_i[\AttemptPassProbability_i])^\IndependentAttemptCount$. Because $\FunctionInputVariable^\IndependentAttemptCount$ is convex for $\IndependentAttemptCount\ge 1$, Jensen's inequality (the mean of a convex function is at least the function of the mean) places that value at or below $\mathbb{E}_i[\AttemptPassProbability_i^\IndependentAttemptCount]$. The inequality is strict whenever task difficulty varies across the workload ($\operatorname{Var}(\AttemptPassProbability_i) > 0$) and $\IndependentAttemptCount\ge2$. Consequently, repeating one task overstates consistency across new tasks. Suppose two equally likely task types pass on `{python} SelectionMetrics.task_probs_str` of runs. Repeating one randomly selected task `{python} SelectionMetrics.repetitions_str` times passes every run `{python} SelectionMetrics.same_all_str` of the time, while `{python} SelectionMetrics.repetitions_str` independently drawn tasks all pass only `{python} SelectionMetrics.new_all_str` of the time. The single-run average is the same, but the experiment is not. Shared outages, state carried between runs, or feedback-conditioned revisions also break these independence formulas, and @tbl-vol3-statistical-metrics names the experiment behind each quantity.
