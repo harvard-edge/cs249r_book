@@ -986,3 +986,15 @@ __all__ += [
 from .serving import calc_kingman_wait_ratio, calc_speculative_round_speedup
 
 __all__ += ["calc_kingman_wait_ratio", "calc_speculative_round_speedup"]
+# --- ML operations: confirming a drop, detection-delay loss, retraining interval (added 2026-10-20) ---
+from .statistics import calc_one_proportion_sample_size
+from .economics import (calc_detection_delay_loss, calc_staleness_slope, calc_retraining_cost_rate,
+                        calc_optimal_retraining_interval)
+
+__all__ += [
+    "calc_one_proportion_sample_size",
+    "calc_detection_delay_loss",
+    "calc_staleness_slope",
+    "calc_retraining_cost_rate",
+    "calc_optimal_retraining_interval",
+]

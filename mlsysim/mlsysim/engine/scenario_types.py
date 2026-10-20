@@ -5416,6 +5416,14 @@ class KsDriftScenario(BaseScenario):
     # Optional (added 2026-10-20): the significance level the coefficient is
     # for, when it is not the registry's 0.05 (calc_ks_coefficient(level)).
     significance: Optional[float] = None
+    # Optional (added 2026-10-20): the K-S statistic above which a release
+    # policy acts, compared with the critical value at this sample size.
+    alert_gate: Optional[float] = None
+
+    @property
+    def gate_over_critical(self) -> float:
+        """How many times larger the policy gate is than the significance threshold."""
+        return self.alert_gate / self.critical_value
 
     @property
     def scale(self) -> float:
@@ -19773,6 +19781,19 @@ class AccuracyDecayScenario(BaseScenario):
     def drop(self) -> float:
         return self.initial_accuracy - self.later_accuracy
 
+    # Reading the fitted curve (added 2026-10-20, ML operations part 2).
+    def accuracy_at(self, age: Quantity) -> float:
+        """``A0 exp(-gamma t)`` at ``age`` since the last reset."""
+        return self.initial_accuracy * _math.exp(-(self.decay_rate * age).to("").magnitude)
+
+    def time_to(self, accuracy: float) -> Quantity:
+        """Age at which the fitted curve reaches ``accuracy``: ``ln(A0 / A) / gamma``."""
+        return (_math.log(self.initial_accuracy / accuracy) / self.decay_rate).to("day")
+
+    def trigger_for_floor(self, floor: float, delay: Quantity) -> float:
+        """Trigger level that holds ``floor`` when a reset follows the crossing by ``delay``."""
+        return floor * _math.exp((self.decay_rate * delay).to("").magnitude)
+
 
 class AnalysisGateScenario(BaseScenario):
     """A rollout analysis that measures every ``interval``, passes a measurement at or
@@ -21146,3 +21167,176 @@ class PassingPatchAuditScenario(BaseScenario):
 
     def share(self, count: float) -> float:
         return count / self.total
+# --- ML operations, part 2: watching and acting (added 2026-10-20) ------------
+# Confirming a drop from labeled outcomes, the cost of a late detection, the
+# retraining interval, accuracy by traffic segment, the ML Test Score audit,
+# and an incident severity policy.
+
+
+class DriftConfirmationScenario(BaseScenario):
+    """Labeled outcomes that confirm a drop of ``drop`` from ``baseline_accuracy``.
+
+    ``evidence_budget`` is the policy's count, set above the one-sample binomial
+    floor at ``confidence`` (two-sided) and ``power``; ``label_rates`` maps a
+    label to the rate at which labeled outcomes arrive. ``compared_drops`` are
+    further drop sizes to size against the same floor."""
+    baseline_accuracy: float
+    drop: float
+    confidence: float
+    power: float
+    evidence_budget: int
+    label_rates: Dict[str, Quantity]
+    compared_drops: Optional[List[float]] = None
+
+    @property
+    def z_alpha(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - (1 - self.confidence) / 2)
+
+    @property
+    def z_beta(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(self.power)
+
+    def outcomes_needed(self, drop: Optional[float] = None) -> float:
+        """One-sample binomial floor for a drop of ``drop`` (default: the scenario's)."""
+        from ..physics.statistics import calc_one_proportion_sample_size
+        d = self.drop if drop is None else drop
+        return calc_one_proportion_sample_size(self.baseline_accuracy, self.baseline_accuracy - d,
+                                               self.z_alpha, self.z_beta)
+
+    def collection_time(self, rate: str) -> Quantity:
+        """Time to collect the evidence budget at the named label rate."""
+        return (self.evidence_budget / self.label_rates[rate]).to_base_units()
+
+    def collection_time_for(self, samples: float, rate: str) -> Quantity:
+        """Time to collect ``samples`` at the named label rate."""
+        return (samples / self.label_rates[rate]).to_base_units()
+
+
+class DetectionDelayLossScenario(BaseScenario):
+    """A fault that cuts ``quality_drop`` of ``annual_value`` until it is detected,
+    found after ``slow_detection`` or ``fast_detection``, ``incidents_per_year`` times a year."""
+    annual_value: Quantity              # one year's value
+    quality_drop: float
+    slow_detection: Quantity
+    fast_detection: Quantity
+    incidents_per_year: float
+
+    def loss(self, delay: Quantity) -> Quantity:
+        from ..physics.economics import calc_detection_delay_loss
+        return calc_detection_delay_loss(self.annual_value, self.quality_drop, delay).to("USD")
+
+    @property
+    def slow_loss(self) -> Quantity:
+        return self.loss(self.slow_detection)
+
+    @property
+    def fast_loss(self) -> Quantity:
+        return self.loss(self.fast_detection)
+
+    @property
+    def savings_per_incident(self) -> Quantity:
+        return self.slow_loss - self.fast_loss
+
+    @property
+    def annual_savings(self) -> Quantity:
+        return (self.savings_per_incident * self.incidents_per_year).to("USD")
+
+    @property
+    def full_year_loss(self) -> Quantity:
+        """The loss if the fault lasted a whole year."""
+        return (self.annual_value * self.quality_drop).to("USD")
+
+    @property
+    def slow_over_fast(self) -> float:
+        return (self.slow_loss / self.fast_loss).to("").magnitude
+
+
+class RetrainingIntervalScenario(BaseScenario):
+    """Retraining a model whose accuracy decays as ``drift`` fits it, serving
+    ``query_rate`` queries worth ``value_per_query`` per unit accuracy, at
+    ``run_cost`` a run. ``footprint`` and ``accelerator_price`` price the
+    compute share of a run; ``compared_intervals`` and ``scheduled_interval``
+    are cadences to compare with the optimum."""
+    drift: AccuracyDecayScenario
+    query_rate: Quantity                # queries per day
+    value_per_query: Quantity           # USD per query for a unit change in accuracy fraction
+    run_cost: Quantity
+    footprint: Optional[Any] = None     # ReleaseFootprintScenario (retraining accelerators and time)
+    accelerator_price: Optional[Quantity] = None
+    compared_intervals: Optional[List[Quantity]] = None
+    scheduled_interval: Optional[Quantity] = None
+
+    @property
+    def staleness_slope(self) -> Quantity:
+        from ..physics.economics import calc_staleness_slope
+        return calc_staleness_slope(self.query_rate, self.value_per_query, self.drift.initial_accuracy,
+                                    self.drift.decay_rate).to("USD/day**2")
+
+    @property
+    def optimal_interval(self) -> Quantity:
+        from ..physics.economics import calc_optimal_retraining_interval
+        return calc_optimal_retraining_interval(self.run_cost, self.staleness_slope).to("day")
+
+    def cost_rate(self, interval: Quantity) -> Quantity:
+        from ..physics.economics import calc_retraining_cost_rate
+        return calc_retraining_cost_rate(interval, self.run_cost, self.staleness_slope).to("USD/day")
+
+    @property
+    def compute_cost(self) -> Quantity:
+        return (self.footprint.retrain_accelerator_hours * self.accelerator_price).to("USD")
+
+    @property
+    def compute_share(self) -> float:
+        return (self.compute_cost / self.run_cost).to("").magnitude
+
+
+class SegmentAccuracyScenario(BaseScenario):
+    """Accuracy measured separately on each traffic segment; ``traffic_shares``
+    and ``accuracies`` are keyed by segment name."""
+    traffic_shares: Dict[str, float]
+    accuracies: Dict[str, float]
+
+    @property
+    def total_share(self) -> float:
+        return sum(self.traffic_shares.values())
+
+    @property
+    def overall_accuracy(self) -> float:
+        """Traffic-weighted accuracy, what an aggregate dashboard shows."""
+        return sum(self.traffic_shares[k] * self.accuracies[k] for k in self.traffic_shares)
+
+    @property
+    def worst_segment(self) -> str:
+        return min(self.accuracies, key=self.accuracies.get)
+
+
+class RubricAuditScenario(BaseScenario):
+    """Section scores of a minimum-category rubric such as the ML Test Score; the
+    composite is the weakest section."""
+    section_scores: Dict[str, float]
+    tests_per_section: int
+    proposal: Optional[Dict[str, float]] = None   # points a plan would add, by section
+
+    @property
+    def score_after_proposal(self) -> float:
+        s = dict(self.section_scores)
+        for k, added in self.proposal.items():
+            s[k] = min(self.tests_per_section, s[k] + added)
+        return min(s.values())
+
+    @property
+    def score(self) -> float:
+        return min(self.section_scores.values())
+
+    def score_with(self, section: str, added: float) -> float:
+        """Composite after ``added`` points in ``section``, capped at the section's tests."""
+        s = dict(self.section_scores)
+        s[section] = min(self.tests_per_section, s[section] + added)
+        return min(s.values())
+
+
+class SeverityPolicyScenario(BaseScenario):
+    """An incident severity policy: the response deadline of each level."""
+    response_deadlines: Dict[str, Quantity]

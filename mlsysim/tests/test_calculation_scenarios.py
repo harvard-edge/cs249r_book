@@ -5672,3 +5672,51 @@ def test_volume1_synthesis_recall_scenarios():
     assert f.interval.m_as("hour") == pytest.approx(50000 / 1024)
     assert f.expected_failures == pytest.approx(504 / (50000 / 1024))
     assert float(Literature.TrainingRuns.Llama3_405B_HardwareInterruptionFraction) == pytest.approx(0.78)
+def test_ml_operations_part2_scenarios():
+    """Drift confirmation, detection-delay loss, retraining interval, PSI, K-S, alerts, slices,
+    rubric audit, severity policy (added 2026-10-20)."""
+    from mlsysim import Literature
+    from mlsysim.core.units import Q_
+    from mlsysim.physics import (calc_one_proportion_sample_size, calc_detection_delay_loss,
+                                 calc_optimal_retraining_interval, calc_retraining_cost_rate)
+    c = Scenarios.LabeledOutcomeDriftConfirmation
+    assert c.outcomes_needed() == pytest.approx(184.770, rel=1e-5)
+    assert [c.outcomes_needed(d) for d in c.compared_drops] == pytest.approx([1030.093, 3931.769, 15328.286], rel=1e-5)
+    assert c.collection_time("high").m_as("minute") == pytest.approx(1000 / 60)
+    assert c.collection_time("low").m_as("day") == pytest.approx(10)
+    assert calc_one_proportion_sample_size(0.5, 0.4, 1.0, 0.0) == pytest.approx(25)
+    d = Scenarios.RecommenderDetectionDelayLoss
+    assert d.slow_loss.m_as("USD") == pytest.approx(191780.82, rel=1e-6)
+    assert d.annual_savings.m_as("USD") == pytest.approx(739726.03, rel=1e-6)
+    assert d.full_year_loss.m_as("USD") == pytest.approx(2.5e6) and d.slow_over_fast == pytest.approx(28)
+    assert calc_detection_delay_loss(Q_(365, "USD"), 1.0, Q_(1, "day")).m_as("USD") == pytest.approx(1)
+    r = Scenarios.RankingRetrainingInterval
+    assert r.staleness_slope.m_as("USD/day**2") == pytest.approx(1107.1516, rel=1e-6)
+    assert r.optimal_interval.m_as("day") == pytest.approx(3.00536, rel=1e-5)
+    assert r.cost_rate(Q_(3, "day")).m_as("USD/day") == pytest.approx(3327.394, rel=1e-6)
+    assert r.compute_cost.m_as("USD") == pytest.approx(96) and r.compute_share == pytest.approx(0.0192)
+    half = r.optimal_interval.m_as("day") / 2
+    assert Scenarios.RankingRetrainingIntervalFourfoldTraffic.optimal_interval.m_as("day") == pytest.approx(half)
+    assert Scenarios.RankingRetrainingIntervalQuarterRunCost.optimal_interval.m_as("day") == pytest.approx(half)
+    t = calc_optimal_retraining_interval(Q_(50, "USD"), Q_(1, "USD/day**2")).m_as("day")
+    assert t == pytest.approx(10)
+    # at T*, run cost per day equals the average staleness loss per day
+    assert calc_retraining_cost_rate(Q_(10, "day"), Q_(50, "USD"), Q_(1, "USD/day**2")).m_as("USD/day") == pytest.approx(10)
+    dr = Scenarios.RankingServiceAccuracyDrift
+    assert dr.time_to(dr.later_accuracy).m_as("day") == pytest.approx(28)
+    assert dr.accuracy_at(Q_(90, "day")) == pytest.approx(0.760421, rel=1e-5)
+    assert dr.trigger_for_floor(0.88, Q_(10, "day")) == pytest.approx(0.900976, rel=1e-5)
+    assert Scenarios.RankingUserAgePsi.psi == pytest.approx(0.029309, rel=1e-4)
+    k = Scenarios.ServingDayKsAgainstTraining
+    assert k.critical_value == pytest.approx(0.0019233, rel=1e-4) and k.gate_over_critical == pytest.approx(51.993, rel=1e-4)
+    assert Scenarios.OneModelDailyMetricTests.daily_false_alerts == pytest.approx(7.5)
+    assert Scenarios.OneModelDailyMetricTestsAtOnePerThousand.daily_false_alerts == pytest.approx(0.15)
+    s = Scenarios.RecommendationAccuracyByDevice
+    assert s.total_share == pytest.approx(1) and s.overall_accuracy == pytest.approx(0.906) and s.worst_segment == "Tablet"
+    a = Scenarios.MlTestScoreMonitoringGapAudit
+    assert a.score == 1 and a.score_after_proposal == 1 and a.score_with("Monitoring", 4) == 5
+    assert float(Literature.MlOperations.MlTestScoreSections) * a.tests_per_section == 28
+    assert Scenarios.RecommendationIncidentSeverityPolicy.response_deadlines["P3"].m_as("hour") == 24
+    rows = Literature.Series.LabelFreeShiftDetection.entries
+    assert [r["samples"] for r in rows][-1] == 10000 and rows[-1]["small"] == pytest.approx(0.54)
+    assert float(Literature.IncidentReports.UnityPinpointerHeadwindUsd) == 110e6

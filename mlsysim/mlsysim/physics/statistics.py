@@ -998,3 +998,21 @@ def calc_spearman_rank_correlation(xs, ys):
     mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
     cov = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
     return cov / math.sqrt(sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry))
+
+
+# --- Confirming an accuracy drop (added 2026-10-20) ---------------------------
+def calc_one_proportion_sample_size(null_rate, alternative_rate, z_alpha, z_beta):
+    """Outcomes a one-sample binomial test needs to tell ``alternative_rate`` from ``null_rate``.
+
+    Normal approximation with the variance of each hypothesis on its own side:
+    ``n = ((z_alpha sqrt(p0 (1 - p0)) + z_beta sqrt(p1 (1 - p1))) / (p0 - p1))^2``.
+    The count grows as one over the squared gap, so halving the gap needs about
+    four times the outcomes.
+    """
+    if not (0 < null_rate < 1 and 0 < alternative_rate < 1):
+        raise ValueError("rates must be in (0, 1).")
+    if null_rate == alternative_rate:
+        raise ValueError("the rates must differ.")
+    spread = (z_alpha * math.sqrt(null_rate * (1 - null_rate))
+              + z_beta * math.sqrt(alternative_rate * (1 - alternative_rate)))
+    return (spread / (null_rate - alternative_rate)) ** 2

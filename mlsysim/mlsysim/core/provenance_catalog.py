@@ -5186,3 +5186,57 @@ ALEITHAN_2024_SWE_BENCH_PLUS = _lit(
         "rendering on 2026-10-20."
     ),
 )
+
+# --- ML operations, part 2: monitoring, alerting, retraining (added 2026-10-20) ---
+UNITY_Q1_2022_EARNINGS_CALL = _report(
+    "prov:unity-q1-2022-earnings-call",
+    "Unity Software, Q1 2022 earnings call, 10 May 2022, transcript (The Motley Fool), remarks of "
+    "J. Riccitiello and L. Visoso",
+    "https://www.fool.com/earnings/call-transcripts/2022/05/10/unity-software-inc-u-q1-2022-earnings-call-transcript/",
+    notes=("A fault reduced the accuracy of the Audience Pinpointer tool, and bad data from a large customer "
+           "was ingested. 'We quantified this headwind at $110 million with roughly 60% impacting the second "
+           "quarter, 30% impacting the third quarter.' No detection date is stated."),
+)
+VISA_CORE_RULES_APRIL_2026 = _report(
+    "prov:visa-core-rules-2026-04",
+    "Visa Core Rules and Visa Product and Service Rules, 18 April 2026, table 11-29 (dispute time limits)",
+    "https://usa.visa.com/dam/VCOM/download/about-visa/visa-rules-public.pdf",
+    notes="A card-absent fraud dispute may be raised up to 120 calendar days from the transaction processing date.",
+)
+RABANSER_FAILING_LOUDLY_2019 = _lit(
+    "prov:rabanser-failing-loudly-2019",
+    "Rabanser, Guennemann, and Lipton (2019), Failing Loudly: An Empirical Study of Methods for Detecting "
+    "Dataset Shift, NeurIPS 2019, Table 2a",
+    url="https://arxiv.org/abs/1810.11953",
+    verified="2026-10-20",
+    notes=("Detection accuracy of the best label-free detector (univariate tests on the softmax outputs, "
+           "BBSDs) against the number of new samples, for large, medium, and small simulated shifts on "
+           "MNIST and CIFAR-10."),
+)
+DREW_ALARM_FATIGUE_2014 = _lit(
+    "prov:drew-alarm-fatigue-2014",
+    "Drew, Harris, Zegre-Hemsey, et al. (2014), Insights into the Problem of Alarm Fatigue with "
+    "Physiologic Monitor Devices: A Comprehensive Observational Study of Consecutive Intensive Care Unit "
+    "Patients, PLOS ONE 9(10): e110274",
+    url="https://doi.org/10.1371/journal.pone.0110274",
+    verified="2026-10-20",
+    notes=("2,558,760 unique alarms from 461 adult ICU patients in 31 days; of 12,671 annotated arrhythmia "
+           "alarms, 88.8 percent were false."),
+)
+BRECK_ML_TEST_SCORE_2017 = _lit(
+    "prov:breck-ml-test-score-2017",
+    "Breck, Cai, Nielsen, Salib, and Sculley (2017), The ML Test Score: A Rubric for ML Production "
+    "Readiness and Technical Debt Reduction, IEEE Big Data 2017",
+    url="https://research.google/pubs/the-ml-test-score-a-rubric-for-ml-production-readiness-and-technical-debt-reduction/",
+    verified="2026-10-20",
+    notes=("28 tests in four sections of seven; half a point for a documented manual test, one point for an "
+           "automated test; the final score is the minimum of the section scores."),
+)
+HE_ADS_CLICK_PREDICTION_2014 = _lit(
+    "prov:he-facebook-ads-2014",
+    "He, Pan, Jin, et al. (2014), Practical Lessons from Predicting Clicks on Ads at Facebook, ADKDD 2014, "
+    "Sec. 5 and Figure 2",
+    url="https://doi.org/10.1145/2648584.2648589",
+    verified="2026-10-20",
+    notes="Training daily rather than weekly reduced normalized entropy by about 1 percent.",
+)
