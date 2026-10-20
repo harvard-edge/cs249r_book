@@ -181,3 +181,18 @@ __all__ += [
     "ZeroFailureModel",
     "ThrottledStageModel",
 ]
+
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+from .proposer import (
+    VlaEvaluationModel,
+    DecoderFamiliesModel,
+    ProposerTrafficModel,
+    EvidenceHorizonModel,
+)
+
+__all__ += [
+    "VlaEvaluationModel",
+    "DecoderFamiliesModel",
+    "ProposerTrafficModel",
+    "EvidenceHorizonModel",
+]

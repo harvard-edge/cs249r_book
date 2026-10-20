@@ -168,6 +168,46 @@ def calc_chunk_renewal_schedule(
     }
 
 
+def calc_temporal_ensemble_weights(decay: float, predictions: int):
+    """
+    Normalized weights of a temporal ensemble over overlapping action chunks.
+
+    A chunk policy queried every step holds ``predictions`` overlapping
+    predictions for the current step, index 0 the oldest. ACT blends them with
+    exponentially decaying weights
+
+        w_i = exp(-k i) / sum_j exp(-k j),   i = 0 .. n - 1,
+
+    so the oldest prediction weighs most for k > 0.
+
+    Source: Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
+    Low-Cost Hardware" (ACT), RSS 2023, arXiv:2304.13705, and its reference
+    code (imitate_episodes.py, temporal-ensembling branch).
+
+    Parameters
+    ----------
+    decay : float
+        Decay constant k per prediction index (>= 0).
+    predictions : int
+        Number of overlapping predictions n (>= 1).
+
+    Returns
+    -------
+    dict
+        weights (numpy array, sums to 1), oldest_over_newest (w_0 / w_{n-1}),
+        newest_share (w_{n-1}).
+    """
+    validate_at_least(predictions, 1, "predictions")
+    validate_nonnegative(decay, "decay")
+    raw = np.exp(-decay * np.arange(predictions))
+    w = raw / raw.sum()
+    return {
+        "weights": w,
+        "oldest_over_newest": float(w[0] / w[-1]),
+        "newest_share": float(w[-1]),
+    }
+
+
 def calc_watchdog_lease_bound(
     clearance_distance,
     initial_velocity,
