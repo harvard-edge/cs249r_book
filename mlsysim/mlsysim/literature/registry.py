@@ -28,7 +28,7 @@ Crypto = _load("crypto", "Crypto", "Security/crypto overhead anchors (TEE, FHE, 
 ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsible-AI technique overhead ranges for the responsible_ai chapter.")
 TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field figures (GPU counts, durations, MFU, interruptions).")
 FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-operations results (job MTTF, utilization, cluster scale).")
-DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
+DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA), and power contracted for datacenters (Constellation 2024).")
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
 # Incident investigation reports (added 2026-10-20)

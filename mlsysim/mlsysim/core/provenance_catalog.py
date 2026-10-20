@@ -5240,3 +5240,30 @@ HE_ADS_CLICK_PREDICTION_2014 = _lit(
     verified="2026-10-20",
     notes="Training daily rather than weekly reduced normalized entropy by about 1 percent.",
 )
+
+# --- Course-overview anchors: chat traffic, tokens per word, a restarted reactor (added 2026-10-20) ---
+CHATGPT_DAILY_PROMPTS_2025 = _report(
+    "prov:openai-axios-chatgpt-prompts-2025",
+    "OpenAI to Axios (2025), ChatGPT users send 2.5 billion prompts a day, reported by TechCrunch, 21 July 2025",
+    "https://techcrunch.com/2025/07/21/chatgpt-users-send-2-5-billion-prompts-a-day/",
+    notes=("'ChatGPT receives 2.5 billion prompts from global users every day, OpenAI told Axios'; about "
+           "330 million of them from US users. A company statement, not audited. Read 2026-10-20."),
+)
+OPENAI_TOKENIZER_GUIDE = _conv(
+    "prov:openai-tokenizer-guide",
+    "OpenAI, What are tokens and how to count them? (help center) and the Tokenizer page, "
+    "https://platform.openai.com/tokenizer",
+    notes=("'A helpful rule of thumb is that one token generally corresponds to ~4 characters of text for "
+           "common English text. This translates to roughly 3/4 of a word (so 100 tokens ~= 75 words).' "
+           "A rule of thumb for English with OpenAI's tokenizers. Read 2026-10-20."),
+)
+CONSTELLATION_CRANE_2024 = _report(
+    "prov:constellation-crane-clean-energy-center-2024",
+    "Constellation Energy (2024), Constellation to Launch Crane Clean Energy Center, Restoring Jobs and "
+    "Carbon-Free Power to The Grid, press release, Londonderry, PA, 20 September 2024",
+    "https://www.constellationenergy.com/news/2024/Constellation-to-Launch-Crane-Clean-Energy-Center-"
+    "Restoring-Jobs-and-Carbon-Free-Power-to-The-Grid.html",
+    notes=("Three Mile Island Unit 1 'had a generating capacity of 837 megawatts'; 'retired prematurely for "
+           "economic reasons in 2019'; 'a 20-year power purchase agreement with Microsoft'; 'The CCEC is "
+           "expected to be online in 2028.' Read 2026-10-20."),
+)

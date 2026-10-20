@@ -10403,6 +10403,19 @@ class Scenarios(Registry):
         response_tokens=500,  # scenario assumption: typical response length
         low_use_fraction=0.1,  # scenario assumption: poorly batched
     )
+    ChatGptDayAtGeminiMedianPrompt = _st.ChatServiceDayScenario(  # added 2026-10-20
+        name="One day of ChatGPT prompts at Google's measured median prompt energy, served by H100s",
+        description="2.5 billion prompts a day (OpenAI to Axios, 2025) at the median Gemini Apps text "
+                    "prompt's full-boundary energy (Elsworth et al. 2025), against one GPT-3 training run; "
+                    "tokens per answer and per H100 from the H100 chat energy scenario. An estimate: "
+                    "one service's per-prompt energy applied to another's traffic.",
+        prompts_per_day=_ReferenceStats.Workloads.ChatGptPromptsPerDay,
+        energy_per_prompt=Q_(sum(r["comprehensive_wh"] for r in _Literature.Series.GeminiPromptEnergy.entries
+                                 if r["comprehensive_counted"] == 1), "Wh"),
+        tokens_per_prompt=H100ChatEnergyPerToken.response_tokens,
+        accelerator_token_rate=H100ChatEnergyPerToken.token_rate,
+        reference_energy=_Models.Language.GPT3.training_energy_mwh,
+    )
     Llama2_70BConversationalDecodeStreams = _st.LittlesLawScenario(
         name="Streams decoding at once on the MLPerf Llama 2 70B server under the 200 ms TPOT bound",
         description="Little's law: measured Server tokens per second times the TPOT bound.",
