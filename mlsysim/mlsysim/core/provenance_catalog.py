@@ -3408,3 +3408,66 @@ GOOGLE_SRE_SLO_ALERTING = Provenance(
     notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
            "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
 )
+
+# --- Network architectures, part 2: attention, decode, recommenders (added 2026-10-20) ---
+OPENAI_DEVDAY_2023 = _report(
+    "prov:openai-devday-2023",
+    "OpenAI (2023), New models and developer products announced at DevDay, 6 November 2023",
+    "https://openai.com/index/new-models-and-developer-products-announced-at-devday/",
+    notes="GPT-4 Turbo supports a 128K context window.",
+)
+ANTHROPIC_CLAUDE_21_2023 = _report(
+    "prov:anthropic-claude-2-1-2023",
+    "Anthropic (2023), Introducing Claude 2.1, 21 November 2023",
+    "https://www.anthropic.com/news/claude-2-1",
+    notes="A 200K-token context window.",
+)
+GOOGLE_GEMINI_15_2024 = _report(
+    "prov:google-gemini-1-5-2024",
+    "Google (2024), Our next-generation model: Gemini 1.5, 15 February 2024",
+    "https://blog.google/technology/ai/google-gemini-next-generation-model-february-2024/",
+    notes=("Gemini 1.5 Pro ships with a standard 128,000-token context window; a limited group of "
+           "developers could try up to 1 million tokens in private preview."),
+)
+DAO_FLASHATTENTION_2022 = _lit(
+    "prov:dao-flashattention-2022",
+    "Dao et al. (2022), FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness, "
+    "NeurIPS 2022, Tables 20 and 21",
+    url="https://arxiv.org/abs/2205.14135",
+    verified="2026-10-20",
+    notes=("arXiv 2205.14135v2, Appendix E benchmarks: forward plus backward runtime (ms, no dropout or "
+           "masking, Table 20) and memory (MB, Table 21) on one A100 40 GB, batch 16, 8 heads of 64, FP16. "
+           "Standard PyTorch attention runs out of memory beyond 4,096 tokens."),
+)
+KWON_PAGEDATTENTION_2023 = _lit(
+    "prov:kwon-pagedattention-2023",
+    "Kwon et al. (2023), Efficient Memory Management for Large Language Model Serving with "
+    "PagedAttention, SOSP 2023, Figure 1 (left)",
+    url="https://arxiv.org/abs/2309.06180",
+    verified="2026-10-20",
+    notes=("Memory layout when serving a 13B-parameter model on an NVIDIA A100 40 GB: parameters 26 GB "
+           "(65 percent), KV cache over 30 percent, the rest activations (figure labels)."),
+)
+GUPTA_RECOMMENDATION_HPCA_2020 = _lit(
+    "prov:gupta-recommendation-hpca-2020",
+    "Gupta et al. (2020), The Architectural Implications of Facebook's DNN-based Personalized "
+    "Recommendation, HPCA 2020",
+    url="https://arxiv.org/abs/1906.03109",
+    verified="2026-10-20",
+    notes="Recommendation models take 79 percent of the AI inference cycles in Facebook's datacenters.",
+)
+MUDIGERE_ZIONEX_2022 = _lit(
+    "prov:mudigere-zionex-2022",
+    "Mudigere et al. (2022), Software-Hardware Co-design for Fast and Scalable Training of Deep "
+    "Learning Recommendation Models, ISCA 2022",
+    url="https://arxiv.org/abs/2104.05158",
+    verified="2026-10-20",
+    notes='The abstract: "train very large DLRMs with up to 12 Trillion parameters".',
+)
+CRITEO_KAGGLE_DATASET = _lit(
+    "prov:criteo-kaggle-2014",
+    "Criteo Display Advertising Challenge dataset (Kaggle, 2014), as used by Naumov et al. (2019), DLRM",
+    url="https://arxiv.org/abs/1906.00091",
+    verified="2026-10-20",
+    notes="Each example has 13 integer (dense) features and 26 categorical features.",
+)

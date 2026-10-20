@@ -72,6 +72,9 @@ RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of publi
 # Network architectures (added 2026-10-20)
 NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
 KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
+ContextWindows = _load("context_windows", "ContextWindows", "Announced context windows of language models outside the Models registry (GPT-4 Turbo, Claude 2.1, Gemini 1.5 Pro).")  # added 2026-10-20
+RecommendationSystems = _load("recommendation_systems", "RecommendationSystems", "Cited figures of production recommendation systems (Gupta et al. 2020; Mudigere et al. 2022).")  # added 2026-10-20
+ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +370,10 @@ class Literature(Registry):
     RobotLearning = RobotLearning  # added 2026-10-20
     NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
     KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
+    ContextWindows = ContextWindows  # network architectures (added 2026-10-20)
+    RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
+    ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
+    FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

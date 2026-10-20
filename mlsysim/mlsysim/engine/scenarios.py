@@ -5233,3 +5233,165 @@ class Scenarios(Registry):
         name="The same platform serving 20 model teams",
         models=20,  # scenario assumption
     )
+
+    # --- Network architectures: attention, transformer blocks, decode, and recommenders (added 2026-10-20) ---
+    # GPT-2 XL is the running transformer; Llama 2 and Llama 3.1 shapes size
+    # decode and the KV cache; DLRM-style tables carry the recommender.
+    FourTokenToyAttentionHead = _st.ToyAttentionHeadScenario(
+        name="Four tokens through one attention head of width two, by hand",
+        description="Illustrative Q, K, and V rows chosen for easy arithmetic; no model learned them.",
+        queries=[[1, 0], [0, 1], [1, 1], [1, 0]],  # scenario assumption
+        keys=[[2, 0], [0, 2], [1, 1], [0, 0]],  # scenario assumption
+        values=[[1, 0], [0, 1], [1, 1], [0, 0]],  # scenario assumption
+    )
+    Gpt2SmallSixTokenQkvProjection = _st.PackedQkvProjectionScenario(
+        name="Six tokens through GPT-2 Small's packed query-key-value projection",
+        description="One 768 x 2,304 weight matrix produces all three projections in one kernel.",
+        workload=_Models.Language.GPT2_Small,
+        tokens=6,  # scenario assumption: a six-token sequence
+    )
+    Gpt2XlBlockFullWindow = _st.TransformerBlockScenario(
+        name="GPT-2 XL decoder blocks at its 1,024-token window",
+        description="The classic 12 d^2 block (feed-forward width 4d); dense against attention multiply-adds.",
+        workload=_Models.Language.GPT2,
+        context_tokens=_Models.Language.GPT2.context_length,
+    )
+    Gpt2XlBlockAt100kTokens = Gpt2XlBlockFullWindow.variant(
+        name="GPT-2 XL decoder blocks at a 100,000-token context",
+        description="Past the crossover: the attention products dominate.",
+        context_tokens=100_000,  # scenario assumption: a long context, beyond the model's window
+    )
+    Gpt2XlBlockTwiceAsWide = Gpt2XlBlockFullWindow.variant(
+        name="A GPT-2 XL-like block twice as wide",
+        description="The crossover moves out in proportion to the width.",
+        workload=_Models.Language.GPT2.model_copy(update={"hidden_dim": 2 * _Models.Language.GPT2.hidden_dim}),  # scenario assumption: twice the width
+    )
+    Llama3_8BMillionTokenPrompt = _st.TransformerBlockScenario(
+        name="One 1,000,000-token prompt on a model of Llama 3.1 8B's shape, priced on an H100",
+        description="Illustrative: the shape is real; the model card states a 128K window.",
+        workload=_Models.Language.Llama3_8B,
+        context_tokens=1_000_000,  # scenario assumption: a million-token request
+        hardware=_Hardware.Cloud.H100,
+    )
+    TwelveHeadScoresAt100kTokens = _st.MaterializedScoresScenario(
+        name="Materialized attention scores of a 12-head, 32-layer model at 100,000 tokens",
+        description="FP16 scores stored in full, against one 80 GB accelerator.",
+        seq_len=100_000,  # scenario assumption: long context
+        heads=12,  # scenario assumption: generic model
+        layers=32,  # scenario assumption: generic model
+        bytes_per_score=_BYTES_FP16,
+        hardware=_Hardware.Cloud.H100,
+    )
+    TwelveHeadScoresAt4096Tokens = TwelveHeadScoresAt100kTokens.variant(
+        name="The same scores at 4,096 tokens", seq_len=4096)  # scenario assumption
+    TwelveHeadScoresAt8192Tokens = TwelveHeadScoresAt100kTokens.variant(
+        name="The same scores at 8,192 tokens", seq_len=8192)  # scenario assumption
+    OneHeadScoresAtMillionTokens = TwelveHeadScoresAt100kTokens.variant(
+        name="One head's scores in one layer at 1,000,000 tokens",
+        description="What a million-token prompt would store per head, per layer, if scores were kept.",
+        seq_len=Llama3_8BMillionTokenPrompt.context_tokens, heads=1, layers=1,
+    )
+    BertWindowToFourK = _st.ContextGrowthScenario(
+        name="BERT's 512 learned positions against a 4,096-token input",
+        description="Score memory grows with the square of the length ratio.",
+        base_tokens=_Models.Language.BERT_Base.context_length,
+        tokens=4096,  # scenario assumption: a longer input
+    )
+    BertWindowToOneK = BertWindowToFourK.variant(name="BERT's window doubled", tokens=1024)  # scenario assumption
+    BertWindowToTwoK = BertWindowToFourK.variant(name="BERT's window quadrupled", tokens=2048)  # scenario assumption
+    Gpt3ToGemini15PreviewWindow = _st.ContextGrowthScenario(
+        name="GPT-3's 2,048-token window against Gemini 1.5 Pro's million-token preview",
+        description="Published windows, 2020 and 2024.",
+        base_tokens=_Models.Language.GPT3.context_length,
+        tokens=int(_Literature.ContextWindows.Gemini15ProPreviewTokens),
+    )
+    Gpt2XlKvFullWindow = _st.KvFootprintScenario(
+        name="GPT-2 XL's FP16 KV cache at its 1,024-token window",
+        description="2 x 48 layers x 1,600 x 2 bytes per kept token.",
+        workload=_Models.Language.GPT2,
+        tokens=_Models.Language.GPT2.context_length,
+        bytes_per_value=_BYTES_FP16,
+    )
+    Gpt2XlKvAt10kTokens = Gpt2XlKvFullWindow.variant(
+        name="GPT-2 XL's FP16 KV cache at 10,000 tokens", tokens=10_000)  # scenario assumption
+    Llama2_7BKvAt2048Tokens = Gpt2XlKvFullWindow.variant(
+        name="Llama 2 7B's FP16 KV cache for one 2,048-token request",
+        description="32 layers, 32 key-value heads of 128, FP16.",
+        workload=_Models.Language.Llama2_7B,
+        tokens=2048,  # scenario assumption: serving context length
+    )
+    Llama3_8BKvFullWindow = Gpt2XlKvFullWindow.variant(
+        name="Llama 3.1 8B's 16-bit KV cache at its 128K window",
+        description="Grouped-query attention: 8 key-value heads of 128 over 32 layers.",
+        workload=_Models.Language.Llama3_8B,
+        tokens=_Models.Language.Llama3_8B.context_length,
+    )
+    Llama3_8BKvAtMillionTokens = Llama3_8BKvFullWindow.variant(
+        name="Llama 3.1 8B's 16-bit KV cache for a 1,000,000-token request",
+        description="Illustrative: beyond the model's stated window.",
+        tokens=Llama3_8BMillionTokenPrompt.context_tokens,
+    )
+    Opt13BKvOnA100_40GB = _st.KvFootprintScenario(
+        name="OPT-13B 2,048-token requests in the KV share of one A100 40 GB",
+        description="The KV cache's share of device memory from Kwon et al. (2023), Figure 1; full-length requests.",
+        workload=_Models.Language.OPT_13B,
+        tokens=_Models.Language.OPT_13B.context_length,
+        bytes_per_value=_BYTES_FP16,
+        hardware=_Hardware.Cloud.A100_40GB,
+        kv_share=_Literature.ServingMemoryLayout.KvCacheSharePct / 100,
+    )
+    Opt13BKvOnA100_40GBHalfWidth = Opt13BKvOnA100_40GB.variant(
+        name="The same requests with half the key-value width",
+        kv_width_factor=0.5,  # scenario assumption: half the key-value heads
+    )
+    Gpt2XlContextMemoryOnH100 = _st.ContextMemoryCrossingScenario(
+        name="GPT-2 XL's weights, KV cache, and one layer's scores against one H100",
+        description="FP16 throughout; where the linear cache and the quadratic scores cross fixed budgets.",
+        workload=_Models.Language.GPT2,
+        hardware=_Hardware.Cloud.H100,
+        bytes_per_value=_BYTES_FP16,
+    )
+    Llama2_70B_DecodeTwoH100 = Llama2_70B_DecodeH100.variant(
+        name="Llama 2 70B batch-1 decode split across two H100s",
+        description="140 GB of FP16 weights do not fit one 80 GB H100; each device streams its half per token.",
+        tp_size=2,  # scenario assumption: the smallest split that fits
+    )
+    Gpt2XlDecodeH100 = Llama2_70B_DecodeH100.variant(
+        name="GPT-2 XL batch-1 decode on one H100",
+        description="FP16 weights streamed once per token.",
+        workload=_Models.Language.GPT2,
+    )
+    H100DecodeRoofline = _st.RooflinePointScenario(
+        name="Batch-1 FP16 decode on the H100 roofline",
+        description="Two FLOPs per two-byte weight against the H100's dense FP16 ridge.",
+        hardware=_Hardware.Cloud.H100,
+        intensity=Llama2_70B_DecodeH100.result.intensity,
+    )
+    MobileNetV2Fp32Adam = Gpt2Fp32AdamOnH100.variant(
+        name="MobileNetV2 trained in FP32 with Adam", workload=_Models.Vision.MobileNetV2)
+    ResNet50Fp32Adam = Gpt2Fp32AdamOnH100.variant(
+        name="ResNet-50 trained in FP32 with Adam", workload=_Models.Vision.ResNet50)
+    KwsDsCnnFp32Adam = Gpt2Fp32AdamOnH100.variant(
+        name="The DS-CNN keyword spotter trained in FP32 with Adam", workload=_Models.Tiny.DS_CNN)
+    CriteoShapedRequestOnH100 = _st.EmbeddingGatherScenario(
+        name="One Criteo-shaped recommender request on an H100",
+        description="One 128-wide FP32 row per categorical feature; device HBM against the PCIe host link.",
+        dataset=_Datasets.CriteoKaggle,
+        width=128,  # scenario assumption: embedding width
+        bytes_per_value=_BYTES_FP32,
+        hardware=_Hardware.Cloud.H100,
+    )
+    HundredMillionItemTableOnA100 = _st.EmbeddingTableScenario(
+        name="A 100-million-item embedding table on one 80 GB A100",
+        description="128 FP32 values per row, one categorical feature.",
+        rows=100_000_000,  # scenario assumption: catalog size
+        width=CriteoShapedRequestOnH100.width,
+        bytes_per_value=_BYTES_FP32,
+        hardware=_Hardware.Cloud.A100,
+    )
+    TwoHundredMillionRowTablesOnA100 = HundredMillionItemTableOnA100.variant(
+        name="An item table and a user table of the same size on one A100", tables=2)
+    BillionUserTable = HundredMillionItemTableOnA100.variant(
+        name="A billion-user embedding table, 128 FP32 values per row",
+        rows=1_000_000_000,  # scenario assumption: user count
+    )

@@ -1209,6 +1209,24 @@ PagedAttentionMemoryBreakdown = _Series(
     "KV memory holding token states, reservations, internal and external fragmentation (percent).",
 )
 
+# --- Network architectures (added 2026-10-20) ---------------------------------
+FlashAttentionBenchmark = _Series(
+    "flashattention_a100_benchmark",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Dao et al. (2022), FlashAttention: Fast and Memory-Efficient Exact Attention with "
+            "IO-Awareness, NeurIPS 2022, Tables 20 and 21",
+        url="https://arxiv.org/abs/2205.14135",
+        verified="2026-10-20",
+        notes=(
+            "arXiv 2205.14135v2: forward plus backward runtime (ms, no dropout or masking, Table 20) and "
+            "memory (MB, Table 21) of standard PyTorch attention and FlashAttention on one A100 40 GB, "
+            "batch 16, 8 heads of 64, FP16. PyTorch runs out of memory beyond 4,096 tokens (empty cells)."
+        ),
+    ),
+    "Attention runtime and memory against sequence length, standard PyTorch and FlashAttention (A100).",
+)
+
 ToolInterceptionTimes = _Series(
     "infercept_interception_times",
     Provenance(

@@ -8,7 +8,7 @@ chapter results when the scenarios were added (2026-10-20).
 
 import pytest
 
-from mlsysim import Scenarios
+from mlsysim import Models, Scenarios
 
 
 def approx(x, rel=1e-3):
@@ -3047,3 +3047,87 @@ def test_resnet50_macs_from_architecture():
     assert v1["total"] == 3_857_973_248
     assert calc_resnet_bottleneck_macs(stride_on_3x3=True)["total"] == approx(4.0892e9, rel=1e-4)
     assert Scenarios.ResNet50ConvKernelShare.share == approx(0.47945, rel=1e-4)
+# --- Network architectures: attention, transformer blocks, decode, recommenders (added 2026-10-20) ---
+
+def test_toy_attention_head():
+    t = Scenarios.FourTokenToyAttentionHead
+    assert t.scores[0] == pytest.approx([2 ** 0.5, 0, 2 ** 0.5 / 2, 0])
+    assert t.weights[0] == pytest.approx([0.5052, 0.1228, 0.2491, 0.1228], abs=1e-4)
+    assert t.outputs[0] == pytest.approx([0.7543, 0.3720], abs=1e-4)
+    assert t.outputs[1] == pytest.approx(t.outputs[0][::-1]) and t.outputs[3] == pytest.approx(t.outputs[0])
+    assert t.macs_per_product == 32
+
+
+def test_packed_qkv_projection():
+    p = Scenarios.Gpt2SmallSixTokenQkvProjection
+    assert (p.width, p.packed_width, p.workload.head_width) == (768, 2304, 64)
+    assert p.macs == 10_616_832
+
+
+def test_gpt2_xl_block_counts():
+    b = Scenarios.Gpt2XlBlockFullWindow
+    assert (b.weights_per_block, b.block_coefficient) == (30_720_000, 12)
+    assert b.block_weights == 1_474_560_000 and b.token_table == 80_411_200
+    assert b.attention_weights == 491_520_000 and b.mlp_weights == 983_040_000
+    assert b.exact_parameters == 1_557_611_200
+    assert b.flops_per_token.to("GFLOP").magnitude == approx(2.94912)
+    assert (b.dense_macs, b.attention_macs) == (31_457_280_000, 3_355_443_200)
+    assert b.attention_share == approx(0.0963855) and b.crossover == 9600
+    assert b.prompt_flops.to("TFLOP").magnitude == approx(3.3420214)
+    assert Scenarios.Gpt2XlBlockAt100kTokens.attention_to_dense == approx(10.416667)
+    assert Scenarios.Gpt2XlBlockTwiceAsWide.crossover == 19200
+
+
+def test_materialized_scores_and_growth():
+    a = Scenarios.TwelveHeadScoresAt100kTokens
+    assert a.scores_per_layer == 120_000_000_000
+    assert a.layer_bytes.to("GB").magnitude == approx(240) and a.total_bytes.to("GB").magnitude == approx(7680)
+    assert a.layer_device_multiple == approx(3)
+    assert Scenarios.TwelveHeadScoresAt8192Tokens.layer_bytes / Scenarios.TwelveHeadScoresAt4096Tokens.layer_bytes == approx(4)
+    assert Scenarios.OneHeadScoresAtMillionTokens.layer_bytes.to("TB").magnitude == approx(2)
+    assert Scenarios.BertWindowToFourK.score_ratio == 64 and Scenarios.BertWindowToTwoK.score_ratio == 16
+    assert Scenarios.Gpt3ToGemini15PreviewWindow.ratio == approx(488.28125)
+
+
+def test_kv_footprints():
+    assert Scenarios.Gpt2XlKvFullWindow.per_token.to("byte").magnitude == 307_200
+    assert Scenarios.Gpt2XlKvFullWindow.total.to("MB").magnitude == approx(314.5728)
+    assert Scenarios.Llama2_7BKvAt2048Tokens.total.to("GB").magnitude == approx(1.073741824)
+    assert Scenarios.Llama3_8BKvFullWindow.total.to("GB").magnitude == approx(17.179869)
+    assert Scenarios.Llama3_8BKvAtMillionTokens.total.to("GB").magnitude == approx(131.072)
+    o = Scenarios.Opt13BKvOnA100_40GB
+    assert o.per_token.to("byte").magnitude == 819_200 and o.requests == approx(7.1525574)
+    assert Scenarios.Opt13BKvOnA100_40GBHalfWidth.requests == approx(2 * o.requests)
+    assert Models.Language.PaLM_540B.get_kv_cache_size(1, 1).to("byte").magnitude == 120_832
+    assert Models.Language.Llama2_70B.queries_per_kv_head == 8
+
+
+def test_context_memory_crossings():
+    c = Scenarios.Gpt2XlContextMemoryOnH100
+    assert c.kv_crossing == approx(9765.625) and c.kv_score_crossing == approx(6144)
+    assert c.score_crossing == approx(41448.606)
+
+
+def test_decode_weight_stream():
+    one, two = Scenarios.Llama2_70B_DecodeH100.result, Scenarios.Llama2_70B_DecodeTwoH100.result
+    assert one.weight_bytes.to("GB").magnitude == approx(140) and two.weight_bytes.to("GB").magnitude == approx(70)
+    assert two.memory_time.to("ms").magnitude == approx(20.895522)
+    assert Scenarios.H100DecodeRoofline.ridge.magnitude == approx(295.22388)
+    assert Scenarios.Gpt2XlDecodeH100.result.memory_time.to("ms").magnitude == approx(0.8955224)
+
+
+def test_lighthouse_training_state():
+    assert Scenarios.ResNet50Fp32Adam.total.to("MB").magnitude == approx(408.912512)
+    assert Scenarios.MobileNetV2Fp32Adam.total.to("MB").magnitude == approx(56.077952)
+    assert Scenarios.KwsDsCnnFp32Adam.total.to("MB").magnitude == approx(3.2)
+
+
+def test_recommender_gather_and_tables():
+    g = Scenarios.CriteoShapedRequestOnH100
+    assert g.request_bytes.to("byte").magnitude == 13_312 and (g.pairs, g.interaction_macs) == (351, 44_928)
+    assert g.intensity.magnitude == approx(6.75) and g.bandwidth_ratio == approx(52.34375)
+    assert g.device_rate.to("1/s").magnitude == approx(251_652_644.2)
+    e = Scenarios.HundredMillionItemTableOnA100
+    assert e.table_bytes.to("GB").magnitude == approx(51.2) and e.labeled_share == approx(0.64)
+    assert not Scenarios.TwoHundredMillionRowTablesOnA100.fits
+    assert Scenarios.BillionUserTable.table_bytes.to("GB").magnitude == approx(512)
