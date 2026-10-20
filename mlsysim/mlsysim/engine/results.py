@@ -3554,3 +3554,170 @@ __all__ += [
     "RollingWindowResult",
     "CarbonPricedPlacementResult",
 ]
+
+
+# ── Trajectory planning: joint rates, handoffs, seams, swings, and jerk-limited stops (added 2026-10-20) ──
+
+class TwoLinkJointRateResult(SolverResult):
+    """Result from TwoLinkJointRateModel: the joint rates one tool speed asks of a planar two-link arm."""
+    reach: Quantity                          # l1 + l2
+    sigma_max: Quantity                      # Jacobian singular values, m per rad
+    sigma_min: Quantity
+    joint_rate_norm: Quantity                # exact inverse in the weakest direction, v / sigma_min
+    joint_rate_one_joint: Quantity           # some joint reaches at least the norm / sqrt(2)
+    exceeds_joint_limit: bool                # joint_rate_one_joint > the joint velocity limit
+    damped_joint_rate: Quantity              # damped least squares in the weakest direction
+    realized_fraction: float                 # share of the requested tool motion damping delivers
+    damped_ceiling: Quantity                 # v / (2 lambda), at any configuration
+    damped_exceeds_joint_limit: bool
+
+
+class HandoffExposureResult(SolverResult):
+    """Result from HandoffExposureModel: a per-handoff deadline budget across a mission."""
+    handoffs: int                            # mission time x replanning rate
+    expected_late: float                     # handoffs x late probability
+    all_on_time: float                       # (1 - p)^K, independent misses
+    per_handoff_budget: float                # mission budget / K (union bound)
+    design_quantile: float                   # 1 - per-handoff budget
+    depth_ratio: float                       # late probability / per-handoff budget
+    orders_deeper: float                     # log10 of depth_ratio
+    handoffs_per_expected_late: float        # 1 / p: the count at which one late handoff is expected
+
+
+class ChunkReplacementResult(SolverResult):
+    """Result from ChunkReplacementModel: capture-to-admission latency against the renewal period."""
+    latency: Quantity                        # observation age + dispatch-to-admission
+    other_stages: Quantity                   # dispatch-to-admission - inference - validation
+    latency_over_renewal: float
+    requests_in_flight: int                  # ceil(latency / renewal period)
+    latency_beyond_lease: Quantity
+    tail_over_inference: float               # interference tail / p99 inference pass
+
+
+class JerkLimitedStopResult(SolverResult):
+    """Result from JerkLimitedStopModel: a delayed S-curve stop beside its constant and polynomial forms."""
+    speed: Quantity
+    deceleration: Quantity
+    jerk: Quantity                           # jerk bound
+    jerk_plateau_speed: Quantity             # a^2 / j: above it the stop reaches the deceleration bound
+    reaches_deceleration_bound: bool
+    braking_travel: Quantity                 # v^2 / (2 a), constant deceleration
+    braking_time: Quantity                   # v / a
+    jerk_ramp_travel: Quantity               # S-curve travel - braking travel (v a / (2 j) above the plateau speed)
+    ramp_time: Quantity                      # a / j, one jerk ramp
+    ramp_delay: Quantity                     # a / (2 j): the jerk ramps as extra delay at speed
+    scurve_travel: Quantity                  # the S-curve stop alone, braking + jerk-ramp travel
+    stop_time: Quantity                      # the S-curve stop's duration
+    polynomial_distance: Quantity            # reference C2 polynomial with the same peak deceleration
+    polynomial_time: Quantity
+    delay: Quantity
+    delay_travel: Quantity                   # v x delay
+    stop_distance: Quantity                  # delay travel + S-curve travel (as in StoppingBudgetResult)
+    overhead: Quantity                       # localization bound + protective margin
+    constant_required: Quantity              # delay travel + braking travel + overhead
+    required_distance: Quantity              # delay travel + S-curve stop + overhead
+    polynomial_required: Quantity            # delay travel + polynomial stop + overhead
+    rest_time: Quantity                      # delay + stop time
+    delay_share_of_stop: float               # delay travel / S-curve travel
+    clear_distance: Optional[Quantity] = None
+    spare: Optional[Quantity] = None         # clear distance - required distance (negative: overrun)
+    spare_time: Optional[Quantity] = None    # spare / speed
+    fits: Optional[bool] = None
+    speed_ceiling: Optional[Quantity] = None # fastest speed whose delayed S-curve stop fits
+
+
+class SpillLimitedStopResult(SolverResult):
+    """Result from SpillLimitedStopModel: an open container caps the stop's deceleration."""
+    spill_deceleration: Quantity             # g h_f / R
+    rise_at_free_deceleration: Quantity      # R a / g at the free-space stop's deceleration
+    spills_at_free_deceleration: bool
+    stop: JerkLimitedStopResult              # at the spill bound, jerk rescaled with it
+    reused_jerk_stop_distance: Quantity      # the same stop if the free-space jerk were kept
+    overrun: Quantity                        # required distance - clear distance
+    carry_speed: Quantity                    # fastest speed whose spill-limited stop fits
+
+
+class TrajectoryDeadlinesResult(SolverResult):
+    """Result from TrajectoryDeadlinesModel: a trajectory record's deadlines and the cruise it charges."""
+    nominal_end: Quantity                    # setpoints x setpoint period
+    setpoint_rate: Quantity
+    executed_setpoints: float                # renewal period / setpoint period
+    request_slack: Quantity                  # request delay - renewal period
+    preferred_admission: Quantity            # request + latency target + scheduling slack
+    reserve: Quantity                        # scheduling slack + decision-to-onset response
+    minimum_onset: Quantity                  # request + latency target + reserve
+    admission_cutoff: Quantity               # commitment - response
+    commit_slack: Quantity                   # commitment - preferred admission
+    rest: Quantity                           # commitment + stop time
+    window_periods: float                    # rest / setpoint period
+    blend_cruise: Quantity                   # travel from the blend deadline to commitment
+    used: Quantity                           # blend cruise + stop distance
+    margin: Quantity                         # clear distance - used
+    late_cruise: Quantity                    # travel during a late wait past commitment
+    late_breach: Quantity                    # late cruise - margin
+
+
+class SeamBridgeResult(SolverResult):
+    """Result from SeamBridgeModel: a one-tick seam step against a quintic bridge on one joint."""
+    reflected_inertia: Quantity
+    step_torque: Quantity                    # J_refl x gap / tick
+    step_torque_rate: Quantity               # step torque / tick
+    step_over_rate_limit: float
+    step_within_rating: bool                 # step torque below the rated torque
+    loaded_step_torque: Optional[Quantity] = None  # with the payload's inertia added
+    mean_torque: Quantity                    # J_refl x gap / T
+    peak_acceleration: Quantity              # 1.5 gap / T
+    peak_torque: Quantity
+    peak_reduction: float                    # step torque / bridge peak torque
+    peak_jerk: Quantity                      # 6 gap / T^2
+    torque_rate: Quantity                    # J_refl x peak jerk
+    torque_rate_share: float                 # of the torque-rate limit
+    within_rate_limit: bool
+    coefficients: Tuple[float, float, float] # a3, a4, a5 of the bridge's quintic, SI
+    position_residual: Quantity              # gap T / 2
+    shortest_bridge: Quantity                # sqrt(6 gap J_refl / torque-rate limit)
+    velocity_ceiling: Quantity               # repeated peak torque x tick / J_refl
+
+
+class ShoulderSwingResult(SolverResult):
+    """Result from ShoulderSwingModel: the loaded shoulder's holding torque and its fastest swing."""
+    holding_torque: Quantity                 # m g r
+    holding_share: float                     # of the joint torque limit
+    effective_inertia: Quantity              # m r^2 + J_refl
+    accel_up: Quantity                       # (tau_max - tau_g) / J
+    accel_down: Quantity                     # (tau_max + tau_g) / J
+    binding_acceleration: Quantity
+    bang_bang_time: Quantity
+    peak_speed: Quantity
+    switch_torque_step: Quantity             # 2 J a at the switch point
+    switch_step_time: Quantity               # the step at the torque-rate limit
+    jerk_bound: Quantity                     # torque-rate limit / J
+    jerk_limited_time: Quantity
+    jerk_limited_peak_speed: Quantity
+    reaches_plateau: bool
+    penalty: Quantity                        # jerk-limited - bang-bang
+    penalty_share: float
+    ramp_time: Quantity                      # a / j
+    hold_time: Quantity                      # constant-acceleration hold in each half
+    within_velocity_limit: bool
+
+
+class DynamicWindowResult(SolverResult):
+    """Result from DynamicWindowModel: a base's reachable speeds and the classical admissibility test."""
+    half_width: Quantity                     # max acceleration x window
+    admissible_speed: Quantity               # sqrt(2 d a_b)
+    admits_drive_limit: bool
+
+
+class StaleAnchorResult(SolverResult):
+    """Result from StaleAnchorModel: how far a moving reference runs past a pose sampled at the request."""
+    gap: Quantity                            # joint speed x delay
+    gap_degrees: Quantity
+    tool_displacement: Quantity              # gap x lever arm
+
+
+__all__ += [
+    "TwoLinkJointRateResult", "HandoffExposureResult", "ChunkReplacementResult", "JerkLimitedStopResult",
+    "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
+    "DynamicWindowResult", "StaleAnchorResult",
+]

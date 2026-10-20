@@ -13992,3 +13992,205 @@ class CarbonPricedPlacementScenario(BaseScenario):
         from .solvers import CarbonPricedPlacementModel
         return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
                                                   self.carbon_price_per_ton, self.mfu, self.reference_grid)
+
+
+# --- Trajectory planning (added 2026-10-20) ---------------------------------
+# Each scenario names one machine (``Embodied.MobileManipulator.*``), its site
+# (``Embodied.Scenario.*``), or one joint (``Actuators.*``), and states the
+# inputs those records do not carry; the solvers live in
+# ``engine/solvers/trajectory.py``.
+
+class TwoLinkJointRateScenario(BaseScenario):
+    """``machine``'s arm as a planar two-link chain at ``elbow_angle``: the joint rates its TCP
+    speed limit asks in the weakest direction, exact and with damped least squares at ``damping``."""
+    machine: Any                                 # MobileManipulator
+    elbow_angle: Quantity
+    damping: Quantity
+
+    @property
+    def result(self):
+        from .solvers import TwoLinkJointRateModel
+        arm = self.machine.arm
+        return TwoLinkJointRateModel().solve(arm.upper_arm_length, arm.forearm_length, self.elbow_angle,
+                                             self.machine.tcp_speed_limit, arm.joint_velocity_limits[1],
+                                             self.damping)
+
+
+class HandoffExposureScenario(BaseScenario):
+    """A replanner at ``replan_rate`` over ``mission_time`` whose handoffs are each late with
+    ``late_probability``, held to ``mission_budget`` for the whole mission."""
+    mission_time: Quantity
+    replan_rate: Quantity
+    late_probability: float
+    mission_budget: float
+
+    @property
+    def result(self):
+        from .solvers import HandoffExposureModel
+        return HandoffExposureModel().solve(self.mission_time, self.replan_rate, self.late_probability,
+                                            self.mission_budget)
+
+
+class ChunkReplacementScenario(BaseScenario):
+    """Replacing ``machine``'s admitted chunk at ``site``: capture-to-admission latency against the
+    renewal period and the chunk lease, with an ``interference_tail`` on the inference pass."""
+    machine: Any                                 # MobileManipulator
+    site: Any                                    # EmbodiedSiteScenario
+    interference_tail: Quantity
+
+    @property
+    def renewal_period(self) -> Quantity:
+        return (1 / self.machine.chunk_rate).to("ms")
+
+    @property
+    def result(self):
+        from .solvers import ChunkReplacementModel
+        s = self.site
+        return ChunkReplacementModel().solve(s.perception_age, s.t_dispatch_to_admission,
+                                             self.machine.chunk_inference_latency, s.t_plan_validate,
+                                             self.renewal_period, s.t_lease, self.interference_tail)
+
+
+class JerkLimitedStopScenario(BaseScenario):
+    """A machine at ``speed`` that stops along an S-curve at ``deceleration`` after ``delay``.
+
+    The jerk bound is ``jerk`` when stated, else the peak jerk of the reference C2 polynomial stop at
+    ``jerk_reference_speed`` (the entry speed by default). With a ``site``, its localization bound and
+    protective margin join the required distance and its clear distance closes the budget unless
+    ``clear_distance`` is stated."""
+    speed: Quantity
+    deceleration: Quantity
+    delay: Optional[Quantity] = None
+    jerk: Optional[Quantity] = None
+    jerk_reference_speed: Optional[Quantity] = None
+    clear_distance: Optional[Quantity] = None
+    site: Optional[Any] = None                   # EmbodiedSiteScenario
+
+    @property
+    def d_clear(self) -> Optional[Quantity]:
+        if self.clear_distance is not None or self.site is None:
+            return self.clear_distance
+        return self.site.d_clear
+
+    @property
+    def result(self):
+        from .solvers import JerkLimitedStopModel
+        loc = None if self.site is None else self.site.delta_loc
+        margin = None if self.site is None else self.site.delta_margin
+        return JerkLimitedStopModel().solve(self.speed, self.deceleration, self.jerk, self.jerk_reference_speed,
+                                            self.delay, self.d_clear, loc, margin)
+
+
+class SpillLimitedStopScenario(BaseScenario):
+    """The ``free_stop`` scenario's machine carrying an open container of ``inner_radius`` filled
+    ``freeboard`` below the rim: the deceleration the liquid allows, that stop, and the carry speed."""
+    free_stop: JerkLimitedStopScenario
+    inner_radius: Quantity
+    freeboard: Quantity
+
+    @property
+    def result(self):
+        from .solvers import SpillLimitedStopModel
+        f = self.free_stop
+        return SpillLimitedStopModel().solve(f.speed, f.deceleration, f.result.jerk, f.delay, f.d_clear,
+                                             self.inner_radius, self.freeboard)
+
+
+class TrajectoryDeadlinesScenario(BaseScenario):
+    """A trajectory record for ``machine``'s arm at ``site``: a replacement requested at
+    ``request_delay`` with a ``latency_target`` and ``schedule_slack``, a ``blend`` deadline, the
+    ``commit`` instant when ``stop`` (a JerkLimitedStopScenario) must begin, and a ``late_wait``."""
+    machine: Any                                 # MobileManipulator
+    site: Any                                    # EmbodiedSiteScenario
+    stop: JerkLimitedStopScenario
+    request_delay: Quantity
+    latency_target: Quantity
+    schedule_slack: Quantity
+    blend: Quantity
+    commit: Quantity
+    late_wait: Quantity
+
+    @property
+    def response(self) -> Quantity:
+        """Decision to physical onset: one tick, one bus cycle, and the brake onset."""
+        s = self.site
+        return (s.t_tick + s.t_bus + s.t_brake_onset).to("ms")
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryDeadlinesModel
+        rm, st = self.machine, self.stop.result
+        return TrajectoryDeadlinesModel().solve(
+            rm.chunk_step, rm.chunk_horizon, (1 / rm.chunk_rate).to("ms"), self.request_delay,
+            self.latency_target, self.schedule_slack, self.response, self.blend, self.commit,
+            st.stop_time, st.scurve_travel, self.stop.speed, self.stop.d_clear, self.late_wait)
+
+
+class SeamBridgeScenario(BaseScenario):
+    """A ``velocity_gap`` at a chunk seam on ``joint``, closed in one ``tick`` or by a quintic bridge
+    over ``bridge_duration``, against ``machine``'s arm torque-rate limit. ``loaded_inertia`` (optional)
+    prices the one-tick step with the payload's inertia added."""
+    joint: Any                                   # an Actuators.PandaClassJoint entry
+    machine: Any                                 # MobileManipulator
+    velocity_gap: Quantity
+    tick: Quantity
+    bridge_duration: Quantity
+    loaded_inertia: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import SeamBridgeModel
+        j = self.joint
+        return SeamBridgeModel().solve(j.gear_ratio, j.rotor_inertia, j.rated_torque, j.peak_torque,
+                                       self.machine.arm.joint_torque_rate_limit, self.velocity_gap, self.tick,
+                                       self.bridge_duration, self.loaded_inertia)
+
+
+class ShoulderSwingScenario(BaseScenario):
+    """``machine``'s shoulder holding its rated payload at full planar reach, with ``joint``'s
+    reflected rotor inertia, swinging ``swing`` rest to rest inside its datasheet limits."""
+    machine: Any                                 # MobileManipulator
+    joint: Any                                   # an Actuators.PandaClassJoint entry
+    swing: Quantity
+
+    @property
+    def reach(self) -> Quantity:
+        arm = self.machine.arm
+        return (arm.upper_arm_length + arm.forearm_length).to("m")
+
+    @property
+    def result(self):
+        from .solvers import ShoulderSwingModel
+        arm = self.machine.arm
+        return ShoulderSwingModel().solve(arm.payload_capacity, self.reach, arm.max_torque,
+                                          self.joint.reflected_inertia, self.swing,
+                                          arm.joint_acceleration_limits[1], arm.joint_velocity_limits[1],
+                                          arm.joint_torque_rate_limit)
+
+
+class DynamicWindowScenario(BaseScenario):
+    """``machine``'s base over one chunk renewal at ``site``: its dynamic window and the classical
+    admissible speed against the site's clear distance and credible deceleration."""
+    machine: Any                                 # MobileManipulator
+    site: Any                                    # EmbodiedSiteScenario
+
+    @property
+    def result(self):
+        from .solvers import DynamicWindowModel
+        b = self.machine.base
+        return DynamicWindowModel().solve(b.max_acceleration, (1 / self.machine.chunk_rate).to("ms"),
+                                          self.site.d_clear, self.site.a_brake, b.max_velocity)
+
+
+class StaleAnchorScenario(BaseScenario):
+    """A joint of ``machine``'s arm turning at ``joint_speed`` while a replacement takes ``delay``,
+    anchored at the pose sampled at the request; the lever arm is the planar reach."""
+    machine: Any                                 # MobileManipulator
+    joint_speed: Quantity
+    delay: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StaleAnchorModel
+        arm = self.machine.arm
+        return StaleAnchorModel().solve(self.joint_speed, self.delay, arm.upper_arm_length + arm.forearm_length)
