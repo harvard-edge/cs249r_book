@@ -8828,6 +8828,25 @@ class TrainingStateFitScenario(BaseScenario):
     hardware: Optional[HardwareNode] = None
     bytes_per_value: Quantity
     optimizer_bytes_per_parameter: Quantity
+    # Optional (added 2026-10-20): the activations training saves for the
+    # backward pass at ``batch_size``, a stated estimate; saved activations
+    # grow in proportion to the batch.
+    batch_size: Optional[int] = None
+    activations: Optional[Quantity] = None
+
+    def activations_at(self, batch_size: int) -> Quantity:
+        """Saved activations at another batch size, scaled linearly from ``activations``."""
+        return (self.activations * batch_size / self.batch_size).to("byte")
+
+    @property
+    def training_total(self) -> Quantity:
+        """Weights, gradients, optimizer state, and saved activations."""
+        return (self.total + self.activations).to("byte")
+
+    @property
+    def training_copies(self) -> float:
+        """Training total in units of the weights."""
+        return (self.training_total / self.weights).to("").magnitude
 
     def _state(self):
         from ..physics.neural import calc_training_state
@@ -9803,3 +9822,367 @@ class EmbeddingGatherScenario(BaseScenario):
     @property
     def bandwidth_ratio(self) -> float:
         return (self.device_rate / self.host_rate).to("").magnitude
+# --- Framework execution: dispatch, fusion, compilation payback, one training step (added 2026-10-20) ---
+
+class HostDispatchScenario(BaseScenario):
+    """The host's work to issue one eager step against ``device_time`` of accelerator work.
+
+    The step has ``blocks`` blocks of ``ops_per_block`` Python-level
+    operations, each paying ``dispatch``, and ``launches_per_block`` kernels
+    per block (default: one per operation), each paying ``launch``. The model
+    is additive with no host-device overlap: the overhead ratio is host time
+    over device time, and above 1 the host takes more than half of the step.
+    """
+    ops_per_block: int
+    blocks: int = 1
+    launches_per_block: Optional[int] = None
+    dispatch: Quantity
+    launch: Quantity
+    device_time: Quantity
+
+    @property
+    def operations(self) -> int:
+        return self.blocks * self.ops_per_block
+
+    @property
+    def launches(self) -> int:
+        per = self.ops_per_block if self.launches_per_block is None else self.launches_per_block
+        return self.blocks * per
+
+    @property
+    def per_op_cost(self) -> Quantity:
+        """Dispatch plus launch, for an operation that launches one kernel."""
+        return (self.dispatch + self.launch).to("microsecond")
+
+    @property
+    def dispatch_time(self) -> Quantity:
+        return (self.operations * self.dispatch).to("microsecond")
+
+    @property
+    def launch_time(self) -> Quantity:
+        return (self.launches * self.launch).to("microsecond")
+
+    @property
+    def host_time(self) -> Quantity:
+        return (self.dispatch_time + self.launch_time).to("microsecond")
+
+    @property
+    def overhead_ratio(self) -> float:
+        """Host time over device time (the dispatch overhead ratio)."""
+        return (self.host_time / self.device_time).to("").magnitude
+
+    @property
+    def launch_ratio(self) -> float:
+        """Kernel launches alone over device time."""
+        return (self.launch_time / self.device_time).to("").magnitude
+
+    @property
+    def host_share(self) -> float:
+        """Host time as a share of the serial step, host plus device."""
+        return (self.host_time / (self.host_time + self.device_time)).to("").magnitude
+
+    @property
+    def speedup_limit(self) -> float:
+        """Serial step over device time: the most removing all host work could gain."""
+        return ((self.host_time + self.device_time) / self.device_time).to("").magnitude
+
+
+class KernelFusionScenario(BaseScenario):
+    """A chain of ``chain_length`` element-wise operations, run as one kernel each or fused into one.
+
+    Unfused, every operation reads its input from device memory and writes its
+    output back (two trips each) and pays ``dispatch`` plus ``launch``; fused,
+    the chain reads once, keeps intermediates on chip, writes once, and pays
+    one launch. For N elements of b bytes the traffic is 2kNb against 2Nb.
+    """
+    chain_length: int
+    dispatch: Quantity
+    launch: Quantity
+
+    @property
+    def unfused_trips(self) -> int:
+        return 2 * self.chain_length
+
+    @property
+    def fused_trips(self) -> int:
+        return 2
+
+    @property
+    def unfused_launches(self) -> int:
+        return self.chain_length
+
+    @property
+    def fused_launches(self) -> int:
+        return 1
+
+    @property
+    def traffic_ratio(self) -> float:
+        return self.unfused_trips / self.fused_trips
+
+    @property
+    def unfused_overhead(self) -> Quantity:
+        return (self.unfused_launches * (self.dispatch + self.launch)).to("microsecond")
+
+    @property
+    def fused_overhead(self) -> Quantity:
+        return (self.fused_launches * (self.dispatch + self.launch)).to("microsecond")
+
+    @property
+    def overhead_speedup(self) -> float:
+        return (self.unfused_overhead / self.fused_overhead).to("").magnitude
+
+
+class CompileBreakevenScenario(BaseScenario):
+    """Eager against compiled execution: the work that repays ``compile_time``.
+
+    Compiling pays when the time saved per item, summed over items, exceeds
+    the compile time. An experiment of ``experiment_items`` items that changes
+    the code ``recompiles`` times pays a compile for every change.
+    """
+    eager_rate: Quantity                 # items per second
+    compiled_rate: Quantity              # items per second
+    compile_time: Quantity
+    experiment_items: Optional[int] = None
+    recompiles: Optional[int] = None
+
+    @property
+    def eager_item_time(self) -> Quantity:
+        return (1 / self.eager_rate).to("ms")
+
+    @property
+    def compiled_item_time(self) -> Quantity:
+        return (1 / self.compiled_rate).to("ms")
+
+    @property
+    def saving_per_item(self) -> Quantity:
+        return (self.eager_item_time - self.compiled_item_time).to("ms")
+
+    @property
+    def breakeven_items(self) -> float:
+        return (self.compile_time / self.saving_per_item).to("").magnitude
+
+    @property
+    def speedup(self) -> float:
+        return (self.compiled_rate / self.eager_rate).to("").magnitude
+
+    @property
+    def experiment_eager(self) -> Quantity:
+        return (self.experiment_items / self.eager_rate).to("second")
+
+    @property
+    def experiment_compiled_running(self) -> Quantity:
+        return (self.experiment_items / self.compiled_rate).to("second")
+
+    @property
+    def experiment_compiled_total(self) -> Quantity:
+        return (self.recompiles * self.compile_time + self.experiment_compiled_running).to("second")
+
+    @property
+    def experiment_slowdown(self) -> float:
+        return (self.experiment_compiled_total / self.experiment_eager).to("").magnitude
+
+
+class JacobianScenario(BaseScenario):
+    """The full Jacobian of one layer from ``input_width`` inputs to ``output_width`` outputs.
+
+    Reverse-mode differentiation never builds it; it chains vector-Jacobian products.
+    """
+    input_width: int
+    output_width: int
+    bytes_per_value: Quantity
+
+    @property
+    def elements(self) -> int:
+        return self.input_width * self.output_width
+
+    @property
+    def size(self) -> Quantity:
+        return (self.elements * self.bytes_per_value).to("byte")
+
+
+class HostInputPipelineScenario(BaseScenario):
+    """A data loader feeding one accelerator over its host link.
+
+    ``workers`` loader processes each prepare ``prefetch_factor`` batches of
+    ``batch_size`` samples. A sample is ``raw_sample`` bytes as decoded pixels
+    and ``model_sample`` bytes as the tensor copied to the device; the
+    accelerator consumes ``consume_rate`` samples a second. Copy times are
+    bandwidth-only lower bounds; ``step_times`` are compute times a serial
+    copy is compared with.
+    """
+    batch_size: int
+    workers: int
+    prefetch_factor: int
+    raw_sample: Quantity
+    model_sample: Quantity
+    consume_rate: Quantity               # samples per second
+    host_link: Quantity                  # bandwidth
+    device_memory: Quantity              # bandwidth
+    step_times: Dict[str, Quantity] = {}
+
+    @property
+    def batches_in_flight(self) -> int:
+        return self.workers * self.prefetch_factor
+
+    @property
+    def raw_feed(self) -> Quantity:
+        return (self.consume_rate * self.raw_sample).to("MB/second")
+
+    @property
+    def batch_bytes(self) -> Quantity:
+        return (self.batch_size * self.model_sample).to("byte")
+
+    @property
+    def copy_time(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.batch_bytes, self.host_link).to("ms")
+
+    @property
+    def device_copy_time(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.batch_bytes, self.device_memory).to("microsecond")
+
+    def copy_share(self, step: str) -> float:
+        """A serial copy as a share of one named step's compute time."""
+        return (self.copy_time / self.step_times[step]).to("").magnitude
+
+
+_MLP_FORWARD_OPS = ("matmul1", "relu", "matmul2", "loss")
+_MLP_BACKWARD_OPS = ("grad_w2", "grad_h", "grad_w1", "relu_backward", "loss_backward")
+
+
+class MlpTrainingStepScenario(BaseScenario):
+    """One eager training step of a one-hidden-layer MLP, operator by operator.
+
+    Forward: ``x @ W1``, ReLU, ``h @ W2``, and a combined cross-entropy loss
+    (``loss_flops_per_logit`` operations per logit). Backward: the weight
+    gradients of both layers and the hidden-activation gradient (raw inputs
+    need no gradient), the ReLU derivative, and the loss derivative, which
+    reads saved probabilities and integer labels of ``label_bytes`` each.
+    Bias adds are folded into their matrix multiplies. Every value is
+    ``bytes_per_value`` wide. Times are ideal lower bounds on ``hardware``;
+    the host issues one Python entry per forward operator plus one for
+    ``backward()``, and launches one kernel per operator.
+    """
+    batch_size: int
+    input_width: int
+    hidden_width: int
+    output_width: int
+    bytes_per_value: Quantity
+    label_bytes: Quantity
+    loss_flops_per_logit: int
+    optimizer_values_moved: int          # values read and written per parameter by one optimizer step
+    hardware: HardwareNode
+    precision: str = "fp32"
+    forward_ops: int
+    backward_ops: int
+    dispatch: Quantity
+    launch: Quantity
+
+    def _values(self, n: int) -> Quantity:
+        return (n * self.bytes_per_value).to("byte")
+
+    @property
+    def op_flops(self) -> Dict[str, Quantity]:
+        b, i, h, o = self.batch_size, self.input_width, self.hidden_width, self.output_width
+        f = {
+            "matmul1": 2 * b * i * h, "relu": b * h, "matmul2": 2 * b * h * o,
+            "loss": self.loss_flops_per_logit * b * o,
+            "grad_w2": 2 * h * b * o, "grad_h": 2 * b * o * h, "grad_w1": 2 * i * b * h,
+            "relu_backward": b * h, "loss_backward": 2 * b * o,
+        }
+        return {k: Q_(v, "flop") for k, v in f.items()}
+
+    @property
+    def op_bytes(self) -> Dict[str, Quantity]:
+        b, i, h, o = self.batch_size, self.input_width, self.hidden_width, self.output_width
+        v = self._values
+        return {
+            "matmul1": v(b * i + i * h + b * h), "relu": v(2 * b * h),
+            "matmul2": v(b * h + h * o + b * o), "loss": v(2 * b * o),
+            "grad_w2": v(b * h + b * o + h * o), "grad_h": v(b * o + h * o + b * h),
+            "grad_w1": v(b * i + b * h + i * h), "relu_backward": v(3 * b * h),
+            "loss_backward": (v(2 * b * o) + b * self.label_bytes).to("byte"),
+        }
+
+    def _sum(self, table, keys) -> Quantity:
+        return sum((table[k] for k in keys[1:]), table[keys[0]])
+
+    @property
+    def forward_flops(self) -> Quantity:
+        return self._sum(self.op_flops, _MLP_FORWARD_OPS)
+
+    @property
+    def backward_flops(self) -> Quantity:
+        return self._sum(self.op_flops, _MLP_BACKWARD_OPS)
+
+    @property
+    def forward_bytes(self) -> Quantity:
+        return self._sum(self.op_bytes, _MLP_FORWARD_OPS)
+
+    @property
+    def backward_bytes(self) -> Quantity:
+        return self._sum(self.op_bytes, _MLP_BACKWARD_OPS)
+
+    @property
+    def total_flops(self) -> Quantity:
+        return self.forward_flops + self.backward_flops
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return self.forward_bytes + self.backward_bytes
+
+    @property
+    def dense_training_ratio(self) -> float:
+        """Matrix-multiply work of the whole step over the forward matrix multiplies."""
+        f = self.op_flops
+        fwd = f["matmul1"] + f["matmul2"]
+        return ((fwd + f["grad_w2"] + f["grad_h"] + f["grad_w1"]) / fwd).to("").magnitude
+
+    @property
+    def parameters(self) -> int:
+        i, h, o = self.input_width, self.hidden_width, self.output_width
+        return i * h + h + h * o + o
+
+    @property
+    def optimizer_step_bytes(self) -> Quantity:
+        return (self.parameters * self.optimizer_values_moved * self.bytes_per_value).to("byte")
+
+    @property
+    def peak_rate(self) -> Quantity:
+        return self.hardware.compute.precision_flops[self.precision]
+
+    @property
+    def compute_time(self) -> Quantity:
+        return (self.total_flops / self.peak_rate).to("microsecond")
+
+    @property
+    def memory_time(self) -> Quantity:
+        return (self.total_bytes / self.hardware.memory.bandwidth).to("microsecond")
+
+    @property
+    def host(self) -> HostDispatchScenario:
+        """The host's dispatch and launch work against the step's ideal device time."""
+        return HostDispatchScenario(
+            name=f"Host work of: {self.name}", description="Python entries and kernel launches of the step.",
+            ops_per_block=self.forward_ops + 1, launches_per_block=self.forward_ops + self.backward_ops,
+            dispatch=self.dispatch, launch=self.launch, device_time=self.compute_time + self.memory_time)
+
+
+class DeploymentPathScenario(BaseScenario):
+    """Candidate deployment paths measured against a latency and a memory budget.
+
+    ``paths`` maps each path to its measured ``latency`` and ``memory``; a
+    path passes when both are within budget.
+    """
+    latency_budget: Quantity
+    memory_budget: Quantity
+    paths: Dict[str, Dict[str, Quantity]]
+
+    def passes(self, path: str) -> bool:
+        p = self.paths[path]
+        return p["latency"] <= self.latency_budget and p["memory"] <= self.memory_budget
+
+    @property
+    def passing(self) -> List[str]:
+        return [k for k in self.paths if self.passes(k)]

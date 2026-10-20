@@ -84,7 +84,7 @@ A few lines of Python can express one decoding step of a language model: embed t
 # │ How:     Registry model shape, data-center accelerator HBM bandwidth, and
 # │          the runtime overheads used throughout this chapter.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Ops, BYTES_FP16, GB, TB, second, millisecond, microsecond
+from mlsysim import Scenarios, GB, TB, second, millisecond, microsecond
 from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -92,23 +92,22 @@ class GPT2DecodeDispatch:
     """GPT-2 XL batch-one decoding step: weight streaming vs. eager kernel launches."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    hbm_bw = Hardware.Cloud.H100.memory.bandwidth
-    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
-    # scenario assumption: one eager kernel each for two layer norms, the fused
-    # QKV projection, attention scores, softmax, weighted sum, output projection,
-    # two feed-forward matmuls, the activation, and two residual adds
-    kernels_per_block = 12
+    decode = Scenarios.Gpt2XlFp16DecodeOnH100
+    dispatch = Scenarios.Gpt2XlEagerDecodeDispatch
+    gpt2 = decode.workload
+    hbm_bw = decode.hardware.memory.bandwidth
+    kernel_launch = dispatch.launch
+    python_dispatch = dispatch.dispatch
+    kernels_per_block = dispatch.ops_per_block
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = gpt2.size_in_bytes(BYTES_FP16)
-    weight_read = (weights / hbm_bw).to(millisecond)
-    n_kernels = kernels_per_block * gpt2.layers
-    launch_time = (n_kernels * kernel_launch).to(millisecond)
-    host_time = (n_kernels * (kernel_launch + python_dispatch)).to(millisecond)
-    launch_ratio = (launch_time / weight_read).to("").magnitude
-    host_ratio = (host_time / weight_read).to("").magnitude
+    weights = decode.result.weight_bytes
+    weight_read = dispatch.device_time.to(millisecond)
+    n_kernels = dispatch.launches
+    launch_time = dispatch.launch_time.to(millisecond)
+    host_time = dispatch.host_time.to(millisecond)
+    launch_ratio = dispatch.launch_ratio
+    host_ratio = dispatch.overhead_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.8 < weight_read.to(millisecond).magnitude < 1.0, f"Prose (and the ch6 lighthouse) say about 0.9 ms per weight read, got {weight_read}.")
@@ -830,19 +829,21 @@ This flexibility imposes latency costs that map directly to the iron law. Each t
 # │ How: Compare a fixed per-op host cost (Python dispatch plus kernel launch) to varying kernel durations.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Ops, microsecond
+from mlsysim import Scenarios, microsecond
 from mlsysim.fmt import check, fmt_percent, fmt_time
 
 class DispatchOverhead:
     """Fixed per-operation host cost vs. small and large kernel durations."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    per_op_overhead = Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
-    small_kernel = 1 * microsecond  # scenario assumption: ReLU on a small vector
-    large_kernel = 100 * microsecond  # scenario assumption: large matrix multiply
+    small = Scenarios.SmallKernelDispatch
+    large = Scenarios.LargeKernelDispatch
+    per_op_overhead = small.per_op_cost
+    small_kernel = small.device_time
+    large_kernel = large.device_time
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    small_share = (per_op_overhead / (per_op_overhead + small_kernel)).to("").magnitude
-    large_share = (per_op_overhead / (per_op_overhead + large_kernel)).to("").magnitude
+    small_share = small.host_share
+    large_share = large.host_share
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # The margin SVG (frameworks_dispatch_tax_divergence.svg) and its fig-alt hard-code 94/13 percent.
     check(round(small_share * 100) == 94, f"Margin SVG says 94 percent, got {small_share:.3f}.")
@@ -1378,7 +1379,7 @@ Compilation therefore attacks the dispatch overhead of @sec-ml-frameworks-dispat
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import check, fmt_multiple, fmt_time
-from mlsysim import Ops
+from mlsysim import Scenarios
 from mlsysim.core.units import microsecond, GiB
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1389,23 +1390,18 @@ class FusionSpeedup:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
-    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-
-    eager_ops = 2
-    fused_ops = 1
-
-    eager_mem_factor = 4  # 2R + 2W
-    fused_mem_factor = 2  # 1R + 1W (intermediate fused)
+    fusion = Scenarios.ElementwisePairFusion
+    python_dispatch = fusion.dispatch
+    kernel_launch = fusion.launch
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     launch_overhead = python_dispatch + kernel_launch
 
-    eager_total_overhead = eager_ops * launch_overhead
-    fused_total_overhead = fused_ops * launch_overhead
+    eager_total_overhead = fusion.unfused_overhead
+    fused_total_overhead = fusion.fused_overhead
 
-    speedup = (eager_total_overhead / fused_total_overhead).to("").magnitude
-    bw_efficiency = eager_mem_factor / fused_mem_factor
+    speedup = fusion.overhead_speedup
+    bw_efficiency = fusion.traffic_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(speedup >= 1.5, f"Fusion speedup ({speedup:.1f}x) is too small to justify compilation complexity.")
@@ -1661,6 +1657,7 @@ This model assumes that the compiled artifact remains valid between development 
 # │          breakeven equation for ResNet-50 at a reference compile cost.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import (
     check,
     fmt_count,
@@ -1673,14 +1670,21 @@ from mlsysim.fmt import (
 
 class CompilationBenchmark:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    breakeven = Scenarios.ResNet50CompileBreakeven
     throughput = {
-        "ResNet-50": {"eager": 1450, "compile": 2150, "tensorrt": 3800, "compile_min_s": 15, "compile_max_s": 30},
+        "ResNet-50": {
+            "eager": breakeven.eager_rate.to("1/second").magnitude,
+            "compile": breakeven.compiled_rate.to("1/second").magnitude,
+            "tensorrt": 3800,
+            "compile_min_s": 15,
+            "compile_max_s": breakeven.compile_time.to("second").magnitude,
+        },
         "BERT-Base": {"eager": 380, "compile": 520, "tensorrt": 890, "compile_min_s": 30, "compile_max_s": 60},
         "ViT-B/16": {"eager": 620, "compile": 950, "tensorrt": 1650, "compile_min_s": 25, "compile_max_s": 45},
         "GPT-2 (124M)": {"eager": 180, "compile": 260, "tensorrt": 420, "compile_min_s": 45, "compile_max_s": 90},
     }
     resnet = throughput["ResNet-50"]
-    compile_time_ref_s = 30
+    compile_time_ref_s = breakeven.compile_time.to("second").magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     torch_compile_speedups = [row["compile"] / row["eager"] for row in throughput.values()]
@@ -1688,7 +1692,7 @@ class CompilationBenchmark:
 
     resnet_compile_speedup_pct = (resnet["compile"] / resnet["eager"] - 1) * 100
     resnet_tensorrt_speedup = resnet["tensorrt"] / resnet["eager"]
-    resnet_breakeven_images = compile_time_ref_s / ((1 / resnet["eager"]) - (1 / resnet["compile"]))
+    resnet_breakeven_images = breakeven.breakeven_items
     resnet_breakeven_images_rounded = round(resnet_breakeven_images, -3)
     prototype_compiles_per_hour = 10  # scenario assumption
     prototype_lost_min = compile_time_ref_s * prototype_compiles_per_hour / 60
@@ -1923,7 +1927,7 @@ When Overhead Ratio $> 1$, the model is overhead-bound. This is the dispatch ove
 # │ How: Calculate the software-to-hardware execution time ratio for both cases.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Ops
+from mlsysim import Scenarios
 from mlsysim.core.units import microsecond
 from mlsysim.fmt import check, fmt_count, fmt_math, fmt_multiple, fmt_percent, fmt_ratio, fmt_time
 
@@ -1936,27 +1940,27 @@ class DispatchOverheadScales:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Scenario 1: Small MLP (Overhead Bound)
-    small_ops_count = 6
+    small = Scenarios.SmallMlpDispatch
+    small_ops_count = small.operations
     # The per-op overhead this chapter already taught the reader is Python
-    # dispatch plus kernel launch. A local 5.0 literal here contradicted that
-    # and the registry, understating the overhead threefold.
-    small_dispatch = Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
-    small_hw = 2.6 * microsecond  # scenario assumption: small MLP device time
+    # dispatch plus kernel launch.
+    small_dispatch = small.per_op_cost
+    small_hw = small.device_time
 
     # Scenario 2: GPT-3 layer (device bound)
-    large_hw = 100_000.0 * microsecond  # scenario assumption: 100 ms device time
-    large_dispatch = GPT2DecodeDispatch.kernels_per_block * small_dispatch  # one transformer block's eager kernels
+    large = Scenarios.Gpt3BlockDispatch
+    large_hw = large.device_time.to(microsecond)
+    large_dispatch = large.host_time  # one transformer block's eager kernels
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Small Model
-    small_sw_total = small_ops_count * small_dispatch
-    small_total_time = small_sw_total + small_hw
-    small_overhead_ratio = (small_sw_total / small_hw).to("").magnitude
-    small_overhead_pct = (small_sw_total / small_total_time).to("").magnitude * 100
-    small_speedup_limit = (small_total_time / small_hw).to("").magnitude
+    small_sw_total = small.host_time
+    small_overhead_ratio = small.overhead_ratio
+    small_overhead_pct = small.host_share * 100
+    small_speedup_limit = small.speedup_limit
 
     # Step 2: Large Model
-    large_overhead_ratio = (large_dispatch / large_hw).to("").magnitude
+    large_overhead_ratio = large.overhead_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(small_overhead_ratio >= 1.0, f"Small model ratio ({small_overhead_ratio:.1f}) implies it is NOT overhead bound.")
@@ -2175,15 +2179,16 @@ A single forward pass with a seeded tangent vector $\TangentSeedVector$ evaluate
 # │ How: Square the width and multiply by FP32 bytes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import BYTES_FP32, GB
+from mlsysim import GB, Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_memory
 
 class JacobianMemory:
     """Full Jacobian size for a 100,000-wide layer in FP32, which VJPs never materialize."""
 
-    width = 100_000  # scenario assumption: input and output width
-    elements = width * width
-    jacobian_bytes = elements * BYTES_FP32
+    jacobian = Scenarios.Dense100kLayerJacobianFp32
+    width = jacobian.input_width
+    elements = jacobian.elements
+    jacobian_bytes = jacobian.size
     check(elements == 10**10, "Prose says 10^10 elements.")
     check(abs(jacobian_bytes.to(GB).magnitude - 40) < 1e-9, "Prose says 40 GB in FP32.")
     width_str = fmt_count(width, precision=0, commas=True)  # 100,000
@@ -2490,7 +2495,7 @@ Every call to `save_for_backward` in the backward graph keeps a device tensor li
 # │ How: model.size_in_bytes() helpers; m_as(MB/Mparam) for unit extraction.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, BYTES_ADAM_STATE, BYTES_FP32, GB, MB, MILLION, Mparam
+from mlsysim import Scenarios, GB, MB, MILLION, Mparam
 from mlsysim.fmt import fmt_count, fmt_multiple_range, check, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2501,25 +2506,25 @@ class ResNetMemory:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Vision.ResNet50
-    activations_min = 8 * GB  # scenario assumption: saved-activation low end
-    activations_max = 12 * GB  # scenario assumption: saved-activation high end
+    low = Scenarios.ResNet50Fp32AdamBatch64
+    high = Scenarios.ResNet50Fp32AdamBatch64HighActivations
+    model = low.workload
+    activations_min = low.activations
+    activations_max = high.activations
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     params_m = model.parameters.to(Mparam).magnitude
 
-    fp32 = model.size_in_bytes(BYTES_FP32)
-    adam = model.size_in_bytes(BYTES_ADAM_STATE)
+    fp32 = low.weights
+    adam = low.optimizer_state
 
-    # The prose presents the training peak as the sum of its four components, so
-    # derive it here. A hardcoded 10-15 GB did not follow from 8-12 GB of
-    # activations plus weights, gradients, and Adam state.
-    training_min = activations_min + fp32 + fp32 + adam
-    training_max = activations_max + fp32 + fp32 + adam
+    # The prose presents the training peak as the sum of its four components:
+    # saved activations plus weights, gradients, and Adam state.
+    training_min = low.training_total
+    training_max = high.training_total
 
-    # Decimal GB → MB is ×1000 (book-prose §1: decimal units in prose).
-    training_ratio_min = (training_min / fp32).to_base_units().magnitude
-    training_ratio_max = (training_max / fp32).to_base_units().magnitude
+    training_ratio_min = low.training_copies
+    training_ratio_max = high.training_copies
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -2974,7 +2979,7 @@ Tensors answer the data-representation problem by encoding shape, layout, and pr
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import BYTES_FP32, GB, Hardware, MB, TB, microsecond, millisecond, second
+from mlsysim import GB, Hardware, MB, Scenarios, TB, microsecond, millisecond, second
 from mlsysim.fmt import MarkdownStr, check, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
 
 class DeviceBandwidthHierarchy:
@@ -2985,16 +2990,15 @@ class DeviceBandwidthHierarchy:
     pcie = h100.interconnect.bandwidth  # PCIe Gen5 x16, per direction
     nvlink = h100.nvlink.bandwidth  # NVLink 4.0, bidirectional total
     hbm_bw = h100.memory.bandwidth  # HBM3
-    tensor_rows = 1000  # scenario assumption: activation tensor shape
-    tensor_cols = 1000
+    tensor = Scenarios.Fp32MillionElementTensorAcrossH100Links
     transfer_bytes_1gb = 1 * GB  # scenario assumption: bulk transfer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    tensor_bytes = tensor_rows * tensor_cols * BYTES_FP32
-    nvlink_per_direction = nvlink / 2
-    pcie_tensor = (tensor_bytes / pcie).to(microsecond)
-    nvlink_tensor = (tensor_bytes / nvlink_per_direction).to(microsecond)
-    hbm_tensor = (tensor_bytes / hbm_bw).to(microsecond)
+    tensor_bytes = tensor.total_bytes
+    nvlink_per_direction = h100.nvlink.bandwidth_per_direction
+    pcie_tensor = tensor.transfer_time("PCIe").to(microsecond)
+    nvlink_tensor = tensor.transfer_time("NVLink").to(microsecond)
+    hbm_tensor = tensor.transfer_time("HBM").to(microsecond)
     pcie_1gb = (transfer_bytes_1gb / pcie).to(millisecond)
     pcie_to_hbm_gap = (hbm_bw / pcie).to("").magnitude
     nvlink_to_pcie_bidir = (nvlink / (2 * pcie)).to("").magnitude
@@ -3147,24 +3151,23 @@ The same placement machinery extends to the one to eight accelerators of a singl
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import BYTES_FP32, Hardware, MB, byte, millisecond, second
+from mlsysim import Datasets, Hardware, MB, Scenarios, millisecond, second
 from mlsysim.fmt import MarkdownStr, check, fmt_bandwidth, fmt_count, fmt_memory, fmt_time
 
 class DataloaderThroughput:
     """Input-pipeline rate and one batch's host-to-device copy on the H100 host link."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    feed = Scenarios.ImageNetBatch64HostFeed
     host_link = Hardware.Cloud.H100.interconnect
-    img_per_sec = 1000 / second  # scenario assumption: accelerator consumption rate
-    img_res = 224  # scenario assumption
-    img_channels = 3
-    batch_size = 64  # scenario assumption, matches lst-dataloader-throughput
+    img_per_sec = feed.consume_rate
+    img_res = Datasets.ImageNet.image_width  # the feed's 224x224 RGB images
+    batch_size = feed.batch_size  # matches lst-dataloader-throughput
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    raw_image_bytes = img_res * img_res * img_channels * byte  # uint8
-    dataloader = (img_per_sec * raw_image_bytes).to(MB / second)
-    batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
-    batch_transfer = (batch_bytes / host_link.bandwidth).to(millisecond)
+    dataloader = feed.raw_feed.to(MB / second)
+    batch_bytes = feed.batch_bytes
+    batch_transfer = feed.copy_time.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(150 < dataloader.to(MB / second).magnitude < 151, f"Prose says ~150.5 MB/s, got {dataloader}.")
@@ -3708,19 +3711,19 @@ In every iteration of a training loop, millions of floating-point operations, dy
 # │ How: Set constants for input batch, hidden layers, and output classes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_count
 
 class TrainingStepDims:
     """Single source of the 784 -> 128 -> 10 MLP shapes and batch used by the anatomy section."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist = Datasets.MNIST
-    batch = 32  # scenario assumption, matches lst-training-step-anatomy
-    hidden_units = 128  # scenario assumption: two-layer version of ch5's 784-128-64-10 network
+    step = Scenarios.MnistTwoLayerTrainingStepOnH100
+    batch = step.batch_size  # matches lst-training-step-anatomy
+    hidden_units = step.hidden_width  # two-layer version of ch5's 784-128-64-10 network
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    input_features = mnist.image_width * mnist.image_height * mnist.image_channels
-    output_classes = mnist.num_classes
+    input_features = step.input_width
+    output_classes = step.output_width
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(input_features == 784 and output_classes == 10, "Listing hard-codes 784 inputs and 10 classes.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -3848,49 +3851,30 @@ class TrainingStepCalc:
     _output = TrainingStepDims.output_classes
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: MatMul 1: [32, 784] @ [784, 128]
-    mm1_flops = 2 * _batch * _input * _hidden * flop  # ~6.4M FLOPs
-    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte  # FP32
+    # Per-operator FLOPs and bytes of the step (MlpTrainingStepScenario):
+    # forward GEMM 1, ReLU, GEMM 2, and combined cross-entropy; backward
+    # dW2 = h.T @ dlogits, dh = dlogits @ W2.T, dW1 = x.T @ dz1 (no dx product:
+    # raw inputs do not require gradients), the ReLU derivative, and the loss
+    # derivative, which reads saved probabilities and int64 labels.
+    _flops = TrainingStepDims.step.op_flops
+    _bytes = TrainingStepDims.step.op_bytes
+    mm1_flops, mm1_mem = _flops["matmul1"], _bytes["matmul1"]
+    relu_flops, relu_mem = _flops["relu"], _bytes["relu"]
+    mm2_flops, mm2_mem = _flops["matmul2"], _bytes["matmul2"]
+    ce_flops, ce_mem = _flops["loss"], _bytes["loss"]
+    dw2_flops, dw2_mem = _flops["grad_w2"], _bytes["grad_w2"]
+    dh_flops, dh_mem = _flops["grad_h"], _bytes["grad_h"]
+    dw1_flops, dw1_mem = _flops["grad_w1"], _bytes["grad_w1"]
+    pointwise_bwd_flops = _flops["relu_backward"] + _flops["loss_backward"]
+    pointwise_bwd_mem = _bytes["relu_backward"] + _bytes["loss_backward"]
 
-    # Step 2: ReLU: [32, 128]
-    relu_flops = _batch * _hidden * flop  # 4,096 FLOPs
-    relu_mem = (_batch * _hidden) * 2 * 4 * byte  # read + write
-
-    # Step 3: MatMul 2: [32, 128] @ [128, 10]
-    mm2_flops = 2 * _batch * _hidden * _output * flop  # ~82K FLOPs
-    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
-
-    # Step 4: Cross Entropy: [32, 10]
-    # Simplified operation-equivalent estimate: one exp, accumulation, and normalization per logit.
-    ce_flops = _batch * _output * 3 * flop
-    ce_mem = (_batch * _output) * 2 * 4 * byte
-
-    # Step 5: Backward GEMMs: dW2 = h.T @ dlogits; dh = dlogits @ W2.T;
-    # dW1 = x.T @ dz1. No dx product: raw inputs do not require gradients.
-    dw2_flops = 2 * _hidden * _batch * _output * flop
-    dw2_mem = (_batch * _hidden + _batch * _output + _hidden * _output) * 4 * byte
-    dh_flops = 2 * _batch * _output * _hidden * flop
-    dh_mem = (_batch * _output + _hidden * _output + _batch * _hidden) * 4 * byte
-    dw1_flops = 2 * _input * _batch * _hidden * flop
-    dw1_mem = (_batch * _input + _batch * _hidden + _input * _hidden) * 4 * byte
-
-    # Step 6: Nonlinear backward kernels. ReLU reads h and dh and writes dz1.
-    # Combined mean cross-entropy backward is modeled as subtract-and-scale
-    # per logit, reading saved probabilities and int64 labels and writing dlogits.
-    relu_bwd_flops = _batch * _hidden * flop
-    relu_bwd_mem = 3 * _batch * _hidden * 4 * byte
-    ce_bwd_flops = 2 * _batch * _output * flop
-    ce_bwd_mem = (2 * _batch * _output * 4 + _batch * 8) * byte
-    pointwise_bwd_flops = relu_bwd_flops + ce_bwd_flops
-    pointwise_bwd_mem = relu_bwd_mem + ce_bwd_mem
-
-    forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
-    bwd_flops = dw2_flops + dh_flops + dw1_flops + pointwise_bwd_flops
-    bwd_mem = dw2_mem + dh_mem + dw1_mem + pointwise_bwd_mem
+    forward_flops = TrainingStepDims.step.forward_flops
+    forward_mem = TrainingStepDims.step.forward_bytes
+    bwd_flops = TrainingStepDims.step.backward_flops
+    bwd_mem = TrainingStepDims.step.backward_bytes
     dense_forward_flops = mm1_flops + mm2_flops
     dense_training_flops = dense_forward_flops + dw2_flops + dh_flops + dw1_flops
-    dense_training_ratio = (dense_training_flops / dense_forward_flops).to('').magnitude
+    dense_training_ratio = TrainingStepDims.step.dense_training_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
@@ -3970,39 +3954,33 @@ The arithmetic-intensity column helps predict each layer's regime when compared 
 # │ How: Reuse TrainingStepCalc; distinguish Python calls from driver launches.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import BYTES_FP32, Hardware, MB, MFLOPs, Ops, TB, TFLOP, byte, flop, microsecond, second
+from mlsysim import MB, MFLOPs, TB, TFLOP, byte, flop, microsecond, second
 from mlsysim.fmt import fmt, check, fmt_count, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
 
 class MnistTrainingStepCalc:
     """MNIST overhead-bound analysis: dispatch dominates compute and memory on the H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    forward_ops = 4  # GEMM1, ReLU, GEMM2, combined loss in this selected operator set
-    backward_ops = 5  # three GEMMs, ReLU derivative, combined loss derivative
-    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
-    driver_launch = Ops.RuntimeOverheads.KernelLaunch
-    peak_flops = Hardware.Cloud.H100.compute.precision_flops["fp32"]
-    mem_bw = Hardware.Cloud.H100.memory.bandwidth
+    step = TrainingStepDims.step
+    forward_ops = step.forward_ops  # GEMM1, ReLU, GEMM2, combined loss in this selected operator set
+    backward_ops = step.backward_ops  # three GEMMs, ReLU derivative, combined loss derivative
+    python_dispatch = step.dispatch
+    driver_launch = step.launch
+    peak_flops = step.peak_rate
+    mem_bw = step.hardware.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # One Python entry per selected forward operator, plus one backward() entry.
     # Backward's internal kernels are launched by the autograd engine, not Python.
-    python_entries = forward_ops + 1
-    driver_launches = forward_ops + backward_ops
-    total_flops = TrainingStepCalc.forward_flops + TrainingStepCalc.bwd_flops
-    mem_traffic = TrainingStepCalc.forward_mem + TrainingStepCalc.bwd_mem
-    t_compute = (total_flops / peak_flops).to(microsecond)
-    t_memory = (mem_traffic / mem_bw).to(microsecond)
-    t_python = python_entries * python_dispatch
-    t_launch = driver_launches * driver_launch
-    t_overhead = t_python + t_launch
+    python_entries = step.host.operations
+    driver_launches = step.host.launches
+    total_flops = step.total_flops
+    mem_traffic = step.total_bytes
+    t_compute = step.compute_time.to(microsecond)
+    t_memory = step.memory_time.to(microsecond)
+    t_overhead = step.host.host_time
     # Excluded optimizer step: FP32 Adam reads p, g, m, v and writes p, m, v (7 x 4 bytes per parameter).
-    n_params = (
-        TrainingStepDims.input_features * TrainingStepDims.hidden_units
-        + TrainingStepDims.hidden_units
-        + TrainingStepDims.hidden_units * TrainingStepDims.output_classes
-        + TrainingStepDims.output_classes
-    )
-    adam_step_bytes = n_params * 7 * BYTES_FP32
+    n_params = step.parameters
+    adam_step_bytes = step.optimizer_step_bytes
     ridge_fp32 = (peak_flops / mem_bw).to(flop / byte).magnitude
     relu_below_ridge = ridge_fp32 / (TrainingStepCalc.relu_flops / TrainingStepCalc.relu_mem).to(flop / byte).magnitude
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -4396,25 +4374,26 @@ Engineers assume framework migration is straightforward since models are "just m
 # │ How: Scale the ResNetMemory scenario linearly in batch size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import GB, GiB, Hardware
+from mlsysim import GB, GiB, Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_memory_capacity
 
 class BatchActivationScaling:
     """ResNet-50 saved activations at larger batches against one H100's HBM."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    base_batch = 64  # the ResNetMemory scenario's batch size
+    low, high = ResNetMemory.low, ResNetMemory.high
+    base_batch = low.batch_size  # the ResNetMemory scenario's batch size
     act_min = ResNetMemory.activations_min
     act_max = ResNetMemory.activations_max
-    h100_mem = Hardware.Cloud.H100.memory.capacity
+    h100_mem = low.hardware.memory.capacity
     batch_mid = 256  # scenario assumption
-    batch_big = 512  # scenario assumption
+    batch_big = Scenarios.ResNet50Fp32AdamBatch512.batch_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mid_min = act_min * batch_mid / base_batch
-    mid_max = act_max * batch_mid / base_batch
-    big_min = act_min * batch_big / base_batch
-    big_max = act_max * batch_big / base_batch
+    mid_min = low.activations_at(batch_mid)
+    mid_max = high.activations_at(batch_mid)
+    big_min = low.activations_at(batch_big)
+    big_max = high.activations_at(batch_big)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(mid_max < h100_mem, "Batch 256 should still fit one H100 in this scenario.")
@@ -4463,19 +4442,19 @@ class CompilationOverheadCalc:
     """Break-even analysis showing frequent recompilation negates compiled-mode throughput gains."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_images = 10_000  # small experiment
     # ResNet-50 numbers come from the earlier CompilationBenchmark cell (single source of truth).
+    breakeven = CompilationBenchmark.breakeven
+    n_images = breakeven.experiment_items  # small experiment
     eager_throughput = CompilationBenchmark.resnet["eager"]  # images/sec (ResNet-50 eager)
     compiled_throughput = CompilationBenchmark.resnet["compile"]  # images/sec (ResNet-50 compiled)
     compile_min_s = CompilationBenchmark.resnet["compile_min_s"]
     compile_max_s = CompilationBenchmark.resnet["compile_max_s"]
-    n_recompilations = 10  # code changes
-    compilation_time_s = compile_max_s  # seconds per compile
+    n_recompilations = breakeven.recompiles  # code changes
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     resnet_compile_speedup_pct = (compiled_throughput / eager_throughput - 1) * 100
-    eager_total = n_images / eager_throughput  # ~6.9 s
-    compiled_total = n_images / compiled_throughput + n_recompilations * compilation_time_s  # ~304.7 s
-    compiled_slowdown = compiled_total / eager_total
+    eager_total = breakeven.experiment_eager.to("second").magnitude  # ~6.9 s
+    compiled_total = breakeven.experiment_compiled_total.to("second").magnitude  # ~304.7 s
+    compiled_slowdown = breakeven.experiment_slowdown
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(45 <= resnet_compile_speedup_pct <= 50, f"ResNet-50 compile speedup drifted to {resnet_compile_speedup_pct:.1f}%.")
     check(compiled_slowdown > 40, f"Expected frequent recompilation to be >40x slower, got {compiled_slowdown:.1f}x.")

@@ -3131,3 +3131,70 @@ def test_recommender_gather_and_tables():
     assert e.table_bytes.to("GB").magnitude == approx(51.2) and e.labeled_share == approx(0.64)
     assert not Scenarios.TwoHundredMillionRowTablesOnA100.fits
     assert Scenarios.BillionUserTable.table_bytes.to("GB").magnitude == approx(512)
+def test_framework_dispatch_and_fusion():
+    g = Scenarios.Gpt2XlEagerDecodeDispatch
+    assert g.operations == 576 and g.launches == 576
+    assert g.device_time.to("ms").magnitude == approx(0.895522, rel=1e-5)
+    assert g.launch_time.to("ms").magnitude == approx(2.88)
+    assert g.host_time.to("ms").magnitude == approx(8.64)
+    assert g.overhead_ratio == approx(9.648) and g.launch_ratio == approx(3.216)
+    assert Scenarios.SmallKernelDispatch.host_share == approx(0.9375)
+    assert Scenarios.LargeKernelDispatch.host_share == approx(0.130435, rel=1e-5)
+    small = Scenarios.SmallMlpDispatch
+    assert small.host_time.to("microsecond").magnitude == approx(90)
+    assert small.overhead_ratio == approx(34.615385) and small.speedup_limit == approx(35.615385)
+    assert Scenarios.Gpt3BlockDispatch.overhead_ratio == approx(0.0018)
+    pair, chain = Scenarios.ElementwisePairFusion, Scenarios.LayerNormDropoutReluFusion
+    assert pair.overhead_speedup == approx(2) and pair.traffic_ratio == approx(2)
+    assert chain.unfused_trips == 6 and chain.unfused_launches == 3 and chain.traffic_ratio == approx(3)
+
+
+def test_framework_compile_breakeven_and_jacobian():
+    c = Scenarios.ResNet50CompileBreakeven
+    assert c.saving_per_item.to("ms").magnitude == approx(0.224539, rel=1e-5)
+    assert c.breakeven_items == approx(133607.14, rel=1e-6)
+    assert c.experiment_eager.to("second").magnitude == approx(6.896552, rel=1e-6)
+    assert c.experiment_compiled_total.to("second").magnitude == approx(304.651163, rel=1e-6)
+    assert c.experiment_slowdown == approx(44.174419, rel=1e-6)
+    j = Scenarios.Dense100kLayerJacobianFp32
+    assert j.elements == 10 ** 10 and j.size.to("GB").magnitude == approx(40)
+
+
+def test_framework_training_memory_and_host_feed():
+    lo, hi = Scenarios.ResNet50Fp32AdamBatch64, Scenarios.ResNet50Fp32AdamBatch64HighActivations
+    assert lo.weights.to("MB").magnitude == approx(102.228128)
+    assert lo.optimizer_state.to("MB").magnitude == approx(204.456256)
+    assert lo.training_total.to("GB").magnitude == approx(8.408913, rel=1e-6)
+    assert hi.training_total.to("GB").magnitude == approx(12.408913, rel=1e-6)
+    assert lo.training_copies == approx(82.256348, rel=1e-6) and hi.training_copies == approx(121.384523, rel=1e-6)
+    assert lo.activations_at(512).to("GB").magnitude == approx(64) and hi.activations_at(512).to("GB").magnitude == approx(96)
+    t = Scenarios.Fp32MillionElementTensorAcrossH100Links.result.times
+    assert t["PCIe"].to("microsecond").magnitude == approx(62.5)
+    assert t["NVLink"].to("microsecond").magnitude == approx(8.888889, rel=1e-6)
+    f = Scenarios.ImageNetBatch64HostFeed
+    assert f.batches_in_flight == 8 and f.raw_feed.to("MB/s").magnitude == approx(150.528)
+    assert f.batch_bytes.to("MB").magnitude == approx(38.535168)
+    assert f.copy_time.to("ms").magnitude == approx(0.602112)
+    assert f.copy_share("large model") == approx(0.1204224)
+
+
+def test_framework_mlp_training_step_and_paths():
+    m = Scenarios.MnistTwoLayerTrainingStepOnH100
+    assert m.parameters == 101770
+    assert m.total_flops.to("flop").magnitude == approx(13100608)
+    assert m.total_bytes.to("byte").magnitude == approx(1191936)
+    assert m.dense_training_ratio == approx(2.012594, rel=1e-6)
+    assert m.optimizer_step_bytes.to("MB").magnitude == approx(2.84956)
+    assert m.host.operations == 5 and m.host.launches == 9
+    assert m.host.host_time.to("microsecond").magnitude == approx(95)
+    assert m.compute_time.to("microsecond").magnitude == approx(0.195531, rel=1e-5)
+    p = Scenarios.EmbeddedLinuxFrameworkPaths
+    assert p.passing == ["PyTorch to ONNX Runtime", "TensorFlow to TensorFlow Lite"]
+    assert not p.variant(latency_budget=p.paths["PyTorch to ONNX Runtime"]["latency"] / 2).passing
+
+
+def test_framework_batch512_activation_scaling():
+    b = Scenarios.ResNet50Fp32AdamBatch512
+    assert b.batch_size == 512 and b.activations.to("GB").magnitude == approx(64)
+    hi = Scenarios.ResNet50Fp32AdamBatch64HighActivations.activations_at(b.batch_size)
+    assert b.training_total < b.hardware.memory.capacity < hi
