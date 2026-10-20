@@ -18,6 +18,7 @@ numbers.tex lacks stops the build with "Undefined value".
 """
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 import sys
 from pathlib import Path
 
@@ -47,10 +48,25 @@ def v(key, value, fmt="{:,.3g}", label=""):
             raise ValueError(f"key {key!r}: {value} is not a small whole number")
         text = _WORDS[n]
     else:
-        text = fmt.format(value)
+        text = _format(fmt, value)
     _values[key] = text
     print(f"{key:34s} {text:>12s}   {label}")
     return text
+
+
+_FIXED = re.compile(r"^\{:(,?)\.(\d+)f\}$")
+
+
+def _format(fmt, value):
+    """Format like ``fmt.format(value)``, rounding fixed-point formats the way
+    the book's formatters do: half away from zero, after removing float noise
+    (187.49999999999997 is 187.5, which rounds to 188)."""
+    m = _FIXED.match(fmt)
+    if not m:
+        return fmt.format(value)
+    commas, places = m.group(1), int(m.group(2))
+    d = Decimal(repr(round(float(value), 9))).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    return f"{d:{commas}.{places}f}"
 
 
 def val(key):

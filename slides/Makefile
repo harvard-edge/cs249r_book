@@ -342,7 +342,8 @@ deck: deck-svgs
 # images/numbers.tex from MLSysIM and its cited inputs; the deck prints each
 # value with \val{key}. numbers.tex is committed, so a deck builds with LaTeX
 # alone. Run `make numbers` after changing a calcs.py or the MLSysIM registry;
-# `make numbers-check` (CI) fails if any committed numbers.tex is stale.
+# `make numbers-check` (CI) fails if any committed numbers.tex is stale, or if
+# a calcs.py types a number instead of reading it from MLSysIM (tools/calcs_lint.py).
 #   make numbers              every such deck
 #   make numbers V=2 D=02_compute_infrastructure
 NUMBER_DECKS = $(if $(D),vol$(V)/$(D)/images,$(patsubst %/calcs.py,%,$(shell grep -l "from deckvals import" vol*/*/images/calcs.py 2>/dev/null)))
@@ -353,6 +354,7 @@ numbers:
 	done
 
 numbers-check: numbers
+	@$(PY) tools/calcs_lint.py
 	@stale=$$(git status --porcelain -- $(addsuffix /numbers.tex,$(NUMBER_DECKS))); \
 	if [ -n "$$stale" ]; then \
 		echo "  ✗ numbers.tex differs from calcs.py output; run make numbers and commit:"; \
