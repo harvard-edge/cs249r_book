@@ -10,13 +10,14 @@ hardware, memory optimization, fine-tuning, and compilation beyond the 20 core m
 5. simd_matmul, simd_fused_bias_gelu: C++ SIMD kernels through ctypes (AVX2/NEON, OpenMP)
 6. triton_fused_gelu: Triton GPU kernel that fuses bias + GELU (NVIDIA GPUs)
 7. mps_matmul: Apple Silicon GPU matrix multiply via Metal Performance Shaders
+8. cuda_matmul: CUDA SGEMM in three teaching stages (naive, coalesced, tiled) through ctypes
 
 How extensions are triggered: by you. The core framework never calls an
 extension; Tensor.matmul, the activation layers, and the training loop all run
 exactly as they would without this package. You use an extension by calling
-it (simd_matmul, mps_matmul, triton_fused_gelu, compile_graph), by putting it
-in a model (LoRALinear, or checkpoint() inside a forward), or by calling it
-from your training loop (LossScaler). `tito milestone run 07` calls the
+it (simd_matmul, mps_matmul, cuda_matmul, triton_fused_gelu, compile_graph), by
+putting it in a model (LoRALinear, or checkpoint() inside a forward), or by
+calling it from your training loop (LossScaler). `tito milestone run 07` calls the
 hardware kernels for you to time them. Importing this package is cheap except
 for one thing: mps_ops and triton_gelu try to import PyTorch at import time,
 to find out whether their GPU paths are available.
@@ -30,6 +31,7 @@ start from template.py.
 from .simd_ops import simd_matmul, simd_fused_bias_gelu, has_simd_support, simd_build_info
 from .triton_gelu import triton_fused_gelu, has_triton_support
 from .mps_ops import mps_matmul, has_mps_support
+from .cuda_ops import cuda_matmul, has_cuda_support, cuda_build_info
 from .lora import LoRALinear
 from .loss_scaler import LossScaler
 from .checkpoint import checkpoint
@@ -50,4 +52,7 @@ __all__ = [
     "has_triton_support",
     "mps_matmul",
     "has_mps_support",
+    "cuda_matmul",
+    "has_cuda_support",
+    "cuda_build_info",
 ]
