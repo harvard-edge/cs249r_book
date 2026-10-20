@@ -3,8 +3,11 @@
 
 Every figure is drawn at the size of its slot on the slide (centimeters on
 the 16 x 9 cm page) and saved at exactly that size, so the slide places it at
-scale 1 and every label keeps the point size written here. Derived values come
-from calcs.py (imported as K); inputs carry their source there.
+scale 1 and every label keeps the point size written here. Every number comes
+from calcs.py (imported as K), which reads MLSysIM: labels print the recorded
+strings (val), and positions use the recorded values (num) or the MLSysIM
+results K holds. Layout coordinates and the measured samples in data/ are the
+only other numbers here.
 
 Colors follow the Volume IV causal-boundary palette (volumes/vol4/palette.md):
 navy for cognition, blue (dashed) for unprivileged proposals, green for the
@@ -50,6 +53,9 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs as K  # noqa: E402  every derived value comes from calcs.py
+from deckvals import val, num  # noqa: E402
+
+m = K.m
 
 plt = sp.plt
 OUT = Path(__file__).parent
@@ -114,21 +120,23 @@ def plot_axes(w, h, left, bottom, right=0.2, top=0.15):
 def rate_ladder(step):
     w, h = 9.6, 5.9
     fig, ax = plot_axes(w, h, left=0.45, bottom=1.0, right=0.15, top=0.1)
-    rows = [("Intent model", 500.0, NAVY, "500 ms  (2 Hz)",
+    rows = [("Intent model", num("t_intent_period"), NAVY,
+             f"{val('t_intent_period')} ms  ({val('f_intent')} Hz)",
              "set by prefill and weight sweeps"),
-            ("Chunk policy", 50.0, BLUE, "50 ms  (20 Hz)",
-             "set by one weight sweep per 16-setpoint chunk"),
-            ("Permission tick", 1.0, GREEN, "1 ms  (1 kHz)",
-             f"set by travel: {K.V * K.T_TICK:.1f} mm per tick at 1.5 m/s"),
-            ("Current loop", 0.05, SLATE, "50 \u00b5s  (20 kHz)",
-             f"set by the winding: L/R = 2.7 ms, pole near {1 / (2 * np.pi * K.TAU_E):.0f} Hz")]
+            ("Chunk policy", num("t_renew"), BLUE, f"{val('t_renew')} ms  ({val('f_chunk')} Hz)",
+             f"set by one weight sweep per {val('chunk_h')}-setpoint chunk"),
+            ("Permission tick", num("t_tick"), GREEN, f"{val('t_tick')} ms  ({val('f_tick_khz')} kHz)",
+             f"set by travel: {val('d_tick')} mm per tick at {val('v_drive')} m/s"),
+            ("Current loop", m(1 / K.RM.current_loop_rate, "ms"), SLATE,
+             f"{val('t_current_us')} \u00b5s  ({val('f_current_khz')} kHz)",
+             f"set by the winding: L/R = {val('tau_e')} ms, pole near {val('f_pole')} Hz")]
     lo = 0.01
-    for i, (lab, t, c, val, why) in enumerate(rows):
+    for i, (lab, t, c, period_lbl, why) in enumerate(rows):
         y = 3 - i
         ax.barh(y, t - lo, left=lo, height=0.28, color=c)
         ax.text(lo * 1.15, y + 0.2, lab, ha="left", va="bottom", fontsize=FS,
                 fontweight="bold", color=c)
-        ax.text(t * 1.25, y, val, ha="left", va="center", fontsize=FS_S, color=c,
+        ax.text(t * 1.25, y, period_lbl, ha="left", va="center", fontsize=FS_S, color=c,
                 fontweight="bold")
         ax.text(lo * 1.15, y - 0.2, why, ha="left", va="top", fontsize=FS_S,
                 color=GRAY, alpha=1.0 if step >= 2 else 0.0)
@@ -149,40 +157,40 @@ def rate_ladder(step):
 def phase(step):
     w, h = 14.6, 4.3
     fig, ax = plot_axes(w, h, left=3.3, bottom=1.0, right=0.3, top=0.15)
-    hold, comp, bus = (K.lag_deg(K.HOLD), K.lag_deg(K.COMPUTE), K.lag_deg(K.BUS))
+    hold, comp, bus = num("phi_hold"), num("phi_comp"), num("phi_bus")
     y1, y2 = 1.0, 0.0
     ax.barh(y1, hold, color=AMBER, height=0.5)
     ax.barh(y1, comp, left=hold, color=GREEN, height=0.5)
-    ax.text(hold / 2, y1, f"hold\n{hold:.1f}°", ha="center", va="center", fontsize=FS_S,
+    ax.text(hold / 2, y1, f"hold\n{val('phi_hold')}°", ha="center", va="center", fontsize=FS_S,
             color="white", fontweight="bold")
-    ax.text(hold + comp / 2, y1 - 0.42, f"compute {comp:.1f}°", ha="center", va="top",
+    ax.text(hold + comp / 2, y1 - 0.42, f"compute {val('phi_comp')}°", ha="center", va="top",
             fontsize=FS_S, color=GREEN_D)
     x0 = hold + comp
     if step == 1:
         ax.add_patch(Rectangle((x0, y1 - 0.25), bus, 0.5, fc="white", ec=SLATE, ls="--", lw=1.2))
-        ax.text(x0 + bus / 2, y1, "bus cycle 1 ms:  ???", ha="center", va="center",
+        ax.text(x0 + bus / 2, y1, f"bus cycle {val('t_bus')} ms:  ???", ha="center", va="center",
                 fontsize=FS, color=SLATE, fontweight="bold")
     else:
         ax.barh(y1, bus, left=x0, color=SLATE, height=0.5)
-        ax.text(x0 + bus / 2, y1, f"bus {bus:.1f}°", ha="center", va="center",
+        ax.text(x0 + bus / 2, y1, f"bus {val('phi_bus')}°", ha="center", va="center",
                 fontsize=FS, color="white", fontweight="bold")
         tot = x0 + bus
-        ax.text(tot + 0.15, y1, f"{tot:.1f}° = {tot / K.ALLOW:.1f}× the allowance",
+        ax.text(tot + 0.15, y1, f"{val('phi_total')}° = {val('phi_over')}× the allowance",
                 ha="left", va="center", fontsize=FS, color=RED_D, fontweight="bold")
     if step >= 3:
         ax.barh(y2, bus, color=SLATE, height=0.5)
-        ax.text(bus / 2, y2, f"bus alone {bus:.1f}°", ha="center", va="center",
+        ax.text(bus / 2, y2, f"bus alone {val('phi_bus')}°", ha="center", va="center",
                 fontsize=FS, color="white", fontweight="bold")
         ax.text(bus + 0.15, y2, "still over: no tick rate fixes it", ha="left", va="center",
                 fontsize=FS, color=RED_D, fontweight="bold")
-    ax.axvline(K.ALLOW, color=RED, ls="--", lw=1.5)
-    ax.text(K.ALLOW, 1.62, f"allowed {K.ALLOW:.0f}°", ha="center", va="bottom",
+    ax.axvline(num("phi_allow"), color=RED, ls="--", lw=1.5)
+    ax.text(num("phi_allow"), 1.62, f"allowed {val('phi_allow')}°", ha="center", va="bottom",
             fontsize=FS_S, color=RED, fontweight="bold")
     ax.set_yticks([y1, y2])
-    ax.set_yticklabels(["1 kHz tick", "Infinitely fast tick"], fontsize=FS, fontweight="bold")
+    ax.set_yticklabels([f"{val('f_tick_khz')} kHz tick", "Infinitely fast tick"], fontsize=FS, fontweight="bold")
     ax.set_ylim(-0.45, 1.95)
     ax.set_xlim(0, 24)
-    ax.set_xlabel("Phase lag at a 20 Hz crossover (degrees)", fontsize=FS_S)
+    ax.set_xlabel(f"Phase lag at a {val('f_c')} Hz crossover (degrees)", fontsize=FS_S)
     ax.spines["left"].set_visible(False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -194,17 +202,17 @@ def phase(step):
 def jitter():
     w, h = 9.4, 4.6
     fig, ax = plot_axes(w, h, left=1.6, bottom=1.0, right=0.2, top=0.55)
-    rows = [("p50", "p50"), ("p99", "p99"), ("p99.9", "p999"), ("max", "mx")]
+    rows = [("p50", "p50"), ("p99", "p99"), ("p99.9", "p999"), ("max", "maximum")]
     for i, (lab, key) in enumerate(rows):
         y = 3 - i
-        lv, hv = K.JSTAT["light"][key], K.JSTAT["heavy"][key]
+        lv, hv = (m(getattr(K.JSTAT[k], key), "us") for k in ("light", "heavy"))
         ax.barh(y + 0.18, lv, color=GRAY, height=0.32)
         ax.barh(y - 0.18, hv, color=RED, height=0.32)
         ax.text(lv * 1.12, y + 0.18, f"{lv:,.0f}", va="center", fontsize=FS_S, color=GRAY)
         ax.text(hv * 1.12, y - 0.18, f"{hv:,.0f}", va="center", fontsize=FS_S, color=RED,
                 fontweight="bold")
-    ax.axvline(1000, color=SLATE, ls="--", lw=1.2)
-    ax.text(1000, 3.62, "one period, 1 ms", ha="center", va="bottom", fontsize=FS_S,
+    ax.axvline(m(K.PERIOD, "us"), color=SLATE, ls="--", lw=1.2)
+    ax.text(m(K.PERIOD, "us"), 3.62, "one period, 1 ms", ha="center", va="bottom", fontsize=FS_S,
             color=SLATE)
     ax.text(380000, 3.2, "ordinary load", color=GRAY, fontsize=FS_S, fontweight="bold",
             va="center", ha="right")
@@ -228,15 +236,15 @@ def jitter():
 def relay():
     w, h = 8.6, 4.3
     fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.1)
-    rows = [("Safety relay, E-STOP, typical", K.PNOZ["estop_typ"], GREEN, "datasheet"),
-            ("Safety relay, E-STOP, maximum", K.PNOZ["estop_max"], GREEN_D, "datasheet"),
-            ("Laptop 1 ms task, worst seen", K.JSTAT["heavy"]["mx"] / 1000, RED, "measured")]
-    for i, (lab, v, c, kind) in enumerate(rows):
+    rows = [("Safety relay, E-STOP, typical", "relay_typ", "d_relay_typ", GREEN),
+            ("Safety relay, E-STOP, maximum", "relay_max", "d_relay_max", GREEN_D),
+            ("Laptop 1 ms task, worst seen", "jit_max_heavy_ms", "d_jit_heavy", RED)]
+    for i, (lab, tk, dk, c) in enumerate(rows):
         y = 2 - i
+        v = num(tk)
         ax.barh(y - 0.12, v, color=c, height=0.36)
         ax.text(0.3, y + 0.25, lab, fontsize=FS_S, color=c, fontweight="bold", va="bottom")
-        ax.text(v + 0.6, y - 0.12, f"{v:.1f} ms = {K.V * v:.1f} mm" if i == 2 else
-                f"{v:.0f} ms = {K.V * v:.0f} mm", fontsize=FS_S, va="center", color=c)
+        ax.text(v + 0.6, y - 0.12, f"{val(tk)} ms = {val(dk)} mm", fontsize=FS_S, va="center", color=c)
     ax.set_xlim(0, 62)
     ax.set_ylim(-0.5, 2.65)
     ax.set_yticks([])
@@ -253,8 +261,8 @@ def twoproc(step):
     box(ax, 0.1, 3.4, 9.6, 1.55, fc=NAVY_L, ec=NAVY, lw=1.4)
     ax.text(0.25, 4.72, "Application processor (may only propose)", fontsize=FS, color=NAVY,
             fontweight="bold", va="center")
-    box(ax, 0.3, 3.5, 2.7, 0.85, "Chunk policy\n20 Hz", fc="white", ec=BLUE, ls="--")
-    box(ax, 3.5, 3.5, 2.7, 0.85, "Intent model\n2 Hz", fc="white", ec=NAVY)
+    box(ax, 0.3, 3.5, 2.7, 0.85, f"Chunk policy\n{val('f_chunk')} Hz", fc="white", ec=BLUE, ls="--")
+    box(ax, 3.5, 3.5, 2.7, 0.85, f"Intent model\n{val('f_intent')} Hz", fc="white", ec=NAVY)
     box(ax, 6.7, 3.5, 2.8, 0.85, "Perception", fc="white", ec=NAVY)
     arrow(ax, 6.7, 3.92, 6.2, 3.92, NAVY)
     arrow(ax, 3.5, 3.92, 3.0, 3.92, NAVY)
@@ -267,7 +275,7 @@ def twoproc(step):
                 color=GREEN_D, fontweight="bold", va="center")
         arrow(ax, 1.65, 3.5, 1.65, 2.05, BLUE, ls="--")
         box(ax, 0.3, 0.95, 2.7, 1.1, "Mailbox\n(own SRAM)", fc="white", ec=GREEN)
-        box(ax, 3.5, 0.8, 2.9, 1.3, "Permission tick\n1 kHz: freshness,\nlease, limits",
+        box(ax, 3.5, 0.8, 2.9, 1.3, f"Permission tick\n{val('f_tick_khz')} kHz: freshness,\nlease, limits",
             fc="white", ec=GREEN_D, lw=1.6, fs=FS_S)
         arrow(ax, 3.0, 1.5, 3.5, 1.5, GREEN_D)
         box(ax, 6.9, 0.95, 2.6, 1.1, "Drive\nregisters", fc=SLATE_L, ec=SLATE, r=0.0)
@@ -299,9 +307,9 @@ def queue(step):
 
     def row(y, title, color):
         ax.text(0.1, y + 1.45, title, fontsize=FS, fontweight="bold", color=color, va="center")
-        box(ax, 0.1, y, 2.3, 1.0, "Chunk policy\nwrites at 20 Hz", fc=BLUE_L, ec=BLUE, ls="--",
+        box(ax, 0.1, y, 2.3, 1.0, f"Chunk policy\nwrites at {val('f_chunk')} Hz", fc=BLUE_L, ec=BLUE, ls="--",
             fs=FS_S)
-        box(ax, 11.9, y, 2.6, 1.0, "Permission tick\nreads at 1 kHz", fc=GREEN_L, ec=GREEN_D,
+        box(ax, 11.9, y, 2.6, 1.0, f"Permission tick\nreads at {val('f_tick_khz')} kHz", fc=GREEN_L, ec=GREEN_D,
             fs=FS_S)
 
     row(2.55, "FIFO queue (event messages): every proposal is kept and read in order", RED_D)
@@ -328,23 +336,24 @@ def queue(step):
 def mailbox_meas(step):
     w, h = 11.0, 3.9
     fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.1)
-    rows = [("Blocking mutex", K.MBX["mutex"], RED,
-             f"{{v:,.0f}} µs; {K.MBX['mutex']['over1ms']} reads over 1 ms"),
-            ("One try-lock (as ros2_control)", K.MBX["trylock"], GREEN, "{v:.1f} µs"),
-            ("One-attempt seqlock", K.MBX["seqlock"], GREEN_D,
-             f"{{v:.1f}} µs; {K.MBX['seqlock']['torn']} torn reads rejected")]
-    for i, (lab, s, c, fmt) in enumerate(rows):
+    rows = [("Blocking mutex", "mbx_mutex_max", RED,
+             f"{val('mbx_mutex_max')} µs; {val('mbx_mutex_over')} reads over 1 ms"),
+            ("One try-lock (as ros2_control)", "mbx_trylock_max", GREEN, f"{val('mbx_trylock_max')} µs"),
+            ("One-attempt seqlock", "mbx_seqlock_max", GREEN_D,
+             f"{val('mbx_seqlock_max')} µs; {val('mbx_torn')} torn reads rejected")]
+    for i, (lab, key, c, txt) in enumerate(rows):
         y = 2 - i
         ax.text(0.12, y + 0.26, lab, fontsize=FS_S, fontweight="bold", color=c, va="bottom")
         if step >= 2:
-            ax.barh(y - 0.1, s["mx"], left=0.1, color=c, height=0.36)
-            ax.text(s["mx"] * 1.25, y - 0.1, fmt.format(v=s["mx"]), fontsize=FS_S, color=c,
+            mx = num(key)
+            ax.barh(y - 0.1, mx, left=0.1, color=c, height=0.36)
+            ax.text(mx * 1.25, y - 0.1, txt, fontsize=FS_S, color=c,
                     va="center", fontweight="bold", zorder=5,
                     bbox=dict(fc="white", ec="none", pad=0.5))
         else:
             ax.text(0.15, y - 0.1, "?", fontsize=FS, color=c, va="center", fontweight="bold")
-    ax.axvline(1000, color=SLATE, ls="--", lw=1.2)
-    ax.text(1000 * 1.15, 2.45, "one tick", fontsize=FS_S, color=SLATE, va="bottom")
+    ax.axvline(m(K.PERIOD, "us"), color=SLATE, ls="--", lw=1.2)
+    ax.text(m(K.PERIOD, "us") * 1.15, 2.45, "one tick", fontsize=FS_S, color=SLATE, va="bottom")
     ax.set_xscale("log")
     ax.set_xlim(0.1, 3e7)
     ax.set_ylim(-0.55, 2.7)
@@ -408,46 +417,49 @@ def lease(step):
     w, h = 14.6, 4.9
     fig, ax = plot_axes(w, h, left=2.4, bottom=1.0, right=0.2, top=0.15)
     yP, yA, yL, yD = 3.0, 2.0, 1.0, 0.0
-    ax.barh(yP, 40, left=0, color=BLUE, height=0.45)
-    ax.barh(yP, 40, left=50, color=BLUE, height=0.45)
-    for x in (40, 90):
+    infer, renew, lease_ms = num("t_chunk"), num("t_renew"), num("t_lease")
+    first, last, stall = num("t_first_adm"), num("t_last_adm"), num("t_stall")
+    expiry, brake, x_end = num("t_expiry"), num("t_brake_at"), 210  # x_end: axis limit (layout)
+    ax.barh(yP, infer, left=0, color=BLUE, height=0.45)
+    ax.barh(yP, infer, left=renew, color=BLUE, height=0.45)
+    for x in (first, last):
         ax.plot([x], [yA], marker="v", ms=9, color=GREEN_D)
-    ax.text(90, yA + 0.32, "last admission", fontsize=FS_S, color=GREEN_D, ha="center")
-    ax.add_patch(Rectangle((40, yL - 0.22), 60, 0.44, fc="none", ec=GREEN, ls="--", lw=1.2))
+    ax.text(last, yA + 0.32, "last admission", fontsize=FS_S, color=GREEN_D, ha="center")
+    ax.add_patch(Rectangle((first, yL - 0.22), lease_ms, 0.44, fc="none", ec=GREEN, ls="--", lw=1.2))
     if step == 1:
-        ax.barh(yD, 100, left=0, color=SLATE, height=0.45)
-        ax.text(50, yD, "tracking admitted setpoints", color="white", fontsize=FS_S,
+        ax.barh(yD, stall, left=0, color=SLATE, height=0.45)
+        ax.text(stall / 2, yD, "tracking admitted setpoints", color="white", fontsize=FS_S,
                 ha="center", va="center")
     if step >= 2:
-        ax.add_patch(Rectangle((100, yP - 0.22), 110, 0.44, fc=RED_L, ec=RED, hatch="///", lw=1))
-        ax.text(125, yP + 0.33, "stalled", fontsize=FS_S, color=RED_D,
+        ax.add_patch(Rectangle((stall, yP - 0.22), x_end - stall, 0.44, fc=RED_L, ec=RED, hatch="///", lw=1))
+        ax.text(stall + 25, yP + 0.33, "stalled", fontsize=FS_S, color=RED_D,
                 ha="center", fontweight="bold")
-        ax.barh(yL, 60, left=90, color=GREEN, height=0.44)
-        ax.text(120, yL, f"lease {K.T_LEASE:.0f} ms", color="white", fontsize=FS,
+        ax.barh(yL, lease_ms, left=last, color=GREEN, height=0.44)
+        ax.text(last + lease_ms / 2, yL, f"lease {val('t_lease')} ms", color="white", fontsize=FS,
                 fontweight="bold", ha="center", va="center")
-        ax.barh(yD, 150, left=0, color=SLATE, height=0.45)
-        ax.text(75, yD, "tracking the last admitted chunk", color="white", fontsize=FS_S,
+        ax.barh(yD, expiry, left=0, color=SLATE, height=0.45)
+        ax.text(expiry / 2, yD, "tracking the last admitted chunk", color="white", fontsize=FS_S,
                 ha="center", va="center")
     if step >= 3:
-        ax.barh(yD, 22, left=150, color=AMBER, height=0.45)
-        ax.barh(yD, 38, left=172, color=RED, height=0.45)
-        ax.text(191, yD, "stop", color="white", fontsize=FS_S, ha="center", va="center",
+        ax.barh(yD, brake - expiry, left=expiry, color=AMBER, height=0.45)
+        ax.barh(yD, x_end - brake, left=brake, color=RED, height=0.45)
+        ax.text((brake + x_end) / 2, yD, "stop", color="white", fontsize=FS_S, ha="center", va="center",
                 fontweight="bold")
-        ax.axvline(150, color=GREEN_D, ls="--", lw=1)
-        ax.axvline(172, color=RED, ls="--", lw=1.2)
-        ax.text(191, yA, "tick + bus\n+ onset 22 ms", fontsize=FS_S - 1, color=AMBER,
-                ha="center", va="center", fontweight="bold")
-        ax.annotate("", xy=(172, -0.72), xytext=(90, -0.72),
+        ax.axvline(expiry, color=GREEN_D, ls="--", lw=1)
+        ax.axvline(brake, color=RED, ls="--", lw=1.2)
+        ax.text((brake + x_end) / 2, yA, f"tick + bus\n+ onset {val('t_tick_bus_onset')} ms", fontsize=FS_S - 1,
+                color=AMBER, ha="center", va="center", fontweight="bold")
+        ax.annotate("", xy=(brake, -0.72), xytext=(last, -0.72),
                     arrowprops=dict(arrowstyle="<->", color=RED_D, lw=1.2))
-        ax.text(126, -0.64, f"{K.LEASE_PATH_MS + K.T_ONSET:.0f} ms = "
-                f"{K.V * (K.LEASE_PATH_MS + K.T_ONSET):.0f} mm to brake onset", fontsize=FS_S,
+        ax.text((last + brake) / 2 - 5, -0.64, f"{val('t_adm_onset')} ms = "
+                f"{val('d_adm_onset')} mm to brake onset", fontsize=FS_S,
                 color=RED_D, ha="center", va="bottom", fontweight="bold", zorder=5,
                 bbox=dict(fc="white", ec="none", pad=0.5))
     ax.set_yticks([yP, yA, yL, yD])
     ax.set_yticklabels(["Chunk policy", "Admission", "Lease", "Drives"], fontsize=FS,
                        fontweight="bold")
     ax.tick_params(axis="y", length=0)
-    ax.set_xlim(0, 210)
+    ax.set_xlim(0, x_end)
     ax.set_ylim(-0.95, 3.55)
     ax.set_xlabel("Time (ms)", fontsize=FS_S)
     ax.spines["left"].set_visible(False)
@@ -458,16 +470,17 @@ def lease(step):
 def openvla():
     w, h = 9.2, 3.8
     fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.45)
-    for i, (lab, t) in enumerate(K.OPENVLA):
+    for i, ((lab, _), key) in enumerate(zip(K.VLA_MS, ("vla_fp16", "vla_fp8", "vla_int4"))):
         y = 2 - i
+        t = num(key)
         ax.barh(y, t, color=NAVY, height=0.42)
-        ax.text(t + 12, y, f"{lab}  {t:.0f} ms", fontsize=FS_S, va="center", color=NAVY,
+        ax.text(t + 12, y, f"{lab}  {val(key)} ms", fontsize=FS_S, va="center", color=NAVY,
                 fontweight="bold")
-    ax.axvline(K.T_LEASE, color=GREEN_D, ls="-", lw=2)
-    ax.text(K.T_LEASE, 2.62, "lease 60", color=GREEN_D, fontsize=FS_S, ha="center",
+    ax.axvline(num("t_lease"), color=GREEN_D, ls="-", lw=2)
+    ax.text(num("t_lease"), 2.62, f"lease {val('t_lease')}", color=GREEN_D, fontsize=FS_S, ha="center",
             va="bottom", fontweight="bold")
-    ax.axvline(K.CEIL, color=RED, ls="--", lw=1.6)
-    ax.text(K.CEIL, 2.62, f"pre-brake ceiling {K.CEIL:.1f}", color=RED, fontsize=FS_S,
+    ax.axvline(num("t_ceiling"), color=RED, ls="--", lw=1.6)
+    ax.text(num("t_ceiling"), 2.62, f"pre-brake ceiling {val('t_ceiling')}", color=RED, fontsize=FS_S,
             ha="left", va="bottom", fontweight="bold")
     ax.set_xlim(0, 1060)
     ax.set_ylim(-0.5, 2.55)
@@ -481,28 +494,26 @@ def openvla():
 def leaserule(step):
     w, h = 14.6, 4.7
     fig, ax = plot_axes(w, h, left=1.2, bottom=1.25, right=0.2, top=0.2)
-    cols = [("Pre-brake\nceiling", 0, K.CEIL, RED),
-            ("tick, bus,\nonset", K.UP0, K.CEIL, AMBER),
-            ("observation\nage\n(Lecture 8)", K.UP0 - K.OBS_AGE, K.UP0, AMBER),
-            ("dispatch to\nadmission\n(Lecture 13)", K.UPPER, K.UP0 - K.OBS_AGE, AMBER),
-            ("Upper limit\non the lease", 0, K.UPPER, GREEN_D)]
+    lr = K.lease
+    ceil, up0 = m(lr.delay_ceiling, "ms"), m(lr.lease_ceiling, "ms")
+    up_age, upper = m(lr.lease_ceiling_after_age, "ms"), m(lr.lease_ceiling_at_admission, "ms")
+    cols = [("Pre-brake\nceiling", 0, ceil, RED, val("t_ceiling")),
+            ("tick, bus,\nonset", up0, ceil, AMBER, "−" + val("t_tick_bus_onset_1")),
+            ("observation\nage\n(Lecture 8)", up_age, up0, AMBER, "−" + val("t_obs_age")),
+            ("dispatch to\nadmission\n(Lecture 13)", upper, up_age, AMBER, "−" + val("t_disp_adm")),
+            ("Upper limit\non the lease", 0, upper, GREEN_D, val("t_lease_upper"))]
     labels = []
-    for i, (lab, lo, hi, c) in enumerate(cols):
-        hatch = None
-        ax.bar(i, hi - lo, bottom=lo, color=c, width=0.6, hatch=hatch)
-        if i in (0, 4):
-            ax.text(i, hi + 6, f"{hi:.1f}", ha="center", va="bottom", fontsize=FS, color=c,
-                    fontweight="bold")
-        else:
-            ax.text(i, hi + 6, f"−{hi - lo:.1f}", ha="center", va="bottom", fontsize=FS,
-                    color=c, fontweight="bold")
+    for i, (lab, lo, hi, c, txt) in enumerate(cols):
+        ax.bar(i, hi - lo, bottom=lo, color=c, width=0.6)
+        ax.text(i, hi + 6, txt, ha="center", va="bottom", fontsize=FS, color=c, fontweight="bold")
         labels.append(lab)
     if step >= 2:
-        ax.bar(5.2, K.T_RENEW + K.T_JIT, color=BLUE, width=0.45)
-        ax.text(5.2, K.T_RENEW + K.T_JIT + 6, f"{K.T_RENEW + K.T_JIT:.0f}", ha="center",
+        floor_ms, lease_ms = num("t_lease_floor"), num("t_lease")
+        ax.bar(5.2, floor_ms, color=BLUE, width=0.45)
+        ax.text(5.2, floor_ms + 6, val("t_lease_floor"), ha="center",
                 va="bottom", fontsize=FS, color=BLUE, fontweight="bold")
-        ax.bar(5.8, K.T_LEASE, color=GREEN, width=0.45)
-        ax.text(5.8, K.T_LEASE + 6, f"{K.T_LEASE:.0f}", ha="center", va="bottom", fontsize=FS,
+        ax.bar(5.8, lease_ms, color=GREEN, width=0.45)
+        ax.text(5.8, lease_ms + 6, val("t_lease"), ha="center", va="bottom", fontsize=FS,
                 color=GREEN_D, fontweight="bold")
         labels_extra = True
     else:
@@ -521,8 +532,8 @@ def timers():
     w, h = 8.2, 5.0
     fig, ax = canvas(w, h)
     items = [("Evidence deadline passes", NAVY),
-             (f"Chunk lease ({K.T_LEASE:.0f} ms) expires", GREEN_D),
-             ("Host heartbeat silent 30 ms", SLATE),
+             (f"Chunk lease ({val('t_lease')} ms) expires", GREEN_D),
+             (f"Host heartbeat silent {val('t_heartbeat')} ms", SLATE),
              ("Protective scanner trips", RED)]
     for i, (lab, c) in enumerate(items):
         y = 4.0 - i * 0.95
@@ -543,7 +554,7 @@ def events():
     w, h = 14.6, 2.9
     fig, ax = canvas(w, h)
     x0, scale = 0.9, 12.6 / 200.0
-    t = [0, K.OBS_AGE, K.OBS_AGE + K.DISP_ADM, K.OBS_AGE + K.DISP_ADM + K.STALL]
+    t = [0, num("t_obs_age"), m(K.AISLE.t_capture_to_admission, "ms"), m(K.AISLE.t_capture_to_brake_onset, "ms")]
     names = ["capture", "dispatch", "admission", "brake onset"]
     ax.plot([x0, x0 + t[-1] * scale], [1.6, 1.6], color=SLATE, lw=2)
     for ti, n in zip(t, names):
@@ -551,9 +562,9 @@ def events():
         ax.plot([x, x], [1.4, 1.8], color=SLATE, lw=2)
         ax.text(x, 1.95, n, ha="center", va="bottom", fontsize=FS, fontweight="bold",
                 color=RED_D if n == "brake onset" else TEXT)
-    spans = [("observation age\n51.6 ms (Lecture 8)", AMBER),
-             ("dispatch to admission\n63.3 ms (Lecture 13)", AMBER),
-             (f"stalled proposer {K.STALL:.0f} ms\n(lease + tick + bus + onset)", GREEN_D)]
+    spans = [(f"observation age\n{val('t_obs_age')} ms (Lecture 8)", AMBER),
+             (f"dispatch to admission\n{val('t_disp_adm')} ms (Lecture 13)", AMBER),
+             (f"stalled proposer {val('t_adm_onset')} ms\n(lease + tick + bus + onset)", GREEN_D)]
     for k, (lab, c) in enumerate(spans):
         a, b = x0 + t[k] * scale, x0 + t[k + 1] * scale
         ax.annotate("", xy=(b, 1.15), xytext=(a, 1.15),
@@ -567,31 +578,31 @@ def rta(step):
     w, h = 14.6, 4.3
     fig, ax = plot_axes(w, h, left=2.6, bottom=1.0, right=0.3, top=0.35)
     y1, y2 = 1.0, 0.0
-    ax.barh(y1, K.C_UNLOADED, color=GRAY, height=0.45)
-    ax.text(K.C_UNLOADED + 4, y1, f"{K.C_UNLOADED:.0f} µs, one unloaded run", va="center",
+    c0, c, b, i_, r, d = (num(k) for k in ("c_unloaded", "t_wcet", "rta_b", "rta_i", "rta_r", "rta_d"))
+    ax.barh(y1, c0, color=GRAY, height=0.45)
+    ax.text(c0 + 4, y1, f"{val('c_unloaded')} µs, one unloaded run", va="center",
             fontsize=FS_S, color=GRAY)
-    ax.barh(y2, K.C_UNLOADED, color=GREEN, height=0.45)
-    ax.add_patch(Rectangle((K.C_UNLOADED, y2 - 0.225), K.C_DECL - K.C_UNLOADED, 0.45,
+    ax.barh(y2, c0, color=GREEN, height=0.45)
+    ax.add_patch(Rectangle((c0, y2 - 0.225), c - c0, 0.45,
                            fc=GREEN_L, ec=GREEN, hatch="///"))
-    ax.text(K.C_DECL / 2, y2 - 0.38, f"C = {K.C_DECL:.0f} (declared WCET)", ha="center",
+    ax.text(c / 2, y2 - 0.38, f"C = {val('t_wcet')} (declared WCET)", ha="center",
             va="top", fontsize=FS_S, color=GREEN_D, fontweight="bold")
     if step >= 2:
-        ax.barh(y2, K.B, left=K.C_DECL, color=AMBER, height=0.45)
-        ax.barh(y2, K.I, left=K.C_DECL + K.B, color="#B45309", height=0.45)
-        ax.text(K.C_DECL + K.B / 2, y2 + 0.33, f"B {K.B:.0f}", ha="center", va="bottom",
+        ax.barh(y2, b, left=c, color=AMBER, height=0.45)
+        ax.barh(y2, i_, left=c + b, color="#B45309", height=0.45)
+        ax.text(c + b / 2, y2 + 0.33, f"B {val('rta_b')}", ha="center", va="bottom",
                 fontsize=FS_S, color=AMBER, fontweight="bold")
-        ax.text(K.C_DECL + K.B + K.I / 2, y2 + 0.33, f"I {K.I:.0f}", ha="center", va="bottom",
+        ax.text(c + b + i_ / 2, y2 + 0.33, f"I {val('rta_i')}", ha="center", va="bottom",
                 fontsize=FS_S, color="#B45309", fontweight="bold")
-        ax.text(K.R / 2 + 60, y2 - 0.38, "", fontsize=FS_S)
-        ax.text(K.R + 4, y2 - 0.38, f"R = {K.R:.0f}", ha="left", va="top", fontsize=FS,
+        ax.text(r + 4, y2 - 0.38, f"R = {val('rta_r')}", ha="left", va="top", fontsize=FS,
                 color=TEXT, fontweight="bold")
     if step >= 3:
-        ax.axvline(K.DEADLINE, color=RED, ls="--", lw=1.6)
-        ax.text(K.DEADLINE - 4, 1.5, f"deadline D = {K.DEADLINE:.0f} µs", color=RED,
+        ax.axvline(d, color=RED, ls="--", lw=1.6)
+        ax.text(d - 4, 1.5, f"deadline D = {val('rta_d')} µs", color=RED,
                 fontsize=FS_S, fontweight="bold", va="center", ha="right")
-        ax.annotate("", xy=(K.DEADLINE, y2), xytext=(K.R, y2),
+        ax.annotate("", xy=(d, y2), xytext=(r, y2),
                     arrowprops=dict(arrowstyle="<->", color=RED_D, lw=1.2))
-        ax.text(K.DEADLINE + 4, y2, f"margin {K.DEADLINE - K.R:.0f}", va="center",
+        ax.text(d + 4, y2, f"margin {val('rta_margin')}", va="center",
                 fontsize=FS_S, color=RED_D, fontweight="bold")
     ax.set_yticks([y1, y2])
     ax.set_yticklabels(["Observed", "Bound"], fontsize=FS, fontweight="bold")
@@ -607,16 +618,17 @@ def rta(step):
 def runmax():
     w, h = 9.6, 4.7
     fig, ax = plot_axes(w, h, left=1.9, bottom=1.0, right=0.25, top=0.15)
-    ns = np.unique(np.logspace(1, np.log10(60000), 60).astype(int))
+    ns = np.unique(np.logspace(1, np.log10(K.JSTAT["heavy"].count), 60).astype(int))
     for key, c, lab in (("heavy", RED, "all cores loaded"), ("light", GRAY, "ordinary load")):
         a = K.JIT[key]
         mx = np.maximum.accumulate(a)
         ax.plot(ns, mx[ns - 1], color=c, lw=2)
-        p99 = [np.percentile(a[:n], 99) for n in ns]
+        p99 = [m(K.TAIL.solve(a[:n], "microsecond").p99, "us") for n in ns]
         ax.plot(ns, p99, color=c, lw=1.5, ls="--")
-    ax.text(60000, K.JSTAT["heavy"]["mx"] * 1.15, f"max {K.JSTAT['heavy']['mx'] / 1000:.1f} ms",
+    hv = K.JSTAT["heavy"]
+    ax.text(hv.count, m(hv.maximum, "us") * 1.15, f"max {val('jit_max_heavy_ms')} ms",
             ha="right", va="bottom", fontsize=FS_S, color=RED, fontweight="bold")
-    ax.text(60000, K.JSTAT["heavy"]["p99"] * 1.2, f"p99 {K.JSTAT['heavy']['p99']:.0f} µs",
+    ax.text(hv.count, m(hv.p99, "us") * 1.2, f"p99 {val('jit_p99_heavy')} µs",
             ha="right", va="bottom", fontsize=FS_S, color=RED)
     ax.text(12, 25000, "solid: largest so far\ndashed: p99 so far", fontsize=FS_S, color=TEXT,
             va="bottom")
@@ -638,20 +650,24 @@ def runmax():
 def bus():
     w, h = 9.0, 4.4
     fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.45)
-    rows = [(K.BUSES[0][0], K.BUSES[0][1], RED), (K.BUSES[1][0], K.BUSES[1][1], AMBER),
-            (K.BUSES[2][0], K.BUSES[2][1], AMBER), ("EtherCAT, one frame, 9 axes", K.ECAT, GREEN)]
-    for i, (lab, v, c) in enumerate(rows):
+    rows = [(f"One CAN FD bus, {K.CAN_ONE.num_axes} axes", K.one, RED),
+            (f"CAN FD, arm ({K.CAN_ARM.num_axes} axes)", K.arm, AMBER),
+            (f"CAN FD, base ({K.CAN_BASE.num_axes} axes)", K.base, AMBER),
+            (f"EtherCAT, one frame, {val('n_axes')} axes", K.ecat, GREEN)]
+    cycle = m(K.CAN_ONE.cycle, "us")
+    for i, (lab, res, c) in enumerate(rows):
         y = 3 - i
+        v = m(res.occupancy, "us")
         ax.barh(y - 0.12, v, color=c, height=0.38)
         ax.text(5, y + 0.22, lab, fontsize=FS_S, color=c, fontweight="bold", va="bottom")
-        txt = f"{v:,.1f} µs ({100 * v / K.CYCLE:.1f}%)"
+        txt = f"{v:,.1f} µs ({100 * res.utilization:.1f}%)"
         if v > 600:
             ax.text(v - 15, y - 0.12, txt, fontsize=FS_S, color="white", va="center", ha="right",
                     fontweight="bold")
         else:
             ax.text(v + 15, y - 0.12, txt, fontsize=FS_S, color=c, va="center")
-    ax.axvline(K.CYCLE, color=SLATE, ls="--", lw=1.4)
-    ax.text(K.CYCLE, 3.62, "1 ms bus cycle", fontsize=FS_S, color=SLATE, ha="center",
+    ax.axvline(cycle, color=SLATE, ls="--", lw=1.4)
+    ax.text(cycle, 3.62, f"{val('t_bus')} ms bus cycle", fontsize=FS_S, color=SLATE, ha="center",
             va="bottom", fontweight="bold")
     ax.set_xlim(0, 1500)
     ax.set_ylim(-0.5, 3.6)
@@ -688,7 +704,8 @@ def solewriter(step):
             fontsize=FS, color=RED_D, alpha=a2, linespacing=1.15)
     ax.add_patch(FancyArrowPatch((8.4, 3.9), (11.2, 3.0), arrowstyle="-|>", mutation_scale=10,
                                  color=RED, lw=1.8, ls="--", shrinkA=0, shrinkB=0, alpha=a2))
-    ax.text(10.0, 3.95, f"writes {K.CAL_WRITE_A:.1f} A directly", fontsize=FS, color=RED_D,
+    # 35.0 A: the chapter's illustrative given, typed in its prose (NS 4.6)
+    ax.text(10.0, 3.95, "writes 35.0 A directly", fontsize=FS, color=RED_D,
             fontweight="bold", va="bottom", alpha=a2)
     ax.text(0.1, 0.45, "Mailbox still reads 0 m/s; no check saw the write.", fontsize=FS_S,
             color=RED_D, fontweight="bold", va="center", alpha=a2)
