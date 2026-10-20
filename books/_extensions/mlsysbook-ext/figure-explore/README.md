@@ -139,11 +139,20 @@ learner readability; this does not constitute student testing. A source-art
 mapping must preserve the illustrated workload and spatial relationships.
 Alternative toy cases must remain explicit supporting examples.
 
-The current integrated HTML run is
+The most recent full four-volume HTML run is
 `books/_build/parallel/20261020-141018-96957`; all four full-volume HTML jobs
 passed. All 100 selected figures are enrolled exactly once in their owning
 chapters, with matching packaged controller, data, source, and artwork hashes.
 The other 637 cataloged figures retain their static presentation.
+
+A later focused quantization refinement is reviewed in the selective chapter
+run `books/_build/parallel/20261020-151608-32249`. It distinguishes stored sums
+from in-transit products, selects the current multiplier pair, and recenters
+the next operation after phone panning. Separate technical and learner-view
+retakes cover this controller; the other implementations retain their existing
+records and runtime bytes. The original diagram, prose, numerical exports,
+and shared player are unchanged. This selective build does not constitute a
+new full-volume HTML, PDF, or EPUB review.
 
 The 86 newer modules have separate technical and learner-view role records.
 The asynchronous timing and arm comparison receive new production reviews;
@@ -154,8 +163,9 @@ review is not student testing. The original-art catalog binds acceptance to
 source, artwork, runtime, and actual owning chapter HTML; stale records return
 to awaiting review.
 
-Fresh controls checks cover all 100 implementations in Chromium and WebKit,
-on desktop and phone, in both themes: 800 passing profiles against this build.
+The full four-volume run includes controls checks for all 100 implementations
+in Chromium and WebKit, on desktop and phone, in both themes: 800 passing
+profiles against that full build.
 They verify speed choices, paused diagram identity, scoped shortcuts, restart,
 full-window bounds, sticky controls, and Escape focus restoration. None of
 these UI profiles is inherited from the preceding build. Separate integration

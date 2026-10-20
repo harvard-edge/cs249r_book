@@ -30,14 +30,14 @@
   // The original generic activation curves remain visible and explicitly distinguished.
   const steps=[
    ['Start with two floating-point inputs','Follow one dot product through the original pipeline. The top branch carries activations; the lower branch carries weights.'],
-   ['Quantize the activations','Divide each activation by its scale and round. The stored integers are 3 and −5; they represent 0.3 and −0.5.'],
-   ['Quantize the weights','The weight branch uses its own scale. Its stored integers are 4 and 2, representing 0.4 and 0.2.'],
+   ['Quantize the activations','Divide each activation by its scale and round. The converted integers appear when this action finishes.'],
+   ['Quantize the weights','The weight branch uses its own scale. Follow its inputs into the quantizer; the converted integers appear on arrival.'],
    ['Feed the integer operands','Both INT8 branches feed the same matrix multiplication. This small example computes one output from two pairs.'],
-   ['Accumulate the first product','Multiply 3 by 4. Store the partial sum in the INT32 accumulator, not in an INT8 output.'],
-   ['Accumulate the second product','Add −5 times 2 to the existing partial sum. Both contributions have now arrived.'],
-   ['Requantize the completed sum','Convert from the accumulator scale to the output scale, round, and clamp to the INT8 range. Here the integer remains 2.'],
+   ['Accumulate the first product','Send the first product to the INT32 accumulator. The stored sum changes only when the product arrives.'],
+   ['Accumulate the second product','The first partial sum remains stored until the second product arrives. Addition completes the reduction before conversion to INT8.'],
+   ['Requantize the completed sum','All products must arrive before this conversion. Rescale the completed sum, round, and clamp to the INT8 range.'],
    ['Apply the activation','This worked case uses ReLU: negative represented values become zero. The positive value here passes through unchanged.'],
-   ['Write the INT8 output','The final stored integer is 2, representing 0.02. Quantization introduced error; this is a numerical example, not a speedup claim.']
+   ['Write the INT8 output','Write the completed integer output. Its real value depends on the output scale. This numerical example does not establish a speedup.']
   ].map(([label,description])=>({label,description}));
   const equations=[
    `x = ${vector(d.x)}; w = ${vector(d.w)}`,
@@ -50,18 +50,25 @@
    `max(0, ${d.requantized}) = ${d.output}`,
    `${d.output} × ${d.sy} = ${d.reconstructed}; floating-point reference = ${d.float_reference}`
   ];
-  let calculation, assumptions, index=0;
+  let calculation, calculationLabel, calculationValue, assumptions;
   const active=[0,1,3,4,5,5,6,7,8];
+  function centerBoxes(indices) {
+   if(canvas.scrollWidth<=canvas.clientWidth)return;
+   const left=Math.min(...indices.map(j=>cells[j].x)),right=Math.max(...indices.map(j=>cells[j].x+cells[j].w));
+   canvas.scrollLeft=Math.max(0,((left+right)/2-artX)/artWidth*svg.getBoundingClientRect().width-canvas.clientWidth/2);
+  }
   function render(i,{stage,details}) {
    overlay.querySelectorAll('.oq-token').forEach(t=>t.remove());
-   index=i;if(!canvas.isConnected)stage.append(canvas,cue);
-   if(!calculation){calculation=document.createElement('p');calculation.className='oq-calculation';assumptions=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Example assumptions';const note=document.createElement('p');note.textContent=`Symmetric signed INT8; both zero-points are 0. Input scale ${d.sx}, weight scale ${d.sw}, output scale ${d.sy}. Round to nearest, with ties away from zero; saturate to [−128, 127] after rounding. No bias. Movement illustrates logical data flow, not measured hardware timing. The original activation curves are generic; this example applies ReLU.`;assumptions.append(summary,note);details.append(calculation,assumptions);}
-   calculation.textContent=equations[i];
+   if(!calculation){calculation=document.createElement('p');calculation.className='oq-calculation';calculationLabel=document.createElement('span');calculationLabel.className='oq-calculation-label';calculationValue=document.createElement('span');calculation.append(calculationLabel,calculationValue);assumptions=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Example assumptions';const note=document.createElement('p');note.textContent=`Symmetric signed INT8; both zero-points are 0. Input scale ${d.sx}, weight scale ${d.sw}, output scale ${d.sy}. Round to nearest, with ties away from zero; saturate to [−128, 127] after rounding. No bias. Movement illustrates logical data flow, not measured hardware timing. The original activation curves are generic; this example applies ReLU.`;assumptions.append(summary,note);details.append(assumptions);}
+   if(!canvas.isConnected)stage.append(calculation,canvas,cue);
+   calculationLabel.textContent=i===0?'Initial values':i===3?'Operands ready · INT32 sum initialized to zero':'Result now stored';
+   calculationValue.textContent=equations[i];
+   delete root.dataset.oqPending;
    const pair=p=>`${number(d.qx[p])} × ${number(d.qw[p])}`;
-   const values=[vector(d.x),i>=1?vector(d.qx):'—',vector(d.w),i>=2?vector(d.qw):'—',i<3?'—':i===3?`${d.qx.length} pairs`:pair(i===4?0:1),i<4?'empty':String(i===4?d.products[0]:d.accumulator),i>=6?String(d.requantized):'—',i>=7?String(d.output):'—',i>=8?String(d.output):'—'];
-   cells.forEach((c,j)=>{c.value.textContent=values[j];c.g.classList.toggle('oq-active',j===active[i]);});
+   const values=[vector(d.x),i>=1?vector(d.qx):'—',vector(d.w),i>=2?vector(d.qw):'—',i<3?'—':i===3?`${d.qx.length} pairs`:pair(i===4?0:1),i<3?'not started':i===3?'0':String(i===4?d.products[0]:d.accumulator),i>=6?String(d.requantized):'—',i>=7?String(d.output):'—',i>=8?String(d.output):'—'];
+   cells.forEach((c,j)=>{c.value.textContent=values[j];c.g.classList.toggle('oq-active',j===active[i]);c.g.classList.remove('oq-pending','oq-source');});
    root.dataset.quantizationStep=String(i);
-   if(canvas.scrollWidth>canvas.clientWidth){const c=cells[active[i]];canvas.scrollLeft=Math.max(0,(c.x+c.w/2)/506.511*svg.getBoundingClientRect().width-canvas.clientWidth/2);}
+   centerBoxes([active[i]]);
   }
   // Dock outside the box borders. The packet follows the original arrows;
    // its payload badge stays in an empty lane, away from every label.
@@ -70,8 +77,24 @@
   const routes={1:[rightPort(0),leftPort(1)],2:[rightPort(2),leftPort(3)],3:[rightPort(1),[160.6,13.1],[160.6,28.73]],4:[rightPort(4),leftPort(5)],5:[rightPort(4),leftPort(5)],6:[rightPort(5),leftPort(6)],7:[rightPort(6),leftPort(7)],8:[rightPort(7),leftPort(8)]};
   function transition({from,to,duration,animate,onFrame}) {
    if(to!==from+1||!routes[to])return;
-   calculation.textContent=equations[to];
-   cells.forEach((c,j)=>c.g.classList.toggle('oq-active',to===3?(j===1||j===3):j===active[to]));
+   const source=to===3?[1,3]:[({1:0,2:2,4:4,5:4,6:5,7:6,8:7})[to]];
+   root.dataset.oqPending=String(to);
+   calculationLabel.textContent='In transit · dashed box is waiting';
+   const waiting=[
+    '', `Activation inputs → quantizer; converted values pending`,
+    `Weight inputs → quantizer; converted values pending`,
+    `INT8 operands → integer matmul; INT32 accumulation not started`,
+    `INT32 sum held at 0; incoming product ${d.qx[0]} × ${d.qw[0]} = ${d.products[0]}`,
+    `INT32 sum held at ${d.products[0]}; incoming product ${number(d.qx[1])} × ${d.qw[1]} = ${number(d.products[1])}`,
+    `Completed INT32 sum ${d.accumulator} → requantizer; INT8 result pending`,
+    `Requantized integer ${d.requantized} → ReLU; activation result pending`,
+    `Activated integer ${d.output} → output; write pending`
+   ];
+   calculationValue.textContent=waiting[to];
+   // Operand selection is read-only; only endpoint render commits the sum.
+   if(to===4||to===5){const pairIndex=to-4;cells[4].value.textContent=`${number(d.qx[pairIndex])} × ${number(d.qw[pairIndex])}`;}
+   cells.forEach((c,j)=>{c.g.classList.remove('oq-active');c.g.classList.toggle('oq-source',source.includes(j));c.g.classList.toggle('oq-pending',j===active[to]);});
+   centerBoxes([...source,active[to]]);
    const tracks=to===3?[{route:routes[to],text:'xq',lane:-12},{route:[rightPort(3),[160.6,76.82],[160.6,61.19]],text:'wq',lane:103}]:[{route:routes[to],lane:to===2?103:to===1?-12:13,text:['','FP x','FP w','',String(d.products[0]),number(d.products[1]),String(d.accumulator),String(d.requantized),String(d.output)][to]}];
    tracks.forEach(({route,text,lane})=>{const token=node('g',{class:'oq-token'});
    const packet=node('rect',{class:'oq-packet',x:-2.5,y:-2.5,width:5,height:5,rx:1});
