@@ -338,6 +338,27 @@ deck-svgs:
 deck: deck-svgs
 	$(call build-chapter-impl,vol$(V),$(BUILD_DIR)/vol$(V),$(D))
 
+# Computed values. A deck whose images/calcs.py uses deckvals writes
+# images/numbers.tex from MLSysIM and its cited inputs; the deck prints each
+# value with \val{key}. numbers.tex is committed, so a deck builds with LaTeX
+# alone. Run `make numbers` after changing a calcs.py or the MLSysIM registry;
+# `make numbers-check` (CI) fails if any committed numbers.tex is stale.
+#   make numbers              every such deck
+#   make numbers V=2 D=02_compute_infrastructure
+NUMBER_DECKS = $(if $(D),vol$(V)/$(D)/images,$(patsubst %/calcs.py,%,$(shell grep -l "from deckvals import" vol*/*/images/calcs.py 2>/dev/null)))
+
+numbers:
+	@for d in $(NUMBER_DECKS); do \
+		(cd $$d && $(PY) calcs.py > /dev/null) && echo "  ✓ $$d/numbers.tex" || { echo "  ✗ $$d/calcs.py failed"; exit 1; }; \
+	done
+
+numbers-check: numbers
+	@stale=$$(git status --porcelain -- $(addsuffix /numbers.tex,$(NUMBER_DECKS))); \
+	if [ -n "$$stale" ]; then \
+		echo "  ✗ numbers.tex differs from calcs.py output; run make numbers and commit:"; \
+		echo "$$stale" | sed 's/^/    /'; git diff -- $(addsuffix /numbers.tex,$(NUMBER_DECKS)) | head -40; exit 1; \
+	else echo "  ✓ every numbers.tex matches its calcs.py"; fi
+
 # Fit check: LaTeX overflow mapped to frames, plus rendered bleed per page.
 fit:
 	@$(PY) tools/fitcheck.py vol$(V)/$(D)/$(D).tex --pdf $(BUILD_DIR)/vol$(V)/$(D).pdf --log vol$(V)/$(D)/$(D).log
