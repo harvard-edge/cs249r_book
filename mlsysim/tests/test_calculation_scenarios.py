@@ -4887,3 +4887,76 @@ def test_quantized_decode_energy_and_deployment_profile():
     r = Scenarios.ResNet50Int8ProfileH100
     assert r.top1_drop == pytest.approx(0.3) and r.passes_top1 and not r.passes_calibration
     assert r.size_reduction == pytest.approx(4) and r.energy_improvement == pytest.approx(r.throughput_gain)
+
+
+def test_partition_screen_and_scalability_law():
+    """Screening a work partition and its universal-scalability-law form (added 2026-10-20)."""
+    s = Scenarios.RepairPartitionScreen
+    assert s.best_workers == 6 and s.best_time == pytest.approx(0.43333333)
+    assert s.elapsed[4] == pytest.approx(0.46) and s.elapsed[8] == pytest.approx(0.44)
+    assert s.speedup_cap == pytest.approx(5) and s.continuous_best == pytest.approx(6.3245553)
+    h = Scenarios.RepairPartitionScreenHalvedOverhead
+    assert h.best_workers == 9 and s.best_speedup < h.best_speedup < s.speedup_cap
+    n = Scenarios.NinetyPercentPartitionScreen
+    assert n.best_workers == 7 and n.best_speedup == pytest.approx(2.8688525)
+    assert Scenarios.NinetyPercentPartitionScreenHalvedOverhead.best_workers == 9
+    hs = Scenarios.NinetyPercentPartitionScreenHalvedSerial
+    assert hs.best_workers == 7 and hs.speedup_cap == pytest.approx(20)
+    u = Scenarios.RepairPartitionScalability
+    assert u.best_workers == s.best_workers and u.peak_capacity == pytest.approx(1 / s.best_time)
+    assert u.first_slower == 41 == int(u.retrograde_threshold) + 1
+    r = Scenarios.ResearchFanoutScalability
+    assert r.best_workers == 21 and r.peak_capacity == pytest.approx(5.46875)
+
+
+def test_delegation_break_even_schedule_and_handoffs():
+    """Token break-even, the dependency schedule, reference passing, and message rounds (added 2026-10-20)."""
+    b = Scenarios.ResearchSystemTokenBreakEven
+    assert b.token_multiple == pytest.approx(3.75) and b.max_single_acceptance == pytest.approx(0.26666667)
+    assert b.cost_ratio_if_gain_is_acceptance == pytest.approx(1.9716088) and b.required_multi_acceptance == pytest.approx(2.25)
+    d = Scenarios.InterfaceMigrationSchedule
+    assert d.work.m_as("s") == pytest.approx(275) and d.makespan.m_as("s") == pytest.approx(174.5)
+    assert d.peak_slots == 3 and d.free_float[6].m_as("s") == pytest.approx(26.5)
+    assert d.finish[2] == d.finish[3] and d.speedup == pytest.approx(1.5759312)
+    assert Scenarios.InterfaceMigrationScheduleShorterV5.makespan.m_as("s") == pytest.approx(154.5)
+    assert Scenarios.InterfaceMigrationScheduleShorterV6.makespan == d.makespan
+    r = Scenarios.SixChildReferencePassing
+    assert r.pasted_tokens == 288_000 and r.reference_total_tokens == 23_700
+    assert r.reference_cost.m_as("USD") == pytest.approx(0.0711) and r.reduction == pytest.approx(12.151899)
+    assert r.break_even_read_tokens == 47_650 and r.full_read_tokens > r.pasted_tokens
+    m = Scenarios.EightAgentMessageRound
+    assert (m.mesh_deliveries, m.supervisor_deliveries, m.ratio) == (56, 16, 3.5)
+
+
+def test_shared_writes_reviewers_and_fanout_deadline():
+    """Write collisions, correlated reviewers, and a fan-out deadline (added 2026-10-20)."""
+    w = Scenarios.ThousandFileSharedWrites
+    assert w.collision[2] == pytest.approx(0.0960315) and w.collision[8] == pytest.approx(0.9442061)
+    assert w.even_odds_fleet == 5 and abs(w.disjoint[8] - w.disjoint_approx[8]) < 0.01
+    assert Scenarios.TwoThousandFileSharedWrites.even_odds_fleet == 6
+    v = Scenarios.FiveCorrelatedReviewers
+    assert v.independent_majority(5) == pytest.approx(0.05792) and v.correlated_majority(5) == pytest.approx(0.1667566)
+    assert v.floor == pytest.approx(0.1495420, rel=1e-5)
+    assert v.floor < v.correlated_majority(15) < v.correlated_majority(5)
+    assert v.independent_unanimous == pytest.approx(0.00032) and v.unanimous_ratio == pytest.approx(122.447619)
+    f = Scenarios.EightWorkerDeadlineFanout
+    assert f.all_on_time == pytest.approx(0.43046721) and f.quorum_on_time == pytest.approx(0.96190821)
+    assert f.even_odds_workers == 7 and f.all_on_time_by_fleet[7] < 0.5 < f.all_on_time_by_fleet[6]
+
+
+def test_credit_window_allowances_and_delegation_cohort():
+    """A credit window, split allowances, and the matched delegation cohort (added 2026-10-20)."""
+    c = Scenarios.DiffReviewCreditWindow
+    assert c.service_rate.m_as("1/s") == pytest.approx(0.08) and c.backlog == pytest.approx(2952)
+    assert c.backlog_wait.m_as("hour") == pytest.approx(10.25) and c.window_residence.m_as("s") == pytest.approx(100)
+    assert c.window_for_target == 4
+    a = Scenarios.RemediationChildAllowances
+    admitted, left = a.admission
+    assert a.available.m_as("USD") == 39 and a.copied_liability.m_as("USD") == 60
+    assert admitted == [True, False, False] and left.m_as("USD") == 19 and a.equal_allowance.m_as("USD") == 13
+    assert a.naive_allowance.m_as("USD") == pytest.approx(50 / 3) and a.nested_request < a.equal_allowance
+    m = Scenarios.MatchedDelegationCohort
+    assert m.spend(m.single).m_as("USD") == pytest.approx(12) and m.spend(m.delegated).m_as("USD") == pytest.approx(18)
+    assert m.discarded(m.single).m_as("USD") == pytest.approx(3) and m.discarded(m.delegated).m_as("USD") == pytest.approx(6)
+    assert m.cost_ratio == pytest.approx(1.5) and m.marginal_on_time_cost.m_as("USD") == pytest.approx(0.75)
+    assert not m.passes(m.single) and m.passes(m.delegated) and m.discard_share == pytest.approx(1 / 3)

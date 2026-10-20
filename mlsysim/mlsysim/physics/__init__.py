@@ -885,3 +885,30 @@ __all__ += [
     "calc_block_bits_per_weight",
     "calc_accumulator_headroom",
 ]
+
+# --- Coordinating several agents: partitions, schedules, shared writes, correlated votes (added 2026-10-20) ---
+from .coordination import (
+    calc_partition_elapsed,
+    calc_full_mesh_deliveries,
+    calc_supervisor_deliveries,
+    calc_earliest_schedule,
+    calc_disjoint_writes,
+    calc_disjoint_writes_approx,
+    calc_binomial_tail,
+    calc_beta_mixture_shape,
+    calc_beta_binomial_pmf,
+    calc_beta_tail,
+)
+
+__all__ += [
+    "calc_partition_elapsed",
+    "calc_full_mesh_deliveries",
+    "calc_supervisor_deliveries",
+    "calc_earliest_schedule",
+    "calc_disjoint_writes",
+    "calc_disjoint_writes_approx",
+    "calc_binomial_tail",
+    "calc_beta_mixture_shape",
+    "calc_beta_binomial_pmf",
+    "calc_beta_tail",
+]
