@@ -4047,3 +4047,86 @@ def test_carbon_priced_region_placement():
     assert r.best_region == "Quebec" and r.best_region_untaxed == "Quebec"
     assert r.objective_value == approx(25336888.4)
     assert r.objective["US_Avg"] - r.objective["Quebec"] == approx(531280.0)
+
+
+# --- Agent evaluation (added 2026-10-20) ---------------------------------------
+def test_recurring_task_consistency():
+    r = Scenarios.RecurringTaskConsistency.result
+    assert r.success[8] == approx(0.43047) and 1 - r.required_step_error == approx(0.98692)
+    assert r.error_ratio == approx(7.6431)
+    assert Scenarios.RecurringTaskConsistencyLowerRate.result.success[8] == approx(0.16777)
+    assert Scenarios.RecurringTaskConsistencyHalvedFailure.result.success[8] == approx(0.66342)
+    assert Scenarios.RefundAnswerFiveSessions.result.success[5] == approx(0.77378)
+
+
+def test_verdicts_grader_and_agreement():
+    v = Scenarios.UnresolvedTrialsOfHundred.result
+    assert (v.default_rate, v.upper_bound) == (0.6, 0.75) and v.dropped_rate == approx(0.70588)
+    g = Scenarios.ResearchReportJudgeCalibration.result
+    assert g.false_accept_rate == approx(0.2) and g.false_accept_low == approx(0.12703)
+    assert g.false_accept_high == approx(0.30046) and g.failure_among_accepted == approx(0.12308)
+    assert g.false_reject_rate == approx(0.05)
+    j = Scenarios.IndependentJudgesNinetyPercent
+    assert j.agreement == approx(0.82) and abs(j.kappa) < 1e-12
+    assert Scenarios.IndependentJudgesEightyPercent.agreement == approx(0.68)
+
+
+def test_task_repeat_budget_and_intervals():
+    t = Scenarios.RepairSuiteTaskRepeatBudget.result
+    assert t.within_variance == approx(0.16) and t.variance_ratio == approx(2.0)
+    assert t.free_se[1] == approx(0.02) and t.free_se[3] == approx(0.025820) and t.free_se[6] == approx(0.032660)
+    assert (t.best_runs, t.best_tasks) == (5, 40) and t.best_se == approx(0.052915)
+    assert t.paid_tasks[1] == 54 and t.paid_se[1] == approx(0.066667)
+    w = Scenarios.FiftyTaskIntervals.result
+    assert w.wald[0] == (0.0, 0.0) and w.wilson[0][1] == approx(0.071348)
+    assert w.wald[2][0] == approx(-0.014316) and w.wilson[2][0] == approx(0.011039) and w.wilson[2][1] == approx(0.13460)
+    p = Scenarios.AcceptanceRatePlanning.result
+    assert p.half_width == approx(0.097998) and p.wilson_half_width == approx(0.096168)
+    assert p.samples_for_target == 2401 and p.per_arm[0.04] == approx(2450) and p.per_arm[0.02] == approx(9800)
+
+
+def test_paired_comparison_and_published_newcombe_examples():
+    from mlsysim.physics import calc_newcombe_paired_difference, calc_mcnemar_exact_two_sided
+    r = Scenarios.RepairCandidatePairedComparison.result
+    assert r.difference == approx(0.04) and r.lower == approx(-0.032063) and r.upper == approx(0.11121)
+    assert not r.noninferior and r.exact_p == approx(0.36159)
+    assert (r.pairs_if_gain_holds, r.pairs_if_no_gain) == (217, 1948)
+    assert r.paired_share == approx(0.40464) and r.independent_multiple == approx(2.4713)
+    assert r.paired_half_width == approx(0.071281)
+    # Newcombe (1998), Table III: (a, b, c, d) = (20, 2, 12, 16) and (27, 0, 0, 27), method 10.
+    z = 1.959963984540054
+    _, lo, hi = calc_newcombe_paired_difference(20, 12, 2, 16, z)
+    assert lo == pytest.approx(0.0562, abs=5e-5) and hi == pytest.approx(0.3292, abs=5e-5)
+    _, lo, hi = calc_newcombe_paired_difference(27, 0, 0, 27, z)
+    assert lo == pytest.approx(-0.0351, abs=5e-5) and hi == pytest.approx(0.0351, abs=5e-5)
+    assert calc_mcnemar_exact_two_sided(0, 0) == 1.0
+
+
+def test_leaderboards_and_selection_cost():
+    s = Scenarios.TerminalBenchScaffoldSpread.result
+    assert s.models == 16 and s.widest == "claude-opus-4-6" and s.widest_count == 11
+    assert s.median_spread == approx(0.13589) and s.median_se == approx(0.027)
+    t = Scenarios.SweBenchVerifiedRankTies.result
+    assert (t.models, t.pairs, t.tied) == (33, 24, 24) and t.needed_gap == approx(0.054308)
+    m = Scenarios.TwoTaskTypeConsistency.result
+    assert m.same_task_all == approx(0.53) and m.new_tasks_all == approx(0.49)
+    c = Scenarios.CappedCandidateSelection.result
+    assert c.availability == approx(0.784) and c.expected_candidates == approx(1.96)
+    assert c.batch_per_accepted.to("USD").magnitude == approx(0.15306)
+    assert c.sequential_per_accepted.to("USD").magnitude == approx(0.1) and c.batch_premium == approx(0.53061)
+
+
+def test_pass_pow_k_and_paired_run_summary():
+    from mlsysim.physics import calc_pass_pow_k_unbiased
+    from mlsysim.solvers import PairedRunEvaluationModel
+    assert calc_pass_pow_k_unbiased(8, 6, 2) == approx(15 / 28) and calc_pass_pow_k_unbiased(8, 1, 2) == 0.0
+    rows = []
+    for task, base, cand in (("a", (1, 1), (1, 1)), ("b", (0, 1), (1, 1))):
+        for run in range(2):
+            for cfg, ok in (("base", base[run]), ("cand", cand[run])):
+                rows.append(dict(task=task, run=run, config=cfg, verdict="pass" if ok else "fail",
+                                 visible="pass", calls=1, input_tokens=10, output_tokens=5, seconds=1.0))
+    r = PairedRunEvaluationModel().solve(rows, ["a", "b"], 2, "base", "cand")
+    assert r.accepted == {"base": 3, "cand": 4} and (r.both, r.candidate_only, r.baseline_only, r.neither) == (3, 1, 0, 0)
+    assert r.pass_pow["base"][2] == approx(0.5) and r.pass_at["base"][2] == approx(1.0)
+    assert r.visible_pass_sealed_reject["base"] == 1 and r.tokens_per_accepted_ratio == approx(0.75)

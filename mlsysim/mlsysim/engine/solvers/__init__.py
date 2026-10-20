@@ -569,3 +569,32 @@ __all__ += [
     "RollingWindowModel",
     "CarbonPricedPlacementModel",
 ]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    VerdictBoundsModel,
+    GraderCalibrationModel,
+    TaskRepeatAllocationModel,
+    BinomialIntervalsModel,
+    ProportionPlanningModel,
+    PairedComparisonModel,
+    ScaffoldSpreadModel,
+    LeaderboardTiesModel,
+    TaskMixConsistencyModel,
+    CappedSelectionCostModel,
+    PairedRunEvaluationModel,
+)
+
+__all__ += [
+    "VerdictBoundsModel",
+    "GraderCalibrationModel",
+    "TaskRepeatAllocationModel",
+    "BinomialIntervalsModel",
+    "ProportionPlanningModel",
+    "PairedComparisonModel",
+    "ScaffoldSpreadModel",
+    "LeaderboardTiesModel",
+    "TaskMixConsistencyModel",
+    "CappedSelectionCostModel",
+    "PairedRunEvaluationModel",
+]

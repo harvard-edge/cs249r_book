@@ -36,6 +36,7 @@ IncidentReports = _load("incident_reports", "IncidentReports", "Values reported 
 # Model calls and agent trajectories (added 2026-10-20)
 ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
 MultiAgentFailures = _load("multi_agent_failures", "MultiAgentFailures", "Cited multi-agent failure-taxonomy results (MAST, Cemri et al. 2025).")  # added 2026-10-20
+AgentEvaluation = _load("agent_evaluation", "AgentEvaluation", "Cited agent-evaluation results (tau-bench consistency bounds, METR reward-hacking counts, the HumanEval cost study's sample).")  # added 2026-10-20
 SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
 # Added 2026-10-20: benchmark error rates and documented accuracy failures.
 PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
@@ -422,6 +423,9 @@ class Literature(Registry):
     MultiAgentFailures = MultiAgentFailures  # added 2026-10-20
     AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
+    AgentEvaluation = AgentEvaluation  # added 2026-10-20
+    JudgePositionBias = _series.JudgePositionBias  # added 2026-10-20
+    HumanEvalAgentCost = _series.HumanEvalAgentCost  # added 2026-10-20
     CybenchSolveRate = _series.CybenchSolveRate
     FirecrackerBootPreconfigured = _series.FirecrackerBootPreconfigured  # added 2026-10-20
     OSWorldStepBudget = _series.OSWorldStepBudget
