@@ -5186,3 +5186,29 @@ ALEITHAN_2024_SWE_BENCH_PLUS = _lit(
         "rendering on 2026-10-20."
     ),
 )
+
+# --- Course-overview anchors: robot fleets and one mobile manipulator's datasheets (added 2026-10-20) ---
+IFR_WORLD_ROBOTICS_2025 = _report(
+    "prov:ifr-world-robotics-2025",
+    "International Federation of Robotics (2025), World Robotics 2025 press release, Global Robot Demand in "
+    "Factories Doubles Over 10 Years, Frankfurt, 25 September 2025",
+    "https://ifr.org/ifr-press-releases/global-robot-demand-in-factories-doubles-over-10-years",
+    notes=("'542,000 robots installed in 2024' (542,076 in the release text); 'The total number of industrial "
+           "robots in operational use worldwide was 4,664,000 units in 2024.' A 24 September 2026 release "
+           "reports the 2025 figures (about 5 million in operation). Read 2026-10-20."),
+)
+AMAZON_MILLIONTH_ROBOT_2025 = _report(
+    "prov:amazon-millionth-robot-deepfleet-2025",
+    "Amazon (2025), Amazon launches a new AI foundation model to power its robotic fleet and deploys its "
+    "1 millionth robot, aboutamazon.com, July 2025",
+    "https://www.aboutamazon.com/news/operations/amazon-million-robots-ai-foundation-model",
+    notes=("'Amazon has deployed its one millionth robot in its operations.' 'A new generative AI foundation "
+           "model will improve robot fleet travel efficiency by 10%.' A company projection. Read 2026-10-20."),
+)
+UR16E_DATASHEET = _ds(
+    "prov:universal-robots-ur16e-datasheet",
+    "Universal Robots, UR16e datasheet",
+    "https://www.universal-robots.com/manuals/latest/en/datasheets/ur16e/",
+    verified="2026-10-20",
+    notes="Payload 16 kg, reach 900 mm, 6 rotating joints.",
+)
