@@ -435,3 +435,46 @@ __all__ += [
     "VisibilityRangeModel",
     "ThermalExpansionModel",
 ]
+
+# --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
+from .estimation import (
+    RangeFusionModel,
+    EstimatorConsistencyModel,
+    ReplayBufferModel,
+    InertialCoastModel,
+    OdometryDriftModel,
+    OdometryLeaderboardModel,
+    BeliefExpiryModel,
+    StaleTransformModel,
+    FreeSpaceExpiryModel,
+    EpochGapModel,
+    SensorBiasDriftModel,
+    FrozenTransformModel,
+    TrackConfirmationModel,
+)
+from .mapping import (
+    ClearanceQueryModel,
+    HostMapSizingModel,
+    RaymarchTrafficModel,
+    EncoderRateModel,
+)
+
+__all__ += [
+    "RangeFusionModel",
+    "EstimatorConsistencyModel",
+    "ReplayBufferModel",
+    "InertialCoastModel",
+    "OdometryDriftModel",
+    "OdometryLeaderboardModel",
+    "BeliefExpiryModel",
+    "StaleTransformModel",
+    "FreeSpaceExpiryModel",
+    "EpochGapModel",
+    "SensorBiasDriftModel",
+    "FrozenTransformModel",
+    "TrackConfirmationModel",
+    "ClearanceQueryModel",
+    "HostMapSizingModel",
+    "RaymarchTrafficModel",
+    "EncoderRateModel",
+]

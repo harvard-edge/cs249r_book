@@ -3737,3 +3737,38 @@ NTSB_HAR_17_02 = _lit(
     notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
            "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
 )
+
+# --- Robot odometry, mapping, and tracking results (added 2026-10-20) ---
+BORENSTEIN_UMBMARK_1996 = _lit(
+    "prov:borenstein-umbmark-1996",
+    "Borenstein, J. and Feng, L. (1996), Measurement and Correction of Systematic Odometry Errors in "
+    "Mobile Robots, IEEE Transactions on Robotics and Automation 12(6), 869-880",
+    url="https://doi.org/10.1109/70.544770",
+    verified="2026-10-20",
+    notes=("UMBmark: bidirectional 4 m x 4 m square path (16 m per run) at 0.2 m/s with on-the-spot "
+           "turns, TRC LabMate differential-drive base. Table I, experiment 1 (Fig. 11): E_max,syst "
+           "317 mm before and 21 mm after calibrating wheelbase and wheel-diameter ratio; run-to-run "
+           "standard deviation of the return error about 25 mm (Secs. 3.3 and 5)."),
+)
+
+MILLANE_NVBLOX_2024 = _lit(
+    "prov:millane-nvblox-2024",
+    "Millane, A. et al. (2024), nvblox: GPU-Accelerated Incremental Signed Distance Field Mapping, "
+    "IEEE ICRA 2024, arXiv:2311.00626",
+    url="https://arxiv.org/abs/2311.00626",
+    verified="2026-10-20",
+    notes=("Table II, Average row: incremental ESDF update time 1.9 ms for nvblox (GPU), 13 ms for "
+           "Fiesta and 58 ms for voxblox (CPU), over the Redwood and Cow and Lady sequences. Table III "
+           "caption: about 3 ns per uncorrelated distance query on Jetson."),
+)
+
+BEWLEY_SORT_2016 = _lit(
+    "prov:bewley-sort-2016",
+    "Bewley, A. et al. (2016), Simple Online and Realtime Tracking, IEEE ICIP 2016; reference code "
+    "abewley/sort, sort.py at commit 2236dff5019565958b84df7d871d41cc1db58ac7",
+    url="https://github.com/abewley/sort/blob/2236dff5019565958b84df7d871d41cc1db58ac7/sort.py",
+    verified="2026-10-20",
+    notes=("Sort.__init__ defaults: max_age=1, min_hits=3, iou_threshold=0.3. Sort.update outputs a "
+           "track only if it was updated this frame and its hit streak reaches min_hits (or the "
+           "first min_hits frames of the sequence have not passed)."),
+)

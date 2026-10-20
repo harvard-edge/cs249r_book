@@ -572,3 +572,51 @@ def calc_split_conformal_min_count(alpha: float) -> int:
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be in (0, 1)")
     return math.ceil((1 - alpha) / alpha)
+
+
+def calc_chi2_gate(confidence, dof):
+    """Chi-square quantile that a consistent statistic with ``dof`` degrees of freedom stays below with probability ``confidence`` (added 2026-10-20).
+
+    A validation gate rejects an innovation whose normalized squared value
+    (NIS) exceeds this threshold.
+
+    Source: Bar-Shalom, Li, and Kirubarajan, Estimation with Applications to
+    Tracking and Navigation (2001), Sec. 5.4.
+    """
+    from scipy.stats import chi2
+    if not 0.0 < confidence < 1.0 or dof < 1:
+        raise ValueError("confidence must be in (0, 1) and dof >= 1")
+    return float(chi2.ppf(confidence, dof))
+
+
+def calc_chi2_mean_band(n_samples, dof, confidence):
+    """Two-sided acceptance band for the mean of ``n_samples`` consistent chi-square statistics (added 2026-10-20).
+
+    The sum of N independent NEES (or NIS) values of dimension n is
+    chi-square with N n degrees of freedom; dividing its central
+    ``confidence`` interval by N gives the band the sample mean must fall in.
+
+    Source: Bar-Shalom, Li, and Kirubarajan (2001), Sec. 5.4.2.
+    """
+    from scipy.stats import chi2
+    if n_samples < 1 or dof < 1 or not 0.0 < confidence < 1.0:
+        raise ValueError("n_samples and dof must be >= 1 and confidence in (0, 1)")
+    tail = (1 - confidence) / 2
+    k = n_samples * dof
+    return float(chi2.ppf(tail, k)) / n_samples, float(chi2.ppf(1 - tail, k)) / n_samples
+
+
+def calc_noncentral_gate_detection(gate, dof, noncentrality):
+    """Probability that a biased innovation's NIS exceeds ``gate`` (added 2026-10-20).
+
+    A bias b in an innovation of variance S makes its NIS noncentral
+    chi-square with noncentrality b^2 / S, so its mean is dof + b^2 / S; a
+    single-update gate catches it only with this probability.
+
+    Source: Bar-Shalom, Li, and Kirubarajan (2001), Sec. 1.4.17 (noncentral
+    chi-square) and Sec. 5.4.
+    """
+    from scipy.stats import ncx2
+    if gate <= 0 or dof < 1 or noncentrality < 0:
+        raise ValueError("gate must be positive, dof >= 1, and noncentrality >= 0")
+    return float(ncx2.sf(gate, dof, noncentrality))

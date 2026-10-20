@@ -11630,3 +11630,291 @@ class ThermalExpansionScenario(BaseScenario):
     def result(self):
         from .solvers import ThermalExpansionModel
         return ThermalExpansionModel().solve(self.coefficient, self.length, self.temperature_rise)
+
+
+# --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
+# A site scenario (``Embodied.Scenario.*``) supplies the machine, the
+# clearances, the walking speed, and the observation age; the solvers live in
+# ``engine/solvers/estimation.py`` and ``engine/solvers/mapping.py``.
+
+class RangeFusionScenario(BaseScenario):
+    """The range to ``site``'s rack-end upright, predicted over one lidar sweep and updated by the lidar, then ``stereo``; the stereo update misdated by ``age``'s arrival stamp at ``speed``."""
+    site: Any                                   # EmbodiedSiteScenario
+    stereo: Any                                 # StereoDepthErrorScenario
+    age: Any                                    # ObservationAgeScenario
+    prior_sigma: Quantity
+    speed_sigma: Quantity
+    comparison_scale: float = 2.0
+
+    @property
+    def result(self):
+        from .solvers import RangeFusionModel
+        lidar = self.site.machine.lidar
+        return RangeFusionModel().solve(self.prior_sigma, self.speed_sigma, 1 / lidar.scan_rate,
+                                        lidar.range_precision_max, self.stereo.result.sigma_target,
+                                        self.age.result.arrival_travel, self.comparison_scale)
+
+
+class EstimatorConsistencyScenario(BaseScenario):
+    """A qualification campaign of ``runs`` scalar estimates, and single-update gates against ``fusion``'s misdated update."""
+    fusion: Any                                 # RangeFusionScenario
+    runs: int
+    dimension: int = 1
+    confidence: float = 0.95
+    gate_confidences: List[float] = [0.95, 0.99]
+
+    @property
+    def result(self):
+        from .solvers import EstimatorConsistencyModel
+        return EstimatorConsistencyModel().solve(self.runs, self.dimension, self.confidence,
+                                                 self.gate_confidences, self.fusion.result.nis_expected)
+
+
+class ReplayBufferScenario(BaseScenario):
+    """A rewind buffer at ``site.machine``'s IMU rate reaching back one observation age."""
+    site: Any                                   # EmbodiedSiteScenario
+
+    @property
+    def result(self):
+        from .solvers import ReplayBufferModel
+        return ReplayBufferModel().solve(self.site.perception_age, self.site.machine.imu.sample_rate)
+
+
+class InertialCoastScenario(BaseScenario):
+    """``site.machine``'s IMU coasting ``duration`` without a fix, seen at the rack-end distance."""
+    site: Any                                   # EmbodiedSiteScenario
+    duration: Quantity
+
+    @property
+    def result(self):
+        from .solvers import InertialCoastModel
+        imu, s = self.site.machine.imu, self.site
+        return InertialCoastModel().solve(imu.gyro_noise_density, imu.gyro_zero_rate_offset, imu.accel_noise_density,
+                                          imu.accel_zero_g_offset, self.duration, s.d_clear, s.delta_loc)
+
+
+class OdometryDriftScenario(BaseScenario):
+    """A square-path odometry benchmark's return errors, priced against ``site``'s localization bound at its aisle speed and length."""
+    site: Any                                   # EmbodiedSiteScenario
+    square_side: Quantity
+    legs: int
+    return_error_uncalibrated: Quantity
+    return_error_calibrated: Quantity
+    run_sigma: Quantity
+    test_speed: Quantity
+
+    @property
+    def path_length(self) -> Quantity:
+        return self.legs * self.square_side
+
+    @property
+    def result(self):
+        from .solvers import OdometryDriftModel
+        s = self.site
+        return OdometryDriftModel().solve(self.return_error_uncalibrated, self.return_error_calibrated,
+                                          self.path_length, s.delta_loc, s.v_aisle, s.aisle_length, self.test_speed)
+
+
+class OdometryLeaderboardScenario(BaseScenario):
+    """Ranked odometry methods (``entries``: translation_err_pct, sensor_group) against ``site``'s bound and aisle."""
+    site: Any                                   # EmbodiedSiteScenario
+    entries: List[Any]
+
+    @property
+    def result(self):
+        from .solvers import OdometryLeaderboardModel
+        return OdometryLeaderboardModel().solve(self.entries, self.site.delta_loc, self.site.aisle_length)
+
+
+class BeliefExpiryScenario(BaseScenario):
+    """A belief with initial error, growth law, and task tolerance; optionally admitted at ``use_age`` under ``age_bound``."""
+    initial_error: Quantity
+    growth_rate: Quantity
+    tolerance: Quantity
+    growth_acceleration: Optional[Quantity] = None
+    use_age: Optional[Quantity] = None
+    age_bound: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import BeliefExpiryModel
+        return BeliefExpiryModel().solve(self.initial_error, self.growth_rate, self.tolerance,
+                                         self.growth_acceleration, self.use_age, self.age_bound)
+
+
+class StaleTransformScenario(BaseScenario):
+    """``belief``'s cached camera edge composed with the current wrist pose, one ``site.machine`` wrist-camera frame old."""
+    site: Any                                   # EmbodiedSiteScenario
+    belief: Any                                 # BeliefExpiryScenario
+    lever: Quantity
+    angular_rate: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StaleTransformModel
+        return StaleTransformModel().solve(self.belief.result, self.lever, self.angular_rate,
+                                           1 / self.site.machine.wrist_camera.frame_rate)
+
+
+class FreeSpaceExpiryScenario(BaseScenario):
+    """``site``'s rack end: free space ahead (clear distance) and abreast (side clearance) eroding at the walking speed."""
+    site: Any                                   # EmbodiedSiteScenario
+    uniform_timeout: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import FreeSpaceExpiryModel
+        s, rm = self.site, self.site.machine
+        return FreeSpaceExpiryModel().solve(s.d_clear, s.side_clearance, s.delta_loc, s.delta_margin,
+                                            s.v_human_approach, s.perception_age, 1 / rm.nav_camera.frame_rate,
+                                            rm.base.max_velocity, s.a_brake, s.tau_delay, self.uniform_timeout)
+
+
+class EpochGapScenario(BaseScenario):
+    """Named acquisition ``epochs`` in one cycle; the ``pair`` to fuse is projected across its gap at ``speed``."""
+    epochs: Dict[str, Quantity]
+    pair: List[str]
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import EpochGapModel
+        a, b = self.pair
+        return EpochGapModel().solve(self.epochs[a], self.epochs[b], self.speed)
+
+
+class SkewedRecordsScenario(BaseScenario):
+    """Two records ``skew`` apart, compared at ``site``: the base at its drive limit and a person at the walking speed close on each other."""
+    site: Any                                   # EmbodiedSiteScenario
+    skew: Quantity
+    separation: Quantity
+
+    @property
+    def closing_speed(self) -> Quantity:
+        return self.site.machine.base.max_velocity + self.site.v_human_approach
+
+    @property
+    def result(self):
+        from .solvers import EpochGapModel
+        s = self.site
+        return EpochGapModel().solve(0 * self.skew, self.skew, self.closing_speed, self.separation,
+                                     (s.delta_loc, s.delta_margin))
+
+
+class SensorBiasDriftScenario(BaseScenario):
+    """A steady ``reading`` whose sensor bias drifts at ``drift_rate`` for ``span``, while the estimator reports ``reported_sigma``."""
+    reading: Quantity
+    reported_sigma: Quantity
+    drift_rate: Quantity
+    span: Quantity
+    excitation: Optional[Quantity] = None       # a deliberate contact break that would expose the bias
+
+    @property
+    def result(self):
+        from .solvers import SensorBiasDriftModel
+        return SensorBiasDriftModel().solve(self.reading, self.drift_rate, self.span)
+
+
+class FrozenTransformScenario(BaseScenario):
+    """``site``'s conveyor object tracked by a camera lost at ``loss_time``; its last transform republished every ``republish_period``."""
+    site: Any                                   # EmbodiedSiteScenario
+    republish_period: Quantity
+    freshness_threshold: Quantity
+    loss_time: Quantity
+    window: Quantity
+
+    @property
+    def result(self):
+        from .solvers import FrozenTransformModel
+        s = self.site
+        return FrozenTransformModel().solve(s.v_conveyor, self.window, s.grasp_tolerance, self.republish_period,
+                                            self.freshness_threshold)
+
+
+class TrackConfirmationScenario(BaseScenario):
+    """A tracker that outputs a track after ``min_hits`` hits, on ``site.machine``'s navigation camera at its drive limit."""
+    site: Any                                   # EmbodiedSiteScenario
+    min_hits: int
+
+    @property
+    def result(self):
+        from .solvers import TrackConfirmationModel
+        rm = self.site.machine
+        return TrackConfirmationModel().solve(self.min_hits, rm.nav_camera.frame_rate, rm.base.max_velocity)
+
+
+class ClearanceQueryScenario(BaseScenario):
+    """Sphere-hull clearance queries on ``site.machine``'s permission controller, and a snapshot of the stopping corridor."""
+    site: Any                                   # EmbodiedSiteScenario
+    collision_allocation: Quantity
+    hulls: int
+    fewest_hulls: int
+    hull_radius: Quantity
+    esdf_cell_bytes: Quantity
+    occupancy_cell_bytes: Quantity
+    map_edge: Quantity
+    slab_height: Quantity
+    pitches: List[Quantity]
+    trilinear_reads: int
+
+    @property
+    def slab_volume(self) -> Quantity:
+        return (self.site.aisle_width * self.site.d_clear * self.slab_height).to("m**3")
+
+    @property
+    def result(self):
+        from .solvers import ClearanceQueryModel
+        s, rm = self.site, self.site.machine
+        return ClearanceQueryModel().solve(rm.permission_rate, self.collision_allocation, self.hulls,
+                                           self.hull_radius, s.delta_margin, rm.permission_mcu.memory.sram_bandwidth,
+                                           self.esdf_cell_bytes, self.occupancy_cell_bytes, self.map_edge,
+                                           self.slab_volume, self.pitches, self.trilinear_reads, s.enforcer_wcet)
+
+
+class HostMapSizingScenario(BaseScenario):
+    """A workcell of ``extent`` mapped at ``pitch``: dense grid against a hashed band of ``band_half_width`` around ``surface_area``."""
+    extent: List[Quantity]
+    pitch: Quantity
+    voxel_bytes: Quantity
+    surface_area: Quantity
+    band_half_width: Quantity
+    block_edge: int
+
+    @property
+    def result(self):
+        from .solvers import HostMapSizingModel
+        return HostMapSizingModel().solve(self.extent, self.pitch, self.voxel_bytes, self.surface_area,
+                                          self.band_half_width, self.block_edge)
+
+
+class RaymarchTrafficScenario(BaseScenario):
+    """One depth stream ray-marched into a map on ``site.machine``'s host SoC."""
+    site: Any                                   # EmbodiedSiteScenario
+    width_px: int
+    height_px: int
+    frame_rate: Quantity
+    ray_length: Quantity
+    pitch: Quantity
+    bytes_per_step: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RaymarchTrafficModel
+        return RaymarchTrafficModel().solve(self.width_px, self.height_px, self.frame_rate, self.ray_length,
+                                            self.pitch, self.bytes_per_step,
+                                            self.site.machine.brain_soc.memory.bandwidth)
+
+
+class EncoderRateScenario(BaseScenario):
+    """An encoder of ``flop_per_frame`` on every ``site.machine`` navigation frame, against the host SoC's dense FP16 peak."""
+    site: Any                                   # EmbodiedSiteScenario
+    flop_per_frame: Quantity
+    keyframe_rate_low: Optional[Quantity] = None
+    keyframe_rate_high: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import EncoderRateModel
+        rm = self.site.machine
+        return EncoderRateModel().solve(self.flop_per_frame, rm.nav_camera.frame_rate,
+                                        rm.brain_soc.compute.precision_flops["fp16"])
