@@ -578,7 +578,7 @@ def code_panel(path, lines, width, fs=10.5, title=None, colors=None):
     longest = max(len(ln) for ln in lines + ([title] if title else []))
     width = max(width, longest * fs * 0.602 / 72.0 + 0.35)
     n = len(lines) + (1 if title else 0)
-    lh = fs * 1.45 / 72.0
+    lh = fs * 1.3 / 72.0
     fig = plt.figure(figsize=(width, n * lh + 0.25))
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")

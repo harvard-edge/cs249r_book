@@ -136,7 +136,7 @@
 
 \begin{frame}{Every call passes four runtime stages before and after it acts}
   \centering
-  \mlsyssteps[width=0.98\textwidth,height=5.5cm,keepaspectratio]{loop_step}{4}\\[0.05cm]
+  \mlsyssteps[width=0.98\textwidth,height=5.15cm,keepaspectratio]{loop_step}{4}\\[0.05cm]
   \uncover<4->{\small Complete mediation: every call, reads included, passes the check.}
   \mlsyscredit{After Tool Calling, \S7.2.1, figure 1 (redrawn).}
   \note{[2.5 min] [CORE] One model turn proposed three calls. Step 1: validation parses each against its tool's schema: required fields, types, ranges. call\_3 fails and returns a structured error that the model can read. Step 2: authorization checks the session's grants against the resolved target, for reads as well as writes, plus rate and concurrency limits. call\_2 names a target the task was never granted. Step 3: dispatch sends call\_1 and tracks its outcome; shaping bounds the result and matches it to its call ID. Step 4: the next turn receives one observation per call ID, errors included. This path is complete mediation: every access passes an enforced check before it reaches the resource, and the return path is mediated too. ENGAGE: which of the four stages runs only after the effect? (Expected: shaping.) WARN: a prompt that says ``never delete production data'' is not one of these stages; the runtime must refuse even when the model proposes it. LINK: these refine the validate, execute, and observe phases of Lecture 1's six-phase turn.}
@@ -276,20 +276,31 @@
 
 \begin{frame}{A tool's repeat behavior decides whether a retry is safe}
   \begin{columns}[c]
-    \begin{column}{0.60\textwidth}
-      \footnotesize
-      \begin{tabular}{@{}P{2.2cm}P{3.8cm}@{}}\toprule
+    \begin{column}{0.54\textwidth}
+      \small
+      \begin{tabular}{@{}P{2.4cm}P{5.1cm}@{}}\toprule
         \textbf{Class} & \textbf{A second execution} \\\midrule
         Read & another observation, maybe of a changed source \\[0.05cm]
         Set a desired state & reapplies a value that may hold \\[0.05cm]
         \textcolor{errorstroke}{\textbf{Produce an event}} & restarts, appends, or charges again \\\bottomrule
       \end{tabular}
     \end{column}
-    \begin{column}{0.37\textwidth}
-      \begin{mlsyscard}{mlsysaccent}\small
-        \textbf{Idempotent:}\\ $f(f(x)) = f(x)$ for the named state.\\[0.1cm]
-        Set \texttt{timeout\_ms} to 5000 twice: one effect. Restart twice: two.
-      \end{mlsyscard}
+    \begin{column}{0.44\textwidth}
+      \centering{\small\textbf{Idempotent:} $f(f(x)) = f(x)$}\\[0.25cm]
+      \begin{tikzpicture}[font=\footnotesize,x=1cm,y=1.15cm,
+          op/.style={draw=midgray,fill=vlightgray,rounded corners=2pt,line width=0.7pt,minimum height=0.6cm,inner sep=2pt,font=\footnotesize\ttfamily},
+          ok/.style={draw=GreenLine,fill=GreenL,rounded corners=2pt,line width=1pt,minimum height=0.55cm,inner sep=3pt,align=center},
+          bad/.style={draw=errorstroke,fill=RedL,rounded corners=2pt,line width=1pt,minimum height=0.55cm,inner sep=3pt,align=center},
+          ar/.style={->,line width=0.8pt,midgray}]
+        \node[op] (a1) at (0,0) {timeout\_ms=5000};
+        \node[op] (a2) at (0,-0.7) {timeout\_ms=5000};
+        \node[ok] (sa) at (3.6,-0.35) {\textbf{timeout = 5000}\\one final state};
+        \draw[ar] (a1.east) -- (sa.west); \draw[ar] (a2.east) -- (sa.west);
+        \node[op] (b1) at (0,-1.9) {restart};
+        \node[op] (b2) at (0,-2.6) {restart};
+        \node[bad] (sb) at (3.6,-2.25) {\textbf{restart, restart}\\two events};
+        \draw[ar] (b1.east) -- (sb.west); \draw[ar] (b2.east) -- (sb.west);
+      \end{tikzpicture}
     \end{column}
   \end{columns}
   \mlsyscredit{Tool Calling, \S7.5.2, table 2 and Definition 7.5.}
@@ -298,11 +309,11 @@
 
 \begin{frame}{Operation identity across attempts makes a retry harmless}
   \centering
-  \mlsyssteps[width=0.98\textwidth,height=4.9cm,keepaspectratio]{opid_step}{2}\\[0.05cm]
+  \mlsyssteps[width=0.98\textwidth,height=4.6cm,keepaspectratio]{opid_step}{2}\\[0.05cm]
   \uncover<2->{\footnotesize IETF draft: {\ttfamily Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"}\\
-  Same key, other payload: \textbf{422}.\enspace Same key, still running: \textbf{409}.\enspace Expiry: published by the resource.}
+  Same key, other payload: \textbf{422}; still running: \textbf{409}.}
   \mlsyscredit{After Tool Calling, \S7.5.3 figure 2 (redrawn) and listing 3. IETF draft-ietf-httpapi-idempotency-key-header-07 (15 Oct 2025), \S2.2, \S2.3, \S2.7.}
-  \note{[3 min] [CORE] Step 1: the runtime makes an operation ID once, when it admits the intent, and a fresh attempt ID for every send. A timeout loops back with the same operation ID; when attempts run out, the result is recorded as unresolved, and no exception is raised. Step 2: the endpoint looks the ID up, bound to caller, scope, and arguments. Completed: return the kept result. Still running: return pending. Arguments differ: reject. Not found: execute, recording the effect and its result in one transaction, or a crash between them breaks the guarantee. The right column is a real standards draft: the header, and the status codes it assigns (422 for reuse with a different payload, 409 while the first request is outstanding; the chapter uses 409 for the mismatch). ENGAGE: why not hash the tool name and arguments into the ID? (Expected: a deliberate second restart an hour later would be skipped.) WARN: retention is part of the contract; after the window, an old ID is new again. LINK: two stalled copies of a worker are a different hazard; Lecture 11 teaches fencing tokens. Land the segment aloud: a timeout is missing knowledge; retry only on safe semantics, deduplication, or evidence, and otherwise record the effect unsettled.}
+  \note{[3 min] [CORE] Step 1: the runtime makes an operation ID once, when it admits the intent, and a fresh attempt ID for every send. A timeout loops back with the same operation ID; when attempts run out, the result is recorded as unresolved, and no exception is raised. Step 2: the endpoint looks the ID up, bound to caller, scope, and arguments. Completed: return the kept result. Still running: return pending. Arguments differ: reject. Not found: execute, recording the effect and its result in one transaction, or a crash between them breaks the guarantee. The right column is a real standards draft: the header, and the status codes it assigns (422 for reuse with a different payload, 409 while the first request is outstanding; the chapter uses 409 for the mismatch). ENGAGE: why not hash the tool name and arguments into the ID? (Expected: a deliberate second restart an hour later would be skipped.) WARN: retention is part of the contract; after the window, an old ID is new again. LINK: two stalled copies of a worker are a different hazard; Lecture 11 teaches fencing tokens. Land the segment aloud: a timeout is missing knowledge; retry only on safe semantics, deduplication, or evidence, and otherwise record the effect unsettled. The resource publishes key expiry.}
 \end{frame}
 
 % =============================================================================
@@ -550,7 +561,7 @@
     \end{column}
     \begin{column}{0.62\textwidth}
       {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} AGENT SANDBOXES}}\\[0.5cm]
-      {\LARGE\bfseries A call passed every check. What limits what its code can reach?}
+      {\LARGE\bfseries\raggedright A call passed every check. What limits what its code can reach?\par}
     \end{column}
   \end{columns}
   \note{[0.5 min] [CORE] Today's checks look at a call's arguments. A run\_shell call with valid arguments can still read any file and contact any host its process can reach. Lecture 8 enforces those limits beneath the running code.}
