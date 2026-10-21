@@ -588,7 +588,7 @@ a11 = {"d": {n: {"per_auto": calcs.usd(AR.automated_per_accepted[n]), "per_res":
 
 
 def arch(step):
-    fig, axes = plt.subplots(1, 2, figsize=(5.8, 2.3))
+    fig, axes = plt.subplots(1, 2, figsize=(6.4, 1.95))
     names = list(a11["d"])
     short = ["Rewriter", "Single call", f"{len(calcs.ARCH.turn_acceptance)}-turn loop"]
     cols = [GRY, AMB, VIO]
@@ -601,14 +601,14 @@ def arch(step):
             y = 2 - i
             ax.barh(y, v if show else 0, height=0.6, color=cols[i])
             if show:
-                ax.text(v + max(vals) * 0.03, y, money(v, nd), va="center", fontsize=11.5,
+                ax.text(v + max(vals) * 0.03, y, money(v, nd), va="center", fontsize=13.5,
                         fontweight="bold", color=cols[i])
         ax.set_yticks([2, 1, 0])
-        ax.set_yticklabels(short if j == 0 else ["", "", ""], fontsize=11.5)
+        ax.set_yticklabels(short if j == 0 else ["", "", ""], fontsize=13.5)
         ax.set_xlim(0, max(vals) * 1.55)
         ax.set_xticks([])
         ax.spines["bottom"].set_visible(False)
-        ax.set_title(title, fontsize=11.5, color=C["text"] if show else "white", loc="left")
+        ax.set_title(title, fontsize=13.5, color=C["text"] if show else "white", loc="left")
     sp.save(fig, out / f"arch_step{step}.svg")
 
 

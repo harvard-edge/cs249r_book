@@ -277,21 +277,21 @@ def swe_agent():
             ("Iterative search", swe.SweAgentIterativeSearchResolved),
             ("Shell only", swe.SweBenchLiteShellResolved),
             ("No edit command", swe.SweAgentNoEditCommandResolved)]
-    fig, ax = plt.subplots(figsize=(1.9, 1.35))
+    fig, ax = plt.subplots(figsize=(3.4, 2.5))
     for i, (lab, v) in enumerate(rows):
         y = len(rows) - 1 - i
         model = "Opus" in lab
         c = BLUE if model else (PURPLE if i == 0 else AMBER)
         ax.barh(y, v, color=c, height=0.62)
-        ax.text(v + 0.3, y, f"{v:.1f}%", va="center", fontsize=8.5, color=c, fontweight="bold")
-        ax.text(-0.3, y, lab, ha="right", va="center", fontsize=8.5, color=INK)
+        ax.text(v + 0.3, y, f"{v:.1f}%", va="center", fontsize=12, color=c, fontweight="bold")
+        ax.text(-0.3, y, lab, ha="right", va="center", fontsize=12, color=INK)
     ax.set_xlim(0, 22)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xlabel("Issues resolved, SWE-bench Lite (%)")
     ax.grid(axis="x", color=sp.C["grid"], lw=0.6)
     ax.set_axisbelow(True)
-    axis_type(ax, 8.5)
+    axis_type(ax, 11)
     sp.save(fig, HERE / "swe_agent.svg")
 
 
@@ -480,6 +480,73 @@ def thumbs():
                    + [str(HERE / f"{t}.svg") for t in THUMBS], check=True)
 
 
+# ------------------------------------------- visual-review additions (2026-10-21)
+SEAMS = [("World", "Copies", "config_v7 shown", "after config_v8"),
+         ("Proposal", "Effect", "lost reply:", "op_42 repeated"),
+         ("Recovery", "Authority", "old plan used", "as permission"),
+         ("Record", "Learning", "every accepted", "step a target"),
+         ("Worker", "Worker", "one allowance", "copied twice")]
+
+
+def seams():
+    """Five seams; each side meets its own spec, the boundary fails."""
+    shown = {1: 2, 2: 3, 3: 5}
+    for step, n in shown.items():
+        b = []
+        for i, (l, r, f1, f2) in enumerate(SEAMS):
+            x = 6 + i * 178
+            body = (card(x - 2, 10, 84, 64, l, None, BLUE_L, BLUE, size=17)
+                    + card(x + 86, 10, 84, 64, r, None, BLUE_L, BLUE, size=17))
+            body.append(f'<line x1="{x + 83}" y1="0" x2="{x + 83}" y2="84" stroke="{RED}" '
+                        f'stroke-width="4" stroke-dasharray="7 5"/>')
+            body.append(text(x + 83, 120, f1, 20, RED, weight="bold"))
+            body.append(text(x + 83, 146, f2, 20, RED, weight="bold"))
+            b.append(f'<g opacity="{1 if i < n else 0}">' + "".join(body) + "</g>")
+        svg(HERE / f"seams_step{step}.svg", 900, 160, b)
+
+
+def release_curve():
+    """Tasks per arm grow as one over the detectable difference squared."""
+    import numpy as np
+    wide, narrow = calcs.PLAN.differences
+    d = np.linspace(narrow * 0.8, wide * 1.4, 200)
+    fig, ax = plt.subplots(figsize=(3.6, 2.7))
+    ax.plot(d * 100, (wide / d) ** 2, color=PURPLE, lw=3)
+    for x, lab in ((wide, "1×"), (narrow, f"{val('rel_halve')}×")):
+        y = (wide / x) ** 2
+        ax.plot([x * 100], [y], "o", color=RED, ms=9)
+        ax.text(x * 100 + 0.4, y + 0.25, lab, fontsize=15, color=RED, fontweight="bold")
+    ax.set_xlabel("Detectable difference (points)")
+    ax.set_ylabel("Tasks per arm\n(relative)")
+    ax.grid(color=sp.C["grid"], lw=0.6)
+    axis_type(ax, 13)
+    sp.save(fig, HERE / "release_curve.svg")
+
+
+OWNERS = [("Task admitted", "runtime, by contract", "contract, read scope"),
+          ("Evidence selected", "context manager", "context manifest"),
+          ("Change approved", "operator decides", "change request, approval"),
+          ("Change dispatched", "action gate, journal", "durable intent, op_42"),
+          ("Lost reply settled", "settlement process", "status: config_v8"),
+          ("Incident accepted", "accepting principal", "acceptance, health window")]
+
+
+def owners():
+    """Six transitions, each with an owner and a record."""
+    for step in (1, 2, 3):
+        b = []
+        for i, (t, o, r) in enumerate(OWNERS):
+            x, y = 6 + (i % 3) * 298, 6 + (i // 3) * 170
+            b += card(x, y, 282, 56, t, None, PURPLE_L, PURPLE, size=21)
+            if i % 3 < 2:
+                b.append(arrow(x + 282, y + 28, x + 296, y + 28, "p", PURPLE))
+            b.append(f'<g opacity="{1 if step >= 2 else 0}">'
+                     + text(x + 141, y + 92, o, 21, INK, weight="bold") + "</g>")
+            b.append(f'<g opacity="{1 if step >= 3 else 0}">'
+                     + text(x + 141, y + 124, r, 20, GRAY) + "</g>")
+        svg(HERE / f"owners_step{step}.svg", 900, 310, b)
+
+
 if __name__ == "__main__":
     capstone()
     lostreply()
@@ -496,4 +563,7 @@ if __name__ == "__main__":
     horizon()
     metr_p80()
     cost()
+    seams()
+    release_curve()
+    owners()
     thumbs()

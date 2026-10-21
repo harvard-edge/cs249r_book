@@ -705,5 +705,39 @@ def next_bars():
     sp.save(fig, out / "next_bars.svg")
 
 
+# ============================================ visual-review additions (2026-10-21)
+def worktrees():
+    """Private worktrees over one object store; publish is a compare-and-swap."""
+    s = Svg(560, 366)
+    for i, w in enumerate(("interface worker", "caller worker")):
+        x = 10 + i * 280
+        s.box(x, 10, 260, 100, f"worktree: {w.split()[0]}", ("own files, index, HEAD",),
+              "think", tsize=25, ssize=22)
+        s.arrow([(x + 130, 110), (x + 130 if i == 0 else x + 130, 160)], SKY, width=3)
+    s.box(10, 162, 540, 70, "one shared object store", (), "store", tsize=26)
+    s.arrow([(280, 232), (280, 290)], GRN, width=3.5)
+    s.text(296, 268, "compare-and-swap", 22, P["ok"][2], anchor="start", bold=True)
+    s.box(100, 292, 360, 70, "branch head", ("moves only if unchanged",), "ok", tsize=25, ssize=22)
+    s.save("worktrees.svg")
+
+
+worktrees()
+
+
+def shuttle_vote():
+    """Four computers run identical code and vote; a fifth runs other code."""
+    s = Svg(560, 334)
+    for i in range(4):
+        s.box(10 + i * 112, 30, 98, 80, f"GPC {i + 1}", ("PASS",), "think", tsize=21, ssize=19)
+        s.arrow([(59 + i * 112, 110), (59 + i * 112, 150)], SKY, width=2.6)
+    s.box(10, 152, 434, 60, "vote: masks one independent fault", (), "store", tsize=21)
+    s.box(10, 254, 434, 70, "same code: one bug fails all four", (), "fault", tsize=21)
+    s.box(462, 30, 90, 294, "GPC 5", ("backup", "code", "other", "team"), "ok", tsize=21, ssize=19)
+    s.save("shuttle_vote.svg")
+
+
+shuttle_vote()
+
+
 next_bars()
 print("figures written")

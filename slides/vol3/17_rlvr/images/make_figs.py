@@ -444,22 +444,22 @@ def isolation():
 
 def allpass():
     ns = [1, 2, 3, 4, 5]
-    fig, ax = plt.subplots(figsize=(5.4, 3.4))
+    fig, ax = plt.subplots(figsize=(4.6, 3.1))
     curves = [calcs.all_pass(n) for n in ns]
     ax.plot(ns, [100 * good for good, _ in curves], color=GREEN, lw=3, marker="o", ms=7)
     ax.plot(ns, [100 * bad for _, bad in curves], color=RED, lw=3, marker="o", ms=7)
     ax.set_yscale("log")
     ax.set_ylim(0.01, 300)
-    ax.text(1.1, 150, f"correct patch ({val('ap_good')} per trial)", fontsize=14, color=GREEN, fontweight="bold")
-    ax.text(3.15, 1.5, f"{val('ap_trials')} trials: {val('ap_bad_acc')}%", fontsize=15, color=RED, fontweight="bold")
-    ax.text(1.1, 0.03, f"incorrect patch\n({val('ap_bad')} per trial)", fontsize=14, color=RED, fontweight="bold")
+    ax.text(1.1, 150, f"correct ({val('ap_good')} per trial)", fontsize=15, color=GREEN, fontweight="bold")
+    ax.text(3.15, 1.5, f"{val('ap_trials')} trials: {val('ap_bad_acc')}%", fontsize=16, color=RED, fontweight="bold")
+    ax.text(1.1, 0.025, f"wrong\n({val('ap_bad')} per trial)", fontsize=15, color=RED, fontweight="bold")
     ax.set_yticks([0.01, 0.1, 1, 10, 100])
     ax.set_yticklabels(["0.01", "0.1", "1", "10", "100"])
     ax.set_xticks(ns)
     ax.set_xlabel("Trials that must all pass")
     ax.set_ylabel("Accepted (%)")
     ax.grid(color=sp.C["grid"], lw=0.6)
-    axis_type(ax, 15)
+    axis_type(ax, 16)
     sp.save(fig, HERE / "allpass.svg")
 
 
@@ -545,6 +545,70 @@ def thumbs():
     svg(HERE / "thumb_multiagent.svg", 600, 230, "\n".join(b))
 
 
+# ------------------------------------------- visual-review additions (2026-10-21)
+def forks():
+    """Continuation forks at every boundary against two chosen turns (NM 17.2)."""
+    W, H = 440, 300
+    n = int(num("forks_turns"))
+    b = []
+    for row, (label, every, mult, col) in enumerate(
+            (("every boundary", True, "forks_all_mult", RED),
+             (f"turns {val('forks_two_first')} and {val('forks_two_second')}", False,
+              "forks_two_mult", GREEN))):
+        y = 70 + row * 150
+        b.append(text(8, y - 34, label, 29, col, "start", "bold"))
+        b.append(f'<line x1="8" y1="{y}" x2="300" y2="{y}" stroke="{GRAY}" stroke-width="5"/>')
+        picks = range(1, n) if every else (int(num("forks_two_first")), int(num("forks_two_second")))
+        for t in picks:
+            x = 8 + 292 * t / n
+            for d in (-1, 1):
+                b.append(f'<line x1="{x:.1f}" y1="{y}" x2="{x + 12:.1f}" y2="{y + d * 22}" '
+                         f'stroke="{col}" stroke-width="2.4"/>')
+        bar = 300 * num(mult) / num("forks_all_mult")
+        b.append(box(8, y + 34, max(bar, 8), 34, col, col, rx=3))
+        b.append(text(max(bar, 8) + 20, y + 62, f"{val(mult)}×", 32, col, "start", "bold"))
+    svg(HERE / "forks.svg", W, H, "\n".join(b))
+
+
+def loop_limits():
+    """Three limits on the rollout loop: barrier, staleness, verifier pool."""
+    W, H = 900, 330
+    b = []
+    heads = ["Group barrier", "Staleness", "Verifier pool"]
+    for i, h in enumerate(heads):
+        x = 8 + i * 300
+        b.append(box(x, 6, 284, 318, "white", PURPLE, rx=10))
+        b.append(text(x + 142, 40, h, 25, PURPLE, weight="bold"))
+    lat = [q.to("second").magnitude for q in calcs.BAR_S.latencies]
+    top = max(lat)
+    for k, v in enumerate(sorted(lat)):
+        y = 70 + k * 44
+        b.append(box(26, y, 248, 30, GRAY_L, GRAY, rx=3, dash=True))
+        b.append(box(26, y, max(248 * v / top, 4), 30, AMBER if v == top else BLUE, AMBER if v == top else BLUE, rx=3))
+    b.append(text(150, 272, "the step waits for the slowest", 20))
+    b.append(text(150, 304, f"{val('bar_idle')}% of slot time idle", 22, RED, weight="bold"))
+    for k in range(4):
+        x = 330 + k * 64
+        b.append(box(x, 70, 54, 40, PURPLE_L, PURPLE, rx=4))
+        b.append(text(x + 27, 97, f"v{k + 1}", 21, PURPLE, weight="bold"))
+    b.append(box(330, 134, 246, 34, AMBER_L, AMBER, rx=4))
+    b.append(text(453, 158, "one long rollout", 20))
+    b.append(box(330, 180, 54, 34, BLUE_L, BLUE, rx=4))
+    b.append(text(357, 204, "short", 18))
+    b.append(text(458, 262, "long rollouts go stale", 21))
+    b.append(text(458, 296, "lag = versions passed", 22, RED, weight="bold"))
+    b.append(text(758, 86, f"{val('pool_rate')} trials/s arrive", 21))
+    slots = 10
+    busy = round(slots * num("pool_target") / 100)
+    for k in range(slots):
+        x = 630 + (k % 5) * 52
+        y = 110 + (k // 5) * 52
+        b.append(box(x, y, 42, 42, BLUE if k < busy else GRAY_L, BLUE if k < busy else GRAY, rx=4))
+    b.append(text(758, 252, f"{val('pool_busy')} busy of {val('pool_slots')} slots", 21))
+    b.append(text(758, 296, f"{val('pool_target')}% target", 22, RED, weight="bold"))
+    svg(HERE / "loop_limits.svg", W, H, "\n".join(b))
+
+
 if __name__ == "__main__":
     metr_tasks()
     metr_prompts()
@@ -564,4 +628,6 @@ if __name__ == "__main__":
     slot()
     yue()
     thumbs()
+    forks()
+    loop_limits()
     print("figures written")

@@ -109,23 +109,27 @@ def scaffold():
         by.setdefault(r["model"], []).append(100 * r["accuracy"])
     by = {m: v for m, v in by.items() if m in calcs.SC.spreads}
     order = sorted(by, key=lambda m: sorted(by[m])[len(by[m]) // 2])
-    fig, ax = plt.subplots(figsize=(4.0, 2.4))
+    fig, ax = plt.subplots(figsize=(6.2, 2.75))
     for y, m in enumerate(order):
         v = by[m]
         hi = m == calcs.SC.widest
         ax.plot([min(v), max(v)], [y, y], color=PURPLE if hi else BLUE_L, lw=4 if hi else 3.5,
                 solid_capstyle="round", alpha=0.5 if hi else 1)
-        ax.plot(v, [y] * len(v), "o", color=PURPLE if hi else BLUE, ms=3.5)
-        ax.text(101, y, f"{100 * calcs.SC.spreads[m]:.0f} pts, n={len(v)}", va="center", fontsize=8.5,
-                color=PURPLE if hi else GRAY)
+        ax.plot(v, [y] * len(v), "o", color=PURPLE if hi else BLUE, ms=4.5)
+        ax.text(101, y, f"{100 * calcs.SC.spreads[m]:.0f} pts, n={len(v)}", va="center", fontsize=10,
+                color=PURPLE if hi else GRAY, fontweight="bold" if hi else "normal")
     ax.set_yticks(range(len(order)))
-    ax.set_yticklabels(order, fontsize=8.5)
+    ax.set_yticklabels(order, fontsize=10)
+    for t, m in zip(ax.get_yticklabels(), order):
+        if m == calcs.SC.widest:
+            t.set_color(PURPLE)
+            t.set_fontweight("bold")
     ax.set_xlim(0, 100)
     ax.set_xlabel("Terminal-Bench 2.0 accuracy (%), one dot per scaffold")
     ax.set_xticks([0, 25, 50, 75, 100])
     ax.grid(axis="x", color=sp.C["grid"], lw=0.6)
     ax.tick_params(axis="y", length=0)
-    axis_type(ax, 8.5)
+    axis_type(ax, 10)
     sp.save(fig, HERE / "scaffold.svg")
 
 
@@ -208,20 +212,20 @@ def designs():
     shown = (1, 2, tr.best_runs, tr.best_runs + 1)  # the cheapest designs and the best one
     paid = [(f"{tr.paid_tasks[r]} tasks x {r}", 100 * tr.paid_se[r]) for r in shown]
     for step, rows, name in ((1, free, "designs_step1"), (2, paid, "designs_step2")):
-        fig, ax = plt.subplots(figsize=(2.0, 1.25))
+        fig, ax = plt.subplots(figsize=(5.0, 1.9))
         best = min(v for _, v in rows)
         for i, (lab, v) in enumerate(rows):
             y = len(rows) - 1 - i
             c = PURPLE if v == best else GRAY
             ax.barh(y, v, color=c, height=0.62)
-            ax.text(v + 0.12, y, f"{v:.2f}", va="center", fontsize=9.4, color=c, fontweight="bold")
-            ax.text(-0.12, y, lab.replace(" x ", " × "), ha="right", va="center", fontsize=9.0, color=INK)
+            ax.text(v + 0.12, y, f"{v:.2f}", va="center", fontsize=13, color=c, fontweight="bold")
+            ax.text(-0.12, y, lab.replace(" x ", " × "), ha="right", va="center", fontsize=13, color=INK)
         ax.set_xlim(0, 8)
         ax.set_ylim(-0.6, 3.6)
         ax.set_yticks([])
         ax.spines["left"].set_visible(False)
         ax.set_xlabel("Standard error (points)")
-        axis_type(ax, 8.5)
+        axis_type(ax, 12)
         sp.save(fig, HERE / f"{name}.svg")
 
 
@@ -278,26 +282,27 @@ def run_curves():
     """Our run: pass@k and pass^k from 8 graded runs per task."""
     run = calcs.RUN
     runs = run.runs
-    fig, ax = plt.subplots(figsize=(4.6, 2.8))
+    fig, ax = plt.subplots(figsize=(4.2, 2.9))
     for cfg, ls in ((calcs.BASE, "--"), (calcs.CAND, "-")):
         ks = list(range(1, runs + 1))
         at = [100 * run.pass_at[cfg][k] for k in ks]
         pw = [100 * run.pass_pow[cfg][k] for k in ks]
-        ax.plot(ks, at, ls, color=BLUE, lw=2.6)
-        ax.plot(ks, pw, ls, color=PURPLE, lw=2.6)
+        ax.plot(ks, at, ls, color=BLUE, lw=3)
+        ax.plot(ks, pw, ls, color=PURPLE, lw=3)
         if cfg == calcs.CAND:
-            ax.text(8.15, at[-1], f"pass@{runs} {val('run_c_at_max')}%", va="center", fontsize=11.5, color=BLUE,
+            ax.text(8.15, at[-1] + 1, f"pass@{runs}\n{val('run_c_at_max')}%", va="center", fontsize=13, color=BLUE,
                     fontweight="bold")
-            ax.text(8.15, pw[-1] + 3, f"pass$^{runs}$ {val('run_pow_max')}%", va="center", fontsize=11.5,
+            ax.text(8.15, pw[-1] + 2, f"pass$^{runs}$\n{val('run_pow_max')}%", va="center", fontsize=13,
                     color=PURPLE, fontweight="bold")
         else:
-            ax.text(8.15, at[-1] - 3, f"{val('run_b_at_max')}%", va="center", fontsize=11, color=BLUE)
-    ax.text(1.2, 40, "solid: candidate_v2\ndashed: baseline_v1", fontsize=11, color=GRAY)
+            ax.text(8.15, at[-1] - 6, f"{val('run_b_at_max')}%", va="center", fontsize=13, color=BLUE)
+    ax.text(1.2, 36, "solid: candidate_v2\ndashed: baseline_v1", fontsize=12.5, color=GRAY)
     ax.set_xlim(0.7, runs + 0.1)
     ax.set_ylim(30, 100)
     ax.set_xticks([1, 2, 4, 6, 8])
     ax.set_xlabel("k (graded runs per task)")
     ax.set_ylabel("Tasks (%)")
+    axis_type(ax, 13)
     ax.grid(axis="y", color=sp.C["grid"], lw=0.6)
     sp.save(fig, HERE / "run_curves.svg")
 
@@ -503,8 +508,48 @@ def thumbs_src():
     return ["dims_step2.svg", "gym_step3.svg", "confusion_step2.svg", "hook_step2.svg", "batch.svg"]
 
 
+# ------------------------------------------- visual-review additions (2026-10-21)
+def run_hsa():
+    """One trial of the running case, tied to its three exposures."""
+    b = [box(170, 168, 220, 96, PURPLE_L, PURPLE),
+         text(280, 206, "trial ws_r19", 27, PURPLE, weight="bold"),
+         text(280, 240, "pool_repair_01", 23, INK)]
+    spokes = [("H", "horizon", "many turns: tokens,", "time, dollars", 20, 20, BLUE, BLUE_L, "b"),
+              ("S", "state", "workspace ws_r19,", "test environment", 20, 304, AMBER, AMBER_L, "a"),
+              ("A", "authority", "edits the repo,", "runs the tests", 300, 304, RED, RED_L, "r")]
+    for k, name, l1, l2, x, y, c, cl, m in spokes:
+        b.append(box(x, y, 240, 110, cl, c))
+        b.append(text(x + 120, y + 34, f"{k}: {name}", 27, c, weight="bold"))
+        b.append(text(x + 120, y + 68, l1, 23))
+        b.append(text(x + 120, y + 96, l2, 23))
+    b.append(arrow(230, 168, 170, 136, "b", BLUE, sw=3))
+    b.append(arrow(220, 264, 170, 300, "a", AMBER, sw=3))
+    b.append(arrow(340, 264, 390, 300, "r", RED, sw=3))
+    b.append(text(420, 50, "one run exercises", 23, GRAY))
+    b.append(text(420, 78, "all three at once", 23, GRAY))
+    svg(HERE / "run_hsa.svg", 560, 424, "\n".join(b))
+
+
+def seq_batch():
+    """Batch generates and checks every candidate; sequential stops at a pass."""
+    n = int(num("sel_cap"))
+    b = [text(6, 26, f"Batch: all {val('sel_cap')}, every trial", 25, GRAY, "start", "bold")]
+    for i in range(n):
+        b.append(box(6 + i * 146, 38, 126, 46, GRAY_L, GRAY))
+        b.append(text(69 + i * 146, 70, f"cand. {i + 1}", 24))
+    b.append(text(6, 122, "Sequential: stop at a pass", 25, PURPLE, "start", "bold"))
+    for i in range(n):
+        b.append(box(6 + i * 146, 134, 126, 46, PURPLE_L, PURPLE, dash=i > 0))
+        b.append(text(69 + i * 146, 166, f"cand. {i + 1}", 24, PURPLE))
+        if i < n - 1:
+            b.append(arrow(132 + i * 146, 157, 150 + i * 146, 157, "p", PURPLE))
+    b.append(text(6, 212, f"{val('sel_en')} candidates on average", 23, INK, "start"))
+    svg(HERE / "seq_batch.svg", 440, 222, "\n".join(b))
+
+
 if __name__ == "__main__":
     for f in (hook, scaffold, verdicts, coverage, zheng, designs, wilson_fig, ranks,
-              run_curves, kapoor, batch, dims, gym, confusion, kappa, recall_thumbs):
+              run_curves, kapoor, batch, dims, gym, confusion, kappa, recall_thumbs,
+              run_hsa, seq_batch):
         f()
         print("wrote", f.__name__)
