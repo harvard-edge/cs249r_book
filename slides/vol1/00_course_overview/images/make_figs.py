@@ -88,7 +88,7 @@ ON_LAYER = {"Hardware": ["L11", "L11b", "L12", "L12b"], "Frameworks": ["L7"],
             "Operations": ["L14", "L14b"], "Applications": ["L15", "L15b"]}
 
 
-def badge(x, y, w, h, label, size=24):
+def badge(x, y, w, h, label, size=28):
     return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{h / 2}" '
             f'fill="#FFFFFF" stroke="{ACCENT}" stroke-width="1.5"/>\n'
             f'<text x="{x + w / 2}" y="{y + h / 2}" font-family="Helvetica, Arial, '
@@ -101,12 +101,12 @@ for layer, labels in ON_LAYER.items():
     y0 = LAYER_Y[layer]
     right = 688
     for label in reversed(labels):
-        w = 66 if len(label) <= 3 else 80
-        badges += badge(right - w, y0 + 7, w, 40, label)
+        w = 72 if len(label) <= 3 else 88
+        badges += badge(right - w, y0 + 4, w, 46, label)
         right -= w + 6
 # Data lectures sit inside the data bar, below its label
-for label, y in (("L4", 300), ("L4b", 352), ("L9", 404)):
-    badges += badge(715, y, 54, 40, label, 24 if len(label) <= 2 else 20)
+for label, y in (("L4", 292), ("L4b", 348), ("L9", 404)):
+    badges += badge(715, y, 54, 46, label, 26 if len(label) <= 2 else 21)
 (out / "stack_lectures.svg").write_text(stack_svg.replace("</svg>", badges + "</svg>"))
 
 print("figures written")

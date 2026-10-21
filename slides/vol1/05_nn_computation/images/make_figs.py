@@ -437,7 +437,7 @@ def mnist_roofline():
     E = cx.E
     tf = lambda q: q.to("Tflop/s").magnitude
     ai = np.logspace(-1.8, 3, 400)  # room left of batch 1 for its label
-    fig, ax = plt.subplots(figsize=(5.5, 1.95))
+    fig, ax = plt.subplots(figsize=(5.5, 2.3))
     machines = [("Desktop CPU", "host", "#8B5A2B", "--", (12, -8)),
                 ("Data-center accelerator", "accelerator", K["memory"], "-", (10, -10))]
     i1, i32 = cx.R1.intensity.to("flop/byte").magnitude, cx.R.intensity.to("flop/byte").magnitude
@@ -453,9 +453,11 @@ def mnist_roofline():
                    f"{y:.1f} TFLOP/s" if y < 10 else f"{y:,.0f} TFLOP/s")
             up = key == "accelerator"  # up-left keeps the accelerator labels off the CPU line
             # accelerator labels up-left; CPU labels down-right of their points
-            left = up
+            left = up and lab == "batch 1"
+            # the accelerator's batch-32 label sits under its roof, down-right,
+            # clear of its name above the roof
             ax.annotate(f"{lab}:\n{rate_lbl}" if lab == "batch 1" else f"{lab}: {rate_lbl}", (x, y),
-                        xytext=(-10, 6) if left else off, textcoords="offset points",
+                        xytext=(-10, 6) if left else ((10, -4) if up else off), textcoords="offset points",
                         ha="right" if left else "left", va="bottom" if left else "top",
                         fontsize=12, color=K["text"])
     ax.text(max(r.to("flop/byte").magnitude for r in E.ridge.values()) * 2.5, 4e-4,

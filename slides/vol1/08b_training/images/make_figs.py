@@ -365,7 +365,7 @@ copies = [(mem.SCORE_SOFTMAX_BYTES, f"P\n{mem.SCORE_SOFTMAX_BYTES} B"),
           (mem.SCORE_DROPOUT_MASK_BYTES, f"mask\n{mem.SCORE_DROPOUT_MASK_BYTES} B"),
           (mem.SCORE_DROPPED_BYTES, f"dropped P\n{mem.SCORE_DROPPED_BYTES} B")]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
     x = 0
     for w, ck in parts:
         ax.barh(1.45, w, left=x, color=C[ck], height=0.5, edgecolor="white")
@@ -384,16 +384,17 @@ for k in (1, 2):
         w = SCORES * nbytes / mem.KORTHIKANTI_SCORE_BYTES
         ax.barh(0, w, left=x0, color=C["danger_l"], height=0.62, edgecolor=C["danger"],
                 lw=1.5, hatch="//", alpha=a)
-        label(ax, x0 + w / 2, 0, t, C["danger"], shown, ha="center", va="center",
-              fontsize=12, linespacing=1.0,
-              bbox=dict(fc="white", ec="none", pad=1.5, alpha=a))
+        # each copy is named under its box: the 1-byte mask box is too
+        # narrow to hold its label
+        label(ax, x0 + w / 2, -0.4, t, C["danger"], shown, ha="center", va="top",
+              fontsize=12, linespacing=1.0)
         x0 += w
     for xe in (PROJ + FFN, PROJ + FFN + SCORES):
         ax.plot([xe, xe], [1.2, 0.31], color=C["danger"], lw=1.2, ls=":", alpha=a)
     label(ax, 5250, 0, "FlashAttention\nstores none; it keeps\na max and a sum per row", C["memory"],
           shown, va="center", fontsize=12, linespacing=1.05)
     ax.set_xlim(0, 8200)
-    ax.set_ylim(-0.45, 2.3)
+    ax.set_ylim(-1.3, 2.3)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 2000, 4000], ["0", "2,000", "4,000"])
