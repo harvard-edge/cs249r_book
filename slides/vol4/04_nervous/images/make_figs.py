@@ -118,8 +118,8 @@ def plot_axes(w, h, left, bottom, right=0.2, top=0.15):
 
 # ---------------------------------------------------------------- rate ladder
 def rate_ladder(step):
-    w, h = 9.6, 5.9
-    fig, ax = plot_axes(w, h, left=0.45, bottom=1.0, right=0.15, top=0.1)
+    w, h = 10.9, 5.9
+    fig, ax = plot_axes(w, h, left=2.9, bottom=1.0, right=0.15, top=0.1)
     rows = [("Intent model", num("t_intent_period"), NAVY,
              f"{val('t_intent_period')} ms  ({val('f_intent')} Hz)",
              "set by prefill and weight sweeps"),
@@ -133,16 +133,16 @@ def rate_ladder(step):
     lo = 0.01
     for i, (lab, t, c, period_lbl, why) in enumerate(rows):
         y = 3 - i
-        ax.barh(y, t - lo, left=lo, height=0.28, color=c)
-        ax.text(lo * 1.15, y + 0.2, lab, ha="left", va="bottom", fontsize=FS,
+        ax.barh(y + 0.12, t - lo, left=lo, height=0.34, color=c)
+        ax.text(lo / 1.25, y + 0.12, lab, ha="right", va="center", fontsize=FS,
                 fontweight="bold", color=c)
-        ax.text(t * 1.25, y, period_lbl, ha="left", va="center", fontsize=FS_S, color=c,
+        ax.text(t * 1.25, y + 0.12, period_lbl, ha="left", va="center", fontsize=FS_S, color=c,
                 fontweight="bold")
-        ax.text(lo * 1.15, y - 0.2, why, ha="left", va="top", fontsize=FS_S,
+        ax.text(lo * 1.15, y - 0.12, why, ha="left", va="top", fontsize=FS_S,
                 color=GRAY, alpha=1.0 if step >= 2 else 0.0)
     ax.set_xscale("log")
     ax.set_xlim(lo, 30000)
-    ax.set_ylim(-0.6, 3.6)
+    ax.set_ylim(-0.6, 3.5)
     ax.set_yticks([])
     ax.set_xticks([0.01, 0.1, 1, 10, 100, 1000])
     ax.set_xticklabels(["0.01", "0.1", "1", "10", "100", "1,000"])
@@ -648,31 +648,33 @@ def runmax():
 
 # ---------------------------------------------------------------- bus occupancy
 def bus():
-    w, h = 9.0, 4.4
-    fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.45)
-    rows = [(f"One CAN FD bus, {K.CAN_ONE.num_axes} axes", K.one, RED),
-            (f"CAN FD, arm ({K.CAN_ARM.num_axes} axes)", K.arm, AMBER),
-            (f"CAN FD, base ({K.CAN_BASE.num_axes} axes)", K.base, AMBER),
-            (f"EtherCAT, one frame, {val('n_axes')} axes", K.ecat, GREEN)]
+    w, h = 10.4, 4.6
+    fig, ax = plot_axes(w, h, left=3.6, bottom=1.0, right=0.2, top=0.45)
+    rows = [(f"One CAN FD bus,\n{K.CAN_ONE.num_axes} axes", K.one, RED),
+            (f"CAN FD, arm\n({K.CAN_ARM.num_axes} axes)", K.arm, AMBER),
+            (f"CAN FD, base\n({K.CAN_BASE.num_axes} axes)", K.base, AMBER),
+            (f"EtherCAT, one\nframe, {val('n_axes')} axes", K.ecat, GREEN)]
     cycle = m(K.CAN_ONE.cycle, "us")
     for i, (lab, res, c) in enumerate(rows):
         y = 3 - i
         v = m(res.occupancy, "us")
-        ax.barh(y - 0.12, v, color=c, height=0.38)
-        ax.text(5, y + 0.22, lab, fontsize=FS_S, color=c, fontweight="bold", va="bottom")
+        ax.barh(y, v, color=c, height=0.6)
+        ax.text(-30, y, lab, fontsize=FS_S, color=c, fontweight="bold", va="center", ha="right",
+                linespacing=1.05)
         txt = f"{v:,.1f} µs ({100 * res.utilization:.1f}%)"
-        if v > 600:
-            ax.text(v - 15, y - 0.12, txt, fontsize=FS_S, color="white", va="center", ha="right",
-                    fontweight="bold")
-        else:
-            ax.text(v + 15, y - 0.12, txt, fontsize=FS_S, color=c, va="center")
-    ax.axvline(cycle, color=SLATE, ls="--", lw=1.4)
-    ax.text(cycle, 3.62, f"{val('t_bus')} ms bus cycle", fontsize=FS_S, color=SLATE, ha="center",
+        ax.text(v + 25, y, txt, fontsize=FS_S, color=c, va="center", fontweight="bold",
+                bbox=dict(fc="white", ec="none", pad=0.6))
+    ax.axvline(cycle, color=SLATE, ls="--", lw=1.4, zorder=0)
+    ax.text(cycle, 3.45, f"{val('t_bus')} ms bus cycle", fontsize=FS_S, color=SLATE, ha="center",
             va="bottom", fontweight="bold")
-    ax.set_xlim(0, 1500)
-    ax.set_ylim(-0.5, 3.6)
+    ax.set_xlim(0, 1950)
+    ax.set_ylim(-0.5, 3.45)
     ax.set_yticks([])
+    ax.set_xticks([0, 500, 1000, 1500])
+    ax.set_xticklabels(["0", "500", "1,000", "1,500"])
     ax.spines["left"].set_visible(False)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
     ax.set_xlabel("Serialization time per cycle (µs)", fontsize=FS_S)
     save_slot(fig, "bus")
 
@@ -712,6 +714,53 @@ def solewriter(step):
     save_slot(fig, f"solewriter_step{step}")
 
 
+# ---------------------------------------------------------------- pathfinder
+def pathfinder(step):
+    """Priority inversion on Mars Pathfinder (Jones 1997), schematic: no time scale."""
+    w, h = 14.6, 4.7
+    fig, ax = canvas(w, h)
+    x0, sc, lh = 3.7, 2.0, 0.42
+    lanes = [("Bus task (high)", NAVY), ("Comms task (medium)", AMBER), ("Weather task (low)", SLATE)]
+    panels = [("As flown, without priority inheritance", [3.8, 3.25, 2.7], 4.5, 1),
+              ("The fix, with priority inheritance", [1.55, 1.0, 0.45], 2.25, 2)]
+    for title, ys, ty, k in panels:
+        if step < k:
+            continue
+
+        def run(a, b, lane, c, fc=None, ec=None, hatch=None, ls="-", text="", tc="white"):
+            box(ax, x0 + sc * a, ys[lane], sc * (b - a), lh, text=text, fc=fc or c, ec=ec or c,
+                tc=tc, fs=FS_S, bold=True, lw=1.2, r=0.03, hatch=hatch, ls=ls)
+
+        ax.text(x0, ty, title, ha="left", va="center", fontsize=FS, color=TEXT, fontweight="bold")
+        for (lab, c), y in zip(lanes, ys):
+            ax.text(x0 - 0.15, y + lh / 2, lab, ha="right", va="center", fontsize=FS_S, color=c,
+                    fontweight="bold")
+        ax.plot([x0, x0 + sc * 5.2], [ys[2] - 0.1, ys[2] - 0.1], color=GRAY, lw=1.0)
+        ax.text(x0 + sc * 5.2, ys[2] - 0.15, "time", ha="right", va="top", fontsize=FS_S, color=GRAY)
+        run(0.0, 1.2, 2, SLATE, text="takes lock")
+        run(1.2, 1.6, 0, NAVY)
+        if k == 1:
+            run(1.6, 4.6, 0, NAVY, fc="white", ec=RED, hatch="////")
+            ax.text(x0 + sc * 3.1, ys[0] + lh / 2, "B: blocked on the lock, no bound", ha="center",
+                    va="center", fontsize=FS_S, color=RED_D, fontweight="bold",
+                    bbox=dict(fc="white", ec="none", pad=0.6))
+            run(1.6, 1.9, 2, SLATE)
+            run(1.9, 4.6, 1, AMBER, text="runs as long as it likes")
+            run(1.9, 4.6, 2, SLATE, fc="white", ec=SLATE, ls="--", text="preempted", tc=SLATE)
+            ax.plot([x0 + sc * 4.65] * 2, [ys[2] - 0.1, ys[0] + lh + 0.05], color=RED_D, lw=2.0)
+            ax.text(x0 + sc * 4.7, ys[1] + lh / 2, "watchdog\nreset", ha="left", va="center",
+                    fontsize=FS_S, color=RED_D, fontweight="bold", linespacing=1.0)
+        else:
+            run(1.6, 2.5, 0, NAVY, fc="white", ec=RED, hatch="////")
+            run(1.6, 2.5, 2, NAVY, text="inherits")
+            run(2.5, 3.4, 0, NAVY)
+            run(1.9, 3.4, 1, AMBER, fc="white", ec=AMBER, ls="--", text="waits", tc=AMBER)
+            run(3.4, 4.6, 1, AMBER)
+            ax.text(x0 + sc * 3.5, ys[0] + lh / 2, "B: one critical section", ha="left", va="center",
+                    fontsize=FS_S, color=GREEN_D, fontweight="bold")
+    save_slot(fig, f"pathfinder_step{step}")
+
+
 if __name__ == "__main__":
     for s in (1, 2):
         rate_ladder(s)
@@ -732,4 +781,6 @@ if __name__ == "__main__":
     events()
     runmax()
     bus()
+    for s in (1, 2):
+        pathfinder(s)
     print("figures written")
