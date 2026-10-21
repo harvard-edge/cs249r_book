@@ -30,6 +30,7 @@
 \renewcommand{\familydefault}{\sfdefault}
 \usepackage{booktabs,amsmath}
 \usetikzlibrary{arrows.meta,positioning,calc}
+\def\colkind{col}% normalization diagram: shade a column (BatchNorm) or a row
 \graphicspath{{images/}}
 \input{images/numbers.tex}
 \setcounter{mlsystotalsections}{5}
@@ -261,12 +262,27 @@ torch.Size([128, 784])
     \begin{column}{0.40\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \textbf{Given}\\[0.1cm]
-        $d_{\text{in}} \times d_{\text{out}}$ weights in FP32\\
-        (\val{fp32_bytes} bytes each)\\
-        One example (batch one)\\
-        Each weight: one multiply-add,\\
-        2 FLOPs
+        {\small $d_{\text{in}} \times d_{\text{out}}$ FP32 weights, \val{fp32_bytes} B each\\
+        Batch one; per weight one multiply-add, 2 FLOPs}
       \end{mlsyscard}
+      \vspace{0.1cm}
+      \centering
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          wt/.style={draw=BlueLine, fill=BlueL, line width=1pt, rounded corners=2pt,
+            minimum width=1.5cm, minimum height=0.8cm, align=center, font=\footnotesize},
+          mac/.style={draw=OrangeLine, fill=OrangeL, line width=1pt, rounded corners=2pt,
+            minimum width=2.1cm, minimum height=0.45cm, font=\footnotesize}]
+        \node[wt] (w) at (0,0) {one weight\\in memory};
+        \node[mac] (m1) at (3.6,0.62) {MAC, example 1};
+        \draw[->, line width=1.2pt, BlueLine] (w.east) -- node[above, sloped, font=\scriptsize, text=darktext] {\val{fp32_bytes} B} (m1.west);
+        \uncover<6->{
+          \node[mac] (m2) at (3.6,0) {MAC, example 2};
+          \node[font=\footnotesize] at (3.6,-0.36) {$\vdots$};
+          \node[mac] (mb) at (3.6,-0.8) {MAC, example $B$};
+          \draw[->, line width=1.2pt, BlueLine] (w.east) -- (m2.west);
+          \draw[->, line width=1.2pt, BlueLine] (w.east) -- (mb.west);
+          \node[font=\footnotesize\bfseries, text=mlsysaccent, anchor=north west, align=left] at (-0.75,-0.55) {one read,\\[-2pt]$B$ uses};}
+      \end{tikzpicture}
     \end{column}
     \begin{column}{0.56\textwidth}
       \normalsize
@@ -278,7 +294,7 @@ torch.Size([128, 784])
     \end{column}
   \end{columns}
   \mlsyscredit{Network Architectures, equation 2 (weight-only model; ignores inputs, outputs, and caches).}
-  \note{[3 min] Worked example 1. Step 1: the given. Step 2: each weight takes part in one multiply-add, two FLOPs. Step 3: each weight is read once, \val{fp32_bytes_word} bytes in FP32. Step 4: the ratio, arithmetic intensity, is half a FLOP per byte, whatever the widths, because both counts grow with the same product. Step 5: an accelerator's arithmetic can consume tens to hundreds of FLOPs for every byte its memory delivers, so this layer leaves most of the arithmetic idle, waiting for weights. Step 6: the one change that raises the ratio. With a batch of B examples each weight read serves B multiply-adds, so intensity grows to about \val{dense_i} times B until activation traffic takes over (Lecture 5). Low intensity also costs energy. In Horowitz's 45 nm figures, reading one FP32 weight from DRAM costs about \val{mac_ratio} multiply-adds' worth, so batching that divides the reads also cuts energy per inference; Lecture 11 shows the full energy table. ENGAGE: ``At what batch does this layer reach 100 FLOP per byte?'' Expected: about \val{batch_100}. WARN: this is a weight-only model; a small layer such as 784 by 128 can stay in on-chip cache, and then dispatch overhead dominates over memory bandwidth. FLEX: [CORE].}
+  \note{[3 min] Worked example 1. Step 1: the given. Step 2: each weight takes part in one multiply-add, two FLOPs. Step 3: each weight is read once, \val{fp32_bytes_word} bytes in FP32. Step 4: the ratio, arithmetic intensity, is half a FLOP per byte, whatever the widths, because both counts grow with the same product. Step 5: an accelerator's arithmetic can consume tens to hundreds of FLOPs for every byte its memory delivers, so this layer leaves most of the arithmetic idle, waiting for weights. Step 6: the one change that raises the ratio. The diagram under the given card shows it: with a batch of B examples each weight read serves B multiply-adds, so intensity grows to about \val{dense_i} times B until activation traffic takes over (Lecture 5). Low intensity also costs energy. In Horowitz's 45 nm figures, reading one FP32 weight from DRAM costs about \val{mac_ratio} multiply-adds' worth, so batching that divides the reads also cuts energy per inference; Lecture 11 shows the full energy table. ENGAGE: ``At what batch does this layer reach 100 FLOP per byte?'' Expected: about \val{batch_100}. WARN: this is a weight-only model; a small layer such as 784 by 128 can stay in on-chip cache, and then dispatch overhead dominates over memory bandwidth. FLEX: [CORE].}
 \end{frame}
 
 \mlsysnote{[1.5 min] The one ratio to remember today. Arithmetic intensity is the work done per byte moved. Compare it with the machine's balance, its peak FLOP/s divided by its memory bandwidth: above the balance the arithmetic limits (the compute term of the iron law), below it the memory limits (the data term). Each family today lands at a different intensity, and recurrence escapes this axis entirely, because its limit is a chain of steps. ENGAGE: is the batch-one dense layer from the last slide above or below an accelerator's balance? Below, by more than a hundredfold, so its memory term binds. LINK: Lecture 11 draws the full roofline. FLEX: [CORE].}
@@ -488,15 +504,15 @@ tensor([[[1., 2., 4., 5.],
 
 \begin{frame}{Deeper plain networks train worse; residual ones train better}
   \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.49\textwidth}
       \centering
       {\normalsize\textbf{Plain}: 20, 32, 44, 56 layers}\\[0.1cm]
-      \safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{resnet-cifar-plain.png}
+      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{resnet-cifar-plain.png}
     \end{column}
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.49\textwidth}
       \centering
       \uncover<2->{{\normalsize\textbf{Residual}: 20 to 110 layers}\\[0.1cm]
-      \safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{resnet-cifar-residual.png}}
+      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{resnet-cifar-residual.png}}
     \end{column}
   \end{columns}\vspace{0.1cm}
   \centering
@@ -507,21 +523,39 @@ tensor([[[1., 2., 4., 5.],
 \end{frame}
 
 \begin{frame}{LayerNorm works per token; BatchNorm needs the batch}
-  \centering\small
-  \renewcommand{\arraystretch}{1.35}
+  \centering
+  \begin{tikzpicture}[x=0.4cm, y=0.28cm,
+      normgrid/.style={draw=midgray, line width=0.5pt},
+      hl/.style={draw=BlueLine, line width=1.5pt, fill=BlueL}]
+    \foreach \ox/\name/\what/\kind in {0/BatchNorm/{one feature, across the batch}/col,
+                                       10.5/LayerNorm/{one example, its features}/row,
+                                       21/RMSNorm/{one example, no mean}/row} {
+      \begin{scope}[shift={(\ox,0)}]
+        \ifx\kind\colkind \fill[BlueL] (2,0) rectangle (3,-4);
+        \else \fill[BlueL] (0,-1) rectangle (6,-2); \fi
+        \foreach \gx in {0,...,6} \draw[normgrid] (\gx,0) -- (\gx,-4);
+        \foreach \gy in {0,...,4} \draw[normgrid] (0,-\gy) -- (6,-\gy);
+        \ifx\kind\colkind \draw[BlueLine, line width=1.5pt] (2,0) rectangle (3,-4);
+        \else \draw[BlueLine, line width=1.5pt] (0,-1) rectangle (6,-2); \fi
+        \node[font=\small\bfseries, anchor=south, text height=1.7ex, text depth=0.5ex] at (3,0.15) {\name};
+        \node[font=\footnotesize, text=midgray, anchor=north] at (3,-4.15) {\what};
+      \end{scope}
+    }
+    \node[font=\footnotesize, text=midgray, anchor=east, align=right] at (-0.2,-2) {rows: examples\\columns: features};
+  \end{tikzpicture}\\[0.15cm]
+  \small
+  \renewcommand{\arraystretch}{1.15}
   \begin{tabular}{@{}l l l l@{}}
     \toprule
     & \textbf{BatchNorm} & \textbf{LayerNorm} & \textbf{RMSNorm} \\
     \midrule
-    Normalizes over & batch (and positions) & features of one token & features of one token \\
     Depends on batch size & yes, noisy when small & no & no \\
-    Typical use & CNNs & transformers, RNNs & Llama-family models \\
     Training and serving & \alert<2->{different (running stats)} & identical & identical \\
     \bottomrule
-  \end{tabular}\\[0.5cm]
+  \end{tabular}\\[0.2cm]
   \uncover<2->{\normalsize BatchNorm switches to stored averages when it serves, a source of skew.}
   \mlsyscredit{Network Architectures, \S6.4.2 and Table 4 (Ioffe and Szegedy 2015; Ba et al. 2016; Zhang and Sennrich 2019).}
-  \note{[2 min] [OPTIONAL] Skip connections protect the backward pass; normalization steadies the forward pass by re-centering and re-scaling activations at each block. The chapter's Table 4 compares three kinds. Step 1: BatchNorm computes its mean and variance across the examples in the mini-batch (and, for CNNs, across positions), so its output depends on which other examples share the batch; small batches give noisy statistics, and a batch split across accelerators needs an all-reduce to agree on them. LayerNorm computes them across the features of one token, so it works at batch one and for text generated one token at a time. RMSNorm drops the mean and keeps only the root mean square, a simpler kernel. Step 2: the operational cost. BatchNorm keeps running averages and switches to them at serving, so a mismatch between those averages and live data is a frequent source of training-serving skew. All three are elementwise and memory bound. ENGAGE: ``Which one could you use to generate text one token at a time?'' Expected: LayerNorm or RMSNorm. LINK: Part 2's transformer block. FLEX: if cut, Part 2 names LayerNorm in the transformer block.}
+  \note{[2 min] [OPTIONAL] Skip connections protect the backward pass; normalization steadies the forward pass by re-centering and re-scaling activations at each block. The chapter's Table 4 compares three kinds. Step 1: BatchNorm computes its mean and variance across the examples in the mini-batch (and, for CNNs, across positions), so its output depends on which other examples share the batch; small batches give noisy statistics, and a batch split across accelerators needs an all-reduce to agree on them. LayerNorm computes them across the features of one token, so it works at batch one and for text generated one token at a time. RMSNorm drops the mean and keeps only the root mean square, a simpler kernel. Typical use: BatchNorm in CNNs, LayerNorm in transformers and RNNs, RMSNorm in Llama-family models. Step 2: the operational cost. BatchNorm keeps running averages and switches to them at serving, so a mismatch between those averages and live data is a frequent source of training-serving skew. All three are elementwise and memory bound. ENGAGE: ``Which one could you use to generate text one token at a time?'' Expected: LayerNorm or RMSNorm. LINK: Part 2's transformer block. FLEX: if cut, Part 2 names LayerNorm in the transformer block.}
 \end{frame}
 
 \begin{frame}{Factoring a convolution cuts its work about \val{sep_round_word} times}
@@ -647,9 +681,23 @@ tensor([[[1., 2., 4., 5.],
 \end{frame}
 
 \begin{frame}[fragile]{An LSTM step costs four plain steps; training keeps every state}
-  \begin{columns}[c]
-    \begin{column}{0.52\textwidth}
-\begin{semiverbatim}\footnotesize
+  \begin{columns}[T]
+    \begin{column}{0.50\textwidth}
+      \centering
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          gate/.style={draw=white, line width=0.8pt, minimum width=1.05cm, minimum height=0.9cm,
+            font=\footnotesize\bfseries, text=darktext}]
+        \node[font=\footnotesize, align=center] (in) at (-0.4,0) {$x_t$\\$h_{t-1}$};
+        \node[gate, fill=BlueL] (g1) at (1.2,0) {input};
+        \node[gate, fill=OrangeL] (g2) at (2.25,0) {forget};
+        \node[gate, fill=GreenL] (g3) at (3.3,0) {cand.};
+        \node[gate, fill=RedL] (g4) at (4.35,0) {output};
+        \draw[midgray, line width=1pt, rounded corners=2pt] (0.67,-0.45) rectangle (4.88,0.45);
+        \draw[->, line width=1pt, midgray] (in.east) -- (0.67,0);
+        \draw[->, line width=1pt, midgray] (4.88,0) -- (5.4,0) node[right, font=\footnotesize] {$c_t, h_t$};
+        \node[font=\footnotesize, anchor=north] at (2.78,-0.5) {one matrix, \val{lstm_rows} rows $= \val{gates} \times \val{rnn_h}$};
+      \end{tikzpicture}\\[0.15cm]
+\begin{semiverbatim}\scriptsize
 >{}>{}> lstm = nn.LSTM(input_size=100,
 ... hidden_size=128)
 >{}>{}> lstm.weight_ih_l0.shape
@@ -657,12 +705,28 @@ torch.Size([512, 100])
 >{}>{}> lstm.weight_hh_l0.shape
 torch.Size([512, 128])
 \end{semiverbatim}
-      {\small \val{lstm_rows} rows $= \val{gates} \times \val{rnn_h}$: \val{gates_word} gates in one matrix.\\\val{lstm_ratio}$\times$ the weights and MACs of a plain step.}
+      {\small \val{lstm_ratio}$\times$ the weights and MACs of a plain step.}
     \end{column}
-    \begin{column}{0.46\textwidth}
-      \normalsize
-      \uncover<2->{\textbf{Inference:} one state.\\{\small \val{state_w} wide, FP32: \val{state_kb} KB at any length}\\[0.35cm]}
-      \uncover<2->{\textbf{Training:} one state per step.\\{\small \val{seq} steps keep \val{seq} states}\\[0.45cm]}
+    \begin{column}{0.48\textwidth}
+      \centering
+      \uncover<2->{%
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          st/.style={draw=BlueLine, fill=BlueL, line width=1pt, rounded corners=2pt,
+            minimum width=0.66cm, minimum height=0.58cm, font=\footnotesize}]
+        \node[font=\small\bfseries, anchor=west] at (0,1.25) {Inference: one state};
+        \node[st] (s) at (0.4,0.45) {$h$};
+        \draw[->, line width=1pt, BlueLine] (s.north east) to[out=30, in=-30, looseness=4] (s.south east);
+        \node[font=\footnotesize, anchor=west, align=left] at (1.55,0.45) {overwritten every step:\\\val{state_w} wide, \val{state_kb} KB at any length};
+        \node[font=\small\bfseries, anchor=west] at (0,-0.5) {Training: one state per step};
+        \foreach \k/\t in {0/$h_1$, 1/$h_2$, 2/$h_3$, 3/$h_4$} {
+          \node[st] (t\k) at (0.5+0.85*\k,-1.3) {\t};
+        }
+        \foreach \a/\b in {0/1, 1/2, 2/3} {\draw[->, line width=0.9pt, BlueLine] (t\a) -- (t\b);}
+        \node[font=\small] at (4.0,-1.3) {$\cdots$};
+        \node[st] (tT) at (4.75,-1.3) {$h_T$};
+        \node[font=\footnotesize, anchor=north] at (2.6,-1.7) {all kept for backward: \val{seq} steps, \val{seq} states};
+      \end{tikzpicture}}\\[0.35cm]
+      \raggedright
       \uncover<3->{\textcolor{mlsysaccent}{\textbf{Next lecture removes the serial chain and pays for it in memory.}}}
     \end{column}
   \end{columns}
