@@ -71,6 +71,7 @@ VOLUMES = {
                                       (15, "Responsible Engineering", "Applications")]),
             ("Close", [(16, "Conclusion", "all")]),
         ],
+        course_cols=[[0, 1], [2], [3], [4, 5]], course_slot=(15, 6.5),
         divstack=True),
     2: dict(
         stack=["Facility & Accelerators", "Fabric & Storage",
@@ -104,7 +105,8 @@ VOLUMES = {
                                        (15, "Sustainable AI", "Governance & Sustainability"),
                                        (16, "Responsible AI", "Governance & Sustainability")]),
             ("Close", [(17, "Conclusion", "all")]),
-        ]),
+        ],
+        course_cols=[[0, 1], [2], [3], [4, 5]], course_slot=(15, 5.85)),
 }
 
 # Volumes III and IV use a few more keys, all optional:
@@ -121,6 +123,10 @@ VOLUMES = {
 #   course_cols  draw the course order as columns, one list of COURSE
 #                group indices per column, so a long semester stays legible
 #   card_labels  the layer tag printed on course-order cards, per layer
+#   course_slot  (width, height) in cm of the slide slot the course order
+#                fills, so its text is sized for the slide
+#   card_tags    False: no layer tag on course-order cards (Volume III,
+#                where each part is one layer and its header names it)
 VOLUMES[3] = dict(
     stack=["Model", "Memory", "Tools", "Runtime", "Learning",
            "Agents at Scale"],
@@ -152,7 +158,8 @@ VOLUMES[3] = dict(
                                       (19, "Agent Economics", "Agents at Scale")]),
         ("Close", [(20, "Conclusion", "all")]),
     ],
-    course_cols=[[0, 1], [2], [3], [4], [5], [6, 7]],
+    course_cols=[[0, 1, 2], [3, 4], [5, 6, 7]], course_slot=(15, 6.2),
+    card_tags=False,
 )
 VOLUMES[4] = dict(
     stack=["World", "Boundary", "Body", "Nervous System", "Brain"],
@@ -183,7 +190,8 @@ VOLUMES[4] = dict(
                                             (17, "Responsible Physical AI", "Governance")]),
         ("Close", [(18, "Engineering Physical AI", "all")]),
     ],
-    course_cols=[[0, 1], [2], [3], [4], [5], [6]],
+    course_cols=[[0, 1, 2], [3, 4], [5, 6]], course_slot=(15, 6.0),
+    card_tags=False,
     card_labels={"Nervous System": "Nervous System",
                  "Boundary and Brain": "Boundary, Brain",
                  "Governance": "Governance"},
@@ -221,12 +229,43 @@ STACK, ROADMAP, COURSE = (VOLUMES[1]["stack"], VOLUMES[1]["roadmap"],
 DATA, PARTS = True, None
 BAR, TABS, GAP_BELOW, ENVELOPE = "Data", None, None, None
 SLUGS, EXTRA, COURSE_COLS, CARD_LABELS = {}, {}, None, {}
+COURSE_SLOT, CARD_TAGS = (15, 6.3), True
 
 # Volume IV palette roles (rules/volumes/vol4/palette.md) for the budget bar.
 V4 = {"amber": "#D97706", "amber_d": "#B45309", "amber_l": "#F59E0B",
       "slate": "#334155", "slate_m": "#64748B", "gray": "#94A3B8",
       "green": "#059669", "navy": "#1F407A", "red": "#DC2626",
       "brown": "#92400E", "line": "#475569", "band": "#F1F5F9"}
+
+
+# Helvetica advance widths (Adobe core-font metrics, 1/1000 em) for ASCII
+# 32..126, so labels can be wrapped and fitted to a box before drawing.
+_AFM_BOLD = [int(t) for t in (
+    "278 333 474 556 556 889 722 278 333 333 389 584 278 333 278 278 556 556 "
+    "556 556 556 556 556 556 556 556 333 333 584 584 584 611 975 722 722 722 "
+    "722 667 611 778 722 278 556 722 611 833 722 778 667 778 722 667 611 722 "
+    "667 944 667 667 611 333 278 333 584 556 278 556 611 556 611 556 333 611 "
+    "611 278 278 556 278 889 611 611 611 611 389 556 333 611 556 778 556 556 "
+    "500 389 280 389 584").split()]
+
+
+def tw(s, size):
+    """Width of s in bold Helvetica at size (canvas units)."""
+    return sum(_AFM_BOLD[ord(c) - 32] if 32 <= ord(c) <= 126 else 600
+               for c in s) * size / 1000
+
+
+def fit_lines(s, size, width):
+    """Greedy word wrap of s to lines no wider than width."""
+    lines, cur = [], ""
+    for w in s.split():
+        t = (cur + " " + w).strip()
+        if cur and tw(t, size) > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = t
+    return lines + ([cur] if cur else [])
 
 
 def svg(body, w=W, h=H, label=""):
@@ -295,7 +334,7 @@ def stack(accent, highlight=None, upto=None, data=None, roadmap=False):
                        f'H {x0 - 10}" fill="none" stroke="{C["gray"]}" '
                        f'stroke-width="2"/>\n')
             cx, cy = x0 - 46, (ytop + ybot) / 2
-            out.append(text(cx, cy, label, size=17, weight=700, fill=C["gray"],
+            out.append(text(cx, cy, label, size=26, weight=700, fill=C["gray"],
                             anchor="middle",
                             extra=f' transform="rotate(-90 {cx} {cy})"'))
     for i, name in enumerate(STACK):
@@ -425,48 +464,124 @@ def course_order(accent):
 
 
 def course_columns(accent):
+    """The course order at the largest type scale (1.0 to 1.3) whose
+    layout still fits the slot's height, so a short semester fills it."""
+    hmax = 1000 * COURSE_SLOT[1] / COURSE_SLOT[0]
+    for f in (1.3, 1.25, 1.2, 1.15, 1.1, 1.05):
+        try:
+            s, h = course_columns_at(accent, f)
+        except SystemExit:
+            continue
+        if h <= hmax:
+            return s
+    s, h = course_columns_at(accent, 1.0)
+    if h > hmax:
+        print(f"  course_order: {h:.0f} units tall, slot holds {hmax:.0f};"
+              f" it will shrink to fit")
+    return s
+
+
+def course_columns_at(accent, f):
     """The semester as columns, read left to right: each column holds one
     or two parts, a header above each part and its lecture cards below.
-    Volumes III and IV use it; their semesters are too long for one row
-    per part to stay legible on a slide. A part with an empty label
-    continues the part in the previous column, aligned with its cards."""
-    out = []
-    cw, ch, gap, colgap, head, pgap = 196, 84, 10, 16, 64, 14
-    x, ymax = 4, 0
+    Drawn for its slide slot (COURSE_SLOT, in cm): a 1000-unit canvas fills
+    the slot width, so the 22-unit titles land near 9.5 pt and the 18-unit
+    tags near 8 pt (times f). Titles wrap to the measured column width and each card
+    is as tall as its text, so a column of short titles stays compact. A
+    part with an empty label continues the part in the previous column,
+    aligned with its cards."""
+    cw_all, colgap, gap, pgap = 1000, 14 if CARD_TAGS else 22, round(6 * f, 1), round(12 * f, 1)
+    ncol = len(COURSE_COLS)
+    cw = (cw_all - (ncol - 1) * colgap) / ncol
+    pad, fl, ftag, ft, lead = (round(v * f, 1) for v in (7, 20, 18, 22, 25))
+    hp = pad + 3                       # left and right text inset
+    fh1, fh2, hlead = (round(v * f, 1) for v in (23, 19, 22))
+
+    def tag_of(layer):
+        if layer in CARD_LABELS:
+            return CARD_LABELS[layer]
+        if layer == "all":
+            return "whole stack"
+        return f"{layer.split(' & ')[0].split()[-1]} layer"
+
+    def card(n, title, layer):
+        """(L text, tag or None, title lines, height)."""
+        ln = f"L{n}"
+        tag = tag_of(layer) if CARD_TAGS else None
+        if tag and tw(ln, fl) + 10 + tw(tag, ftag) > cw - 2 * hp:
+            tag = tag.replace(" layer", "")
+        if tag and tw(ln, fl) + 10 + tw(tag, ftag) > cw - 2 * hp:
+            raise SystemExit(f"course_order: tag '{tag}' does not fit a card")
+        if tag is None:
+            # No tag line: the lecture number leads the first title line.
+            lines = fit_lines(f"{ln} {title}", ft, cw - 2 * hp)
+            return ln, None, lines, 2 * pad + (len(lines) - 1) * lead + ft
+        lines = fit_lines(title, ft, cw - 2 * hp)
+        return ln, tag, lines, 2 * pad + fl + 5 + (len(lines) - 1) * lead + ft
+
+    def head(part):
+        """Header lines: the part number, then its name, on one line when
+        both fit the column."""
+        words = part.split("  ")
+        if len(words) > 1 and tw(words[0], fh1) + 12 + tw(words[1], fh2) <= cw:
+            return [(words[0], words[1])], 2 + hlead + 6
+        lines = [words[0]] + (fit_lines(words[1], fh2, cw) if len(words) > 1 else [])
+        return lines, 2 + len(lines) * hlead + 6
+
+    out, x, ymax, last_h = [], 0, 0, 0
     for col in COURSE_COLS:
-        y = 4
+        y = 2
         for gi in col:
             part, lectures = COURSE[gi]
             if part:
-                words = part.split("  ")
-                lines = [words[0]] + (wrap(words[1], 22) if len(words) > 1 else [])
+                lines, hh = head(part)
                 for k, w in enumerate(lines):
-                    out.append(text(x + 2, y + 12 + k * 20, w.replace("&", "&amp;"),
-                                    size=18 if k == 0 else 16, weight=700,
+                    yy = y + 2 + hlead / 2 + k * hlead
+                    if isinstance(w, tuple):
+                        out.append(text(x + 2, yy, w[0], size=fh1, weight=700,
+                                        fill=C["gray"]))
+                        w = w[1]
+                        out.append(text(x + 2 + tw(lines[0][0], fh1) + 12, yy,
+                                        w.replace("&", "&amp;"), size=fh2,
+                                        weight=700, fill=C["gray"]))
+                        continue
+                    out.append(text(x + 2, yy, w.replace("&", "&amp;"),
+                                    size=fh1 if k == 0 else fh2, weight=700,
                                     fill=C["gray"]))
-            y += head
+                last_h = hh
+            elif gi != col[0]:
+                # The part continues in the same column: no header, no gap.
+                hh = 0
+                y -= pgap - gap
+            else:
+                hh = last_h
+            y += hh
             for n, title, layer in lectures:
+                ln, tag, lines, h = card(n, title, layer)
                 lit = layer != "all"
-                out.append(rect(x, y, cw, ch, accent, opacity=0.14 if lit else 0.06,
-                                stroke=accent, sw=1.2, rx=8))
-                if layer in CARD_LABELS:
-                    where = CARD_LABELS[layer]
-                elif lit:
-                    where = f"{layer.split(' & ')[0].split()[-1]} layer"
-                else:
-                    where = "whole stack"
-                out.append(text(x + 10, y + 18, f"L{n}", size=17, weight=700,
-                                fill=accent))
-                out.append(text(x + 52, y + 18, where, size=15, weight=600,
-                                fill=C["gray"]))
-                for k, line in enumerate(wrap(title, 16)):
-                    out.append(text(x + 10, y + 45 + k * 23, line.replace("&", "&amp;"),
-                                    size=19, weight=700, fill=C["text"]))
-                y += ch + gap
-            y += pgap
-        ymax = max(ymax, y - pgap - gap)
+                out.append(rect(x, y, cw, h, accent, opacity=0.14 if lit else 0.06,
+                                stroke=accent, sw=1.4, rx=8))
+                ty = y + pad
+                if tag is not None:
+                    out.append(text(x + hp, ty + fl / 2, ln, size=fl, weight=700,
+                                    fill=accent))
+                    out.append(text(x + hp + tw(ln, fl) + 10, ty + fl / 2,
+                                    tag.replace("&", "&amp;"), size=ftag,
+                                    weight=600, fill=C["gray"]))
+                    ty += fl + 5
+                for k, line in enumerate(lines):
+                    s = line.replace("&", "&amp;")
+                    if tag is None and k == 0:
+                        s = (f'<tspan fill="{accent}">{ln}</tspan>'
+                             + s[len(ln):])
+                    out.append(text(x + hp, ty + ft / 2 + k * lead, s, size=ft,
+                                    weight=700, fill=C["text"]))
+                y += h + gap
+            y += pgap - gap
+        ymax = max(ymax, y - pgap)
         x += cw + colgap
-    return svg("".join(out), w=x - colgap + 4, h=ymax + 4, label="Course order")
+    return (svg("".join(out), w=cw_all, h=round(ymax + 2), label="Course order"),
+            ymax + 2)
 
 
 def wrap(s, n):
@@ -556,6 +671,11 @@ def machine(accent, step=4, hl=None):
 
 # ---------------------------------------------------------------- D-A-M
 def dam(accent, hl=None):
+    """The D-A-M triangle. Vertex positions and circle sizes are fixed:
+    Lecture 1 trims the figure (30 22 45 22 bp, so x 40..840 and y 29..471
+    stay visible) and draws arrows over it at fixed relative positions.
+    The names sit 10 units clear of the highlight ring at 29 units, the
+    largest size that keeps "Algorithm" and "Machine" inside that trim."""
     pts = {"D": (450, 100), "A": (260, 400), "M": (640, 400)}
     names = {"D": "Data", "A": "Algorithm", "M": "Machine"}
     col = {"D": ("GreenL", "GreenLine"), "A": ("OrangeL", "OrangeLine"),
@@ -573,14 +693,16 @@ def dam(accent, hl=None):
                    f'stroke="{C[line]}" stroke-width="4" '
                    f'opacity="{0.35 if dim else 1}"/>\n')
         if hl == k:
-            out.append(f'<circle cx="{x}" cy="{y}" r="70" fill="none" '
-                       f'stroke="{accent}" stroke-width="6"/>\n')
-        out.append(text(x, y, k, size=48, weight=700, fill=C[line],
+            out.append(f'<circle cx="{x}" cy="{y}" r="67" fill="none" '
+                       f'stroke="{accent}" stroke-width="5"/>\n')
+        out.append(text(x, y, k, size=60, weight=700, fill=C[line],
                         anchor="middle",
                         extra=f' opacity="{0.4 if dim else 1}"'))
-        lx, align = {"D": (x + 82, "start"), "A": (x - 82, "end"),
-                   "M": (x + 82, "start")}[k]
-        out.append(text(lx, y, names[k], size=26, weight=700,
+        # "Data" sits above right of its circle: Lecture 1 ends an arrow on
+        # the circle's right side, level with its center.
+        lx, ly, align = {"D": (x + 74, y - 48, "start"), "A": (x - 80, y, "end"),
+                         "M": (x + 80, y, "start")}[k]
+        out.append(text(lx, ly, names[k], size=29, weight=700,
                         fill=C["text"], anchor=align,
                         extra=f' opacity="{0.4 if dim else 1}"'))
     return svg("".join(out), label="D-A-M triangle")
@@ -621,41 +743,72 @@ ARROW_DEFS = ('<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" '
               '<path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>\n')
 
 
-def record_chain(accent, lit=None, thumb=False):
+def record_chain(accent, lit=None, thumb=False, upto=None):
     """The sixteen records of Volume IV in the book's spine layout (fig-01-
-    spine), redrawn for a full-width slide slot: about 14 cm wide, so an
-    18-unit label lands near 8 pt. lit: the lecture whose record is lit;
-    earlier records stay normal and later ones are dimmed. thumb: shapes
-    only, no text, heavier lines, for goal and recall thumbnails."""
-    col0, cw, bw, bh = 150, 120, 108, 64
-    X0 = 4
-    W = X0 + col0 + 6 * cw + 14
-    yrow = {0: 24, 1: 108, 2: 224}
-    H = 312
+    spine), redrawn for a full-width slide slot (about 14 by 5.2 cm). Each
+    box names its record in one or two words ("record" is dropped: every box
+    is one), and each column is as wide as its longest word, so the names
+    land near 9.5 pt. lit: the lecture whose record is lit; earlier records
+    stay normal and later ones are dimmed. thumb: shapes only, no text,
+    heavier lines, for goal and recall thumbnails. upto: build step 1 to 4,
+    showing Parts I to upto (hidden parts leave their space empty, so the
+    geometry is the same at every step)."""
+    fn, fl, fb = 22, 18, 19                    # name, lecture, band label
+    X0, col0, gapx, bh, lead = 4, 162, 12, 76, 22
+    names = {lec: [w for w in lines if w not in ("record", "records")]
+             for lec, lines, _, _ in RECORDS}
+    names = {k: [w.replace("-", " ") for w in v] for k, v in names.items()}
+    ncol = 1 + max(c for *_, c in RECORDS)
+    # Column widths: the widest one-line name in the column, plus padding.
+    widths = [col0 - 42] + [0] * (ncol - 1)
+    for lec, _, r, c in RECORDS:
+        if c and lec != 18:
+            widths[c] = max([widths[c]] + [tw(w, fn) * 0.93 + 14 for w in names[lec]])
+    xs = [X0 + (col0 - widths[0]) / 2, X0 + col0 + 2]
+    for c in range(1, ncol - 1):
+        xs.append(xs[-1] + widths[c] + gapx)
+    W = xs[-1] + widths[-1] + 14
+    yrow = {0: 22, 1: 112, 2: 244}
+    yr_py, yr_ry = 222, 230                    # the two routes into Part IV
+    H = 346
+    part = {}
+    for lec, _, r, c in RECORDS:
+        part[lec] = 1 if lec <= 4 else 2 if lec <= 7 else 3 if lec <= 13 else 4
+    vis = {lec for lec in part if upto is None or part[lec] <= upto}
 
     def cx(c):
-        return X0 + (col0 - bw) / 2 if c == 0 else X0 + col0 + (c - 1) * cw + 6
+        return xs[c]
 
     def box(c, r, wide=False):
-        return cx(c), yrow[r], (bw + 32 if wide else bw), bh
+        w = widths[c]
+        if wide:
+            w = max(w, max(tw(s, fn) * 0.93 + 14 for s in names[18]))
+        return cx(c), yrow[r], w, bh
 
     sw = 5 if thumb else 1.8
     asw = 4 if thumb else 1.8
     out = [] if thumb else [ARROW_DEFS]
     band = V4["band"]
     # Part bands, with their law, as in the book's figure.
-    bands = [(X0, 0, col0 - 4, 180, "I · Irreversibility", 12),
-             (X0 + col0 + 2, 0, 3 * cw - 4, 94, "II · Endogenous data", 12),
-             (X0 + col0 + 2, 100, 6 * cw - 4, 94, "III · Proposal is not permission", 184),
-             (X0 + col0 + 2, 216, 4 * cw - 4, 94, "IV · Permission must be earned", 300)]
-    for x, y, w, h, label, ly in bands:
+    x2 = X0 + col0 + 2
+    bands = [(1, X0, 0, col0 - 4, yrow[1] + bh + 8, "I · Irreversibility", 12),
+             (2, x2, 0, cx(4) - gapx / 2 - x2, yrow[1] - 8, "II · Endogenous data", 12),
+             (3, x2, yrow[1] - 6, W - 6 - x2, yr_py - 6 - (yrow[1] - 6),
+              "III · Proposal is not permission", yrow[1] + bh + 14),
+             (4, x2, yr_ry + 6, cx(5) + box(5, 2, True)[2] + gapx / 2 - x2,
+              H - yr_ry - 6, "IV · Permission must be earned", yrow[2] + bh + 14)]
+    for p, x, y, w, h, label, ly in bands:
+        if upto is not None and p > upto:
+            continue
         out.append(rect(x, y, w, h, band, rx=8))
         if not thumb:
-            out.append(text(x + 8, ly, label, size=16, weight=700, fill=V4["line"]))
+            out.append(text(x + 8, ly, label, size=fb, weight=700, fill=V4["line"]))
     # Connections first, so boxes sit on top of them.
     mark = "" if thumb else ' marker-end="url(#ah)"'
 
-    def path(d, dash=False):
+    def path(ends, d, dash=False):
+        if not set(ends) <= vis:
+            return
         da = ' stroke-dasharray="6,5"' if dash else ""
         out.append(f'<path d="{d}" fill="none" stroke="{V4["line"]}" '
                    f'stroke-width="{asw}"{da}{mark}/>\n')
@@ -668,33 +821,36 @@ def record_chain(accent, lit=None, thumb=False):
         return x + w, y + h / 2
 
     def left(lec):
-        r, c = pos[lec]
-        return cx(c)
+        return cx(pos[lec][1])
+
+    def mid(c):
+        return cx(c) + widths[c] / 2
 
     for row in ([5, 6, 7], [8, 9, 10, 11, 12, 13], [14, 15, 16, 17, 18]):
         for a, b in zip(row, row[1:]):
             x1, y1 = mid_right(a)
-            path(f"M {x1} {y1} H {left(b) - 2}")
-    lx = cx(0) + bw / 2
-    path(f"M {lx} {yrow[0] + bh} V {yrow[1] - 2}")                  # limit -> handoff
+            path((a, b), f"M {x1} {y1} H {left(b) - 2}")
+    lx = mid(0)
+    path((2, 4), f"M {lx} {yrow[0] + bh} V {yrow[1] - 2}")             # limit -> handoff
     hx, hy = mid_right(4)
     fx = (hx + left(8)) / 2
-    path(f"M {hx} {hy} H {left(8) - 2}")                             # handoff -> observation
-    path(f"M {fx} {hy} V {yrow[0] + bh / 2} H {left(5) - 2}")        # handoff -> provenance
+    path((4, 8), f"M {hx} {hy} H {left(8) - 2}")                        # handoff -> observation
+    path((4, 5), f"M {fx} {hy} V {yrow[0] + bh / 2} H {left(5) - 2}")   # handoff -> provenance
     ex, ey = mid_right(7)
-    path(f"M {ex} {ey} H {cx(5) + bw / 2} V {yrow[1] - 2}")          # evaluation -> enforcement
-    px = cx(6) + bw / 2
-    path(f"M {px} {yrow[1] + bh} V 200 H {cx(1) + bw / 2} V {yrow[2] - 2}")  # placement -> authority
-    rx_ = cx(3) + bw / 2
-    path(f"M {rx_} {yrow[0]} V 6 H {W - 7} V 210 H {rx_} V {yrow[2] - 2}")  # evaluation -> release
-    if not thumb:
+    path((7, 12), f"M {ex} {ey} H {mid(5)} V {yrow[1] - 2}")            # evaluation -> enforcement
+    path((13, 14), f"M {mid(6)} {yrow[1] + bh} V {yr_py} H {mid(1)} V {yrow[2] - 2}")  # placement -> authority
+    path((7, 16), f"M {mid(3)} {yrow[0]} V 6 H {W - 7} V {yr_ry} H {mid(3) + 10} "
+         f"V {yrow[2] - 2}")                                            # evaluation -> release
+    if not thumb and 4 in vis:
         # Lecture 3 has no record: its proposer limits enter the handoff record.
-        path(f"M {lx} {yrow[1] + bh + 46} V {yrow[1] + bh + 2}", dash=True)
-        out.append(text(lx, yrow[1] + bh + 60, "L3: proposer", size=16, weight=600,
+        path((4,), f"M {lx} {yrow[1] + bh + 44} V {yrow[1] + bh + 2}", dash=True)
+        out.append(text(lx, yrow[1] + bh + 58, "L3: proposer", size=fl, weight=600,
                         fill=C["gray"], anchor="middle"))
-        out.append(text(lx, yrow[1] + bh + 80, "limits", size=16, weight=600,
+        out.append(text(lx, yrow[1] + bh + 79, "limits", size=fl, weight=600,
                         fill=C["gray"], anchor="middle"))
-    for lec, lines, r, c in RECORDS:
+    for lec, _, r, c in RECORDS:
+        if lec not in vis:
+            continue
         x, y, w, h = box(c, r, wide=lec == 18)
         if thumb:
             out.append(rect(x, y, w, h, accent, accent, sw, rx=6, opacity=0.16))
@@ -704,15 +860,17 @@ def record_chain(accent, lit=None, thumb=False):
         stroke = accent if on else ("#CBD5E1" if dim else V4["line"])
         out.append(rect(x, y, w, h, accent if on else C["white"], stroke, sw, rx=6))
         col = C["white"] if on else ("#A3A3A3" if dim else C["text"])
+        lines = names[lec]
+        y0 = y + (15 if len(lines) == 2 else 25)
         for k, s in enumerate(lines):
-            out.append(text(x + w / 2, y + 16 + 19 * k, s, size=18, weight=500,
+            out.append(text(x + w / 2, y0 + lead * k, s, size=fn, weight=500,
                             fill=col, anchor="middle"))
-        out.append(text(x + w / 2, y + 53, f"L{lec}", size=16, weight=700,
+        out.append(text(x + w / 2, y + h - 11, f"L{lec}", size=fl, weight=700,
                         fill=C["white"] if on else ("#BDBDBD" if dim else C["gray"]),
                         anchor="middle"))
     # Six units of headroom above the band labels.
     body = f'<g transform="translate(0,6)">{"".join(out)}</g>'
-    return svg(body, w=W, h=H + 6, label="Record chain")
+    return svg(body, w=round(W), h=H + 6, label="Record chain")
 
 
 # ---------------------------------------------------------------- budget bar
@@ -786,8 +944,10 @@ def budget_bar(accent, n, step, v, speed_label):
     """The aisle stopping budget as one horizontal bar at speed v, with the
     first `step` segments of budget_segments(). Every step has the same axis,
     and each segment's label has a fixed place, so nothing moves between
-    steps: pieces of the delay are labeled below on the left, later terms
-    below on the right, each on its own row with a leader."""
+    steps. The pieces of the delay are too narrow for a leader each, so a
+    bracket under the delay block groups them and a swatch legend below it
+    names them in bar order; later terms are labeled below on the right,
+    each on its own row with a leader."""
     segs = budget_segments(n)[:step]
     xl, xr, mmax = 20, 860, 1300.0
     s = (xr - xl) / mmax
@@ -797,7 +957,7 @@ def budget_bar(accent, n, step, v, speed_label):
 
     fs = 20
     by, bh = 92, 48
-    rows = {"B1": 162, "B2": 186, "B3": 210, "A1": 70, "A2": 44}
+    rows = {"B1": 168, "B2": 196, "B3": 224, "A1": 70, "A2": 44}
     out = [ARROW_DEFS.replace('fill="#475569"', f'fill="{V4["brown"]}"')]
     keys = [k for k, *_ in segs]
     mm = {k: f(v) for k, _, _, f, _ in segs}
@@ -842,17 +1002,28 @@ def budget_bar(accent, n, step, v, speed_label):
         "track": f"tracking {fmt_mm(mm.get('track', 0))}",
         "da": f"dispatch to admission {fmt_mm(mm.get('da', 0))}",
     }
-    place = {"onset": ("B1", "r"), "lease": ("B2", "r"), "age": ("B3", "r"),
-             "jerk": ("B1", "l"), "track": ("B2", "l"), "da": ("B3", "l")}
+    # The delay's pieces, in bar order (age, lease path, brake onset): a
+    # bracket under the delay block, then one legend row per piece.
+    legend = {"age": "B1", "lease": "B2", "onset": "B3"}
+    if any(k in spans for k in legend):
+        yb = by + bh + 7
+        out.append(f'<path d="M {X(d0) + 1} {yb - 5} V {yb} H {X(d1) - 1} V {yb - 5}" '
+                   f'fill="none" stroke="{C["text"]}" stroke-width="1.5"/>\n')
+    for k, row in legend.items():
+        if k not in spans:
+            continue
+        y = rows[row]
+        out.append(rect(xl, y - 8, 16, 16, color[k], rx=2))
+        lab(texts[k], xl + 24, y, color[k])
+    place = {"jerk": ("B1", "l"), "track": ("B2", "l"), "da": ("B3", "l")}
     for k, (row, side) in place.items():
         if k not in spans:
             continue
         # A vertical leader from the segment's middle down to its row; the
-        # label sits right of it (side "r") or ends just left of it ("l").
+        # label ends just left of it.
         a, b = spans[k]
         lx, y = (X(a) + X(b)) / 2, rows[row]
-        tc = lab(texts[k], lx + 6 if side == "r" else lx - 6, y, color[k],
-                 "start" if side == "r" else "end")
+        tc = lab(texts[k], lx - 6, y, color[k], "end")
         out.append(f'<line x1="{lx}" y1="{by + bh}" x2="{lx}" y2="{y + 7}" '
                    f'stroke="{tc}" stroke-width="1.5"/>\n')
     # Above the bar: the delay (whole), the allowances, and the large terms.
@@ -893,7 +1064,7 @@ def budget_bar(accent, n, step, v, speed_label):
     out.append(f'<line x1="{xc}" y1="{rows["A1"] + 12}" x2="{xc}" y2="{by + bh + 8}" stroke="{V4["red"]}" '
                f'stroke-width="3" stroke-dasharray="7,4"/>\n')
     lab(f"clear {n['clear']:,.0f} mm", xc, rows["A1"], V4["red"], "middle")
-    ya = 232
+    ya = 248
     out.append(f'<line x1="{xl}" y1="{ya}" x2="{xr}" y2="{ya}" stroke="#888888" stroke-width="1.5"/>\n')
     for t in range(0, int(mmax) + 1, 200):
         out.append(f'<line x1="{X(t)}" y1="{ya}" x2="{X(t)}" y2="{ya + 6}" stroke="#888888" '
@@ -937,7 +1108,7 @@ def main():
         # stack); add its layers, roadmap, and course to VOLUMES first.
         raise SystemExit(f"Volume {args.volume} stack not defined yet")
     global STACK, ROADMAP, COURSE, DATA, PARTS, BAR, TABS, GAP_BELOW
-    global ENVELOPE, SLUGS, EXTRA, COURSE_COLS, CARD_LABELS
+    global ENVELOPE, SLUGS, EXTRA, COURSE_COLS, CARD_LABELS, COURSE_SLOT, CARD_TAGS
     v = VOLUMES[args.volume]
     STACK, ROADMAP, COURSE = v["stack"], v["roadmap"], v["course"]
     PARTS = v["parts"]
@@ -946,6 +1117,7 @@ def main():
     TABS, GAP_BELOW, ENVELOPE = v.get("tabs"), v.get("gap_below"), v.get("envelope")
     SLUGS, EXTRA = v.get("slugs", {}), v.get("extra", {})
     COURSE_COLS, CARD_LABELS = v.get("course_cols"), v.get("card_labels", {})
+    COURSE_SLOT, CARD_TAGS = v.get("course_slot", (15, 6.3)), v.get("card_tags", True)
     accent = ACCENT[args.volume]
     out = Path(__file__).parent / f"vol{args.volume}"
     out.mkdir(exist_ok=True)
@@ -984,6 +1156,10 @@ def main():
         figs["thumb_record_chain"] = record_chain(accent, thumb=True)
         for lec, *_ in RECORDS:
             figs[f"record_chain_l{lec:02d}"] = record_chain(accent, lit=lec)
+        # A build of the whole chain, one part per step, for the slide that
+        # first shows it (Lecture 1) and the course synthesis (Lecture 18).
+        for k in range(1, 5):
+            figs[f"record_chain_build{k}"] = record_chain(accent, upto=k)
     if vol.get("budget"):
         n = budget_numbers()
         segs = budget_segments(n)
