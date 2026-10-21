@@ -285,7 +285,7 @@ bar_steps("saving", [
      f"${val('save_serve_k')}K, about {val('save_serve_t')} t", 1),
     ("Halve all training", K.mag(K.TCO.training_saving, "dollar") / 10 ** 3, "neutral",
      f"${val('save_train_k')}K, {val('save_train_t')} t", 1),
-], 1, (4.6, 1.3), 520, "Three-year saving (US$ thousands)")
+], 1, (4.6, 1.3), 620, "Three-year saving (US$ thousands)")
 
 # Measured fleets (moved from Lecture 15; two rows)
 fleet = [("Google, ML energy, 2019 to 2021", [("Training ~2/5", num("g_train_share"), "neutral_l"),
@@ -408,12 +408,12 @@ bar_steps("sisa", [
 # DP-SGD per-sample gradient memory (moved from Lecture 15)
 # Redrawn 2026-10-19 for a half-width column beside the Opacus code: labels
 # sit above the bars so the plot can be narrow.
-fig, ax = plt.subplots(figsize=(3.0, 1.25))
+fig, ax = plt.subplots(figsize=(3.4, 1.75))
 ax.barh(0.9, K.mag(K.GRADS.per_batch("KWS"), "MB"), height=0.45, color=C["memory"])
-ax.text(36, 1.17, f"KWS: {val('kws_batch_mb')} MB", fontsize=11,
+ax.text(36, 1.17, f"KWS: {val('kws_batch_mb')} MB", fontsize=13,
         fontweight="bold", color=C["memory"], va="bottom")
 ax.barh(0, K.mag(K.GRADS.per_batch("GPT-2"), "MB"), height=0.5, color=C["danger"])
-ax.text(40, 0, f"GPT-2: {val('gpt2_batch_tb')} TB", fontsize=11, fontweight="bold",
+ax.text(40, 0, f"GPT-2: {val('gpt2_batch_tb')} TB", fontsize=13, fontweight="bold",
         color="white", va="center")
 ax.axvline(num("h100_gb") * 10 ** 3, color=C["neutral"], lw=1.6, ls="--")
 # dashed line: one H100, 80 GB (labeled in the slide text)
@@ -424,7 +424,8 @@ ax.set_yticks([])
 ax.spines["left"].set_visible(False)
 ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
-ax.set_xlabel(f"Batch of {val('batch')}, MB (log)", fontsize=11)
+ax.tick_params(axis="x", labelsize=12)
+ax.set_xlabel(f"Batch of {val('batch')}, MB (log)", fontsize=12)
 sp.save(fig, out / "dpsgd_step1.svg")
 
 # Corrected 2026-10-19: the ImageNet result fine-tunes a model pre-trained on
@@ -555,6 +556,19 @@ g.text(815, 270, "Recall\nthe model", 19, C["danger"], "bold", first=4)
 g.text(450, 360, "Answer within one month, extendable by two (GDPR Art. 12(3))", 19,
        C["danger"], "bold", first=4)
 g.write("lineage", 4)
+
+# Erasure without unlearning: the request forces a retraining, a new
+# checkpoint, and an update to every deployed device (chapter Sec. 15.5.5).
+g = Svg(900, 96)
+steps_ = [("Erasure\nrequest", "danger"), ("Retrain without\nthe record", "compute"),
+          ("Replacement\ncheckpoint", "memory"), ("Update every\ndeployed device", "data")]
+for i, (lab, ck) in enumerate(steps_):
+    x = 8 + i * 225
+    g.rect(x, 8, 195, 80, C[ck + "_l"], C[ck], sw=2.5)
+    g.text(x + 97, 48, lab, 22, C["text"], "bold")
+    if i:
+        g.line(x - 27, 48, x - 4, 48, C["neutral"])
+g.write("erasure_flow", 1)
 
 # DP-SGD mechanism
 g = Svg(900, 330)

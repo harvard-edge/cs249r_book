@@ -591,3 +591,23 @@ except FileNotFoundError:
     pass
 
 print("figures written to", out)
+
+# ---------------------------------------------------------------------------
+# Hedged read on a timeline (frame "A hedged read pays only when its trigger
+# sits in the tail"): the original read lands on a slow server; at the p99
+# delay a second read goes to a replica, and the first response wins.
+# Schematic, no measured times. Added 2026-10-21.
+# ---------------------------------------------------------------------------
+s = Svg(900, 220)
+s.line(190, 182, 880, 182, V["mute"], 2, arrow=True)
+s.text(880, 210, "time", 22, V["mute"], anchor="end")
+s.text(175, 62, "First read", 24, V["text"], "bold", anchor="end")
+s.rect(195, 36, 640, 44, V["bad_fill"], V["bad"])
+s.text(634, 66, "server A: slow, in the tail", 22, V["bad_text"], "bold")
+s.line(430, 24, 430, 182, V["c1"], 2.5, dash="7 5")
+s.text(436, 210, "p99 delay", 22, V["c1"], "bold", anchor="middle")
+s.text(175, 132, "Second read", 24, V["text"], "bold", anchor="end")
+s.rect(432, 106, 180, 44, V["st_fill"], V["st"])
+s.text(522, 136, "replica B", 22, V["st_text"], "bold")
+s.text(626, 136, "first response wins", 24, V["st_text"], "bold", anchor="start")
+s.save(out / "hedge_timeline.svg")

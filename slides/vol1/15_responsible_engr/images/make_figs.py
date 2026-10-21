@@ -526,27 +526,29 @@ g.write("threshold", 2)
 # Three places to intervene; during training, an adversary head with a reversed
 # gradient (chapter Sec. 15.3.2.1)
 g = Svg(560, 470)
-stages = [("Before training", "Reweight the\ntraining examples", 1, "data"),
-          ("During training", "", 2, "compute"),
-          ("After training", "Move Group B's\nthreshold", 3, "danger")]
-for i, (stage, body, first, ck) in enumerate(stages):
-    y = 10 + i * 155
-    g.rect(10, y, 540, 140, C[ck + "_l"], C[ck], first=first, sw=2.5)
-    g.text(25, y + 24, stage, 25, C[ck], "bold", "start", first=first)
-    if body:
-        g.text(280, y + 80, body, 27, C["text"], "bold", first=first)
-y = 165
-g.rect(25, y + 50, 125, 62, "white", C["neutral"], first=2)
-g.text(87, y + 81, "Encoder", 22, C["text"], "bold", first=2)
-g.rect(205, y + 36, 140, 44, "white", C["data"], first=2)
-g.text(275, y + 58, "Task head", 21, C["text"], "bold", first=2)
-g.rect(205, y + 88, 140, 44, "white", C["danger"], first=2)
-g.text(275, y + 110, "Adversary", 21, C["danger"], "bold", first=2)
-g.line(152, y + 72, 201, y + 60, C["neutral"], first=2)
-g.line(152, y + 92, 201, y + 106, C["neutral"], first=2)
-g.text(448, y + 58, "repay?", 22, C["data"], "bold", first=2)
-g.text(448, y + 104, "group?\ngradient reversed", 19, C["danger"], "bold", first=2)
-g.text(280, 448, "Legally restricted in US credit", 22, C["danger"], "bold", first=3)
+# Before (short), during (tall: the adversary diagram needs room), after.
+g.rect(10, 10, 540, 105, C["data_l"], C["data"], first=1, sw=2.5)
+g.text(25, 34, "Before training", 25, C["data"], "bold", "start", first=1)
+g.text(280, 80, "Reweight the training examples", 27, C["text"], "bold", first=1)
+y = 125
+g.rect(10, y, 540, 205, C["compute_l"], C["compute"], first=2, sw=2.5)
+g.text(25, y + 24, "During training", 25, C["compute"], "bold", "start", first=2)
+g.rect(25, y + 72, 135, 76, "white", C["neutral"], first=2)
+g.text(92, y + 110, "Encoder", 26, C["text"], "bold", first=2)
+g.rect(220, y + 52, 165, 52, "white", C["data"], first=2)
+g.text(302, y + 78, "Task head", 24, C["text"], "bold", first=2)
+g.rect(220, y + 120, 165, 52, "white", C["danger"], first=2)
+g.text(302, y + 146, "Adversary", 24, C["danger"], "bold", first=2)
+g.line(162, y + 100, 216, y + 80, C["neutral"], first=2)
+g.line(162, y + 120, 216, y + 142, C["neutral"], first=2)
+g.text(470, y + 78, "repay?", 25, C["data"], "bold", first=2)
+g.text(470, y + 146, "group?", 25, C["danger"], "bold", first=2)
+g.text(302, y + 190, "gradient reversed into the encoder", 21, C["danger"], "bold", first=2)
+y = 340
+g.rect(10, y, 540, 120, C["danger_l"], C["danger"], first=3, sw=2.5)
+g.text(25, y + 24, "After training", 25, C["danger"], "bold", "start", first=3)
+g.text(280, y + 62, "Move Group B's threshold", 27, C["text"], "bold", first=3)
+g.text(280, y + 98, "Legally restricted in US credit", 22, C["danger"], "bold", first=3)
 g.write("interventions", 3)
 
 # Fairness-accuracy frontier, slide variant of the chapter's figure 3

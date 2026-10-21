@@ -702,3 +702,33 @@ s.text(740, 296, f"{val('shard_c_gb')} GB gradient shard", 21, "#b45309", weight
 s.save(out / "grid3d.svg")
 
 print("figures written to", out)
+
+# ---------------------------------------------------------------------------
+# PPO against DPO: static state per model, stacked (frame "PPO alignment
+# holds four models"). Values from calcs.py (Distributed Training, table 7).
+# Added 2026-10-21 so the footprints compare at a glance.
+# ---------------------------------------------------------------------------
+_pol, _ref = num("rlhf_policy_gb"), num("rlhf_ref_gb")
+_rew, _valg = num("rlhf_reward_gb"), num("rlhf_value_gb")
+fig, ax = plt.subplots(figsize=(5.8, 1.1))
+for y, parts, tot in ((1, [(_pol, C["memory"], "policy"), (_ref, C["neutral"], "ref."),
+                           (_rew, C["data"], ""), (_valg, C["compute"], "value")],
+                       f"PPO {val('rlhf_ppo_gb')} GB"),
+                      (0, [(_pol, C["memory"], "policy"), (_ref, C["neutral"], "ref.")],
+                       f"DPO {val('rlhf_dpo_gb')} GB")):
+    left = 0
+    for w, col, lab in parts:
+        ax.barh(y, w, 0.62, left=left, color=col, edgecolor="white", lw=1)
+        if lab:
+            ax.text(left + w / 2, y, lab, ha="center", va="center", fontsize=11.5,
+                    fontweight="bold", color="white")
+        left += w
+    ax.text(left + 15, y, tot, va="center", fontsize=12.5, fontweight="bold", color=C["text"])
+_x = _pol + _ref + _rew / 2
+ax.annotate("reward", (_x, 1.31), xytext=(_x - 25, 1.62), ha="right", va="center",
+            fontsize=11, fontweight="bold", color=C["data"],
+            arrowprops=dict(arrowstyle="-", color=C["data"], lw=1.2))
+ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.32)
+ax.set_ylim(-0.4, 1.8)
+ax.axis("off")
+sp.save(fig, out / "rlhf_state.svg")

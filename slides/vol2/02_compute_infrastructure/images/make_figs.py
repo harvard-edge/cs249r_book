@@ -505,3 +505,63 @@ sp.hbars(out / "delivered.svg",
           ("8,192-GPU run", num("chain_share_pct"), "network", f"{val('chain_share_pct')}%")],
          "%", log=False, xlabel="Share of peak that becomes progress, %",
          size=(4.2, 1.9))
+
+# 18. ZeRO memory per GPU against one H100 (frame "Adding 128-way data
+#     parallelism"): weights, then Adam moments, then the subtotal. Added
+#     2026-10-21 so the comparison the frame computes is visible. Drawn at
+#     its slot (about 8.5 x 3 cm) so type lands near 10 pt.
+_W, _A, _CAP = num("tp8_weights_gb"), num("zero_adam_gb"), num("h100_hbm_gb")
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(3.4, 1.15))
+    ax.barh(0, _W, 0.6, color=C["memory"])
+    label(ax, _W / 2, 0, f"weights {val('tp8_weights_gb')}", "white", ha="center", va="center",
+          fontsize=11)
+    ax.barh(0, _A, 0.6, left=_W, color=C["compute"], alpha=1.0 if k >= 2 else 0.0)
+    label(ax, _W + _A + 1.5, 0.45, f"+ Adam {val('zero_adam_gb')}", C["compute"], k >= 2,
+          va="bottom", fontsize=11)
+    label(ax, _W + _A + 1.5, -0.05, f"= {val('zero_subtotal_gb')} GB", C["text"], k >= 3,
+          va="center", fontsize=12)
+    ax.axvline(_CAP, color=C["danger"], lw=2, ls="--")
+    label(ax, _CAP - 1, -0.65, f"H100 {val('h100_hbm_gb')} GB", C["danger"], ha="right",
+          va="center", fontsize=11)
+    ax.set_xlim(0, 90)
+    ax.set_ylim(-0.9, 1.0)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("GB per GPU", fontsize=11)
+    ax.tick_params(axis="x", labelsize=10)
+    sp.save(fig, out / f"zero_mem_step{k}.svg")
+
+# 19. The power step and its voltage droop on one H100 core rail (frame "A
+#     barrier swings every GPU"). Shape is schematic; the levels, rise times,
+#     and droops are the chapter's scenario values. Added 2026-10-21; drawn
+#     at its slot (about 8.3 x 4.2 cm).
+_lo, _hi = num("step_low_w"), num("tdp_h100")
+_ts, _tf = num("rise_slow_us"), num("rise_fast_ns") / 10 ** 3   # microseconds
+_ds, _df = num("droop_1us_mv"), num("droop_100ns_mv")
+_t0 = 0.5
+fig, (a1, a2) = plt.subplots(2, 1, figsize=(3.4, 1.85), sharex=True,
+                             gridspec_kw={"hspace": 0.3})
+for ramp, col in ((_ts, C["memory"]), (_tf, C["danger"])):
+    a1.plot([0, _t0, _t0 + ramp, 2.2], [_lo, _lo, _hi, _hi], color=col, lw=2.2)
+a1.set_ylim(_lo - 80, _hi + 190)
+a1.set_yticks([_lo, _hi])
+a1.set_ylabel("W", fontsize=10)
+a1.text(_t0 + _ts + 0.05, _hi - 170, f"{val('rise_slow_us')} µs edge", color=C["memory"],
+        fontsize=10.5, fontweight="bold")
+a1.text(_t0 + _tf + 0.04, _hi + 25, f"{val('rise_fast_ns')} ns edge", color=C["danger"],
+        fontsize=10.5, fontweight="bold", va="bottom")
+for ramp, d, col in ((_ts, _ds, C["memory"]), (_tf, _df, C["danger"])):
+    a2.plot([0, _t0, _t0, _t0 + ramp, _t0 + ramp, 2.2], [0, 0, -d, -d, 0, 0], color=col, lw=2.2)
+a2.text(_t0 + _ts + 0.05, -_ds - 8, f"−{val('droop_1us_mv')} mV", color=C["memory"],
+        fontsize=10.5, fontweight="bold", va="top")
+a2.text(_t0 + _tf + 0.06, -_df + 10, f"−{val('droop_100ns_mv')} mV", color=C["danger"],
+        fontsize=10.5, fontweight="bold", va="bottom")
+a2.set_ylim(-_df - 30, 30)
+a2.set_yticks([0, -round(_df, -2)])
+a2.set_ylabel("mV", fontsize=10)
+a2.set_xlim(0, 2.2)
+a2.set_xlabel("time (µs)", fontsize=10)
+for a in (a1, a2):
+    a.tick_params(labelsize=9.5)
+sp.save(fig, out / "droop.svg")

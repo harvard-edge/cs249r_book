@@ -47,10 +47,10 @@ def cluster_counts():
     rows = [("AlexNet", 2012, num("alexnet_gpus"), False, (8, -3, "left")),
             ("Megatron-LM", 2019, num("megatron_gpus"), False, (-8, 4, "right")),
             ("GPT-3 (estimate)", 2020, num("msft_gpus"), True, (-10, 0, "right")),
-            ("PaLM", 2022, num("palm_chips"), False, (-8, -13, "right")),
+            ("PaLM", 2022, num("palm_chips"), False, (0, 13, "center")),
             ("LLaMA 1", 2023, num("llama1_gpus"), False, (-4, -17, "right")),
             ("DeepSeek-V3", 2024, num("deepseek_gpus"), False, (4, -17, "left")),
-            ("Llama 3", 2024, num("llama3_gpus"), False, (-9, 6, "right"))]
+            ("Llama 3", 2024, num("llama3_gpus"), False, (9, 4, "left"))]
     fig, ax = sp.plt.subplots(figsize=(5.7, 2.4))
     _, slope, intercept = calcs.GROW.fit   # the filled points only
     xs = np.linspace(2011.5, 2024.5, 100)
@@ -96,7 +96,7 @@ ON_ROW = {"Facility": ["L2"], "Fabric": ["L3", "L4"], "Execution": ["L5", "L6"],
           "Governance": ["L15", "L16"]}
 
 
-def badge(x, y, w, h, label, size=22):
+def badge(x, y, w, h, label, size=26):
     return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{h / 2}" '
             f'fill="#FFFFFF" stroke="{ACCENT}" stroke-width="1.5"/>\n'
             f'<text x="{x + w / 2}" y="{y + h / 2}" font-family="{FONT}" '
@@ -108,8 +108,8 @@ badges = ""
 for row, labels in ON_ROW.items():
     right = 710
     for label in reversed(labels):
-        w = 58 if len(label) <= 2 else 70
-        badges += badge(right - w, ROW_Y[row] + 6, w, 36, label)
+        w = 66 if len(label) <= 2 else 80
+        badges += badge(right - w, ROW_Y[row] + 4, w, 40, label)
         right -= w + 6
 (out / "stack_lectures.svg").write_text(stack_svg.replace("</svg>", badges + "</svg>"))
 
