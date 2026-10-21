@@ -330,7 +330,7 @@ sp.hbars(out / "energy_ladder.svg", [
 
 
 # ===================================================== embodied share
-def embodied_fig(k, size=(5.8, 2.9), fs=12):
+def embodied_fig(k, size=(5.8, 2.9), fs=13):
     fig, ax = plt.subplots(figsize=size)
     us = CARBON["US average"]
     qc = CARBON["Quebec"]
@@ -484,7 +484,7 @@ edge_fig()
 
 
 # ===================================================== nine regions
-def regions_fig(size=(5.8, 2.9), fs=12):
+def regions_fig(size=(5.8, 3.0), fs=13):
     fig, ax = plt.subplots(figsize=size)
     items = sorted(GRID.items(), key=lambda kv: kv[1])
     n = len(items)
@@ -514,7 +514,7 @@ regions_fig()
 
 
 # ===================================================== EU week
-def eu_week(k, size=(5.8, 2.5), fs=12):
+def eu_week(k, size=(5.8, 2.5), fs=13.5):
     eu = calcs.EU
     t = np.array([datetime.fromisoformat(x) for x in eu.times])
     hrs = np.array([(x - t[0]).total_seconds() / 3600 for x in t])

@@ -489,15 +489,22 @@ def roofline(k):
     ax.text(R * 1.1, 0.0045, f"ridge {val('ridge')}\n(H100 FP16,\nderived)", color=C["neutral"], fontsize=10)
     pts = [(f"decode, B = {val('decode_intensity')}", num("decode_intensity"), "memory", (10, -16), "left"),
            (f"decode, B = {val('knee_llm')}", num("knee_llm"), "memory", (-10, 8), "right"),
-           (f"prefill,\n{val('ix_isl')}-token\nprompt", num("ix_isl"), "compute", (0, -48), "center")]
+           (f"prefill,\n{val('ix_isl')}-token\nprompt", num("ix_isl"), "compute", None, "left")]
     for i, (lab, x, ck, off, ha) in enumerate(pts[:k]):
         y = min(1.0, x / R)
         ax.plot([x], [y], "o", ms=11, color=C[ck], mec="white", mew=1.5, zorder=5)
+        if off is None:  # label in open space right of the ridge, with a leader line
+            ax.annotate(lab, (x, y), xytext=(R * 1.35, 0.2), textcoords="data",
+                        ha=ha, va="center", fontsize=11.5, fontweight="bold",
+                        color=C[ck], linespacing=1.0,
+                        arrowprops=dict(arrowstyle="-", color=C[ck], lw=1.2,
+                                        shrinkA=2, shrinkB=6))
+            continue
         ax.annotate(lab, (x, y), xytext=off, textcoords="offset points", ha=ha,
                     fontsize=11.5, fontweight="bold", color=C[ck])
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlim(0.5, 1e4)
+    ax.set_xlim(0.5, 2e4)
     ax.set_ylim(1e-3, 3)
     ax.minorticks_off()
     ax.set_xticks([1, 10, 100, 1000])
@@ -551,21 +558,25 @@ for k in (1, 2):
 
 # ============================================== disaggregated vs colocated
 def disagg():
-    fig, axs = plt.subplots(1, 2, figsize=(5.8, 2.5), sharey=True)
+    fig, axs = plt.subplots(1, 2, figsize=(5.4, 2.9), sharey=True)
     for ax, (h, lab) in zip(axs, (("b200", "B200"), ("h200", "H200"))):
         for j, t in enumerate(IX.targets):
             j = 1.4 * j
             for d, ck, dx in ((1.0, "network", -0.22), (0.0, "neutral", 0.22)):
                 v = IX.best_at(h, t, disagg=d)
                 ax.bar(j + dx, v, width=0.38, color=C[ck])
-                ax.text(j + dx, v * 1.12, f"{v:,.0f}", ha="center", va="bottom", fontsize=9,
+                # split-pool label hangs left of the pair, colocated right,
+                # so the two values never collide at similar heights
+                ax.text(j + dx + (0.19 if dx < 0 else -0.19), v * 1.12, f"{v:,.0f}",
+                        ha="right" if dx < 0 else "left", va="bottom", fontsize=11,
                         fontweight="bold", color=C[ck])
         ax.set_yscale("log")
         ax.set_ylim(20, 30000)
         ax.set_xticks([0, 1.4, 2.8])
         ax.set_xticklabels([val("disagg_t1"), val("disagg_t2"), val("disagg_t3")])
         ax.set_xlabel("tok/s per user, at least")
-        ax.set_title(lab, fontsize=12, fontweight="bold", loc="left")
+        ax.set_title(lab, fontsize=13, fontweight="bold", loc="left")
+        ax.set_xlim(-0.95, 3.55)
         ax.minorticks_off()
     axs[0].set_ylabel("top tok/s per GPU")
     axs[1].text(0.55, 0.93, "split pools", transform=axs[1].transAxes, color=C["network"],
@@ -719,7 +730,7 @@ def traffic():
     t = [datetime.strptime(x[W.bin_column], "%Y-%m-%d %H:%M") for x in r]
     v = np.array([x[W.count_column] for x in r]) / W.bin_width.to("second").magnitude
     hours = np.array([(x - t[0]).total_seconds() / 3600 for x in t])
-    fig, (a1, a2) = plt.subplots(2, 1, figsize=(5.8, 3.0), gridspec_kw={"height_ratios": [1.2, 1]})
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(6.2, 3.3), gridspec_kw={"height_ratios": [1.2, 1]})
     a1.plot(hours / 24, v, color=C["memory"], lw=1.6)
     a1.set_ylabel("req/s", fontsize=11)
     a1.set_xlim(0, 7)
@@ -736,13 +747,23 @@ def traffic():
     a2.plot(np.arange(len(per)) / 60, per, color=C["compute"], lw=0.8)
     a2.set_xlabel("Minutes (one hour, code trace); top: one week, chat trace, 10-min means")
     a2.set_ylabel("req per s", fontsize=11)
-    a2.text(2, per.max() * 0.82, f"mean {val('code_per_s')}/s, busiest second {val('code_peak_s')}", fontsize=10.5,
+    a2.text(16, per.max() * 0.92, f"mean {val('code_per_s')}/s, busiest second {val('code_peak_s')}", fontsize=10.5,
             fontweight="bold", color=C["compute"])
     a2.set_xlim(0, 58)
+    a2.set_ylim(0, per.max() * 1.18)
     sp.save(fig, out / "traffic.svg")
 
 
 traffic()
+
+# ================================================ tenant quota (Example 10.9)
+sp.hbars(out / "quota.svg",
+         [("no quota", num("nn_p99_hi"), "danger",
+           f"{val('nn_p99_lo')} to {val('nn_p99_hi')} ms"),
+          (f"quota at {val('nn_quota')} QPS", num("nn_protected_ms"), "data",
+           f"{val('nn_protected_ms')} ms")],
+         "ms", log=False, size=(3.0, 1.5), fontsize=15,
+         xlabel=f"other tenants' p99 (ms); SLO {val('nn_slo_ms')} ms")
 
 # ============================================================ circuit breaker
 def breaker():

@@ -167,6 +167,7 @@ v("retained_exp", EXP.expanded_retained, "{:.3f}", "retained fraction at 2,048")
 v("breakeven", EXP.breakeven_speedup, "{:.3f}", "break-even step speedup")
 v("breakeven2", EXP.breakeven_speedup, "{:.2f}", "the same as the chapter rounds it")
 v("ideal_hours_pct", pct(EXP.accelerator_hours_change(EXP.factor)), "{:.1f}", "accelerator-hours at ideal 2x, %")
+v("ideal_sooner_pct", -pct(EXP.run_time_change(EXP.factor)), "{:.0f}", "run shorter at an ideal 2x, %")
 v("superlinear", EXP.superlinear_threshold, "{:.3f}", "step speedup that would save accelerator-hours")
 
 print("== The expansion: communication (MegaScale, Jiang et al. 2024, Table 2)")

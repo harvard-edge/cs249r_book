@@ -419,16 +419,16 @@
 
 \begin{frame}{Split pools pay a KV handoff and win at slower streams}
   \begin{columns}[c]
-    \begin{column}{0.36\textwidth}
+    \begin{column}{0.31\textwidth}
       \small
       Handoff of the prefill's cache:\\[0.05cm]
       $T = \alpha + M_{\text{KV}} / \beta$\\[0.2cm]
       Median chat, \val{kv_chat_mb} MB:\\ \val{handoff_chat_nvl_ms} ms over NVLink, \val{handoff_chat_ib_ms} ms over InfiniBand\\[0.15cm]
       128K request, \val{kv_long_gb} GB:\\ \val{handoff_long_nvl_ms} ms over NVLink\\[0.1cm]
-      {\footnotesize\textcolor{midgray}{Derived, bandwidth term only; \val{nvlink_gbs} and \val{ib_gbs} GB/s per direction.}}
+      {\footnotesize\textcolor{midgray}{Bandwidth term only; \val{nvlink_gbs} and \val{ib_gbs} GB/s per direction.}}
     \end{column}
-    \begin{column}{0.62\textwidth}
-      \centering\safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{disagg.pdf}
+    \begin{column}{0.67\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{disagg.pdf}
     \end{column}
   \end{columns}
   \mlsyscredit{Serving at Scale, \S10.8.3 and equation 10; Zhong et al., OSDI 2024. Bars: InferenceX, DeepSeek-R1, FP8; frameworks and GPU counts differ between bars.}
@@ -444,35 +444,22 @@
   \note{[2 min] [CORE] LINK: Lecture 1's Fleet Law, applied to one request. Sharding divides the compute term and adds communication and synchronization. Step 1: the chapter's long-prompt prefill reference, \val{tp_layer_ms} ms of serial compute per layer, \val{tp_attn_ms} attention and \val{tp_ffn_ms} feed-forward. Step 2: tensor parallelism splits each layer across \val{tp_size} GPUs, as Lecture 6 taught for training, giving \val{tp_compute_ms} ms of compute plus two AllReduces of \val{tp_ar_ms} ms each, \val{tp_layer_par_ms} ms. Across \val{tp_layers} layers, \val{tp_serial_total} ms becomes \val{tp_parallel_total} ms, \val{tp_speedup} times, short of \val{tp_size} only by the collectives. Weight bytes set the floor, since \val{replica_weights_gb} GB needs at least \val{min_shards} GPUs of \val{h100_gib} GiB (\val{h100_gb} GB) each. ENGAGE: in decode each layer's compute is far smaller. What share of the step do the collectives take then? (Expected: much larger, since their fixed latency does not shrink.) WARN: that is why tensor-parallel groups stay inside one NVLink domain; a link with tens of microseconds per message pays it \val{allreduces_step} times per token. MoE models add expert parallelism and its AllToAll; the reading covers it (\S10.10.4). Fleet Law term: $T_{\text{comm}}$. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}[fragile]{A serving engine exposes these choices as flags}
-  \begin{columns}[c]
-    \begin{column}{0.56\textwidth}
-\begin{semiverbatim}\footnotesize
-vllm serve <70B model> \textbackslash
-  -{}-tensor-parallel-size 8 \textbackslash
-  -{}-max-model-len 131072 \textbackslash
-  -{}-gpu-memory-utilization 0.9 \textbackslash
-  -{}-block-size 16 \textbackslash
-  -{}-enable-prefix-caching \textbackslash
-  -{}-kv-cache-dtype fp8 \textbackslash
-  -{}-enable-chunked-prefill \textbackslash
-  -{}-max-num-batched-tokens 8192 \textbackslash
-  -{}-max-num-seqs 256
-\end{semiverbatim}
-    \end{column}
-    \begin{column}{0.40\textwidth}
-      \footnotesize
-      \textbf{shard} across 8 GPUs\\[0.07cm]
-      \textbf{context} admitted\\[0.07cm]
-      \textbf{HBM share} for weights and KV\\[0.07cm]
-      \textbf{page} of 16 tokens\\[0.07cm]
-      \textbf{share} common prefixes\\[0.07cm]
-      \textbf{bytes} per cached element\\[0.07cm]
-      \textbf{chunk} long prompts\\[0.07cm]
-      \textbf{token budget} per iteration\\[0.07cm]
-      \textbf{batch} cap
-    \end{column}
-  \end{columns}
+\begin{frame}{A serving engine exposes these choices as flags}
+  \centering
+  \vspace*{-0.2cm}
+  \renewcommand{\arraystretch}{0.98}
+  \begin{tabular}{@{}>{\small\ttfamily}l>{\small}l@{}}
+    vllm serve <70B model> \textbackslash & \\
+    \quad-{}-tensor-parallel-size 8 \textbackslash & \textbf{shard} across 8 GPUs \\
+    \quad-{}-max-model-len 131072 \textbackslash & \textbf{context} admitted \\
+    \quad-{}-gpu-memory-utilization 0.9 \textbackslash & \textbf{HBM share} for weights and KV \\
+    \quad-{}-block-size 16 \textbackslash & \textbf{page} of 16 tokens \\
+    \quad-{}-enable-prefix-caching \textbackslash & \textbf{share} common prefixes \\
+    \quad-{}-kv-cache-dtype fp8 \textbackslash & \textbf{bytes} per cached element \\
+    \quad-{}-enable-chunked-prefill \textbackslash & \textbf{chunk} long prompts \\
+    \quad-{}-max-num-batched-tokens 8192 \textbackslash & \textbf{token budget} per iteration \\
+    \quad-{}-max-num-seqs 256 & \textbf{batch} cap \\
+  \end{tabular}
   \mlsyscredit{vLLM engine arguments (vllm/engine/arg\_utils.py, github.com/vllm-project/vllm, read 2026-10-18). Values are an untuned example.}
   \note{[1.5 min] [OPTIONAL] A real launch command for an open-source serving engine, vLLM, with flags that exist in its source today. Read it as a map of the lecture so far. Tensor-parallel size is the shard count. Max model length bounds the context each request may hold. GPU memory utilization sets how much HBM the engine claims; what is left after weights becomes the KV pool. Block size is the page. Prefix caching shares common prompts. The KV cache data type sets bytes per element. Chunked prefill and the batched-token limit are the per-iteration token budget of the chunked schedule. Max number of sequences caps the batch. ENGAGE: which two flags change the \val{kv_budget_gb0} GB budget, and which change the per-request cost? (Expected: memory utilization and tensor-parallel size; KV data type and max model length.) WARN: the values shown are an example; each must be tuned against measured SLO goodput. FLEX: [OPTIONAL].}
 \end{frame}
@@ -534,11 +521,11 @@ vllm serve <70B model> \textbackslash
 
 \begin{frame}{Real LLM traffic doubles daily and bursts each second}
   \begin{columns}[c]
-    \begin{column}{0.66\textwidth}
-      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{traffic.pdf}
+    \begin{column}{0.73\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.8cm,keepaspectratio]{traffic.pdf}
     \end{column}
-    \begin{column}{0.31\textwidth}
-      \centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{tsubame4-h100-node.jpg}\\[0.05cm]
+    \begin{column}{0.25\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.9cm,keepaspectratio]{tsubame4-h100-node.jpg}\\[0.05cm]
       {\footnotesize Cold start, 70B: \val{cs_provision_min} min provision + \val{cs_fetch_min} min to fetch \val{cs_artifact_gb} GB + \val{cs_warmup_min} min warmup = \textbf{\val{cs_total_min} min}}
     \end{column}
   \end{columns}
@@ -557,7 +544,7 @@ vllm serve <70B model> \textbackslash
 
 \begin{frame}[fragile]{Quotas in tokens confine one tenant's burst}
   \begin{columns}[c]
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.45\textwidth}
 \begin{semiverbatim}\footnotesize
 class TenantQuota:
     max_concurrent_requests
@@ -568,11 +555,10 @@ class TenantQuota:
     max_batch_tokens
 \end{semiverbatim}
     \end{column}
-    \begin{column}{0.47\textwidth}
-      \small
-      One tenant bursts to \val{nn_burst_mult}$\times$ its \val{nn_base_qps} QPS.\\[0.1cm]
-      No quota: every tenant's p99 rises to \val{nn_p99_lo} to \val{nn_p99_hi} ms.\\[0.1cm]
-      Quota at \val{nn_quota} QPS: others keep \val{nn_protected_ms} ms; the burst waits in its own queue.\\[0.15cm]
+    \begin{column}{0.53\textwidth}
+      \centering
+      {\small One tenant bursts to \val{nn_burst_mult}$\times$ its \val{nn_base_qps} QPS.}\\[0.15cm]
+      \safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{quota.pdf}\\[0.1cm]
       {\footnotesize Shared \val{nn_pool_gb} GB KV pool: one tenant at \val{nn_swollen_gb} GB cuts the others from \val{nn_base_seqs} to \val{nn_other_seqs} sequences.}
     \end{column}
   \end{columns}
