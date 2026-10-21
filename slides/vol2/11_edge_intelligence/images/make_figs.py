@@ -692,7 +692,7 @@ def aibench():
     rows = [r for r in Literature.Series.AIBenchmarkSoCs.entries if r["ai_score"]]
     fam = [("Snapdragon", C["danger"]), ("Dimensity", C["compute"]), ("Exynos", C["memory"]),
            ("Google", C["data"]), ("Kirin", C["network"])]
-    fig, ax = plt.subplots(figsize=(5.9, 2.6))
+    fig, ax = plt.subplots(figsize=(5.4, 2.7))
     ax.axvspan(2019.5, 2026.5, color=C["neutral_l"], alpha=0.5, zorder=0)
     for r in rows:
         f = r["processor"].split()[0]

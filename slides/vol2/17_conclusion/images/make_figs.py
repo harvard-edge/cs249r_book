@@ -170,10 +170,10 @@ ax.text(150, mttf_h / 150 * 1.5, f"model: {val('gpu_mttf_h')} h / N", color=C["m
         fontsize=12, fontweight="bold")
 pts = [(num("ref_gpus"), calcs.m(calcs.EXP.mtbf, "hour"), f"{val('ref_gpus')}: {val('mtbi_ref_h')} h"),
        (num("exp_gpus"), calcs.m(calcs.EXP.expanded_mtbf, "hour"), f"{val('exp_gpus')}: {val('mtbi_exp_h')} h")]
-for x, y, lab in pts:
+for (x, y, lab), off, ha, va in zip(pts, [(-8, -6), (8, 6)], ["right", "left"], ["top", "bottom"]):
     ax.plot([x], [y], "o", ms=9, color=C["memory"], mec="white", mew=1.5, zorder=5)
-    ax.annotate(lab, (x, y), xytext=(-8, -6), textcoords="offset points", ha="right",
-                va="top", fontsize=12, color=C["memory"], fontweight="bold")
+    ax.annotate(lab, (x, y), xytext=off, textcoords="offset points", ha=ha,
+                va=va, fontsize=13, color=C["memory"], fontweight="bold")
 x = num("llama_gpus")
 llama_h = calcs.m(calcs.Q_(calcs.llama_days, "day"), "hour") / calcs.llama_n
 ax.plot([x], [llama_h], "D", ms=9, color=C["danger"], zorder=6)
@@ -196,6 +196,31 @@ ax.set_xlabel("GPUs the job needs at once")
 ax.set_ylabel("Hours between interruptions")
 ax.grid(color=C["grid"], lw=0.6)
 sp.save(fig, out / "mtbi.svg")
+
+# =============================================================================
+# 5b. Doubling at an ideal 2x: run time halves, accelerator-hours do not fall
+# =============================================================================
+E = calcs.EXP
+fig, ax = plt.subplots(figsize=(2.9, 1.35))
+bars = [("run time", 1 + E.run_time_change(E.factor), f"−{val('ideal_sooner_pct')}%"),
+        ("accel.-hours", 1 + E.accelerator_hours_change(E.factor), f"+{val('ideal_hours_pct')}%")]
+for i, (lab, r, txt) in enumerate(bars):
+    y = 1 - i
+    ax.barh(y + 0.19, 1, height=0.34, color=C["neutral_l"], edgecolor=C["neutral"])
+    ax.barh(y - 0.19, r, height=0.34, color=C["memory"])
+    ax.text(-0.04, y, lab, ha="right", va="center", fontsize=14, fontweight="bold",
+            color=C["text"])
+    ax.text(r + 0.03, y - 0.19, txt, va="center", fontsize=14, fontweight="bold",
+            color=C["memory"])
+ax.text(1.03, 1.19, val("ref_gpus"), va="center", fontsize=13, color=C["neutral"])
+ax.text(0.03, 0.81, val("exp_gpus"), va="center", fontsize=13, color="white", fontweight="bold")
+ax.set_xlim(0, 1.45)
+ax.set_ylim(-0.5, 1.5)
+ax.set_yticks([])
+ax.set_xticks([])
+for s in ("left", "top", "right", "bottom"):
+    ax.spines[s].set_visible(False)
+sp.save(fig, out / "expand_bars.svg")
 
 # =============================================================================
 # 6. Young-Daly overhead against cluster size (derived, GPU failures only)
@@ -278,7 +303,7 @@ sp.save(fig, out / "loss_doublings.svg")
 # 9. The six-step diagnostic procedure, applied to the lagging expanded run
 #    Canvas 900 x 380 for a full-width slot: 18 px = 8.2 pt.
 # =============================================================================
-g = Svg(900, 380)
+g = Svg(900, 285)
 steps = [
     ("1 Symptom", "run falls\nbehind\nschedule", SLATE, SLATE_L, 1),
     ("2 Metric", "MFU per\nstep has\ndropped", SLATE, SLATE_L, 1),
@@ -292,17 +317,28 @@ for i, (head, body, stroke, fill, step) in enumerate(steps):
     g.rect(x, 4, 140, 58, stroke, stroke, first=step, sw=1, rx=6)
     g.text(x + 70, 33, head, 19, "#ffffff", "bold", first=step)
     g.rect(x, 70, 140, 150, fill, stroke, first=step, sw=2, rx=6)
-    g.text(x + 70, 145, body, 18, TEXT, "normal", first=step)
+    g.text(x + 70, 145, body, 20, TEXT, "normal", first=step)
     if i < 5:
         g.line(x + 141, 33, x + 149, 33, SLATE, sw=2.5, first=steps[i + 1][4])
-g.text(450, 256, "Barrier wait alone cannot tell slow transfer from late arrival.", 20,
+g.text(450, 262, "Barrier wait alone cannot tell slow transfer from late arrival.", 21,
        AMBER, "bold", first=2)
-g.text(450, 300, "Gradient compression shrinks the bytes in T_comm(N),", 20, TEXT, first=3)
-g.text(450, 332, "and must show the compressed run still reaches its quality target.", 20,
-       TEXT, first=3)
-g.text(450, 366, "Same steps: a fairness alert may trace to labels, reviewers, or a threshold.",
-       18, SLATE, first=3)
 g.write("diagnose", 3)
+
+# =============================================================================
+# 9b. The next question: an agent's loop (closing slide, no numbers)
+#     Canvas 520 x 420 for a right-hand column: 22 px = about 10 pt.
+# =============================================================================
+g = Svg(520, 420)
+nodes = [(260, 55, "plan"), (430, 210, "call a tool"), (260, 365, "observe"), (90, 210, "act")]
+for x, y, lab in nodes:
+    g.rect(x - 88, y - 38, 176, 76, ETH_L, ETH, sw=2.5, rx=10)
+    g.text(x, y + 11, lab, 30, ETH, "bold")
+for (x1, y1), (x2, y2) in [((350, 70), (425, 166)), ((425, 254), (350, 350)),
+                           ((170, 350), (95, 254)), ((95, 166), (170, 70))]:
+    g.line(x1, y1, x2, y2, ETH, sw=3)
+g.text(260, 200, "one task,", 28, SLATE)
+g.text(260, 238, "many steps", 28, SLATE)
+g.write("agent_loop", 1)
 
 # =============================================================================
 # 10. Where next: MoE resident against active bytes (Chapter 10, Sec. 10.10.4)

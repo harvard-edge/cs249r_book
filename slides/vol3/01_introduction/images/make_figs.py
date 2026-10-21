@@ -313,15 +313,15 @@ def hsa():
                 s.box(x0, yb, xw + 20, band, (role[0], "#e2e8f0", ""), rx=0, sw=1)
                 s.text(x0 - 12, yb + band / 2 + 8, lab, 23, "normal", role[2] if i == 3 else INK, "end")
             for i, lab in enumerate(["S₁ context", "S₂ working copy", "S₃ durable"]):
-                xx, yy = x0 - 22 * (i + 1), y0 + 20 * (i + 1)
+                xx, yy = x0 - 28 * (i + 1), y0 + 27 * (i + 1)
                 s.line(xx - 6, yy, xx + 6, yy, INK, sw=2, arrow=False)
                 s.text(xx - 12, yy + 7, lab, 20, color=INK, anchor="end")
         s.line(x0, y0, x0, 20, INK, sw=2.5)
         s.line(x0, y0, x0 + xw + 30, y0, INK, sw=2.5)
-        s.line(x0, y0, x0 - 80, y0 + 76, INK, sw=2.5)
+        s.line(x0, y0, x0 - 96, y0 + 92, INK, sw=2.5)
         s.text(x0 + 8, 24, "Authority A", 22, "bold")
         s.text(x0 + xw + 30, y0 + 52, "Horizon H (turns)", 22, "bold", INK, "end")
-        s.text(x0 - 84, y0 + 104, "State S", 22, "bold", INK, "middle")
+        s.text(x0 - 100, y0 + 120, "State S", 22, "bold", INK, "middle")
         for h in (1, 10, 100, 1000):
             s.text(hx(h), y0 + 28, f"{h:,}", 21, color=GRAY, anchor="middle")
         s.add(f'<circle cx="{x0}" cy="{y0}" r="8" fill="{INK}"/>')

@@ -131,8 +131,6 @@ def goodput_chain(path, step):
     text(ax, -0.15, -0.68, "useful work = offered capacity-time × S × R × P",
          C["data"], step >= 3, ha="left", va="center", fontsize=12.5,
          fontweight="bold")
-    text(ax, 2.35, 3.35, "widths schematic", C["neutral"], True, ha="right",
-         va="center", fontsize=9)
     ax.set_xlim(-0.17, 2.38)
     ax.set_ylim(-0.85, 3.4)
     ax.axis("off")
@@ -193,7 +191,7 @@ for k in (1, 2):
 # 5. Localization ladder: three records, one rung per step
 # ---------------------------------------------------------------------------
 def ladder(path, step):
-    fig, ax = plt.subplots(figsize=(5.6, 2.0))
+    fig, ax = plt.subplots(figsize=(5.6, 2.7))
     rungs = [("S", "Scheduler records", "every job; free",
               "settles S", "cannot see\ninside a gang"),
              ("R", "Job timeline", "every job; bytes per step",
@@ -204,7 +202,7 @@ def ladder(path, step):
         y = 2 - i
         shown = i < step
         a = 1.0 if shown else 0.0
-        ax.add_patch(plt.Rectangle((0, y - 0.38), 13.3, 0.76, fc="white",
+        ax.add_patch(plt.Rectangle((0, y - 0.42), 13.3, 0.84, fc="white",
                                    ec=COL[k], lw=1.6, alpha=a))
         text(ax, 0.38, y, k, "white", shown, ha="center", va="center",
              fontsize=14, fontweight="bold",
@@ -215,14 +213,14 @@ def ladder(path, step):
              fontsize=11)
         text(ax, 6.3, y, settles, C["data"], shown, ha="left", va="center",
              fontsize=12, fontweight="bold", linespacing=1.0)
-        text(ax, 9.6, y, blind, C["danger"], shown, ha="left", va="center",
+        text(ax, 10.0, y, blind, C["danger"], shown, ha="left", va="center",
              fontsize=11, linespacing=1.0)
         if 0 < i:
-            ax.annotate("", xy=(0.38, y + 0.4), xytext=(0.38, y + 0.62),
+            ax.annotate("", xy=(0.38, y + 0.43), xytext=(0.38, y + 0.58),
                         arrowprops=dict(arrowstyle="-|>", color=C["neutral"], lw=1.5),
                         alpha=a)
     for x, h in [(0.85, "Record, read top first"), (6.3, "Establishes"),
-                 (9.6, "Blind spot")]:
+                 (10.0, "Blind spot")]:
         ax.text(x, 2.6, h, fontsize=11, color=C["neutral"], fontweight="bold",
                 va="center")
     ax.set_xlim(-0.05, 13.4)
@@ -563,7 +561,7 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 16. Iso-goodput curves (Sec. 9.9.1)
 # ---------------------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(5.6, 2.15))
+fig, ax = plt.subplots(figsize=(5.8, 2.5))
 P = np.linspace(0.30, 0.75, 200)
 R0, P0, P1 = num("runtime"), num("program"), num("program_ceiling")
 base = R0 * P0
@@ -571,14 +569,14 @@ ax.fill_between(P, base / P, 1.05, where=base / P < 1.05, color=C["data_l"], alp
 for c in (0.30, 0.35, 0.50, 0.55):
     ax.plot(P, c / P, color=C["grid"], lw=1.0)
 ax.plot(P, base / P, color=C["text"], lw=2.4)
-ax.text(0.745, 0.88, f"bold curve:\nR × P = {val('job_rp')}", fontsize=11, ha="right",
+ax.text(0.745, 0.90, f"bold curve:\nR × P = {val('job_rp')}", fontsize=12, ha="right",
         va="center", color=C["text"], fontweight="bold", linespacing=0.95)
 ax.plot([P0], [R0], "o", ms=11, color=C["danger"], zorder=5)
 ax.text(P0 - 0.012, R0 - 0.02, "running job", ha="right", va="top", fontsize=11.5,
         fontweight="bold", color=C["danger"])
 ax.annotate("", xy=(P1, R0), xytext=(P0 + 0.01, R0),
             arrowprops=dict(arrowstyle="-|>", color=COL["P"], lw=2.2))
-ax.text((P0 + P1) / 2, R0 - 0.02, f"P to {val('program_ceiling')}: +{val('lever_p_pct')}%", ha="center", va="top",
+ax.text((P0 + P1) / 2 + 0.005, R0 - 0.025, f"P to {val('program_ceiling')}: +{val('lever_p_pct')}%", ha="center", va="top",
         fontsize=11.5, fontweight="bold", color=COL["P"])
 ax.annotate("", xy=(P1, base / P1), xytext=(P1, R0 - 0.01),
             arrowprops=dict(arrowstyle="-|>", color=COL["R"], lw=1.8, ls="--"))
@@ -588,10 +586,10 @@ ax.text(P1 + 0.01, 0.73, f"break-even:\nR may fall {val('p_cut_pct')}%", ha="lef
 ax.axhline(1.0, color=C["neutral"], lw=1, ls=":")
 ax.annotate("", xy=(P0, 1.0), xytext=(P0, R0 + 0.005),
             arrowprops=dict(arrowstyle="-|>", color=C["neutral"], lw=1.6))
-ax.text(P0 + 0.008, 0.985, f"R headroom: +{val('r_headroom_pct')}% at most", ha="left", va="top",
-        fontsize=10.5, color=C["neutral"], fontweight="bold")
-ax.text(0.31, 0.57, "shaded: the trade raises R × P", fontsize=10, color=C["data"],
-        fontweight="bold")
+ax.text(P0 - 0.045, 0.955, f"R headroom:\n+{val('r_headroom_pct')}% at most", ha="right", va="center",
+        fontsize=11, color=C["neutral"], fontweight="bold", linespacing=0.95)
+ax.text(0.745, 1.02, "shaded: the trade raises R × P", fontsize=11, color=C["data"],
+        fontweight="bold", ha="right", va="center")
 ax.set_xlim(0.30, 0.75)
 ax.set_ylim(0.55, 1.05)
 ax.set_xlabel("Program goodput P")
