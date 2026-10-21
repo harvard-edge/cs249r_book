@@ -319,8 +319,9 @@ for k in (1, 2, 3):
             va="top", fontweight="bold")
     # step 1: decode
     ax.plot([num("dec_ai")], [BW], "o", ms=11, color=C["memory"], mec="white", mew=1.5, zorder=5)
-    ax.annotate(f"GPT-2 XL decode,\nbatch 1: {val('dec_ai')}", (num("dec_ai"), BW), xytext=(14, 0),
-                textcoords="offset points", va="center", fontsize=11, fontweight="bold",
+    ax.annotate(f"GPT-2 XL decode,\nbatch 1: {val('dec_ai')}", (num("dec_ai"), BW), xytext=(-16, 52),
+                textcoords="offset points", ha="left", va="bottom", fontsize=11,
+                arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1.2), fontweight="bold",
                 color=C["memory"])
     a2 = 1.0 if k >= 2 else 0.0
     ax.plot([PREFILL_I], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
