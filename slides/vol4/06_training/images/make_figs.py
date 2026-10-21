@@ -335,7 +335,8 @@ def cells_support():
 
 
 def odd(k):
-    fig, axs = plt.subplots(1, 3, figsize=(5.9, 2.9))
+    fig, axs = plt.subplots(1, 3, figsize=(6.6, 3.0),
+                            gridspec_kw={"width_ratios": [1.6, 1, 1]})
     fast = RED
     specs = [
         ("latch-bc-01", [[GREEN, fast], [GRAY, fast], [GRAY, fast]],
@@ -345,12 +346,22 @@ def odd(k):
         ("bc-recovery-02", [[GREEN, fast], [ASK, fast], [GRAY, fast]],
          [["declared", "out"], ["requested", "out"], ["absent", "out"]], 3),
     ]
-    for ax, (title, fills, labels, s) in zip(axs, specs):
-        grid(ax, fills, labels, title, fs=11.5)
+    for i, (ax, (title, fills, labels, s)) in enumerate(zip(axs, specs)):
+        grid(ax, fills, labels, None, fs=10.5)
+        for c, sp_ in enumerate(("guarded", "fast")):
+            ax.text(c + 0.47, 3.0, sp_, ha="center", va="bottom", fontsize=11, color=C["text"])
+        ax.text(0.97, 3.42, title, ha="center", va="bottom", fontsize=12, fontweight="bold",
+                color=C["text"])
+        if i == 0:
+            for r, pl in enumerate(PLATES):
+                ax.text(-0.08, 2 - r + 0.45, pl, ha="right", va="center", fontsize=11,
+                        color=C["text"])
+            ax.set_xlim(-1.25, 2.0)
+        ax.set_ylim(-0.05, 3.85)
         for art in ax.patches + ax.texts:
-            art.set_alpha(a(k >= s))
-        ax.title.set_alpha(a(k >= s))
-    fig.tight_layout(w_pad=0.6)
+            if i > 0 or not hasattr(art, "get_text") or art.get_position()[0] >= 0:
+                art.set_alpha(a(k >= s))
+    fig.tight_layout(w_pad=0.4)
     sp.save(fig, out / f"odd_step{k}.svg")
 
 

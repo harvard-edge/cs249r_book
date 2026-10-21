@@ -648,6 +648,19 @@ def walking():
     save(fig, "walking")
 
 
+def paper_crops():
+    """Slide-size crops of two paper figures (sources in SOURCES.yml)."""
+    from PIL import Image
+    vox = Image.open(OUT / "voxposer_tasks.jpg")  # VoxPoser Fig. 3, 1600 x 700
+    lamp, bottle = vox.crop((0, 234, 800, 468)), vox.crop((806, 234, 1600, 468))
+    stack = Image.new("RGB", (800, 474), "white")
+    stack.paste(lamp, (0, 0))
+    stack.paste(bottle, (3, 240))
+    stack.save(OUT / "voxposer_row2.jpg", quality=90)
+    knowno = Image.open(OUT / "knowno_example.png")  # KnowNo Fig. 1, 1633 x 1205
+    knowno.crop((925, 400, 1633, 1165)).save(OUT / "knowno_set.png")
+
+
 def main():
     autort()
     mug_affordance()
@@ -665,6 +678,7 @@ def main():
     okrobot_fail()
     vla_rates()
     walking()
+    paper_crops()
 
 
 if __name__ == "__main__":

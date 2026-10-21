@@ -553,6 +553,49 @@ def lifecycle():
     svg("lifecycle.svg", "\n".join(b), w=900, h=460)
 
 
+def frozen():
+    """The frozen transform: fresh publication stamps, a frozen capture epoch."""
+    loss, per, win = num("t_loss"), num("t_repub"), num("frozen_window")
+    vb, tol, tau = num("v_belt_mm_ms"), num("grasp_tol"), num("tau_max")
+    end = loss + win
+    tt = np.linspace(0, end, 400)
+    for step in (1, 2):
+        fig, (a1, a2) = plt.subplots(2, 1, figsize=COL, sharex=True,
+                                     gridspec_kw={"height_ratios": [1, 1]})
+        pubs = np.arange(0, end + per / 2, per)
+        a1.plot(tt, tt, color=C["neutral"], lw=2.5)
+        a1.plot(tt, np.minimum(tt, loss), color=C["memory"], lw=3)
+        a1.axvline(loss, color=C["danger"], lw=1.5, ls="--")
+        a1.text(end * 0.97, end * 0.58, "publication stamp", fontsize=14, color=C["neutral"],
+                ha="right", va="top", fontweight="bold")
+        a1.text(end, loss + end * 0.06, "capture epoch carried", fontsize=14, color=C["memory"],
+                ha="right", va="bottom", fontweight="bold")
+        a1.text(loss + end * 0.02, end * 0.93, f"camera dies, {val('t_loss')} ms", fontsize=13,
+                color=C["danger"], va="top")
+        a1.set_ylim(0, end * 1.05)
+        a1.set_ylabel("Stamp (ms)", fontsize=14)
+        a1.tick_params(labelsize=12)
+        a1.text(0.02 * end, -0.30 * end,
+                f"Stamp age always under {val('t_repub')} ms: passes the {val('tau_max')} ms check",
+                fontsize=13, color=C["data"], fontweight="bold", clip_on=False)
+        a2.axhline(tol, color=C["danger"], lw=1.8, ls="--")
+        a2.text(1, tol + 0.8, f"grasp tolerance {val('grasp_tol')} mm", fontsize=13,
+                color=C["danger"], va="bottom")
+        if step == 2:
+            err = np.clip(tt - loss, 0, None) * vb
+            a2.plot(tt, err, color=C["compute"], lw=3)
+            a2.plot([end], [err[-1]], "o", color=C["compute"], ms=8)
+            a2.text(end * 0.75, num("frozen_err") * 1.04, f"mug moved {val('frozen_err')} mm",
+                    fontsize=14, color=C["compute"], ha="right", va="bottom", fontweight="bold")
+        a2.set_ylim(0, num("frozen_err") * 1.35)
+        a2.set_xlim(0, end * 1.02)
+        a2.set_ylabel("Error (mm)", fontsize=14)
+        a2.set_xlabel("Wall-clock time (ms)", fontsize=14)
+        a2.tick_params(labelsize=12)
+        fig.subplots_adjust(hspace=0.55)
+        sp.save(fig, out(f"frozen_step{step}.svg"))
+
+
 def force():
     f, sig, span = num("f_read"), num("f_sigma"), num("bias_span")
     tt = np.linspace(0, span, 100)
@@ -592,4 +635,5 @@ if __name__ == "__main__":
     latch()
     horizons()
     lifecycle()
+    frozen()
     force()
