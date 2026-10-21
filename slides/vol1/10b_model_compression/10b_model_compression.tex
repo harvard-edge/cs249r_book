@@ -425,10 +425,10 @@ tensor([[-1.0039,  1.0039],
 
 \begin{frame}{Outlier features appear abruptly near \val{out_b} billion parameters}
   \begin{columns}[c]
-    \begin{column}{0.47\textwidth}
-      \centering\includegraphics[width=\textwidth,height=5.9cm,keepaspectratio]{dettmers2022-fig3a}
+    \begin{column}{0.56\textwidth}
+      \centering\includegraphics[width=\textwidth,height=6.2cm,keepaspectratio]{dettmers2022-fig3a}
     \end{column}
-    \begin{column}{0.51\textwidth}
+    \begin{column}{0.42\textwidth}
       \small
       \textcolor{BlueLine}{\textbf{Blue:}} share of layers with an outlier feature\\[0.1cm]
       \textcolor{OrangeLine}{\textbf{Orange:}} share of tokens affected\\[0.4cm]
@@ -548,33 +548,13 @@ tensor([[-1.0039,  1.0039],
   \note{[3.5 min] [CORE] Recall Lecture 2's roofline. Left of the bend, bytes moved set the time; right of it, arithmetic. Step 1: decoding GPT-2 XL at batch one on the phone reads every weight once per token, so it sits on the memory slope. Each token reads \val{dec_w16_gb} GB of FP16 weights plus a \val{dec_kv_gb} GB key-value (KV) cache, \val{dec_t16_gb} GB in all, \val{dec_t16_ms} ms. A large-batch MLP on the H100 reuses each weight and sits on the FP16 roof, \val{h100_fp16} tera-ops/s. ENGAGE: one minute, predict what INT4 weights do to the first point and INT8 to the second. Step 2: INT4 weights cut the bytes to \val{dec_t4_gb} GB per token, \val{dec_speedup} times fewer for the same operations, so the point slides up the slope: \val{dec_t4_ms} ms. Below \val{dec_byte_ratio} because the cache stayed FP16. Step 3: the H100's INT8 roof, \val{h100_int8}, twice FP16. The MLP point rises to it; decode does not move, since its math stays 16-bit. Step 4, measured: GPTQ's 3-bit OPT-175B runs at \val{gptq_3bit_ms} ms per token on \val{gptq_3bit_gpus_word} A100 against \val{gptq_fp16_ms} ms in FP16 on \val{gptq_fp16_gpus_word}, \val{gptq_x} times; say the change in GPU count aloud. WARN: on a chip without a faster integer path, case (b) gains nothing. LINK: the next slide measures both cases with one tool; Lecture 11 owns the roofline. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}[fragile]{Measured: 4-bit weights speed up generation and slow the prompt}
-  {\footnotesize\textbf{llama-bench}, Llama 2 7B on an Apple M2 Ultra (\val{lb_ultra_bw} GB/s), build 8e672efe}
-\begin{semiverbatim}\footnotesize
-model                      size  test              t/s
-llama 7B mostly F16   12.55 GiB  pp 512  1401.85 ± 1.75
-llama 7B mostly F16   12.55 GiB  tg 128    41.02 ± 0.02
-llama 7B mostly Q8_0   6.67 GiB  pp 512  1248.59 ± 0.73
-llama 7B mostly Q8_0   6.67 GiB  tg 128    66.64 ± 0.02
-llama 7B mostly Q4_0   3.56 GiB  pp 512  1238.48 ± 0.76
-llama 7B mostly Q4_0   3.56 GiB  tg 128    94.27 ± 0.05
-\end{semiverbatim}
-  \vspace{-0.1cm}
-  \begin{columns}[T]
-    \begin{column}{0.49\textwidth}
-      \uncover<2->{\begin{mlsyscard}{BlueLine}
-        \footnotesize\textbf{Generate (tg 128): memory bound}\\
-        Q4\_0: \textbf{\val{lb_tg4_x}$\times$} F16, from a file \val{lb_file_x}$\times$ smaller
-      \end{mlsyscard}}
-    \end{column}
-    \begin{column}{0.49\textwidth}
-      \uncover<2->{\begin{mlsyscard}{OrangeLine}
-        \footnotesize\textbf{Prompt (pp 512): compute bound}\\
-        Q4\_0: \textbf{\val{lb_pp4_x}$\times$} F16, slower
-      \end{mlsyscard}}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{github.com/ggml-org/llama.cpp, discussion 4167 (M2 Ultra post, @ggerganov), llama-bench output; columns excerpted (every row: \val{llama_params_b} B weights, Metal, ngl 99). Ratios: images/calcs.py.}
+\begin{frame}[t]{Measured: 4-bit weights speed up generation and slow the prompt}
+  \noindent{\footnotesize\textbf{llama-bench}, Llama 2 7B on an Apple M2 Ultra (\val{lb_ultra_bw} GB/s), build 8e672efe}\par
+  \vspace{0.05cm}\centering\safeimg[width=0.98\textwidth,height=3.2cm,keepaspectratio]{llamabench.pdf}\par
+  \vspace{0.1cm}
+  \uncover<2->{\small\textcolor{BlueLine}{\textbf{Generate, memory bound:}} Q4\_0 \textbf{\val{lb_tg4_x}$\times$} F16, from a file \val{lb_file_x}$\times$ smaller\\[0.05cm]
+  \textcolor{OrangeLine}{\textbf{Prompt, compute bound:}} Q4\_0 \textbf{\val{lb_pp4_x}$\times$} F16, slower}
+  \mlsyscredit{github.com/ggml-org/llama.cpp, discussion 4167 (M2 Ultra post, @ggerganov), llama-bench output (t/s column) redrawn (every row: \val{llama_params_b} B weights, Metal, ngl 99). Ratios: images/calcs.py.}
   \note{[2.5 min] [CORE] Measured by a tool students can run on a laptop: llama-bench, from llama.cpp's public results thread. Every row is the same \val{llama_params_b}-billion-weight model on the GPU. tg 128 generates 128 tokens one at a time, batch one, like decoding on the phone; pp 512 processes a 512-token prompt in one pass. ENGAGE: from the roofline slide, which test should gain from Q4\_0, and by at most how much? Step 2: generation runs \val{lb_tg4_x} times faster with Q4\_0 (Q8\_0: \val{lb_tg8_x}) from a file \val{lb_file_x} times smaller, the memory-bound case, short of the byte ratio. The prompt runs \val{lb_pp4_x} times as fast because it is compute bound, so the 4-bit weights only add unpacking work. The thread's other chips agree, with generation \val{lb_other_tg_lo} to \val{lb_other_tg_hi} times on M1 Pro, M3 Max, and M4 Max, prompt \val{lb_other_pp_lo} to \val{lb_other_pp_hi} (derived). WARN: why short of \val{lb_file_x}? At F16 the M2 Ultra streams about \val{lb_stream16} GB/s of weights; at Q4\_0 about \val{lb_stream4} GB/s (derived: tokens per second times file size), so unpacking costs time on every byte. LINK: the next slide shows unpacking that costs more than it saves. FLEX: [CORE].}
 \end{frame}
 

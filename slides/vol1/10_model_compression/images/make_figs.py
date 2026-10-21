@@ -567,19 +567,19 @@ for k in (1, 2):
     svg(out / f"spmv_step{k}.svg", 600, 380, body)
 
 # 16c. Where sparsity starts to pay: break-evens on one sparsity axis
-fig, ax = plt.subplots(figsize=(5.8, 2.0))
+fig, ax = plt.subplots(figsize=(5.8, 2.6))
 ax.axvspan(80, 90, color=C["danger_l"])
-ax.text(85, 1.75, "unstructured kernel\ncan lose to dense\nuntil 80 to 90%", ha="center",
-        va="center", fontsize=11, fontweight="bold", color=C["danger"])
+ax.text(85, 1.85, "unstructured kernel\ncan lose to dense\nuntil 80 to 90%", ha="center",
+        va="center", fontsize=12, fontweight="bold", color=C["danger"])
 for x, lab, ck, y in ((num("csr_even_pct"), f"CSR bytes: {val('csr_even_pct')}%", "memory", 1.05),
                       (num("coo_even_pct"), f"COO bytes: {val('coo_even_pct')}%", "memory", 0.5),
-                      (50, "2:4 pattern: exactly 50%,\nhardware path", "data", -0.75)):
+                      (50, "2:4 pattern: exactly 50%,\nhardware path", "data", -1.05)):
     ax.plot([x], [0], "o", ms=10, color=C[ck], zorder=5)
     ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2)
-    ax.text(x, y, lab, ha="center", va="center", fontsize=11, fontweight="bold", color=C[ck])
+    ax.text(x, y, lab, ha="center", va="center", fontsize=12, fontweight="bold", color=C[ck])
 ax.axhline(0, color=C["text"], lw=1.5)
 ax.set_xlim(0, 100)
-ax.set_ylim(-1.3, 2.5)
+ax.set_ylim(-1.6, 2.6)
 ax.set_yticks([])
 for side in ("left", "bottom"):
     ax.spines[side].set_visible(False)
@@ -619,7 +619,7 @@ def _yr(d):
     return d.year + (d.timetuple().tm_yday - 1) / (SEC_PER_YEAR_LEAP / SEC_PER_DAY)
 
 
-fig, ax = plt.subplots(figsize=(3.7, 2.15))
+fig, ax = plt.subplots(figsize=(4.0, 2.6))
 for hi, ck, sz in ((False, "neutral_l", 16), (True, "memory", 22)):
     pts = [r for r in _rows if (r["mmlu"] >= _bar) == hi]
     ax.scatter([_yr(r["date"]) for r in pts], [r["parameters"] for r in pts], s=sz,
@@ -627,8 +627,8 @@ for hi, ck, sz in ((False, "neutral_l", 16), (True, "memory", 22)):
 fx = [_yr(r["date"]) for r in _front] + [2025.1]
 fy = [r["parameters"] for r in _front] + [_front[-1]["parameters"]]
 ax.step(fx, fy, where="post", color=C["danger"], lw=2.2, zorder=4)
-labels = {"Gopher 280B": (6, 2, "left"), "Chinchilla 70B": (6, 4, "left"),
-          "LLAMA 2 34B": (6, 4, "left"), "Mistral 7B": (6, 4, "left"),
+labels = {"Gopher 280B": (8, 4, "left"), "Chinchilla 70B": (8, 6, "left"),
+          "LLAMA 2 34B": (8, 8, "left"), "Mistral 7B": (8, 6, "left"),
           "Qwen2.5-Coder-3B": (-4, -16, "right")}
 for _r in _front:
     if _r["model"] in labels:
@@ -756,7 +756,7 @@ _cliff_color = {"Pruning + quantization": "data", "Pruning only": "compute",
 CLIFF = {name: (ck, [(r["size_pct"], r["accuracy_change"]) for r in K.SERIES.DeepCompressionMethods.entries
                      if r["method"] == name])
          for name, ck in _cliff_color.items()}
-fig, ax = plt.subplots(figsize=(5.8, 3.0))
+fig, ax = plt.subplots(figsize=(5.8, 2.7))
 label_at = {"Pruning + quantization": (2.2, 0.3, "left"), "Pruning only": (10.0, 0.3, "left"),
             "Quantization only": (15.3, 0.3, "left"), "SVD": (17.2, -3.6, "left")}
 for name, (ck, pts) in CLIFF.items():

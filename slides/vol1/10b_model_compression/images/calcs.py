@@ -414,6 +414,9 @@ v("lb_tg4_x", ultra4["tg128_tps"] / ultra16["tg128_tps"], "{:.2f}", "generation 
 v("lb_tg8_x", ultra8["tg128_tps"] / ultra16["tg128_tps"], "{:.2f}", "generation Q8_0 over F16")
 v("lb_pp4_x", ultra4["pp512_tps"] / ultra16["pp512_tps"], "{:.2f}", "prompt Q4_0 over F16")
 v("lb_file_x", ultra16["size_gib"] / ultra4["size_gib"], "{:.2f}", "F16 file over Q4_0 file")
+for q, r in (("16", ultra16), ("8", ultra8), ("4", ultra4)):
+    v(f"lb_tg{q}", r["tg128_tps"], "{:.0f}", f"M2 Ultra generation (tg 128), {r['quant']}, tokens/s")
+    v(f"lb_pp{q}", r["pp512_tps"], "{:,.0f}", f"M2 Ultra prompt (pp 512), {r['quant']}, tokens/s")
 others = [c for c in dict.fromkeys(r["chip"] for r in BENCH) if c != "M2 Ultra"]
 tg = [bench(c, "Q4_0")["tg128_tps"] / bench(c, "F16")["tg128_tps"] for c in others]
 pp = [bench(c, "Q4_0")["pp512_tps"] / bench(c, "F16")["pp512_tps"] for c in others]
