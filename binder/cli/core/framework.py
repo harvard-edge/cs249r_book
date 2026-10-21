@@ -1,0 +1,270 @@
+"""Compile the optional candidate subject framework and its explicit book links.
+
+A single candidate home is an editorial maintenance rule, not an assertion of
+exclusive membership, a SKOS broader relation, completeness, or competence.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from copy import deepcopy
+import csv
+import html
+import io
+import json
+from pathlib import Path
+import re
+from urllib.parse import urlparse
+
+import yaml
+
+from .concept_graph import ConceptGraphError
+
+
+DIMENSIONS = ("activities", "layers", "concerns", "contexts")
+REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
+
+
+def _fail(message):
+    raise ConceptGraphError(f"framework: {message}")
+
+
+def _text(record, names, context):
+    if not isinstance(record, dict):
+        _fail(f"{context} must be a mapping")
+    for name in names:
+        if not isinstance(record.get(name), str) or not record[name].strip():
+            _fail(f"{context} requires {name}")
+
+
+def _records(values, context, nonempty=True):
+    if not isinstance(values, list) or (nonempty and not values):
+        _fail(f"{context} must be {'a nonempty' if nonempty else 'a'} list")
+    seen = set()
+    for item in values:
+        _text(item, ("id",), context)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", item["id"]):
+            _fail(f"invalid {context} ID {item['id']}")
+        if item["id"] in seen:
+            _fail(f"duplicate {context} ID {item['id']}")
+        seen.add(item["id"])
+    return values
+
+
+def _members(values, known, context, nonempty=True):
+    if not isinstance(values, list) or (nonempty and not values):
+        _fail(f"{context} must be {'a nonempty' if nonempty else 'a'} list")
+    if any(not isinstance(value, str) for value in values):
+        _fail(f"{context} requires string IDs")
+    if len(set(values)) != len(values):
+        _fail(f"duplicate {context} value")
+    if any(value not in known for value in values):
+        _fail(f"unknown {context} value")
+
+
+def _scope_notes(record, source_ids, context):
+    for name in ("display_label", "warrant_role", "inventory_status"):
+        if name in record:
+            _text(record, (name,), context)
+    for name in ("includes", "excludes"):
+        if name in record:
+            values = record[name]
+            if (not isinstance(values, list) or not values
+                    or any(not isinstance(value, str) or not value.strip() for value in values)):
+                _fail(f"{context} {name} must be a nonempty text list")
+    if "warrants" in record:
+        _members(record["warrants"], source_ids, f"{context} warrants")
+
+
+def load_framework(root: Path, field: dict) -> dict | None:
+    """Validate optional authored rows; resolve only existing passage links.
+
+    New field identities deliberately block compilation until their candidate
+    home is considered. No classification or additional book link is guessed.
+    """
+    path = root / "shared/concepts/ml-systems-framework.yml"
+    if not path.exists():
+        return None
+    model = yaml.safe_load(path.read_text())
+    if not isinstance(model, dict) or model.get("schema_version") != 1:
+        _fail("unsupported schema")
+    _text(model, ("id", "title", "version", "status", "scope"), "metadata")
+    if model["status"] != "editorial-draft" or model["version"] != "0.1-draft":
+        _fail("only version 0.1-draft with editorial-draft status is supported")
+    sources = _records(model.get("sources"), "source")
+    for source in sources:
+        _text(source, ("title", "url", "role"), source["id"])
+        url = urlparse(source["url"])
+        if (url.scheme != "https" or not url.netloc or url.username or url.password
+                or re.search(r'[\s<>"{}|\\^`]', source["url"])):
+            _fail(f"unsafe source URL {source['id']}")
+    if len({s["title"].strip().casefold() for s in sources}) != len(sources):
+        _fail("duplicate source title")
+    dimensions = model.get("dimensions")
+    if not isinstance(dimensions, dict) or not REQUIRED_DIMENSIONS <= set(dimensions) or set(dimensions) - set(DIMENSIONS):
+        _fail("dimensions must define activities, layers, and concerns")
+    facets = {}
+    for name in DIMENSIONS:
+        records = _records(dimensions.get(name, []), name, nonempty=name != "contexts")
+        for record in records:
+            _text(record, ("label",), record["id"])
+        if len({r["label"].strip().casefold() for r in records}) != len(records):
+            _fail(f"duplicate {name} label")
+        facets[name] = {r["id"] for r in records}
+    facet_labels = {r["label"].strip().casefold() for records in dimensions.values() for r in records}
+    source_ids = {source["id"] for source in sources}
+    concepts = {n["id"]: n for n in field["concepts"]}
+    if len(concepts) != len(field["concepts"]):
+        _fail("duplicate field concept identity")
+    areas = _records(model.get("areas"), "area")
+    row_ids, labels, homes = set(), set(), Counter()
+    identities = {model["id"], *concepts}
+    resolved_areas = []
+    for area in areas:
+        _text(area, ("label", "question", "scope"), area["id"])
+        _scope_notes(area, source_ids, area["id"])
+        if area["id"] in identities:
+            _fail(f"area identity overlaps another source {area['id']}")
+        identities.add(area["id"])
+        key = area["label"].strip().casefold()
+        if key in labels:
+            _fail(f"duplicate area or row label {area['label']}")
+        labels.add(key)
+        rows = _records(area.get("rows"), "row")
+        resolved_rows = []
+        for row in rows:
+            _text(row, ("label", "definition"), row["id"])
+            _scope_notes(row, source_ids, row["id"])
+            if row["id"] in identities or row["id"] in row_ids:
+                _fail(f"duplicate or overlapping row identity {row['id']}")
+            row_ids.add(row["id"])
+            key = row["label"].strip().casefold()
+            if key in labels:
+                _fail(f"duplicate area or row label {row['label']}")
+            if key in facet_labels:
+                _fail(f"row label duplicates a facet label {row['label']}")
+            labels.add(key)
+            if row.get("status", "draft") != "draft" or area.get("status", "draft") != "draft":
+                _fail("area and row assertions must remain draft")
+            _members(row.get("concepts"), concepts, f"row {row['id']} concepts", nonempty=False)
+            secondary = row.get("secondary_concepts", [])
+            _members(secondary, concepts, f"row {row['id']} secondary concepts", nonempty=False)
+            if set(secondary) & set(row["concepts"]):
+                _fail(f"secondary concepts overlap own home in row {row['id']}")
+            for name in DIMENSIONS:
+                _members(row.get(name, [] if name == "contexts" else None), facets[name], f"row {row['id']} {name}", nonempty=name != "contexts")
+            homes.update(row["concepts"])
+            members = set(row["concepts"]) | set(secondary)
+            links = [deepcopy(link) for link in field.get("book_links", []) if link["concept"] in members]
+            resolved_rows.append({**row, "contexts": row.get("contexts", []), "secondary_concepts": secondary,
+                                  "concept_count": len(row["concepts"]), "home_concept_count": len(row["concepts"]),
+                                  "secondary_concept_count": len(secondary), "book_links": links,
+                                  "inventory_status": row.get("inventory_status", "draft-inventory" if row["concepts"] else "unpopulated-candidate"),
+                                  "book_link_count": len(links),
+                                  "linked_concept_count": len({link["concept"] for link in links}),
+                                  "book_volumes": sorted({link["volume"] for link in links})})
+        resolved_areas.append({**area, "rows": resolved_rows})
+    if row_ids & {area["id"] for area in areas}:
+        _fail("area and row identities overlap")
+    duplicate = sorted(ident for ident, count in homes.items() if count != 1)
+    if duplicate:
+        _fail(f"concepts require exactly one candidate home: {', '.join(duplicate)}")
+    unassigned = sorted(set(concepts) - set(homes))
+    if unassigned:
+        _fail(f"unassigned field concepts require a candidate home decision: {', '.join(unassigned)}")
+    gaps = _records(model.get("gaps"), "gap", nonempty=False)
+    resolved_gaps = []
+    rows_by_id = {row["id"]: row for area in resolved_areas for row in area["rows"]}
+    for gap in gaps:
+        _text(gap, ("reason", "status"), gap["id"])
+        if "subject_row" in gap:
+            _text(gap, ("subject_row",), gap["id"])
+            if gap["subject_row"] not in rows_by_id:
+                _fail(f"unknown gap subject_row {gap['subject_row']}")
+            resolved_gaps.append({**gap, "label": rows_by_id[gap["subject_row"]]["label"]})
+        else:
+            _text(gap, ("label",), gap["id"])
+            resolved_gaps.append(deepcopy(gap))
+        if gap["status"] != "candidate":
+            _fail("gaps require candidate status, not a verified absence claim")
+        if gap["id"] in identities or gap["id"] in row_ids:
+            _fail(f"gap identity overlaps another source {gap['id']}")
+    links = field.get("book_links", [])
+    return {**deepcopy(model), "dimensions": {name: dimensions.get(name, []) for name in DIMENSIONS}, "areas": resolved_areas, "gaps": resolved_gaps,
+            "summary": {"areas": len(areas), "rows": len(row_ids), "concepts": len(concepts),
+                        "book_links": len(links), "linked_concepts": len({link["concept"] for link in links}),
+                        "gaps": len(gaps)}}
+
+
+def _md(value):
+    return html.escape(value, quote=False).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("[", "\\[").replace("]", "\\]").replace("*", "\\*").replace("_", "\\_").replace("#", "\\#")
+
+
+def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict[Path, bytes]:
+    """Export one deterministic table, reference, and data payload; no new claims."""
+    if framework is None:
+        return {}
+    concepts = {c["id"]: c for c in field["concepts"]}
+    facets = {name: {r["id"]: r["label"] for r in framework["dimensions"][name]} for name in DIMENSIONS}
+    payload = {"schema_version": 1, "framework": framework, "concepts": field["concepts"],
+               "book_links": field.get("book_links", []), "relationships": field.get("relationships", [])}
+    stream = io.StringIO(newline="")
+    columns = ["framework_id", "framework_title", "framework_scope", "version", "status", "source_file",
+               "area_id", "area_label", "area_display_label", "area_question", "area_scope", "row_id", "row_label", "row_display_label", "definition",
+               "includes", "excludes", "warrant_source_ids", "warrant_source_titles", "warrant_source_urls", "warrant_role", "inventory_status",
+               *DIMENSIONS, "concept_ids", "secondary_concept_ids", "concept_count", "home_concept_count", "secondary_concept_count", "book_link_count", "linked_concept_count", "book_volumes"]
+    sources_by_id = {source["id"]: source for source in framework["sources"]}
+    writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    lines = [f'# {_md(framework["title"])}', '', f'Version: `{framework["version"]}`. **Editorial draft.**', '',
+             _md(framework["scope"]), '',
+             'Each concept has one candidate home for editorial maintenance. All facet placements are candidate editorial synthesis; empty contexts mean relevance has not been assessed. This does not assert exclusive membership or a broader/narrower hierarchy. Passage links do not certify coverage, teaching depth, prerequisites, or competence.', '',
+             '## Dimensions', '']
+    for name in DIMENSIONS:
+        lines.append(f'- **{name.title()}:** ' + '; '.join(_md(r["label"]) for r in framework["dimensions"][name]) + '.')
+    for area in framework["areas"]:
+        lines.extend(['', f'## {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
+        for row in area["rows"]:
+            writer.writerow({"framework_id": framework["id"], "framework_title": framework["title"], "framework_scope": framework["scope"],
+                             "version": framework["version"], "status": framework["status"], "source_file": "shared/concepts/ml-systems-framework.yml",
+                             "area_id": area["id"], "area_label": area["label"], "area_display_label": area.get("display_label", ""),
+                             "area_question": area["question"], "area_scope": area["scope"],
+                             "row_id": row["id"], "row_label": row["label"], "row_display_label": row.get("display_label", ""),
+                             "includes": json.dumps(row.get("includes", []), ensure_ascii=False),
+                             "excludes": json.dumps(row.get("excludes", []), ensure_ascii=False),
+                             "warrant_source_ids": ";".join(row.get("warrants", [])),
+                             "warrant_source_titles": json.dumps([sources_by_id[ident]["title"] for ident in row.get("warrants", [])], ensure_ascii=False),
+                             "warrant_source_urls": json.dumps([sources_by_id[ident]["url"] for ident in row.get("warrants", [])]),
+                             "warrant_role": row.get("warrant_role", ""), "inventory_status": row["inventory_status"],
+                             "definition": row["definition"], **{name: ";".join(row[name]) for name in DIMENSIONS},
+                             "concept_ids": ";".join(row["concepts"]), "secondary_concept_ids": ";".join(row["secondary_concepts"]),
+                             **{name: row[name] for name in ("concept_count", "home_concept_count", "secondary_concept_count", "book_link_count", "linked_concept_count")},
+                             "book_volumes": ";".join(row["book_volumes"])})
+            lines.extend(['', f'### {_md(row["label"])}', '', f'Identity: `{row["id"]}`', '', _md(row["definition"]), ''])
+            for name in DIMENSIONS:
+                lines.append(f'- **{name.title()}:** ' + '; '.join(_md(facets[name][ident]) for ident in row[name]) + '.')
+            for name in ("includes", "excludes"):
+                if name in row:
+                    lines.extend(['', f'{name.title()}: ' + '; '.join(_md(value) for value in row[name]) + '.'])
+            if row.get("warrants"):
+                lines.extend(['', 'Design warrants: ' + ', '.join(f'`{ident}`' for ident in row["warrants"]) + '.'])
+            lines.extend(['', 'Candidate home concepts:', ''])
+            if not row["concepts"]:
+                lines.append('No current field concept has this candidate home. The row records proposed subject scope, not evidence of absence from the books.')
+            lines.extend(f'- **{_md(concepts[ident]["label"])}** (`{ident}`): {_md(concepts[ident]["definition"])}' for ident in row["concepts"])
+            if row["secondary_concepts"]:
+                lines.extend(['', 'Secondary concept connections (not additional homes):', ''])
+                lines.extend(f'- **{_md(concepts[ident]["label"])}** (`{ident}`)' for ident in row["secondary_concepts"])
+            lines.extend(['', 'Related MLSysBook passages (teaching depth not assessed):', ''])
+            if not row["book_links"]:
+                lines.append('No passage link is recorded. This is not evidence of absence from the books.')
+            else:
+                lines.extend(f'- {_md(link.get("volume", ""))}: {_md(link.get("chapter_title", ""))} — {_md(link.get("label", link["book_concept"]))} (`{link["book_concept"]}`)' for link in row["book_links"])
+    lines.extend(['', '## Candidate scope gaps', '', 'Candidates for editorial investigation, not verified omissions.'])
+    for gap in framework["gaps"]:
+        lines.extend(['', f'- **{_md(gap["label"])}** (`{gap["id"]}`): {_md(gap["reason"])}'])
+    lines.extend(['', '## Design references', '', 'These references inform design and scope; they are not assertion-level validation.', ''])
+    lines.extend(f'- [{_md(s["title"])}]({s["url"]}): {_md(s["role"])}' for s in framework["sources"])
+    site = root / "site/explore"
+    return {site / "framework-data.json": (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(),
+            site / "framework-table.csv": stream.getvalue().encode(),
+            site / "framework-reference.md": ("\n".join(lines) + "\n").encode()}

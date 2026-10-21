@@ -196,6 +196,10 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host "📦 Inkscape installed: $iv" ; `
     Write-Host '✅ Inkscape installation complete'
 
+# Chapter concept-map generation uses Graphviz; Scoop provides dot through its shims.
+RUN scoop install graphviz ; `
+    if (-not (Get-Command dot -ErrorAction SilentlyContinue)) { exit 1 }
+
 RUN Write-Host '=== STARTING RSVG-CONVERT INSTALLATION ===' ; `
     Write-Host 'Installing rsvg-convert via Scoop (required by Quarto for SVG-to-PDF)...' ; `
     scoop install rsvg-convert ; `
