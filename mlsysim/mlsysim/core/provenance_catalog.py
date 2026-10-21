@@ -82,12 +82,82 @@ IEA_WEO_2023 = Provenance(
     verified="2026-03-06",
 )
 
+# --- Facility PUE anchors (one record per source; each tier cites its own) ---
 UPTIME_PUE_2022 = Provenance(
     id="prov:uptime-pue-survey-2022",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="Uptime Institute Global Data Center Survey 2022",
-    url="https://uptimeinstitute.com/resources/research-and-reports/uptime-institute-global-data-center-survey-2022",
-    verified="2026-03-06",
+    ref="Uptime Institute Global Data Center Survey 2022 (press release, 20 September 2022)",
+    url="https://uptimeinstitute.com/about-ui/press-releases/2022-global-data-center-survey-reveals-strong-industry-growth",
+    verified="2026-10-21",
+    notes=(
+        "Survey average across about 800 operators: \"The average annual power usage effectiveness (PUE) "
+        "reported in 2022 was 1.55.\" (2021: 1.57). An industry average, not a best-case tier."
+    ),
+)
+
+UPTIME_PUE_2023 = Provenance(
+    id="prov:uptime-pue-survey-2023",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Uptime Institute, \"Large data centers are mostly more efficient, analysis confirms\" (7 February 2024)",
+    url="https://journal.uptimeinstitute.com/large-data-centers-are-mostly-more-efficient-analysis-confirms/",
+    verified="2026-10-21",
+    notes=(
+        "\"In 2023, industry average PUE stood at 1.58.\" Uptime adds that the industry average has "
+        "stayed between 1.55 and 1.59 since about 2020. An industry average, not a legacy-facility tier."
+    ),
+)
+
+NREL_ESIF_PUE = Provenance(
+    id="prov:nrel-esif-hpc-datacenter-pue",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NREL, Energy Systems Integration Facility 2015 Mid-Year Report (warm-water liquid-cooled HPC data center)",
+    url="https://docs.nlr.gov/docs/fy15osti/64703.pdf",
+    verified="2026-10-21",
+    notes=(
+        "\"The ultraefficient ESIF data center developed by Hewlett-Packard features a chiller-less design, "
+        "warm-water liquid cooling, an annual average power usage effectiveness (PUE) of 1.06\". "
+        "NREL (now NLR) later reports an annualized average of 1.036 for the same facility "
+        "(https://www.nlr.gov/computational-science/hpc-data-center); this record holds the 1.06 figure."
+    ),
+)
+
+MICROSOFT_DESIGN_PUE_2022 = Provenance(
+    id="prov:microsoft-datacenter-design-pue-2022",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Microsoft Azure Blog, \"How Microsoft measures datacenter water and energy use to improve Azure Cloud sustainability\" (22 April 2022)",
+    url="https://azure.microsoft.com/en-us/blog/how-microsoft-measures-datacenter-water-and-energy-use-to-improve-azure-cloud-sustainability/",
+    verified="2026-10-21",
+    notes=(
+        "\"Our newest generation of datacenters have a design PUE of 1.12\". A design value, not a measured "
+        "fleet average; the post describes outside-air and evaporative cooling for its sites but does not "
+        "name the cooling method of that generation."
+    ),
+)
+
+GOOGLE_FLEET_PUE = Provenance(
+    id="prov:google-datacenter-fleet-pue",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Google Data Centers, Efficiency: fleet-wide trailing twelve-month (TTM) PUE",
+    url="https://datacenters.google/efficiency/",
+    verified="2026-10-21",
+    notes=(
+        "\"For Q4 2023, TTM PUE was 1.10 and quarterly PUE was 1.08.\" The fleet TTM PUE was 1.10 at Q4 of "
+        "2019 through 2023 and 1.09 for 2024 and 2025 (\"a comprehensive trailing twelve-month (TTM) PUE "
+        "of 1.09 across all our large-scale data centers\")."
+    ),
+)
+
+LBNL_SMALL_SERVER_ROOMS_2013 = _lit(
+    "prov:lbnl-small-server-rooms-2013",
+    "Cheung, Greenberg, Mahdavi et al., Energy Efficiency in Small Server Rooms, LBNL final project report "
+    "for the California Energy Commission (PIER), April 2013, Table 4",
+    url="https://datacenters.lbl.gov/sites/default/files/SmallServerRooms_Final%20Report_0.pdf",
+    verified="2026-10-21",
+    notes=(
+        "Table 4 (PUE Breakdown) gives PUE 2.1, 1.8, 1.5 and 2.1 for Stanford 333 Bonair Siding, Stanford "
+        "Alumni Center, LBNL 90-2094 and City of Walnut Creek. The 1.5 room (LBNL 90-2094, 10.4 kW total "
+        "load) is cooled by three window-mounted units."
+    ),
 )
 
 CLUSTER_TIER_CONVENTIONS = _conv(
