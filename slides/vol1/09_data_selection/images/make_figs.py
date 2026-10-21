@@ -118,6 +118,19 @@ def gpt2_tokens():
 
 
 # -----------------------------------------------------------------------------
+# 2b. Learning per FLOP: all data against the EL2N half (Napkin Math 9.1)
+# -----------------------------------------------------------------------------
+def icr_bars():
+    i = calcs.ICR
+    full = float(getattr(i.icr_full, "magnitude", i.icr_full))
+    half = float(getattr(i.icr_subset, "magnitude", i.icr_subset))
+    sp.hbars(out / "icr_bars.svg", [
+        ("All data", full / full, "neutral", "baseline"),
+        ("Half, EL2N", half / full, "data", f"{val('icr_ratio')}\u00d7"),
+    ], "", log=False, size=(3.9, 1.0), fontsize=15)
+
+
+# -----------------------------------------------------------------------------
 # 3c. Curriculum warmup: linear pacing serves about half the samples
 # -----------------------------------------------------------------------------
 def warmup():
@@ -539,6 +552,7 @@ def data_path():
 if __name__ == "__main__":
     data_wall()
     gpt2_tokens()
+    icr_bars()
     warmup()
     tokens_per_param()
     scoreboard()

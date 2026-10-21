@@ -838,6 +838,34 @@ for k in (2, 3):
              color=C["neutral"])
     sp.save(fig, out / f"waterfall_step{k}.svg")
 
+# ---------------------------------------------------------------------------
+# 15b. llama-bench on the M2 Ultra, redrawn at slide size (visual review
+# 2026-10-21): generation and prompt throughput per weight format, from
+# Literature.Series.LlamaBenchAppleSilicon through calcs.py.
+# ---------------------------------------------------------------------------
+fig, axes = plt.subplots(1, 2, figsize=(5.8, 1.55))
+for ax, key, title, ck in ((axes[0], "tg", "Generate (tg 128), tokens/s", "memory"),
+                           (axes[1], "pp", "Prompt (pp 512), tokens/s", "compute")):
+    rows = [("F16", f"lb_{key}16"), ("Q8_0", f"lb_{key}8"), ("Q4_0", f"lb_{key}4")]
+    top = max(num(k) for _, k in rows)
+    for i, (lab, k) in enumerate(rows):
+        y = len(rows) - 1 - i
+        ax.barh(y, num(k), color=C[ck] if lab == "Q4_0" else C["neutral_l"], height=0.62)
+        ax.text(num(k) + top * 0.02, y, val(k), va="center", fontsize=13, fontweight="bold",
+                color=C[ck] if lab == "Q4_0" else C["text"])
+        ax.text(-top * 0.03, y, lab, va="center", ha="right", fontsize=13, fontweight="bold",
+                color=C["text"])
+    ax.set_xlim(0, top * 1.32)
+    ax.set_yticks([])
+    ax.set_title(title, fontsize=14, fontweight="bold", color=C[ck])
+    ax.set_xticks([])
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+fig.subplots_adjust(wspace=0.6)
+sp.save(fig, out / "llamabench.svg")
+
 # The frame-time-only waterfall figure was retired 2026-10-18:
 # the Pixel 2 frame now shows the phone itself.
 
