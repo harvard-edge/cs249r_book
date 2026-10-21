@@ -247,17 +247,39 @@ def ladder():
         ax.text(0.3, 7.5, "A warehouse", fontsize=12, fontweight="bold", color=P["slate"], va="center",
                 alpha=a(s2))
         for i in range(3):
-            x = 11.5 + i * 16.0
-            box(ax, x, 17.5 + i * 1.6, 13.0, 6.2, road[i], P["green_l"], P["green"], fs=11.5)
-            box(ax, x, 3.5 + i * 1.6, 13.0, 6.2, floor[i], P["green_l"], P["green"], fs=11.5, shown=s2)
+            x = 11.0 + i * 16.6
+            box(ax, x, 17.5 + i * 1.6, 14.4, 6.2, road[i], P["green_l"], P["green"], fs=11)
+            box(ax, x, 3.5 + i * 1.6, 14.4, 6.2, floor[i], P["green_l"], P["green"], fs=11, shown=s2)
             if i < 2:
-                arrow(ax, x + 13.0, 20.6 + i * 1.6, x + 16.0, 22.2 + i * 1.6, P["slate"], lw=1.6)
-                arrow(ax, x + 13.0, 6.6 + i * 1.6, x + 16.0, 8.2 + i * 1.6, P["slate"], lw=1.6, shown=s2)
+                arrow(ax, x + 14.4, 20.6 + i * 1.6, x + 16.6, 22.2 + i * 1.6, P["slate"], lw=1.6)
+                arrow(ax, x + 14.4, 6.6 + i * 1.6, x + 16.6, 8.2 + i * 1.6, P["slate"], lw=1.6, shown=s2)
         ax.text(11.5, 14.8, "Each rung is its own DMV permit; the CPUC adds passenger rungs",
                 fontsize=11, color=P["gray"], va="center")
         ax.text(11.5, 0.9, "Granted by the owner, the integrator, and workers' representatives",
                 fontsize=11, color=P["gray"], va="center", alpha=a(s2))
         save(fig, f"ladder_step{step}")
+
+
+def withdraw():
+    """The DMV suspension of 24 October 2023 steps Cruise down the road ladder:
+    the two driverless rungs are withdrawn and the safety-driver permit stays
+    (Responsible Physical AI, Sec. 17.4.2; DMV statement, 24 Oct 2023)."""
+    road = ["Testing with a\nsafety driver", "Driverless\ntesting", "Deployment to\nthe public"]
+    fig, ax = canvas(3.0, 2.8, (0, 30), (0, 28))
+    for i in range(3):
+        y = 1.0 + i * 7.4
+        kept = i == 0
+        box(ax, 1.0, y, 16.0, 5.4, road[i], P["green_l"] if kept else P["red_l"],
+            P["green"] if kept else P["red"], fs=12, ls="-" if kept else "--")
+        ax.text(21.5, y + 2.7, "kept" if kept else "suspended", ha="left", va="center", fontsize=11.5,
+                fontweight="bold", color=P["green_d"] if kept else P["red_d"])
+        if i < 2:
+            arrow(ax, 9.0, y + 5.4, 9.0, y + 7.4, P["gray"], lw=1.6, ms=12)
+    ax.plot([17.0, 19.6, 19.6, 18.6], [18.1, 18.1, 3.7, 3.7], color=P["red"], lw=2.4, solid_capstyle="butt")
+    arrow(ax, 18.8, 3.7, 17.1, 3.7, P["red"], lw=2.4, ms=14)
+    ax.text(1.0, 25.4, "24 Oct 2023: the DMV withdraws\nboth driverless rungs",
+            ha="left", va="center", fontsize=11.5, color=P["red_d"], fontweight="bold", linespacing=1.15)
+    save(fig, "withdraw")
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +589,7 @@ def main():
     time_test()
     queue()
     ladder()
+    withdraw()
     stage_hours()
     fines()
     detect_data()

@@ -469,6 +469,10 @@ def latch_bars():
 
 # The record chain is the course kit's (assets/kit/vol4/record_chain_l18).
 
+# thumb_indist.svg, thumb_friction_knee.svg and thumb_derate_gap.svg (the
+# missing-evidence grid) are those figures run through tools/greek_thumbs.py;
+# rerun it after regenerating them.
+
 
 # ---------------------------------------------------------------------------
 # Text-free thumbnails drawn as shapes (goals and takeaways)

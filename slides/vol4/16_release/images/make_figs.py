@@ -179,17 +179,17 @@ def cae(k):
     leaves = [("Loaded stop trials", f"a_brake ≥ {val('a_brake')} m/s²"), ("Brake-onset trials", f"≤ {val('t_onset')} ms"),
               ("End-to-end age trace", f"{val('t_age')} ms"), ("Site survey", f"D_clear {val('d_clear_m')} m")]
     for i, (t1, t2) in enumerate(leaves):
-        x = 98 + i * 182
-        b.append(box(x, 230, 176, 62, "white", GREEN, sw=2.0))
-        b += lines(x + 88, 255, [t1], 16, weight="bold")
-        b += lines(x + 88, 279, [t2], 16)
-        b.append(arrow(x + 88, 230, 462 + (i - 1.5) * 50, 173, GREEN, 2, marker="ahg"))
-    b.append(text(450, 318, "Evidence: calibrated records with stated uncertainty", 17, GREEN, weight="bold"))
+        x = 46 + i * 206
+        b.append(box(x, 228, 200, 66, "white", GREEN, sw=2.0))
+        b += lines(x + 100, 255, [t1], 18, weight="bold")
+        b += lines(x + 100, 281, [t2], 18)
+        b.append(arrow(x + 100, 228, 462 + (i - 1.5) * 50, 173, GREEN, 2, marker="ahg"))
+    b.append(text(450, 320, "Evidence: calibrated records with stated uncertainty", 18, GREEN, weight="bold"))
     if k >= 2:
-        b.append(box(8, 150, 222, 56, GRAY_F, GRAY, dash="3,4"))
-        b += lines(119, 172, ["1,000 clean runs"], 18, weight="bold", fill=GRAY)
-        b += lines(119, 194, ["a demonstration"], 17, fill=GRAY)
-        b.append(text(119, 222, "not evidence for new conditions", 15, RED, weight="bold"))
+        b.append(box(8, 134, 222, 56, GRAY_F, GRAY, dash="3,4"))
+        b += lines(119, 156, ["1,000 clean runs"], 18, weight="bold", fill=GRAY)
+        b += lines(119, 178, ["a demonstration"], 17, fill=GRAY)
+        b += lines(10, 207, ["not evidence for", "new conditions"], 15, RED, "start", "bold", gap=16)
     if k >= 3:
         b.append(box(704, 100, 188, 74, RED_F, RED, sw=2.4))
         b += lines(798, 128, ["Defeater: clear", f"oil film, μ ≈ {val('mu_oil')}"], 18, RED, weight="bold")
@@ -280,30 +280,30 @@ MAT = {"ill": "illustrative", "dec": "declared", "unk": "unknown"}
 def tree(k):
     W, H = 900, 360
     b = []
-    b.append(box(4, 100, 150, 82, GREEN_F, GREEN, sw=2.4))
-    b += lines(79, 128, ["C0  Restricted", "mug delivery", "(all must hold)"], 17, weight="bold", gap=21)
+    b.append(box(4, 98, 150, 88, GREEN_F, GREEN, sw=2.4))
+    b += lines(79, 126, ["C0  Restricted", "mug delivery", "(all must hold)"], 18, weight="bold", gap=22)
     for i, (c, leaf, m) in enumerate(TREE):
-        y = 8 + i * 44
-        b.append(line(154, 141, 176, y + 17, SLATE, 1.6))
-        b.append(box(176, y, 205, 34, "white", SLATE, sw=1.8))
-        b.append(text(186, y + 23, c, 17, TXT, "start", "bold"))
-        b.append(line(381, y + 17, 394, y + 17, SLATE, 1.6))
-        b.append(box(394, y, 300, 34, "white", GRAY if k == 1 else SLATE, dash=DASH[m], sw=2.0))
-        b.append(text(402, y + 23, leaf, 16, TXT, "start"))
+        y = 6 + i * 44
+        b.append(line(154, 141, 172, y + 18, SLATE, 1.6))
+        b.append(box(172, y, 222, 36, "white", SLATE, sw=1.8))
+        b.append(text(180, y + 25, c, 18, TXT, "start", "bold"))
+        b.append(line(394, y + 18, 404, y + 18, SLATE, 1.6))
+        b.append(box(404, y, 306, 36, "white", GRAY if k == 1 else SLATE, dash=DASH[m], sw=2.0))
+        b.append(text(411, y + 25, leaf, 17, TXT, "start"))
         if k >= 3:
-            b.append(box(702, y + 2, 88, 30, RED_F, RED, rx=4, sw=1.8))
-            b.append(text(746, y + 23, "REFUSE", 16, RED, weight="bold"))
+            b.append(box(716, y + 2, 86, 32, RED_F, RED, rx=4, sw=1.8))
+            b.append(text(759, y + 24, "REFUSE", 17, RED, weight="bold"))
     if k >= 2:
-        y3 = 8 + 4 * 44
-        b.append(box(798, y3 - 6, 98, 46, RED_F, RED, sw=2.2))
-        b += lines(847, y3 + 13, ["clear oil", "film"], 16, RED, weight="bold", gap=18)
-        b.append(arrow(798, y3 + 17, 790 if k >= 3 else 698, y3 + 17, RED, 2.2, marker="ahr"))
-        b.append(text(847, y3 - 14, "defeater", 16, RED, weight="bold"))
+        y3 = 6 + 4 * 44
+        b.append(box(808, y3 - 6, 90, 48, RED_F, RED, sw=2.2))
+        b += lines(853, y3 + 13, ["clear oil", "film"], 17, RED, weight="bold", gap=19)
+        b.append(arrow(808, y3 + 18, 802 if k >= 3 else 712, y3 + 18, RED, 2.2, marker="ahr"))
+        b.append(text(853, y3 - 13, "defeater", 17, RED, weight="bold"))
         for j, mm in enumerate(("ill", "dec", "unk")):
-            yy = 214 + j * 32
-            b.append(box(8, yy, 36, 22, "white", SLATE, dash=DASH[mm], sw=2.0, rx=3))
-            b.append(text(52, yy + 17, MAT[mm], 16, TXT, "start"))
-        b.append(text(8, 330, "none measured", 16, RED, "start", "bold"))
+            yy = 212 + j * 32
+            b.append(box(6, yy, 34, 22, "white", SLATE, dash=DASH[mm], sw=2.0, rx=3))
+            b.append(text(46, yy + 18, MAT[mm], 17, TXT, "start"))
+        b.append(text(6, 332, "none measured", 17, RED, "start", "bold"))
     svg(f"tree_step{k}", W, H, b)
 
 
@@ -438,53 +438,45 @@ def erosion():
 # =============================================================================
 # 11. The release manifest. viewBox 900 x 370, slot 14.8 x 6.1 cm.
 # =============================================================================
-GROUPS = [
-    ("Plant and timing", [("limit record", "L2"), ("handoff record", "L4")]),
-    ("Data and policy", [("provenance", "L5"), ("policy manifest", "L6"), ("evaluation", "L7")]),
-    ("Perception, planning", [("observation contract", "L8"), ("belief record", "L9"),
-                              ("intent lease", "L10"), ("trajectory record", "L11")]),
-    ("Containment", [("enforcement", "L12"), ("placement", "L13"), ("authority", "L14"),
-                     ("fault records", "L15")]),
+MGROUPS = [  # group, lectures, record lines
+    ("Plant and timing", "L2, L4", ["limit · handoff"]),
+    ("Data and policy", "L5–7", ["provenance · policy", "manifest · evaluation"]),
+    ("Perception, planning", "L8–11", ["observation contract", "belief · intent lease", "trajectory"]),
+    ("Containment", "L12–15", ["enforcement · placement", "authority · fault records"]),
 ]
 
 
 def manifest(k):
     W, H = 900, 370
     b = []
-    y = 6
-    for g, recs in GROUPS:
-        b.append(text(8, y + 18, g, 17, SLATE, "start", "bold"))
-        y += 24
-        for j, (r, lec) in enumerate(recs):
-            x = 8 + (j % 2) * 176
-            if j and j % 2 == 0:
-                y += 30
-            b.append(box(x, y, 172, 26, SLATE_F, SLATE, rx=4, sw=1.4))
-            b.append(text(x + 5, y + 19, r, 15, TXT, "start"))
-            b.append(text(x + 167, y + 19, lec, 15, GRAY, "end", "bold"))
-        y += 36
-    b.append(text(8, 342, "Digest: a hash that changes if any byte does.", 15, GRAY, "start"))
-    b.append(text(8, 362, "Merkle root: one digest over all digests.", 15, GRAY, "start"))
+    y = 4
+    for g, lec, rows in MGROUPS:
+        h = 28 + 22 * len(rows)
+        b.append(box(4, y, 262, h, SLATE_F, SLATE, rx=5, sw=1.4))
+        b.append(text(12, y + 21, g, 18, SLATE, "start", "bold"))
+        b.append(text(258, y + 21, lec, 16, GRAY, "end", "bold"))
+        b += lines(12, y + 44, rows, 17, TXT, "start", gap=22)
+        y += h + 8
     a2 = k >= 2
     if a2:
-        b.append(arrow(360, 185, 384, 185, SLATE, 2.4))
-        b.append(box(388, 6, 236, 358, GREEN_F, GREEN, sw=2.6))
-        b.append(text(506, 34, "Release manifest", 21, GREEN, weight="bold"))
+        b.append(arrow(268, 185, 292, 185, SLATE, 2.4))
+        b.append(box(296, 4, 272, 362, GREEN_F, GREEN, sw=2.6))
+        b.append(text(432, 32, "Release manifest", 21, GREEN, weight="bold"))
         fields = ["record digests → Merkle root", "root claim, argument digest", "binary hashes: policy,",
                   "   enforcer, RTOS kernel", "calibration tables", "standing conditions",
                   "wear budget (hours, cycles)", "expiry date", "adjudicator signature (HSM)"]
         for i, f in enumerate(fields):
-            b.append(text(398, 68 + i * 32, f, 15.5, TXT, "start"))
+            b.append(text(306, 66 + i * 35, f, 18, TXT, "start"))
     if k >= 3:
-        b.append(arrow(624, 185, 646, 185, SLATE, 2.4))
-        b.append(box(650, 120, 112, 130, "white", SLATE, sw=2.2))
-        b += lines(706, 150, ["Gate:", "authenticate,", "then check", "standing"], 16, gap=24)
-        b.append(arrow(762, 160, 782, 110, GREEN, 2.2, marker="ahg"))
-        b.append(arrow(762, 210, 782, 260, RED, 2.2, marker="ahr"))
-        b.append(box(784, 54, 112, 84, GREEN_F, GREEN, sw=2.2))
-        b += lines(840, 80, ["UNCOND or", "COND:", "permit on"], 16, GREEN, weight="bold", gap=20)
-        b.append(box(784, 232, 112, 84, RED_F, RED, sw=2.2))
-        b += lines(840, 258, ["REFUSE:", "permit off;", "stop or hold"], 16, RED, weight="bold", gap=20)
+        b.append(arrow(568, 185, 592, 185, SLATE, 2.4))
+        b.append(box(596, 116, 132, 138, "white", SLATE, sw=2.2))
+        b += lines(662, 146, ["Gate:", "authenticate,", "then check", "standing"], 18, gap=26)
+        b.append(arrow(728, 160, 750, 112, GREEN, 2.2, marker="ahg"))
+        b.append(arrow(728, 210, 750, 258, RED, 2.2, marker="ahr"))
+        b.append(box(752, 50, 144, 90, GREEN_F, GREEN, sw=2.2))
+        b += lines(824, 78, ["UNCOND or", "COND:", "permit on"], 18, GREEN, weight="bold", gap=22)
+        b.append(box(752, 230, 144, 90, RED_F, RED, sw=2.2))
+        b += lines(824, 258, ["REFUSE:", "permit off;", "stop or hold"], 18, RED, weight="bold", gap=22)
     svg(f"manifest_step{k}", W, H, b)
 
 
