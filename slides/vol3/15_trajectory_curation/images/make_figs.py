@@ -319,8 +319,8 @@ def order():
 
 # ---------------------------------------------------------------- recovery (§15.6)
 def typology():
-    """Drawn 900 x 420 for a full-width slot about 12 cm wide."""
-    W, H = 900, 420
+    """Drawn 900 x 460 for a full-width slot about 13 cm wide."""
+    W, H = 900, 460
     rows = [("Direct-success demonstration",
              [("task and", "context", "c"), ("inspect the", "failing check", "t"), ("edit the", "pool wakeup", "t"),
               ("required", "checks pass", "c"), ("report the", "result", "t")]),
@@ -333,21 +333,21 @@ def typology():
     for step in (1, 2, 3):
         b = ""
         for r, (title, cells) in enumerate(rows):
-            y = 4 + r * 126
-            body = text(6, y + 20, title, 21, INK, "start", "bold")
+            y = 2 + r * 140
+            body = text(4, y + 22, title, 24, INK, "start", "bold")
             for i, (l1, l2, kind) in enumerate(cells):
-                x = 6 + i * 148
+                x = 4 + i * 149
                 fill, st, dash = {"c": (GRAY_L, LINE, False), "t": (BLUE_L, BLUE, False),
                                   "x": (RED_L, RED, True)}[kind]
-                body += box(x, y + 30, 140, 66, fill, st, dash=dash)
-                body += text(x + 70, y + 58, l1, 18) + text(x + 70, y + 82, l2, 18)
+                body += box(x, y + 32, 143, 80, fill, st, dash=dash)
+                body += text(x + 71.5, y + 66, l1, 21) + text(x + 71.5, y + 94, l2, 21)
                 bar = BLUE if kind == "t" else "#e2e8f0"
-                body += f'<rect x="{x}" y="{y + 102}" width="140" height="9" fill="{bar}"/>'
+                body += f'<rect x="{x}" y="{y + 118}" width="143" height="10" fill="{bar}"/>'
             b += g(body, 1 if r < step else 0)
-        b += (box(6, 394, 26, 18, BLUE_L, BLUE, rx=3) + text(40, 409, "selected target", 18, INK, "start")
-              + box(230, 394, 26, 18, GRAY_L, LINE, rx=3) + text(264, 409, "context only", 18, INK, "start")
-              + box(430, 394, 26, 18, RED_L, RED, rx=3, dash=True) + text(464, 409, "never imitated", 18, INK, "start")
-              + f'<rect x="650" y="398" width="26" height="9" fill="{BLUE}"/>' + text(684, 409, "in the loss", 18, INK, "start"))
+        b += (box(4, 430, 28, 20, BLUE_L, BLUE, rx=3) + text(40, 447, "selected target", 21, INK, "start")
+              + box(230, 430, 28, 20, GRAY_L, LINE, rx=3) + text(266, 447, "context only", 21, INK, "start")
+              + box(440, 430, 28, 20, RED_L, RED, rx=3, dash=True) + text(476, 447, "never imitated", 21, INK, "start")
+              + f'<rect x="680" y="435" width="28" height="10" fill="{BLUE}"/>' + text(716, 447, "in the loss", 21, INK, "start"))
         svg(f"typology_step{step}.svg", W, H, b)
 
 
@@ -452,34 +452,38 @@ def staging():
 
 
 def lineage():
-    """Drawn 900 x 400 for a full-width slot about 11 cm wide."""
+    """Drawn 900 x 400 for a full-width slot about 13 cm wide."""
     W, H = 900, 400
-    src = ["collection identity", "generation config", "environment, capture", "assessment",
-           "use and partition", "reverse references"]
     for step in (1, 2):
-        b = box(4, 4, 280, 352, "white", PURPLE, rx=10)
-        b += text(144, 32, "Source record", 21, INK, weight="bold")
-        b += text(144, 58, "trace_r19_01", 19, PURPLE, family="Courier, monospace")
-        for i, s in enumerate(src):
-            hl = s == "reverse references"
-            b += box(18, 72 + i * 46, 252, 38, PURPLE_L if hl else GRAY_L, PURPLE if hl else LINE, rx=5, sw=2)
-            b += text(144, 98 + i * 46, s, 19)
-        b += card(306, 150, 184, 72, "Redaction", "versioned policy", GRAY_L, LINE, ts=20, ss=18)
-        b += arrow(270, 186, 302, 186) + arrow(490, 186, 520, 186)
-        der = [("parent reference", PURPLE_L, PURPLE), ("changed fields", GRAY_L, LINE),
-               ("same split group", GREEN_L, GREEN), ("same use permission", GREEN_L, GREEN),
-               ("assessment: pending", "#f1f5f9", GRAY)]
-        body = box(524, 4, 372, 300, "white", PURPLE, rx=10)
-        body += text(710, 32, "Derived record", 21, INK, weight="bold")
-        body += text(710, 58, "trace_r19_01_redacted_v1", 19, PURPLE, family="Courier, monospace")
-        for i, (s, f, st) in enumerate(der):
-            body += box(540, 72 + i * 45, 340, 37, f, st, rx=5, sw=2, dash=(i == 4))
-            body += text(710, 97 + i * 45, s, 19)
-        body += arrow(540, 91, 274, 91, "p", PURPLE)
+        b = box(4, 4, 300, 330, "white", PURPLE, rx=10)
+        b += text(154, 34, "Source record", 24, INK, weight="bold")
+        b += text(154, 62, "trace_r19_01", 21, PURPLE, family="Courier, monospace")
+        b += box(18, 76, 272, 92, GRAY_L, LINE, rx=5, sw=2)
+        b += text(154, 102, "identity, generation config,", 18, GRAY)
+        b += text(154, 126, "environment, assessment", 18, GRAY)
+        b += text(154, 152, "(metadata)", 18, GRAY)
+        b += box(18, 180, 272, 62, GREEN_L, GREEN, rx=5, sw=2.5)
+        b += text(154, 219, "use and partition", 23, INK, weight="bold")
+        b += box(18, 254, 272, 62, PURPLE_L, PURPLE, rx=5, sw=2.5)
+        b += text(154, 293, "reverse references", 23, INK, weight="bold")
+        b += card(324, 150, 176, 80, "Redaction", "versioned policy", GRAY_L, LINE, ts=22, ss=19)
+        b += arrow(290, 190, 320, 190) + arrow(500, 190, 520, 190)
+        body = box(524, 4, 372, 330, "white", PURPLE, rx=10)
+        body += text(710, 34, "Derived record", 24, INK, weight="bold")
+        body += text(710, 62, "trace_r19_01_redacted_v1", 20, PURPLE, family="Courier, monospace")
+        body += box(540, 76, 340, 56, PURPLE_L, PURPLE, rx=5, sw=2)
+        body += text(710, 112, "parent ref, changed fields", 20, INK)
+        body += box(540, 144, 340, 56, GREEN_L, GREEN, rx=5, sw=2.5)
+        body += text(710, 181, "same split group", 23, INK, weight="bold")
+        body += box(540, 212, 340, 56, GREEN_L, GREEN, rx=5, sw=2.5)
+        body += text(710, 249, "same use permission", 23, INK, weight="bold")
+        body += box(540, 280, 340, 44, "#f1f5f9", GRAY, rx=5, sw=2, dash=True)
+        body += text(710, 309, "assessment: pending", 20, INK)
+        body += arrow(540, 104, 294, 104, "p", PURPLE)
         b += body
-        b += g(f'<path d="M284,330 L710,330 L710,308" fill="none" stroke="{RED}" stroke-width="2.5" '
+        b += g(f'<path d="M154,334 L154,356 L710,356 L710,338" fill="none" stroke="{RED}" stroke-width="3" '
                f'stroke-dasharray="7 5" marker-end="url(#ar)"/>'
-               + text(560, 388, "withdraw the source: every descendant is found", 20, RED, weight="bold"),
+               + text(450, 392, "withdraw the source: every descendant is found", 23, RED, weight="bold"),
                1 if step == 2 else 0)
         svg(f"lineage_step{step}.svg", W, H, b)
 
@@ -518,11 +522,11 @@ def synthesis():
     b = ""
     for i, (t, s, f, st) in enumerate(steps):
         x = 4 + i * 128
-        b += card(x, 40, 118, 92, t, s, f, st, ts=20, ss=18)
+        b += card(x, 40, 120, 100, t, s, f, st, ts=23, ss=20)
         if i < len(steps) - 1:
-            b += arrow(x + 118, 86, x + 128, 86)
-    b += text(450, 26, "what reaches the weights, and with what evidence", 21, INK, weight="bold")
-    b += text(450, 172, "published as repair_demonstrations_v1 with its manifest", 20, PURPLE, weight="bold")
+            b += arrow(x + 120, 90, x + 128, 90)
+    b += text(450, 26, "what reaches the weights, and with what evidence", 24, INK, weight="bold")
+    b += text(450, 180, "published as repair_demonstrations_v1 with its manifest", 23, PURPLE, weight="bold")
     svg("synthesis.svg", W, H, b)
 
 
@@ -534,6 +538,31 @@ def recall_thumb():
         b += f'<path d="M276,110 C330,110 340,{y} 400,{y} L560,{y}" fill="none" stroke="{c}" stroke-width="9" stroke-linecap="round"/>'
         b += f'<circle cx="580" cy="{y}" r="16" fill="{c}"/>'
     svg("recall_branches.svg", 620, 220, b)
+
+
+def recipe_bars():
+    """The published filter applied to the corpus: what it removes."""
+    fig, ax = plt.subplots(figsize=(6.0, 1.5))
+    tot, rem = num("c_resolved"), num("c_rec")
+    ax.barh(1, tot, color=GREEN, height=0.55)
+    ax.barh(1, rem, left=tot - rem, color=RED, height=0.55)
+    ax.text(tot, 1.45, f"removed by the filter: {val('c_rec')} ({val('c_rec_pct')}%)", ha="right",
+            va="center", fontsize=12.5, color=RED, fontweight="bold")
+    ax.text((tot - rem) / 2, 1, "kept", ha="center", va="center", fontsize=12.5, color="white",
+            fontweight="bold")
+    ax.text(-tot * 0.02, 1, "resolved runs", ha="right", va="center", fontsize=12.5)
+    d, r = num("c_direct_mean"), num("c_rec_mean")
+    sc = tot / (r * 1.25)
+    ax.barh(0.25, d * sc, color=GRAY, height=0.4)
+    ax.barh(-0.3, r * sc, color=RED, height=0.4)
+    ax.text(d * sc + tot * 0.01, 0.25, f"direct: {val('c_direct_mean')} chars", va="center", fontsize=12)
+    ax.text(r * sc + tot * 0.01, -0.3, f"recovery: {val('c_len_ratio')}× longer", va="center", fontsize=12,
+            color=RED, fontweight="bold")
+    ax.text(-tot * 0.02, -0.02, "mean length", ha="right", va="center", fontsize=12.5)
+    ax.set_xlim(0, tot * 1.02)
+    ax.set_ylim(-0.6, 1.65)
+    ax.axis("off")
+    sp.save(fig, HERE / "recipe_bars.svg")
 
 
 if __name__ == "__main__":
@@ -554,3 +583,4 @@ if __name__ == "__main__":
     lineage()
     dispositions()
     synthesis()
+    recipe_bars()

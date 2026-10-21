@@ -31,7 +31,7 @@ out = Path(__file__).parent
 
 # ---------------------------------------------------------------- SVG kit
 # Volume III agentic palette (volumes/vol3/palette.md).
-P = {
+P = PALETTE = {
     "store": ("#f3e8ff", "#7c3aed", "#6d28d9"),   # saga, supervisor, log
     "tool": ("#fef3c7", "#d97706", "#b45309"),    # tool calls, actuation
     "fault": ("#fee2e2", "#dc2626", "#b91c1c"),   # unknown, blocked, pivots
@@ -410,7 +410,7 @@ rt, rd = R.break_even_time, R.break_even_cost
 p0 = num("rp_p")
 import numpy as np  # noqa: E402
 
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
+fig, ax = plt.subplots(figsize=(4.5, 3.1))
 ps = np.linspace(0, 1, 200)
 ax.axhline(1.0, color=C["danger"], lw=2.2, ls="--")
 ax.text(0.99, 1.03, "unwind and rebuild now", color=C["danger"], fontsize=12,
@@ -418,11 +418,11 @@ ax.text(0.99, 1.03, "unwind and rebuild now", color=C["danger"], fontsize=12,
 ax.plot(ps, rt + (1 - ps), color=C["memory"], lw=2.6)
 ax.plot(ps, rd + (1 - ps), color=C["compute"], lw=2.6)
 ax.plot([p0], [1 - R.time_saved_fraction], "o", ms=9, color=C["memory"])
-ax.annotate(f"p = {val('rp_p')}: {val('rp_exp_s')} s, {val('rp_save')}% less",
-            (p0, 1 - R.time_saved_fraction), xytext=(0.56, 0.72),
+ax.annotate(f"p = {val('rp_p')}: {val('rp_exp_s')} s,\n{val('rp_save')}% less",
+            (p0, 1 - R.time_saved_fraction), xytext=(0.56, 0.66),
             fontsize=12, color=C["memory"], fontweight="bold")
-ax.annotate(f"break-even: p* = {val('rp_pstar_s')}% (s), "
-            f"{val('rp_pstar_usd')}% ($)", (0.06, 1.0), xytext=(0.12, 0.25),
+ax.annotate(f"break-even p*:\n{val('rp_pstar_s')}% (s), "
+            f"{val('rp_pstar_usd')}% ($)", (0.06, 1.0), xytext=(0.10, 0.12),
             fontsize=12, color=C["text"],
             arrowprops=dict(arrowstyle="->", color=C["neutral"]))
 ax.text(0.12, 0.66, "seconds", color=C["memory"], fontsize=12, fontweight="bold")
@@ -553,7 +553,7 @@ sp.save(fig, out / "jitter_bars.svg")
 
 
 # ---- metastable incidents (OSDI 2022)
-fig, ax = plt.subplots(figsize=(5.0, 3.2))
+fig, ax = plt.subplots(figsize=(6.2, 2.75))
 rows = calcs.OUTAGES.with_duration
 for i, (n, v) in enumerate(rows):
     y = len(rows) - 1 - i
@@ -567,7 +567,7 @@ ax.set_xlim(0.1, 600)
 ax.minorticks_off()
 ax.set_xticks([0.1, 1, 10, 100])
 ax.set_xticklabels(["0.1", "1", "10", "100"], fontsize=13)
-ax.set_xlabel("Outage duration (hours, log scale)", fontsize=13)
+ax.set_xlabel("Duration of each retry-sustained outage (hours, log scale)", fontsize=13)
 ax.grid(axis="x", color=C["grid"], lw=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "metastable_bars.svg")
@@ -665,5 +665,148 @@ for i in range(10):
         grid += (f'<rect x="{12 + i * 24}" y="{10 + jj * 21}" width="18" height="16" rx="2" '
                  f'fill="{"#dcfce7" if ok else "#fee2e2"}" stroke="{G if ok else R}" stroke-width="2"/>')
 thumb("thumb_next.svg", grid)
+
+# ============================================ visual-review additions (2026-10-21)
+P = PALETTE  # the pivot plot above rebinds P
+def knight_servers():
+    """Knight, 1 Aug 2012: the rollback moved all servers onto Power Peg."""
+    s = Svg(620, 290)
+    for gx, label, after in ((10, "Before rollback", False),
+                             (350, "After rollback", True)):
+        s.text(gx, 30, label, 24, "#0f172a", bold=True, anchor="start")
+        for i in range(int(num("kn_servers"))):
+            x = gx + (i % 4) * 66
+            y = 48 + (i // 4) * 62
+            peg = after or i == int(num("kn_servers")) - 1
+            s.box(x, y, 58, 52, "Peg" if peg else "RLP", None,
+                  "fault" if peg else "think", tsize=21)
+    s.arrow([(280, 104), (340, 104)], P["fault"][1], width=4)
+    s.text(10, 210, "RLP: the new code", 22, P["think"][2], anchor="start",
+           bold=True)
+    s.text(350, 210, "Peg: the retired path", 22, P["fault"][2],
+           anchor="start", bold=True)
+    s.text(310, 270, f"Uninstalling RLP from {val('kn_correct')} servers "
+           f"put all {val('kn_servers')} on Peg", 23, P["fault"][2], bold=True)
+    s.save("knight_servers.svg")
+
+
+knight_servers()
+
+
+def timeout_seq():
+    """Client-token sequence: request acts, reply is lost, lookup settles."""
+    s = Svg(560, 430)
+    for x, name in ((110, "Agent"), (450, "Cloud API")):
+        s.box(x - 90, 10, 180, 50, name, None,
+              "store" if name == "Agent" else "tool", tsize=23)
+        s.raw(f'<line x1="{x}" y1="60" x2="{x}" y2="420" stroke="#94a3b8" '
+              f'stroke-width="2" stroke-dasharray="6,5"/>')
+    s.arrow([(110, 100), (446, 100)], P["store"][1])
+    s.text(280, 90, "create, token t1", 21, "#0f172a")
+    s.box(370, 116, 160, 44, "instance i-1", None, "ok", tsize=20)
+    s.arrow([(450, 196), (114, 196)], P["fault"][1], dash=True)
+    s.text(280, 172, "reply lost", 21, P["fault"][2], bold=True)
+    s.raw('<path d="M 268 184 L 292 208 M 292 184 L 268 208" '
+          'stroke="#dc2626" stroke-width="4"/>')
+    s.box(20, 216, 180, 50, "unknown", "timeout", "fault", tsize=21,
+          ssize=18, dash=True)
+    s.arrow([(110, 310), (446, 310)], P["store"][1])
+    s.text(280, 300, "retry, same token t1", 21, "#0f172a")
+    s.arrow([(450, 360), (114, 360)], P["ok"][1])
+    s.text(280, 350, "returns i-1, no new instance", 21, P["ok"][2])
+    s.box(20, 374, 180, 46, "established", None, "ok", tsize=21)
+    s.save("timeout_seq.svg")
+
+
+timeout_seq()
+
+
+def comp_states():
+    """Before, after provision, after release: predicates in P vs records."""
+    s = Svg(900, 236)
+    cols = [(300, "Before"), (500, "After provision"), (705, "After release")]
+    for x, h in cols:
+        s.text(x + 93, 26, h, 23, "#0f172a", bold=True)
+    rows = [("env_r18_01 allocated", "in P",
+             [("no", "gray"), ("yes", "tool"), ("no", "ok")]),
+            ("A test depends on it", "in P",
+             [("no", "gray"), ("yes", "tool"), ("no", "ok")]),
+            ("Billing, audit records", "not in P",
+             [("none", "gray"), ("written", "tool"), ("remain", "fault")])]
+    for r, (name, inp, cells) in enumerate(rows):
+        y = 42 + r * 64
+        s.text(6, y + 26, name, 23, "#0f172a", anchor="start", bold=True)
+        s.text(6, y + 50, inp, 19, "#64748b", anchor="start")
+        for (x, _), (t, role) in zip(cols, cells):
+            s.box(x, y, 186, 54, t, None, role, tsize=24,
+                  bold=(role != "gray"), dash=(role == "gray"))
+    s.save("comp_states.svg")
+
+
+comp_states()
+
+
+def contracts():
+    """Three recovery contracts as three small pictures."""
+    s = Svg(900, 330)
+    heads = [("Restore selected state", "ok"), ("Compensate a known effect", "tool"),
+             ("Manage a commitment", "fault")]
+    for i, (h, role) in enumerate(heads):
+        x = 10 + i * 300
+        s.rect(x, 8, 280, 314, "#ffffff", P[role][1], rx=8, sw=2.4)
+        s.rect(x, 8, 280, 46, P[role][0], P[role][1], rx=8, sw=2.4)
+        s.text(x + 140, 39, h, 20, P[role][2], bold=True)
+    # restore: snapshot -> files; remote env untouched
+    s.box(30, 72, 110, 50, "snapshot", None, "store", tsize=19)
+    s.box(170, 72, 100, 50, "files", None, "ok", tsize=19)
+    s.arrow([(140, 97), (168, 97)], P["ok"][1])
+    s.box(70, 142, 160, 46, "remote env", None, "gray", tsize=19, dash=True,
+          bold=False)
+    s.text(150, 216, "untouched", 19, "#64748b", italic=True)
+    # compensate: env released, records remain
+    s.box(330, 72, 240, 50, "env released", None, "ok", tsize=19)
+    s.box(330, 142, 240, 46, "logs, charges remain", None, "fault", tsize=19,
+          bold=False)
+    s.text(450, 216, "release itself can fail", 19, "#64748b", italic=True)
+    # commitment: one push fans out to many hosts
+    s.box(625, 72, 110, 50, "config", None, "fault", tsize=19)
+    for j in range(6):
+        hx, hy = 790 + (j % 2) * 46, 64 + (j // 2) * 40
+        s.rect(hx, hy, 36, 30, P["fault"][0], P["fault"][1], rx=3)
+    s.arrow([(735, 97), (782, 97)], P["fault"][1], width=2.4)
+    s.text(750, 216, "the effect itself remains", 19, "#64748b", italic=True)
+    for i, ex in enumerate(["snapshot ws_r18", "release env_r18_01",
+                            "fleet config rollout"]):
+        s.text(150 + i * 300, 262, "example:", 18, "#64748b")
+        s.text(150 + i * 300, 292, ex, 19, "#0f172a", mono=True)
+    s.save("contracts.svg")
+
+
+contracts()
+
+
+def stuck_pairs():
+    """OpenHands scenario 4: steps 1, 3, 5 match and 2, 4, 6 match."""
+    s = Svg(900, 250)
+    for i in range(6):
+        x = 12 + i * 148
+        a = "A" if i % 2 == 0 else "B"
+        role = "think" if a == "A" else "plain"
+        s.text(x + 64, 26, f"step {i + 1}", 22, "#475569")
+        s.box(x, 38, 128, 50, f"patch {a}", None, role, tsize=23)
+        s.box(x, 96, 128, 50, "test fails", None, "fault", tsize=22,
+              bold=False)
+    for k, (col, y) in enumerate(((P["think"][1], 170), ("#64748b", 200))):
+        xs = [12 + 64 + (k + 2 * j) * 148 for j in range(3)]
+        s.raw(f'<path d="M {xs[0]} 150 L {xs[0]} {y} L {xs[2]} {y} L {xs[2]} 150 '
+              f'M {xs[1]} 150 L {xs[1]} {y}" fill="none" stroke="{col}" '
+              f'stroke-width="3"/>')
+    s.text(450, 240, "steps 1 = 3 = 5 and 2 = 4 = 6: period 2, stop the run",
+           24, P["fault"][2], bold=True)
+    s.save("stuck_pairs.svg")
+
+
+stuck_pairs()
+
 
 print("figures written")

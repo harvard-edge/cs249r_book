@@ -342,30 +342,30 @@ def tempe_track():
             (-2.6, -1.5, "static, then\nnext lane", "#E5E7EB", INK),
             (-1.5, -1.2, "", "#FDE68A", INK), (-1.2, 0.0, "in the\nSUV's lane", "#FECACA", RED)]
     for step in (1, 2):
-        fig, ax = plt.subplots(figsize=(5.75, 2.1))
+        fig, ax = plt.subplots(figsize=(5.75, 2.7))
         fig.subplots_adjust(left=0.13, right=0.985, top=0.89, bottom=0.23)
         for i, (a, b, lab, col) in enumerate(cls):
             if col is None:
-                ax.barh(1, b - a, left=a, height=0.5, color="white", edgecolor=PETROL, hatch="//", lw=1.0)
+                ax.barh(1, b - a, left=a, height=0.62, color="white", edgecolor=PETROL, hatch="//", lw=1.0)
             else:
-                ax.barh(1, b - a, left=a, height=0.5, color=col, edgecolor="white")
+                ax.barh(1, b - a, left=a, height=0.62, color=col, edgecolor="white")
             if i in above:
-                ax.text(above[i], 1.36, lab, ha="center", va="bottom", fontsize=8.5, color=INK)
+                ax.text(above[i], 1.36, lab, ha="center", va="bottom", fontsize=9.5, color=INK)
             else:
-                ax.text((a + b) / 2, 1, lab, ha="center", va="center", fontsize=8.5, linespacing=0.95,
+                ax.text((a + b) / 2, 1, lab, ha="center", va="center", fontsize=9.5, linespacing=0.95,
                         color="white" if col in (PETROL, AMBER) else INK, fontweight="bold",
                         bbox=dict(fc="white", ec="none", pad=0.6) if col is None else None)
         for d in changes:
             ax.plot([d, d], [0.68, 1.32], color=RED, lw=1.8, solid_capstyle="butt")
         if step >= 2:
             for a, b, lab, col, tc in path:
-                ax.barh(0, b - a, left=a, height=0.5, color=col, edgecolor="white")
+                ax.barh(0, b - a, left=a, height=0.62, color=col, edgecolor="white")
                 if lab:
-                    ax.text((a + b) / 2, 0, lab, ha="center", va="center", fontsize=8.5, color=tc,
+                    ax.text((a + b) / 2, 0, lab, ha="center", va="center", fontsize=9.5, color=tc,
                             fontweight="bold", linespacing=0.95)
             ax.annotate("", xy=(-1.2, -0.42), xytext=(-0.2, -0.42),
                         arrowprops=dict(arrowstyle="<->", color=RED, lw=1.3), annotation_clip=False)
-            ax.text(-1.25, -0.42, "suppression, 1 s", ha="right", va="center", fontsize=8.5, color=RED,
+            ax.text(-1.25, -0.42, "suppression, 1 s", ha="right", va="center", fontsize=9.5, color=RED,
                     fontweight="bold")
         ax.set_yticks([0, 1], ["predicted\npath", "class"] if step >= 2 else ["", "class"])
         ax.tick_params(axis="y", length=0)

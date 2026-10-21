@@ -701,6 +701,24 @@ def paired(name, show_217=True, size=(5.4, 2.4)):
 
 paired("paired.svg")
 
+paired("paired_wide.svg", size=(6.0, 1.6))
+
+
+# ============================================ visual-review additions (2026-10-21)
+def prompt_ref():
+    """A span carries a reference; the payload sits in a restricted store."""
+    s = Svg(900, 230)
+    s.box(10, 10, 360, 210, "Span: model call", ("trace and span ids", "model version, latency",
+                                                   "content_ref = hash"), "think", tsize=30, ssize=26)
+    s.arrow([(370, 168), (518, 168)], VIO, width=3.5)
+    s.text(444, 154, "reference", 25, P["store"][2], bold=True)
+    s.box(520, 10, 370, 210, "Restricted store", ("raw prompt and output", "access-controlled",
+                                                  "expires on schedule"), "store", tsize=30, ssize=26)
+    s.save("prompt_ref.svg")
+
+
+prompt_ref()
+
 # ============================================ text-free thumbnails 260x100
 def thumb(name, body):
     (out / name).write_text(
