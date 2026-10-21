@@ -835,7 +835,7 @@ def record_chain(accent, lit=None, thumb=False, upto=None):
     hx, hy = mid_right(4)
     fx = (hx + left(8)) / 2
     path((4, 8), f"M {hx} {hy} H {left(8) - 2}")                        # handoff -> observation
-    path((4, 5), f"M {fx} {hy} V {yrow[0] + bh / 2} H {left(5) - 2}")   # handoff -> provenance
+    path((4, 5), f"M {hx} {hy} H {fx} V {yrow[0] + bh / 2} H {left(5) - 2}")   # handoff -> provenance
     ex, ey = mid_right(7)
     path((7, 12), f"M {ex} {ey} H {mid(5)} V {yrow[1] - 2}")            # evaluation -> enforcement
     path((13, 14), f"M {mid(6)} {yrow[1] + bh} V {yr_py} H {mid(1)} V {yrow[2] - 2}")  # placement -> authority
