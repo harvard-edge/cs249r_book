@@ -810,7 +810,7 @@ memv = [num("blur_fp32_mb"), num("blur_pruned_mb"), num("blur_int8_mb")]
 timev = [num("blur_cpu_ms"), num("blur_pruned_ms"), num("blur_int8_ms")]
 # Drawn for a half-slide slot: stages are rows, shared by both panels, so
 # every label stays at slide-legible size.
-for k in (2, 3):
+for k in (2,):  # the deck shows only step 2 of the Part 1 waterfall
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.4, 1.55), sharey=True,
                                  gridspec_kw={"wspace": 0.12})
     for ax, vals, ck, unit, ttl in ((a1, memv, "memory", "MB", "Weight memory (MB)"),

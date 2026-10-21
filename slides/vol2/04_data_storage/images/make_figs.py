@@ -388,25 +388,6 @@ s.text(755, 236, f"= {val('pfs_tbs')} TB/s of data", 21, V["st_text"], "bold")
 s.save(out / "pfs.svg")
 
 # ---------------------------------------------------------------------------
-# 12. Tail at scale: probability that at least one of n servers is slow
-# ---------------------------------------------------------------------------
-nn = np.arange(1, 1001)
-fig, ax = plt.subplots(figsize=(4.8, 1.5))
-ax.plot(nn, (1 - K.TAIL.availability ** nn) * 100, color=C["danger"], lw=3)
-ax.plot([K.TAIL.n_components], [(1 - K.TAIL.all_up) * 100], "o", ms=10, color=C["danger"], mec="white", mew=1.5)
-ax.annotate(f"{val('tail_servers')} servers: {val('tail_some_slow_pct')}% of steps\nwait on a slow one", (K.TAIL.n_components, (1 - K.TAIL.all_up) * 100), xytext=(140, 25),
-            fontsize=12, fontweight="bold", color=C["danger"],
-            arrowprops=dict(arrowstyle="-", color=C["danger"], lw=1.2))
-ax.set_xscale("log")
-ax.set_xlim(1, 1000)
-ax.set_ylim(0, 105)
-ax.set_xlabel(f"Servers one step reads from (each slow {val('tail_slow_pct')}% of the time)")
-ax.set_ylabel("% of steps")
-ax.grid(color=C["grid"], lw=0.6)
-ax.minorticks_off()
-sp.save(fig, out / "tail.svg")
-
-# ---------------------------------------------------------------------------
 # 13. Checkpoint bytes: 14 B per parameter
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(5.8, 1.7))
