@@ -59,6 +59,8 @@ plt.rcParams.update({"font.size": 11, "axes.labelsize": 11,
                      "xtick.labelsize": 10, "ytick.labelsize": 10})
 OUT = Path(__file__).parent
 DATA = OUT / "data"
+# Input, not an output: the synced KITTI color frame the figures read.
+KITTI_CAM = DATA / "kitti/sync/image_02_0000000000.png"
 
 
 def cm(w, h):
@@ -157,7 +159,7 @@ def project(yaw_err_deg=0.0):
     uv = P @ np.vstack([cam, np.ones(cam.shape[1])])
     u, v = uv[0] / uv[2], uv[1] / uv[2]
     depth = cam[2]
-    img = np.asarray(Image.open(DATA / "kitti" / "sync" / "image_02_0000000000.png"))
+    img = np.asarray(Image.open(KITTI_CAM))
     h, w = img.shape[:2]
     m = (u >= 0) & (u < w) & (v >= 0) & (v < h)
     return img, u[m], v[m], depth[m]
@@ -736,8 +738,8 @@ def lostmis(step=2):
 # KITTI: a saturation monitor on a real frame
 # =============================================================================
 def kitti_sat():
-    img = np.asarray(Image.open(DATA / "kitti" / "sync" / "image_02_0000000000.png").convert("RGB"))
-    gray = np.asarray(Image.open(DATA / "kitti" / "sync" / "image_02_0000000000.png").convert("L"))
+    img = np.asarray(Image.open(KITTI_CAM).convert("RGB"))
+    gray = np.asarray(Image.open(KITTI_CAM).convert("L"))
     full = num("pix_max")
     sat = gray >= full
     over = img.copy().astype(float) / 255
