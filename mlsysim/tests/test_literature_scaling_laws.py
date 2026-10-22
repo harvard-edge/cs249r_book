@@ -94,3 +94,34 @@ def test_epoch_compute_history_joins_without_overlap():
     assert all(e["date"] >= "2012-01-01" for e in post)
     assert all(e["training_compute_flop"] and e["training_compute_flop"] > 0 for e in pre)
     assert not {e["model"] for e in pre} & {e["model"] for e in post}
+
+
+def test_robot_trajectory_series_agrees_with_scalar_registries():
+    traj = {r["dataset"]: r for r in Literature.RobotTrajectoryDatasets.entries}
+    rl = Literature.RobotLearning
+    rds = Literature.RobotDataSystems
+    oxe_total = sum(r["episodes"] for r in Literature.OpenXEmbodimentComposition.entries if r["episodes"])
+
+    assert int(traj["Levine Grasping Farm"]["episodes"]) == int(rl.GraspingFarmAttempts)
+    assert int(traj["QT-Opt"]["episodes"]) == int(rl.QtOptGraspAttempts)
+    assert int(traj["OpenVLA pretraining"]["episodes"]) == int(rl.OpenVlaPretrainingEpisodes)
+    assert int(traj["DROID"]["episodes"]) == int(rds.DroidTrajectories)
+    assert int(traj["AgiBot World"]["episodes"]) == int(rds.AgibotTrajectories)
+    assert int(traj["Open X-Embodiment"]["episodes"]) == int(oxe_total)
+    assert all("arXiv:" in str(r["source"]) for r in Literature.RobotTrajectoryDatasets.entries)
+
+
+def test_models_scale_by_domain_agrees_with_vla_and_token_series():
+    rob = Literature.ModelsScaleByDomain.where(domain_group="Robotics")
+    assert all("Cosmos" not in str(r["model"]) for r in rob)
+
+    by_model = {r["model"]: r for r in rob}
+    vla = Literature.VlaSystems
+    assert by_model["π0 (pi-zero)"]["parameters"] == float(vla.Pi0TotalParams)
+    assert by_model["Helix"]["parameters"] == float(vla.HelixSlowParams) + float(vla.HelixFastParams)
+
+    toks = {r["model"]: r["tokens"] for r in Literature.Series.PretrainingTokens.entries}
+    notable_ds = {r["model"]: r["training_dataset_size"] for r in Literature.Series.NotableModelDatasets.entries}
+    assert toks["DeepSeek-V3"] == notable_ds["DeepSeek-V3"]
+    assert toks["Qwen3"] == notable_ds["Qwen3-235B-A22B"]
+

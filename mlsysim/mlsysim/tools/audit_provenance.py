@@ -21,24 +21,7 @@ from mlsysim.hardware.tech import Interconnect, Memory, Op, Storage as TechStora
 from mlsysim.infrastructure.registry import Datacenters, FacilityCooling, Grids, Racks
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
-from mlsysim.literature.registry import (
-    BatchSize,
-    Benchmarks,
-    Chinchilla,
-    Communication,
-    ComputeTrend,
-    AlgorithmicEfficiency,
-    Crypto,
-    DatacenterElectricity,
-    EdgeInferenceBenchmarks,
-    Fairness,
-    FleetOperations,
-    KaplanScalingLaws,
-    ResponsibleAIOverhead,
-    Surveys,
-    Training,
-    TrainingRuns,
-)
+from mlsysim.literature.registry import Literature
 from mlsysim.models.registry import (
     EmbodiedModels,
     GenerativeVisionModels,
@@ -296,31 +279,22 @@ def audit_infra_capacity() -> list[str]:
 
 def audit_literature_sourced() -> list[str]:
     issues: list[str] = []
-    for prefix, reg in (
-        ("Literature.Training", Training),
-        ("Literature.Benchmarks", Benchmarks),
-        ("Literature.Chinchilla", Chinchilla),
-        ("Literature.Communication", Communication),
-        ("Literature.BatchSize", BatchSize),
-        ("Literature.Fairness", Fairness),
-        ("Literature.Surveys", Surveys),
-        ("Literature.Crypto", Crypto),
-        ("Literature.ResponsibleAIOverhead", ResponsibleAIOverhead),
-        ("Literature.TrainingRuns", TrainingRuns),
-        ("Literature.FleetOperations", FleetOperations),
-        ("Literature.DatacenterElectricity", DatacenterElectricity),
-    ):
-        for item in _registry_nodes(reg):
-            if isinstance(item, Sourced):
-                issues.extend(_validate_provenance_record(f"{prefix}", item.provenance))
-    for prefix, series_cls in (
-        ("Literature.ComputeTrend", ComputeTrend),
-        ("Literature.AlgorithmicEfficiency", AlgorithmicEfficiency),
-        ("Literature.EdgeInferenceBenchmarks", EdgeInferenceBenchmarks),
-        ("Literature.KaplanScalingLaws", KaplanScalingLaws),
-    ):
-        prov = getattr(series_cls, "provenance", None)
-        issues.extend(_validate_provenance_record(prefix, prov))
+    for attr in sorted(dir(Literature)):
+        if attr.startswith("_") or attr in ("list", "get", "names", "Series"):
+            continue
+        obj = getattr(Literature, attr)
+        if hasattr(obj, "provenance"):
+            issues.extend(_validate_provenance_record(f"Literature.{attr}", obj.provenance))
+        elif hasattr(obj, "list"):
+            for item in _registry_nodes(obj):
+                if isinstance(item, Sourced):
+                    issues.extend(_validate_provenance_record(f"Literature.{attr}", item.provenance))
+    for attr in sorted(dir(Literature.Series)):
+        if attr.startswith("_"):
+            continue
+        obj = getattr(Literature.Series, attr)
+        if hasattr(obj, "provenance"):
+            issues.extend(_validate_provenance_record(f"Literature.Series.{attr}", obj.provenance))
     return issues
 
 

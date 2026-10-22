@@ -404,11 +404,13 @@ ModelsScaleByDomain = _Series(
         kind=ProvenanceKind.LITERATURE,
         ref="Epoch AI, Data on AI Models (all_ai_models.csv): parameters and training dataset size by domain (Robotics, Language, Vision)",
         url="https://epoch.ai/data/ai-models",
-        verified="2026-10-12",
+        verified="2026-10-22",
         notes=(
             "Rows dated 2018 or later that report parameters or training dataset size "
             "(total datapoints). A model tagged with several domains appears once per "
-            "matching domain_group. Epoch tags NVIDIA Cosmos world models as Robotics. "
+            "matching domain_group; NVIDIA Cosmos video world models (tagged "
+            "Robotics,Video,Worldsim upstream) are retained under Vision and excluded "
+            "from Robotics. "
             + _EPOCH_LICENSE
         ),
     ),
@@ -421,11 +423,12 @@ RobotTrajectoryDatasets = _Series(
         kind=ProvenanceKind.LITERATURE,
         ref="Published robot demonstration and trajectory datasets, 2016-2025 (see source column)",
         url="https://github.com/google-deepmind/open_x_embodiment",
-        verified="2026-10-12",
+        verified="2026-10-22",
         notes=(
-            "Reported episode or grasp-attempt counts for landmark physical robot collection "
+            "Reported episode or grasp-attempt counts for 11 landmark physical robot collection "
             "campaigns across single-lab arm farms, multi-scene teleoperation, and pooled "
-            "cross-embodiment archives; individual citations in the source column."
+            "cross-embodiment archives; individual citations, section/table locations, and "
+            "arXiv identifiers are recorded in the source column."
         ),
     ),
     "Reported episode counts and collection regimes of landmark physical robot datasets, 2016-2025.",
