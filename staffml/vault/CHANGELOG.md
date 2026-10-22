@@ -42,6 +42,25 @@ and a course topic can be found and compared by the same concept.
   items where the two disagree form that file's review queue.
 - `topic` and `competency_area` are unchanged and still required.
 
+### Site: browse by the ML Systems Taxonomy
+
+- The Vault, Explore, Progress, Dashboard radar, command palette, and the
+  practice sidebar group questions by taxonomy area → subject (20 areas,
+  coded F1 … T2), and a subject's drawer lists the concepts its questions
+  test. New practice links: `?subject=<id>` and `?concept=<mlsys.id>`;
+  `/?subject=<id>` opens a subject. `?topic=`, `?area=`, and `?q=` links
+  keep working.
+- Saved progress is unchanged: a question's subject is looked up from its
+  id, so no migration is needed. Chains, the interviewer, plans, the
+  heat map, and textbook pointers still use `topic` / `competency_area`.
+- Analytics events and issue reports carry `subject` beside `topic`; the
+  analytics worker allowlists it (redeploy the worker to keep the field).
+- Publishing fails if a question lacks a known `taxonomy_subject`.
+- Removed `vault/taxonomy.json` (an unused 825-concept graph superseded by
+  the ML Systems Taxonomy) and `scripts/vault_invariants.py`, which read a
+  `vault/corpus.json` that no longer exists; `vault check` covers its
+  checks. `scripts/scorecard.py` now reports taxonomy coverage.
+
 ## [0.1.2-dev] — 2026-04-25
 
 ### Summary
