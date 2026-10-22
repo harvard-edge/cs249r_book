@@ -415,13 +415,20 @@ def emit_taxonomy_labels(vault_dir: Path, output: Path) -> dict[str, Any]:
     if taxonomy is None:
         return {"output": str(output), "subjects": 0, "concepts": 0, "skipped": "no taxonomy in this checkout"}
     home = taxonomy.home
-    subjects = {rid: {"code": row.get("code", ""), "label": row["label"], "area": area["label"]}
+    subjects = {rid: {"code": row.get("code", ""), "label": row["label"], "short": row.get("display_label") or row["label"],
+                      "area": area["label"], "area_id": area.get("code", ""), "definition": row.get("definition", "")}
                 for rid, (row, area) in taxonomy.subjects.items()}
     concepts = {cid: {"label": c["label"], "subject": home.get(cid, "")} for cid, c in taxonomy.concepts.items()}
+    groups = {g["id"]: g for g in taxonomy.framework.get("groups", [])}
+    # Areas in the framework's own order, keyed by their stable code (F1 … T2).
+    areas = [{"id": a.get("code", ""), "label": a["label"], "short": a.get("display_label") or a["label"],
+              "group": groups.get(a.get("group"), {}).get("label", ""), "group_code": groups.get(a.get("group"), {}).get("code", ""),
+              "question": a.get("question", ""), "subjects": [r["id"] for r in a.get("rows", [])]}
+             for a in taxonomy.framework.get("areas", [])]
     payload = {"version": taxonomy.framework.get("version", ""), "explorer": "https://mlsysbook.ai/explore/",
-               "subjects": subjects, "concepts": concepts}
+               "areas": areas, "subjects": subjects, "concepts": concepts}
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=1, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"output": str(output), "subjects": len(subjects), "concepts": len(concepts)}
 
 
