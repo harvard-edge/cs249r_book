@@ -198,6 +198,10 @@ class Question(BaseModel):
     bloom_level: str = ""
     phase: Optional[str] = None
 
+    # ML Systems Taxonomy tags (identities from shared/concepts/ml-systems-*.yml)
+    taxonomy_subject: Optional[str] = None
+    taxonomy_concepts: Optional[list[str]] = None
+
     # Content
     title: str
     scenario: str

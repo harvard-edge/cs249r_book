@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vault_cli.loader import LoadedQuestion
+from vault_cli.ml_systems_taxonomy import load_taxonomy
 from vault_cli.paths import is_lowercase, vault_questions_root
 from vault_cli.yaml_io import load_file
 
@@ -304,12 +305,38 @@ def structural_tier(
     # #15: applicability matrix respected — no questions in excluded (track, topic) cells (B.8).
     failures.extend(_check_applicability(loaded, vault_dir))
 
+    # #20 (2026-10-22): ML Systems Taxonomy tags cite identities that exist.
+    failures.extend(_check_ml_systems_taxonomy(loaded, vault_dir))
+
     # #19 (2026-05-04): published YAMLs follow the AUTHORING.md marker
     # convention on common_mistake / napkin_math, as a corpus-wide invariant.
     # Drafts are exempt — author-in-progress drafts may not yet be marker-
     # compliant, and `vault check --strict` runs against the published set.
     failures.extend(_check_format_markers(loaded))
 
+    return failures
+
+
+def _check_ml_systems_taxonomy(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFailure]:
+    taxonomy = load_taxonomy(vault_dir)
+    if taxonomy is None:
+        return []
+    subjects, concepts, retired = set(taxonomy.subjects), set(taxonomy.concepts), taxonomy.retired
+    failures: list[InvariantFailure] = []
+    for lq in loaded:
+        q = lq.question
+        if q.taxonomy_concepts and not q.taxonomy_subject:
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message="taxonomy_concepts requires a taxonomy_subject"))
+        if q.taxonomy_subject and q.taxonomy_subject not in subjects:
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message=f"taxonomy_subject {q.taxonomy_subject!r} is not a subject in the ML Systems Taxonomy"))
+        for c in q.taxonomy_concepts or []:
+            if c in concepts:
+                continue
+            hint = f"; retired, replaced by {retired[c]!r}" if c in retired else ""
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message=f"taxonomy concept {c!r} is not in the ML Systems Taxonomy{hint}"))
     return failures
 
 

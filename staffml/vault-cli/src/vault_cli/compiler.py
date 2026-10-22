@@ -33,6 +33,7 @@ CREATE TABLE questions (
   competency_area TEXT,
   bloom_level TEXT,
   phase TEXT,
+  taxonomy_subject TEXT,
   status TEXT NOT NULL,
   scenario TEXT NOT NULL,
   question TEXT,
@@ -55,6 +56,7 @@ CREATE INDEX idx_questions_track_level ON questions(track, level);
 CREATE INDEX idx_questions_zone ON questions(zone);
 CREATE INDEX idx_questions_status ON questions(status);
 CREATE INDEX idx_questions_human_review ON questions(human_review_status);
+CREATE INDEX idx_questions_taxonomy_subject ON questions(taxonomy_subject);
 
 CREATE TABLE chains (
   id TEXT PRIMARY KEY,
@@ -79,6 +81,16 @@ CREATE TABLE tags (
   tag TEXT NOT NULL,
   FOREIGN KEY (question_id) REFERENCES questions(id)
 );
+
+-- ML Systems Taxonomy concept tags (2026-10): position 0 is the most central.
+CREATE TABLE question_concepts (
+  question_id TEXT NOT NULL,
+  concept_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (question_id, concept_id),
+  FOREIGN KEY (question_id) REFERENCES questions(id)
+);
+CREATE INDEX idx_question_concepts_concept ON question_concepts(concept_id);
 
 CREATE TABLE taxonomy (
   id TEXT PRIMARY KEY,
@@ -159,11 +171,11 @@ def _compile_questions(
             """
             INSERT INTO questions (
               id, title, topic, track, level, zone, competency_area, bloom_level, phase,
-              status, scenario, question, common_mistake, realistic_solution, napkin_math,
+              taxonomy_subject, status, scenario, question, common_mistake, realistic_solution, napkin_math,
               provenance, created_at, last_modified,
               human_review_status, human_review_by, human_review_date,
               file_path, content_hash, authors_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 q.id,
@@ -175,6 +187,7 @@ def _compile_questions(
                 q.competency_area,
                 q.bloom_level,
                 q.phase,
+                q.taxonomy_subject,
                 q.status,
                 q.scenario,
                 q.question,
@@ -200,6 +213,11 @@ def _compile_questions(
             )
         for tag in q.tags or []:
             cur.execute("INSERT INTO tags(question_id, tag) VALUES (?, ?)", (q.id, tag))
+        for position, concept in enumerate(q.taxonomy_concepts or []):
+            cur.execute(
+                "INSERT INTO question_concepts(question_id, concept_id, position) VALUES (?,?,?)",
+                (q.id, concept, position),
+            )
     conn.commit()
     return leaves
 

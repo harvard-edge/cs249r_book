@@ -136,7 +136,7 @@ BOUNDS = dict(id="bounds", forward="bounds", inverse="is bounded by", kind="cons
     (lambda m: m.update(relations=[BOUNDS]), "needs a controlled relation"),
     (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="reduces")), "needs a controlled relation"),
     (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="bounds", kind="mechanism")), "kind disagrees"),
-    (lambda m: m["relationships"].append({**m["relationships"][0], "id": "rel.capacity.state", "source": "mlsys.capacity", "target": "mlsys.state"}), "duplicate concept pair"),
+    (lambda m: m["relationships"].append({**deepcopy(m["relationships"][0]), "id": "rel.capacity.state", "source": "mlsys.capacity", "target": "mlsys.state"}), "duplicate concept pair"),
 ])
 def test_relation_vocabulary_and_pairs_are_enforced(landscape, mutation, error):
     root, model = landscape
@@ -170,3 +170,14 @@ def test_retired_identities_stay_unused_and_point_to_a_replacement(landscape, re
     else:
         with pytest.raises(ConceptGraphError, match="retired identity"):
             load_field(root, {"nodes": {}, "chapters": {}})
+
+
+def test_taxonomy_yaml_rejects_aliases(tmp_path):
+    from core.field_graph import load_taxonomy_yaml
+
+    path = tmp_path / "ml-systems-framework.yml"
+    path.write_text("a: &shared [x, y]\nb: *shared\n")
+    with pytest.raises(ConceptGraphError, match="aliases"):
+        load_taxonomy_yaml(path)
+    path.write_text("a: [x, y]\nb: [x, y]\n")
+    assert load_taxonomy_yaml(path) == {"a": ["x", "y"], "b": ["x", "y"]}

@@ -10,6 +10,38 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ---
 
+## [Unreleased] — 2026-10-22
+
+### Summary
+
+Every question is tagged with the ML Systems Taxonomy (version 0.2-draft),
+the vocabulary shared with the MLSysBook textbooks, so a question, a chapter,
+and a course topic can be found and compared by the same concept.
+
+### Schema changes (additive, no migration)
+
+- **`taxonomy_subject`** (subject identity) and **`taxonomy_concepts`**
+  (one to three concept identities, most central first), both optional.
+  The model checks their format; the structural tier (`vault check
+  --strict`, check #20) checks that they name a subject or concept in
+  `shared/concepts/`.
+- **`CANON_VERSION` 2 → 3**: both fields join the content-hash whitelist,
+  so retagging changes `release_hash` like any reclassification.
+- **SQLite / D1**: `questions.taxonomy_subject` column and a
+  `question_concepts(question_id, concept_id, position)` table.
+- **Site**: the corpus carries both fields; `vault build` writes
+  `app/src/data/mlsys-taxonomy.json` (labels and codes), and the practice
+  page shows a "Concepts tested" card after an attempt.
+
+### Tagging
+
+- The whole bank was tagged by one model (`gpt-6.1-sol`) under the
+  taxonomy's published tagging rules. Two 300-question samples were tagged
+  independently by a second model (`claude-opus-5-5`); subject agreement is
+  recorded in `staffml/vault/data/taxonomy-tagging-2026-10.yaml`, and the
+  items where the two disagree form that file's review queue.
+- `topic` and `competency_area` are unchanged and still required.
+
 ## [0.1.2-dev] — 2026-04-25
 
 ### Summary

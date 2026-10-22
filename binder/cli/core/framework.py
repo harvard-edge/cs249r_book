@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import yaml
 
 from .concept_graph import ConceptGraphError
+from .field_graph import load_taxonomy_yaml
 from .taxonomy_release import release_artifacts
 
 
@@ -116,7 +117,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
     path = root / "shared/concepts/ml-systems-framework.yml"
     if not path.exists():
         return None
-    model = yaml.safe_load(path.read_text())
+    model = load_taxonomy_yaml(path)
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata")

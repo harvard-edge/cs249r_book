@@ -33,6 +33,8 @@ export interface QuestionRow {
   bloom_level: string | null;
   /** v1.0: ML lifecycle phase (training/inference/both). */
   phase: string | null;
+  /** ML Systems Taxonomy subject identity (2026-10); concepts live in question_concepts. */
+  taxonomy_subject?: string | null;
   status: string;
   scenario: string;
   common_mistake: string | null;

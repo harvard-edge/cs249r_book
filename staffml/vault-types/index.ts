@@ -104,6 +104,10 @@ export interface Question {
   bloom_level?: BloomLevel;
   phase?: Phase;
 
+  // ML Systems Taxonomy tags (identities, not display codes)
+  taxonomy_subject?: string;
+  taxonomy_concepts?: string[];
+
   // Content
   title: string;
   scenario: string;

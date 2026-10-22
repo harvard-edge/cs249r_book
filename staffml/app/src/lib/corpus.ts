@@ -68,6 +68,14 @@ export interface Question {
    */
   book_refs?: BookRef[];
 
+  /**
+   * ML Systems Taxonomy tags (identities, resolved for display through
+   * `@/data/mlsys-taxonomy.json`): the subject the question belongs to and
+   * the one to three concepts it centrally tests, most central first.
+   */
+  taxonomy_subject?: string;
+  taxonomy_concepts?: string[];
+
   // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
   // The summary bundle ships scenario: "" and details with empty strings
   // for common_mistake / realistic_solution / napkin_math. Hydration via
