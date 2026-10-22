@@ -1,5 +1,8 @@
 # Physical AI Systems
 
+The [Physical AI instructor guide](index.qmd) covers teaching format, equipment,
+station qualification, assessment, and adaptation.
+
 The student-facing course overview and syllabus have moved to the
 [Physical AI course website](https://mlsysbook.ai/courses/physical-ai/).
 

@@ -13,6 +13,7 @@ supporting textbooks.
 | `agentic/` | Agentic Machine Learning Systems | Volume III |
 | `physical-ai/` | Physical AI | Volume IV |
 | `tinyml/` | Tiny Machine Learning | Historical Harvard CS249r offerings and resources |
+| `edge-ai/` | Edge AI learning path | Volume I and author-maintained hardware materials |
 
 The planned public URL pattern is `https://mlsysbook.ai/courses/<course>/`.
 A standalone Quarto project renders the course pages locally. The unified site
@@ -31,6 +32,7 @@ courses/
 ├── scaling/
 ├── agentic/
 ├── tinyml/
+├── edge-ai/
 └── physical-ai/
     └── eth-spring-2027/
 ```
@@ -110,3 +112,38 @@ brochure](https://sem.bupt.edu.cn/__local/D/D5/17/3E86F4C3F4F53F21A638CC46336_8A
 Manually resolved icons use Tongji's blue footer logo, Ain Shams' current
 `asu.edu.eg` domain, and institutional icons from Helwan, HUST's SoICT, and
 North South's admissions site. Existing cached icons are retained on refresh.
+
+Draft reading links are resolved at render time by
+`shared/scripts/resolve-draft-links.py`, called by both the course and instructor
+projects: Volumes III and IV and the Volume IV labs
+currently use the working development site because their production routes are
+not yet published. Course navigation stays relative to this Quarto project.
+Remove the draft URL overrides when those production routes become available.
+The Lab Instructions sidebar item opens the course homepage's lab sequence.
+
+## Course families and navigation
+
+The directory groups hosted material by course family. Each card links the
+family overview and its offerings or resources. Physical AI and TinyML have
+separate sidebar IDs in `_quarto.yml`; page-level `sidebar` metadata selects the
+appropriate family. Offering pages can hide the sidebar when they provide their
+own local navigation. New course families should receive their own card and
+sidebar when their student pages are available.
+
+The Edge AI page is a learning path through existing textbook and hardware
+materials, not a dated course offering. Keep its external materials attributed
+to their maintainers. Add an institutional offering only when its syllabus and
+student resources are available.
+
+The Physical AI family links to `instructors/vol4/index.qmd` for reusable teaching
+guidance. Course rendering resolves this link relative to the combined site.
+Build and stage the Instructor Hub alongside `/courses/` for a complete local
+preview, and deploy the updated instructor artifact with the course artifact.
+
+## Instructor entry point
+
+The main site keeps Instructor Hub at `/instructors/`. Its landing page starts
+with course selection and then presents the AI Engineering Blueprint and shared
+teaching guidance. `/courses/intro/` and `/courses/scaling/` provide student-facing
+overviews of the existing curriculum; the instructor syllabi remain canonical.
+Course packages can combine reusable materials with dated institutional examples.
