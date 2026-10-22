@@ -505,7 +505,7 @@ The companion frameworks, simulators, and labs are also open source under permis
     </tr>
     <tr>
       <td align="center"><h3>④</h3></td>
-      <td><b>Teach it.</b> Adopt the curriculum with the <a href="https://mlsysbook.ai/instructors/">AI Engineering Blueprint</a> and <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
+      <td><b>Teach it.</b> Use a course syllabus from the <a href="https://mlsysbook.ai/instructors/">Instructor Hub</a> and the <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
     </tr>
   </tbody>
 </table>
