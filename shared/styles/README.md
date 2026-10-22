@@ -93,7 +93,7 @@ with this layering.
 | Labs             | [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss) | [`labs/assets/styles/dark-mode.scss`](../../labs/assets/styles/dark-mode.scss) |
 | Kits             | [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss) | [`kits/assets/styles/dark-mode.scss`](../../kits/assets/styles/dark-mode.scss) |
 | Slides           | [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../slides/assets/styles/dark-mode.scss) |
-| Instructors      | [`instructors/assets/styles/style.scss`](../../instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../instructors/assets/styles/dark-mode.scss) |
+| Instructors      | [`shared/styles/style-site.scss`](style-site.scss) | [`shared/styles/dark-mode-site.scss`](dark-mode-site.scss) |
 | MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../mlsysim/docs/styles/dark-mode.scss) |
 | TinyTorch (Guide) | [`tinytorch/guide/assets/styles/style.scss`](../../tinytorch/guide/assets/styles/style.scss) | [`tinytorch/guide/assets/styles/dark-mode.scss`](../../tinytorch/guide/assets/styles/dark-mode.scss) |
 

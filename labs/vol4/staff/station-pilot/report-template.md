@@ -44,7 +44,7 @@ For each numbered step above, add: **Result; exact build and software revisions;
 
 ## Weekly lab preparation
 
-For each [lab](../../README.md#3-the-14-week-lab-schedule), record **ready / ready with replay / needs revision**, a link to the example student artifact, active bench minutes, and what Andrea had to supply or fix. Record station booking needs and any exercise that cannot fit the class period.
+For each [lab](../../README.md#lab-instructions), record **ready / ready with replay / needs revision**, a link to the example student artifact, active bench minutes, and what Andrea had to supply or fix. Record station booking needs and any exercise that cannot fit the class period.
 
 ## Trial protocol and result
 
