@@ -169,7 +169,7 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">🎓</td>
       <td><b>Instructor Hub</b></td>
-      <td>The AI Engineering Blueprint: two 16-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td>A syllabus for each course, with weekly readings and slides: introductory, scaling, TinyML, Edge AI, Physical AI (draft), and Agentic AI (in preparation).</td>
       <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="instructors/README.md">Repo guide</a></td>
     </tr>
     <tr>
@@ -196,7 +196,7 @@ The pieces are designed to work together, but you do not need to adopt everythin
 | If you are... | Start here | Then go deeper |
 |---|---|---|
 | **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) and try [Lab 00](https://mlsysbook.ai/labs/vol1/lab_00_introduction/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), use [MLSys·im](https://mlsysbook.ai/mlsysim/), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
-| **An instructor** | Open [The AI Engineering Blueprint](https://mlsysbook.ai/instructors/) | Use the [course map](https://mlsysbook.ai/instructors/course-map.html), [slides](https://mlsysbook.ai/slides/), rubrics, and TA guide |
+| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), and labs |
 | **A contributor** | Pick the component you use most | Improve chapters, labs, tests, examples, hardware notes, simulator models, or assessment content |
 
 The learning loop is: **Read → Explore → Build → Model → Deploy → Practice → Teach**.
@@ -479,7 +479,7 @@ Rather than viewing textbooks and LLMs in opposition, we bring them together. Th
 
 Yes, completely! Every volume is free to read online at [mlsysbook.ai](https://mlsysbook.ai).
 
-The entire textbook is open source under a Creative Commons license ([CC BY-NC-SA 4.0](LICENSE.md)), which means you are welcome to read, share, and adapt it for non-commercial educational use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press.
+The textbook is published by MIT Press under a Creative Commons license ([CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)), which means you are welcome to read and share it for non-commercial educational use with attribution. Translations and other modified versions need permission. If you prefer print, the MIT Press hardcover edition is on its way.
 
 The companion frameworks, simulators, and labs are also open source under permissive licenses (like MIT and Apache 2.0). Everything is right here in this repository—dive in and enjoy!
 
@@ -505,7 +505,7 @@ The companion frameworks, simulators, and labs are also open source under permis
     </tr>
     <tr>
       <td align="center"><h3>④</h3></td>
-      <td><b>Teach it.</b> Adopt the curriculum with the <a href="https://mlsysbook.ai/instructors/">AI Engineering Blueprint</a> and <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
+      <td><b>Teach it.</b> Use a course syllabus from the <a href="https://mlsysbook.ai/instructors/">Instructor Hub</a> and the <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
     </tr>
   </tbody>
 </table>
@@ -653,7 +653,8 @@ This is a multi-component repository, and **each component is released under its
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution; modified versions, including translations, need permission. |
+| Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
 | [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
 | [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
 | [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |

@@ -1,5 +1,8 @@
 # Physical AI Systems
 
+The [Physical AI instructor guide](index.qmd) covers teaching format, equipment,
+station qualification, assessment, and adaptation.
+
 The student-facing course overview and syllabus have moved to the
 [Physical AI course website](https://mlsysbook.ai/courses/physical-ai/).
 
@@ -7,6 +10,5 @@ The student-facing course overview and syllabus have moved to the
 - [Course syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html): readings, schedule, assessment, and policies.
 - [Studio labs](../../labs/vol4/README.md): reusable assignments and bench resources.
 
-The [first-offering teaching plan](first-offering-plan.md) remains an instructor
-planning document. For general curriculum adoption, see the
-[AI Engineering Blueprint](../index.qmd).
+For other courses and shared teaching guidance, see the
+[Instructor Hub](../index.qmd).

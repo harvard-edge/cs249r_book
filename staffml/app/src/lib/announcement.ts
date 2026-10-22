@@ -44,7 +44,7 @@ export const ANNOUNCEMENT: AnnouncementConfig = {
   type: "primary",
   lines: [
     `🎯 <strong>StaffML</strong> — physics-grounded ML systems interview prep; practice with worked-problem rigor. <a href="${staffmlPath("/practice/")}">Start practicing →</a>`,
-    `📘 <strong>The book:</strong> <a href="${BASE}/vol1/">Vol I: Foundations</a> · <a href="${BASE}/vol2/">Vol II: At Scale</a> — open access, free forever.`,
+    `📘 <strong>The books:</strong> <a href="${BASE}/vol1/">Introduction to Machine Learning Systems</a> · <a href="${BASE}/vol2/">Scaling Machine Learning Systems</a> · <a href="${BASE}/vol3/">Agentic Machine Learning Systems</a> (in preparation) · <a href="${BASE}/vol4/">Physical AI</a> (in preparation) — open access.`,
     `🛠️ <strong>Alongside the book:</strong> <a href="${BASE}/tinytorch/">TinyTorch</a> (build) · <a href="${BASE}/kits/">Hardware Kits</a> (deploy) · <a href="${BASE}/mlsysim/">MLSys·im</a> (simulate)`,
     `📬 <strong>Newsletter:</strong> ML Systems insights & updates — <a href="${BASE}/newsletter/">Subscribe →</a>`,
   ],

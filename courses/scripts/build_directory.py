@@ -12,6 +12,15 @@ ROOT = COURSES.parent
 SITE = ROOT / "site"
 
 
+def resolve_course_links(build):
+    """Use the shared resolver for cross-project and unpublished reading links."""
+    spec = importlib.util.spec_from_file_location(
+        "course_links", ROOT / "shared/scripts/resolve-draft-links.py")
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+    resolver.resolve_links(build, "courses")
+
+
 def prepare():
     generated = COURSES / "_generated"
     generated.mkdir(exist_ok=True)
@@ -45,6 +54,7 @@ def publish():
     (build / "adopters.json").write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
     shutil.copytree(SITE / "community/assets/images/adopters",
                     build / "assets/images/adopters", dirs_exist_ok=True)
+    resolve_course_links(build)
     print("Course directory: embedded canonical adopter data and map")
 
 

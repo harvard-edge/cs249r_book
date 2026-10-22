@@ -69,14 +69,14 @@
     document.getElementById('crs-chips').hidden = view === 'schools';
     tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.view === view)));
     document.getElementById('directory-heading').textContent = view === 'schools'
-      ? 'Where people are learning.' : 'Find your course.';
+      ? 'Where people are learning.' : 'Learn and teach with MLSysBook.';
     document.getElementById('directory-description').textContent = view === 'schools'
       ? 'Explore the institutions connected to the MLSysBook learning community, through teaching and engagement with the book and its resources.'
-      : 'Explore ML systems courses, hands-on studios, and teaching archives. Start with a course hosted here, or find an offering at your institution.';
+      : 'Explore readings, experiments, and teaching plans for machine learning systems. Follow a learning path or adapt the materials for a course.';
     document.getElementById('directory-title').textContent = view === 'schools'
-      ? 'Our learning community' : 'Across the community';
+      ? 'Our learning community' : 'Community courses and workshops';
     document.querySelector('#directory-title + span').textContent = view === 'schools'
-      ? 'Institutions represented in teaching & engagement' : 'Courses & workshops using MLSysBook';
+      ? 'Institutions represented in teaching & engagement' : 'Instructor-maintained offerings';
     if (view === 'schools') return drawSchools(needle);
     intro.hidden = true;
     const shown = rows.filter(r => (kind === 'all' || r.kind === kind) &&
