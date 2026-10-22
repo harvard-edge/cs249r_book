@@ -9,7 +9,7 @@ from cli.core.concept_graph import ConceptGraphError, build, refresh
 
 def run(root: Path, args: list[str]) -> bool:
     parser = argparse.ArgumentParser(prog="binder concepts", description=__doc__)
-    parser.add_argument("action", choices=("build", "check", "refresh", "audit"))
+    parser.add_argument("action", choices=("build", "check", "refresh", "audit", "coverage"))
     group = parser.add_mutually_exclusive_group()
     for number in range(1, 5):
         group.add_argument(
@@ -18,12 +18,12 @@ def run(root: Path, args: list[str]) -> bool:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Fail for stale generated assets (build), or unresolved primary declarations (audit)",
+        help="Fail for stale generated assets (build), unresolved primary declarations (audit), or invalid checklist judgments (coverage)",
     )
     try:
         options = parser.parse_args(args)
-        if options.check and options.action not in {"build", "audit"}:
-            parser.error("--check is only supported with build and audit")
+        if options.check and options.action not in {"build", "audit", "coverage"}:
+            parser.error("--check is only supported with build, audit, and coverage")
     except SystemExit as exc:
         return exc.code == 0
     volumes = (options.volume,) if options.volume else ()
@@ -39,6 +39,19 @@ def run(root: Path, args: list[str]) -> bool:
             print(report["gate_meaning"])
             print("Reports: books/_build/concepts/coverage-audit*.json and .md")
             return not options.check or report["gate_passed"]
+        if options.action == "coverage":
+            from cli.core.taxonomy_coverage import write_report
+
+            report = write_report(root)
+            for c in report["checklists"]:
+                s = c["summary"]
+                tag = "held out" if c["held_out"] else "design input"
+                print(f"{c['title']} [{tag}]: {s['covered_pct']}% covered, {s['homed_pct']}% homed "
+                      f"({s['counts']['covered']} covered, {s['counts']['partial']} partial, {s['counts']['missing']} missing of {s['in_scope']} in scope)")
+            for error in report["errors"]:
+                print(f"  invalid: {error}")
+            print("Report: books/_build/concepts/taxonomy-coverage.md")
+            return not (options.check and report["errors"])
         if options.action == "refresh":
             if options.check:
                 parser.error("--check is only supported with build and audit")

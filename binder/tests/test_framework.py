@@ -50,7 +50,7 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     assert row["book_link_count"] == 1
     assert row["book_volumes"] == ["vol1"]
     assert row["contexts"] == []
-    assert framework["summary"] == dict(areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1)
+    assert framework["summary"] == dict(groups=0, areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1)
     assert "coverage" not in row and "competence" not in row
     assert field == before
     assert original["areas"][0]["rows"][0].get("contexts") is None
@@ -69,6 +69,15 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     (lambda m: m["areas"][0]["rows"][0].update(status="reviewed"), "remain draft"),
     (lambda m: m["gaps"][0].update(status="confirmed"), "candidate status"),
     (lambda m: m["areas"][0]["rows"][0].update(id="mlsys.state"), "overlapping row identity"),
+    (lambda m: m["areas"][0].update(group="stack"), "no groups are defined"),
+    (lambda m: m.update(groups=[dict(id="stack", label="Stack", question="What runs it?")]), "requires a known group"),
+    (lambda m: (m.update(groups=[dict(id="stack", label="Stack", question="What runs it?"), dict(id="spare", label="Spare", question="Unused?")]),
+                m["areas"][0].update(group="stack")), "groups without areas: spare"),
+    (lambda m: (m.update(groups=[dict(id="row.state", label="Stack", question="What runs it?")]),
+                m["areas"][0].update(group="row.state")), "overlapping row identity"),
+    (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["chapter five"]), "malformed chapter code"),
+    (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["v1/07"]), "does not resolve"),
+    (lambda m: m["areas"][0]["rows"][0].update(excludes=["Storage ([[row.missing]])"]), "cites unknown row or area row.missing"),
 ])
 def test_bad_edits_fail_before_exports(candidate, mutation, error):
     root, model, field = candidate
@@ -114,7 +123,8 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
     site = root / "site/explore"
-    assert len(artifacts) == 3
+    # Three internal files plus six public downloads.
+    assert len(artifacts) == 9
     data = json.loads(artifacts[site / "framework-data.json"])
     assert data["concepts"] == field["concepts"]
     assert data["relationships"] == field["relationships"]
@@ -220,4 +230,70 @@ def test_display_labels_require_nonempty_strings(candidate, where, value):
     target["display_label"] = value
     write(root, model)
     with pytest.raises(ConceptGraphError, match="requires display_label"):
+        load_framework(root, field)
+
+
+def test_groups_and_chapter_pointers_resolve_without_claiming_depth(candidate):
+    root, model, field = candidate
+    chapter = root / "books/vol2/08_fleet_orchestration"
+    chapter.mkdir(parents=True)
+    (chapter / "08_fleet_orchestration.qmd").write_text("# Fleet Orchestration {#sec-fleet}\n\nBody.\n")
+    model.update(version="0.2-draft", groups=[dict(id="stack", label="Stack", question="What does it run on?")])
+    model["areas"][0].update(group="stack")
+    model["areas"][0]["rows"][0].update(book_chapters=["v2/08"])
+    write(root, model)
+    framework = load_framework(root, field)
+    assert framework["summary"]["groups"] == 1
+    assert framework["areas"][0]["rows"][0]["book_chapters"] == [dict(
+        code="vol2/08", volume="vol2", chapter="vol2/08_fleet_orchestration", title="Fleet Orchestration",
+        url="https://mlsysbook.ai/vol2/08_fleet_orchestration/08_fleet_orchestration.html")]
+    artifacts = {path.name: data.decode() for path, data in framework_artifacts(root, field, framework).items()}
+    assert "## Stack" in artifacts["framework-reference.md"]
+    assert "### Execution area" in artifacts["framework-reference.md"]
+    rows = list(csv.DictReader(io.StringIO(artifacts["framework-table.csv"])))
+    assert rows[0]["group_id"] == "stack" and rows[0]["group_label"] == "Stack"
+
+
+def test_scope_references_render_current_labels(candidate):
+    root, model, field = candidate
+    model["areas"][0]["rows"][0].update(excludes=["Persisting state ([[row.state]]) and the area ([[area.execution]])"])
+    write(root, model)
+    framework = load_framework(root, field)
+    reference = {path.name: data.decode() for path, data in framework_artifacts(root, field, framework).items()}["framework-reference.md"]
+    assert "Persisting state (Retained state) and the area (Execution area)" in reference
+    assert "[[" not in reference
+
+
+def _coded(model):
+    model.update(version="0.2-draft", groups=[dict(id="stack", code="S", label="Stack", question="What does it run on?")])
+    model["areas"][0].update(group="stack", code="S1")
+    model["areas"][0]["rows"][0].update(code="S1.1")
+    return model
+
+
+def test_readable_codes_must_nest_and_reach_every_download(candidate):
+    root, model, field = candidate
+    write(root, _coded(model))
+    framework = load_framework(root, field)
+    artifacts = {path.name: data.decode() for path, data in framework_artifacts(root, field, framework).items()}
+    assert {"mlsys-taxonomy.json", "mlsys-taxonomy-subjects.csv", "mlsys-taxonomy-concepts.csv", "mlsys-taxonomy.ttl",
+            "mlsys-concept-graph.graphml", "mlsys-taxonomy.bib"} <= set(artifacts)
+    outline = json.loads(artifacts["mlsys-taxonomy.json"])
+    assert outline["groups"][0]["areas"][0]["subjects"][0]["code"] == "S1.1"
+    assert {c["home"] for c in outline["concepts"]} == {"S1.1"}
+    assert artifacts["mlsys-taxonomy-subjects.csv"].splitlines()[1].startswith("S1.1,Stack,")
+    assert 'skos:notation "S1.1"' in artifacts["mlsys-taxonomy.ttl"]
+    assert artifacts["mlsys-concept-graph.graphml"].count("<node ") == 2
+
+
+@pytest.mark.parametrize("edit,error", [
+    (lambda m: m["areas"][0]["rows"][0].update(code="S2.1"), "does not extend area code"),
+    (lambda m: m["areas"][0].update(code="L1"), "does not extend group code"),
+    (lambda m: m["areas"][0]["rows"][0].pop("code"), "requires a unique readable code"),
+])
+def test_bad_codes_fail(candidate, edit, error):
+    root, model, field = candidate
+    edit(_coded(model))
+    write(root, model)
+    with pytest.raises(ConceptGraphError, match=error):
         load_framework(root, field)

@@ -18,10 +18,15 @@ from urllib.parse import urlparse
 import yaml
 
 from .concept_graph import ConceptGraphError
+from .taxonomy_release import release_artifacts
 
 
 DIMENSIONS = ("activities", "layers", "concerns", "contexts")
+# Scope notes cite the row or area that owns a topic as [[identity]], so a
+# relabeled row cannot leave a stale pointer behind.
+SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
 REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
+SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft")
 
 
 def _fail(message):
@@ -75,6 +80,33 @@ def _scope_notes(record, source_ids, context):
         _members(record["warrants"], source_ids, f"{context} warrants")
 
 
+def _chapters(root: Path, codes, context):
+    """Resolve `vN/NN` chapter codes to the chapter folder, title, and clean URL.
+
+    A chapter pointer says where a row's subject is taught at chapter grain. It
+    is an editorial reading pointer, not a passage-level alignment or a claim of
+    teaching depth.
+    """
+    if not isinstance(codes, list) or any(not isinstance(code, str) for code in codes) or len(set(codes)) != len(codes):
+        _fail(f"{context} book_chapters must be a list of distinct codes")
+    resolved = []
+    for code in codes:
+        match = re.fullmatch(r"v(?:ol)?([1-4])/(\d{2})", code)
+        if not match:
+            _fail(f"{context} has malformed chapter code {code}")
+        volume = f"vol{match[1]}"
+        folders = sorted((root / "books" / volume).glob(f"{match[2]}_*/"))
+        if len(folders) != 1:
+            _fail(f"{context} chapter code {code} does not resolve to one chapter")
+        folder = folders[0]
+        source = folder / f"{folder.name}.qmd"
+        title_match = re.search(r"^#\s+(.+?)(?:\s+\{.*)?$", source.read_text(), re.M) if source.exists() else None
+        resolved.append({"code": f"{volume}/{match[2]}", "volume": volume, "chapter": f"{volume}/{folder.name}",
+                         "title": title_match[1].strip() if title_match else folder.name,
+                         "url": f"https://mlsysbook.ai/{volume}/{folder.name}/{folder.name}.html"})
+    return resolved
+
+
 def load_framework(root: Path, field: dict) -> dict | None:
     """Validate optional authored rows; resolve only existing passage links.
 
@@ -88,8 +120,8 @@ def load_framework(root: Path, field: dict) -> dict | None:
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata")
-    if model["status"] != "editorial-draft" or model["version"] != "0.1-draft":
-        _fail("only version 0.1-draft with editorial-draft status is supported")
+    if model["status"] != "editorial-draft" or model["version"] not in SUPPORTED_VERSIONS:
+        _fail(f"only versions {', '.join(SUPPORTED_VERSIONS)} with editorial-draft status are supported")
     sources = _records(model.get("sources"), "source")
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"])
@@ -118,10 +150,41 @@ def load_framework(root: Path, field: dict) -> dict | None:
     areas = _records(model.get("areas"), "area")
     row_ids, labels, homes = set(), set(), Counter()
     identities = {model["id"], *concepts}
+    # Groups are an optional top tier (e.g. stack, lifecycle, qualities). When
+    # present, every area names exactly one group; groups carry no concepts.
+    groups = _records(model["groups"], "group") if "groups" in model else []
+    for group in groups:
+        _text(group, ("label", "question"), group["id"])
+        if group["id"] in identities:
+            _fail(f"group identity overlaps another source {group['id']}")
+        identities.add(group["id"])
+    group_ids = {group["id"] for group in groups}
+    # Readable codes (L4.3) are optional but, once used, must be complete,
+    # unique, and nested: an area code extends its group code, a subject code
+    # its area code. Permanent identities stay the machine reference.
+    if any("code" in area for area in areas):
+        codes = set()
+        records = [*groups, *model["areas"], *(row for area in model["areas"] for row in area.get("rows", []))]
+        for record in records:
+            code = record.get("code")
+            if not isinstance(code, str) or not re.fullmatch(r"[A-Z](\d+(\.\d+)?)?", code) or code in codes:
+                _fail(f"{record.get('id')} requires a unique readable code")
+            codes.add(code)
+        for area in model["areas"]:
+            parent = next((g["code"] for g in groups if g["id"] == area.get("group")), None)
+            if parent and not re.fullmatch(re.escape(parent) + r"\d+", area["code"]):
+                _fail(f"area code {area['code']} does not extend group code {parent}")
+            for row in area.get("rows", []):
+                if not re.fullmatch(re.escape(area["code"]) + r"\.\d+", row["code"]):
+                    _fail(f"subject code {row['code']} does not extend area code {area['code']}")
     resolved_areas = []
     for area in areas:
         _text(area, ("label", "question", "scope"), area["id"])
         _scope_notes(area, source_ids, area["id"])
+        if groups and area.get("group") not in group_ids:
+            _fail(f"area {area['id']} requires a known group")
+        if not groups and "group" in area:
+            _fail(f"area {area['id']} names a group but no groups are defined")
         if area["id"] in identities:
             _fail(f"area identity overlaps another source {area['id']}")
         identities.add(area["id"])
@@ -153,9 +216,11 @@ def load_framework(root: Path, field: dict) -> dict | None:
             for name in DIMENSIONS:
                 _members(row.get(name, [] if name == "contexts" else None), facets[name], f"row {row['id']} {name}", nonempty=name != "contexts")
             homes.update(row["concepts"])
+            chapters = _chapters(root, row.get("book_chapters", []), f"row {row['id']}")
             members = set(row["concepts"]) | set(secondary)
             links = [deepcopy(link) for link in field.get("book_links", []) if link["concept"] in members]
             resolved_rows.append({**row, "contexts": row.get("contexts", []), "secondary_concepts": secondary,
+                                  "book_chapters": chapters,
                                   "concept_count": len(row["concepts"]), "home_concept_count": len(row["concepts"]),
                                   "secondary_concept_count": len(secondary), "book_links": links,
                                   "inventory_status": row.get("inventory_status", "draft-inventory" if row["concepts"] else "unpopulated-candidate"),
@@ -165,6 +230,16 @@ def load_framework(root: Path, field: dict) -> dict | None:
         resolved_areas.append({**area, "rows": resolved_rows})
     if row_ids & {area["id"] for area in areas}:
         _fail("area and row identities overlap")
+    targets = row_ids | {area["id"] for area in areas}
+    for area in resolved_areas:
+        for record in (area, *area["rows"]):
+            for note in (*record.get("includes", []), *record.get("excludes", [])):
+                unknown = sorted(set(SCOPE_REF.findall(note)) - targets)
+                if unknown:
+                    _fail(f"{record['id']} scope note cites unknown row or area {', '.join(unknown)}")
+    empty_groups = sorted(group_ids - {area.get("group") for area in areas})
+    if empty_groups:
+        _fail(f"groups without areas: {', '.join(empty_groups)}")
     duplicate = sorted(ident for ident, count in homes.items() if count != 1)
     if duplicate:
         _fail(f"concepts require exactly one candidate home: {', '.join(duplicate)}")
@@ -190,7 +265,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
             _fail(f"gap identity overlaps another source {gap['id']}")
     links = field.get("book_links", [])
     return {**deepcopy(model), "dimensions": {name: dimensions.get(name, []) for name in DIMENSIONS}, "areas": resolved_areas, "gaps": resolved_gaps,
-            "summary": {"areas": len(areas), "rows": len(row_ids), "concepts": len(concepts),
+            "summary": {"groups": len(groups), "areas": len(areas), "rows": len(row_ids), "concepts": len(concepts),
                         "book_links": len(links), "linked_concepts": len({link["concept"] for link in links}),
                         "gaps": len(gaps)}}
 
@@ -206,10 +281,11 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
     concepts = {c["id"]: c for c in field["concepts"]}
     facets = {name: {r["id"]: r["label"] for r in framework["dimensions"][name]} for name in DIMENSIONS}
     payload = {"schema_version": 1, "framework": framework, "concepts": field["concepts"],
-               "book_links": field.get("book_links", []), "relationships": field.get("relationships", [])}
+               "book_links": field.get("book_links", []), "relationships": field.get("relationships", []),
+               "relations": field.get("relations", []), "retired": field.get("retired", [])}
     stream = io.StringIO(newline="")
     columns = ["framework_id", "framework_title", "framework_scope", "version", "status", "source_file",
-               "area_id", "area_label", "area_display_label", "area_question", "area_scope", "row_id", "row_label", "row_display_label", "definition",
+               "group_id", "group_label", "area_id", "area_label", "area_display_label", "area_question", "area_scope", "row_id", "row_label", "row_display_label", "definition",
                "includes", "excludes", "warrant_source_ids", "warrant_source_titles", "warrant_source_urls", "warrant_role", "inventory_status",
                *DIMENSIONS, "concept_ids", "secondary_concept_ids", "concept_count", "home_concept_count", "secondary_concept_count", "book_link_count", "linked_concept_count", "book_volumes"]
     sources_by_id = {source["id"]: source for source in framework["sources"]}
@@ -221,11 +297,24 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
              '## Dimensions', '']
     for name in DIMENSIONS:
         lines.append(f'- **{name.title()}:** ' + '; '.join(_md(r["label"]) for r in framework["dimensions"][name]) + '.')
+    groups = {group["id"]: group for group in framework.get("groups", [])}
+    titles = {area["id"]: area["label"] for area in framework["areas"]}
+    titles.update({row["id"]: row["label"] for area in framework["areas"] for row in area["rows"]})
+
+    def note(value):
+        return _md(SCOPE_REF.sub(lambda match: titles[match[1]], value))
+    current_group = None
     for area in framework["areas"]:
-        lines.extend(['', f'## {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
+        group = groups.get(area.get("group"))
+        if group and group["id"] != current_group:
+            current_group = group["id"]
+            lines.extend(['', f'## {_md(group["label"])}', '', _md(group["question"])])
+        heading = "###" if groups else "##"
+        lines.extend(['', f'{heading} {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
         for row in area["rows"]:
             writer.writerow({"framework_id": framework["id"], "framework_title": framework["title"], "framework_scope": framework["scope"],
                              "version": framework["version"], "status": framework["status"], "source_file": "shared/concepts/ml-systems-framework.yml",
+                             "group_id": area.get("group", ""), "group_label": group["label"] if group else "",
                              "area_id": area["id"], "area_label": area["label"], "area_display_label": area.get("display_label", ""),
                              "area_question": area["question"], "area_scope": area["scope"],
                              "row_id": row["id"], "row_label": row["label"], "row_display_label": row.get("display_label", ""),
@@ -239,12 +328,12 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
                              "concept_ids": ";".join(row["concepts"]), "secondary_concept_ids": ";".join(row["secondary_concepts"]),
                              **{name: row[name] for name in ("concept_count", "home_concept_count", "secondary_concept_count", "book_link_count", "linked_concept_count")},
                              "book_volumes": ";".join(row["book_volumes"])})
-            lines.extend(['', f'### {_md(row["label"])}', '', f'Identity: `{row["id"]}`', '', _md(row["definition"]), ''])
+            lines.extend(['', f'{heading}# {_md(row["label"])}', '', f'Identity: `{row["id"]}`', '', _md(row["definition"]), ''])
             for name in DIMENSIONS:
                 lines.append(f'- **{name.title()}:** ' + '; '.join(_md(facets[name][ident]) for ident in row[name]) + '.')
             for name in ("includes", "excludes"):
                 if name in row:
-                    lines.extend(['', f'{name.title()}: ' + '; '.join(_md(value) for value in row[name]) + '.'])
+                    lines.extend(['', f'{name.title()}: ' + '; '.join(note(value) for value in row[name]) + '.'])
             if row.get("warrants"):
                 lines.extend(['', 'Design warrants: ' + ', '.join(f'`{ident}`' for ident in row["warrants"]) + '.'])
             lines.extend(['', 'Candidate home concepts:', ''])
@@ -261,10 +350,12 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
                 lines.extend(f'- {_md(link.get("volume", ""))}: {_md(link.get("chapter_title", ""))} — {_md(link.get("label", link["book_concept"]))} (`{link["book_concept"]}`)' for link in row["book_links"])
     lines.extend(['', '## Candidate scope gaps', '', 'Candidates for editorial investigation, not verified omissions.'])
     for gap in framework["gaps"]:
-        lines.extend(['', f'- **{_md(gap["label"])}** (`{gap["id"]}`): {_md(gap["reason"])}'])
+        topic = f'{_md(gap["topic"])}, in ' if gap.get("topic") else ''
+        lines.extend(['', f'- **{topic}{_md(gap["label"])}** (`{gap["id"]}`): {_md(gap["reason"])}'])
     lines.extend(['', '## Design references', '', 'These references inform design and scope; they are not assertion-level validation.', ''])
     lines.extend(f'- [{_md(s["title"])}]({s["url"]}): {_md(s["role"])}' for s in framework["sources"])
     site = root / "site/explore"
-    return {site / "framework-data.json": (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(),
+    return {**release_artifacts(root, framework, field),
+            site / "framework-data.json": (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(),
             site / "framework-table.csv": stream.getvalue().encode(),
             site / "framework-reference.md": ("\n".join(lines) + "\n").encode()}

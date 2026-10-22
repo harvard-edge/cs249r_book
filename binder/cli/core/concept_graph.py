@@ -116,7 +116,9 @@ def load_graph(root: Path, volumes: tuple[str, ...] = ()) -> dict:
             )
             claims = contract.get("claims", {})
             title = title_match[1] if title_match else path.parent.name
-            url = f"https://mlsysbook.ai/{volume}/{volume}/{path.parent.name}/{source.stem}.html"
+            # Clean published form (.github/scripts/flatten-vol-urls.sh): the
+            # volume tree is flattened, so chapters sit directly under /volN/.
+            url = f"https://mlsysbook.ai/{volume}/{path.parent.name}/{source.stem}.html"
             chapters[key] = dict(
                 id=key,
                 volume=volume,

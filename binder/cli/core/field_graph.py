@@ -86,8 +86,32 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if node["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown concept scope {node['id']}")
         _references(node, sources, node["id"])
+    # A controlled relation vocabulary (optional) gives every edge a verb with a
+    # forward and inverse phrase, so readers can ask "what reduces X?". When the
+    # vocabulary exists, every edge must use it and its kind must agree.
+    relations = _index(model["relations"], "relation") if "relations" in model else {}
+    for relation in relations.values():
+        _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"])
+        if relation["kind"] not in {"mechanism", "constraint", "tradeoff", "evaluation", "dependency", "failure", "composition"}:
+            raise ConceptGraphError(f"field model: invalid relation kind {relation['id']}")
+    # Concept identities are permanent: a retired identity is never reused and
+    # names its replacement, so links and tags elsewhere keep resolving.
+    for record in model.get("retired", []):
+        _text(record, ("id", "replaced_by", "version", "reason"), "retired concept")
+        if record["id"] in concepts or record["replaced_by"] not in concepts:
+            raise ConceptGraphError(f"field model: retired identity {record['id']} must be unused and name a current replacement")
     edges = _index(model.get("relationships"), "relationship")
+    pairs = set()
     for edge in edges.values():
+        if relations:
+            if edge.get("relation") not in relations:
+                raise ConceptGraphError(f"field model: relationship needs a controlled relation {edge['id']}")
+            if edge["kind"] != relations[edge["relation"]]["kind"]:
+                raise ConceptGraphError(f"field model: kind disagrees with relation {edge['id']}")
+        pair = frozenset((edge.get("source"), edge.get("target")))
+        if pair in pairs:
+            raise ConceptGraphError(f"field model: duplicate concept pair {edge['id']}")
+        pairs.add(pair)
         _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"])
         if edge["source"] not in concepts or edge["target"] not in concepts or edge["source"] == edge["target"]:
             raise ConceptGraphError(f"field model: missing or identical endpoints {edge['id']}")

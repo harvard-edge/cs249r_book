@@ -127,3 +127,46 @@ def test_portable_view_and_svg_use_same_records_without_script_injection(landsca
     assert site / "field-focus/mlsys.state.svg" in artifacts
     assert "<script>window.bad" not in artifacts[site / "field-preview.html"].decode()
     assert artifacts[site / "field-all.svg"].startswith(b"<?xml")
+
+
+BOUNDS = dict(id="bounds", forward="bounds", inverse="is bounded by", kind="constraint", meaning="A limits B.")
+
+
+@pytest.mark.parametrize("mutation,error", [
+    (lambda m: m.update(relations=[BOUNDS]), "needs a controlled relation"),
+    (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="reduces")), "needs a controlled relation"),
+    (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="bounds", kind="mechanism")), "kind disagrees"),
+    (lambda m: m["relationships"].append({**m["relationships"][0], "id": "rel.capacity.state", "source": "mlsys.capacity", "target": "mlsys.state"}), "duplicate concept pair"),
+])
+def test_relation_vocabulary_and_pairs_are_enforced(landscape, mutation, error):
+    root, model = landscape
+    mutation(model)
+    save(root, model)
+    with pytest.raises(ConceptGraphError, match=error):
+        load_field(root, {"nodes": {}, "chapters": {}})
+
+
+def test_controlled_relation_reaches_the_payload(landscape):
+    root, model = landscape
+    model.update(relations=[BOUNDS])
+    model["relationships"][0].update(relation="bounds")
+    save(root, model)
+    field = load_field(root, {"nodes": {}, "chapters": {}})
+    assert field["relations"] == [BOUNDS]
+    assert field["relationships"][0]["relation"] == "bounds"
+
+
+@pytest.mark.parametrize("retired,ok", [
+    (dict(id="mlsys.old-state", replaced_by="mlsys.state", version="0.3-draft", reason="Merged."), True),
+    (dict(id="mlsys.state", replaced_by="mlsys.capacity", version="0.3-draft", reason="Still in use."), False),
+    (dict(id="mlsys.old-state", replaced_by="mlsys.missing", version="0.3-draft", reason="No replacement."), False),
+])
+def test_retired_identities_stay_unused_and_point_to_a_replacement(landscape, retired, ok):
+    root, model = landscape
+    model["retired"] = [retired]
+    save(root, model)
+    if ok:
+        assert load_field(root, {"nodes": {}, "chapters": {}})["retired"] == [retired]
+    else:
+        with pytest.raises(ConceptGraphError, match="retired identity"):
+            load_field(root, {"nodes": {}, "chapters": {}})
