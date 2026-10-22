@@ -17,8 +17,9 @@ Usage:
                               (network; run by the refresh workflow, not by renders)
   build_adopters.py json OUT  write the published JSON alone (the refresh workflow)
   build_adopters.py           post-render: write _build/adopters.json and embed the
-                              same data in the landing ticker, community/courses.html
-                              (the course directory) and community/index.html (readers)
+                              same data in the landing ticker and community/index.html
+                              (readers). The courses build imports this module for
+                              the directory at /courses/
 
 The pages render from that JSON in the browser: first from the copy embedded
 at build time, then from /adopters.json fetched on load. Refreshing the one
@@ -34,6 +35,9 @@ formula.
 from __future__ import annotations
 
 import json
+import base64
+from html.parser import HTMLParser
+from concurrent.futures import ThreadPoolExecutor
 import math
 import os
 import struct
@@ -52,6 +56,7 @@ CACHE = SITE_DIR / "config" / "adopters-cache.json"
 GEO_CACHE = SITE_DIR / "config" / "adopters-geo.json"
 WORLD = SITE_DIR / "scripts" / "data" / "countries-110m.json"
 LOGO_DIR = SITE_DIR / "community" / "assets" / "images" / "adopters"
+ICON_CACHE = SITE_DIR / "config/adopters-icons.json"
 BUILD = SITE_DIR / "_build"
 
 MIN_LOGO_PX = 40   # smaller site icons read as blur at 44px; use a monogram
@@ -86,6 +91,84 @@ def hidden() -> set[str]:
     """Domains and course links kept off the site (`hidden:` in adopters.yml)."""
     data = yaml.safe_load(DATA.read_text(encoding="utf-8")) or {}
     return {str(h).strip().lower() for h in data.get("hidden") or []}
+
+
+def refresh_icons() -> int:
+    """Cache school favicons in the shared payload, including future additions.
+
+    Embedded icons travel with the scheduled JSON refresh, so new schools do
+    not require a full site deployment or third-party requests from visitors.
+    """
+    data = payload()
+    icons = json.loads(ICON_CACHE.read_text()) if ICON_CACHE.exists() else {}
+    domains = {s["domain"] for s in data["teaching"] + data["readers"]}
+    missing = {s["domain"] for s in data["teaching"] + data["readers"] if not s.get("logo")}
+
+    def encode(raw):
+        mime = ("image/png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else
+                "image/x-icon" if raw.startswith(b"\x00\x00\x01\x00") else
+                "image/jpeg" if raw.startswith(b"\xff\xd8\xff") else
+                "image/gif" if raw.startswith((b"GIF87a", b"GIF89a")) else
+                "image/svg+xml" if b"<svg" in raw[:1024] else None)
+        if not mime:
+            raise ValueError("unrecognized favicon format")
+        return "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")
+
+    class IconLinks(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "link" and "icon" in attrs.get("rel", "").lower() and attrs.get("href"):
+                self.links.append(attrs["href"])
+
+    def fetch(domain):
+        urls = ["https://www.google.com/s2/favicons?sz=128&domain=" + urllib.parse.quote(domain, safe=""),
+                "https://www.google.com/s2/favicons?sz=64&domain=www." + urllib.parse.quote(domain, safe=""),
+                "https://icons.duckduckgo.com/ip3/" + urllib.parse.quote(domain, safe="") + ".ico"]
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    raw = response.read(1_000_000)
+                return domain, encode(raw)
+            except Exception:
+                continue
+        # Resolve the icon from the school's own homepage when index services
+        # do not have it. Keep collection server-side and preserve old successes.
+        for host in [domain, "www." + domain]:
+            try:
+                req = urllib.request.Request("https://" + host, headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=12) as response:
+                    home = response.geturl()
+                    parser = IconLinks()
+                    parser.feed(response.read(2_000_000).decode("utf-8", errors="replace"))
+                for href in parser.links + ["/favicon.ico"]:
+                    icon_url = urllib.parse.urljoin(home, href)
+                    if urllib.parse.urlsplit(icon_url).scheme not in {"http", "https"}:
+                        continue
+                    try:
+                        req = urllib.request.Request(icon_url, headers={"User-Agent": UA})
+                        with urllib.request.urlopen(req, timeout=12) as response:
+                            raw = response.read(1_000_000)
+                        return domain, encode(raw)
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        log(f"! icon unavailable for {domain}")
+        return domain, None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for domain, icon in pool.map(fetch, sorted(missing)):
+            if icon:
+                icons[domain] = icon
+    ICON_CACHE.write_text(json.dumps(icons, sort_keys=True, indent=1) + "\n", encoding="utf-8")
+    unresolved = missing - icons.keys()
+    log(f"School icons: {len(domains - unresolved)} available of {len(domains)} institutions")
+    return 0
 
 
 def teaching(extra: list[dict] | None = None) -> list[dict]:
@@ -253,6 +336,10 @@ def payload() -> dict:
     taught = {s["domain"] for s in t}
     hide = hidden()
     readers = [r for r in cache.get("readers", []) if r["domain"] not in taught and r["domain"].lower() not in hide]
+    icons = json.loads(ICON_CACHE.read_text()) if ICON_CACHE.exists() else {}
+    for school in t:
+        school["logo"] = school["logo"] or icons.get(school["domain"])
+    readers = [{**r, "logo": icons.get(r["domain"])} for r in readers]
     return {
         "generated": cache.get("generated", ""),
         "counts": {
@@ -341,8 +428,6 @@ def publish() -> int:
     embedded = ('<script type="application/json" id="adp-data">'
                 + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + "</script>")
     pages = [(BUILD / "index.html", "<!-- adopters:strip -->", embedded),
-             (BUILD / "community" / "courses.html", "<!-- adopters:courses -->",
-              embedded + "\n" + land_svg()),
              (BUILD / "community" / "index.html", "<!-- adopters:readers -->", embedded)]
     done = sum(inject(p, m, f) for p, m, f in pages)
     c = data["counts"]
@@ -355,6 +440,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["gather"]:
         sys.exit(gather())
+    if args == ["icons"]:
+        sys.exit(refresh_icons())
     if len(args) == 2 and args[0] == "json":
         Path(args[1]).write_text(json.dumps(payload(), ensure_ascii=False) + "\n", encoding="utf-8")
         sys.exit(0)
