@@ -12,7 +12,7 @@ calcs.py (deckvals val/num), which this file imports:
     Scenarios.WarehouseAisleStopAtDriveLimit (The Causal Boundary, Napkin Math 1.1).
   - Tempe: Literature.IncidentReports (NTSB HAR-19/03), through
     Scenarios.TempeActionSuppression and its ADS-cap variant.
-  - Training compute: Epoch AI via Literature.ModelsByDomain, as the
+  - Training compute: Epoch AI via vol4/01_boundary/data/epoch_models_by_domain.csv, as the
     chapter's figure 2.
   - The Tempe classification track (tempe_track) keeps the NTSB table's
     intermediate times as figure data (HAR-19/03, pp. 15-16).
@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 import calcs as K  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
@@ -276,7 +277,7 @@ def tempe_bars():
 # 6. Training compute by domain (Epoch AI via mlsysim), column
 # ---------------------------------------------------------------------------
 def epoch():
-    rows = [r for r in K.Literature.ModelsByDomain.entries
+    rows = [r for r in load_series("vol4/01_boundary/data/epoch_models_by_domain.csv").entries
             if str(r["publication_date"]) >= "2018" and r["training_flop"]]
     date = lambda r: dt.datetime.fromisoformat(str(r["publication_date"])[:10])
     lang = [r for r in rows if r["domain_group"] == "Language"]

@@ -10,7 +10,7 @@ file writes images/numbers.tex.
 
 Running case: Scenarios.Llama31_405BTrainingFootprint (Llama 3.1 model card
 GPU-hours on up to 16,384 H100s, DGX H100 rack ratio, PUE 1.12, nine grids,
-three-year life). Outside tables: Literature.Series (Patterson Table 4,
+three-year life). Outside tables: local CSV series (Patterson Table 4,
 BLOOM Table 5, CSO Ireland Table 1, Energy-Charts EU week 47 of 2023,
 Elsworth et al. Gemini prompt energy and serving factors) and Literature
 scalars (Llama 3.1 card, BLOOM Table 3, TPU v6e lifecycle, LBNL).
@@ -24,10 +24,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Infrastructure, Systems = mlsysim.Hardware, mlsysim.Infrastructure, mlsysim.Systems
 Literature, Scenarios, Models = mlsysim.Literature, mlsysim.Scenarios, mlsysim.Models
-SERIES, RUNS, LIFE = Literature.Series, Literature.TrainingRuns, Literature.AcceleratorLifecycle
+RUNS, LIFE = Literature.TrainingRuns, Literature.AcceleratorLifecycle
 H100, RACK, COOL = Hardware.Cloud.H100, Systems.Racks.DGX_H100_4Node, Infrastructure.FacilityCooling
 
 RUN = Scenarios.Llama31_405BTrainingFootprint
@@ -73,12 +74,12 @@ def row(series, key, value):
 
 def factor(name):
     """A Google serving factor (Elsworth et al. 2025) by parameter name."""
-    return row(SERIES.GoogleServingFactors, "parameter", name)["value"]
+    return row(load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv"), "parameter", name)["value"]
 
 
 def prompt(prefix, column):
     """One component of the median Gemini prompt's energy (Wh)."""
-    return next(r[column] for r in SERIES.GeminiPromptEnergy.entries if r["component"].startswith(prefix))
+    return next(r[column] for r in load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries if r["component"].startswith(prefix))
 
 
 print("== Running case: Llama 3.1 405B")
@@ -177,8 +178,8 @@ v("rb_min_lo", m(ROLL.rollbacks["low"], "minute"), "{:.0f}", "rollback, low, min
 v("rb_min_hi", m(ROLL.rollbacks["high"], "minute"), "{:.0f}", "rollback, high, min")
 v("rb_mwh_lo", m(ROLL.result.energy["low"], "MWh"), "{:.1f}", "repeated energy, low, MWh")
 v("rb_mwh_hi", m(ROLL.result.energy["high"], "MWh"), "{:.0f}", "repeated energy, high, MWh")
-full = sum(r["comprehensive_wh"] for r in SERIES.GeminiPromptEnergy.entries if r["comprehensive_counted"] == 1)
-narrow = sum(r["existing_wh"] for r in SERIES.GeminiPromptEnergy.entries if r["existing_counted"] == 1)
+full = sum(r["comprehensive_wh"] for r in load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries if r["comprehensive_counted"] == 1)
+narrow = sum(r["existing_wh"] for r in load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries if r["existing_counted"] == 1)
 v("prompt_narrow_wh", narrow, "{:.2f}", "active accelerators only, Wh")
 v("prompt_full_wh", full, "{:.2f}", "full serving stack, Wh")
 for key, prefix in (("accel", "Active AI"), ("host", "Active host"), ("idle", "Idle"), ("ovh", "Data center")):
@@ -206,7 +207,7 @@ v("compute_pj", m(d.compute_energy, "pJ"), "{:.0f}", "arithmetic per weight, pJ"
 v("move_pct", 100 * d.movement_share, "{:.0f}", "movement share of modeled energy, %")
 v("ib_pj_bit", m(SYNC.energy_per_bit, "pJ/bit"), "{:.0f}", "fabric energy, pJ/bit")
 v("sync_j", m(SYNC.result.energy_per_step, "J"), "{:.0f}", "fabric energy per worker per step, J")
-TPU3 = [r for r in SERIES.PattersonTrainingFootprints.entries if r["processor"] == "TPU v3"]
+TPU3 = [r for r in load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv").entries if r["processor"] == "TPU v3"]
 meas = [r["measured_w"] for r in TPU3]
 v("tpu3_tdp", TPU3[0]["tdp_w"], "{:.0f}", "TPU v3 TDP, W")
 v("tpu3_meas_lo", min(meas), "{:.0f}", "TPU v3 measured power, low, W")
@@ -223,7 +224,7 @@ v("site_b_g", m(SITES.intensities["B"], "g/kWh"), "{:.0f}", "site B grid, g/kWh"
 v("site_a_t", m(rates["A"], "metric_ton/hour"), "{:.2f}", "site A, t/h")
 v("site_b_t", m(rates["B"], "metric_ton/hour"), "{:.3f}", "site B, t/h")
 v("site_ratio", ratio(rates["A"], rates["B"]), "{:.1f}", "A / B")
-PAT = {r["model"]: r for r in SERIES.PattersonTrainingFootprints.entries}
+PAT = {r["model"]: r for r in load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv").entries}
 v("gshard_t", PAT["GShard-600B"]["net_tco2e"], "{:.1f}", "GShard-600B net t CO2e")
 v("gshard_act_pct", PAT["GShard-600B"]["activated_pct"], "{:.2f}", "GShard weights active per token, %")
 v("t5_t", PAT["T5"]["net_tco2e"], "{:.1f}", "T5 net t CO2e")
@@ -254,7 +255,7 @@ v("pay_us_weeks", m(pr.payback["US average"], "week"), "{:.1f}", "payback, US, w
 v("pay_qc_years", m(pr.payback["Quebec"], "year"), "{:.1f}", "payback, Quebec, years")
 v("life_long_y", m(LIFEX.long_life, "year"), "{:.0f}", "extended life, years")
 v("life_cut_pct", 100 * LIFEX.result.annual_charge_reduction, "{:.0f}", "embodied charged per year cut, %")
-BLOOM = SERIES.BloomProjectEmissions.entries
+BLOOM = load_series("slides/vol2/15_sustainable_ai/images/data/bloom_project_emissions.csv").entries
 final = BLOOM[0]["tco2e"]
 project = float(RUNS.BloomProjectTotalTco2e)
 v("bloom_final_t", final, "{:.2f}", "BLOOM-176B final run, t")
@@ -346,7 +347,7 @@ v("us_2030_hi", float(DC.Us2030HighTwh), "{:.0f}", "2030 high, TWh")
 v("us_growth", DC.Us2024Twh / DC.Us2014Twh, "{:.1f}", "2024 / 2014")
 
 print("== Hook and recall")
-CSO = SERIES.CsoIrelandDatacenterElectricity.entries
+CSO = load_series("slides/vol2/15_sustainable_ai/images/data/cso_ireland_datacenter_electricity.csv").entries
 v("cso_2015_pct", CSO[0]["share_pct"], "{:.0f}", "Irish data centers 2015, % of metered")
 v("cso_2023_pct", CSO[-1]["share_pct"], "{:.0f}", "Irish data centers 2023, % of metered")
 v("cso_2015_gwh", CSO[0]["gwh"], "{:,.0f}", "2015, GWh")

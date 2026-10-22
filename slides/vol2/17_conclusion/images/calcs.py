@@ -23,13 +23,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Q_ = mlsysim.core.units.Q_
 Models, Systems, Literature, Scenarios = mlsysim.Models, mlsysim.Systems, mlsysim.Literature, mlsysim.Scenarios
 RUNS, FLEET = Literature.TrainingRuns, Literature.FleetOperations
-LLAMA3 = Literature.Series.Llama3Interruptions.entries
-MEGA = Literature.Series.MegaScaleStrongScaling.entries
-TAIL = Literature.Series.TailAtScaleLeafLatency
+LLAMA3 = load_series("vol2/07_fault_tolerance/data/llama3_interruptions.csv").entries
+MEGA = load_series("slides/vol2/17_conclusion/images/data/megascale_strong_scaling.csv").entries
+TAIL = load_series("slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv")
 P50, P99 = sorted(set(TAIL.column("percentile")))  # the two percentiles the table rows carry
 GPT3, DEEPSEEK = Models.Language.GPT3, Models.Language.DeepSeek_V3
 NODE = Systems.Nodes.DGX_H100

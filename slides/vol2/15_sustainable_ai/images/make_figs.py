@@ -2,6 +2,7 @@
 """Figures for Volume II, Lecture 15 (Sustainable AI).
 
 Every value comes from MLSysIM through calcs.py: figures import calcs (which
+from mlsysim.core.series_loader import load_series  # noqa: E402
 records every slide value) and read the formatted strings with val() and the
 numbers with num(), or the same MLSysIM objects calcs selects (the running
 case's footprint, the Literature series behind the outside tables). Nothing
@@ -53,7 +54,7 @@ def note(ax, text, x=0.0, y=-0.02, fs=10, ha="left", va="top"):
 
 
 # ================================================================ hook
-# CSO Ireland, Table 1: % of metered electricity used by data centers (Literature.Series).
+# CSO Ireland, Table 1: % of metered electricity used by data centers (local CSV series).
 CSO = [(int(r["year"]), r["share_pct"]) for r in calcs.CSO]
 
 
@@ -289,7 +290,7 @@ prompt_fig()
 # =========================================== Patterson Table 4 scatter
 SHORT = {"Switch Transformer": "Switch"}
 PAT = [(SHORT.get(r["model"], r["model"]), r["params_b"], r["net_tco2e"])
-       for r in calcs.SERIES.PattersonTrainingFootprints.entries]
+       for r in load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv").entries]
 
 
 def patterson_fig(size=(4.4, 2.6), fs=16):

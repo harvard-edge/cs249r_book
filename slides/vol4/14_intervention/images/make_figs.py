@@ -5,8 +5,8 @@ Every value comes from MLSysIM through calcs.py (imported as K); printed
 numbers use the formatted strings calcs.py records (deckvals.val). "SI" is the
 rendered chapter, Supervisory Intervention (Volume IV, Chapter 14). Data:
   - California DMV disengagement filings, Waymo 2015 to 2025
-    (Literature.CaliforniaDisengagements; SI 14.1 figure 1).
-  - Zhang et al. 2019, 520 mean take-over times (Literature.TakeoverTimeMeta).
+    (vol4/14_intervention/data/ca_dmv_disengagements.csv; SI 14.1 figure 1).
+  - Zhang et al. 2019, 520 mean take-over times (slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv).
   - Lufthansa 2904 timeline (Literature.IncidentReports; SI War Story 14.1).
 Diagram colors follow the Volume IV causal-boundary palette
 (rules/volumes/vol4/palette.md); red only for veto, hazard, and limits.

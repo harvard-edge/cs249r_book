@@ -3,7 +3,7 @@
 
 MLSysIM holds the inputs (format layouts, Hardware.Tech energies, Models,
 Platforms, the quantization and compression Scenarios.*, and the cited
-results in Literature.CompressionResults and Literature.Series) and the
+results in Literature.CompressionResults and local CSV series) and the
 calculations (physics.numerics for grids, scales, and block formats); the
 Model Compression chapter reads the same scenarios. This file only selects
 values, converts units, and formats them; it types no numbers. Each value is
@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import (  # noqa: E402
     BYTES_FP16, BYTES_FP32, BYTES_INT4, BYTES_INT8, FLOAT_FORMAT_BITS, FP8_FORMAT_BITS, FP32_BITS, INT4_BITS,
@@ -35,13 +36,13 @@ from mlsysim.physics import (  # noqa: E402
 
 Models, Platforms, Datasets = mlsysim.Models, mlsysim.Platforms, mlsysim.Datasets
 Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
-CR, SERIES = Literature.CompressionResults, Literature.Series
+CR = Literature.CompressionResults
 
-KQ = SERIES.KrishnamoorthiQuantization.entries
-WU = SERIES.WuInt8Calibration.entries
-DET = SERIES.DettmersInt8Perplexity.entries
-GGUF = SERIES.Llama2_7BGgufFiles.entries
-BENCH = SERIES.LlamaBenchAppleSilicon.entries
+KQ = load_series("slides/vol1/10b_model_compression/images/data/krishnamoorthi2018_quantization.csv").entries
+WU = load_series("slides/vol1/10b_model_compression/images/data/wu2020_int8_calibration.csv").entries
+DET = load_series("slides/vol1/10b_model_compression/images/data/dettmers2022_int8_perplexity.csv").entries
+GGUF = load_series("slides/vol1/10b_model_compression/images/data/thebloke_llama2_7b_gguf_files.csv").entries
+BENCH = load_series("slides/vol1/10b_model_compression/images/data/llamacpp_bench_apple_silicon.csv").entries
 
 BLUR = Scenarios.MobileNetV2BlurPipelinePhone
 GPT2_READ = Scenarios.Gpt2XlFp16WeightReadPhone
@@ -76,7 +77,7 @@ def pct(x):
 def kq(model, method, weight_bits, granularity="", scheme=""):
     """Krishnamoorthi 2018 top-1 (percent) for one row: float, or ptq/qat at ``weight_bits``."""
     rows = [r for r in KQ if r["model"] == model and r["method"] == method and r["weight_bits"] == weight_bits
-            and r["granularity"] == granularity and r["scheme"] == scheme]
+            and (r["granularity"] or "") == granularity and (r["scheme"] or "") == scheme]
     assert len(rows) == 1, (model, method, weight_bits, granularity, scheme)
     return pct(rows[0]["top1"])
 
@@ -97,7 +98,7 @@ R50_W4_QAT, MBV2_W4_QAT = kq(R50, "qat", INT4_BITS, "per_channel"), kq(MBV2, "qa
 PX2_FP32, PX2_CPU, PX2_DSP = (lit(CR.KrishnamoorthiPixel2Fp32CpuMs), lit(CR.KrishnamoorthiPixel2Int8CpuMs),
                               lit(CR.KrishnamoorthiPixel2Int8DspMs))
 
-print("== Hook (Literature.Series.KrishnamoorthiQuantization, Table 3; Nagel et al. 2019)")
+print("== Hook (slides/vol1/10b_model_compression/images/data/krishnamoorthi2018_quantization.csv, Table 3; Nagel et al. 2019)")
 classes = Datasets.ImageNet.num_classes
 v("r50_float", R50_FLOAT, "{:.1f}", "ResNet-50 float top-1, %")
 v("r50_tensor", R50_TENSOR, "{:.1f}", "ResNet-50 INT8 per-tensor top-1, %")
@@ -146,7 +147,7 @@ v("int4_levels", calc_int_levels(INT4_BITS), "{:.0f}", "INT4 levels")
 v("int8_smaller", FP32_BITS / INT8_BITS, "{:.0f}", "INT8 smaller than FP32, times")
 v("int4_smaller", FP32_BITS / INT4_BITS, "{:.0f}", "INT4 smaller than FP32, times")
 
-print("== A real 4-bit file (Literature.Series.Llama2_7BGgufFiles; CompressionResults llama.cpp blocks)")
+print("== A real 4-bit file (slides/vol1/10b_model_compression/images/data/thebloke_llama2_7b_gguf_files.csv; CompressionResults llama.cpp blocks)")
 LLAMA_PARAMS = lit(CR.LlamaBenchLlama2_7BParamsB) * 10 ** 9
 QK = lit(CR.LlamaCppQ4_0BlockWeights)
 SCALE_BITS = lit(CR.LlamaCppBlockScaleBits)
@@ -307,7 +308,7 @@ v("clip_full_s", CLIP_FULL.scale, "{:.4f}", "step, full range")
 v("clip_cut_s", CLIP_CUT.scale, "{:.4f}", "step, clipped")
 v("clip_finer", CLIP_FULL.scale / CLIP_CUT.scale, "{:.1f}", "finer, times")
 
-print("== Measured calibration (Literature.Series.WuInt8Calibration)")
+print("== Measured calibration (slides/vol1/10b_model_compression/images/data/wu2020_int8_calibration.csv)")
 WU_COLS = ("fp32", "max", "entropy", "pct_99_99")
 WU_ONE_DECIMAL = {("EfficientNet b0", "max")}  # printed to one decimal in the paper
 for r in WU:
@@ -332,7 +333,7 @@ v("nagel_step", calc_affine_scale(-nagel_wide, nagel_wide, INT8_BITS), "{:.0f}",
 v("nagel_channels", lit(CR.NagelFirstDepthwiseChannels), "{:.0f}", "channels in the figure")
 v("awq_group", lit(CR.LinAwqGroupSize), "{:.0f}", "AWQ group size")
 
-print("== Outliers (Literature.Series.DettmersInt8Perplexity; CompressionResults Dettmers)")
+print("== Outliers (slides/vol1/10b_model_compression/images/data/dettmers2022_int8_perplexity.csv; CompressionResults Dettmers)")
 
 
 def det(params_b):
@@ -401,7 +402,7 @@ v("gptq_fp16_gpus_word", lit(CR.FrantarOpt175BFp16Gpus), "words", "A100s for FP1
 v("gptq_3bit_gpus_word", lit(CR.FrantarOpt175B3BitGpus), "words", "A100s for 3-bit, in prose")
 v("gptq_x", gptq_x, "{:.2f}", "measured speedup, times")
 
-print("== llama-bench (Literature.Series.LlamaBenchAppleSilicon)")
+print("== llama-bench (slides/vol1/10b_model_compression/images/data/llamacpp_bench_apple_silicon.csv)")
 
 
 def bench(chip, quant):

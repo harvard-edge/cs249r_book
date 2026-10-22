@@ -841,7 +841,7 @@ for k in (2,):  # the deck shows only step 2 of the Part 1 waterfall
 # ---------------------------------------------------------------------------
 # 15b. llama-bench on the M2 Ultra, redrawn at slide size (visual review
 # 2026-10-21): generation and prompt throughput per weight format, from
-# Literature.Series.LlamaBenchAppleSilicon through calcs.py.
+# slides/vol1/10b_model_compression/images/data/llamacpp_bench_apple_silicon.csv through calcs.py.
 # ---------------------------------------------------------------------------
 fig, axes = plt.subplots(1, 2, figsize=(5.8, 1.55))
 for ax, key, title, ck in ((axes[0], "tg", "Generate (tg 128), tokens/s", "memory"),

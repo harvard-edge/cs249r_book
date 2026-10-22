@@ -23,12 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import BYTES_FP16, BYTES_FP32, BYTES_INT8  # noqa: E402
 
 Hardware, Models, Systems, Platforms = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems, mlsysim.Platforms
 Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
-SERIES, TR, IR = Literature.Series, Literature.TrainingRuns, Literature.IncidentReports
+TR, IR = Literature.TrainingRuns, Literature.IncidentReports
 DM, TECH = Literature.DeviceMeasurements, Hardware.Tech
 H100 = Hardware.Cloud.H100
 
@@ -144,7 +145,7 @@ v("l70_mem_ms", m(d70.memory_time, "ms"), "{:.1f}", "memory floor, ms")
 v("l70_comp_ms", m(d70.compute_time, "ms"), "{:.2f}", "compute floor, ms")
 v("l70_ratio", d70.bound_ratio, "{:.1f}", "memory floor over compute floor")
 v("l70_ratio_round", d70.bound_ratio, "{:.0f}", "the same, whole (title)")
-MLP = SERIES.MLPerfInferenceV50Llama2_70B
+MLP = load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv")
 conv = row(MLP, benchmark="llama2-70b-99", scenario="Server")
 inter = row(MLP, benchmark="llama2-70b-interactive-99", scenario="Server")
 v("mlp_gpus", conv["accelerators"], "{:.0f}", "H100s in the MLPerf system")
@@ -195,18 +196,18 @@ v("beede_submitted", YIELD.attempted, "{:,.0f}", "photos submitted")
 v("ungradable_pct", pct(YIELD.rejected_share), "{:.0f}", "ungradable share, %")
 
 print("== Dual mandate: energy per prompt (Elsworth et al. 2025, as in Lecture 15b)")
-full_wh = sum(r["comprehensive_wh"] for r in SERIES.GeminiPromptEnergy.entries if r["comprehensive_counted"] == 1)
+full_wh = sum(r["comprehensive_wh"] for r in load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries if r["comprehensive_counted"] == 1)
 v("prompt_wh", full_wh, "{:.2f}", "median Gemini prompt, full boundary, Wh")
-v("prompt_gco2", row(SERIES.GoogleServingFactors, parameter="prompt_emissions_total")["value"], "{:.2f}",
+v("prompt_gco2", row(load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv"), parameter="prompt_emissions_total")["value"], "{:.2f}",
   "the same prompt, g CO2e")
-v("prompt_cut", row(SERIES.GoogleServingFactors, parameter="energy_reduction_12_months")["value"], "{:.0f}",
+v("prompt_cut", row(load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv"), parameter="energy_reduction_12_months")["value"], "{:.0f}",
   "energy cut over twelve months, times")
 
 print("== Tails (Scenarios.ChatEndpointTtftMeanVersusP99; Dean and Barroso 2013 via Lecture 12; Lecture 13)")
 v("ttft_mean", m(TTFT.mean, "ms"), "{:.0f}", "illustrative mean TTFT, ms")
 v("ttft_p99", m(TTFT.tail_high, "ms"), "{:,.0f}", "illustrative p99 TTFT, ms")
 v("ttft_gap", TTFT.gap_high, "{:.0f}", "p99 over mean")
-TAS = SERIES.TailAtScaleLeafLatency
+TAS = load_series("slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv")
 
 
 def median_and_p99(leaves):
@@ -262,12 +263,12 @@ v("dag_sum", m(DAG.work, "ms"), "{:.0f}", "sum of every box, ms")
 
 print("== Llama 3 405B interruptions (Literature.TrainingRuns, Series.Llama3Interruptions)")
 QUOTED = ("Faulty GPU", "GPU HBM3 Memory", "Software Bug", "Network Switch/Cable", "Host Maintenance")
-T5 = SERIES.Llama3Interruptions.entries
+T5 = load_series("vol2/07_fault_tolerance/data/llama3_interruptions.csv").entries
 unexpected, planned = TR.Llama3_405B_UnexpectedInterruptions, TR.Llama3_405B_PlannedInterruptions
 days, gpus = TR.Llama3_405B_SnapshotDays, TR.Llama3_405B_Gpus16K
 assert sum(r["interruption_count"] for r in T5) == unexpected
 for key, name in zip(("faulty_gpu", "hbm3", "sw_bug", "network", "host_maint"), QUOTED):
-    v(f"t5_{key}", row(SERIES.Llama3Interruptions, component=name)["interruption_count"], "{:.0f}", name)
+    v(f"t5_{key}", row(load_series("vol2/07_fault_tolerance/data/llama3_interruptions.csv"), component=name)["interruption_count"], "{:.0f}", name)
 rest = [r for r in T5 if r["component"] not in QUOTED]
 v("t5_rest_rows", len(rest), "{:.0f}", "rows not quoted")
 v("t5_rest_sum", sum(r["interruption_count"] for r in rest), "{:.0f}", "their counts summed")

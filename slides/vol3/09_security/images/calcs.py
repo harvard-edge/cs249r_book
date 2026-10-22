@@ -11,7 +11,7 @@ Scenarios.CleanAttackSuite50 and CleanAttackSuite100, the prefix-cache timing
 is Scenarios.PrefixCacheProbe2K and InvariantPrefixRebuildDgxH100, and the
 fifty-repository example is Scenarios.DelegatedRepositoryGrant. Cited results
 are Literature entries: AgentDojo's published results table
-(Literature.InjectionDefenseResults) and the prompt-cache audit of Gu et al.,
+(vol3/09_security/data/agentdojo_results.csv) and the prompt-cache audit of Gu et al.,
 ICML 2025 (Literature.PromptCacheAudit). This file only selects values,
 converts units, and formats them; it types no numbers. Each value is recorded
 with v() under the key the deck prints as \\val{key}; running this file writes
@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 
@@ -38,7 +39,7 @@ AUDIT = Literature.PromptCacheAudit
 POLICY = Scenarios.FixtureReleasePolicyComparison
 CLEAN50 = Scenarios.CleanAttackSuite50
 CLEAN100 = Scenarios.CleanAttackSuite100
-DOJO = Literature.InjectionDefenseResults.entries
+DOJO = load_series("vol3/09_security/data/agentdojo_results.csv").entries
 
 # AgentDojo rows the deck names (the published table's model and defense ids)
 ATTACK = "important_instructions"
@@ -97,7 +98,7 @@ v("gu_caching", AUDIT.ProvidersCaching, "{:.0f}", "providers caching")
 v("gu_global", AUDIT.ProvidersGlobalSharing, "{:.0f}", "providers sharing globally")
 v("gu_global_words", AUDIT.ProvidersGlobalSharing, "words", "the same, in words")
 
-print("== AgentDojo, important_instructions attack (Literature.InjectionDefenseResults)")
+print("== AgentDojo, important_instructions attack (vol3/09_security/data/agentdojo_results.csv)")
 early, late, base = dojo_row(EARLY), dojo_row(LATE), dojo_row(ABLATED)
 v("dj_models", len(DOJO_PLAIN), "{:.0f}", "undefended models")
 v("dj_asr_lo", min(r["targeted_asr_pct"] for r in DOJO_PLAIN), "{:.0f}", "lowest attack success, %")

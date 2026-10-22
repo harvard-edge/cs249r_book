@@ -18,7 +18,7 @@ Scenario values are labeled "illustrative", as the chapter labels them.
     keyboard allowance 200 to 300 MB (Sec. 11.3.1).
   - Memory ladder: EI Sec. 11.3.4 figure (phone 16 GB, IoT device up to
     1 GB, microcontroller 256 KB).
-  - Apple Neural Engine ratings: MLSysIM Literature.Series.AppleNeuralEngine
+  - Apple Neural Engine ratings: MLSysIM vol2/11_edge_intelligence/data/apple_neural_engine.csv
     (Apple statements; A13 derived; precision never stated), as in EI
     figure 5. A18 Pro (secondary source) is left out, as in the book.
   - Edge inference energy: MLSysIM Literature.EdgeInferenceBenchmarks
@@ -36,7 +36,7 @@ Scenario values are labeled "illustrative", as the chapter labels them.
     illustrative).
   - Session outcomes: Bonawitz et al., "Towards Federated Learning at Scale,"
     MLSys 2019, Appendix A Table 1 (1,116,401 / 327,478 / 29,771).
-  - AI Benchmark: MLSysIM Literature.Series.AIBenchmarkSoCs (ETH Zurich
+  - AI Benchmark: MLSysIM vol2/11_edge_intelligence/data/ai_benchmark_socs.csv (ETH Zurich
     AI Benchmark ranking, snapshot 2026-10-12), as in EI figure 17.
   - Coverage funnel: illustrative cohort shares, after EI figure 13.
   - Forgetting: illustrative curves, after EI Sec. 11.5.2 figure.
@@ -52,6 +52,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 import calcs as K  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 import matplotlib  # noqa: E402
@@ -329,7 +330,7 @@ def memladder():
 # --------------------------------------------------------------------------
 def npu_tops():
     from mlsysim import Literature
-    rows = [r for r in Literature.Series.AppleNeuralEngine.entries
+    rows = [r for r in load_series("vol2/11_edge_intelligence/data/apple_neural_engine.csv").entries
             if r["basis"] in ("stated", "derived")]
     fig, ax = plt.subplots(figsize=(4.0, 3.2))
     xs = [r["year"] for r in rows]
@@ -532,7 +533,7 @@ def fedavg():
     # (E, B, u, IID rounds, non-IID rounds); FedSGD first (MLSysIM series)
     from mlsysim import Literature
     rows = [(r["local_epochs"], r["batch_size"], r["updates_per_round"], r["iid_rounds"], r["non_iid_rounds"])
-            for r in Literature.Series.FedAvgMnistCnnRounds.entries]
+            for r in load_series("slides/vol2/11_edge_intelligence/images/data/fedavg_mnist_cnn_rounds.csv").entries]
     sgd_iid, sgd_non = num("fedsgd_iid"), num("fedsgd_noniid")
     best_u, best_iid, best_non = num("fedavg_best_u"), num("fedavg_best_iid"), num("fedavg_best_noniid")
     for step in (1, 2):
@@ -689,7 +690,7 @@ def sessions():
 # --------------------------------------------------------------------------
 def aibench():
     from mlsysim import Literature
-    rows = [r for r in Literature.Series.AIBenchmarkSoCs.entries if r["ai_score"]]
+    rows = [r for r in load_series("vol2/11_edge_intelligence/data/ai_benchmark_socs.csv").entries if r["ai_score"]]
     fam = [("Snapdragon", C["danger"]), ("Dimensity", C["compute"]), ("Exynos", C["memory"]),
            ("Google", C["data"]), ("Kirin", C["network"])]
     fig, ax = plt.subplots(figsize=(5.4, 2.7))

@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from mlsysim.physics import calc_independent_success  # noqa: E402
 from mlsysim.solvers import PairedRunEvaluationModel  # noqa: E402
 
@@ -66,8 +67,8 @@ SEL = SEL_S.result
 SC = SC_S.result
 RK = RK_S.result
 AE = Literature.AgentEvaluation
-ZHENG = {r["judge"]: r for r in Literature.JudgePositionBias.entries}
-KAPOOR = {r["agent"]: r for r in Literature.HumanEvalAgentCost.entries}
+ZHENG = {r["judge"]: r for r in load_series("slides/vol3/13_evaluation/images/data/judge_position_bias.csv").entries}
+KAPOOR = {r["agent"]: r for r in load_series("slides/vol3/13_evaluation/images/data/humaneval_agent_cost_accuracy.csv").entries}
 
 
 def pct(x):
@@ -181,7 +182,7 @@ v("gr_far_lo", pct(JUDGE.false_accept_low), "{:.1f}", "Wilson low, %")
 v("gr_far_hi", pct(JUDGE.false_accept_high), "{:.1f}", "Wilson high, %")
 v("gr_fam", pct(JUDGE.failure_among_accepted), "{:.1f}", "failure among accepted, %")
 
-print("== Zheng et al. 2023, Table 2 (Literature.JudgePositionBias)")
+print("== Zheng et al. 2023, Table 2 (slides/vol3/13_evaluation/images/data/judge_position_bias.csv)")
 for _judge, _tag in (("GPT-4", "g4"), ("GPT-3.5", "g35"), ("Claude-v1", "cl")):
     v(f"zh_{_tag}_cons", ZHENG[_judge]["consistency_pct"], "{:.1f}", f"{_judge} consistent, %")
     v(f"zh_{_tag}_first", ZHENG[_judge]["biased_first_pct"], "{:.1f}", f"{_judge} favors first, %")
@@ -276,7 +277,7 @@ print("== One task against new tasks (Scenarios.TwoTaskTypeConsistency)")
 v("mix_same_pct", pct(MIX.same_task_all), "{:.0f}", "one task repeated, %")
 v("mix_new_pct", pct(MIX.new_tasks_all), "{:.0f}", "new tasks, %")
 
-print("== Kapoor et al. 2024, Table A1 (Literature.HumanEvalAgentCost)")
+print("== Kapoor et al. 2024, Table A1 (slides/vol3/13_evaluation/images/data/humaneval_agent_cost_accuracy.csv)")
 _lats, _warm = KAPOOR["LATS (GPT-4)"], KAPOOR["Warming (GPT-4)"]
 _retry, _gpt4 = KAPOOR["Retry (GPT-4)"], KAPOOR["GPT-4 (baseline)"]
 v("ha_problems", AE.HumanEvalProblems, "{:.0f}", "HumanEval problems")

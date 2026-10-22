@@ -7,7 +7,7 @@ runs (Lecture 7, Scenarios.LatchEvaluationCampaign) and the Challenger flight
 record (Lecture 16, Literature.SpaceflightAnomalies).
 
 Sources behind the values
-  Waymo miles       Literature.Series.WaymoRiderOnlyMiles (Safety Impact Data Hub)
+  Waymo miles       vol2/16_responsible_ai/data/waymo_rider_only_miles.csv (Safety Impact Data Hub)
   Robot fleets      Literature.RobotDeployments (IFR World Robotics 2025; Amazon, July 2025)
   ER-FLEX body      Literature.PlatformConfigurations (UR16e datasheet; MiR250 Specifications)
 
@@ -21,9 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
-WAYMO = Literature.Series.WaymoRiderOnlyMiles.entries
+WAYMO = load_series("vol2/16_responsible_ai/data/waymo_rider_only_miles.csv").entries
 FLEETS, BODY = Literature.RobotDeployments, Literature.PlatformConfigurations
 CAMPAIGN = Scenarios.LatchEvaluationCampaign
 YEAR_START, YEAR_END = "2025-06", "2026-06"   # the twelve months the vote asks about

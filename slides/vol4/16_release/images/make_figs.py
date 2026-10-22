@@ -4,10 +4,10 @@
 Every value is sourced. "DR" is the rendered chapter, Deployment Release
 (Volume IV, Chapter 16). Every value comes from calcs.py (imported as K;
 labels through deckvals.val), which reads MLSysIM: the running machine, the
-Challenger O-ring record (Literature.ChallengerORingDistressRecord, Dalal,
+Challenger O-ring record (slides/vol4/16_release/images/data/challenger_oring_distress_record.csv, Dalal,
 Fowlkes, and Hoadley 1989 via UCI) with the Rogers Commission's temperatures
 (Literature.SpaceflightAnomalies), and Waymo's rider-only crash rates by
-outcome (Literature.WaymoSafetyImpact).
+outcome (vol4/16_release/data/waymo_safety_impact_headline.csv).
 Diagrams follow the Volume IV causal-boundary palette (rules/volumes/vol4/
 palette.md): green for verified or certified, blue for learned proposals,
 slate for plant and structure, amber for latency and warnings, red only for
@@ -36,6 +36,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     import calcs as K  # noqa: E402  every derived value comes from calcs.py
 
 from deckvals import val  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from mlsysim import Literature  # noqa: E402  (calcs.py put MLSysIM on the path)
 
 C = sp.C
@@ -321,7 +322,7 @@ LABELS = {
 
 
 def waymo(k):
-    rows = Literature.WaymoSafetyImpact.entries
+    rows = load_series("vol4/16_release/data/waymo_safety_impact_headline.csv").entries
     last = max(r["data_cut"] for r in rows)
     latest = [r for r in rows if r["data_cut"] == last and r["outcome"] in LABELS]
     latest.sort(key=lambda r: -r["waymo_count"])

@@ -28,6 +28,7 @@ from ..core.units import BYTES_INT16 as _BYTES_INT16, BYTES_INT32 as _BYTES_INT3
 from ..core.units import BYTES_INT64 as _BYTES_INT64  # framework training step (added 2026-10-20)
 from ..core.units import BYTES_TRAINING_STATE_MIXED_PRECISION as _BYTES_TRAINING_STATE
 from ..literature.registry import Literature as _Literature
+from ..core.series_loader import load_series as _load_series
 from ..systems.reliability import Reliability as _Reliability
 from ..infrastructure.registry import Infrastructure as _Infrastructure
 from ..ops import Ops as _Ops
@@ -40,7 +41,7 @@ from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as 
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
 # iPhone XS GPU drift on a warming phone (Lee et al. 2019, Figure 8; added 2026-10-20)
-_LEE_XS_GPU = next(r for r in _Literature.Series.LeeSustainedLatency.entries
+_LEE_XS_GPU = next(r for r in _load_series("slides/vol1/12_benchmarking/images/data/lee2019_sustained_latency.csv").entries
                    if r["device"] == "iPhone XS" and r["processor"] == "GPU")
 from ..core.units import BITS_PER_BYTE as _BITS_PER_BYTE  # security and privacy (added 2026-10-20)
 from ..physics.statistics import calc_ks_coefficient as _calc_ks_coefficient  # robust AI (added 2026-10-20)
@@ -617,7 +618,7 @@ class Scenarios(Registry):
     NotableRunGrowth2012to2024 = _st.TrainingGrowthScenario(
         name="Training-compute growth, 2012 to 2024",
         description="Epoch AI notable models that report accelerator count and duration.",
-        series_name="NotableModelTrainingRuns", first_year="2012", last_year="2024")
+        series_name="vol2/01_introduction/data/notable_model_training_runs.csv", first_year="2012", last_year="2024")
 
     GpuFailuresLlama3Run = _st.FailureIntervalScenario(
         name="GPU failures across the Llama 3 405B run",
@@ -691,7 +692,7 @@ class Scenarios(Registry):
         name="Two-parameter fit to an eight-H100 NCCL AllReduce sweep",
         description="Floor = median time up to 64 KiB; bandwidth = algorithm bandwidth at the largest "
                     "message; worst measured/model ratio from 8 to 128 MiB.",
-        series_name="NCCLAllReduceH100Node",
+        series_name="vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv",
         floor_cutoff=Q_(64 * 1024, "byte"),
         mid_low=Q_(8 * 2**20, "byte"), mid_high=Q_(128 * 2**20, "byte"))
 
@@ -979,7 +980,7 @@ class Scenarios(Registry):
         name="MLPerf Storage v1.0 training demand per emulated accelerator",
         description="Closed-division passing results; medians for 3D U-Net, CosmoFlow, and "
                     "ResNet-50 on emulated A100s and H100s.",
-        series_name="MLPerfStorageV1Training",
+        series_name="vol2/04_data_storage/data/mlperf_storage_v1_training.csv",
         division="Closed",
         workloads=("unet3d", "cosmoflow", "resnet50"),
         accelerators=("A100", "H100"),
@@ -1107,15 +1108,15 @@ class Scenarios(Registry):
 
     OpenVlaComputeGap = _st.DomainComputeGapScenario(
         name="OpenVLA against the largest language model of 2024",
-        description="Epoch AI training-compute estimates (Literature.ModelsByDomain).",
-        series_name="ModelsByDomain",
+        description="Epoch AI training-compute estimates (vol4/01_boundary/data/epoch_models_by_domain.csv).",
+        series_name="vol4/01_boundary/data/epoch_models_by_domain.csv",
         model="OpenVLA",
     )
 
     Gr00tN1ComputeGap = _st.DomainComputeGapScenario(
         name="GR00T N1 2B against the largest language model of 2025",
-        description="Epoch AI training-compute estimates (Literature.ModelsByDomain).",
-        series_name="ModelsByDomain",
+        description="Epoch AI training-compute estimates (vol4/01_boundary/data/epoch_models_by_domain.csv).",
+        series_name="vol4/01_boundary/data/epoch_models_by_domain.csv",
         model="GR00T N1 2B",
     )
 
@@ -1167,7 +1168,7 @@ class Scenarios(Registry):
         name="Frontier 50 percent task horizon, METR Time Horizon v1.1",
         description="Doubling time of the frontier horizon at release, over the whole series and "
                     "since 2023, fit as the source fits it (frontier points at or below 16 h).",
-        series_name="AgentTimeHorizon",
+        series_name="vol3/01_introduction/data/metr_time_horizon_v1_1.csv",
         fit_cap=Q_(16, "hour"),  # the source's own fit rule
         recent_from="2023-01-01",  # the source's recent window
         published_recent_doubling=Q_(_Literature.Benchmarks.AgentHorizonDoublingDays2023On, "day"),
@@ -1176,7 +1177,7 @@ class Scenarios(Registry):
     MiniSweAgentSonnet4Run = _st.AgentRunScenario(
         name="mini-swe-agent 1.0.0 with Claude 4 Sonnet on SWE-bench Verified",
         description="500 tasks, one attempt each, bash only; hidden tests decide acceptance.",
-        series_name="SweBenchMiniSonnet4Run",
+        series_name="vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv",
         call_bin_edges=[20, 30, 40, 60],  # scenario assumption: model-call bins for acceptance by length
         # Observation staging of the run's harness: mini-swe-agent v1.0.0,
         # src/microsweagent/config/extra/swebench.yaml, action_observation_template
@@ -1315,7 +1316,7 @@ class Scenarios(Registry):
         name="Token mix of a production code-completion trace, priced at the 8-bit floors",
         description="Azure LLM inference trace 2023 (code); the time share prices each request at "
                     "the Llama-3 70B 8-bit floors, an illustration rather than the trace's latency.",
-        series_name="LlmInferenceTraceCode2023",
+        series_name="slides/vol2/10_inference/images/data/azure_llm_inference_code_2023.csv",
         prompt_column="ContextTokens",
         output_column="GeneratedTokens",
         floors=Llama3_70B_Int8DecodeH100,
@@ -1673,7 +1674,7 @@ class Scenarios(Registry):
     MLPerfLlmScalingSeries = _st.ScalingSeriesScenario(
         name="MLPerf Training LLM series at several sizes",
         description="Five same-round series of the GPT-3 and Llama 3.1 405B benchmarks.",
-        series_name="MLPerfTrainingLLMScaling",
+        series_name="vol2/06_distributed_training/data/mlperf_training_llm_scaling.csv",
         specs=[
             ("GPT-3, NVIDIA H100 (v3.1)", ("v3.1", "NVIDIA", "gpt3", "H100-SXM5")),
             ("GPT-3, Google TPU v5p (v4.1)", ("v4.1", "Google", "gpt3", "TPU-v5p")),
@@ -1808,7 +1809,7 @@ class Scenarios(Registry):
         name="ImageNet models on ImageNetV2",
         description="67 published models on the original test set and on one re-collected by the "
                     "same procedure (Recht et al. 2019); fv_* are Fisher-vector baselines.",
-        series_name="ImageNetV2MatchedFrequency",
+        series_name="slides/vol1/01_introduction/images/data/imagenetv2_matched_frequency_top1.csv",
         original_key="original_top1", new_key="imagenet_v2_top1", gap_key="gap",
         baseline_prefix="fv_",
     )
@@ -1816,7 +1817,7 @@ class Scenarios(Registry):
     GoogleFluTrendsDrift = _st.ProxyDriftScenario(
         name="Google Flu Trends against the CDC count",
         description="Seasons 2003-04 to 2012-13, weeks 40 to 20; drift from 2011-12; peak season 2012-13.",
-        series_name="GoogleFluTrendsVsCdc",
+        series_name="slides/vol1/01_introduction/images/data/google_flu_trends_cdc_ilinet.csv",
         proxy_key="gft_ili_pct", reference_key="cdc_wili_pct",
         first_year=2003, last_year=2012,        # seasons with both series throughout
         start_week=40, end_week=20,             # the CDC influenza season
@@ -1844,7 +1845,7 @@ class Scenarios(Registry):
     AwsUsEast1Routes = _st.MeasuredRoutesScenario(
         name="AWS round trips from N. Virginia to four regions",
         description="One-week median round trips measured between AWS regions, against each fiber floor.",
-        series_name="AwsInterRegionRtt",
+        series_name="slides/vol1/02_system_paradigms/images/data/aws_interregion_rtt_p50.csv",
     )
     FactoryCameras1080p = _st.SensorUplinkScenario(
         name="100 factory cameras at 1080p on a 10 Gb/s link",
@@ -1901,7 +1902,7 @@ class Scenarios(Registry):
         description="Measured 2016 rates against the 92 TOPS ceiling and the 1,350 ops-per-weight-byte ridge.",
         peak=_Hardware.Cloud.TPUv1.compute.precision_flops["int8"],
         ridge=float(_Literature.DeviceMeasurements.TpuV1RooflineRidge),
-        series_name="TpuV1ProductionApps",
+        series_name="slides/vol1/02_system_paradigms/images/data/tpu_v1_production_apps.csv",
     )
     TPUv4Pod4096 = _st.AcceleratorPodScenario(
         name="A TPU v4 pod of 4,096 chips",
@@ -1925,7 +1926,7 @@ class Scenarios(Registry):
     MemoryWallFlopsTrend = _st.TrendFitScenario(
         name="Server peak FLOP/s, fitted growth every two years",
         description="Least-squares fit on the log of the digitized markers, as the source fits them.",
-        series_name="MemoryWallHardwareScaling", group_key="series", group="flops",
+        series_name="slides/vol1/02_system_paradigms/images/data/memory_wall_hardware_scaling.csv", group_key="series", group="flops",
         x_key="year", y_key="normalized", period=2.0,
     )
     MemoryWallDramTrend = MemoryWallFlopsTrend.variant(
@@ -1935,7 +1936,7 @@ class Scenarios(Registry):
     MicroprocessorTrendsAroundDennard = _st.TrendWindowScenario(
         name="Microprocessor trends around the end of Dennard scaling",
         description="Series maxima over the mid-1990s, the mid-2000s, and the early 2020s.",
-        series_name="MicroprocessorTrends",
+        series_name="vol1/02_system_paradigms/data/microprocessor_trends.csv",
         windows={"mid_1990s": (1994, 1996), "mid_2000s": (2004, 2006),   # scenario assumption: windows
                  "after_2005": (2005, 2023), "early_2020s": (2019, 2023)},
     )
@@ -2345,7 +2346,7 @@ class Scenarios(Registry):
     KalosJobSizeMix = _st.JobSizeMixScenario(
         name="Jobs and GPU time by job size in the Kalos LLM cluster (2023)",
         description="AcmeTrace Kalos rows split into one-GPU, mid-size, and large jobs.",
-        series=_Literature.Series.AcmeKalosJobSizes,
+        series=_load_series("vol2/08_fleet_orchestration/data/acme_kalos_job_sizes.csv"),
         large_threshold=256,  # GPUs: the smallest job size in the trace's large-run class
     )
     DrfTwoTenantExample = _st.DominantShareScenario(
@@ -2722,8 +2723,8 @@ class Scenarios(Registry):
         description="Llama-3 8B and 70B Instruct on MATH at 1, 256, and 10,000 samples; "
                     "DeepSeek-Coder-V2 with Moatless Tools on SWE-bench Lite at 1 and 250 samples "
                     "(Brown et al. 2024, recomputed from released per-sample labels).",
-        majority_series="RepeatedSamplingMajority",
-        coverage_series="RepeatedSamplingCoverage",
+        majority_series="vol3/03_test_time_compute/data/repeated_sampling_majority.csv",
+        coverage_series="vol3/03_test_time_compute/data/repeated_sampling_coverage.csv",
         small_model="Llama-3-8B-Instruct",
         large_model="Llama-3-70B-Instruct",
         dataset="MATH",
@@ -2830,7 +2831,7 @@ class Scenarios(Registry):
     SweAgentClaude35SonnetRunCost = _st.RecordedRunCostScenario(
         name="SWE-agent with Claude 3.5 Sonnet on SWE-bench Verified (2024), recorded cost",
         description="500 trajectories, one per task; model-token cost as the agent recorded it.",
-        series_name="SweBenchTrajectories",
+        series_name="vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv",
         submission="20240620_sweagent_claude3.5sonnet",
     )
 
@@ -2875,7 +2876,7 @@ class Scenarios(Registry):
     FictionLiveBenchThrough60K = _st.ComprehensionByLengthScenario(
         name="Fiction.LiveBench models scored at every length through 60K tokens",
         description="Median and quartiles per length, and how many models hold 90 percent at 60K.",
-        series_name="LongContextComprehension",
+        series_name="vol3/04_context_engineering/data/fiction_livebench_by_length.csv",
         lengths=["0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k"],
         hold_bar=0.90,  # scenario assumption: the score a model must hold at 60K
     )
@@ -3092,7 +3093,7 @@ class Scenarios(Registry):
     OrinDevKitSingleStream = _st.SingleStreamLatencyScenario(
         name="MLPerf Inference edge single-stream latencies on the Jetson AGX Orin 64G developer kit",
         description="NVIDIA's own submission, latest round per benchmark, 90th-percentile latency.",
-        series=_Literature.EdgeInferenceOrin,
+        series=_load_series("vol4/03_brain/data/mlperf_inference_edge_orin.csv"),
         system="NVIDIA Jetson AGX Orin Developer Kit 64G (TensorRT)",
         benchmarks=[  # (benchmark, task, model)
             ("resnet50", "Image classification", "ResNet-50"),
@@ -3261,8 +3262,8 @@ class Scenarios(Registry):
     )
     PretrainingCorpusGrowth = _st.TrendFitScenario(
         name="Reported pre-training tokens of landmark language models, fitted growth per year",
-        description="Least-squares fit of log tokens on release date (Literature.Series.PretrainingTokens).",
-        series_name="PretrainingTokens", x_key="date", y_key="tokens", x_is_date=True,
+        description="Least-squares fit of log tokens on release date (vol1/04_data_engineering/data/pretraining_tokens.csv).",
+        series_name="vol1/04_data_engineering/data/pretraining_tokens.csv", x_key="date", y_key="tokens", x_is_date=True,
     )
 
     # --- Data engineering: delivering a dataset to the accelerator, and watching it drift (added 2026-10-20) ---
@@ -3523,7 +3524,7 @@ class Scenarios(Registry):
     MlperfInferenceSoftwareGainsDgxH100 = _st.SoftwareGainsScenario(
         name="Offline throughput of one DGX H100 across four MLPerf Inference rounds",
         description="Same eight-GPU system; the gains come from software alone.",
-        series=_Literature.Series.MLPerfInferenceDGXH100,
+        series=_load_series("vol2/09_performance_engineering/data/mlperf_inference_dgx_h100.csv"),
         benchmarks=[
             ("gptj-99", "GPT-J 6B"),
             ("llama2-70b-99.9", "Llama 2 70B"),
@@ -3598,19 +3599,19 @@ class Scenarios(Registry):
         name="Azure LLM chat trace 2023, one hour",
         description="19,366 production chat requests; idle share for fixed batches of 8 "
                     "consecutive requests.",
-        series=_Literature.LlmInferenceTraceConversation2023,
+        series=_load_series("slides/vol2/10_inference/images/data/azure_llm_inference_conv_2023.csv"),
         batch_size=8,  # scenario assumption: fixed batch of consecutive requests
     )
     LlmCodeTrace2023 = LlmChatTrace2023.variant(
         name="Azure LLM code-completion trace 2023, one hour",
         description="8,819 production code-completion requests, same batching.",
-        series=_Literature.LlmInferenceTraceCode2023,
+        series=_load_series("slides/vol2/10_inference/images/data/azure_llm_inference_code_2023.csv"),
     )
     LlmChatWeekTraffic2024 = _st.TrafficProfileScenario(
         name="Azure LLM chat traffic 2024, one week in 10-minute bins",
         description="Request rate per bin, 12 to 18 May 2024; weekday nightly trough and "
                     "afternoon peak.",
-        series=_Literature.LlmInferenceTraceConversation2024TenMinute,
+        series=_load_series("slides/vol2/10_inference/images/data/azure_llm_inference_conv_2024_10min.csv"),
         bin_column="bin10min",
         count_column="requests",
         bin_width=Q_(10, "minute"),
@@ -3829,7 +3830,7 @@ class Scenarios(Registry):
     InferenceXServingFrontier = _st.ServingFrontierScenario(
         name="InferenceX: DeepSeek-R1 FP8, 1,024 tokens in and out",
         description="Measured per-GPU output against per-user interactivity, per accelerator.",
-        series=_Literature.Series.InferenceXDeepSeekR1,
+        series=_load_series("vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv"),
         targets=[25, 50, 100],  # scenario assumption: per-user rates for split-versus-colocated comparison
     )
     H100OutputTokenCost = _st.TokenCostScenario(
@@ -4052,15 +4053,15 @@ class Scenarios(Registry):
     LeRobotHubDatasetCounts = _st.HubDatasetCountsScenario(
         name="Public LeRobot-format datasets on the Hugging Face Hub",
         description="Cumulative dataset count by month and episodes per dataset.",
-        monthly=_Literature.LeRobotHubMonthly,
-        histogram=_Literature.LeRobotEpisodeHistogram,
+        monthly=_load_series("vol4/05_data/data/lerobot_hub_monthly.csv"),
+        histogram=_load_series("vol4/05_data/data/lerobot_hub_episode_histogram.csv"),
         small_episodes=16,              # scenario assumption: "small" threshold
         large_episodes=512,             # scenario assumption: "large" threshold
     )
     OpenXEmbodimentPoolComposition = _st.PooledCorpusCompositionScenario(
         name="Open X-Embodiment by morphology and declared command rate",
         description="Episode-weighted shares against the warehouse manipulator's chunk rate.",
-        series=_Literature.OpenXEmbodimentComposition,
+        series=_load_series("vol4/05_data/data/open_x_embodiment_composition.csv"),
         rate_threshold=_Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate,
         top_datasets=2,                 # scenario assumption: "two datasets supply most of them"
     )
@@ -4459,7 +4460,7 @@ class Scenarios(Registry):
     FirecrackerPreconfiguredBootSerial = _st.BootTimeCdfScenario(
         name="Firecracker pre-configured microVMs booted one at a time: median and p99",
         description="Agache et al. (2020) released boot CDF on m5d.metal.",
-        series=_Literature.FirecrackerBootPreconfigured,
+        series=_load_series("slides/vol3/08_sandboxes/images/data/firecracker_boot_preconfigured.csv"),
         booting=1,  # the serial run
         median_fraction=0.5,  # the median
         tail_fraction=0.99,  # the 99th percentile
@@ -4577,7 +4578,7 @@ class Scenarios(Registry):
     PhoneSocAiScoreSpread = _st.SeriesSpreadScenario(
         name="Measured AI Benchmark score spread among phone processors",
         description="Processors released 2020 on, which a deployed fleet can still hold, and one generation (2024-2025).",
-        series_name="AIBenchmarkSoCs",
+        series_name="vol2/11_edge_intelligence/data/ai_benchmark_socs.csv",
         value_key="ai_score",
         windows={"fleet": (2020, 2026),       # scenario assumption: phones from 2020 on remain in a fleet
                  "generation": (2024, 2025)},
@@ -4677,7 +4678,7 @@ class Scenarios(Registry):
         name="Dactyl's physical-hand trials by randomization group and by network memory",
         description="Ten physical trials per condition and their medians (Andrychowicz et al. 2020, "
                     "Tables 4 and 5).",
-        series=_Literature.DactylPhysicalTrials,
+        series=_load_series("slides/vol4/06_training/images/data/dactyl_physical_trials.csv"),
     )
 
     # --- Network architectures: dense, convolutional, and recurrent layers (added 2026-10-20) ---
@@ -5002,13 +5003,13 @@ class Scenarios(Registry):
     NotableModelParameterGrowth = _st.ParameterGrowthScenario(
         name="Parameter counts of notable models, before and after 2010",
         description="Epoch AI Notable AI Models that report parameters, fit as log10(parameters) on date.",
-        rows=_Literature.Series.NotableModels.entries,
+        rows=_load_series("vol1/05_nn_computation/data/notable_models.csv").entries,
         split_year=2010,  # scenario assumption: the deep-learning era begins
     )
     NotableModelDatasetGrowth = _st.DatasetGrowthScenario(
         name="Training dataset sizes of notable models, before and after 2010",
         description="Epoch AI Notable AI Models that report training dataset size (datapoints), fit as log10(training_dataset_size) on date.",
-        rows=_Literature.Series.NotableModelDatasets.entries,
+        rows=_load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries,
         split_year=2010,  # scenario assumption: the deep-learning era begins
     )
 
@@ -5779,7 +5780,7 @@ class Scenarios(Registry):
     ResNet50CleanVersusRobustAttacked = _st.CrossConditionGapScenario(
         name="Standard ResNet-50 clean against an adversarially trained ResNet-50 under attack at 4/255",
         description="Two of the four cells; the difference mixes a model change with a test change.",
-        standard_clean_accuracy=next(r["val"] for r in _Literature.Series.ImageNetTestbedShift.entries
+        standard_clean_accuracy=next(r["val"] for r in _load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries
                                      if r["model"] == "resnet50"),
         robust_attacked_accuracy=50.0,    # scenario assumption: an adversarially trained ImageNet model at 4/255
     )
@@ -5805,14 +5806,14 @@ class Scenarios(Registry):
         name="ImageNet models of the Taori et al. testbed on ImageNetV2",
         description="Models scored on ImageNetV2 with at least 55 percent on the ImageNet validation set; "
                     "the floor drops partially trained and low-data checkpoints.",
-        series_name="ImageNetTestbedShift",
+        series_name="vol2/14_robust_ai/data/imagenet_testbed_shift.csv",
         original_key="val", new_key="imagenet_v2",
         original_floor=55,                # scenario assumption: percent, ImageNet top-1
     )
     RobustBenchCifar10LinfProgress = _st.StandardizedAttackScenario(
         name="CIFAR-10 defenses under AutoAttack at 8/255, 2018 to 2024",
         description="Best attacked accuracy by publication year and defenses that fall to near zero.",
-        series_name="RobustBenchCIFAR10Linf",
+        series_name="vol2/14_robust_ai/data/robustbench_cifar10_linf.csv",
         first_year=2018, last_year=2024,
         broken_floor=5.0,                 # scenario assumption: percent; below it a defense gives no robustness
     )
@@ -5964,8 +5965,8 @@ class Scenarios(Registry):
         name="A model-call ceiling at the accepted runs' 90th percentile, five public SWE-bench "
              "Verified configurations",
         description="Post hoc truncation of the public trajectories in "
-                    "Literature.SweBenchTrajectories.",
-        series_name="SweBenchTrajectories",
+                    "vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv.",
+        series_name="vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv",
         quantile=0.90,  # scenario assumption: ceiling at the accepted runs' 90th percentile
     )
     MiniSweAgentOpus46RunCost = SweAgentClaude35SonnetRunCost.variant(
@@ -5980,8 +5981,8 @@ class Scenarios(Registry):
     OSWorldStepCeilingReturn = _st.StepCeilingReturnScenario(
         name="OSWorld success of the same model at each enforced step ceiling",
         description="Xie et al. (2024), values via the Epoch AI Benchmarking Hub "
-                    "(Literature.OSWorldStepBudget).",
-        series_name="OSWorldStepBudget",
+                    "(vol3/10_agent_harness/data/osworld_step_budget.csv).",
+        series_name="vol3/10_agent_harness/data/osworld_step_budget.csv",
     )
 
     # --- Closed-loop evaluation: the latch campaign, sequential tests, exposure (added 2026-10-20) ---
@@ -6379,7 +6380,7 @@ class Scenarios(Registry):
         name="COMPAS flags (Medium or High) against two-year recidivism, Black and white defendants",
         description="Recomputed from ProPublica's released data with its own filters.",
         groups={r["race"]: {k: r[k] for k in ("tp", "fp", "fn", "tn")}
-                for r in _Literature.Series.CompasTwoYearConfusion.entries},
+                for r in _load_series("slides/vol2/16_responsible_ai/images/data/compas_two_year_confusion.csv").entries},
     )
     LoanApprovalGapTest = _st.ProportionGapTestScenario(
         name="The loan model's approval-rate gap, 0.70 against 0.40, tested at 100 and 10 per group",
@@ -6487,8 +6488,8 @@ class Scenarios(Registry):
     OfqualStandardization2020 = _st.GradeStandardizationScenario(
         name="England's 2020 A level standardization against teacher-assessed grades",
         description="Ofqual Table 1 (entries) and Table 2 (candidates).",
-        matrix=_Literature.Series.OfqualGradeMatrix2020,
-        candidates=_Literature.Series.OfqualCandidatesLowered2020,
+        matrix=_load_series("slides/vol2/16_responsible_ai/images/data/ofqual_2020_grade_matrix.csv"),
+        candidates=_load_series("slides/vol2/16_responsible_ai/images/data/ofqual_2020_candidates_lowered.csv"),
         grades=["A*", "A", "B", "C", "D", "E", "U"],
         stated_entries=_Literature.Fairness.OfqualEntriesTotal,
         stated_candidates=_Literature.Fairness.OfqualCandidatesTotal,
@@ -6778,7 +6779,7 @@ class Scenarios(Registry):
     RetrySustainedMetastableOutages = _st.RetrySustainedOutagesScenario(
         name="Published metastable outages sustained by retries (Huang et al., OSDI 2022)",
         description="Table 1 of Metastable Failures in the Wild, counted by its sustaining effects.",
-        series_name="MetastableFailures",
+        series_name="slides/vol3/12_failure_recovery/images/data/metastable_failures_in_the_wild.csv",
         threshold_hours=20,  # outages longer than this are counted
     )
 
@@ -6882,14 +6883,14 @@ class Scenarios(Registry):
     )
     TerminalBenchScaffoldSpread = _st.ScaffoldSpreadScenario(
         name="Terminal-Bench 2.0: the same model under different agent scaffolds",
-        description="Models with at least five scaffolds on the leaderboard (Literature.TerminalBenchHarness).",
-        series_name="TerminalBenchHarness",
+        description="Models with at least five scaffolds on the leaderboard (vol3/13_evaluation/data/terminal_bench_2_harness.csv).",
+        series_name="vol3/13_evaluation/data/terminal_bench_2_harness.csv",
         min_scaffolds=5,  # scenario assumption: enough scaffolds to show a spread
     )
     SweBenchVerifiedRankTies = _st.LeaderboardTiesScenario(
         name="SWE-bench Verified under one scaffold: the top 25 runs and their neighbors",
-        description="One evaluator's runs with reported standard errors (Literature.SweBenchVerifiedRuns).",
-        series_name="SweBenchVerifiedRuns",
+        description="One evaluator's runs with reported standard errors (vol3/13_evaluation/data/epoch_swe_bench_verified_runs.csv).",
+        series_name="vol3/13_evaluation/data/epoch_swe_bench_verified_runs.csv",
         top=25,  # scenario assumption: ranks shown
     )
     TwoTaskTypeConsistency = _st.TaskMixConsistencyScenario(
@@ -6912,7 +6913,7 @@ class Scenarios(Registry):
     # The machine, clearances, walking speed, conveyor, grasp record, and
     # observation age are in Embodied.Scenario.WarehouseAisle; the cited
     # odometry, mapping, and tracking figures in Literature.RobotPerception and
-    # Literature.KittiOdometry. Inputs neither record carries are stated here.
+    # vol4/09_memory/data/kitti_odometry_leaderboard.csv. Inputs neither record carries are stated here.
     WarehouseRackEndRangeFusion = _st.RangeFusionScenario(
         name="The range to the warehouse rack-end upright, fused from lidar and stereo",
         description="One sweep's prediction, a lidar update, a stereo update, and the stereo update "
@@ -6962,7 +6963,7 @@ class Scenarios(Registry):
         description="Best and median translation error by sensor, and the travel at which each spends "
                     "the 50 mm bound, against one 30 m aisle.",
         site=_Embodied.Scenario.WarehouseAisle,
-        entries=_Literature.KittiOdometry.entries,
+        entries=_load_series("vol4/09_memory/data/kitti_odometry_leaderboard.csv").entries,
     )
     LatchSlotFingerBelief = _st.BeliefExpiryScenario(
         name="The finger's position in the cage latch-release slot while the finger hides it",
@@ -7404,7 +7405,7 @@ class Scenarios(Registry):
                "China": _Infrastructure.Grids.China_Avg, "India": _Infrastructure.Grids.India_Avg,
                "Poland": _Infrastructure.Grids.Poland},
         service_life=Q_(_Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate * _HOURS_PER_YEAR, "hour"),
-        wue={"Google fleet": Q_(next(r["value"] for r in _Literature.Series.GoogleServingFactors.entries
+        wue={"Google fleet": Q_(next(r["value"] for r in _load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv").entries
                                      if r["parameter"] == "wue_category2"), "liter/kWh"),
              "evaporative": Q_(_Infrastructure.FacilityCooling.Typical.wue, "liter/kWh")},
     )
@@ -7489,7 +7490,7 @@ class Scenarios(Registry):
         description="Days of serving at the measured full-stack prompt energy that equal the run's facility energy.",
         one_time_energy=Llama31_405BTrainingFootprint.result.facility_energy,
         requests_per_day=1e9,  # scenario assumption: illustrative fleet volume
-        energy_per_request=Q_(sum(r["comprehensive_wh"] for r in _Literature.Series.GeminiPromptEnergy.entries
+        energy_per_request=Q_(sum(r["comprehensive_wh"] for r in _load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
                                   if r["comprehensive_counted"] == 1), "Wh"),
     )
     EdgeFirstImageCascade = _st.CascadeEnergyScenario(
@@ -7548,7 +7549,7 @@ class Scenarios(Registry):
     EuropeWeek47FossilShare = _st.RollingShareScenario(
         name="EU fossil share of generation, 24-hour windows, 20 to 26 November 2023",
         description="Gas, coal, lignite, and oil over all generation, hourly, averaged over every 24-hour job window.",
-        series_name="EuropeGenerationWeek47",
+        series_name="vol2/15_sustainable_ai/data/europe_generation_2023w47.csv",
         time_column="time_cet",
         share_columns=["gas", "coal_oil"],
         total_columns=["nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil"],
@@ -8064,7 +8065,7 @@ class Scenarios(Registry):
     SsdGradientLossScaling = _st.LossScalingScenario(
         name="SSD's activation gradients against FP16, unscaled and scaled by 8",
         description="Micikevicius et al. (2018), Figure 3 histogram, and a dynamic scaler at 1,024.",
-        histogram=list(_Literature.SsdGradientHistogram.entries),
+        histogram=list(_load_series("slides/vol1/08b_training/images/data/micikevicius_ssd_gradient_histogram.csv").entries),
         grid_high_px=35,  # read from the figure: gridline row of 64 percent
         grid_high_pct=64,  # the figure's gridline label
         grid_low_px=504,  # read from the figure: gridline row of 1/512 percent
@@ -8139,7 +8140,7 @@ class Scenarios(Registry):
     SmallestModelAtSixtyPercentMmlu = _st.SmallestModelAtScoreScenario(
         name="Smallest dense language model at or above 60 percent on MMLU, by release date",
         description="Running minimum of parameters among Epoch AI's reported MMLU results that clear the bar.",
-        series="MMLUDenseModels",
+        series="vol1/10_model_compression/data/mmlu_dense_models.csv",
         score="mmlu",
         threshold=0.60,                    # scenario assumption: a fixed capability bar
     )
@@ -8422,7 +8423,7 @@ class Scenarios(Registry):
     AcceleratorEnvelopeSinceTpuV2 = _st.DeviceEnvelopeScenario(
         name="Best dense FP16 throughput and memory bandwidth to date, all vendors",
         description="Running maxima over Epoch AI's accelerator table, from TPU v2 (2017).",
-        series_name="AcceleratorBandwidthCompute",
+        series_name="vol1/11_hw_acceleration/data/accelerator_bandwidth_compute.csv",
         date_key="date",
         compute_key="fp16_tensor_flops",
         bandwidth_key="memory_bandwidth_bytes_per_s",
@@ -8880,8 +8881,8 @@ class Scenarios(Registry):
     SweBenchVerifiedRoleShares = _st.TrajectoryRoleShareScenario(
         name="Transcript characters by role in five public SWE-bench Verified configurations",
         description="Prompt, observation, and model-output shares pooled per configuration over "
-                    "Literature.SweBenchTrajectories; each message counted once.",
-        series_name="SweBenchTrajectories",
+                    "vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv; each message counted once.",
+        series_name="vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv",
     )
     RepairTraceWithLookupWeighting = _st.LossNormalizationScenario(
         name="A long repair trace and a one-turn file lookup in one batch",
@@ -9189,7 +9190,7 @@ class Scenarios(Registry):
         name="Waymo's California disengagement filings, 2015 to 2025",
         description="Miles per disengagement in the first and latest years, the latest driverless-testing "
                     "rate, and the 2020-to-2021 swing in rate and miles.",
-        entries=_Literature.CaliforniaDisengagements.entries,
+        entries=_load_series("vol4/14_intervention/data/ca_dmv_disengagements.csv").entries,
         company="Waymo",
         first_year=2015,
         latest_year=2025,
@@ -9353,7 +9354,7 @@ class Scenarios(Registry):
         name="The median Gemini text prompt under two measurement boundaries",
         description="Active accelerators only (most efficient data centers) against everything the service "
                     "draws (Elsworth et al. 2025, Table 1).",
-        series_name="GeminiPromptEnergy",
+        series_name="vol2/15_sustainable_ai/data/gemini_prompt_energy.csv",
     )
     FasterStepsMoreSteps = _st.StepsToQualityScenario(
         name="A change that speeds each step 1.8x but needs 2.5x the steps",
@@ -9372,7 +9373,7 @@ class Scenarios(Registry):
     EosEightH100ResNetMLPerfV40 = _st.MLPerfTrainingResultScenario(
         name="NVIDIA Eos, 8x H100, ResNet-50, MLPerf Training v4.0",
         description="Five runs of one 8-GPU node; published score and per-accelerator rate.",
-        series_name="MLPerfTrainingV40ResNetRuns",
+        series_name="slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_resnet_runs.csv",
         system="eos_ngc24.04_mxnet",
         accelerators=8,
         dataset=_Datasets.ImageNet,
@@ -9442,8 +9443,8 @@ class Scenarios(Registry):
     ImageNetValidationSamplingNoise = _st.ProportionPrecisionScenario(
         name="A 76 percent top-1 measured on a fresh draw of 50,000 validation images",
         description="Binomial 95 percent half-width at the mean top-1 of the 20 MLPerf Training v4.0 ResNet-50 runs.",
-        rate=(sum(r["top1"] for r in _Literature.Series.MLPerfTrainingV40ResNetRuns.entries)
-              / len(_Literature.Series.MLPerfTrainingV40ResNetRuns.entries) / 100),
+        rate=(sum(r["top1"] for r in _load_series("slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_resnet_runs.csv").entries)
+              / len(_load_series("slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_resnet_runs.csv").entries) / 100),
         n_samples=int(_Datasets.ImageNet.validation_examples.to("count").magnitude),
         confidence=0.95,          # scenario assumption
     )
@@ -10416,7 +10417,7 @@ class Scenarios(Registry):
                     "tokens per answer and per H100 from the H100 chat energy scenario. An estimate: "
                     "one service's per-prompt energy applied to another's traffic.",
         prompts_per_day=_ReferenceStats.Workloads.ChatGptPromptsPerDay,
-        energy_per_prompt=Q_(sum(r["comprehensive_wh"] for r in _Literature.Series.GeminiPromptEnergy.entries
+        energy_per_prompt=Q_(sum(r["comprehensive_wh"] for r in _load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
                                  if r["comprehensive_counted"] == 1), "Wh"),
         tokens_per_prompt=H100ChatEnergyPerToken.response_tokens,
         accelerator_token_rate=H100ChatEnergyPerToken.token_rate,
@@ -10425,17 +10426,17 @@ class Scenarios(Registry):
     Llama2_70BConversationalDecodeStreams = _st.LittlesLawScenario(
         name="Streams decoding at once on the MLPerf Llama 2 70B server under the 200 ms TPOT bound",
         description="Little's law: measured Server tokens per second times the TPOT bound.",
-        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+        arrival_rate=Q_([r["tokens_per_s"] for r in _load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv").entries
                          if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "1/second"),
-        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv").entries
                            if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "ms"),
     )
     Llama2_70BInteractiveDecodeStreams = Llama2_70BConversationalDecodeStreams.variant(
         name="Streams decoding at once on the same server under the 40 ms interactive TPOT bound",
-        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+        arrival_rate=Q_([r["tokens_per_s"] for r in _load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv").entries
                          if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
                         "1/second"),
-        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv").entries
                            if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
                           "ms"),
     )
@@ -10465,15 +10466,15 @@ class Scenarios(Registry):
     # is named; every other input is a stated teaching assumption.
     PriceAtFixedCapabilityDecline = _st.PriceDeclineScenario(
         name="Lowest price at a fixed capability, fitted decline per year (Epoch AI 2025)",
-        description="Every benchmark-threshold series in Literature.LowestPriceAtCapability, log-linear "
+        description="Every benchmark-threshold series in vol3/19_agent_economics/data/epoch_lowest_price_at_capability.csv, log-linear "
                     "fit of the lowest qualifying price on release date.",
-        series_name="LowestPriceAtCapability",
+        series_name="vol3/19_agent_economics/data/epoch_lowest_price_at_capability.csv",
     )
     FrontierSweCostVsScore = _st.CostVsScoreScenario(
         name="FrontierSWE V2: cost per trial against mean score over five trials",
-        description="Every configuration in Literature.FrontierSweTrials; the top score against the "
+        description="Every configuration in vol3/19_agent_economics/data/frontier_swe_v2_trials.csv; the top score against the "
                     "runner-up, and the median best-to-worst spread.",
-        series_name="FrontierSweTrials",
+        series_name="vol3/19_agent_economics/data/frontier_swe_v2_trials.csv",
         trials=5,  # the benchmark's published protocol: five trials per task
         budget_hours=20,  # the benchmark's published protocol: 20 hours per trial
     )
@@ -10724,7 +10725,7 @@ class Scenarios(Registry):
         name="Repeated-sampling coverage on SWE-bench Lite against independent trials (Brown et al. 2024)",
         description="DeepSeek-Coder-V2 with Moatless Tools on all 300 tasks; measured coverage at k "
                     "against 1 - (1 - p1)^k.",
-        series_name="RepeatedSamplingCoverage",
+        series_name="vol3/03_test_time_compute/data/repeated_sampling_coverage.csv",
         system=RepeatedSamplingCoverageVsVote.repair_system,
         dataset=RepeatedSamplingCoverageVsVote.repair_dataset,
     )
@@ -10907,8 +10908,8 @@ class Scenarios(Registry):
     FrontierHorizonReliabilityGap = _st.TaskHorizonReliabilityScenario(
         name="METR frontier models since 2024: 50 against 80 percent task horizons",
         description="Models METR marks state of the art at release, released 2024 or later "
-                    "(Literature.AgentTimeHorizon).",
-        series_name="AgentTimeHorizon",
+                    "(vol3/01_introduction/data/metr_time_horizon_v1_1.csv).",
+        series_name="vol3/01_introduction/data/metr_time_horizon_v1_1.csv",
         released_from="2024-01-01",  # scenario assumption: the window the comparison covers
     )
 
@@ -11194,9 +11195,9 @@ class Scenarios(Registry):
     # --- SWE-bench Verified leaderboard (added 2026-10-20) ------------------------
     SweBenchVerifiedLeaderboardOneAttempt = _st.BenchmarkLeaderboardScenario(
         name="SWE-bench Verified submissions with one attempt per task",
-        description="Every submission folder with a results file (Literature.SweBenchVerifiedLeaderboard); "
+        description="Every submission folder with a results file (slides/vol3/00_course_overview/images/data/swe_bench_verified_leaderboard.csv); "
                     "the one-attempt submissions and their best score so far.",
-        series_name="SweBenchVerifiedLeaderboard",
+        series_name="slides/vol3/00_course_overview/images/data/swe_bench_verified_leaderboard.csv",
         tasks=int(_Literature.AgentEvaluation.SweBenchVerifiedTasks),
     )
 
@@ -11205,22 +11206,22 @@ class Scenarios(Registry):
         name="Production inference gateway usage, spend, price per token, and tool-call share (Vercel 2026)",
         description="Monthly index (April 2026 = 100) of token usage, total spend, and price per token "
                     "through September 2026, paired with the share of requests and tokens ending in tool calls.",
-        index_series_name="VercelGatewayUsageSpendPrice",
-        tool_series_name="VercelGatewayToolCallShare",
+        index_series_name="vol3/01_introduction/data/vercel_gateway_usage_spend_price_index.csv",
+        tool_series_name="vol3/01_introduction/data/vercel_gateway_tool_call_share.csv",
         teams_covered=200_000,
     )
     MiniSweAgentDjango12050Calls = _st.RecordedRepairTrajectoryCallsScenario(
         name="Per-call and cumulative context characters in django__django-12050 (mini-SWE-agent + Claude Sonnet 4)",
         description="The 22 model calls of one public SWE-bench Verified repair trajectory "
-                    "(Literature.SweBenchMiniSonnet4Django12050Calls).",
-        series_name="SweBenchMiniSonnet4Django12050Calls",
-        run_series_name="SweBenchMiniSonnet4Run",
+                    "(vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv).",
+        series_name="vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv",
+        run_series_name="vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv",
         instance_id="django__django-12050",
     )
     VercelGatewayWorkloadSpend = _st.GatewayWorkloadSpendScenario(
         name="Token volume share vs. spend share across gateway workloads and model weight tiers (Vercel 2026)",
-        description="Workload token and cost shares (Literature.VercelGatewayUseCaseShares) and "
-                    "open-weight vs. closed-weight token and spend shares (Literature.VercelGatewayOpenWeightShare).",
-        use_case_series_name="VercelGatewayUseCaseShares",
-        open_weight_series_name="VercelGatewayOpenWeightShare",
+        description="Workload token and cost shares (vol3/19_agent_economics/data/vercel_gateway_use_case_shares.csv) and "
+                    "open-weight vs. closed-weight token and spend shares (vol3/19_agent_economics/data/vercel_gateway_open_weight_share.csv).",
+        use_case_series_name="vol3/19_agent_economics/data/vercel_gateway_use_case_shares.csv",
+        open_weight_series_name="vol3/19_agent_economics/data/vercel_gateway_open_weight_share.csv",
     )

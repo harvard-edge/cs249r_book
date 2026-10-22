@@ -2,7 +2,7 @@
 """Every number on the Lecture 9 slides and notes (Spatial Memory), read from MLSysIM.
 
 MLSysIM holds the inputs (the Embodied.* machine and its site record, the
-Literature.RobotPerception and Literature.KittiOdometry figures) and the
+Literature.RobotPerception and vol4/09_memory/data/kitti_odometry_leaderboard.csv figures) and the
 calculations (Scenarios.*, each backed by a solver in
 engine/solvers/estimation.py or mapping.py); the chapter reads the same
 scenarios. This file only selects values, converts units, and formats them;

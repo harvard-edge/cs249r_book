@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Models, Systems = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems
 Infrastructure, Literature, Scenarios = mlsysim.Infrastructure, mlsysim.Literature, mlsysim.Scenarios
@@ -168,7 +169,7 @@ for w in BENCH.workloads:
         v(f"mlp_{w}_{a.lower()}", b.medians[w][a], "{:.2f}", f"median {w} {a}, GB/s per accelerator")
 v("mlp_gen_min", min(b.generation_ratios.values()), "{:.1f}", "H100 / A100, smallest")
 v("mlp_gen_max", max(b.generation_ratios.values()), "{:.0f}", "H100 / A100, largest")
-row = Literature.Series.MLPerfStorageV1Training.find(
+row = load_series("vol2/04_data_storage/data/mlperf_storage_v1_training.csv").find(
     "system", "AI400X2T_24x14TiB_nvme_8xNDR200_16clients/cosmoflow-h100")
 v("ex_accels", row["num_accelerators"], "{:.0f}", "example: emulated H100s")
 v("ex_hosts", row["num_hosts"], "{:.0f}", "example: hosts")

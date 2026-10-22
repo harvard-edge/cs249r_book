@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import BYTES_FP32, Q_  # noqa: E402
 from mlsysim.physics import (  # noqa: E402
@@ -31,9 +32,9 @@ HERE = Path(__file__).resolve().parent
 
 CASE = Literature.IncidentReports
 RETR = Literature.AgentRetrieval
-SWEB = Literature.SweBenchBm25Context.entries
-POISON = Literature.PoisonedRagBlackBox.entries
-LIU = Literature.AnswerPositionAccuracy.entries
+SWEB = load_series("slides/vol3/06_long_term_memory/images/data/swe_bench_bm25_context.csv").entries
+POISON = load_series("slides/vol3/06_long_term_memory/images/data/poisonedrag_black_box_palm2.csv").entries
+LIU = load_series("slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv").entries
 PAY = Scenarios.RetrievalRecordsInAllowance
 BM25 = Scenarios.Bm25ShortAgainstLongFile
 DOCS = Scenarios.ConditionNotifyDocstrings
@@ -83,7 +84,7 @@ v("rp_overshoot", p.overshoot, "{:,.0f}", "over the allowance, tokens")
 v("rp_meta2", p.scaled_metadata, "{:,.0f}", "metadata doubled, tokens")
 v("rp_meta2_records", p.scaled_metadata_records, "{:.0f}", "whole records at doubled metadata")
 
-print("== SWE-bench BM25 by context limit (Literature.SweBenchBm25Context)")
+print("== SWE-bench BM25 by context limit (slides/vol3/06_long_term_memory/images/data/swe_bench_bm25_context.csv)")
 for i, row in enumerate(SWEB, start=1):
     v(f"swb_ctx{i}", row["max_context_k"] * K, "{:,.0f}", "maximum retrieved context, tokens")
     v(f"swb_rec{i}", row["bm25_recall_avg"], "{:.2f}", "BM25 recall of edited files, %")
@@ -180,7 +181,7 @@ for d, (n, t) in enumerate(zip(g.nodes_by_depth, g.tokens_by_depth)):
     v(f"gn_level{d}", n - (g.nodes_by_depth[d - 1] if d else 0), "{:.0f}", f"nodes at depth {d}")
 v("gn_fit", g.fit, "{:.0f}", "most whole nodes in the allowance")
 
-print("== PoisonedRAG (Literature.PoisonedRagBlackBox, AgentRetrieval)")
+print("== PoisonedRAG (slides/vol3/06_long_term_memory/images/data/poisonedrag_black_box_palm2.csv, AgentRetrieval)")
 n_poison = RETR.PoisonedRagTextsPerQuestion
 v("pr_n", n_poison, "{:.0f}", "planted texts per target question")
 for i, row in enumerate(POISON, start=1):
@@ -223,7 +224,7 @@ v("pc_ceff_b", c.maintained_cost, "{:.2f}", "policy B cost per accepted task")
 v("pc_change", -c.change * 100, "{:.1f}", "policy B lower by, %")
 v("pc_breakeven", c.break_even_acceptance, "{:.2f}", "break-even acceptance")
 
-print("== Lost in the middle (Literature.AnswerPositionAccuracy)")
+print("== Lost in the middle (slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv)")
 v("liu_docs", LIU[0]["documents"], "{:.0f}", "documents per question")
 
 if __name__ == "__main__":

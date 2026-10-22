@@ -14,8 +14,8 @@ label offsets are layout. "CE" is the rendered chapter. Sources:
     fig-vol3-working-set-selection, fig-vol3-context-zones,
     fig-vol3-invalidation-graph (CE Secs. 4.2, 4.4.3, 4.7.1).
   - Fiction.LiveBench via Epoch AI: Scenarios.FictionLiveBenchThrough60K over
-    Literature.LongContextComprehension.
-  - Literature.AnswerPositionAccuracy and ContextUse (Liu et al. 2024; Shi et
+    vol3/04_context_engineering/data/fiction_livebench_by_length.csv.
+  - slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv and ContextUse (Liu et al. 2024; Shi et
     al. 2023; the RULER bar), RulerEffectiveLength (Hsieh et al. 2024, Table 3),
     SummarizationFaithfulness (Maynez et al. 2020), PrefixCaching (Zheng et
     al. 2024, SGLang).
@@ -38,6 +38,7 @@ sys.path.insert(0, str(HERE))
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 import slideplot as sp  # noqa: E402
 import calcs as K  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 from mlsysim.physics.agents import calc_unchecked_success  # noqa: E402
 from mlsysim.physics.context import calc_softmax_target_weight  # noqa: E402
@@ -304,7 +305,7 @@ def fiction():
     f = K.SWEEP.result
     lengths = f.lengths
     cols = ["score_" + n for n in lengths]
-    rows = {e["model"]: e for e in K.Literature.LongContextComprehension.entries}
+    rows = {e["model"]: e for e in load_series("vol3/04_context_engineering/data/fiction_livebench_by_length.csv").entries}
     best, worst = rows[f.highest_model], rows[f.lowest_model]
     median = [100 * f.median[n] for n in lengths]
     x = np.arange(len(lengths))

@@ -10,26 +10,26 @@ file writes images/numbers.tex.
 
 Sources by slide:
   - Hook, flows, close: Scenarios.OfqualStandardization2020 over
-    Literature.Series.OfqualGradeMatrix2020 and OfqualCandidatesLowered2020;
+    slides/vol2/16_responsible_ai/images/data/ofqual_2020_grade_matrix.csv and OfqualCandidatesLowered2020;
     report-text shares and dates in Literature.Fairness (Ofqual 2021).
   - Loan model and z-test: Scenarios.LoanScreeningTwoGroups and
     Scenarios.LoanApprovalGapTest (Napkin Math 16.1, 16.2; chapter 16.5.2).
   - COMPAS: Scenarios.CompasTwoYearRecidivism over
-    Literature.Series.CompasTwoYearConfusion (ProPublica data, recomputed).
+    slides/vol2/16_responsible_ai/images/data/compas_two_year_confusion.csv (ProPublica data, recomputed).
   - Dual thresholds: Scenarios.GroupThresholdSketch; fairness cost:
     Scenarios.CreditParityAccuracyCost (Napkin Math 16.4).
   - Obermeyer, Apple Card, four-fifths rule: Literature.Fairness.
-  - Gender Shades: Literature.Series.GenderShadesAudit.
+  - Gender Shades: vol2/16_responsible_ai/data/gender_shades_audit.csv.
   - Monitoring: Scenarios.FairnessMonitor10K (chapter 16.5.5).
   - Overheads: Literature.ResponsibleAIOverhead (chapter table 5).
   - SHAP: Scenarios.ExactShapEnumeration, Scenarios.InlineShapRetrofit,
     Scenarios.ImageExplanationLog.
-  - DP-SGD: Literature.Series.AbadiDpSgdAccuracy and
+  - DP-SGD: vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv and
     Literature.DifferentialPrivacy; the cost scenario Scenarios.Gpt3PrivacyPlan.
   - Unlearning: Scenarios.Gpt3ShardedUnlearning (Napkin Math 16.6).
   - RLHF labels: Scenarios.RewardModelLabelBudget.
   - Automation bias: Scenarios.RadiologyAutomationBias (Napkin Math 16.7).
-  - Waymo: Literature.Series.WaymoRiderOnlyMiles and WaymoVsHumanBenchmark;
+  - Waymo: vol2/16_responsible_ai/data/waymo_rider_only_miles.csv and WaymoVsHumanBenchmark;
     fleet failures: Scenarios.SafetyComplianceAtBillionRequests.
   - Tempe recall: Literature.IncidentReports.
 
@@ -42,10 +42,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 FAIR = Literature.Fairness
-SERIES = Literature.Series
 
 OFQ = Scenarios.OfqualStandardization2020
 LOAN = Scenarios.LoanScreeningTwoGroups
@@ -70,10 +70,10 @@ OFQ_GRADES = OFQ.grades
 OFQ_SPLIT = [OFQ.split(g) for g in OFQ_GRADES]
 OFQ_T2 = [OFQ.candidates_with(k) for k in range(len(OFQ.candidates.entries))]
 BLACK, WHITE = COMPAS.first, COMPAS.second
-GS = SERIES.GenderShadesAudit.entries
-DPSGD = SERIES.AbadiDpSgdAccuracy.entries
-MILES = SERIES.WaymoRiderOnlyMiles.entries
-RATES = SERIES.WaymoVsHumanBenchmark.entries
+GS = load_series("vol2/16_responsible_ai/data/gender_shades_audit.csv").entries
+DPSGD = load_series("vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv").entries
+MILES = load_series("vol2/16_responsible_ai/data/waymo_rider_only_miles.csv").entries
+RATES = load_series("vol2/16_responsible_ai/data/waymo_vs_human_benchmark.csv").entries
 
 
 def pct(x):

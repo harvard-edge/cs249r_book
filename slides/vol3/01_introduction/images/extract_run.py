@@ -16,7 +16,7 @@ folder holding <id>.json for each task), then run
 
     python3 extract_run.py <that folder>
 
-It writes the MLSysIM series Literature.SweBenchMiniSonnet4Run
+It writes the MLSysIM series vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv
 (mlsysim/mlsysim/literature/data/series/swe_bench_verified_mini_v1_sonnet4_run.csv);
 the deck and the chapter read the run only through MLSysIM
 (Scenarios.MiniSweAgentSonnet4Run). Each trajectory is read
@@ -105,8 +105,8 @@ def main(folder):
             "cmd_net": counts["net"],
             "files_in_submission": len(files),
         })
-    out = (Path(__file__).resolve().parents[4] / "mlsysim" / "mlsysim" / "literature" / "data"
-           / "series" / "swe_bench_verified_mini_v1_sonnet4_run.csv")
+    out = (Path(__file__).resolve().parents[4] / "books" / "vol3" / "01_introduction"
+           / "data" / "swe_bench_verified_mini_v1_sonnet4_run.csv")
     with out.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()

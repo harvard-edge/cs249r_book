@@ -751,11 +751,9 @@ sp.hbars(out / "split_link.svg", [
 # million input tokens, with dated vendor sources). The case study's
 # derived floor (calcs.py COST_M, MS Sec. 13.10.3) is drawn on it.
 # Slot: 8.7 x 5.1 cm.
-import csv  # noqa: E402
 from datetime import date  # noqa: E402
 
-PRICES = Path(__file__).resolve().parents[4] / "mlsysim" / "mlsysim" / "literature" / "data" / "series" / "llm_api_input_prices.csv"
-rows = list(csv.DictReader(PRICES.open()))
+rows = K.mlsysim.load_series("vol1/13_model_serving/data/llm_api_input_prices.csv").entries
 OFFSET = {"Legacy GPT-3.5": (4, -11, "left"), "GPT-3.5 Turbo": (5, -10, "left"),
           "GPT-4 (Original)": (5, 2, "left"), "Claude 3 Opus": (5, 3, "left"),
           "Claude 3 Haiku": (-5, -2, "right"), "GPT-4o": (5, 2, "left"),

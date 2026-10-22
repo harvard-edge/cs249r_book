@@ -2,7 +2,7 @@
 """Data plots for Lecture 7 (ML Frameworks).
 
 Every value and label comes from calcs.py, which reads MLSysIM: operator
-registry counts (Literature.Series), the GPT-2 XL decode step and its eager
+registry counts (local CSV series), the GPT-2 XL decode step and its eager
 host work, the dispatch share of a small and a large operation, the PyTorch 2
 speedups (Literature.CompilerResults), the ResNet-50 training-memory estimate,
 the H100's bandwidths, and the MNIST training step. The measured ResNet-50

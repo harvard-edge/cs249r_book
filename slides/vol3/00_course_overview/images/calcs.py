@@ -10,10 +10,10 @@ question (Lecture 1, Scenarios.UncheckedRepairHorizon), the resend question
 slide; the notes carry them for the instructor.
 
 Sources behind the values
-  Hook run          Literature.SweBenchMiniSonnet4Run (django__django-12050)
-  Its calls         Literature.SweBenchMiniSonnet4Django12050Calls
+  Hook run          vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv (django__django-12050)
+  Its calls         vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv
   Leaderboard       Scenarios.SweBenchVerifiedLeaderboardOneAttempt
-                    (Literature.SweBenchVerifiedLeaderboard)
+                    (slides/vol3/00_course_overview/images/data/swe_bench_verified_leaderboard.csv)
   Incident cards    Literature.ServingIncidents, IncidentReports, AgentEvaluation,
                     MultiAgentSystems; Scenarios.ResearchSystemTokenBreakEven
 
@@ -26,14 +26,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 LB = Scenarios.SweBenchVerifiedLeaderboardOneAttempt
 HORIZON, RESEND = Scenarios.UncheckedRepairHorizon, Scenarios.CodingAgentResend30Turns
 BE = Scenarios.ResearchSystemTokenBreakEven
 HOOK_ID = "django__django-12050"
-HOOK = Literature.SweBenchMiniSonnet4Run.where(instance_id=HOOK_ID)[0]
-CALLS = Literature.SweBenchMiniSonnet4Django12050Calls.entries
+HOOK = load_series("vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv").where(instance_id=HOOK_ID)[0]
+CALLS = load_series("vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv").entries
 # Same model, same day (2 April 2024): retrieval baseline (one call) and SWE-agent (loop)
 PAIRS = [("gpt4", "GPT-4 (1106)", "20240402_rag_gpt4", "20240402_sweagent_gpt4"),
          ("opus", "Claude 3 Opus", "20240402_rag_claude3opus", "20240402_sweagent_claude3opus")]

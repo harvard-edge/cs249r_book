@@ -22,10 +22,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Literature, Scenarios = mlsysim.Hardware, mlsysim.Literature, mlsysim.Scenarios
 Q_ = mlsysim.core.units.Q_
-SERIES, BENCH = Literature.Series, Literature.Benchmarks
+BENCH = Literature.Benchmarks
 HERE = Path(__file__).resolve().parent
 H100 = Hardware.Cloud.H100
 
@@ -77,8 +78,8 @@ v("hook_power_rise", CLAIM.power_rise, "{:.0f}", "power rose")
 print("== Recall: the H100 ridge (Hardware.Cloud.H100)")
 v("h100_ridge", m(H100.ridge_point(), "flop/byte"), "{:.0f}", "H100 ridge, FLOP/byte")
 
-print("== Tail: Dean and Barroso 2013, Table 1 (Literature.Series.TailAtScaleLeafLatency)")
-TAS = SERIES.TailAtScaleLeafLatency
+print("== Tail: Dean and Barroso 2013, Table 1 (slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv)")
+TAS = load_series("slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv")
 
 
 def median_and_p99(leaves):
@@ -184,8 +185,8 @@ v("nb_total", m(AMDAHL.total, "ms"), "{:.0f}", "total before, ms")
 v("nb_gain", AMDAHL.overall_speedup, "{:.1f}", "end-to-end speedup")
 v("nb_limit", AMDAHL.limit, "{:.2f}", "Amdahl ceiling")
 
-print("== Software stack: Lee et al. 2019, Tables 4 and 5 (Literature.Series.LeeMobileGpuLatency)")
-LEE = SERIES.LeeMobileGpuLatency
+print("== Software stack: Lee et al. 2019, Tables 4 and 5 (slides/vol1/12_benchmarking/images/data/lee2019_mobile_gpu_latency.csv)")
+LEE = load_series("slides/vol1/12_benchmarking/images/data/lee2019_mobile_gpu_latency.csv")
 xs_tflite = row(LEE, device="iPhone XS", framework="TFLite GPU")["latency_ms"]
 xs_metal = row(LEE, device="iPhone XS", framework="Metal (MPSCNN)")["latency_ms"]
 xs_coreml = row(LEE, device="iPhone XS", framework="Core ML")["latency_ms"]
@@ -200,8 +201,8 @@ v("lee_xs", xs_coreml / xs_tflite, "{:.1f}", "iPhone XS spread")
 v("lee_xs_int", xs_coreml / xs_tflite, "{:.0f}", "the same, whole (title)")
 v("lee_px", px_cpu / px_gpu, "{:.1f}", "Pixel 3 spread")
 
-print("== Time to quality: MLPerf Training v4.0, Eos run 0 (Literature.Series.MLPerfTrainingV40EosResNetEvals)")
-EVALS = SERIES.MLPerfTrainingV40EosResNetEvals.entries
+print("== Time to quality: MLPerf Training v4.0, Eos run 0 (slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_eos_resnet_result0_evals.csv)")
+EVALS = load_series("slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_eos_resnet_result0_evals.csv").entries
 target = float(BENCH.MLPerfResNet50QualityTargetTop1)
 v("target_top1", pct(target), "{:.1f}", "MLPerf ResNet-50 quality target, percent")
 ev_first, ev_mid = EVALS[0], EVALS[statistics.median_low(range(len(EVALS)))]
@@ -239,8 +240,8 @@ v("illus_eff", pct(ILLUSTRATIVE_SCALING.efficiency), "{:.0f}", "chapter's illust
 v("next_gap", pct(m(EOS8.published_score, "minute") / m(DELL8.published_score, "minute") - 1), "{:.1f}",
   "Eos score over Dell score, percent (Lecture 12b)")
 
-print("== MLPerf Inference v5.0, ResNet-50 (Literature.Series.MLPerfInferenceV50ResNet50)")
-INF = SERIES.MLPerfInferenceV50ResNet50
+print("== MLPerf Inference v5.0, ResNet-50 (slides/vol1/12_benchmarking/images/data/mlperf_inference_v5_0_resnet50.csv)")
+INF = load_series("slides/vol1/12_benchmarking/images/data/mlperf_inference_v5_0_resnet50.csv")
 rtx_p90 = row(INF, result_id="5.0-0032", scenario="SingleStream")["value"]
 rtx_off = row(INF, result_id="5.0-0032", scenario="Offline")["value"]
 cisco_off = row(INF, result_id="5.0-0010", scenario="Offline")["value"]
@@ -288,8 +289,8 @@ v("gem_accel", pct(GEMINI.share("Active AI")), "{:.0f}", "accelerators, percent 
 v("gem_host", pct(GEMINI.share("Active host")), "{:.0f}", "host CPU and DRAM, percent")
 v("gem_idle", pct(GEMINI.share("Idle", "Data center")), "{:.0f}", "idle machines and facility, percent")
 
-print("== Throttling: Lee et al. 2019, Figure 8; Tummalapalli et al. 2026 (Literature.Series)")
-SUS = SERIES.LeeSustainedLatency
+print("== Throttling: Lee et al. 2019, Figure 8; Tummalapalli et al. 2026 (local CSV series)")
+SUS = load_series("slides/vol1/12_benchmarking/images/data/lee2019_sustained_latency.csv")
 xs_cpu = row(SUS, device="iPhone XS", processor="CPU")
 xs_gpu = row(SUS, device="iPhone XS", processor="GPU")
 px3 = row(SUS, device="Pixel 3", processor="GPU")
@@ -300,15 +301,15 @@ v("thr_gpu1", xs_gpu["end_ms"], "{:.1f}", "iPhone XS GPU after 200 s, ms")
 v("thr_px", px3["start_ms"], "{:.1f}", "Pixel 3 GPU, ms")
 v("thr_cpu", pct(xs_cpu["end_ms"] / xs_cpu["start_ms"] - 1), "{:.0f}", "iPhone CPU slowdown, percent")
 v("thr_gpu", pct(xs_gpu["end_ms"] / xs_gpu["start_ms"] - 1), "{:.1f}", "iPhone GPU slowdown, percent (exactly 62.5)")
-TOK = SERIES.TummalapalliIphoneThermal
+TOK = load_series("slides/vol1/12_benchmarking/images/data/tummalapalli2026_iphone_thermal.csv")
 tok = {r["state"]: r["tokens_per_s"] for r in TOK.entries}
 v("tok_peak", tok["peak"], "{:.1f}", "tokens/s at peak")
 v("tok_warm", tok["warm"], "{:.1f}", "tokens/s once warm")
 v("tok_hot", tok["hot"], "{:.1f}", "tokens/s once hot")
 v("tok_loss", pct(1 - tok["hot"] / tok["peak"]), "{:.1f}", "loss when hot, percent")
 
-print("== MLPerf Tiny v1.2, visual wake words (Literature.Series.MLPerfTinyV12VwwEnergy)")
-VWW = SERIES.MLPerfTinyV12VwwEnergy
+print("== MLPerf Tiny v1.2, visual wake words (slides/vol1/12_benchmarking/images/data/mlperf_tiny_v1_2_vww_energy.csv)")
+VWW = load_series("slides/vol1/12_benchmarking/images/data/mlperf_tiny_v1_2_vww_energy.csv")
 syn_lo = row(VWW, system="syntiant_9120_0v9_30mhz")
 syn_hi = row(VWW, system="syntiant_9120_1v1_98mhz")
 stm = {r["board"]: r["energy_uj"] for r in VWW.entries if r["organization"] == "STMicroelectronics"}

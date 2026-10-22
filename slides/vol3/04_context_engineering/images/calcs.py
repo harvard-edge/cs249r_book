@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 HERE = Path(__file__).resolve().parent
@@ -33,7 +34,7 @@ INVAL = Scenarios.SupersededExcerptInvalidation
 RETAIN, CHECK = Scenarios.CompactionConstraintRetention, Scenarios.ProtectedFieldCheckPayback
 RESEND, COST = Scenarios.CodingAgentResend30Turns, Scenarios.RepairAttemptCostLevers
 USE, SUMM, CACHE = Literature.ContextUse, Literature.SummarizationFaithfulness, Literature.PrefixCaching
-LIU, RULER = Literature.AnswerPositionAccuracy.entries, Literature.RulerEffectiveLength.entries
+LIU, RULER = load_series("slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv").entries, load_series("slides/vol3/04_context_engineering/images/data/ruler_effective_length.csv").entries
 
 K = 10 ** 3
 STEP_TURNS = 10  # hook step 2 pauses after this many turns (presentation choice)
@@ -95,7 +96,7 @@ v("rec_acc", COST.acceptance, "{:.2f}", "acceptance probability")
 v("rec_acc_pct", 100 * COST.acceptance, "{:.0f}", "acceptance probability, %")
 v("rec_ceff", COST.result.cost_per_accepted, "{:.2f}", "cost per accepted task, $")
 
-print("== Fiction.LiveBench sweep (Literature.LongContextComprehension)")
+print("== Fiction.LiveBench sweep (vol3/04_context_engineering/data/fiction_livebench_by_length.csv)")
 s = SWEEP.result
 first, last = SWEEP.lengths[0], SWEEP.lengths[-1]
 v("fl_models", s.scored_models, "{:.0f}", "models scored at every length")
@@ -107,14 +108,14 @@ v("fl_bar_pct", 100 * SWEEP.hold_bar, "{:.0f}", "the bar, %")
 v("fl_hi", 100 * s.highest_last, "{:.0f}", "highest score at 60K, %")
 v("fl_lo", 100 * s.lowest_last, "{:.0f}", "lowest score at 60K, %")
 
-print("== RULER (Literature.RulerEffectiveLength, ContextUse)")
+print("== RULER (slides/vol3/04_context_engineering/images/data/ruler_effective_length.csv, ContextUse)")
 v("ruler_bar", USE.RulerEffectiveLengthThreshold, "{:.1f}", "effective-length threshold, %")
 v("ruler_rows_words", len(RULER), "words", "rows plotted")
 v("ruler_reached", sum(1 for e in RULER if e["effective_k"] is not None and e["effective_k"] >= e["claimed_k"]),
   "{:.0f}", "rows reaching their claimed length")
 v("ruler_models", USE.RulerModelsEvaluated, "{:.0f}", "models the paper evaluated")
 
-print("== Lost in the middle (Literature.AnswerPositionAccuracy, ContextUse)")
+print("== Lost in the middle (slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv, ContextUse)")
 acc = {int(e["position"]): e["accuracy"] for e in LIU}
 pos = sorted(acc)
 worst = min(pos, key=lambda p: acc[p])

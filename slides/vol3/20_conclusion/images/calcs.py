@@ -23,7 +23,7 @@ Sources
   Attribution         Scenarios.CheckedWindowBlameSearch
   Specification       Scenarios.SpecificationReviewHalfOfEffort (Amdahl)
   Two relations       Scenarios.UncheckedRepairHorizon, Scenarios.RepairAttemptCostLevers (Lecture 1)
-  METR p50 and p80    Scenarios.FrontierHorizonReliabilityGap (Literature.AgentTimeHorizon)
+  METR p50 and p80    Scenarios.FrontierHorizonReliabilityGap (vol3/01_introduction/data/metr_time_horizon_v1_1.csv)
   Recalled lectures   L2 Scenarios.CodingAgentResend30Turns; L4 Scenarios.RepairContextBudget;
                       L7 Scenarios.BlindRetryTwoPercentLoss; L10 Scenarios.FreezeRuleOverStepBudget;
                       L17 Literature.AgentEvaluation (METR o3); L18 Scenarios.ResearchSystemTokenBreakEven;

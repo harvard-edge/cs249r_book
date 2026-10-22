@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios = mlsysim.Scenarios
 Literature = mlsysim.Literature
@@ -54,7 +55,7 @@ MON = MON_S.result
 MON2 = MON2_S.result
 MONF = MONF_S.result
 INC = Literature.IncidentReports
-DAPPER = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
+DAPPER = {r["sampling_frequency"]: r for r in load_series("slides/vol3/14_agent_operations/images/data/dapper_sampling_overhead.csv").entries}
 TRACING = Literature.DistributedTracing
 SWE = Literature.AgentRetrieval
 
@@ -105,7 +106,7 @@ v("tr_saving_int", mag(TRIAL.saving, "s"), "{:.0f}", "the same, whole seconds")
 v("tr_reduction", mag(_tests - _cut, "s"), "{:.1f}", "cut to the tests, s")
 v("tr_reduction_int", mag(_tests - _cut, "s"), "{:.0f}", "the same, whole seconds")
 
-print("== Dapper Table 2 and Section 4.4 (Literature.DapperSamplingOverhead, DistributedTracing)")
+print("== Dapper Table 2 and Section 4.4 (slides/vol3/14_agent_operations/images/data/dapper_sampling_overhead.csv, DistributedTracing)")
 _all = DAPPER["1/1"]
 v("dp_full", _all["latency_change_pct"], "{:.1f}", "tracing every request, latency %")
 v("dp_full_int", _all["latency_change_pct"], "{:.0f}", "the same, whole percent")

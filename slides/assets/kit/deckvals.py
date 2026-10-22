@@ -25,6 +25,8 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "mlsysim"))
 import mlsysim  # noqa: E402,F401
+load_series = mlsysim.load_series
+
 
 # Running prose spells out whole numbers from zero to one hundred (house
 # style, after the MIT Press style sheet: lego-numbers-in-prose.md).

@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Models, Systems = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems
 Platforms, Literature, Scenarios = mlsysim.Platforms, mlsysim.Literature, mlsysim.Scenarios
@@ -73,7 +74,7 @@ def mobile_ram_gb():
 
 def tiny_kws():
     """MLPerf Tiny v1.2 keyword-spotting energy rows."""
-    return Literature.Series.MLPerfTinyV12KwsEnergy.entries
+    return load_series("slides/vol1/02_system_paradigms/images/data/mlperf_tiny_v1_2_kws_energy.csv").entries
 
 
 def wall_points():
@@ -208,7 +209,7 @@ v("decode_pct_under", math.ceil(100 * d.peak_fraction), "{:.0f}", "decode share 
 
 print("== TPU v1 roofline (Jouppi et al. 2017 via Literature)")
 apps = TPU_ROOF.apps
-mix = {r["family"]: r["deployed_share_pct"] for r in Literature.Series.TpuV1DeploymentMix.entries}
+mix = {r["family"]: r["deployed_share_pct"] for r in load_series("slides/vol1/02_system_paradigms/images/data/tpu_v1_deployment_mix.csv").entries}
 bound_share = sum(mix[f] for f in {a["family"] for a in apps if a["bound"] == "memory"})
 v("tpu1_tops", m(TPU_ROOF.peak, "TOPS"), "{:.0f}", "TPU v1 INT8 peak, TOPS")
 v("tpu1_ridge", TPU_ROOF.ridge, "{:,.0f}", "ridge, ops per weight byte")

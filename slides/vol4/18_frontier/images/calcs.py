@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.physics.drivetrain import calc_required_friction  # noqa: E402
 
@@ -272,8 +273,8 @@ v("n_coverage", bill.coverage_trials, "{:,.0f}", "seeded hazards for coverage")
 v("days_needed", m(bill.days_needed, "day"), "{:.1f}", "days of log to meet the bound")
 v("days_beyond", m(bill.days_beyond_cycle, "day"), "{:.1f}", "beyond the cycle, days")
 
-print("== Waymo: rider-only injury crashes (Literature.WaymoSafetyImpact, as in Lecture 16)")
-rows = Literature.WaymoSafetyImpact.entries
+print("== Waymo: rider-only injury crashes (vol4/16_release/data/waymo_safety_impact_headline.csv, as in Lecture 16)")
+rows = load_series("vol4/16_release/data/waymo_safety_impact_headline.csv").entries
 last = max(r["data_cut"] for r in rows)
 inj = next(r for r in rows if r["data_cut"] == last and r["outcome"] == "Any-injury-reported")
 v("waymo_n", inj["waymo_count"], "{:.0f}", "injury crashes")

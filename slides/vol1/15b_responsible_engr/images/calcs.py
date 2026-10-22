@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402,F401
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios, Literature, Hardware = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Hardware
 ureg = mlsysim.core.units.ureg
@@ -116,11 +117,11 @@ v("fb_gap_fail", LOOP.gap_at_breach, "{:.1f}", "gap in that quarter")
 v("credit_all_n", sum(CREDIT.size(g) for g in CREDIT.groups), "{:,.0f}", "credit applicants in the worked example")
 v("credit_appr_n", sum(CREDIT.positives(g) for g in CREDIT.groups), "{:,.0f}", "approved in the worked example")
 
-print("== Gemini prompt (Literature.Series.GeminiPromptEnergy, GoogleServingFactors; Elsworth et al. 2025)")
-GEM = Literature.Series.GeminiPromptEnergy.entries
+print("== Gemini prompt (vol2/15_sustainable_ai/data/gemini_prompt_energy.csv, GoogleServingFactors; Elsworth et al. 2025)")
+GEM = load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
 GEM_WH = sum(r["comprehensive_wh"] for r in GEM)
 GEM_NARROW = sum(r["existing_wh"] for r in GEM if r["existing_counted"])
-SF = Literature.Series.GoogleServingFactors
+SF = load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv")
 
 
 def factor(name):
@@ -164,7 +165,7 @@ v("ff_iowa_local", lit(RUNS.IowaLocalGridKgPerKwh), "{:.3f}", "Iowa local grid, 
 v("ff_cfe_pct", lit(RUNS.GoogleIowaHourlyCfePct2019), "{:.0f}", "hourly carbon-free share, %")
 
 print("== Estimate: GPT-3 against BLOOM (Scenarios.Gpt3TrainingCarbon, BloomTrainingCarbon)")
-G3 = row(Literature.Series.PattersonTrainingFootprints, "model", "GPT-3")
+G3 = row(load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv"), "model", "GPT-3")
 GPT3_KWH, GPT3_GRID = mag(GPT3.energy, "kWh"), mag(GPT3.intensity, "kg/kWh")
 BLOOM_GPU_KWH, BLOOM_GRID = mag(BLOOM.it_energy_total, "kWh"), mag(BLOOM.intensity, "kg/kWh")
 BLOOM_KWH, BLOOM_T, GPT3_T = mag(BLOOM.energy, "kWh"), mag(BLOOM.carbon, "t"), mag(GPT3.carbon, "t")
@@ -194,14 +195,14 @@ v("naive_carbon_x", GPT3_T / (BLOOM_GPU_KWH * BLOOM_GRID / 10 ** 3), "{:.0f}", "
 v("bloom_t4", lit(RUNS.BloomTable4Tco2e), "{:.0f}", "BLOOM, Table 4, t")
 v("llm_gap_t4", GPT3_T / lit(RUNS.BloomTable4Tco2e), "{:.0f}", "GPT-3 / BLOOM with Table 4's rounding")
 
-print("== Four large models (Literature.Series.LuccioniLlmTrainingComparison; PattersonTrainingFootprints)")
-LLM = {r["model"]: r for r in Literature.Series.LuccioniLlmTrainingComparison.entries}
+print("== Four large models (slides/vol1/15b_responsible_engr/images/data/luccioni_llm_training_comparison.csv; PattersonTrainingFootprints)")
+LLM = {r["model"]: r for r in load_series("slides/vol1/15b_responsible_engr/images/data/luccioni_llm_training_comparison.csv").entries}
 v("llm_gpt3", LLM["GPT-3"]["tco2e_pue"], "{:.0f}", "GPT-3, t")
 v("llm_gopher", LLM["Gopher"]["tco2e_pue"], "{:.0f}", "Gopher, t")
 v("llm_opt", LLM["OPT"]["tco2e_pue"], "{:.1f}", "OPT, t")
 v("llm_bloom", LLM["BLOOM"]["tco2e_pue"], "{:.0f}", "BLOOM, t")
 v("llm_span", LLM["GPT-3"]["tco2e_pue"] / LLM["BLOOM"]["tco2e_pue"], "{:.0f}", "span")
-PT = Literature.Series.PattersonTrainingFootprints.entries
+PT = load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv").entries
 v("pt_min_t", min(r["net_tco2e"] for r in PT), "{:.1f}", "smallest Table 4 net emissions, t")
 v("pt_max_t", max(r["net_tco2e"] for r in PT), "{:.0f}", "largest, t")
 v("pt_min_grid", min(r["net_kg_per_kwh"] for r in PT), "{:.3f}", "lowest net grid, kg/kWh")

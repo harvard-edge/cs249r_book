@@ -23,12 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 
-CYBENCH = Literature.CybenchSolveRate.entries
+CYBENCH = load_series("vol3/08_sandboxes/data/cybench_unguided.csv").entries
 ISO = Literature.SandboxIsolation
 TAX = Scenarios.SyscallTaxPerMillionCalls
 SETUP = Scenarios.ParserCallsEnvelopeSetup
@@ -50,7 +51,7 @@ def recorded(fn):
         return list(csv.DictReader(l for l in fh if not l.startswith("#")))
 
 
-print("== Cybench offensive capability (Literature.CybenchSolveRate)")
+print("== Cybench offensive capability (vol3/08_sandboxes/data/cybench_unguided.csv)")
 first_2025 = "2025-01-01"
 v("cy_tasks", ISO.CybenchTasks, "{:.0f}", "Cybench tasks")
 v("cy_best_2024", max(r["unguided_solved"] for r in CYBENCH if r["release_date"] < first_2025) * 100,
@@ -118,7 +119,7 @@ v("cl_full", clone["full copy"], "{:.0f}", "full copy, ms")
 v("cl_clone", clone["copy-on-write clone (cp -c)"], "{:.0f}", "clone, ms")
 v("cl_write", clone["1-byte change to the clone"], "{:.1f}", "1-byte change to the clone, ms")
 
-print("== Firecracker boot (Literature.FirecrackerBootPreconfigured)")
+print("== Firecracker boot (slides/vol3/08_sandboxes/images/data/firecracker_boot_preconfigured.csv)")
 b1, bn = BOOT1.result, BOOTN.result
 v("fc_serial_p50", mag(b1.median, "ms"), "{:.0f}", "one at a time, median, ms")
 v("fc_par_n", bn.booting, "{:.0f}", "booting at once")

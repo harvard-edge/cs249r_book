@@ -4,7 +4,7 @@
 Every value is read from MLSysIM through calcs.py (the same Scenarios.* the
 chapter reads) or from a cited Literature series:
 
-  - Hook and batch sweep: Literature.Series.GoyalLargeMinibatchResNet50
+  - Hook and batch sweep: slides/vol2/06_distributed_training/images/data/goyal_resnet50_large_minibatch.csv
     (Goyal et al. 2017, Table 1 and Figure 3).
   - 175B data-parallel step and the hybrid scoreboard: Scenarios.Gpt3DataParallel1K,
     Gpt3TensorDataParallel1K, Gpt3ThreeDParallel1K.
@@ -19,7 +19,7 @@ chapter reads) or from a cited Literature series:
   - Pipeline: Scenarios.NaiveFourStagePipeline, GPipeFourStageWalkthrough,
     Pipeline8Stage32Micro, Pipeline16Stage32Micro (calc_pipeline_bubble).
   - Tensor parallelism: Scenarios.Gpt3TensorParallelLayerTp8.
-  - Megatron-LM weak scaling: Literature.Series.MegatronLmWeakScaling.
+  - Megatron-LM weak scaling: slides/vol2/06_distributed_training/images/data/megatron_lm_weak_scaling.csv.
   - The top half of the scaling-wall figure and the timelines are schematic.
 
 Run from this folder: python make_figs.py

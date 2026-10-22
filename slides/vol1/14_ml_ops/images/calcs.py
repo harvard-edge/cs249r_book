@@ -7,7 +7,7 @@ footprints on H100s, the keyword spotter's dual-bank update, the retraining
 pipeline break-even, the skew cost, the A/B sizing, and the Argo Rollouts
 gate), the cited results in Literature.IncidentReports (Zillow Offers, Knight
 Capital) and Literature.MlOperations (Papasian and Underwood, Google SRE), and
-the Wild-Time and outage series in Literature.Series. The ML Operations
+the Wild-Time and outage series in local CSV series. The ML Operations
 chapter reads the same scenarios. This file only selects values, converts
 units, and formats them; it types no numbers. Each value is recorded with v()
 under the key the deck prints as \\val{key}; running this file writes
@@ -23,11 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import Q_, DAYS_PER_YEAR  # noqa: E402
 
 Scenarios, Literature, Hardware = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Hardware
-IR, OPS, SERIES = Literature.IncidentReports, Literature.MlOperations, Literature.Series
+IR, OPS = Literature.IncidentReports, Literature.MlOperations
 
 DRIFT = Scenarios.RankingServiceAccuracyDrift
 RANK = Scenarios.DlrmReleaseFootprintH100
@@ -49,10 +50,10 @@ WILD_LABELS = {
     "arXiv (papers)": "arXiv papers",
     "FMoW-Time (satellite)": "FMoW satellite",
 }
-_rows = {r["dataset"]: r for r in SERIES.TemporalShiftWildTime.entries}
+_rows = {r["dataset"]: r for r in load_series("vol1/14_ml_ops/data/temporal_shift_wildtime.csv").entries}
 WILD = [(label, _rows[d]["id_mean"], _rows[d]["ood_mean"]) for d, label in WILD_LABELS.items()]
 WILD_DROPS = [(n, a - b) for n, a, b in WILD]
-OUTAGES = [r["outages"] for r in SERIES.OutagesByMlness.entries]
+OUTAGES = [r["outages"] for r in load_series("slides/vol1/14_ml_ops/images/data/outages_by_mlness.csv").entries]
 
 
 def m(q, unit):
@@ -91,7 +92,7 @@ v("z_q4_low_m", lit(IR.ZillowQ4WriteDownLowUsd) / 10 ** 6, "{:.0f}", "Q4 write-d
 v("z_q4_high_m", lit(IR.ZillowQ4WriteDownHighUsd) / 10 ** 6, "{:.0f}", "Q4 write-down expected, high, $ million")
 v("z_staff_pct", pct(lit(IR.ZillowWorkforceReductionFraction)), "{:.0f}", "workforce cut, %")
 
-print("== Silent failure: Wild-Time (Literature.Series.TemporalShiftWildTime)")
+print("== Silent failure: Wild-Time (vol1/14_ml_ops/data/temporal_shift_wildtime.csv)")
 drops = [d for _, d in WILD_DROPS]
 v("wt_min_drop", min(drops), "{:.0f}", "smallest drop, points")
 v("wt_max_drop", max(drops), "{:.1f}", "largest drop, points")
@@ -108,7 +109,7 @@ v("drift_week_words", m(DRIFT.elapsed, "week"), "words", "the same, in words")
 v("noticed_week", m(DRIFT.noticed, "week"), "{:.0f}", "week a product manager noticed")
 v("noticed_week_words", m(DRIFT.noticed, "week"), "words", "the same, in words")
 
-print("== Hidden debt: outages (Literature.Series.OutagesByMlness, Papasian and Underwood 2020)")
+print("== Hidden debt: outages (slides/vol1/14_ml_ops/images/data/outages_by_mlness.csv, Papasian and Underwood 2020)")
 v("outages_total", lit(OPS.PapasianPostmortems), "{:.0f}", "postmortems")
 v("outages_not_ml", OUTAGES[0], "{:.0f}", "outages rated 0 (not ML)")
 v("outages_all_ml", OUTAGES[-1], "{:.0f}", "outages rated 4 (entirely ML)")

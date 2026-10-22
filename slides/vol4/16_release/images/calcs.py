@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.physics.drivetrain import calc_required_friction  # noqa: E402
 from mlsysim.physics.robotics import (  # noqa: E402
@@ -42,7 +43,7 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 SPACE = Literature.SpaceflightAnomalies
 REPORTS = Literature.IncidentReports
-RECORD = Literature.ChallengerORingDistressRecord
+RECORD = load_series("slides/vol4/16_release/images/data/challenger_oring_distress_record.csv")
 
 STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
 DISPATCH = Scenarios.WarehouseFinishedStopWithDispatch
@@ -222,8 +223,8 @@ v("a_insp", m(INSPECTED.deceleration, "m/s**2"), "{:.2f}", "traction-limited dec
 v("ceiling_insp", m(insp.speed_ceiling, "m/s"), "{:.2f}", "inspected-floor ceiling, m/s")
 v("v_restricted", m(RESTRICTED.speed, "m/s"), "{:.0f}", "signed restricted speed, m/s")
 
-print("== Waymo: rider-only crash rates by outcome (Literature.WaymoSafetyImpact)")
-rows = Literature.WaymoSafetyImpact.entries
+print("== Waymo: rider-only crash rates by outcome (vol4/16_release/data/waymo_safety_impact_headline.csv)")
+rows = load_series("vol4/16_release/data/waymo_safety_impact_headline.csv").entries
 last = max(r["data_cut"] for r in rows)
 latest = {r["outcome"]: r for r in rows if r["data_cut"] == last}
 inj, ssi, fat = latest["Any-injury-reported"], latest["Suspected Serious Injury+"], latest["Any Fatal"]

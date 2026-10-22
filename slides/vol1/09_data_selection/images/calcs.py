@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Models, Scenarios = mlsysim.Literature, mlsysim.Models, mlsysim.Scenarios
 DSR, CHIN = Literature.DataSelectionResults, Literature.Chinchilla
@@ -59,9 +60,9 @@ def sci(key, x, label):
     v(f"{key}_e", e, "{:.0f}", f"{label}, power of ten")
 
 
-print("== The data wall (Literature.Series, Scenarios.PretrainingCorpusGrowth)")
-corpora = Literature.Series.PretrainingTokens.entries
-stock = {r["bound"]: r["tokens"] for r in Literature.Series.PublicTextStock.entries}
+print("== The data wall (local CSV series, Scenarios.PretrainingCorpusGrowth)")
+corpora = load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries
+stock = {r["bound"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/public_text_stock.csv").entries}
 v("corpus_growth", CORPUS.growth, "{:.1f}", "pre-training corpus growth per year")
 v("first_corpus_b", corpora[0]["tokens"] / 10 ** 9, "{:.0f}", "GPT-3 training tokens, billions")
 v("first_corpus_year", int(corpora[0]["date"].split("-")[0]), "{:.0f}", "GPT-3 year")

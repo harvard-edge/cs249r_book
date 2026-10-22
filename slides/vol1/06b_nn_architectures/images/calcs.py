@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Models, Literature, Scenarios = mlsysim.Hardware, mlsysim.Models, mlsysim.Literature, mlsysim.Scenarios
 units = mlsysim.core.units
@@ -45,7 +46,7 @@ XL, SMALL, BERT, GPT3 = LM.GPT2, LM.GPT2_Small, LM.BERT_Base, LM.GPT3
 L7, L8, L70, PALM, OPT = LM.Llama2_7B, LM.Llama3_8B, LM.Llama2_70B, LM.PaLM_540B, LM.OPT_13B
 DLRM = Models.Recommendation.DLRM
 H100, A100 = Hardware.Cloud.H100, Hardware.Cloud.A100
-WINDOWS, FLASH = Literature.ContextWindows, Literature.FlashAttentionBenchmark
+WINDOWS, FLASH = Literature.ContextWindows, load_series("slides/vol1/06b_nn_architectures/images/data/flashattention_a100_benchmark.csv")
 LAYOUT, RECSYS = Literature.ServingMemoryLayout, Literature.RecommendationSystems
 
 TOY = Scenarios.FourTokenToyAttentionHead
@@ -231,7 +232,7 @@ v("sc8k_gb", m(SCORES_8K.layer_bytes, "GB"), "{:.2f}", "one layer at 8,192 token
 v("sc_double_word", m(SCORES_8K.layer_bytes / SCORES_4K.layer_bytes, ""), "words", "growth for twice the tokens, in prose")
 v("dev_gb", labeled_gb(H100), "{:.0f}", "one accelerator's labeled memory, GB")
 
-print("== True or false (Scenarios.BertWindowToFourK; Literature.FlashAttentionBenchmark)")
+print("== True or false (Scenarios.BertWindowToFourK; slides/vol1/06b_nn_architectures/images/data/flashattention_a100_benchmark.csv)")
 v("bert_long", BERT_4K.tokens, "{:,.0f}", "longer input, tokens")
 v("bert_long_ratio", BERT_4K.score_ratio, "{:.0f}", "score memory growth, times")
 fa = {int(r["seq_len"]): r for r in FLASH.entries}
@@ -372,8 +373,8 @@ v("mil_flop_exp", exp, "{:.0f}", "attention FLOP per prompt, power of ten")
 v("mil_minutes", m(MILLION.attention_time_at_peak, "minute"), "{:.0f}", "minutes at H100 peak")
 v("mil_layers", L8.layers, "{:.0f}", "Llama 3.1 8B layers")
 
-print("== Open questions (Literature.LongContextComprehension)")
-row = Literature.LongContextComprehension.where(model="chutes/DeepSeek-R1-0528")[0]
+print("== Open questions (vol3/04_context_engineering/data/fiction_livebench_by_length.csv)")
+row = load_series("vol3/04_context_engineering/data/fiction_livebench_by_length.csv").where(model="chutes/DeepSeek-R1-0528")[0]
 short_col, long_col = "score_400", "score_60k"
 
 

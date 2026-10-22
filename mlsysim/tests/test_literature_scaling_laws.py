@@ -1,3 +1,4 @@
+from mlsysim.core.series_loader import load_series
 """Published scaling-law fits and landmark-run durations stay self-consistent.
 
 Added 2026-10-15 with the Kaplan et al. (2020) joint fits, the Hoffmann et al.
@@ -87,8 +88,8 @@ def test_palm_training_days_equal_sum_of_phases():
 
 
 def test_epoch_compute_history_joins_without_overlap():
-    pre = Literature.Series.NotableModelComputePre2012.entries
-    post = Literature.Series.NotableModelTrainingRuns.entries
+    pre = load_series("vol2/01_introduction/data/notable_model_compute_pre2012.csv").entries
+    post = load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries
     assert len(pre) == 72
     assert all(e["date"] < "2012-01-01" for e in pre)
     assert all(e["date"] >= "2012-01-01" for e in post)
@@ -104,7 +105,7 @@ def test_robot_trajectory_series_agrees_with_scalar_registries():
     traj = {r["dataset"]: r for r in series.entries}
     rl = Literature.RobotLearning
     rds = Literature.RobotDataSystems
-    oxe_total = sum(r["episodes"] for r in Literature.OpenXEmbodimentComposition.entries if r["episodes"])
+    oxe_total = sum(r["episodes"] for r in load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries if r["episodes"])
 
     assert int(traj["Pinto & Gupta"]["episodes"]) == int(rds.PintoGraspingAttempts)
     assert int(traj["Levine Grasping Farm"]["episodes"]) == int(rl.GraspingFarmAttempts)
@@ -141,7 +142,7 @@ def test_models_scale_by_domain_agrees_with_vla_and_token_series():
     assert by_model["RT-2"]["parameters"] == float(vla.Rt2Params)
     assert by_model["PaLM-E"]["parameters"] == float(vla.PalmEParams)
 
-    toks = {r["model"]: r["tokens"] for r in Literature.Series.PretrainingTokens.entries}
+    toks = {r["model"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries}
     notable_ds = {r["model"]: r["training_dataset_size"] for r in viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries}
     assert toks["DeepSeek-V3"] == notable_ds["DeepSeek-V3"] == Models.Language.DeepSeek_V3.training_tokens.to("count").magnitude
     assert toks["Qwen3"] == notable_ds["Qwen3-235B-A22B"]

@@ -14,9 +14,9 @@ Sources behind the scenarios
   Section 1.9       Scenarios.AppendOnlyRepairContext (SWE-bench harness budget)
   Real run          Scenarios.MiniSweAgentSonnet4Run: SWE-bench Verified, mini-swe-agent
                     1.0.0 with Claude 4 Sonnet, one attempt per task
-                    (Literature.SweBenchMiniSonnet4Run, reduced by extract_run.py)
+                    (vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv, reduced by extract_run.py)
   Hook task         Scenarios.AstropyBitmaskRepair (astropy__astropy-14995)
-  METR              Scenarios.FrontierTaskHorizonTrend (Literature.AgentTimeHorizon)
+  METR              Scenarios.FrontierTaskHorizonTrend (vol3/01_introduction/data/metr_time_horizon_v1_1.csv)
 
 Run from this folder: python3 calcs.py
 """

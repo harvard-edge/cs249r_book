@@ -1,3 +1,4 @@
+from mlsysim.core.series_loader import load_series
 """Calculation scenarios: named inputs plus the solver that owns the arithmetic.
 
 Chapters and lecture slides quote these values; pinning them here means a
@@ -134,7 +135,7 @@ def test_memory_interface_widths():
 
 def test_series_lookups():
     from mlsysim import Literature
-    s = Literature.Series.AISupercomputers
+    s = load_series("vol2/02_compute_infrastructure/data/ai_supercomputers.csv")
     assert s.find("name", "Frontier")["power_mw"] == approx(40)
     last = s.largest("power_mw", "first_operational_date", "2025-12-31")
     assert last["first_operational_date"] <= "2025-12-31"
@@ -2657,7 +2658,7 @@ def test_on_device_learning_literature():
     L = Literature.OnDeviceLearning
     assert (L.GboardNgramRecallClientPct, L.GboardServerRecallClientPct, L.GboardFederatedRecallClientPct) == (12.5, 15.0, 15.8)
     assert (L.FlSessionsAccepted, L.FlSessionsRejectedLate, L.FlSessionsInterrupted) == (1_116_401, 327_478, 29_771)
-    rows = Literature.Series.FedAvgMnistCnnRounds.entries
+    rows = load_series("slides/vol2/11_edge_intelligence/images/data/fedavg_mnist_cnn_rounds.csv").entries
     assert (rows[0]["iid_rounds"], rows[0]["non_iid_rounds"], rows[-1]["iid_rounds"]) == (626, 483, 18)
 
 
@@ -3664,10 +3665,10 @@ def test_responsible_ai_safeguard_costs():
 
 def test_responsible_ai_literature_series():
     from mlsysim import Literature
-    dp = Literature.Series.AbadiDpSgdAccuracy.entries
+    dp = load_series("vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv").entries
     cifar8 = next(r for r in dp if r["dataset"] == "CIFAR-10" and r["epsilon"] == 8)
     assert cifar8["accuracy_pct"] == Literature.DifferentialPrivacy.Cifar10AbadiAccuracyAtEps8Pct
-    assert len(Literature.Series.OfqualGradeMatrix2020.entries) == 7
+    assert len(load_series("slides/vol2/16_responsible_ai/images/data/ofqual_2020_grade_matrix.csv").entries) == 7
     assert Literature.Fairness.OfqualReversalDayAugust2020 - Literature.Fairness.OfqualResultsDayAugust2020 == 4
 def test_durable_execution_log_and_snapshots():
     g = Scenarios.IntentQuorumGroupCommit.result
@@ -4089,10 +4090,10 @@ def test_fleet_scale_recall_scenarios():
 
 def test_megascale_and_tail_at_scale_series():
     from mlsysim import Literature
-    rows = {r["gpus"]: r for r in Literature.Series.MegaScaleStrongScaling.entries}
+    rows = {r["gpus"]: r for r in load_series("slides/vol2/17_conclusion/images/data/megascale_strong_scaling.csv").entries}
     assert rows[1024]["megascale_tokens_s"] / rows[512]["megascale_tokens_s"] == approx(1.86015, rel=1e-4)
     tail = {(r["leaves_awaited"], r["percentile"]): r["latency_ms"]
-            for r in Literature.Series.TailAtScaleLeafLatency.entries}
+            for r in load_series("slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv").entries}
     assert tail[("all leaves", 99.0)] / tail[("one random leaf", 99.0)] == approx(14.0)
 def test_warehouse_finished_stopping_budget():
     d = Scenarios.WarehouseFinishedStopAtDriveLimit.result
@@ -4293,7 +4294,7 @@ def test_openai_sycophancy_timeline_and_dapper():
     inc = Literature.IncidentReports
     assert (inc.OpenAiSycophancyRolloutStartDay, inc.OpenAiSycophancyRollbackStartDay) == (24, 28)
     assert inc.OpenAiSycophancyRollbackHours == 24
-    rows = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
+    rows = {r["sampling_frequency"]: r for r in load_series("slides/vol3/14_agent_operations/images/data/dapper_sampling_overhead.csv").entries}
     assert rows["1/1"]["latency_change_pct"] == 16.3 and rows["1/1024"]["latency_change_pct"] == -0.20
     assert Literature.DistributedTracing.DapperFirstProductionSamplingDenominator == 1024
 def test_gpt2_xl_step_fits_one_h100():
@@ -4394,7 +4395,7 @@ def test_model_compression_scenarios():
     assert calc_sparse_breakeven_zero_share(BYTES_FP32, csr) == approx(0.5)
     assert calc_sparse_breakeven_zero_share(BYTES_FP32, coo) == approx(2 / 3)
     assert calc_csr_bytes(6, 4, BYTES_FP32, BYTES_INT32).to("byte").magnitude == 68
-    t3 = Literature.Series.MobileNetV3Table3.entries
+    t3 = load_series("slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv").entries
     front = [t3[i]["model"] for i in calc_pareto_frontier([(r["pixel1_ms"], r["top1"]) for r in t3])]
     assert "V2 1.0" not in front and "V3-Large 0.75" in front
     assert Literature.CompressionResults.SanhDistilBertRetainedPct == 97
@@ -4970,7 +4971,7 @@ def test_supervisory_intervention_takeover_budgets():
             + Literature.HumanTakeover.WaymoDisengagementsByAvSystem2024) == Literature.HumanTakeover.WaymoDisengagementRows2024
     # The take-over series reproduces the paper's mean and the stored inverted-CDF percentiles.
     import math
-    vals = sorted(r["mean_takeover_time_s"] for r in Literature.TakeoverTimeMeta.entries)
+    vals = sorted(r["mean_takeover_time_s"] for r in load_series("slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv").entries)
     assert len(vals) == 520 and sum(vals) / len(vals) == pytest.approx(2.72, abs=5e-3)
     pct = lambda p: vals[max(math.ceil(p / 100 * len(vals)) - 1, 0)]  # noqa: E731
     assert pct(50) == pytest.approx(site.t_takeover_driving_p50.m_as("s"))
@@ -5034,11 +5035,11 @@ def test_verification_literature():
     assert s.DriveFiHazardScenes == 68 and s.DriveFiScenes == 7200 and s.DriveFiGpuSdcPct == pytest.approx(1.93)
     assert Literature.RobustnessStudies.RoboPairGo2DirectCompliant == 3
     assert Literature.IncidentReports.ToyotaTinWhiskerShortOhm == 248
-    vnn = Literature.VnnComp2025ScoredBenchmarks
+    vnn = load_series("vol4/15_verification/data/vnncomp2025_scored_benchmarks.csv")
     assert len(vnn) == 25 and max(e["params_high"] for e in vnn.entries) == 138e6
-    ok = Literature.OKelly2018RareEventTable1
+    ok = load_series("slides/vol4/15_verification/images/data/okelly2018_rare_event_table1.csv")
     assert len(ok) == 12 and ok.where(method="Cross-entropy", gamma=0.14)[0]["std_error"] == pytest.approx(8.88e-6)
-    w = Literature.Wang2025OpenVlaLiberoUntargeted
+    w = load_series("slides/vol4/15_verification/images/data/wang2025_openvla_libero_untargeted.csv")
     assert sum(e["benign_failure_pct"] for e in w.entries) / 4 == pytest.approx(23.5)
 def test_benchmarking_scenarios():
     """Benchmarking: datasheet gap, edge board, Amdahl dilution, training ceiling, duty cycle, boundaries, MLPerf scores."""
@@ -5204,7 +5205,7 @@ def test_release_scenarios_and_records():
     assert arg.conjunction == pytest.approx(0.99 ** 10) and arg.multilegged == pytest.approx(0.99)
     scanner = Embodied.MobileManipulator.WarehouseMobileManipulator.safety_scanner
     assert scanner.response_time_standard_mode.m_as("ms") == 160.0
-    rec = Literature.ChallengerORingDistressRecord
+    rec = load_series("slides/vol4/16_release/images/data/challenger_oring_distress_record.csv")
     assert len(rec) == 23 and min(e["joint_temp_f"] for e in rec.entries) == 53
     assert sum(1 for e in rec.entries if e["orings_distressed"] > 0) == 7
     assert Literature.SpaceflightAnomalies.ThiokolMinimumJointTempF == 53
@@ -5331,10 +5332,10 @@ def test_responsibility_groups_and_records():
     p = Scenarios.CruiseDisclosurePenalties
     assert p.per_day_penalty == Literature.IncidentReports.CruiseCpucPenaltyUsd == 112500
     assert p.total == 2112500
-    assert len(Literature.PedestrianMissRateByAge) == 8 and len(Literature.PedestrianAp75BySkinType) == 8
-    li = Literature.PedestrianMissRateByAge.entries
+    assert len(load_series("slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv")) == 8 and len(load_series("slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv")) == 8
+    li = load_series("slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv").entries
     assert sum(e["miss_rate_child_pct"] for e in li) / 8 == pytest.approx(43.89, abs=0.005)
-    w = Literature.PedestrianAp75BySkinType.entries
+    w = load_series("slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv").entries
     assert round(sum(e["ap75_darker_pct"] for e in w) / 8, 1) == Literature.Fairness.WilsonAp75AverageDarkerPct
 
 
@@ -5364,7 +5365,7 @@ def test_ml_operations_part1_scenarios():
     assert d.decay_rate.m_as("1/day") == pytest.approx(0.00235564, rel=1e-5)
     assert calc_exponential_decay_rate(1.0, 0.5, 1.0) == pytest.approx(0.693147, rel=1e-6)
     assert Scenarios.ArgoRolloutsSuccessRateGate.failures_to_abort == 4
-    out = [row["outages"] for row in Literature.Series.OutagesByMlness.entries]
+    out = [row["outages"] for row in load_series("slides/vol1/14_ml_ops/images/data/outages_by_mlness.csv").entries]
     assert sum(out) == float(Literature.MlOperations.PapasianPostmortems)
     assert float(Literature.IncidentReports.ZillowQ3HomesBought) == 9680
 
@@ -5725,7 +5726,7 @@ def test_ml_operations_part2_scenarios():
     assert a.score == 1 and a.score_after_proposal == 1 and a.score_with("Monitoring", 4) == 5
     assert float(Literature.MlOperations.MlTestScoreSections) * a.tests_per_section == 28
     assert Scenarios.RecommendationIncidentSeverityPolicy.response_deadlines["P3"].m_as("hour") == 24
-    rows = Literature.Series.LabelFreeShiftDetection.entries
+    rows = load_series("slides/vol1/14b_ml_ops/images/data/rabanser2019_label_free_detection.csv").entries
     assert [r["samples"] for r in rows][-1] == 10000 and rows[-1]["small"] == pytest.approx(0.54)
     assert float(Literature.IncidentReports.UnityPinpointerHeadwindUsd) == 110e6
 
@@ -5802,7 +5803,7 @@ def test_swe_bench_verified_leaderboard_one_attempt():
     assert s.frontier[0] == ("2023-10-10", pytest.approx(0.044)) and s.frontier[-1][1] == pytest.approx(0.792)
     assert s.ratio("20240402_sweagent_gpt4", "20240402_rag_gpt4") == pytest.approx(112 / 14)
     assert s.ratio("20240402_sweagent_claude3opus", "20240402_rag_claude3opus") == pytest.approx(79 / 35)
-    calls = Literature.SweBenchMiniSonnet4Django12050Calls.entries
+    calls = load_series("vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv").entries
     assert len(calls) == 22 and calls[0]["context_chars"] == 5499
 def test_chat_service_day_scenario():
     """One day of ChatGPT prompts at the Gemini median prompt (added 2026-10-20)."""

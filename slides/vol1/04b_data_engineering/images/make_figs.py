@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 import numpy as np  # noqa: E402
 from deckvals import val, num  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402
 from calcs import m  # noqa: E402
@@ -114,7 +115,7 @@ bars_lines(out / "transfer_time.svg", [
 
 # 2. Storage price per TB by medium, 1956 to 2023 (variant of the book figure)
 def price_trend():
-    rows = K.Literature.Series.StoragePricePerTB.entries
+    rows = load_series("vol1/04_data_engineering/data/storage_price_per_tb.csv").entries
     series = [("dram", "DRAM", C["danger"]), ("ssd", "Solid-state drive", C["data"]),
               ("hdd", "Hard disk", C["memory"])]
     for k in (1, 2):

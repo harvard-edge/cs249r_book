@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Literature, Platforms = mlsysim.Hardware, mlsysim.Literature, mlsysim.Platforms
 ReferenceStats, Scenarios, Datasets = mlsysim.ReferenceStats, mlsysim.Scenarios, mlsysim.Datasets
@@ -137,7 +138,7 @@ v("hbm_over_a17", ratio(H100.memory.bandwidth, A17.memory.bandwidth), "{:.0f}", 
 v("hbm_over_sd8_1", ratio(H100.memory.bandwidth, SD8.memory.bandwidth), "{:.1f}", "same, one decimal")
 v("hbm_over_a17_1", ratio(H100.memory.bandwidth, A17.memory.bandwidth), "{:.1f}", "same, one decimal")
 v("weight_read_pct", STACK.weight_read_share * 100, "{:.0f}", "three weight reads, share of step traffic, %")
-ane = {r["chip"]: r for r in Literature.Series.AppleNeuralEngine.entries}
+ane = {r["chip"]: r for r in load_series("vol2/11_edge_intelligence/data/apple_neural_engine.csv").entries}
 v("ane_a11", ane["A11 Bionic"]["tops"], "{:.1f}", "A11 stated rating, TOPS")
 v("ane_a11_year", ane["A11 Bionic"]["year"], "{:.0f}", "A11 year")
 v("ane_a17", ane["A17 Pro"]["tops"], "{:.0f}", "A17 Pro stated rating, TOPS")
@@ -198,7 +199,7 @@ v("dropout_hi", FL.FlDropoutPctHigh, "{:.0f}", "dropout, high, %")
 v("secagg_rounds_words", FL.FlSecAggProtocolRounds, "words", "Secure Aggregation message rounds, spelled")
 
 print("== FedAvg rounds (McMahan et al. 2017, Table 2)")
-rows = Literature.Series.FedAvgMnistCnnRounds.entries
+rows = load_series("slides/vol2/11_edge_intelligence/images/data/fedavg_mnist_cnn_rounds.csv").entries
 sgd, best = rows[0], max(rows, key=lambda r: r["updates_per_round"])
 e5 = max(rows[1:], key=lambda r: r["non_iid_rounds"])  # the full-batch E = 5 row, worst non-IID
 helps = [sgd["non_iid_rounds"] / r["non_iid_rounds"] for r in rows[1:] if r["non_iid_rounds"] < sgd["non_iid_rounds"]]

@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
 Q = mlsysim.core.units.Q_
@@ -50,8 +51,8 @@ SAMPLE = Scenarios.PedestrianGroupEvaluationSample
 CROSSINGS = Scenarios.WarehouseCrossingExposure
 RETENTION = Scenarios.WarehouseEventTriggeredRetention
 LABOR = Scenarios.WarehouseRemoteAssistantLabor
-LI = Literature.PedestrianMissRateByAge
-WILSON = Literature.PedestrianAp75BySkinType
+LI = load_series("slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv")
+WILSON = load_series("slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv")
 
 
 def m(q, unit):

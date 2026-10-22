@@ -23,7 +23,7 @@ Sources behind the scenarios
   Napkin Math 3.6   Scenarios.FlatVsBeamSearch
   Napkin Math 3.7   Scenarios.DeadlineBoundRepairPolicies
   Lecture 1 recall  Scenarios.UncheckedRepairHorizon
-  Public runs       Scenarios.SweAgentClaude35SonnetRunCost (Literature.SweBenchTrajectories)
+  Public runs       Scenarios.SweAgentClaude35SonnetRunCost (vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv)
   Snell, PRM800K    Literature.TestTimeCompute
 
 Run from this folder: python3 calcs.py

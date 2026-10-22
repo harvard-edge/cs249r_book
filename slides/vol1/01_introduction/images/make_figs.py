@@ -4,7 +4,7 @@
 Every plotted value and every printed label comes from MLSysIM through
 calcs.py (val() and num() give the formatted string and the float the slides
 print), or from the measured series MLSysIM holds:
-  - Google Flu Trends against the CDC count: Literature.Series.GoogleFluTrendsVsCdc
+  - Google Flu Trends against the CDC count: slides/vol1/01_introduction/images/data/google_flu_trends_cdc_ilinet.csv
     (Delphi Epidata API), seasons and peaks from Scenarios.GoogleFluTrendsDrift.
   - GPU-days: the registry's AlexNet, GPT-3, and GPT-4-class training runs.
   - Iron-law bars: Scenarios.ResNet50Batch64StepH100 and Gpt2XlDecodeStepH100
@@ -15,7 +15,7 @@ print), or from the measured series MLSysIM holds:
     are illustrative layout, labeled "Illustrative" on the plot.
   - Amdahl pipeline: Scenarios.ModelSpeedupRequestPath.
   - ImageNetV2 scatter and fit: Scenarios.ImageNetV2Shift (Recht et al. 2019).
-  - MLPerf: Literature.Series.MLPerfInferenceV4Llama2Offline and the H100 and
+  - MLPerf: slides/vol1/01_introduction/images/data/mlperf_inference_v4_llama2_70b_offline.csv and the H100 and
     H200 registry entries.
 
 Run from this folder with the MLSysBook venv (it imports mlsysim):
@@ -392,7 +392,7 @@ sp.save(fig, out / "recht_scatter.svg")
 # ---------------------------------------------------------------------------
 # MLPerf Inference v4.0, Llama 2 70B Offline: H100 against H200, throughput
 # relative to the H100, with the bandwidth and compute ratios as reference
-# lines. Throughput from Literature.Series.MLPerfInferenceV4Llama2Offline;
+# lines. Throughput from slides/vol1/01_introduction/images/data/mlperf_inference_v4_llama2_70b_offline.csv;
 # specs from the MLSysIM registry (calcs.py).
 # ---------------------------------------------------------------------------
 H100_RUN, H200_RUN, CTS_RUN = calcs.mlperf_rows()

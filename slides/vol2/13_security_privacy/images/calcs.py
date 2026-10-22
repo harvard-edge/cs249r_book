@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 STEAL = Literature.ExtractionAttacks
@@ -209,8 +210,8 @@ v("mnist_base_pct", mnist, "{:.1f}", "MNIST nonprivate baseline, %")
 # Same gap the chapter computes: the largest shortfall from the MNIST baseline
 # among the plotted MNIST points at single-digit epsilon (1 <= epsilon < 10),
 # Bu et al. 2020 (Table 1, CLT epsilon) and Abadi et al. 2016 (Section 5.2).
-mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in Literature.Series.GaussianDpMnistNoisySgd.entries]
-mnist_points += [(r["epsilon"], r["accuracy_pct"]) for r in Literature.Series.AbadiDpSgdAccuracy.entries
+mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in load_series("vol2/13_security_privacy/data/bu_gdp_mnist_noisysgd.csv").entries]
+mnist_points += [(r["epsilon"], r["accuracy_pct"]) for r in load_series("vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv").entries
                  if r["dataset"] == "MNIST"]
 mnist_gap = mnist - min(acc for eps, acc in mnist_points if 1 <= eps < 10)
 v("mnist_gap_pts", mnist_gap, "{:.1f}", "largest MNIST gap at single-digit epsilon, points")

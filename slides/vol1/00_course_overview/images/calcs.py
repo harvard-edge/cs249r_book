@@ -49,7 +49,7 @@ v("ans_tokens", ENERGY.response_tokens, "{:.0f}", "tokens in one answer")
 v("ans_words", ENERGY.response_tokens * lit(ReferenceStats.TextTokenization.WordsPerToken), "{:.0f}",
   "the same answer in words")
 
-print("== Reveal: the measured median prompt (Literature.Series.GeminiPromptEnergy, as in Lecture 13)")
+print("== Reveal: the measured median prompt (vol2/15_sustainable_ai/data/gemini_prompt_energy.csv, as in Lecture 13)")
 phone_j = m(ReferenceStats.EnergyAnchors.SmartphoneCharge, "J")
 v("prompt_wh", m(CHAT.energy_per_prompt, "Wh"), "{:.2f}", "median Gemini prompt, Wh")
 v("prompt_j", m(CHAT.energy_per_prompt, "J"), "{:,.0f}", "the same, J")

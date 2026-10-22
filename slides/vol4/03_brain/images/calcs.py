@@ -2,7 +2,7 @@
 """Every number on the Lecture 3 slides and notes (The Cognitive Brain), read from MLSysIM.
 
 MLSysIM holds the inputs (the Embodied.* machine and its site record,
-Literature.VlaSystems and Literature.EdgeInferenceOrin) and the calculations
+Literature.VlaSystems and vol4/03_brain/data/mlperf_inference_edge_orin.csv) and the calculations
 (Scenarios.*, backed by the solvers in engine/solvers/proposer.py); the chapter
 reads the same scenarios. This file only selects values, converts units, and
 formats them; it types no numbers. Each value is recorded with v() under the

@@ -4,9 +4,9 @@
 Every value comes from calcs.py, which reads MLSysIM:
   - SWE-bench Verified leaderboard submissions
     (Scenarios.SweBenchVerifiedLeaderboardOneAttempt over
-    Literature.SweBenchVerifiedLeaderboard)
+    slides/vol3/00_course_overview/images/data/swe_bench_verified_leaderboard.csv)
   - The django__django-12050 run of mini-SWE-agent 1.0.0 with Claude 4 Sonnet
-    (Literature.SweBenchMiniSonnet4Django12050Calls)
+    (vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv)
 This file types only dates, layout, and label offsets.
 
 Run from this folder: python3 make_figs.py   (then make deck converts SVG to PDF)

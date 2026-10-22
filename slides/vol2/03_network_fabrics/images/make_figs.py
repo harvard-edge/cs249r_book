@@ -6,7 +6,7 @@ MLSysIM (registry values and Scenarios.*); the list below names the source of
 each figure. Derived and illustrative values say so here and on the slide.
   - Staircase recall: 10 GB at HBM 3,350 GB/s, NVLink 450 GB/s, InfiniBand
     50 GB/s: 3.0, 22.2, 200 ms (Compute Infrastructure, Napkin Math 2.3).
-  - Interconnect generations: MLSysIM Literature.Series.InterconnectGenerations
+  - Interconnect generations: MLSysIM vol2/03_network_fabrics/data/interconnect_generations.csv
     (IEEE 802.3, IBTA, NVIDIA specs), per direction; NVLink is the sum of one
     GPU's links. H100 NVLink 3,600 Gb/s = 450 GB/s; NDR 400 Gb/s = 50 GB/s.
   - Step timeline: illustrative 100 + 100 ms compute with a 1 ms or 30 ms
@@ -16,7 +16,7 @@ each figure. Derived and illustrative values say so here and on the slide.
     (Network Fabrics, Sec. 3.6.4). Drain time in units of one flow alone.
   - Alpha-beta crossover: NDR alpha 1.5 us, beta 50 GB/s (n* = 75 KB); RoCE
     100G alpha 5 us, beta 12.5 GB/s (n* = 62.5 KB) (Napkin Math 3.1, fig. 7).
-  - NCCL sweep: MLSysIM Literature.Series.NCCLAllReduceH100Node (NVIDIA
+  - NCCL sweep: MLSysIM vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv (NVIDIA
     exemplar-performance all_reduce_perf output, 8x H100 over NVLink). Model:
     floor = median time for sizes up to 64 KB (17.0 us); bandwidth = algbw at
     16 GB (274 GB/s); knee 4.7 MB; worst ratio 1.74 at 8 MB (8 to 128 MB).
@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 from mlsysim import Literature  # noqa: E402
 from mlsysim.core.units import Q_  # noqa: E402
@@ -141,7 +142,7 @@ sp.hbars(out / "staircase_recall.svg", [
 # =============================================================================
 # 2. Interconnect generations (MLSysIM, per direction, GB/s)
 # =============================================================================
-rows = Literature.Series.InterconnectGenerations.entries
+rows = load_series("vol2/03_network_fabrics/data/interconnect_generations.csv").entries
 best = {}
 for r in rows:
     if r["first_product_year"] is None or r["family"] == "PCIe":

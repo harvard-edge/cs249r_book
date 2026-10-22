@@ -41,6 +41,8 @@ from .agents.registry import (
 from .ops import Ops
 from .engine import calibration
 from .notation.registry import Notation, Symbols
+from .core.series_loader import LocalSeries, load_series
+
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.units import *  # noqa: F401,F403

@@ -6,7 +6,7 @@ slide prints and num(key) its value, and bar lengths read the Scenarios.*
 quantities directly. The notes below say where each figure's inputs live.
   - Data wall: reported pretraining tokens and the stock of public human text
     (Villalobos et al. 2024), read from MLSysIM's literature series
-    (Literature.Series.PretrainingTokens and PublicTextStock), the same data
+    (vol1/04_data_engineering/data/pretraining_tokens.csv and PublicTextStock), the same data
     as the Data Engineering chapter's figure; the fit is recomputed here
     exactly as the book does (least squares on log10 tokens), and its label
     is Scenarios.PretrainingCorpusGrowth's growth.
@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
@@ -60,8 +61,8 @@ def data_wall():
     root = Path(__file__).resolve().parents[4] / "mlsysim"
     sys.path.insert(0, str(root))
     from mlsysim import Literature
-    corpora = Literature.Series.PretrainingTokens.entries
-    stock = {r["bound"]: r["tokens"] for r in Literature.Series.PublicTextStock.entries}
+    corpora = load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries
+    stock = {r["bound"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/public_text_stock.csv").entries}
 
     def year(d):
         d = dt.date.fromisoformat(d)

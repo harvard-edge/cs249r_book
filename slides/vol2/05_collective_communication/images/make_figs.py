@@ -4,7 +4,7 @@
 Every number a figure prints or plots comes from calcs.py, which reads it from
 MLSysIM (registry values, Literature, and Scenarios.*); the list below names
 the source of each figure. Derived and illustrative values say so on the slide.
-  - Horovod hook and trace: Literature.Series.HorovodScaling128Gpu and
+  - Horovod hook and trace: slides/vol2/05_collective_communication/images/data/horovod_scaling_128gpu.csv and
     HorovodTimelineTrace, Literature.Communication.Horovod* (Sergeev and Del
     Balso 2018; bar heights and phase edges read from the paper's figures).
   - Traffic map: table 1 (Sec. 5.3). Contracts: Sec. 5.4 and figure 2.
@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 from mlsysim import Literature  # noqa: E402
 from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time  # noqa: E402
@@ -539,11 +540,11 @@ def ring():
 
 
 # 15. Horovod Timeline (Sergeev and Del Balso 2018, Figure 5), redrawn -------
-# Phase edges (read from the screenshot) are Literature.Series.HorovodTimelineTrace;
+# Phase edges (read from the screenshot) are slides/vol2/05_collective_communication/images/data/horovod_timeline_trace.csv;
 # the ALLREDUCE span of tensors 2 to 4 is printed in its detail pane
 # (Literature.Communication.HorovodTimelineAllreduce*). Derived spans: calcs.py.
 def horovod_trace():
-    trace = Literature.Series.HorovodTimelineTrace.entries
+    trace = load_series("slides/vol2/05_collective_communication/images/data/horovod_timeline_trace.csv").entries
     fast = [(r["phase"], r["start_ms"], r["end_ms"]) for r in trace if r["tensors"] == "0-1"]
     slow = [(r["phase"], r["start_ms"], r["end_ms"]) for r in trace if r["tensors"] == "2-4"]
     color = {"negotiate": C["c3"], "wait": C["neutral_l"], "schedule": C["c3_l"],

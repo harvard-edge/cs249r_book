@@ -8,7 +8,7 @@ and continuous schedules, prefix sharing, vLLM's KV pool, DistServe's pools,
 energy per token, and Little's law on the MLPerf server), the cited results in
 Literature.ServingResults, and the MLPerf Inference v5.0 Llama 2 70B rows,
 the vLLM benchmark runs, the PagedAttention memory breakdown, and the API
-price series in Literature.Series. The Model Serving chapter reads the same
+price series in local CSV series. The Model Serving chapter reads the same
 scenarios. This file only selects values, converts units, and formats them;
 it types no numbers. Each value is recorded with v() under the key the deck
 prints as \\val{key}; running this file writes images/numbers.tex.
@@ -27,12 +27,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import Q_, BYTES_FP16, BYTES_INT4  # noqa: E402
 from mlsysim.physics import calc_littles_law_rate  # noqa: E402
 
 Scenarios, Literature, Models, Hardware = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Models, mlsysim.Hardware
-SR, SERIES = Literature.ServingResults, Literature.Series
+SR = Literature.ServingResults
 
 H100 = Hardware.Cloud.H100
 CHAT = Scenarios.Gpt2XlChatDecodeBatchesH100
@@ -83,8 +84,8 @@ def pct(x):
     return 100 * x
 
 
-print("== Hook (Literature.Series.MLPerfInferenceV50Llama2_70B, 5.0-0020)")
-LL = SERIES.MLPerfInferenceV50Llama2_70B
+print("== Hook (slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv, 5.0-0020)")
+LL = load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv")
 LL_OFF = row(LL, benchmark="llama2-70b-99", scenario="Offline")
 LL_CONV = row(LL, benchmark="llama2-70b-99", scenario="Server")
 LL_INT = row(LL, benchmark="llama2-70b-interactive-99", scenario="Server")
@@ -217,8 +218,8 @@ v("h100_mem_gb", m(H100.memory.capacity, "GB"), "{:.1f}", "H100 memory, decimal 
 v("h100_mem_gib", m(H100.memory.capacity, "GiB"), "{:.0f}", "H100 memory, GiB")
 v("sw_batch", lit(SR.SplitwiseTbtBatch), "{:.0f}", "Splitwise batch size")
 
-print("== vLLM serving benchmark (Literature.Series.VllmServingBenchmarkH100, issue 24684)")
-VB = SERIES.VllmServingBenchmarkH100
+print("== vLLM serving benchmark (slides/vol1/13b_model_serving/images/data/vllm_serving_benchmark_h100.csv, issue 24684)")
+VB = load_series("slides/vol1/13b_model_serving/images/data/vllm_serving_benchmark_h100.csv")
 SHORT, LONG = row(VB, prompts="sharegpt"), row(VB, prompts="random")
 for name, r in (("short", SHORT), ("long", LONG)):
     v(f"vb_{name}_in", r["input_tokens"] / r["requests"], "{:,.0f}", f"{name}: input tokens per request")
@@ -313,8 +314,8 @@ v("kv70_hdim", R70.head_dim, "{:.0f}", "70B-class head width")
 v("kwon_param_pct", lit(Literature.ServingMemoryLayout.ParameterSharePct), "{:.0f}", "13B on A100 40 GB: weights, %")
 v("kwon_kv_pct", lit(Literature.ServingMemoryLayout.KvCacheSharePct), "{:.0f}", "13B on A100 40 GB: cache, %")
 
-print("== Reservation and paging (Literature.Series.PagedAttentionMemoryBreakdown; ServingResults)")
-PA = Literature.PagedAttentionMemoryBreakdown
+print("== Reservation and paging (slides/vol1/13b_model_serving/images/data/pagedattention_kv_memory_breakdown.csv; ServingResults)")
+PA = load_series("slides/vol1/13b_model_serving/images/data/pagedattention_kv_memory_breakdown.csv")
 USED = {r["system"]: r["token_states"] for r in PA.entries}
 orca_used = [USED["Orca (Max)"], USED["Orca (Pow2)"], USED["Orca (Oracle)"]]
 v("orca_used_low", min(orca_used), "{:.1f}", "Orca: token states, lowest %")
@@ -411,11 +412,11 @@ v("cc_low_joules", m(ENERGY.low_use_joules_per_token, "J"), "{:.1f}", "the chapt
 v("g_reduction", lit(SR.GooglePromptEnergyReduction), "{:.0f}", "Google: energy per prompt fell, times")
 v("g_model", lit(SR.GooglePromptEnergyModelReduction), "{:.0f}", "of it from models, times")
 v("g_util", lit(SR.GooglePromptEnergyUtilizationReduction), "{:.1f}", "of it from utilization, times")
-GEMINI = SERIES.GeminiPromptEnergy.entries
+GEMINI = load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
 v("g_wh", sum(r["comprehensive_wh"] for r in GEMINI if r["comprehensive_counted"] == 1), "{:.2f}",
   "median prompt, Wh (full stack)")
 
-print("== Cost per million tokens (Scenarios.Llama3_8BInt4ChatServiceH100; Literature.Series.LlmApiInputPrices)")
+print("== Cost per million tokens (Scenarios.Llama3_8BInt4ChatServiceH100; vol1/13_model_serving/data/llm_api_input_prices.csv)")
 COST_M = m(CASE.cost_per_million_tokens, "dollar")
 v("cs_price", m(CASE.price, "dollar/hour"), "{:.0f}", "H100, $ per hour")
 v("cs_prefill_rate", m(CASE.prefill_rate, "1/s"), "{:,.0f}", "prefill, prompt tokens/s")
@@ -424,7 +425,7 @@ v("cs_decode", CASE.decode_tokens, "{:.0f}", "generated tokens")
 v("cs_tokens", CASE.total_tokens, "{:,.0f}", "tokens per request")
 v("cs_mtok_h", CASE.tokens_per_hour / 10 ** 6, "{:.1f}", "million tokens per hour")
 v("cs_usd_m", COST_M, "{:.3f}", "$ per million tokens")
-PRICES = {r["model"]: r["usd_per_mtok_input"] for r in SERIES.LlmApiInputPrices.entries}
+PRICES = {r["model"]: r["usd_per_mtok_input"] for r in load_series("vol1/13_model_serving/data/llm_api_input_prices.csv").entries}
 v("price_gpt4", PRICES["GPT-4 (Original)"], "{:.0f}", "GPT-4 (original), $ per million input tokens")
 v("price_flash", PRICES["Gemini 1.5 Flash"], "{:.3f}", "Gemini 1.5 Flash, $ per million input tokens")
 

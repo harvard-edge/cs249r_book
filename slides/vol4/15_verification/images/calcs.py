@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.physics.drivetrain import calc_required_friction, calc_traction_deceleration_limit  # noqa: E402
 
@@ -101,10 +102,10 @@ RESTRICTED_BOUND = m(restricted.required_distance, "m")
 LATE_TRAVEL = m(late.travel, "m")
 INTENT_PARAMS = m(RM.intent_model.parameters, "param")
 CHUNK_PARAMS = m(RM.chunk_model.parameters, "param")
-VNN_BENCHMARKS = Literature.VnnComp2025ScoredBenchmarks.entries
+VNN_BENCHMARKS = load_series("vol4/15_verification/data/vnncomp2025_scored_benchmarks.csv").entries
 VNN_MAX_PARAMS = [e["params_high"] for e in VNN_BENCHMARKS]
-WANG = Literature.Wang2025OpenVlaLiberoUntargeted.entries
-OKELLY = Literature.OKelly2018RareEventTable1.entries
+WANG = load_series("slides/vol4/15_verification/images/data/wang2025_openvla_libero_untargeted.csv").entries
+OKELLY = load_series("slides/vol4/15_verification/images/data/okelly2018_rare_event_table1.csv").entries
 DFI_EXHAUSTIVE_H = m(Q_(STUDIES.DriveFiExhaustiveDays, "day"), "hour")
 DFI_BAYES_H = STUDIES.DriveFiBayesianHours
 N_MC, N_ZERO, N_IS = RARE.result.monte_carlo_runs, RARE.result.zero_failure_runs, RARE.result.importance_runs

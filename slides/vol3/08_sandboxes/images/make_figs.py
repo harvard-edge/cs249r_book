@@ -448,7 +448,7 @@ def cybench_plot():
 
 def firecracker_plot():
     def preconf(booting):
-        # Literature.FirecrackerBootPreconfigured: Agache et al. 2020 released CDF
+        # slides/vol3/08_sandboxes/images/data/firecracker_boot_preconfigured.csv: Agache et al. 2020 released CDF
         series = calcs.BOOT1.series
         return np.array([[r["boot_ms"], r["booted_fraction"]]
                          for r in series.entries if r["concurrency"] == booting])

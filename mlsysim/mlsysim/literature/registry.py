@@ -357,8 +357,6 @@ class KaplanScalingLaws:
     default_context_tokens = 1024
 
 
-from .series import Series  # noqa: E402  (dataset series behind trend figures)
-from . import series as _series
 
 
 class Literature(Registry):
@@ -381,9 +379,6 @@ class Literature(Registry):
     ServingIncidents = ServingIncidents
     InferenceDeterminism = InferenceDeterminism  # added 2026-10-20
     SelfCorrection = SelfCorrection
-    LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
-    LlmInferenceTraceConversation2023 = _series.LlmInferenceTraceConversation2023  # added 2026-10-20
-    LlmInferenceTraceConversation2024TenMinute = _series.LlmInferenceTraceConversation2024TenMinute  # added 2026-10-20
     PredictionQuality = PredictionQuality  # added 2026-10-20
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
@@ -430,15 +425,8 @@ class Literature(Registry):
     ContextWindows = ContextWindows  # network architectures (added 2026-10-20)
     RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
     ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
-    FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
-    NvidiaGemmTileQuantizationA100 = _series.NvidiaGemmTileQuantizationA100  # added 2026-10-20
-    SsdGradientHistogram = _series.SsdGradientHistogram  # added 2026-10-20
     RobustnessStudies = RobustnessStudies  # added 2026-10-20
     VerificationStudies = VerificationStudies  # added 2026-10-20
-    VnnComp2025ScoredBenchmarks = _series.VnnComp2025ScoredBenchmarks  # added 2026-10-20
-    OKelly2018RareEventTable1 = _series.OKelly2018RareEventTable1  # added 2026-10-20
-    Wang2025OpenVlaLiberoUntargeted = _series.Wang2025OpenVlaLiberoUntargeted  # added 2026-10-20
-    ChallengerORingDistressRecord = _series.ChallengerORingDistressRecord  # added 2026-10-20
     DataSelectionResults = DataSelectionResults  # added 2026-10-20
     TrajectoryGeneration = TrajectoryGeneration  # added 2026-10-20
     SharedHardwareInterference = SharedHardwareInterference  # added 2026-10-20
@@ -450,55 +438,9 @@ class Literature(Registry):
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
-    Series = Series
-    AgentTimeHorizon = _series.AgentTimeHorizon
-    LowestPriceAtCapability = _series.LowestPriceAtCapability
-    TerminalBenchHarness = _series.TerminalBenchHarness
-    LongContextComprehension = _series.LongContextComprehension
-    RulerEffectiveLength = _series.RulerEffectiveLength  # added 2026-10-20
-    AnswerPositionAccuracy = _series.AnswerPositionAccuracy  # added 2026-10-20
-    SweBenchBm25Context = _series.SweBenchBm25Context  # added 2026-10-20
-    PoisonedRagBlackBox = _series.PoisonedRagBlackBox  # added 2026-10-20
-    PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
-    ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
-    MetastableFailures = _series.MetastableFailures  # added 2026-10-20
-    DapperSamplingOverhead = _series.DapperSamplingOverhead  # added 2026-10-20
     MultiAgentFailures = MultiAgentFailures  # added 2026-10-20
-    AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
-    SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     AgentEvaluation = AgentEvaluation  # added 2026-10-20
     MultiAgentSystems = MultiAgentSystems  # added 2026-10-20
     CorrelatedModelErrors = CorrelatedModelErrors  # added 2026-10-20
     FanoutTailLatency = FanoutTailLatency  # added 2026-10-20
-    JudgePositionBias = _series.JudgePositionBias  # added 2026-10-20
-    HumanEvalAgentCost = _series.HumanEvalAgentCost  # added 2026-10-20
-    CybenchSolveRate = _series.CybenchSolveRate
-    FirecrackerBootPreconfigured = _series.FirecrackerBootPreconfigured  # added 2026-10-20
-    OSWorldStepBudget = _series.OSWorldStepBudget
-    FrontierSweTrials = _series.FrontierSweTrials
-    SweBenchTrajectories = _series.SweBenchTrajectories
-    SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
-    SweBenchVerifiedLeaderboard = _series.SweBenchVerifiedLeaderboard  # added 2026-10-20
-    SweBenchMiniSonnet4Django12050Calls = _series.SweBenchMiniSonnet4Django12050Calls  # added 2026-10-20
-    VercelGatewayUsageSpendPrice = _series.VercelGatewayUsageSpendPrice  # added 2026-10-21
-    VercelGatewayUseCaseShares = _series.VercelGatewayUseCaseShares  # added 2026-10-21
-    VercelGatewayOpenWeightShare = _series.VercelGatewayOpenWeightShare  # added 2026-10-21
-    VercelGatewayToolCallShare = _series.VercelGatewayToolCallShare  # added 2026-10-21
-    ImitationSuperTuxKart = _series.ImitationSuperTuxKart  # added 2026-10-20
-    GrpoPassAtKSteps = _series.GrpoPassAtKSteps  # added 2026-10-20
     RlTrainingDynamics = RlTrainingDynamics  # added 2026-10-20
-    RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
-    RepeatedSamplingMajority = _series.RepeatedSamplingMajority
-    InjectionDefenseResults = _series.InjectionDefenseResults
-    ModelsByDomain = _series.ModelsByDomain
-    OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
-    LeRobotHubMonthly = _series.LeRobotHubMonthly
-    LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
-    DactylPhysicalTrials = _series.DactylPhysicalTrials  # added 2026-10-20
-    EdgeInferenceOrin = _series.EdgeInferenceOrin
-    KittiOdometry = _series.KittiOdometry
-    CaliforniaDisengagements = _series.CaliforniaDisengagements
-    TakeoverTimeMeta = _series.TakeoverTimeMeta  # added 2026-10-20
-    PedestrianAp75BySkinType = _series.PedestrianAp75BySkinType  # added 2026-10-20
-    PedestrianMissRateByAge = _series.PedestrianMissRateByAge  # added 2026-10-20
-    WaymoSafetyImpact = _series.WaymoSafetyImpact

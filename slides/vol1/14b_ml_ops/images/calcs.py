@@ -9,7 +9,7 @@ by device, the ML Test Score audit, and the severity policy), the cited
 results in Literature.IncidentReports (Unity, Zillow) and
 Literature.MlOperations (Breck et al., Visa, Drew et al., the ML Test Score,
 He et al.), and the label-free detection series of Rabanser et al. in
-Literature.Series. The ML Operations chapter reads the same scenarios. This
+local CSV series. The ML Operations chapter reads the same scenarios. This
 file only selects values, converts units, and formats them; it types no
 numbers. Each value is recorded with v() under the key the deck prints as
 \\val{key}; running this file writes images/numbers.tex. make_figs.py imports
@@ -24,11 +24,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402,F401
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import Q_, DAYS_PER_MONTH, DAYS_PER_YEAR  # noqa: E402
 
 Scenarios, Literature, Ops = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Ops
-IR, OPS, SERIES, MON = Literature.IncidentReports, Literature.MlOperations, Literature.Series, Ops.Monitoring
+IR, OPS, MON = Literature.IncidentReports, Literature.MlOperations, Ops.Monitoring
 
 DRIFT = Scenarios.RankingServiceAccuracyDrift
 RANK = Scenarios.DlrmReleaseFootprintH100
@@ -43,7 +44,7 @@ RETRAIN_CHEAP = Scenarios.RankingRetrainingIntervalQuarterRunCost
 SLICES = Scenarios.RecommendationAccuracyByDevice
 MLTS = Scenarios.MlTestScoreMonitoringGapAudit
 SEVERITY = Scenarios.RecommendationIncidentSeverityPolicy
-RABANSER = SERIES.LabelFreeShiftDetection.entries
+RABANSER = load_series("slides/vol1/14b_ml_ops/images/data/rabanser2019_label_free_detection.csv").entries
 
 
 def m(q, unit):
@@ -139,7 +140,7 @@ v("zillow_hi_mo", lit(IR.ZillowResaleHorizonHighMonths), "{:.0f}", "resale horiz
 v("zillow_lo_words", lit(IR.ZillowResaleHorizonLowMonths), "words", "the low end, in words")
 v("zillow_hi_words", lit(IR.ZillowResaleHorizonHighMonths), "words", "the high end, in words")
 
-print("== Label-free tests (Literature.Series.LabelFreeShiftDetection, Rabanser et al. 2019 Table 2a)")
+print("== Label-free tests (slides/vol1/14b_ml_ops/images/data/rabanser2019_label_free_detection.csv, Rabanser et al. 2019 Table 2a)")
 COIN = 1 / len(("shift", "no shift"))  # chance level of a two-way decision
 RAB_N = [round(r["samples"]) for r in RABANSER]
 RAB = {k: [r[k] for r in RABANSER] for k in ("large", "medium", "small")}

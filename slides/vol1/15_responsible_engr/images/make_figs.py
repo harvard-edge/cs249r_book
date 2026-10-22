@@ -5,7 +5,7 @@ Plots use the shared slideplot helper; diagrams are written as SVG with a
 small builder below, one file per build step, every step on the same canvas
 so nothing moves. Every value comes from calcs.py (imported below), which
 reads MLSysIM: Literature.Fairness (Obermeyer et al. 2019, Gender Shades,
-ProPublica's COMPAS analysis), Literature.Series.GenderShadesAudit (Raji and
+ProPublica's COMPAS analysis), vol2/16_responsible_ai/data/gender_shades_audit.csv (Raji and
 Buolamwini 2019), Literature.TrainingRuns (Strubell et al. 2019), and the
 fairness Scenarios.* (credit service, its price and feedback loop, the
 evaluation budget, the shared threshold, the frontier, the proxy and goal).

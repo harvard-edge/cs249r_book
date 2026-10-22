@@ -21,6 +21,7 @@ import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as cc  # noqa: E402  (records every value)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 out = Path(__file__).parent
@@ -453,8 +454,8 @@ def million_request(step):
 
 # --- Open questions: comprehension against context (published) -------------
 def fiction_livebench():
-    row = cc.row                              # DeepSeek-R1-0528, Literature.LongContextComprehension
-    cols = [c for c in cc.Literature.LongContextComprehension.columns if c.startswith("score_")
+    row = cc.row                              # DeepSeek-R1-0528, vol3/04_context_engineering/data/fiction_livebench_by_length.csv
+    cols = [c for c in load_series("vol3/04_context_engineering/data/fiction_livebench_by_length.csv").columns if c.startswith("score_")
             and row[c] is not None and cc.col_tokens(cc.short_col) <= cc.col_tokens(c) <= cc.col_tokens(cc.long_col)]
     xs = [cc.col_tokens(c) for c in cols]
     ys = [row[c] for c in cols]

@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Systems, Ops = mlsysim.Hardware, mlsysim.Systems, mlsysim.Ops
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
@@ -98,8 +99,8 @@ v("dram_mult", m(dram, "pJ") / m(flop32, "pJ/flop"), "{:.0f}", "DRAM access / FP
 v("net_mult", m(net, "pJ/bit") / (m(flop32, "pJ/flop") / m(mlsysim.core.units.BYTES_FP32, "bit")),
   "{:,.0f}", "network transfer / FP32 multiply energy, per bit")
 
-print("== Storage price per TB (Literature.Series.StoragePricePerTB)")
-rows = Literature.Series.StoragePricePerTB.entries
+print("== Storage price per TB (vol1/04_data_engineering/data/storage_price_per_tb.csv)")
+rows = load_series("vol1/04_data_engineering/data/storage_price_per_tb.csv").entries
 first = next(r for r in rows if r["hdd"] is not None)
 last = rows[-1]
 v("hdd_first_year", first["year"], "{:.0f}", "first hard-disk year")

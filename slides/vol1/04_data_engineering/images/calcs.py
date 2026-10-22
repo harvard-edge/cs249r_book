@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Datasets, Scenarios = mlsysim.Literature, mlsysim.Datasets, mlsysim.Scenarios
 ReferenceStats = mlsysim.ReferenceStats
@@ -62,7 +63,7 @@ def pct(x):
 
 def label_errors():
     """{series dataset name: row} of the Northcutt label-error series."""
-    return {r["dataset"]: r for r in Literature.Series.TestSetLabelErrors.entries}
+    return {r["dataset"]: r for r in load_series("vol1/04_data_engineering/data/test_set_label_errors.csv").entries}
 
 
 print("== Hook (Tay, Literature.IncidentReports)")
@@ -171,7 +172,7 @@ v("lab_ratio_lo", round(RUN.ratio_low, -2), "{:,.0f}", "labeling / run, low, to 
 v("lab_ratio_hi", round(RUN.ratio_high, -2), "{:,.0f}", "labeling / run, high, to the hundred")
 v("img_per_s", m(RUN.throughput_per_accelerator, "count/second"), "{:,.0f}", "ResNet-50 images a second per A100")
 
-print("== Label errors (Northcutt et al. 2021 via Literature.Series)")
+print("== Label errors (Northcutt et al. 2021 via local CSV series)")
 errs = label_errors()
 for name, _ in LABEL_ERROR_ROWS:
     key = "".join(c for c in name.lower() if c.isalnum())
@@ -243,7 +244,7 @@ v("ex_gain_lo", pct(EXAMPLES.gain_low), "{:.0f}", "detection gain, low, points")
 v("ex_gain_hi", pct(EXAMPLES.gain_high), "{:.0f}", "detection gain, high, points")
 v("stream_ratio_word", round(INGEST.cost_ratio), "words", "streaming over batch compute cost, in prose")
 v("corpus_growth", CORPUS.growth, "{:.1f}", "pre-training corpus growth per year")
-stock = {r["bound"]: r["tokens"] for r in Literature.Series.PublicTextStock.entries}
+stock = {r["bound"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/public_text_stock.csv").entries}
 v("text_stock_t", stock["median"] / 10 ** 12, "{:.0f}", "public text stock, median, trillions of tokens")
 v("stock_year", round(CORPUS.crossing(stock["median"])), "{:.0f}", "year the fit reaches the median stock")
 

@@ -4,7 +4,7 @@
 MLSysIM holds the inputs and the calculations: the cited results in
 Literature.Fairness (Obermeyer et al. 2019, Gender Shades, ProPublica's COMPAS
 analysis, Lum and Isaac 2016), the Gender Shades re-audit rows in
-Literature.Series.GenderShadesAudit, Strubell et al. 2019 in
+vol2/16_responsible_ai/data/gender_shades_audit.csv, Strubell et al. 2019 in
 Literature.TrainingRuns, and the fairness Scenarios.* the Responsible
 Engineering chapter reads: the credit service's confusion matrices, the price
 and the feedback stability of closing its TPR gap, the evaluation budget of a
@@ -27,10 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402,F401
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
 F, RUNS = Literature.Fairness, Literature.TrainingRuns
-AUDIT = Literature.Series.GenderShadesAudit
+AUDIT = load_series("vol2/16_responsible_ai/data/gender_shades_audit.csv")
 
 CREDIT = Scenarios.CreditServiceTwoGroups
 PRICE = Scenarios.CreditServiceEqualOpportunityPrice
@@ -244,7 +245,7 @@ v("rk_seen_pct", pct(EXPOSURE.catalog_coverage), "{:.3f}", "share of catalog see
 v("rk_explore_pct", pct(EXPOSURE.explore_share), "{:.0f}", "exploration share, %")
 v("rk_explore_m", EXPOSURE.explore_impressions / 10 ** 6, "{:.0f}", "exploration impressions a day, millions")
 
-print("== Raji and Buolamwini 2019 (Literature.Series.GenderShadesAudit, darker female)")
+print("== Raji and Buolamwini 2019 (vol2/16_responsible_ai/data/gender_shades_audit.csv, darker female)")
 for company, k in (("Face++", "fpp"), ("IBM", "ibm"), ("Microsoft", "msft"), ("Amazon", "amzn"), ("Kairos", "kai")):
     before, after = audit(company, "darker female", "error_may2017_pct"), audit(company, "darker female", "error_aug2018_pct")
     if before is not None and before == before:

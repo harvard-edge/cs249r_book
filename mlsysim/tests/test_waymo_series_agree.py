@@ -1,7 +1,8 @@
+from mlsysim.core.series_loader import load_series
 """The two Waymo Safety Impact tables must agree wherever they overlap.
 
-``Literature.WaymoSafetyImpact`` (reduction by data cut) and
-``Literature.Series.WaymoRiderOnlyMiles`` / ``WaymoVsHumanBenchmark`` (mileage
+``load_series("vol4/16_release/data/waymo_safety_impact_headline.csv")`` (reduction by data cut) and
+``load_series("vol2/16_responsible_ai/data/waymo_rider_only_miles.csv")`` / ``WaymoVsHumanBenchmark`` (mileage
 by release; latest cut against every benchmark variant) are built separately
 from the same Waymo releases. Added 2026-10-13: the benchmark table had been
 built from the superseded 2026-09-24 CSV3, which Waymo's 2026-10-02 release
@@ -13,9 +14,9 @@ import pytest
 
 from mlsysim.literature.registry import Literature
 
-HEADLINE = Literature.WaymoSafetyImpact.entries
-MILES = Literature.Series.WaymoRiderOnlyMiles.entries
-BENCH = Literature.Series.WaymoVsHumanBenchmark.entries
+HEADLINE = load_series("vol4/16_release/data/waymo_safety_impact_headline.csv").entries
+MILES = load_series("vol2/16_responsible_ai/data/waymo_rider_only_miles.csv").entries
+BENCH = load_series("vol2/16_responsible_ai/data/waymo_vs_human_benchmark.csv").entries
 
 # Headline outcome name -> benchmark-table row using the same dynamic benchmark.
 DYNAMIC_ROW = {

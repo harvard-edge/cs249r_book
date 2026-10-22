@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
 Q_ = mlsysim.core.units.Q_
@@ -112,7 +113,7 @@ v("stop_in_da", m(aisle.with_takeover_and_dispatch.required_distance, "mm"), "{:
 v("stop_ool_da", m(ool.with_takeover_and_dispatch.required_distance, "mm"), "{:,.2f}", "Napkin Math 14.1 out-of-loop stop, with the allocation, mm")
 
 print("== Take-over times (Zhang et al. 2019) and the ceilings they allow (SI table 2)")
-MTOT = [r["mean_takeover_time_s"] for r in Literature.TakeoverTimeMeta.entries]
+MTOT = [r["mean_takeover_time_s"] for r in load_series("slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv").entries]
 v("n_cond", len(MTOT), "{:.0f}", "study conditions")
 v("n_studies", TAKEOVER.Zhang2019TakeoverStudies, "{:.0f}", "studies")
 v("tot_mean", m(AISLE.t_takeover_driving_mean, "s"), "{:.2f}", "mean condition, s")

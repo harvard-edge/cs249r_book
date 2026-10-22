@@ -5,7 +5,7 @@ MLSysIM holds the inputs and the calculations: the chapter's Napkin Math 7.1
 to 7.4 and Exercise 9 are Scenarios.* backed by the solvers in
 engine/solvers/tool_calls.py (the chapter reads the same scenarios); the
 adapter count is Scenarios.ThreeHostsFourToolServices; the 500 public repair
-runs are Scenarios.MiniSweAgentSonnet4Run over Literature.SweBenchMiniSonnet4Run,
+runs are Scenarios.MiniSweAgentSonnet4Run over vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv,
 with the harness's staging policy; SWE-agent's results are
 Literature.AgentRetrieval. The other sources are the deck's own measurements
 in data/, read as recorded: the retry harness (retry_results.json), the

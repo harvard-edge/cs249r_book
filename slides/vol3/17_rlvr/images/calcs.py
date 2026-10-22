@@ -16,7 +16,7 @@ barrier (RolloutGroupOfFourBarrier), and the verifier pool (RepairVerifierPool),
 backed by engine/solvers/reinforcement.py. Lecture 16's target mask is
 RecoveryRecordTargetMask. Published data are Literature entries: METR's
 reward-hacking counts (Literature.AgentEvaluation), Yue et al.'s pass@k series
-(Literature.GrpoPassAtKSteps), and the DeepSeek-R1-Zero and DAPO curve readings
+(slides/vol3/17_rlvr/images/data/yue_grpo_pass_at_k.csv), and the DeepSeek-R1-Zero and DAPO curve readings
 (Literature.RlTrainingDynamics). The one other source is the deck's own data
 (data/): a local model's recorded log probabilities. This file only selects
 values, converts units, and formats them; it types no numbers. Each value is
@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios = mlsysim.Scenarios
 Literature = mlsysim.Literature
@@ -42,7 +43,7 @@ DATA = HERE / "data"
 
 METR = Literature.AgentEvaluation
 RLD = Literature.RlTrainingDynamics
-YUE = sorted(Literature.GrpoPassAtKSteps.entries, key=lambda r: r["step"])
+YUE = sorted(load_series("slides/vol3/17_rlvr/images/data/yue_grpo_pass_at_k.csv").entries, key=lambda r: r["step"])
 
 FA_S = Scenarios.VerifierFalseAcceptsAtTenPercentPass
 FA5_S = Scenarios.VerifierFalseAcceptsAtFivePercentPass
@@ -336,7 +337,7 @@ v("pool_busy", PL.busy, "{:.0f}", "busy workers")
 v("pool_target", pct(POOL_S.target_utilization), "{:.0f}", "target utilization, %")
 v("pool_slots", PL.slots, "{:.0f}", "provisioned slots")
 
-print("== Yue et al. 2025 (Literature.GrpoPassAtKSteps)")
+print("== Yue et al. 2025 (slides/vol3/17_rlvr/images/data/yue_grpo_pass_at_k.csv)")
 v("yue_p1_base", YUE[0]["pass_at_1"], "{:.1f}", "pass@1, base, %")
 v("yue_p1_end", YUE[-1]["pass_at_1"], "{:.1f}", "pass@1, last step, %")
 v("yue_pk_base", YUE[0]["pass_at_256"], "{:.1f}", "pass@256, base, %")

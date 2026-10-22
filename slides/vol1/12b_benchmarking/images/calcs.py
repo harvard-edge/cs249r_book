@@ -24,11 +24,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 import sysdiff  # noqa: E402
 
 Hardware, Literature, Scenarios, Datasets = mlsysim.Hardware, mlsysim.Literature, mlsysim.Scenarios, mlsysim.Datasets
 Q_ = mlsysim.core.units.Q_
-SERIES, BENCH = Literature.Series, Literature.Benchmarks
+BENCH = Literature.Benchmarks
 ROB, PQ = Literature.RobustnessStudies, Literature.PredictionQuality
 
 EOS = Scenarios.EosEightH100ResNetMLPerfV40
@@ -56,7 +57,7 @@ BOARD = Scenarios.MobileNetV2CameraTrapBoard
 # One row per submission on the noise and seed figures: scenario, label, color.
 SYSTEMS = [(EOS, "Eos, 8x H100", "memory"), (DELL, "Dell, 8x H100", "compute"),
            (H200, "NVIDIA, 8x H200", "data"), (N8, "Eos, 64x H100", "network")]
-ALL_RUNS = SERIES.MLPerfTrainingV40ResNetRuns.entries
+ALL_RUNS = load_series("slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_resnet_runs.csv").entries
 TARGET = float(BENCH.MLPerfResNet50QualityTargetTop1)
 
 
@@ -99,8 +100,8 @@ v("recall_sus_w", m(CLAIM.sustained_power, "W"), "{:.0f}", "sustained watts")
 v("recall_eff", m(CLAIM.claimed_efficiency, "TOPS/W"), "{:.0f}", "datasheet TOPS/W")
 v("recall_sus_eff", m(CLAIM.sustained_efficiency, "TOPS/W"), "{:.1f}", "sustained TOPS/W")
 
-print("== The log: Eos result_0 and Dell result_4 (Literature.Series MLPerf Training v4.0)")
-EVALS = SERIES.MLPerfTrainingV40EosResNetEvals.entries
+print("== The log: Eos result_0 and Dell result_4 (local CSV series MLPerf Training v4.0)")
+EVALS = load_series("slides/vol1/12_benchmarking/images/data/mlperf_training_v4_0_eos_resnet_result0_evals.csv").entries
 eos0 = next(r for r in EOS.rows if r["run"] == 0)
 v("log_seed", eos0["seed"], "{:.0f}", "Eos run 0 seed")
 v("global_batch", EOS.global_batch, "{:.0f}", "global batch, as logged")
@@ -287,8 +288,8 @@ v("recht_hi", shift.network_gap_max, "{:.1f}", "largest drop, points")
 v("recht_rho", shift.network_rank_correlation, "{:.3f}", "Spearman rank correlation")
 v("gsm1k_drop", float(BENCH.Gsm1kMaxAccuracyDropPct), "{:.0f}", "GSM1k drop, up to, percent")
 
-print("== Pareto on a Pixel 1 (Literature.Series.SandlerMobileNetV2Pixel1)")
-SANDLER = SERIES.SandlerMobileNetV2Pixel1.entries
+print("== Pareto on a Pixel 1 (slides/vol1/12b_benchmarking/images/data/sandler2018_mobilenetv2_pixel1.csv)")
+SANDLER = load_series("slides/vol1/12b_benchmarking/images/data/sandler2018_mobilenetv2_pixel1.csv").entries
 
 
 def dominated(row, rows):
@@ -303,8 +304,8 @@ for r in SANDLER:
     v(f"sd_{key}_ms", r["latency_ms"], "{:.0f}", f"{r['model']}: latency, ms" + (", dominated" if dominated(r, SANDLER) else ""))
 v("frame_budget", m(BOARD.frame_budget, "ms"), "{:.0f}", "camera trap frame deadline, ms")
 
-print("== Hardware lottery on a Pixel 4 (Literature.Series.ChuPixel4CpuDspLatency)")
-CHU = SERIES.ChuPixel4CpuDspLatency.entries
+print("== Hardware lottery on a Pixel 4 (slides/vol1/12b_benchmarking/images/data/chu2021_pixel4_cpu_dsp.csv)")
+CHU = load_series("slides/vol1/12b_benchmarking/images/data/chu2021_pixel4_cpu_dsp.csv").entries
 v("chu_top1_lo", min(r["top1"] for r in CHU), "{:.1f}", "lowest top-1, percent")
 v("chu_top1_hi", max(r["top1"] for r in CHU), "{:.1f}", "highest top-1, percent")
 chu = {r["model"]: r for r in CHU}

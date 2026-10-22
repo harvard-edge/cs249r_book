@@ -7,19 +7,19 @@ and Scenarios.*); figure labels print the same strings the slides print
   - Power tiers: TPU v4 pod, DGX Spark, the mobile envelope, and the TinyML
     envelope (Systems.Pods, Hardware, Platforms).
   - Round trips: Scenarios.RoboticArmRegionalCloud and AwsUsEast1Routes
-    (cloudping.co medians via Literature.Series.AwsInterRegionRtt).
+    (cloudping.co medians via slides/vol1/02_system_paradigms/images/data/aws_interregion_rtt_p50.csv).
   - Camera bandwidth: Scenarios.FactoryCameras1080p.
   - Memory wall: Gholami et al., IEEE Micro 2024, Fig. 1 markers
-    (Literature.Series.MemoryWallHardwareScaling) and their log-linear fits
+    (slides/vol1/02_system_paradigms/images/data/memory_wall_hardware_scaling.csv) and their log-linear fits
     (Scenarios.MemoryWall*Trend).
   - A100 roofline: Scenarios.ResNet50A100Batch1; decode intensity from the
     Llama-3 70B decode scenario on the A100.
   - TPU roofline: Scenarios.TpuV1ProductionRoofline (Jouppi et al. 2017).
   - Voice assistant: Scenarios.VoiceAssistantBillionDevices.
-  - Microprocessor trends: Literature.Series.MicroprocessorTrends (Karl Rupp).
+  - Microprocessor trends: vol1/02_system_paradigms/data/microprocessor_trends.csv (Karl Rupp).
   - Energy per inference: Scenarios.EnergyPerInferenceTiers and
     RadioUploadVsMobileNetV2; measured row from MLPerf Tiny v1.2
-    (Literature.Series.MLPerfTinyV12KwsEnergy).
+    (slides/vol1/02_system_paradigms/images/data/mlperf_tiny_v1_2_kws_energy.csv).
   - Doorbell: Scenarios.SmartDoorbell and SmartDoorbellResponsiveChime.
 
 Run from this folder: python3 make_figs.py
@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num, mlsysim  # noqa: E402
 
 out = Path(__file__).parent
@@ -316,7 +317,7 @@ sp.hbars_steps(out / "voice_upload", [
 #    Karl Rupp, Microprocessor Trend Data). Direct labels replace the legend.
 # ---------------------------------------------------------------------------
 def trends():
-    rows = mlsysim.Literature.Series.MicroprocessorTrends.entries
+    rows = load_series("vol1/02_system_paradigms/data/microprocessor_trends.csv").entries
     series = [  # key, label, color, marker, label y at the right edge
         ("transistors", "Transistors (K)", C["danger"], "o", 3e7),
         ("specint", "Single-thread\nperf. (SPECint ×10³)", C["memory"], "s", 1.2e5),

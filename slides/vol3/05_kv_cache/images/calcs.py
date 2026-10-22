@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
 
@@ -39,9 +40,9 @@ SHARE, SHARE90 = Scenarios.RepairBlockSharingResidency, Scenarios.RepairBlockSha
 REPAIR, SUPPORT = Scenarios.RepairAgentResidency, Scenarios.SupportAgentResidency
 RESEND = Scenarios.CodingAgentResend30Turns
 MODEL, NODE = POOL.workload, HIT.node
-KWON = Literature.PagedAttentionMemoryBreakdown.entries
-WAITS = Literature.ToolInterceptionTimes.entries
-SINKS = Literature.AttentionSinkPerplexity.entries
+KWON = load_series("slides/vol1/13b_model_serving/images/data/pagedattention_kv_memory_breakdown.csv").entries
+WAITS = load_series("slides/vol3/05_kv_cache/images/data/infercept_interception_times.csv").entries
+SINKS = load_series("slides/vol3/05_kv_cache/images/data/streamingllm_attention_sink_perplexity.csv").entries
 SGLANG = Literature.PrefixCaching
 OPERATOR_TARGET = 100  # note question: resident repair contexts an operator wants
 
@@ -136,7 +137,7 @@ v("gqa_over_mla", d.gqa_over_mla, "{:.1f}", "Llama 70B / DeepSeek-V3")
 v("gqa_session_gb", mag(d.gqa_session, "GB"), "{:.1f}", "Llama 70B, one long session, GB")
 v("mla_session_gb", mag(d.mla_session, "GB"), "{:.1f}", "DeepSeek-V3, one long session, GB")
 
-print("== Kwon et al. 2023, Figure 2 (Literature.PagedAttentionMemoryBreakdown)")
+print("== Kwon et al. 2023, Figure 2 (slides/vol1/13b_model_serving/images/data/pagedattention_kv_memory_breakdown.csv)")
 kw = {e["system"]: e for e in KWON}
 v("kwon_max", kw["Orca (Max)"]["token_states"], "{:.1f}", "Orca Max token states, %")
 v("kwon_pow2", kw["Orca (Pow2)"]["token_states"], "{:.1f}", "Orca Pow2 token states, %")
@@ -192,7 +193,7 @@ v("gap_mono", mag(c.monolithic_gap, "ms"), "{:.0f}", "decode gap, monolithic, ms
 v("t_iter", mag(c.chunked_iteration, "ms"), "{:.0f}", "chunked iteration, ms")
 v("chunk_done", mag(c.chunked_done, "ms"), "{:.0f}", "prompt done, chunked, ms")
 
-print("== Tool waits (Literature.ToolInterceptionTimes, ToolInterception)")
+print("== Tool waits (slides/vol3/05_kv_cache/images/data/infercept_interception_times.csv, ToolInterception)")
 wt = {e["workload"]: e["mean_interception_s"] for e in WAITS}
 v("w_calc_ms", 10 ** 3 * wt["Math (calculator)"], "{:.2f}", "calculator, ms")
 v("w_venv_ms", 10 ** 3 * wt["Virtual env."], "{:.0f}", "virtual environment, ms")
@@ -222,7 +223,7 @@ v("burst_gb", mag(pz.burst, "GB"), "{:.0f}", "returning state, GB")
 v("burst_s", mag(pz.burst_time, "s"), "{:.2f}", "last reload done, s")
 v("burst_ratio", pz.burst_slowdown, "{:.0f}", "last reload / one reload")
 
-print("== StreamingLLM (Literature.AttentionSinkPerplexity)")
+print("== StreamingLLM (slides/vol3/05_kv_cache/images/data/streamingllm_attention_sink_perplexity.csv)")
 s13, s7 = ({e["model"]: e for e in SINKS}[k] for k in ("Llama-2-13B", "Llama-2-7B"))
 v("sink_tokens", s13["sink_tokens"], "{:.0f}", "initial tokens kept")
 v("s13_cache", s13["cache_tokens"], "{:,.0f}", "Llama-2-13B cache, tokens")

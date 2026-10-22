@@ -8,7 +8,7 @@ Datasets); this file types no data. The scenarios behind each figure:
   - Label entries: Scenarios.FullHdMaskVersusBoxes (Sec. 4.6.1).
   - Label cost: Scenarios.ImageNetLabelingVersusResNetRun (Sec. 4.6.2).
   - Picovoice miss rates: Literature.WakeWordBenchmarks.
-  - Label errors: Literature.Series.TestSetLabelErrors (Northcutt et al. 2021).
+  - Label errors: vol1/04_data_engineering/data/test_set_label_errors.csv (Northcutt et al. 2021).
   - Forced alignment: Datasets.MSWC.
 
 2026-10-17: the storage latency, storage supply, format, drift-type, and K-S

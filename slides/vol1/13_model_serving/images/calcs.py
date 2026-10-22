@@ -6,7 +6,7 @@ profile (engine.serving_profile) and the model-serving Scenarios.* built on it
 (the request path, the M/M/1 fleet plan, the batching window, the dual-trigger
 trace, the batch cap, replica startup, the cost of each instance), the cited
 results in Literature.ServingResults, and the MLPerf Inference v5.0 rows in
-Literature.Series. The Model Serving chapter reads the same scenarios. This
+local CSV series. The Model Serving chapter reads the same scenarios. This
 file only selects values, converts units, and formats them; it types no
 numbers. Each value is recorded with v() under the key the deck prints as
 \\val{key}; running this file writes images/numbers.tex. make_figs.py imports
@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, val, num, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import Q_, BYTES_FP32  # noqa: E402
 from mlsysim.engine.serving_profile import resnet50_h100_profile  # noqa: E402
@@ -35,7 +36,7 @@ from mlsysim.physics import calc_mm1_max_utilization, calc_littles_law_rate  # n
 HERE = Path(__file__).resolve().parent
 Scenarios, Literature, Models = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Models
 Datasets, ReferenceStats = mlsysim.Datasets, mlsysim.ReferenceStats
-SR, SERIES = Literature.ServingResults, Literature.Series
+SR = Literature.ServingResults
 
 PROFILE = resnet50_h100_profile()
 SVC = Scenarios.ResNet50EagerFp16BatchingH100
@@ -103,8 +104,8 @@ v("hook_added_pct", pct(m(COST.added_time / SVC.service_time(B8), "")), "{:.0f}"
 v("eager_kernels", PROFILE.eager_kernels, "{:.0f}", "kernel launches per eager pass")
 v("batch_8", B8, "{:.0f}", "the batched size of the hook")
 
-print("== Recall Lecture 12 (Literature.Series.MLPerfInferenceV50ResNet50, 5.0-0032)")
-RES = SERIES.MLPerfInferenceV50ResNet50
+print("== Recall Lecture 12 (slides/vol1/12_benchmarking/images/data/mlperf_inference_v5_0_resnet50.csv, 5.0-0032)")
+RES = load_series("slides/vol1/12_benchmarking/images/data/mlperf_inference_v5_0_resnet50.csv")
 RTX_SS = row(RES, result_id="5.0-0032", scenario="SingleStream")["value"]
 RTX_OFF = row(RES, result_id="5.0-0032", scenario="Offline")["value"]
 rtx_rate = 10 ** 3 / RTX_SS
@@ -209,7 +210,7 @@ v("naive_gpus", math.ceil(PLAN.saturated_accelerators_exact), "{:.0f}", "the sam
 v("rho_at_printed", calc_mm1_max_utilization(Q_(num("b1_ms"), "ms"), PLAN.tail_budget, PLAN.tail_factor),
   "{:.3f}", "safe utilization with the printed 3.5 ms")
 
-print("== MLPerf Server against Offline (Literature.Series.MLPerfInferenceV50ResNet50)")
+print("== MLPerf Server against Offline (slides/vol1/12_benchmarking/images/data/mlperf_inference_v5_0_resnet50.csv)")
 A_OFF = row(RES, result_id="5.0-0010", scenario="Offline")["value"]
 A_SRV = row(RES, result_id="5.0-0010", scenario="Server")["value"]
 B_OFF = row(RES, result_id="5.0-0065", scenario="Offline")["value"]
@@ -234,8 +235,8 @@ v("vote_new", m(VOTE.fast_time, "ms"), "{:.1f}", "mean after, ms")
 v("vote_wait_new", m(VOTE.fast_wait, "ms"), "{:.1f}", "wait after, ms")
 v("vote_gain", VOTE.time_gain, "{:.0f}", "mean-time gain")
 
-print("== Fan-out (Scenarios.ServingFanout*Leaves; Literature.Series.TailAtScaleLeafLatency)")
-TAIL = SERIES.TailAtScaleLeafLatency
+print("== Fan-out (Scenarios.ServingFanout*Leaves; slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv)")
+TAIL = load_series("slides/vol1/12_benchmarking/images/data/tail_at_scale_leaf_latency.csv")
 TAIL_Q = round(pct(FAN100.availability))  # the leaves' own percentile, p99
 leaf = row(TAIL, leaves_awaited="one random leaf", percentile=TAIL_Q)["latency_ms"]
 leaves = row(TAIL, leaves_awaited="all leaves", percentile=TAIL_Q)["latency_ms"]
@@ -290,12 +291,12 @@ for k, t in RT.items():
 v("fused_kernels", PROFILE.fused_kernels, "{:.0f}", "kernels after fusion")
 v("rt_prec_gain", m(RT["fp32"] / RT["int8"], ""), "{:.1f}", "INT8 over TensorRT FP32")
 
-print("== Modeled curve and a measured L4 (Literature.Series.MLPerfInferenceV50ResNet50L4)")
+print("== Modeled curve and a measured L4 (slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_resnet50_l4.csv)")
 for b in (B1, B32, B128):
     v(f"curve_ms_{b}", m(SVC.service_time(b), "ms"), "{:.2f}" if b < B128 else "{:.1f}", f"batch {b} pass, ms")
     v(f"curve_rate_{b}", float(f"{m(SVC.throughput(b), '1/s'):.3g}"), "{:,.0f}", f"batch {b}, per second, 3 figures")
 v("batch_128", B128, "{:.0f}", "batch 128")
-L4 = SERIES.MLPerfInferenceV50ResNet50L4
+L4 = load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_resnet50_l4.csv")
 L4_SS, L4_MS = row(L4, scenario="SingleStream"), row(L4, scenario="MultiStream")
 L4_OFF = row(L4, scenario="Offline")
 l4_one = L4_SS["samples_per_query"] / L4_SS["value"] * 10 ** 3
@@ -434,8 +435,8 @@ v("syn_cost_bt", m(PLAN.cost_per_million(PLAN.batched_accelerators_planned), "do
   "batched fleet, $ per million")
 v("syn_ratio", PLAN.accelerators_planned / PLAN.batched_accelerators_planned, "{:.0f}", "fleet cost ratio")
 
-print("== Next lecture (Literature.Series.MLPerfInferenceV50Llama2_70B)")
-LL = SERIES.MLPerfInferenceV50Llama2_70B
+print("== Next lecture (slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv)")
+LL = load_series("slides/vol1/13_model_serving/images/data/mlperf_inference_v5_0_llama2_70b.csv")
 LL_OFF = row(LL, benchmark="llama2-70b-99", scenario="Offline")
 LL_CONV = row(LL, benchmark="llama2-70b-99", scenario="Server")
 LL_INT = row(LL, benchmark="llama2-70b-interactive-99", scenario="Server")

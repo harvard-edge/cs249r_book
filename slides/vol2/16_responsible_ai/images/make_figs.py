@@ -35,8 +35,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
-SERIES = MLSYSIM / "mlsysim" / "literature" / "data" / "series"
 
 import contextlib  # noqa: E402
 import io  # noqa: E402
@@ -408,8 +406,7 @@ def ztest():
 
 
 def gs_rows():
-    with open(SERIES / "gender_shades_audit.csv") as fh:
-        return list(csv.DictReader(fh))
+    return calcs.GS
 
 
 def gender_grid():
@@ -705,8 +702,7 @@ def autobias():
 def waymo():
     import datetime as dt
     import matplotlib.dates as mdates
-    with open(SERIES / "waymo_rider_only_miles.csv") as fh:
-        rows = list(csv.DictReader(fh))
+    rows = calcs.MILES
     xs = [dt.date(int(r["data_through"][:4]), int(r["data_through"][5:]), 1) for r in rows]
     ys = [float(r["cumulative_ro_miles_millions"]) for r in rows]
     fig, ax = plt.subplots(figsize=(3.9, 2.6))

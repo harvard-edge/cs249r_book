@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Systems, Literature, Scenarios = (mlsysim.Hardware, mlsysim.Systems,
                                             mlsysim.Literature, mlsysim.Scenarios)
@@ -43,8 +44,8 @@ ACT = Scenarios.Gpt3ActivationsMicrobatch4
 RLHF = Scenarios.Llama2_70B_PpoAlignment
 FAIL = Scenarios.GpuFailuresTraining1K
 RESID = Scenarios.ResidualOnePercent512
-GOYAL = Literature.Series.GoyalLargeMinibatchResNet50
-MEGATRON = Literature.Series.MegatronLmWeakScaling
+GOYAL = load_series("slides/vol2/06_distributed_training/images/data/goyal_resnet50_large_minibatch.csv")
+MEGATRON = load_series("slides/vol2/06_distributed_training/images/data/megatron_lm_weak_scaling.csv")
 
 
 def m(q, unit):

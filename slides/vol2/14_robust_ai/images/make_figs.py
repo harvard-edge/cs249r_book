@@ -23,7 +23,7 @@ and the illustrative conformal score draw.
     Pr(>= 1) = 1 - (1 - p)^N with p = 1e-4 per device-hour (assumed).
     Derived: N = 1,000 gives 0.095; N = 10,000 gives 0.632.
   - Shift panels: redrawn from RA figure 3 (illustrative points).
-  - ImageNet-V2 (RA figure 4): MLSysIM Literature.Series.ImageNetTestbedShift
+  - ImageNet-V2 (RA figure 4): MLSysIM vol2/14_robust_ai/data/imagenet_testbed_shift.csv
     (Taori et al. 2020 testbed; Recht et al. 2019), models with val >= 55.
   - Mean-shift test (RA Napkin Math 14.1): sigma 0.3, n 1,000, 0.50 -> 0.55;
     standard error 0.0095 and 5.3 standard errors (derived).
@@ -41,7 +41,7 @@ and the illustrative conformal score draw.
   - PGD-7 work model (RA Napkin Math 14.2): 1 + 7 = 8 standard passes;
     FGSM listing about 3 (RA listing 1 and Napkin Math 14.2).
   - RobustBench (RA figure 10): MLSysIM
-    Literature.Series.RobustBenchCIFAR10Linf, dated and not flagged
+    vol2/14_robust_ai/data/robustbench_cifar10_linf.csv, dated and not flagged
     unreliable; l-infinity 8/255.
   - Certified radius (RA Sec. 14.6.1.1): sigma 0.5, pA 0.999, R = sigma *
     Phi^-1(pA) = 1.5. Derived: an l-infinity ball of 8/255 on a 32x32x3

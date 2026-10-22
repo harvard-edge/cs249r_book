@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 from mlsysim.core.units import BYTES_FP16, BYTES_FP32, BYTES_INT4, BYTES_INT8, BYTES_INT16, BYTES_INT32  # noqa: E402
 from mlsysim.physics import (  # noqa: E402
@@ -34,7 +35,7 @@ from mlsysim.physics import (  # noqa: E402
 HERE = Path(__file__).parent
 Models, Hardware, Platforms = mlsysim.Models, mlsysim.Hardware, mlsysim.Platforms
 Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
-CR, SERIES = Literature.CompressionResults, Literature.Series
+CR = Literature.CompressionResults
 
 TOKEN = Scenarios.Llama2_7BTokenOnFlagshipPhone
 MNV2_READ, R50_READ = Scenarios.MobileNetV2Fp32WeightReadPhone, Scenarios.ResNet50Fp32WeightReadPhone
@@ -130,8 +131,8 @@ v("gpt2_fp16_gb", m(GPT2_READ.weight_bytes, "GB"), "{:.0f}", "GPT-2 XL in FP16, 
 v("gpt2_read_ms", m(GPT2_READ.read_time, "ms"), "{:.0f}", "GPT-2 XL FP16 weight read per token, ms")
 v("gpt2_int4_read_ms", m(GPT2_INT4_READ.read_time, "ms"), "{:.0f}", "GPT-2 XL INT4 weight read per token, ms")
 
-print("== The accuracy-efficiency frontier (Literature.Series.MobileNetV3Table3)")
-MNV3 = SERIES.MobileNetV3Table3.entries
+print("== The accuracy-efficiency frontier (slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv)")
+MNV3 = load_series("slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv").entries
 FRONTIER = [MNV3[i]["model"] for i in calc_pareto_frontier([(r["pixel1_ms"], r["top1"]) for r in MNV3])]
 v2 = next(r for r in MNV3 if r["model"] == "V2 1.0")
 v3l75 = next(r for r in MNV3 if r["model"] == "V3-Large 0.75")
@@ -201,7 +202,7 @@ v("csr_even_pct", pct(calc_sparse_breakeven_zero_share(BYTES_FP32, csr_nz)), "{:
 v("coo_even_pct", pct(calc_sparse_breakeven_zero_share(BYTES_FP32, coo_nz)), "{:.1f}", "COO break-even zeros, %")
 
 print("== Sparse kernels (Literature.CompressionResults: Gale et al. 2020; Mishra et al. 2021)")
-GEMM = SERIES.MishraInt8SparseGemm.entries
+GEMM = load_series("slides/vol1/10_model_compression/images/data/mishra2021_int8_sparse_gemm.csv").entries
 v("gale20_lo", lit(CR.GaleSparseKernelSpeedupLow), "{:.1f}", "sparse-kernel speedup, low")
 v("gale20_hi", lit(CR.GaleSparseKernelSpeedupHigh), "{:.1f}", "sparse-kernel speedup, high")
 v("gale20_peak_pct", lit(CR.GaleSparseKernelPeakPct), "{:.0f}", "share of FP32 peak, %")
@@ -230,8 +231,8 @@ v("w075_width", narrow.width_multiplier, "{:.2f}", "width multiplier")
 v("w075_square_pct", pct((narrow.width_multiplier / BLUR.full.width_multiplier) ** 2), "{:.0f}",
   "arithmetic kept if every layer scaled with the square of the width, %")
 
-print("== Iterative pruning (Literature.Series.HanAlexNetPruning)")
-HAN = SERIES.HanAlexNetPruning.entries
+print("== Iterative pruning (slides/vol1/10_model_compression/images/data/han2015_alexnet_pruning.csv)")
+HAN = load_series("slides/vol1/10_model_compression/images/data/han2015_alexnet_pruning.csv").entries
 han = {c: [(r["pruned_pct"], r["top5_change"]) for r in HAN if r["curve"] == c]
        for c in ("no_retrain", "retrain", "iterative")}
 two_thirds = han["no_retrain"][3]  # the 66.6 percent point

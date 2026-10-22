@@ -3,7 +3,7 @@
 
 MLSysIM holds the inputs and the calculations, and the chapter reads the same
 entries: the recorded role shares of 2,100 public SWE-bench Verified
-trajectories (SweBenchVerifiedRoleShares over Literature.SweBenchTrajectories)
+trajectories (SweBenchVerifiedRoleShares over vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv)
 and one run's recorded tokens (SweAgentClaude35SonnetRunCost), one example per
 model call (RepairTrajectoryPerCallExamples), the recovery record's target
 mask (RecoveryRecordTargetMask and its variants), loss weighting
@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios = mlsysim.Scenarios
 Literature = mlsysim.Literature
@@ -70,7 +71,7 @@ DPO = DPO_S.result
 DPO2 = DPO2_S.result
 DIST = DIST_S.result
 REL = REL_S.result
-STK = Literature.ImitationSuperTuxKart
+STK = load_series("slides/vol3/16_fine_tuning/images/data/ross_dagger_supertuxkart.csv")
 LLAMA = Models.Language.Llama3_8B
 TR = Literature.TrainingRuns
 
@@ -212,7 +213,7 @@ v("eb_gap", BOUND_S.capped_gap, "{:.0f}", "gap, x")
 v("eb_need_pct", pct(BOUND_S.matching_error), "{:.3f}", "reference error that matches, %")
 v("eb_sat", BOUND_S.saturation_horizon, "{:.0f}", "saturation horizon, steps")
 
-print("== Super Tux Kart (Literature.ImitationSuperTuxKart, read from Ross et al. Figure 2)")
+print("== Super Tux Kart (slides/vol3/16_fine_tuning/images/data/ross_dagger_supertuxkart.csv, read from Ross et al. Figure 2)")
 _sup = sorted(STK.where(method="Supervised"), key=lambda r: r["iteration"])
 _dag = sorted(STK.where(method="DAgger"), key=lambda r: r["iteration"])
 v("stk_states", STK.entries[0]["states_per_iteration"], "{:,.0f}", "states collected per iteration")

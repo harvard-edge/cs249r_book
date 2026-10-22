@@ -2,7 +2,7 @@
 """Data plots for Lecture 0 (course overview).
 
 Every value comes from calcs.py, which reads MLSysIM:
-  - Google's measured median Gemini text prompt (Literature.Series.
+  - Google's measured median Gemini text prompt (local CSV series.
     GeminiPromptEnergy) against charging a phone (ReferenceStats.EnergyAnchors).
   - One day of ChatGPT prompts against training GPT-3 once
     (Scenarios.ChatGptDayAtGeminiMedianPrompt).

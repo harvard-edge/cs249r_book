@@ -13,7 +13,7 @@ Scenarios.* quantities. Where each figure's inputs live:
   - Listing mask and 4 by 4 product: Scenarios.MagnitudePruned3x3 and
     SparseMatVec4x4; sparse-format bytes and break-evens: physics.memory and
     Scenarios.WearableMobileNetV2SparseFlash.
-  - 2:4 GEMM: Literature.Series.MishraInt8SparseGemm (values read from the
+  - 2:4 GEMM: slides/vol1/10_model_compression/images/data/mishra2021_int8_sparse_gemm.csv (values read from the
     published plot, approximate) and Literature.CompressionResults.
   - Channel tiles: Scenarios.Channels256To250Tile8 and Channels256To248Tile8;
     width 0.75: Models MobileNetV2 and MobileNetV2_Alpha0_75.
@@ -26,10 +26,10 @@ Scenarios.* quantities. Where each figure's inputs live:
     band for unstructured kernels is the chapter's (Sec. 10.4.2), unsourced.
   - MLP share: physics.transformer.calc_transformer_block_weights.
   - Smallest capable model: Scenarios.SmallestModelAtSixtyPercentMmlu
-    (Epoch AI data, Literature.Series.MMLUDenseModels).
-  - Frontier: Literature.Series.MobileNetV3Table3 (Howard et al. 2019).
-  - Iterative pruning: Literature.Series.HanAlexNetPruning (Han et al. 2015).
-  - Deep Compression cliffs: Literature.Series.DeepCompressionMethods.
+    (Epoch AI data, vol1/10_model_compression/data/mmlu_dense_models.csv).
+  - Frontier: slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv (Howard et al. 2019).
+  - Iterative pruning: slides/vol1/10_model_compression/images/data/han2015_alexnet_pruning.csv (Han et al. 2015).
+  - Deep Compression cliffs: slides/vol1/10_model_compression/images/data/han2016_compression_methods.csv.
   - Measured CPU bars: cpu_measure.json (measure_cpu.py, run for this deck).
   - hook_step1.svg is copied from ../10b_model_compression/images.
 
@@ -47,6 +47,7 @@ import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402  (every derived number; prints its values)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
@@ -606,7 +607,7 @@ bars(out / "mlpshare.svg", mlp_rows, [1, 1, 1], xlim=(0, 14), size=(5.0, 1.9),
 # ---------------------------------------------------------------------------
 # 17a. Smallest model at >= 60 percent MMLU, redrawn at slide size from the
 # same data the book figure uses (Epoch AI Benchmarking Hub, CC BY 4.0, via
-# mlsysim Literature.Series.MMLUDenseModels; chapter fig-smallest-capable-model).
+# mlsysim vol1/10_model_compression/data/mmlu_dense_models.csv; chapter fig-smallest-capable-model).
 import datetime as dt  # noqa: E402
 
 from mlsysim.core.units import SEC_PER_DAY, SEC_PER_YEAR_LEAP  # noqa: E402
@@ -753,7 +754,7 @@ sp.save(fig, out / "cpu_measure.svg")
 # ---------------------------------------------------------------------------
 _cliff_color = {"Pruning + quantization": "data", "Pruning only": "compute",
                 "Quantization only": "memory", "SVD": "danger"}
-CLIFF = {name: (ck, [(r["size_pct"], r["accuracy_change"]) for r in K.SERIES.DeepCompressionMethods.entries
+CLIFF = {name: (ck, [(r["size_pct"], r["accuracy_change"]) for r in load_series("slides/vol1/10_model_compression/images/data/han2016_compression_methods.csv").entries
                      if r["method"] == name])
          for name, ck in _cliff_color.items()}
 fig, ax = plt.subplots(figsize=(5.8, 2.7))

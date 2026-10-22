@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Systems, Literature, Scenarios, Ops = (mlsysim.Hardware, mlsysim.Systems, mlsysim.Literature,
                                                  mlsysim.Scenarios, mlsysim.Ops)
@@ -178,7 +179,7 @@ v("pollux_lo", pct(float(FLEET_OPS.PolluxJctReductionLow)), "{:.0f}", "Pollux JC
 v("pollux_hi", pct(float(FLEET_OPS.PolluxJctReductionHigh)), "{:.0f}", "Pollux JCT cut, high, %")
 
 print("== Bandwidth and placement (Napkin Math 8.2; NCCL)")
-nccl = next(r for r in Literature.Series.NCCLAllReduceH100Node.entries if r["size_bytes"] == GIB_BYTES)
+nccl = next(r for r in load_series("vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv").entries if r["size_bytes"] == GIB_BYTES)
 v("nccl_busbw", nccl["ip_busbw_GBps"], "{:.0f}", "in-place bus bandwidth at 1 GiB, GB/s")
 links = TPX.links
 v("nvlink_gbs", m(links["NVLink"], "GB/s"), "{:.0f}", "H100 NVLink per direction, GB/s")

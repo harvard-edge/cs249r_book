@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
 units = mlsysim.core.units
@@ -114,13 +115,13 @@ v("fuse_ratio", FUSE.traffic_ratio, "{:.0f}", "traffic, unfused over fused")
 v("flash_hbm_ratio", CR.FlashAttentionGpt2MediumStandardHbmTrafficGB / CR.FlashAttentionGpt2MediumFusedHbmTrafficGB,
   "{:.0f}", "FlashAttention: standard over fused HBM traffic (Dao 2022, Fig. 2)")
 
-print("== Operator surfaces (Literature.Series, 2025 registries)")
-pt = Literature.Series.PyTorchOperatorSchemas.entries[-1]
-tf = Literature.Series.TensorFlowOperators.entries[-1]
-core = [r for r in Literature.Series.PyTorchOperatorSchemas.entries if r["core_aten"]][-1]["core_aten"]
-xla = Literature.Series.XLAHLOOpcodes.entries[-1]["opcodes"]
-onnx = Literature.Series.ONNXOpsetOperators.entries[-1]["operators"]
-jax = Literature.Series.JAXLaxPrimitives.entries[-1]["primitives"]
+print("== Operator surfaces (local CSV series, 2025 registries)")
+pt = load_series("vol1/07_frameworks/data/pytorch_operator_schemas.csv").entries[-1]
+tf = load_series("vol1/07_frameworks/data/tensorflow_operators.csv").entries[-1]
+core = [r for r in load_series("vol1/07_frameworks/data/pytorch_operator_schemas.csv").entries if r["core_aten"]][-1]["core_aten"]
+xla = load_series("vol1/07_frameworks/data/xla_hlo_opcodes.csv").entries[-1]["opcodes"]
+onnx = load_series("vol1/07_frameworks/data/onnx_opset_operators.csv").entries[-1]["operators"]
+jax = load_series("vol1/07_frameworks/data/jax_lax_primitives.csv").entries[-1]["primitives"]
 OPS = [("PyTorch ATen (eager)", "ops_pt", pt["aten_schemas"]), ("TensorFlow (eager)", "ops_tf", tf["ops"]),
        ("ONNX standard", "ops_onnx", onnx), ("Core ATen IR", "ops_core", core),
        ("JAX lax primitives", "ops_jax", jax), ("XLA HLO", "ops_xla", xla)]

@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Models, Systems = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems
 Infrastructure, Literature, Scenarios = mlsysim.Infrastructure, mlsysim.Literature, mlsysim.Scenarios
@@ -229,13 +230,13 @@ print("== Rack and power")
 v("rack_gpu_kw", m(RACK.accelerator_count * H100.tdp, "kW"), "{:.1f}", "GPUs in one DGX rack x TDP, kW")
 v("cluster_mw", m(REF_CLUSTER.total_accelerators / RACK.accelerator_count * RACK.total_power, "MW"),
   "{:.1f}", "reference cluster in DGX racks, MW")
-series = Literature.Series.AISupercomputers
+series = load_series("vol2/02_compute_infrastructure/data/ai_supercomputers.csv")
 front = series.find("name", "Frontier")
 last = series.largest("power_mw", "first_operational_date", "2025-12-31")
 v("frontier_mw", front["power_mw"], "{:.0f}", "Frontier, MW (Epoch AI via MLSysIM)")
 v("largest_2025_mw", last["power_mw"], "{:.0f}", "largest system by 2025, MW")
 v("largest_over_frontier", last["power_mw"] / front["power_mw"], "{:.0f}", "largest 2025 / Frontier")
-chips = Literature.Series.AcceleratorPowerRatings
+chips = load_series("vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv")
 v("chip_growth", chips.largest("power_w")["power_w"] / m(H100.tdp, "W"), "{:.0f}",
   "highest package rating / H100 TDP")
 v("largest_over_frontier_word", round(last["power_mw"] / front["power_mw"]), "words", "the same, in prose")

@@ -24,13 +24,14 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from digitize_sdc import BOX  # noqa: E402  (the keynote slide's highlighted window)
 
 Q_ = mlsysim.core.units.Q_
 Systems, Models, Literature, Scenarios = (mlsysim.Systems, mlsysim.Models, mlsysim.Literature,
                                           mlsysim.Scenarios)
 RUNS, FLEET = Literature.TrainingRuns, Literature.FleetOperations
-LLAMA3 = Literature.Series.Llama3Interruptions.entries
+LLAMA3 = load_series("vol2/07_fault_tolerance/data/llama3_interruptions.csv").entries
 NODE = Systems.Nodes.DGX_H100
 LADDER = Scenarios.GpuFailureLadder                   # GPU-only, MTTF / N
 FULL, FULL100K = Scenarios.FullSystemFailures10K, Scenarios.FullSystemFailures100K

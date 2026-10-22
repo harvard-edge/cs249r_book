@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from mlsysim.engine.serving_profile import resnet50_h100_profile  # noqa: E402
 
 Hardware, Literature, Scenarios = mlsysim.Hardware, mlsysim.Literature, mlsysim.Scenarios
@@ -62,7 +63,7 @@ READ1, B_INT8, B_FP16 = (Scenarios.ResNet50Stage2MapInt8ReadOnce, Scenarios.ResN
 B_HBM_LO, B_HBM_HI, B_DDR = (Scenarios.ResNet50Stage2MapInt8BoundaryHbm2Low,
                              Scenarios.ResNet50Stage2MapInt8BoundaryHbm2High,
                              Scenarios.ResNet50Stage2MapInt8BoundaryDdr7nm)
-TILE_SERIES = Literature.NvidiaGemmTileQuantizationA100
+TILE_SERIES = load_series("slides/vol1/11b_hw_acceleration/images/data/nvidia_gemm_tile_quantization_a100.csv")
 
 
 def m(q, unit):
@@ -239,7 +240,7 @@ v("w129_pct2", pct(FRINGE.utilization ** 2), "{:.0f}", "both dimensions, %")
 v("w129_last", FRINGE.last_tile_lanes, "words", "busy lanes in the second tile, in prose")
 v("mm_tiles_dim", MM.tiles_m, "{:.0f}", "tiles per dimension")
 
-print("== Measured tile quantization (Literature.NvidiaGemmTileQuantizationA100)")
+print("== Measured tile quantization (slides/vol1/11b_hw_acceleration/images/data/nvidia_gemm_tile_quantization_a100.csv)")
 tile_n = MM_256.tile_n                               # the forced tile is 128 wide along N
 rows = TILE_SERIES.entries
 at = next(i for i, r in enumerate(rows) if r["n"] == tile_n)

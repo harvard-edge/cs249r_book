@@ -14,7 +14,7 @@ rendered chapter, Fleet Orchestration. Values derived from a trace are labeled
   - Recall (Fault Tolerance, Napkin Math 7.3): detect 60 s, restart 3 min,
     load 24.5 s, warm up 2 min, about 6.4 min.
   - Kalos trace (Hu et al., NSDI 2024; AcmeTrace, CC BY 4.0), read from
-    MLSysIM Literature.Series.AcmeKalosJobSizes
+    MLSysIM vol2/08_fleet_orchestration/data/acme_kalos_job_sizes.csv
     (mlsysim/literature/data/series/acme_kalos_job_sizes.csv). Class shares,
     mean GPU-hours per job, the Cs lower bound, and the job-state shares are
     derived here from those rows.
@@ -27,14 +27,14 @@ rendered chapter, Fleet Orchestration. Values derived from a trace are labeled
     the slot layout here is illustrative.
   - M/G/1 (FO Napkin Math 8.1): W / (1/mu) = rho / (1 - rho) x (1 + Cs^2) / 2.
   - NCCL all_reduce_perf on one 8x H100 node (NVIDIA exemplar-performance,
-    MLSysIM Literature.Series.NcclAllreduceH100Node): in-place bus bandwidth.
+    MLSysIM local CSV series.NcclAllreduceH100Node): in-place bus bandwidth.
     One NDR port 50 GB/s per direction (FO section 8.4.2, spec).
   - Placement (FO Napkin Math 8.2): 1 GB at 450 GB/s = 2.2 ms, at 50 GB/s
     = 20 ms.
   - Elastic decision (FO Napkin Math 8.3): 24, 64, 39.7 epochs; GPU-hours
     derived.
   - MLPerf Training v3.1 GPT-3 175B on NVIDIA Eos (MLSysIM
-    Literature.Series.MLPerfTrainingLLMScaling): minutes by GPU count.
+    vol2/06_distributed_training/data/mlperf_training_llm_scaling.csv): minutes by GPU count.
   - Preemption (FO section 8.8.1): 15 min lost, 3 min relaunch, 24.5 s
     reload, 2 min warmup = 20.4 min; 12 per day = 4.1 h.
   - Spot (FO Systems Perspective 8.4): on-demand $344,064 over 336 h; spot
@@ -59,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs as K  # noqa: E402  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
 
@@ -459,7 +460,7 @@ def mg1(k, cs_kalos, path=None, sat=False):
 
 # ====================================================================== NCCL
 def nccl():
-    rows = K.Literature.Series.NCCLAllReduceH100Node.entries
+    rows = load_series("vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv").entries
     sz = np.array([float(r["size_bytes"]) for r in rows])
     bw = np.array([float(r["ip_busbw_GBps"]) for r in rows])
     keep = sz >= 2 ** 16

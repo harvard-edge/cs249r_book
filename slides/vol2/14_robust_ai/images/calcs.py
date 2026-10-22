@@ -24,7 +24,7 @@ Sources by slide:
   - RobustBench: Scenarios.RobustBenchCifar10LinfProgress.
   - Certified radius: Scenarios.SmoothingRadiusCifar10.
   - Bit flip: Scenarios.Fp32WeightExponentFlip; Llama 3 interruptions from
-    Literature.TrainingRuns and Literature.Series.Llama3Interruptions; GPT-3
+    Literature.TrainingRuns and vol2/07_fault_tolerance/data/llama3_interruptions.csv; GPT-3
     parameters from Models.
 
 Run from this folder: python3 calcs.py
@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Literature, Scenarios, Models = mlsysim.Literature, mlsysim.Scenarios, mlsysim.Models
 STUDY = Literature.RobustnessStudies
@@ -52,7 +53,7 @@ CELLS = Scenarios.ResNet50CleanVersusRobustAttacked
 RB = Scenarios.RobustBenchCifar10LinfProgress
 CERT = Scenarios.SmoothingRadiusCifar10
 FLIP = Scenarios.Fp32WeightExponentFlip
-LLAMA3 = Literature.Series.Llama3Interruptions.entries
+LLAMA3 = load_series("vol2/07_fault_tolerance/data/llama3_interruptions.csv").entries
 
 
 def pct(x):

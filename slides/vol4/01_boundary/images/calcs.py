@@ -3,7 +3,7 @@
 
 MLSysIM holds the inputs (the running machine in Embodied.*, the Tempe and
 Cruise records in Literature.IncidentReports, the Epoch AI series in
-Literature.ModelsByDomain) and the calculations (Scenarios.*, each backed by a
+vol4/01_boundary/data/epoch_models_by_domain.csv) and the calculations (Scenarios.*, each backed by a
 solver); the chapter, The Causal Boundary, reads the same scenarios. This file
 only selects values, converts units, and formats them; it types no numbers.
 Each value is recorded with v() under the key the deck prints as \\val{key};

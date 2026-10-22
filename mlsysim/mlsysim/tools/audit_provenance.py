@@ -280,7 +280,7 @@ def audit_infra_capacity() -> list[str]:
 def audit_literature_sourced() -> list[str]:
     issues: list[str] = []
     for attr in sorted(dir(Literature)):
-        if attr.startswith("_") or attr in ("list", "get", "names", "Series"):
+        if attr.startswith("_") or attr in ("list", "get", "names"):
             continue
         obj = getattr(Literature, attr)
         if hasattr(obj, "provenance"):
@@ -289,12 +289,6 @@ def audit_literature_sourced() -> list[str]:
             for item in _registry_nodes(obj):
                 if isinstance(item, Sourced):
                     issues.extend(_validate_provenance_record(f"Literature.{attr}", item.provenance))
-    for attr in sorted(dir(Literature.Series)):
-        if attr.startswith("_"):
-            continue
-        obj = getattr(Literature.Series, attr)
-        if hasattr(obj, "provenance"):
-            issues.extend(_validate_provenance_record(f"Literature.Series.{attr}", obj.provenance))
     return issues
 
 

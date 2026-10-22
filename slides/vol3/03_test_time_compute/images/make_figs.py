@@ -12,7 +12,7 @@ that draw them say "illustrative".
   - alloc: NM 3.2, table 2, illustrative.
   - passk, poolcost: NM 3.3, illustrative.
   - coverage: Brown et al. 2024 (Large Language Monkeys), recomputed per-sample
-    labels via MLSysIM Literature.RepeatedSamplingMajority / Coverage.
+    labels via MLSysIM vol3/03_test_time_compute/data/repeated_sampling_majority.csv / Coverage.
   - precision, loss: NM 3.4 and TTC equation 3, illustrative rates.
   - selection: TTC equation 4; exact Gaussian expected maximum (calcs.py).
   - topo: TTC figure 7 (where each search structure prunes), redrawn.
@@ -224,8 +224,8 @@ def passk():
 # --------------------------------------------------------------------------
 def coverage():
     S = K.COV
-    maj = getattr(K.Literature, S.majority_series).entries
-    cov = getattr(K.Literature, S.coverage_series).entries
+    maj = K.mlsysim.load_series(S.majority_series).entries
+    cov = K.mlsysim.load_series(S.coverage_series).entries
     series = ((S.small_model, "8B", C["memory"]), (S.large_model, "70B", C["network"]))
     rep = sorted([e for e in cov if e["model"] == S.repair_system and e["dataset"] == S.repair_dataset],
                  key=lambda e: e["k"])

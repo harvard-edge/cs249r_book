@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..core.types import Quantity
 from ..core.units import Q_
+from ..core.series_loader import load_series
 from ..hardware.types import HardwareNode
 from ..models.types import Workload
 from ..systems.types import Fleet
@@ -677,9 +678,8 @@ class TrainingGrowthScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import TrainingGrowthModel
-        rows = getattr(Literature.Series, self.series_name).entries
+        rows = load_series(self.series_name).entries
         return TrainingGrowthModel().solve(rows, self.first_year, self.last_year)
 
 
@@ -976,7 +976,7 @@ class SilentSlowdownScenario(BaseScenario):
 
 
 class CollectiveFitScenario(BaseScenario):
-    """A floor-plus-bandwidth fit to the measured collective sweep ``series_name`` (Literature.Series)."""
+    """A floor-plus-bandwidth fit to the measured collective sweep ``series_name`` (local CSV series)."""
     series_name: str
     floor_cutoff: Quantity
     mid_low: Quantity
@@ -984,8 +984,7 @@ class CollectiveFitScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -1247,15 +1246,13 @@ class StorageBenchmarkScenario(BaseScenario):
 
     @property
     def rows(self) -> list:
-        from ..literature.registry import Literature
-        return [r for r in getattr(Literature.Series, self.series_name).entries
+        return [r for r in load_series(self.series_name).entries
                 if r["division"] == self.division and r["au_check"] == "pass"]
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import StorageBenchmarkDemandModel
-        return StorageBenchmarkDemandModel().solve(getattr(Literature.Series, self.series_name).entries,
+        return StorageBenchmarkDemandModel().solve(load_series(self.series_name).entries,
                                                    self.division, self.workloads, self.accelerators)
 
 
@@ -1371,9 +1368,8 @@ class DomainComputeGapScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import DomainComputeGapModel
-        rows = getattr(Literature, self.series_name).entries
+        rows = load_series(self.series_name).entries
         return DomainComputeGapModel().solve(rows, self.model, self.reference_group)
 
 
@@ -1445,8 +1441,7 @@ class TaskHorizonTrendScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -1473,8 +1468,7 @@ class AgentRunScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     def task(self, instance_id: str) -> dict:
         return next(r for r in self.rows if r["instance_id"] == instance_id)
@@ -1628,9 +1622,8 @@ class TokenMixScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import TokenMixModel
-        rows = getattr(Literature, self.series_name).entries
+        rows = load_series(self.series_name).entries
         f = self.floors.result
         return TokenMixModel().solve([r[self.prompt_column] for r in rows],
                                      [r[self.output_column] for r in rows],
@@ -2021,9 +2014,8 @@ class ScalingSeriesScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import ScalingSeriesModel
-        rows = getattr(Literature.Series, self.series_name).entries
+        rows = load_series(self.series_name).entries
         return ScalingSeriesModel().solve(rows, self.specs)
 
 
@@ -2281,7 +2273,7 @@ class ResidualShareScenario(BaseScenario):
 
 class MemoryWallScenario(BaseScenario):
     """Training-state demand of notable models against one accelerator's memory, by year."""
-    models: List                     # (label, name in Literature.Series.NotableModels)
+    models: List                     # (label, name in vol1/05_nn_computation/data/notable_models.csv)
     accelerators: List[str]          # Hardware.Cloud keys
     bytes_per_param: Quantity
 
@@ -2497,15 +2489,14 @@ class PropagationScenario(BaseScenario):
 
 class MeasuredRoutesScenario(BaseScenario):
     """Measured round trips from one source to several regions, each against its fiber floor."""
-    series_name: str                 # a Literature.Series table with coordinates and p50_rtt_ms
+    series_name: str                 # a local CSV series table with coordinates and p50_rtt_ms
 
     @property
     def routes(self) -> Dict[str, PropagationScenario]:
         """Destination label -> propagation scenario over the great-circle distance."""
-        from ..literature.registry import Literature
         from ..physics.networking import calc_great_circle_distance
         out = {}
-        for r in getattr(Literature.Series, self.series_name).entries:
+        for r in load_series(self.series_name).entries:
             d = calc_great_circle_distance(r["source_lat"], r["source_lon"], r["dest_lat"], r["dest_lon"])
             out[r["dest_label"]] = PropagationScenario(
                 name=f"{r['source_region']} to {r['dest_region']}",
@@ -2659,7 +2650,7 @@ class FeatureUnitSkewScenario(BaseScenario):
 
 
 class ShiftedTestSetScenario(BaseScenario):
-    """Published models scored on an original and a re-collected test set (``Literature.Series``)."""
+    """Published models scored on an original and a re-collected test set (``local CSV series``)."""
     series_name: str
     original_key: str
     new_key: str
@@ -2672,8 +2663,7 @@ class ShiftedTestSetScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        rows = getattr(Literature.Series, self.series_name).entries
+        rows = load_series(self.series_name).entries
         if self.original_floor is None:
             return rows
         return [r for r in rows if r[self.new_key] is not None and r[self.original_key] >= self.original_floor]
@@ -2686,7 +2676,7 @@ class ShiftedTestSetScenario(BaseScenario):
 
 
 class ProxyDriftScenario(BaseScenario):
-    """A proxy estimate against its reference by season (``Literature.Series`` of weekly rows)."""
+    """A proxy estimate against its reference by season (``local CSV series`` of weekly rows)."""
     series_name: str
     proxy_key: str
     reference_key: str
@@ -2699,8 +2689,7 @@ class ProxyDriftScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -2759,15 +2748,14 @@ class PublishedRooflineScenario(BaseScenario):
     """Measured applications placed on a published roofline: a peak and the ridge where the slope meets it."""
     peak: Quantity
     ridge: float                       # operations per byte, in the source's own counting
-    series_name: str                   # Literature.Series table: app, ops_per_weight_byte, measured_tops
+    series_name: str                   # local CSV series table: app, ops_per_weight_byte, measured_tops
 
     @property
     def apps(self) -> List[dict]:
         """Per application: intensity, measured rate, the roof above it, its share, and the binding side."""
-        from ..literature.registry import Literature
         peak = self.peak.to("TOPS").magnitude
         out = []
-        for r in getattr(Literature.Series, self.series_name).entries:
+        for r in load_series(self.series_name).entries:
             roof = min(peak, r["ops_per_weight_byte"] * peak / self.ridge)
             out.append(dict(app=r["app"], family=r["family"], intensity=r["ops_per_weight_byte"],
                             measured_tops=r["measured_tops"], roof_tops=roof,
@@ -2850,8 +2838,7 @@ class TrendFitScenario(BaseScenario):
     def points(self) -> List[tuple]:
         if self.stated_points is not None:
             return [(float(x), float(y)) for x, y in self.stated_points]
-        from ..literature.registry import Literature
-        rows = getattr(Literature.Series, self.series_name).entries
+        rows = load_series(self.series_name).entries
         return [(self._x(r[self.x_key]), r[self.y_key]) for r in rows
                 if self.group_key is None or r[self.group_key] == self.group]
 
@@ -2880,9 +2867,8 @@ class TrendWindowScenario(BaseScenario):
 
     def peak(self, series: str, window: str) -> float:
         """Largest value of ``series`` in the named window."""
-        from ..literature.registry import Literature
         lo, hi = self.windows[window]
-        rows = getattr(Literature.Series, self.series_name).entries
+        rows = load_series(self.series_name).entries
         return max(r["value"] for r in rows if r["series"] == series and lo <= r["year"] < hi)
 
     def growth(self, series: str, start: str, end: str) -> float:
@@ -4249,11 +4235,10 @@ class CoverageVsVoteScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import CoverageVsVoteModel
         return CoverageVsVoteModel().solve(
-            getattr(Literature, self.majority_series).entries,
-            getattr(Literature, self.coverage_series).entries,
+            load_series(self.majority_series).entries,
+            load_series(self.coverage_series).entries,
             self.small_model, self.large_model, self.dataset, self.k_max, self.k_knee,
             self.repair_system, self.repair_dataset, self.repair_k)
 
@@ -4380,8 +4365,7 @@ class RecordedRunCostScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return [r for r in getattr(Literature, self.series_name).entries if r["submission"] == self.submission]
+        return [r for r in load_series(self.series_name).entries if r["submission"] == self.submission]
 
     @property
     def result(self):
@@ -4438,8 +4422,7 @@ class ComprehensionByLengthScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -8159,8 +8142,7 @@ class SeriesSpreadScenario(BaseScenario):
 
     @property
     def rows(self) -> tuple:
-        from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        return load_series(self.series_name).entries
 
     def window(self, name: str) -> List[dict]:
         lo, hi = self.windows[name]
@@ -11558,7 +11540,7 @@ class FloatBitFlipScenario(BaseScenario):
 
 
 class StandardizedAttackScenario(BaseScenario):
-    """Published defenses under one standardized attack (``Literature.Series``): best by year and broken defenses.
+    """Published defenses under one standardized attack (``local CSV series``): best by year and broken defenses.
 
     Rows without a year and rows the benchmark flags unreliable are dropped. A
     defense below ``broken_floor`` percent attacked accuracy provides no robustness.
@@ -11570,9 +11552,8 @@ class StandardizedAttackScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return [r for r in getattr(Literature.Series, self.series_name).entries
-                if r["year"] and r["unreliable"] != "True"]
+        return [r for r in load_series(self.series_name).entries
+                if r["year"] and r["unreliable"] not in (True, "True")]
 
     @property
     def years(self) -> List[int]:
@@ -11685,8 +11666,7 @@ class CallCeilingScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -11761,9 +11741,8 @@ class StepCeilingReturnScenario(BaseScenario):
 
     @property
     def result(self):
-        from ..literature.registry import Literature
         from .solvers import StepCeilingReturnModel
-        rows = getattr(Literature, self.series_name).entries
+        rows = load_series(self.series_name).entries
         steps = self.steps or sorted({int(r["steps"]) for r in rows})
         return StepCeilingReturnModel().solve(rows, steps)
 # --- Closed-loop evaluation: trial campaigns, sequential tests, and exposure (added 2026-10-20) ---
@@ -13136,14 +13115,13 @@ class BreakerWindowScenario(BaseScenario):
 
 
 class RetrySustainedOutagesScenario(BaseScenario):
-    """Published incidents (``Literature.Series``) counted by whether retries sustained them."""
+    """Published incidents (``local CSV series``) counted by whether retries sustained them."""
     series_name: str
     threshold_hours: float           # count retry-sustained outages longer than this
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -13251,8 +13229,7 @@ class ScaffoldSpreadScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -13268,8 +13245,7 @@ class LeaderboardTiesScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -13560,8 +13536,7 @@ class RollingShareScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def shares(self) -> List[float]:
@@ -15789,7 +15764,7 @@ class FrameCompressionScenario(BaseScenario):
 class SmallestModelAtScoreScenario(BaseScenario):
     """The smallest model at or above ``threshold`` on ``score`` released up to each date.
 
-    ``series`` names a ``Literature.Series`` table with ``date``, ``parameters``,
+    ``series`` names a ``local CSV series`` table with ``date``, ``parameters``,
     ``model``, and the ``score`` column; the frontier is the running minimum of
     parameters among rows that clear the bar, in date order.
     """
@@ -15799,8 +15774,7 @@ class SmallestModelAtScoreScenario(BaseScenario):
 
     @property
     def rows(self) -> list:
-        from ..literature.registry import Literature
-        return sorted(getattr(Literature.Series, self.series).entries, key=lambda r: r["date"])
+        return sorted(load_series(self.series).entries, key=lambda r: r["date"])
 
     @property
     def frontier(self) -> list:
@@ -16284,7 +16258,7 @@ class ParameterBandwidthGrowthScenario(BaseScenario):
 
 
 class DeviceEnvelopeScenario(BaseScenario):
-    """Best-device-to-date envelopes of two columns of a ``Literature.Series`` device table.
+    """Best-device-to-date envelopes of two columns of a ``local CSV series`` device table.
 
     Rows are ordered by ``date_key``; each envelope is the running maximum,
     and growth is the final envelope over the earliest device's value.
@@ -16296,8 +16270,7 @@ class DeviceEnvelopeScenario(BaseScenario):
 
     @property
     def rows(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return sorted(getattr(Literature.Series, self.series_name).entries, key=lambda r: r[self.date_key])
+        return sorted(load_series(self.series_name).entries, key=lambda r: r[self.date_key])
 
     def _envelope(self, key) -> List[tuple]:
         best, out = 0.0, []
@@ -16760,8 +16733,7 @@ class TrajectoryRoleShareScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -16926,7 +16898,7 @@ class PeriodicInferencePowerScenario(BaseScenario):
 
 
 class MeasurementBoundaryEnergyScenario(BaseScenario):
-    """One request's energy under a narrow and a full measurement boundary (``Literature.Series`` rows).
+    """One request's energy under a narrow and a full measurement boundary (``local CSV series`` rows).
 
     Each row is a component with its energy and a counted flag under each
     boundary; the two totals sum the counted rows.
@@ -16937,8 +16909,7 @@ class MeasurementBoundaryEnergyScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        return load_series(self.series_name).entries
 
     def _total(self, key: str) -> float:
         return sum(r[f"{key}_wh"] for r in self.rows if r[f"{key}_counted"] == 1)
@@ -17735,7 +17706,7 @@ class CommandAuthenticationScenario(BaseScenario):
 
 class DisengagementRecordScenario(BaseScenario):
     """One company's filed disengagement record: first and latest years and a year-over-year swing."""
-    entries: Tuple[Dict[str, Any], ...]         # rows of Literature.CaliforniaDisengagements
+    entries: Tuple[Dict[str, Any], ...]         # rows of vol4/14_intervention/data/ca_dmv_disengagements.csv
     company: str
     first_year: int
     latest_year: int
@@ -17890,7 +17861,7 @@ class MeanVersusTailScenario(BaseScenario):
 
 
 class MLPerfTrainingResultScenario(BaseScenario):
-    """One MLPerf Training submission's runs (``Literature.Series`` rows) and its published score.
+    """One MLPerf Training submission's runs (``local CSV series`` rows) and its published score.
 
     MLPerf's rule: drop the fastest and slowest of the runs, a run that missed
     the quality target counting as the slowest, average the rest, and multiply
@@ -17907,8 +17878,7 @@ class MLPerfTrainingResultScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return tuple(r for r in getattr(Literature.Series, self.series_name).entries if r["system"] == self.system)
+        return tuple(r for r in load_series(self.series_name).entries if r["system"] == self.system)
 
     @property
     def run_minutes(self) -> List[float]:
@@ -20504,8 +20474,7 @@ class PriceDeclineScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -20576,8 +20545,7 @@ class TaskHorizonReliabilityScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        rows = [r for r in getattr(Literature, self.series_name).entries
+        rows = [r for r in load_series(self.series_name).entries
                 if r["is_sota"] and r["release_date"] >= self.released_from]
         return sorted(rows, key=lambda r: r["release_date"])
 
@@ -20608,8 +20576,7 @@ class CostVsScoreScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return getattr(Literature, self.series_name).entries
+        return load_series(self.series_name).entries
 
     @property
     def result(self):
@@ -20947,8 +20914,7 @@ class CoverageIndependenceScenario(BaseScenario):
 
     @property
     def rows(self):
-        from ..literature.registry import Literature
-        return [r for r in getattr(Literature, self.series_name).entries
+        return [r for r in load_series(self.series_name).entries
                 if r["model"] == self.system and r["dataset"] == self.dataset]
 
     @property
@@ -21692,7 +21658,7 @@ class PerExampleGradientScenario(BaseScenario):
 
 class FrontierCostTrendScenario(BaseScenario):
     """Least-squares growth of frontier training cost: log10(cost) against publication date
-    (decimal year) over the frontier-flagged rows of Literature.Series.NotableModels dated
+    (decimal year) over the frontier-flagged rows of vol1/05_nn_computation/data/notable_models.csv dated
     ``from_year`` or later."""
     from_year: int
 
@@ -21704,8 +21670,7 @@ class FrontierCostTrendScenario(BaseScenario):
 
     @property
     def rows(self) -> List[Dict[str, Any]]:
-        from ..literature.registry import Literature
-        return [r for r in Literature.Series.NotableModels.entries
+        return [r for r in load_series("vol1/05_nn_computation/data/notable_models.csv").entries
                 if r["training_cost_2023usd"] and r["date"][:4] >= str(self.from_year)]
 
     @property
@@ -21802,8 +21767,7 @@ class BenchmarkLeaderboardScenario(BaseScenario):
 
     @property
     def submissions(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return list(getattr(Literature, self.series_name).entries)
+        return list(load_series(self.series_name).entries)
 
     @property
     def comparable(self) -> List[dict]:
@@ -21887,13 +21851,11 @@ class GatewayTokenGrowthScenario(BaseScenario):
 
     @property
     def index_rows(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return list(getattr(Literature, self.index_series_name).entries)
+        return list(load_series(self.index_series_name).entries)
 
     @property
     def tool_rows(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return list(getattr(Literature, self.tool_series_name).entries)
+        return list(load_series(self.tool_series_name).entries)
 
     @property
     def base_row(self) -> dict:
@@ -21951,13 +21913,11 @@ class RecordedRepairTrajectoryCallsScenario(BaseScenario):
 
     @property
     def rows(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return list(getattr(Literature, self.series_name).entries)
+        return list(load_series(self.series_name).entries)
 
     @property
     def run_row(self) -> dict:
-        from ..literature.registry import Literature
-        return getattr(Literature, self.run_series_name).where(instance_id=self.instance_id)[0]
+        return load_series(self.run_series_name).where(instance_id=self.instance_id)[0]
 
     @property
     def calls(self) -> int:
@@ -21999,13 +21959,11 @@ class GatewayWorkloadSpendScenario(BaseScenario):
 
     @property
     def use_cases(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return sorted(getattr(Literature, self.use_case_series_name).entries, key=lambda r: -r["token_share_pct"])
+        return sorted(load_series(self.use_case_series_name).entries, key=lambda r: -r["token_share_pct"])
 
     @property
     def open_weight_rows(self) -> List[dict]:
-        from ..literature.registry import Literature
-        return list(getattr(Literature, self.open_weight_series_name).entries)
+        return list(load_series(self.open_weight_series_name).entries)
 
     def use_case(self, name: str) -> dict:
         return next(r for r in self.use_cases if r["use_case"] == name)

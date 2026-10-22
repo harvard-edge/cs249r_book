@@ -39,7 +39,7 @@ def _year(ym):
 
 # ---------------------------------------------------------------------------
 # Hook: Waymo cumulative rider-only miles (Waymo Safety Impact Data Hub,
-# MLSysIM Literature.Series.WaymoRiderOnlyMiles). Step 2 marks the last year.
+# MLSysIM vol2/16_responsible_ai/data/waymo_rider_only_miles.csv). Step 2 marks the last year.
 # ---------------------------------------------------------------------------
 def waymo_miles(step):
     rows = calcs.waymo_rows()

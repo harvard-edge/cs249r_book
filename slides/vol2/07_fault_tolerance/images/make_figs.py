@@ -10,7 +10,7 @@ chapter uses three:
     series; redundant power supplies add no term.
   - Measured: Meta RSC (Kokolis et al. 2025) and Llama 3 405B (Dubey et al.
     2024), from Literature.FleetOperations and Literature.TrainingRuns.
-  - Llama 3 root causes: Literature.Series.Llama3Interruptions (Dubey et al.
+  - Llama 3 root causes: vol2/07_fault_tolerance/data/llama3_interruptions.csv (Dubey et al.
     2024, Table 5 counts), grouped here as the chart shows them.
   - Young-Daly (Napkin Math 7.2): Scenarios.Gpt3CheckpointInterval10K.
   - Recovery budget (Napkin Math 7.3): Scenarios.Gpt3RecoveryBudget1K.

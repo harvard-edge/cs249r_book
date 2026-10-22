@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Systems, Models, Scenarios, Literature = (mlsysim.Hardware, mlsysim.Systems, mlsysim.Models,
                                                     mlsysim.Scenarios, mlsysim.Literature)
@@ -50,7 +51,7 @@ def ratio(a, b):
 
 
 print("== Hook: Horovod at Uber")
-hvd = {r["model"]: r for r in Literature.Series.HorovodScaling128Gpu.entries}
+hvd = {r["model"]: r for r in load_series("slides/vol2/05_collective_communication/images/data/horovod_scaling_128gpu.csv").entries}
 v("hvd_gpus", LIT.HorovodBenchmarkGpus, "{:.0f}", "Pascal GPUs in the benchmark")
 v("hvd_gbe", LIT.HorovodEthernetGbps, "{:.0f}", "Ethernet, Gb/s")
 v("hvd_eff_pct", LIT.HorovodScalingEfficiencyPct, "{:.0f}", "Horovod efficiency, %")
@@ -73,7 +74,7 @@ v("hvd_rdma_ratio_word", LIT.HorovodRdmaGainVgg16Pct / LIT.HorovodRdmaGainLowPct
   "VGG-16 gain over the others, in prose")
 
 print("== Horovod Timeline (redrawn trace)")
-rows = Literature.Series.HorovodTimelineTrace.entries
+rows = load_series("slides/vol2/05_collective_communication/images/data/horovod_timeline_trace.csv").entries
 ph = {(r["tensors"], r["phase"]): (r["start_ms"], r["end_ms"]) for r in rows}
 t0 = LIT.HorovodTimelineOriginMs
 ar_start = LIT.HorovodTimelineAllreduceStartMs - t0

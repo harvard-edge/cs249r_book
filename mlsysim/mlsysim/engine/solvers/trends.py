@@ -124,10 +124,11 @@ class MemoryWallModel(ForwardModel):
     def solve(self, models, accelerators, bytes_per_param):
         from ..results import MemoryWallResult
         from ...hardware.registry import Hardware
-        from ...literature.registry import Literature
+        from ...core.series_loader import load_series
+        notable = load_series("vol1/05_nn_computation/data/notable_models.csv").entries
         rows = []
         for label, name in models:
-            r = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
+            r = next(m for m in notable if m["model"] == name)
             rows.append({"Year": int(r["date"][:4]), "Date": r["date"], "Name": label, "Type": "Model",
                          "Memory_GB": (r["parameters"] * bytes_per_param).to("GB").magnitude})
         for key in accelerators:
@@ -176,7 +177,7 @@ class ParameterGrowthModel(ForwardModel):
         ls, li = (float(x) for x in np.polyfit(ly, ll, 1))
         months = lambda s: 12 * math.log10(2) / s
         return ParameterGrowthResult(
-            models=[r["model"] for r in rows], domains=[r["domain"] for r in rows],
+            models=[r["model"] for r in rows], domains=[r["domain"] or "" for r in rows],
             parameters=[r["parameters"] for r in rows], years=years, log_parameters=logp,
             split_year=split_year, early_slope=es, early_intercept=ei, late_slope=ls, late_intercept=li,
             early_doubling_months=months(es), late_doubling_months=months(ls),
@@ -209,7 +210,7 @@ class DatasetGrowthModel(ForwardModel):
         ls, li = (float(x) for x in np.polyfit(ly, ll, 1))
         months = lambda s: 12 * math.log10(2) / s
         return DatasetGrowthResult(
-            models=[r["model"] for r in rows], domains=[r["domain"] for r in rows],
+            models=[r["model"] for r in rows], domains=[r["domain"] or "" for r in rows],
             dataset_sizes=[r["training_dataset_size"] for r in rows], years=years, log_dataset_sizes=logd,
             split_year=split_year, early_slope=es, early_intercept=ei, late_slope=ls, late_intercept=li,
             early_doubling_months=months(es), late_doubling_months=months(ls),

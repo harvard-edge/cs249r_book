@@ -4,7 +4,7 @@
 Every value comes from calcs.py (imported as c), which reads MLSysIM: the
 ResNet-50 H100 serving profile and the model-serving Scenarios.* the Model
 Serving chapter also reads, the cited results in Literature.ServingResults,
-and the MLPerf Inference v5.0 rows in Literature.Series. Figure code takes
+and the MLPerf Inference v5.0 rows in local CSV series. Figure code takes
 plotted values from those objects and printed labels from deckvals.val(), so
 a label shows exactly the digits the slide text shows. The ResNet-50 numbers
 are the chapter's modeled reference profile on the H100 (not measurements);

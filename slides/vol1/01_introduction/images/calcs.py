@@ -24,6 +24,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.core.series_loader import load_series  # noqa: E402
 
 Hardware, Models, Literature = mlsysim.Hardware, mlsysim.Models, mlsysim.Literature
 Scenarios, Datasets = mlsysim.Scenarios, mlsysim.Datasets
@@ -35,7 +36,6 @@ from mlsysim.physics import calc_decoder_matmul_weights, memory_from_params  # n
 HERE = Path(__file__).resolve().parent
 GPT3, GPT4, ALEXNET = Models.Language.GPT3, Models.Language.GPT4, Models.Vision.AlexNet
 RUNS, QUALITY, GAMES = Literature.TrainingRuns, Literature.PredictionQuality, Literature.GamePlaying
-SERIES = Literature.Series
 RUN, RUN_HI = Scenarios.Gpt3TrainingTime1KA100, Scenarios.Gpt3TrainingTime1KA100HigherUtilization
 SPACE = Scenarios.ImageNetInputSpace
 PED, SKEW = Scenarios.PedestrianRecallWinterShift, Scenarios.AccountAgeUnitSkew
@@ -66,7 +66,7 @@ def mantissa_exponent(x):
 # ---------------------------------------------------------------------------
 def flu_weeks():
     """Weekly Google Flu Trends estimate and CDC count, percent of doctor visits."""
-    rows = SERIES.GoogleFluTrendsVsCdc.entries
+    rows = load_series("slides/vol1/01_introduction/images/data/google_flu_trends_cdc_ilinet.csv").entries
     gft = {int(r["epiweek"]): r[GFT.proxy_key] for r in rows}
     cdc = {int(r["epiweek"]): r[GFT.reference_key] for r in rows}
     return gft, cdc
@@ -79,7 +79,7 @@ def recht_rows():
 
 def mlperf_rows():
     """MLPerf Inference v4.0 Llama 2 70B Offline rows, H100 system first."""
-    return SERIES.MLPerfInferenceV4Llama2Offline.entries
+    return load_series("slides/vol1/01_introduction/images/data/mlperf_inference_v4_llama2_70b_offline.csv").entries
 
 
 print("== Recall and efficiency: GPT-3 on 1,024 A100s (cluster training-time scenarios)")

@@ -20,7 +20,7 @@ Every value is from the rendered chapter (Compute Infrastructure, dev build of
   - Die arithmetic share: CPU 5-10, GPU 50-60, TPU 70-80, ASIC over 90
     percent, approximate shares that mark a direction (Sec. 2.2, figure 2).
   - Arithmetic per watt: Epoch AI Machine Learning Hardware, 64 devices with a
-    dense FP16 rate and a TDP (via MLSysIM Literature.Series), fit about 1.2x
+    dense FP16 rate and a TDP (via MLSysIM local CSV series), fit about 1.2x
     per year; V100 0.42, A100 0.78, H100 1.41, B200 2.25 TFLOP/s/W (table 2).
   - Node state: 175B with mixed-precision Adam, 350 + 350 + 700 + 700 + 700 GB
     plus 100-400 GB activations (table 11); DGX H100 640 GB. Per GPU under
@@ -33,7 +33,7 @@ Every value is from the rendered chapter (Compute Infrastructure, dev build of
     2.5.2, Example 2.3).
   - Rack power: 12 kW traditional, 33.5 kW four-node DGX H100 scenario,
     100 kW liquid class (Sec. 2.6.2 figure), GB200 NVL72 120 kW (Sec. 2.6.2).
-  - Package and system power: MLSysIM Literature.Series.AcceleratorPowerRatings
+  - Package and system power: MLSysIM vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv
     (14 parts, vendor conventions) and AISupercomputers (Epoch AI Data on AI
     Supercomputers; Pilz et al. 2025), as in the chapter's figure 13.
   - Cooling: 100 kW of air at 15 K needs 6.6 kg/s, 5.5 m^3/s (Sec. 2.6.2);
@@ -59,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs  # noqa: E402,F401  (records every value; figures read them)
+from mlsysim.core.series_loader import load_series  # noqa: E402
 from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
@@ -263,7 +264,7 @@ def dyear(s):
 
 
 # 7. Arithmetic per watt, Epoch AI ---------------------------------------------
-rows = Literature.Series.AcceleratorFlopsPerWatt.entries
+rows = load_series("vol2/02_compute_infrastructure/data/accelerator_flops_per_watt.csv").entries
 xs = np.array([dyear(r["release_date"]) for r in rows])
 ys = np.array([r["flops_per_w"] / 1e12 for r in rows])
 kfit, bfit = np.polyfit(xs, np.log10(ys), 1)
@@ -402,8 +403,8 @@ sp.hbars(out / "rack_power.svg",
          "kW", log=False, xlabel="kW per rack", size=(4.2, 2.2))
 
 # 13. Package power against system power ---------------------------------------
-chips = Literature.Series.AcceleratorPowerRatings.entries
-systems = [r for r in Literature.Series.AISupercomputers.entries if r["power_mw"]]
+chips = load_series("vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv").entries
+systems = [r for r in load_series("vol2/02_compute_infrastructure/data/ai_supercomputers.csv").entries if r["power_mw"]]
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.6), gridspec_kw={"wspace": 0.45})
 cx = [r["release_year"] for r in chips]
 cy = [r["power_w"] for r in chips]
