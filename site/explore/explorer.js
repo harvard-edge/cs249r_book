@@ -177,6 +177,7 @@
     emphasize([id]);
     renderIndex();
     $("focus-connections").disabled = false;
+    document.body.classList.add("has-selection");
     saveSelection();
     if (focusDetail) $("concept-detail").focus({ preventScroll: false });
   }
@@ -344,6 +345,7 @@
       $("map-selector").value = id;
       $("concept-search").value = "";
       $("concept-detail").innerHTML = initialDetail;
+      document.body.classList.remove("has-selection");
       data.nodes.forEach((n) => {
         const el = nodeElement(n.id);
         el.setAttribute("tabindex", "0");
@@ -405,7 +407,17 @@
     saveSelection();
     $("concept-detail").innerHTML = initialDetail;
     $("focus-connections").disabled = true;
+    document.body.classList.remove("has-selection");
   };
+  // Embedded in a chapter the reader is an overlay on the map; its close
+  // button clears the selection the same way "Show all connections" does.
+  const closeReader = document.createElement("button");
+  closeReader.type = "button";
+  closeReader.className = "reader-close";
+  closeReader.setAttribute("aria-label", "Close the concept details");
+  closeReader.textContent = "×";
+  closeReader.onclick = () => $("reset-view").click();
+  document.querySelector(".volume-concept-reader")?.prepend(closeReader);
   window.addEventListener("hashchange", () => {
     if (data) {
       const id = new URLSearchParams(location.hash.slice(1)).get("concept");
