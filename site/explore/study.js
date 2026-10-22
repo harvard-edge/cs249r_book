@@ -102,6 +102,8 @@
       return `<li><b>${esc(g.topic || g.label)}</b>${row ? ` · ${subjectLink(row)}` : ''}</li>`;
     }).join('');
     if (gapList) $('bok-gaps').innerHTML = `<p><strong>Known gaps.</strong> Topics this version does not yet cover, declared so they are not mistaken for omissions:</p><ul>${gapList}</ul>`;
+    const rules = (fw.tagging_rules || []).map((r) => `<li>${esc(r)}</li>`).join('');
+    if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul>${rules}</ul>`;
     $('bok-method').textContent = `Version ${fw.version}. Generated from shared/concepts/ml-systems-framework.yml and ml-systems-field.yml.`;
   }
 

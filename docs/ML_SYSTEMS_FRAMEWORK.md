@@ -17,7 +17,7 @@ The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy
 
 ## Organizing frame
 
-An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 98 subjects (rows) under those five groups:
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 99 subjects (rows) under those five groups:
 
 | Group | Areas |
 |---|---|
@@ -32,11 +32,23 @@ The groups correspond to the layer, activity, concern, and context facets. A sin
 - **Mechanism first.** A concept lives in the Stack or Lifecycle row that engineers its mechanism whenever one exists (KV caching in serving, kernel fusion in compilers), even when it exists for performance.
 - **Qualities hold measurement and cross-layer techniques.** A Quality area holds measurement, trade-off reasoning, and techniques that act across several layers at once, such as compression.
 - **System-type admission test.** A system type earns an area only when, after placement, it keeps core concepts with no general home. Recommendation, multimodal, generative, edge, and distributed settings are contexts, shown as lenses.
-- **Background tier.** Concepts imported from general ML, robotics, distributed systems, site reliability, and safety engineering carry `scope: background`. They remain because ML systems concepts depend on them.
+- **Background tier.** Concepts developed outside ML systems that ML systems reasoning depends on (loss functions, consensus, feedback control) carry `scope: background`. The tag records origin, not importance: a background concept is not optional and implies no lower depth.
+- **Uneven subjects.** Subjects differ in size because fields do; a three-concept subject is not a weaker one, and size is not a weight.
 - **Identity references.** Includes and excludes cite owning rows as `[[row-id]]`; the compiler rejects unknown identities.
 - **Declared gaps.** Topics a reviewer should expect but this version does not yet cover are recorded as `gaps` with a `topic` and a subject row, and published on the page.
 
 Using ML to optimize systems is an adjacent field and out of scope. Chapter pointers (`book_chapters`) name where MLSysBook teaches a subject at chapter grain; they are reading pointers, not alignment or depth claims.
+
+## Tagging with the taxonomy
+
+Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with the same vocabulary, so a competency is a concept or subject paired with a depth. The rules (`tagging_rules` in `ml-systems-framework.yml`, also shipped in the JSON download and shown on the page):
+
+- Tag the one to three concepts an item centrally teaches or tests, not its prerequisites or passing mentions.
+- A subject alone is a valid, complete tag when the item is broad or no concept is specific enough.
+- When no concept fits, tag the closest subject and record the missing idea as a proposed concept for the next version.
+- Store identities (`mlsys.kv-cache`, `llm-inference`), never codes.
+- Mechanism belongs to the Stack or Lifecycle subject that builds it; measurement and trade-off reasoning belong to Qualities.
+- Depth is recorded separately (for example, StaffML levels L1 to L6+).
 
 ## Website
 
@@ -52,11 +64,11 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,392 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,443 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
 
 ## Codes, downloads, and citation
 
-Every group, area, and subject carries a readable code: a group letter (F, S, L, Q, T), an area number, and a subject number, so `L4.3` is Lifecycle › Deployment & serving › its third subject. The compiler requires codes to be unique and nested. Codes are for people and may be renumbered between versions; concept identities such as `mlsys.kv-cache` are permanent and are what tools should store.
+Every group, area, and subject carries a readable code: a group letter (F, S, P, Q, T; Lifecycle uses P so a code never reads as a StaffML depth level), an area number, and a subject number, so `P4.3` is Lifecycle › Deployment & serving › its third subject. The compiler requires codes to be unique and nested. Codes are for people and may be renumbered between versions; concept identities such as `mlsys.kv-cache` are permanent and are what tools should store.
 
 `binder concepts build` writes the public release to `site/explore/downloads/` from the same compiled records as the page:
 

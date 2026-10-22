@@ -58,13 +58,16 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
 
     # JSON: the whole outline plus concepts and typed relationships.
     document = {**meta,
+                "tagging_rules": framework.get("tagging_rules", []),
                 "groups": outline["groups"],
                 "concepts": [{"id": c["id"], "label": c["label"], "aliases": c.get("aliases", []), "definition": c["definition"],
-                              "background": c.get("scope") == "background", "home": home[c["id"]][2]["code"] if c["id"] in home else ""}
+                              "background": c.get("scope") == "background", "home": home[c["id"]][2]["code"] if c["id"] in home else "",
+                              "home_id": home[c["id"]][2]["id"] if c["id"] in home else ""}
                              for c in field["concepts"]],
                 "relations": relations,
                 "relationships": [{"source": r["source"], "relation": r.get("relation", ""), "target": r["target"],
-                                   "statement": r.get("predicate", ""), "conditions": r.get("conditions", "")} for r in relationships]}
+                                   "statement": r.get("predicate", ""), "conditions": r.get("conditions", "")} for r in relationships],
+                "retired": field.get("retired", [])}
 
     # CSV: one row per subject (the outline) and one row per concept (the glossary).
     subjects = io.StringIO(newline="")
