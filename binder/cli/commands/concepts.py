@@ -9,7 +9,7 @@ from cli.core.concept_graph import ConceptGraphError, build, refresh
 
 def run(root: Path, args: list[str]) -> bool:
     parser = argparse.ArgumentParser(prog="binder concepts", description=__doc__)
-    parser.add_argument("action", choices=("build", "check", "refresh", "audit", "coverage"))
+    parser.add_argument("action", choices=("build", "check", "refresh", "audit", "coverage", "agreement"))
     group = parser.add_mutually_exclusive_group()
     for number in range(1, 5):
         group.add_argument(
@@ -18,12 +18,12 @@ def run(root: Path, args: list[str]) -> bool:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Fail for stale generated assets (build), unresolved primary declarations (audit), or invalid checklist judgments (coverage)",
+        help="Fail for stale generated assets (build), unresolved primary declarations (audit), invalid checklist judgments (coverage), or tags citing retired identities (agreement)",
     )
     try:
         options = parser.parse_args(args)
-        if options.check and options.action not in {"build", "audit", "coverage"}:
-            parser.error("--check is only supported with build, audit, and coverage")
+        if options.check and options.action not in {"build", "audit", "coverage", "agreement"}:
+            parser.error("--check is only supported with build, audit, coverage, and agreement")
     except SystemExit as exc:
         return exc.code == 0
     volumes = (options.volume,) if options.volume else ()
@@ -51,6 +51,21 @@ def run(root: Path, args: list[str]) -> bool:
             for error in report["errors"]:
                 print(f"  invalid: {error}")
             print("Report: books/_build/concepts/taxonomy-coverage.md")
+            return not (options.check and report["errors"])
+        if options.action == "agreement":
+            from cli.core.taxonomy_agreement import write_report as write_agreement
+
+            report = write_agreement(root)
+            for record in report["records"]:
+                for run in record["runs"]:
+                    s = run["scores"]
+                    tag = "held out" if run["held_out"] else "rules revised on this sample"
+                    print(f"{record['title']} {run['id']} [{tag}]: subject {s['subject_pct']}% (kappa {s['subject_kappa']}), "
+                          f"area {s['area_pct']}% (kappa {s['area_kappa']}), primary concept {s['primary_concept_pct']}%, "
+                          f"same concept set {s['same_concept_set_pct']}%, compatible {s['compatible_pct']}% of {s['items']}")
+            for error in report["errors"]:
+                print(f"  invalid: {error}")
+            print("Report: books/_build/concepts/taxonomy-agreement.json")
             return not (options.check and report["errors"])
         if options.action == "refresh":
             if options.check:

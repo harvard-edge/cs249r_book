@@ -52,14 +52,28 @@ Using ML to optimize systems is an adjacent field and out of scope. Chapter poin
 
 Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with the same vocabulary, so a competency is a concept or subject paired with a depth. The rules (`tagging_rules` in `ml-systems-framework.yml`, also shipped in the JSON download and shown on the page):
 
-- Tag the one to three concepts an item centrally teaches or tests, not its prerequisites or passing mentions.
+- Tag the concepts an item centrally teaches or tests, preferring one and adding a second or third only when the item cannot be answered without it; never prerequisites or passing mentions.
 - A subject alone is a valid, complete tag when the item is broad or no concept is specific enough.
 - When no concept fits, tag the closest subject and record the missing idea as a proposed concept for the next version.
 - Store identities (`mlsys.kv-cache`, `llm-inference`), never codes.
 - Do not tag a workload-class concept (Large language model, Transformer) only because an LLM is involved.
 - A retired identity resolves to its `replaced_by`; when a concept is split, existing tags resolve to the replacement until they are re-reviewed.
 - A concept that seems to fit two subjects takes its home under the home rule; related subjects are navigation, not alternative tags.
+- Tag the mechanism, not the platform: cloud, edge, mobile, and TinyML are contexts. Edge & embedded hardware and On-device deployment are subjects only when the item is about the device class or about deploying to it.
+- Tag a calculation by what it is about; Performance models, Workload characterization, and Profiling are subjects only when the item teaches the method.
+- When an item asks for a technique's effect, the technique is the subject and the affected quantity may be a second concept.
 - Depth is recorded separately (for example, StaffML levels L1 to L6+).
+
+### Tagging agreement
+
+A vocabulary that things are labeled with must label the same item the same way for different taggers. `shared/concepts/agreement/staffml-300-2026-10.yml` records two independent taggers, `gpt-6.1-sol` and `claude-opus-5-5`, tagging the same 300 StaffML questions (sampled across all topics and tracks) without seeing each other's work, and `./binder/binder concepts agreement --check` recomputes the numbers and fails if a recorded tag cites a retired identity.
+
+| Run | Subject | Area | Main concept | Same concept set | Compatible |
+|---|---|---|---|---|---|
+| 1 (first rules) | 78.7% (κ 0.78) | 82.3% (κ 0.81) | 74.6% | 37.1% | 93.0% |
+| 2 (rules revised) | 83.7% (κ 0.83) | 87.0% (κ 0.86) | 80.4% | 55.9% | 94.3% |
+
+*Compatible* means the taggers chose the same subject, shared a concept, or one chose a concept homed in the other's subject. Run 1 disagreements had three causes: filing by platform instead of mechanism (mobile and edge questions agreed only 65% and 69% of the time), filing calculations under the modeling method, and filing a technique's effect under the effect. The three rules above, a preference for one concept, and 13 concepts the taggers proposed came from them; mobile and edge rose to 78% and 76%. Run 2 is not an independent test, because the rules were revised on the same sample, and model taggers are not people. A fresh sample, ideally with human taggers, is the next measurement.
 
 ## Website
 
@@ -75,7 +89,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,489 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,515 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
 
 ## Codes, downloads, and citation
 
@@ -100,7 +114,7 @@ The taxonomy is meant to be complete enough to rely on and cheap to keep current
 
 1. **Add or edit.** A new concept is one record in `ml-systems-field.yml` (identity, label, definition, family, optional aliases) plus at least two relationships using the controlled relations, and its identity added to one subject's `concepts` in `ml-systems-framework.yml`. Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
 2. **Build.** `./binder/binder concepts build` validates homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
-3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `shared/concepts/coverage/`, marked `held_out: true` when it did not inform the design.
+3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `shared/concepts/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
 4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `docs/ML_SYSTEMS_TAXONOMY_CHANGELOG.md`, and retire rather than delete any withdrawn identity.
 
 ## Authoring and illustration tools
