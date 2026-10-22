@@ -5810,3 +5810,41 @@ def test_chat_service_day_scenario():
     d = Literature.DatacenterElectricity
     assert float(d.CraneUnit1CapacityMw) == 837 and float(d.CraneMicrosoftPpaYears) == 20
     assert float(d.CraneUnit1ExpectedOnlineYear) - float(d.CraneUnit1RetiredYear) == 9
+
+
+def test_vercel_gateway_and_repair_trajectory_scenarios():
+    """Production gateway token-usage telemetry and recorded repair trajectory (added 2026-10-21)."""
+    g = Scenarios.VercelGatewayTokenGrowth
+    assert len(g.index_rows) == 6 and len(g.tool_rows) == 2
+    assert g.usage_growth == pytest.approx(7.908)
+    assert g.spend_growth == pytest.approx(3.427)
+    assert g.price_index_end == pytest.approx(43.3)
+    assert g.price_drop_fraction == pytest.approx(0.567)
+    assert g.tool_request_share_start == pytest.approx(0.114)
+    assert g.tool_request_share_end == pytest.approx(0.222)
+    assert g.tool_token_share_start == pytest.approx(0.316)
+    assert g.tool_token_share_end == pytest.approx(0.589)
+    assert g.tool_tokens_per_request_ratio == pytest.approx((0.589 / 0.222) / (0.411 / 0.778))
+
+    c = Scenarios.MiniSweAgentDjango12050Calls
+    assert c.calls == 22
+    assert c.first_call_chars == 5499 and c.last_call_chars == 29594
+    assert c.context_growth == pytest.approx(29594 / 5499)
+    assert c.cumulative_sent_chars == 396997 and c.cumulative_new_chars == 29594
+    assert c.reread_ratio == pytest.approx(396997 / 29594)
+    assert c.cost_usd == pytest.approx(0.147413)
+
+    w = Scenarios.VercelGatewayWorkloadSpend
+    assert len(w.use_cases) == 8 and len(w.open_weight_rows) == 10
+    assert w.token_share("AI Personal Assistants") == pytest.approx(0.400)
+    assert w.cost_share("AI Personal Assistants") == pytest.approx(0.196)
+    assert w.token_share("AI Coding Agents") == pytest.approx(0.218)
+    assert w.cost_share("AI Coding Agents") == pytest.approx(0.204)
+    assert w.token_share("Back Office") == pytest.approx(0.058)
+    assert w.cost_share("Back Office") == pytest.approx(0.150)
+    assert w.back_office_vs_assistant_price_ratio == pytest.approx((15.0 / 5.8) / (19.6 / 40.0))
+    assert w.open_weight_token_share_start == pytest.approx(0.070)
+    assert w.open_weight_token_share_end == pytest.approx(0.715)
+    assert w.open_weight_spend_share_end == pytest.approx(0.226)
+    assert w.closed_vs_open_price_ratio_end == pytest.approx((0.774 / 0.285) / (0.226 / 0.715))
+
