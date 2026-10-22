@@ -44,6 +44,7 @@ import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import BookRefCard from "@/components/BookRefCard";
+import TaxonomyTags from "@/components/TaxonomyTags";
 import QuestionVisual from "@/components/QuestionVisual";
 import { track } from "@/lib/analytics";
 
@@ -1402,6 +1403,7 @@ function PracticePage() {
                             </div>
                             <QuestionFeedback question={current} />
                             <BookRefCard refs={current.book_refs} />
+                            <TaxonomyTags subject={current.taxonomy_subject} concepts={current.taxonomy_concepts} />
                             {chainInfo && (
                               <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
                             )}
