@@ -22,6 +22,7 @@ from typing import Any
 
 from vault_cli.book_refs import BookRefResolver
 from vault_cli.loader import LoadedQuestion
+from vault_cli.ml_systems_taxonomy import load_taxonomy
 from vault_cli.policy import filter_questions, load_policy
 
 
@@ -94,6 +95,11 @@ def _adapt(
     }
     if q.phase:
         legacy["phase"] = q.phase
+    # ML Systems Taxonomy tags travel as identities; the site resolves labels.
+    if q.taxonomy_subject:
+        legacy["taxonomy_subject"] = q.taxonomy_subject
+    if q.taxonomy_concepts:
+        legacy["taxonomy_concepts"] = list(q.taxonomy_concepts)
     if q.question:
         legacy["question"] = q.question
     if q.visual is not None:
@@ -398,7 +404,29 @@ def emit_manifest(
     }
 
 
+def emit_taxonomy_labels(vault_dir: Path, output: Path) -> dict[str, Any]:
+    """Write the ML Systems Taxonomy labels the site needs to display tags.
+
+    Questions carry identities (``taxonomy_subject``, ``taxonomy_concepts``);
+    this maps them to display codes and labels, read from the repo's
+    ``shared/concepts/`` so the site never drifts from the taxonomy.
+    """
+    taxonomy = load_taxonomy(vault_dir)
+    if taxonomy is None:
+        return {"output": str(output), "subjects": 0, "concepts": 0, "skipped": "no taxonomy in this checkout"}
+    home = taxonomy.home
+    subjects = {rid: {"code": row.get("code", ""), "label": row["label"], "area": area["label"]}
+                for rid, (row, area) in taxonomy.subjects.items()}
+    concepts = {cid: {"label": c["label"], "subject": home.get(cid, "")} for cid, c in taxonomy.concepts.items()}
+    payload = {"version": taxonomy.framework.get("version", ""), "explorer": "https://mlsysbook.ai/explore/",
+               "subjects": subjects, "concepts": concepts}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=1, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return {"output": str(output), "subjects": len(subjects), "concepts": len(concepts)}
+
+
 __all__ = [
+    "emit_taxonomy_labels",
     "emit_corpus_summary",
     "emit_legacy_corpus",
     "emit_manifest",

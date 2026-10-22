@@ -18,7 +18,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-CANON_VERSION = 2
+CANON_VERSION = 3
 
 # Fields included in per-question content_hash. Metadata fields that can change
 # without altering meaning (last_modified, file_path, authors list ordering,
@@ -30,10 +30,13 @@ CANON_VERSION = 2
 # tree via path-derived leaves, but in v1.0 they must be whitelisted explicitly
 # so reclassifications produce a visibly different release_hash.
 # `chain` (singular) replaced by `chains` (plural) per schema v1.0.
+# CANON_VERSION=3 (2026-10-22) adds taxonomy_subject/taxonomy_concepts, the
+# ML Systems Taxonomy classification, so retagging is a visible change too.
 WHITELIST_TOP: frozenset[str] = frozenset({
     "id", "title",
     "track", "level", "zone",           # v1.0: classification now in YAML
     "topic", "competency_area", "bloom_level", "phase",
+    "taxonomy_subject", "taxonomy_concepts",
     "chains",                            # v1.0: plural chain refs
     "status", "scenario", "question", "visual", "details", "tags", "provenance",
 })
