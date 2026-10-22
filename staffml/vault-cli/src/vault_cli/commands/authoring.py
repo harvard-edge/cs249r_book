@@ -186,7 +186,7 @@ def register(app: typer.Typer) -> None:
     @app.command("new")
     def new_cmd(
         title: str = typer.Option(..., "--title", "-t", help="Question title."),
-        topic: str = typer.Option(..., "--topic", help="Topic (must exist in taxonomy.yaml)."),
+        topic: str = typer.Option(..., "--topic", help="Topic (must exist in schema/taxonomy_data.yaml)."),
         track: Track = typer.Option(..., "--track"),
         level: Level = typer.Option(..., "--level"),
         zone: Zone = typer.Option(..., "--zone"),

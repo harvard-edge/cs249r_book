@@ -333,7 +333,7 @@ def build(
         # rejects chain_questions inserts pointing at unknown chain IDs.
         _populate_chains(conn, vault_dir)
 
-        taxonomy_path = vault_dir / "taxonomy.yaml"
+        taxonomy_path = vault_dir / "schema" / "taxonomy_data.yaml"  # the topic registry
         chains_path = vault_dir / "chains.yaml"
         zones_path = vault_dir / "zones.yaml"
         taxonomy_hash = hash_of_canonical_yaml(load_file(taxonomy_path)) if taxonomy_path.exists() else hash_of_canonical_yaml({})
