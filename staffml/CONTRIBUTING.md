@@ -55,7 +55,7 @@ it's longer, file an issue titled "CONTRIBUTING.md getting-started friction".
 | New question | `vault/questions/<track>/<level>/<zone>/` | `vault new` |
 | Fix a question | same | `vault edit <id>` |
 | Reclassify a question | same | `vault move <id> --to <track>/<level>/<zone>` |
-| New topic | `vault/taxonomy.yaml` | PR with a §7 entry in EVOLUTION.md |
+| New topic | `vault/schema/taxonomy_data.yaml` (and `schema/enums.py`) | PR with a §7 entry in EVOLUTION.md |
 | Website UX | `staffml/app/src/` | Next.js |
 | Worker API | `staffml/vault-worker/` (Phase 3+) | Wrangler project |
 | Schema evolution | `vault/schema/` | RFC-style PR per EVOLUTION.md |

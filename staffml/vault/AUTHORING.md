@@ -36,7 +36,7 @@ table is its human-readable companion.
 | `track` | enum | `cloud / edge / mobile / tinyml / global` | `cloud` |
 | `level` | enum | `L1 / L2 / L3 / L4 / L5 / L6+` | `L3` |
 | `zone` | enum | one of 11 zones (see § Zones) | `implement` |
-| `topic` | string | one of 87 topics in `taxonomy.yaml` | `quantization-fundamentals` |
+| `topic` | string | one of 87 topics in `schema/taxonomy_data.yaml` | `quantization-fundamentals` |
 | `competency_area` | enum | one of 13 areas (see § Competency areas) | `precision` |
 | `title` | string | ≤ 120 chars, plaintext, no trailing period, no LaTeX | `W8A16 KV Cache Expansion` |
 | `scenario` | string | ≥ 30 chars, plaintext (no HTML), 1-3 sentences | see worked example |
@@ -232,7 +232,7 @@ because the constraint is HBM size).
 87 closed-enum topics in
 `staffml/vault/schema/enums.py:VALID_TOPICS`. The CLI tab-completes
 when you `vault new --topic <Tab>`. Adding a new topic is a schema
-change — open a PR against `enums.py` *and* `taxonomy.yaml`, then run
+change — open a PR against `enums.py` *and* `schema/taxonomy_data.yaml`, then run
 `vault codegen`.
 
 ## ML Systems Taxonomy tags

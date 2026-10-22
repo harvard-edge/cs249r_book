@@ -137,6 +137,10 @@ def fast_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
     return failures
 
 
+# The curated StaffML topic registry (87 topics, prerequisite edges).
+TOPIC_REGISTRY = "schema/taxonomy_data.yaml"
+
+
 def _load_yaml_set(vault_dir: Path, filename: str, key: str) -> set[str]:
     """Load ``{vault_dir}/{filename}`` and extract IDs from its top-level ``key`` list."""
     path = vault_dir / filename
@@ -156,8 +160,10 @@ def structural_tier(
     """Structural invariants — CI-tier checks."""
     failures: list[InvariantFailure] = []
 
-    # #11: every `topic` exists in taxonomy.yaml
-    known_topics = _load_yaml_set(vault_dir, "taxonomy.yaml", "topics")
+    # #11: every `topic` exists in the topic registry. Until 2026-10-22 this
+    # read vault/taxonomy.yaml, which no longer exists, so the check silently
+    # passed; it now reads schema/taxonomy_data.yaml, the curated registry.
+    known_topics = _load_yaml_set(vault_dir, TOPIC_REGISTRY, "topics")
     if known_topics:
         for lq in loaded:
             if lq.question.topic not in known_topics:
@@ -167,7 +173,7 @@ def structural_tier(
                         "topic-in-taxonomy",
                         qid=lq.id,
                         path=lq.path,
-                        message=f"topic {lq.question.topic!r} not found in taxonomy.yaml",
+                        message=f"topic {lq.question.topic!r} not found in {TOPIC_REGISTRY}",
                     )
                 )
 
@@ -387,22 +393,25 @@ def _check_format_markers(loaded: list[LoadedQuestion]) -> list[InvariantFailure
 
 
 def _check_taxonomy_dag(vault_dir: Path) -> list[InvariantFailure]:
-    """Invariant #14: taxonomy prerequisite edges form a DAG (B.8 / §5)."""
-    tax_path = vault_dir / "taxonomy.yaml"
+    """Invariant #14: topic prerequisite edges form a DAG (B.8 / §5).
+
+    Edges are declared per topic in schema/taxonomy_data.yaml as
+    ``edges: [{target, edge_type: prerequisite}]``; other edge types
+    (related, hierarchical) may cycle and are ignored.
+    """
+    tax_path = vault_dir / TOPIC_REGISTRY
     if not tax_path.exists():
         return []
     data = load_file(tax_path)
     if not isinstance(data, dict):
         return []
-    edges = data.get("edges", []) or []
     graph: dict[str, set[str]] = {}
-    for edge in edges:
-        if not isinstance(edge, dict):
+    for topic in data.get("topics", []) or []:
+        if not isinstance(topic, dict):
             continue
-        src = edge.get("source") or edge.get("from")
-        dst = edge.get("target") or edge.get("to")
-        if src and dst:
-            graph.setdefault(src, set()).add(dst)
+        for edge in topic.get("edges", []) or []:
+            if isinstance(edge, dict) and edge.get("edge_type") == "prerequisite" and edge.get("target"):
+                graph.setdefault(topic["id"], set()).add(edge["target"])
 
     # Detect cycle via DFS with 3-color marking.
     WHITE, GRAY, BLACK = 0, 1, 2
