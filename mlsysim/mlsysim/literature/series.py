@@ -398,6 +398,39 @@ ModelsByDomain = _Series(
     "Training compute (FLOP) and publication date of AI models, by domain group.",
 )
 
+ModelsScaleByDomain = _Series(
+    "epoch_models_scale_by_domain",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Epoch AI, Data on AI Models (all_ai_models.csv): parameters and training dataset size by domain (Robotics, Language, Vision)",
+        url="https://epoch.ai/data/ai-models",
+        verified="2026-10-12",
+        notes=(
+            "Rows dated 2018 or later that report parameters or training dataset size "
+            "(total datapoints). A model tagged with several domains appears once per "
+            "matching domain_group. Epoch tags NVIDIA Cosmos world models as Robotics. "
+            + _EPOCH_LICENSE
+        ),
+    ),
+    "Parameters, training dataset size (datapoints), and publication date of AI models, by domain group.",
+)
+
+RobotTrajectoryDatasets = _Series(
+    "robot_trajectory_datasets",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Published robot demonstration and trajectory datasets, 2016-2025 (see source column)",
+        url="https://github.com/google-deepmind/open_x_embodiment",
+        verified="2026-10-12",
+        notes=(
+            "Reported episode or grasp-attempt counts for landmark physical robot collection "
+            "campaigns across single-lab arm farms, multi-scene teleoperation, and pooled "
+            "cross-embodiment archives; individual citations in the source column."
+        ),
+    ),
+    "Reported episode counts and collection regimes of landmark physical robot datasets, 2016-2025.",
+)
+
 OpenXEmbodimentComposition = _Series(
     "open_x_embodiment_composition",
     Provenance(
@@ -682,6 +715,15 @@ class Series:
              "training_cost_2023usd follows Cottier et al. (2024); frontier = Epoch's frontier-model flag"),
         "Parameters, training cost, domain, and publication date of notable models.",
         numeric=("parameters", "training_cost_2023usd", "frontier"),
+    )
+    NotableModelDatasets = TrendSeries(
+        "notable_model_datasets",
+        _lit("Epoch AI, Notable AI Models database (CC BY 4.0), snapshot 2026-10-12",
+             "https://epoch.ai/data/notable-ai-models",
+             "training_dataset_size is Epoch's Training dataset size (total) column in datapoints; "
+             "frontier = Epoch's frontier-model flag"),
+        "Training dataset size (datapoints), domain, and publication date of notable models.",
+        numeric=("training_dataset_size", "frontier"),
     )
     PretrainingTokens = TrendSeries(
         "pretraining_tokens",

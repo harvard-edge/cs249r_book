@@ -400,8 +400,8 @@ __all__ += [
 ]
 from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation (added 2026-10-20)
 __all__ += ["DenseNetworkModel", "EpochOverheadModel"]
-from .trends import ParameterGrowthModel  # added 2026-10-20
-__all__ += ["ParameterGrowthModel"]
+from .trends import ParameterGrowthModel, DatasetGrowthModel  # added 2026-10-20
+__all__ += ["ParameterGrowthModel", "DatasetGrowthModel"]
 
 # --- Agent security (added 2026-10-20) ---
 from .security import InjectionExposureModel, TurnExposureModel, PolicyComparisonModel

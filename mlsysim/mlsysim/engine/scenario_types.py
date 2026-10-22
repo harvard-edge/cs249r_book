@@ -9624,6 +9624,17 @@ class ParameterGrowthScenario(BaseScenario):
         return ParameterGrowthModel().solve(self.rows, self.split_year)
 
 
+class DatasetGrowthScenario(BaseScenario):
+    """Training dataset sizes of a model series over time, fit separately before and after ``split_year``."""
+    rows: List[Dict[str, Any]]
+    split_year: int
+
+    @property
+    def result(self):
+        from .solvers import DatasetGrowthModel
+        return DatasetGrowthModel().solve(self.rows, self.split_year)
+
+
 # ── ML operations at scale (added 2026-10-20) ────────────────────────────────
 # A portfolio of models sharing features, releases, alerts, and capacity: the
 # coupling sketch, feature history and lookups, incident costs, staged

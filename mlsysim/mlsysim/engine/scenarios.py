@@ -5005,6 +5005,12 @@ class Scenarios(Registry):
         rows=_Literature.Series.NotableModels.entries,
         split_year=2010,  # scenario assumption: the deep-learning era begins
     )
+    NotableModelDatasetGrowth = _st.DatasetGrowthScenario(
+        name="Training dataset sizes of notable models, before and after 2010",
+        description="Epoch AI Notable AI Models that report training dataset size (datapoints), fit as log10(training_dataset_size) on date.",
+        rows=_Literature.Series.NotableModelDatasets.entries,
+        split_year=2010,  # scenario assumption: the deep-learning era begins
+    )
 
     # ── ML operations at scale (added 2026-10-20) ─────────────────────────────
     OperationalLoadSketch = _st.OperationalLoadScenario(
