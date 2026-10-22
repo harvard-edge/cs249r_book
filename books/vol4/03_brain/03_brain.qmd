@@ -1410,7 +1410,200 @@ A chunked policy therefore has two rates that a single "action rate" conflates: 
 
 ### Two proposers and the evidence horizon {#sec-brain-two-proposers}
 
-Chunking reduces the cost per waypoint, but the decoder pricing showed that each fresh context still waits for the large backbone's prefill, whatever the decoder. The split that follows, a slow intent model above a fast chunk policy, can now be budgeted on the warehouse mobile manipulator, and the chunks the fast policy supplies can be checked against how long they stay true. Budgeting that split also uses a term that the stopping budget of @sec-boundary-kinematic-roofline already charged, a lease, authority that lapses unless it is renewed\index{Lease!authority that lapses}. The motion the chunk policy proposes runs under a chunk lease\index{Chunk lease!proposer side}, the longest an admitted chunk may keep driving the actuators without an admitted successor. @Sec-nervous-lease-sizing sizes that lease against the stopping budget, so that a late renewal is contained by that lease rather than by the length of the chunk. Notebook \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} applies the memory bound to the split and checks whether chunking alone could give the larger model the required renewal cadence.
+```{python}
+#| label: calc-brain-embodied-model-scaling
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EMBODIED MODEL PARAMETER SCALING AND TWO-TIER BIFURCATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: opening of @sec-brain-two-proposers and @fig-03-parameter-by-domain
+# │ Goal:    quantify the parameter bifurcation between multimodal VLM/VLA
+# │          backbones and compact visuomotor chunk policies / action experts
+# │ Show:    1,534 Language + Robotics models with parameters (2018-2026);
+# │          intent backbones (2.2B-562B) vs. fast chunk policies (80M-300M),
+# │          an 88x ratio between the machine's 7B intent model and 80M ACT
+# │ How:     Literature.ModelsScaleByDomain, Literature.VlaSystems, and RM
+# └─────────────────────────────────────────────────────────────────────────────
+from datetime import date
+import numpy as np
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import param
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_params
+
+def _dec_year(iso_str: str) -> float:
+    d = date.fromisoformat(str(iso_str))
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+class EmbodiedModelScaling:
+    """Parameter scaling of language and robotics models (Epoch AI and VLA literature)."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    series = Literature.ModelsScaleByDomain  # category: literature (Epoch AI all_ai_models.csv)
+    vla = Literature.VlaSystems  # category: literature (published VLA architectures)
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    lang_rows = [
+        (_dec_year(r["publication_date"]), float(r["parameters"]), str(r["model"]))
+        for r in series.where(domain_group="Language")
+        if r["parameters"] is not None and r["publication_date"] is not None
+    ]
+    rob_rows = [
+        (_dec_year(r["publication_date"]), float(r["parameters"]), str(r["model"]))
+        for r in series.where(domain_group="Robotics")
+        if r["parameters"] is not None and r["publication_date"] is not None
+    ]
+    n_lang = len(lang_rows)
+    n_rob = len(rob_rows)
+    n_models = n_lang + n_rob
+    all_years = [y for y, _, _ in lang_rows + rob_rows]
+    start_year = int(min(all_years))
+    end_year = int(max(all_years))
+
+    intent_params = RM.intent_model.parameters.to(param).magnitude
+    chunk_params = RM.chunk_model.parameters.to(param).magnitude
+    pi0_expert_params = float(vla.Pi0ActionExpertParams)
+    helix_s2_params = float(vla.HelixSlowParams)
+    helix_s1_params = float(vla.HelixFastParams)
+    palm_e_params = max(p for _, p, m in rob_rows if "PaLM-E" in m)
+    rt2_params = max(p for _, p, m in rob_rows if m == "RT-2")
+    rt1_params = max(p for _, p, m in rob_rows if m == "RT-1")
+    octo_params = max(p for _, p, m in rob_rows if m == "Octo-Base")
+    split_ratio = intent_params / chunk_params
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_lang >= 1400 and n_rob >= 45, f"Unexpected Epoch AI counts: {n_lang}, {n_rob}")
+    check(start_year == 2018 and end_year >= 2026, f"Year span drifted: {start_year}-{end_year}")
+    check(abs(split_ratio - 87.5) < 0.1, f"Intent-to-chunk parameter ratio drifted: {split_ratio}")
+    check(palm_e_params > 5e11 and rt2_params == 5.5e10, "Landmark VLA parameter counts drifted")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    n_models_str = fmt_int(n_models)
+    n_lang_str = fmt_int(n_lang)
+    n_rob_str = fmt_int(n_rob)
+    start_year_str = fmt_int(start_year, commas=False)
+    end_year_str = fmt_int(end_year, commas=False)
+    palm_e_str = fmt_params(palm_e_params * param, precision=0)
+    rt2_str = fmt_params(rt2_params * param, precision=0)
+    rt1_str = fmt_params(rt1_params * param, precision=0)
+    octo_str = fmt_params(octo_params * param, precision=0)
+    chunk_params_str = fmt_params(chunk_params * param, precision=0)
+    split_ratio_mult_str = fmt_multiple(round(split_ratio), precision=0)
+```
+
+Chunking reduces the weight traffic per waypoint, but the decoder pricing showed that each fresh context still waits for the large backbone's prefill, whatever the decoder. That prefill floor and the weight-streaming ceiling of @fig-cadence-gap explain why embodied models in the published literature split into two parameter regimes rather than converging on a single model size (@fig-03-parameter-by-domain). Across `{python} EmbodiedModelScaling.n_models_str` language and robotics models with disclosed parameter counts in the Epoch AI catalog between `{python} EmbodiedModelScaling.start_year_str` and `{python} EmbodiedModelScaling.end_year_str` (`{python} EmbodiedModelScaling.n_lang_str` language and `{python} EmbodiedModelScaling.n_rob_str` robotics models) [@epochai2026models], language models climbed continuously past hundreds of billions of parameters. Embodied vision-language-action backbones followed that curve upward, from RT-1 (`{python} EmbodiedModelScaling.rt1_str`) to GR00T N1 (`{python} StateOfPractice.gr00t_params_str`), $\pi_0$ (`{python} StateOfPractice.pi0_params_str`), OpenVLA (`{python} IntentModelLatency.params_str`), Helix System 2 (`{python} StateOfPractice.helix_s2_params_str`), RT-2 (`{python} EmbodiedModelScaling.rt2_str`), and PaLM-E (`{python} EmbodiedModelScaling.palm_e_str`), to inherit web-scale semantic and visual breadth [@brohan2023rt1; @bjorck2025gr00t; @black2024pi0; @kim2024openvla; @figureai2025helix; @brohan2023rt2; @driess2023palme]. Alongside those backbones, a compact tier of visuomotor chunk policies and action experts, including ACT (`{python} EmbodiedModelScaling.chunk_params_str`), Octo-Base (`{python} EmbodiedModelScaling.octo_str`), Helix System 1 (`{python} StateOfPractice.helix_s1_params_str`), and the $\pi_0$ action expert (`{python} StateOfPractice.pi0_expert_str`), stayed near $10^8$ parameters (`{python} EmbodiedModelScaling.split_ratio_mult_str` smaller than the machine's `{python} IntentModelLatency.params_str` intent model) so that onboard processors can renew trajectories at tens of hertz [@zhao2023learning; @octo_2023].
+
+::: {#fig-03-parameter-by-domain fig-env="figure" fig-pos="htb" fig-cap="**Parameter scaling of language and robotics models, 2018 to 2026**: Each point plots one model with a disclosed parameter count on a logarithmic axis against its publication date. Language models scale continuously past $10^{11}$ parameters, while robotics models after 2022 bifurcate into multi-billion-parameter vision-language-action backbones that supply open-world semantic grounding and compact $80\text{M}$–$300\text{M}$ visuomotor chunk policies and action experts that fit real-time renewal budgets on embedded processors. Catalog series from @epochai2026models; component sizes for ACT, Helix System 1, and the $\pi_0$ action expert from @zhao2023learning, @figureai2025helix, and @black2024pi0." fig-alt="Scatter plot of model parameter counts on a logarithmic axis from 10 to the 5 to 10 to the 13 against publication years from 2018 to 2026. Gray points show 1,484 language models rising from 10 to the 8 to above 10 to the 12. Blue circles and copper squares mark multi-billion-parameter robotics backbones including PaLM-E at 562 billion, RT-2 at 55 billion, OpenVLA and Helix System 2 at 7 billion, pi0 at 3.3 billion, and GR00T N1 at 2.2 billion. A shaded teal band between 50 million and 350 million parameters highlights compact chunk policies and action experts including ACT at 80 million, Octo-Base at 93 million, Helix System 1 at 80 million, and the pi0 action expert at 300 million."}
+
+```{python}
+#| label: plot-03-parameter-by-domain
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PARAMETER SCALING OF LANGUAGE AND ROBOTICS MODELS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-03-parameter-by-domain in @sec-brain-two-proposers
+# │ Goal:    show how robotics models split into a multi-billion-parameter
+# │          VLM/VLA backbone tier and an 80M-300M fast chunk-policy tier
+# │ Show:    Language vs. Robotics scatter from Epoch AI (2018-2026) plus
+# │          labeled VLM/VLA backbones and visuomotor chunk policies/experts
+# │ How:     EmbodiedModelScaling (above); mlsysim.viz.setup_plot()
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+
+_S = EmbodiedModelScaling
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 4.3))
+ax.set_yscale("log")
+
+PROPOSAL = "#B87333"
+CHUNK_COLOR = "#007A87"
+
+# 1. Background language and robotics catalog points
+_ly = [r[0] for r in _S.lang_rows]
+_lp = [r[1] for r in _S.lang_rows]
+ax.scatter(_ly, _lp, s=11, color=COLORS["grid"], alpha=0.45, label="Language models (Epoch AI)", zorder=2)
+
+_ry = [r[0] for r in _S.rob_rows]
+_rp = [r[1] for r in _S.rob_rows]
+ax.scatter(_ry, _rp, s=22, color=COLORS["BlueLine"], alpha=0.65, label="Robotics models (Epoch AI)", zorder=3)
+
+# 2. Shaded regime bands for the two-speed split
+ax.axhspan(1.5e9, 7e11, color=PROPOSAL, alpha=0.07, zorder=1)
+ax.axhspan(4e7, 3.8e8, color=CHUNK_COLOR, alpha=0.09, zorder=1)
+
+# 3. Highlighted tier 2 (slow VLM/VLA backbones) and tier 1 (fast chunk policies / experts)
+_vla_pts = [
+    (2023.18, _S.palm_e_params, "PaLM-E (562B)", (-78, -3)),
+    (2023.57, _S.rt2_params, "RT-2 (55B)", (-66, -4)),
+    (2024.45, _S.intent_params, "OpenVLA (7B)", (-76, -4)),
+    (2024.83, float(_S.vla.Pi0TotalParams), r"$\pi_0$ (3.3B)", (-62, -16)),
+    (2025.14, _S.helix_s2_params, "Helix S2 (7B)", (8, 12)),
+    (2025.21, float(_S.vla.Gr00tN1Params), "GR00T N1 (2.2B)", (12, 0)),
+]
+for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_vla_pts):
+    ax.plot(
+        _x,
+        _y,
+        "s",
+        ms=6.5,
+        color=PROPOSAL,
+        zorder=5,
+        label="VLM / VLA backbones (1–10 Hz)" if _i == 0 else None,
+    )
+    ax.annotate(
+        _lbl,
+        xy=(_x, _y),
+        xytext=(_dx, _dy),
+        textcoords="offset points",
+        fontsize=9,
+        color=PROPOSAL,
+        arrowprops=dict(arrowstyle="-", color=PROPOSAL, lw=0.7, alpha=0.7),
+    )
+
+_fast_pts = [
+    (2022.95, _S.rt1_params, "RT-1 (35M)", (-66, -10)),
+    (2023.30, _S.chunk_params, "ACT (80M)", (-64, 8)),
+    (2024.38, _S.octo_params, "Octo-Base (93M)", (-52, -24)),
+    (2024.83, _S.pi0_expert_params, r"$\pi_0$ Expert (300M)", (14, -2)),
+    (2025.14, _S.helix_s1_params, "Helix S1 (80M)", (8, -12)),
+]
+for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_fast_pts):
+    ax.plot(
+        _x,
+        _y,
+        "^",
+        ms=7,
+        color=CHUNK_COLOR,
+        zorder=5,
+        label="Chunk policies and experts (10–200 Hz)" if _i == 0 else None,
+    )
+    ax.annotate(
+        _lbl,
+        xy=(_x, _y),
+        xytext=(_dx, _dy),
+        textcoords="offset points",
+        fontsize=9,
+        color=CHUNK_COLOR,
+        arrowprops=dict(arrowstyle="-", color=CHUNK_COLOR, lw=0.7, alpha=0.7),
+    )
+
+ax.set_xlim(2017.8, 2027.9)
+ax.set_ylim(3e4, 2e13)
+ax.set_xlabel("Publication year")
+ax.set_ylabel("Parameters (log scale)")
+plt.legend(bbox_to_anchor=(0.5, 1.02), loc="lower center", ncol=2, frameon=False, fontsize=9)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
+This two-tier split, a slow intent model above a fast chunk policy, can now be budgeted on the warehouse mobile manipulator, and the chunks the fast policy supplies can be checked against how long they stay true. Budgeting that split also uses a term that the stopping budget of @sec-boundary-kinematic-roofline already charged, a lease, authority that lapses unless it is renewed\index{Lease!authority that lapses}. The motion the chunk policy proposes runs under a chunk lease\index{Chunk lease!proposer side}, the longest an admitted chunk may keep driving the actuators without an admitted successor. @Sec-nervous-lease-sizing sizes that lease against the stopping budget, so that a late renewal is contained by that lease rather than by the length of the chunk. Notebook \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} applies the memory bound to the split and checks whether chunking alone could give the larger model the required renewal cadence.
 
 ```{python}
 #| label: calc-brain-action-chunking-lpddr5
@@ -2049,10 +2242,10 @@ The stipulated values in @tbl-03-calibration-degradation illustrate how environm
 
 | Distribution Shift Regime               | Physical & Environmental Trigger                                             | Conf. vs. Success ($\text{conf} \text{ vs. } \text{success}$) | Confidence–Success Gap ($\text{conf}-\text{acc}$) | Downstream Supervisory Action                                                     |
 |:----------------------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------|:--------------------------------------------------|:----------------------------------------------------------------------------------|
-| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | `{python} CalibrationRegimes.in_pair_math`                     | `{python} CalibrationRegimes.in_gap_math`                     | Apply independent limits before nominal execution                                 |
-| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | `{python} CalibrationRegimes.near_pair_math`                   | `{python} CalibrationRegimes.near_gap_math`                   | Abstain or seek new evidence; permit probing only with a qualified contact policy |
-| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | `{python} CalibrationRegimes.far_pair_math`                    | `{python} CalibrationRegimes.far_gap_math`                    | Reject proposal; use feasible controlled response                                 |
-| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | `{python} CalibrationRegimes.sensor_pair_math`                 | `{python} CalibrationRegimes.sensor_gap_math`                 | Restrict operation to modes supported despite the sensor degradation              |
+| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | `{python} CalibrationRegimes.in_pair_math`                    | `{python} CalibrationRegimes.in_gap_math`         | Apply independent limits before nominal execution                                 |
+| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | `{python} CalibrationRegimes.near_pair_math`                  | `{python} CalibrationRegimes.near_gap_math`       | Abstain or seek new evidence; permit probing only with a qualified contact policy |
+| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | `{python} CalibrationRegimes.far_pair_math`                   | `{python} CalibrationRegimes.far_gap_math`        | Reject proposal; use feasible controlled response                                 |
+| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | `{python} CalibrationRegimes.sensor_pair_math`                | `{python} CalibrationRegimes.sensor_gap_math`     | Restrict operation to modes supported despite the sensor degradation              |
 
 : **Illustrative Confidence–Success gaps under distribution shift**: Stipulated confidence and task-success rates for four operating regimes, with candidate responses requiring separate physical justification. These values are illustrative, not test results. {#tbl-03-calibration-degradation tbl-colwidths="[18,18,20,24,20]"}
 

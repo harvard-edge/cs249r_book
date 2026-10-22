@@ -2936,6 +2936,14 @@ def test_notable_model_parameter_growth():
     assert r.largest_parameters >= 1e12
 
 
+def test_notable_model_dataset_growth():
+    r = Scenarios.NotableModelDatasetGrowth.result
+    assert r.model_count == 668 and r.split_year == 2010
+    assert r.early_doubling_months == approx(34.30511)
+    assert r.late_doubling_months == approx(7.70240)
+    assert r.largest_dataset_size >= 1e14
+
+
 def test_mnist_large_batch_saved_activations():
     big = Scenarios.MnistDenseNetworkLargeBatch.result
     small = Scenarios.MnistDenseNetwork.result

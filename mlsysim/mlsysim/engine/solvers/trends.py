@@ -182,3 +182,36 @@ class ParameterGrowthModel(ForwardModel):
             early_doubling_months=months(es), late_doubling_months=months(ls),
             largest_parameters=max(r["parameters"] for r in rows), model_count=len(rows),
         )
+
+
+class DatasetGrowthModel(ForwardModel):
+    """
+    Doubling time of notable models' training dataset sizes, before and after a split year.
+
+    Two least-squares fits of log10(training_dataset_size) on publication date (decimal
+    year), one for models published before ``split_year`` and one from it on.
+    A slope ``s`` (decades per year) doubles every ``12 log10(2) / s`` months.
+    """
+    requires = ("series",)
+    produces = None
+
+    def solve(self, rows, split_year: int):
+        from ..results import DatasetGrowthResult
+        rows = [r for r in rows if r["training_dataset_size"]]
+        years = [_decimal_year(r["date"]) for r in rows]
+        logd = [float(np.log10(r["training_dataset_size"])) for r in rows]
+        early = [y < split_year for y in years]
+        ey = [y for y, e in zip(years, early) if e]
+        el = [v for v, e in zip(logd, early) if e]
+        ly = [y for y, e in zip(years, early) if not e]
+        ll = [v for v, e in zip(logd, early) if not e]
+        es, ei = (float(x) for x in np.polyfit(ey, el, 1))
+        ls, li = (float(x) for x in np.polyfit(ly, ll, 1))
+        months = lambda s: 12 * math.log10(2) / s
+        return DatasetGrowthResult(
+            models=[r["model"] for r in rows], domains=[r["domain"] for r in rows],
+            dataset_sizes=[r["training_dataset_size"] for r in rows], years=years, log_dataset_sizes=logd,
+            split_year=split_year, early_slope=es, early_intercept=ei, late_slope=ls, late_intercept=li,
+            early_doubling_months=months(es), late_doubling_months=months(ls),
+            largest_dataset_size=max(r["training_dataset_size"] for r in rows), model_count=len(rows),
+        )

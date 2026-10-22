@@ -491,6 +491,8 @@ class Literature(Registry):
     RepeatedSamplingMajority = _series.RepeatedSamplingMajority
     InjectionDefenseResults = _series.InjectionDefenseResults
     ModelsByDomain = _series.ModelsByDomain
+    ModelsScaleByDomain = _series.ModelsScaleByDomain
+    RobotTrajectoryDatasets = _series.RobotTrajectoryDatasets
     OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
     LeRobotHubMonthly = _series.LeRobotHubMonthly
     LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
