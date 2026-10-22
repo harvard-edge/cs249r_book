@@ -17,7 +17,7 @@ The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy
 
 ## Organizing frame
 
-An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 99 subjects (rows) under those five groups:
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups:
 
 | Group | Areas |
 |---|---|
@@ -29,8 +29,17 @@ An ML system is a **stack**, run through a **lifecycle**, judged by **qualities*
 
 The groups correspond to the layer, activity, concern, and context facets. A single tree necessarily flattens that faceted space, so each concept's one home exists for maintenance and browsing, while facets and secondary links carry the other legitimate placements. The placement rules are recorded in the framework `rationale`:
 
-- **Mechanism first.** A concept lives in the Stack or Lifecycle row that engineers its mechanism whenever one exists (KV caching in serving, kernel fusion in compilers), even when it exists for performance.
-- **Qualities hold measurement and cross-layer techniques.** A Quality area holds measurement, trade-off reasoning, and techniques that act across several layers at once, such as compression.
+- **Home rule.** A mechanism that implements a layer of the stack or a stage of the lifecycle lives in that Stack or Lifecycle subject, even when it exists for speed or cost. A mechanism whose only purpose is one quality, and which applies across layers, lives in that Quality, beside the measurement of that quality. Measurement and trade-off reasoning live in Qualities, except metrics defined by one lifecycle stage (serving latency targets), which live with that stage. Worked examples (`placement_examples`, also shown on the page):
+
+  | Concept | Home | Why |
+  |---|---|---|
+  | KV cache | Generative inference | Part of how decoding works, though it exists for speed |
+  | KV-cache quantization | Model compression | Only purpose is efficiency; the technique spans weights, activations, and caches |
+  | Speculative decoding | Generative inference | Changes how the serving stage generates tokens |
+  | Activation recomputation | Training memory | Implements a training-stage memory plan |
+  | Carbon-aware scheduling | Energy & carbon | Only purpose is lower carbon, across training, inference, and data jobs |
+  | Kernel fusion | ML compilers | Implements the compiler layer |
+  | DP-SGD | Privacy & DP | Only purpose is privacy |
 - **System-type admission test.** A system type earns an area only when, after placement, it keeps core concepts with no general home. Recommendation, multimodal, generative, edge, and distributed settings are contexts, shown as lenses.
 - **Background tier.** Concepts developed outside ML systems that ML systems reasoning depends on (loss functions, consensus, feedback control) carry `scope: background`. The tag records origin, not importance: a background concept is not optional and implies no lower depth.
 - **Uneven subjects.** Subjects differ in size because fields do; a three-concept subject is not a weaker one, and size is not a weight.
@@ -47,7 +56,9 @@ Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with 
 - A subject alone is a valid, complete tag when the item is broad or no concept is specific enough.
 - When no concept fits, tag the closest subject and record the missing idea as a proposed concept for the next version.
 - Store identities (`mlsys.kv-cache`, `llm-inference`), never codes.
-- Mechanism belongs to the Stack or Lifecycle subject that builds it; measurement and trade-off reasoning belong to Qualities.
+- Do not tag a workload-class concept (Large language model, Transformer) only because an LLM is involved.
+- A retired identity resolves to its `replaced_by`; when a concept is split, existing tags resolve to the replacement until they are re-reviewed.
+- A concept that seems to fit two subjects takes its home under the home rule; related subjects are navigation, not alternative tags.
 - Depth is recorded separately (for example, StaffML levels L1 to L6+).
 
 ## Website
@@ -64,7 +75,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,443 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,489 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
 
 ## Codes, downloads, and citation
 

@@ -59,6 +59,7 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
     # JSON: the whole outline plus concepts and typed relationships.
     document = {**meta,
                 "tagging_rules": framework.get("tagging_rules", []),
+                "placement_examples": framework.get("placement_examples", []),
                 "groups": outline["groups"],
                 "concepts": [{"id": c["id"], "label": c["label"], "aliases": c.get("aliases", []), "definition": c["definition"],
                               "background": c.get("scope") == "background", "home": home[c["id"]][2]["code"] if c["id"] in home else "",

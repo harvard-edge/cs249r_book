@@ -103,7 +103,12 @@
     }).join('');
     if (gapList) $('bok-gaps').innerHTML = `<p><strong>Known gaps.</strong> Topics this version does not yet cover, declared so they are not mistaken for omissions:</p><ul>${gapList}</ul>`;
     const rules = (fw.tagging_rules || []).map((r) => `<li>${esc(r)}</li>`).join('');
-    if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul>${rules}</ul>`;
+    const home = (fw.rationale || []).find((r) => r.startsWith('Home rule.'));
+    const cases = (fw.placement_examples || []).filter((x) => concepts.has(x.concept) && rows.has(x.home))
+      .map((x) => `<li>${conceptLink(x.concept)} → ${subjectLink(rows.get(x.home))}: ${esc(x.why)}</li>`).join('');
+    if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
+      + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
+      + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
     $('bok-method').textContent = `Version ${fw.version}. Generated from shared/concepts/ml-systems-framework.yml and ml-systems-field.yml.`;
   }
 
