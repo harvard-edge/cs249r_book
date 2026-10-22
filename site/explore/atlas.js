@@ -14,6 +14,7 @@ window.MLSysVolume = (() => {
         })[c],
     );
   function init(catalog, openMap, focusNodes, saveSelection) {
+    let autoFocused = false;
     let data = null;
     const state = new URLSearchParams(location.hash.slice(1));
     let chapter =
@@ -91,6 +92,15 @@ window.MLSysVolume = (() => {
             b.setAttribute("aria-pressed", String(b.dataset.volume === volume)),
           );
         highlight();
+        // Inside a chapter, open on that chapter's concepts rather than the
+        // whole volume, which is unreadable at the embed's size.
+        if (!autoFocused && chapter && document.body.classList.contains("embedded-map")) {
+          autoFocused = true;
+          // Only the concepts this chapter teaches: adding the ones it revisits
+          // spreads the view across the volume and shrinks every label.
+          const taught = data.nodes.filter((n) => n.chapter === chapter).map((n) => n.id);
+          setTimeout(() => (taught.length ? focusNodes(taught) : $("focus-chapter").click()), 60);
+        }
       },
     };
   }

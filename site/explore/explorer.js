@@ -5,7 +5,21 @@
   if (fieldEntry) fieldEntry.href = window.parent !== window
     ? "https://mlsysbook.ai/explore/field.html"
     : location.pathname.endsWith("/atlas.html") ? "field-preview.html" : "field.html";
-  if (window.parent !== window) document.body.classList.add("embedded-map");
+  if (window.parent !== window) {
+    document.body.classList.add("embedded-map");
+    // Inside a chapter, follow the book page's light/dark theme (same origin).
+    try {
+      const host = window.parent.document.body;
+      const sync = () => {
+        document.body.classList.toggle("quarto-dark", host.classList.contains("quarto-dark"));
+        document.body.style.background = getComputedStyle(host).backgroundColor;
+      };
+      sync();
+      new MutationObserver(sync).observe(host, { attributes: true, attributeFilter: ["class"] });
+    } catch (e) {
+      /* cross-origin host: keep the viewer's own light theme */
+    }
+  }
   const esc = (value) =>
     String(value).replace(
       /[&<>"']/g,

@@ -22,11 +22,19 @@ local function inject(doc)
   if not entry then return nil end
   local viewer = escape(entry.viewer)
   local label = escape(entry.title .. " concept maps")
-  local markup = '<details class="chapter-concept-map" style="margin:1.4em 0;border:1px solid #d9e0e5;border-radius:8px;padding:1em">'
-    .. '<summary style="cursor:pointer;font-weight:650">Explore the concepts in this chapter</summary>'
-    .. '<p>Explore the volume’s connected concept map with this chapter highlighted. Follow labeled relationships into other chapters.</p>'
-    .. '<p><a class="concept-map-expand" href="' .. viewer .. '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;padding:.65em 1em;border-radius:6px;background:#a51c30;color:white;text-decoration:none;font-weight:650">Expand interactive map ↗</a></p>'
-    .. '<iframe class="concept-map-frame" src="' .. viewer .. '" title="' .. label .. '" loading="lazy" style="width:100%;height:780px;border:0" sandbox="allow-scripts allow-same-origin allow-popups allow-top-navigation-by-user-activation"></iframe></details>'
+  -- Folded by default and visually quiet: one sentence, one text link out to
+  -- the full map, and the map itself. The viewer hides its own page controls
+  -- when embedded (explorer.css, .embedded-map) and follows the page theme.
+  local markup = '<details class="chapter-concept-map">'
+    .. '<summary>Explore the concepts in this chapter</summary>'
+    .. '<p class="chapter-concept-map-lede">The volume’s concept map, opened on this chapter. Select a concept to read how it connects to ideas in other chapters. '
+    .. '<a class="concept-map-expand" href="' .. viewer .. '" target="_blank" rel="noopener">Open the full map ↗</a></p>'
+    .. '<iframe class="concept-map-frame" src="' .. viewer .. '" title="' .. label .. '" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-top-navigation-by-user-activation"></iframe></details>'
+    .. '<style>.chapter-concept-map{margin:1.4em 0;border:1px solid var(--bs-border-color,#dee2e6);border-left:3px solid var(--bs-border-color,#dee2e6);border-radius:.25rem;padding:.6em 1em}'
+    .. '.chapter-concept-map>summary{cursor:pointer;font-weight:600;font-size:.95em}'
+    .. '.chapter-concept-map-lede{font-size:.9em;margin:.7em 0 .6em;color:var(--bs-secondary-color,#6c757d)}'
+    .. '.chapter-concept-map-lede a{white-space:nowrap}'
+    .. '.chapter-concept-map iframe{display:block;width:100%;height:560px;border:0;background:transparent}</style>'
     .. '<script>(()=>{const box=document.querySelector(".chapter-concept-map");if(!box)return;const frame=box.querySelector("iframe"),link=box.querySelector(".concept-map-expand");window.addEventListener("message",event=>{if(event.source!==frame.contentWindow||event.origin!==location.origin||!event.data||event.data.type!=="mlsys-concept-map-state"||typeof event.data.map!=="string")return;const url=new URL(frame.src,location.href);url.searchParams.set("map",event.data.map);if(typeof event.data.chapter==="string"&&event.data.chapter)url.searchParams.set("chapter",event.data.chapter);else url.searchParams.delete("chapter");url.hash=event.data.concept?"concept="+encodeURIComponent(event.data.concept):"";link.href=url.href;});})();</script>'
   local added = false
   doc = doc:walk({Div = function(div)
