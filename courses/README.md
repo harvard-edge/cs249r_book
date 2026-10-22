@@ -48,7 +48,7 @@ files to generate HTML. Keep dated offering URLs stable when a new term begins.
   `community/courses.html` address forwards here, preserving filters and anchors.
   Adopter data still comes from `site/community/adopters.yml` and its refresh cache.
 - The [Instructor Hub](../instructors/index.qmd)
-  holds reusable syllabi, pedagogy, assessment guidance, and adoption resources.
+  holds one syllabus for each course.
 - The [labs directory](../labs/README.md) holds reusable experiments. Course
   offerings link to those instructions and specify their local deadlines.
 - This directory holds the student-facing details of the offerings maintained
@@ -149,8 +149,7 @@ preview, and deploy the updated instructor artifact with the course artifact.
 
 The main site keeps Instructor Hub at `/instructors/`. Its landing page starts
 with a short getting-started note, then one kit per course linking its page here,
-its syllabus or guide, slides, and hands-on materials, then the shared guides. The
-introductory and scaling courses can run as a two-semester sequence; the hub's
-course map covers that case. `/courses/intro/` and `/courses/scaling/` provide student-facing
+its syllabus or guide, slides, and hands-on materials. The introductory and
+scaling courses can run as a two-semester sequence. `/courses/intro/` and `/courses/scaling/` provide student-facing
 overviews of the existing curriculum; the instructor syllabi remain canonical.
 Course packages can combine reusable materials with dated institutional examples.

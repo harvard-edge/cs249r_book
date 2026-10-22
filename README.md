@@ -169,7 +169,7 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">🎓</td>
       <td><b>Instructor Hub</b></td>
-      <td>The AI Engineering Blueprint: two 16-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td>A syllabus for each course, with weekly readings and slides: introductory, scaling, TinyML, Edge AI, Physical AI (draft), and Agentic AI (in preparation).</td>
       <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="instructors/README.md">Repo guide</a></td>
     </tr>
     <tr>
@@ -196,7 +196,7 @@ The pieces are designed to work together, but you do not need to adopt everythin
 | If you are... | Start here | Then go deeper |
 |---|---|---|
 | **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) and try [Lab 00](https://mlsysbook.ai/labs/vol1/lab_00_introduction/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), use [MLSys·im](https://mlsysbook.ai/mlsysim/), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
-| **An instructor** | Open [The AI Engineering Blueprint](https://mlsysbook.ai/instructors/) | Use the [course map](https://mlsysbook.ai/instructors/course-map.html), [slides](https://mlsysbook.ai/slides/), rubrics, and TA guide |
+| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), and labs |
 | **A contributor** | Pick the component you use most | Improve chapters, labs, tests, examples, hardware notes, simulator models, or assessment content |
 
 The learning loop is: **Read → Explore → Build → Model → Deploy → Practice → Teach**.
