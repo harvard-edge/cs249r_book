@@ -309,8 +309,12 @@
     };
     const els = [];
     const seen = new Set([id]);
-    const centerWidth = Math.min(2 * SPINE - 16, Math.round(concepts.get(id).label.length * 8.8 + 40));
+    // Leave at least 24px between the chip and the spine: Cytoscape ignores a
+    // taxi turn closer than its 10px minimum and reroutes the edges through
+    // the neighbors, stacking their verb labels. Long labels wrap instead.
+    const centerWidth = Math.min(2 * SPINE - 48, Math.round(concepts.get(id).label.length * 8.8 + 40));
     const centerHalf = centerWidth / 2;
+    const ys = [];
     const place = (blocks, x, top) => {
       let y = top;
       for (const block of blocks) {
@@ -321,6 +325,7 @@
           const c = concepts.get(other);
           const w = chipWidth(c.label, 200);
           els.push({ group: 'nodes', position: { x, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background' } });
+          ys.push(y);
           const into = rel.target === id;
           // The outer segment runs from the concept to the spine; the verb sits on it.
           const segment = COLUMN - w / 2 - SPINE;
@@ -340,7 +345,15 @@
     const outs = blocksFor(outgoing.get(id) || [], 'out');
     const center = concepts.get(id);
     const tall = Math.max(place(ins, -COLUMN, 30), place(outs, COLUMN, 30), 80);
-    els.unshift({ group: 'nodes', classes: 'center', position: { x: 0, y: 30 + tall / 2 - 20 }, data: { id, label: center.label, w: centerWidth, tw: centerWidth - 20 } });
+    // Center on the span of the placed concepts, not on the column height: an
+    // off-center chip runs its edges through a neighbor's row, so they enter it
+    // vertically and their verb labels stack (seen with two-link concepts).
+    let centerY = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 30 + tall / 2 - 20;
+    // A neighbor a few pixels off the center line would also be entered
+    // vertically; put the center on its row so that edge runs straight.
+    const near = ys.find((y) => y !== centerY && Math.abs(y - centerY) < 20);
+    if (near !== undefined) centerY = near;
+    els.unshift({ group: 'nodes', classes: 'center', position: { x: 0, y: centerY }, data: { id, label: center.label, w: centerWidth, tw: centerWidth - 20 } });
     const height = tall + 40;
     cy.elements().remove();
     cy.add(els);
