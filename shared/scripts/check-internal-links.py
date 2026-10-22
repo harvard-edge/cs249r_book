@@ -109,6 +109,12 @@ CI_INJECTED_BASENAMES = {
     "tutorial_module4.pdf",
 }
 
+# Directories rendered on every build and gitignored, so links into them
+# resolve only after a render. mlsysim/docs/api/ is written by
+# mlsysim/docs/scripts/build_api.py (2026-10-22: the solver guide, the
+# engineers' page and the zoo pages link into it).
+GENERATED_DIRS = (REPO_ROOT / "mlsysim" / "docs" / "api",)
+
 # Match explicit Quarto / Pandoc anchor syntax inside headings:
 #   ## My Header {#sec-foo}
 ANCHOR_ATTR_RE = re.compile(r"\{#(?P<id>[^\s}]+)[^}]*\}")
@@ -376,6 +382,10 @@ def check_file(path: Path, cache: dict[Path, str]) -> list[Problem]:
                 continue  # Site-absolute or unparsable; skip.
 
             resolved = next((c for c in cands if c.exists()), None)
+            if resolved is None and any(
+                c.resolve().is_relative_to(d) for c in cands for d in GENERATED_DIRS
+            ):
+                continue  # Rendered into a gitignored directory at build time.
             if resolved is None:
                 problems.append(
                     Problem(path, line_no, target, f"no such file (checked {len(cands)} candidate paths)")
