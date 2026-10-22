@@ -1861,11 +1861,12 @@ Pretraining on a million pooled trajectories from foreign robots does not help t
 # │ Goal:    Hold the reported scale and headline result of each dated system
 # │          in one place so a later edition can refresh them.
 # │ Show:    Corpus sizes and the reported scaling and transfer results.
-# │ How:     Literature.RobotDataSystems, each value from the cited paper
-# │          (section in its provenance record).
+# │ How:     Literature.RobotDataSystems, Literature.RobotLearning, Models.Language,
+# │          and chapter-local plot series in vol4/05_data/data/.
 # └─────────────────────────────────────────────────────────────────────────────
 from datetime import date
-from mlsysim import Literature
+from mlsysim import Literature, Models, viz
+from mlsysim.core.units import count
 from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
 
 def _dec_year_data(iso_str: str) -> float:
@@ -1877,8 +1878,10 @@ class StateOfPractice:
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     _lit = Literature.RobotDataSystems
-    _traj = Literature.RobotTrajectoryDatasets
-    _epoch = Literature.ModelsScaleByDomain
+    _rlearn = Literature.RobotLearning
+    _deepseek = Models.Language.DeepSeek_V3
+    _traj = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
+    _epoch = viz.load_series("vol4/05_data/data/epoch_models_scale_by_domain.csv")
     oxe_datasets = int(_lit.OxeDatasets)  # Open X-Embodiment, Fig. 2; category: literature
     oxe_embodiments = int(_lit.OxeEmbodiments)  # Open X-Embodiment, Fig. 2; category: literature
     oxe_rt1x_gain = float(_lit.OxeRt1xMeanSuccessGain)  # RT-1-X mean success vs. original methods, Fig. 4; category: literature
@@ -1901,6 +1904,12 @@ class StateOfPractice:
     mimicgen_tasks = int(_lit.MimicgenTasks)  # MimicGen, abstract; category: literature
     cotrain_gain = float(_lit.CotrainingSuccessGain)  # sim-and-real co-training, abstract (average); category: literature
     droid_recal = int(_lit.DroidRecalibratedEpisodes)  # DROID website, April 2025 release of improved calibrations; category: literature
+    pinto_episodes = int(_lit.PintoGraspingAttempts)  # Pinto & Gupta 2016, abstract; category: literature
+    levine_episodes = int(_rlearn.GraspingFarmAttempts)  # Levine et al. 2018, grasping farm; category: literature
+    bridgedata_v2_episodes = int(_lit.BridgeDataV2Trajectories)  # Walke et al. 2023, Sec. 3; category: literature
+    oxe_episodes = int(_lit.OxeTotalTrajectories)  # Open X-Embodiment 2023, Table I; category: literature
+    pi0_datapoints = int(_lit.Pi0PretrainingDatapoints)  # Black et al. 2024, pi0 pretraining scale; category: literature
+    deepseek_v3_tokens = _deepseek.training_tokens.to(count).magnitude  # DeepSeek-V3 pretraining tokens; category: literature
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     agibot_over_droid = agibot_traj / droid_traj
@@ -1910,10 +1919,6 @@ class StateOfPractice:
     traj_rows = list(_traj.entries)
     n_traj_corpora = len(traj_rows)
     first_traj_year = int(min(float(r["year"]) for r in traj_rows))
-    pinto_episodes = int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Pinto & Gupta"))
-    levine_episodes = int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Levine Grasping Farm"))
-    bridgedata_v2_episodes = int(next(r["episodes"] for r in traj_rows if r["dataset"] == "BridgeData V2"))
-    oxe_episodes = int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Open X-Embodiment"))
 
     epoch_lang = [
         (_dec_year_data(r["publication_date"]), float(r["training_dataset_size"]), str(r["model"]))
@@ -1931,8 +1936,6 @@ class StateOfPractice:
         if r["training_dataset_size"] is not None and r["publication_date"] is not None
     ]
     n_epoch_data = len(epoch_lang) + len(epoch_vis) + len(epoch_rob)
-    pi0_datapoints = int(next(d for _, d, m in epoch_rob if "pi-zero" in m))
-    deepseek_v3_tokens = float(next(d for _, d, m in epoch_lang if m == "DeepSeek-V3"))
     web_to_pi0_mult = deepseek_v3_tokens / pi0_datapoints
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
@@ -1940,6 +1943,18 @@ class StateOfPractice:
     check(lin_recipe_demos == 1600, "Lin et al. recipe: 32 environments x 50 demonstrations")
     check(mimicgen_mult >= 250, "MimicGen generates at least 250 demonstrations per seed")
     check(n_traj_corpora == 11 and oxe_episodes > 2_000_000, "Landmark robot dataset series drifted")
+    check(
+        int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Pinto & Gupta")) == pinto_episodes
+        and int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Levine Grasping Farm")) == levine_episodes
+        and int(next(r["episodes"] for r in traj_rows if r["dataset"] == "BridgeData V2")) == bridgedata_v2_episodes
+        and int(next(r["episodes"] for r in traj_rows if r["dataset"] == "Open X-Embodiment")) == oxe_episodes,
+        "Local robot_trajectory_datasets.csv drifted from MLSysIM scalar anchors",
+    )
+    check(
+        int(next(d for _, d, m in epoch_rob if "pi-zero" in m)) == pi0_datapoints
+        and float(next(d for _, d, m in epoch_lang if m == "DeepSeek-V3")) == deepseek_v3_tokens,
+        "Local epoch_models_scale_by_domain.csv drifted from MLSysIM scalar anchors",
+    )
     check(n_epoch_data >= 850 and abs(web_to_pi0_mult - 14800.0) < 10.0, "Epoch cross-domain dataset counts drifted")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
