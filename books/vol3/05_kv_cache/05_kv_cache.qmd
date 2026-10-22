@@ -158,7 +158,10 @@ class KvGeometry:
 
     # ┌── 3. GUARD ────────────────────────────────
     check(bytes_per_token.to(byte).magnitude == 327_680, "Registry KV geometry changed")
-    check(_agent.hbm_per_accelerator == _node.accelerator.memory.capacity and n_acc == _node.accelerators_per_node, "Scenario replica must be the registry DGX H100 node")
+    check(
+        _agent.hbm_per_accelerator == _node.accelerator.memory.capacity and n_acc == _node.accelerators_per_node,
+        "Scenario replica must be the registry DGX H100 node",
+    )
     check(525.9 < kv_pool.to(GB).magnitude < 526.1, "Expected canonical decimal-GB pool")
     check((conc_short, conc_agent, conc_long) == (195, 48, 12), "Resident-fit bounds changed")
     check(conc_agent * kv_agent <= kv_pool < (conc_agent + 1) * kv_agent, "Floor bound must bracket pool")
@@ -274,7 +277,7 @@ class KvFootprintByArchitecture:
     mla_session_str = fmt_memory(mla_session, unit=GB, precision=1)
 ```
 
-:::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
+::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
 
 ```{python}
 #| echo: false
@@ -298,7 +301,7 @@ from binder.tools.figures import style as book_style
 book_style.set_book_style()
 plt = book_style.plt
 COLORS = book_style.COLORS
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw=dict(width_ratios=[1, 1.3]))
+fig, (a1, a2) = plt.subplots(2, 1, figsize=(6.2, 5.8), gridspec_kw=dict(height_ratios=[1, 1.25]))
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
 L = Models.Language
@@ -308,42 +311,68 @@ color = {"MHA": COLORS["secondary"], "GQA": COLORS["BlueLine"], "MLA": COLORS["G
 kb = [m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("kilobyte").magnitude for m in models]
 
 # ┌── 2. PANEL A ──────────────────────────────────────────────────────────────
-a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models])
+a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models], height=0.68)
 for y, v in enumerate(kb):
-    a1.text(v * 1.08, y, f"{v:,.0f}" if v >= 100 else f"{v:.1f}", va="center", fontsize=8)
+    a1.text(v * 1.08, y, f"{v:,.0f} KB" if v >= 100 else f"{v:.1f} KB", va="center", fontsize=9, color=COLORS["primary"])
 a1.set_xscale("log")
-a1.set_xlim(30, 20000)
+a1.set_xlim(30, 28000)
 a1.set_xlabel("KV cache per token (KB)")
-a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5)
+a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5, fontweight="bold")
 a1.grid(axis="y", visible=False)
-a1.legend(handles=[Patch(color=c, label=k) for k, c in color.items()], frameon=False, fontsize=8, loc="lower right")
+a1.legend(
+    handles=[Patch(color=c, label=k) for k, c in color.items()],
+    loc="lower right",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.5,
+)
 
 # ┌── 3. PANEL B ──────────────────────────────────────────────────────────────
 n = np.logspace(np.log10(1024), np.log10(131_072), 120)
 for m, ls in ((L.GPT3, "-"), (L.Llama3_70B, "-"), (L.DeepSeek_V3, "-")):
     per = m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("GB").magnitude
     trained = n <= (m.context_length or n[-1])
-    a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=1.8, label=f"{m.name} ({design(m)})")
-    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.2, ls=":")
-for acc in (Hardware.Cloud.H100, Hardware.Cloud.B200):
+    a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=2.0, label=f"{m.name} ({design(m)})")
+    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.4, ls=":")
+for acc, dy in ((Hardware.Cloud.H100, 0.72), (Hardware.Cloud.B200, 1.18)):
     cap = acc.memory.capacity.to("GB").magnitude
-    a2.axhline(cap, color=COLORS["primary"], lw=0.8, ls=":")
-    a2.text(1100, cap * 1.12, f"one {acc.name.replace('NVIDIA ', '')}: {acc.memory.capacity.to('GiB').magnitude:.0f} GiB", fontsize=8)
+    a2.axhline(cap, color=COLORS["primary"], lw=0.9, ls=":")
+    a2.text(
+        1080,
+        cap * dy,
+        f"One {acc.name.replace('NVIDIA ', '')} ({acc.memory.capacity.to('GiB').magnitude:.0f} GiB)",
+        fontsize=9,
+        color=COLORS["primary"],
+        bbox=dict(fc="white", ec="none", pad=0.4, alpha=0.85),
+    )
 a2.set_xscale("log", base=2)
 a2.set_yscale("log")
 a2.set_xticks([2**10, 2**12, 2**14, 2**15, 2**17])
 a2.set_xticklabels(["1K", "4K", "16K", "32K", "128K"])
-a2.set_ylim(0.03, 2000)
+a2.set_ylim(0.03, 2500)
 a2.set_xlabel("Tokens retained in one session")
 a2.set_ylabel("KV cache for one session (GB)")
-a2.set_title("(b) One session vs. accelerator memory", loc="left", fontsize=10.5)
-a2.legend(frameon=False, fontsize=8, loc="lower right")
+a2.set_title("(b) One session vs. accelerator memory", loc="left", fontsize=10.5, fontweight="bold")
+a2.legend(
+    loc="lower right",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.5,
+)
 fig.tight_layout()
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 The spread in @fig-vol3-kv-footprint-by-architecture is fixed at pretraining; the serving engine can work within it but cannot change it. Full multi-head attention in the `{python} KvFootprintByArchitecture.mha_name_str` geometry retains `{python} KvFootprintByArchitecture.mha_tok_str` per token, `{python} KvFootprintByArchitecture.mha_over_mla_mult_str` the `{python} KvFootprintByArchitecture.mla_tok_str` of the latent-attention `{python} KvFootprintByArchitecture.mla_name_str`; even the grouped-query `{python} KvFootprintByArchitecture.gqa_name_str` of the worked estimate retains `{python} KvFootprintByArchitecture.gqa_over_mla_mult_str` as much. At the `{python} KvFootprintByArchitecture.session_tokens_str` tokens of the long regime, that is `{python} KvFootprintByArchitecture.gqa_session_str` against `{python} KvFootprintByArchitecture.mla_session_str` for one session. The choice of model therefore fixes the slope of every capacity line in this chapter, and the runtime's levers (retained tokens, sharing, precision, and eviction) act only along that slope. Whatever the slope, each retained byte stays allocated for as long as its sequence holds the prefix, which is where the lifecycle decisions begin.
 
