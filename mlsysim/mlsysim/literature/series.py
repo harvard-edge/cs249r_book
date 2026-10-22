@@ -22,6 +22,86 @@ from ..core import provenance_catalog as _catalog  # added 2026-10-20
 _SERIES = Path(__file__).parent / "data" / "series"
 _BOOKS = Path(__file__).resolve().parents[3] / "books"
 
+# Chapter-owned plot datasets migrated from mlsysim/literature/data/series/ to
+# their owning chapter's data/ directory. Kept mapped here so Scenarios.* and
+# lecture-slide calcs.py / make_figs.py callers continue to resolve in O(1).
+_CHAPTER_SERIES_PATHS: dict[str, str] = {
+    "abadi_dpsgd_accuracy": "vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv",
+    "accelerator_bandwidth_compute": "vol1/11_hw_acceleration/data/accelerator_bandwidth_compute.csv",
+    "accelerator_flops_per_watt": "vol2/02_compute_infrastructure/data/accelerator_flops_per_watt.csv",
+    "accelerator_power_ratings": "vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv",
+    "acme_kalos_job_sizes": "vol2/08_fleet_orchestration/data/acme_kalos_job_sizes.csv",
+    "agentdojo_results": "vol3/09_security/data/agentdojo_results.csv",
+    "ai_benchmark_socs": "vol2/11_edge_intelligence/data/ai_benchmark_socs.csv",
+    "ai_supercomputers": "vol2/02_compute_infrastructure/data/ai_supercomputers.csv",
+    "apple_neural_engine": "vol2/11_edge_intelligence/data/apple_neural_engine.csv",
+    "bu_gdp_mnist_noisysgd": "vol2/13_security_privacy/data/bu_gdp_mnist_noisysgd.csv",
+    "ca_dmv_disengagements": "vol4/14_intervention/data/ca_dmv_disengagements.csv",
+    "cybench_unguided": "vol3/08_sandboxes/data/cybench_unguided.csv",
+    "epoch_lowest_price_at_capability": "vol3/19_agent_economics/data/epoch_lowest_price_at_capability.csv",
+    "epoch_models_by_domain": "vol4/01_boundary/data/epoch_models_by_domain.csv",
+    "epoch_models_scale_by_domain": "vol4/03_brain/data/epoch_models_scale_by_domain.csv",
+    "epoch_swe_bench_verified_runs": "vol3/13_evaluation/data/epoch_swe_bench_verified_runs.csv",
+    "europe_generation_2023w47": "vol2/15_sustainable_ai/data/europe_generation_2023w47.csv",
+    "fiction_livebench_by_length": "vol3/04_context_engineering/data/fiction_livebench_by_length.csv",
+    "frontier_swe_v2_trials": "vol3/19_agent_economics/data/frontier_swe_v2_trials.csv",
+    "gemini_prompt_energy": "vol2/15_sustainable_ai/data/gemini_prompt_energy.csv",
+    "gender_shades_audit": "vol2/16_responsible_ai/data/gender_shades_audit.csv",
+    "google_serving_factors": "vol2/15_sustainable_ai/data/google_serving_factors.csv",
+    "imagenet_efficiency_frontier": "vol1/06_nn_architectures/data/imagenet_efficiency_frontier.csv",
+    "imagenet_testbed_shift": "vol2/14_robust_ai/data/imagenet_testbed_shift.csv",
+    "inferencex_dsr1_fp8_1k1k": "vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv",
+    "interconnect_generations": "vol2/03_network_fabrics/data/interconnect_generations.csv",
+    "iot_device_growth": "vol2/15_sustainable_ai/data/iot_device_growth.csv",
+    "jax_lax_primitives": "vol1/07_frameworks/data/jax_lax_primitives.csv",
+    "kitti_odometry_leaderboard": "vol4/09_memory/data/kitti_odometry_leaderboard.csv",
+    "lerobot_hub_episode_histogram": "vol4/05_data/data/lerobot_hub_episode_histogram.csv",
+    "lerobot_hub_monthly": "vol4/05_data/data/lerobot_hub_monthly.csv",
+    "llama3_interruptions": "vol2/07_fault_tolerance/data/llama3_interruptions.csv",
+    "llm_api_input_prices": "vol1/13_model_serving/data/llm_api_input_prices.csv",
+    "meta_operational_carbon": "vol2/15_sustainable_ai/data/meta_operational_carbon.csv",
+    "metr_time_horizon_v1_1": "vol3/01_introduction/data/metr_time_horizon_v1_1.csv",
+    "microprocessor_trends": "vol1/02_system_paradigms/data/microprocessor_trends.csv",
+    "mlperf_inference_dgx_h100": "vol2/09_performance_engineering/data/mlperf_inference_dgx_h100.csv",
+    "mlperf_inference_edge_orin": "vol4/03_brain/data/mlperf_inference_edge_orin.csv",
+    "mlperf_storage_v1_training": "vol2/04_data_storage/data/mlperf_storage_v1_training.csv",
+    "mlperf_training_llm_scaling": "vol2/06_distributed_training/data/mlperf_training_llm_scaling.csv",
+    "mmlu_dense_models": "vol1/10_model_compression/data/mmlu_dense_models.csv",
+    "nccl_allreduce_h100_node": "vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv",
+    "notable_model_compute_pre2012": "vol2/01_introduction/data/notable_model_compute_pre2012.csv",
+    "notable_model_datasets": "vol1/04_data_engineering/data/notable_model_datasets.csv",
+    "notable_model_training_runs": "vol2/01_introduction/data/notable_model_training_runs.csv",
+    "notable_models": "vol1/05_nn_computation/data/notable_models.csv",
+    "onnx_opset_operators": "vol1/07_frameworks/data/onnx_opset_operators.csv",
+    "open_x_embodiment_composition": "vol4/05_data/data/open_x_embodiment_composition.csv",
+    "osworld_step_budget": "vol3/10_agent_harness/data/osworld_step_budget.csv",
+    "patterson_training_footprints": "vol2/15_sustainable_ai/data/patterson_training_footprints.csv",
+    "pretraining_tokens": "vol1/04_data_engineering/data/pretraining_tokens.csv",
+    "public_text_stock": "vol1/04_data_engineering/data/public_text_stock.csv",
+    "pytorch_operator_schemas": "vol1/07_frameworks/data/pytorch_operator_schemas.csv",
+    "repeated_sampling_coverage": "vol3/03_test_time_compute/data/repeated_sampling_coverage.csv",
+    "repeated_sampling_majority": "vol3/03_test_time_compute/data/repeated_sampling_majority.csv",
+    "robot_trajectory_datasets": "vol4/05_data/data/robot_trajectory_datasets.csv",
+    "robustbench_cifar10_linf": "vol2/14_robust_ai/data/robustbench_cifar10_linf.csv",
+    "storage_price_per_tb": "vol1/04_data_engineering/data/storage_price_per_tb.csv",
+    "swe_bench_verified_mini_v1_sonnet4_django_12050_calls": "vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv",
+    "swe_bench_verified_mini_v1_sonnet4_run": "vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_run.csv",
+    "swe_bench_verified_trajectories": "vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv",
+    "temporal_shift_wildtime": "vol1/14_ml_ops/data/temporal_shift_wildtime.csv",
+    "tensorflow_operators": "vol1/07_frameworks/data/tensorflow_operators.csv",
+    "terminal_bench_2_harness": "vol3/13_evaluation/data/terminal_bench_2_harness.csv",
+    "test_set_label_errors": "vol1/04_data_engineering/data/test_set_label_errors.csv",
+    "vercel_gateway_open_weight_share": "vol3/19_agent_economics/data/vercel_gateway_open_weight_share.csv",
+    "vercel_gateway_tool_call_share": "vol3/01_introduction/data/vercel_gateway_tool_call_share.csv",
+    "vercel_gateway_usage_spend_price_index": "vol3/01_introduction/data/vercel_gateway_usage_spend_price_index.csv",
+    "vercel_gateway_use_case_shares": "vol3/19_agent_economics/data/vercel_gateway_use_case_shares.csv",
+    "vnncomp2025_scored_benchmarks": "vol4/15_verification/data/vnncomp2025_scored_benchmarks.csv",
+    "waymo_rider_only_miles": "vol2/16_responsible_ai/data/waymo_rider_only_miles.csv",
+    "waymo_safety_impact_headline": "vol4/16_release/data/waymo_safety_impact_headline.csv",
+    "waymo_vs_human_benchmark": "vol2/16_responsible_ai/data/waymo_vs_human_benchmark.csv",
+    "xla_hlo_opcodes": "vol1/07_frameworks/data/xla_hlo_opcodes.csv",
+}
+
 _EPOCH_HUB = "https://epoch.ai/benchmarks"
 _EPOCH_LICENSE = "Epoch AI data, CC-BY 4.0 (credit Epoch AI)."
 
@@ -29,11 +109,15 @@ _EPOCH_LICENSE = "Epoch AI data, CC-BY 4.0 (credit Epoch AI)."
 def _open_series_lines(stem: str) -> list[str]:
     cand = _SERIES / f"{stem}.csv"
     if not cand.exists():
-        matches = sorted(_BOOKS.glob(f"vol*/*/data/{stem}.csv"))
-        if matches:
-            cand = matches[0]
+        rel = _CHAPTER_SERIES_PATHS.get(stem)
+        if rel is not None and (_BOOKS / rel).exists():
+            cand = _BOOKS / rel
         else:
-            raise FileNotFoundError(f"Series CSV not found for {stem!r}")
+            matches = sorted(_BOOKS.glob(f"vol*/*/data/{stem}.csv"))
+            if matches:
+                cand = matches[0]
+            else:
+                raise FileNotFoundError(f"Series CSV not found for {stem!r}")
     lines = cand.read_text(encoding="utf-8").splitlines(keepends=True)
     return [line for line in lines if not line.lstrip().startswith("#")]
 
@@ -50,15 +134,35 @@ def _coerce(value: str):
 
 
 class _Series:
-    """A provenance-carrying table loaded from one CSV."""
+    """A provenance-carrying table loaded lazily from one CSV."""
 
     def __init__(self, stem: str, provenance: Provenance, doc: str):
+        self.name = stem
+        self._stem = stem
         self.__doc__ = doc
         self.provenance = provenance
-        reader = csv.DictReader(_open_series_lines(stem))
-        self.columns = tuple(reader.fieldnames or ())
-        self.entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
-        self.list = self.entries
+        self._columns: tuple[str, ...] | None = None
+        self._entries: tuple[dict, ...] | None = None
+
+    def _ensure_loaded(self) -> None:
+        if self._entries is None:
+            reader = csv.DictReader(_open_series_lines(self._stem))
+            self._columns = tuple(reader.fieldnames or ())
+            self._entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        self._ensure_loaded()
+        return self._columns  # type: ignore[return-value]
+
+    @property
+    def entries(self) -> tuple[dict, ...]:
+        self._ensure_loaded()
+        return self._entries  # type: ignore[return-value]
+
+    @property
+    def list(self) -> tuple[dict, ...]:
+        return self.entries
 
     def where(self, **match):
         return tuple(e for e in self.entries if all(e.get(k) == v for k, v in match.items()))
@@ -595,25 +699,36 @@ _DIR = Path(__file__).parent / "data" / "series"
 
 
 class TrendSeries:
-    """A provenance-carrying table loaded from ``data/series/<stem>.csv``.
+    """A provenance-carrying table loaded lazily from ``data/series/<stem>.csv``.
 
     ``numeric`` names the columns parsed as floats; empty cells become ``None``.
     """
 
     def __init__(self, stem: str, provenance: Provenance, doc: str, numeric: tuple[str, ...] = ()):
         self.name = stem
+        self._stem = stem
+        self._numeric = numeric
         self.provenance = provenance
         self.__doc__ = doc
-        rows = []
-        for raw in csv.DictReader(_open_series_lines(stem)):
-            row = {}
-            for k, v in raw.items():
-                if k in numeric:
-                    row[k] = float(v) if v not in ("", None) else None
-                else:
-                    row[k] = v
-            rows.append(row)
-        self.entries = tuple(rows)
+        self._entries: tuple[dict, ...] | None = None
+
+    def _ensure_loaded(self) -> None:
+        if self._entries is None:
+            rows = []
+            for raw in csv.DictReader(_open_series_lines(self._stem)):
+                row = {}
+                for k, v in raw.items():
+                    if k in self._numeric:
+                        row[k] = float(v) if v not in ("", None) else None
+                    else:
+                        row[k] = v
+                rows.append(row)
+            self._entries = tuple(rows)
+
+    @property
+    def entries(self) -> tuple[dict, ...]:
+        self._ensure_loaded()
+        return self._entries  # type: ignore[return-value]
 
     def column(self, key: str) -> list:
         """Return one column, in file order."""
