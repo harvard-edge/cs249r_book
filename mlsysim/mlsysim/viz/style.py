@@ -229,6 +229,13 @@ class LocalSeries:
     def column(self, key: str) -> list:
         return [r[key] for r in self.entries]
 
+    def largest(self, key: str, date_key: str | None = None, on_or_before: str | None = None) -> dict:
+        rows = [
+            r for r in self.entries
+            if r[key] is not None and (on_or_before is None or str(r[date_key]) <= str(on_or_before))
+        ]
+        return max(rows, key=lambda r: r[key])
+
     def find(self, key: str, fragment: str) -> dict:
         return next(r for r in self.entries if fragment in str(r[key]))
 

@@ -20,9 +20,22 @@ from ..core.provenance import Provenance, ProvenanceKind
 from ..core import provenance_catalog as _catalog  # added 2026-10-20
 
 _SERIES = Path(__file__).parent / "data" / "series"
+_BOOKS = Path(__file__).resolve().parents[3] / "books"
 
 _EPOCH_HUB = "https://epoch.ai/benchmarks"
 _EPOCH_LICENSE = "Epoch AI data, CC-BY 4.0 (credit Epoch AI)."
+
+
+def _open_series_lines(stem: str) -> list[str]:
+    cand = _SERIES / f"{stem}.csv"
+    if not cand.exists():
+        matches = sorted(_BOOKS.glob(f"vol*/*/data/{stem}.csv"))
+        if matches:
+            cand = matches[0]
+        else:
+            raise FileNotFoundError(f"Series CSV not found for {stem!r}")
+    lines = cand.read_text(encoding="utf-8").splitlines(keepends=True)
+    return [line for line in lines if not line.lstrip().startswith("#")]
 
 
 def _coerce(value: str):
@@ -42,10 +55,9 @@ class _Series:
     def __init__(self, stem: str, provenance: Provenance, doc: str):
         self.__doc__ = doc
         self.provenance = provenance
-        with open(_SERIES / f"{stem}.csv", newline="") as fh:
-            reader = csv.DictReader(fh)
-            self.columns = tuple(reader.fieldnames or ())
-            self.entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
+        reader = csv.DictReader(_open_series_lines(stem))
+        self.columns = tuple(reader.fieldnames or ())
+        self.entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
         self.list = self.entries
 
     def where(self, **match):
@@ -593,15 +605,14 @@ class TrendSeries:
         self.provenance = provenance
         self.__doc__ = doc
         rows = []
-        with open(_DIR / f"{stem}.csv", newline="") as f:
-            for raw in csv.DictReader(f):
-                row = {}
-                for k, v in raw.items():
-                    if k in numeric:
-                        row[k] = float(v) if v not in ("", None) else None
-                    else:
-                        row[k] = v
-                rows.append(row)
+        for raw in csv.DictReader(_open_series_lines(stem)):
+            row = {}
+            for k, v in raw.items():
+                if k in numeric:
+                    row[k] = float(v) if v not in ("", None) else None
+                else:
+                    row[k] = v
+            rows.append(row)
         self.entries = tuple(rows)
 
     def column(self, key: str) -> list:
