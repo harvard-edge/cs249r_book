@@ -90,12 +90,13 @@ class ResNetTrainingScenario:
     """Shared anchor for the chapter's ResNet-50 throughput lighthouse."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Scenario assumption: sustained training rate one accelerator reaches once
-    # input keeps up, about a quarter of its compute ceiling (FeedingProblem).
-    sustained_img_per_sec = float(Literature.Benchmarks.ResNet50A100TrainThroughput)  # registry: A100 ResNet-50 training anchor
-    # Scenario assumption: the standard 90-epoch ResNet-50 schedule.
-    epochs = 90
-    train_images = Datasets.ImageNet.training_examples.to(count).magnitude
+    # Scenarios.ImageNetLabelingVersusResNetRun: the sustained training rate one
+    # accelerator reaches once input keeps up, about a quarter of its compute
+    # ceiling (FeedingProblem); the standard 90-epoch ResNet-50 schedule.
+    run = Scenarios.ImageNetLabelingVersusResNetRun
+    sustained_img_per_sec = run.throughput_per_accelerator.to(count / second).magnitude
+    epochs = run.epochs
+    train_images = run.dataset_examples.to(count).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1_000_000 < train_images < 1_500_000, "ImageNet-1k training split holds about 1.28M images.")
@@ -127,21 +128,20 @@ from mlsysim.core.units import USD, hour, count
 # ┌── LEGO ───────────────────────────────────────────────
 class LabelingComputeRatio:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    labeling_budget = 100_000
-    a100_count = 8
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+    run = ResNetTrainingScenario.run
+    labeling_budget = run.labeling_budget.to(USD).magnitude
+    a100_count = run.accelerators
+    gpu_hour_cost_low = run.price_low.to(USD / hour).magnitude
+    gpu_hour_cost_high = run.price_high.to(USD / hour).magnitude
     effort_majority_pct = 80
     effort_minority_pct = 20
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_hours = (
-        ResNetTrainingScenario.train_images * ResNetTrainingScenario.epochs / (a100_count * ResNetTrainingScenario.sustained_img_per_sec) / 3600
-    )
-    train_cost_low = a100_count * train_hours * gpu_hour_cost_low
-    train_cost_high = a100_count * train_hours * gpu_hour_cost_high
-    ratio_low = labeling_budget / train_cost_high
-    ratio_high = labeling_budget / train_cost_low
+    train_hours = run.train_time.to(hour).magnitude
+    train_cost_low = run.train_cost_low.to(USD).magnitude
+    train_cost_high = run.train_cost_high.to(USD).magnitude
+    ratio_low = run.ratio_low
+    ratio_high = run.ratio_high
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(train_cost_low < train_cost_high, "Reference training cost range must be ordered.")
@@ -165,9 +165,172 @@ class LabelingComputeRatio:
     effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='prose')
 ```
 
-A missing accent in a speech corpus, a mislabeled class, or a feature computed one way in training and another in serving becomes a defect in system behavior with no line of code to point to. Because a machine learning system learns its behavior from data, the trained model is a compressed summary of its training set: it can represent only the evidence that data contains, and it treats the data's labels as the definition of a correct answer. The bitter lesson (@sec-introduction-bitter-lesson-79c7) explains why this dependence has grown rather than shrunk. Methods that learn from data at scale have repeatedly overtaken methods built on hand-encoded knowledge, so the knowledge that engineers once wrote into programs must now arrive through data. In the lifecycle that @sec-ml-workflow lays out, this work is Stage 2, which ends by handing a versioned dataset to model development; every later stage inherits what that dataset contains and what it lacks.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATASET SIZE GROWTH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Opening of Data as Code and @fig-dataset-size-growth.
+# │
+# │ Goal: Quantify the multi-decade growth of training dataset sizes before and
+# │       after the deep-learning transition in 2010.
+# │ Show: Doubling every ~34 months before 2010 and ~8 months after across 668
+# │       notable models, crossing the 1.28M ImageNet-1k lighthouse to reach
+# │       hundreds of trillions of datapoints.
+# │ How: Least-squares fits of log10(training_dataset_size) on publication date
+# │      over vol1/04_data_engineering/data/notable_model_datasets.csv, split at 2010.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+from mlsysim.engine.solvers import DatasetGrowthModel
+from mlsysim.fmt import check, fmt_int
 
-Data constrains the machine as well as the model. Every training step reads its examples from storage, decodes them, and moves them to the accelerator, and an accelerator waiting on input computes nothing however fast it is. Datasets measured in terabytes also have physical mass. They are slow and expensive to move, and they spend energy at every level of the memory hierarchy they cross. Data therefore occupies two of the pairwise overlaps of the D·A·M taxonomy at once, the ones labeled *what to learn from* and *how to move information* in @fig-ai-triad. Toward the algorithm, it bounds what the model can learn; toward the machine, it bounds how fast learning can proceed.
+# ┌── LEGO ───────────────────────────────────────────────
+class DatasetGrowth:
+    """Training dataset sizes of notable models over time."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    series = viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv")
+    split_year = 2010  # scenario assumption: deep-learning transition split year
+    rows = [r for r in series.entries if r["training_dataset_size"]]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    fit = DatasetGrowthModel().solve(series.entries, split_year)
+    years = np.array(fit.years)
+    log_sizes = np.array(fit.log_dataset_sizes)
+    early_slope, early_intercept = fit.early_slope, fit.early_intercept
+    late_slope, late_intercept = fit.late_slope, fit.late_intercept
+    early_doubling_months = fit.early_doubling_months
+    late_doubling_months = fit.late_doubling_months
+    largest_size = fit.largest_dataset_size
+    model_count = fit.model_count
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(24 <= early_doubling_months <= 48, f"Expected ~34-month doubling before 2010, got {early_doubling_months:.0f}.")
+    check(5 <= late_doubling_months <= 12, f"Expected ~8-month doubling after 2010, got {late_doubling_months:.0f}.")
+    check(largest_size >= 1e14, "Largest training datasets exceed 100 trillion datapoints.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    early_doubling_str = fmt_int(round(early_doubling_months), commas=False)
+    late_doubling_str = fmt_int(round(late_doubling_months), commas=False)
+    model_count_str = fmt_int(model_count)
+```
+
+A missing accent in a speech corpus, a mislabeled class, or a feature computed one way in training and another in serving becomes a defect in system behavior with no line of code to point to. Because a machine learning system learns its behavior from data, the trained model is a compressed summary of its training set. It can represent only the evidence that data contains, and it treats the data's labels as the definition of a correct answer. The bitter lesson (@sec-introduction-bitter-lesson-79c7) explains why this dependence has grown rather than shrunk. Methods that learn from data at scale have repeatedly overtaken methods built on hand-encoded knowledge, so the knowledge that engineers once wrote into programs must now arrive through data. In the lifecycle that @sec-ml-workflow lays out, this work is Stage 2, which ends by handing a versioned dataset to model development; every later stage inherits what that dataset contains and what it lacks. Across `{python} DatasetGrowth.model_count_str` notable models published since 1950 (@fig-dataset-size-growth), training dataset sizes show how far that shift has gone [@epochai2026notable]. Until 2010, dataset size doubled roughly every `{python} DatasetGrowth.early_doubling_str` months; after 2010, as deep learning and web-scale collection took hold, it doubled about every `{python} DatasetGrowth.late_doubling_str` months, climbing from tens of thousands of examples in early vision benchmarks past the million-image scale of ImageNet to trillions of tokens in modern language models.
+
+::: {#fig-dataset-size-growth fig-env="figure" fig-pos="htb" fig-cap="**Training Dataset Sizes of Notable Models, 1950 to the Present**: Each point is one notable model, colored by domain, plotted by publication date on a logarithmic axis. Dashed lines show least-squares fits before and after 2010, and the dotted horizontal line marks the ImageNet-1k training split used by this chapter's ResNet-50 workload. The steeper post-2010 slope moves training sets past single-machine memory and turns data delivery into a throughput bottleneck. Data from @epochai2026notable." fig-alt="Scatter plot of training dataset sizes in datapoints on a logarithmic axis from 1 to 10 to the 16 against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models, with a horizontal dotted line near 1.28 million for ImageNet-1k. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of vision and language models above 10 to the 12. Perceptron Mark I, TD-Gammon, LeNet-5, AlexNet, GPT-3, Chinchilla, DeepSeek-V3, and Qwen3 are labeled."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATASET SIZE GROWTH (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-dataset-size-growth.
+# │
+# │ Goal: Plot training dataset sizes of notable models over seven decades.
+# │ Show: Scatter by domain with two fitted segments split at 2010 and the
+# │       ImageNet-1k lighthouse line.
+# │ How: DatasetGrowth and ResNetTrainingScenario (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.4))
+_D = DatasetGrowth
+_dom = {"Language": COLORS["RedLine"], "Vision": COLORS["BlueLine"], "Games": COLORS["GreenLine"]}
+_d = np.array([r["domain"] if r["domain"] in _dom else "Other" for r in _D.rows])
+for _k, _c in list(_dom.items()) + [("Other", COLORS["grid"])]:
+    _m = _d == _k
+    ax.scatter(
+        _D.years[_m],
+        10 ** _D.log_sizes[_m],
+        s=10,
+        color=_c,
+        alpha=0.7 if _k != "Other" else 0.6,
+        label=_k,
+        zorder=3 if _k != "Other" else 2,
+    )
+for _lo, _hi, _sl, _ic in (
+    (1950, _D.split_year, _D.early_slope, _D.early_intercept),
+    (_D.split_year, 2026.8, _D.late_slope, _D.late_intercept),
+):
+    _xx = np.linspace(_lo, _hi, 50)
+    ax.plot(_xx, 10 ** (_sl * _xx + _ic), "--", color=COLORS["primary"], lw=1.2, zorder=4)
+
+_y_early = 10 ** (_D.early_slope * 1978 + _D.early_intercept)
+ax.annotate(
+    f"{_D.early_doubling_str}-month doubling\n(pre-2010)",
+    xy=(1978, _y_early),
+    xytext=(1973, _y_early * 35),
+    ha="center",
+    fontsize=9,
+    color=COLORS["primary"],
+    arrowprops=dict(arrowstyle="->", color=COLORS["primary"], lw=0.8),
+    bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.3),
+    zorder=6,
+)
+_y_late = 10 ** (_D.late_slope * 2011.8 + _D.late_intercept)
+ax.annotate(
+    f"{_D.late_doubling_str}-month doubling\n(post-2010)",
+    xy=(2011.8, _y_late),
+    xytext=(2019.5, 2e2),
+    ha="center",
+    fontsize=9,
+    color=COLORS["primary"],
+    arrowprops=dict(arrowstyle="->", color=COLORS["primary"], lw=0.8),
+    bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.3),
+    zorder=6,
+)
+_landmarks = {
+    "Perceptron Mark I": ("Perceptron Mark I", (10, -14), "left"),
+    "TD-Gammon": ("TD-Gammon", (-12, 12), "right"),
+    "LeNet-5": ("LeNet-5 (MNIST)", (-14, -18), "right"),
+    "AlexNet": ("AlexNet", (-18, 10), "right"),
+    "GPT-3 175B (davinci)": ("GPT-3", (-22, -6), "right"),
+    "Chinchilla": ("Chinchilla", (-24, 1), "right"),
+    "DeepSeek-V3": ("DeepSeek-V3", (-22, 7), "right"),
+    "Qwen3-235B-A22B": ("Qwen3", (-14, 16), "right"),
+}
+for _key, (_lbl, _off, _ha) in _landmarks.items():
+    for _x, _r in zip(_D.years, _D.rows):
+        if _r["model"] == _key:
+            ax.annotate(
+                _lbl,
+                (_x, _r["training_dataset_size"]),
+                xytext=_off,
+                textcoords="offset points",
+                ha=_ha,
+                fontsize=9,
+                zorder=7,
+                arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.6),
+                bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.2),
+            )
+            break
+
+ax.axhline(ResNetTrainingScenario.train_images, color=COLORS["primary"], lw=0.8, ls=":", zorder=1)
+ax.text(
+    1948.5,
+    ResNetTrainingScenario.train_images * 1.45,
+    "chapter lighthouse (ImageNet-1k, 1.28M)",
+    ha="left",
+    va="bottom",
+    fontsize=9,
+    color=COLORS["primary"],
+)
+ax.set_yscale("log")
+ax.set_xlim(1947, 2028)
+ax.set_ylim(1, 1e16)
+ax.set_xlabel("Publication date")
+ax.set_ylabel("Training dataset size (datapoints, log scale)")
+ax.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=9)
+plt.show()
+plt.close()
+```
+
+:::
+
+At that scale, data constrains the machine as well as the model. Every training step reads its examples from storage, decodes them, and moves them to the accelerator, and an accelerator waiting on input computes nothing however fast it is. Datasets measured in terabytes also have physical mass. They are slow and expensive to move, and they spend energy at every level of the memory hierarchy they cross. Data therefore occupies two of the pairwise overlaps of the D·A·M taxonomy at once, the ones labeled *what to learn from* and *how to move information* in @fig-ai-triad. Toward the algorithm, it bounds what the model can learn; toward the machine, it bounds how fast learning can proceed.
 
 Both bounds are expensive to meet. Cleaning and organizing data was the most common answer to where data scientists spend their time in the practitioner survey that @sec-ml-workflow presents [@crowdflower2016data]. In the image-classification cost comparison later in this chapter, labeling a dataset costs roughly `{python} LabelingComputeRatio.ratio_low_round_mult_str` to `{python} LabelingComputeRatio.ratio_high_round_mult_str` as much as one training run on it. Each stage between raw input and an ML-ready dataset (acquisition, ingestion and validation, labeling, and processing) can also introduce a defect that no later stage detects. Data bounds both capability and throughput and often dominates cost, so it requires the same engineering discipline as the model and the machine: acquisition systems, validation checks, labeling workflows, storage layouts, and governance.
 
@@ -645,8 +808,9 @@ class KWSProblemTargets:
     """KWS detection-rate and latency targets for problem definition."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    kws_accuracy_target = 98
-    kws_latency_limit_ms = 200
+    targets = Scenarios.KeywordSpotterTargets
+    kws_accuracy_target = targets.detection_target * 100
+    kws_latency_limit_ms = targets.response_limit.to(millisecond).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(kws_accuracy_target > 90, f"KWS target accuracy unexpectedly low: {kws_accuracy_target}.")
@@ -681,16 +845,17 @@ class FalsePositiveTarget:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    duty_cycle_hours = 24
-    window_sec = 1
-    tolerance_per_month = 1
+    budget = Scenarios.KeywordSpotterFalseWakes
+    duty_cycle_hours = budget.listening_per_day.to(hour).magnitude
+    window_sec = budget.window.to(second).magnitude
+    tolerance_per_month = budget.budget
 
-    days_month = DAYS_PER_MONTH
+    days_month = budget.horizon.to(day).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    windows_per_month = (days_month * duty_cycle_hours * SEC_PER_HOUR) / window_sec
-    target_fpr = tolerance_per_month / windows_per_month
-    rejection_pct = (1 - target_fpr) * 100
+    windows_per_month = budget.windows
+    target_fpr = budget.target_false_positive_rate
+    rejection_pct = budget.rejection_needed * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rejection_pct >= 99.999, f"Rejection target ({rejection_pct:.4f}%) is too lenient. Should be > 99.999%.")
@@ -777,32 +942,29 @@ class KWSDesignSpaceTradeoffs:
     """Scenario anchors and derived multipliers for the KWS design-space table."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    sampling_rate_low_khz = 8
-    sampling_rate_high_khz = 16
-    mfcc_coeff_low = 13
-    mfcc_coeff_high = 40
-    examples_low_m = 1
-    examples_high_m = 10
+    sampling = Scenarios.KeywordSpotterSampleRateChoice
+    mfcc = Scenarios.KeywordSpotterMfccChoice
+    examples = Scenarios.KeywordSpotterExampleCountChoice
     local_latency_ms = 10
     cloud_latency_ms = 100
     local_query_cost_usd = 0
     cloud_query_cost_usd = 0.001
     local_model_memory = (
-        256 * KB
-    )  # scenario assumption: KWS always-on model-size budget (matches the 256 KB scenario limit; the 16 KB preprocessing-state budget is separate)
+        Scenarios.KeywordSpotterTargets.model_memory
+    )  # always-on model-size budget (the 16 KB preprocessing-state budget is separate)
     noisy_collection_cost_mult = 3
     synthetic_cost_savings_mult = 10
-    sampling_accuracy_gain = (0.02, 0.04)
-    mfcc_accuracy_gain = (0.03, 0.05)
-    data_volume_accuracy_gain = (0.05, 0.08)
+    sampling_accuracy_gain = (sampling.gain_low, sampling.gain_high)
+    mfcc_accuracy_gain = (mfcc.gain_low, mfcc.gain_high)
+    data_volume_accuracy_gain = (examples.gain_low, examples.gain_high)
     noisy_accuracy_gain = (0.10, 0.15)
     local_accuracy_risk = 0.02
     synthetic_robustness_gain = (0.03, 0.05)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sampling_ratio = sampling_rate_high_khz / sampling_rate_low_khz
-    mfcc_ratio = mfcc_coeff_high / mfcc_coeff_low
-    data_volume_ratio = examples_high_m / examples_low_m
+    sampling_ratio = sampling.ratio
+    mfcc_ratio = mfcc.ratio
+    data_volume_ratio = examples.ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(sampling_ratio == 2, f"KWS sampling ratio drifted: {sampling_ratio}.")
@@ -873,19 +1035,20 @@ class BudgetAllocation:
     """Budget planning as an engineering optimization problem."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    total_budget = 150_000
-    labeling_pct = 0.60
-    storage_pct = 0.25
-    governance_pct = 0.15
-    cost_per_label = 0.10
-    review_overhead = 0.20
+    plan = Scenarios.KeywordSpotterDataBudget
+    total_budget = plan.total.to(USD).magnitude
+    labeling_pct = plan.shares["labeling"]
+    storage_pct = plan.shares["storage and processing"]
+    governance_pct = plan.shares["governance"]
+    cost_per_label = plan.label_price.to(USD).magnitude
+    review_overhead = plan.review_overhead
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    labeling_budget = total_budget * labeling_pct
-    storage_budget = total_budget * storage_pct
-    governance_budget = total_budget * governance_pct
-    effective_cost = cost_per_label * (1 + review_overhead)
-    labeled_examples = labeling_budget / effective_cost
+    labeling_budget = plan.allocation("labeling").to(USD).magnitude
+    storage_budget = plan.allocation("storage and processing").to(USD).magnitude
+    governance_budget = plan.allocation("governance").to(USD).magnitude
+    effective_cost = plan.effective_label_cost.to(USD).magnitude
+    labeled_examples = plan.labels
     review_overhead_pct = int(review_overhead * 100)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -929,14 +1092,15 @@ class KWSDesignConstraints:
     """KWS four-pillar constraints for the design-space callout."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    kws_accuracy_target = 98
-    kws_false_wake_month = 1
-    kws_budget = 150_000
-    kws_memory_limit_design_kb = 256  # scenario assumption: always-on island sized for the INT8 DS-CNN lighthouse
-    kws_memory_limit_design = kws_memory_limit_design_kb * KB
+    targets = Scenarios.KeywordSpotterTargets
+    kws_accuracy_target = targets.detection_target * 100
+    kws_false_wake_month = targets.false_wake_budget
+    kws_budget = targets.data_budget.to(USD).magnitude
+    kws_memory_limit_design_kb = targets.model_memory.to(KB).magnitude  # always-on island sized for the INT8 DS-CNN lighthouse
+    kws_memory_limit_design = targets.model_memory
     kws_model_int8 = Models.Tiny.DS_CNN.size_in_bytes(1 * byte)
-    kws_timeline_months = 6
-    kws_base_model_acc = 90
+    kws_timeline_months = targets.timeline.to(month).magnitude
+    kws_base_model_acc = targets.base_detection_rate * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(kws_accuracy_target > 90, f"KWS target accuracy unexpectedly low: {kws_accuracy_target}.")
@@ -1358,15 +1522,14 @@ class TrainingDataSupply:
     """Pre-training corpus growth versus the estimated stock of public text."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    growth_fit = Scenarios.PretrainingCorpusGrowth
     corpora = Literature.Series.PretrainingTokens.entries
     stock = {r["bound"]: r["tokens"] for r in Literature.Series.PublicTextStock.entries}
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    years = np.array([dt.date.fromisoformat(r["date"]).year + (dt.date.fromisoformat(r["date"]).timetuple().tm_yday - 1) / 365.25 for r in corpora])
-    log_tokens = np.log10([r["tokens"] for r in corpora])
-    fit_slope, fit_intercept = np.polyfit(years, log_tokens, 1)
-    growth_per_year = 10**fit_slope
-    median_crossing_year = (np.log10(stock["median"]) - fit_intercept) / fit_slope
+    years = np.array([x for x, _ in growth_fit.points])
+    growth_per_year, fit_slope, fit_intercept = growth_fit.fit
+    median_crossing_year = growth_fit.crossing(stock["median"])
     first, last = corpora[0], max(corpora, key=lambda r: r["tokens"])
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1382,7 +1545,7 @@ class TrainingDataSupply:
     crossing_year_str = fmt_int(round(median_crossing_year), commas=False)
 ```
 
-Even a well-governed crawl draws on a finite supply. Pretraining corpora for large language models grew at a fitted rate of about `{python} TrainingDataSupply.growth_mult_str` per year, from the `{python} TrainingDataSupply.first_tokens_str` tokens that trained GPT-3 in 2020 to the `{python} TrainingDataSupply.last_tokens_str` reported for Qwen3 in 2025 [@brown2020language; @yang2025qwen3]. @Fig-running-out-of-human-data sets that climb against the estimated stock of public human-generated text, roughly `{python} TrainingDataSupply.stock_median_str` tokens once quality and repetition are accounted for [@villalobos2024will], and at the fitted rate the largest corpora reach the middle of that estimate around `{python} TrainingDataSupply.crossing_year_str`. Once quality text runs short, acquiring more of it stops being a purchasing decision, and filtering, deduplication, and the selection methods of @sec-data-selection decide how much each additional token is worth. A wake-word model meets its own version of the limit far sooner. No crawl holds enough clean recordings of one phrase in every accent and acoustic setting, so the KWS pipeline has to commission the data it lacks.
+Even a well-governed crawl draws on a finite supply. Within the post-2010 climb of @fig-dataset-size-growth, pretraining corpora for large language models grew at a fitted rate of about `{python} TrainingDataSupply.growth_mult_str` per year, from the `{python} TrainingDataSupply.first_tokens_str` tokens that trained GPT-3 in 2020 to the `{python} TrainingDataSupply.last_tokens_str` reported for Qwen3 in 2025 [@brown2020language; @yang2025qwen3]. @Fig-running-out-of-human-data sets that climb against the estimated stock of public human-generated text, roughly `{python} TrainingDataSupply.stock_median_str` tokens once quality and repetition are accounted for [@villalobos2024will], and at the fitted rate the largest corpora reach the middle of that estimate around `{python} TrainingDataSupply.crossing_year_str`. Once quality text runs short, acquiring more of it stops being a purchasing decision, and filtering, deduplication, and the selection methods of @sec-data-selection decide how much each additional token is worth. A wake-word model meets its own version of the limit far sooner. No crawl holds enough clean recordings of one phrase in every accent and acoustic setting, so the KWS pipeline has to commission the data it lacks.
 
 ::: {#fig-running-out-of-human-data fig-env="figure" fig-pos="htb" fig-cap="**Training Data Approaching the Stock of Public Text**: Reported pre-training tokens for landmark language models from 2020 to 2025 on a logarithmic axis, with a least-squares fit, against the estimated stock of public human-generated text (shaded band, 90 percent interval; dotted line, median). The projection is a dated constraint scenario rather than a forecast, because data selection, synthetic generation, multimodal data, licensing, and filtering policy all change the usable supply. Stock estimate from @villalobos2024will; token counts from the model reports [@brown2020language; @rae2021scaling; @hoffmann2022chinchilla; @chowdhery2022palm; @touvron2023llama; @touvron2023llama2; @dubey2024llama; @qwen2024qwen25; @deepseek2025v3; @yang2025qwen3]." fig-alt="Log-scale scatter plot of training tokens against release date from 2020 to 2028. Ten labeled points rise from GPT-3 and Gopher near 300 billion tokens in 2020 and 2021 to Qwen3 near 36 trillion in 2025, with a dashed fitted line that continues upward. An orange shaded band spans 100 trillion to 1 quadrillion tokens with a dotted median line near 300 trillion, and the fitted line enters the band around 2027."}
 
@@ -1918,24 +2081,24 @@ class RealtimeCost:
     """Streaming vs. batch ingestion daily cost comparison."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    events_per_sec = 1_000_000
-    event_size_kb = 1
-    stream_cores = 100
-    stream_hours = 24
-    stream_cost_per_hr = 0.05
-    batch_cores = 200
-    batch_window_min = 10
-    hours_per_day = int(SEC_PER_DAY / SEC_PER_HOUR)
+    ingest = Scenarios.MillionEventBatchVersusStreaming
+    events_per_sec = ingest.event_rate.to(1 / second).magnitude
+    event_size_kb = ingest.event_size.to(KB).magnitude
+    stream_cores = ingest.stream_cores
+    stream_hours = ingest.stream_hours_per_day.to(hour).magnitude
+    stream_cost_per_hr = ingest.core_hour_price.to(USD / hour).magnitude
+    batch_cores = ingest.batch_cores
+    batch_window_min = ingest.batch_window.to(minute).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    throughput = (events_per_sec / second) * event_size_kb * KB
+    throughput = ingest.throughput
     throughput_value = throughput.to(GB / second).magnitude
-    stream_cost_day = stream_cores * stream_hours * stream_cost_per_hr
-    hourly_data = throughput * SEC_PER_HOUR * second
-    event_size = event_size_kb * KB
-    batch_core_hours = batch_cores * (batch_window_min / 60) * hours_per_day
-    batch_cost_day = batch_core_hours * stream_cost_per_hr
-    cost_ratio = stream_cost_day / batch_cost_day
+    stream_cost_day = ingest.stream_cost_per_day.to(USD).magnitude
+    hourly_data = ingest.hourly_data
+    event_size = ingest.event_size
+    batch_core_hours = ingest.batch_core_hours_per_day
+    batch_cost_day = ingest.batch_cost_per_day.to(USD).magnitude
+    cost_ratio = ingest.cost_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(throughput_value - 1.0) < 1e-9, f"1 million events/s at 1 KB/event should be 1 GB/s, got {throughput_value:.2f}.")
@@ -1984,18 +2147,16 @@ class RealtimePerCore:
     """Per-core throughput implied by the streaming and batch core counts."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    redundancy_factor = 2  # scenario assumption: one standby core per primary core
+    ingest = RealtimeCost.ingest
+    redundancy_factor = ingest.redundancy_factor  # one standby core per primary core
     stream_cores = RealtimeCost.stream_cores
     batch_cores = RealtimeCost.batch_cores
-    throughput = RealtimeCost.throughput
-    hourly_data = RealtimeCost.hourly_data
-    batch_window = RealtimeCost.batch_window_min * 60 * second
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    stream_primary_cores = stream_cores // redundancy_factor
-    stream_per_core = throughput / stream_primary_cores
-    batch_aggregate = hourly_data / batch_window
-    batch_per_core = batch_aggregate / batch_cores
+    stream_primary_cores = ingest.stream_primary_cores
+    stream_per_core = ingest.stream_per_core
+    batch_aggregate = ingest.batch_aggregate
+    batch_per_core = ingest.batch_per_core
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(stream_primary_cores * redundancy_factor == stream_cores, "Stream cores must split evenly into primary and standby.")
@@ -2386,8 +2547,7 @@ Schema and latency alerts expose structural and timing failures, but a shift in 
 # │ How: Calculate the K-S critical value at alpha = 0.05.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Ops
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2398,12 +2558,13 @@ class KSTest:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n_train = 1000
-    n_serving = 1000
-    coeff = Ops.Monitoring.KsTestCoefficient  # 1.36 for alpha=0.05
+    test = Scenarios.LoudnessDriftKs1000
+    n_train = test.n_reference
+    n_serving = test.n_current
+    coeff = test.coefficient  # Ops.Monitoring.KsTestCoefficient: 1.36 for alpha=0.05
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_crit = coeff * math.sqrt((n_train + n_serving) / (n_train * n_serving))
+    d_crit = test.critical_value
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(d_crit - 0.061) < 0.001, f"Critical value ({d_crit:.3f}) drifted from ~0.061 for n=1000 per sample.")
@@ -2569,22 +2730,24 @@ Classification labels\index{Classification label!storage requirements} represent
 # │ How: Compare one pixel label per image pixel with four coordinates per box.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_time, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SegmentationLabelScale:
     """Scalar label-entry comparison for masks versus bounding boxes."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    image_width_px = 1920
-    image_height_px = 1080
-    box_count = 10
-    box_coords = 4
+    labels = Scenarios.FullHdMaskVersusBoxes
+    image_width_px = labels.image_width
+    image_height_px = labels.image_height
+    box_count = labels.boxes
+    box_coords = labels.coords_per_box
+    mask_hours = float(Literature.AnnotationTimes.CityscapesFineMaskHours)  # Cordts et al. 2016
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    pixel_labels = image_width_px * image_height_px
-    box_scalar_entries = box_count * box_coords
-    label_entry_ratio = pixel_labels / box_scalar_entries
+    pixel_labels = labels.mask_entries
+    box_scalar_entries = labels.box_entries
+    label_entry_ratio = labels.mask_to_box_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(pixel_labels > 2_000_000, f"1080p mask should exceed two million pixels, got {pixel_labels}.")
@@ -2595,6 +2758,7 @@ class SegmentationLabelScale:
     box_count_str = fmt(box_count, precision=0, commas=False)
     box_coords_str = fmt(box_coords, precision=0, commas=False)
     label_entry_ratio_mult_str = fmt_multiple(round(label_entry_ratio), precision=0, commas=True)
+    mask_hours_str = fmt_time(mask_hours, "hour", precision=1, commas=False, style="word")
 ```
 
 ::: {.column-margin}
@@ -2603,7 +2767,7 @@ class SegmentationLabelScale:
 *Finer annotation granularity multiplies storage and processing scale.*
 :::
 
-Segmentation maps\index{Semantic segmentation!pixel-level labels} assign a class identifier to every pixel, producing dense 2D label matrices ($\ImageHeight\times \ImageWidth$). In autonomous driving and traffic monitoring, this entails tracing irregular boundaries for driveable road surfaces, vehicles, and pedestrians. These dense annotations multiply storage and ingestion bandwidth. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_mult_str` more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding. The time manual segmentation takes per image (more than 1.5 hours for each Cityscapes image [@cordts2016cityscapes]) makes this approach suitable only when pixel-level precision is essential.
+Segmentation maps\index{Semantic segmentation!pixel-level labels} assign a class identifier to every pixel, producing dense 2D label matrices ($\ImageHeight\times \ImageWidth$). In autonomous driving and traffic monitoring, this entails tracing irregular boundaries for driveable road surfaces, vehicles, and pedestrians. These dense annotations multiply storage and ingestion bandwidth. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_mult_str` more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding. The time manual segmentation takes per image (more than `{python} SegmentationLabelScale.mask_hours_str` for each Cityscapes image [@cordts2016cityscapes]) makes this approach suitable only when pixel-level precision is essential.
 
 @Fig-labels arrays five annotation formats across vision and speech examples, demonstrating how labeling granularity ranges from coarse scene tags and captions to spatial bounding boxes, dense pixel-level masks, and audio transcripts. Classification can label an entire scene, while bounding boxes and segmentation maps localize objects or regions. Production datasets may combine formats: a single camera frame might carry a scene label, obstacle boxes, and path-region masks, with each label type serving a distinct downstream task.
 
@@ -2648,6 +2812,8 @@ class DataEngineeringCostConstants:
     labeling_cost_medical_high = Infrastructure.Pricing.Labeling.MedicalHigh.rate.to(USD).magnitude
     storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate.to(USD / (TB * month)).magnitude
     retrieval_cost_glacier = Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate.to(USD / GB).magnitude
+    gpu_hour_low = Scenarios.ImageNetLabelingVersusResNetRun.price_low.to(USD / hour).magnitude
+    gpu_hour_high = Scenarios.ImageNetLabelingVersusResNetRun.price_high.to(USD / hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -2679,6 +2845,7 @@ class DataEngineeringCostConstants:
     )
     storage_cost_s3_str = fmt_usd(storage_cost_s3, precision=0, commas=False, per="TB/month")
     retrieval_cost_glacier_str = fmt_usd(retrieval_cost_glacier, precision=2, commas=False, per="GB")
+    gpu_hour_range_str = fmt_usd_range(gpu_hour_low, gpu_hour_high, precision=0, commas=False, repeat_symbol=False)
 ```
 
 ```{=latex}
@@ -2693,7 +2860,7 @@ class DataEngineeringCostConstants:
 | **Expert medical label**     | `{python} DataEngineeringCostConstants.labeling_cost_medical_range_str` | Per study, radiologist |
 | **S3 storage (Standard)**    |       `{python} DataEngineeringCostConstants.storage_cost_s3_str`       | Hot storage            |
 | **S3 retrieval (Glacier)**   |    `{python} DataEngineeringCostConstants.retrieval_cost_glacier_str`   | Standard: 3-5 hours    |
-| **Cloud GPU training hour**  |                                  \$2–4                                  | Cloud spot pricing     |
+| **Cloud GPU training hour**  |        `{python} DataEngineeringCostConstants.gpu_hour_range_str`       | Cloud spot pricing     |
 | **Human review hour**        |                                 \$15–50                                 | Depending on expertise |
 
 : **Illustrative Data Engineering Costs (2024)**: These dated reference assumptions feed workload-specific cost models and are not current vendor quotes. Because the rows use different units, compare them only after scaling each rate by the quantity it prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[39,27,34]"}
@@ -2714,14 +2881,16 @@ Beyond per-unit dollar rates, labeling, training, and serving also run on very d
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from math import log10
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_time_range, check
 
 class DataEngineeringTimeConstants:
     """Order-of-magnitude span for data-engineering operation durations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     fastest_lookup_s = 0.001
-    slowest_labeling_weeks = 4
+    labeling_time_low = Scenarios.ImageNetLabelingVersusResNetRun.labeling_time_low
+    labeling_time_high = Scenarios.ImageNetLabelingVersusResNetRun.labeling_time_high
+    slowest_labeling_weeks = labeling_time_high.to(week).magnitude
     seconds_per_week = 7 * 24 * 60 * 60
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -2734,13 +2903,14 @@ class DataEngineeringTimeConstants:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     span_orders_str = fmt_int(span_orders, commas=False)
+    labeling_weeks_range_str = fmt_time_range(labeling_time_low, labeling_time_high, "week", precision=0, style="word")
 ```
 
-| **Operation**                      |                   **Duration**                  | **Bottleneck**                      |
-|:-----------------------------------|:-----------------------------------------------:|:------------------------------------|
-| **Label 1M images (crowdsourced)** |                    2–4 weeks                    | Annotation throughput               |
-| **Train ResNet-50 on ImageNet**    | `{python} LabelingComputeRatio.train_hours_str` | Compute (8$\times$ A100, optimized) |
-| **Feature store lookup**           |                     1–10 ms                     | Network + cache                     |
+| **Operation**                      |                           **Duration**                           | **Bottleneck**                      |
+|:-----------------------------------|:----------------------------------------------------------------:|:------------------------------------|
+| **Label 1M images (crowdsourced)** | `{python} DataEngineeringTimeConstants.labeling_weeks_range_str` | Annotation throughput               |
+| **Train ResNet-50 on ImageNet**    |         `{python} LabelingComputeRatio.train_hours_str`          | Compute (8$\times$ A100, optimized) |
+| **Feature store lookup**           |                             1–10 ms                              | Network + cache                     |
 
 : **Illustrative Data Engineering Time Scales**: The scenario spans about `{python} DataEngineeringTimeConstants.span_orders_str` orders of magnitude, with human labeling as its slowest listed stage. Actual durations depend on the dataset, task, hardware, and service configuration. {#tbl-data-engineering-time-constants tbl-colwidths="[36,31,33]"}
 
@@ -2864,23 +3034,27 @@ Given these inherent quality challenges, production ML systems implement multipl
 # │ How: Square and sum the class marginals to get chance agreement.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_math, check
 
 class CohensKappaChance:
     """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    majority_probability = 0.90
-    minority_probability = 0.10
+    annotators = Scenarios.BinaryLabelChanceAgreement
+    majority_probability, minority_probability = annotators.class_shares
+    drift = Scenarios.WakeWordLabelQualityDrift  # the wake-word campaign's kappa, baseline and later
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    chance_agreement = majority_probability**2 + minority_probability**2
+    chance_agreement = annotators.chance_agreement
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
+    check(drift.later_kappa < drift.baseline_kappa, "The campaign's agreement must fall.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
+    kappa_baseline_math = fmt_math(rf"\InterAnnotatorAgreement = {fmt(drift.baseline_kappa, precision=2, commas=False)}")
+    kappa_later_math = fmt_math(rf"\InterAnnotatorAgreement = {fmt(drift.later_kappa, precision=2, commas=False)}")
 ```
 
 Beyond random sampling approaches, collecting multiple labels per data point, often referred to as "consensus labeling,"\index{Consensus labeling!quality control} can help identify controversial or ambiguous cases. Commercial labeling platforms expose consensus and tiered quality-control workflows [@labelbox_consensus; @scaleai_qc], but the statistical core is inter-annotator agreement. The consensus infrastructure collects several labels per example and measures how far annotators agree beyond what chance alone would produce. For two annotators, Cohen's kappa[^fn-cohens-kappa-labeling] $(\InterAnnotatorAgreement)$ makes that correction. Let $\ObservedAnnotatorAgreement$ represent observed agreement between annotators and $\ChanceAnnotatorAgreement$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
@@ -2900,7 +3074,7 @@ Quality control also depends on human factors. Working effectively with annotato
 
 Six months into a wake-word collection campaign, new annotators join without the original rubric training and start marking near-homophones as valid wake words, while every audio feature distribution in the ingestion monitors stays flat. This failure is **label quality drift**\index{Label quality drift!detection}: a decline over time in the reliability of the labels themselves even when the inputs being labeled have not changed. Feature distribution monitoring cannot catch it\index{Label quality drift!silent corruption}, because the features did not move. Crowdsourced labels degrade as annotator pools turn over, training examples go stale, or guidelines change without a matching model update. Automated labelers drift as the upstream models that produce their labels move out of their original operating regime. Implicit-feedback pipelines, such as recommendation systems that treat clicks as labels, shift whenever bots, interface redesigns, or more exploratory user behavior change what a click means.
 
-Catching that drift requires monitoring annotation consistency rather than feature distributions, and the kappa statistic of @eq-cohens-kappa supplies the measure. In the wake-word campaign above, tracking $\InterAnnotatorAgreement$ across rolling windows shows agreement falling from a baseline of $\InterAnnotatorAgreement = 0.85$ (almost perfect agreement) during initial collection to $\InterAnnotatorAgreement = 0.72$ (substantial agreement) six months later. Label-side change is also one of the three silent changes behind the deployed keyword spotter's regression in @sec-data-engineering-data-debt-hidden-liability-3335, where a revised guideline was never reconciled with the earlier evaluation standard.
+Catching that drift requires monitoring annotation consistency rather than feature distributions, and the kappa statistic of @eq-cohens-kappa supplies the measure. In the wake-word campaign above, tracking $\InterAnnotatorAgreement$ across rolling windows shows agreement falling from a baseline of `{python} CohensKappaChance.kappa_baseline_math` (almost perfect agreement) during initial collection to `{python} CohensKappaChance.kappa_later_math` (substantial agreement) six months later. Label-side change is also one of the three silent changes behind the deployed keyword spotter's regression in @sec-data-engineering-data-debt-hidden-liability-3335, where a revised guideline was never reconciled with the earlier evaluation standard.
 
 For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $\PredictedOutputComponent_i$ represent the model's probability assigned to label category $\LabelCategoryIndex$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
 $$
@@ -3041,28 +3215,29 @@ class ActiveLearningBudget:
     """Budget normalization for active learning over a 10M-image candidate pool."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_images = 10 * MILLION
-    label_budget = 50 * THOUSAND
-    label_cost = 0.50
-    inference_cost_per_image = 0.01
-    random_labels_needed = 1 * MILLION
-    active_labels_low = 100 * THOUSAND
-    active_labels_high = 200 * THOUSAND
-    compute_budget_fraction = 0.10
-    baseline_acc = 85
-    target_acc = 95
+    plan = Scenarios.ActiveLearningTenMillionPool
+    dataset_images = plan.pool
+    label_budget = plan.label_budget.to(USD).magnitude
+    label_cost = plan.label_price.to(USD).magnitude
+    inference_cost_per_image = plan.scoring_price.to(USD).magnitude
+    random_labels_needed = plan.random_labels_needed
+    active_labels_low = plan.active_labels_low
+    active_labels_high = plan.active_labels_high
+    compute_budget_fraction = plan.compute_share
+    baseline_acc = plan.baseline_accuracy * 100
+    target_acc = plan.target_accuracy * 100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    random_label_cost = random_labels_needed * label_cost
-    active_label_cost_low = active_labels_low * label_cost
-    active_label_cost_high = active_labels_high * label_cost
-    full_pool_inference_cost = dataset_images * inference_cost_per_image
-    active_total_low = full_pool_inference_cost + active_label_cost_low
-    active_total_high = full_pool_inference_cost + active_label_cost_high
-    compute_budget = label_budget * compute_budget_fraction
-    candidate_pool_images = compute_budget / inference_cost_per_image
+    random_label_cost = plan.random_label_cost.to(USD).magnitude
+    active_label_cost_low = plan.active_label_cost_low.to(USD).magnitude
+    active_label_cost_high = plan.active_label_cost_high.to(USD).magnitude
+    full_pool_inference_cost = plan.full_pool_scoring_cost.to(USD).magnitude
+    active_total_low = plan.active_total_low.to(USD).magnitude
+    active_total_high = plan.active_total_high.to(USD).magnitude
+    compute_budget = plan.compute_budget.to(USD).magnitude
+    candidate_pool_images = plan.candidate_pool
     label_budget_after_compute = label_budget - compute_budget
-    affordable_labels_after_compute = label_budget_after_compute / label_cost
+    affordable_labels_after_compute = plan.affordable_labels
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(random_label_cost == 500 * THOUSAND, "Random labeling reference should cost $500K.")
@@ -3148,17 +3323,18 @@ class KWSAutomatedLabelingScale:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     dataset = Datasets.MSWC
+    by_hand = Scenarios.MswcByHand
     total_examples = dataset.training_examples
     languages = dataset.languages
     keywords = dataset.keywords
-    label_seconds_per_example = 10
+    label_seconds_per_example = by_hand.time_per_item.to(second).magnitude
     sample_duration_ms_low = 500
     sample_duration_ms_high = 800
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_examples_count = total_examples.to(count).magnitude
-    label_hours = total_examples_count * label_seconds_per_example / SEC_PER_HOUR
-    label_years = label_hours / 2000
+    label_hours = by_hand.total_time.to(hour).magnitude
+    label_years = by_hand.person_years
     sample_duration_window_ms = sample_duration_ms_high - sample_duration_ms_low
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3420,10 +3596,10 @@ class KWSScalabilityTargets:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     dataset = Datasets.MSWC
     total_examples = dataset.training_examples
-    memory_limit_edge_kb = 16
-    model_size_limit_kb = KWSDesignConstraints.kws_memory_limit_design_kb  # the requirement's always-on island limit
-    memory_limit_edge = memory_limit_edge_kb * KB
-    model_size_limit = model_size_limit_kb * KB
+    memory_limit_edge = Scenarios.KeywordSpotterTargets.preprocessing_memory
+    model_size_limit = KWSDesignConstraints.kws_memory_limit_design  # the requirement's always-on island limit
+    memory_limit_edge_kb = memory_limit_edge.to(KB).magnitude
+    model_size_limit_kb = model_size_limit.to(KB).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_examples_count = total_examples.to(count).magnitude
@@ -3588,26 +3764,25 @@ class DataGravity:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    dataset_pb = 1
-    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-    egress_rate = 0.02 * USD / GB  # scenario assumption: AWS inter-region transfer rate
-    tpu_rate = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate
+    move = Scenarios.PetabyteCrossRegionMove
+    dataset = move.payload
+    network_bw = move.links["100 Gb/s"]
+    egress_rate = move.egress_rate.to(USD / GB)  # AWS inter-region transfer rate (scenario assumption)
+    tpu_rate = move.compute_price
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    dataset = dataset_pb * PB
-
-    # Step 1: Time using library formula
-    t_100g = dataset / network_bw
+    # Step 1: Time over the dedicated 100 Gb/s link
+    t_100g = move.transfer_time("100 Gb/s")
     transfer_seconds = t_100g.to(second).magnitude
     transfer_hours = t_100g.to(hour).magnitude
 
-    # Step 2: 10 Gbps = 1.25 GB/s
-    t_10g = dataset / (10 * Gbps)
+    # Step 2: Time over a 10 Gb/s link
+    t_10g = move.transfer_time("10 Gb/s")
     transfer_days_10g = t_10g.to(day).magnitude
 
     # Step 3: Cost
-    transfer_cost = (dataset * egress_rate).to(USD)
-    equiv_tpu_hours = (transfer_cost / tpu_rate).to(hour).magnitude
+    transfer_cost = move.egress_cost
+    equiv_tpu_hours = move.egress_compute_hours.to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(transfer_hours >= 20, f"Transfer time ({transfer_hours:.1f} h) is too fast. Data gravity argument fails.")
@@ -3674,7 +3849,7 @@ The numerator is not a universal physical quantity. A team estimates marginal le
 # │       the gap between accelerator demand and baseline disk bandwidth.
 # │ Show: Compute ceiling (~12.7K img/s), sustained rate (3,200 img/s), 480 MB/s
 # │       of compressed JPEG demand vs. 1.8 GB/s of decoded FP32 tensors, and the
-# │       ~44% (compressed) vs. ~86% (pre-decoded) feeding tax on a 250 MB/s disk.
+# │       ~44% (compressed) vs. ~87% (pre-decoded) feeding tax on a 250 MB/s disk.
 # │ How: Ceiling = peak FLOP/s / (3 x forward FLOPs); demand = rate x bytes/image;
 # │      DataModel compares demand with the storage path.
 # │
@@ -3683,7 +3858,7 @@ The numerator is not a universal physical quantity. A team estimates marginal le
 # │       class so the four starvation sites share one scenario.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check, fmt_rate, fmt_percent, fmt_bandwidth, fmt_memory, fmt_flops, fmt_flop_rate
-from mlsysim.core.units import GB, MB, KB, second, flop, BYTES_FP32, GFLOPs, TFLOPs
+from mlsysim.core.units import GB, MB, KB, second, count, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FeedingProblem:
@@ -3693,45 +3868,33 @@ class FeedingProblem:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Datasets, Systems
-    from mlsysim.solvers import DataModel
-
-    m = Models.Vision.ResNet50
-    h = Hardware.Cloud.A100
-
-    # Shared scenario anchor: sustained rate once input keeps up.
-    sustained_img_per_sec = ResNetTrainingScenario.sustained_img_per_sec
-    # Scenario assumption: average compressed JPEG as stored on disk.
-    compressed_image_kb = 150
-
-    # Decoded tensor in host memory: 224x224x3 at FP32
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    decoded_image = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * BYTES_FP32
-    compressed_image = compressed_image_kb * KB
-
-    # Standard Cloud Disk (e.g. AWS gp3 baseline)
-    disk_profile = Systems.Storage.CloudBlockStorageBaseline
-    h_custom = h.model_copy(update={'storage': disk_profile})
+    # Scenarios.ResNet50A100InputFeed: ResNet-50 on one A100, the shared sustained
+    # rate, 150 KB JPEGs (scenario assumption) that decode to 224x224x3 FP32
+    # tensors, and a standard cloud block volume (AWS gp3 baseline).
+    feed = Scenarios.ResNet50A100InputFeed
+    m = feed.workload
+    h = feed.hardware
+    sustained_img_per_sec = feed.sustained_rate.to(count / second).magnitude
+    compressed_image = feed.encoded_sample
+    decoded_image = feed.decoded_sample
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute ceiling: peak FLOP/s over forward + backward (3x forward) FLOPs
-    peak_flops = h.compute.peak_flops.to(flop / second).magnitude
-    train_flops_per_img = (m.inference_flops * 3).to(flop).magnitude
-    ceiling_img_per_sec = int(peak_flops / train_flops_per_img)
-    sustained_fraction = sustained_img_per_sec / ceiling_img_per_sec
+    ceiling_img_per_sec = int(feed.ceiling_rate.to(count / second).magnitude)
+    sustained_fraction = feed.sustained_fraction
 
     # Step 2: Demand in compressed (disk) bytes and decoded (memory) bytes
-    compressed_bw = (sustained_img_per_sec / second) * compressed_image
-    decoded_bw = (sustained_img_per_sec / second) * decoded_image
-    decode_expansion = (decoded_image / compressed_image).to("").magnitude
+    compressed_bw = feed.demand()
+    decoded_bw = feed.demand(decoded=True)
+    decode_expansion = feed.decode_expansion
 
     # Step 3: Feeding tax on baseline disk, for JPEG reads and for a pre-decoded tensor cache
-    jpeg_res = DataModel().solve(compressed_bw, h_custom)
-    tensor_res = DataModel().solve(decoded_bw, h_custom)
-    feeding_tax_pct = (1.0 - 1.0 / max(jpeg_res.utilization, 1.0)) * 100
-    tensor_tax_pct = (1.0 - 1.0 / max(tensor_res.utilization, 1.0)) * 100
+    disk_bw = feed.supply.bandwidth
+    feeding_tax_pct = feed.feeding_loss() * 100
+    tensor_tax_pct = feed.feeding_loss(decoded=True) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(sustained_img_per_sec == ResNetTrainingScenario.sustained_img_per_sec, "Feed and labeling scenarios share one sustained rate.")
     check(12000 < ceiling_img_per_sec < 13500, f"ResNet-50 training ceiling drifted: {ceiling_img_per_sec}.")
     check(0.2 < sustained_fraction < 0.3, f"Sustained rate should be about a quarter of the ceiling, got {sustained_fraction:.2f}.")
     check(abs(compressed_bw.to(MB / second).magnitude - 480) < 1, "3,200 img/s at 150 KB should be 480 MB/s.")
@@ -3742,7 +3905,7 @@ class FeedingProblem:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ceiling_img_per_s_str = fmt_rate(ceiling_img_per_sec, 'img/s', precision=0, commas=True)
     peak_tflop_per_s_str = fmt_flop_rate(h.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    train_gflop_per_img_str = fmt_flops(m.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
+    train_gflop_per_img_str = fmt_flops(feed.training_flops_per_sample, unit=GFLOPs, precision=1, commas=False)
     img_per_s_str = fmt_rate(sustained_img_per_sec, 'img/s', precision=0, commas=True)
     sustained_fraction_pct_str = fmt_percent(round(sustained_fraction * 100) / 100, precision=0, commas=False, style='prose')
     compressed_image_kb_str = fmt_memory(compressed_image, unit=KB, precision=0, commas=False)
@@ -3750,7 +3913,7 @@ class FeedingProblem:
     decode_expansion_str = fmt_int(round(decode_expansion))
     compressed_bw_mb_per_s_str = fmt_bandwidth(compressed_bw, unit=MB / second, precision=0, commas=False)
     req_bw_gb_per_s_str = fmt_bandwidth(decoded_bw, unit=GB / second, precision=1, commas=False)
-    disk_bw_mb_per_s_str = fmt_bandwidth(jpeg_res.supply_bw, unit=MB / second, precision=0, commas=False)
+    disk_bw_mb_per_s_str = fmt_bandwidth(disk_bw, unit=MB / second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(round(feeding_tax_pct) / 100, precision=0, commas=False, style='prose')
     tensor_tax_pct_str = fmt_percent(round(tensor_tax_pct) / 100, precision=0, commas=False, style='prose')
 ```
@@ -3900,34 +4063,44 @@ Each lifecycle stage also reads the same data in its own way:\index{Machine lear
 # │      image-to-feature sizes; multiply RPS by feature reads per request.
 # │
 # │ Note: Per-accelerator rate and image sizes come from FeedingProblem.
+# │       The guard on host DRAM latency pins the typed "DRAM 100 ns" label in
+# │       the margin figure data_engineering_storage_latency_hierarchy.svg and
+# │       its alt text to the registry.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_rate, fmt_multiple, fmt_bandwidth, fmt_memory
-from mlsysim.core.units import KB, GB, second
+from mlsysim.core.units import KB, GB, second, count, nanosecond
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LifecycleStorageRequirements:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_accelerators = 8
-    train_img_per_sec = n_accelerators * FeedingProblem.sustained_img_per_sec
-    image_size = FeedingProblem.compressed_image
-    decoded_image = FeedingProblem.decoded_image
-    feature_vector_kb = 5
-    feature_vector = feature_vector_kb * KB
-    serving_rps = 10_000
-    feature_reads_per_request = 10
+    # Scenarios.ResNet50EightA100InputFeed: the one-A100 feed on all eight
+    # accelerators of one server. Scenarios.RecommendationFeatureLookups: an
+    # online service's feature reads (scenario assumptions).
+    server = Scenarios.ResNet50EightA100InputFeed
+    lookups = Scenarios.RecommendationFeatureLookups
+    train_img_per_sec = server.total_rate.to(count / second).magnitude
+    image_size = server.encoded_sample
+    feature_vector = lookups.feature_bytes
+    serving_rps = lookups.request_rate.to(1 / second).magnitude
+    feature_reads_per_request = lookups.reads_per_request
+    host_dram_latency = Hardware.Tech.Memory.HostDram_Latency2009.latency  # margin figure's DRAM bar
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    training_bw = (train_img_per_sec / second) * image_size
+    training_bw = server.demand()
     training_bw_value = training_bw.to(GB / second).magnitude
-    decoded_bw = (train_img_per_sec / second) * decoded_image
-    storage_reduction = (image_size / feature_vector).to("").magnitude
-    random_reads_per_sec = serving_rps * feature_reads_per_request
+    decoded_bw = server.demand(decoded=True)
+    storage_reduction = lookups.storage_reduction
+    random_reads_per_sec = lookups.reads_per_second
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(training_bw_value - 3.84) < 0.05, f"25.6K img/s at 150 KB should be 3.84 GB/s, got {training_bw_value:.2f}.")
     check(15 < decoded_bw.to(GB / second).magnitude < 16, "Decoded FP32 staging should be about 15.4 GB/s.")
     check(storage_reduction == 30, f"150 KB to 5 KB should be 30x, got {storage_reduction:.0f}x.")
     check(random_reads_per_sec == 100_000, f"Serving read fanout should be 100K/s, got {random_reads_per_sec}.")
+    check(
+        host_dram_latency.to(nanosecond).magnitude == 100,
+        "The storage-latency margin figure types DRAM 100 ns; update the SVG and alt text if the registry changes.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     train_img_per_s_str = fmt_rate(train_img_per_sec, 'img/s', precision=0, commas=True)
@@ -4058,27 +4231,19 @@ class KWSStorageEconomics:
     """Storage-cost recap for the KWS training dataset."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
-    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate
-    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
     nvme_bw_high = Systems.Storage.LocalNvmeGen4.bandwidth
     sata_bw = Systems.Storage.SataSsdEffective.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    obj_bw = tiers.read_bandwidths["object store"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    dataset_size = sample_count * sample_duration * sample_rate * sample_width
+    dataset_size = tiers.corpus_bytes
     dataset_size_value = dataset_size.to(GB).magnitude
-    storage_s3_cost = (dataset_size * storage_cost_s3).to(USD / month)
-    storage_nvme_low_cost = (dataset_size * storage_cost_nvme_low).to(USD / month)
-    storage_nvme_high_cost = (dataset_size * storage_cost_nvme_high).to(USD / month)
-    load_speedup = (nvme_bw / obj_bw).to("").magnitude
+    storage_s3_cost = tiers.monthly_cost("object store")
+    storage_nvme_low_cost = tiers.monthly_cost("NVMe low")
+    storage_nvme_high_cost = tiers.monthly_cost("NVMe high")
+    load_speedup = (tiers.load_time("object store") / tiers.load_time("NVMe")).to("").magnitude
     nvme_bw_low_value = nvme_bw.to(GB / second).magnitude
     nvme_bw_high_value = nvme_bw_high.to(GB / second).magnitude
     nvme_over_sata = (nvme_bw / sata_bw).to("").magnitude
@@ -4147,19 +4312,12 @@ class StorageLoading:
     """KWS dataset load time comparison: NVMe vs. object storage."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    kws_dataset = sample_count * sample_duration * sample_rate * sample_width
-    nvme_load = kws_dataset / nvme_bw
-    obj_load = kws_dataset / obj_bw
+    nvme_load = tiers.load_time("NVMe")
+    obj_load = tiers.load_time("object store")
     load_speedup = (obj_load / nvme_load).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4250,21 +4408,21 @@ Each storage tier sets its own ceiling on the feeding problem of @sec-data-engin
 # │       12.7K img/s ceiling; NVMe covers the ceiling.
 # │ How: Calculate required MB/s from image consumption rate and file size.
 # │
-# │ Note: Ceiling, sustained rate, and JPEG size come from FeedingProblem
-# │       (chapter scenario anchor).
+# │ Note: Ceiling, sustained rate, and JPEG size come from
+# │       Scenarios.ResNet50A100InputFeed, as in FeedingProblem.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_rate, fmt_percent, fmt_flops, fmt_flop_rate, fmt_bandwidth, fmt_memory
-from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
+from mlsysim.core.units import KB, GB, MB, second, count, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageBandwidth:
     """Storage bandwidth budget for saturating an A100 training ResNet-50."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_a100 = Hardware.Cloud.A100
-    m_resnet = Models.Vision.ResNet50
-    image_size = FeedingProblem.compressed_image
+    feed = Scenarios.ResNet50A100InputFeed
+    h_a100 = feed.hardware
+    image_size = feed.encoded_sample
     sustained_img_per_sec = FeedingProblem.sustained_img_per_sec
     sata = Systems.Storage.SataSsdEffective
     sata_max = Systems.Storage.SataSsd
@@ -4278,15 +4436,13 @@ class StorageBandwidth:
     nvme_bw_high = nvme_high.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_flops_val = h_a100.compute.peak_flops.to(flop / second).magnitude
-    resnet_flops_per_img = (m_resnet.inference_flops * 3).to(flop).magnitude  # forward + backward
-    max_img_per_sec = int(a100_flops_val / resnet_flops_per_img)
+    max_img_per_sec = int(feed.ceiling_rate.to(count / second).magnitude)
     required_bw = (max_img_per_sec / second) * image_size
-    sustained_bw = (sustained_img_per_sec / second) * image_size
+    sustained_bw = feed.demand()
     required_bw_value = required_bw.to(GB / second).magnitude
-    sata_max_img_sec = int((sata_bw / image_size).to(1 / second).magnitude)
+    sata_max_img_sec = int(feed.samples_supplied(sata_bw).to(count / second).magnitude)
     sata_utilization_pct = int(round(sata_max_img_sec / max_img_per_sec * 100))
-    s3_workers = int(round((required_bw / s3_bw).to("").magnitude))
+    s3_workers = int(round(feed.streams_needed(s3_bw, rate=max_img_per_sec * count / second)))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(required_bw > 1.5 * GB / second, f"Reference accelerator storage budget should exceed 1.5 GB/s, got {required_bw_value:.1f}.")
@@ -4304,7 +4460,7 @@ class StorageBandwidth:
     sustained_bw_mb_per_s_str = fmt_bandwidth(sustained_bw, unit=MB / second, precision=0, commas=False)
     required_bw_gb_per_s_str = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
     a100_fp16_tflop_per_s_str = fmt_flop_rate(h_a100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    resnet_fwdbwd_gflop_str = fmt_flops(m_resnet.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
+    resnet_fwdbwd_gflop_str = fmt_flops(feed.training_flops_per_sample, unit=GFLOPs, precision=1, commas=False)
     image_size_kb_str = fmt_memory(image_size, unit=KB, precision=0, commas=False)
     sata_bw_mb_per_s_str = fmt_bandwidth(sata_bw, unit=MB / second, precision=0, commas=False)
     sata_max_bw_mb_per_s_str = fmt_bandwidth(sata_max_bw, unit=MB / second, precision=0, commas=False)
@@ -4380,8 +4536,9 @@ Between storage and the accelerator sits the host processor, which reads each st
 # │
 # │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_rate
+from mlsysim.core.units import count, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataloaderStats:
@@ -4390,13 +4547,14 @@ class DataloaderStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    feed = Scenarios.ResNet50A100InputFeed
     gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
-    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
-    cpu_throughput_cap_img_sec = 3500
-    max_workers = 16
+    worker_img_sec = feed.worker_rate.to(count / second).magnitude  # JPEG decode + augment per CPU worker
+    cpu_throughput_cap_img_sec = feed.host_decode_cap.to(count / second).magnitude
+    max_workers = 16  # plotted range of worker counts
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
+    resnet_worker_count = feed.workers_per_accelerator
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_worker_count == 9, f"Expected 9 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
@@ -4497,6 +4655,7 @@ Scanning a 100-column CSV file when the model uses only 20 columns wastes four-f
 # │ How: Model effective data transfer for 20 columns out of a 100-column dataset.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4504,14 +4663,15 @@ class FormatEfficiency:
     """CSV vs. Parquet I/O efficiency for a 20-of-100-column fraud model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    needed_cols = 20
-    total_cols = 100
-    eta_parquet = 1.0
+    projection = Scenarios.FraudModelColumnProjection
+    needed_cols = projection.columns_used
+    total_cols = projection.columns_total
+    eta_parquet = 1.0  # a columnar reader fetches only the needed columns
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    eta_csv = needed_cols / total_cols
-    waste_pct = (1 - eta_csv) * 100
-    throughput_ratio = eta_parquet / eta_csv
+    eta_csv = projection.read_fraction
+    waste_pct = projection.wasted_fraction * 100
+    throughput_ratio = projection.speedup
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(throughput_ratio == 5, f"20-of-100 column projection should be 5x, got {throughput_ratio:.1f}x.")
@@ -4559,6 +4719,7 @@ Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar forma
 # │ How: Calculate total decompression latency for a 100 GB dataset.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt, check, fmt_time, fmt_multiple, fmt_count, fmt_bandwidth, fmt_memory
 from mlsysim.core.units import MB, GB, second, minute, hour
 
@@ -4567,20 +4728,18 @@ class CompressionTradeoff:
     """Snappy vs. Gzip decompression time over 50 training epochs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    snappy_decompress_mbs = 500  # MB/s
-    gzip_decompress_mbs = 120  # MB/s
-    dataset_gb = 100
-    n_epochs = 50
+    codecs = Scenarios.GzipVersusSnappyEpochs
+    snappy_decompress = codecs.decode_rates["Snappy"]
+    gzip_decompress = codecs.decode_rates["gzip"]
+    dataset = codecs.epoch_bytes
+    n_epochs = codecs.epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    snappy_decompress = snappy_decompress_mbs * MB / second
-    gzip_decompress = gzip_decompress_mbs * MB / second
-    dataset = dataset_gb * GB
-    decompress_speedup = snappy_decompress_mbs / gzip_decompress_mbs
-    gzip_decompress_min = (dataset / gzip_decompress).to(minute).magnitude
-    snappy_decompress_min = (dataset / snappy_decompress).to(minute).magnitude
-    time_diff_min = gzip_decompress_min - snappy_decompress_min
-    total_diff_hours = (time_diff_min * minute * n_epochs).to(hour).magnitude
+    decompress_speedup = codecs.rate_ratio("Snappy", "gzip")
+    gzip_decompress_min = codecs.decode_time("gzip").to(minute).magnitude
+    snappy_decompress_min = codecs.decode_time("Snappy").to(minute).magnitude
+    time_diff_min = codecs.time_saved("gzip", "Snappy").to(minute).magnitude
+    total_diff_hours = codecs.run_time_saved("gzip", "Snappy").to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(decompress_speedup > 4, f"Snappy should be over 4x faster in this scenario, got {decompress_speedup:.1f}x.")
@@ -4633,18 +4792,19 @@ class ListeningHours:
     """Non-keyword listening time needed to support the false-wake budget."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    confidence = 0.95
-    target_per_month = FalsePositiveTarget.tolerance_per_month
-    hours_per_month = FalsePositiveTarget.days_month * FalsePositiveTarget.duty_cycle_hours
-    sample_rate_hz = 16_000  # matches the 16 kHz candidate configuration
-    bytes_per_sample = 2  # 16-bit mono audio
+    evidence = Scenarios.KeywordSpotterFalseWakeEvidence
+    confidence = evidence.confidence
+    target_per_month = evidence.budget
+    hours_per_month = evidence.horizon.to(hour).magnitude
+    sample_rate_hz = evidence.sample_rate.to(Hz).magnitude  # matches the 16 kHz candidate configuration
+    bytes_per_sample = evidence.sample_width.to(byte).magnitude  # 16-bit mono audio
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    events_bound = -math.log(1 - confidence)
-    target_rate_per_hour = target_per_month / hours_per_month
-    hours_needed = events_bound / target_rate_per_hour
-    months_needed = hours_needed / hours_per_month
-    audio_bytes = hours_needed * 3600 * sample_rate_hz * bytes_per_sample
+    events_bound = evidence.events_bound
+    target_rate_per_hour = evidence.target_rate.to(1 / hour).magnitude
+    hours_needed = evidence.exposure_needed.to(hour).magnitude
+    months_needed = evidence.horizons_needed
+    audio_bytes = evidence.recording_size.to(byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.9 < events_bound < 3.1, f"Zero-event 95% bound should be about 3 events, got {events_bound:.2f}.")
@@ -5117,10 +5277,7 @@ class DataEngineeringSummaryRecap:
     """Local quantitative recap for chapter takeaways."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    labeling_budget = 100_000
-    a100_count = 8
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+    labeling_budget = LabelingComputeRatio.labeling_budget
     dataset = Datasets.MSWC
     kws_total_examples = dataset.training_examples
     sample_duration = dataset.sample_duration
@@ -5166,19 +5323,12 @@ class StorageLoadingRecap:
     """Summary recap of NVMe vs. object-storage loading speed."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    kws_dataset = sample_count * sample_duration * sample_rate * sample_width
-    nvme_load = kws_dataset / nvme_bw
-    obj_load = kws_dataset / obj_bw
+    nvme_load = tiers.load_time("NVMe")
+    obj_load = tiers.load_time("object store")
     load_speedup = (obj_load / nvme_load).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

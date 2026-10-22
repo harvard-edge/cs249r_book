@@ -388,3 +388,52 @@ def calc_teleop_ingestion_budget(
         "bw_total": bw_total,
         "storage_per_hour": storage_1hr,
     }
+
+
+# --- Clearance queries against volumetric maps (added 2026-10-20) ---
+
+def calc_sphere_scan_cells(reach, pitch):
+    """
+    Cells an occupancy scan reads to certify a sphere's clearance.
+
+    Equation:
+        N = (4/3) pi (reach / r)^3
+
+    ``reach`` is the sphere radius plus the protective clearance; every cell
+    within it must be read, because an occupancy cell answers only whether
+    that one cell is occupied.
+
+    Source: volume of a sphere in units of the voxel volume r^3.
+    """
+    validate_positive(reach, "reach")
+    validate_positive(pitch, "pitch")
+    return 4 / 3 * math.pi * float((reach / pitch).to("").magnitude) ** 3
+
+
+def calc_octree_depth(map_edge, pitch):
+    """
+    Levels an octree descends from a cube of edge ``map_edge`` to leaves of edge ``pitch``.
+
+    Equation:
+        depth = ceil(log2(L / r))
+
+    Each level is one dependent read in a point query.
+
+    Source: Hornung et al., "OctoMap," Autonomous Robots 34(3), 2013, Sec. III.
+    """
+    validate_positive(map_edge, "map_edge")
+    validate_positive(pitch, "pitch")
+    return math.ceil(math.log2(float((map_edge / pitch).to("").magnitude)))
+
+
+def calc_voxel_quantization_error(pitch):
+    """
+    Largest distance from a point to its voxel's center, half the voxel diagonal.
+
+    Equation:
+        e_q = (sqrt(3) / 2) r
+
+    Source: geometry of a cube of edge r.
+    """
+    validate_positive(pitch, "pitch")
+    return (math.sqrt(3) / 2 * pitch).to(ureg.millimeter)

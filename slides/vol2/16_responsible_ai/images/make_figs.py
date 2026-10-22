@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Figures for Lecture 16 (Volume II): Responsible AI.
 
-Every number drawn comes from calcs.py (imported as V) or is a sourced
+Every number drawn comes from calcs.py (MLSysIM, via deckvals) or is a sourced
 input listed here. "Ch." is the rendered chapter (Volume II, Chapter 16).
 
   - Ofqual, Grading gaps in summer 2020 (July 2021), Table 1 text: A level
@@ -43,7 +43,7 @@ import io  # noqa: E402
 
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs  # noqa: E402
-V = calcs.V
+from deckvals import val, num  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 import slideplot as sp  # noqa: E402
@@ -139,12 +139,12 @@ plt.rcParams.update({"xtick.labelsize": 12.5, "ytick.labelsize": 12.5, "axes.lab
 # Hook: Ofqual entry-level outcome (Grading gaps, Table 1 text)
 # ---------------------------------------------------------------------------
 def hook():
-    rows = [("Lower than teacher grade", 39, "danger", "39%"),
-            ("Same as teacher grade", 59, "neutral", "59%"),
-            ("Higher than teacher grade", 2, "data", "about 2%")]
+    rows = [("Lower than teacher grade", num("ofq_lower_pct"), "danger", f"{val('ofq_lower_pct')}%"),
+            ("Same as teacher grade", num("ofq_same_pct"), "neutral", f"{val('ofq_same_pct')}%"),
+            ("Higher than teacher grade", num("ofq_higher_pct"), "data", f"about {val('ofq_higher_pct')}%")]
     for k, step in ((1, 0), (2, 3)):
         sp.hbars(out(f"hook_step{k}.svg"), rows, "%", log=False, step=step,
-                 xlabel="Share of 457,420 A level entries (%)", size=(5.2, 1.8))
+                 xlabel=f"Share of {val('ofq_entries')} A level entries (%)", size=(5.2, 1.8))
 
 
 def ofqual_flows():
@@ -163,7 +163,7 @@ def ofqual_flows():
             ax.barh(y, v, left=left, height=0.7, color=col, edgecolor="white", lw=0.8)
             left += v
         lower = s[2] + s[3]
-        ax.text(101.5, y, f"{lower}%", va="center", ha="left", fontsize=12,
+        ax.text(101.5, y, f"{lower:.0f}%", va="center", ha="left", fontsize=12,
                 fontweight="bold", color=RED if lower else GRAY)
     ax.text(101.5, len(split) - 0.35, "lower", va="bottom", ha="left", fontsize=12,
             color=RED)
@@ -187,13 +187,13 @@ def ofqual_flows():
 def ofqual_candidates():
     """Ofqual Table 2 as bars: candidates by the number of A levels lowered."""
     n = calcs.OFQ_T2
-    pct = [100 * v / calcs.ofq_cands for v in n]
+    pct = [100 * v / calcs.OFQ.total_candidates for v in n]
     fig, ax = plt.subplots(figsize=(4.4, 1.8))
     for k, p in enumerate(pct):
         ax.bar(k, p, width=0.7, color=GRAY if k == 0 else RED)
         ax.text(k, p + 1.5, f"{p:.0f}%" if p >= 0.5 else "<0.5%", ha="center",
                 va="bottom", fontsize=12, color=GRAY if k == 0 else RED, fontweight="bold")
-    at_least = V["hook: candidates with at least one grade lowered (%)"]
+    at_least = num("ofq_any_pct_1")
     ax.plot([0.7, 4.3], [52, 52], color=RED, lw=1.5)
     for x in (0.7, 4.3):
         ax.plot([x, x], [49, 52], color=RED, lw=1.5)
@@ -277,9 +277,10 @@ def lifecycle():
 def loan_metrics():
     import numpy as np
     names = ["Approval", "TPR", "FPR", "PPV"]
-    keys = ["approval rate", "TPR", "FPR", "PPV"]
-    a = [V[f"loan A: {k}"] for k in keys]
-    bb = [V[f"loan B: {k}"] for k in keys]
+    keys = ["approval", "tpr", "fpr", "ppv"]
+    L = calcs.LOAN
+    a = [L.positive_rate("A"), L.tpr("A"), L.fpr("A"), L.ppv("A")]
+    bb = [L.positive_rate("B"), L.tpr("B"), L.fpr("B"), L.ppv("B")]
     fig, ax = plt.subplots(figsize=(4.2, 2.7))
     x = np.arange(4)
     ax.bar(x - 0.2, a, 0.38, color=ETH)
@@ -303,10 +304,9 @@ def loan_metrics():
 def compas():
     import numpy as np
     names = ["Base rate", "FPR", "PPV"]
-    blk = [V["COMPAS Black: base rate, reoffended in 2 years (%)"], V["COMPAS Black: FPR (%)"],
-           V["COMPAS Black: PPV (%)"]]
-    wht = [V["COMPAS White: base rate, reoffended in 2 years (%)"], V["COMPAS White: FPR (%)"],
-           V["COMPAS White: PPV (%)"]]
+    CP = calcs.COMPAS
+    blk = [100 * f(calcs.BLACK) for f in (CP.base_rate, CP.fpr, CP.ppv)]
+    wht = [100 * f(calcs.WHITE) for f in (CP.base_rate, CP.fpr, CP.ppv)]
     fig, ax = plt.subplots(figsize=(4.2, 2.8))
     x = np.arange(3)
     ax.bar(x - 0.2, blk, 0.38, color=ETH)
@@ -340,35 +340,36 @@ def dual_thresholds():
         for g, y, fill, st in bands:
             b += f'<rect x="{x0}" y="{y}" width="{x1 - x0}" height="100" fill="{fill}" stroke="{st}" stroke-width="1.5"/>\n'
             b += text(32, y + 62, g, 34, st, weight="bold")
-            t = 0.75 if (k == 1 or g == "A") else 0.45
+            t = D.uniform_threshold if k == 1 else D.group_thresholds[g]
             b += f'<rect x="{X(t)}" y="{y}" width="{x1 - X(t)}" height="100" fill="{st}" fill-opacity="0.18"/>\n'
             b += (f'<line x1="{X(t)}" y1="{y - 4}" x2="{X(t)}" y2="{y + 104}" stroke="{INK}" '
                   f'stroke-width="3" stroke-dasharray="8,5"/>\n')
             b += text(X(t) - 8, y - 8, f"cutoff {t:.2f}", 22, INK, anchor="end", weight="bold")
-            for s in D[g]["qual"]:
+            for s in D.scores[g]["qualified"]:
                 b += text(X(s), y + 46, "+", 40, st, weight="bold")
-            for s in D[g]["dflt"]:
+            for s in D.scores[g]["default"]:
                 b += (f'<circle cx="{X(s)}" cy="{y + 72}" r="10" fill="white" stroke="{st}" '
                       f'stroke-width="3"/>\n')
-            tpr = calcs.tpr_at(g, t)
+            tpr = D.tpr(g, t)
             b += text(x1 - 8, y + 94, f"TPR {100 * tpr:.0f}%", 24, INK, anchor="end", weight="bold")
         b += f'<line x1="{x0}" y1="300" x2="{x1}" y2="300" stroke="{GRAY}" stroke-width="1.5"/>\n'
         for s in (0, 0.25, 0.5, 0.75, 1.0):
             b += text(X(s), 326, f"{s:g}", 22, GRAY)
         if k == 2:
-            b += text(X(0.60), 370, "Two applicants at 0.60: A denied, B approved", 24, RED,
+            same = num("dual_same_score")
+            b += text(X(same), 370, f"Two applicants at {val('dual_same_score')}: A denied, B approved", 24, RED,
                       weight="bold")
-            b += path_arrow(f"M{X(0.60) - 150},350 C{X(0.60) - 200},300 {X(0.60) - 40},140 {X(0.60) - 6},96",
+            b += path_arrow(f"M{X(same) - 150},350 C{X(same) - 200},300 {X(same) - 40},140 {X(same) - 6},96",
                             "red", w=2.2)
-            b += path_arrow(f"M{X(0.60) + 30},350 L{X(0.60) + 4},{182 + 46}", "red", w=2.2)
+            b += path_arrow(f"M{X(same) + 30},350 L{X(same) + 4},{182 + 46}", "red", w=2.2)
         write(f"dual_step{k}.svg", b, 900, 385)
     frame(1)
     frame(2)
 
 
 def obermeyer():
-    rows = [("Before (cost label)", 17.7, "neutral", "17.7%"),
-            ("After (simulated fix)", 46.5, "memory", "46.5%")]
+    rows = [("Before (cost label)", num("ober_before"), "neutral", f"{val('ober_before')}%"),
+            ("After (simulated fix)", num("ober_after"), "memory", f"{val('ober_after')}%")]
     sp.hbars(out("obermeyer.svg"), rows, "%", log=False,
              xlabel="Black patients among those auto-identified (%)", size=(4.6, 1.5))
 
@@ -382,24 +383,24 @@ def ztest():
     zs = [calcs.z_for(n) for n in ns]
     fig, ax = plt.subplots(figsize=(5.0, 2.5))
     ax.plot(ns, zs, color=ETH, lw=3)
-    ax.axhline(1.96, color=RED, lw=1.8, ls="--")
-    ax.text(129, 1.45, "z = 1.96 (5%, two-sided)", color=RED, fontsize=13, ha="right",
+    ax.axhline(round(calcs.ZT.z_critical, 2), color=RED, lw=1.8, ls="--")
+    ax.text(129, 1.45, f"z = {val('z_crit')} (5%, two-sided)", color=RED, fontsize=13, ha="right",
             fontweight="bold")
-    for n, key in ((10, "z: n = 10 per group (20 applications)"), (100, "z: n = 100 per group")):
-        z = V[key]
-        col = AMBER if n == 10 else ETH
+    for n in (calcs.ZT.small_n_per_group, calcs.ZT.n_per_group):
+        z = calcs.ZT.z_at(n)
+        col = AMBER if n == calcs.ZT.small_n_per_group else ETH
         ax.plot([n], [z], "o", ms=11, color=col, mec="white", mew=1.5, zorder=5)
-        if n == 10:
-            ax.annotate(f"10 per group: z = {z:.2f}", (n, z), xytext=(12, -24),
+        if n == calcs.ZT.small_n_per_group:
+            ax.annotate(f"{n} per group: z = {z:.2f}", (n, z), xytext=(12, -24),
                         textcoords="offset points", ha="left", fontsize=13, fontweight="bold",
                         color=col)
         else:
-            ax.annotate(f"100 per group: z = {z:.2f}", (n, z), xytext=(-10, 10),
+            ax.annotate(f"{n} per group: z = {z:.2f}", (n, z), xytext=(-10, 10),
                         textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
                         color=col)
     ax.set_xlim(0, 132)
     ax.set_ylim(0, 5.4)
-    ax.set_xlabel("Applicants per group (0.70 against 0.40 approved)")
+    ax.set_xlabel(f"Applicants per group ({val('z_rate_a')} against {val('z_rate_b')} approved)")
     ax.set_ylabel("z statistic")
     ax.grid(color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
@@ -412,8 +413,7 @@ def gs_rows():
 
 
 def gender_grid():
-    acc = {k: V[f"IBM 2017 accuracy, {k} (%)"] for k in
-           ("lighter male", "lighter female", "darker male", "darker female")}
+    acc = calcs.IBM_ACC
     b = text(150, 22, "IBM, 2017 accuracy", 22, GRAY, weight="bold")
     cells = [("lighter male", 6, 36, "#e5e7eb"), ("lighter female", 152, 36, "#d1d5db"),
              ("darker male", 6, 152, "#9ca3af"), ("darker female", 152, 152, RED_L)]
@@ -501,8 +501,8 @@ def architecture():
 
 
 def alerts():
-    n = int(V["monitor: active metrics"])
-    exp = V["monitor: expected false alerts per interval"]
+    n = int(num("mon_metrics"))
+    exp = num("mon_alerts")
     fig, ax = plt.subplots(figsize=(4.6, 1.9))
     cols, rows_ = 25, 6
     red = int(exp)
@@ -522,9 +522,7 @@ def alerts():
 # Segment 4
 # ---------------------------------------------------------------------------
 def overhead():
-    rows = [("Fairness-aware training", 5, 15, "train"), ("DP-SGD", 30, 300, "train"),
-            ("Federated learning", 200, 500, "train"), ("Adversarial training", 100, 1000, "train"),
-            ("Sampled KernelSHAP", 50, 200, "serve"), ("Exhaustive SHAP", 5000, 100000, "serve")]
+    rows = calcs.OVERHEAD
     fig, ax = plt.subplots(figsize=(5.2, 2.6))
     for i, (lab, lo, hi, path) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -547,30 +545,30 @@ def overhead():
 
 def shap_ladder():
     rows = []
-    for f, ck in ((3, "data"), (10, "compute"), (20, "danger")):
-        ms = V[f"SHAP time at 1 us per subset, {f} features (ms)"]
-        sub = V[f"SHAP subsets, {f} features"]
+    for f, ck in zip(calcs.SHAP.feature_counts, ("data", "compute", "danger")):
+        ms = calcs.SHAP.time(f).to("ms").magnitude
+        sub = calcs.SHAP.subsets(f)
         lab = f"{ms:.3f} ms" if ms < 0.1 else (f"{ms:.2f} ms" if ms < 1000 else f"{ms / 1000:.2f} s")
         rows.append((f"{f} features: {sub:,.0f}", ms, ck, lab))
     sp.hbars(out("shap.svg"), rows, "ms", log=True, size=(5.0, 1.8),
-             xlabel="Exact SHAP time at 1 µs per subset (ms, log)",
-             vlines=[(100, "100 ms budget", "danger")])
+             xlabel=f"Exact SHAP time at {val('shap_us')} µs per subset (ms, log)",
+             vlines=[(num("shap_budget_ms"), f"{val('shap_budget_ms')} ms budget", "danger")])
 
 
 def dp_accuracy():
     fig, ax = plt.subplots(figsize=(4.4, 2.6))
-    me, ma = [8, 2, 0.5], [97, 95, 90]
-    ce, ca = [8, 4, 2], [73, 70, 67]
+    me, ma = [r["epsilon"] for r in calcs.MNIST], [r["accuracy_pct"] for r in calcs.MNIST]
+    ce, ca = [r["epsilon"] for r in calcs.CIFAR], [r["accuracy_pct"] for r in calcs.CIFAR]
     ax.plot(me, ma, "o-", color=ETH, lw=3, ms=9)
     ax.plot(ce, ca, "o-", color=AMBER, lw=3, ms=9)
-    ax.axhline(98.30, color=ETH, lw=1.5, ls="--")
-    ax.axhline(80, color=AMBER, lw=1.5, ls="--")
-    ax.text(0.37, 99.3, "MNIST, no privacy: 98.3%", color=ETH, fontsize=12.5, ha="right")
-    ax.text(0.37, 81.3, "CIFAR-10, no privacy: about 80%", color=AMBER, fontsize=12.5, ha="right")
+    ax.axhline(num("dp_mnist0"), color=ETH, lw=1.5, ls="--")
+    ax.axhline(num("dp_cifar0"), color=AMBER, lw=1.5, ls="--")
+    ax.text(0.37, 99.3, f"MNIST, no privacy: {val('dp_mnist0')}%", color=ETH, fontsize=12.5, ha="right")
+    ax.text(0.37, 81.3, f"CIFAR-10, no privacy: about {val('dp_cifar0')}%", color=AMBER, fontsize=12.5, ha="right")
     for e, a in zip(me, ma):
-        ax.text(e, a - 5.0, f"{a}%", color=ETH, fontsize=13, ha="center", fontweight="bold")
+        ax.text(e, a - 5.0, f"{a:.0f}%", color=ETH, fontsize=13, ha="center", fontweight="bold")
     for e, a in zip(ce, ca):
-        ax.text(e, a + 2.0, f"{a}%", color=AMBER, fontsize=13, ha="center", fontweight="bold")
+        ax.text(e, a + 2.0, f"{a:.0f}%", color=AMBER, fontsize=13, ha="center", fontweight="bold")
     ax.set_xscale("log")
     ax.set_xlim(12, 0.35)
     ax.set_xticks([8, 4, 2, 1, 0.5])
@@ -614,13 +612,16 @@ def privacy_boundary():
 
 
 def unlearn():
-    rows = [("Full retraining", 4.6e6, "danger", "\\$4.6M, 36 days"),
-            ("SISA, 1 request", V["SISA: one-shard cost ($)"], "data", "\\$46,000, 8.6 h"),
-            ("SISA, 1,000/day", V["SISA: daily batch cost if every touched shard retrains ($)"],
-             "compute", "about \\$4.6M a day")]
+    U = calcs.SISA
+    rows = [("Full retraining", U.full_cost.to("USD").magnitude, "danger",
+             f"\\${val('sisa_full_m')}M, {val('sisa_days')} days"),
+            ("SISA, 1 request", U.shard_cost.to("USD").magnitude, "data",
+             f"\\${val('sisa_shard_cost')}, {val('sisa_shard_h1')} h"),
+            (f"SISA, {val('sisa_req')}/day", U.daily_batch_cost.to("USD").magnitude,
+             "compute", f"about \\${val('sisa_batch_m')}M a day")]
     for k, step in ((1, 2), (2, 3)):
         sp.hbars(out(f"unlearn_step{k}.svg"), rows, "$", log=True, step=step, size=(4.4, 1.6),
-                 xlabel="Cost to forget, 175B model ($, log)")
+                 xlabel=f"Cost to forget, {val('sisa_params_b')}B model ($, log)")
 
 
 def genai():
@@ -693,8 +694,9 @@ def loop():
 
 
 def autobias():
-    best = V["automation bias: best-case team sensitivity (%)"]
-    rows = [("Radiologist alone", 92, "neutral", "92%"), ("AI alone", 95, "memory", "95%"),
+    best = num("ab_team")
+    rows = [("Radiologist alone", num("ab_human"), "neutral", f"{val('ab_human')}%"),
+            ("AI alone", num("ab_ai"), "memory", f"{val('ab_ai')}%"),
             ("Team, best case", best, "compute", f"at most {best:.1f}%")]
     sp.hbars(out("autobias.svg"), rows, "%", log=False, size=(4.4, 1.7),
              xlabel="Tumors found among patients with tumors (%)")
@@ -713,7 +715,7 @@ def waymo():
                 ha="left", fontsize=13, fontweight="bold", color=ETH)
     ax.annotate(f"{ys[-1]:.0f}M", (xs[-1], ys[-1]), xytext=(-10, 0), textcoords="offset points",
                 ha="right", va="center", fontsize=13, fontweight="bold", color=ETH)
-    ax.text(xs[1], 200, f"{V['Waymo: exposure growth (x)']:.1f}× in two years", fontsize=13,
+    ax.text(xs[1], 200, f"{val('waymo_growth')}× in two years", fontsize=13,
             fontweight="bold", color=INK)
     ax.set_ylabel("Rider-only miles (M)")
     ax.set_ylim(0, 300)

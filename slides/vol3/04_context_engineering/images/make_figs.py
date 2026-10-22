@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Figures for Lecture 4 (Volume III), Context Engineering.
 
-Every derived value comes from calcs.py in this folder; this file only draws.
-"CE" is the rendered chapter. Sources:
+Every number drawn here comes from calcs.py, which reads MLSysIM (the
+Scenarios.* the chapter also reads, and Literature): plotted geometry uses the
+scenario values and results, labels use the formatted strings the slides print
+(deckvals val/num). Diagram coordinates, axis ranges, tick positions, and
+label offsets are layout. "CE" is the rendered chapter. Sources:
 
-  - Hook, partition, bill, layout, watermark, invalidation bars: the chapter's
-    Napkin Math 4.1 to 4.4 (scenario values, illustrative).
+  - Hook, bill, layout, watermark, survival, check, invalidation bars: the
+    chapter's Napkin Math 4.1 to 4.4, equation 6, and Exercise 6, as
+    MLSysIM Scenarios (scenario values, illustrative).
   - Diagrams redrawn at slide size from the chapter's figures:
     fig-vol3-working-set-selection, fig-vol3-context-zones,
     fig-vol3-invalidation-graph (CE Secs. 4.2, 4.4.3, 4.7.1).
-  - Fiction.LiveBench via Epoch AI: MLSysIM Literature.LongContextComprehension.
-  - Liu et al. 2024 (TACL), Tables 1 and 6. Hsieh et al. 2024 (COLM), RULER
-    Table 3. Maynez et al. 2020 (ACL), Table 2. Shi et al. 2023 (ICML),
-    Tables 2 and 3. Zheng et al. 2024 (SGLang), Sec. 6.
+  - Fiction.LiveBench via Epoch AI: Scenarios.FictionLiveBenchThrough60K over
+    Literature.LongContextComprehension.
+  - Literature.AnswerPositionAccuracy and ContextUse (Liu et al. 2024; Shi et
+    al. 2023; the RULER bar), RulerEffectiveLength (Hsieh et al. 2024, Table 3),
+    SummarizationFaithfulness (Maynez et al. 2020), PrefixCaching (Zheng et
+    al. 2024, SGLang).
   - Real artifacts, text copied exactly: vLLM v0.6.0
     vllm/core/block/prefix_caching_block.py lines 834 to 855; inotify(7),
     Linux man-pages 6.19 (2026-02-14); and output of real runs recorded in
@@ -31,8 +37,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 import slideplot as sp  # noqa: E402
-import calcs  # noqa: E402
-from matplotlib.patches import Rectangle  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics.agents import calc_unchecked_success  # noqa: E402
+from mlsysim.physics.context import calc_softmax_target_weight  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -124,11 +132,13 @@ def terminal(name, lines, w=900, size=19, title=None, marks=None, h=None, dim=No
 
 # ================================================================== hook
 def hook():
-    b = calcs.budget()
-    fixed = [("Instructions\nand tools 15K", calcs.SYSTEM + calcs.TOOLS, "#cbd5e1"),
-             ("Task state\n24K", calcs.STATE, V["ctx_s"])]
-    start_obs = calcs.SYSTEM + calcs.TOOLS + calcs.STATE
-    limit = b["allowance"]
+    fixed_k, limit_k, window_k = num("b_fixed_k"), num("b_limit_k"), num("b_window_k")
+    root, state = num("b_root"), num("b_state")
+    fixed = [(f"Instructions\nand tools {val('b_root_k')}K", root, "#cbd5e1"),
+             (f"Task state\n{val('b_state_k')}K", state, V["ctx_s"])]
+    start_obs, limit = num("b_fixed"), num("b_limit")
+    reserve, obs = num("b_reserve"), num("b_obs")
+    overflow = int(num("b_overflow_turn"))
     mid = (start_obs + limit) / 2000
     for k in range(1, 5):
         fig, ax = plt.subplots(figsize=(6.4, 2.0))
@@ -139,83 +149,87 @@ def hook():
             ax.text((x + v / 2) / 1000, -0.34 if below else 0.36, lab.replace("\n", " ") if below else lab,
                     ha="center", va="top" if below else "bottom", fontsize=10.5, color=C["text"])
             x += v
-        ax.barh(0, calcs.RESERVE / 1000, left=limit / 1000, height=0.55, color="white",
+        ax.barh(0, reserve / 1000, left=limit / 1000, height=0.55, color="white",
                 edgecolor=C["neutral"], hatch="///", lw=1)
-        n = {1: 0, 2: 10, 3: 0, 4: b["overflow_turn"]}[k]
+        n = {1: 0, 2: int(num("b_step_turns")), 3: 0, 4: overflow}[k]
         for t in range(n):
-            left = start_obs + t * calcs.OBS_TURN
-            over = left + calcs.OBS_TURN > limit
-            ax.barh(0, calcs.OBS_TURN / 1000, left=left / 1000, height=0.55,
+            left = start_obs + t * obs
+            over = left + obs > limit
+            ax.barh(0, obs / 1000, left=left / 1000, height=0.55,
                     color=C["danger"] if over else "#fbbf24", edgecolor="white", lw=0.8)
-        ax.text((limit + calcs.RESERVE / 2) / 1000, 0.36, "Output\nreserve 8K", ha="center",
+        ax.text((limit + reserve / 2) / 1000, 0.36, f"Output\nreserve {val('b_reserve_k')}K", ha="center",
                 va="bottom", fontsize=10.5, color=C["neutral"])
         ax.plot([limit / 1000] * 2, [-0.36, 0.36], color=C["danger"], lw=1.8, ls="--")
         ax.annotate("", xy=(limit / 1000, -0.66), xytext=(start_obs / 1000, -0.66),
                     arrowprops=dict(arrowstyle="<->", color="#b45309", lw=1.6,
                                     alpha=1.0 if k == 1 else 0.0))
         texts = [
-            (1, mid, -0.78, "81,000 tokens left for tool results; +4,000 per turn", "#b45309"),
-            (2, (start_obs + 20_000) / 1000 + 6, -0.72, "Turn 10: 40,000 tokens of results", "#b45309"),
+            (1, mid, -0.78, f"{val('b_obs_budget')} tokens left for tool results; +{val('b_obs')} per turn",
+             "#b45309"),
+            (2, (start_obs + num("b_step_obs") / 2) / 1000 + 6, -0.72,
+             f"Turn {val('b_step_turns')}: {val('b_step_obs')} tokens of results", "#b45309"),
             (3, mid, 0.0, "On which turn?", C["danger"]),
-            (4, mid, -0.72, "Turn 21 needs 84,000 > 81,000 tokens", C["danger"]),
-            (4, mid, -1.08, "Lasting 30 turns allows at most 2,700 per result", C["danger"]),
+            (4, mid, -0.72, f"Turn {val('b_overflow_turn')} needs {val('b_overflow_obs')} > "
+             f"{val('b_obs_budget')} tokens", C["danger"]),
+            (4, mid, -1.08, f"Lasting {val('b_turns')} turns allows at most {val('b_max_obs')} per result",
+             C["danger"]),
         ]
         for kk, xx, yy, tt, col in texts:
             ax.text(xx, yy, tt, ha="center", va="top" if yy < 0 else "center",
                     fontsize=14 if kk == 3 else 11, color=col, fontweight="bold",
                     alpha=1.0 if kk == k else 0.0)
-        ax.set_xlim(0, 128)
+        ax.set_xlim(0, window_k)
         ax.set_ylim(-1.5, 1.05)
         ax.set_yticks([])
         ax.spines["left"].set_visible(False)
-        ax.set_xticks([0, 39, 120, 128])
-        ax.set_xlabel("Thousand tokens in one 128K-token request (illustrative)")
+        ax.set_xticks([0, fixed_k, limit_k, window_k])
+        ax.set_xlabel(f"Thousand tokens in one {val('b_window_k')}K-token request (illustrative)")
         sp.save(fig, out / f"hook_step{k}.svg")
     # The final state again, drawn for a narrow column (the retrieval slide);
-    # the turn-21 verdict is set as slide text beside it.
+    # the overflow verdict is set as slide text beside it.
     fig, ax = plt.subplots(figsize=(2.4, 0.9))
     x = 0
     for lab, v, col in fixed:
         ax.barh(0, v / 1000, left=x / 1000, color=col, height=0.55, edgecolor="white")
         x += v
-    ax.barh(0, calcs.RESERVE / 1000, left=limit / 1000, height=0.55, color="white",
+    ax.barh(0, reserve / 1000, left=limit / 1000, height=0.55, color="white",
             edgecolor=C["neutral"], hatch="///", lw=1)
-    for t in range(b["overflow_turn"]):
-        left = start_obs + t * calcs.OBS_TURN
-        over = left + calcs.OBS_TURN > limit
-        ax.barh(0, calcs.OBS_TURN / 1000, left=left / 1000, height=0.55,
+    for t in range(overflow):
+        left = start_obs + t * obs
+        over = left + obs > limit
+        ax.barh(0, obs / 1000, left=left / 1000, height=0.55,
                 color=C["danger"] if over else "#fbbf24", edgecolor="white", lw=0.6)
     ax.plot([limit / 1000] * 2, [-0.36, 0.36], color=C["danger"], lw=1.8, ls="--")
-    ax.text(0, 0.36, "Instructions\nand tools 15K", ha="left", va="bottom", fontsize=11,
+    ax.text(0, 0.36, f"Instructions\nand tools {val('b_root_k')}K", ha="left", va="bottom", fontsize=11,
             color=C["text"])
-    ax.text(128, 0.36, "Output\nreserve 8K", ha="right", va="bottom", fontsize=11,
+    ax.text(window_k, 0.36, f"Output\nreserve {val('b_reserve_k')}K", ha="right", va="bottom", fontsize=11,
             color=C["neutral"])
-    ax.text(15, -0.34, "Task state 24K", ha="left", va="top", fontsize=11, color=C["text"])
-    ax.set_xlim(0, 128)
+    ax.text(num("b_root_k"), -0.34, f"Task state {val('b_state_k')}K", ha="left", va="top", fontsize=11,
+            color=C["text"])
+    ax.set_xlim(0, window_k)
     ax.set_ylim(-0.75, 0.4)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xticks([0, 39, 120])
-    ax.set_xlabel("Thousand tokens in one\n128K-token request (illustrative)")
+    ax.set_xticks([0, fixed_k, limit_k])
+    ax.set_xlabel(f"Thousand tokens in one\n{val('b_window_k')}K-token request (illustrative)")
     sp.save(fig, out / "hook_col.svg")
 
 
 def recall_fig():
-    r = calcs.recall_l2()
     fig, ax = plt.subplots(figsize=(4.2, 1.5))
-    for y, lab, v, ck in [(1, "Resend", r["resend"], "danger"), (0, "Reuse prefix", r["fresh"], "memory")]:
+    for y, lab, key, ck in [(1, "Resend", "rs_resent", "danger"), (0, "Reuse prefix", "rs_fresh", "memory")]:
+        v = num(key)
         ax.barh(y, v / 1000, color=C[ck], height=0.6)
         ax.text(-15, y, lab, ha="right", va="center", fontsize=13, fontweight="bold")
-        ax.text(v / 1000 + 15, y, f"{v:,}", va="center", fontsize=13, color=C[ck],
+        ax.text(v / 1000 + 15, y, val(key), va="center", fontsize=13, color=C[ck],
                 fontweight="bold")
     ax.set_xlim(0, 1150)
     ax.set_yticks([])
     ax.set_xticks([])
     for sname in ("left", "bottom"):
         ax.spines[sname].set_visible(False)
-    ax.set_title("Input tokens, 30 turns (Lecture 2)", fontsize=12, loc="left")
+    ax.set_title(f"Input tokens, {val('rs_turns')} turns (Lecture 2)", fontsize=12, loc="left")
     sp.save(fig, out / "recall_resend.svg")
-
 
 # ================================================================== partition (book figure, redrawn)
 def partition():
@@ -266,62 +280,60 @@ def partition():
 
 # ================================================================== bill (NM 4.1)
 def bill():
-    a = calcs.append_vs_select()
-    t = np.arange(1, calcs.TURNS + 1)
+    a = K.BUDGET.result
+    t = np.arange(1, K.BUDGET.turns + 1)
     fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    ax.plot(t, np.array(a["cum_append"]) / 1e6, color=C["danger"], lw=3)
-    ax.plot(t, np.array(a["cum_select"]) / 1e6, color=C["memory"], lw=3)
+    ax.plot(t, np.array(a.append_cumulative) / 1e6, color=C["danger"], lw=3)
+    ax.plot(t, np.array(a.select_cumulative) / 1e6, color=C["memory"], lw=3)
     ax.text(15, 1.3, "Append every result", color=C["danger"], fontsize=12, fontweight="bold",
             ha="right")
-    ax.text(21, 0.42, "Select 47,000 per call", color=C["memory"], fontsize=12,
+    ax.text(21, 0.42, f"Select {val('b_request')} per call", color=C["memory"], fontsize=12,
             fontweight="bold")
-    ax.annotate("", xy=(30.6, a["cum_append"][-1] / 1e6), xytext=(30.6, a["cum_select"][-1] / 1e6),
+    ax.annotate("", xy=(30.6, a.append_bill / 1e6), xytext=(30.6, a.select_bill / 1e6),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.5))
-    ax.text(18.5, 2.6, f"3.03M against 1.41M: {a['ratio']:.1f}×", ha="center", va="center",
-            fontsize=12, fontweight="bold", color=C["text"])
+    ax.text(18.5, 2.6, f"{val('b_append_bill_m')}M against {val('b_select_bill_m')}M: {val('b_ratio')}×",
+            ha="center", va="center", fontsize=12, fontweight="bold", color=C["text"])
     ax.set_xlim(0, 33)
     ax.set_ylim(0, 3.3)
     ax.set_xlabel("Turn")
     ax.set_ylabel("Cumulative input,\nmillion tokens")
     sp.save(fig, out / "bill.svg")
 
-
 # ================================================================== usable context
 def fiction():
-    f = calcs.fiction_live()
-    sys.path.insert(0, str(calcs.MLSYSIM))
-    from mlsysim import Literature
-    cols = ["score_" + n for n in f["lengths"]]
-    scored = [e for e in Literature.LongContextComprehension.entries
-              if all(e[c] is not None for c in cols)]
-    best = max(scored, key=lambda e: e["score_60k"])
-    worst = min(scored, key=lambda e: e["score_60k"])
-    x = np.arange(len(f["lengths"]))
-    labels = ["0", "400", "1K", "2K", "4K", "8K", "16K", "32K", "60K"]
+    f = K.SWEEP.result
+    lengths = f.lengths
+    cols = ["score_" + n for n in lengths]
+    rows = {e["model"]: e for e in K.Literature.LongContextComprehension.entries}
+    best, worst = rows[f.highest_model], rows[f.lowest_model]
+    median = [100 * f.median[n] for n in lengths]
+    x = np.arange(len(lengths))
+    labels = [n.upper() for n in lengths]
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.2))
         if k == 1:
-            ax.plot([0], [f["median"][0]], "o", color=C["text"], ms=8)
-            ax.text(0.25, f["median"][0] - 2, "Shortest version: median 100%", fontsize=11,
+            ax.plot([0], [median[0]], "o", color=C["text"], ms=8)
+            ax.text(0.25, median[0] - 2, f"Shortest version: median {val('fl_med_first')}%", fontsize=11,
                     va="top", color=C["text"], fontweight="bold")
-            ax.text(8, 50, "60K: ???", fontsize=15, ha="center", color=C["danger"],
+            ax.text(8, 50, f"{labels[-1]}: ???", fontsize=15, ha="center", color=C["danger"],
                     fontweight="bold")
         if k >= 2:
-            ax.fill_between(x, f["q25"], f["q75"], color=C["neutral_l"], alpha=0.8, lw=0)
-            ax.plot(x, f["median"], "-o", color=C["text"], lw=2.5, ms=5)
-            ax.text(8.15, f["median"][-1], f"median\n{f['median'][-1]:.0f}%", fontsize=11,
+            ax.fill_between(x, [100 * f.q25[n] for n in lengths], [100 * f.q75[n] for n in lengths],
+                            color=C["neutral_l"], alpha=0.8, lw=0)
+            ax.plot(x, median, "-o", color=C["text"], lw=2.5, ms=5)
+            ax.text(8.15, median[-1], f"median\n{val('fl_med_last')}%", fontsize=11,
                     va="center", color=C["text"], fontweight="bold")
-            ax.text(2.2, 40, f"middle half of {f['n']} models", fontsize=11, color=C["neutral"],
+            ax.text(2.2, 40, f"middle half of {val('fl_models')} models", fontsize=11, color=C["neutral"],
                     alpha=1.0 if k == 2 else 0.0)
         if k == 3:
-            for e, col, lab in [(best, C["data"], "highest at 60K"),
-                                (worst, C["danger"], "lowest at 60K")]:
+            for e, col, lab, key in [(best, C["data"], "highest at 60K", "fl_hi"),
+                                     (worst, C["danger"], "lowest at 60K", "fl_lo")]:
                 y = [100 * e[c] for c in cols]
                 ax.plot(x, y, "-", color=col, lw=1.8)
-                ax.text(8.15, y[-1], f"{lab}\n{y[-1]:.0f}%", fontsize=10.5, va="center",
+                ax.text(8.15, y[-1], f"{lab}\n{val(key)}%", fontsize=10.5, va="center",
                         color=col, fontweight="bold")
-            ax.text(0.0, 4, f"Only {f['hold90']} of {f['n']} stay at\nor above 90% at 60K",
-                    fontsize=11, color=C["danger"], fontweight="bold")
+            ax.text(0.0, 4, f"Only {val('fl_hold')} of {val('fl_models')} stay at\nor above "
+                    f"{val('fl_bar_pct')}% at 60K", fontsize=11, color=C["danger"], fontweight="bold")
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
         ax.set_xlim(-0.3, 9.6)
@@ -332,16 +344,17 @@ def fiction():
 
 
 def ruler():
-    rows = calcs.RULER
+    rows = K.RULER
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    for i, (name, claimed, eff) in enumerate(rows):
+    for i, e in enumerate(rows):
         y = len(rows) - 1 - i
-        e = eff if eff is not None else 2
-        ax.plot([e, claimed], [y, y], color=C["neutral_l"], lw=4, zorder=1)
+        claimed, eff = e["claimed_k"], e["effective_k"]
+        drawn = eff if eff is not None else 2  # "<4K" is drawn at 2K (layout)
+        ax.plot([drawn, claimed], [y, y], color=C["neutral_l"], lw=4, zorder=1)
         ax.plot([claimed], [y], "o", color=C["neutral"], ms=8, zorder=2)
-        ax.plot([e], [y], "o", color=C["danger"], ms=8, zorder=3)
-        ax.text(1.3, y, name, ha="right", va="center", fontsize=10.5, color=C["text"])
-        ax.text(190, y, ("<4K" if eff is None else f"{eff}K") + f" of {claimed}K", ha="left",
+        ax.plot([drawn], [y], "o", color=C["danger"], ms=8, zorder=3)
+        ax.text(1.3, y, e["model"], ha="right", va="center", fontsize=10.5, color=C["text"])
+        ax.text(190, y, f"{e['effective_label']} of {claimed:.0f}K", ha="left",
                 va="center", fontsize=10.5, color=C["danger"], fontweight="bold")
     ax.set_xscale("log", base=2)
     ax.set_xlim(1.4, 180)
@@ -360,39 +373,43 @@ def ruler():
 
 
 def liu():
+    pos = [int(e["position"]) for e in K.LIU]
+    acc = [e["accuracy"] for e in K.LIU]
     fig, ax = plt.subplots(figsize=(5.2, 2.2))
-    ax.plot(calcs.LIU_POS, calcs.LIU_ACC, "-o", color=C["memory"], lw=3, ms=8)
-    for xx, yy in zip(calcs.LIU_POS, calcs.LIU_ACC):
-        below = xx in (10, 15)
-        dx = 1.4 if xx == 5 else 0
-        ax.text(xx + dx, yy - 4.5 if below else yy + 2.2, f"{yy:.1f}", ha="center", fontsize=11, color=C["memory"],
-                fontweight="bold")
-    ax.axhline(calcs.LIU_CLOSED, color=C["danger"], ls="--", lw=1.8)
-    ax.text(0.4, 46.5, f"Dashed: no documents at all, {calcs.LIU_CLOSED}%",
+    ax.plot(pos, acc, "-o", color=C["memory"], lw=3, ms=8)
+    for i, (xx, yy) in enumerate(zip(pos, acc)):
+        below = i in (2, 3)   # the two middle-low points take their labels underneath
+        dx = 1.4 if i == 1 else 0
+        ax.text(xx + dx, yy - 4.5 if below else yy + 2.2, f"{yy:.1f}", ha="center", fontsize=11,
+                color=C["memory"], fontweight="bold")
+    ax.axhline(num("liu_closed"), color=C["danger"], ls="--", lw=1.8)
+    ax.text(0.4, 46.5, f"Dashed: no documents at all, {val('liu_closed')}%",
             ha="left", fontsize=11, color=C["danger"], fontweight="bold")
-    ax.set_xticks(calcs.LIU_POS)
-    ax.set_xlim(0, 21)
+    ax.set_xticks(pos)
+    ax.set_xlim(0, max(pos) + 1)
     ax.set_ylim(44, 82)
-    ax.set_xlabel("Position of the answer document among 20 (about 4K tokens)")
+    ax.set_xlabel(f"Position of the answer document among {val('liu_docs')} (about 4K tokens)")
     ax.set_ylabel("Accuracy (%)")
     sp.save(fig, out / "liu.svg")
 
 
 def dilution():
+    head = K.HEAD
     n = np.logspace(1, 5.3, 200)
-    w = [100 * calcs.dilution(int(v)) for v in n]
+    w = [100 * calc_softmax_target_weight(head.target_logit, [(int(c) - 1, head.background_logit)])
+         for c in n]
     fig, ax = plt.subplots(figsize=(3.5, 2.0))
     ax.plot(n, w, color=C["text"], lw=3)
-    for keys, col in [(100, C["data"]), (100_000, C["danger"])]:
-        v = 100 * calcs.dilution(keys)
-        ax.plot([keys], [v], "o", color=col, ms=10, zorder=5)
-        if keys == 100:
-            ax.text(keys * 1.4, v + 4, f"{keys:,} keys: {v:.1f}%", fontsize=11, color=col,
-                    fontweight="bold", ha="left")
+    for keys, pct, kx, v, col, short in [
+            ("dil_short", "dil_short_pct", head.short_keys, 100 * K.h.short_weight, C["data"], True),
+            ("dil_long", "dil_long_pct", head.long_keys, 100 * K.h.long_weight, C["danger"], False)]:
+        ax.plot([kx], [v], "o", color=col, ms=10, zorder=5)
+        label = f"{val(keys)} keys: {val(pct)}%"
+        if short:
+            ax.text(kx * 1.4, v + 4, label, fontsize=11, color=col, fontweight="bold", ha="left")
         else:
-            ax.annotate(f"{keys:,} keys: {v:.1f}%", (keys, v), xytext=(14, 12), fontsize=11,
-                        color=col, fontweight="bold", ha="left",
-                        arrowprops=dict(arrowstyle="->", color=col, lw=1.3))
+            ax.annotate(label, (kx, v), xytext=(14, 12), fontsize=11, color=col, fontweight="bold",
+                        ha="left", arrowprops=dict(arrowstyle="->", color=col, lw=1.3))
     ax.set_xscale("log")
     ax.minorticks_off()
     # Plain tick labels: a 10 with a superscript exponent is too small on the slide.
@@ -402,7 +419,6 @@ def dilution():
     ax.set_xlabel("Keys in the request (log scale)")
     ax.set_ylabel("Weight on\nthe target (%)")
     sp.save(fig, out / "dilution.svg")
-
 
 # ================================================================== layout (book figure, redrawn)
 def zones():
@@ -450,19 +466,17 @@ def zones():
 
 
 def layout_bars():
-    lb = calcs.layout_bill()
     sp.hbars(out / "layout_bars.svg",
-             [("Volatile field first", lb["unstable"], "danger", f"${lb['unstable']:.2f}"),
-              ("Root, trunk, leaf", lb["stable"], "data",
-               f"${lb['stable']:.2f}")],
-             "", log=False, size=(3.4, 1.3), xlabel="Input bill, 30 calls, $")
+             [("Volatile field first", K.usd(K.L.unstable_cost), "danger", f"${val('lay_unstable')}"),
+              ("Root, trunk, leaf", K.usd(K.L.stable_cost), "data", f"${val('lay_stable')}")],
+             "", log=False, size=(3.4, 1.3), xlabel=f"Input bill, {val('lay_calls')} calls, $")
 
 
 def sglang_bars():
     sp.hbars(out / "sglang_hits.svg",
-             [(n, v, "data", f"{v}%") for n, v in calcs.SGLANG],
+             [("LLaVA-Next-34B", num("sg_llava"), "data", f"{val('sg_llava')}%"),
+              ("Vicuna-33B", num("sg_vicuna"), "data", f"{val('sg_vicuna')}%")],
              "", log=False, size=(3.4, 1.2), xlabel="Cache hit rate, one month (%)")
-
 
 # ================================================================== scope rule envelope
 def scope():
@@ -502,50 +516,56 @@ def scope():
 
 # ================================================================== compaction
 def maynez():
-    rows = [(n, v, "neutral" if n.startswith("Gold") else "danger", f"{v}%")
-            for n, v in calcs.MAYNEZ]
+    S = K.SUMM
+    rows = [(name, value, "neutral" if name.startswith("Gold") else "danger", f"{value:.1f}%")
+            for name, value in [("PTGen", S.XsumPtGenHallucinated), ("TConvS2S", S.XsumTConvS2SHallucinated),
+                                ("TranS2S", S.XsumTranS2SHallucinated), ("BertS2S", S.XsumBertS2SHallucinated),
+                                ("Gold reference", S.XsumGoldHallucinated)]]
     sp.hbars(out / "maynez.svg", rows, "", log=False, size=(5.4, 2.2),
-             xlabel="Summaries with unsupported content (%, 500 per system)")
+             xlabel=f"Summaries with unsupported content (%, {val('mz_n')} per system)")
 
 
 def sawtooth():
-    w = calcs.watermark()
-    wn = calcs.watermark(calcs.TARGET_NARROW)
-    t = np.arange(0, calcs.TURNS + 1)
+    w = K.MARKS.result
+    target, alt, trigger = num("cw_target_k"), num("cw_alt_target_k"), num("cw_trigger_k")
+    turns = K.MARKS.turns
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.2))
-        xs1, ys1 = [0], [calcs.TARGET / 1000]
-        for i, v in enumerate(w["trace"], start=1):
+        xs1, ys1 = [0], [target]
+        for i, v in enumerate(w.lengths, start=1):
             xs1.append(i)
             ys1.append(v / 1000)
-            if v >= calcs.TRIGGER:
+            if v >= K.MARKS.trigger:
                 ax.plot([i], [v / 1000], "o", color=C["danger"], ms=8, zorder=5)
                 xs1.append(i)
-                ys1.append(calcs.TARGET / 1000)
+                ys1.append(target)
         ax.plot(xs1, ys1, color=C["memory"], lw=2.5)
-        ax.axhline(calcs.TRIGGER / 1000, color=C["neutral"], ls="--", lw=1.5)
-        ax.axhline(calcs.TARGET / 1000, color=C["neutral"], ls="--", lw=1.5)
-        ax.axhline(calcs.budget()["allowance"] / 1000, color=C["danger"], lw=2)
-        ax.text(30.4, 120, "input limit 120K", va="center", fontsize=10.5, color=C["danger"])
-        ax.text(30.4, 92, "trigger 92K", va="center", fontsize=10.5, color=C["neutral"])
-        ax.text(30.4, 47, "target 47K", va="center", fontsize=10.5, color=C["neutral"])
-        ax.text(7, 106, f"every {w['cycle']} turns: {w['passes']} passes in 30",
+        ax.axhline(trigger, color=C["neutral"], ls="--", lw=1.5)
+        ax.axhline(target, color=C["neutral"], ls="--", lw=1.5)
+        ax.axhline(num("b_limit_k"), color=C["danger"], lw=2)
+        ax.text(turns + 0.4, num("b_limit_k"), f"input limit {val('b_limit_k')}K", va="center", fontsize=10.5,
+                color=C["danger"])
+        ax.text(turns + 0.4, trigger, f"trigger {val('cw_trigger_k')}K", va="center", fontsize=10.5,
+                color=C["neutral"])
+        ax.text(turns + 0.4, target, f"target {val('cw_target_k')}K", va="center", fontsize=10.5,
+                color=C["neutral"])
+        ax.text(7, 106, f"every {val('cw_cycle')} turns: {val('cw_passes')} passes in {val('b_turns')}",
                 fontsize=11.5, color=C["memory"], fontweight="bold", ha="center")
         if k == 2:
-            ys2 = [calcs.TARGET_NARROW] + wn["trace"]
-            xs2, yy2 = [0], [ys2[0] / 1000]
-            for i, v in enumerate(wn["trace"], start=1):
+            xs2, yy2 = [0], [alt]
+            for i, v in enumerate(w.alternate_lengths, start=1):
                 xs2.append(i)
                 yy2.append(v / 1000)
-                if v >= calcs.TRIGGER:
+                if v >= K.MARKS.trigger:
                     xs2.append(i)
-                    yy2.append(calcs.TARGET_NARROW / 1000)
+                    yy2.append(alt)
             ax.plot(xs2, yy2, color=C["compute"], lw=2)
-            ax.axhline(calcs.TARGET_NARROW / 1000, color=C["compute"], ls=":", lw=1.5)
-            ax.text(30.4, 78, "target 81K", va="center", fontsize=10.5, color=C["compute"])
-            ax.text(22, 106, f"every {wn['cycle']} turns: {wn['passes']} passes",
+            ax.axhline(alt, color=C["compute"], ls=":", lw=1.5)
+            ax.text(turns + 0.4, alt - 3, f"target {val('cw_alt_target_k')}K", va="center", fontsize=10.5,
+                    color=C["compute"])
+            ax.text(22, 106, f"every {val('cw_alt_cycle')} turns: {val('cw_alt_passes')} passes",
                     fontsize=11.5, color=C["compute"], fontweight="bold", ha="center")
-        ax.set_xlim(0, 30)
+        ax.set_xlim(0, turns)
         ax.set_ylim(30, 128)
         ax.set_xlabel("Turn")
         ax.set_ylabel("Request length,\nthousand tokens")
@@ -553,20 +573,21 @@ def sawtooth():
 
 
 def survival():
-    s = calcs.survival()
-    n = np.arange(0, 41)
+    ret = K.RETAIN
+    n = np.arange(0, ret.long_horizon + 1)
     fig, ax = plt.subplots(figsize=(3.6, 2.3))
-    ax.plot(n, 100 * (1 - calcs.LOSS) ** n, color=C["danger"], lw=3)
-    for r, col in [(10, C["data"]), (40, C["danger"])]:
-        v = 100 * (1 - calcs.LOSS) ** r
+    ax.plot(n, [100 * calc_unchecked_success(ret.step_success, r) for r in n], color=C["danger"], lw=3)
+    for rk, pk, r, col, short in [("ret_short", "ret_short_pct", ret.short_horizon, C["data"], True),
+                                  ("ret_long", "ret_long_pct", ret.long_horizon, C["danger"], False)]:
+        v = 100 * K.rt.success[r]
         ax.plot([r], [v], "o", color=col, ms=9, zorder=5)
-        ax.text(r + 1.5 if r == 10 else 39, v + 6 if r == 10 else 2, f"{r} rounds: {v:.1f}%",
-                fontsize=11, color=col, fontweight="bold", ha="left" if r == 10 else "right",
+        ax.text(r + 1.5 if short else r - 1, v + 6 if short else 2, f"{val(rk)} rounds: {val(pk)}%",
+                fontsize=11, color=col, fontweight="bold", ha="left" if short else "right",
                 va="bottom")
-    ax.axhline(50, color=C["neutral"], ls=":", lw=1.3)
-    ax.text(16, 54, f"< 50% at round {s['below_half']}", fontsize=10.5,
-            color=C["neutral"])
-    ax.set_xlim(0, 41)
+    ax.axhline(num("ret_floor_pct"), color=C["neutral"], ls=":", lw=1.3)
+    ax.text(16, num("ret_floor_pct") + 4, f"< {val('ret_floor_pct')}% at round {val('ret_below')}",
+            fontsize=10.5, color=C["neutral"])
+    ax.set_xlim(0, ret.long_horizon + 1)
     ax.set_ylim(0, 105)
     ax.set_xlabel("Compaction rounds")
     ax.set_ylabel("Constraint\nsurvives (%)")
@@ -574,12 +595,10 @@ def survival():
 
 
 def check_pays():
-    c = calcs.check_pays()
     sp.hbars(out / "check_pays.svg",
-             [("No check", c["c_no"], "danger", f"${c['c_no']:.2f}"),
-              ("Host check", c["c_chk"], "data", f"${c['c_chk']:.2f}")],
+             [("No check", K.c.cost_per_accepted_unchecked, "danger", f"${val('pf_c_no')}"),
+              ("Host check", K.c.cost_per_accepted_checked, "data", f"${val('pf_c_chk')}")],
              "", log=False, size=(3.2, 1.3), xlabel="Cost per accepted task, $")
-
 
 # ================================================================== invalidation (book figure, redrawn)
 def inval_graph():
@@ -639,21 +658,21 @@ def inval_graph():
                3: ("Observations become history; only conclusions built on them are reassessed", V["bad_t"])}[k]
         s.text(450, 338, msg[0], size=18, anchor="middle", fill=msg[1], weight="bold")
         s.save(f"inval_step{k}.svg")
+
+
 def inval_bars():
-    iv = calcs.invalidation()
     sp.hbars(out / "inval_bars.svg",
-             [("Replace in place", iv["replaced_suffix"], "compute", f"{iv['replaced_suffix']:,}"),
-              ("Append a notice", iv["appended_suffix"], "data", f"{iv['appended_suffix']:,}")],
+             [("Replace in place", num("iv_replaced_suffix"), "compute", val("iv_replaced_suffix")),
+              ("Append a notice", num("iv_appended_suffix"), "data", val("iv_appended_suffix"))],
              "", log=False, size=(3.1, 1.3), xlabel="Tokens prefilled again")
 
 
 def shi_bars():
-    rows = [("Base", calcs.SHI[0][1], "data", f"{calcs.SHI[0][1]}%"),
-            ("+ 1 irrelevant", calcs.SHI[1][1], "danger", f"{calcs.SHI[1][1]}%"),
-            ("+ 'ignore it'", calcs.SHI[2][1], "compute", f"{calcs.SHI[2][1]}%")]
+    rows = [("Base", num("shi_base"), "data", f"{val('shi_base')}%"),
+            ("+ 1 irrelevant", num("shi_noisy"), "danger", f"{val('shi_noisy')}%"),
+            ("+ 'ignore it'", num("shi_told"), "compute", f"{val('shi_told')}%")]
     sp.hbars(out / "shi.svg", rows, "", log=False, size=(3.3, 1.5),
              xlabel="Math accuracy (%)")
-
 
 # ================================================================== real artifacts as terminal cards
 def artifacts():

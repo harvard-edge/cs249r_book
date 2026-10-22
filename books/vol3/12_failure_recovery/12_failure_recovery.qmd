@@ -227,7 +227,7 @@ signifies that compensating operation $\SagaCompensatingStep_j$ must establish i
 
 In our temporary environment scenario, confirming that the test process has stopped (or canceling it and verifying termination) and preserving diagnostic test artifacts outside the sandbox are both predecessors of `release_test_env_r18` in $(\CleanupGraphVertexSet,\CleanupGraphEdgeSet)$. Removing the unrelated local scratch directory forms an independent vertex with no edges to the environment release, provided no active test or pending evidence collection depends on it. The cleanup graph answers what must happen first, settlement rules determine what has been empirically verified, and admission control determines which operations may run next. The graph cannot be sequenced until provisioning evidence has bound its target, which is why @fig-vol3-saga-flow draws the release ordering beneath the registration step it depends on.
 
-::: {#fig-vol3-saga-flow data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-saga-flow" fig-env="figure" fig-pos="htb" fig-cap="**Registration Before Dispatch, Release After Evidence**: The forward lane records the cleanup obligation before `provision_test_env_r18` is sent, and binds `env_r18_01` only when correlated evidence arrives; a lost reply leaves the obligation open with an owner instead of guessing a target. The dashed link shows the binding supplying the target of the registered cleanup. In the cleanup lane, `release_test_env_r18` waits for its predecessors, and its own outcome either closes the obligation or remains owned, so no path ends in an assumed clean state." fig-alt="Two stacked panels. The top panel, forward operation, shows three boxes left to right: register obligation, target unbound; dispatch provision_test_env_r18; and bind on evidence, env_r18_01. A red arrow labeled reply lost leads from dispatch to a dotted box, outcome unknown, obligation open, owned. The lower panel, registered cleanup, receives two purple links into a release box for release_test_env_r18: a solid link labeled registers from register obligation, and a dashed link labeled binds target from bind on evidence. Test ended or cancel confirmed and artifacts preserved outside the environment both feed the release box, while a separate scratch removal box has no dependency and no connections. Release branches by a green arrow to obligation closed, postcondition shown, and by a red arrow to a dotted box, retained, owned, release unconfirmed."}
+::: {#fig-vol3-saga-flow data-explore="original-v3-saga-flow" data-explore-key="vol3:fig-vol3-saga-flow" fig-env="figure" fig-pos="htb" fig-cap="**Registration Before Dispatch, Release After Evidence**: The forward lane records the cleanup obligation before `provision_test_env_r18` is sent, and binds `env_r18_01` only when correlated evidence arrives; a lost reply leaves the obligation open with an owner instead of guessing a target. The dashed link shows the binding supplying the target of the registered cleanup. In the cleanup lane, `release_test_env_r18` waits for its predecessors, and its own outcome either closes the obligation or remains owned, so no path ends in an assumed clean state." fig-alt="Two stacked panels. The top panel, forward operation, shows three boxes left to right: register obligation, target unbound; dispatch provision_test_env_r18; and bind on evidence, env_r18_01. A red arrow labeled reply lost leads from dispatch to a dotted box, outcome unknown, obligation open, owned. The lower panel, registered cleanup, receives two purple links into a release box for release_test_env_r18: a solid link labeled registers from register obligation, and a dashed link labeled binds target from bind on evidence. Test ended or cancel confirmed and artifacts preserved outside the environment both feed the release box, while a separate scratch removal box has no dependency and no connections. Release branches by a green arrow to obligation closed, postcondition shown, and by a red arrow to a dotted box, retained, owned, release unconfirmed."}
 ![](images/svg/vol3-saga-flow.svg)
 :::
 
@@ -335,31 +335,35 @@ Engineers must evaluate this comparison independently for latency (in seconds) a
 # ONE REPAIR ATTEMPT VERSUS UNWIND AND REBUILD (LEGO)
 # Goal: Compare the same verified-readiness endpoint on time and model dollars.
 # Scope: Hypothetical costs; one bounded attempt; failure preserves fallback.
-from mlsysim import *
+from mlsysim import Scenarios, second, token, Mtoken, USD
+from mlsysim.fmt import fmt_qty, fmt_int, fmt_usd, fmt_percent, check
 
 class RepairVsUnwind:
     # 1. LOAD: scenario assumptions, not measurements or admission ceilings.
-    unwind_s = 40.6
-    rebuild_s = 46.0  # includes obtaining and validating a usable configuration
-    rebuild_in = 38_500
-    rebuild_out = 3_100
-    price_in, price_out = 3.00, 15.00  # dollars per million tokens, no discount
-    rep_in, rep_out = 2_390, 180  # entire isolated repair request and response
-    startup_s = 0.09  # pre-output startup, NOT time to first token
-    output_tps = 50
-    validate_s = 0.4  # local validation charged on success and failure
-    p_assume = 0.5
+    scen = Scenarios.TestConfigRepairVsRebuild
+    unwind_s = scen.unwind_time.to(second).magnitude
+    rebuild_s = scen.rebuild_time.to(second).magnitude  # includes obtaining and validating a usable configuration
+    rebuild_in = scen.rebuild_input
+    rebuild_out = scen.rebuild_output
+    price_in = scen.input_price.to(USD / Mtoken).magnitude  # dollars per million tokens, no discount
+    price_out = scen.output_price.to(USD / Mtoken).magnitude
+    rep_in, rep_out = scen.repair_input, scen.repair_output  # entire isolated repair request and response
+    startup_s = scen.startup_time.to(second).magnitude  # pre-output startup, NOT time to first token
+    output_tps = scen.output_rate.to(token / second).magnitude
+    validate_s = scen.validation_time.to(second).magnitude  # local validation charged on success and failure
+    p_assume = scen.assumed_success
 
     # 2. EXECUTE: both paths stop at ready-to-submit, not a passing test.
-    back_s = unwind_s + rebuild_s
-    back_usd = (rebuild_in * price_in + rebuild_out * price_out) / 1e6
-    rep_s = startup_s + rep_out / output_tps + validate_s
-    rep_usd = (rep_in * price_in + rep_out * price_out) / 1e6
-    pstar_s, pstar_usd = rep_s / back_s, rep_usd / back_usd
-    exp_s = rep_s + (1 - p_assume) * back_s
-    exp_usd = rep_usd + (1 - p_assume) * back_usd
-    save_s = 1 - exp_s / back_s  # expected time saved vs. immediate fallback
-    one_in = int(1 // pstar_usd)  # repair pays on both axes at 1 success in one_in
+    r = scen.result
+    back_s = r.fallback_time.to(second).magnitude
+    back_usd = r.fallback_cost.to(USD).magnitude
+    rep_s = r.repair_time.to(second).magnitude
+    rep_usd = r.repair_cost.to(USD).magnitude
+    pstar_s, pstar_usd = r.break_even_time, r.break_even_cost
+    exp_s = r.expected_time.to(second).magnitude
+    exp_usd = r.expected_cost.to(USD).magnitude
+    save_s = r.time_saved_fraction  # expected time saved vs. immediate fallback
+    one_in = r.one_in  # repair pays on both axes at 1 success in one_in
 
     # 3. GUARD: direct arithmetic and two-path expectations.
     check(abs(back_s - 86.6) < 1e-9, "Same-endpoint fallback seconds")
@@ -523,34 +527,32 @@ Hoisting a diagnostic check ahead of the pivot transforms an unrecoverable failu
 # Scope: Agents.Remediation.OnCall workload profile (teaching assumptions,
 #        not measured incident data); attempt cost uses the same terms as
 #        the cost-per-accepted-task table in @sec-vol3-agent-economics.
-from mlsysim import Agents, USD
+from mlsysim import Scenarios, USD
 from mlsysim.fmt import fmt_usd, fmt_percent, fmt_multiple, fmt_int, check
 
 class PivotLoss:
     # 1. LOAD: remediation-agent workload profile.
-    remed = Agents.Remediation.OnCall
+    scen = Scenarios.RemediationCanaryPivotLoss
+    remed = scen.workload
     p_bad = remed.wrong_change_probability  # probability a proposed fleet change is wrong
     consequence = remed.wrong_change_impact.to(USD).magnitude  # impact when a wrong change fully commits
     v_catch = remed.canary_catch_rate  # fraction of wrong changes caught by canary checks pre-pivot
     r_canary = remed.canary_recovery_fraction  # fraction of a caught change's impact avoided by revert
     # Model calls, telemetry and change tools, health check, and approver review per attempt.
-    c_attempt = (
-        (remed.model_cost_per_attempt + remed.environment_cost_per_attempt + remed.assessment_cost_per_attempt + remed.approval_cost_per_attempt)
-        .to(USD)
-        .magnitude
-    )
-    dv = 0.10  # catch-rate increment for the sensitivity
+    c_attempt = scen.attempt_cost.to(USD).magnitude
+    dv = scen.catch_step  # catch-rate increment for the sensitivity
 
     # 2. EXECUTE: L_A = sum P(bad) * consequence * (1 - r).
-    loss_first = p_bad * consequence * (1 - 0)
-    loss_caught = p_bad * v_catch * consequence * (1 - r_canary)
-    loss_missed = p_bad * (1 - v_catch) * consequence * (1 - 0)
-    loss_canary = loss_caught + loss_missed
-    reduction = loss_first / loss_canary
-    missed_share = loss_missed / loss_canary
-    per_dv = p_bad * consequence * r_canary * dv  # dL/dv * dv
-    loss_vs_attempt = loss_canary / c_attempt
-    per_dv_vs_attempt = per_dv / c_attempt
+    r = scen.result
+    loss_first = r.loss_without_check.to(USD).magnitude
+    loss_caught = r.loss_caught.to(USD).magnitude
+    loss_missed = r.loss_missed.to(USD).magnitude
+    loss_canary = r.loss_with_check.to(USD).magnitude
+    reduction = r.reduction
+    missed_share = r.missed_share
+    per_dv = r.loss_per_catch_step.to(USD).magnitude  # dL/dv * dv
+    loss_vs_attempt = r.loss_vs_attempt
+    per_dv_vs_attempt = r.step_vs_attempt
 
     # 3. GUARD: arithmetic and the closed form p_bad * I * (1 - v rho).
     check(abs(loss_first - 480) < 1e-9, "Rollout-first loss")
@@ -699,35 +701,36 @@ Every extra turn a detector waits before flagging an execution loop costs more t
 # Goal: Compare a turn ceiling with an assumed earlier intervention.
 # Show: Re-sent input, model charges, elapsed time, and gross avoided charge.
 # Scope: Append-only context, no cache, fixed turn time; no monitor/cleanup cost.
-from mlsysim import second, minute, USD
+from mlsysim import Scenarios, second, minute, Mtoken, USD
 from mlsysim.fmt import fmt_int, fmt_qty, fmt_usd, fmt_multiple, check
 
 class LoopCost:
     # 1. LOAD: one-off hypothetical workload and prices, not measurements.
-    base_ctx = 1_000  # scenario assumption: first looping input, tokens
-    out_turn = 300  # scenario assumption: output appended each turn, tokens
-    err_turn = 800  # scenario assumption: appended error observation, tokens
-    turn_time = 10 * second  # scenario assumption: complete serial turn duration
-    cap = 50  # scenario assumption: ceiling counted from the loop's start
-    detect = 4  # scenario assumption: intervention after this completed turn
-    context_limit = 64_000  # scenario assumption: combined input/output capacity
-    price_in = 3 * USD / 1_000_000  # scenario assumption: per input token
-    price_out = 15 * USD / 1_000_000  # scenario assumption: per output token
+    scen = Scenarios.RepairLoopToTurnCeiling
+    base_ctx = scen.first_input  # scenario assumption: first looping input, tokens
+    out_turn = scen.output_per_turn  # scenario assumption: output appended each turn, tokens
+    err_turn = scen.observation_per_turn  # scenario assumption: appended error observation, tokens
+    turn_time = scen.turn_time  # scenario assumption: complete serial turn duration
+    cap = scen.ceiling  # scenario assumption: ceiling counted from the loop's start
+    detect = scen.stop_after  # scenario assumption: intervention after this completed turn
+    context_limit = scen.context_window  # scenario assumption: combined input/output capacity
+    price_in = scen.input_price  # scenario assumption: per input token
+    price_out = scen.output_price  # scenario assumption: per output token
 
     # 2. EXECUTE: every new call resends all retained prior turns.
-    grow = out_turn + err_turn
-    in_cap = cap * base_ctx + grow * cap * (cap - 1) // 2
-    in_det = detect * base_ctx + grow * detect * (detect - 1) // 2
-    charge_cap = in_cap * price_in + cap * out_turn * price_out
-    charge_det = in_det * price_in + detect * out_turn * price_out
-    time_cap = cap * turn_time
-    time_det = detect * turn_time
-    avoided_charge = charge_cap - charge_det
-    ratio = (charge_cap / charge_det).to_base_units().magnitude
-    peak_request = base_ctx + (cap - 1) * grow + out_turn
-    half = cap // 2  # sensitivity: stop a long loop at half the ceiling
-    in_half = half * base_ctx + grow * half * (half - 1) // 2
-    half_ratio = in_cap / in_half
+    r = scen.result
+    grow = r.appended_per_turn
+    in_cap = r.ceiling_input
+    in_det = r.stop_input
+    charge_cap = r.ceiling_cost
+    charge_det = r.stop_cost
+    time_cap = r.ceiling_time
+    time_det = r.stop_time
+    avoided_charge = r.avoided_cost
+    ratio = r.cost_ratio
+    peak_request = r.peak_request
+    half = r.half_turns  # sensitivity: stop a long loop at half the ceiling
+    half_ratio = r.half_ratio
 
     # 3. GUARD: arithmetic and the assumed context-fit boundary.
     check(0 < detect < cap, "Intervention precedes the turn ceiling")
@@ -748,8 +751,8 @@ class LoopCost:
     detect_str = fmt_int(detect)
     context_limit_str = fmt_int(context_limit)
     peak_request_str = fmt_int(peak_request)
-    price_in_str = fmt_usd(price_in * 1_000_000, precision=0)
-    price_out_str = fmt_usd(price_out * 1_000_000, precision=0)
+    price_in_str = fmt_usd(price_in.to(USD / Mtoken).magnitude, precision=0)
+    price_out_str = fmt_usd(price_out.to(USD / Mtoken).magnitude, precision=0)
     in_cap_str = fmt_int(in_cap)
     in_det_str = fmt_int(in_det)
     usd_cap_str = fmt_usd(charge_cap, precision=2)
@@ -877,16 +880,18 @@ A probe is a concrete network operation, not a cost-free diagnostic abstraction.
 # RETRY AMPLIFICATION ACROSS INDEPENDENT LAYERS (LEGO)
 # Goal: Price the pitfall of granting each retry layer its own allowance.
 # Scope: Hypothetical stack; every attempt fails, so each layer exhausts its allowance.
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, check
 
 class RetryLayers:
     # 1. LOAD: scenario assumptions.
-    layers = 3  # client library, gateway, trajectory-level recovery
-    attempts = 3  # attempts per layer (one try plus two retries)
+    scen = Scenarios.ThreeLayerRetryAmplification
+    layers = len(scen.layer_names)  # client library, gateway, trajectory-level recovery
+    attempts = scen.attempts_per_layer  # attempts per layer (one try plus two retries)
 
     # 2. EXECUTE: nested layers multiply attempts.
-    downstream = attempts**layers
-    coordinated = attempts  # one owner holds a single allowance
+    downstream = scen.result.layered
+    coordinated = scen.result.coordinated  # one owner holds a single allowance
 
     # 3. GUARD
     check(downstream == 27 and coordinated == 3, "Nested vs. coordinated attempts")
@@ -938,30 +943,34 @@ Local concurrency bounds do not constrain remote work that outlives a client-sid
 # CAPACITY AND JITTER UNDER DECLARED LOAD (LEGO)
 # Goal: Separate bounded occupancy from probabilistic retry arrivals.
 # Scope: Hypothetical blocking-worker burst and a separate retry cohort.
-from mlsysim import second
+from mlsysim import Scenarios, second
 from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_rate, check
 
 class ContainmentCapacity:
     # 1. LOAD: scenario inputs, not production recommendations.
-    arrivals = 256
-    workers = 300
-    external_cap = 64
-    queue_cap = 32
-    retry_count = 128
-    jitter = 2 * second
-    burst = 0.002 * second
+    pool = Scenarios.BlockingCallBulkhead
+    cohort = Scenarios.RetryCohortJitter
+    arrivals = pool.arrivals
+    workers = pool.workers
+    external_cap = pool.worker_cap
+    queue_cap = pool.queue_cap
+    retry_count = cohort.retries
+    jitter = cohort.jitter_span
+    burst = cohort.burst_window
 
     # 2. EXECUTE: no completions during the initial admission burst.
-    uncapped_busy = min(arrivals, workers)
-    uncapped_free = workers - uncapped_busy
-    capped_busy = min(arrivals, external_cap)
-    queued = min(arrivals - capped_busy, queue_cap)
-    rejected = arrivals - capped_busy - queued
-    protected_workers = workers - capped_busy
-    synchronized_window_rate = retry_count / burst
-    mean_jitter_rate = retry_count / jitter
-    expected_in_window = (retry_count * burst / jitter).to("").magnitude
-    spread_ratio = (synchronized_window_rate / mean_jitter_rate).to("").magnitude
+    occ = pool.result
+    uncapped_busy = occ.uncapped_occupied
+    uncapped_free = occ.uncapped_free
+    capped_busy = occ.occupied
+    queued = occ.queued
+    rejected = occ.rejected
+    protected_workers = occ.protected_workers
+    arr = cohort.result
+    synchronized_window_rate = arr.synchronized_rate
+    mean_jitter_rate = arr.jittered_mean_rate
+    expected_in_window = arr.expected_in_window
+    spread_ratio = arr.spread_ratio
 
     # 3. GUARD: independent arithmetic and conservation checks.
     check(capped_busy + queued + rejected == arrivals, "Account for every arrival")
@@ -1046,21 +1055,23 @@ Containment decisions must be pushed all the way to the dispatch boundaries that
 # Context: ws-12-knight-capital-2012.
 # Goal: Carry the SEC order's reported figures as named, sourced inputs.
 # How: Values as reported in sec2013knight (Release No. 70694); no computation.
+from mlsysim import Literature
 from mlsysim.fmt import fmt_int, fmt_count, fmt_usd, check
 
 class KnightIncident:
-    # 1. LOAD: sourced from sec2013knight.
-    servers = 8  # SMARS servers in the deployment
-    stale_servers = 1  # servers that did not receive the new code
-    parent_orders = 212  # parent orders processed by the stale code
-    alert_emails = 97  # "Power Peg disabled" emails before the open
-    minutes = 45  # approximate duration of the erroneous trading
-    executions = 4_000_000  # executions obtained (reported as over 4 million)
-    stocks = 154  # stocks traded
-    shares = 397_000_000  # shares (reported as more than 397 million)
-    net_long = 3.5e9  # USD, approximate net long position
-    net_short = 3.15e9  # USD, approximate net short position
-    loss = 460e6  # USD realized loss
+    # 1. LOAD: sourced from sec2013knight (Literature.IncidentReports).
+    rep = Literature.IncidentReports
+    servers = int(rep.KnightSmarsServers)  # SMARS servers in the deployment
+    stale_servers = int(rep.KnightServersMissed)  # servers that did not receive the new code
+    parent_orders = int(rep.KnightParentOrders)  # parent orders processed by the stale code
+    alert_emails = int(rep.KnightAlertEmails)  # "Power Peg disabled" emails before the open
+    minutes = int(rep.KnightTradingMinutes)  # approximate duration of the erroneous trading
+    executions = int(rep.KnightExecutions)  # executions obtained (reported as over 4 million)
+    stocks = int(rep.KnightStocks)  # stocks traded
+    shares = int(rep.KnightShares)  # shares (reported as more than 397 million)
+    net_long = float(rep.KnightNetLongUsd)  # USD, approximate net long position
+    net_short = float(rep.KnightNetShortUsd)  # USD, approximate net short position
+    loss = float(rep.KnightRealizedLossUsd)  # USD realized loss
 
     # 2. EXECUTE: reported values only.
     correct_servers = servers - stale_servers

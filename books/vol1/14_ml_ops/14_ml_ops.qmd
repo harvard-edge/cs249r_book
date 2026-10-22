@@ -246,8 +246,7 @@ These three interfaces determine how operational infrastructure partitions respo
 # │          is considered; the INT8 KWS model is 200 KB of a 4 MiB flash.
 # │ How:     Registry model sizes divided by registry device capacities.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil
-from mlsysim import Models, Hardware, BYTES_INT8
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, GiB, KB, MiB
 from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity
 
@@ -256,17 +255,15 @@ class OpsRunningCases:
     """DLRM capacity footprint on the H100 and KWS footprint on a microcontroller."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dlrm = Models.Recommendation.DLRM
-    h100 = Hardware.Cloud.H100
-    kws = Models.Tiny.DS_CNN
-    mcu = Hardware.Tiny.ESP32_S3
+    ranking = Scenarios.DlrmReleaseFootprintH100
+    spotter = Scenarios.KeywordSpotterDualBankEsp32S3
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dlrm_bytes = dlrm.model_size
-    hbm = h100.memory.capacity
-    dlrm_accels = ceil((dlrm_bytes / hbm).to("").magnitude)
-    kws_bytes = kws.size_in_bytes(BYTES_INT8)
-    flash = mcu.memory.flash_capacity
+    dlrm_bytes = ranking.copy_bytes
+    hbm = ranking.device.memory.capacity
+    dlrm_accels = ranking.accelerators_per_copy
+    kws_bytes = spotter.bank_bytes
+    flash = spotter.flash
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(dlrm_bytes > hbm, "DLRM's tables must exceed one H100's memory for the capacity-bound framing.")
@@ -294,19 +291,19 @@ Two of the book's lighthouse workloads (@sec-introduction-lighthouse-models-9b1c
 # │          the story does.
 # │ How:     Fit A(t) = A0 exp(-gamma t) to the launch and week-four readings.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, check
 
 class RankingDriftScenario:
     """Ranking service: observed accuracy slide and the implied daily decay rate."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    acc_initial = 0.94  # scenario assumption: click-prediction accuracy at launch
-    acc_week4 = 0.88  # scenario assumption: accuracy measured four weeks later
-    days_to_reading = 28  # four weeks
+    drift = Scenarios.RankingServiceAccuracyDrift
+    acc_initial = drift.initial_accuracy  # click-prediction accuracy at launch
+    acc_week4 = drift.later_accuracy  # accuracy measured four weeks later
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gamma = math.log(acc_initial / acc_week4) / days_to_reading
+    gamma = drift.decay_rate.to("1/day").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.001 < gamma < 0.005, f"A six-point slide over four weeks is a slow drift, got gamma={gamma:.4f}/day.")
@@ -417,13 +414,14 @@ class SkewEconomics:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    queries_daily = MILLION
-    skew_error_rate = 0.01
-    cost_per_error = 0.10
+    skew = Scenarios.RankingSkewOnePercent
+    queries_daily = skew.query_rate.to("1/day").magnitude
+    skew_error_rate = skew.skew_rate
+    cost_per_error = skew.cost_per_error.to("USD").magnitude
     days_per_year = DAYS_PER_YEAR
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    annual_cost = queries_daily * skew_error_rate * cost_per_error * days_per_year
+    annual_cost = skew.cost_over(days_per_year * day).to("USD").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(annual_cost == 365_000, f"Annual cost should be 365,000, got {annual_cost:.0f}")
@@ -554,6 +552,7 @@ A break-even calculation makes the cost dynamics of technical debt concrete. Tea
 # │      while automated teams have zero ongoing cost.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -564,12 +563,13 @@ class AutomationROI:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    hrs_manual_week = 4.0
-    hrs_automation_once = 80.0
+    pipeline = Scenarios.RetrainingPipelineAutomation
+    hrs_manual_week = pipeline.manual_rate.to("hour/week").magnitude
+    hrs_automation_once = pipeline.build_time.to("hour").magnitude
     time_horizon_years = 1.0
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    breakeven_weeks = hrs_automation_once / hrs_manual_week
+    breakeven_weeks = pipeline.breakeven.to("week").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(breakeven_weeks <= 26, f"Automation takes too long ({breakeven_weeks} weeks) to justify. Narrative implies fast ROI.")
@@ -1516,13 +1516,12 @@ Rollback contains a release that degrades service health, and canary routing ver
 # │
 # │ Goal:    Size a two-arm A/B deployment test for a conversion-rate lift.
 # │ Show:    Roughly 745K users per variant detect a 2 percent relative lift.
-# │ How:     Apply the standard two-proportion sample-size formula with
-# │          NormalDist quantiles for confidence and power.
+# │ How:     The two-proportion sample-size formula and its inverse on
+# │          Scenarios.ConversionRelativeLiftExperiment (exact normal quantiles).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil, sqrt
-from statistics import NormalDist
-from mlsysim.physics import calc_two_proportion_sample_size
+from math import ceil
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_percent, fmt_pp, fmt_rate, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1530,21 +1529,17 @@ class ABSampleSize:
     """Two-arm conversion-rate sample sizing for an A/B deployment test."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    confidence = 0.95
-    power = 0.80
-    baseline_rate = 0.05
-    relative_lift = 0.02
-    comparison_users_per_variant = 25_000
+    test = Scenarios.ConversionRelativeLiftExperiment
+    confidence = test.confidence
+    power = test.power
+    baseline_rate = test.baseline_rate
+    relative_lift = test.relative_lift
+    comparison_users_per_variant = test.available_per_variant
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    alpha = 1 - confidence
-    target_rate = baseline_rate * (1 + relative_lift)
-    absolute_lift = target_rate - baseline_rate
-    variance = baseline_rate * (1 - baseline_rate)
-    z_alpha_2 = NormalDist().inv_cdf(1 - alpha / 2)
-    z_beta = NormalDist().inv_cdf(power)
-    users_per_variant = ceil(calc_two_proportion_sample_size(baseline_rate, absolute_lift, z_alpha=z_alpha_2, z_beta=z_beta))
-    detectable_abs_lift = sqrt(2 * (z_alpha_2 + z_beta) ** 2 * variance / comparison_users_per_variant)
+    target_rate = test.target_rate
+    users_per_variant = ceil(test.per_variant)
+    detectable_abs_lift = test.detectable_lift()
     detectable_pct_points = detectable_abs_lift * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1631,8 +1626,7 @@ Graceful degradation is a core operational pattern for edge AI. When thermal lim
 # │          update holds a second 200 KB bank in 4 MiB of flash.
 # │ How:     Registry model sizes over registry device capacities.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil
-from mlsysim import Models, Hardware, BYTES_INT8, BYTES_FP16
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, KB, MB, MiB
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, fmt_memory_capacity
 
@@ -1641,21 +1635,19 @@ class ReleaseControlFootprint:
     """Extra resident memory each release control holds on the DLRM service and the KWS device."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dlrm = Models.Recommendation.DLRM
-    h100 = Hardware.Cloud.H100
-    resnet = Models.Vision.ResNet50
-    kws = Models.Tiny.DS_CNN
-    mcu = Hardware.Tiny.ESP32_S3
-    canary_share = 0.05  # scenario: the 5 percent canary in the release-strategy prose
+    ranking = Scenarios.DlrmReleaseFootprintH100
+    resnet = Scenarios.ResNet50Fp16ReleaseFootprintH100
+    spotter = Scenarios.KeywordSpotterDualBankEsp32S3
+    canary_share = ranking.canary_share  # the 5 percent canary in the release-strategy prose
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    copy_bytes = dlrm.model_size
-    accels_per_copy = ceil((copy_bytes / h100.memory.capacity).to("").magnitude)
-    accels_two_copies = 2 * accels_per_copy
-    resnet_bytes = resnet.size_in_bytes(BYTES_FP16)
-    resnet_two_copy_fraction = (2 * resnet_bytes / h100.memory.capacity).to("").magnitude
-    kws_bank = kws.size_in_bytes(BYTES_INT8)
-    flash = mcu.memory.flash_capacity
+    copy_bytes = ranking.copy_bytes
+    accels_per_copy = ranking.accelerators_per_copy
+    accels_two_copies = ranking.accelerators_for(2)
+    resnet_bytes = resnet.copy_bytes
+    resnet_two_copy_fraction = 2 * resnet.copy_fraction
+    kws_bank = spotter.bank_bytes
+    flash = spotter.flash
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(accels_per_copy == 2, f"Prose says one copy of the tables needs two H100s, got {accels_per_copy}.")
@@ -1858,6 +1850,7 @@ The **drift detection delay**\index{Drift detection delay!statistical monitoring
 # │ How: Calculate the time needed to collect an illustrative evidence budget.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1865,18 +1858,20 @@ class DriftDetectionDelay:
     """Illustrative labeled-example evidence budget for a five-point drop."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    baseline_acc = 0.95  # original accuracy
-    drop = 0.05  # 5-percentage-point drop to detect
-    confidence = 0.95  # 95% statistical confidence
-    qps_high = 1  # 1 labeled outcome per second
+    confirm = Scenarios.LabeledOutcomeDriftConfirmation
+    baseline_acc = confirm.baseline_accuracy  # original accuracy
+    drop = confirm.drop  # 5-percentage-point drop to detect
+    confidence = confirm.confidence  # 95% statistical confidence
+    qps_high = confirm.label_rates["high"].to("1/s").magnitude  # 1 labeled outcome per second
+    requests_per_day_low = confirm.label_rates["low"].to("1/day").magnitude  # 100 labeled outcomes per day
     # Illustrative evidence budget for this scenario
-    samples_needed = 1000
+    samples_needed = confirm.evidence_budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     target_acc = baseline_acc - drop
-    seconds_needed_high = samples_needed / qps_high
+    seconds_needed_high = confirm.collection_time("high").to("s").magnitude
     minutes_needed_high = seconds_needed_high / SECONDS_PER_MINUTE
-    days_needed_low = samples_needed / 100  # 100 labeled outcomes per day
+    days_needed_low = confirm.collection_time("low").to("day").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(minutes_needed_high) == 17, f"1 QPS detection latency should be about 17 minutes, got {minutes_needed_high:.1f}.")
@@ -1889,7 +1884,7 @@ class DriftDetectionDelay:
     samples_needed_str = fmt(samples_needed, precision=0, commas=True)
     seconds_needed_high_str = fmt_time(seconds_needed_high, "second", precision=0, commas=True, style="word")
     minutes_needed_high_str = fmt_time(minutes_needed_high, "minute", precision=1, commas=False, style="word")
-    requests_per_day_low_str = fmt(100, precision=0, commas=False)
+    requests_per_day_low_str = fmt(requests_per_day_low, precision=0, commas=False)
     days_needed_low_str = fmt_time(days_needed_low, "day", precision=0, commas=False, style="word")
 ```
 
@@ -1932,6 +1927,7 @@ Detection delay has a direct cost. When a silent failure persists until the next
 # │ How: Calculate lost revenue for incidents detected in 30 days vs. 1 day.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_rate, fmt_usd, fmt, check, MarkdownStr, fmt_percent, fmt_time
 
 class SilentFailureCost:
@@ -1941,19 +1937,20 @@ class SilentFailureCost:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    annual_revenue = 50_000_000  # $50M/year recommendation engine
-    quality_drop = 0.05  # 5% conversion rate degradation
-    days_manual = 28  # monthly review cycle (~4 weeks)
-    days_auto = 1  # daily automated monitoring
-    incidents_per_year = 4  # scenario assumption for a high-drift domain
+    delay = Scenarios.RecommenderDetectionDelayLoss
+    annual_revenue = delay.annual_value.to("USD").magnitude  # $50M/year recommendation engine
+    quality_drop = delay.quality_drop  # 5% conversion rate degradation
+    days_manual = delay.slow_detection.to("day").magnitude  # monthly review cycle (~4 weeks)
+    days_auto = delay.fast_detection.to("day").magnitude  # daily automated monitoring
+    incidents_per_year = delay.incidents_per_year  # scenario assumption for a high-drift domain
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Per-incident loss = Revenue × Quality Drop × (Detection Days / 365)
-    loss_manual = annual_revenue * quality_drop * (days_manual / DAYS_PER_YEAR)
-    loss_auto = annual_revenue * quality_drop * (days_auto / DAYS_PER_YEAR)
+    loss_manual = delay.slow_loss.to("USD").magnitude
+    loss_auto = delay.fast_loss.to("USD").magnitude
 
-    savings_per_incident = loss_manual - loss_auto
-    annual_savings = savings_per_incident * incidents_per_year
+    savings_per_incident = delay.savings_per_incident.to("USD").magnitude
+    annual_savings = delay.annual_savings.to("USD").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(annual_savings >= 500_000, f"Annual savings (${annual_savings:,.0f}) too low to justify MLOps investment.")
@@ -2061,8 +2058,7 @@ The ranking service monitors user age as an input feature, and a shift toward ol
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Ops
-from mlsysim.physics import calc_population_stability_index
+from mlsysim import Ops, Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_percent, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2070,16 +2066,17 @@ class PSIAgeExample:
     """Population Stability Index for a six-bin user-age distribution."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    age_bins = ["18-25", "26-35", "36-45", "46-55", "56-65", "66+"]
-    training = [0.15, 0.25, 0.20, 0.18, 0.12, 0.10]
-    serving = [0.12, 0.22, 0.18, 0.20, 0.15, 0.13]
+    age = Scenarios.RankingUserAgePsi
+    age_bins = age.bins
+    training = age.baseline_shares
+    serving = age.current_shares
     warning_threshold = Ops.Monitoring.PsiWarnThreshold
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     differences = [actual - expected for expected, actual in zip(training, serving)]
     log_ratios = [math.log(actual / expected) for expected, actual in zip(training, serving)]
-    contributions = [diff * log_ratio for diff, log_ratio in zip(differences, log_ratios)]
-    total_psi = calc_population_stability_index(training, serving)
+    contributions = age.terms
+    total_psi = age.psi
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sum(training) - 1.0) < 1e-12, "Training proportions must sum to 1.")
@@ -2258,7 +2255,7 @@ The four $\MonitoringCostComponent$ terms are cost components over the same acco
 # │ How: Sum ingestion, storage, and dashboard query costs for one ML node.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, GB, USD, ureg
+from mlsysim import Infrastructure, Scenarios, GB, USD, ureg
 from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_count, fmt_memory, fmt_rate, fmt_time
 from mlsysim.core.units import month
 
@@ -2267,8 +2264,9 @@ class MonitoringBudget:
     """Monthly ingestion, storage, and query-cost subtotal for one ML node."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_variants = 3  # prod, canary, staging
-    metrics_per_variant = 50  # metrics per deployment
+    monitors = Scenarios.OneModelDailyMetricTests
+    n_variants = monitors.models  # prod, canary, staging
+    metrics_per_variant = monitors.metrics_per_model  # metrics per deployment
     samples_per_min = 4  # 15-second intervals
     sample_interval_s = SECONDS_PER_MINUTE / samples_per_min
     days = DAYS_PER_MONTH  # monthly retention
@@ -2511,7 +2509,7 @@ To turn the trigger gate of @lst-ops-triggered-retraining into a concrete schedu
 # │ How: Apply the square-root law using retraining costs and accuracy decay rates.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_usd, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2519,23 +2517,24 @@ class RetrainingInterval:
     """Optimal retraining interval via square-root law for the ranking service."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    retrain_cost = 5000  # $5,000 per retraining run
-    Q = 1_000_000  # ranking requests per day
-    V = 0.50  # dollars/query for a unit change in accuracy fraction
+    interval = Scenarios.RankingRetrainingInterval
+    retrain_cost = interval.run_cost.to("USD").magnitude  # $5,000 per retraining run
+    Q = interval.query_rate.to("1/day").magnitude  # ranking requests per day
+    V = interval.value_per_query.to("USD").magnitude  # dollars/query for a unit change in accuracy fraction
     A0 = RankingDriftScenario.acc_initial  # the ranking service's launch accuracy
     gamma = RankingDriftScenario.gamma  # decay rate implied by its observed four-week slide
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     numerator = 2 * retrain_cost
-    denominator = Q * V * A0 * gamma
+    denominator = interval.staleness_slope.to("USD/day**2").magnitude
     ratio = numerator / denominator
-    T_star = math.sqrt(ratio)
+    T_star = interval.optimal_interval.to("day").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.5 <= T_star <= 3.5, f"Prose says the ranking service lands at about three days, got {T_star:.2f} days.")
     # images/svg/vol1_ml_ops_margin_002.svg ("T* ≈ 3 d", aria-label) and its
     # fig-alt hand-type the rounded T*; the check above guards them.
-    T_star_4q = math.sqrt(numerator / (4 * Q * V * A0 * gamma))
+    T_star_4q = Scenarios.RankingRetrainingIntervalFourfoldTraffic.optimal_interval.to("day").magnitude
     check(1.0 <= T_star_4q <= 2.0, f"Fourfold traffic should land near daily, got {T_star_4q:.2f} days.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2677,7 +2676,6 @@ Under the square-root approximation, $\RetrainingInterval^*$ scales with the squ
 # │ How:     Scenario run size times the registry training price; node
 # │          accelerators minus the serving copy and the run.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
 from mlsysim.core.units import hour, USD
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_usd
 
@@ -2686,17 +2684,17 @@ class RetrainContention:
     """Accelerator share of one ranking-model retraining run and its contention with serving."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    node_accels = 8  # scenario: one eight-accelerator H100 node
-    retrain_accels = 4  # scenario: accelerators a retraining run occupies
-    retrain_time = 6 * hour  # scenario: duration of a retraining run
-    price = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    run_cost = RetrainingInterval.retrain_cost * USD  # total run cost of the interval example
+    node_accels = ReleaseControlFootprint.ranking.node_accelerators  # one eight-accelerator H100 node
+    retrain_accels = ReleaseControlFootprint.ranking.retrain_accelerators  # accelerators a run occupies
+    retrain_time = ReleaseControlFootprint.ranking.retrain_time  # duration of a retraining run
+    price = RetrainingInterval.interval.accelerator_price  # cloud training rate per accelerator-hour
+    run_cost = RetrainingInterval.interval.run_cost.to(USD)  # total run cost of the interval example
     serving_accels = ReleaseControlFootprint.accels_per_copy
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accel_hours = retrain_accels * retrain_time
-    compute_cost = (accel_hours * price).to(USD)
-    compute_share = (compute_cost / run_cost).to("").magnitude
+    compute_cost = RetrainingInterval.interval.compute_cost.to(USD)
+    compute_share = RetrainingInterval.interval.compute_share
     free_accels = node_accels - serving_accels - retrain_accels
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2715,7 +2713,7 @@ class RetrainContention:
 
 The run cost $\RetrainingRunCost$ bundles the four terms of @eq-retrain-cost, and on the ranking service the accelerator term is the smallest of them. In an illustrative scenario, a run that retrains on the logs gathered since the previous run occupies four H100s for six hours. Those twenty-four accelerator-hours cost `{python} RetrainContention.compute_cost_str` at the registry's training rate, about `{python} RetrainContention.compute_share_pct_str` of the `{python} RetrainContention.run_cost_str` run. Validation, deployment, and rollout risk make up the rest, which is why automating the validation path (@sec-ml-operations-model-validation-a891) shortens the economic interval more than faster training would. The accelerator-hours matter instead as contention. The serving copy of the tables already holds two accelerators. On an eight-accelerator node, a run that holds its own copy and training state on four more leaves room for exactly one further copy of the tables while it executes (@fig-ml-ops-dlrm-node-day). That copy can be a canary, a shadow, or the hot standby of @tbl-ml-ops-release-control-footprint, but not more than one of them. A team that releases and retrains on the same node must therefore schedule the two so that a retraining run never evicts the copy that makes rollback immediate.
 
-::: {#fig-ml-ops-dlrm-node-day data-explore="mechanism-scene" data-explore-key="vol1:fig-ml-ops-dlrm-node-day" fig-env="figure" fig-pos="htb" fig-cap="**One Ranking Node's Day**: Accelerator occupancy on an eight-accelerator H100 node over the day of a retraining run, under one schedule that keeps rollback immediate. The serving copy of the `{python} OpsRunningCases.dlrm_gb_str` tables holds `{python} ReleaseControlFootprint.accels_per_copy_str` accelerators and the hot standby holds `{python} ReleaseControlFootprint.accels_per_copy_str` more. The retraining run holds `{python} RetrainContention.retrain_accels_str` accelerators for `{python} RetrainContention.retrain_time_str`, so while it runs the standby is the only further copy of the tables that fits. After the run, the candidate it produces can go out as a canary on `{python} ReleaseControlFootprint.accels_per_copy_str` of the freed accelerators. The schedule is illustrative and built from the chapter's worked numbers." fig-alt="Eight horizontal accelerator lanes across a 24-hour axis. The top two lanes hold the serving copy of the tables all day and the next two hold a hot standby all day. The bottom four lanes hold a retraining run for the first six hours. After the run, two of those lanes hold a canary copy and the last two are drawn as a dashed outline marked free."}
+::: {#fig-ml-ops-dlrm-node-day data-explore="original-v1-ml-ops-dlrm-node-day" data-explore-key="vol1:fig-ml-ops-dlrm-node-day" fig-env="figure" fig-pos="htb" fig-cap="**One Ranking Node's Day**: Accelerator occupancy on an eight-accelerator H100 node over the day of a retraining run, under one schedule that keeps rollback immediate. The serving copy of the `{python} OpsRunningCases.dlrm_gb_str` tables holds `{python} ReleaseControlFootprint.accels_per_copy_str` accelerators and the hot standby holds `{python} ReleaseControlFootprint.accels_per_copy_str` more. The retraining run holds `{python} RetrainContention.retrain_accels_str` accelerators for `{python} RetrainContention.retrain_time_str`, so while it runs the standby is the only further copy of the tables that fits. After the run, the candidate it produces can go out as a canary on `{python} ReleaseControlFootprint.accels_per_copy_str` of the freed accelerators. The schedule is illustrative and built from the chapter's worked numbers." fig-alt="Eight horizontal accelerator lanes across a 24-hour axis. The top two lanes hold the serving copy of the tables all day and the next two hold a hot standby all day. The bottom four lanes hold a retraining run for the first six hours. After the run, two of those lanes hold a canary copy and the last two are drawn as a dashed outline marked free."}
 
 ```{python}
 #| echo: false
@@ -2847,7 +2845,7 @@ days = np.arange(0, 365, 1)  # 1-year simulation
 baseline_acc = RankingDriftScenario.acc_initial  # the ranking service at launch
 decay_rate = RankingDriftScenario.gamma  # fitted daily decay from its week-four reading
 threshold = RankingDriftScenario.acc_week4  # drift alert threshold at the week-four value
-retrain_interval = 90  # scheduled: every 90 days
+retrain_interval = round(RetrainingInterval.interval.scheduled_interval.to("day").magnitude)  # scheduled: every 90 days
 
 # —Compute decay curves ---
 decay = np.exp(-decay_rate * days) * baseline_acc
@@ -2965,14 +2963,16 @@ Slice analysis can guide pipeline and serving-skew investigations by testing whe
 # │ How: Sum traffic percentages; compute weighted average of accuracy values.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, check
 
 class SliceAnalysisCalc:
     """Compute overall row from slice analysis segments."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    traffic_pcts = [45, 30, 20, 5]  # Desktop, iOS, Android, Tablet
-    accuracies = [94, 92, 88, 62]  # percent accuracy per segment
+    slices = Scenarios.RecommendationAccuracyByDevice
+    traffic_pcts = [round(100 * share) for share in slices.traffic_shares.values()]  # Desktop, iOS, Android, Tablet
+    accuracies = [round(100 * acc) for acc in slices.accuracies.values()]  # percent accuracy per segment
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     total_traffic = sum(traffic_pcts)

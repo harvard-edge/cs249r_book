@@ -78,37 +78,37 @@ A learned policy acquires its behavior from the experience its training supplies
 # │       the tripwire-to-brake response after threshold accumulation.
 # │ Show: setpoint and chunk periods, both approach speeds, latch limit, contact-loop
 # │       response, threshold and brake-onset times, and the two deadlines.
-# │ How: F = k*v*t, so t_yield = F_lim / (k*v) (calc_contact_yield_deadline);
-# │      every input from RM / AISLE.
+# │ How: F = k*v*t, so t_yield = F_lim / (k*v); Scenarios.LatchContactDeadlines
+# │      computes every deadline from AISLE; the periods come from RM.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_contact_yield_deadline
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class LatchContactDeadline:
     # ┌── 1. LOAD (Constants) ──────────────────────
+    deadlines = Scenarios.LatchContactDeadlines  # category: derived (constant-drive contact deadlines at the latch)
     t_step = RM.chunk_step  # category: chosen (chunk-policy setpoint period)
     chunk_rate = RM.chunk_rate  # category: chosen (chunk-policy renewal rate)
-    k_plate = AISLE.k_latch  # category: illustrative (strike-plate contact stiffness)
-    v_guarded = AISLE.v_latch_approach  # category: illustrative (guarded, demonstrated approach speed)
-    v_fast = AISLE.v_latch_high  # category: illustrative (unsupported fast approach speed)
-    f_lim = AISLE.f_latch_limit  # category: illustrative (latch force limit)
-    f_trip = AISLE.f_latch_tripwire  # category: illustrative (contact tripwire force)
-    t_contact_loop = AISLE.t_contact_response  # category: illustrative (tripwire-detection-to-brake-onset response time)
+    k_plate = deadlines.site.k_latch  # category: illustrative (strike-plate contact stiffness)
+    v_guarded = deadlines.guarded_speed  # category: illustrative (guarded, demonstrated approach speed)
+    v_fast = deadlines.fast_speed  # category: illustrative (unsupported fast approach speed)
+    f_lim = deadlines.site.f_latch_limit  # category: illustrative (latch force limit)
+    f_trip = deadlines.site.f_latch_tripwire  # category: illustrative (contact tripwire force)
+    t_contact_loop = deadlines.site.t_contact_response  # category: illustrative (tripwire-detection-to-brake-onset response time)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     t_chunk = (1 / chunk_rate).to(millisecond)  # chunk renewal period, the asynchronous inference deadline
-    t_yield_guarded = calc_contact_yield_deadline(f_lim, k_plate, v_guarded).to(millisecond)
-    t_yield_fast = calc_contact_yield_deadline(f_lim, k_plate, v_fast).to(millisecond)
-    t_trip_fast = (f_trip / (k_plate * v_fast)).to(millisecond)
-    t_trip_guarded = (f_trip / (k_plate * v_guarded)).to(millisecond)
-    t_brake_fast = (t_trip_fast + t_contact_loop).to(millisecond)
-    t_brake_guarded = (t_trip_guarded + t_contact_loop).to(millisecond)
-    fast_margin_ratio = (t_yield_fast / t_brake_fast).to("dimensionless").magnitude
-    t_left_fast = (t_yield_fast - t_brake_fast).to(millisecond)
-    t_left_guarded = (t_yield_guarded - t_brake_guarded).to(millisecond)
+    t_yield_guarded = deadlines.deadline_guarded.to(millisecond)
+    t_yield_fast = deadlines.deadline_fast.to(millisecond)
+    t_trip_fast = deadlines.tripwire_fast.to(millisecond)
+    t_trip_guarded = deadlines.tripwire_guarded.to(millisecond)
+    t_brake_fast = deadlines.brake_onset_fast.to(millisecond)
+    t_brake_guarded = deadlines.brake_onset_guarded.to(millisecond)
+    fast_margin_ratio = deadlines.fast_margin_ratio
+    t_left_fast = deadlines.time_left_fast.to(millisecond)
+    t_left_guarded = deadlines.time_left_guarded.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_step.to(millisecond).magnitude - 25.0) < 1e-9, f"setpoint period {t_step}")  # M5: 2 steps per renewal
@@ -207,7 +207,8 @@ A reward function that pays a policy for opening the cage door and penalizes eac
 # │       decision, the effective horizon in steps and seconds, and the
 # │       smallest discount that keeps half the terminal weight.
 # │ How: n = t_rollout / t_step; w = gamma^n; horizon = 1 / (1 - gamma);
-# │      gamma_half = 0.5^(1/n). Step from RM; rollout and gamma are chosen.
+# │      gamma_half = 0.5^(1/n), all in Scenarios.LatchOpeningDiscount. Step
+# │      from RM; rollout and gamma are scenario assumptions there.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -216,17 +217,18 @@ AISLE = Embodied.Scenario.WarehouseAisle
 
 class LatchRewardProblem:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_step = RM.chunk_step  # category: chosen (setpoint step, one decision)
-    t_rollout = 8.0 * second  # category: illustrative (autonomous contact phase of one opening, not the 25 s collection attempt of @sec-data)
-    gamma = 0.99  # category: chosen (a common discount factor)
+    opening = Scenarios.LatchOpeningDiscount  # category: derived (the discounted return over one opening)
+    t_step = opening.step  # category: chosen (setpoint step, one decision)
+    t_rollout = opening.rollout  # category: illustrative (autonomous contact phase of one opening, not the 25 s collection attempt of @sec-data)
+    gamma = opening.discount  # category: chosen (a common discount factor)
     f_trip = AISLE.f_latch_tripwire  # category: illustrative (contact tripwire on the latch)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    n_decisions = round((t_rollout / t_step).to("dimensionless").magnitude)
-    w_terminal = gamma**n_decisions
-    horizon_steps = 1 / (1 - gamma)
-    horizon_time = (horizon_steps * t_step).to(second)
-    gamma_half = 0.5 ** (1 / n_decisions)
+    n_decisions = opening.decisions
+    w_terminal = opening.terminal_weight
+    horizon_steps = opening.horizon_steps
+    horizon_time = opening.horizon_time.to(second)
+    gamma_half = opening.retaining_discount
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_step.to(millisecond).magnitude - 25.0) < 1e-9, f"setpoint step {t_step}")
@@ -491,7 +493,7 @@ The decoders that fix mode averaging buy that fix with time. A generative head e
 ↪ The placement of the multi-rate proposal and permission paths on the application processor and the safety microcontroller is developed in @sec-placement-two-paths-one-die.
 :::
 
-::: {#fig-06-diffusion-denoising data-explore="mechanism-scene" data-explore-key="vol4:fig-06-diffusion-denoising" fig-env="figure" fig-pos="htb" fig-cap="**Generative policy architectures and action chunk denoising**: (a) Sampling represents alternative demonstrated routes instead of their direct-regression mean. (b) Iterative refinement produces a candidate action chunk whose clearance and actuator feasibility still require checking. (c) On the machine's schedule, proposals renew every `{python} LatchContactDeadline.t_chunk_str` while setpoints play every `{python} LatchContactDeadline.t_step_str`, and the bars compare the deployed ACT decoder with an illustrative diffusion head that leaves far less of each renewal period to spare. An admitted chunk crosses the black-channel link into the safety MCU's own double buffer and is checked on every permission tick before the drives act. Buffering alone guarantees neither freshness nor freedom from starvation." fig-alt="Three-panel diagram. Panel (a) contrasts direct regression, whose single mean arrow runs between two dashed demonstrated routes into an obstacle, with conditional diffusion, where a sample arrow from noise lands in one of two mode regions. Panel (b) shows three denoising stages, from a jagged noise trace at step N through a dashed coarse curve to a smooth action chunk at step 0 marked candidate only. Panel (c) is a timing strip over 125 milliseconds with rows for 40 millisecond ACT inference bars, dashed 48 millisecond diffusion bars with 2 milliseconds of slack, a 60 millisecond lease renewed at the next admission, setpoint ticks every 25 milliseconds, and a dense 1 kilohertz permission tick row. Beside it, a block chain runs from the application processor through a black-channel link to a safety MCU with active and filling buffers, then to the drives."}
+::: {#fig-06-diffusion-denoising data-explore="original-v4-06-diffusion-denoising" data-explore-key="vol4:fig-06-diffusion-denoising" fig-env="figure" fig-pos="htb" fig-cap="**Generative policy architectures and action chunk denoising**: (a) Sampling represents alternative demonstrated routes instead of their direct-regression mean. (b) Iterative refinement produces a candidate action chunk whose clearance and actuator feasibility still require checking. (c) On the machine's schedule, proposals renew every `{python} LatchContactDeadline.t_chunk_str` while setpoints play every `{python} LatchContactDeadline.t_step_str`, and the bars compare the deployed ACT decoder with an illustrative diffusion head that leaves far less of each renewal period to spare. An admitted chunk crosses the black-channel link into the safety MCU's own double buffer and is checked on every permission tick before the drives act. Buffering alone guarantees neither freshness nor freedom from starvation." fig-alt="Three-panel diagram. Panel (a) contrasts direct regression, whose single mean arrow runs between two dashed demonstrated routes into an obstacle, with conditional diffusion, where a sample arrow from noise lands in one of two mode regions. Panel (b) shows three denoising stages, from a jagged noise trace at step N through a dashed coarse curve to a smooth action chunk at step 0 marked candidate only. Panel (c) is a timing strip over 125 milliseconds with rows for 40 millisecond ACT inference bars, dashed 48 millisecond diffusion bars with 2 milliseconds of slack, a 60 millisecond lease renewed at the next admission, setpoint ticks every 25 milliseconds, and a dense 1 kilohertz permission tick row. Beside it, a block chain runs from the application processor through a black-channel link to a safety MCU with active and filling buffers, then to the drives."}
 ![](images/svg/fig06_bespoke_diffusion_denoising_process.svg){width="100%"}
 :::
 
@@ -520,8 +522,8 @@ The encoder runs once per proposal, whereas each dependent decoder evaluation ad
 # │       10 ms; a 5 ms stretch carries the diffusion head 3 ms past its
 # │       renewal. The weight-streaming floor is priced in
 # │       @sec-brain-action-chunking, not here (coherence P1-4).
-# │ How: t_eval = (t_infer - t_enc) / K; deployed decoder and periods from
-# │      RM (2026-09-28, M5).
+# │ How: t_eval = (t_infer - t_enc) / K in Scenarios.LatchDecoderBudget;
+# │      deployed decoder and periods from RM (2026-09-28, M5).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -529,23 +531,24 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class DecoderBudget:
     # ┌── 1. LOAD (Constants) ──────────────────────
+    budget = Scenarios.LatchDecoderBudget  # category: derived (ACT against iterative heads on the machine's deadlines)
     act_params = RM.chunk_model.parameters  # category: datasheet (ACT, the deployed chunk policy)
     horizon = RM.chunk_horizon  # category: chosen (setpoints per chunk)
-    t_act = RM.chunk_inference_latency.to(millisecond)  # category: illustrative (P99 incl. vision)
-    t_step = RM.chunk_step.to(millisecond)  # category: chosen (setpoint step, synchronous deadline)
-    t_renew = RM.chunk_period  # category: derived (renewal period, asynchronous deadline)
-    k_ddim = 16  # category: illustrative (DDIM denoising steps)
-    k_flow = 4  # category: illustrative (flow-matching evaluations)
-    t_enc = 8 * millisecond  # category: illustrative (visual encoding, once per proposal)
-    t_ddim = 48 * millisecond  # category: illustrative (stipulated total DDIM inference)
-    t_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
+    t_act = budget.one_pass_latency.to(millisecond)  # category: illustrative (P99 incl. vision)
+    t_step = budget.setpoint_step.to(millisecond)  # category: chosen (setpoint step, synchronous deadline)
+    t_renew = budget.renewal_period  # category: derived (renewal period, asynchronous deadline)
+    k_ddim = budget.denoising_steps  # category: illustrative (DDIM denoising steps)
+    k_flow = budget.flow_steps  # category: illustrative (flow-matching evaluations)
+    t_enc = budget.encode  # category: illustrative (visual encoding, once per proposal)
+    t_ddim = budget.denoising_latency  # category: illustrative (stipulated total DDIM inference)
+    t_jitter = budget.renewal_jitter  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_eval = ((t_ddim - t_enc) / k_ddim).to(millisecond)
-    t_flow = (t_enc + k_flow * t_eval).to(millisecond)
-    slack_act = (t_renew - t_act).to(millisecond)
-    slack_ddim = (t_renew - t_ddim).to(millisecond)
-    ddim_stretch_over = (t_ddim + t_jitter - t_renew).to(millisecond)
+    t_eval = budget.per_evaluation.to(millisecond)
+    t_flow = budget.flow_latency.to(millisecond)
+    slack_act = budget.one_pass_slack.to(millisecond)
+    slack_ddim = budget.denoising_slack.to(millisecond)
+    ddim_stretch_over = budget.denoising_overrun_under_jitter.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_eval.magnitude - 2.5) < 1e-9, f"per-evaluation time {t_eval}")
@@ -749,14 +752,15 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 class PretrainSupport:
     # ┌── 1. LOAD (Constants) ──────────────────────
     base = RM.intent_model  # category: datasheet (the machine's pretrained VLA)
-    n_pretrain_episodes = 970_000  # category: measured (Kim et al. 2024: 970k Open X-Embodiment episodes; registry training_dataset_size is empty)
-    n_plate_positions = 3  # category: chosen (nominal and two displacements, the scenario table of @sec-data-policy-coverage)
-    n_approach_speeds = 2  # category: chosen (guarded and fast, same table)
-    n_supported_campaign = 1  # category: derived (@sec-data-policy-coverage join: nominal plate, guarded approach)
+    table = Scenarios.LatchScenarioTable  # category: derived (the latch scenario table of @sec-data-policy-coverage)
+    n_pretrain_episodes = int(Literature.RobotLearning.OpenVlaPretrainingEpisodes)  # category: measured (Kim et al. 2024: 970k Open X-Embodiment episodes; registry training_dataset_size is empty)
+    n_plate_positions = len(table.offsets)  # category: chosen (nominal and two displacements)
+    n_approach_speeds = len(table.speeds)  # category: chosen (guarded and fast, same table)
+    n_supported_campaign = table.supported  # category: derived (@sec-data-policy-coverage join: nominal plate, guarded approach)
     n_joinable_pretrain = 0  # category: derived (no pretraining episode was recorded on this machine, door, or table)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    n_cells = n_plate_positions * n_approach_speeds
+    n_cells = table.cells
     n_supported_post = n_supported_campaign + n_joinable_pretrain
     n_absent_post = n_cells - n_supported_post
 
@@ -813,41 +817,42 @@ Because each physical rollout dissipates heat in motor windings, cycles actuator
 # │       resulting single-machine and 14-rig durations, and the trial and
 # │       reversal counts that fit a 2.5 h demonstration-seeded campaign.
 # │ How: T_wall = N (t_rollout + t_reset) / N_rig; N_hil = floor(t_hil /
-# │      (t_rollout + t_reset_auto)); literature values from the cited papers.
+# │      (t_rollout + t_reset_auto)), in Scenarios.LatchTrialCampaign;
+# │      literature values from Literature.RobotLearning.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import degC
 from mlsysim.fmt import fmt_sci, fmt_temperature
 
 class TrialWallClock:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_rollout = LatchRewardProblem.t_rollout  # category: illustrative (one opening, @sec-training-rl-primer)
-    n_trials = 1_000_000  # category: illustrative (order-of-magnitude trial count for RL from scratch)
-    n_rig = 1  # category: illustrative (single physical machine)
-    t_reset_auto = 4.0 * second  # category: illustrative (dedicated RL fixture, faster than the 15 s collection re-latch of @sec-data)
-    t_reset_manual = 30.0 * second  # category: illustrative (manual operator reset)
-    n_reversals_per_trial = 4  # category: illustrative (joint load reversals per opening)
-    n_rig_farm = 14  # category: measured (largest simultaneous arm count, Levine et al. 2018)
-    n_rig_farm_min = 6  # category: measured (smallest simultaneous arm count, Levine et al. 2018)
-    n_grasps_farm = 800_000  # category: measured (grasp attempts, Levine et al. 2018)
+    campaign = Scenarios.LatchTrialCampaign  # category: derived (the from-scratch latch campaign and its seeded alternative)
+    LIT = Literature.RobotLearning
+    t_rollout = campaign.rollout  # category: illustrative (one opening, @sec-training-rl-primer)
+    n_trials = campaign.trials  # category: illustrative (order-of-magnitude trial count for RL from scratch)
+    t_reset_auto = campaign.automated_reset  # category: illustrative (dedicated RL fixture, faster than the 15 s collection re-latch of @sec-data)
+    t_reset_manual = campaign.manual_reset  # category: illustrative (manual operator reset)
+    n_reversals_per_trial = campaign.reversals_per_trial  # category: illustrative (joint load reversals per opening)
+    n_rig_farm = campaign.farm_rigs  # category: measured (largest simultaneous arm count, Levine et al. 2018)
+    n_rig_farm_min = int(LIT.GraspingFarmMinArms)  # category: measured (smallest simultaneous arm count, Levine et al. 2018)
+    n_grasps_farm = int(LIT.GraspingFarmAttempts)  # category: measured (grasp attempts, Levine et al. 2018)
     t_insul = INSULATION_CLASS_F_LIMIT  # category: sourced (IEC 60085 Class F hotspot; same limit as @sec-body-thermal-capacity)
-    n_grasps_qtopt = 580_000  # category: measured (real grasp attempts, Kalashnikov et al. 2018)
-    t_hil_min = 1.0 * hour  # category: measured (shortest reported real training time, Luo et al. 2025)
-    t_hil_max = 2.5 * hour  # category: measured (longest reported real training time, Luo et al. 2025)
-    n_demo_hil_min = 20  # category: measured (typical demonstration buffer, Luo et al. 2025)
-    n_demo_hil_max = 30  # category: measured (typical demonstration buffer, Luo et al. 2025)
+    n_grasps_qtopt = int(LIT.QtOptGraspAttempts)  # category: measured (real grasp attempts, Kalashnikov et al. 2018)
+    t_hil_min = float(LIT.HilSerlMinTrainingHours) * hour  # category: measured (shortest reported real training time, Luo et al. 2025)
+    t_hil_max = campaign.seeded_budget  # category: measured (longest reported real training time, Luo et al. 2025)
+    n_demo_hil_min = int(LIT.HilSerlMinDemonstrations)  # category: measured (typical demonstration buffer, Luo et al. 2025)
+    n_demo_hil_max = int(LIT.HilSerlMaxDemonstrations)  # category: measured (typical demonstration buffer, Luo et al. 2025)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_exec = (n_trials * t_rollout / n_rig).to(second)
-    t_auto = (n_trials * (t_rollout + t_reset_auto) / n_rig).to(second)
-    t_manual = (n_trials * (t_rollout + t_reset_manual) / n_rig).to(second)
-    t_manual_farm = (t_manual / n_rig_farm).to(day)
-    n_reversals = n_trials * n_reversals_per_trial
-    n_trials_hil = math.floor((t_hil_max / (t_rollout + t_reset_auto)).to("dimensionless").magnitude)
-    n_reversals_hil = n_trials_hil * n_reversals_per_trial
-    trials_ratio = round(n_trials / n_trials_hil, -2)  # rounded to two significant figures for prose
-    reset_share_manual = (t_reset_manual / (t_rollout + t_reset_manual)).to("dimensionless").magnitude
+    t_exec = campaign.execution_time.to(second)
+    t_auto = campaign.automated_time.to(second)
+    t_manual = campaign.manual_time.to(second)
+    t_manual_farm = campaign.farm_manual_time.to(day)
+    n_reversals = campaign.reversals
+    n_trials_hil = campaign.seeded_trials
+    n_reversals_hil = campaign.seeded_reversals
+    trials_ratio = round(campaign.trial_ratio, -2)  # rounded to two significant figures for prose
+    reset_share_manual = campaign.manual_reset_share
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_exec.to(day).magnitude - 92.59) < 0.01, f"execution time {t_exec.to(day)}")
@@ -1009,29 +1014,29 @@ GPU-resident simulation achieves this scale by maintaining the state of thousand
 # │       total policy steps, lower-bound throughput, simulated days of walking,
 # │       and the latch campaign's policy steps and time at that throughput.
 # │ How: batch = n_env * n_steps; samples = batch * n_updates; rate >= samples /
-# │      t_train (the paper reports "under 20 minutes"); Rudin et al. (2022).
+# │      t_train (the paper reports "under 20 minutes"); Rudin et al. (2022),
+# │      in Scenarios.LeggedGymQuadrupedRun and Scenarios.LatchTrialCampaign.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class ParallelSimBudget:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    n_env = 4096  # category: measured (parallel simulated robots, Rudin et al. 2022)
-    n_steps = 24  # category: measured (steps per robot per policy update, Rudin et al. 2022)
-    n_updates = 1500  # category: measured (policy updates, Rudin et al. 2022)
-    t_train = 20.0 * minute  # category: measured (upper bound, "under 20 minutes" on one RTX A6000, Rudin et al. 2022)
-    f_policy = 50.0 * hertz  # category: measured (policy rate, Rudin et al. 2022)
-    n_trials_latch = TrialWallClock.n_trials  # category: illustrative (from-scratch scenario)
-    n_decisions_latch = LatchRewardProblem.n_decisions  # category: derived (decisions per opening)
-    t_auto_latch = TrialWallClock.t_auto  # category: derived (automated-reset hardware campaign)
+    run = Scenarios.LeggedGymQuadrupedRun  # category: measured (Rudin et al. 2022, via Literature.RobotLearning)
+    campaign = Scenarios.LatchTrialCampaign  # category: derived (the latch openings at the run's throughput)
+    n_env = run.robots  # category: measured (parallel simulated robots, Rudin et al. 2022)
+    n_steps = run.steps_per_update  # category: measured (steps per robot per policy update, Rudin et al. 2022)
+    n_updates = run.updates  # category: measured (policy updates, Rudin et al. 2022)
+    t_train = run.training_time  # category: measured (upper bound, "under 20 minutes" on one RTX A6000, Rudin et al. 2022)
+    f_policy = run.policy_rate  # category: measured (policy rate, Rudin et al. 2022)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    batch = n_env * n_steps
-    samples = batch * n_updates
-    rate_min = (samples / t_train).to(1 / second)
-    t_sim_experience = (samples / f_policy).to(day)
-    latch_steps = n_trials_latch * n_decisions_latch
-    t_latch_sim = (latch_steps / rate_min).to(minute)
-    speedup = (t_auto_latch / t_latch_sim).to("dimensionless").magnitude
+    batch = run.batch
+    samples = run.samples
+    rate_min = run.throughput.to(1 / second)
+    t_sim_experience = run.simulated_experience.to(day)
+    latch_steps = campaign.simulated_steps
+    t_latch_sim = campaign.simulated_time.to(minute)
+    speedup = campaign.simulation_speedup
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(batch == 98_304, f"batch {batch}")
@@ -1099,36 +1104,37 @@ Rigid-body physics engines typically model contact using one of two paradigms: c
 # │      (F_lim/v)^2/m; k_robot* = 1/(1/k_eff* - 1/k_plate). The moving mass is
 # │      half the arm's mass (the registry's reflected-mass convention) without
 # │      the payload capacity, since the gripper carries no payload at the door.
+# │      Scenarios.LatchSoftSpringExploit computes every value.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_transient_impact_force
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class LatchContactExploit:
     # ┌── 1. LOAD (Constants) ──────────────────────
+    exploit = Scenarios.LatchSoftSpringExploit  # category: derived (soft simulated plate against the real plate)
     m_eff_registry = RM.arm_effective_contact_mass  # category: derived (half arm mass plus payload capacity)
     m_payload = RM.arm.payload_capacity  # category: datasheet (payload capacity, not carried at the door)
-    k_plate = AISLE.k_latch  # category: illustrative (real strike-plate contact stiffness)
-    v_fast = AISLE.v_latch_high  # category: illustrative (unsupported fast approach speed)
-    v_guarded = AISLE.v_latch_approach  # category: illustrative (guarded approach speed)
-    f_lim = AISLE.f_latch_limit  # category: illustrative (latch force limit)
-    delta_pen = 2.4 * millimeter  # category: illustrative (simulator penalty penetration at v_fast)
+    k_plate = exploit.site.k_latch  # category: illustrative (real strike-plate contact stiffness)
+    v_fast = exploit.site.v_latch_high  # category: illustrative (unsupported fast approach speed)
+    v_guarded = exploit.site.v_latch_approach  # category: illustrative (guarded approach speed)
+    f_lim = exploit.site.f_latch_limit  # category: illustrative (latch force limit)
+    delta_pen = exploit.penalty_penetration  # category: illustrative (simulator penalty penetration at v_fast)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    m_task = (m_eff_registry - m_payload).to(kg)
-    k_sim = (m_task * v_fast**2 / delta_pen**2).to(newton / meter)
-    f_sim = calc_transient_impact_force(v_fast, m_task, k_sim).to(newton)
-    f_rigid = calc_transient_impact_force(v_fast, m_task, k_plate).to(newton)
-    f_guarded_rigid = calc_transient_impact_force(v_guarded, m_task, k_plate).to(newton)
-    k_eff_star = ((f_lim / v_fast) ** 2 / m_task).to(newton / meter)
-    k_robot_star = (1 / (1 / k_eff_star - 1 / k_plate)).to(newton / meter)
-    plate_over_sim = (k_plate / k_sim).to("dimensionless").magnitude
-    rigid_over_lim = (f_rigid / f_lim).to("dimensionless").magnitude
-    t_contact_sim = ((m_task / k_sim) ** 0.5).to(millisecond)  # contact timescale sqrt(m/k), soft penalty spring
-    t_contact_plate = ((m_task / k_plate) ** 0.5).to(millisecond)  # contact timescale sqrt(m/k), real plate
-    t_contact_ratio = (t_contact_sim / t_contact_plate).to("dimensionless").magnitude
+    m_task = exploit.moving_mass.to(kg)
+    k_sim = exploit.penalty_stiffness.to(newton / meter)
+    f_sim = exploit.simulated_peak.to(newton)
+    f_rigid = exploit.rigid_peak.to(newton)
+    f_guarded_rigid = exploit.guarded_rigid_peak.to(newton)
+    k_eff_star = exploit.break_even_series_stiffness.to(newton / meter)
+    k_robot_star = exploit.break_even_arm_stiffness.to(newton / meter)
+    plate_over_sim = exploit.plate_over_penalty
+    rigid_over_lim = exploit.rigid_over_limit
+    t_contact_sim = exploit.penalty_timescale.to(millisecond)  # contact timescale sqrt(m/k), soft penalty spring
+    t_contact_plate = exploit.plate_timescale.to(millisecond)  # contact timescale sqrt(m/k), real plate
+    t_contact_ratio = exploit.timescale_ratio
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(m_eff_registry.to(kg).magnitude - 12.0) < 1e-9, f"registry m_eff {m_eff_registry}")
@@ -1378,31 +1384,32 @@ Timing mismatch governs the temporal alignment between observation capture, poli
 # │       sensing and appearance channels' bias, dropout, pixel difference,
 # │       patch shift, and chamfer tolerance.
 # │ How: t = F / (dF/dt); unmodeled travel = v * (tau_p99 - tau_sim); every
-# │      input is a scenario assumption for an illustrative drive.
+# │      input is a scenario assumption of Scenarios.LinearDriveRealityGap.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class LinearDriveGap:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    v_approach = 0.20 * meter / second  # category: illustrative (drive approach speed)
-    f_target = 10.0 * newton  # category: illustrative (regulated contact force)
-    rate_sim = 500.0 * newton / second  # category: illustrative (simulated force rise)
-    rate_real = 250.0 * newton / second  # category: illustrative (physical force rise)
-    tau_p99 = 49.5 * millisecond  # category: illustrative (P99 end-to-end actuation delay)
-    dt_sim = 20.0 * millisecond  # category: illustrative (simulator integration period, not command delay)
-    tau_sim = 0.0 * millisecond  # category: illustrative (observation-to-actuation delay omitted by the simulator)
-    tau_drive = 8.0 * millisecond  # category: illustrative (unmodeled drive/bus delay; also @tbl-06-reality-gap actuator row)
-    d_overtravel = 3.0 * millimeter  # category: illustrative (overtravel into the current-limit shutdown)
-    range_bias = 3.2 * millimeter  # category: illustrative (range-sensor bias; also @tbl-06-reality-gap sensing row)
-    n_dropout_frames = 4  # category: illustrative (specular dropout burst length, frames)
-    pixel_diff = 0.055  # category: illustrative (raw pixel difference, fraction of image)
-    patch_shift = 6.0 * millimeter  # category: illustrative (contact-patch estimate shift)
-    chamfer_tol = 2.0 * millimeter  # category: illustrative (chamfer tolerance)
+    gap = Scenarios.LinearDriveRealityGap  # category: illustrative (every input a scenario assumption there)
+    v_approach = gap.approach_speed  # category: illustrative (drive approach speed)
+    f_target = gap.target_force  # category: illustrative (regulated contact force)
+    rate_sim = gap.simulated_rise_rate  # category: illustrative (simulated force rise)
+    rate_real = gap.physical_rise_rate  # category: illustrative (physical force rise)
+    tau_p99 = gap.p99_delay  # category: illustrative (P99 end-to-end actuation delay)
+    dt_sim = gap.simulator_step  # category: illustrative (simulator integration period, not command delay)
+    tau_sim = gap.simulated_delay  # category: illustrative (observation-to-actuation delay omitted by the simulator)
+    tau_drive = gap.drive_delay  # category: illustrative (unmodeled drive/bus delay; also @tbl-06-reality-gap actuator row)
+    d_overtravel = gap.overtravel  # category: illustrative (overtravel into the current-limit shutdown)
+    range_bias = gap.range_bias  # category: illustrative (range-sensor bias; also @tbl-06-reality-gap sensing row)
+    n_dropout_frames = gap.dropout_frames  # category: illustrative (specular dropout burst length, frames)
+    pixel_diff = gap.pixel_difference  # category: illustrative (raw pixel difference, fraction of image)
+    patch_shift = gap.patch_shift  # category: illustrative (contact-patch estimate shift)
+    chamfer_tol = gap.chamfer_tolerance  # category: illustrative (chamfer tolerance)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_target_sim = (f_target / rate_sim).to(millisecond)
-    t_target_real = (f_target / rate_real).to(millisecond)
-    d_unmodeled = (v_approach * (tau_p99 - tau_sim)).to(millimeter)
+    t_target_sim = gap.simulated_time_to_target.to(millisecond)
+    t_target_real = gap.physical_time_to_target.to(millisecond)
+    d_unmodeled = gap.unmodeled_travel.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_target_sim.magnitude - 20.0) < 1e-9, f"sim time to target {t_target_sim}")
@@ -1626,8 +1633,8 @@ Furthermore, physical adaptation exacts a concrete hardware toll\index{Fine-tuni
 # │ Context: The real-machine fine-tuning example that follows (latch-res-03).
 # │ Goal: Convert an on-robot interaction budget into contact time and threshold samples.
 # │ Show: setpoint period and rate, active contact time, above-threshold sample count.
-# │ How: RM.chunk_step (machine setpoint period); AISLE.f_latch_tripwire;
-# │      step count and exceedance fraction are scenario assumptions.
+# │ How: Scenarios.LatchResidualFineTune (RM.chunk_step, and the step count and
+# │      exceedance fraction as scenario assumptions); AISLE.f_latch_tripwire.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -1636,16 +1643,17 @@ AISLE = Embodied.Scenario.WarehouseAisle
 
 class LatchResidualExposure:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_step = RM.chunk_step  # category: chosen (setpoint period of the chunk policy)
+    tune = Scenarios.LatchResidualFineTune  # category: illustrative (on-robot fine-tuning at the latch)
+    t_step = tune.step  # category: chosen (setpoint period of the chunk policy)
     f_trip = AISLE.f_latch_tripwire  # category: illustrative (contact tripwire on the latch)
-    plate_offset = 1.5 * millimeter  # category: illustrative (real plate position vs. simulated placement)
-    n_steps = 20_000  # category: illustrative (interaction steps collected)
-    frac_exceed = 0.015  # category: illustrative (exploratory steps past the tripwire)
+    plate_offset = tune.plate_offset  # category: illustrative (real plate position vs. simulated placement)
+    n_steps = tune.interaction_steps  # category: illustrative (interaction steps collected)
+    frac_exceed = tune.exceed_fraction  # category: illustrative (exploratory steps past the tripwire)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    f_step = (1 / t_step).to(hertz)
-    t_active = (n_steps * t_step).to(second)
-    n_exceed_samples = round(n_steps * frac_exceed)
+    f_step = tune.setpoint_rate.to(hertz)
+    t_active = tune.active_time.to(second)
+    n_exceed_samples = tune.exceed_samples
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_step.to(millisecond).magnitude - 25.0) < 1e-9, f"setpoint period {t_step}")  # M5 (was 20 ms)

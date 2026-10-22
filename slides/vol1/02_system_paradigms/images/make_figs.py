@@ -1,30 +1,26 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 2 (System Paradigms).
 
-Every value is sourced to the rendered chapter (System Paradigms) unless
-noted:
-  - Power tiers: cloud 3 MW, edge 200 W, mobile 5 W, TinyML 1 mW (Sec. 2.1).
-    Memory per example platform: TPU v4 pod 128 TB HBM, DGX Spark 128 GB,
-    phone 8-16 GB, ESP32-S3 512 KB SRAM (table 4).
-  - Round trip in fiber at 200,000 km/s (eq. 1): the arm's 1,500 km gives
-    15 ms (Napkin Math 2.2). Measured AWS medians from us-east-1 and the
-    great-circle floors come from calcs.py (cloudping.co, 2026-10-18).
-  - Camera bandwidth: 100 x 186.6 MB/s = 18.7 GB/s raw; 10 Gb/s link =
-    1.25 GB/s; defect metadata 1 KB x 20 events/s = 20 KB/s (Napkin Math 2.4).
-  - Memory wall: the slide shows Gholami et al., IEEE Micro 2024, Fig. 1
-    (gholami2024-hw-scaling.pdf, from the arXiv 2403.14123 source), not a
-    plot drawn here.
-  - TPU roofline: Jouppi et al., ISCA 2017, Tables 1 and 3 (inputs in calcs.py).
-  - A100 roofline: 312 TFLOP/s FP16, 2.04 TB/s, ridge 153 FLOP/byte;
-    ResNet-50 at batch 1: 8.2 GFLOP over 56.3 MB = 146 FLOP/byte (Napkin
-    Math 2.1). Batch-1 decode with 16-bit weights: about 1 FLOP/byte (Model
-    Serving, Sec. 13.9, as in Lecture 0). Batch B: about B FLOP/byte if
-    weight traffic dominates (derived; KV cache and activations ignored).
-  - Throttling: the slide shows the 3DMark result screen (GSMArena), not a
-    plot drawn here.
-  - Voice assistant: 1B devices x 32 KB/s = 32 TB/s if every microphone
-    streams; on-device wake word cuts audio leaving each device about 860x,
-    so about 37 GB/s (derived) (Napkin Math 2.10).
+Every value comes from calcs.py, which reads MLSysIM (registry, Literature,
+and Scenarios.*); figure labels print the same strings the slides print
+(deckvals.val). Sources, by figure:
+  - Power tiers: TPU v4 pod, DGX Spark, the mobile envelope, and the TinyML
+    envelope (Systems.Pods, Hardware, Platforms).
+  - Round trips: Scenarios.RoboticArmRegionalCloud and AwsUsEast1Routes
+    (cloudping.co medians via Literature.Series.AwsInterRegionRtt).
+  - Camera bandwidth: Scenarios.FactoryCameras1080p.
+  - Memory wall: Gholami et al., IEEE Micro 2024, Fig. 1 markers
+    (Literature.Series.MemoryWallHardwareScaling) and their log-linear fits
+    (Scenarios.MemoryWall*Trend).
+  - A100 roofline: Scenarios.ResNet50A100Batch1; decode intensity from the
+    Llama-3 70B decode scenario on the A100.
+  - TPU roofline: Scenarios.TpuV1ProductionRoofline (Jouppi et al. 2017).
+  - Voice assistant: Scenarios.VoiceAssistantBillionDevices.
+  - Microprocessor trends: Literature.Series.MicroprocessorTrends (Karl Rupp).
+  - Energy per inference: Scenarios.EnergyPerInferenceTiers and
+    RadioUploadVsMobileNetV2; measured row from MLPerf Tiny v1.2
+    (Literature.Series.MLPerfTinyV12KwsEnergy).
+  - Doorbell: Scenarios.SmartDoorbell and SmartDoorbellResponsiveChime.
 
 Run from this folder: python3 make_figs.py
 """
@@ -34,23 +30,28 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import calcs  # noqa: E402
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num, mlsysim  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
+Q_ = mlsysim.Q_
+
+
+def mag(q, unit):
+    return q.to(unit).magnitude
 
 # ---------------------------------------------------------------------------
 # 1. Power ladder with each tier's memory (four steps)
 # ---------------------------------------------------------------------------
 sp.hbars_steps(out / "power_tiers", [
-    ("Cloud", 3e6, "neutral", "3 MW   ·  128 TB"),
-    ("Edge", 200, "neutral", "200 W  ·  128 GB"),
-    ("Mobile", 5, "neutral", "5 W  ·  8–16 GB"),
-    ("TinyML", 1e-3, "neutral", "1 mW  ·  512 KB"),
+    ("Cloud", mag(calcs.POD.power, "W"), "neutral", f"{val('pod_mw')} MW   ·  {val('pod_mem_tb')} TB"),
+    ("Edge", mag(calcs.SPARK.tdp, "W"), "neutral", f"{val('edge_w')} W  ·  {val('edge_mem_gb')} GB"),
+    ("Mobile", num("mobile_w"), "neutral", f"{val('mobile_w')} W  ·  {val('mobile_ram_lo')}–{val('mobile_ram_hi')} GB"),
+    ("TinyML", mag(calcs.Platforms.Tiny.power_threshold, "W"), "neutral", f"{val('tiny_mw')} mW  ·  {val('tiny_sram_kb')} KB"),
 ], "W", xlabel="Power (watts, log scale)   ·   memory of the example platform")
 
 
@@ -58,9 +59,10 @@ sp.hbars_steps(out / "power_tiers", [
 # 2. Round trip: the fiber floor, then measured AWS medians (two steps)
 # ---------------------------------------------------------------------------
 def rtt(step):
-    rows = [("Arm to cloud, 1,500 km", 1500, calcs.rtt_floor_ms(1500), None)]
-    rows += [(f"Virginia to {lab}, {km:,.0f} km", km, fl, me)
-             for lab, km, fl, me in calcs.aws_routes()]
+    rows = [(f"Arm to cloud, {val('arm_km')} km", None, mag(calcs.ARM.round_trip, "ms"), None)]
+    rows += [(f"Virginia to {lab}, {val(f'rtt_{lab.lower()}_km')} km", None,
+              mag(r.round_trip, "ms"), mag(r.measured_round_trip, "ms"))
+             for lab, r in calcs.ROUTES.items()]
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
     n = len(rows)
     for i, (label, km, floor, meas) in enumerate(rows):
@@ -76,8 +78,9 @@ def rtt(step):
             ax.barh(y - 0.17, meas, color=C["danger"], height=0.32, alpha=a2)
             ax.text(meas + 1.5, y - 0.17, f"{meas:.0f} measured", va="center",
                     fontsize=11, color=C["danger"], fontweight="bold", alpha=a2)
-    ax.axvline(10, color=C["data"], lw=2.5)
-    ax.text(11, n - 0.25, "Arm budget 10 ms", color=C["data"], fontsize=11,
+    budget = num("arm_budget_ms")
+    ax.axvline(budget, color=C["data"], lw=2.5)
+    ax.text(budget + 1, n - 0.25, f"Arm budget {val('arm_budget_ms')} ms", color=C["data"], fontsize=11,
             fontweight="bold", va="center")
     ax.text(0.99, 0.99, "light: fiber floor\ndark: AWS median", transform=ax.transAxes,
             ha="right", va="top", fontsize=10, color=C["neutral"])
@@ -97,25 +100,25 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 3. Factory cameras: raw video against the link (three steps)
 # ---------------------------------------------------------------------------
-CAM_RAW = 100 * 1920 * 1080 * 3 * 30      # Napkin Math 2.4 inputs
-CAM_LINK = 10e9 / 8
-CAM_META = 1e3 * 20
+CAM_RAW = mag(calcs.CAMS.total_rate, "B/s")
+CAM_LINK = mag(calcs.CAMS.link_bandwidth, "B/s")
+CAM_META = mag(calcs.CAMS.event_bandwidth, "B/s")
 # Tick labels at 14 pt so the powers of ten stay legible on the slide.
 with sp.plt.rc_context({"xtick.labelsize": 14}):
     sp.hbars_steps(out / "camera_bandwidth", [
-      ("100 raw camera feeds", CAM_RAW, "danger", f"{CAM_RAW / 1e9:.1f} GB/s"),
-      ("10 Gb/s factory link", CAM_LINK, "neutral",
-       f"{CAM_LINK / 1e9:.2f} GB/s: {CAM_RAW / CAM_LINK:.0f}× too small"),
-      ("Defect metadata only", CAM_META, "data", f"{CAM_META / 1e3:.0f} KB/s"),
+      (f"{val('cam_count')} raw camera feeds", CAM_RAW, "danger", f"{val('cam_total_gbs')} GB/s"),
+      (f"{val('link_gbit')} Gb/s factory link", CAM_LINK, "neutral",
+       f"{val('link_gbs')} GB/s: {val('cam_short')}× too small"),
+      ("Defect metadata only", CAM_META, "data", f"{val('event_kbs')} KB/s"),
     ], "B/s", xlabel="Data rate (bytes per second, log scale)")
 
 # ---------------------------------------------------------------------------
 # 4. Memory wall from published chips: Gholami et al., IEEE Micro 2024,
-#    Fig. 1, redrawn at slide size from the markers digitized in calcs.py.
+#    Fig. 1, redrawn at slide size from the digitized markers in MLSysIM.
 #    Trend lines are least-squares fits on log values, as in the paper.
 # ---------------------------------------------------------------------------
 def memory_wall():
-    pts = calcs.gholami_points()
+    pts = calcs.wall_points()
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
     spec = [("flops", C["compute"], "Peak FLOP/s"),
             ("dram", C["memory"], "DRAM bandwidth"),
@@ -123,12 +126,12 @@ def memory_wall():
     for key, col, name in spec:
         xs = [p[0] for p in pts[key]]
         ys = [p[1] for p in pts[key]]
-        g, b, a0 = calcs.growth_per_2yr(pts[key])
+        g, b, a0 = calcs.WALL_FITS[key].fit
         ax.scatter(xs, ys, s=22, color=col, edgecolors="white", linewidths=0.6, zorder=3)
         fx = np.array([min(xs), max(xs)])
         ax.plot(fx, 10 ** (a0 + b * fx), color=col, lw=2.5, alpha=0.55, zorder=2)
         ly = {"flops": 4e6, "dram": 500, "interconnect": 12}[key]
-        ax.text(2023.3, ly, f"{name}\n{g:.1f}× every 2 years", color=col,
+        ax.text(2023.3, ly, f"{name}\n{val('wall_fit_' + key)}× every 2 years", color=col,
                 fontsize=11, fontweight="bold", va="center", ha="left")
     for label, (x, y), off in (("R10000", (1997.07, 1.0), (4, 8)),
                                ("H100", (2022.7, 2.92e6), (-6, 4))):
@@ -153,8 +156,8 @@ memory_wall()
 # ---------------------------------------------------------------------------
 # 5. The A100 roofline, built up, then workloads placed on it
 # ---------------------------------------------------------------------------
-PEAK, BW = 312.0, 2.04       # TFLOP/s, TB/s
-RIDGE = PEAK / BW            # about 153 FLOP/byte
+PEAK, BW = num("a100_tflops"), num("a100_tbs")    # TFLOP/s, TB/s, as printed
+RIDGE = PEAK / BW
 
 
 def roofline(name, parts):
@@ -164,17 +167,17 @@ def roofline(name, parts):
     if "slope" in parts:
         m = xs <= (RIDGE if "ceiling" in parts else 1e4)
         ax.plot(xs[m], slope[m], color=C["memory"], lw=3.5)
-        ax.text(0.13, 60, "Memory slope:\nintensity × 2.04 TB/s",
+        ax.text(0.13, 60, f"Memory slope:\nintensity × {val('a100_tbs')} TB/s",
                 color=C["memory"], fontsize=11, fontweight="bold", ha="left",
                 va="top")
     if "ceiling" in parts:
         m = xs >= RIDGE
         ax.plot(xs[m], [PEAK] * m.sum(), color=C["compute"], lw=3.5)
-        ax.text(1300, PEAK * 0.7, "Compute ceiling:\n312 TFLOP/s", color=C["compute"],
+        ax.text(1300, PEAK * 0.7, f"Compute ceiling:\n{val('a100_tflops')} TFLOP/s", color=C["compute"],
                 fontsize=11, fontweight="bold", ha="center", va="top")
     if "ridge" in parts:
         ax.axvline(RIDGE, color=C["neutral"], lw=1.2, ls="--")
-        ax.text(RIDGE * 1.1, 0.25, "Ridge\n153 FLOP/byte", color=C["neutral"],
+        ax.text(RIDGE * 1.1, 0.25, f"Ridge\n{val('a100_ridge')} FLOP/byte", color=C["neutral"],
                 fontsize=10, va="bottom")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -204,10 +207,10 @@ def roofline_col(name, point=None, peak2=False, arrow=False, qmark=False):
     m = xs <= RIDGE
     ax.plot(xs[m], xs[m] * BW, color=C["memory"], lw=3.5)
     ax.plot(xs[~m], [PEAK] * (~m).sum(), color=C["compute"], lw=3.5)
-    ax.text(1500, PEAK * 0.72, "312 TFLOP/s", color=C["compute"], fontsize=12,
+    ax.text(1500, PEAK * 0.72, f"{val('a100_tflops')} TFLOP/s", color=C["compute"], fontsize=12,
             fontweight="bold", ha="center", va="top")
     ax.axvline(RIDGE, color=C["neutral"], lw=1.2, ls="--")
-    ax.text(RIDGE * 1.15, 0.22, "Ridge\n153", color=C["neutral"], fontsize=12,
+    ax.text(RIDGE * 1.15, 0.22, f"Ridge\n{val('a100_ridge')}", color=C["neutral"], fontsize=12,
             va="bottom")
     if peak2:
         r2 = 2 * PEAK / BW
@@ -245,10 +248,12 @@ def roofline_col(name, point=None, peak2=False, arrow=False, qmark=False):
 
 
 roofline_col("roofline_resnet",
-             point=("ResNet-50,\nbatch 1: 146", 146.0, "memory", -10, 4, "right", "bottom"))
+             point=(f"ResNet-50,\nbatch 1: {val('resnet_intensity')}", num("resnet_intensity"),
+                    "memory", -10, 4, "right", "bottom"))
 roofline_col("roofline_decode_q", peak2=True, qmark=True)
 roofline_col("roofline_decode_a",
-             point=("Decode,\nbatch 1: ≈1", 1.0, "danger", 6, -8, "left", "top"),
+             point=(f"Decode,\nbatch 1: ≈{val('decode_intensity')}", num("decode_intensity"),
+                    "danger", 6, -8, "left", "top"),
              peak2=True, arrow=True)
 
 
@@ -257,21 +262,22 @@ roofline_col("roofline_decode_a",
 #    (Jouppi et al., ISCA 2017, Fig. 5 redrawn from Tables 1 and 3)
 # ---------------------------------------------------------------------------
 def tpu_roofline():
-    peak, ridge = calcs.TPU_PEAK, calcs.TPU_RIDGE
+    peak, ridge = mag(calcs.TPU_ROOF.peak, "TOPS"), calcs.TPU_ROOF.ridge
     xs = np.logspace(1, 4, 400)
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
     m = xs <= ridge
     ax.plot(xs[m], xs[m] * peak / ridge, color=C["memory"], lw=3.5)
     ax.plot(xs[~m], [peak] * (~m).sum(), color=C["compute"], lw=3.5)
     ax.axvline(ridge, color=C["neutral"], lw=1.2, ls="--")
-    ax.text(ridge * 0.92, 1.25, "Ridge\n1,350", color=C["neutral"], fontsize=11,
+    ax.text(ridge * 0.92, 1.25, f"Ridge\n{val('tpu1_ridge')}", color=C["neutral"], fontsize=11,
             ha="right", va="bottom")
-    ax.text(5200, peak * 1.15, "92 TOPS peak", color=C["compute"], fontsize=11,
+    ax.text(5200, peak * 1.15, f"{val('tpu1_tops')} TOPS peak", color=C["compute"], fontsize=11,
             fontweight="bold", ha="center", va="bottom")
     offs = {"MLP0": (9, -3, "left", "top"), "MLP1": (-10, 4, "right", "bottom"),
             "LSTM0": (-11, 2, "right", "bottom"), "LSTM1": (9, -3, "left", "top"),
             "CNN0": (4, -9, "left", "top"), "CNN1": (10, 0, "left", "center")}
-    for name, x, y in calcs.TPU_APPS:
+    for a in calcs.TPU_ROOF.apps:
+        name, x, y = a["app"], a["intensity"], a["measured_tops"]
         ck = "memory" if x < ridge else "compute"
         ax.plot([x], [y], "o", ms=10, color=C[ck], mec="white", mew=1.5, zorder=5)
         dx, dy, ha, va = offs[name]
@@ -298,9 +304,9 @@ tpu_roofline()
 # 7. Voice assistant: audio leaving one billion devices (two steps)
 # ---------------------------------------------------------------------------
 sp.hbars_steps(out / "voice_upload", [
-    ("Every microphone streams", 32e12, "danger", "32 TB/s"),
-    ("Wake word on the device", 32e12 / 860, "data",
-     f"≈{32e12 / 860 / 1e9:.0f} GB/s: 860× less"),  # chapter's 860x
+    ("Every microphone streams", mag(calcs.VOICE.fleet_stream_rate, "B/s"), "danger", f"{val('voice_tbs')} TB/s"),
+    ("Wake word on the device", mag(calcs.VOICE.fleet_query_rate, "B/s"), "data",
+     f"≈{val('voice_after_gbs')} GB/s: {val('voice_cut')}× less"),
 ], "B/s", xlabel="Audio sent to the cloud (bytes per second, log scale)",
     size=sp.SHORT)
 
@@ -310,9 +316,7 @@ sp.hbars_steps(out / "voice_upload", [
 #    Karl Rupp, Microprocessor Trend Data). Direct labels replace the legend.
 # ---------------------------------------------------------------------------
 def trends():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-    from mlsysim import Literature
-    rows = Literature.Series.MicroprocessorTrends.entries
+    rows = mlsysim.Literature.Series.MicroprocessorTrends.entries
     series = [  # key, label, color, marker, label y at the right edge
         ("transistors", "Transistors (K)", C["danger"], "o", 3e7),
         ("specint", "Single-thread\nperf. (SPECint ×10³)", C["memory"], "s", 1.2e5),
@@ -346,25 +350,27 @@ trends()
 
 # ---------------------------------------------------------------------------
 # 9. Energy per inference across tiers, redrawn at slide size with the
-#    values printed on the book's figure (System Paradigms, fig. 7,
-#    EnergyAnchors): 10 μJ, 2.6 mJ, 15.9 mJ, 75.5 mJ, 1 kJ; span 100,000,000×.
-#    Step 2 adds Napkin Math 2.5: sending 1 MB by radio costs about 100 mJ,
-#    39 times the whole phone's 2.6 mJ; the NPU alone uses about 0.1 mJ.
-#    A measured row from MLPerf Tiny v1.2 (keyword spotting, energy track,
-#    best closed-division result, read by calcs.tiny_kws) sits under the
-#    chapter's TinyML anchor.
+#    values printed on the book's figure (System Paradigms, fig. 7;
+#    Scenarios.EnergyPerInferenceTiers). Step 2 adds Napkin Math 2.5
+#    (Scenarios.RadioUploadVsMobileNetV2): sending the payload by radio
+#    against the whole phone and the NPU alone. A measured row from MLPerf
+#    Tiny v1.2 (keyword spotting, energy track, best closed-division result,
+#    read by calcs.tiny_kws) sits under the chapter's TinyML anchor. Bars sit
+#    at the printed values.
 # ---------------------------------------------------------------------------
 def energy(step):
-    tiny = min(calcs.tiny_kws(), key=lambda r: r[3])
+    e = calcs.ENERGY.energies
+    J = lambda key, unit: mag(Q_(num(key), unit), "J")  # bar at the printed value
     rows = [
-        ("TinyML: keyword spotting", 10e-6, "compute", "≈10 μJ"),  # Greek mu: Helvetica slants the micro sign
-        ("Measured: KWS, Syntiant NDP9120", tiny[3] * 1e-6, "compute",
-         f"{tiny[3]:.1f} μJ (MLPerf Tiny)"),
-        ("Mobile: MobileNetV2, phone", 2.6e-3, "memory", "≈2.6 mJ"),
-        ("Mobile: send 1 MB by radio", 0.1, "danger", f"≈100 mJ: {100 / 2.6:.0f}× the phone"),
-        ("Edge: ResNet-50, Jetson", 15.9e-3, "data", "≈15.9 mJ"),
-        ("Cloud: ResNet-50, A100", 75.5e-3, "danger", "≈75.5 mJ"),
-        ("Cloud: LLM query (anchor)", 1e3, "danger", "≈1 kJ"),
+        ("TinyML: keyword spotting", J("e_kws_uj", "uJ"), "compute", f"≈{val('e_kws_uj')} μJ"),  # Greek mu: Helvetica slants the micro sign
+        ("Measured: KWS, Syntiant NDP9120", J("tiny_best_uj", "uJ"), "compute",
+         f"{val('tiny_best_uj')} μJ (MLPerf Tiny)"),
+        ("Mobile: MobileNetV2, phone", J("e_mobile_mj", "mJ"), "memory", f"≈{val('e_mobile_mj')} mJ"),
+        (f"Mobile: send {val('upload_mb')} MB by radio", J("upload_mj", "mJ"), "danger",
+         f"≈{val('upload_mj')} mJ: {val('upload_phone_x')}× the phone"),
+        ("Edge: ResNet-50, Jetson", J("e_edge_mj", "mJ"), "data", f"≈{val('e_edge_mj')} mJ"),
+        ("Cloud: ResNet-50, A100", J("e_cloud_mj", "mJ"), "danger", f"≈{val('e_cloud_mj')} mJ"),
+        ("Cloud: LLM query (anchor)", J("e_llm_kj", "kJ"), "danger", f"≈{val('e_llm_kj')} kJ"),
     ]
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.95))
     n = len(rows)
@@ -389,13 +395,14 @@ def energy(step):
                 color=C[ck], alpha=alpha)
     # the phone's NPU alone, inside the whole-phone bar
     ynpu = n - 3
-    ax.plot([1e-4, 1e-4], [ynpu - 0.31, ynpu + 0.31], color="white", lw=2.5,
+    npu = J("npu_mj", "mJ")
+    ax.plot([npu, npu], [ynpu - 0.31, ynpu + 0.31], color="white", lw=2.5,
             alpha=1.0 if step == 2 else 0.0)
-    ax.text(0.5, ynpu, "(tick: NPU alone ≈0.1 mJ)", color=C["memory"], fontsize=12,
+    ax.text(0.5, ynpu, f"(tick: NPU alone ≈{val('npu_mj')} mJ)", color=C["memory"], fontsize=12,
             fontweight="bold", ha="left", va="center", alpha=1.0 if step == 2 else 0.0)
     ax.annotate("", xy=(4e5, n - 1), xytext=(4e5, 0),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
-    ax.text(6e5, (n - 1) / 2, f"{1e3 / 10e-6:,.0f}×", color=C["danger"], fontsize=12,
+    ax.text(6e5, (n - 1) / 2, f"{val('e_span')}×", color=C["danger"], fontsize=12,
             fontweight="bold", rotation=90, va="center", ha="left")
     ax.set_xscale("log")
     ax.set_xlim(1e-6, 1e6)
@@ -417,18 +424,17 @@ for k in (1, 2):
 
 # ---------------------------------------------------------------------------
 # 10. Smart doorbell scorecard on the ESP32-S3 (System Paradigms, S2.3.2 and
-#     fig. 3): 0.5 MB of weights fill 11.9% of 4.2 MB flash; 25 MFLOP at
-#     about 0.25 GFLOP/s plus 1 ms overhead = 101 ms per frame. Step 1: the
-#     200 ms chime, 101 / 200 = 50.5%; step 2: a 50 ms chime, 202% (calcs.py).
+#     fig. 3): weights against flash, and latency per frame against the
+#     canonical chime (step 1) and the responsive chime (step 2); values from
+#     Scenarios.SmartDoorbell* via calcs.py.
 # ---------------------------------------------------------------------------
 def doorbell(step):
-    ms = 25e6 / 0.25e9 * 1e3 + 1          # 25 MFLOP at 0.25 GFLOP/s, +1 ms
-    budget = 200 if step == 1 else 50
-    lat = ms / budget * 100
-    lat_txt = f"{ms:.0f} ms of {budget} ms: {lat:.1f}%".replace(".0%", "%")
-    flash = 0.5 / 4.2 * 100
+    budget, pct = ("db_sla_ms", "db_sla_pct") if step == 1 else ("db_strict_ms", "db_strict_pct")
+    lat = num(pct)
+    lat_txt = f"{val('db_latency_ms')} ms of {val(budget)} ms: {val(pct)}%"
+    flash = num("db_flash_pct")
     rows = [("Latency\nper frame", lat, "danger" if lat > 100 else "data", lat_txt),
-            ("Weights in\n4.2 MB flash", flash, "data", f"{flash:.1f}%")]
+            (f"Weights in\n{val('db_flash_mb')} MB flash", flash, "data", f"{val('db_flash_pct')}%")]
     fig, ax = sp.plt.subplots(figsize=(4.0, 2.3))
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i

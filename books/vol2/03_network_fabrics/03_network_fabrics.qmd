@@ -514,18 +514,19 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_power, fmt_qty_range, fmt_usd
 
 class SpineOpticsCost:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
-    n_links = 2 * cluster_gpus  # scenario assumption: two spine-layer optical links per accelerator
-    link_cost = Infrastructure.Pricing.Network.OpticsPerLinkUsd.rate  # per-link optics cost
+    scenario = Scenarios.SpineOpticsTraining10K  # two spine-layer optical links per GPU on the 10K cluster
+    cluster_gpus = scenario.fleet.total_accelerators
+    link_cost = scenario.cost_per_link  # per-link optics cost
     dac_cost = Infrastructure.Pricing.Network.DacCableUsd.rate  # passive copper cable
     aoc_cost = Infrastructure.Pricing.Network.AocCableUsd.rate  # active optical cable
-    link_power = Systems.SwitchFabric.OpticsPluggable400G  # one selected spine-side module per link; opposite end excluded
+    link_power = scenario.power_per_link  # one selected spine-side module per link; opposite end excluded
     rack_power_low = Infrastructure.Racks.AI_Standard.power_kw * kW  # dense AI rack lower bound
     rack_power_high = Infrastructure.Racks.AI_High.power_kw * kW  # dense AI rack upper bound
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_cost = n_links * link_cost
-    total_power = n_links * link_power
+    n_links = scenario.n_links
+    total_cost = scenario.total_cost
+    total_power = scenario.total_power
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_power.to(kW).magnitude == 400, "20,000 selected spine-side modules at registry power should draw 400 kW")
@@ -677,7 +678,7 @@ RDMA bypasses the kernel data path. Offloading transport logic to the NIC allows
 
 [^fn-gpudirect-rdma-bypass]: **GPUDirect RDMA**\index{GPUDirect RDMA!zero-copy}: Introduced by NVIDIA for Kepler-class GPUs and CUDA 5.0, GPUDirect RDMA enables a direct PCIe path between GPU memory and third-party peer devices such as network interfaces [@nvidia2026gpudirectRdma]. Before GPUDirect, every gradient transfer had to stage through host memory, consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is one reason overlapping communication with backward-pass computation is feasible at scale.
 
-::: {#fig-gpudirect-data-path data-explore="mechanism-scene" data-explore-key="vol2:fig-gpudirect-data-path" fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA Data Path**: Without GPUDirect (dashed), a sending node first writes the $\PointToPointMessageSize$-byte payload from GPU memory into a registered host-memory buffer and the NIC then reads it back out, about $2\PointToPointMessageSize$ bytes of host-memory traffic per payload. With GPUDirect RDMA (solid), the NIC reads GPU memory directly over the PCIe peer-to-peer path, so the host-memory bounce disappears." fig-alt="A sending node drawn as its board layout: host memory with a registered buffer and the CPU root complex along the top, a wide PCIe switch in the middle, and GPU memory holding an n-byte payload beside the RDMA NIC along the bottom. A solid green path climbs from GPU memory into the PCIe switch and drops straight down to the NIC, which sends to the fabric. A dashed gray path climbs from GPU memory through the switch to the CPU, then into host memory, labeled 1, write n, and back out, labeled 2, read n, before descending through the switch to the NIC; a note under host memory reads about 2n bytes of bus traffic. A key labels the solid path GPUDirect RDMA and the dashed path staged via host memory."}
+::: {#fig-gpudirect-data-path data-explore="original-v2-gpudirect-data-path" data-explore-key="vol2:fig-gpudirect-data-path" fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA Data Path**: Without GPUDirect (dashed), a sending node first writes the $\PointToPointMessageSize$-byte payload from GPU memory into a registered host-memory buffer and the NIC then reads it back out, about $2\PointToPointMessageSize$ bytes of host-memory traffic per payload. With GPUDirect RDMA (solid), the NIC reads GPU memory directly over the PCIe peer-to-peer path, so the host-memory bounce disappears." fig-alt="A sending node drawn as its board layout: host memory with a registered buffer and the CPU root complex along the top, a wide PCIe switch in the middle, and GPU memory holding an n-byte payload beside the RDMA NIC along the bottom. A solid green path climbs from GPU memory into the PCIe switch and drops straight down to the NIC, which sends to the fabric. A dashed gray path climbs from GPU memory through the switch to the CPU, then into host memory, labeled 1, write n, and back out, labeled 2, read n, before descending through the switch to the NIC; a note under host memory reads about 2n bytes of bus traffic. A key labels the solid path GPUDirect RDMA and the dashed path staged via host memory."}
 ![](images/svg/gpudirect-data-path.svg)
 
 :::
@@ -714,10 +715,11 @@ By routing the user-space verbs API directly to hardware (@fig-ib-roce-stack), t
 # │      detection lengthens the delay.
 class GoBackNWindow:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    line_rate = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per direction
-    detect_delay = 5 * microsecond  # scenario assumption: same 5 μs feedback round trip as the incast analysis
+    scenario = Scenarios.GoBackNResendNdr  # NDR line rate, 5 μs loss-detection round trip
+    line_rate = scenario.link_bandwidth  # 50 GB/s per direction
+    detect_delay = scenario.delay  # same 5 μs feedback round trip as the incast analysis
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    resent = line_rate * detect_delay
+    resent = scenario.product
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(resent.to(KB).magnitude - 250) < 1e-6, "50 GB/s × 5 μs should be 250 KB")
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
@@ -755,34 +757,34 @@ class NetworkAlphaBeta:
     """Namespace for the alpha-beta communication model."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Level 1: Hardware Specs
-    FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
     # Scenario parameters, not universal protocol constants. Measured alpha and
     # delivered beta vary with NIC, topology, software, and message placement.
-    alpha_ib = FABRIC_ALPHA_NDR
-    beta_ib = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    eth_alpha = Systems.SwitchFabric.AlphaRoce
-    eth_beta = Systems.Fabrics.Ethernet_100G.bandwidth
+    scenario = Scenarios.AlphaBetaNdrRoce  # modeled NDR and 100G RoCE paths; 4 KB and 350 MB messages
+    alpha_ib = scenario.alphas["NDR"]
+    beta_ib = scenario.bandwidths["NDR"]
+    eth_alpha = scenario.alphas["RoCE 100G"]
+    eth_beta = scenario.bandwidths["RoCE 100G"]
 
     # Level 2: Messages
-    n_small = 4000 * byte  # scenario assumption: 4 KB control message
-    n_large = 350 * MB  # scenario assumption: 350 MB gradient shard
+    n_small = scenario.messages["control"]  # 4 KB control message
+    n_large = scenario.messages["shard"]  # 350 MB gradient shard
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    n_cross_ib = calc_alpha_beta_crossover(alpha_ib, beta_ib)
-    n_cross_eth = calc_alpha_beta_crossover(eth_alpha, eth_beta)
+    _ab = scenario.result
+    n_cross_ib = _ab.crossovers["NDR"]
+    n_cross_eth = _ab.crossovers["RoCE 100G"]
 
-    t_small_ib = calc_point_to_point_time(n_small, alpha_ib, beta_ib)
-    t_small_eth = calc_point_to_point_time(n_small, eth_alpha, eth_beta)
-    small_bw_term_pct = ((n_small / beta_ib) / t_small_ib).to_base_units().magnitude * 100
+    t_small_ib = _ab.times["NDR"]["control"]
+    t_small_eth = _ab.times["RoCE 100G"]["control"]
+    small_bw_term_pct = (_ab.transmission_times["NDR"]["control"] / t_small_ib).to_base_units().magnitude * 100
     small_speedup = (t_small_eth / t_small_ib).to_base_units().magnitude
 
     # Small-message worked-equation terms (microseconds), for the alpha-beta callout.
-    ib_small_xfer_us = (n_small / beta_ib).to(microsecond).magnitude
-    eth_small_xfer_us = (n_small / eth_beta).to(microsecond).magnitude
+    ib_small_xfer_us = _ab.transmission_times["NDR"]["control"].to(microsecond).magnitude
+    eth_small_xfer_us = _ab.transmission_times["RoCE 100G"]["control"].to(microsecond).magnitude
 
-    t_large_ib = calc_point_to_point_time(n_large, alpha_ib, beta_ib)
-    t_large_eth = calc_point_to_point_time(n_large, eth_alpha, eth_beta)
+    t_large_ib = _ab.times["NDR"]["shard"]
+    t_large_eth = _ab.times["RoCE 100G"]["shard"]
     large_speedup = (t_large_eth / t_large_ib).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -834,11 +836,13 @@ class NetworkAlphaBeta:
 # │ How: RoCE alpha on a 400 Gb/s Ethernet link, same messages as NetworkAlphaBeta.
 class AlphaBetaSameRate:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    alpha = NetworkAlphaBeta.eth_alpha
-    beta = Systems.Fabrics.RoCE_400G.bandwidth
+    _scn = NetworkAlphaBeta.scenario  # the same scenario's 400 Gb/s RoCE path
+    alpha = _scn.alphas["RoCE 400G"]
+    beta = _scn.bandwidths["RoCE 400G"]
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    t_small = calc_point_to_point_time(NetworkAlphaBeta.n_small, alpha, beta)
-    t_large = calc_point_to_point_time(NetworkAlphaBeta.n_large, alpha, beta)
+    _times = _scn.result.times["RoCE 400G"]
+    t_small = _times["control"]
+    t_large = _times["shard"]
     small_ratio = (t_small / NetworkAlphaBeta.t_small_ib).to_base_units().magnitude
     large_ratio = (t_large / NetworkAlphaBeta.t_large_ib).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
@@ -911,10 +915,11 @@ import numpy as np
 from mlsysim.fmt import fmt_bandwidth, fmt_memory
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-alpha_ib_q = Systems.SwitchFabric.AlphaNdr
-beta_ib_q = Systems.Fabrics.InfiniBand_NDR.bandwidth
-alpha_eth_q = Systems.SwitchFabric.AlphaRoce
-beta_eth_q = Systems.Fabrics.Ethernet_100G.bandwidth
+_ab_scn = Scenarios.AlphaBetaNdrRoce  # the paths of NetworkAlphaBeta
+alpha_ib_q = _ab_scn.alphas["NDR"]
+beta_ib_q = _ab_scn.bandwidths["NDR"]
+alpha_eth_q = _ab_scn.alphas["RoCE 100G"]
+beta_eth_q = _ab_scn.bandwidths["RoCE 100G"]
 
 alpha_ib = alpha_ib_q.to(second).magnitude
 beta_ib = beta_ib_q.to(byte / second).magnitude
@@ -1056,39 +1061,29 @@ plt.close()
 # │ Show: 8x H100 all-reduce: ~17 µs floor to 512 KB, 274 GB/s asymptotic
 # │       algorithm bandwidth; model knee ~5 MB; measured time up to ~1.7×
 # │       the model between 8 and 128 MB.
-# │ How: Floor = median time for sizes <= 64 KB; bandwidth = algbw at the
-# │      largest size; model T = floor + size / bandwidth over
-# │      Literature.Series.NCCLAllReduceH100Node.
+# │ How: Scenarios.NcclAllReduceH100NodeFit (CollectiveFitModel): floor =
+# │      median time for sizes <= 64 KiB; bandwidth = algbw at the largest
+# │      size; model T = floor + size / bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import statistics
-from mlsysim import Literature
 from mlsysim.core.units import GB, MB, second
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_multiple
-
-def _model_us(size_b, floor_us, bw_gbps):
-    return floor_us + size_b / (bw_gbps * 1e9) * 1e6
-
-def _worst_ratio(rows, floor_us, bw_gbps, lo_b, hi_b):
-    return max(r["oop_time_us"] / _model_us(r["size_bytes"], floor_us, bw_gbps) for r in rows if lo_b <= r["size_bytes"] <= hi_b)
-
-def _floor(rows, cutoff_b):
-    return statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= cutoff_b)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MeasuredAllReduce:
     """Two-parameter fit to a measured eight-GPU NCCL all-reduce sweep."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.NCCLAllReduceH100Node.entries
-    floor_cutoff_b = 64 * 1024
+    scenario = Scenarios.NcclAllReduceH100NodeFit  # floor up to 64 KiB; bandwidth at the largest size
+    rows = scenario.rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    floor_us = _floor(rows, floor_cutoff_b)
-    bw_gbps = rows[-1]["oop_algbw_GBps"]
-    peak_busbw_gbps = max(r["oop_busbw_GBps"] for r in rows)
-    knee_b = floor_us * 1e-6 * bw_gbps * 1e9
-    mid_ratio = _worst_ratio(rows, floor_us, bw_gbps, 8 * 2**20, 128 * 2**20)
+    fit = scenario.result
+    floor_us = fit.floor_time.to(microsecond).magnitude
+    bw_gbps = fit.bandwidth.to(GB / second).magnitude
+    peak_busbw_gbps = fit.peak_bus_bandwidth.to(GB / second).magnitude
+    knee_b = fit.knee.to(byte).magnitude
+    mid_ratio = fit.worst_mid_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(12 <= floor_us <= 20, f"Prose quotes the measured floor (about 17 microseconds), got {floor_us:.1f}.")
@@ -1127,7 +1122,7 @@ _C = MeasuredAllReduce
 _x = np.array([r["size_bytes"] for r in _C.rows])
 _t = np.array([r["oop_time_us"] for r in _C.rows])
 _xx = np.logspace(np.log10(_x.min()), np.log10(_x.max()), 200)
-ax.plot(_xx, [_model_us(s, _C.floor_us, _C.bw_gbps) for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2)
+ax.plot(_xx, [_C.fit.model_time(s * byte).to(microsecond).magnitude for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2)
 ax.plot(_xx, np.full_like(_xx, _C.floor_us), ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.plot(_xx, _xx / (_C.bw_gbps * 1e9) * 1e6, ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.scatter(_x, _t, s=22, color=COLORS["RedLine"], label="Measured (8× H100, NVLink)", zorder=3)
@@ -1187,13 +1182,14 @@ The $\MessageStartupLatency$-$\LinkBandwidth$ model quantifies the speed of a si
 class NetworkTopologyRadixRecap:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
-    radix = int(Systems.SwitchFabric.NdrSwitchPorts)
+    _fat_tree = Scenarios.FatTreeNdrSwitch  # fat-tree of 64-port NDR switches
+    radix = _fat_tree.radix
     downlinks = int(Systems.SwitchFabric.NdrLeafDownlinkPorts)
     uplinks = int(Systems.SwitchFabric.NdrLeafUplinkPorts)
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
-    two_tier_hosts = radix**2 // 2
-    three_tier_hosts = radix**3 // 4
+    two_tier_hosts = _fat_tree.two_tier_hosts
+    three_tier_hosts = _fat_tree.three_tier_hosts
     n_leaf_groups = n_gpus // downlinks
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
@@ -1232,14 +1228,13 @@ class NonBlockingOversubscription:
     """Throughput loss from a 2:1 oversubscribed spine."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    comm_fraction = ReferenceStats.NetworkEconomicsProfile.CommunicationFraction
-    oversubscription_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub2to1.oversubscription_ratio
+    scenario = Scenarios.RingAllReduceAcross2to1Spine  # the bisection scenario on a 2:1 spine
+    comm_fraction = scenario.communication_fraction
+    oversubscription_ratio = scenario.oversubscription_ratio
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    relative_throughput, throughput_loss = calc_oversubscription_effect(
-        comm_fraction,
-        oversubscription_ratio,
-    )
+    _r = scenario.result
+    relative_throughput, throughput_loss = _r.relative_throughput, _r.throughput_loss
     throughput_loss_pct = throughput_loss * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
@@ -1273,14 +1268,16 @@ class BisectionDefinitionExample:
     """1,024-GPU fat-tree bisection bandwidth at 1:1 vs 4:1 subscription."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_1K.total_accelerators
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s (50 GB/s) per port
-    oversub_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio
+    scenario = Scenarios.RingAllReduceAcross4to1Spine  # 1,024 GPUs, NDR links, 4:1 spine
+    n_gpus = scenario.fleet.total_accelerators
+    beta = scenario.link_bandwidth  # 400 Gb/s (50 GB/s) per port
+    oversub_ratio = scenario.oversubscription_ratio
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpus_per_side = n_gpus // 2
-    bisect_1_1 = calc_bisection_bandwidth(gpus_per_side, beta)
-    bisect_4_1 = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversub_ratio)
+    _r = scenario.result
+    gpus_per_side = _r.devices_per_side
+    bisect_1_1 = _r.bisection_full
+    bisect_4_1 = _r.bisection_oversubscribed
     slowdown = (bisect_1_1 / bisect_4_1).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1389,18 +1386,19 @@ class FatTreeScaling:
     """Fat-tree host count for radix-64 switches."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fat_tree_k = int(Systems.SwitchFabric.NdrSwitchPorts)  # NDR switch radix
+    _fat_tree = Scenarios.FatTreeNdrSwitch  # fat-tree of 64-port NDR switches
+    fat_tree_k = _fat_tree.radix  # NDR switch radix
     switch_cost_low = 10_000 * USD  # scenario assumption: per-switch price, low end
     switch_cost_high = 50_000 * USD  # scenario assumption: per-switch price, high end
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    fat_tree_hosts_val = (fat_tree_k**3) // 4
-    fat_tree_two_tier_hosts_val = (fat_tree_k**2) // 2  # standalone two-tier: k leaves x k/2 host ports
-    fat_tree_pod_hosts_val = (fat_tree_k // 2) ** 2  # one pod of the three-tier design: k/2 leaves x k/2 host ports
-    fat_tree_switches_val = (5 * fat_tree_k**2) // 4
+    fat_tree_hosts_val = _fat_tree.three_tier_hosts  # k^3/4
+    fat_tree_two_tier_hosts_val = _fat_tree.two_tier_hosts  # standalone two-tier: k leaves x k/2 host ports
+    fat_tree_pod_hosts_val = _fat_tree.pod_hosts  # one pod of the three-tier design: k/2 leaves x k/2 host ports
+    fat_tree_switches_val = _fat_tree.three_tier_switches  # 5k^2/4
     infra_cost_low = fat_tree_switches_val * switch_cost_low
     infra_cost_high = fat_tree_switches_val * switch_cost_high
-    scale_out_hosts_val = 2 * fat_tree_two_tier_hosts_val  # doubling past one standalone two-tier fabric
+    scale_out_hosts_val = Scenarios.TorusVsFatTree4K.n_endpoints  # doubling past one standalone two-tier fabric
     scale_out_pods_val = scale_out_hosts_val // fat_tree_pod_hosts_val
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
@@ -1454,26 +1452,27 @@ from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_int, fmt_memor
 
 class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_1K.total_accelerators
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    _econ = ReferenceStats.NetworkEconomicsProfile
-    gradient = _econ.PerGpuGradientPayload  # per-GPU gradient payload
-    oversubscription_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio  # cost-optimized spine
-    cluster_cost = _econ.ClusterCapex  # cluster capital cost
-    comm_fraction = _econ.CommunicationFraction  # training time spent communicating
+    scenario = Scenarios.RingAllReduceAcross4to1Spine  # every ring edge crosses the cut (worst case)
+    n_gpus = scenario.fleet.total_accelerators
+    beta = scenario.link_bandwidth
+    gradient = scenario.payload_per_device  # per-GPU gradient payload
+    oversubscription_ratio = scenario.oversubscription_ratio  # cost-optimized spine
+    cluster_cost = scenario.cluster_cost  # cluster capital cost
+    comm_fraction = scenario.communication_fraction  # training time spent communicating
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    gpus_per_side = n_gpus // 2
-    bw_1_1_q = calc_bisection_bandwidth(gpus_per_side, beta)
-    bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversubscription_ratio)
-    ring_factor = 2 * (n_gpus - 1) / n_gpus
+    _r = scenario.result
+    gpus_per_side = _r.devices_per_side
+    bw_1_1_q = _r.bisection_full
+    bw_4_1_q = _r.bisection_oversubscribed
+    ring_factor = _r.ring_factor
     crossing_edges_per_direction = gpus_per_side  # alternating-half rank placement
-    total_data = crossing_edges_per_direction * gradient * ring_factor
-    time_1_1 = total_data / bw_1_1_q
-    time_4_1 = total_data / bw_4_1_q
-    slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
-    _, throughput_loss = calc_oversubscription_effect(comm_fraction, oversubscription_ratio)
-    waste = throughput_loss * cluster_cost
+    total_data = _r.crossing_bytes
+    time_1_1 = _r.time_full
+    time_4_1 = _r.time_oversubscribed
+    slowdown = _r.slowdown
+    throughput_loss = _r.throughput_loss
+    waste = _r.idle_cost
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
     # 2026-09-28: cut load depends on ring placement, not total network traffic.
@@ -1584,17 +1583,17 @@ from mlsysim.fmt import check, fmt, fmt_time
 
 class RailLatency:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
-    t_hop = FABRIC_HOP_LATENCY  # switch + wire latency
+    scenario = Scenarios.RailVsLeafSpineHops
+    t_hop = scenario.hop_latency  # switch + wire latency
     n_nodes = Systems.Clusters.Training_1K.count  # reference-cluster node count
     # Standard fat-tree: source Leaf -> Spine -> destination Leaf = 3 switch
     # traversals (2026-06-07: was counted as 2, dropping the destination leaf).
     # Rail-optimized: one shared rail switch = 1 traversal.
-    n_hops_std = 3
-    n_hops_rail = 1
+    n_hops_std = scenario.hops["leaf-spine-leaf"]
+    n_hops_rail = scenario.hops["rail"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lat_std = calc_hop_latency(n_hops_std, t_hop)
-    lat_rail = calc_hop_latency(n_hops_rail, t_hop)
+    lat_std = scenario.latencies["leaf-spine-leaf"]
+    lat_rail = scenario.latencies["rail"]
     speedup = (lat_std / lat_rail).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(speedup == 3.0, f"Speedup {speedup:.1f}x unexpected")
@@ -1639,7 +1638,7 @@ class NetworkRailRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(_cluster.total_accelerators, commas=True, label="GPU")
     n_nodes_str = fmt_count(_cluster.count, commas=False, label="node")
-    gpus_per_rail_str = fmt_count(_cluster.total_accelerators // 8, commas=False, label="GPU")
+    gpus_per_rail_str = fmt_count(_cluster.total_accelerators // _cluster.node.accelerators_per_node, commas=False, label="GPU")  # one rail per GPU slot
 ```
 
 For the cluster of `{python} NetworkRailRecap.n_gpus_str` spanning `{python} NetworkRailRecap.n_nodes_str`, this creates 8 parallel networks\index{Rail-optimized topology!parallel rail fabrics} of `{python} NetworkRailRecap.gpus_per_rail_str` each, requiring at least one switch port per endpoint in each rail. A single-switch realization therefore needs a radix at least as large as the rail endpoint count; the earlier radix-`{python} NetworkTopologyRadixRecap.radix_str` switch cannot realize this rail alone, which is why notebook \ref{nbk-network-fabrics-rail-optimized-dividend} assumed higher-radix rail switches. Built from radix-`{python} NetworkTopologyRadixRecap.radix_str` switches instead, each rail becomes a small two-tier fabric that preserves rank alignment but adds hops. For the bandwidth-hungry gradient exchanges of data parallelism, the larger benefit is isolation: each rail carries only its own rank's traffic, so the eight rail networks operate concurrently without competing for shared spine capacity. When a rail fits on one switch, the shorter path also trims the startup cost a ring pays on every round. That same isolation creates a sharp trade-off, because traffic that must reach GPUs of different ranks (such as expert routing in mixture of experts (MoE), or pipeline-stage handoffs that do not align with the rail wiring) requires bridging across rails. Large clusters therefore often employ a hybrid approach, using rail-optimized leaves for same-rank data-parallel traffic while bridging the rails with a full fat-tree spine to support cross-rank communication patterns.
@@ -1683,21 +1682,23 @@ from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_math, fmt_multip
 
 class TorusVsFatTree:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    n_nodes = FatTreeScaling.scale_out_hosts_val  # same endpoints as the four-pod fat-tree
-    link_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # scenario assumption: equal per-link capacity, per direction
-    fat_tree_switches = 5  # leaf-spine-core-spine-leaf inter-pod path
+    scenario = Scenarios.TorusVsFatTree4K  # same endpoints as the four-pod fat-tree
+    n_nodes = scenario.n_endpoints
+    link_bw = scenario.link_bandwidth  # equal per-link capacity, per direction
+    fat_tree_switches = scenario.fat_tree_path_switches  # leaf-spine-core-spine-leaf inter-pod path
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    side = round(n_nodes ** (1 / 3))
-    torus_cut_links = 2 * side**2  # the wraparound doubles the links crossing a planar cut
-    fat_tree_cut_links = n_nodes // 2  # non-blocking: one full-rate link per host on each side
-    torus_bisect = torus_cut_links * link_bw
-    fat_tree_bisect = fat_tree_cut_links * link_bw
+    side = scenario.side
+    torus_cut_links = scenario.torus_cut_links  # the wraparound doubles the links crossing a planar cut
+    fat_tree_cut_links = scenario.fat_tree_cut_links  # non-blocking: one full-rate link per host on each side
+    torus_bisect = scenario.torus_bisection
+    fat_tree_bisect = scenario.fat_tree_bisection
     bisect_ratio = fat_tree_cut_links / torus_cut_links
-    torus_diameter = 3 * (side // 2)
+    torus_diameter = scenario.torus_diameter
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(side**3 == n_nodes, "Endpoint count must form a cubic torus")
+    check(n_nodes == FatTreeScaling.scale_out_hosts_val, "Torus endpoints must match the four-pod fat-tree")
     check(torus_cut_links == 512 and fat_tree_cut_links == 2048, "Expected 512 torus vs. 2,048 fat-tree cut links")
     check(torus_diameter == 24, "16-ary 3D torus diameter should be 24 hops")
     check(fat_tree_switches == 5, "Prose spells the inter-pod switch count as 'five'")
@@ -2003,7 +2004,7 @@ $$\PacketBuffer_1 \to \PacketBuffer_2 \to \dots \to \PacketBuffer_k \to \PacketB
 
 When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently. A four-switch ring whose queues ($\PacketBuffer_1$ through $\PacketBuffer_4$) are completely full shows this mutual protocol interlock (@fig-pfc-credit-deadlock). Solid gray arrows trace packet forwarding dependencies advancing clockwise ($\PacketBuffer_1 \to \PacketBuffer_2 \to \PacketBuffer_3 \to \PacketBuffer_4 \to \PacketBuffer_1$), while dashed red PAUSE frames propagate counterclockwise. Each full queue pauses its upstream predecessor while waiting for its downstream successor to drain, permanently freezing all four queues until an external watchdog intervenes to drop frames.
 
-::: {#fig-pfc-credit-deadlock data-explore="mechanism-scene" data-explore-key="vol2:fig-pfc-credit-deadlock" fig-env="figure" fig-pos="htb" fig-cap="**A PFC Deadlock from a Cyclic Buffer Dependency**: Four switch queues form the cycle of @eq-network-buffer-dependency-cycle. Follow the solid arrows clockwise: each full buffer holds packets that need space in the next. The dashed PAUSE frames run counterclockwise, so each full queue pauses its upstream predecessor while awaiting space in its downstream successor, and no queue can drain until a watchdog drops packets." fig-alt="Four switch boxes arranged as a ring, switch 1 at the top, 2 at the right, 3 at the bottom, and 4 at the left, each containing a full red four-slot queue labeled b1 to b4 and the words queue full. Solid dark arrows curve clockwise around the outside of the ring from switch 1 to 2 to 3 to 4 and back to 1, labeled b1 to b2, b2 to b3, b3 to b4, and b4 to b1. Dashed red arrows labeled PAUSE curve counterclockwise around the inside of the ring between the same switches, and the center of the ring reads deadlock."}
+::: {#fig-pfc-credit-deadlock data-explore="original-v2-pfc-credit-deadlock" data-explore-key="vol2:fig-pfc-credit-deadlock" fig-env="figure" fig-pos="htb" fig-cap="**A PFC Deadlock from a Cyclic Buffer Dependency**: Four switch queues form the cycle of @eq-network-buffer-dependency-cycle. Follow the solid arrows clockwise: each full buffer holds packets that need space in the next. The dashed PAUSE frames run counterclockwise, so each full queue pauses its upstream predecessor while awaiting space in its downstream successor, and no queue can drain until a watchdog drops packets." fig-alt="Four switch boxes arranged as a ring, switch 1 at the top, 2 at the right, 3 at the bottom, and 4 at the left, each containing a full red four-slot queue labeled b1 to b4 and the words queue full. Solid dark arrows curve clockwise around the outside of the ring from switch 1 to 2 to 3 to 4 and back to 1, labeled b1 to b2, b2 to b3, b3 to b4, and b4 to b1. Dashed red arrows labeled PAUSE curve counterclockwise around the inside of the ring between the same switches, and the center of the ring reads deadlock."}
 ![](images/svg/pfc-credit-deadlock.svg)
 :::
 
@@ -2044,15 +2045,16 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_percent
 
 class TransceiverDegradationRisk:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = 4096  # scenario assumption: large RoCE cluster size
-    links_per_gpu = 3  # scenario assumption: leaf + spine + core link tiers per GPU
-    transceivers_per_link = 2  # one module at each end of an optical link
-    p_transceiver_degrade = 1e-5  # scenario assumption: 0.001 percent per transceiver per day
+    scenario = Scenarios.TransceiverDegradationRoce4K  # 4,096 GPUs, three link tiers, two modules per link
+    n_gpus = scenario.counts["devices"]  # large RoCE cluster size
+    links_per_gpu = scenario.counts["links_per_device"]  # leaf + spine + core link tiers per GPU
+    transceivers_per_link = scenario.counts["modules_per_link"]  # one module at each end of an optical link
+    p_transceiver_degrade = scenario.probability  # 0.001 percent per transceiver per day
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_total_links = n_gpus * links_per_gpu
-    n_total_transceivers = n_total_links * transceivers_per_link
-    p_no_degradation = (1 - p_transceiver_degrade) ** n_total_transceivers
-    p_any_degradation = 1 - p_no_degradation
+    n_total_transceivers = scenario.n_components
+    p_no_degradation = scenario.p_none
+    p_any_degradation = scenario.p_any
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────
     check(n_total_links == 12288, f"Total links {n_total_links} outside expected range")
     check(n_total_transceivers == 24576, f"Total transceivers {n_total_transceivers} outside expected range")
@@ -2143,14 +2145,15 @@ from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_multipl
 
 class IncastCascadeFigure:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    n_senders = Systems.Clusters.DgxH100SuperPodSU.total_accelerators  # one GPU per sender
-    sender_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # per port, per direction
-    egress_port = Systems.Fabrics.Ethernet_400G.bandwidth
-    buffer = 32 * MB  # scenario assumption: switch egress buffer
+    scenario = Scenarios.IncastSuperPodUnit  # one SuperPOD scalable unit into one 400G egress
+    n_senders = scenario.n_senders  # one GPU per sender
+    sender_bw = scenario.sender_bandwidth  # per port, per direction
+    egress_port = scenario.egress_bandwidth
+    buffer = scenario.buffer  # switch egress buffer
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    offered = n_senders * sender_bw
-    oversub = (offered / egress_port).to_base_units().magnitude
+    offered = scenario.result.offered_load
+    oversub = scenario.result.oversubscription
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     # fig-alt (literal) says "GPU 1, 2, 3, and 256, with 252 more implied".
@@ -2198,20 +2201,22 @@ class IncastBurst:
     su_nodes = _su.count  # 32 DGX nodes per scalable unit
     gpus_per_node = _su.node.accelerators_per_node  # 8 GPUs per DGX node
     n_senders = su_nodes * gpus_per_node  # 256 scalable-unit GPUs (one per egress)
-    sender_bw = IncastCascadeFigure.sender_bw  # 50 GB/s per port (per direction)
-    egress_port = IncastCascadeFigure.egress_port  # 400 Gb/s (50 GB/s) egress port
-    buffer = IncastCascadeFigure.buffer  # scenario assumption (set in the figure cell): switch egress buffer
-    feedback_rtt = 5 * microsecond  # scenario assumption: congestion-feedback round trip
+    _scn = IncastCascadeFigure.scenario  # Scenarios.IncastSuperPodUnit
+    sender_bw = _scn.sender_bandwidth  # 50 GB/s per port (per direction)
+    egress_port = _scn.egress_bandwidth  # 400 Gb/s (50 GB/s) egress port
+    buffer = _scn.buffer  # switch egress buffer
+    feedback_rtt = _scn.feedback_rtt  # congestion-feedback round trip
     ref_cluster_gpus = Systems.Clusters.Training_1K.total_accelerators  # SuperPOD prose: reference cluster
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    offered = n_senders * sender_bw
+    _r = _scn.result
+    offered = _r.offered_load
     su_per_ref_cluster = ref_cluster_gpus // n_senders
-    oversub = (offered / egress_port).to_base_units().magnitude
-    buffer_hold = buffer / egress_port  # time one egress stream takes to drain the buffer
-    net_fill = offered - egress_port  # fill rate after the single egress port drains
-    overflow = buffer / net_fill
-    bandwidth_delay_product = egress_port * feedback_rtt
+    oversub = _r.oversubscription
+    buffer_hold = _r.drain_time  # time one egress stream takes to drain the buffer
+    net_fill = _r.net_fill_rate  # fill rate after the single egress port drains
+    overflow = _r.overflow_time
+    bandwidth_delay_product = _r.bandwidth_delay_product
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 × 50 GB/s should be 12.8 TB/s")
@@ -2374,13 +2379,14 @@ from mlsysim.fmt import check, fmt_percent
 class VirtualizationIdleCost:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     training_share = 0.80  # scenario assumption: bisection share reserved for the training job
-    n_vfs = 8  # scenario assumption: SR-IOV virtual functions carved from one NIC
-    nic_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    ckpt_write = 100 * GB  # scenario assumption: neighboring job's checkpoint burst
+    _sriov = Scenarios.SriovNdrNic  # eight SR-IOV functions on one NDR NIC; 100 GB neighbor checkpoint
+    n_vfs = _sriov.n_virtual_functions  # SR-IOV virtual functions carved from one NIC
+    nic_bw = _sriov.nic_bandwidth
+    ckpt_write = _sriov.burst_size  # neighboring job's checkpoint burst
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    vf_rate = nic_bw / n_vfs
-    ckpt_time = ckpt_write / nic_bw
+    vf_rate = _sriov.slice_rate
+    ckpt_time = _sriov.burst_time
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(n_vfs == 8, "Prose spells the VF count as 'eight'")
@@ -2444,27 +2450,30 @@ class SilentWaste:
     """Silent waste a degraded transceiver inflicts on a 30-day run."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_1K.total_accelerators
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # fleet price canon, per in-service accelerator-hour
-    bw_loss = 0.10  # scenario assumption: bandwidth loss from a degraded transceiver
-    slowdown_lo = 0.02  # scenario assumption: per-iteration slowdown (low end)
-    slowdown_hi = 0.03  # scenario assumption: per-iteration slowdown (high end)
-    run_days = 30  # scenario assumption: training-run duration
-    n_links = SerDesPowerBudget.n_links  # same fabric link count as the SerDes power estimate
-    p_link_degraded = 0.001  # scenario assumption: point-in-time probability that one link is degraded
+    scenario = Scenarios.DegradedTransceiverRun1K  # 10 percent bandwidth loss, 2-3 percent slower steps, 30 days
+    _links = Scenarios.DegradedLinksReferenceFabric  # about 3,000 links, each degraded with probability 0.1 percent
+    n_gpus = scenario.fleet.total_accelerators
+    gpu_hour_rate = scenario.device_hour_rate  # fleet price canon, per in-service accelerator-hour
+    bw_loss = scenario.bandwidth_loss  # bandwidth loss from a degraded transceiver
+    slowdown_lo = scenario.slowdowns["low"]  # per-iteration slowdown (low end)
+    slowdown_hi = scenario.slowdowns["high"]  # per-iteration slowdown (high end)
+    run_days = scenario.run_duration.to(day).magnitude  # training-run duration
+    n_links = _links.n_components  # same fabric link count as the SerDes power estimate
+    p_link_degraded = _links.probability  # point-in-time probability that one link is degraded
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_gpu_hours = n_gpus * run_days * 24
-    waste_lo = round(total_gpu_hours * slowdown_lo / 1000) * 1000
-    waste_hi = round(total_gpu_hours * slowdown_hi / 1000) * 1000
+    total_gpu_hours = scenario.device_hours
+    waste_lo = round(scenario.lost_device_hours["low"] / 1000) * 1000
+    waste_hi = round(scenario.lost_device_hours["high"] / 1000) * 1000
     _rate = gpu_hour_rate.to(USD / hour).magnitude
     cost_lo = round(waste_lo * _rate / 1000) * 1000
     cost_hi = round(waste_hi * _rate / 1000) * 1000
-    expected_degraded = n_links * p_link_degraded
-    p_any_degraded = 1 - (1 - p_link_degraded) ** n_links
+    expected_degraded = _links.expected_events
+    p_any_degraded = _links.p_any
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_gpu_hours == 737280, "1,024 GPUs × 30 days × 24 h should be 737,280 GPU-hours")
+    check(n_links == SerDesPowerBudget.n_links, "Degraded-link exposure uses the SerDes estimate's link count")
     check(waste_lo < waste_hi, "Low waste estimate must be below the high estimate")
     check(cost_hi < 100_000, "Silent waste should be tens of thousands of dollars, not millions")
 
@@ -2561,17 +2570,18 @@ In this order, application symptoms identify the failing path, transport counter
 # │ Context: "Diagnosing a training slowdown" checkpoint below.
 class DebugSlowdownScenario:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    step_before = 4.2 * second  # scenario assumption: healthy iteration time
-    step_after = 4.8 * second  # scenario assumption: degraded iteration time
-    util_before = 0.92  # scenario assumption: nvidia-smi utilization, healthy
-    util_after = 0.85  # scenario assumption: nvidia-smi utilization, degraded
-    run_days = 3  # scenario assumption: time since launch
-    delivered_eff = 0.96  # scenario assumption: ib_write_bw payload efficiency on a healthy NDR link
-    port_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    scenario = Scenarios.HalfRateLinkDiagnosis  # day-3 slowdown traced to one link at half rate
+    step_before = scenario.step_before  # healthy iteration time
+    step_after = scenario.step_after  # degraded iteration time
+    util_before = scenario.utilization_before  # nvidia-smi utilization, healthy
+    util_after = scenario.utilization_after  # nvidia-smi utilization, degraded
+    run_days = scenario.days_since_launch  # time since launch
+    delivered_eff = scenario.delivered_efficiency  # ib_write_bw payload efficiency on a healthy NDR link
+    port_bw = scenario.port_bandwidth
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    slowdown = (step_after / step_before - 1).to_base_units().magnitude
-    expected_bw = delivered_eff * port_bw
-    degraded_bw = expected_bw / 2  # the checkpoint's 50 percent bandwidth drop
+    slowdown = scenario.slowdown
+    expected_bw = scenario.expected_bandwidth
+    degraded_bw = scenario.measured_bandwidth  # the checkpoint's 50 percent bandwidth drop
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(0.14 < slowdown < 0.15, "4.2 s to 4.8 s should be a ~14 percent slowdown")
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
@@ -2792,16 +2802,16 @@ class BandwidthFallacy:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     from mlsysim import Hardware
 
+    scenario = Scenarios.AlphaBetaHdrNdrSmallMessage  # NDR startup latency on HDR and NDR links
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    alpha = FABRIC_ALPHA_NDR
-    msg = 10 * KB  # scenario assumption: small control packet
+    alpha = scenario.alphas["NDR"]
+    msg = scenario.messages["small"]  # small control packet
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # T(n) = alpha + n/beta, computed via pint to keep units explicit.
-    t_hdr = calc_point_to_point_time(msg, alpha, ib_hdr.bandwidth)
-    t_ndr = calc_point_to_point_time(msg, alpha, ib_ndr.bandwidth)
+    t_hdr = scenario.result.times["HDR"]["small"]
+    t_ndr = scenario.result.times["NDR"]["small"]
 
     speedup_pct = (1 - (t_ndr / t_hdr).to_base_units().magnitude) * 100
 
@@ -2838,11 +2848,12 @@ RoCE over Ethernet can achieve throughput comparable to InfiniBand for large tra
 class BisectionWasteRecap:
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
     # Same anchors as BisectionScaling (@sec-network-fabrics-fat-tree).
-    oversub_ratio_b = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio
-    cluster_cost = ReferenceStats.NetworkEconomicsProfile.ClusterCapex
-    comm_fraction = ReferenceStats.NetworkEconomicsProfile.CommunicationFraction
-    rel_throughput, throughput_loss = calc_oversubscription_effect(comm_fraction, oversub_ratio_b)
-    waste_val = throughput_loss * cluster_cost
+    _scn = Scenarios.RingAllReduceAcross4to1Spine
+    oversub_ratio_b = _scn.oversubscription_ratio
+    cluster_cost = _scn.cluster_cost
+    comm_fraction = _scn.communication_fraction
+    rel_throughput, throughput_loss = _scn.result.relative_throughput, _scn.result.throughput_loss
+    waste_val = _scn.result.idle_cost
     check(waste_val == BisectionScaling.waste, "Fallacy recap must match the bisection-bottleneck notebook")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     oversub_ratio_b_value_str = fmt(oversub_ratio_b, precision=0, commas=False)

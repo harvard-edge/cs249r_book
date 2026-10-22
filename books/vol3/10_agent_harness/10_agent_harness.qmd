@@ -383,25 +383,22 @@ Local candidate processing does not have to wait for remote model generation to 
 # │ Goal: Show how long one admitted call can hold off the next turn boundary.
 # │ Show: Reference per-token output allowance, a scenario output ceiling,
 # │       and their product.
-# │ How: Same registry path as the foundation-model cost cell: 8-bit weight
-# │      bytes / accelerator bandwidth per generated token. No queueing,
-# │      stalls, or serving overhead, so the product understates real waits.
+# │ How: Scenarios.CanceledStreamDecodeSavings: one call's output allowance at
+# │      the Llama-3 70B 8-bit decode floor on one H100 (weight bytes /
+# │      accelerator bandwidth per generated token). No queueing, stalls, or
+# │      serving overhead, so the product understates real waits.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import BYTES_INT8, param
 from mlsysim.fmt import check, fmt_count, fmt_time
 
 class BoundaryWait:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    weight_bytes = BYTES_INT8
-    k_max = 4_096  # scenario: per-call output-token allowance
+    call = Scenarios.CanceledStreamDecodeSavings  # one streamed call at the 8-bit decode floor
+    k_max = call.output_allowance  # scenario: per-call output-token allowance
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    weights = model.parameters / param * weight_bytes
-    t_dec = (weights / accel.memory.bandwidth).to(second)
-    t_wait = (k_max * t_dec).to(second)
+    t_dec = call.floors.result.memory_time.to(second)
+    t_wait = call.allowance_decode_time.to(second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(60 * second < t_wait < 120 * second, "Boundary wait exceeds one minute")
@@ -578,30 +575,31 @@ Under stable flow, Little's law (theorem \ref{thrm-05-littles-law}) makes the me
 # │ Show: Little's law held count, retained sandbox memory, approval share of
 # │       time to mitigate.
 # │ How:  L = lambda * W; registry sandbox footprint per held repair trajectory.
-# │ Note: Arrival rates and times are scenario inputs, not measurements; the
-# │       remediation ones come from the Agents.Remediation.OnCall profile.
+# │ Note: Arrival rates and times are scenario inputs, not measurements
+# │       (Scenarios.RepairRemediationApprovalEscrow); the remediation ones
+# │       come from the Agents.Remediation.OnCall profile.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent
 
 class EscrowByWorkload:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    remed = Agents.Remediation.OnCall
-    lease_mem = agent.sandbox_memory_footprint
-    lam_repair = 6  # scenario: review requests per hour
-    w_repair = 2  # scenario: mean hours to a review decision
-    lam_remed = remed.approval_request_rate.to("1/hour").magnitude  # approval requests per hour
-    t_diag = remed.diagnosis_time.to("minute").magnitude  # minutes of diagnosis before the proposal
-    w_remed = remed.approval_decision_time.to("minute").magnitude  # mean minutes to an on-call decision
-    t_apply = remed.apply_verify_time.to("minute").magnitude  # minutes to apply and verify the change
+    escrow = Scenarios.RepairRemediationApprovalEscrow
+    lease_mem = escrow.lease  # the coding harness's workspace lease
+    lam_repair = escrow.repair_rate.to("1/hour").magnitude  # scenario: review requests per hour
+    w_repair = escrow.repair_wait.to("hour").magnitude  # scenario: mean hours to a review decision
+    lam_remed = escrow.remediation_rate.to("1/hour").magnitude  # approval requests per hour
+    t_diag = escrow.diagnosis.to("minute").magnitude  # minutes of diagnosis before the proposal
+    w_remed = escrow.remediation_wait.to("minute").magnitude  # mean minutes to an on-call decision
+    t_apply = escrow.apply_verify.to("minute").magnitude  # minutes to apply and verify the change
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    l_repair = lam_repair * w_repair
-    retained = (l_repair * lease_mem).to(GiB)
-    l_remed = lam_remed * w_remed / 60
-    ttm = t_diag + w_remed + t_apply
-    approval_share = w_remed / ttm
+    _r = escrow.result
+    l_repair = _r.held
+    retained = _r.retained_memory.to(GiB)
+    l_remed = _r.remediation_held
+    ttm = _r.time_to_mitigate.to("minute").magnitude
+    approval_share = _r.approval_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(l_repair > 5 and l_remed < 1, "Repair holds many; remediation holds under one")
@@ -714,27 +712,33 @@ Credit belongs to the service class rather than to individual trajectories, so a
 # │ Context: @sec-vol3-controlplane-scheduling, notebook nbk-10-drr-charge-vs-calls.
 # │ Goal: Show that class weights fix token-charge shares, not call rates.
 # │ Show: Calls per round per class, rounds per maintenance call, call ratio.
-# │ How:  Long-run DRR: calls/round = weight * quantum / charge per call.
+# │ How:  Long-run DRR: calls/round = weight * quantum / charge per call
+# │       (Scenarios.InteractiveMaintenanceDrr, DeficitRoundRobinModel).
 # │ Note: Weights, quantum, and request sizes are scenario inputs.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class DrrShares:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    q = 8_000  # scheduling-charge tokens per unit weight per round
-    w_int, w_mnt = 3, 1  # class weights: interactive, maintenance
-    in_int, out_int = 2_000, 500  # interactive call: input + output allowance
-    in_mnt, out_mnt = 40_000, 2_000  # maintenance call: input + output allowance
+    drr = Scenarios.InteractiveMaintenanceDrr
+    compacted = Scenarios.InteractiveMaintenanceDrrCompacted  # maintenance input halved
+    q = drr.quantum  # scheduling-charge tokens per unit weight per round
+    _i, _m = drr.classes["interactive"], drr.classes["maintenance"]
+    w_int, w_mnt = _i["weight"], _m["weight"]  # class weights: interactive, maintenance
+    in_int, out_int = _i["input"], _i["output"]  # interactive call: input + output allowance
+    in_mnt, out_mnt = _m["input"], _m["output"]  # maintenance call: input + output allowance
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    q_int, q_mnt = w_int * q, w_mnt * q
-    c_int, c_mnt = in_int + out_int, in_mnt + out_mnt
-    calls_int = q_int / c_int  # long-run calls per round
-    rounds_mnt = c_mnt / q_mnt  # rounds of credit per maintenance call
-    calls_mnt = 1 / rounds_mnt
-    call_ratio = calls_int / calls_mnt
-    share_int = q_int / (q_int + q_mnt)
-    rounds_mnt_half = (in_mnt / 2 + out_mnt) / q_mnt
+    _r = drr.result
+    q_int, q_mnt = _r.credit_per_round["interactive"], _r.credit_per_round["maintenance"]
+    c_int, c_mnt = _r.charge_per_call["interactive"], _r.charge_per_call["maintenance"]
+    calls_int = _r.calls_per_round["interactive"]  # long-run calls per round
+    rounds_mnt = _r.rounds_per_call["maintenance"]  # rounds of credit per maintenance call
+    calls_mnt = _r.calls_per_round["maintenance"]
+    call_ratio = _r.call_ratio
+    share_int = _r.charge_share["interactive"]
+    rounds_mnt_half = compacted.result.rounds_per_call["maintenance"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(c_mnt > q_mnt, "A maintenance call must need credit carried over several rounds")
@@ -895,33 +899,35 @@ Even when the unreserved balance remains strictly positive, it may prove insuffi
 # │ Show: Both headrooms, the call's liability and its input share, the largest
 # │       admissible input, and the context cost of each unsettled dollar.
 # │ How:  liability = n_in * p_in + k_out * p_out (undiscounted input rate).
-# │ Note: Hypothetical prices and allowance, not a provider schedule.
+# │ Note: Hypothetical prices and allowance, not a provider schedule
+# │       (Scenarios.RepairNextCallAdmission).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_usd, fmt_percent
 
 class Admission:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    c_max = 3.50  # hypothetical dollar allowance for the trajectory
-    actual = 2.58  # settled spend so far
-    reserved = 0.50  # outstanding reservation on the unsettled test job
-    fin = 0.30  # protected finalization reserve
-    n_in = 50_000  # next call's input tokens
-    k_out = 4_096  # next call's output allowance
-    p_in, p_out = 3.00, 15.00  # hypothetical dollars per million tokens
-    probe = 0.10  # an unsettled amount used to express sensitivity
+    adm = Scenarios.RepairNextCallAdmission
+    c_max = adm.allowance.to("USD").magnitude  # hypothetical dollar allowance for the trajectory
+    actual = adm.settled.to("USD").magnitude  # settled spend so far
+    reserved = adm.reserved.to("USD").magnitude  # outstanding reservation on the unsettled test job
+    fin = adm.finalization_reserve.to("USD").magnitude  # protected finalization reserve
+    n_in = adm.input_tokens  # next call's input tokens
+    k_out = adm.output_allowance  # next call's output allowance
+    p_in = adm.input_price.to("USD / Mtoken").magnitude  # hypothetical dollars per million tokens
+    p_out = adm.output_price.to("USD / Mtoken").magnitude
+    probe = adm.probe.to("USD").magnitude  # an unsettled amount used to express sensitivity
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    c_input = n_in * p_in / 1e6
-    c_output = k_out * p_out / 1e6
-    liability = c_input + c_output
-    spend_headroom = c_max - actual
-    true_headroom = c_max - actual - reserved - fin
-    input_share = c_input / liability
-    n_in_max = (true_headroom - c_output) / (p_in / 1e6)
-    left_for_fin = c_max - (actual + reserved + liability)
-    fin_short = fin - left_for_fin
-    tokens_per_probe = probe / (p_in / 1e6)
-    reserved_share = reserved / c_max
+    _r = adm.result
+    c_input, c_output, liability = _r.input_liability, _r.output_liability, _r.liability
+    spend_headroom = _r.spend_headroom
+    true_headroom = _r.headroom
+    input_share = _r.input_share
+    n_in_max = _r.max_input_tokens
+    fin_short = _r.finalization_shortfall
+    tokens_per_probe = _r.tokens_per_probe
+    reserved_share = _r.reservation_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(liability < spend_headroom, "The spend check must admit the call")
@@ -986,28 +992,30 @@ from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_percent, check
 
 class HarnessBudget:
-    # 1. LOAD: registry trajectory length and declared scenario inputs.
-    agent = Agents.Coding.SWE_Bench_Runner
-    turns = agent.max_trajectory_steps
-    s_base = 8_000
-    delta = 1_500  # appended output plus tool-observation tokens
-    k_out = 200
-    p_in, p_cache, p_out = 3.00, 0.30, 15.00  # hypothetical dollars/million tokens
-    h_max, n_max = 40, 2_000_000
-    t_max, t_wall = 900, 460  # hypothetical elapsed allowance/readout, seconds
-    c_max = 3.50  # hypothetical dollar allowance
+    # 1. LOAD: registry trajectory length and declared scenario inputs
+    #    (Scenarios.RepairTrajectoryBudgetMeter over CodingAgentResend30Turns).
+    meter = Scenarios.RepairTrajectoryBudgetMeter
+    traj = meter.trajectory  # the coding harness's step budget sets the turns
+    turns = traj.turns
+    s_base = traj.first_prompt
+    delta = traj.appended  # appended output plus tool-observation tokens
+    k_out = traj.output_per_turn
+    p_in = meter.input_price.to("USD / Mtoken").magnitude  # hypothetical dollars/million tokens
+    p_cache = (meter.input_price * meter.cached_fraction).to("USD / Mtoken").magnitude
+    p_out = meter.output_price.to("USD / Mtoken").magnitude
+    h_max, n_max = meter.turn_allowance, meter.token_allowance
+    t_max = meter.time_allowance.to("second").magnitude  # hypothetical elapsed allowance, seconds
+    t_wall = meter.elapsed.to("second").magnitude  # hypothetical readout, seconds
+    c_max = meter.dollar_allowance.to("USD").magnitude  # hypothetical dollar allowance
 
     # 2. EXECUTE: distinguish effective token counts from billed categories.
-    n_in = turns * s_base + delta * turns * (turns - 1) // 2
-    n_uncached = s_base + delta * (turns - 1)
-    n_cached = n_in - n_uncached
-    n_out = turns * k_out
-    n_total = n_in + n_out
-    c_total = (n_uncached * p_in + n_cached * p_cache + n_out * p_out) / 1e6
-    c_total_nocache = (n_in * p_in + n_out * p_out) / 1e6
-    rho_turns, rho_tokens = turns / h_max, n_total / n_max
-    rho_wall, rho_dollars = t_wall / t_max, c_total / c_max
-    rho_dollars_nocache = c_total_nocache / c_max
+    _r = meter.result
+    n_in, n_uncached, n_cached = _r.input_tokens, _r.uncached_tokens, _r.cached_tokens
+    n_out, n_total = _r.output_tokens, _r.total_tokens
+    c_total, c_total_nocache = _r.cost_with_reuse, _r.cost_without_reuse
+    rho_turns, rho_tokens = _r.used_with_reuse["turns"], _r.used_with_reuse["tokens"]
+    rho_wall, rho_dollars = _r.used_with_reuse["time"], _r.used_with_reuse["dollars"]
+    rho_dollars_nocache = _r.used_without_reuse["dollars"]
 
     # 3. GUARD: these are current fractions, not future binding predictions.
     check(n_uncached + n_cached == n_in, "Disjoint input billing categories")
@@ -1086,46 +1094,32 @@ Baseline profiling under unconstrained budgets reveals the empirical completion 
 # │ Show: Share of failed and of accepted runs that a call ceiling at the
 # │       accepted runs' 90th percentile would halt; success vs. step
 # │       ceiling for the same model.
-# │ How:  Literature.SweBenchTrajectories (per-run call counts and outcome);
-# │       Literature.OSWorldStepBudget (same model at 15, 50, 100 steps).
+# │ How:  Scenarios.SweBenchCallCeilingP90 over Literature.SweBenchTrajectories
+# │       (per-run call counts and outcome); Scenarios.OSWorldStepCeilingReturn
+# │       over Literature.OSWorldStepBudget (same model at 15, 50, 100 steps).
 # └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
-
-def _halt_shares(runs, q):
-    """Share of failed and of accepted runs above the accepted runs' q-quantile of calls."""
-    ok = np.array([r["n_model_calls"] for r in runs if r["resolved"]])
-    bad = np.array([r["n_model_calls"] for r in runs if not r["resolved"]])
-    cap = np.quantile(ok, q)
-    return (bad > cap).mean(), (ok > cap).mean(), float(np.median(bad)), float(np.median(ok)), float(cap)
 
 class CeilingEvidence:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    runs = Literature.SweBenchTrajectories.entries
-    steps = Literature.OSWorldStepBudget.entries
-    n_tasks = 500  # SWE-bench Verified task count
-    q = 0.90  # ceiling at the accepted runs' 90th percentile of calls
+    ceiling = Scenarios.SweBenchCallCeilingP90
+    step_return = Scenarios.OSWorldStepCeilingReturn
+    q = ceiling.quantile  # ceiling at the accepted runs' 90th percentile of calls
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    systems = tuple(sorted({r["submission"] for r in runs}))
-    shares = []
-    for _s in systems:
-        shares.append(_halt_shares(tuple(filter(lambda r, s=_s: r["submission"] == s, runs)), q))
-    fail_halt_lo = min(x[0] for x in shares)
-    fail_halt_hi = max(x[0] for x in shares)
-    ok_halt_hi = max(x[1] for x in shares)
-    longer_when_failed = all(x[2] > x[3] for x in shares)
-    cap_lo = min(x[4] for x in shares)
-    cap_hi = max(x[4] for x in shares)
+    _r = ceiling.result
+    n_tasks = max(c["runs"] for c in _r.configurations)  # a full submission runs every task once
+    fail_halt_lo, fail_halt_hi = _r.failed_halted_low, _r.failed_halted_high
+    ok_halt_hi = _r.accepted_halted_high
+    longer_when_failed = _r.longer_when_failed
+    cap_lo, cap_hi = _r.cap_low, _r.cap_high
     # Two configurations share one model; their ceilings still differ.
-    _same = [x[4] for _s, x in zip(systems, shares) if "claude-4-sonnet" in _s or "claude_4_sonnet" in _s]
-    by_model = {}
-    for r in steps:
-        by_model.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
-    gain_15_100 = {m: v[100] - v[15] for m, v in by_model.items()}
-    n_flat_after_50 = sum(1 for v in by_model.values() if v[100] <= v[50])
-    best_gain = max(gain_15_100.values())
+    _same = [c["cap"] for c in _r.configurations if "claude-4-sonnet" in c["submission"] or "claude_4_sonnet" in c["submission"]]
+    _s = step_return.result
+    by_model = _s.scores
+    n_flat_after_50 = _s.flat_after_middle
+    best_gain = _s.best_gain
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(longer_when_failed, "Prose says failed runs take more calls in every configuration")
@@ -1150,7 +1144,7 @@ class CeilingEvidence:
 
 Baseline profiling of public repair-agent runs shows what such distributions look like. @Fig-vol3-model-calls-resolved-vs-failed plots the distribution of model calls per trajectory for five published agent configurations on the same `{python} CeilingEvidence.n_tasks_str` repository-repair tasks [@jimenez2024swebench], split by whether the patch was accepted.
 
-:::: {#fig-vol3-model-calls-resolved-vs-failed fig-env="figure" fig-pos="htb" fig-cap="**Failed Runs Take More Calls**: Cumulative distribution of model calls per trajectory for five public agent configurations on the same repository-repair tasks, accepted runs solid and failed runs dashed. The vertical line marks the accepted runs' `{python} CeilingEvidence.q_str`th percentile; the label gives the share of each group a call ceiling at that line would halt. In every configuration the failed distribution sits to the right, so a ceiling drawn from successful runs stops a disproportionate share of runs that would have failed anyway. Trajectories from @jimenez2024swebench submissions; counts are as each agent recorded its calls." fig-alt="Five side-by-side panels, one per agent configuration, each plotting the cumulative fraction of runs from 0 to 1 against model calls per trajectory. In each panel a solid line for accepted runs rises earlier than a dashed line for failed runs. A vertical gray line marks a call count, with a label giving two percentages, the share of failed runs and the share of accepted runs beyond it."}
+::: {#fig-vol3-model-calls-resolved-vs-failed fig-env="figure" fig-pos="htb" fig-cap="**Failed Runs Take More Calls**: Cumulative distribution of model calls per trajectory for five public agent configurations on the same repository-repair tasks, accepted runs solid and failed runs dashed. The vertical line marks the accepted runs' `{python} CeilingEvidence.q_str`th percentile; the label gives the share of each group a call ceiling at that line would halt. In every configuration the failed distribution sits to the right, so a ceiling drawn from successful runs stops a disproportionate share of runs that would have failed anyway. Trajectories from @jimenez2024swebench submissions; counts are as each agent recorded its calls." fig-alt="Five panels, one per agent configuration, each plotting the cumulative fraction of runs from 0 to 1 against model calls per trajectory. In each panel a solid line for accepted runs rises earlier than a dashed line for failed runs. A vertical gray line marks a call count, with a label giving two percentages, the share of failed runs and the share of accepted runs beyond it."}
 
 ```{python}
 #| echo: false
@@ -1162,55 +1156,67 @@ Baseline profiling of public repair-agent runs shows what such distributions loo
 # │ Goal: Show that failed runs consume more calls than accepted ones.
 # │ Show: Per-configuration CDFs of calls, accepted vs. failed, with the
 # │       ceiling at the accepted runs' 90th percentile.
-# │ How: Literature.SweBenchTrajectories (MLSysIM); book_style.set_book_style().
+# │ How: Scenarios.SweBenchCallCeilingP90 (MLSysIM); book_style.set_book_style().
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 plt = book_style.plt
 COLORS = book_style.COLORS
-runs = Literature.SweBenchTrajectories.entries
-systems = sorted({r["submission"] for r in runs})
-fig, axes = plt.subplots(1, len(systems), figsize=(10, 3.0), sharey=True)
+configs = Scenarios.SweBenchCallCeilingP90.result.configurations
+fig, axes = plt.subplots(2, 3, figsize=(6.2, 4.6), sharey=True)
+flat = axes.ravel()
 
-for ax, s in zip(axes, systems):
-    g = [r for r in runs if r["submission"] == s]
-    ok = np.sort([r["n_model_calls"] for r in g if r["resolved"]])
-    bad = np.sort([r["n_model_calls"] for r in g if not r["resolved"]])
-    cap = np.quantile(ok, 0.90)
-    ax.plot(ok, np.arange(1, len(ok) + 1) / len(ok), color=COLORS["BlueLine"], lw=1.6, label="Accepted")
-    ax.plot(bad, np.arange(1, len(bad) + 1) / len(bad), color=COLORS["RedLine"], lw=1.6, ls="--", label="Failed")
-    ax.axvline(cap, color=COLORS["secondary"], lw=0.9)
+for ax, c in zip(flat[:5], configs):
+    ok, bad, cap = np.array(c["accepted_calls"]), np.array(c["failed_calls"]), c["cap"]
+    ax.plot(ok, np.arange(1, len(ok) + 1) / len(ok), color=COLORS["BlueLine"], lw=1.8, label="Accepted runs")
+    ax.plot(bad, np.arange(1, len(bad) + 1) / len(bad), color=COLORS["RedLine"], lw=1.8, ls="--", label="Failed runs")
+    ax.axvline(cap, color=COLORS["secondary"], lw=1.0, ls=":", label="90th-pct ceiling")
     ax.text(
         0.96,
-        0.05,
-        f"ceiling halts\n{100 * (bad > cap).mean():.0f}% of failed\n{100 * (ok > cap).mean():.0f}% of accepted",
+        0.06,
+        f"Halts {100 * c['failed_halted']:.0f}% failed\nvs. {100 * c['accepted_halted']:.0f}% accepted",
         transform=ax.transAxes,
         ha="right",
         va="bottom",
-        fontsize=7.5,
-        bbox=dict(fc="white", ec="none", pad=0.6, alpha=0.9),
+        fontsize=9,
+        bbox=dict(fc="white", ec="none", pad=0.4, alpha=0.9),
     )
-    ax.set_title(f"{g[0]['scaffold']}\n{g[0]['model']}", fontsize=8.5, loc="left")
+    ax.set_title(f"{c['scaffold']}\n{c['model']}", fontsize=9, loc="left")
+    ax.set_xlim(left=0)
     ax.set_xlabel("Model calls", fontsize=9)
-    ax.tick_params(labelsize=8)
-axes[0].set_ylabel("Fraction of runs", fontsize=9)
+    ax.tick_params(labelsize=9)
+
+axes[0, 0].set_ylabel("Fraction of runs", fontsize=9)
+axes[1, 0].set_ylabel("Fraction of runs", fontsize=9)
+flat[5].axis("off")
+handles, labels = flat[0].get_legend_handles_labels()
+flat[5].legend(
+    handles,
+    labels,
+    loc="center",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.6,
+)
 fig.tight_layout()
-handles, labels = axes[0].get_legend_handles_labels()
-fig.legend(handles, labels, frameon=False, fontsize=8.5, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.08))
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 Two lessons follow for ceiling choice. Failed runs take more calls than accepted ones in every configuration of @fig-vol3-model-calls-resolved-vs-failed, so the tail of the call distribution is mostly spend on attempts that will not be accepted. A ceiling at the accepted runs' `{python} CeilingEvidence.q_str`th percentile halts at most `{python} CeilingEvidence.ok_halt_str` of eventual successes but `{python} CeilingEvidence.fail_halt_lo_str` to `{python} CeilingEvidence.fail_halt_hi_str` of eventual failures. The same figure also warns against reading a ceiling off another configuration, because the percentile ranges from `{python} CeilingEvidence.cap_lo_str` to `{python} CeilingEvidence.cap_hi_str` calls across the five and differs even between the two agents built on the same model (`{python} CeilingEvidence.same_lo_str` and `{python} CeilingEvidence.same_hi_str`). These percentiles come from post-hoc truncations of unconstrained runs rather than enforced policy trials: because a ceiling the agent can see changes how it spends the remaining calls, the estimate locates a candidate ceiling and the policy evaluation confirms it.
 
 Re-running the same model under several enforced ceilings supplies the confirmation. A computer-use benchmark reports `{python} CeilingEvidence.n_models_str` models at step limits of 15, 50, and 100 actions [@xie2024osworld], plotted in @fig-vol3-step-ceiling-curves.
 
-:::: {#fig-vol3-step-ceiling-curves fig-env="figure" fig-pos="htb" fig-cap="**Raising the Ceiling Helps Some Models, Not Others**: Task success for the same model at three enforced step ceilings on a computer-use benchmark. Two models keep gaining from 50 to 100 steps while the other three flatten or dip, so the knee, where one exists, is a property of the model and harness rather than of the task. Data from @xie2024osworld via @epochai2026benchmarks." fig-alt="Line chart of tasks completed from 0 to 70 percent against step ceilings of 15, 50, and 100. Five colored lines with markers, each labeled at its right end with a model name. The top line rises from about 43 to 63 percent. The next three rise from 15 to 50 steps and stay level or fall slightly at 100. The bottom line rises steadily from about 9 to 23 percent."}
+::: {#fig-vol3-step-ceiling-curves fig-env="figure" fig-pos="htb" fig-cap="**Raising the Ceiling Helps Some Models, Not Others**: Task success for the same model at three enforced step ceilings on a computer-use benchmark. Two models keep gaining from 50 to 100 steps while the other three flatten or dip, so the knee, where one exists, is a property of the model and harness rather than of the task. Data from @xie2024osworld via @epochai2026benchmarks." fig-alt="Line chart of tasks completed from 0 to 70 percent against step ceilings of 15, 50, and 100. Five colored lines with markers, each labeled at its right end with a model name. The top line rises from about 43 to 63 percent. The next three rise from 15 to 50 steps and stay level or fall slightly at 100. The bottom line rises steadily from about 9 to 23 percent."}
 
 ```{python}
 #| echo: false
@@ -1221,31 +1227,29 @@ Re-running the same model under several enforced ceilings supplies the confirmat
 # │
 # │ Goal: Show that the return on a higher ceiling depends on the model.
 # │ Show: Success at 15, 50, 100 steps for each model run at all three.
-# │ How: Literature.OSWorldStepBudget (MLSysIM); book_style.setup_plot().
+# │ How: Scenarios.OSWorldStepCeilingReturn over Literature.OSWorldStepBudget
+# │      (MLSysIM); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7, 4.0))
-by_model = {}
-for r in Literature.OSWorldStepBudget.entries:
-    by_model.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
-by_model = {m: v for m, v in by_model.items() if len(v) == 3}
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
+by_model = Scenarios.OSWorldStepCeilingReturn.result.scores  # models run at every ceiling
 names = {
     "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
     "claude-sonnet-4-20250514": "Claude Sonnet 4",
     "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
-    "computer-use-preview-2025-03-11": "OpenAI computer-use-preview",
+    "computer-use-preview-2025-03-11": "OpenAI CUA preview",
     "o3-2025-04-16_medium": "o3",
 }
 palette = ["RedLine", "BlueLine", "VioletLine", "OrangeLine", "GreenLine"]
 markers = ["o", "s", "^", "D", "v"]
 for (m, v), col, mk in zip(sorted(by_model.items(), key=lambda kv: -max(kv[1].values())), palette, markers):
     xs = sorted(v)
-    ax.plot(xs, [v[x] for x in xs], "-", marker=mk, color=COLORS[col], lw=1.8, ms=5)
-    ax.text(104, v[100], names.get(m, m), va="center", fontsize=8.5, color=COLORS[col])
+    ax.plot(xs, [v[x] for x in xs], "-", marker=mk, color=COLORS[col], lw=2.0, ms=5.5)
+    ax.text(103, v[100], names.get(m, m), va="center", fontsize=9, color=COLORS[col])
 ax.set_xticks([15, 50, 100])
-ax.set_xlim(8, 150)
+ax.set_xlim(8, 146)
 ax.set_ylim(0, 70)
 ax.set_xlabel("Step ceiling enforced on the agent")
 ax.set_ylabel("Tasks completed (%)")
@@ -1253,7 +1257,7 @@ plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 Among the `{python} CeilingEvidence.n_models_str` models in @fig-vol3-step-ceiling-curves, `{python} CeilingEvidence.n_flat_str` gain nothing from the last 50 steps, while the strongest gains `{python} CeilingEvidence.best_gain_str` points between the lowest and highest ceiling. A generous fixed ceiling therefore buys nothing for most configurations and costs the extra spend of every run that uses it, whereas a tight one forfeits real successes for the configurations that convert extra steps into progress.
 
@@ -1292,7 +1296,8 @@ Architectural failures in agent systems rarely stem from exotic distributed bugs
 # │ Context: @sec-vol3-agent-harness-fallacies, prompt-instruction fallacy.
 # │ Goal: Price a per-turn compliance rate over the registry horizon.
 # │ Show: Probability the instruction holds on every turn of the trajectory.
-# │ How:  @eq-vol3-horizon-compounding with independent turns.
+# │ How:  @eq-vol3-horizon-compounding with independent turns
+# │       (Scenarios.FreezeRuleOverStepBudget, HorizonCompoundingModel).
 # │ Note: The per-turn compliance rate is a hypothetical input.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -1300,11 +1305,12 @@ from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class InstructionHold:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    turns = Agents.Coding.SWE_Bench_Runner.max_trajectory_steps
-    p_follow = 0.99  # hypothetical per-turn probability the model honors a freeze
+    rule = Scenarios.FreezeRuleOverStepBudget  # horizon: the coding harness's step budget
+    turns = rule.short_horizon
+    p_follow = rule.step_success  # hypothetical per-turn probability the model honors a freeze
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_hold = p_follow**turns
+    p_hold = rule.result.success[turns]
     p_break = 1 - p_hold
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

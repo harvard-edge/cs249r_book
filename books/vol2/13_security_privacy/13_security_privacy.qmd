@@ -1359,25 +1359,23 @@ $$
 # │      retained bins at two decimals = 101; bits = log2(levels).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim.fmt import fmt, fmt_count, fmt_percent
 
 class OutputRoundingLeakage:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    class_count = Datasets.ImageNet.num_classes
-    from_decimals = 6
-    to_decimals = 2
+    shaping = Scenarios.ImageNetTop5RoundedScores
+    class_count = shaping.class_count
+    from_decimals = shaping.from_decimals
+    to_decimals = shaping.to_decimals
     fp32_bits = FP32_BITS
-    top_k = 5
+    top_k = shaping.top_k
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    decimal_digits_removed = from_decimals - to_decimals
-    decimal_levels_removed = 10**decimal_digits_removed
-    bits_removed = math.log2(decimal_levels_removed)
-    retained_bins = 10**to_decimals + 1
-    retained_bits = math.log2(retained_bins)
+    decimal_digits_removed = shaping.decimal_digits_removed
+    bits_removed = shaping.bits_removed
+    retained_bits = shaping.retained_bits
     fp32_reduction_bits = fp32_bits - retained_bits
-    topk_eliminated_pct = (1 - top_k / class_count) * 100
+    topk_eliminated_pct = shaping.entries_removed * 100
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(bits_removed - 13.2877) < 0.01, "Decimal rounding bit reduction changed")
@@ -1450,21 +1448,21 @@ class DefenseOverheadAnalysis:
     """Quantify the latency impact of security monitoring and output perturbation."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    budget = Scenarios.ResNet50ApiExtractionBudget
     class_count = Datasets.ImageNet.num_classes  # ResNet-50 ImageNet classifier
     daily_queries = 1 * MILLION
     daily_users = 10 * THOUSAND
-    training_cost_usd = 5 * THOUSAND
-    extraction_queries = 5 * MILLION
-    target_fidelity_pct = 90
+    training_cost_usd = budget.training_cost.to(USD).magnitude
+    extraction_queries = budget.extraction_queries
+    target_fidelity_pct = budget.target_fidelity * 100
     attacker_daily_queries = 25 * THOUSAND
     extraction_days = 200
     free_tier_queries = 100
-    paid_tier_price_usd_month = 50
-    paid_tier_queries = 10_000
+    paid_tier_price_usd_month = budget.tier_price.to(USD).magnitude
+    paid_tier_queries = budget.tier_daily_quota
     alert_queries_per_day = 5_000
     alert_interquery_ms = 100
-    price_per_query_usd = 0.001
-    billing_days = DAYS_PER_MONTH
+    price_per_query_usd = budget.price_per_query.to(USD).magnitude
     output_accuracy_no_defense_pct = 90
     output_accuracy_with_defense_pct = 72
     top5_accuracy_pct = 99.2
@@ -1476,9 +1474,9 @@ class DefenseOverheadAnalysis:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     queries_per_class = extraction_queries / class_count
-    extraction_cost_usd = extraction_queries * price_per_query_usd
-    paid_tier_days_to_extract = extraction_queries / paid_tier_queries
-    paid_tier_extraction_cost_usd = (paid_tier_days_to_extract / billing_days) * paid_tier_price_usd_month
+    extraction_cost_usd = budget.full_set_pay_per_query.to(USD).magnitude
+    paid_tier_days_to_extract = budget.collection_days
+    paid_tier_extraction_cost_usd = budget.full_set_tier.to(USD).magnitude
     fidelity_drop_pct = output_accuracy_no_defense_pct - output_accuracy_with_defense_pct
     total_defense_ms = monitoring_ms + perturbation_ms
     overhead_pct = (total_defense_ms / base_inference_ms) * 100
@@ -1557,7 +1555,7 @@ class DefenseOverheadAnalysis:
 # │       extraction set at the training cost.
 # │ Show: cumulative attacker bill vs. queries collected for pay-as-you-go,
 # │       paid-tier-only, and lifetime-budget regimes; training cost line.
-# │ How: Reuses DefenseOverheadAnalysis scenario inputs; the lifetime regime
+# │ How: Scenarios.ResNet50ApiExtractionBudget; the lifetime regime
 # │      bills every query beyond a per-principal allowance at the
 # │      pay-as-you-go price.
 # │
@@ -1567,21 +1565,12 @@ from mlsysim.fmt import check, fmt_count, fmt_usd
 class ExtractionBudgetRegimes:
     # ┌── 1. LOAD ──────────────────────────────────────────
     d = DefenseOverheadAnalysis
-    lifetime_allowance_queries = 100 * THOUSAND  # scenario assumption: per-principal allowance before overage billing
+    budget = Scenarios.ResNet50ApiExtractionBudget
+    lifetime_allowance_queries = budget.lifetime_allowance
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    usd_per_day_paid_tier = d.paid_tier_price_usd_month / d.billing_days
-
-    def paid_tier_cost(q, _d=d, _rate=usd_per_day_paid_tier):
-        return (q / _d.paid_tier_queries) * _rate
-
-    def lifetime_cost(q, _d=d, _allow=lifetime_allowance_queries, _rate=usd_per_day_paid_tier):
-        within = min(q, _allow)
-        overage = max(q - _allow, 0)
-        return (within / _d.paid_tier_queries) * _rate + overage * _d.price_per_query_usd
-
-    full_set_paid_tier_usd = paid_tier_cost(d.extraction_queries)
-    full_set_lifetime_usd = lifetime_cost(d.extraction_queries)
+    full_set_paid_tier_usd = budget.full_set_tier.to(USD).magnitude
+    full_set_lifetime_usd = budget.full_set_lifetime.to(USD).magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(full_set_paid_tier_usd < 0.25 * d.training_cost_usd, "Daily quota alone should leave extraction far cheaper than training")
@@ -1621,8 +1610,8 @@ _r = ExtractionBudgetRegimes
 _d = DefenseOverheadAnalysis
 q = np.linspace(0, _d.extraction_queries, 401)
 payg_k = q * _d.price_per_query_usd / 1e3
-paid_k = np.array([_r.paid_tier_cost(v) for v in q]) / 1e3
-life_k = np.array([_r.lifetime_cost(v) for v in q]) / 1e3
+paid_k = np.array([_r.budget.tier_cost(v).to(USD).magnitude for v in q]) / 1e3
+life_k = np.array([_r.budget.lifetime_cost(v).to(USD).magnitude for v in q]) / 1e3
 q_m = q / 1e6
 train_k = _d.training_cost_usd / 1e3
 
@@ -1634,7 +1623,7 @@ ax.plot(q_m, paid_k, color=COLORS['RedLine'], linestyle='-', linewidth=2.2, zord
 x_end = q_m[-1]
 ax.text(0.05, train_k + 0.15, 'training cost', ha='left', va='bottom', color=COLORS['primary'])
 ax.text(2.3, 2.3 * 1e6 * _d.price_per_query_usd / 1e3 + 0.35, 'pay-as-you-go', ha='right', va='bottom', color=COLORS['BrownLine'], rotation=0)
-ax.text(3.3, _r.lifetime_cost(3.3e6) / 1e3 - 0.35, 'lifetime budget', ha='left', va='top', color=COLORS['primary'])
+ax.text(3.3, _r.budget.lifetime_cost(3.3e6).to(USD).magnitude / 1e3 - 0.35, 'lifetime budget', ha='left', va='top', color=COLORS['primary'])
 ax.text(
     x_end - 0.08,
     paid_k[-1] + 0.25,
@@ -1685,20 +1674,16 @@ Membership inference is also the standard privacy audit, and the audit and diffe
 # │      "test flags member" and to its complement (delta = 0).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim.fmt import check, fmt
 
 class MiaAuditDpBound:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    epsilon = 1.0  # illustrative privacy budget for the figure
-    audit_shape = 0.6  # illustrative audit-curve bulge; must stay under the ceiling (needs <= 1 - e^-eps)
+    audit_scenario = Scenarios.MembershipAuditAtEpsilonOne
+    epsilon = audit_scenario.epsilon
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    def ceiling(fpr, _eps=epsilon):
-        return min(math.exp(_eps) * fpr, 1 - math.exp(-_eps) * (1 - fpr))
-
-    def audit(fpr, _a=audit_shape):
-        return fpr + _a * fpr * (1 - fpr)
+    ceiling = audit_scenario.ceiling
+    audit = audit_scenario.audit
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     _under = True
@@ -1974,23 +1959,18 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_multiple
 
 class ReferenceClusterAttackSurface:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    scenario = Scenarios.DenseLLMPretrainingReference
-    cluster = scenario.system
-    params = scenario.workload.parameters
-    ckpt_bpp = ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
-    state_bpp = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
-    dp_degree = 64  # scenario assumption: data-parallel degree for the robust-aggregation comparison
+    surface = Scenarios.ReferenceJobAttackSurface
+    dp_degree = surface.dp_degree
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_gpus = cluster.total_accelerators
-    node_count = cluster.count
-    gpus_per_node = cluster.node.accelerators_per_node
-    grad_bpp = state_bpp - ckpt_bpp  # FP16 gradient, recomputed after restore
-    grad_total = memory_from_params(params, grad_bpp)
-    ckpt_total = memory_from_params(params, ckpt_bpp)
-    allreduce_factor = 2 * (dp_degree - 1) / dp_degree  # per-worker traffic / M, ring AllReduce
-    allgather_factor = dp_degree - 1  # per-worker traffic / M, gathering every individual gradient
-    robust_traffic_ratio = allgather_factor / allreduce_factor  # = dp_degree / 2
+    total_gpus = surface.accelerators
+    node_count = surface.nodes
+    gpus_per_node = surface.accelerators_per_node
+    grad_total = surface.gradient_bytes  # FP16 gradient, recomputed after restore
+    ckpt_total = surface.checkpoint_bytes
+    allreduce_factor = surface.allreduce_factor  # per-worker traffic / M, ring AllReduce
+    allgather_factor = surface.gather_factor  # per-worker traffic / M, gathering every individual gradient
+    robust_traffic_ratio = surface.gather_traffic_ratio  # = dp_degree / 2
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(node_count * gpus_per_node == total_gpus, "Node composition must multiply to the cluster size")
@@ -2057,11 +2037,12 @@ from mlsysim.fmt import check, fmt
 
 class MultiTenantIsolation:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    peak_throughput = 1000  # assumed baseline tokens/sec, fixed workload and resource budget
-    secure_throughput = 850  # assumed tokens/sec with additional security controls, same budget
+    isolation = Scenarios.SecureMultiTenantServing
+    peak_throughput = isolation.baseline_rate.to("1/s").magnitude  # tokens/sec, fixed workload and budget
+    secure_throughput = isolation.controlled_rate.to("1/s").magnitude  # tokens/sec with security controls
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    throughput_loss = peak_throughput - secure_throughput
-    overhead_pct = (1 - secure_throughput / peak_throughput) * 100
+    throughput_loss = isolation.rate_lost.to("1/s").magnitude
+    overhead_pct = isolation.overhead * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(overhead_pct - 15.0) < 0.01, f"Overhead {overhead_pct}% unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -3158,24 +3139,25 @@ from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_percent
 
 class TEEMemoryFootprint:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    resnet18_params = Models.Vision.ResNet18.parameters
-    resnet50_params = Models.Vision.ResNet50.parameters
-    fp32_bytes_q = BYTES_FP32
-    int8_bytes_q = BYTES_INT8
-    sgx_epc_q = Hardware.Cloud.IntelSGX.memory.capacity
+    r18_fp32 = Scenarios.ResNet18Fp32InSgxEnclave
+    r18_int8 = Scenarios.ResNet18Int8InSgxEnclave
+    r50_fp32 = Scenarios.ResNet50Fp32InSgxEnclave
+    r50_int8 = Scenarios.ResNet50Int8InSgxEnclave
+    sgx_epc_q = r50_fp32.capacity
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    resnet18_fp32_q = memory_from_params(resnet18_params, fp32_bytes_q / param)
-    resnet18_int8_q = memory_from_params(resnet18_params, int8_bytes_q / param)
-    resnet50_fp32_q = memory_from_params(resnet50_params, fp32_bytes_q / param)
-    resnet50_int8_q = memory_from_params(resnet50_params, int8_bytes_q / param)
-    resnet50_fp32_epc_ratio = resnet50_fp32_q / sgx_epc_q
+    resnet18_fp32_q = r18_fp32.weight_bytes
+    resnet18_int8_q = r18_int8.weight_bytes
+    resnet50_fp32_q = r50_fp32.weight_bytes
+    resnet50_int8_q = r50_int8.weight_bytes
+    resnet50_fp32_epc_ratio = r50_fp32.capacity_share
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(resnet50_fp32_q.to(MB).magnitude - 102.4) < 0.01, "ResNet-50 FP32 size changed")
+    # vol2_security_privacy_margin_001.svg and its fig-alt type this size.
+    check(abs(resnet50_fp32_q.to(MB).magnitude - 102.2) < 0.05, "Margin SVG says 102.2 MB.")
     # 0.76 (not 0.80): the SGX EPC is 128 MiB (Intel quotes EPC in binary), so
-    # 102.4 MB of FP32 weights is 0.76 of the true 134.2 MB enclave, not 0.80.
-    check(abs(resnet50_fp32_epc_ratio.to_base_units().magnitude - 0.76) < 0.01, "ResNet-50 EPC share changed")
+    # 102.2 MB of FP32 weights is 0.76 of the true 134.2 MB enclave, not 0.80.
+    check(abs(resnet50_fp32_epc_ratio - 0.76) < 0.01, "ResNet-50 EPC share changed")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     resnet18_fp32_mb_str = fmt_memory(resnet18_fp32_q, unit=MB, precision=1, commas=False)
@@ -3189,7 +3171,7 @@ class TEEMemoryFootprint:
 Security features scale differently than computational resources. Protected memory capacity, not host memory, sets how much of a model can remain resident inside a TEE without paging. On an older Intel SGX configuration with a `{python} TEEMemoryFootprint.sgx_epc_mb_str` enclave page cache (the protected resident memory), ResNet-50's FP32 weights alone would fill about `{python} TEEMemoryFootprint.resnet50_fp32_epc_pct_str` of it. A ResNet-18 model is about `{python} TEEMemoryFootprint.resnet18_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet18_int8_mb_str` with INT8 weights, while ResNet-50 is about `{python} TEEMemoryFootprint.resnet50_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet50_int8_mb_str` with INT8 weights before activations and runtime buffers. The fleet's reference model sits far beyond that scale. The FP16 weights of the Archetype A (GPT-4/Llama-3) model occupy as many bytes as the `{python} ReferenceClusterAttackSurface.grad_total_gb_str` gradient it reduces each step, orders of magnitude more than an enclave page cache. Fleet-scale confidential computing therefore draws its boundary around a whole confidential virtual machine, an entire guest protected from the host, rather than an application enclave.
 
 ::: {.column-margin}
-![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Two blue bars against a red dashed limit line marking the 128-mebibyte EPC: ResNet-50 FP32 weights at 102.4 MB reach about three quarters of the way to the line, and ResNet-18 INT8 weights at 11.7 MB form a short stub."}
+![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Two blue bars against a red dashed limit line marking the 128-mebibyte EPC: ResNet-50 FP32 weights at 102.2 MB reach about three quarters of the way to the line, and ResNet-18 INT8 weights at 11.7 MB form a short stub."}
 
 *FP32 ResNet-50 weights alone nearly fill an older enclave page cache.*
 :::
@@ -3739,12 +3721,13 @@ from mlsysim.fmt import check, fmt_multiple, fmt_time
 
 class EncryptionOverhead:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    t_inference_q = 20 * ms  # scenario assumption: baseline plaintext inference
-    overhead_aes_q = 0.5 * ms  # scenario assumption: AES-NI accelerated encryption
-    multiplier_fhe = Literature.Crypto.FheOverheadMultiplier  # FHE overhead vs plaintext
+    encrypted = Scenarios.HealthMonitoringEncryptedInference
+    t_inference_q = encrypted.plaintext_latency  # baseline plaintext inference
+    overhead_aes_q = encrypted.encryption_overhead  # AES-NI accelerated encryption
+    multiplier_fhe = encrypted.fhe_multiplier  # FHE overhead vs plaintext
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_aes_q = t_inference_q + overhead_aes_q
-    t_fhe_q = t_inference_q * multiplier_fhe
+    t_aes_q = encrypted.encrypted_transport_latency
+    t_fhe_q = encrypted.fhe_latency
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(t_fhe_q.to(second).magnitude == 200, f"FHE time {t_fhe_q} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -3966,16 +3949,16 @@ class DPCostAnalysis:
     """Quantify the utility cost of differential privacy noise."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_employees = 1000
-    salary_range = 200000
-    epsilon = 1.0
-    n_small = 100
+    release = Scenarios.SalaryMeanLaplaceRelease
+    n_employees = release.group_size
+    epsilon = release.epsilon
+    n_small = release.small_group_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    sensitivity = salary_range  # max one person can change the sum
-    noise_scale = sensitivity / epsilon
-    error_per_person = noise_scale / n_employees
-    error_small = noise_scale / n_small
+    sensitivity = release.sensitivity.to(USD).magnitude  # max one person can change the sum
+    noise_scale = release.noise_scale.to(USD).magnitude
+    error_per_person = release.mean_error().to(USD).magnitude
+    error_small = release.small_group_error.to(USD).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -4142,17 +4125,18 @@ class PracticalDPBudget:
     """Inputs for accounting a Poisson-sampled CIFAR-10 DP-SGD run."""
 
     # ┌── 1. LOAD (registry + scenario assumptions) ────────────────────────
-    n_records = int(Datasets.CIFAR10.training_examples.to(count).magnitude)  # 50,000
-    batch_size = 4000  # scenario assumption
-    clip_norm = 1.0  # gradient clipping norm C
-    sigma = 1.3  # noise multiplier
-    n_epochs = 60  # scenario assumption
-    eps_target = 3.0  # target privacy budget
-    delta = 1e-5  # additive slack in the (epsilon, delta) bound
+    run = Scenarios.Cifar10DpSgdRun
+    n_records = run.dataset_size  # 50,000
+    batch_size = run.batch_size
+    clip_norm = run.clip_norm  # gradient clipping norm C
+    sigma = run.noise_multiplier  # noise multiplier
+    n_epochs = run.epochs
+    eps_target = run.target_epsilon  # target privacy budget
+    delta = run.delta  # additive slack in the (epsilon, delta) bound
 
     # ┌── 2. EXECUTE (accountant inputs) ───────────────────────────────────
-    q = batch_size / n_records  # Poisson inclusion probability
-    k_steps = int(n_epochs * n_records / batch_size)
+    q = run.sampling_rate  # Poisson inclusion probability
+    k_steps = run.steps
     alt_epochs = 25
     alt_batch_size = 2000
     k_alt_epochs = int(alt_epochs * n_records / batch_size)
@@ -4209,11 +4193,70 @@ account for private-data-dependent selection; retuning does not erase prior rele
 
 ### Quantifying the privacy-utility trade-off {#sec-security-privacy-privacy-utility-tradeoff-b3e7}
 
-Tightening differential privacy to single-digit $\PrivacyBudget$ keeps MNIST within about 3.5 percentage points of its 98.3 percent nonprivate baseline, yet drops CIFAR-10 trained from scratch by 12 to 20 percentage points even at $\PrivacyBudget = 8$ [@abadi2016deep; @bu2020gaussian; @de2022dp]. That gap shows how strongly the utility cost of differential privacy depends on task complexity, architecture, privacy accountant, pretraining, and whether extra public data are allowed.
+```{python}
+#| echo: false
+#| label: privacy-utility-frontier-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRIVACY-UTILITY GAPS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-privacy-utility-frontier and the two paragraphs that read it
+# │
+# │ Goal: Measure each published DP result against its nonprivate reference:
+# │       the largest MNIST gap at single-digit epsilon and the CIFAR-10 gaps
+# │       at epsilon 8.
+# │ How: Literature.Series.GaussianDpMnistNoisySgd (Bu 2020, Table 1),
+# │      Literature.Series.AbadiDpSgdAccuracy (Abadi 2016, Sec. 5.2), and
+# │      Literature.DifferentialPrivacy (baselines, De 2022, WRN-16-4).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_int
 
-@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 results on a logarithmic axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. These comparisons show setting-specific utility costs; differences in architectures and training procedures prevent isolating task complexity alone. The plotted MNIST results stay within about 3.5 percentage points of the 98.3 percent nonprivate baseline at budgets in the range $\PrivacyBudget\in [1, 2]$. For CIFAR-10 without extra data, the plotted results reach 73.0 percent in @abadi2016deep and 81.4 percent in @de2022dp at $\PrivacyBudget= 8$, roughly 12 to 20 points below the displayed 93.0 percent nonprivate reference. These CIFAR-10 settings therefore pay several times the MNIST accuracy cost at a budget four times looser. That reference is a comparison point, not a ceiling on achievable accuracy. Selecting a budget therefore requires the full training regime, adjacency relation, additive slack, accountant, and utility requirements rather than the horizontal coordinate alone.
+class PrivacyUtilityGaps:
+    """Accuracy gaps between published DP results and nonprivate references."""
 
-::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Accuracy at selected privacy budgets from [@abadi2016deep; @bu2020gaussian; @de2022dp]. MNIST stays comparatively accurate under single-digit epsilon budgets in these experiments, while CIFAR-10 trained from scratch without extra data remains harder, with De et al. reporting 81.4 percent at $\PrivacyBudget = 8$. Comparisons require the full mechanism, accountant, adjacency relation, training regime, and data rather than epsilon alone." fig-alt="Test accuracy versus privacy budget epsilon on a log axis. A blue line of MNIST results from Bu 2020 rises from 95 to 98 percent, blue triangles mark MNIST results from Abadi 2016, and orange markers at epsilon 8 mark CIFAR-10 results from Abadi 2016 at 73.0 percent and De 2022 at 81.4 percent. Dashed lines mark the nonprivate baselines, 98.3 percent for MNIST and 93.0 percent for CIFAR-10, each labeled directly. A double arrow at epsilon 8 spans from the CIFAR-10 baseline down to the lower result and is labeled roughly 12 to 20 points below its baseline."}
+    # ┌── 1. LOAD (registry) ───────────────────────────────────────────────
+    dp = Literature.DifferentialPrivacy
+    bu = Literature.Series.GaussianDpMnistNoisySgd
+    abadi = Literature.Series.AbadiDpSgdAccuracy
+    mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in bu.entries] + [
+        (r["epsilon"], r["accuracy_pct"]) for r in abadi.entries if r["dataset"] == "MNIST"
+    ]
+    mnist_base = float(dp.MnistNonprivateAccuracyPct)
+    cifar_base = float(dp.Cifar10NonprivateAccuracyPct)  # WRN-16-4, nonprivate
+    cifar_eps = float(dp.Cifar10ComparisonEpsilon)
+    cifar_abadi = float(dp.Cifar10AbadiAccuracyAtEps8Pct)
+    cifar_de = float(dp.Cifar10DeAccuracyAtEps8Pct)
+
+    # ┌── 2. EXECUTE (gaps) ────────────────────────────────────────────────
+    single_digit = [(e, a) for e, a in mnist_points if 1 <= e < 10]
+    mnist_gap_max = mnist_base - min(a for e, a in single_digit)  # largest gap = lowest accuracy
+    single_digit_eps_min = min(e for e, a in single_digit)
+    cifar_gap_lo = cifar_base - cifar_de
+    cifar_gap_hi = cifar_base - cifar_abadi
+    eps_ratio = cifar_eps / single_digit_eps_min
+
+    # ┌── 3. GUARD (prose claims) ──────────────────────────────────────────
+    check(len(single_digit) == 5, f"single-digit MNIST points {len(single_digit)}")
+    check(eps_ratio == 4, f"'a budget four times looser' needs ratio 4, got {eps_ratio}")
+    check(cifar_gap_lo / mnist_gap_max >= 3, "'several times the MNIST accuracy cost'")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    mnist_gap_max_str = fmt(mnist_gap_max, precision=1, commas=False)
+    mnist_base_str = fmt(mnist_base, precision=1, commas=False)
+    single_digit_eps_min_str = fmt(single_digit_eps_min, precision=0, commas=False)
+    cifar_base_str = fmt(cifar_base, precision=1, commas=False)
+    cifar_eps_str = fmt(cifar_eps, precision=0, commas=False)
+    cifar_abadi_str = fmt(cifar_abadi, precision=0, commas=False)
+    cifar_de_str = fmt(cifar_de, precision=1, commas=False)
+    cifar_gap_lo_str = fmt_int(cifar_gap_lo, commas=False)  # "roughly": nearest point
+    cifar_gap_hi_str = fmt_int(cifar_gap_hi, commas=False)
+```
+
+Tightening differential privacy to single-digit $\PrivacyBudget$ keeps MNIST within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of its `{python} PrivacyUtilityGaps.mnist_base_str` percent nonprivate baseline, yet drops CIFAR-10 trained from scratch by roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` percentage points even at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str` [@abadi2016deep; @bu2020gaussian; @de2022dp]. That gap shows how strongly the utility cost of differential privacy depends on task complexity, architecture, privacy accountant, pretraining, and whether extra public data are allowed.
+
+@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 results on a logarithmic axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. These comparisons show setting-specific utility costs; differences in architectures and training procedures prevent isolating task complexity alone. The plotted MNIST results stay within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of the `{python} PrivacyUtilityGaps.mnist_base_str` percent nonprivate baseline at every plotted single-digit budget, the smallest of which is $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.single_digit_eps_min_str`. For CIFAR-10 without extra data, the plotted results reach `{python} PrivacyUtilityGaps.cifar_abadi_str` percent in @abadi2016deep and `{python} PrivacyUtilityGaps.cifar_de_str` percent in @de2022dp at $\PrivacyBudget=$ `{python} PrivacyUtilityGaps.cifar_eps_str`, roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` points below the displayed `{python} PrivacyUtilityGaps.cifar_base_str` percent nonprivate reference. These CIFAR-10 settings therefore pay several times the MNIST accuracy cost at a budget four times looser. That reference is a comparison point, not a ceiling on achievable accuracy. Selecting a budget therefore requires the full training regime, adjacency relation, additive slack, accountant, and utility requirements rather than the horizontal coordinate alone.
+
+::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Accuracy at selected privacy budgets from [@abadi2016deep; @bu2020gaussian; @de2022dp]. MNIST stays comparatively accurate under single-digit epsilon budgets in these experiments, while CIFAR-10 trained from scratch without extra data remains harder, with De et al. reporting 81.4 percent at $\PrivacyBudget = 8$. Comparisons require the full mechanism, accountant, adjacency relation, training regime, and data rather than epsilon alone." fig-alt="Test accuracy versus privacy budget epsilon on a log axis. A blue line of MNIST results from Bu 2020 rises from 95 to 98 percent, blue triangles mark MNIST results from Abadi 2016, and orange markers at epsilon 8 mark CIFAR-10 results from Abadi 2016 at 73.0 percent and De 2022 at 81.4 percent. Dashed lines mark the nonprivate baselines, 98.3 percent for MNIST and 95.0 percent for CIFAR-10, each labeled directly. A double arrow at epsilon 8 spans from the CIFAR-10 baseline down to the lower result and is labeled roughly 14 to 22 points below its baseline."}
 
 ```{python}
 #| echo: false
@@ -4237,26 +4280,28 @@ from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.0, 3.3))
 
-# -- MNIST data ---
-# Bu 2020 (Harvard Data Science Review, PMC7695347)
+# ┌── 2. ARRAYS (MLSysIM Literature) ───────────────────────────────────────────
+from mlsysim import Literature
 
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-bu_eps = np.array([0.83, 2.32, 5.07, 9.98, 14.98, 31.12])
-bu_acc = np.array([95.0, 96.6, 97.0, 97.6, 97.8, 98.0])
+dp = Literature.DifferentialPrivacy
+# MNIST: Bu 2020, Table 1 (CLT epsilon at delta = 1e-5)
+bu = Literature.Series.GaussianDpMnistNoisySgd
+bu_eps = np.array(bu.column('clt_epsilon'))
+bu_acc = np.array(bu.column('test_accuracy_pct'))
 
-# Abadi 2016 (CCS)
-abadi_mnist_eps = np.array([0.5, 2.0, 8.0])
-abadi_mnist_acc = np.array([90.0, 95.0, 97.0])
+# MNIST: Abadi 2016, Section 5.2 (sorted by epsilon)
+abadi_mnist = sorted((r for r in Literature.Series.AbadiDpSgdAccuracy.entries if r['dataset'] == 'MNIST'), key=lambda r: r['epsilon'])
+abadi_mnist_eps = np.array([r['epsilon'] for r in abadi_mnist])
+abadi_mnist_acc = np.array([r['accuracy_pct'] for r in abadi_mnist])
 
-# MNIST nonprivate baseline
-mnist_baseline = 98.3
+# MNIST nonprivate baseline (Abadi 2016)
+mnist_baseline = float(dp.MnistNonprivateAccuracyPct)
 
-# -- CIFAR-10 data ---
-# Abadi 2016: eps=8, acc=73%
-# De 2022 (arXiv:2204.13650): eps=8, acc=81.4%
-cifar_eps = np.array([8.0, 8.0])
-cifar_acc = np.array([73.0, 81.4])
-cifar_baseline = 93.0
+# CIFAR-10 at the comparison budget: Abadi 2016 and De 2022 (from scratch)
+cifar_eps = np.array([float(dp.Cifar10ComparisonEpsilon)] * 2)
+cifar_acc = np.array([float(dp.Cifar10AbadiAccuracyAtEps8Pct), float(dp.Cifar10DeAccuracyAtEps8Pct)])
+# CIFAR-10 nonprivate reference: WRN-16-4 (Zagoruyko and Komodakis 2016)
+cifar_baseline = float(dp.Cifar10NonprivateAccuracyPct)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 # MNIST: Bu line + Abadi triangles
@@ -4269,7 +4314,7 @@ ax.plot(cifar_eps[1], cifar_acc[1], color=COLORS['OrangeLine'], marker='D', mark
 
 # Nonprivate baselines
 ax.axhline(y=mnist_baseline, color=COLORS['BlueLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'MNIST baseline ({mnist_baseline}%)')
-ax.axhline(y=cifar_baseline, color=COLORS['OrangeLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'CIFAR-10 baseline ({cifar_baseline}%)')
+ax.axhline(y=cifar_baseline, color=COLORS['OrangeLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'CIFAR-10 baseline ({cifar_baseline:.1f}%)')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.set_xscale('log')
@@ -4288,7 +4333,7 @@ ax.text(0.56, 89.6, 'MNIST (Abadi 2016)', color=COLORS['BlueLine'], ha='left', v
 ax.text(7.0, cifar_acc[1], 'CIFAR-10 (De 2022)', color=COLORS['OrangeLine'], ha='right', va='center', **lab)
 ax.text(7.0, cifar_acc[0], 'CIFAR-10 (Abadi 2016)', color=COLORS['OrangeLine'], ha='right', va='center', **lab)
 ax.text(0.32, mnist_baseline + 0.35, f'MNIST nonprivate baseline ({mnist_baseline}%)', color=COLORS['BlueLine'], ha='left', va='bottom', **lab)
-ax.text(0.32, cifar_baseline - 0.35, f'CIFAR-10 nonprivate baseline ({cifar_baseline}%)', color=COLORS['OrangeLine'], ha='left', va='top', **lab)
+ax.text(0.32, cifar_baseline - 1.0, f'CIFAR-10 nonprivate baseline ({cifar_baseline:.1f}%)', color=COLORS['OrangeLine'], ha='left', va='top', **lab)
 
 # Focal gap: the CIFAR-10 accuracy cost at epsilon = 8, measured from its baseline
 gx = 9.6
@@ -4300,7 +4345,7 @@ for acc in cifar_acc:
 ax.text(
     gx * 1.12,
     (cifar_baseline + cifar_acc[0]) / 2,
-    'CIFAR-10 at $\\epsilon$ = 8:\nroughly 12 to 20 points\nbelow its baseline',
+    f'CIFAR-10 at $\\epsilon$ = {PrivacyUtilityGaps.cifar_eps_str}:\nroughly {PrivacyUtilityGaps.cifar_gap_lo_str} to {PrivacyUtilityGaps.cifar_gap_hi_str} points\nbelow its baseline',
     color=COLORS['primary'],
     ha='left',
     va='center',

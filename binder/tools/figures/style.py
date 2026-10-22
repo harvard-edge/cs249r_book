@@ -30,5 +30,7 @@ WEB_FIG_DPI = _style.WEB_FIG_DPI
 plt = _style.plt
 bar_compare = _style.bar_compare
 finalize_web_figure = _style.finalize_web_figure
+load_series = _style.load_series
+LocalSeries = _style.LocalSeries
 set_book_style = _style.set_book_style
 setup_plot = _style.setup_plot

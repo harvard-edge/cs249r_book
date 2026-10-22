@@ -159,27 +159,27 @@ class MachineStallTravel:
 # │ Show:    tau_e = 1.885 mH / 0.7 Ohm = 2.7 ms, a plant pole near 59 Hz; the
 # │          20 kHz sampling rate caps the closed-loop bandwidth near 2 kHz,
 # │          about 34 times above the pole.
-# │ How:     tau_e = L/R from RM.drive_unit (ZLTECH ZLLG10ASM800 datasheet);
-# │          pole = 1 / (2 pi tau_e); bandwidth cap = f_current / 10.
+# │ How:     Scenarios.WarehouseBaseHubDriveElectrical (tau_e = L/R from
+# │          RM.drive_unit, ZLTECH ZLLG10ASM800 datasheet; pole = 1 / (2 pi
+# │          tau_e)); bandwidth cap = f_current / 10.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_frequency, fmt_latency, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+ELEC = Scenarios.WarehouseBaseHubDriveElectrical
 
 class WindingTimeConstant:
     """Hub-motor electrical time constant and the current-loop bandwidth window."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    l_line = RM.drive_unit.line_inductance  # category: sourced (line-to-line)
-    r_line = RM.drive_unit.line_resistance  # category: sourced (line-to-line)
+    hub = ELEC.site.machine.drive_unit  # category: sourced (line-to-line L and R)
     f_current = RM.current_loop_rate  # category: chosen (drive current-loop rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_e = (l_line / r_line).to(millisecond)
-    f_pole = (1 / (2 * math.pi * tau_e)).to(hertz)
+    tau_e = ELEC.result.time_constant.to(millisecond)
+    f_pole = ELEC.result.pole_frequency.to(hertz)
     f_bw_cap = (f_current / 10).to(hertz)  # a factor of ten below the sampling rate
     room = (f_bw_cap / f_pole).to("dimensionless").magnitude
 
@@ -248,7 +248,7 @@ class TickVocabulary:
     t_unloaded = AISLE.enforcer_unloaded  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_wcet_gap = (t_wcet - t_unloaded).to(microsecond)
+    t_wcet_gap = Scenarios.WarehousePermissionTickResponse.result.wcet_claim.to(microsecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_period.to(millisecond).magnitude - 1.0) < 1e-9, f"Tick period drifted: {t_period}")
@@ -560,8 +560,10 @@ The current-loop rate follows directly from the winding's electrical time consta
 # │          5 deg allowance (0.69 ms of total delay); next-tick output 18.0 deg;
 # │          highest crossover at 1 kHz 7.9 Hz; 500 Hz ZOH alone 7.2 deg;
 # │          1.5 mm of base travel per millisecond of detection delay.
-# │ How:     calc_phase_lag_total (appendix_control total-delay formula);
-# │          tick, bus, WCET from AISLE; crossover and allowance chosen.
+# │ How:     Scenarios.WarehouseJointLoopThroughTick, ...NextTickOutput, and
+# │          ...SlowTick (calc_phase_lag_total, the appendix_control
+# │          total-delay formula); tick, bus, WCET from AISLE; crossover and
+# │          allowance are scenario assumptions there.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -569,38 +571,41 @@ from mlsysim.fmt import fmt, fmt_frequency, fmt_latency, fmt_length, fmt_multipl
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+LOOP = Scenarios.WarehouseJointLoopThroughTick
+LOOP_NEXT = Scenarios.WarehouseJointLoopNextTickOutput
+LOOP_SLOW = Scenarios.WarehouseJointLoopSlowTick
 
 class TickDelayBudget:
     """Phase erosion of a joint loop closed through the permission tick and the bus."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    f_c = 20.0 * hertz  # category: chosen (illustrative joint-loop crossover)
-    phi_allow = 5.0 * degree  # category: chosen (illustrative erosion allowance)
-    t_tick = AISLE.t_tick  # category: chosen (1 kHz permission tick)
-    t_bus = AISLE.t_bus  # category: illustrative (EtherCAT cycle)
-    t_comp = AISLE.enforcer_wcet  # category: chosen (declared enforcer WCET)
-    t_tick_slow = 2.0 * millisecond  # category: illustrative (500 Hz comparison)
+    f_c = LOOP.crossover  # category: chosen (illustrative joint-loop crossover)
+    phi_allow = LOOP.phase_allowance  # category: chosen (illustrative erosion allowance)
+    t_tick = LOOP.sample_period  # category: chosen (1 kHz permission tick)
+    t_bus = LOOP.transport_delay  # category: illustrative (EtherCAT cycle)
+    t_comp = LOOP.compute_delay  # category: chosen (declared enforcer WCET)
+    t_tick_slow = LOOP_SLOW.sample_period  # category: illustrative (500 Hz comparison)
     v = RM.base.max_velocity  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    same_tick = calc_phase_lag_total(f_c, t_tick, compute_delay=t_comp, transport_delay=t_bus, phase_allowance=phi_allow)
-    next_tick = calc_phase_lag_total(f_c, t_tick, compute_delay=t_tick, transport_delay=t_bus, phase_allowance=phi_allow)
-    slow_zoh = calc_phase_lag_total(f_c, t_tick_slow)
-    phi_zoh = same_tick["phase_zoh"].to(degree).magnitude
-    phi_bus = same_tick["phase_transport"].to(degree).magnitude
-    phi_comp = same_tick["phase_compute"].to(degree).magnitude
-    phi_total = same_tick["phase_total"].to(degree).magnitude
-    phi_next = next_tick["phase_total"].to(degree).magnitude
-    phi_slow = slow_zoh["phase_zoh"].to(degree).magnitude
-    tau_total = same_tick["tau_total"].to(millisecond)
-    tau_next = next_tick["tau_total"].to(millisecond)
-    tau_allowed = same_tick["tau_allowed"].to(millisecond)
-    f_max = same_tick["f_crossover_max"].to(hertz)
-    over_ratio = phi_total / phi_allow.magnitude
+    same_tick = LOOP.result
+    next_tick = LOOP_NEXT.result
+    slow_zoh = LOOP_SLOW.result
+    phi_zoh = same_tick.phase_hold.to(degree).magnitude
+    phi_bus = same_tick.phase_transport.to(degree).magnitude
+    phi_comp = same_tick.phase_compute.to(degree).magnitude
+    phi_total = same_tick.phase_total.to(degree).magnitude
+    phi_next = next_tick.phase_total.to(degree).magnitude
+    phi_slow = slow_zoh.phase_hold.to(degree).magnitude
+    tau_total = same_tick.total_delay.to(millisecond)
+    tau_next = next_tick.total_delay.to(millisecond)
+    tau_allowed = same_tick.allowed_delay.to(millisecond)
+    f_max = same_tick.crossover_ceiling.to(hertz)
+    over_ratio = same_tick.over_allowance
     mm_per_ms = (v * (1 * millisecond)).to(millimeter)
     n_fir = 9  # category: illustrative (moving-average taps, fn-fir-smoothing)
     tau_fir = ((n_fir - 1) / 2 * t_tick).to(millisecond)  # FIR group delay, (N-1)/2 samples
-    phi_fir = (360.0 * f_c * tau_fir).to(dimensionless).magnitude  # degrees at crossover
+    phi_fir = (same_tick.phase_per_delay * tau_fir).to(degree).magnitude  # degrees at crossover
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_fir.magnitude - 4.0) < 1e-9, f"FIR group delay drifted: {tau_fir}")
@@ -612,14 +617,14 @@ class TickDelayBudget:
     check(abs(phi_total - 12.6) < 1e-9, f"Total phase drifted: {phi_total}")
     check(abs(phi_next - 18.0) < 1e-9, f"Next-tick total phase drifted: {phi_next}")
     check(abs(phi_slow - 7.2) < 1e-9, f"500 Hz ZOH phase drifted: {phi_slow}")
-    check(phi_zoh < phi_allow.magnitude < phi_bus, "ZOH alone fits the allowance; the bus alone does not")
+    check(phi_zoh < phi_allow.to(degree).magnitude < phi_bus, "ZOH alone fits the allowance; the bus alone does not")
     check(t_bus > tau_allowed, "The bus cycle alone exceeds the whole delay allowance")
     check(abs(f_max.magnitude - 7.9365) < 1e-3, f"Highest supported crossover drifted: {f_max}")
     check(abs(mm_per_ms.magnitude - 1.5) < 1e-9, f"Travel per millisecond drifted: {mm_per_ms}")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     f_c_str = fmt_frequency(f_c, unit=hertz, precision=0)
-    phi_allow_str = fmt(phi_allow.magnitude, precision=0)
+    phi_allow_str = fmt(phi_allow.to(degree).magnitude, precision=0)
     t_tick_str = fmt_latency(t_tick, unit=millisecond, precision=0)
     t_bus_str = fmt_latency(t_bus, unit=millisecond, precision=0)
     t_comp_str = fmt_latency(t_comp.to(microsecond), unit=microsecond, precision=0)
@@ -638,7 +643,7 @@ class TickDelayBudget:
     n_fir_str = fmt(n_fir, precision=0)
     tau_fir_str = fmt_latency(tau_fir, unit=millisecond, precision=0)
     phi_fir_str = fmt(phi_fir, precision=1)
-    fir_over_mult_str = fmt_multiple(phi_fir / phi_allow.magnitude, precision=1)
+    fir_over_mult_str = fmt_multiple(phi_fir / phi_allow.to(degree).magnitude, precision=1)
 ```
 
 Excess phase lag causes corrective control torques to arrive out of phase with physical joint motion, eventually turning stabilizing negative feedback into unstable positive feedback [@nyquist1932regeneration]. Closing a feedback loop across the permission tick accumulates three distinct sources of latency. The discrete sample-and-hold introduces an effective transport delay equal to half the sample period ($\SamplingPeriod/2$). The enforcer requires compute time ($\EnforcerComputeTime$) to evaluate constraints. The resulting command then incurs fieldbus transit latency ($\CommandTransportTime$) before reaching the drive. Because a pure delay $\PureTransportDelay$ removes $\AngularFrequency \PureTransportDelay$ radians of phase across all frequencies, these stages collectively erode the phase margin at crossover according to @eq-nervous-delay-phase, the total-delay relation given in @sec-appendix-control-zoh:
@@ -687,7 +692,8 @@ While a first-in, first-out (FIFO) queue guarantees sequential message delivery,
 # │ Context: caption of @fig-04-multirate-cadence-buffer and its plotting cell.
 # │ Goal:    Compute and guard the values the caption prints, before the
 # │          figure div, so the caption can reference them.
-# │ How:     See the class docstring; every value from RM / AISLE.
+# │ How:     See the class docstring; inputs from RM / AISLE, the stall
+# │          timeline from Scenarios.WarehouseChunkLease.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim import viz
@@ -697,6 +703,7 @@ import matplotlib.pyplot as plt
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+LEASE = Scenarios.WarehouseChunkLease
 
 class MultirateStall:
     """One proposer stall on the running machine's clocks, drawn to scale."""
@@ -712,10 +719,10 @@ class MultirateStall:
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Renewals begin at 0, T, 2T; the third never completes (the stall).
-    t_last_adm = t_renew + t_infer  # last admission
-    t_expiry = t_last_adm + t_lease  # lease lapses
-    t_brake = t_expiry + t_tick + t_bus + t_onset
-    renewal_to_onset = (t_brake - t_last_adm).to(millisecond)
+    t_last_adm = LEASE.result.stall_last_admission.to(millisecond)  # last admission
+    t_expiry = LEASE.result.stall_lease_expiry.to(millisecond)  # lease lapses
+    t_brake = LEASE.result.stall_brake_onset.to(millisecond)
+    renewal_to_onset = LEASE.result.admission_to_brake_onset.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_last_adm.magnitude - 90.0) < 1e-9, f"Last admission drifted: {t_last_adm}")
@@ -731,7 +738,7 @@ class MultirateStall:
     renewal_to_onset_str = fmt_latency(renewal_to_onset, unit=millisecond, precision=0)
 ```
 
-::: {#fig-04-multirate-cadence-buffer data-explore="mechanism-scene" data-explore-key="vol4:fig-04-multirate-cadence-buffer" fig-env="figure" fig-pos="t" fig-cap="**Multi-rate cadence and the mailbox exchange**: (a) The running machine's clocks during a proposer stall, to scale. The chunk policy renews every `{python} MultirateStall.t_renew_str` and needs `{python} MultirateStall.t_infer_str`; the admitted chunk supplies a setpoint every `{python} MultirateStall.t_step_str`. When the third renewal never completes, the tick keeps executing the admitted chunk only until the `{python} MultirateStall.t_lease_str` lease from the last admission lapses; the tick, bus, and brake onset then put the fallback stop `{python} MultirateStall.renewal_to_onset_str` after that admission. (b) The single-slot seqlock in the microcontroller's own memory, in event order. The receive interrupt makes the counter odd, copies a checked frame, and makes it even; the tick accepts a copy only when it reads the same even value before and after. A tick that preempts a write reads an odd value and keeps its last validated chunk, and a stalled application processor leaves the slot unchanged while the lease runs." fig-alt="Two panels. Panel a, a timeline from 0 to about 210 milliseconds with five lanes. Chunk policy: inference bars from 0 to 40 and 50 to 90, then a hatched stalled bar from 100 onward. Setpoints: ticks every 25 milliseconds from 40 to 140. Lease: a dashed outline from 40 to 100 and a filled bar from 90 to 150 labeled lease 60 ms from last admission. Permission tick: fine lines every 1 millisecond. Drives: tracking until 150, a short green interval to 172 labeled tick plus bus plus onset 22 ms, then a red fallback stop. Dashed vertical lines mark last admission at 90, lease expiry at 150, and a red brake onset at 172. Panel b, three lanes in event order: receive ISR writer, sequence counter, and permission tick reader, in three cases. Clean exchange: the writer copies a frame while the counter goes 7 then 8, and the reader reads 8 twice and accepts. Tick preempts a write: the counter reads 9 during a paused write, the reader rejects, then after the counter becomes 10 the reader accepts. Application processor stalls: no frame arrives and the reader reads 10 again twice."}
+::: {#fig-04-multirate-cadence-buffer data-explore="original-v4-04-multirate-cadence-buffer" data-explore-key="vol4:fig-04-multirate-cadence-buffer" fig-env="figure" fig-pos="t" fig-cap="**Multi-rate cadence and the mailbox exchange**: (a) The running machine's clocks during a proposer stall, to scale. The chunk policy renews every `{python} MultirateStall.t_renew_str` and needs `{python} MultirateStall.t_infer_str`; the admitted chunk supplies a setpoint every `{python} MultirateStall.t_step_str`. When the third renewal never completes, the tick keeps executing the admitted chunk only until the `{python} MultirateStall.t_lease_str` lease from the last admission lapses; the tick, bus, and brake onset then put the fallback stop `{python} MultirateStall.renewal_to_onset_str` after that admission. (b) The single-slot seqlock in the microcontroller's own memory, in event order. The receive interrupt makes the counter odd, copies a checked frame, and makes it even; the tick accepts a copy only when it reads the same even value before and after. A tick that preempts a write reads an odd value and keeps its last validated chunk, and a stalled application processor leaves the slot unchanged while the lease runs." fig-alt="Two panels. Panel a, a timeline from 0 to about 210 milliseconds with five lanes. Chunk policy: inference bars from 0 to 40 and 50 to 90, then a hatched stalled bar from 100 onward. Setpoints: ticks every 25 milliseconds from 40 to 140. Lease: a dashed outline from 40 to 100 and a filled bar from 90 to 150 labeled lease 60 ms from last admission. Permission tick: fine lines every 1 millisecond. Drives: tracking until 150, a short green interval to 172 labeled tick plus bus plus onset 22 ms, then a red fallback stop. Dashed vertical lines mark last admission at 90, lease expiry at 150, and a red brake onset at 172. Panel b, three lanes in event order: receive ISR writer, sequence counter, and permission tick reader, in three cases. Clean exchange: the writer copies a frame while the counter goes 7 then 8, and the reader reads 8 twice and accepts. Tick preempts a write: the counter reads 9 during a paused write, the reader rejects, then after the counter becomes 10 the reader accepts. Application processor stalls: no frame arrives and the reader reads 10 again twice."}
 
 ```{python}
 #| label: plot-04-multirate-cadence-buffer
@@ -996,7 +1003,9 @@ A learned policy runtime can stall for many reasons: a page fault, thermal throt
 # │ Show:    ceiling 258.3 ms; row 4 = 93.0 mm; running total 742.5 -> 835.5 mm;
 # │          renewal-to-onset 82 ms; 176.3 ms of ceiling left; renewal
 # │          floor 50 + 5 = 55 ms below the 60 ms lease.
-# │ How:     calc_watchdog_lease_bound on D_clear less the fixed overheads;
+# │ How:     Scenarios.WarehouseChunkLease (LeaseBudgetModel: the stopping
+# │          budget with its delay ceiling, calc_watchdog_lease_bound on D_clear
+# │          less the fixed overheads) and Scenarios.WarehouseBaseStopBodyTerms;
 # │          every term from RM / AISLE (canon §3.2-§3.4).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -1005,12 +1014,14 @@ from mlsysim.fmt import fmt, fmt_length, fmt_velocity, fmt_acceleration, fmt_lat
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+LEASE = Scenarios.WarehouseChunkLease
+BODY = Scenarios.WarehouseBaseStopBodyTerms
 
 class MachineLeaseBudget:
     """Chunk lease sized from the mobile manipulator's stopping budget at its drive limit."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    v = LEASE.speed  # category: illustrative (drive limit)
     a_brake = AISLE.a_brake  # category: illustrative (loaded, dry floor)
     d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
     delta_loc = AISLE.delta_loc  # category: illustrative
@@ -1023,28 +1034,24 @@ class MachineLeaseBudget:
     t_heartbeat_timeout = AISLE.heartbeat_timeout  # category: chosen
     t_self_watchdog = AISLE.mcu_self_watchdog  # category: chosen
     f_chunk = RM.chunk_rate  # category: chosen (chunk-policy renewal rate)
-    t_renewal_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance; scenario assumption)
+    t_renewal_jitter = LEASE.renewal_jitter  # category: chosen (renewal-jitter allowance; scenario assumption)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    overhead = (delta_loc + delta_margin).to(millimeter)
-    ceiling = calc_watchdog_lease_bound(
-        clearance_distance=d_clear - delta_loc - delta_margin,
-        initial_velocity=v,
-        max_deceleration=a_brake,
-    )
-    d_brake = ceiling["d_brake"].to(millimeter)
-    t_ceiling = ceiling["t_total_delay_max"].to(millisecond)  # whole pre-brake delay, onset included
-    d_onset = (v * t_act).to(millimeter)
-    prior_total = (d_brake + overhead + d_onset).to(millimeter)  # rows 1-3 (@sec-body-kinetic-momentum)
-    t_lease_path = (t_lease + t_tick + t_bus).to(millisecond)
-    d_lease_path = (v * t_lease_path).to(millimeter)  # row 4
-    running_total = (prior_total + d_lease_path).to(millimeter)
-    remaining = (d_clear - running_total).to(millimeter)
-    t_renewal_to_onset = (t_lease_path + t_act).to(millisecond)
-    t_ceiling_left = (t_ceiling - t_renewal_to_onset).to(millisecond)
+    lease = LEASE.result
+    overhead = BODY.result.overhead.to(millimeter)
+    d_brake = BODY.result.braking_travel.to(millimeter)
+    t_ceiling = lease.delay_ceiling.to(millisecond)  # whole pre-brake delay, onset included
+    d_onset = BODY.result.delay_travel.to(millimeter)
+    prior_total = lease.body_terms_distance.to(millimeter)  # rows 1-3 (@sec-body-kinetic-momentum)
+    t_lease_path = lease.lease_path.to(millisecond)
+    d_lease_path = lease.lease_path_travel.to(millimeter)  # row 4
+    running_total = lease.running_total.to(millimeter)
+    remaining = lease.spare.to(millimeter)
+    t_renewal_to_onset = lease.admission_to_brake_onset.to(millisecond)
+    t_ceiling_left = lease.delay_spare.to(millisecond)
     mm_per_ms = (v * (1 * millisecond)).to(millimeter)
     t_chunk_period = (1 / f_chunk).to(millisecond)
-    t_renewal_need = (t_chunk_period + t_renewal_jitter).to(millisecond)  # lease lower limit
+    t_renewal_need = lease.lease_floor.to(millisecond)  # lease lower limit
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_ceiling.magnitude - 258.333) < 5e-3, f"Pre-brake ceiling drifted: {t_ceiling}")
@@ -1338,13 +1345,15 @@ Each term demands distinct evidentiary backing. Formal static timing analysis ag
 # │          then price a missed deadline in base travel.
 # │ Show:    250 + 50 + 40 = 340 us <= 400 us deadline, 60 us margin; one
 # │          missed period costs 1 ms, or 1.5 mm at the drive limit.
-# │ How:     C, D, T from TickVocabulary (AISLE); B and I are scenario bounds.
+# │ How:     Scenarios.WarehousePermissionTickResponse (calc_response_time_bound);
+# │          C, D, T from TickVocabulary (AISLE); B and I are scenario bounds.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_display_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+RTA = Scenarios.WarehousePermissionTickResponse
 
 class TickResponseBudget:
     """R = C + B + I for the permission tick against its deadline."""
@@ -1354,14 +1363,14 @@ class TickResponseBudget:
     t_deadline = TickVocabulary.t_deadline  # category: chosen
     t_period = TickVocabulary.t_period  # category: chosen
     t_block = (
-        AISLE.enforcer_blocking
+        RTA.site.enforcer_blocking
     )  # category: illustrative (longest tick-masking section in lower-priority driver code; the seqlock adds none; scenario bound)
-    t_interf = AISLE.enforcer_interference  # category: illustrative (timer and bus-interrupt work per response window; scenario bound)
+    t_interf = RTA.site.enforcer_interference  # category: illustrative (timer and bus-interrupt work per response window; scenario bound)
     v = RM.base.max_velocity  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_resp = (t_wcet + t_block + t_interf).to(microsecond)
-    t_margin = (t_deadline - t_resp).to(microsecond)
+    t_resp = RTA.result.response.to(microsecond)
+    t_margin = RTA.result.margin.to(microsecond)
     d_miss = (v * t_period).to(millimeter)  # travel during one extra period of detection delay
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1483,76 +1492,69 @@ None of these bounds belongs to a protocol acronym alone. Each guarantee depends
 # │          1 Mbps + 113 bits at 5 Mbps; one bus, 18 frames = 1018.8 us > 1 ms;
 # │          one bus per limb: arm 14 frames = 792.4 us, base 4 frames =
 # │          226.4 us; EtherCAT one frame (16 B/axis) + 9 hops = 22.0 us.
-# │ How:     calc_canfd_bus_utilization (ISO 11898-1:2015 frame bits) and
-# │          calc_ethercat_cycle_time; axis counts and cycle from RM; PDO
-# │          sizes and bit rates are scenario inputs.
+# │ How:     Scenarios.WarehouseServoCanFdOneBus, ...ArmBus, ...BaseBus
+# │          (calc_canfd_bus_utilization, ISO 11898-1:2015 frame bits) and
+# │          Scenarios.WarehouseServoEtherCat (calc_ethercat_cycle_time); axis
+# │          counts and cycle from RM; PDO sizes and bit rates are scenario
+# │          assumptions there.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_latency, fmt_percent, fmt_int, fmt_display_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+CAN_ONE = Scenarios.WarehouseServoCanFdOneBus
+CAN_ARM = Scenarios.WarehouseServoCanFdArmBus
+CAN_BASE = Scenarios.WarehouseServoCanFdBaseBus
+ECAT = Scenarios.WarehouseServoEtherCat
 
 class FieldbusSchedulability:
     """Scenario serialization and forwarding occupancy, not end-to-end schedulability."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    num_axes = RM.servo_axes  # category: chosen (arm joints + drive wheels)
-    arm_axes = RM.arm.dofs  # category: datasheet
-    cycle_time = RM.fieldbus_cycle  # category: illustrative (EtherCAT cycle, T_bus)
+    num_axes = CAN_ONE.num_axes  # category: chosen (arm joints + drive wheels)
+    arm_axes = CAN_ARM.num_axes  # category: datasheet
+    drive_axes = CAN_BASE.num_axes  # category: chosen (drive wheels)
+    cycle_time = CAN_ONE.cycle  # category: illustrative (EtherCAT cycle, T_bus)
 
     # Frame parameters below are scenario assumptions (chosen for this comparison)
-    pdo_bytes = 8  # category: chosen (position-mode record: 32-bit position + two 16-bit words, each direction)
-    frames_per_axis = 2  # category: chosen (one command frame and one feedback frame per axis per cycle)
-    canfd_baud_arb = 1.0 * (megabit / second)  # category: chosen (nominal rate)
-    canfd_baud_data = 5.0 * (megabit / second)  # category: chosen (data-phase rate)
-    ethercat_baud = 100.0 * (megabit / second)  # category: datasheet (100BASE-TX link rate)
-    ethercat_header = 64  # category: illustrative
-    ethercat_hop = 0.6 * microsecond  # category: illustrative
+    pdo_bytes = CAN_ONE.payload_bytes  # category: chosen (position-mode record: 32-bit position + two 16-bit words, each direction)
+    frames_per_axis = CAN_ONE.frames_per_axis  # category: chosen (one command frame and one feedback frame per axis per cycle)
+    canfd_baud_arb = CAN_ONE.baud_arbitration  # category: chosen (nominal rate)
+    canfd_baud_data = CAN_ONE.baud_data  # category: chosen (data-phase rate)
+    ethercat_baud = ECAT.baud_rate  # category: datasheet (100BASE-TX link rate)
+    ethercat_header = ECAT.header_bytes  # category: illustrative
+    ethercat_hop = ECAT.hop_delay  # category: illustrative
+    ethercat_bytes_per_axis = ECAT.bytes_per_axis  # category: chosen (command and feedback share one frame)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    drive_axes = num_axes - arm_axes
-    canfd_kw = dict(
-        payload_bytes=pdo_bytes,
-        baud_arbitration=canfd_baud_arb,
-        baud_data=canfd_baud_data,
-        cycle_time=cycle_time,
-        frames_per_axis=frames_per_axis,
-    )
-    one_bus = calc_canfd_bus_utilization(num_axes=num_axes, **canfd_kw)
-    arm_bus = calc_canfd_bus_utilization(num_axes=arm_axes, **canfd_kw)
-    base_bus = calc_canfd_bus_utilization(num_axes=drive_axes, **canfd_kw)
-    ethercat = calc_ethercat_cycle_time(
-        num_axes=num_axes,
-        bytes_per_axis=frames_per_axis * pdo_bytes,  # command and feedback share one frame
-        baud_rate=ethercat_baud,
-        header_bytes=ethercat_header,
-        hop_delay=ethercat_hop,
-        cycle_time=cycle_time,
-    )
+    one_bus = CAN_ONE.result
+    arm_bus = CAN_ARM.result
+    base_bus = CAN_BASE.result
+    ethercat = ECAT.result
 
-    t_frame = one_bus["t_tx"]
-    t_nom = one_bus["t_nominal"]
-    t_dat = one_bus["t_data"]
-    bits_nom = one_bus["bits_nominal"]
-    bits_dat = one_bus["bits_data"]
-    stuff_bits = one_bus["stuff_bits_nominal"] + one_bus["stuff_bits_data"]
-    n_frames = one_bus["n_frames"]
-    t_total_one = one_bus["t_total_tx"]
-    rho_one = one_bus["utilization"]
-    n_frames_arm = arm_bus["n_frames"]
-    t_total_arm = arm_bus["t_total_tx"]
-    rho_arm = arm_bus["utilization"]
-    t_left_arm = (cycle_time - t_total_arm).to(microsecond)
-    n_frames_base = base_bus["n_frames"]
-    t_total_base = base_bus["t_total_tx"]
-    rho_base = base_bus["utilization"]
+    t_frame = one_bus.frame_time
+    t_nom = one_bus.nominal_time
+    t_dat = one_bus.data_time
+    bits_nom = one_bus.bits_nominal
+    bits_dat = one_bus.bits_data
+    stuff_bits = one_bus.stuff_bits
+    n_frames = one_bus.frames
+    t_total_one = one_bus.occupancy
+    rho_one = one_bus.utilization
+    n_frames_arm = arm_bus.frames
+    t_total_arm = arm_bus.occupancy
+    rho_arm = arm_bus.utilization
+    t_left_arm = arm_bus.unallocated.to(microsecond)
+    n_frames_base = base_bus.frames
+    t_total_base = base_bus.occupancy
+    rho_base = base_bus.utilization
 
-    t_frame_ethercat = ethercat["t_tx"]
-    t_hop_ethercat = ethercat["t_forward"]
-    t_total_ethercat = ethercat["t_cycle_total"]
-    t_margin_ethercat = ethercat["t_margin"]
-    rho_ethercat = ethercat["utilization"]
+    t_frame_ethercat = ethercat.frame_time
+    t_hop_ethercat = ethercat.forward_time
+    t_total_ethercat = ethercat.occupancy
+    t_margin_ethercat = ethercat.unallocated
+    rho_ethercat = ethercat.utilization
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # 2026-09-28 (M1): command AND feedback frames, CRC and stuffing in the data
@@ -1605,7 +1607,7 @@ class FieldbusSchedulability:
         rf"{n_frames} \times {_us1(t_frame)} = {_us1(t_total_one)}\ \mu\text{{s}} > {fmt(cycle_time, unit=microsecond, precision=0, commas=False)}\ \mu\text{{s}}, \qquad {n_frames_arm} \times {_us1(t_frame)} = {_us1(t_total_arm)}\ \mu\text{{s}}"
     )
     ethercat_math = fmt_display_math(
-        rf"\frac{{({ethercat_header} + {num_axes} \times {frames_per_axis * pdo_bytes})\ \text{{B}} \times 8}}{{{fmt(ethercat_baud, unit=megabit / second, precision=0)}\ \text{{Mbps}}}} + {num_axes} \times {_us1(ethercat_hop)}\ \mu\text{{s}} = {fmt(t_frame_ethercat, unit=microsecond, precision=2)} + {_us1(t_hop_ethercat)} = {fmt(t_total_ethercat, unit=microsecond, precision=2)}\ \mu\text{{s}}"
+        rf"\frac{{({ethercat_header} + {num_axes} \times {ethercat_bytes_per_axis})\ \text{{B}} \times 8}}{{{fmt(ethercat_baud, unit=megabit / second, precision=0)}\ \text{{Mbps}}}} + {num_axes} \times {_us1(ethercat_hop)}\ \mu\text{{s}} = {fmt(t_frame_ethercat, unit=microsecond, precision=2)} + {_us1(t_hop_ethercat)} = {fmt(t_total_ethercat, unit=microsecond, precision=2)}\ \mu\text{{s}}"
     )
 ```
 
@@ -1714,18 +1716,23 @@ plt.show()
 # │          frames, two per axis (8 axes per 1 ms bus); lease 60 -> 100 ms
 # │          (60 mm at 1.5 m/s).
 # │ How:     Reuses TickResponseBudget, FieldbusSchedulability, and
-# │          MachineLeaseBudget; the two changed values are checkpoint givens.
+# │          MachineLeaseBudget; the two changed values are checkpoint givens,
+# │          held by Scenarios.WarehousePermissionTickLongBlocking and
+# │          Scenarios.WarehouseChunkLeaseLengthened.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_latency, fmt_velocity, check
 
+RTA_LONG = Scenarios.WarehousePermissionTickLongBlocking
+LEASE_LONG = Scenarios.WarehouseChunkLeaseLengthened
+
 class CheckpointEstimates:
     """Givens for the checkpoint estimate items, with guards on their verdicts."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_block_new = 120 * microsecond  # category: illustrative (checkpoint given: a longer tick-masking section)
-    t_lease_new = 100 * millisecond  # category: illustrative (checkpoint given: a lengthened lease)
+    t_block_new = RTA_LONG.blocking  # category: illustrative (checkpoint given: a longer tick-masking section)
+    t_lease_new = LEASE_LONG.lease  # category: illustrative (checkpoint given: a lengthened lease)
     t_block = TickResponseBudget.t_block  # category: illustrative
     t_wcet = TickResponseBudget.t_wcet  # category: chosen
     t_interf = TickResponseBudget.t_interf  # category: illustrative
@@ -1736,9 +1743,9 @@ class CheckpointEstimates:
     v = MachineLeaseBudget.v  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_resp_new = (t_wcet + t_block_new + t_interf).to(microsecond)
-    axes_per_bus = int((cycle / (2 * t_frame)).to("dimensionless").magnitude)
-    d_extra = (v * (t_lease_new - t_lease)).to(millimeter)
+    t_resp_new = RTA_LONG.result.response.to(microsecond)
+    axes_per_bus = FieldbusSchedulability.one_bus.axes_capacity
+    d_extra = (LEASE_LONG.result.running_total - MachineLeaseBudget.running_total).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_resp_new > t_deadline, "Checkpoint: the longer blocking section must break the deadline.")
@@ -2082,12 +2089,12 @@ class PartOneCoupledBudget:
     )["t_stream"].to(millisecond)
 
     t_chunk_period = (1 / f_chunk).to(millisecond)
-    t_renewal_need = (t_chunk_period + t_renewal_jitter).to(millisecond)  # lease lower limit
-    t_lease_upper = (t_ceiling - t_tick - t_bus - t_act).to(millisecond)  # before observation age
+    t_renewal_need = Scenarios.WarehouseChunkLease.result.lease_floor.to(millisecond)  # lease lower limit
+    t_lease_upper = Scenarios.WarehouseChunkLease.result.lease_ceiling.to(millisecond)  # before observation age
     t_age = AISLE.perception_age.to(millisecond)  # capture-to-dispatch age only (@sec-perception)
-    t_lease_upper_age = (t_lease_upper - t_age).to(millisecond)  # before the dispatch-to-admission allocation
+    t_lease_upper_age = Scenarios.WarehouseChunkLease.result.lease_ceiling_after_age.to(millisecond)  # before the dispatch-to-admission allocation
     t_age_admit = CaptureToBrakeTiming.t_replace  # capture to admission, rows 1 + 2 of @tbl-04-event-timing
-    t_lease_upper_admit = (t_lease_upper - t_age_admit).to(millisecond)  # with Delta_da allocated
+    t_lease_upper_admit = Scenarios.WarehouseChunkLease.result.lease_ceiling_at_admission.to(millisecond)  # with Delta_da allocated
     mm_per_ms = (v * (1 * millisecond)).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

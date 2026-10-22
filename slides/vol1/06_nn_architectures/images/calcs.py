@@ -1,226 +1,291 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 6 (Network Architectures, Part 1).
+"""Every number on the Lecture 6 (Network Architectures, Part 1) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment
-("ch" is the rendered chapter, Network Architectures); each printed line is
-a value the slide or its note shows, under the label used there.
-make_figs.py imports from this file so figures and slides share one
-computation.
+MLSysIM holds the inputs and the calculations: the layer scenarios
+(Scenarios.MnistMlpLayerStack, ImageNet64ChannelConv, ElmanRnnStep, and the rest), the
+model registry (ResNet-50, MobileNetV2, the DS-CNN keyword spotter), the
+nRF52840 microcontroller, the 45 nm energy figures in Hardware.Tech, and the
+cited results in Literature (Netflix Prize, Keras Applications, He et al. 2016,
+Vaswani et al. 2017). The chapter reads the same scenarios. This file only
+selects values, converts units, and formats them; it types no numbers. Each
+value is recorded with v() under the key the deck prints as \\val{key};
+running this file writes images/numbers.tex. make_figs.py imports this
+module, so figures and slides share one computation.
+
+Kept typed in the deck, by rule: the PyTorch console listings (recorded output
+of images/torch_shapes.py), the toy drawings of Example 6.3 and the im2col
+grid, wrong answer choices, years, depths listed in a figure legend, and
+lecture and section numbers.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Hardware, Models, Literature, Scenarios = mlsysim.Hardware, mlsysim.Models, mlsysim.Literature, mlsysim.Scenarios
+units = mlsysim.core.units
+FP32, FP16, INT8 = units.BYTES_FP32, units.BYTES_FP16, units.BYTES_INT8
+
+NETFLIX = Literature.NetflixPrize
+KERAS = Literature.KerasApplications
+QUALITY = Literature.PredictionQuality
+RUNS = Literature.TrainingRuns
+
+MLP = Scenarios.MnistMlpLayerStack
+L1 = Scenarios.MnistMlpFirstLayer
+L1_BIG = Scenarios.MnistMlpFirstLayerDoubledInput
+WIDE = Scenarios.Dense2048Layer
+TOY = Scenarios.FourPixelThreeNeuronLayer
+FIRST = Scenarios.MnistFirstConvLayer
+SMALL_CNN = Scenarios.MnistSmallCnn
+CONV = Scenarios.ImageNet64ChannelConv
+CONV_BIG = Scenarios.ImageNet64ChannelConvAt1024
+CONV_VALID = Scenarios.ImageNet64ChannelConvUnpadded
+MINI = Scenarios.Im2colMiniature
+ALEX = Scenarios.AlexNetFirstConv
+RF = Scenarios.ThreeByThreeReceptiveField
+GRAD = Scenarios.PlainStackGradientDecay
+ADD = Scenarios.ResidualAddFp32
+SHARE3 = Scenarios.ResNet50ConvKernelShare
+STREAM = Scenarios.ResNet50ThirtyFpsStream
+KWS32, KWS8 = Scenarios.KwsDsCnnOnNrf52840Fp32, Scenarios.KwsDsCnnOnNrf52840Int8
+RNN, LSTM, STATE = Scenarios.ElmanRnnStep, Scenarios.LstmStep, Scenarios.RecurrentState512Fp32
+RESNET, MOBILENET, KWS = Models.Vision.ResNet50, Models.Vision.MobileNetV2, Models.Tiny.DS_CNN
+MCU = Hardware.Tiny.nRF52840
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def head(title):
-    print(f"\n[{title}]")
+def intensity(workload):
+    """FLOPs per FP32 weight byte (the chapter's weight-only proxy, Table 8)."""
+    return m(workload.inference_flops / workload.size_in_bytes(FP32), "flop/byte")
 
 
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-MLP = (784, 128, 64, 10)          # ch, Lecture 5 reference MNIST network
-MNIST_HW = 28 * 28                # 28x28 image, pixel count (input)
-N_FEAT_MNIST = 32                 # ch Example 6.1: 32 features
-K3 = 3                            # 3x3 filter
-WIDE = 2048                       # ch §6.2.5: production-width layer
-FP32_B = 4                        # bytes per FP32 value
-INT8_B = 1
-DRAM_PJ_PER_BYTE = 160            # ch §6.2.5 (Horowitz 2014, 45 nm)
-MAC_FP32_PJ = 4.6                 # ch §6.2.5 (Horowitz 2014, 45 nm)
-IMG = 224                         # ch Definition 6.3: 224x224x64 feature map
-C_IN = C_OUT = 64
-BIG_IMG = 1024                    # note: "if the image grows to 1,024 by 1,024"
-RESNET50_INT = 80.1               # ch Table 8, FLOP per FP32 weight byte
-DENSE_INT = None                  # derived below (equation 2)
-RESNET50_GFLOP = 8.2              # ch Napkin Math 6.3 / Lighthouse 6.1
-MOBILENETV2_GFLOP = 0.6           # ch Table 8 (600 MFLOP)
-FPS = 30                          # ch Napkin Math 6.3
-GPU_PEAK_TFLOPS = 10              # ch Napkin Math 6.3
-GPU_ACHIEVED_TFLOPS = 5           # ch Napkin Math 6.3: 50 to 60% of peak
-DETECTOR_GFLOP = 100              # ch Napkin Math 6.3
-GAIN = 0.9                        # ch §6.4.1: per-layer gradient factor
-DEPTH = 50
-KWS_PARAMS = 200_000              # ch Lighthouse 6.3, Table 10
-RNN_IN, RNN_H = 100, 128          # ch §6.5 self-check
-RNN_STEPS = 1000
-LSTM_STATE = 512                  # ch §6.5.5: 512-wide FP32 state
-
-# Keras Applications table (keras.io/api/applications, retrieved 2026-10-18):
-# time (ms) per inference step, batch 32, mean of 30 batches x 10 repeats;
-# CPU: AMD EPYC (92 core); GPU: Tesla A100.
-KERAS = {"ResNet50": dict(params="25.6M", top1=74.9, cpu_ms=58.2, gpu_ms=4.6),
-         "MobileNetV2": dict(params="3.5M", top1=71.3, cpu_ms=25.9, gpu_ms=3.8)}
-
-# Arduino Nano 33 BLE Sense Rev2 (store.arduino.cc, tech specs, retrieved
-# 2026-10-18): nRF52840, 1 MB flash, 256 KB SRAM (binary units).
-FLASH_B = 1 * 1024 * 1024
-SRAM_B = 256 * 1024
-
-# Vaswani et al. 2017, Table 2: training cost (FLOPs), EN-DE, and BLEU.
-GNMT_RL_FLOPS, GNMT_RL_BLEU = 2.3e19, 24.6
-TRANSFORMER_BASE_FLOPS, TRANSFORMER_BASE_BLEU = 3.3e18, 27.3
-
-# PyTorch 2.14.1, torch_shapes.py (run 2026-10-18): nn.Linear(784, 128)
-# weights (128, 784) plus bias (128,); nn.LSTM(100, 128) weight_ih_l0 (512, 100).
+def mantissa_exponent(x):
+    e = math.floor(math.log10(x))
+    return x / 10 ** e, e
 
 
-def main():
-    head("Recall: MNIST MLP multiply-adds")
-    macs = sum(a * b for a, b in zip(MLP, MLP[1:]))
-    show("MACs per digit", f"{macs:,}")
+print("== Hook: the Netflix Prize (Literature.NetflixPrize)")
+v("prize_musd", NETFLIX.GrandPrizeUsd / 10 ** 6, "{:.0f}", "Grand Prize, millions of dollars")
+v("target_pct", NETFLIX.TargetImprovementPct, "{:.0f}", "required improvement, %")
+v("win_pct", NETFLIX.WinningImprovementPct, "{:.2f}", "leaderboard improvement of the winners, %")
+v("blend_algos", NETFLIX.ProgressPrizeBlendAlgorithms, "{:.0f}", "algorithms in the 2007 Progress Prize blend")
+v("progress_pct", NETFLIX.ProgressPrizeImprovementPct, "{:.2f}", "2007 Progress Prize improvement, %")
+v("kept_algos_word", NETFLIX.ProgressPrizeAlgorithmsKept, "words", "algorithms Netflix kept, in prose")
+v("contest_ratings_m", NETFLIX.ContestRatings / 10 ** 6, "{:.0f}", "contest ratings, millions")
+v("prod_ratings_b", NETFLIX.ProductionRatings / 10 ** 9, "{:.0f}", "production ratings, billions")
 
-    head("Shared filter: 87x fewer weights per detector")
-    dense_det = N_FEAT_MNIST * MNIST_HW
-    conv_det = N_FEAT_MNIST * K3 * K3
-    show("32 dense features (weights)", f"{dense_det:,}")
-    show("32 shared 3x3 filters (weights)", f"{conv_det:,}")
-    show("ratio", f"{dense_det / conv_det:.0f}x")
+print("== Recall: the MNIST network (Scenarios.MnistMlpLayerStack)")
+v("mnist_side", mlsysim.Datasets.MNIST.image_width, "{:.0f}", "MNIST image side, pixels")
+v("mlp_in", MLP.widths[0], "{:.0f}", "input width")
+v("mlp_h1", MLP.widths[1], "{:.0f}", "first hidden width")
+v("mlp_h2", MLP.widths[2], "{:.0f}", "second hidden width")
+v("mlp_out", MLP.widths[3], "{:.0f}", "classes")
+v("mnist_macs", MLP.macs_per_example_dense, "{:,.0f}", "multiply-adds per digit (= weights, biases aside)")
 
-    head("Dense layer weights")
-    w = MLP[0] * MLP[1]
-    show("784 -> 128 weights", f"{w:,}")
-    show("nn.Linear(784,128) parameters (weights + bias)", f"{w + MLP[1]:,}")
-    w2 = WIDE * WIDE
-    show("2048 -> 2048 weights", f"{w2:,} = {w2 / 1e6:.2f} million")
-    show("2048 -> 2048 FP32 MB", f"{w2 * FP32_B / 1e6:.1f} MB")
-    show("input doubled in width and height: weight factor", f"{(2 * 2):d}x")
+print("== Shared filter against dense units (Scenarios.MnistFirstConvLayer, MnistSmallCnn)")
+v("first_feat", FIRST.out_channels, "{:.0f}", "first-layer features")
+v("k", FIRST.kernel, "{:.0f}", "filter side")
+v("dense_det", FIRST.dense_weights, "{:,.0f}", "weights of 32 dense features")
+v("conv_det", FIRST.weights, "{:,.0f}", "weights of 32 shared 3x3 filters")
+v("det_ratio", FIRST.sharing_ratio, "{:.0f}", "dense over shared, times")
+v("cnn_weights", SMALL_CNN.weights, "{:,.0f}", "small CNN weights")
+v("head_pct", 100 * SMALL_CNN.dense_share, "{:.0f}", "dense head share of the CNN's weights, %")
 
-    head("Four pixels into three neurons")
-    x = [0.8, 0.2, 0.9, 0.1]
-    W = [[0.5, 0.1, -0.2], [-0.3, 0.8, 0.4], [0.2, -0.4, 0.6], [0.7, 0.3, -0.1]]
-    s = [sum(x[i] * W[i][j] for i in range(4)) for j in range(3)]
-    show("terms of neuron 1", ", ".join(f"{x[i] * W[i][0]:+.2f}" for i in range(4)))
-    show("sums", ", ".join(f"{v:.2f}" for v in s))
-    show("ReLU", ", ".join(f"{max(0.0, v):.2f}" for v in s))
+print("== Dense layer (Scenarios.FourPixelThreeNeuronLayer, MnistMlpFirstLayer, Dense2048Layer)")
+v("toy_in", len(TOY.inputs), "{:.0f}", "toy layer inputs")
+v("toy_out", TOY.neurons, "{:.0f}", "toy layer outputs")
+v("toy_weights", TOY.multiply_adds, "{:.0f}", "toy layer weights (and multiply-adds)")
+v("toy_in_word", len(TOY.inputs), "words", "the same, in prose")
+v("toy_out_word", TOY.neurons, "words", "the same, in prose")
+v("toy_weights_word", TOY.multiply_adds, "words", "the same, in prose")
+v("l1_weights", L1.weights, "{:,.0f}", "784 -> 128 weights")
+v("l1_params", L1.parameters, "{:,.0f}", "784 -> 128 parameters with biases (PyTorch count)")
+v("wide", WIDE.in_features, "{:,.0f}", "production layer width")
+v("wide_m", WIDE.weights / 10 ** 6, "{:.2f}", "2,048 -> 2,048 weights, millions")
+v("wide_mb", m(WIDE.weight_bytes, "MB"), "{:.1f}", "2,048 -> 2,048 weights in FP32, MB")
+v("fp32_bytes", m(FP32, "byte"), "{:.0f}", "bytes per FP32 value")
+v("fp32_bytes_word", m(FP32, "byte"), "words", "the same, in prose")
+v("growth_word", L1_BIG.weights / L1.weights, "words", "weight growth when the input doubles in width and height")
 
-    head("Dense intensity at batch one")
-    i_dense = 2 / FP32_B
-    show("I (FLOP/byte)", f"{i_dense}")
-    show("batch for 100 FLOP/byte", f"{100 / i_dense:.0f}")
+print("== Four pixels into three neurons (Scenarios.FourPixelThreeNeuronLayer)")
+for i, x in enumerate(TOY.inputs, start=1):
+    v(f"x{i}", x, "{:.1f}", f"pixel {i}")
+for i, row in enumerate(TOY.weights, start=1):
+    for j, w in enumerate(row, start=1):
+        v(f"w{i}{j}", w, "{:.1f}", f"weight, input {i} to neuron {j}")
+for i, row in enumerate(TOY.weights, start=1):
+    v(f"w{i}1_abs", abs(row[0]), "{:.1f}", f"weight, input {i} to neuron 1 (magnitude; the sign is in the text)")
+for i, t in enumerate(TOY.terms(0), start=1):
+    v(f"t{i}", abs(t), "{:.2f}", f"term {i} of neuron 1 (magnitude; the sign is in the text)")
+for j, z in enumerate(TOY.preactivations, start=1):
+    v(f"z{j}", abs(z), "{:.2f}", f"sum of neuron {j} (magnitude; the sign is in the text)")
+for j, a in enumerate(TOY.activations, start=1):
+    v(f"r{j}", a, "{:.2f}" if a else "{:.0f}", f"ReLU of neuron {j}")
 
-    head("Energy: moving a weight vs. using it")
-    e_w = DRAM_PJ_PER_BYTE * FP32_B
-    show("read FP32 weight (pJ)", f"{e_w}")
-    show("ratio to one FP32 MAC", f"{e_w / MAC_FP32_PJ:.0f}x")
+print("== Dense intensity at batch one; energy (MnistMlpFirstLayer; Hardware.Tech, Horowitz 45 nm)")
+v("dense_i", L1.intensity, "{:.1f}", "FLOP per byte, FP32 weights, batch one")
+v("batch_100", L1.batch_for_intensity(100), "{:.0f}", "batch at which the layer reaches 100 FLOP/byte")
+v("dense_i_fp16", L1.variant(bytes_per_weight=FP16).intensity, "{:.0f}", "FLOP per byte with 16-bit weights")
+e_mac = m((Hardware.Tech.Op.FlopFp32.energy + Hardware.Tech.Op.AddFp32.energy) * units.flop, "pJ")
+e_word = m(FP32 * Hardware.Tech.Memory.DRAM.energy_per_byte, "pJ")
+v("mac_ratio", e_word / e_mac, "{:.0f}", "one FP32 DRAM weight read over one FP32 multiply-add")
 
-    head("Shift and receptive field")
-    show("three 3x3 layers see", f"{1 + 3 * (K3 - 1)}x{1 + 3 * (K3 - 1)}")
-    show("3x3 layers to see 21x21", f"{(21 - 1) // (K3 - 1)}")
+print("== Convolution: shift, receptive field, AlexNet (Scenarios.ThreeByThreeReceptiveField, AlexNetFirstConv)")
+v("k_area", CONV.kernel ** 2, "{:.0f}", "weights in one 3x3 filter (per input channel)")
+v("k_area_word", CONV.kernel ** 2, "words", "the same, in prose")
+v("rf_growth", RF.growth_per_layer, "{:.0f}", "pixels each 3x3 layer adds")
+v("rf_layers_word", RF.layers, "words", "layers in the stack, in prose")
+v("rf_field", RF.field, "{:.0f}", "receptive field of three 3x3 layers, pixels")
+v("rf_target", RF.target_field, "{:.0f}", "self-check target field, pixels")
+v("rf_needed", RF.layers_for_target, "{:.0f}", "3x3 layers to reach it")
+v("alex_filters", ALEX.out_channels, "{:.0f}", "AlexNet conv1 filters")
+v("alex_k", ALEX.kernel, "{:.0f}", "AlexNet conv1 filter side")
+v("alex_c", ALEX.in_channels, "{:.0f}", "AlexNet conv1 input channels")
+v("alex_weights", ALEX.weights, "{:,.0f}", "AlexNet conv1 weights, biases aside")
+v("img", CONV.height, "{:.0f}", "ImageNet input side, pixels")
 
-    head("AlexNet first layer (Krizhevsky et al. 2012, figure 3)")
-    # 96 kernels of 11x11x3 (paper, figure 3 caption)
-    show("conv1 weights", f"{96 * 11 * 11 * 3:,}")
+print("== Weight sharing and reuse (Scenarios.ImageNet64ChannelConv)")
+v("ch", CONV.in_channels, "{:.0f}", "channels in and out")
+v("dense_w_m", CONV.dense_weights / 10 ** 6, "{:.1f}", "dense weights, millions")
+v("conv_w", CONV.weights, "{:,.0f}", "3x3 convolution weights")
+v("share_ratio", CONV.sharing_ratio, "{:,.0f}", "dense over convolution, times")
+v("big_img", CONV_BIG.height, "{:,.0f}", "larger image side, pixels")
+v("big_growth", CONV_BIG.dense_weights / CONV.dense_weights, "{:.0f}", "dense weight growth at that size, times")
+v("positions", CONV.positions, "{:,.0f}", "positions per filter weight")
+v("layer_gmac", CONV.macs / 10 ** 9, "{:.2f}", "layer multiply-adds, billions")
+v("layer_kb", m(CONV.weight_bytes, "KB"), "{:.1f}", "layer weights in FP32, KB")
+v("outputs_m", CONV.outputs / 10 ** 6, "{:.1f}", "output values, millions")
+v("act_mb", m(CONV.activation_bytes, "MB"), "{:.1f}", "activations in FP32, MB")
+v("act_ratio", CONV.activation_to_weight_ratio, "{:.0f}", "activations over weights, times")
+v("resnet_i", intensity(RESNET), "{:.1f}", "ResNet-50 FLOP per FP32 weight byte")
+v("resnet_i_round", intensity(RESNET), "{:.0f}", "the same, to the unit")
+v("resnet_vs_dense", intensity(RESNET) / L1.intensity, "{:.0f}", "ResNet-50 over the batch-one dense layer, times")
 
-    head("Weight sharing: 205 million vs 36,864")
-    dense_w = IMG * IMG * C_IN * C_OUT
-    conv_w = K3 * K3 * C_IN * C_OUT
-    show("dense weights", f"{dense_w:,} (about {dense_w / 1e6:.1f} million)")
-    show("conv weights", f"{conv_w:,}")
-    show("ratio", f"{dense_w / conv_w:,.0f}x")
-    show("dense growth at 1024x1024", f"{(BIG_IMG / IMG) ** 2:.0f}x")
+print("== Unfolding (Scenarios.Im2colMiniature, ImageNet64ChannelConvUnpadded)")
+v("im_k", MINI.kernel, "{:.0f}", "miniature filter side")
+v("im_in", MINI.input_values, "{:.0f}", "miniature input values")
+v("im_unf", MINI.unfolded_entries, "{:.0f}", "unfolded entries")
+v("im_windows", MINI.positions, "{:.0f}", "windows (patch-matrix columns)")
+v("im_row", MINI.kernel ** 2, "{:.0f}", "values per window")
+v("max_copies", CONV.max_copies, "{:.0f}", "most copies of one pixel, 3x3 filter")
+v("valid_side", CONV_VALID.output_height, "{:.0f}", "window positions per side, no padding")
+v("unfold_cols", CONV_VALID.positions, "{:,.0f}", "patch-matrix columns, 224x224 image, 3x3 window")
 
-    head("Conv reuse and activations")
-    pos = IMG * IMG
-    show("positions per filter weight", f"{pos:,}")
-    show("ResNet-50 / dense intensity", f"{RESNET50_INT / i_dense:.0f}x")
-    layer_macs = pos * conv_w
-    show("example layer MACs", f"{layer_macs / 1e9:.2f} billion")
-    wbytes = conv_w * FP32_B
-    show("example layer weight bytes", f"{wbytes / 1e3:.1f} KB")
-    outs = pos * C_OUT
-    show("output values", f"{outs / 1e6:.1f} million")
-    show("activations FP32", f"{outs * FP32_B / 1e6:.1f} MB")
-    show("activations / weights", f"{outs * FP32_B / wbytes:.0f}x")
+print("== Thirty frames a second (Scenarios.ResNet50ThirtyFpsStream)")
+v("resnet_gflop", m(STREAM.flops_per_frame, "GFLOP"), "{:.1f}", "ResNet-50 GFLOP per image")
+v("fps", m(STREAM.frame_rate, "Hz"), "{:.0f}", "frames per second")
+v("gpu_tflops", m(STREAM.peak_rate, "TFLOP/s"), "{:.0f}", "GPU peak, TFLOP/s")
+v("util_lo", 100 * STREAM.utilization_low, "{:.0f}", "planning utilization, low, %")
+v("util_hi", 100 * STREAM.utilization_high, "{:.0f}", "planning utilization, high, %")
+v("eff_tflops", m(STREAM.sustained_low, "TFLOP/s"), "{:.0f}", "sustained rate at the low utilization, TFLOP/s")
+v("need_gflops", m(STREAM.required_rate, "GFLOP/s"), "{:.0f}", "GFLOP/s the stream needs")
+v("need_tflops", m(STREAM.required_rate, "TFLOP/s"), "{:.3f}", "the same, TFLOP/s")
+v("headroom", STREAM.headroom, "{:.1f}", "headroom, times")
+v("headroom_round", STREAM.headroom, "{:.0f}", "the same, to the unit")
+v("det_gflop", m(STREAM.alternative_flops, "GFLOP"), "{:.0f}", "detector GFLOP per frame")
+v("det_tflops", m(STREAM.alternative_required_rate, "TFLOP/s"), "{:.0f}", "detector need, TFLOP/s")
+v("det_headroom", STREAM.alternative_headroom, "{:.1f}", "detector headroom, times")
+v("conv3_pct", 100 * SHARE3.share, "{:.0f}", "3x3 convolutions' share of ResNet-50 multiply-adds, %")
 
-    head("im2col miniature")
-    n_in, k, out_hw = 3, 2, 3 - 2 + 1
-    show("input values", n_in * n_in)
-    show("unfolded entries", (out_hw ** 2) * k * k)
-    show("max copies of a pixel, 3x3 filter", K3 * K3)
+print("== Depth: skips and residual add (Scenarios.PlainStackGradientDecay, ResidualAddFp32)")
+v("depth", GRAD.depth, "{:.0f}", "plain-stack depth")
+v("depth_word", GRAD.depth, "words", "the same, in prose")
+v("gain", GRAD.gain, "{:.1f}", "per-layer gradient factor")
+v("grad", GRAD.product, "{:.3f}", "gradient product")
+v("add_i", ADD.intensity, "{:.2f}", "residual add, FLOP per byte")
+v("add_bytes", m(ADD.bytes_per_element, "byte"), "{:.0f}", "bytes moved per add")
 
-    head("unfold on a 224x224 image, 3x3 window, no padding")
-    show("columns (windows)", f"{(IMG - K3 + 1) ** 2:,}")
+print("== Residual networks on CIFAR-10 (He et al. 2016, Table 6)")
+v("r56_err", QUALITY.ResNet56Cifar10TestErrorPct, "{:.1f}", "ResNet-56 test error, %, rounded")
+v("r20_err", QUALITY.ResNet20Cifar10TestErrorPct, "{:.1f}", "ResNet-20 test error, %, rounded")
+v("r56_err_exact", QUALITY.ResNet56Cifar10TestErrorPct, "{:.2f}", "ResNet-56 test error, %")
+v("r20_err_exact", QUALITY.ResNet20Cifar10TestErrorPct, "{:.2f}", "ResNet-20 test error, %")
 
-    head("Estimate: 30 frames a second")
-    need = FPS * RESNET50_GFLOP
-    show("GFLOP/s needed", f"{need:.0f}")
-    show("headroom", f"{GPU_ACHIEVED_TFLOPS * 1e3 / need:.1f}x")
-    det = FPS * DETECTOR_GFLOP
-    show("detector need (TFLOP/s)", f"{det / 1e3:.0f}")
-    show("detector headroom", f"{GPU_ACHIEVED_TFLOPS * 1e3 / det:.1f}x")
-    show("peak-based (wrong) frames/s", f"{GPU_PEAK_TFLOPS * 1e3 / RESNET50_GFLOP:,.0f}")
+print("== Depthwise separable factoring (Scenarios.ImageNet64ChannelConv)")
+v("dw", CONV.depthwise_weights, "{:,.0f}", "depthwise multiply-adds per position")
+v("pw", CONV.pointwise_weights, "{:,.0f}", "pointwise multiply-adds per position")
+v("sep", CONV.separable_weights, "{:,.0f}", "separable total")
+v("sep_ratio", CONV.separable_ratio, "{:.1f}", "standard over separable, times")
+v("sep_round", CONV.separable_ratio, "{:.0f}", "the same, to the unit")
+v("sep_round_word", round(CONV.separable_ratio), "words", "the same, in prose")
+v("sep_limit", CONV.separable_limit, "{:.0f}", "limit with many channels, times")
 
-    head("Skip connections")
-    show("0.9^50", f"{GAIN ** DEPTH:.3f}")
-    add_bytes = 3 * FP32_B           # two operands read, one result written
-    show("residual add FLOP/byte", f"{1 / add_bytes:.2f} (1 FLOP per {add_bytes} bytes)")
+print("== Check: ResNet-50 against MobileNetV2 (Models; Literature.KerasApplications)")
+v("flop_ratio", m(RESNET.inference_flops / MOBILENET.inference_flops, ""), "{:.1f}", "FLOP ratio")
+v("resnet_params_m", m(RESNET.parameters, "Mparam"), "{:.1f}", "ResNet-50 parameters, millions")
+v("mobilenet_params_m", m(MOBILENET.parameters, "Mparam"), "{:.1f}", "MobileNetV2 parameters, millions")
+v("mobilenet_gflop", m(MOBILENET.inference_flops, "GFLOP"), "{:.1f}", "MobileNetV2 GFLOP per image")
+v("resnet_top1", KERAS.ResNet50Top1Pct, "{:.1f}", "Keras ResNet50 top-1, %")
+v("mobilenet_top1", KERAS.MobileNetV2Top1Pct, "{:.1f}", "Keras MobileNetV2 top-1, %")
+v("top1_gap", KERAS.ResNet50Top1Pct - KERAS.MobileNetV2Top1Pct, "{:.1f}", "top-1 gap, points")
+v("resnet_cpu_ms", KERAS.ResNet50CpuMsPerStep, "{:.1f}", "ResNet50 CPU ms/step")
+v("mobilenet_cpu_ms", KERAS.MobileNetV2CpuMsPerStep, "{:.1f}", "MobileNetV2 CPU ms/step")
+v("resnet_gpu_ms", KERAS.ResNet50GpuMsPerStep, "{:.1f}", "ResNet50 A100 ms/step")
+v("mobilenet_gpu_ms", KERAS.MobileNetV2GpuMsPerStep, "{:.1f}", "MobileNetV2 A100 ms/step")
+v("cpu_speedup", KERAS.ResNet50CpuMsPerStep / KERAS.MobileNetV2CpuMsPerStep, "{:.1f}", "measured CPU speedup")
+v("gpu_speedup", KERAS.ResNet50GpuMsPerStep / KERAS.MobileNetV2GpuMsPerStep, "{:.1f}", "measured A100 speedup")
+v("keras_batch", KERAS.BatchSize, "{:.0f}", "Keras timing batch")
+v("keras_cores", KERAS.CpuCores, "{:.0f}", "Keras timing CPU cores")
 
-    head("Depthwise factoring")
-    dw = K3 * K3 * C_IN
-    pw = C_IN * C_OUT
-    show("depthwise", f"{dw:,}")
-    show("pointwise", f"{pw:,}")
-    show("total", f"{dw + pw:,}")
-    show("ratio", f"{conv_w / (dw + pw):.1f}x")
-    frac = 1 / C_OUT + 1 / (K3 * K3)
-    show("fraction 1/64 + 1/9", f"{frac:.4f} -> {1 / frac:.1f}x")
-    show("limit with many channels", f"{K3 * K3}x")
+print("== Keyword spotter on a microcontroller (Scenarios.KwsDsCnnOnNrf52840Fp32/Int8)")
+v("flash_mb", m(MCU.memory.flash_capacity, "MiB"), "{:.0f}", "nRF52840 flash, MB (binary)")
+v("sram_kb", m(MCU.memory.sram_capacity, "KiB"), "{:.0f}", "nRF52840 SRAM, KB (binary)")
+v("mcu_mhz", m(MCU.compute.clock_rate, "MHz"), "{:.0f}", "nRF52840 clock, MHz")
+v("kws_params", m(KWS.parameters, "param"), "{:,.0f}", "keyword spotter weights")
+v("kws_params_k", m(KWS.parameters, "Kparam"), "{:.0f}", "the same, thousands")
+v("kws_fp32_kb", m(KWS32.weight_bytes, "KB"), "{:.0f}", "FP32 weights, KB")
+v("kws_int8_kb", m(KWS8.weight_bytes, "KB"), "{:.0f}", "INT8 weights, KB")
+v("kws_fp32_pct", 100 * KWS32.flash_share, "{:.0f}", "FP32 share of flash, %")
+v("kws_int8_pct", 100 * KWS8.flash_share, "{:.0f}", "INT8 share of flash, %")
+v("quant_word", m(FP32 / INT8, ""), "words", "FP32 over INT8 bytes, in prose")
+v("kws_i", intensity(KWS), "{:.0f}", "keyword spotter FLOP per FP32 weight byte")
+v("mobilenet_i", intensity(MOBILENET), "{:.1f}", "MobileNetV2 FLOP per FP32 weight byte")
 
-    head("Check: 13.7x fewer FLOPs (Keras measured)")
-    show("FLOP ratio ResNet-50 / MobileNetV2", f"{RESNET50_GFLOP / MOBILENETV2_GFLOP:.1f}x")
-    r, m = KERAS["ResNet50"], KERAS["MobileNetV2"]
-    show("CPU speedup", f"{r['cpu_ms'] / m['cpu_ms']:.1f}x")
-    show("GPU (A100) speedup", f"{r['gpu_ms'] / m['gpu_ms']:.1f}x")
-    show("top-1 gap (points)", f"{r['top1'] - m['top1']:.1f}")
+print("== Recurrence (Scenarios.ElmanRnnStep, LstmStep, RecurrentState512Fp32)")
+v("rnn_in", RNN.input_dim, "{:.0f}", "input width")
+v("rnn_h", RNN.hidden_dim, "{:.0f}", "state width")
+v("rnn_macs", RNN.macs_per_step, "{:,.0f}", "multiply-adds per step")
+v("seq", RNN.steps, "{:,.0f}", "sequence length, steps")
+v("lstm_rows", LSTM.gate_rows, "{:.0f}", "fused gate rows")
+v("lstm_ratio_word", LSTM.weights / RNN.weights, "words", "the same, in prose")
+v("gates", LSTM.gates, "{:.0f}", "LSTM gate maps")
+v("gates_word", LSTM.gates, "words", "the same, in prose")
+v("lstm_ratio", LSTM.weights / RNN.weights, "{:.0f}", "LSTM over plain weights, times")
+v("state_w", STATE.hidden_dim, "{:.0f}", "state width, illustrative")
+v("state_kb", m(STATE.state_bytes, "KiB"), "{:.0f}", "512-wide FP32 state, KB (binary)")
 
-    head("KWS on a Nano 33 BLE Sense")
-    fp32 = KWS_PARAMS * FP32_B
-    int8 = KWS_PARAMS * INT8_B
-    show("FP32 weights", f"{fp32 / 1e3:.0f} KB")
-    show("INT8 weights", f"{int8 / 1e3:.0f} KB")
-    show("FP32 share of 1 MB flash", f"{100 * fp32 / FLASH_B:.0f}%")
-    show("INT8 share of 1 MB flash", f"{100 * int8 / FLASH_B:.0f}%")
-    show("FP32 weights / 256 KB SRAM", f"{fp32 / SRAM_B:.1f}x")
-    show("INT8 weights / 256 KB SRAM", f"{100 * int8 / SRAM_B:.0f}%")
-
-    head("Recurrent step")
-    step = RNN_H * RNN_H + RNN_IN * RNN_H
-    show("MACs per step", f"{step:,}")
-
-    head("Predict: Transformer vs recurrent training cost (Vaswani Table 2)")
-    show("GNMT+RL / Transformer base training FLOPs",
-         f"{GNMT_RL_FLOPS / TRANSFORMER_BASE_FLOPS:.0f}x")
-    show("BLEU gain", f"{TRANSFORMER_BASE_BLEU - GNMT_RL_BLEU:.1f}")
-
-    head("LSTM")
-    show("weight_ih rows (4 x hidden)", 4 * RNN_H)
-    show("weight_hh rows (4 x hidden)", 4 * RNN_H)
-    show("LSTM weights per layer (ih + hh)", f"{4 * RNN_H * (RNN_IN + RNN_H):,}")
-    show("plain RNN weights per layer", f"{step:,}")
-    show("LSTM / plain weights", f"{4 * RNN_H * (RNN_IN + RNN_H) / step:.0f}x")
-    show("state, 512 wide FP32", f"{LSTM_STATE * FP32_B / 1024:.0f} KB")
+print("== Transformer against recurrence (Vaswani et al. 2017, Table 2)")
+gnmt, base = RUNS.GnmtRlEnDeTrainingFlops, RUNS.TransformerBaseEnDeTrainingFlops
+v("gnmt_bleu", QUALITY.GnmtRlEnDeBleu, "{:.1f}", "GNMT + RL BLEU")
+v("tf_bleu", QUALITY.TransformerBaseEnDeBleu, "{:.1f}", "Transformer base BLEU")
+for key, flops, label in (("gnmt", gnmt, "GNMT + RL"), ("tf", base, "Transformer base")):
+    mant, exp = mantissa_exponent(flops)
+    v(f"{key}_flops_mant", mant, "{:.1f}", f"{label} training FLOPs, mantissa")
+    v(f"{key}_flops_exp", exp, "{:.0f}", f"{label} training FLOPs, power of ten")
+v("tf_compute_ratio", gnmt / base, "{:.0f}", "training compute ratio, times")
 
 
 def note_minutes():
     """Title-slide note: total note minutes and the total without [OPTIONAL]
-    notes, summed from the deck's own [N min] tags."""
+    notes, summed from the deck's own [N min] tags (a check; not recorded)."""
     import re
-    from pathlib import Path
     tex = (Path(__file__).resolve().parents[1] / "06_nn_architectures.tex").read_text()
     notes = re.findall(r"\\(?:note|mlsysnote)\{\[(\d+(?:\.\d+)?) min\](.*?)\n", tex)
-    total = sum(float(m) for m, _ in notes)
-    core = sum(float(m) for m, t in notes if "[OPTIONAL" not in t)
-    head("Title note: lecture length")
-    show("notes total (min)", f"{total:g}")
-    show("without [OPTIONAL] notes (min)", f"{core:g}")
+    total = sum(float(n) for n, _ in notes)
+    core = sum(float(n) for n, t in notes if "[OPTIONAL" not in t)
+    print(f"\n[Title note: lecture length] notes total {total:g} min; without [OPTIONAL] notes {core:g} min")
 
 
 if __name__ == "__main__":
-    main()
     note_minutes()
+    write(__file__)

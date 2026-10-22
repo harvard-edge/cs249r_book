@@ -119,7 +119,10 @@ The third law, proposal is not permission, separates the machine's two paths in 
 # │       renewal-jitter allowance tolerates at most a 12.5 percent stretch of
 # │       the 40 ms chunk inference (Ch8's HostContentionAllowance).
 # │ How: Registry fields of the warehouse mobile manipulator and its aisle
-# │      scenario; the three enforcer sub-costs are chapter-local.
+# │      scenario; the three enforcer sub-costs are the stages of
+# │      Scenarios.WarehouseEnforcerUnloadedTick, the response budget is
+# │      Scenarios.WarehousePermissionTickResponse, and the renewal jitter is
+# │      Scenarios.WarehouseChunkLease's.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import nanosecond, microsecond, millisecond, second, hertz
@@ -141,17 +144,16 @@ class PlacementMachine:
     deadline = AISLE.enforcer_deadline  # category: chosen
     self_watchdog = AISLE.mcu_self_watchdog  # category: chosen
     rail_holdup = RM.permission_rail_holdup  # category: chosen (permission-rail hold-up)
-    renewal_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
-    sense = 40 * microsecond  # scenario assumption; category: illustrative (encoders, IMU, evidence epoch)
-    constraint = 80 * microsecond  # scenario assumption; category: illustrative
-    write = 15 * microsecond  # scenario assumption; category: illustrative (drive-frame staging)
+    renewal_jitter = Scenarios.WarehouseChunkLease.renewal_jitter  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
+    unloaded_tick = Scenarios.WarehouseEnforcerUnloadedTick  # category: illustrative (sub-costs of the unloaded tick)
+    sense = unloaded_tick.stage("sense")  # category: illustrative (encoders, IMU, evidence epoch)
+    constraint = unloaded_tick.stage("constraint check")  # category: illustrative
+    write = unloaded_tick.stage("drive-frame staging")  # category: illustrative (drive-frame staging)
     # Blocking B and interference I from the MCU's own lower- and higher-priority
-    # work: the scenario bounds of Ch4's TickResponseBudget (notebook
-    # nbk-nervous-response-margin), mirrored here because a chapter cannot import
-    # another chapter's LEGO cell. Keep equal to Ch4; promotion to the aisle
-    # scenario in MLSysIM is pending.
+    # work: the aisle scenario's bounds, which Ch4's TickResponseBudget also reads.
     blocking = AISLE.enforcer_blocking  # category: illustrative (Ch4 B, scenario bound; registry)
     interference = AISLE.enforcer_interference  # category: illustrative (Ch4 I, scenario bound; registry)
+    response = Scenarios.WarehousePermissionTickResponse.result  # category: derived (R = C + B + I)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     chunk_period = (1 / chunk_rate).to(millisecond)
@@ -160,8 +162,8 @@ class PlacementMachine:
     unloaded_slack = (deadline - unloaded).to(microsecond)
     wcet_margin = (deadline - wcet).to(microsecond)
     b_plus_i = (blocking + interference).to(microsecond)
-    exec_ceiling = (deadline - b_plus_i).to(microsecond)  # t_enf ceiling under the full response budget
-    shared_allowance = (exec_ceiling - wcet).to(microsecond)  # I_shared the declared WCET leaves before the deadline
+    exec_ceiling = response.execution_ceiling.to(microsecond)  # t_enf ceiling under the full response budget
+    shared_allowance = response.margin.to(microsecond)  # I_shared the declared WCET leaves before the deadline
     unloaded_cycles = (unloaded * mcu_clock).to("dimensionless").magnitude
     min_chunk_rate = (1 / lease).to(hertz)
     compute_after_sense = (constraint + write).to(microsecond)
@@ -552,15 +554,15 @@ where $\QueuedTransactionSet$ holds the transactions ahead of the read, ${\Queue
 # │       backlog takes 28.4 µs: the allowance absorbs 1, the WCET 5. Bandwidth
 # │       queueing alone is a weak threat under interleaving;
 # │       @sec-placement-interference-mechanisms prices the strong one.
-# │ How: calc_axi_fifo_contention with PlacementMachine's sub-costs; bandwidth is
-# │      the brain SoC's registry peak (RM.brain_soc.memory.bandwidth), served
-# │      at the full aggregate rate because addresses interleave across all
-# │      channels; queue composition and snapshot size are scenario inputs.
+# │ How: Scenarios.WarehouseSharedDieLoadedRead (SharedDramReadModel over
+# │      calc_axi_fifo_contention) with the unloaded tick's sub-costs; bandwidth
+# │      is the brain SoC's registry peak, served at the full aggregate rate
+# │      because addresses interleave across all channels; the one-channel
+# │      variant divides it by the channel count. Queue composition and
+# │      snapshot size are the scenario's inputs.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
-from mlsysim.core.units import Q_, microsecond
-from mlsysim.physics.robotics import calc_axi_fifo_contention
+from mlsysim.core.units import microsecond
 from mlsysim.fmt import fmt_int, fmt_latency, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -572,64 +574,41 @@ class PlacementLoadedRead:
     deadline = PlacementMachine.deadline  # category: chosen
     exec_ceiling = PlacementMachine.exec_ceiling  # category: derived (deadline less Ch4's blocking and interference)
     wcet = PlacementMachine.wcet  # category: chosen (declared WCET, the falsification threshold)
-    tile_bytes = 256 * 1024  # category: illustrative (weight tile)
-    camera_bytes = 64 * 1024  # category: illustrative
-    telemetry_bytes = 32 * 1024  # category: illustrative
-    snapshot_bytes = 4 * 1024  # category: illustrative (encoder, IMU, and evidence-epoch snapshot)
-    transaction_bytes = 4 * 1024  # category: datasheet (AXI4 4 KiB boundary)
     # Premise: the controller interleaves physical addresses across all its
     # channels, so the backlog and the snapshot are both served at the SoC's
     # aggregate peak rate. A backlog confined to the snapshot's channel would wait
     # longer by the channel count.
-    bandwidth = RM.brain_soc.memory.bandwidth  # category: datasheet (application SoC peak DRAM bandwidth)
-    bank_switches = 3  # same-bank row conflicts; category: illustrative
-    bank_switch_time = PlacementDramTiming.t_conflict  # category: datasheet (LPDDR5-6400 t_RP + t_RCD)
-    channel_width = Hardware.Tech.Memory.LPDDR5_6400.channel_width.to("bit").magnitude  # category: datasheet (LPDDR5 x16 channel, registry)
-    bus_width_bits = RM.brain_soc.memory.bus_width.to("bit").magnitude  # category: datasheet (registry)
+    read = Scenarios.WarehouseSharedDieLoadedRead  # category: illustrative (backlog composition) + datasheet (LPDDR5, AXI4)
+    read_1ch = Scenarios.WarehouseSharedDieLoadedReadOneChannel  # category: illustrative (contrast case)
+    tile_bytes = read.tile_bytes  # category: illustrative (weight tile)
+    snapshot_bytes = read.snapshot_bytes  # category: illustrative (encoder, IMU, and evidence-epoch snapshot)
+    bandwidth = read.bandwidth  # category: datasheet (application SoC peak DRAM bandwidth)
+    bank_switches = read.bank_switches  # same-bank row conflicts; category: illustrative
+    bank_switch_time = read.bank_switch_time  # category: datasheet (LPDDR5-6400 t_RP + t_RCD)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    result = calc_axi_fifo_contention(
-        tile_bytes=tile_bytes,
-        camera_bytes=camera_bytes,
-        telemetry_bytes=telemetry_bytes,
-        safety_read_bytes=snapshot_bytes,
-        transaction_bytes=transaction_bytes,
-        bandwidth=bandwidth,
-        bank_switches=bank_switches,
-        bank_switch_time=bank_switch_time,
-        compute_time=compute_after_sense,
-    )
-    backlog_bytes = tile_bytes + camera_bytes + telemetry_bytes
-    queue = result["queue_fifo"].to(microsecond)
-    own_read = result["own_read"].to(microsecond)
-    loaded_read = (queue + own_read).to(microsecond)
-    sense_left = (sense - loaded_read).to(microsecond)
-    read_ceiling = (exec_ceiling - compute_after_sense).to(microsecond)
-    wcet_read_ceiling = (wcet - compute_after_sense).to(microsecond)
-    backlogs_wcet = math.floor(((wcet_read_ceiling - own_read) / queue).to("dimensionless").magnitude)
-    backlogs_sense = math.floor(((sense - own_read) / queue).to("dimensionless").magnitude)
-    backlogs_deadline = math.floor(((read_ceiling - own_read) / queue).to("dimensionless").magnitude)
-    bypass_read = (result["queue_priority_bypass"] + own_read).to(microsecond)
+    result = read.result
+    backlog_bytes = result.backlog_bytes
+    queue = result.backlog_wait.to(microsecond)
+    own_read = result.snapshot_read.to(microsecond)
+    loaded_read = result.loaded_read.to(microsecond)
+    sense_left = result.sense_left.to(microsecond)
+    read_ceiling = result.read_ceiling_deadline.to(microsecond)
+    wcet_read_ceiling = result.read_ceiling_wcet.to(microsecond)
+    backlogs_wcet = result.backlogs_wcet
+    backlogs_sense = result.backlogs_sense
+    backlogs_deadline = result.backlogs_deadline
+    bypass_read = result.bypass_read.to(microsecond)
     # Contrast case: the backlog and the snapshot confined to one channel.
-    n_channels = int(round(bus_width_bits / channel_width))
-    result_1ch = calc_axi_fifo_contention(
-        tile_bytes=tile_bytes,
-        camera_bytes=camera_bytes,
-        telemetry_bytes=telemetry_bytes,
-        safety_read_bytes=snapshot_bytes,
-        transaction_bytes=transaction_bytes,
-        bandwidth=bandwidth / n_channels,
-        bank_switches=bank_switches,
-        bank_switch_time=bank_switch_time,
-        compute_time=compute_after_sense,
-    )
-    queue_1ch = result_1ch["queue_fifo"].to(microsecond)
-    own_read_1ch = result_1ch["own_read"].to(microsecond)
-    backlogs_sense_1ch = math.floor(((sense - own_read_1ch) / queue_1ch).to("dimensionless").magnitude)
-    backlogs_wcet_1ch = math.floor(((wcet_read_ceiling - own_read_1ch) / queue_1ch).to("dimensionless").magnitude)
+    n_channels = read_1ch.channels
+    result_1ch = read_1ch.result
+    queue_1ch = result_1ch.backlog_wait.to(microsecond)
+    own_read_1ch = result_1ch.snapshot_read.to(microsecond)
+    backlogs_sense_1ch = result_1ch.backlogs_sense
+    backlogs_wcet_1ch = result_1ch.backlogs_wcet
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
-    check(result["queued_transactions"] == 88 and result["tile_transactions"] == 64, "88 queued transactions, 64 of them from one tile.")
+    check(result.queued_transactions == 88 and result.tile_transactions == 64, "88 queued transactions, 64 of them from one tile.")
     check(abs(bandwidth.to("GB/s").magnitude - 204.0) < 1e-9, "The application SoC's registry bandwidth is 204 GB/s.")
     check(abs(queue.magnitude - 1.8794) < 5e-4, "360,448 bytes at 204 GB/s plus three 37.5 ns conflicts is 1.879 µs.")
     check(loaded_read < sense, "One backlog fits inside the sense allowance.")
@@ -650,8 +629,8 @@ class PlacementLoadedRead:
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
     b_plus_i_str = PlacementMachine.b_plus_i_str
     exec_ceiling_str = PlacementMachine.exec_ceiling_str
-    n_tx_str = fmt_int(result["queued_transactions"])
-    tile_tx_str = fmt_int(result["tile_transactions"])
+    n_tx_str = fmt_int(result.queued_transactions)
+    tile_tx_str = fmt_int(result.tile_transactions)
     backlog_bytes_str = fmt_int(backlog_bytes)
     snapshot_bytes_str = fmt_int(snapshot_bytes)
     queue_str = fmt(queue.magnitude, precision=3)
@@ -694,7 +673,7 @@ class PlacementLoadedRead:
 
 Drawn to scale on one `{python} PlacementMachine.tick_str` period, the thresholds show how far the declared bound sits from the deadline and the period (@fig-13-loaded-tick). The unloaded tick ends at `{python} PlacementMachine.unloaded_str`. The next three rows carry the largest backlog counts that keep each bound: `{python} PlacementLoadedRead.backlogs_sense_str` for the `{python} PlacementLoadedRead.sense_str` sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` for the declared `{python} PlacementLoadedRead.wcet_str`, and `{python} PlacementLoadedRead.backlogs_deadline_str` for the `{python} PlacementLoadedRead.deadline_str` deadline once `{python} PlacementLoadedRead.b_plus_i_str` is reserved for blocking and interference. The bottom row confines the traffic to one memory channel, where `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` backlogs already reach the declared bound.
 
-::: {#fig-13-loaded-tick data-explore="mechanism-scene" data-explore-key="vol4:fig-13-loaded-tick" fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline once blocking and interference take their `{python} PlacementLoadedRead.b_plus_i_str`; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 114 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 309 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds; a shaded band from 310 to 400 microseconds is reserved for blocking and interference."}
+::: {#fig-13-loaded-tick data-explore="original-v4-13-loaded-tick" data-explore-key="vol4:fig-13-loaded-tick" fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline once blocking and interference take their `{python} PlacementLoadedRead.b_plus_i_str`; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 114 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 309 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds; a shaded band from 310 to 400 microseconds is reserved for blocking and interference."}
 
 ```{python}
 #| echo: false
@@ -827,11 +806,13 @@ plt.show()
 # │ How: registry WCET, deadline, and unloaded tick, with Ch4's blocking and
 # │      interference (PlacementMachine.exec_ceiling); slowdowns are published
 # │      measurements on other platforms (not the Orin), used as multipliers;
-# │      calc_stall_share_breakeven (Amdahl's fixed-fraction model read as a
-# │      slowdown) for the break-even shares.
+# │      the break-even shares are Scenarios.WarehouseTickMshrStallShare (and its
+# │      deadline variant) and Scenarios.WarehouseTickWritebackStallShare
+# │      (calc_stall_share_breakeven, Amdahl's fixed-fraction model read as a
+# │      slowdown); the 21x is Literature.SharedHardwareInterference.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics import calc_partial_slowdown_stretch, calc_stall_share_breakeven
+from mlsysim.physics import calc_partial_slowdown_stretch
 from mlsysim.fmt import fmt, fmt_percent, fmt_multiple, check
 
 class PlacementInterference:
@@ -840,15 +821,18 @@ class PlacementInterference:
     wcet = PlacementMachine.wcet  # category: chosen (declared)
     deadline = PlacementMachine.deadline  # category: chosen
     exec_ceiling = PlacementMachine.exec_ceiling  # category: derived (deadline less Ch4's blocking and interference)
-    s_mshr = 21.0  # category: measured (Valsan, Yun, Farshchi, RTAS 2016: up to 21x WCET increase, MSHR contention, cache partitioned)
-    s_wb = 300.0  # category: measured (Bechtel and Yun, RTAS 2019: >300x on a dedicated core; lower bound of the reported range)
+    mshr = Scenarios.WarehouseTickMshrStallShare  # category: measured slowdown (Valsan, Yun, Farshchi, RTAS 2016: up to 21x WCET increase, MSHR contention, cache partitioned)
+    mshr_deadline = Scenarios.WarehouseTickMshrStallShareAtDeadline  # category: derived (same slowdown, execution ceiling)
+    wb = Scenarios.WarehouseTickWritebackStallShare  # category: measured (Bechtel and Yun, RTAS 2019: >300x on a dedicated core; lower bound of the reported range)
+    s_mshr = mshr.slowdown
+    s_wb = wb.slowdown
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    stretch_wcet = (wcet / unloaded).to("dimensionless").magnitude
-    stretch_deadline = (exec_ceiling / unloaded).to("dimensionless").magnitude  # full response budget
-    f_mshr = calc_stall_share_breakeven(stretch_wcet, s_mshr)
-    f_wb = calc_stall_share_breakeven(stretch_wcet, s_wb)
-    f_mshr_deadline = calc_stall_share_breakeven(stretch_deadline, s_mshr)
+    stretch_wcet = mshr.allowed_stretch
+    stretch_deadline = mshr_deadline.allowed_stretch  # full response budget
+    f_mshr = mshr.breakeven_share
+    f_wb = wb.breakeven_share
+    f_mshr_deadline = mshr_deadline.breakeven_share
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(stretch_wcet - 250 / 135) < 1e-9 and abs(stretch_deadline - 310 / 135) < 1e-9, "250/135 and (400 - 90)/135.")
@@ -892,36 +876,27 @@ The placement decision depends on whether regulation, decoupling, and stored ene
 #| echo: false
 #| warning: false
 #| message: false
+from mlsysim import Scenarios
 from mlsysim.core.units import nanosecond, ampere, milliohm, millivolt, picohenry, volt
-from mlsysim.physics.robotics import (
-    calc_voltage_droop,
-    calc_inductive_voltage_droop,
-    calc_alpha_power_gate_delay_stretch,
-)
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 
 class InductivePDNVoltageDroop:
-    v_core = 0.850 * volt  # category: illustrative
-    l_pkg = 30.0 * picohenry  # category: illustrative
-    r_pkg = 8.0 * milliohm  # category: illustrative
-    delta_i = 6.0 * ampere  # category: illustrative
-    t_rise = 2.0 * nanosecond  # category: illustrative
-    di_dt = delta_i / t_rise
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    pdn = Scenarios.PackageRailDroop  # category: illustrative (package, rail, and current step)
+    v_core = pdn.rail_voltage  # category: illustrative
+    l_pkg = pdn.inductance  # category: illustrative
+    r_pkg = pdn.resistance  # category: illustrative
+    delta_i = pdn.delta_i  # category: illustrative
+    t_rise = pdn.rise_time  # category: illustrative
+    v_th = pdn.threshold_voltage  # category: illustrative
+    alpha = pdn.alpha  # category: illustrative
 
-    v_ind = calc_inductive_voltage_droop(l_pkg, di_dt)
-    v_res = calc_voltage_droop(delta_i, r_pkg)
-    v_droop = v_ind + v_res
-    v_drooped = v_core - v_droop
-
-    v_th = 0.420 * volt  # category: illustrative
-    alpha = 1.3  # category: illustrative
-    res_stretch = calc_alpha_power_gate_delay_stretch(
-        nominal_voltage=v_core,
-        drooped_voltage=v_drooped,
-        threshold_voltage=v_th,
-        alpha=alpha,
-    )
-    delay_expansion_pct = res_stretch["delay_expansion_percent"]
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    v_ind = pdn.inductive_droop  # L dI/dt (calc_inductive_voltage_droop)
+    v_res = pdn.resistive_droop  # I R (calc_voltage_droop)
+    v_droop = pdn.droop
+    v_drooped = pdn.drooped_voltage
+    delay_expansion_pct = pdn.delay_expansion_percent  # calc_alpha_power_gate_delay_stretch
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     # margin_coupling_timescale_ladder.svg fig-alt hand-types 2 nanoseconds
@@ -941,7 +916,7 @@ class InductivePDNVoltageDroop:
     v_droop_mv_str = fmt(v_droop.to(millivolt).magnitude, precision=0)
     v_droop_v_str = fmt(v_droop.to(volt).magnitude, precision=3)
     v_drooped_str = fmt(v_drooped.to(volt).magnitude, precision=3)
-    droop_pct_str = fmt_percent((v_droop / v_core).magnitude, precision=1)
+    droop_pct_str = fmt_percent((v_droop / v_core).to("dimensionless").magnitude, precision=1)
     delay_expansion_pct_str = fmt_int(round(delay_expansion_pct))
 ```
 
@@ -968,26 +943,29 @@ Here $\TransistorThresholdVoltage$ is the modeled threshold voltage, stipulated 
 # │       (250/135 - 1)/9 = 9.5 percent miss-stall share; an illustrative
 # │       300 µs loaded cycle is 50 µs past the WCET and 100 µs inside the
 # │       deadline.
-# │ How: calc_stall_share_breakeven on PlacementInterference's stretch;
-# │      PlacementMachine's WCET and deadline. Both givens are illustrative.
+# │ How: Scenarios.WarehouseTickTenfoldStallShare (calc_stall_share_breakeven)
+# │      and Scenarios.WarehouseLoadedCycleCheckpoint (R = C + B + I with the
+# │      300 µs cycle as C). Both givens are illustrative.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import microsecond
-from mlsysim.physics import calc_stall_share_breakeven
 from mlsysim.fmt import fmt_latency, fmt_multiple, check
 
 class PlacementCheckpointEstimates:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
     stretch_wcet = PlacementInterference.stretch_wcet  # category: derived (C_wcet / t_unloaded)
-    s_check = 10.0  # category: illustrative (checkpoint slowdown)
+    tenfold = Scenarios.WarehouseTickTenfoldStallShare  # category: illustrative (checkpoint slowdown)
+    s_check = tenfold.slowdown
     wcet = PlacementMachine.wcet  # category: chosen
     deadline = PlacementMachine.deadline  # category: chosen
-    t_loaded_check = 300 * microsecond  # category: illustrative (checkpoint loaded cycle)
+    loaded_check = Scenarios.WarehouseLoadedCycleCheckpoint  # category: illustrative (checkpoint loaded cycle)
+    t_loaded_check = loaded_check.wcet
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    f_check = calc_stall_share_breakeven(stretch_wcet, s_check)
+    f_check = tenfold.breakeven_share
     over_wcet = (t_loaded_check - wcet).to(microsecond)
     under_deadline = (deadline - t_loaded_check).to(microsecond)
-    under_full_budget = (PlacementMachine.exec_ceiling - t_loaded_check).to(microsecond)  # after Ch4's blocking and interference
+    under_full_budget = loaded_check.result.margin.to(microsecond)  # after Ch4's blocking and interference
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(f_check - (250 / 135 - 1) / 9) < 1e-9, "Break-even share at 10x is (250/135 - 1)/9, about 9.5 percent.")
@@ -1041,8 +1019,9 @@ A permission core can suffer execution delays long after a heavy proposal worklo
 # │       passes the WCET that falsifies independence; 2.18 s of
 # │       hysteresis spans 2,175 ticks when the load stops at the trip,
 # │       and 2.55 s (2,547 ticks) from the loaded 97 °C steady state.
-# │ How: WCET, deadline, and tick from the aisle scenario; cluster clocks and
-# │      the thermal model are scenario inputs for the rejected design.
+# │ How: Scenarios.WarehouseSharedDieThermalThrottle (ThermalThrottleModel):
+# │      WCET, deadline, and tick from the aisle scenario; cluster clocks and
+# │      the first-order thermal model are its inputs for the rejected design.
 # │
 # │ Note: @fig-13-thermal-hysteresis plots these values directly.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1050,6 +1029,8 @@ import math
 from mlsysim import *
 from mlsysim.core.units import microsecond, millisecond, second, gigahertz, megahertz
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_frequency, fmt_percent, check
+
+THROTTLE = Scenarios.WarehouseSharedDieThermalThrottle
 
 AISLE = Embodied.Scenario.WarehouseAisle
 
@@ -1059,37 +1040,38 @@ class RejectedPlacementThrottle:
     wcet = AISLE.enforcer_wcet  # category: chosen (declared, not measured)
     deadline = AISLE.enforcer_deadline  # category: chosen
     b_plus_i = PlacementMachine.b_plus_i  # category: illustrative (Ch4's blocking + interference, @eq-nervous-response-budget)
-    f_nom = 1.20 * gigahertz  # scenario assumption; category: illustrative (shared-die cluster)
-    f_throt = 600 * megahertz  # scenario assumption; category: illustrative (governor halves the clock)
-    tau_th = 8.0 * second  # scenario assumption; category: illustrative
-    t_ambient = 45.0  # °C, electronics-bay ambient; scenario assumption; category: illustrative
-    p_base = 4.0  # W, enforcer plus idle and memory power; scenario assumption; category: illustrative
-    p_load = 26.0  # W, total with continuous proposal inference; scenario assumption; category: illustrative
-    theta_ja = 2.0  # K/W, junction-to-ambient; scenario assumption; category: illustrative
-    t_start = 95.0  # °C, trip threshold; category: illustrative
-    t_clear = 85.0  # °C, clearance threshold; category: illustrative
+    f_nom = THROTTLE.nominal_clock  # scenario assumption; category: illustrative (shared-die cluster)
+    f_throt = THROTTLE.throttled_clock  # scenario assumption; category: illustrative (governor halves the clock)
+    tau_th = THROTTLE.time_constant  # scenario assumption; category: illustrative
+    t_ambient = THROTTLE.ambient.to("degC").magnitude  # °C, electronics-bay ambient; scenario assumption; category: illustrative
+    p_base = THROTTLE.quiet_power.to("W").magnitude  # W, enforcer plus idle and memory power; scenario assumption; category: illustrative
+    p_load = THROTTLE.loaded_power.to("W").magnitude  # W, total with continuous proposal inference; scenario assumption; category: illustrative
+    theta_ja = THROTTLE.theta.to("K/W").magnitude  # K/W, junction-to-ambient; scenario assumption; category: illustrative
+    t_start = THROTTLE.trip.to("degC").magnitude  # °C, trip threshold; category: illustrative
+    t_clear = THROTTLE.clear.to("degC").magnitude  # °C, clearance threshold; category: illustrative
     mcu_unloaded = AISLE.enforcer_unloaded  # category: illustrative
     mcu_clock = RM.permission_mcu.compute.clock_rate  # category: illustrative (reference class)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    n_cycles = (wcet * f_nom).to("dimensionless").magnitude  # cluster sized to meet the declared WCET
-    t_exec = (n_cycles / f_nom).to(microsecond)
-    t_exec_throt = (n_cycles / f_throt).to(microsecond)
-    t_resp = (t_exec + b_plus_i).to(microsecond)  # full response bound, nominal clock
-    t_resp_throt = (t_exec_throt + b_plus_i).to(microsecond)  # full response bound, throttled clock
-    slack = (deadline - t_resp).to(microsecond)
-    overrun = (t_resp_throt - deadline).to(microsecond)
-    overrun_ratio = (overrun / deadline).to("dimensionless").magnitude
-    t_target = t_ambient + p_base * theta_ja  # °C, baseline equilibrium
-    t_rise_load = p_load * theta_ja  # K, steady-state rise under continuous inference
-    t_steady_load = t_ambient + t_rise_load  # °C, loaded steady state
-    t_recov = (tau_th * math.log((t_start - t_target) / (t_clear - t_target))).to(second)  # load stops at the trip
-    t_recov_loaded = (tau_th * math.log((t_steady_load - t_target) / (t_clear - t_target))).to(second)  # load stops at steady state
-    t_trip = (tau_th * math.log((t_steady_load - t_target) / (t_steady_load - t_start))).to(second)  # time from baseline to trip under load
-    ticks_exposed = math.floor((t_recov / tick).to("dimensionless").magnitude)
-    ticks_exposed_loaded = math.floor((t_recov_loaded / tick).to("dimensionless").magnitude)
+    r = THROTTLE.result  # ThermalThrottleModel: tick sized to the WCET at f_nom; first-order junction
+    n_cycles = r.cycles  # cluster sized to meet the declared WCET
+    t_exec = r.execution.to(microsecond)
+    t_exec_throt = r.execution_throttled.to(microsecond)
+    t_resp = r.response.to(microsecond)  # full response bound, nominal clock
+    t_resp_throt = r.response_throttled.to(microsecond)  # full response bound, throttled clock
+    slack = r.slack.to(microsecond)
+    overrun = r.overrun.to(microsecond)
+    overrun_ratio = r.overrun_ratio
+    t_target = r.junction_quiet.to("degC").magnitude  # °C, baseline equilibrium
+    t_rise_load = r.loaded_rise.to("K").magnitude  # K, steady-state rise under continuous inference
+    t_steady_load = r.junction_loaded.to("degC").magnitude  # °C, loaded steady state
+    t_recov = r.recovery.to(second)  # load stops at the trip
+    t_recov_loaded = r.recovery_from_loaded.to(second)  # load stops at steady state
+    t_trip = r.time_to_trip.to(second)  # time from baseline to trip under load
+    ticks_exposed = r.ticks_exposed
+    ticks_exposed_loaded = r.ticks_exposed_from_loaded
     mcu_cycles = (mcu_unloaded * mcu_clock).to("dimensionless").magnitude  # TCM-resident unloaded tick on the discrete MCU
-    c_th = tau_th.to(second).magnitude / theta_ja  # J/K, lumped heat capacity of the first-order pole (tau = theta C)
+    c_th = r.heat_capacity.to("J/K").magnitude  # J/K, lumped heat capacity of the first-order pole (tau = theta C)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(n_cycles - 3.0e5) < 1e-6, "250 µs at 1.2 GHz is 3.0e5 cycles.")
@@ -1187,7 +1169,7 @@ where $\ThrottleOnsetJunctionTemperature$ is the junction temperature when throt
 
 The two timescales meet in one picture: a cooling curve measured in seconds holds the clock at `{python} RejectedPlacementThrottle.f_throt_str`, and every tick inside it, measured in microseconds, ends `{python} RejectedPlacementThrottle.overrun_str` past the deadline (@fig-13-thermal-hysteresis). The scenario is also optimistic. Over a full shift, heat accumulating in the chassis raises the baseline $\QuiescentJunctionTemperature$, which flattens the cooling gradient and lengthens recovery, and higher-order thermal poles in the enclosure can stretch the hysteresis by minutes. A shared-die placement would need a separately timed hardware fallback to stay safe across every exposed tick.
 
-::: {#fig-13-thermal-hysteresis data-explore="mechanism-scene" data-explore-key="vol4:fig-13-thermal-hysteresis" fig-env="figure" fig-pos="t" fig-cap="**A cooldown that outlasts the load**: Top, the junction relaxes from the `{python} RejectedPlacementThrottle.t_start_str`$\\,^{\circ}\text{C}$ trip threshold toward its `{python} RejectedPlacementThrottle.t_target_str`$\\,^{\circ}\text{C}$ baseline along @eq-placement-cooling-recovery, falling fastest at the moment the load stops and flattening afterward; the clock stays halved until the curve crosses `{python} RejectedPlacementThrottle.t_clear_str`$\\,^{\circ}\text{C}$ at `{python} RejectedPlacementThrottle.t_recov_str`. Bottom, one tick drawn to scale, with `{python} RejectedPlacementThrottle.b_plus_i_str` of blocking and interference after the execution: the same work that meets the deadline at `{python} RejectedPlacementThrottle.f_nom_str` overruns it by `{python} RejectedPlacementThrottle.overrun_str` at `{python} RejectedPlacementThrottle.f_throt_str`, on every one of the `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks inside the cooldown. The scenario is stipulated, not measured." fig-alt="Two stacked panels. Top: junction temperature versus time in seconds, an exponential cooling curve starting at 95 degrees Celsius at time zero, steepest at the start and flattening toward a 53 degree baseline, with dashed horizontal lines at 95 and 85 degrees; the interval until the curve crosses 85 degrees at 2.18 seconds is shaded and labeled 600 megahertz. Bottom: a horizontal time axis from 0 to 1,000 microseconds with two bars, each an execution segment followed by a hatched 90 microsecond block for blocking and interference. The nominal bar at 1.2 gigahertz executes for 250 microseconds and ends at 340, 60 microseconds before a vertical deadline line at 400; the throttled bar at 600 megahertz executes for 500 microseconds and ends at 590, its last 190 microseconds past the deadline."}
+::: {#fig-13-thermal-hysteresis data-explore="original-v4-13-thermal-hysteresis" data-explore-key="vol4:fig-13-thermal-hysteresis" fig-env="figure" fig-pos="t" fig-cap="**A cooldown that outlasts the load**: Top, the junction relaxes from the `{python} RejectedPlacementThrottle.t_start_str`$\\,^{\circ}\text{C}$ trip threshold toward its `{python} RejectedPlacementThrottle.t_target_str`$\\,^{\circ}\text{C}$ baseline along @eq-placement-cooling-recovery, falling fastest at the moment the load stops and flattening afterward; the clock stays halved until the curve crosses `{python} RejectedPlacementThrottle.t_clear_str`$\\,^{\circ}\text{C}$ at `{python} RejectedPlacementThrottle.t_recov_str`. Bottom, one tick drawn to scale, with `{python} RejectedPlacementThrottle.b_plus_i_str` of blocking and interference after the execution: the same work that meets the deadline at `{python} RejectedPlacementThrottle.f_nom_str` overruns it by `{python} RejectedPlacementThrottle.overrun_str` at `{python} RejectedPlacementThrottle.f_throt_str`, on every one of the `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks inside the cooldown. The scenario is stipulated, not measured." fig-alt="Two stacked panels. Top: junction temperature versus time in seconds, an exponential cooling curve starting at 95 degrees Celsius at time zero, steepest at the start and flattening toward a 53 degree baseline, with dashed horizontal lines at 95 and 85 degrees; the interval until the curve crosses 85 degrees at 2.18 seconds is shaded and labeled 600 megahertz. Bottom: a horizontal time axis from 0 to 1,000 microseconds with two bars, each an execution segment followed by a hatched 90 microsecond block for blocking and interference. The nominal bar at 1.2 gigahertz executes for 250 microseconds and ends at 340, 60 microseconds before a vertical deadline line at 400; the throttled bar at 600 megahertz executes for 500 microseconds and ends at 590, its last 190 microseconds past the deadline."}
 
 ```{python}
 #| echo: false
@@ -1438,7 +1420,10 @@ That board-level serial hop and split validation pipeline age sensor observation
 # │       spare / v = 131.01 mm / 1.3 m/s = 100.78 ms; reserve 37.47 ms =
 # │       48.7 mm. Doubling the chunk or halving the link adds 1.31 ms; a
 # │       second inference's worth of delay (103.31 ms) exhausts the spare.
-# │ How: S-curve budget as in calc-placement-separation-budget; Delta_da is
+# │ How: the finished stopping budget at the aisle speed
+# │      (Scenarios.WarehouseFinishedStopAtAisleSpeed, S-curve with the aisle's
+# │      jerk bound) and with Delta_da charged
+# │      (Scenarios.WarehouseFinishedStopWithDispatch); Delta_da is
 # │      AISLE.t_dispatch_to_admission (MLSysIM), which Ch14 imports too; its
 # │      stages (inference, chunk size, link clock, and the deserialization,
 # │      validation, and activation allowances of @sec-planning-horizon-tradeoff)
@@ -1446,7 +1431,6 @@ That board-level serial hop and split validation pipeline age sensor observation
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import Q_, millisecond, millimeter, meter, second, byte, megahertz
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1463,20 +1447,17 @@ class PlacementTransport:
     tick = AISLE.t_tick  # category: chosen (wait for the next permission tick)
     v_aisle = AISLE.v_aisle  # category: chosen
     tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    v_drive = RM.base.max_velocity  # category: illustrative (drive limit that sets the jerk bound)
-    overhead = AISLE.fixed_overhead  # category: illustrative + chosen
-    d_clear = AISLE.d_clear  # category: illustrative
+    aisle_stop = Scenarios.WarehouseFinishedStopAtAisleSpeed  # category: derived (finished S-curve budget)
+    dispatch_stop = Scenarios.WarehouseFinishedStopWithDispatch  # category: derived (Delta_da charged)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     t_link = AISLE.t_board_link.to(millisecond)
     delta_da = AISLE.t_dispatch_to_admission.to(millisecond)
-    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
-    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)
-    t_ceiling = (spare / v_aisle).to(millisecond)
-    reserve_t = (t_ceiling - delta_da).to(millisecond)
-    reserve_d = (v_aisle * reserve_t).to(millimeter)
+    budget = aisle_stop.result.required_distance.to(millimeter)
+    spare = aisle_stop.result.spare.to(millimeter)
+    t_ceiling = aisle_stop.result.delay_spare.to(millisecond)  # spare / v
+    reserve_t = dispatch_stop.result.delay_spare.to(millisecond)
+    reserve_d = dispatch_stop.result.spare.to(millimeter)
     travel_da = (v_aisle * delta_da).to(millimeter)
     delta_da_slow = (delta_da + t_infer).to(millisecond)
     t_replace = AISLE.t_capture_to_admission.to(millisecond)  # rows 1 + 2 of @tbl-04-event-timing
@@ -1576,8 +1557,10 @@ These remediation pathways determine which computing resources engineers must st
 # │       1.2 s offloaded, lives on the task scale.
 # │ How: lease and jitter from PlacementMachine; ceiling from
 # │      PlacementTransport; remote rates and planning times are published
-# │      measurements (Brohan et al. 2023, Sec. 3.3; Ichnowski et al. 2023).
+# │      measurements (Literature.VlaSystems, Brohan et al. 2023, Sec. 3.3;
+# │      Literature.RobotOffload, Ichnowski et al. 2023).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.core.units import millisecond, second, hertz
 from mlsysim.fmt import fmt, fmt_latency, fmt_frequency, check
 
@@ -1586,10 +1569,10 @@ class PlacementOffload:
     lease = PlacementMachine.lease  # category: chosen
     renewal_jitter = PlacementMachine.renewal_jitter  # category: chosen
     t_ceiling = PlacementTransport.t_ceiling  # category: derived (spare / v)
-    f_rt2_5b = 5 * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 5B model "around 5 Hz", cloud TPU over the network)
-    f_rt2_55b_max = 3 * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 55B model 1-3 Hz; upper end)
-    t_grasp_local = 14 * second  # category: measured (Ichnowski et al. 2023, abstract: grasp planning 14 s)
-    t_grasp_fog = 1.2 * second  # category: measured (Ichnowski et al. 2023, abstract: 1.2 s with FogROS2)
+    f_rt2_5b = float(Literature.VlaSystems.Rt2SmallRateHz) * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 5B model "around 5 Hz", cloud TPU over the network)
+    f_rt2_55b_max = float(Literature.VlaSystems.Rt2LargeRateHighHz) * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 55B model 1-3 Hz; upper end)
+    t_grasp_local = float(Literature.RobotOffload.FogRos2GraspPlanningLocalS) * second  # category: measured (Ichnowski et al. 2023, abstract: grasp planning 14 s)
+    t_grasp_fog = float(Literature.RobotOffload.FogRos2GraspPlanningOffloadedS) * second  # category: measured (Ichnowski et al. 2023, abstract: 1.2 s with FogROS2)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     w_renew = (lease - renewal_jitter).to(millisecond)
@@ -1646,14 +1629,15 @@ The thermal hangover refuted candidate (b) from a model, but a placement that su
 # │ Show: WCET 250 µs < deadline 400 µs < tick 1 ms; budget 969.0 mm at 1.3 m/s
 # │       with 131.0 mm before dispatch-to-admission travel; one missed tick 1.3 mm; renewal-to-onset 82 ms;
 # │       an illustrative 10^7-tick trace that refutes the rejected placement.
-# │ How: v tau + the jerk-limited S-curve stop (calc_scurve_stop_distance; jerk
-# │      bound = the reference C2 polynomial's peak jerk at the drive limit, as in
-# │      @sec-planning-c2-stopping-suffix) + the aisle scenario's overheads;
-# │      trace percentiles are illustrative.
+# │ How: Scenarios.WarehouseFinishedStopAtAisleSpeed (v tau + the jerk-limited
+# │      S-curve stop with the aisle's jerk bound, the reference C2 polynomial's
+# │      peak jerk at the drive limit as in @sec-planning-c2-stopping-suffix, +
+# │      the aisle scenario's overheads); renewal-to-onset from
+# │      Scenarios.WarehouseChunkLease; trace percentiles from the illustrative
+# │      Scenarios.WarehouseRejectedPlacementTrace.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import microsecond, millisecond, millimeter, meter, second
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1665,35 +1649,28 @@ class PlacementSeparationBudget:
     deadline = AISLE.enforcer_deadline  # category: chosen
     tick = AISLE.t_tick  # category: chosen
     v_aisle = AISLE.v_aisle  # category: chosen
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    v_drive = RM.base.max_velocity  # category: illustrative (drive limit, where the jerk bound is set)
-    overhead = AISLE.fixed_overhead  # category: illustrative + chosen (delta_loc + delta_margin + eps_track)
     d_clear = AISLE.d_clear  # category: illustrative
-    t_lease = AISLE.t_lease  # category: chosen
-    t_bus = AISLE.t_bus  # category: illustrative
-    t_onset = AISLE.t_brake_onset  # category: illustrative
-    n_ticks = 10_000_000  # scenario assumption; category: chosen (trace length)
+    aisle_stop = Scenarios.WarehouseFinishedStopAtAisleSpeed  # category: derived (finished S-curve budget)
+    trace = Scenarios.WarehouseRejectedPlacementTrace  # scenario assumption; category: chosen (trace length)
+    n_ticks = trace.ticks
     # Illustrative trace for the rejected placement (not a measurement)
-    cold_p50 = 95 * microsecond  # category: illustrative
-    cold_p99 = 128 * microsecond  # category: illustrative
-    cold_max = 152 * microsecond  # category: illustrative
-    warm_p50 = 210 * microsecond  # category: illustrative
-    warm_p99 = 330 * microsecond  # category: illustrative
-    warm_p999 = 395 * microsecond  # category: illustrative
-    warm_max = 468 * microsecond  # category: illustrative
+    cold_p50 = trace.cold["p50"]  # category: illustrative
+    cold_p99 = trace.cold["p99"]  # category: illustrative
+    cold_max = trace.cold["max"]  # category: illustrative
+    warm_p50 = trace.warm["p50"]  # category: illustrative
+    warm_p99 = trace.warm["p99"]  # category: illustrative
+    warm_p999 = trace.warm["p99.9"]  # category: illustrative
+    warm_max = trace.warm["max"]  # category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
-    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)
+    j_brake = aisle_stop.jerk.to(meter / second**3)
+    budget = aisle_stop.result.required_distance.to(millimeter)
+    spare = aisle_stop.result.spare.to(millimeter)
     missed_tick = (v_aisle * tick).to(millimeter)
     deadline_share = (deadline / tick).to("dimensionless").magnitude
-    renewal_to_onset = (t_lease + tick + t_bus + t_onset).to(millisecond)
-    trace_s = (n_ticks * tick).to(second).magnitude
-    trace_h = int(trace_s // 3600)
-    trace_min = int((trace_s % 3600) // 60)
-    trace_sec = int(round(trace_s % 60))
+    renewal_to_onset = Scenarios.WarehouseChunkLease.result.admission_to_brake_onset.to(millisecond)  # lease + tick + bus + onset
+    trace_s = trace.duration.to(second).magnitude
+    trace_h, trace_min, trace_sec = trace.hours_minutes_seconds
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(wcet < deadline < tick, "Declared WCET < deadline < tick.")

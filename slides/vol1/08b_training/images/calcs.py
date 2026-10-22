@@ -1,439 +1,416 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 8b (Model Training, Part 2).
+"""Every number on the Volume I Lecture 8b (Model Training, Part 2) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment
-("ch" is the rendered chapter, Model Training); each printed line is a value
-the slide or its note shows, under the label used there. make_figs.py
-imports from this file so figures and slides share one computation.
+MLSysIM holds the inputs and the calculations: GPT-2 XL's batch-32 step on
+one H100 in FP32 (Scenarios.Gpt2Fp32AdamBatch32OnH100), in mixed precision
+(Gpt2MixedPrecisionAdamOnH100), without stored attention scores
+(Gpt2MixedPrecisionFlashAttentionOnH100), as two micro-batches of 16
+(Gpt2MixedPrecisionTwoMicroBatchesOnH100), and with segment checkpointing
+(Gpt2MixedPrecisionSegmentCheckpointedOnH100, Gpt2XlBatch32SegmentCheckpointed);
+the run on the FP32, TF32, and 16-bit paths (Gpt2XlRunOnOneH100Fp32, ...Tf32,
+Gpt2XlRunOnOneH100); the number formats and the swamped update
+(Fp16WeightSmallUpdates); loss scaling on the SSD gradient histogram
+(SsdGradientLossScaling); the online-softmax toy (OnlineSoftmaxFourScores);
+the attention tiles and stored tensors (AttentionScores4096TokensFp32); and
+the single-core tokenizer (Gpt2XlSingleCoreTokenizerFeed). Cited results
+(FlashAttention, Korthikanti et al., Chen et al., Micikevicius et al., the
+Hugging Face guide) are in Literature. The chapter reads the same scenarios.
+
+Two measured runs of our own are read from data/: the GradScaler trace
+(scaler_run.py writes data/scaler_trace.csv) and the SDPA profile
+(sdpa_profile.py writes data/sdpa_profile.txt).
+
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex. make_figs.py imports
+this module, so figures and slides share one computation.
 
 Run from this folder: python3 calcs.py
 """
+
 import csv
 import math
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Scenarios, Literature, Hardware, Models = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Hardware, mlsysim.Models
+units = mlsysim.core.units
+Q_ = units.Q_
+BITS = units.FLOAT_FORMAT_BITS
+TR, TM, CR = Literature.TrainingRuns, Literature.TrainingMemory, Literature.CompilerResults
+
+RUN = Scenarios.Gpt2XlRunOnOneH100
+RUN_FP32 = Scenarios.Gpt2XlRunOnOneH100Fp32
+RUN_TF32 = Scenarios.Gpt2XlRunOnOneH100Tf32
+ACT = Scenarios.Gpt2XlBatch32Activations
+ACT16 = Scenarios.Gpt2XlMicroBatch16Activations
+SEG = Scenarios.Gpt2XlBatch32SegmentCheckpointed
+FP32 = Scenarios.Gpt2Fp32AdamBatch32OnH100
+MIXED = Scenarios.Gpt2MixedPrecisionAdamOnH100
+FLASH = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
+ACCUM = Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100
+CKPT = Scenarios.Gpt2MixedPrecisionSegmentCheckpointedOnH100
+SWAMP = Scenarios.Fp16WeightSmallUpdates
+LS = Scenarios.SsdGradientLossScaling
+SM = Scenarios.OnlineSoftmaxFourScores
+TILE = Scenarios.AttentionScores4096TokensFp32
+FEED = Scenarios.Gpt2XlSingleCoreTokenizerFeed
+H100 = MIXED.hardware
+GPT2 = MIXED.workload
+GTX580 = Hardware.Workstation.GTX580_3GB
+SRAM = Hardware.Tech.Memory.AcceleratorOnChipSram
+LADDER = [Hardware.Cloud.V100, Hardware.Cloud.A100, Hardware.Cloud.H100, Hardware.Cloud.B200]
+DATA = HERE / "data"
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def head(title):
-    print(f"\n[{title}]")
+def r(a, b):
+    """A dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-GB = 1e9
-DAY = 86400
-P = 1.5e9                    # ch Lighthouse 8.1: GPT-2 XL parameters
-RUN_FLOP = 1.5e21            # ch Sec. 8.1: GPT-2 XL training run
-BATCH, SEQ = 32, 1024        # ch Sec. 8.6.6
-LAYERS, HIDDEN, HEADS, DHEAD = 48, 1600, 25, 64   # ch Napkin Math 8.3
-H100_GIB = 80                # H100 capacity, GiB (sold as "80 GB")
-GTX580_GB = 3                # ch Sec. 8.7.1: GTX 580 memory
-UTIL = 0.50                  # ch Napkin Math 8.7
-PRICE = 4.0                  # ch Napkin Math 8.7: dollars per H100-hour
-BUSY = 48                    # ch Sec. 8.6.6: percent busy, single-core tokenizer
-MP_BYTES = (2, 2, 4, 8)      # ch Sec. 8.3.2: FP16 W, FP16 G, FP32 master, Adam m+v
-FP32_BYTES = (4, 4, 0, 8)    # ch Napkin Math 8.6: FP32 W, FP32 G, no master, Adam
-
-# Peak dense TFLOP/s by format (ch figure 10; NVIDIA datasheets)
-PEAK = {"V100": {"FP32": 15.7, "FP16": 125},
-        "A100": {"FP32": 19.5, "TF32": 156, "FP16": 312},
-        "H100": {"FP32": 67, "TF32": 494, "FP16": 989, "FP8": 1979},
-        "B200": {"FP32": 75, "TF32": 1125, "FP16": 2250, "FP8": 4500, "FP4": 9000}}
-H100_BW = 3.35e12            # ch Sec. 8.3: HBM bandwidth, B/s
-# NVIDIA H100 product page spec table (H100 SXM, retrieved 2026-10-18),
-# rates marked "* With sparsity": TF32 989, BF16/FP16 1,979 TFLOP/s
-H100_SPARSE = {"TF32": 989, "FP16": 1979}
-
-# ch Napkin Math 8.3: activations per layer, FP16, batch 32, 1,024 tokens
-ATTN_MB, FFN_MB, LN_MB = 419.4, 419.4, 10
-LIB_ACT_GB = 286.9           # ch: library estimate of saved activations
-SCORE_BYTES = (2, 1, 2)      # ch: softmax P, dropout mask, P after dropout
-
-# ch Sec. 8.6.4 tiling example: 4,096 tokens, one head, FP32 scores
-N_TILE_EX, TILE = 4096, 128
-SMEM_KB = 228                # Hardware Acceleration: shared memory per SM
-
-# Dao et al. 2022, Figure 2 (left): GPT-2 medium attention fwd+bwd, A100
-FA_GFLOP = (66.6, 75.2)
-FA_HBM_GB = (40.3, 4.4)
-FA_MS = (41.7, 7.3)
-FA_FIG1_SPEEDUP = 7.6        # Dao et al. 2022, Figure 1 caption (GPT-2, attention)
-FA_FIG1_BW = (19, 1.5)       # Dao et al. 2022, Figure 1 left: SRAM, HBM TB/s (A100)
-
-# Napkin Math 8.8 (ch): 8 segments of 6 layers
-SEGMENTS = 8
-LIVE_SEG_GB = 10.7           # ch: live reconstructed segment
-
-# Chen et al. 2016, abstract: 1,000-layer residual net
-CHEN_GB = (48, 7)
-
-# Korthikanti et al. 2023 (arXiv 2205.05198v1). Table 2: activation bytes per
-# layer = s*b*h*(34 + 5*a*s/h) storing everything; s*b*h*34 with selective
-# recomputation (attention core only); s*b*h*2 with full recomputation.
-# Table 4: one layer of the 22B model, forward + backward (ms).
-K_TABLE4 = {"No recompute": 19.6, "Full recompute": 27.2, "Selective recompute": 20.9}
-K_MFU = (42.1, 54.2)         # abstract: 530B on 2,240 A100s, full vs present work
-
-# Micikevicius et al. 2018, Figure 3 (SSD activation gradients), read from the
-# figure image (arXiv 1710.03740v3, page 4, 898 x 575 px): gridline y pixel of
-# 64 percent = 35, of 1/512 percent = 504; bar top pixels per bin [lo, hi) in
-# log2(magnitude). The zero bin uses the caption's 67 percent.
-FIG3_Y64, FIG3_Y512 = 35, 504
-FIG3_BINS = [(-75, -60, None), (-60, -45, 436), (-45, -40, 330), (-40, -38, 312),
-             (-38, -36, 274), (-36, -34, 234), (-34, -32, 195), (-32, -30, 162),
-             (-30, -28, 140), (-28, -26, 134), (-26, -24, 143), (-24, -22, 169),
-             (-22, -20, 206), (-20, -18, 242), (-18, -16, 272), (-16, -14, 310),
-             (-14, -12, 358), (-12, -10, 439)]
-FIG3_ZERO_PCT = 67           # caption
-SSD_SCALE = 8                # Sec. 3.2: scaling by 8 matched FP32
-
-# torch.amp.GradScaler defaults (PyTorch docs)
-SCALER_INIT, SCALER_INTERVAL = 2.0 ** 16, 2000
-
-# Hugging Face docs (perf_train_gpu_one.md, v5.0.0): checkpointing "~20%" slower
-HF_CKPT_SLOWER = 20
+def sci(key, x, fmt, label):
+    """Record x as a mantissa (key_m) and a power of ten (key_e), for $m\\times10^{e}$."""
+    e = math.floor(math.log10(x))
+    mant = x / 10 ** e
+    if float(fmt.format(mant)) >= 10:   # a mantissa that rounds up to 10
+        e, mant = e + 1, mant / 10
+    v(f"{key}_m", mant, fmt, f"{label}, mantissa")
+    v(f"{key}_e", e, "{:.0f}", f"{label}, power of ten")
 
 
-def h100_gb():
-    return H100_GIB * 2 ** 30 / GB
-
-
-def static_gb():
-    return P * sum(MP_BYTES) / GB
-
-
-def scores_layer_bytes(b=BATCH, s=SEQ):
-    return sum(SCORE_BYTES) * HEADS * s * s * b
-
-
-def fp16_act_gb():
-    return LIB_ACT_GB
-
-
-def fp32_act_gb():
-    return 2 * LIB_ACT_GB
-
-
-def run_days(rate_tflops):
-    return RUN_FLOP / (rate_tflops * 1e12 * UTIL) / DAY
-
-
-def k_bytes_per_layer(coeff):
-    """Korthikanti Table 2 with the deck's s, b, h (bytes per layer)."""
-    return SEQ * BATCH * HIDDEN * coeff
-
-
-def k_score_coeff():
-    return 5 * HEADS * SEQ / HIDDEN
-
-
-def flash_act_gb():
-    return LIB_ACT_GB * 34 / (34 + k_score_coeff())
-
-
-def per_seq_gb():
-    return flash_act_gb() / BATCH
-
-
-def seg_inputs_gb():
-    return SEGMENTS * BATCH * SEQ * HIDDEN * 2 / GB
-
-
-def fig3_pct():
-    """Digitized percentages per bin (None for an empty bin)."""
-    per_oct = (FIG3_Y512 - FIG3_Y64) / 15       # 64 = 2^6 down to 1/512 = 2^-9
-    out = []
-    for lo, hi, y in FIG3_BINS:
-        out.append((lo, hi, None if y is None else 2 ** (6 - (y - FIG3_Y64) / per_oct)))
-    return out
+def digits(fmt):
+    """Decimal digits a binary float keeps."""
+    return mlsysim.physics.calc_float_decimal_digits(BITS[fmt][1])
 
 
 def scaler_trace():
-    path = HERE / "data" / "scaler_trace.csv"
-    rows = []
-    with path.open() as f:
+    """Rows (step, scale after the step, skipped) of our GradScaler run."""
+    with (DATA / "scaler_trace.csv").open() as f:
         next(f)
-        for r in csv.DictReader(f):
-            rows.append((int(r["step"]), float(r["scale_after_step"]), int(r["skipped"])))
-    return rows
+        return [(int(row["step"]), float(row["scale_after_step"]), int(row["skipped"]))
+                for row in csv.DictReader(f)]
 
 
-# ---------------------------------------------------------------------------
-def hook():
-    head("Slide 2: AlexNet's GTX 580 and the H100")
-    show("H100 80 GiB in GB", f"{h100_gb():.1f}")
-    show("memory growth GTX 580 to H100", f"{H100_GIB / GTX580_GB:.0f}x (80 GB / 3 GB, about 27)")
-    fp32 = P * sum(FP32_BYTES) / GB + fp32_act_gb()
-    show("FP32 step", f"{fp32:.0f} GB (static {P * sum(FP32_BYTES) / GB:.0f} + activations {fp32_act_gb():.1f})")
+def sdpa_profile():
+    """The profiler rows of our SDPA run: section, operator -> (self MB, total ms); and the max difference."""
+    rows, section, diff = {}, None, None
+    for line in (DATA / "sdpa_profile.txt").read_text().splitlines():
+        if line.startswith("=="):
+            section = line.strip("= ").strip()
+        elif line.startswith("aten::"):
+            name, mb, ms = line.split()
+            rows[(section, name)] = (float(mb), float(ms))
+        elif line.startswith("max |difference|"):
+            diff = float(line.split()[-1])
+    return rows, diff
 
 
-def predict():
-    head("Slide 3: Predict")
-    fp32 = P * sum(FP32_BYTES) / GB + fp32_act_gb()
-    show("static", f"{static_gb():.0f} GB")
-    show("FP32 activations", f"{fp32 - static_gb():.0f} GB")
-    show("H100s of memory", f"{fp32 / h100_gb():.2f}")
-    show("BF16 run", f"{run_days(PEAK['H100']['FP16']):.1f} days")
+fp32_run_d = m(RUN_FP32.training_time, "day")
+run_d = m(RUN.training_time, "day")
+ckpt_run_d = run_d * (1 + ACT.recompute_overhead)
+
+print("== The machines (Hardware.Cloud.H100; Hardware.Workstation.GTX580_3GB)")
+v("h100_gib", m(H100.memory.capacity, "GiB"), "{:.0f}", "H100 HBM, GiB (sold as GB)")
+v("h100_gb", m(H100.memory.capacity, "GB"), "{:.1f}", "H100 HBM, decimal GB")
+v("h100_bw", m(H100.memory.bandwidth, "TB/s"), "{:.2f}", "H100 HBM bandwidth, TB/s")
+v("h100_smem_kb", m(H100.memory.shared_memory_per_sm, "KiB"), "{:.0f}", "shared memory per SM, KB (KiB)")
+v("gtx580_gb", m(GTX580.memory.capacity, "GiB"), "{:.0f}", "GTX 580 memory, GB (3 GiB board)")
+v("gtx580_growth", r(H100.memory.capacity, GTX580.memory.capacity), "{:.0f}", "H100 memory over a GTX 580's")
+v("alexnet_params_m", m(Models.Vision.AlexNet.parameters, "count") / 10 ** 6, "{:.0f}", "AlexNet parameters, millions")
+v("alexnet_gpus_word", TR.AlexNetGpus, "words", "GTX 580s AlexNet trained on")
+v("sram_lo_mb", m(SRAM.capacity_low, "MB"), "{:.0f}", "on-chip SRAM, low, MB")
+v("sram_hi_mb", m(SRAM.capacity_high, "MB"), "{:.0f}", "on-chip SRAM, high, MB")
+v("sram_bw_lo", m(SRAM.bandwidth_low, "TB/s"), "{:.0f}", "on-chip SRAM bandwidth, low, TB/s")
+v("sram_bw_hi", m(SRAM.bandwidth_high, "TB/s"), "{:.0f}", "on-chip SRAM bandwidth, high, TB/s")
+
+print("== GPT-2 XL and the step (Models.Language.GPT2; Scenarios.Gpt2XlBatch32Activations)")
+v("gpt2_params_b", m(GPT2.parameters, "count") / 10 ** 9, "{:.1f}", "parameters, billions")
+v("gpt2_layers", GPT2.layers, "{:.0f}", "layers")
+v("gpt2_hidden", GPT2.hidden_dim, "{:,.0f}", "width")
+v("gpt2_heads", GPT2.heads, "{:.0f}", "attention heads")
+v("dhead", GPT2.hidden_dim // GPT2.heads, "{:.0f}", "head width")
+v("batch", MIXED.batch_size, "{:.0f}", "sequences per step")
+v("seq", ACT.sequence, "{:,.0f}", "tokens per sequence")
+
+print("== Static state (Scenarios.Gpt2MixedPrecisionAdamOnH100)")
+v("mp_w_b", m(MIXED.bytes_per_value, "byte"), "{:.0f}", "16-bit weight, B")
+v("mp_master_b", m(MIXED.master_bytes_per_parameter, "byte"), "{:.0f}", "master copy, B")
+v("mp_moments_b", m(MIXED.optimizer_bytes_per_parameter, "byte"), "{:.0f}", "two FP32 moments, B")
+v("mp_total_b", m(MIXED.bytes_per_trained_parameter, "byte"), "{:.0f}", "B per parameter")
+v("static_gb", m(MIXED.total, "GB"), "{:.0f}", "static state, GB")
+
+print("== The scoreboard (Scenarios.Gpt2Fp32AdamBatch32OnH100 ... Gpt2MixedPrecisionSegmentCheckpointedOnH100)")
+v("fp32_step_gb", m(FP32.training_total, "GB"), "{:.0f}", "FP32 step, GB")
+v("fp32_act_gb", m(FP32.activations, "GB"), "{:.0f}", "FP32 activations, GB")
+v("fp32_h100s_word", round(FP32.training_capacity_multiple), "words", "FP32 step in H100s, rounded")
+v("act_gb", m(MIXED.activations, "GB"), "{:.0f}", "16-bit activations, GB")
+v("scores_gb", m(ACT.score_activations, "GB"), "{:.0f}", "attention scores, GB")
+v("tok_act_gb", m(ACT.per_token_activations, "GB"), "{:.0f}", "activations without the scores, GB")
+v("tok_act_gb_1", m(ACT.per_token_activations, "GB"), "{:.1f}", "the same, one decimal")
+v("mp_step_gb", m(MIXED.training_total, "GB"), "{:.0f}", "mixed-precision step, GB")
+v("mp_step_x", MIXED.training_capacity_multiple, "{:.1f}", "mixed-precision step in H100s")
+v("flash_step_gb", m(FLASH.training_total, "GB"), "{:.1f}", "FlashAttention step, GB")
+v("flash_over_gb", m(FLASH.training_total - H100.memory.capacity, "GB"), "{:.0f}", "over one H100, GB")
+v("accum_step_gb", m(ACCUM.training_total, "GB"), "{:.1f}", "two micro-batches of 16, GB")
+v("ckpt_step_gb", m(CKPT.training_total, "GB"), "{:.1f}", "segment checkpointing, GB")
+v("fit_shrink_word", round(r(FP32.training_total, ACCUM.training_total)), "words", "FP32 step over the fitted step")
+v("fit_shrink_x", r(FP32.training_total, ACCUM.training_total), "{:.0f}", "the same, as a number")
+v("gtx580_step_x", round(r(FP32.training_total, GTX580.memory.capacity), -2), "{:.0f}",
+  "FP32 step over one GTX 580, to the hundred")
+
+print("== Precision ladder (Hardware.Cloud V100, A100, H100, B200: precision_flops)")
 
 
-def recall():
-    head("Slide 4: Recall")
-    show("bytes per parameter", f"{sum(MP_BYTES)} B")
-    show("static", f"{static_gb():.0f} GB")
-    scores = LAYERS * scores_layer_bytes() / GB
-    show("scores over 48 layers", f"{scores:.1f} GB")
-    show("other activations", f"{fp16_act_gb() - scores:.1f} GB")
-    show("mixed-precision step", f"{static_gb() + fp16_act_gb():.1f} GB")
+def rate(hw, key):
+    pf = hw.compute.precision_flops
+    if key == "fp16_dense" and key not in pf:
+        return m(hw.compute.peak_flops, "TFLOP/s")
+    return m(pf[key], "TFLOP/s") if key in pf else None
 
 
-def ladder():
-    head("Slide 6: precision ladder")
-    show("V100 to B200 FP32 growth", f"{PEAK['B200']['FP32'] / PEAK['V100']['FP32']:.1f}x")
-    show("V100 to B200 FP16 tensor growth", f"{PEAK['B200']['FP16'] / PEAK['V100']['FP16']:.0f}x")
-    r = PEAK["H100"]["FP16"] / PEAK["H100"]["FP32"]
-    show("H100 FP16 over FP32", f"{r:.1f}x (about 15; 14 of every 15 unused)")
-    for f, v in H100_SPARSE.items():
-        show(f"H100 {f} sparse / dense", f"{v} / {PEAK['H100'][f]} = {v / PEAK['H100'][f]:.2f}")
+LADDER_FORMATS = ["fp32", "tf32", "fp16_dense", "fp8", "fp4"]
+LADDER_RATES = [[rate(hw, f) for f in LADDER_FORMATS] for hw in LADDER]
+v("v100_fp32", rate(LADDER[0], "fp32"), "{:.1f}", "V100 FP32, TFLOP/s")
+v("v100_fp16", rate(LADDER[0], "fp16_dense"), "{:.0f}", "V100 16-bit tensor, TFLOP/s")
+v("ladder_fp32_x", rate(LADDER[3], "fp32") / rate(LADDER[0], "fp32"), "{:.1f}", "B200 over V100, FP32")
+v("ladder_fp16_x", rate(LADDER[3], "fp16_dense") / rate(LADDER[0], "fp16_dense"), "{:.0f}",
+  "B200 over V100, 16-bit tensor")
+v("h100_fp32", rate(H100, "fp32"), "{:.0f}", "H100 FP32, TFLOP/s")
+v("h100_tf32", rate(H100, "tf32"), "{:.1f}", "H100 TF32 dense, TFLOP/s")
+v("h100_peak", m(H100.compute.peak_flops, "TFLOP/s"), "{:.0f}", "H100 16-bit dense, TFLOP/s")
+v("h100_peak_sparse", rate(H100, "fp16_sparse"), "{:,.0f}", "H100 16-bit with sparsity, TFLOP/s")
+v("h100_tf32_sparse", rate(H100, "tf32_sparse"), "{:.0f}", "H100 TF32 with sparsity, TFLOP/s")
+fp16_over_fp32 = r(H100.compute.peak_flops, H100.compute.precision_flops["fp32"])
+v("fp16_over_fp32", fp16_over_fp32, "{:.0f}", "16-bit over FP32 peak, H100")
+v("fp16_over_fp32_word", round(fp16_over_fp32), "words", "the same, in prose")
+v("fp32_unused", round(fp16_over_fp32) - 1, "{:.0f}", "FP32 leaves this many of every 15 unused")
 
+print("== Number formats (core.units.FLOAT_FORMAT_BITS; Scenarios.Fp16WeightSmallUpdates)")
+_, fp32_lo, _ = mlsysim.physics.calc_float_range(*BITS["fp32"])
+v("fp32_e", BITS["fp32"][0], "{:.0f}", "FP32 exponent bits")
+v("fp32_f", BITS["fp32"][1], "{:.0f}", "FP32 mantissa bits")
+v("fp16_e", BITS["fp16"][0], "{:.0f}", "FP16 exponent bits")
+v("fp16_f", BITS["fp16"][1], "{:.0f}", "FP16 mantissa bits")
+v("bf16_f", BITS["bf16"][1], "{:.0f}", "BF16 mantissa bits")
+v("fp32_digits_word", round(digits("fp32")), "words", "FP32 decimal digits, rounded")
+v("fp16_digits_word", round(digits("fp16")), "words", "FP16 decimal digits, rounded")
+v("bf16_digits_lo_word", math.floor(digits("bf16")), "words", "BF16 decimal digits, low")
+v("bf16_digits_hi_word", math.ceil(digits("bf16")), "words", "BF16 decimal digits, high")
+sci("fp16_min", LS.smallest_normal, "{:.1f}", "FP16 smallest normal")
+v("fp16_max", LS.largest, "{:,.0f}", "FP16 largest")
+sci("fp16_sub", LS.smallest_subnormal, "{:.0f}", "FP16 smallest subnormal, about")
+v("fp16_sub_log2", LS.subnormal_floor_log2, "{:.0f}", "log2 of the FP16 smallest subnormal")
+v("fp16_min_log2", LS.normal_floor_log2, "{:.0f}", "log2 of the FP16 smallest normal")
+v("fp32_min_e", math.floor(math.log10(fp32_lo)), "{:.0f}", "FP32 and BF16 smallest normal, power of ten")
+v("grad_e", math.log10(LS.probe_gradient), "{:.0f}", "the small gradient, power of ten")
 
-def formats():
-    head("Slide 7: formats")
-    show("FP16 smallest normal 2^-14", f"{2 ** -14:.2e}")
-    show("FP16 largest", f"{(2 - 2 ** -10) * 2 ** 15:,.0f}")
-    show("FP16 smallest subnormal 2^-24", f"{2 ** -24:.1e}")
-    show("FP32 smallest normal 2^-126", f"{2 ** -126:.1e}")
-    show("FP32 largest", f"{(2 - 2 ** -23) * 2 ** 127:.2e}")
+print("== Swamping (Scenarios.Fp16WeightSmallUpdates)")
+v("sw_weight", SWAMP.weight, "{:.1f}", "weight")
+v("sw_update", SWAMP.update, "{:.4f}", "update")
+v("sw_true", SWAMP.weight + SWAMP.update, "{:.4f}", "true sum")
+v("sw_repeats", SWAMP.repeats, "{:,.0f}", "updates")
+v("sw_fp32", SWAMP.final("fp32"), "{:.1f}", "FP32 after the updates")
+v("sw_fp16", SWAMP.final("fp16"), "{:.1f}", "FP16 after the updates")
+v("sw_next", SWAMP.next_value("fp16"), "{:.5f}", "next FP16 value above the weight")
+v("sw_fp16_log2", math.log2(SWAMP.spacing("fp16")), "{:.0f}", "FP16 spacing near 0.5, log2")
+sci("sw_fp16_sp", SWAMP.spacing("fp16"), "{:.1f}", "FP16 spacing near 0.5")
+v("sw_bf16_log2", math.log2(SWAMP.spacing("bf16")), "{:.0f}", "BF16 spacing near 0.5, log2")
+sci("sw_bf16_sp", SWAMP.spacing("bf16"), "{:.1f}", "BF16 spacing near 0.5")
+v("sw_ratio", SWAMP.vanishing_ratio("fp16"), "{:,.0f}", "weight over the largest update that rounds away")
 
+print("== Loss scaling (Scenarios.SsdGradientLossScaling; Micikevicius et al. Figure 3)")
+v("ls_zero_pct", 100 * LS.zero_fraction, "{:.0f}", "exact zeros, percent")
+v("ls_below_pct", 100 * LS.below_share_of_nonzero, "{:.0f}", "nonzero values below the subnormal floor, percent")
+v("ls_top_log2", LS.top_edge_log2, "{:.0f}", "largest occupied bin edge, log2")
+v("ls_scale", LS.scale, "{:.0f}", "the paper's loss scale")
+v("ls_shift", LS.shift, "{:.0f}", "doublings it adds")
+v("ls_headroom", LS.headroom_doublings, "{:.0f}", "doublings of headroom")
+v("ls_dyn_scale", LS.dynamic_scale, "{:,.0f}", "a dynamic scaler's setting")
+sci("ls_scaled", LS.scaled_probe, "{:.2f}", "the small gradient after scaling")
+v("ls_overflow", LS.dynamic_overflow_threshold, "{:.0f}", "gradient that overflows at that scale")
 
-def swamp():
-    head("Slide 8: swamping")
-    show("FP16 spacing near 0.5 (2^-11)", f"{2 ** -11:.2e}")
-    show("next FP16 value above 0.5", f"{0.5 + 2 ** -11:.5f}")
-    show("BF16 spacing near 0.5 (2^-8)", f"{2 ** -8:.2e}")
-    show("update/weight ratio that rounds away (0.5 / half spacing)", f"{0.5 / 2 ** -12:,.0f}")
-    show("FP32 after 10,000 x 0.0001", f"{0.5 + 10000 * 1e-4:.1f}")
+print("== Our GradScaler run (data/scaler_trace.csv)")
+TRACE = scaler_trace()
+trace_init = TRACE[0][1]
+first_double = next(s for s, sc, _ in TRACE if sc > trace_init)
+skips = [s for s, _, k in TRACE if k]
+top = max(sc for _, sc, _ in TRACE)
+v("gs_steps", len(TRACE), "{:,.0f}", "steps run")
+v("gs_init_log2", math.log2(trace_init), "{:.0f}", "initial scale, log2")
+v("gs_interval", first_double, "{:,.0f}", "clean steps per doubling")
+v("gs_doublings_word", math.log2(top / trace_init), "words", "doublings before the first skip")
+v("gs_top_log2", math.log2(top), "{:.0f}", "ceiling, log2")
+v("gs_first_skip", skips[0], "{:,.0f}", "first skipped step")
+v("gs_cycle", skips[1] - skips[0], "{:,.0f}", "steps between skips")
+v("gs_skips", len(skips), "{:.0f}", "skipped steps")
 
+print("== Run time by format (Scenarios.Gpt2XlRunOnOneH100Fp32, ...Tf32, Gpt2XlRunOnOneH100)")
+v("eta_pct", 100 * RUN.efficiency, "{:.0f}", "utilization held fixed, percent")
+v("price_hr", m(RUN.hourly_price, "USD/hour"), "{:.0f}", "USD per H100-hour")
+v("fp32_days", fp32_run_d, "{:.0f}", "FP32 run, days")
+v("fp32_usd", round(m(RUN_FP32.rental_cost, "USD")), "{:,.0f}", "FP32 run, USD")
+v("tf32_days", m(RUN_TF32.training_time, "day"), "{:.0f}", "TF32 run, days")
+v("run_days", run_d, "{:.0f}", "16-bit run, days")
+v("run_usd", round(m(RUN.rental_cost, "USD")), "{:,.0f}", "16-bit run, USD")
 
-def loss_scale():
-    head("Slide 9: loss scaling (Micikevicius et al. Figure 3)")
-    bins = fig3_pct()
-    below = sum(p for lo, hi, p in bins if p and hi <= -24)
-    sub = sum(p for lo, hi, p in bins if p and lo >= -24 and hi <= -14)
-    normal = sum(p for lo, hi, p in bins if p and lo >= -14)
-    nonzero = below + sub + normal
-    show("digitized [-34,-32) (caption: 2%)", f"{dict(((lo, hi), p) for lo, hi, p in bins)[(-34, -32)]:.1f}%")
-    show("nonzero values below 2^-24", f"{below:.1f}% of all, {100 * below / nonzero:.0f}% of nonzero")
-    show("in the subnormal band", f"{sub:.1f}%")
-    show("at or above 2^-14", f"{normal:.2f}%")
-    show("nonzero total read from bars (+ 67% zeros)", f"{nonzero:.1f}% (sum {nonzero + FIG3_ZERO_PCT:.0f}%)")
-    shift = math.log2(SSD_SCALE)
-    show("x8 shift in exponent", f"{shift:.0f}")
-    rescued = sum(p for lo, hi, p in bins if p and hi <= -24 and lo >= -24 - shift)
-    show("nonzero values moved above 2^-24 by x8 (bins fully inside)", f"{rescued:.1f}%")
-    lo_after = max(lo for lo, hi, p in bins if p) + shift
-    show("largest bin edge after x8", f"2^{lo_after + 2:.0f} (far below 2^16)")
-    top_edge = max(hi for lo, hi, p in bins if p)
-    show("headroom: largest bin edge to 65,504", f"{math.log2(65504) - top_edge:.0f} doublings")
-    show("1e-6 in log2", f"{math.log2(1e-6):.1f}")
-    show("S = 1,024: 1e-6 x S", f"{1e-6 * 1024:.2e}")
-    show("S = 1,024: overflow above", f"{65504 / 1024:.0f}")
+print("== One layer's bytes (Scenarios.Gpt2XlBatch32Activations line items)")
+v("layer_scores_mb", m(ACT.score_activations_per_layer, "MB"), "{:,.0f}", "scores per layer, MB")
+v("layer_items_mb", m(ACT.line_items_per_layer, "MB"), "{:,.0f}", "line items per layer, MB")
+v("layer_scores_pct", 100 * r(ACT.score_activations_per_layer, ACT.line_items_per_layer), "{:.0f}",
+  "scores' share of a layer, percent")
+v("layer_proj_mb", m(ACT.projection_activations_per_layer, "MB"), "{:.0f}", "projections per layer, MB")
+v("act_items_gb", m(ACT.line_items_total, "GB"), "{:.0f}", "line items over all layers, GB")
+mem = mlsysim.physics.memory
+v("score_p_b", mem.SCORE_SOFTMAX_BYTES, "{:.0f}", "softmax probabilities, B per entry")
+v("score_mask_b", mem.SCORE_DROPOUT_MASK_BYTES, "{:.0f}", "dropout mask, B per entry")
+v("score_entry_b", mem.KORTHIKANTI_SCORE_BYTES, "{:.0f}", "bytes per score entry")
 
+print("== Attention I/O (Hardware.Cloud.H100; head width of GPT-2 XL)")
+v("attn_intensity", m(mlsysim.physics.calc_score_matrix_intensity(GPT2.hidden_dim // GPT2.heads, units.BYTES_FP16),
+                       "flop/byte"), "{:.0f}", "score intensity d_head/2, FLOP/B")
+v("h100_ridge", m(H100.compute.peak_flops / H100.memory.bandwidth, "flop/byte"), "{:.0f}", "H100 ridge, FLOP/B")
 
-def diagnose_trace():
-    head("Slide 11: real GradScaler trace")
-    rows = scaler_trace()
-    skips = [s for s, _, k in rows if k]
-    top = max(sc for _, sc, _ in rows)
-    show("steps run", f"{len(rows):,}")
-    show("first skipped step", f"{skips[0]:,}")
-    show("doublings before first skip", f"{math.log2(top / SCALER_INIT):.0f} (2^16 to 2^{math.log2(top):.0f})")
-    show("skipped steps", f"{len(skips)}")
-    gaps = sorted({b - a for a, b in zip(skips, skips[1:])})
-    show("steps between skips", f"{gaps}")
-    show("scale at the ceiling", f"2^{math.log2(top):.0f} = {top:,.0f}; after halving 2^{math.log2(top) - 1:.0f}")
-    show("share of steps skipped after the climb",
-         f"{100 * len(skips) / (len(rows) - skips[0] + 1):.2f}%")
+print("== FlashAttention, Figures 1 and 2 (Literature.CompilerResults)")
+v("fa_sram_tbs", CR.FlashAttentionA100SramBandwidthTBs, "{:.0f}", "A100 SRAM, TB/s")
+v("fa_sram_mb", CR.FlashAttentionA100SramCapacityMB, "{:.0f}", "A100 SRAM, MB")
+v("fa_hbm_tbs", CR.FlashAttentionA100HbmBandwidthTBs, "{:.1f}", "A100 HBM, TB/s")
+v("fa_hbm_gb", CR.FlashAttentionA100HbmCapacityGB, "{:.0f}", "A100 HBM, GB")
+v("fa_bw_x", CR.FlashAttentionA100SramBandwidthTBs / CR.FlashAttentionA100HbmBandwidthTBs, "{:.1f}",
+  "SRAM over HBM bandwidth")
+v("fa_speedup", CR.FlashAttentionGpt2AttentionSpeedup, "{:.1f}", "GPT-2 attention speedup")
+v("fa_gflop_std", CR.FlashAttentionGpt2MediumStandardGflops, "{:.1f}", "standard, GFLOPs")
+v("fa_gflop_fa", CR.FlashAttentionGpt2MediumFusedGflops, "{:.1f}", "FlashAttention, GFLOPs")
+v("fa_hbm_std", CR.FlashAttentionGpt2MediumStandardHbmTrafficGB, "{:.1f}", "standard, HBM GB")
+v("fa_hbm_fa", CR.FlashAttentionGpt2MediumFusedHbmTrafficGB, "{:.1f}", "FlashAttention, HBM GB")
+v("fa_ms_std", CR.FlashAttentionGpt2MediumStandardRuntimeMs, "{:.1f}", "standard, ms")
+v("fa_ms_fa", CR.FlashAttentionGpt2MediumFusedRuntimeMs, "{:.1f}", "FlashAttention, ms")
+v("fa_more_flops_pct", 100 * (CR.FlashAttentionGpt2MediumFusedGflops / CR.FlashAttentionGpt2MediumStandardGflops - 1),
+  "{:.0f}", "more arithmetic, percent")
+v("fa_fewer_bytes_x", CR.FlashAttentionGpt2MediumStandardHbmTrafficGB / CR.FlashAttentionGpt2MediumFusedHbmTrafficGB,
+  "{:.0f}", "fewer HBM bytes, times, about")
+v("fa_faster", CR.FlashAttentionGpt2MediumStandardRuntimeMs / CR.FlashAttentionGpt2MediumFusedRuntimeMs, "{:.1f}",
+  "faster, times")
 
+print("== Tiles and stored tensors (Scenarios.AttentionScores4096TokensFp32)")
+v("tile_seq", TILE.seq_len, "{:,.0f}", "tokens")
+v("tile_side", TILE.tile, "{:.0f}", "tile side")
+v("tile_kb", m(TILE.tile_bytes, "KB"), "{:.1f}", "one tile, KB")
+v("tile_full_mb", m(TILE.score_matrix, "MB"), "{:.1f}", "full matrix, MB")
+v("tiles_per_side", TILE.tiles_per_side, "{:.0f}", "tiles per side")
+v("tile_count", TILE.tile_count, "{:,.0f}", "tiles in all")
+v("tile_heads", TILE.heads, "{:.0f}", "heads")
+v("tile_heads_gb", m(TILE.all_heads_scores, "GB"), "{:.1f}", "all heads' scores, GB")
+v("store_std_mb", m(TILE.stored_standard, "MB"), "{:.1f}", "standard attention stores, MB")
+v("store_fa_mb", m(TILE.stored_flash, "MB"), "{:.1f}", "FlashAttention stores, MB")
+v("store_x", TILE.stored_ratio, "{:.1f}", "ratio")
 
-def days():
-    head("Slide 12: 518 days to 35, 598 GB to 311")
-    for f in ("FP32", "TF32", "FP16"):
-        d = run_days(PEAK["H100"][f])
-        show(f"{f} run", f"{d:.1f} days, ${d * 24 * PRICE:,.0f}")
-    show("mixed-precision activations", f"{fp32_act_gb():.1f} -> {fp16_act_gb():.1f} GB")
-    show("step", f"{static_gb() + fp16_act_gb():.1f} GB = {(static_gb() + fp16_act_gb()) / h100_gb():.2f} H100s")
+print("== Online softmax (Scenarios.OnlineSoftmaxFourScores)")
+b1, b2 = SM.blocks
+whole = SM.whole_row
+for i, (x, val_) in enumerate(zip(SM.scores, SM.values), start=1):
+    v(f"sm_x{i}", x, "{:.0f}", f"score {i}")
+    v(f"sm_v{i}", val_, "{:.0f}", f"value {i}")
+    v(f"sm_d{i}", x - whole["max"], "{:.0f}", f"score {i} minus the row maximum")
+v("sm_d2b1", SM.scores[0] - b1["max"], "{:.0f}", "score 1 minus block 1's maximum")
+v("sm_m", whole["max"], "{:.0f}", "row maximum")
+v("sm_m1", b1["max"], "{:.0f}", "block 1 maximum")
+v("sm_l", whole["sum"], "{:.3f}", "whole-row sum")
+v("sm_l1", b1["sum"], "{:.3f}", "block 1 sum")
+v("sm_f", b2["rescale"], "{:.3f}", "rescale factor")
+v("sm_l1f", b1["sum"] * b2["rescale"], "{:.3f}", "old sum rescaled")
+v("sm_t3", SM.block_terms(1)[0], "{:.3f}", "block 2's first term")
+v("sm_o", whole["output"], "{:.2f}", "whole-row output")
+v("sm_o1", b1["output"], "{:.2f}", "block 1 output")
+v("sm_o1f", b1["output"] * b2["rescale"], "{:.2f}", "old output rescaled")
+v("sm_vt3", SM.values[2] * SM.block_terms(1)[0], "{:.2f}", "block 2's first weighted value")
+v("sm_avg", SM.weighted_average, "{:.1f}", "O over l")
 
+print("== Our SDPA profile (data/sdpa_profile.txt; GPT-2 XL attention shape)")
+PROF, PROF_DIFF = sdpa_profile()
+t_flash = PROF[("default dispatch", "aten::_scaled_dot_product_flash_attention_for_cpu")][1]
+t_math = PROF[("forced math backend", "aten::_scaled_dot_product_attention_math")][1]
+v("sdpa_flash_ms", t_flash, "{:.1f}", "fused kernel, ms")
+v("sdpa_math_ms", t_math, "{:.1f}", "math backend, ms")
+v("sdpa_x", t_math / t_flash, "{:.1f}", "math over fused")
+v("sdpa_bmm_mb", PROF[("forced math backend", "aten::bmm")][0], "{:.1f}", "batched matmul allocation, MB")
+v("sdpa_out_mb", PROF[("default dispatch", "aten::empty_strided")][0], "{:.1f}", "output allocation, MB")
+score_mb = m(GPT2.heads * ACT.sequence ** 2 * units.BYTES_FP32, "MB")
+v("sdpa_scores_mb", score_mb, "{:.1f}", "one sequence's FP32 score matrix, MB")
+v("sdpa_diff_e", math.floor(math.log10(PROF_DIFF)), "{:.0f}", "outputs agree to this power of ten")
 
-def layer_bytes():
-    head("Slide 14: one layer's bytes")
-    sc = scores_layer_bytes() / 1e6
-    total = ATTN_MB + FFN_MB + sc + LN_MB
-    show("scores per layer", f"{sc:,.1f} MB")
-    show("layer total", f"{total:,.1f} MB")
-    show("score share", f"{100 * sc / total:.0f}%")
-    show("x48 scores", f"{LAYERS * sc / 1e3:.1f} GB")
-    show("line items x48", f"{LAYERS * total / 1e3:.1f} GB")
-    show("bytes per score entry", f"{sum(SCORE_BYTES)}")
+print("== Batch fit and accumulation (Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100, ...TwoMicroBatches)")
+v("per_seq_gb", m(ACT.per_sequence_activations, "GB"), "{:.2f}", "activations per sequence, GB")
+v("fit_batch", FLASH.resident_batch_limit, "{:.0f}", "sequences that fit, about")
+v("micro", ACCUM.batch_size, "{:.0f}", "micro-batch")
+v("accum_k", MIXED.batch_size // ACCUM.batch_size, "{:.0f}", "micro-batches per update")
+v("accum_k_word", MIXED.batch_size // ACCUM.batch_size, "words", "the same, in prose")
 
+print("== Segment checkpointing (Scenarios.Gpt2XlBatch32SegmentCheckpointed)")
+v("segments", SEG.checkpoint_segments, "{:.0f}", "segments")
+v("segments_word", SEG.checkpoint_segments, "words", "the same, in prose")
+v("segment_layers", SEG.segment_layers, "{:.0f}", "layers per segment")
+v("seg_inputs_gb", m(SEG.segment_inputs, "GB"), "{:.2f}", "kept segment inputs, GB")
+v("live_seg_gb", m(SEG.live_segment, "GB"), "{:.1f}", "one rebuilt segment, GB")
+v("ckpt_act_gb", m(SEG.checkpointed_activations, "GB"), "{:.1f}", "checkpointed activations, GB")
+v("ckpt_x", r(SEG.per_token_activations, SEG.checkpointed_activations), "{:.1f}", "less than without, times")
+v("fwd_passes_word", ACT.forward_equivalents, "words", "a step in forward passes")
+v("fwd_passes_ckpt_word", ACT.recompute_forward_equivalents, "words", "the same with checkpointing")
+v("recompute_pct", 100 * ACT.recompute_overhead, "{:.0f}", "extra step arithmetic, percent")
+v("ckpt_days", ckpt_run_d, "{:.0f}", "run with checkpointing, days")
+v("ckpt_extra_days", ckpt_run_d - run_d, "{:.0f}", "days checkpointing adds")
 
-def attention_io():
-    head("Slide 15: standard attention")
-    show("intensity d_head/2", f"{DHEAD / 2:.0f} FLOP/B")
-    show("ridge 989 / 3.35", f"{PEAK['H100']['FP16'] * 1e12 / H100_BW:.0f} FLOP/B")
+print("== Square-root checkpointing (Scenarios.Gpt2XlBatch32SegmentCheckpointed.checkpoint_memory_units)")
+L_ = GPT2.layers
+units_k = {k: SEG.checkpoint_memory_units(k) for k in range(1, L_ + 1)}
+k_best = min(units_k, key=units_k.get)
+v("sqrt_l", math.sqrt(L_), "{:.0f}", "square root of the layer count, about")
+v("k_one_units", units_k[1], "{:.0f}", "k = 1, layers")
+v("k_best", k_best, "{:.0f}", "best k")
+v("k_best_units", units_k[k_best], "{:.0f}", "best k, layers, about")
+v("k_seg_units", units_k[SEG.checkpoint_segments], "{:.0f}", "k = 8, layers")
+v("sqrt_saving_pct", 100 * (1 - units_k[k_best] / L_), "{:.0f}", "less activation memory, percent")
+v("chen_layers", TM.ChenResidualNetLayers, "{:,.0f}", "Chen et al.: layers")
+v("chen_before_gb", TM.ChenResidualNetMemoryBeforeGB, "{:.0f}", "Chen et al.: GB before")
+v("chen_after_gb", TM.ChenResidualNetMemoryAfterGB, "{:.0f}", "Chen et al.: GB after")
+v("chen_time_pct", 100 * TM.ChenResidualNetExtraTimeFraction, "{:.0f}", "Chen et al.: more time, percent")
 
+print("== Selective recomputation (Literature.TrainingMemory; Scenarios.Gpt2XlBatch32Activations)")
+v("k_tok_coef", ACT.per_token_bytes_coefficient, "{:.0f}", "34 of sbh(34 + 5as/h)")
+v("k_score_coef", ACT.score_bytes_coefficient, "{:.0f}", "5as/h for GPT-2 XL")
+v("k_score_pct", 100 * ACT.score_share, "{:.1f}", "scores' share, percent")
+k_none, k_full = TM.Korthikanti22BLayerNoRecomputeMs, TM.Korthikanti22BLayerFullRecomputeMs
+k_sel = TM.Korthikanti22BLayerSelectiveRecomputeMs
+v("k_none_ms", k_none, "{:.1f}", "Table 4, no recomputation, ms")
+v("k_full_ms", k_full, "{:.1f}", "Table 4, full recomputation, ms")
+v("k_sel_ms", k_sel, "{:.1f}", "Table 4, selective recomputation, ms")
+v("k_full_pct", 100 * (k_full / k_none - 1), "{:.0f}", "full recomputation, percent more")
+v("k_sel_pct", 100 * (k_sel / k_none - 1), "{:.0f}", "selective recomputation, percent more")
+v("k_model_b", TM.KorthikantiTableModelParamsB, "{:.0f}", "the timed model, billions of parameters")
+v("k_530b", TM.Korthikanti530BParamsB, "{:.0f}", "largest model, billions")
+v("k_gpus", TM.Korthikanti530BA100Gpus, "{:,.0f}", "A100s")
+v("k_mfu", 100 * TM.Korthikanti530BMfu, "{:.1f}", "MFU, percent")
+v("k_mfu_full", 100 * TM.Korthikanti530BMfuFullRecompute, "{:.1f}", "MFU with full recomputation, percent")
+v("k_mfu_gain_pct", 100 * (TM.Korthikanti530BMfu / TM.Korthikanti530BMfuFullRecompute - 1), "{:.0f}",
+  "faster, percent")
 
-def fa_figure1():
-    head("Slide 16: FlashAttention Figure 1 (A100)")
-    show("speedup (caption, input)", f"{FA_FIG1_SPEEDUP}x")
-    show("SRAM / HBM bandwidth, A100 (19 / 1.5 TB/s)", f"{FA_FIG1_BW[0] / FA_FIG1_BW[1]:.1f}x")
+print("== Hugging Face guide (Literature.TrainingMemory)")
+v("hf_slow_pct", 100 * TM.HuggingFaceCheckpointingSlowdownFraction, "{:.0f}", "checkpointing slowdown, percent")
+v("hf_batch", TM.HuggingFaceAccumulationExampleBatch, "{:.0f}", "example per-device batch")
+v("hf_steps", TM.HuggingFaceAccumulationExampleSteps, "{:.0f}", "example accumulation steps")
+v("hf_effective", TM.HuggingFaceAccumulationExampleBatch * TM.HuggingFaceAccumulationExampleSteps, "{:.0f}",
+  "example effective batch")
 
-
-def tiles():
-    head("Slide 17: tiles")
-    full = N_TILE_EX ** 2 * 4
-    tile = TILE ** 2 * 4
-    show("full matrix", f"{full / 1e6:.1f} MB")
-    show("tile", f"{tile / 1e3:.1f} KB")
-    show("tiles per side, total", f"{N_TILE_EX // TILE}, {(N_TILE_EX // TILE) ** 2:,}")
-    show("16 heads", f"{16 * full / 1e9:.2f} GB")
-
-
-def online_softmax():
-    head("Slide 18: online softmax toy")
-    x, v = [1, 3, 2, 5], [10, 20, 30, 40]
-    m = max(x)
-    ell = sum(math.exp(xi - m) for xi in x)
-    o = sum(math.exp(xi - m) * vi for xi, vi in zip(x, v))
-    m1 = max(x[:2])
-    l1 = sum(math.exp(xi - m1) for xi in x[:2])
-    o1 = sum(math.exp(xi - m1) * vi for xi, vi in zip(x[:2], v[:2]))
-    f = math.exp(m1 - m)
-    show("whole-row l", f"{ell:.3f}")
-    show("block 1 l", f"{l1:.3f}")
-    show("rescale factor e^(3-5)", f"{f:.3f}")
-    show("old sum rescaled", f"{l1 * f:.3f}")
-    show("e^-3", f"{math.exp(-3):.3f}")
-    show("block 2 l", f"{l1 * f + math.exp(2 - 5) + 1:.3f}")
-    show("whole-row O", f"{o:.2f}")
-    show("block 1 O", f"{o1:.2f}")
-    show("old O rescaled", f"{o1 * f:.2f}")
-    show("30e^-3", f"{30 * math.exp(-3):.2f}")
-    show("O/l", f"{o / ell:.1f}")
-
-
-def flash_store():
-    head("Slide 19: stored per head, 4,096 tokens, FP32")
-    n, d = N_TILE_EX, DHEAD
-    qkvo = 4 * n * d * 4
-    std = qkvo + 2 * n * n * 4
-    fa = qkvo + 2 * n * 4
-    show("standard (Q, K, V, O, S, P)", f"{std / 1e6:.1f} MB")
-    show("FlashAttention (Q, K, V, O, m, l)", f"{fa / 1e6:.1f} MB")
-    show("ratio", f"{std / fa:.1f}x")
-
-
-def fa_table():
-    head("Slide 20: FlashAttention table")
-    show("more FLOPs", f"{100 * (FA_GFLOP[1] / FA_GFLOP[0] - 1):.0f}%")
-    show("fewer HBM bytes", f"{FA_HBM_GB[0] / FA_HBM_GB[1]:.1f}x")
-    show("faster", f"{FA_MS[0] / FA_MS[1]:.1f}x")
-    step = static_gb() + flash_act_gb()
-    show("GPT-2 XL step with FlashAttention", f"{step:.1f} GB, {step - h100_gb():.1f} GB over")
-
-
-def sdpa():
-    head("Slide 21: SDPA profile (data/sdpa_profile.txt)")
-    txt = (HERE / "data" / "sdpa_profile.txt").read_text().splitlines()
-    tot = [float(l.split()[-1]) for l in txt if l.startswith("aten::scaled_dot_product_attention ")]
-    show("default vs math total ms", f"{tot[0]:.2f} vs {tot[1]:.2f}: {tot[1] / tot[0]:.1f}x")
-    show("one head-batch score matrix, FP32", f"{HEADS * SEQ * SEQ * 4 / 1e6:.1f} MB (25 x 1,024^2 x 4 B)")
-    show("output tensor", f"{HEADS * SEQ * DHEAD * 4 / 1e6:.1f} MB")
-
-
-def batch_fit():
-    head("Slide 23: batch fit")
-    show("activations after FlashAttention", f"{flash_act_gb():.1f} GB")
-    show("per sequence", f"{per_seq_gb():.3f} GB")
-    show("sequences that fit", f"{(h100_gb() - static_gb()) / per_seq_gb():.1f}")
-    for b in (16, 32):
-        show(f"batch {b}", f"{static_gb() + b * per_seq_gb():.1f} GB")
-
-
-def accumulate():
-    head("Slide 24: accumulation")
-    show("2 x 16", f"{static_gb() + 16 * per_seq_gb():.1f} GB")
-
-
-def checkpoint():
-    head("Slide 27: segment checkpointing")
-    show("one segment input", f"{BATCH * SEQ * HIDDEN * 2 / 1e6:.1f} MB")
-    show("eight inputs", f"{seg_inputs_gb():.2f} GB")
-    act = seg_inputs_gb() + LIVE_SEG_GB
-    show("activations", f"{act:.1f} GB, {flash_act_gb() / act:.1f}x less")
-    show("step", f"{static_gb() + act:.1f} GB")
-    show("arithmetic factor (fwd+bwd = 3 fwd, +1)", f"{4 / 3:.3f}")
-    d = run_days(PEAK["H100"]["FP16"])
-    show("run with checkpointing", f"{d * 4 / 3:.1f} days ({d * 4 / 3 - d:.1f} more)")
-
-
-def sqrt_ckpt():
-    head("Slide 28: sqrt(L)")
-    units = {k: k + LAYERS / k for k in range(1, LAYERS + 1)}
-    kmin = min(units, key=units.get)
-    show("sqrt(48)", f"{math.sqrt(LAYERS):.2f}")
-    show("k=1, k=48", f"{units[1]:.0f}, {units[48]:.0f}")
-    show("minimum", f"k = {kmin}: {units[kmin]:.2f}; k = 8: {units[8]:.0f}")
-    show("less than 48 units", f"{100 * (1 - units[kmin] / LAYERS):.0f}%")
-    show("Chen: 48 -> 7 GB", f"{CHEN_GB[0] / CHEN_GB[1]:.1f}x less")
-
-
-def korthikanti():
-    head("Slide 29: selective recomputation (Korthikanti et al.)")
-    c = k_score_coeff()
-    show("5as/h for GPT-2 XL", f"{c:.0f}")
-    full = k_bytes_per_layer(34 + c)
-    show("per layer, everything stored", f"{full / GB:.2f} GB; x48 = {LAYERS * full / GB:.1f} GB")
-    show("score share 5as/h / (34 + 5as/h)", f"{100 * c / (34 + c):.1f}%")
-    show("selective: 34 sbh per layer x48", f"{LAYERS * k_bytes_per_layer(34) / GB:.1f} GB")
-    show("full recompute: 2 sbh per layer x48", f"{LAYERS * k_bytes_per_layer(2) / GB:.2f} GB")
-    show("5as equals the scores: 5 a s^2 b", f"{scores_layer_bytes() / GB:.3f} GB vs {k_bytes_per_layer(c) / GB:.3f} GB")
-    base = K_TABLE4["No recompute"]
-    for name, ms in K_TABLE4.items():
-        show(f"Table 4 {name}", f"{ms} ms, +{100 * (ms / base - 1):.0f}%")
-    show("530B MFU gain", f"{K_MFU[0]} -> {K_MFU[1]}: {100 * (K_MFU[1] / K_MFU[0] - 1):.0f}% faster")
-
-
-def vote():
-    head("Slide 30: vote")
-    fp32 = P * sum(FP32_BYTES) / GB + fp32_act_gb()
-    final = static_gb() + 16 * per_seq_gb()
-    show("598 -> 66.8", f"{fp32 / final:.1f}x smaller")
-
-
-def hf_flags():
-    head("Slide 31: Hugging Face arguments")
-    show("checkpointing, our estimate vs docs", f"+{100 * (4 / 3 - 1):.0f}% arithmetic vs ~{HF_CKPT_SLOWER}% slower (docs)")
-    show("docs example effective batch", f"{4 * 16}")
-
-
-def alexnet_back():
-    head("Slide 34: back to AlexNet")
-    fp32 = P * sum(FP32_BYTES) / GB + fp32_act_gb()
-    show("FP32 step over one GTX 580", f"{fp32 / GTX580_GB:.0f}x")
-    d = run_days(PEAK["H100"]["FP16"])
-    show("checkpointing extra days", f"{d * 4 / 3 - d:.1f}")
-    show("busy", f"{BUSY}%")
-
+print("== The fitted run's input (Scenarios.Gpt2XlSingleCoreTokenizerFeed)")
+v("busy_pct", 100 * round(FEED.busy_fraction, 2), "{:.0f}", "accelerator busy with one tokenizer core, percent")
 
 if __name__ == "__main__":
-    for fn in (hook, predict, recall, ladder, formats, swamp, loss_scale, diagnose_trace,
-               days, layer_bytes, attention_io, fa_figure1, tiles, online_softmax,
-               flash_store, fa_table, sdpa, batch_fit, accumulate, checkpoint, sqrt_ckpt,
-               korthikanti, vote, hf_flags, alexnet_back):
-        fn()
+    write(__file__)

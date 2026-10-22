@@ -2,15 +2,16 @@
 """Figures for Lecture 9 (Spatial Memory), Volume IV.
 
 Plots use the shared slideplot helper; diagrams are written as SVG with text
-kept as text. Every number drawn comes from calcs.py (derived values) or from
-the sourced inputs it holds. Each figure is drawn at the size of its slot:
-full-width plots 5.8 x 2.4 in, column figures about 5.4 x 3.6 in, full-width
-SVG diagrams on a 900 x 500 canvas with labels of 20 units or more.
+kept as text. Every number drawn comes from calcs.py (imported as K), which
+reads MLSysIM, and every label prints val(key), the string the slide prints.
+Each figure is drawn at the size of its slot: full-width plots 5.8 x 2.4 in,
+column figures about 5.4 x 3.6 in, full-width SVG diagrams on a 900 x 500
+canvas with labels of 20 units or more.
 
 Run from this folder: python3 make_figs.py   (then make deck V=4 D=09_memory)
 """
-import math
-import statistics
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -22,7 +23,9 @@ import numpy as np  # noqa: E402
 import slideplot as sp  # noqa: E402
 from slideplot import C, plt  # noqa: E402
 
-import calcs  # noqa: E402
+with contextlib.redirect_stdout(io.StringIO()):
+    import calcs as K  # noqa: E402  every derived value comes from calcs.py
+from deckvals import val, num  # noqa: E402
 
 COL = (5.4, 3.6)
 FONT = "Helvetica, Arial, sans-serif"
@@ -62,24 +65,24 @@ def t(x, y, s, size=22, fill=SLATE, anchor="middle", weight="normal", halo=False
 # Segment 1: estimation
 # ---------------------------------------------------------------------------
 def kalman():
-    k = calcs.kalman()
-    m = calcs.misdated(k)
-    cols = [("Prior", 0, k["sig_pred"] * 0 + calcs.SIG0, "neutral"),
-            ("Predict", 0, k["sig_pred"], "neutral"),
-            ("+ lidar", 0, k["sig_l"], "memory"),
-            ("+ stereo", 0, k["sig_s"], "data"),
-            ("Misdated\nstereo", m["shift"], k["sig_s"], "danger")]
-    meas = {2: calcs.SIG_LIDAR, 3: calcs.SIG_STEREO}
+    f = K.FUSED  # geometry at full precision; labels print the slide's strings
+    shift, sig_s = K.m(f.misdated_shift, "mm"), K.m(f.fused_sigma, "mm")
+    cols = [("Prior", 0, K.m(K.FUSION.prior_sigma, "mm"), "neutral", val("sig_prior_fig")),
+            ("Predict", 0, K.m(f.predicted_sigma, "mm"), "neutral", val("sig_pred")),
+            ("+ lidar", 0, K.m(f.first_sigma, "mm"), "memory", val("sig_l")),
+            ("+ stereo", 0, sig_s, "data", val("sig_s")),
+            ("Misdated\nstereo", shift, sig_s, "danger", val("sig_s"))]
+    meas = {2: K.m(K.RM.lidar.range_precision_max, "mm"), 3: K.m(f.second_sensor_sigma, "mm")}
     for step in range(1, 5):
-        n = {1: 2, 2: 3, 3: 4, 4: 5}[step]
+        n = step + 1  # columns shown at this build step
         fig, ax = plt.subplots(figsize=COL)
-        for i, (lab, mu, s, ck) in enumerate(cols):
+        for i, (lab, mu, s, ck, s_lab) in enumerate(cols):
             vis = i < n
             a = 1.0 if vis else 0.0
             ax.plot([i, i], [mu - s, mu + s], color=C[ck], lw=9, alpha=a,
                     solid_capstyle="butt")
             ax.plot([i - 0.22, i + 0.22], [mu, mu], color=C[ck], lw=2.5, alpha=a)
-            ax.text(i, mu + s + 3, f"±{s:.1f}", ha="center", va="bottom",
+            ax.text(i, mu + s + 3, f"±{s_lab}", ha="center", va="bottom",
                     fontsize=15, color=C[ck], fontweight="bold", alpha=a)
             if i in meas:
                 ax.plot([i + 0.3, i + 0.3], [-meas[i], meas[i]], color=C["neutral_l"],
@@ -88,8 +91,8 @@ def kalman():
         ax.text(4.45, -2, "true range", fontsize=13, color=C["text"], ha="right",
                 va="top")
         if step == 4:
-            ax.annotate(f"{m['shift']:.1f} mm off,\nsame ±{k['sig_s']:.1f}",
-                        (4, m["shift"]), xytext=(2.85, 52), fontsize=14,
+            ax.annotate(f"{val('shift')} mm off,\nsame ±{val('sig_s')}",
+                        (4, shift), xytext=(2.85, 52), fontsize=14,
                         color=C["danger"], fontweight="bold", ha="center",
                         arrowprops=dict(arrowstyle="->", color=C["danger"]))
         ax.set_xticks(range(5))
@@ -104,13 +107,13 @@ def kalman():
 
 
 def gates():
-    g = calcs.gates(calcs.kalman())
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    rows = [("Gate 3.84 (95%)", g["p95"]), ("Gate 6.63 (99%)", g["p99"])]
-    for i, (lab, v) in enumerate(rows):
+    rows = [(f"Gate {val('gate95')} ({val('gate95_pct')}%)", "p95", K.cons.detection[0]),
+            (f"Gate {val('gate99')} ({val('gate99_pct')}%)", "p99", K.cons.detection[1])]
+    for i, (lab, key, v) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=C["memory"], height=0.6)
-        ax.text(v + 0.015, y, f"{v:.2f} caught", va="center", fontsize=13,
+        ax.text(v + 0.015, y, f"{val(key)} caught", va="center", fontsize=13,
                 color=C["memory"], fontweight="bold")
         ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=13, color=C["text"], fontweight="bold")
@@ -125,35 +128,37 @@ def gates():
 
 
 def imu():
-    v = calcs.imu()
-    rows = [("Accel. bias", v["acc_bias"], "danger"),
-            ("Gyro bias at 1.1 m", v["lateral"], "compute"),
-            ("Accel. noise", v["acc_noise"], "neutral")]
+    rows = [("Accel. bias", "acc_bias_mm", "danger", K.imu.position_bias),
+            (f"Gyro bias at {val('d_clear_fig')} m", "imu_lateral", "compute", K.imu.lateral_bias),
+            ("Accel. noise", "acc_noise_mm", "neutral", K.imu.position_noise)]
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    for i, (lab, val, ck) in enumerate(rows):
+    for i, (lab, key, ck, q) in enumerate(rows):
         y = 2 - i
-        ax.barh(y, val, color=C[ck], height=0.6)
-        if val > 5:
-            ax.text(val / 1.12, y, f"{val:.1f} mm", va="center", ha="right", fontsize=13,
+        v = K.m(q, "mm")
+        ax.barh(y, v, color=C[ck], height=0.6)
+        if v > 5:
+            ax.text(v / 1.12, y, f"{val(key)} mm", va="center", ha="right", fontsize=13,
                     color="white", fontweight="bold")
         else:
-            ax.text(val * 1.2, y, f"{val:.1f} mm", va="center", fontsize=13,
+            ax.text(v * 1.2, y, f"{val(key)} mm", va="center", fontsize=13,
                     color=C[ck], fontweight="bold")
         ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=13, color=C["text"], fontweight="bold")
-    ax.axvline(50, color=C["danger"], ls="--", lw=1.5)
-    ax.text(55, 2.45, "50 mm bound", color=C["danger"], fontsize=11, fontweight="bold")
+    bound = num("delta_loc")
+    ax.axvline(bound, color=C["danger"], ls="--", lw=1.5)
+    ax.text(bound * 1.1, 2.45, f"{val('delta_loc')} mm bound", color=C["danger"], fontsize=11, fontweight="bold")
     ax.set_xscale("log")
     ax.set_xlim(0.3, 2000)
     ax.set_ylim(-0.5, 2.75)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Position error after 1 s without a fix (mm, log scale)")
+    ax.set_xlabel(f"Position error after {val('t_coast')} s without a fix (mm, log scale)")
     sp.save(fig, out("imu.svg"))
 
 
 def sort_timeline():
     # Six camera frames; the person is seen in frames 1 to 4, hidden in 5 and 6.
+    hits = int(num("min_hits"))
     x0, dx, y, bh = 250, 105, [62, 132, 202], 52
     b = []
     for f in range(6):
@@ -167,7 +172,7 @@ def sort_timeline():
         seen = f < 4
         b.append(f'<rect x="{xx}" y="{y[0]}" width="{ww}" height="{bh}" rx="5" '
                  f'fill="{PETROL if seen else "white"}" stroke="{PETROL if seen else "#CBD5E1"}" stroke-width="3"/>')
-        out_ok = f in (2, 3)
+        out_ok = seen and f >= hits - 1  # output once the hit streak reaches min_hits
         dash = "" if out_ok else ' stroke-dasharray="7,5"'
         b.append(f'<rect x="{xx}" y="{y[1]}" width="{ww}" height="{bh}" rx="5" '
                  f'fill="{BLUE if out_ok else "white"}" stroke="{BLUE if out_ok else "#CBD5E1"}" stroke-width="3"{dash}/>')
@@ -175,9 +180,10 @@ def sort_timeline():
     b.append(t(x0 + 2 * dx, y[2] + 37, "occupied", 28, "white", weight="bold"))
     b.append(f'<rect x="{x0 + 4 * dx + 6}" y="{y[2]}" width="{2 * dx - 12}" height="{bh}" rx="5" fill="url(#hatch)" stroke="#64748B" stroke-width="3"/>')
     b.append(t(x0 + 5 * dx, y[2] + 37, "unknown", 28, SLATE, weight="bold"))
-    b.append(t(x0 + dx, 300, "min_hits = 3:", 26, BLUE, weight="bold"))
-    b.append(t(x0 + dx, 330, "frames 1 and 2 held back", 26, BLUE))
-    b.append(t(x0 + 4.6 * dx, 300, "max_age = 1:", 26, BLUE, weight="bold"))
+    held = " and ".join(str(f + 1) for f in range(hits - 1))
+    b.append(t(x0 + dx, 300, f"min_hits = {val('min_hits')}:", 26, BLUE, weight="bold"))
+    b.append(t(x0 + dx, 330, f"frames {held} held back", 26, BLUE))
+    b.append(t(x0 + 4.6 * dx, 300, f"max_age = {val('max_age')}:", 26, BLUE, weight="bold"))
     b.append(t(x0 + 4.6 * dx, 330, "hidden track not output", 26, BLUE))
     svg("sort_timeline.svg", "\n".join(b), w=920, h=345)
 
@@ -205,62 +211,65 @@ def epochs():
 
 
 def lever():
-    v = calcs.lever()
-    one = calcs.latch()["one"]  # common-epoch error over one frame (mm)
+    st = K.stale
+    e0, drift, swing, same = (K.m(q, "mm") for q in (K.LATCH.initial_error, st.drift_term, st.lever_term, st.same_epoch_error))
+    r_tol = num("r_tol")
     fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    rows = [("Stale edge\n+ current wrist", [calcs.E0_SLOT, v["e_tr"], v["e_rot"]]),
-            ("Same-epoch\nchain", [calcs.E0_SLOT, v["e_tr"], one - calcs.E0_SLOT - v["e_tr"]])]
+    rows = [("Stale edge\n+ current wrist", [e0, drift, swing], "e_total"),
+            ("Same-epoch\nchain", [e0, drift, same - e0 - drift], "e_same")]
     cols = [C["neutral"], C["memory"], C["compute"]]
-    for i, (lab, parts) in enumerate(rows):
+    for i, (lab, parts, key) in enumerate(rows):
         yy = 1 - i
         left = 0
         for j, p in enumerate(parts):
             ax.barh(yy, p, left=left, color=cols[j], height=0.55)
             left += p
-        ax.text(left + 0.02, yy, f"{left:.2f} mm", va="center", fontsize=13,
-                fontweight="bold", color=C["danger"] if left > calcs.R_TOL else C["data"])
+        ax.text(left + 0.02, yy, f"{val(key)} mm", va="center", fontsize=13,
+                fontweight="bold", color=C["danger"] if left > r_tol else C["data"])
         ax.text(-0.02, yy, lab, ha="right", va="center", fontsize=12,
                 color=C["text"], fontweight="bold")
-    key = [(0.0, f"initial {calcs.E0_SLOT:.2f}", cols[0]),
-           (0.30, f"drift {v['e_tr']:.2f}", cols[1]),
-           (0.58, f"lever arm {v['e_rot']:.2f}", cols[2])]
+    key = [(0.0, f"initial {val('e0_slot_fig')}", cols[0]),
+           (0.30, f"drift {val('e_drift')}", cols[1]),
+           (0.58, f"lever arm {val('e_lever')}", cols[2])]
     for x, s, c in key:
         ax.text(x, 1.45, s, fontsize=11.5, color=c, fontweight="bold", ha="left")
-    ax.axvline(calcs.R_TOL, color=C["danger"], ls="--", lw=1.5)
-    ax.text(calcs.R_TOL + 0.02, -0.5, "1 mm slot\ntolerance", color=C["danger"],
+    ax.axvline(r_tol, color=C["danger"], ls="--", lw=1.5)
+    ax.text(r_tol + 0.02, -0.5, f"{val('r_tol')} mm slot\ntolerance", color=C["danger"],
             fontsize=11, ha="left", va="center", fontweight="bold")
     ax.set_xlim(0, 1.35)
     ax.set_ylim(-0.75, 1.7)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Finger error after one 16.7 ms frame (mm)")
+    ax.set_xlabel(f"Finger error after one {val('t_frame')} ms frame (mm)")
     sp.save(fig, out("lever.svg"))
 
 
 def umbmark():
-    u = calcs.umbmark()
+    u = K.umb
+    bound, aisle = num("delta_loc"), num("aisle_m")
     x = np.linspace(0, 60, 300)
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.5))
-        ax.plot(x, u["r_unc"] * x * 1000, color=C["danger"], lw=2.5)
-        ax.text(12.5, 225, f"uncalibrated: {u['r_unc'] * 100:.1f}% of distance",
+        ax.plot(x, u.rate_uncalibrated * x * 1000, color=C["danger"], lw=2.5)
+        ax.text(12.5, 225, f"uncalibrated: {val('r_unc_pct')}% of distance",
                 color=C["danger"], fontsize=12, fontweight="bold", va="center")
         a = 1.0 if step == 2 else 0.0
-        ax.plot(x, u["r_cal"] * x * 1000, color=C["data"], lw=2.5, alpha=a)
-        ax.text(44, 105, f"calibrated:\n{u['r_cal'] * 100:.2f}%", color=C["data"],
+        ax.plot(x, u.rate_calibrated * x * 1000, color=C["data"], lw=2.5, alpha=a)
+        ax.text(44, 105, f"calibrated:\n{val('r_cal_pct')}%", color=C["data"],
                 fontsize=12, fontweight="bold", alpha=a)
-        ax.axhline(50, color=C["neutral"], ls="--", lw=1.5)
-        ax.text(14, 56, "50 mm bound", ha="left", va="bottom", fontsize=11,
+        ax.axhline(bound, color=C["neutral"], ls="--", lw=1.5)
+        ax.text(14, bound + 6, f"{val('delta_loc')} mm bound", ha="left", va="bottom", fontsize=11,
                 color=C["neutral"])
-        ax.axvline(calcs.AISLE_M, color=C["neutral"], ls=":", lw=1.5)
-        ax.text(calcs.AISLE_M - 0.7, 170, "one aisle, 30 m", fontsize=11,
+        ax.axvline(aisle, color=C["neutral"], ls=":", lw=1.5)
+        ax.text(aisle - 0.7, 170, f"one aisle, {val('aisle_m')} m", fontsize=11,
                 color=C["neutral"], ha="right")
-        ax.plot([u["d_unc"]], [50], "o", color=C["danger"], ms=8)
-        ax.annotate(f"{u['d_unc']:.1f} m", (u["d_unc"], 50), xytext=(8, 92),
+        d_unc, d_cal = K.m(u.distance_uncalibrated, "m"), K.m(u.distance_calibrated, "m")
+        ax.plot([d_unc], [bound], "o", color=C["danger"], ms=8)
+        ax.annotate(f"{val('d_unc')} m", (d_unc, bound), xytext=(8, 92),
                     fontsize=12, color=C["danger"], fontweight="bold",
                     arrowprops=dict(arrowstyle="->", color=C["danger"]))
-        ax.plot([u["d_cal"]], [50], "o", color=C["data"], ms=8, alpha=a)
-        ax.annotate(f"{u['d_cal']:.1f} m", (u["d_cal"], 50), xytext=(46, 12),
+        ax.plot([d_cal], [bound], "o", color=C["data"], ms=8, alpha=a)
+        ax.annotate(f"{val('d_cal')} m", (d_cal, bound), xytext=(46, 12),
                     fontsize=12, color=C["data"], fontweight="bold", alpha=a,
                     arrowprops=dict(arrowstyle="->", color=C["data"], alpha=a))
         ax.set_xlim(0, 60)
@@ -271,8 +280,8 @@ def umbmark():
 
 
 def kitti():
-    rows = calcs.kitti()
-    dl = calcs.DELTA_LOC
+    rows = K.KITTI.entries
+    dl = K.m(K.AISLE.delta_loc, "m")
     groups = [("stereo", "Stereo", C["memory"]), ("laser", "Lidar", C["data"]),
               ("other", "Other", C["neutral"])]
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
@@ -282,13 +291,13 @@ def kitti():
                       if (r["sensor_group"] if r["sensor_group"] in ("stereo", "laser") else "other") == key])
         ax.scatter(v, 2 - i + rng.uniform(-0.2, 0.2, len(v)), s=22, color=col,
                    alpha=0.85, zorder=3)
-    thr = 100 * dl / calcs.AISLE_M
+    thr = 100 * dl / num("aisle_m")
     ax.axvspan(thr, 40, color=C["danger_l"], alpha=0.6, lw=0, zorder=1)
     ax.axvline(thr, color=C["danger"], lw=1.5, ls="--")
-    ax.text(38, -0.72, "red: bound spent within one 30 m aisle", fontsize=12,
+    ax.text(38, -0.72, f"red: bound spent within one {val('aisle_m')} m aisle", fontsize=12,
             color=C["danger"], fontweight="bold", ha="right")
-    best = min(r["translation_err_pct"] for r in rows)
-    ax.annotate(f"lowest {best:.2f}%", (best, 2), xytext=(0.19, 2.45), fontsize=13,
+    best = K.kit.best_pct
+    ax.annotate(f"lowest {val('kitti_best')}%", (best, 2), xytext=(0.19, 2.45), fontsize=13,
                 color=C["text"], arrowprops=dict(arrowstyle="->", color=C["text"]))
     ax.set_xscale("log")
     ax.set_xlim(0.1, 40)
@@ -302,7 +311,7 @@ def kitti():
                                                lambda d: 100 * dl / np.maximum(d, 1e-9)))
     top.set_xticks([30, 10, 3, 1, 0.3])
     top.set_xticklabels(["30", "10", "3", "1", "0.3"])
-    top.set_xlabel("Meters until 50 mm is spent")
+    top.set_xlabel(f"Meters until {val('delta_loc')} mm is spent")
     sp.save(fig, out("kitti.svg"))
 
 
@@ -310,46 +319,51 @@ def kitti():
 # Segment 3: maps
 # ---------------------------------------------------------------------------
 def reads():
-    b = calcs.budget()
-    r = calcs.reads()
+    pitches = list(K.q.rows)
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     names = [("occ", "occupancy", C["memory"]), ("oct", "octree", C["network"]),
              ("esdf", "ESDF", C["data"])]
     w = 0.27
     for j, (key, lab, col) in enumerate(names):
         xs = [i + (j - 1) * w for i in range(3)]
-        vals = [r[cm][key] for cm in calcs.PITCHES_CM]
+        keys = [f"{key}{cm}" if key != "esdf" else "trilinear" for cm in pitches]
+        field = {"occ": "occupancy_reads", "oct": "octree_reads", "esdf": "esdf_reads"}[key]
+        vals = [getattr(K.q.rows[cm], field) for cm in pitches]
         ax.bar(xs, vals, width=w * 0.92, color=col)
-        for xx, v in zip(xs, vals):
-            ax.text(xx, v * 1.3, f"{v:,.0f}", ha="center", fontsize=9.5, color=col,
+        for xx, v, k in zip(xs, vals, keys):
+            ax.text(xx, v * 1.3, val(k), ha="center", fontsize=9.5, color=col,
                     fontweight="bold")
         ax.text(2.97, 2e6 / 6**j, lab, ha="right", va="top", fontsize=11.5,
                 color=col, fontweight="bold")
-    ax.axhline(b["reads"], color=C["danger"], ls="--", lw=1.5)
-    ax.text(2.97, b["reads"] * 1.2, f"budget\n{b['reads']:.0f} reads", color=C["danger"],
+    budget = num("reads")
+    ax.axhline(budget, color=C["danger"], ls="--", lw=1.5)
+    ax.text(2.97, budget * 1.2, f"budget\n{val('reads')} reads", color=C["danger"],
             fontsize=11, fontweight="bold", ha="right", va="bottom")
     ax.set_yscale("log")
     ax.set_ylim(2.5, 3e6)
     ax.set_xlim(-0.5, 3.0)
     ax.set_xticks(range(3))
-    ax.set_xticklabels([f"{cm} cm voxels" for cm in calcs.PITCHES_CM], fontsize=12)
+    ax.set_xticklabels([f"{val(f'pitch{cm}')} cm voxels" for cm in pitches], fontsize=12)
     ax.set_ylabel("Reads per hull query")
     sp.save(fig, out("reads.svg"))
 
 
 def nvblox():
     fig, ax = plt.subplots(figsize=(5.0, 3.3))
-    items = list(calcs.ESDF_MS.items())
-    for i, (k, v) in enumerate(items):
+    items = [("nvblox (GPU)", "esdf_nvblox"), ("Fiesta (CPU)", "esdf_fiesta"),
+             ("voxblox (CPU)", "esdf_voxblox")]
+    for i, (k, key) in enumerate(items):
         y = len(items) - 1 - i
+        v = num(key)
         col = C["data"] if "nvblox" in k else C["neutral"]
         ax.barh(y, v, color=col, height=0.42)
-        ax.text(v * 1.15, y, f"{v:g} ms", va="center", fontsize=16, color=col,
+        ax.text(v * 1.15, y, f"{val(key)} ms", va="center", fontsize=16, color=col,
                 fontweight="bold")
         ax.text(1.2, y + 0.32, k, fontsize=15, color=C["text"], fontweight="bold",
                 va="bottom")
-    ax.axvline(1.0, color=C["danger"], ls="--", lw=2)
-    ax.text(0.95, 2.95, "1 ms tick", fontsize=15, color=C["danger"], fontweight="bold",
+    tick = num("t_tick_ms")
+    ax.axvline(tick, color=C["danger"], ls="--", lw=2)
+    ax.text(tick * 0.95, 2.95, f"{val('t_tick_ms')} ms tick", fontsize=15, color=C["danger"], fontweight="bold",
             ha="right")
     ax.set_xscale("log")
     ax.set_xlim(0.25, 400)
@@ -362,11 +376,12 @@ def nvblox():
 
 
 def snapshot():
-    r = calcs.reads()
-    rows = [(f"{cm} cm pitch", r[cm]["esdf_kb"], "danger" if r[cm]["esdf_kb"] > 1050 else "data",
-             f"{r[cm]['esdf_kb']:,.0f} kB") for cm in calcs.PITCHES_CM]
+    sram_kb = K.m(K.RM.permission_mcu.memory.sram_capacity, "kB")
+    rows = [(f"{val(f'pitch{cm}')} cm pitch", K.m(r.esdf_bytes, "kB"),
+             "danger" if K.m(r.esdf_bytes, "kB") > sram_kb else "data",
+             f"{val(f'esdf{cm}_kb')} kB") for cm, r in K.q.rows.items()]
     sp.hbars(out("snapshot.svg"), rows, "kB", log=True, size=(5.8, 1.8),
-             vlines=[(calcs.SRAM_CAP_MB * 1000, "1.05 MB SRAM", "danger")],
+             vlines=[(num("sram_mb") * 1000, f"{val('sram_mb')} MB SRAM", "danger")],
              xlabel="ESDF snapshot of the stopping corridor (kB, log)")
 
 
@@ -419,10 +434,10 @@ def rack_top():
     cy = 190
     hull_x, hull_w, hull_h = 40, 130, 105
     front = hull_x + hull_w
-    hull_y = cy + calcs.SIDE_CLEAR * s
-    rack_end = front + calcs.D_CLEAR * s
+    hull_y = cy + num("side_clearance_m") * s
+    rack_end = front + num("d_clear") * s
     W, H = 720, 500
-    r = (calcs.D_CLEAR - calcs.DELTA_LOC - calcs.DELTA_MARGIN) * s
+    r = num("depth_ahead_m") * s
     low = hull_y + hull_h + 45
     b.append(f'<rect x="{rack_end}" y="0" width="{W - rack_end}" height="{cy}" fill="url(#hatch)"/>')
     b.append(f'<circle cx="{rack_end}" cy="{cy}" r="{r}" fill="{RED}" fill-opacity="0.05" stroke="{RED}" stroke-width="3" stroke-dasharray="9,6"/>')
@@ -437,33 +452,33 @@ def rack_top():
     b.append(t(hull_x + hull_w / 2, hull_y + hull_h / 2 + 10, "robot", 30, SLATE, weight="bold"))
     yy = hull_y + hull_h / 2
     b.append(f'<line x1="{front}" y1="{yy + 18}" x2="{rack_end}" y2="{yy + 18}" stroke="{NAVY}" stroke-width="4" marker-start="url(#arr)" marker-end="url(#arr)"/>')
-    b.append(t((front + rack_end) / 2, yy - 2, "ahead: 1.10 m", 30, NAVY, weight="bold", halo=True))
+    b.append(t((front + rack_end) / 2, yy - 2, f"ahead: {val('d_clear')} m", 30, NAVY, weight="bold", halo=True))
     b.append(f'<line x1="{hull_x + 25}" y1="{hull_y}" x2="{hull_x + 25}" y2="{cy}" stroke="{RED}" stroke-width="5"/>')
-    b.append(t(hull_x + 36, cy + 31, "abreast: 150 mm", 28, RED, "start", "bold", halo=True))
-    b.append(t(10, H - 14, "Dashed: a hidden walker's reach after 594 ms", 28, RED, "start", "bold"))
+    b.append(t(hull_x + 36, cy + 31, f"abreast: {val('side_clearance')} mm", 28, RED, "start", "bold", halo=True))
+    b.append(t(10, H - 14, f"Dashed: a hidden walker's reach after {val('t_ahead_whole')} ms", 28, RED, "start", "bold"))
     svg("rack_top.svg", "\n".join(b), w=W, h=H)
 
 
 def erosion():
-    e = calcs.erosion()
+    t_ah, t_age = num("t_ahead"), num("t_age")
     tt = np.linspace(0, 700, 300)
-    d0 = (calcs.D_CLEAR - calcs.DELTA_LOC - calcs.DELTA_MARGIN) * 1000
+    d0 = num("depth_ahead_mm")
     for step in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.5))
-        y = np.clip(d0 - calcs.V_WALK * tt, 0, None)
+        y = np.clip(d0 - num("v_walk") * tt, 0, None)  # m/s is mm per ms
         ax.plot(tt, y, color=C["memory"], lw=3)
-        ax.plot([e["t_ah"]], [0], "o", color=C["danger"], ms=9, zorder=5)
-        ax.annotate(f"ahead: {e['t_ah']:.2f} ms", (e["t_ah"], 0), xytext=(470, 330),
+        ax.plot([t_ah], [0], "o", color=C["danger"], ms=9, zorder=5)
+        ax.annotate(f"ahead: {val('t_ahead')} ms", (t_ah, 0), xytext=(470, 330),
                     fontsize=12, color=C["memory"], fontweight="bold",
                     arrowprops=dict(arrowstyle="->", color=C["memory"]))
         a2 = 1.0 if step >= 2 else 0.0
-        ax.axvspan(0, calcs.T_AGE_MS, color=C["neutral_l"], alpha=0.8 * a2, lw=0)
-        ax.text(calcs.T_AGE_MS + 8, 300, f"frame age {calcs.T_AGE_MS} ms",
+        ax.axvspan(0, t_age, color=C["neutral_l"], alpha=0.8 * a2, lw=0)
+        ax.text(t_age + 8, 300, f"frame age {val('t_age')} ms",
                 fontsize=11, color=C["neutral"], alpha=a2, va="center")
         a3 = 1.0 if step >= 3 else 0.0
         ax.plot([0, 700], [0, 0], color=C["danger"], lw=3, ls="--", alpha=a3)
-        ax.plot([0], [0], "o", color=C["danger"], ms=9, alpha=a3, zorder=6)
-        ax.text(60, 70, "abreast of the rack end: 0 ms", fontsize=12,
+        ax.plot([0], [num("t_abreast")], "o", color=C["danger"], ms=9, alpha=a3, zorder=6)
+        ax.text(60, 70, f"abreast of the rack end: {val('t_abreast')} ms", fontsize=12,
                 color=C["danger"], fontweight="bold", alpha=a3)
         ax.set_xlim(-10, 700)
         ax.set_ylim(-40, 1000)
@@ -473,24 +488,26 @@ def erosion():
 
 
 def latch():
-    v = calcs.latch()
+    lat = K.lat
+    t_lin, e_at, r_tol = num("t_lin"), num("e_at_lin"), num("r_tol")
     tt = np.linspace(0, 0.1, 300)
+    e0, v0, a_half = num("e0_slot"), num("v_drift"), K.m(lat.quadratic_coefficient, "mm/s**2")
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=COL)
-        e = calcs.E0_SLOT + calcs.V_DRIFT * tt + calcs.A_DIST / 2 * tt**2
-        lin = calcs.E0_SLOT + calcs.V_DRIFT * tt
+        e = e0 + v0 * tt + a_half * tt**2
+        lin = e0 + v0 * tt
         ax.plot(tt * 1000, e, color=C["danger"], lw=3)
-        ax.axhline(calcs.R_TOL, color=C["text"], ls="--", lw=1.5)
-        ax.text(2, calcs.R_TOL + 0.03, "slot tolerance 1 mm", fontsize=14, color=C["text"])
-        ax.axvspan(v["t"], 100, color=C["danger_l"], alpha=0.6, lw=0)
-        ax.text(v["t"] - 1, 0.25, f"{v['t']:.0f} ms", fontsize=16, color=C["danger"],
+        ax.axhline(r_tol, color=C["text"], ls="--", lw=1.5)
+        ax.text(2, r_tol + 0.03, f"slot tolerance {val('r_tol')} mm", fontsize=14, color=C["text"])
+        ax.axvspan(K.m(lat.horizon, "ms"), 100, color=C["danger_l"], alpha=0.6, lw=0)
+        ax.text(K.m(lat.horizon, "ms") - 1, 0.25, f"{val('t_latch')} ms", fontsize=16, color=C["danger"],
                 fontweight="bold", ha="right")
-        ax.text(5, 0.55, "bounded error,\nwith 50 mm/s²", fontsize=14, color=C["danger"])
+        ax.text(5, 0.55, f"bounded error,\nwith {val('a_dist')} mm/s²", fontsize=14, color=C["danger"])
         a = 1.0 if step == 2 else 0.0
         ax.plot(tt * 1000, lin, color=C["neutral"], lw=2.5, ls="--", alpha=a)
-        ax.plot([v["t_lin"]], [v["e_at"]], "o", color=C["danger"], ms=10, alpha=a)
-        ax.annotate(f"{v['t_lin']:.0f} ms: error {v['e_at']:.2f} mm",
-                    (v["t_lin"], v["e_at"]), xytext=(14, 1.32), fontsize=14,
+        ax.plot([t_lin], [e_at], "o", color=C["danger"], ms=10, alpha=a)
+        ax.annotate(f"{val('t_lin')} ms: error {val('e_at_lin')} mm",
+                    (t_lin, e_at), xytext=(14, 1.32), fontsize=14,
                     color=C["text"], fontweight="bold", alpha=a,
                     arrowprops=dict(arrowstyle="->", color=C["text"], alpha=a))
         ax.text(80, 0.72, "constant\nvelocity", fontsize=14, color=C["neutral"], alpha=a)
@@ -503,13 +520,10 @@ def latch():
 
 
 def horizons():
-    lat = calcs.latch()
-    ero = calcs.erosion()
-    cw = (calcs.TOL_COWORKER - calcs.E0_COWORKER) / calcs.V_WALK
-    rows = [("Free space abreast", 0.0, "danger", "0 ms"),
-            ("Latch-slot finger", lat["t"], "compute", f"{lat['t']:.0f} ms"),
-            ("Coworker by the arm", cw, "network", f"{cw:.0f} ms"),
-            ("Free space ahead", ero["t_ah"], "memory", f"{ero['t_ah']:.2f} ms")]
+    rows = [("Free space abreast", num("t_abreast"), "danger", f"{val('t_abreast')} ms"),
+            ("Latch-slot finger", K.m(K.lat.horizon, "ms"), "compute", f"{val('t_latch')} ms"),
+            ("Coworker by the arm", K.m(K.COWORKER.result.horizon, "ms"), "network", f"{val('t_cw')} ms"),
+            ("Free space ahead", num("t_ahead"), "memory", f"{val('t_ahead')} ms")]
     sp.hbars(out("horizons.svg"), rows, "ms", log=False, size=(5.8, 2.2),
              xlabel="Invalidation horizon: time from capture to expiry (ms)")
 
@@ -539,16 +553,60 @@ def lifecycle():
     svg("lifecycle.svg", "\n".join(b), w=900, h=460)
 
 
+def frozen():
+    """The frozen transform: fresh publication stamps, a frozen capture epoch."""
+    loss, per, win = num("t_loss"), num("t_repub"), num("frozen_window")
+    vb, tol, tau = num("v_belt_mm_ms"), num("grasp_tol"), num("tau_max")
+    end = loss + win
+    tt = np.linspace(0, end, 400)
+    for step in (1, 2):
+        fig, (a1, a2) = plt.subplots(2, 1, figsize=COL, sharex=True,
+                                     gridspec_kw={"height_ratios": [1, 1]})
+        pubs = np.arange(0, end + per / 2, per)
+        a1.plot(tt, tt, color=C["neutral"], lw=2.5)
+        a1.plot(tt, np.minimum(tt, loss), color=C["memory"], lw=3)
+        a1.axvline(loss, color=C["danger"], lw=1.5, ls="--")
+        a1.text(end * 0.97, end * 0.58, "publication stamp", fontsize=14, color=C["neutral"],
+                ha="right", va="top", fontweight="bold")
+        a1.text(end, loss + end * 0.06, "capture epoch carried", fontsize=14, color=C["memory"],
+                ha="right", va="bottom", fontweight="bold")
+        a1.text(loss + end * 0.02, end * 0.93, f"camera dies, {val('t_loss')} ms", fontsize=13,
+                color=C["danger"], va="top")
+        a1.set_ylim(0, end * 1.05)
+        a1.set_ylabel("Stamp (ms)", fontsize=14)
+        a1.tick_params(labelsize=12)
+        a1.text(0.02 * end, -0.30 * end,
+                f"Stamp age always under {val('t_repub')} ms: passes the {val('tau_max')} ms check",
+                fontsize=13, color=C["data"], fontweight="bold", clip_on=False)
+        a2.axhline(tol, color=C["danger"], lw=1.8, ls="--")
+        a2.text(1, tol + 0.8, f"grasp tolerance {val('grasp_tol')} mm", fontsize=13,
+                color=C["danger"], va="bottom")
+        if step == 2:
+            err = np.clip(tt - loss, 0, None) * vb
+            a2.plot(tt, err, color=C["compute"], lw=3)
+            a2.plot([end], [err[-1]], "o", color=C["compute"], ms=8)
+            a2.text(end * 0.75, num("frozen_err") * 1.04, f"mug moved {val('frozen_err')} mm",
+                    fontsize=14, color=C["compute"], ha="right", va="bottom", fontweight="bold")
+        a2.set_ylim(0, num("frozen_err") * 1.35)
+        a2.set_xlim(0, end * 1.02)
+        a2.set_ylabel("Error (mm)", fontsize=14)
+        a2.set_xlabel("Wall-clock time (ms)", fontsize=14)
+        a2.tick_params(labelsize=12)
+        fig.subplots_adjust(hspace=0.55)
+        sp.save(fig, out(f"frozen_step{step}.svg"))
+
+
 def force():
-    tt = np.linspace(0, 15, 100)
+    f, sig, span = num("f_read"), num("f_sigma"), num("bias_span")
+    tt = np.linspace(0, span, 100)
     fig, ax = plt.subplots(figsize=COL)
-    ax.fill_between(tt, 5 - 0.05, 5 + 0.05, color=C["memory_l"])
-    ax.plot(tt, np.full_like(tt, 5.0), color=C["memory"], lw=3)
-    ax.text(0.3, 5.25, "reported 5 N ± 0.05", fontsize=15, color=C["memory"],
+    ax.fill_between(tt, f - sig, f + sig, color=C["memory_l"])
+    ax.plot(tt, np.full_like(tt, f), color=C["memory"], lw=3)
+    ax.text(0.3, 5.25, f"reported {val('f_read')} N ± {val('f_sigma')}", fontsize=15, color=C["memory"],
             fontweight="bold")
-    ax.plot(tt, 5 - calcs.BIAS_RATE * tt, color=C["danger"], lw=3)
-    ax.plot([15], [2], "o", color=C["danger"], ms=10)
-    ax.text(14.8, 1.45, "true 2 N", fontsize=15, color=C["danger"], fontweight="bold",
+    ax.plot(tt, f - num("bias_rate") * tt, color=C["danger"], lw=3)
+    ax.plot([span], [num("f_true")], "o", color=C["danger"], ms=10)
+    ax.text(14.8, 1.45, f"true {val('f_true')} N", fontsize=15, color=C["danger"], fontweight="bold",
             ha="right")
     ax.text(0.3, 0.45, "innovation: 0 at every sample", fontsize=14, color=C["text"])
     ax.set_xlim(0, 15.5)
@@ -577,4 +635,5 @@ if __name__ == "__main__":
     latch()
     horizons()
     lifecycle()
+    frozen()
     force()

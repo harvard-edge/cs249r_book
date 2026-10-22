@@ -3,7 +3,7 @@
 Run: python3 make_figs.py   (writes SVGs here; `make deck V=3 D=17_rlvr`
 converts them to PDF). Plots use the shared slideplot helper and are drawn at
 the size of their slot; diagrams are SVG at 900 px wide for a full-width slot.
-Every derived value comes from calcs.py.
+Every derived value comes from calcs.py, which reads MLSysIM.
 """
 
 import sys
@@ -16,6 +16,7 @@ sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 from slideplot import plt  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 # Volume III roles (volumes/vol3/palette.md)
 BLUE, BLUE_L = "#0284c7", "#e0f2fe"
@@ -66,15 +67,15 @@ def axis_type(ax, size):
 # ---------------------------------------------------------------- hook: METR
 def metr_tasks():
     """Share of o3 runs that reward hacked, per task (METR task table)."""
-    short = ["LLM Foundry", "Rust scaffold", "Kernel", "RE-Bench, all", "HCAST, all"]
     fig, ax = plt.subplots(figsize=(4.6, 3.6))
-    rows = list(zip(short, calcs.METR_TASKS, calcs.metr()))
-    for i, (label, (_, h, n), (_, v)) in enumerate(rows):
+    rows = calcs.METR_TASK_ROWS
+    colors = {"task": "compute", "rebench": "danger", "hcast": "neutral"}
+    for i, (label, h, n, kind, v) in enumerate(rows):
         y = len(rows) - 1 - i
-        ck = "neutral" if label.startswith("HCAST") else ("danger" if label.startswith("RE-Bench") else "compute")
+        ck = colors[kind]
         ax.barh(y, v, color=sp.C[ck], height=0.62)
         ax.text(-3, y, label, ha="right", va="center", fontsize=16, color=sp.C["text"], fontweight="bold")
-        ax.text(v + 3, y, f"{h}/{n:,}", va="center", fontsize=16, color=sp.C[ck], fontweight="bold")
+        ax.text(v + 3, y, f"{h:.0f}/{n:,.0f}", va="center", fontsize=16, color=sp.C[ck], fontweight="bold")
     ax.set_yticks([])
     ax.set_xlim(0, 150)
     ax.set_xticks([0, 50, 100])
@@ -88,16 +89,16 @@ def metr_tasks():
 
 def metr_prompts():
     """Hacking rate with an added instruction (METR prompt table, 20 runs each)."""
-    short = ["Original prompt", "Designer's intent", "Do not cheat", "Do not reward hack", "Alzheimer's stakes"]
+    rows = calcs.METR_PROMPTS
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(4.8, 3.4))
-        for i, (label, (_, v)) in enumerate(zip(short, calcs.METR_PROMPTS)):
-            y = len(short) - 1 - i
+        for i, (label, v) in enumerate(rows):
+            y = len(rows) - 1 - i
             shown = step == 2 or i == 0
             ck = "neutral" if i == 0 else "danger"
             ax.barh(y, v, color=sp.C[ck], height=0.62, alpha=1 if shown else 0)
             ax.text(-3, y, label, ha="right", va="center", fontsize=16, color=sp.C["text"], fontweight="bold")
-            ax.text(v + 3, y, f"{v}%", va="center", fontsize=16, color=sp.C[ck], fontweight="bold",
+            ax.text(v + 3, y, f"{v:.0f}%", va="center", fontsize=16, color=sp.C[ck], fontweight="bold",
                     alpha=1 if shown else 0)
             if not shown:
                 ax.text(5, y, "?", va="center", fontsize=18, color=sp.C["danger"], fontweight="bold")
@@ -161,7 +162,7 @@ def groups():
          text(790, 40, "update signal", 22, GRAY, weight="bold")]
     for k, (name, rs, col) in enumerate(rows):
         y = 80 + k * 110
-        _, _, coef = calcs.grpo(rs, eps=1e-8)
+        coef = calcs.coefficients(rs)
         b.append(text(150, y + 42, name, 24, INK, weight="bold"))
         for i, r in enumerate(rs):
             x = 300 + i * 44
@@ -186,14 +187,15 @@ def false_share():
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.4, 3.4))
         ax.plot(100 * ps, [100 * calcs.false_share(p) for p in ps], color=RED, lw=3)
-        y10 = 100 * calcs.false_share(0.10)
-        ax.plot([10], [y10], "o", color=RED, ms=10)
-        ax.annotate(f"pass rate 10%:\n{y10:.1f}% of rewards\ngo to failures", (10, y10), xytext=(17, 48),
+        x10, y10 = num("fa_pass"), calcs.pct(calcs.FA_S.result.false_share)
+        ax.plot([x10], [y10], "o", color=RED, ms=10)
+        ax.annotate(f"pass rate {val('fa_pass')}%:\n{val('fa_share')}% of rewards\ngo to failures", (x10, y10),
+                    xytext=(17, 48),
                     fontsize=15, color=RED, fontweight="bold",
                     arrowprops=dict(arrowstyle="-", color=RED, lw=1.2))
-        y5 = 100 * calcs.false_share(0.05)
-        ax.plot([5], [y5], "o", color=PURPLE, ms=10, alpha=1 if step == 2 else 0)
-        ax.text(7.5, y5 + 6, f"5%: {y5:.0f}%" if step == 2 else "5%: ?", fontsize=15,
+        x5, y5 = num("fa5_pass"), calcs.pct(calcs.FA5_S.result.false_share)
+        ax.plot([x5], [y5], "o", color=PURPLE, ms=10, alpha=1 if step == 2 else 0)
+        ax.text(7.5, y5 + 6, f"{val('fa5_pass')}%: {y5:.0f}%" if step == 2 else f"{val('fa5_pass')}%: ?", fontsize=15,
                 color=PURPLE, fontweight="bold")
         ax.set_xlim(0, 52)
         ax.set_ylim(0, 75)
@@ -213,8 +215,9 @@ def shaping():
     def X(v):
         return x0 + (v + 1.0) / 2.5 * (x1 - x0)
 
-    cases = [(1, 0.2, 0.3), (2, 0.4, 0.7)]
-    for step, a, lam in cases:
+    cases = [(1, calcs.SHAPE_OK_S), (2, calcs.SHAPE_S)]
+    for step, sc in cases:
+        a, lam, res = sc.format_weight, sc.length_weight, sc.result
         b = [f'<line x1="{x0}" y1="250" x2="{x1}" y2="250" stroke="{GRAY}" stroke-width="2"/>']
         for v in (-1, -0.5, 0, 0.5, 1, 1.5):
             b.append(f'<line x1="{X(v)}" y1="244" x2="{X(v)}" y2="256" stroke="{GRAY}" stroke-width="2"/>')
@@ -226,8 +229,8 @@ def shaping():
         # pass band
         b.append(box(X(1 - lam), 70, X(1 + a) - X(1 - lam), 50, GREEN_L, GREEN, rx=6))
         b.append(text((X(1 - lam) + X(1 + a)) / 2, 102, "any pass", 22, GREEN, weight="bold"))
-        ok = a + lam < 1
-        b.append(text(30, 40, f"α = {a}, λ = {lam}:  α + λ = {a + lam:.1f}", 24, INK, "start",
+        ok = res.order_holds
+        b.append(text(30, 40, f"α = {a}, λ = {lam}:  α + λ = {res.weight_sum:.1f}", 24, INK, "start",
                       "bold"))
         b.append(text(870, 40, "every pass outranks every failure" if ok else "a short failure can beat a long pass",
                       22, GREEN if ok else RED, "end", "bold"))
@@ -241,7 +244,7 @@ def credit():
     """Five turns of the repair; one terminal failure; equal blame; forks."""
     W, H = 900, 400
     turns = ["reproduce", "read pool.py", "debugger", "bad edit", "tests fail"]
-    v0, v1, d, se, sed, thr = calcs.forks()
+    fail = val("credit_fail").replace("-", "−")
     for step in (1, 2, 3):
         b = []
         for i, t in enumerate(turns):
@@ -255,14 +258,16 @@ def credit():
                           weight="bold"))
             if step >= 2 and i < 4:
                 b.append(f'<rect x="{x + 60}" y="132" width="40" height="48" fill="{RED}"/>')
-                b.append(text(x + 80, 212, "−0.4", 26, RED, weight="bold"))
+                b.append(text(x + 80, 212, fail, 26, RED, weight="bold"))
         if step >= 3:
             xd = 10 + 2 * 178
             b.append(arrow(xd + 80, 224, xd + 80, 262, "p", PURPLE, dash=True))
             b.append(box(60, 264, 780, 130, PURPLE_L, PURPLE, rx=10))
-            b.append(text(450, 300, "fork 20 continuations before and after turn 3", 25, PURPLE, weight="bold"))
-            b.append(text(450, 340, f"before: 1 of 20 pass = {v0:.2f}    after: 12 of 20 = {v1:.2f}", 25, INK))
-            b.append(text(450, 380, f"debugger turn: +{d:.2f}  (noise bound {thr:.2f})", 26, GREEN,
+            k = val("fork_k")
+            b.append(text(450, 300, f"fork {k} continuations before and after turn 3", 25, PURPLE, weight="bold"))
+            b.append(text(450, 340, f"before: {val('fork_before')} of {k} pass = {val('fork_v0')}    "
+                                    f"after: {val('fork_after')} of {k} = {val('fork_v1')}", 25, INK))
+            b.append(text(450, 380, f"debugger turn: +{val('fork_diff')}  (noise bound {val('fork_bound')})", 26, GREEN,
                           weight="bold"))
         svg(HERE / f"credit_step{step}.svg", W, H, "\n".join(b))
 
@@ -270,15 +275,16 @@ def credit():
 # ---------------------------------------------------------------- GRPO
 def lone_pass():
     import numpy as np
-    Gs = np.arange(2, 17)
+    g_small, g_big = calcs.GRPO_S.result.group, int(num("lone_g"))
+    Gs = np.arange(2, g_big + 1)
     fig, ax = plt.subplots(figsize=(4.0, 2.9))
-    ax.plot(Gs, [calcs.lone_pass(g) for g in Gs], color=GREEN, lw=3, marker="o", ms=5)
-    for g in (3, 16):
+    ax.plot(Gs, [calcs.lone_pass(int(g)) for g in Gs], color=GREEN, lw=3, marker="o", ms=5)
+    for g in (g_small, g_big):
         v = calcs.lone_pass(g)
         ax.plot([g], [v], "o", color=PURPLE, ms=11)
-        ax.text(g + (0.6 if g == 3 else -0.4), v + (-0.75 if g == 3 else 0.25),
+        ax.text(g + (0.6 if g == g_small else -0.4), v + (-0.75 if g == g_small else 0.25),
                 f"G = {g}: {v:.2f}", fontsize=16, color=PURPLE, fontweight="bold",
-                ha="left" if g == 3 else "right")
+                ha="left" if g == g_small else "right")
     ax.set_xlim(1, 17)
     ax.set_ylim(0, 4.6)
     ax.set_xlabel("Group size G")
@@ -291,18 +297,18 @@ def lone_pass():
 def length_bias():
     """Token count and per-token push for two failures with one coefficient (column)."""
     W, H = 500, 400
-    ratio = calcs.length_ratio()
+    ratio = num("len_ratio")
     full = 440
     b = []
-    for k, (label, toks, push) in enumerate([("failure, 128 tokens", full / ratio, full),
-                                             ("failure, 4,096 tokens", full, full / ratio)]):
+    for k, (label, toks, push) in enumerate([(f"failure, {val('len_short')} tokens", full / ratio, full),
+                                             (f"failure, {val('len_long')} tokens", full, full / ratio)]):
         y = 34 + k * 190
         b.append(text(10, y, label, 27, INK, "start", "bold"))
         b.append(box(10, y + 14, toks, 36, RED_L, RED, rx=3, sw=2))
         b.append(text(10 + toks + 10, y + 42, "tokens", 22, GRAY, "start") if toks < 100 else "")
         b.append(f'<rect x="10" y="{y + 72}" width="{push:.2f}" height="36" fill="{RED}"/>')
         b.append(text(10 + push + 10 if push < 100 else 20, y + 99,
-                      f"push per token: {ratio:.0f}" if k == 0 else "push per token: 1",
+                      f"push per token: {val('len_ratio')}" if k == 0 else "push per token: 1",
                       24, "white" if push >= 100 else RED, "start", "bold"))
     svg(HERE / "length_bias.svg", W, H, "\n".join(b))
 
@@ -310,19 +316,23 @@ def length_bias():
 def arch():
     import numpy as np
     ps = np.linspace(0, 1, 201)
+    g, g_big = int(num("arch_g")), int(num("arch_big_g"))
+    x_hard, x_tgt = num("arch_hard_pct"), num("arch_tgt_pct")
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.4, 3.4))
-        ax.plot(ps * 100, [calcs.contrast(p, 8) for p in ps], color=BLUE, lw=3)
-        ax.text(50, 1.04, "G = 8", fontsize=15, color=BLUE, fontweight="bold", ha="center")
-        ax.plot(ps * 100, [calcs.contrast(p, 16) for p in ps], color=AMBER, lw=2.5, ls="--",
+        ax.plot(ps * 100, [calcs.contrast(p, g) for p in ps], color=BLUE, lw=3)
+        ax.text(50, 1.04, f"G = {g}", fontsize=15, color=BLUE, fontweight="bold", ha="center")
+        ax.plot(ps * 100, [calcs.contrast(p, g_big) for p in ps], color=AMBER, lw=2.5, ls="--",
                 alpha=1 if step == 2 else 0)
         if step == 2:
-            ax.text(3, 1.03, "G = 16", fontsize=15, color=AMBER, fontweight="bold")
-        c5, c50 = calcs.contrast(0.05, 8), calcs.contrast(0.5, 8)
-        ax.plot([5], [c5], "o", color=RED, ms=11)
-        ax.text(7, c5 - 0.1, f"5%: {c5:.2f}", fontsize=15, color=RED, fontweight="bold")
-        ax.plot([50], [c50], "o", color=GREEN, ms=11)
-        ax.text(52, c50 - 0.15, f"50%: {c50:.2f}", fontsize=15, color=GREEN, fontweight="bold")
+            ax.text(3, 1.03, f"G = {g_big}", fontsize=15, color=AMBER, fontweight="bold")
+        c5, c50 = calcs.HARD_S.result.contrast, calcs.TGT_S.result.contrast
+        ax.plot([x_hard], [c5], "o", color=RED, ms=11)
+        ax.text(x_hard + 2, c5 - 0.1, f"{val('arch_hard_pct')}%: {val('arch_hard_c')}", fontsize=15, color=RED,
+                fontweight="bold")
+        ax.plot([x_tgt], [c50], "o", color=GREEN, ms=11)
+        ax.text(x_tgt + 2, c50 - 0.15, f"{val('arch_tgt_pct')}%: {val('arch_tgt_c')}", fontsize=15, color=GREEN,
+                fontweight="bold")
         ax.set_xlim(0, 100)
         ax.set_ylim(0, 1.12)
         ax.set_xlabel("Task pass rate p (%)")
@@ -333,15 +343,16 @@ def arch():
 
 
 def informative():
-    _, rows = calcs.nm174()
-    labels = ["G 8, p 5%", "G 16, p 5%", "G 8, p 50%"]
+    rows = [(f"G {val('arch_g')}, p {val('arch_hard_pct')}%", calcs.HARD_S, "budget_hard_r", "danger"),
+            (f"G {val('arch_big_g')}, p {val('arch_hard_pct')}%", calcs.BIG_S, "budget_big_r", "danger"),
+            (f"G {val('arch_g')}, p {val('arch_tgt_pct')}%", calcs.TGT_S, "budget_tgt_r", "data")]
     fig, ax = plt.subplots(figsize=(4.4, 2.6))
-    for i, (lab, (_, G, p, c, r)) in enumerate(zip(labels, rows)):
-        y = 2 - i
-        ck = "danger" if r > 20 else "data"
+    for i, (lab, sc, key, ck) in enumerate(rows):
+        y = len(rows) - 1 - i
+        r = sc.result.rollouts_per_informative_group
         ax.barh(y, r, color=sp.C[ck], height=0.6)
         ax.text(-0.6, y, lab, ha="right", va="center", fontsize=16, fontweight="bold", color=sp.C["text"])
-        ax.text(r + 0.6, y, f"{r:.1f}", va="center", fontsize=16, fontweight="bold", color=sp.C[ck])
+        ax.text(r + 0.6, y, val(key), va="center", fontsize=16, fontweight="bold", color=sp.C[ck])
     ax.set_yticks([])
     ax.set_xlim(0, 36)
     ax.set_xlabel("Rollouts per informative group")
@@ -433,33 +444,36 @@ def isolation():
 
 def allpass():
     ns = [1, 2, 3, 4, 5]
-    fig, ax = plt.subplots(figsize=(5.4, 3.4))
-    ax.plot(ns, [100 * 0.98 ** n for n in ns], color=GREEN, lw=3, marker="o", ms=7)
-    ax.plot(ns, [100 * 0.20 ** n for n in ns], color=RED, lw=3, marker="o", ms=7)
+    fig, ax = plt.subplots(figsize=(4.6, 3.1))
+    curves = [calcs.all_pass(n) for n in ns]
+    ax.plot(ns, [100 * good for good, _ in curves], color=GREEN, lw=3, marker="o", ms=7)
+    ax.plot(ns, [100 * bad for _, bad in curves], color=RED, lw=3, marker="o", ms=7)
     ax.set_yscale("log")
     ax.set_ylim(0.01, 300)
-    ax.text(1.1, 150, "correct patch (0.98 per trial)", fontsize=14, color=GREEN, fontweight="bold")
-    ax.text(3.15, 1.5, f"3 trials: {100*0.2**3:.1f}%", fontsize=15, color=RED, fontweight="bold")
-    ax.text(1.1, 0.03, "incorrect patch\n(0.20 per trial)", fontsize=14, color=RED, fontweight="bold")
+    ax.text(1.1, 150, f"correct ({val('ap_good')} per trial)", fontsize=15, color=GREEN, fontweight="bold")
+    ax.text(3.15, 1.5, f"{val('ap_trials')} trials: {val('ap_bad_acc')}%", fontsize=16, color=RED, fontweight="bold")
+    ax.text(1.1, 0.025, f"wrong\n({val('ap_bad')} per trial)", fontsize=15, color=RED, fontweight="bold")
     ax.set_yticks([0.01, 0.1, 1, 10, 100])
     ax.set_yticklabels(["0.01", "0.1", "1", "10", "100"])
     ax.set_xticks(ns)
     ax.set_xlabel("Trials that must all pass")
     ax.set_ylabel("Accepted (%)")
     ax.grid(color=sp.C["grid"], lw=0.6)
-    axis_type(ax, 15)
+    axis_type(ax, 16)
     sp.save(fig, HERE / "allpass.svg")
 
 
 # ---------------------------------------------------------------- slot cycle
 def slot():
-    w, cc, cs, kc, ks, ratio, rs, frac = calcs.nm176()
-    parts = [("model", 20 * 0.12, sp.C["memory"]), ("tools", 20 * 0.08, sp.C["compute"]),
-             ("assess", 0.5, sp.C["network"])]
+    d = calcs.SLOT_S
+    parts = [("model", calcs.sec(d.decisions * d.model_time), sp.C["memory"]),
+             ("tools", calcs.sec(d.decisions * d.tool_time), sp.C["compute"]),
+             ("assess", calcs.sec(d.assessment_time), sp.C["network"])]
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.5))
-        for y, (name, reset, cap, cyc) in enumerate([("snapshot", 0.015, ks, f"{cs:.3f} s"),
-                                                     ("cold", 3.5, kc, f"{cc:.1f} s")]):
+        for y, (name, reset, cap, cyc) in enumerate([
+                ("snapshot", calcs.sec(d.snapshot_reset), val("slot_snap_rate"), f"{val('slot_snap_cycle')} s"),
+                ("cold", calcs.sec(d.cold_reset), val("slot_cold_rate"), f"{val('slot_cold_cycle1')} s")]):
             left = 0
             vis = step == 2 or name == "cold"
             for lab, v, c in parts:
@@ -473,7 +487,7 @@ def slot():
             if y == 1:
                 ax.text(left + reset / 2, 1.42, "reset", ha="center", va="bottom", fontsize=14,
                         color=sp.C["danger"], fontweight="bold")
-            ax.text(left + reset + 0.15, y, f"{cyc}: {cap:,.0f}/h", va="center", fontsize=14,
+            ax.text(left + reset + 0.15, y, f"{cyc}: {cap}/h", va="center", fontsize=14,
                     fontweight="bold", color=sp.C["text"], alpha=1 if vis else 0)
             ax.text(-0.15, y, name, ha="right", va="center", fontsize=14, fontweight="bold",
                     color=sp.C["text"])
@@ -490,20 +504,23 @@ def slot():
 
 # ---------------------------------------------------------------- Yue et al.
 def yue():
-    xs = [s for s, _, _ in calcs.YUE]
+    xs = [r["step"] for r in calcs.YUE]
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
-    ax.plot(xs, [a for _, a, _ in calcs.YUE], color=GREEN, lw=3, marker="o", ms=8)
-    ax.plot(xs, [b for _, _, b in calcs.YUE], color=BLUE, lw=3, marker="o", ms=8)
+    ax.plot(xs, [r["pass_at_1"] for r in calcs.YUE], color=GREEN, lw=3, marker="o", ms=8)
+    ax.plot(xs, [r["pass_at_256"] for r in calcs.YUE], color=BLUE, lw=3, marker="o", ms=8)
+    x_end = xs[-1] + 10
     ax.text(10, 77, "pass@256: one of 256 samples", fontsize=14, color=BLUE, fontweight="bold")
-    ax.text(460, 64.3, "64.3", fontsize=14, color=BLUE, fontweight="bold", va="center")
-    ax.text(-15, 67.2, "67.2", fontsize=14, color=BLUE, fontweight="bold", va="center", ha="right")
+    ax.text(x_end, num("yue_pk_end"), val("yue_pk_end"), fontsize=14, color=BLUE, fontweight="bold", va="center")
+    ax.text(-15, num("yue_pk_base"), val("yue_pk_base"), fontsize=14, color=BLUE, fontweight="bold", va="center",
+            ha="right")
     ax.text(200, 10, "pass@1: one sample", fontsize=14, color=GREEN, fontweight="bold")
-    ax.text(-15, 9.9, "9.9", fontsize=14, color=GREEN, fontweight="bold", va="center", ha="right")
-    ax.text(460, 42.5, "42.5", fontsize=14, color=GREEN, fontweight="bold", va="center")
+    ax.text(-15, num("yue_p1_base"), val("yue_p1_base"), fontsize=14, color=GREEN, fontweight="bold", va="center",
+            ha="right")
+    ax.text(x_end, num("yue_p1_end"), val("yue_p1_end"), fontsize=14, color=GREEN, fontweight="bold", va="center")
     ax.set_xlim(-90, 540)
     ax.set_ylim(0, 90)
     ax.set_xticks(xs)
-    ax.set_xticklabels(["base", "150", "300", "450"])
+    ax.set_xticklabels(["base"] + [f"{x:.0f}" for x in xs[1:]])
     ax.set_xlabel("GRPO training steps")
     ax.set_ylabel("Problems solved (%)")
     ax.grid(color=sp.C["grid"], lw=0.6)
@@ -528,6 +545,70 @@ def thumbs():
     svg(HERE / "thumb_multiagent.svg", 600, 230, "\n".join(b))
 
 
+# ------------------------------------------- visual-review additions (2026-10-21)
+def forks():
+    """Continuation forks at every boundary against two chosen turns (NM 17.2)."""
+    W, H = 440, 300
+    n = int(num("forks_turns"))
+    b = []
+    for row, (label, every, mult, col) in enumerate(
+            (("every boundary", True, "forks_all_mult", RED),
+             (f"turns {val('forks_two_first')} and {val('forks_two_second')}", False,
+              "forks_two_mult", GREEN))):
+        y = 70 + row * 150
+        b.append(text(8, y - 34, label, 29, col, "start", "bold"))
+        b.append(f'<line x1="8" y1="{y}" x2="300" y2="{y}" stroke="{GRAY}" stroke-width="5"/>')
+        picks = range(1, n) if every else (int(num("forks_two_first")), int(num("forks_two_second")))
+        for t in picks:
+            x = 8 + 292 * t / n
+            for d in (-1, 1):
+                b.append(f'<line x1="{x:.1f}" y1="{y}" x2="{x + 12:.1f}" y2="{y + d * 22}" '
+                         f'stroke="{col}" stroke-width="2.4"/>')
+        bar = 300 * num(mult) / num("forks_all_mult")
+        b.append(box(8, y + 34, max(bar, 8), 34, col, col, rx=3))
+        b.append(text(max(bar, 8) + 20, y + 62, f"{val(mult)}×", 32, col, "start", "bold"))
+    svg(HERE / "forks.svg", W, H, "\n".join(b))
+
+
+def loop_limits():
+    """Three limits on the rollout loop: barrier, staleness, verifier pool."""
+    W, H = 900, 330
+    b = []
+    heads = ["Group barrier", "Staleness", "Verifier pool"]
+    for i, h in enumerate(heads):
+        x = 8 + i * 300
+        b.append(box(x, 6, 284, 318, "white", PURPLE, rx=10))
+        b.append(text(x + 142, 40, h, 25, PURPLE, weight="bold"))
+    lat = [q.to("second").magnitude for q in calcs.BAR_S.latencies]
+    top = max(lat)
+    for k, v in enumerate(sorted(lat)):
+        y = 70 + k * 44
+        b.append(box(26, y, 248, 30, GRAY_L, GRAY, rx=3, dash=True))
+        b.append(box(26, y, max(248 * v / top, 4), 30, AMBER if v == top else BLUE, AMBER if v == top else BLUE, rx=3))
+    b.append(text(150, 272, "the step waits for the slowest", 20))
+    b.append(text(150, 304, f"{val('bar_idle')}% of slot time idle", 22, RED, weight="bold"))
+    for k in range(4):
+        x = 330 + k * 64
+        b.append(box(x, 70, 54, 40, PURPLE_L, PURPLE, rx=4))
+        b.append(text(x + 27, 97, f"v{k + 1}", 21, PURPLE, weight="bold"))
+    b.append(box(330, 134, 246, 34, AMBER_L, AMBER, rx=4))
+    b.append(text(453, 158, "one long rollout", 20))
+    b.append(box(330, 180, 54, 34, BLUE_L, BLUE, rx=4))
+    b.append(text(357, 204, "short", 18))
+    b.append(text(458, 262, "long rollouts go stale", 21))
+    b.append(text(458, 296, "lag = versions passed", 22, RED, weight="bold"))
+    b.append(text(758, 86, f"{val('pool_rate')} trials/s arrive", 21))
+    slots = 10
+    busy = round(slots * num("pool_target") / 100)
+    for k in range(slots):
+        x = 630 + (k % 5) * 52
+        y = 110 + (k // 5) * 52
+        b.append(box(x, y, 42, 42, BLUE if k < busy else GRAY_L, BLUE if k < busy else GRAY, rx=4))
+    b.append(text(758, 252, f"{val('pool_busy')} busy of {val('pool_slots')} slots", 21))
+    b.append(text(758, 296, f"{val('pool_target')}% target", 22, RED, weight="bold"))
+    svg(HERE / "loop_limits.svg", W, H, "\n".join(b))
+
+
 if __name__ == "__main__":
     metr_tasks()
     metr_prompts()
@@ -547,4 +628,6 @@ if __name__ == "__main__":
     slot()
     yue()
     thumbs()
+    forks()
+    loop_limits()
     print("figures written")

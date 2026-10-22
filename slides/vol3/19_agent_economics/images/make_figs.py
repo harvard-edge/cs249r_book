@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Figures for Lecture 19 (Agent Economics), Volume III.
 
-Every value comes from calcs.py, which this script imports, so figures and
-slides agree. "AE" is the rendered chapter, Agent Economics; "NM 19.k" its
+Every value comes from calcs.py, which this script imports and which reads
+MLSysIM's scenarios, so figures and slides agree; labels use deckvals.val. "AE" is the rendered chapter, Agent Economics; "NM 19.k" its
 Napkin Math notebooks. The book's margin SVGs (rejected per accepted, queue
 wait, break-even) and its full-page figures (critical-path waterfall,
 cascade flowchart, hierarchical budget) are page-sized and fall below the
@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -60,14 +61,14 @@ def tidy(ax):
 
 
 # =================================================================== hook
-h = calcs.nm191()
+HF, HL = calcs.HF, calcs.HL
 
 
 def hook(step):
     """Hook reveal: cost per accepted repair, frontier against low price."""
     fig, ax = plt.subplots(figsize=COL)
-    rows = [("Frontier", h["frontier"]["per_acc"], P["think"][1]),
-            ("Low token\nprice", h["lowprice"]["per_acc"], RED)]
+    rows = [("Frontier", HF.cost_per_accepted, P["think"][1]),
+            ("Low token\nprice", HL.cost_per_accepted, RED)]
     for i, (lab, v, col) in enumerate(rows):
         shown = step >= 2
         ax.bar(i, v if shown else 0, width=0.6, color=col)
@@ -80,7 +81,7 @@ def hook(step):
     ax.set_ylabel("Dollars per accepted repair", fontsize=15)
     ax.tick_params(axis="y", labelsize=14)
     if step >= 2:
-        ax.text(0.5, 1.6, f"{h['ratio']:.1f}× more per accepted repair", ha="center", fontsize=16,
+        ax.text(0.5, 1.6, f"{val('hk_ratio')}× more per accepted repair", ha="center", fontsize=16,
                 color=RED, fontweight="bold")
     ax.grid(axis="y", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
@@ -95,12 +96,11 @@ for k in (1, 2):
 def bill(step):
     """Per-attempt bill by term (NM 19.1): model tokens, environment, assessment."""
     fig, ax = plt.subplots(figsize=WIDE)
-    names = [("frontier", "Frontier\n4 turns"), ("lowprice", "Low token price\n7 turns")]
-    for i, (k, lab) in enumerate(names):
-        x = h[k]
+    names = [(HF, f"Frontier\n{val('hk_fr_turns')} turns"), (HL, f"Low token price\n{val('hk_lp_turns')} turns")]
+    for i, (x, lab) in enumerate(names):
         y = 1 - i
-        parts = [("model tokens", x["model"], SKY), ("environment", x["env"], AMB),
-                 ("assessment", x["assess"], GRY)]
+        parts = [("model tokens", x.model_cost, SKY), ("environment", x.environment_cost, AMB),
+                 ("assessment", x.attempt_cost - x.model_cost - x.environment_cost, GRY)]
         left = 0
         for j, (pn, v, col) in enumerate(parts):
             show = step >= 2 or j == 0
@@ -115,7 +115,7 @@ def bill(step):
         ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right", va="center",
                 fontsize=12, fontweight="bold", color=C["text"])
         if step >= 2:
-            ax.text(left + 0.008, y, f"{money(x['attempt'], 3)} per attempt", va="center",
+            ax.text(left + 0.008, y, f"{money(x.attempt_cost, 3)} per attempt", va="center",
                     fontsize=12, fontweight="bold", color=C["text"])
     # legend as direct labels on the top bar
     if step >= 1:
@@ -137,7 +137,8 @@ for k in (1, 2):
 
 
 # ======================================================== price trend (real)
-pt = calcs.price_trend()
+PR = calcs.PRICE.result
+PR_ROWS = calcs.PRICE.rows
 
 
 def price_trend():
@@ -149,13 +150,15 @@ def price_trend():
     ylab = {("MMLU", "GPT-3"): 8, ("MMLU", "GPT-4-0314"): 70, ("GPQA Diamond", "GPT-4-0314"): 24}
     short = {("MMLU", "GPT-3"): "GPT-3 level, MMLU", ("MMLU", "GPT-4-0314"): "GPT-4 level, MMLU",
              ("GPQA Diamond", "GPT-4-0314"): "GPT-4 level, GPQA"}
+    rate_key = dict(zip(calcs.PRICE_SERIES, ("pr_gpt3", "pr_gpt4", "pr_gpqa")))
     for key, lab, col in style:
-        s = pt["chosen"][key]
-        d = [dt.datetime.fromisoformat(p["release_date"]) for p in s["pts"]]
-        v = [float(p["usd_per_mtok"]) for p in s["pts"]]
+        pts = sorted((p for p in PR_ROWS if (p["benchmark"], p["threshold_model"]) == key),
+                     key=lambda p: p["release_date"])
+        d = [dt.datetime.fromisoformat(p["release_date"]) for p in pts]
+        v = [float(p["usd_per_mtok"]) for p in pts]
         ax.step(d + [end], v + [v[-1]], where="post", color=col, lw=2.4)
         ax.scatter(d, v, color=col, s=26, zorder=4)
-        ax.text(dt.datetime(2024, 6, 15), ylab[key], f"{short[key]}: {s['rate']:.0f}× per year",
+        ax.text(dt.datetime(2024, 6, 15), ylab[key], f"{short[key]}: {val(rate_key[key])}× per year",
                 color=col, fontsize=11, fontweight="bold", va="center")
     ax.set_yscale("log")
     ax.set_ylim(0.02, 150)
@@ -175,7 +178,7 @@ price_trend()
 
 
 # ======================================================== SWE-bench cohorts (real)
-sw = calcs.swe_cohorts()
+sw = [(sc.result, label) for sc, label in calcs.SWE_RUNS]
 
 
 def swe_cohort(step):
@@ -183,8 +186,8 @@ def swe_cohort(step):
     import numpy as np
     x = np.arange(len(sw))
     w = 0.4
-    a = [c["mean_resolved"] for c in sw]
-    b = [c["per_resolved"] for c in sw]
+    a = [r.mean_resolved_cost for r, _ in sw]
+    b = [r.cost_per_resolved for r, _ in sw]
     ax.bar(x - w / 2, a, w, color=C["neutral_l"], edgecolor=C["neutral"], lw=1.2)
     for i, v in enumerate(a):
         ax.text(x[i] - w / 2, v + 0.08, money(v), ha="center", fontsize=12, color=C["neutral"],
@@ -195,7 +198,7 @@ def swe_cohort(step):
             ax.text(x[i] + w / 2, v + 0.08, money(v), ha="center", fontsize=12, color=VIO,
                     fontweight="bold")
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{c['label'].replace(' run ', ' ')}\n{c['resolved']}/{c['n']}" for c in sw], fontsize=13)
+    ax.set_xticklabels([f"{lab.replace(' run ', ' ')}\n{r.resolved}/{r.tasks}" for r, lab in sw], fontsize=13)
     ax.set_ylabel("Dollars", fontsize=13)
     ax.set_ylim(0, 6.2)
     ax.tick_params(axis="y", labelsize=13)
@@ -219,13 +222,13 @@ def multiplier():
     fig, ax = plt.subplots(figsize=COL)
     a = np.linspace(0.12, 0.98, 200)
     ax.plot(a * 100, (1 - a) / a, color=VIO, lw=3)
-    for acc, col in ((0.25, RED), (0.75, GRN)):
+    for acc, col in ((calcs.LP.accepted / calcs.LP.tasks, RED), (calcs.FR.accepted / calcs.FR.tasks, GRN)):
         m = (1 - acc) / acc
         ax.plot([acc * 100], [m], "o", ms=12, color=col, mec="white", mew=1.5, zorder=5)
         ax.annotate(f"{m:.2f}" if m < 1 else f"{m:.0f}", (acc * 100, m), xytext=(10, 10),
                     textcoords="offset points", fontsize=17, fontweight="bold", color=col)
-    ax.text(30, 4.3, "low price: 25 of 100 accepted", fontsize=14, color=RED, va="center")
-    ax.text(58, 1.9, "frontier: 75 of 100", fontsize=14, color=GRN, va="center")
+    ax.text(30, 4.3, f"low price: {val('hk_lp_acc')} of {val('hk_tasks')} accepted", fontsize=14, color=RED, va="center")
+    ax.text(58, 1.9, f"frontier: {val('hk_fr_acc')} of {val('hk_tasks')}", fontsize=14, color=GRN, va="center")
     ax.set_xlabel("Acceptance rate α (percent)", fontsize=15)
     ax.set_ylabel("Rejected per accepted", fontsize=15)
     ax.set_ylim(0, 7.5)
@@ -239,22 +242,22 @@ multiplier()
 
 
 # ======================================================== resend per turn
-r2 = calcs.nm192()
+B = calcs.BILL.result
 
 
 def resend(step):
     import numpy as np
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    t = np.arange(1, 31)
-    ax.bar(t - 0.2, r2["per_turn_no"], 0.4, color=C["neutral_l"], edgecolor=C["neutral"], lw=0.8)
+    t = np.arange(1, len(B.per_turn_uncached) + 1)
+    ax.bar(t - 0.2, B.per_turn_uncached, 0.4, color=C["neutral_l"], edgecolor=C["neutral"], lw=0.8)
     if step >= 2:
-        ax.bar(t + 0.2, r2["per_turn_re"], 0.4, color=SKY)
-    ax.text(1, 0.15, f"resend all, fresh price: {money(r2['total_no'], 3)}", fontsize=12.5,
+        ax.bar(t + 0.2, B.per_turn_cached, 0.4, color=SKY)
+    ax.text(1, 0.15, f"resend all, fresh price: ${val('rs_no')}", fontsize=12.5,
             color=C["neutral"], fontweight="bold")
     if step >= 2:
-        ax.text(1, 0.12, f"cached prefix: {money(r2['total_re'], 3)} ({r2['ratio']:.1f}× less)",
+        ax.text(1, 0.12, f"cached prefix: ${val('rs_re')} ({val('rs_ratio')}× less)",
                 fontsize=12.5, color=SKY, fontweight="bold")
-    ax.set_xlabel("Turn of a 30-turn trajectory (NM 19.2, illustrative)", fontsize=11)
+    ax.set_xlabel(f"Turn of a {val('rs_turns')}-turn trajectory (NM 19.2, illustrative)", fontsize=11)
     ax.set_ylabel("Dollars per call", fontsize=11)
     ax.set_xlim(0, 31)
     ax.set_ylim(0, 0.17)
@@ -271,17 +274,18 @@ for k in (1, 2):
 # ======================================================== compaction payback
 def payback():
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
-    for frac, col, lab in ((0.10, SKY, "cached read at 10%"),
-                           (0.05, AMB, "cached read at 5%")):
-        c = calcs.nm193(frac)
-        n = list(range(1, 31))
-        ax.plot(n, [c["diff"][i] * 100 for i in n], color=col, lw=2.8)
-        ax.plot([c["nstar"]], [c["diff"][c["nstar"]] * 100], "o", ms=9, color=col, mec="white", zorder=5)
-        ax.text(0.0, 10.4 if frac == 0.10 else 8.0, f"{lab}: payback {c['nstar']} calls",
+    for c, col, lab, ytxt in ((calcs.COMP.result, SKY, f"cached read at {val('tf_cached_pct')}%", 10.4),
+                              (calcs.COMP_H.result, AMB, f"cached read at {val('tf_half_pct')}%", 8.0)):
+        n = sorted(c.net_by_calls)
+        ax.plot(n, [c.net_by_calls[i] * 100 for i in n], color=col, lw=2.8)
+        ax.plot([c.breakeven_calls], [c.net_by_calls[c.breakeven_calls] * 100], "o", ms=9, color=col,
+                mec="white", zorder=5)
+        ax.text(0.0, ytxt, f"{lab}: payback {c.breakeven_calls} calls",
                 fontsize=14, color=col, fontweight="bold", clip_on=False)
     ax.axhline(0, color=INK, lw=1.2)
-    ax.plot([15, 15], [-3.5, 6.5], color=RED, lw=1.6, ls="--")
-    ax.text(15.3, 5.4, "15 calls remain", color=RED, fontsize=14, fontweight="bold")
+    rest = num("cp_rest")
+    ax.plot([rest, rest], [-3.5, 6.5], color=RED, lw=1.6, ls="--")
+    ax.text(rest + 0.3, 5.4, f"{val('cp_rest')} calls remain", color=RED, fontsize=14, fontweight="bold")
     ax.set_xlabel("Calls remaining after compaction (NM 19.3, illustrative)", fontsize=13)
     ax.set_ylabel("Compact minus keep (¢)", fontsize=13)
     ax.set_xlim(0, 30)
@@ -295,16 +299,20 @@ payback()
 
 
 # ======================================================== waterfall
-c5 = calcs.nm195()
+E, SP = calcs.EPI.result, calcs.SPEC.result
+c5 = {"tests": calcs.s(E.tests_time), "sandbox": calcs.s(E.lifecycle_time), "runtime": calcs.s(E.runtime_time),
+      "model": calcs.s(E.model_time)}
 
 
 def waterfall(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     floor = c5["tests"] + c5["sandbox"] + c5["runtime"]
-    rows = [("Baseline", c5["model"], f"{c5['T']:.1f} s"),
-            ("Model 4× faster", c5["model"] / 4, f"{c5['t4']:.1f} s, {c5['sp4']:.2f}×"),
-            ("Speculative decoding", c5["model"] / c5["s_hi"], f"{c5['t_hi']:.1f} s, {c5['sp_hi']:.2f}×"),
-            ("Instant model calls", 0.0, f"{c5['t_inf']:.1f} s, {c5['sp_inf']:.2f}×")]
+    rows = [("Baseline", c5["model"], f"{calcs.s(E.total_time):.1f} s"),
+            (f"Model {val('ep_speedup')}× faster", c5["model"] / calcs.EPI.model_speedup,
+             f"{calcs.s(E.changed_time):.1f} s, {E.speedup:.2f}×"),
+            ("Speculative decoding", c5["model"] / SP.speedup_high,
+             f"{calcs.s(SP.episode_time_high):.1f} s, {SP.episode_speedup_high:.2f}×"),
+            ("Instant model calls", 0.0, f"{calcs.s(E.other_time):.1f} s, {E.limiting_speedup:.2f}×")]
     for i, (lab, m, txt) in enumerate(rows):
         y = 3 - i
         show = i < step
@@ -336,7 +344,8 @@ for k in range(1, 5):
 
 
 # ======================================================== FrontierSWE (real)
-fs = calcs.frontierswe()
+fs = {"pts": sorted(({"usd": r["usd_per_trial"], "mean": 100 * r["mean5"], "best": 100 * r["best5"],
+                     "worst": 100 * r["worst5"]} for r in calcs.FSWE.rows), key=lambda p: -p["mean"])}
 
 
 def frontierswe():
@@ -364,7 +373,8 @@ frontierswe()
 
 
 # ======================================================== cascade (SVG)
-c6 = calcs.nm196()
+CQ = calcs.CAS.result
+c6 = {"reached": CQ.reached, "accepted": calcs.CAS.accepted_by_tier}
 
 
 class Svg:
@@ -398,16 +408,17 @@ class Svg:
 def cascade(step):
     s = Svg(900, 430)
     x0, wmax = 250, 260
-    tiers = [("Tier 1: small", "$0.0004 + $0.0010 gate"),
-             ("Tier 2: mid", "$0.0020 + $0.0010 gate"),
-             ("Tier 3: frontier", "$0.0600 + $0.0010 gate")]
+    tiers = [("Tier 1: small", f"${val('cs_call_one')} + ${val('cs_gate')} gate"),
+             ("Tier 2: mid", f"${val('cs_call_two')} + ${val('cs_gate')} gate"),
+             ("Tier 3: frontier", f"${val('cs_call_three')} + ${val('cs_gate')} gate")]
+    total = calcs.CAS.tasks
     for i, (name, price) in enumerate(tiers):
         y = 14 + i * 112
         reach, acc = c6["reached"][i], c6["accepted"][i]
         s.text(8, y + 36, name, 24, INK, bold=True, anchor="start")
         s.text(8, y + 68, price, 20, "#334155", anchor="start")
-        wr = wmax * reach / 100000
-        wa = wmax * acc / 100000
+        wr = wmax * reach / total
+        wa = wmax * acc / total
         s.rect(x0, y + 10, wa, 66, P["ok"][0], P["ok"][1])
         s.rect(x0 + wa, y + 10, wr - wa, 66, P["fault"][0], P["fault"][1])
         if wa > 66:
@@ -422,13 +433,13 @@ def cascade(step):
         s.text(781, 52, "Per accepted", 22, INK, bold=True)
         s.text(781, 80, "result", 22, INK, bold=True)
         s.text(781, 128, "cascade", 21, VIO, bold=True)
-        s.text(781, 160, money(c6["per_acc"], 5), 25, VIO, bold=True)
+        s.text(781, 160, f"${val('cs_per')}", 25, VIO, bold=True)
         s.text(781, 212, "direct frontier", 21, RED, bold=True)
-        s.text(781, 244, money(c6["direct_per_acc"], 5), 25, RED, bold=True)
-        s.text(781, 300, f"{c6['ratio']:.1f}× apart", 23, INK, bold=True)
+        s.text(781, 244, f"${val('cs_direct_per')}", 25, RED, bold=True)
+        s.text(781, 300, f"{val('cs_ratio')}× apart", 23, INK, bold=True)
     if step >= 3:
-        s.text(8, 416, f"Time: mean {c6['mean_t']:.2f} s; through all tiers {c6['worst_t']:.2f} s; "
-               f"direct {c6['direct_t']:.2f} s", 21, RED, bold=True, anchor="start")
+        s.text(8, 416, f"Time: mean {val('cs_mean_t')} s; through all tiers {val('cs_all_t')} s; "
+               f"direct {val('cs_direct_t')} s", 21, RED, bold=True, anchor="start")
     s.save(f"cascade_step{step}.svg")
 
 
@@ -437,7 +448,7 @@ for k in (1, 2, 3):
 
 
 # ======================================================== InferenceX (real)
-ix = calcs.inferencex()
+ix = {"pts": calcs.SERVE.result.points}
 
 
 def inferencex():
@@ -446,7 +457,7 @@ def inferencex():
     ys = [p[2] for p in ix["pts"]]
     ax.plot(xs, ys, color=SKY, lw=3, marker="o", ms=10)
     for c, u, g in ix["pts"]:
-        ax.annotate(f"{c} users", (u, g), xytext=(10, -18), textcoords="offset points", fontsize=14,
+        ax.annotate(f"{c:.0f} users", (u, g), xytext=(10, -18), textcoords="offset points", fontsize=14,
                     color=P["think"][2], fontweight="bold")
     ax.set_xlabel("Tokens/s each user sees", fontsize=15)
     ax.set_ylabel("Tokens/s per GPU", fontsize=15)
@@ -461,14 +472,16 @@ inferencex()
 
 
 # ======================================================== Kingman
-q = calcs.nm198()
+QW = calcs.QUEUE.result
+RHO = [x / 100 for x in range(5, 96)]   # utilization grid for the curve
 
 
 def kingman(step):
     fig, ax = plt.subplots(figsize=COL)
-    ax.plot([u * 100 for u, _ in q["curve"]], [w for _, w in q["curve"]], color=VIO, lw=3)
+    ax.plot([u * 100 for u in RHO], [calcs.s(calcs.QUEUE.wait_at(u)) for u in RHO], color=VIO, lw=3)
     if step >= 2:
-        for u, w, col in ((0.7, q["w70"], SKY), (0.9, q["w90"], RED)):
+        for u, w, col in ((calcs.QUEUE.low_utilization, calcs.s(QW.wait_low), SKY),
+                          (calcs.QUEUE.high_utilization, calcs.s(QW.wait_high), RED)):
             ax.plot([u * 100], [w], "o", ms=13, color=col, mec="white", mew=1.5, zorder=5)
             ax.annotate(f"{w:.0f} s", (u * 100, w), xytext=(-56, 4), textcoords="offset points",
                         fontsize=20, fontweight="bold", color=col)
@@ -486,8 +499,9 @@ for k in (1, 2):
 
 
 # ======================================================== break-even
-d9 = calcs.nm199()
-d0 = calcs.nm199(0.0)
+OW = calcs.OWN.result
+d9 = {"ustar": OW.crossing, "api": OW.api_hour, "ded": OW.dedicated_hour,
+      "line": calcs.OWN.hourly_costs, "load": calcs.OWN.load}
 
 
 def breakeven():
@@ -503,11 +517,12 @@ def breakeven():
     us = d9["ustar"] * 100
     ax.axvline(us, color=GRY, ls="--", lw=1.6)
     ax.plot([us], [d9["line"](d9["ustar"])[0]], "o", ms=12, color=VIO, mec="white", zorder=5)
-    ax.text(us - 2, 76, f"u* = {us:.1f}%", color=VIO, fontsize=15, fontweight="bold", ha="right")
-    ax.plot([52], [d9["api"]], "o", ms=10, color=AMB, mec="white", zorder=5)
-    ax.plot([52], [d9["ded"]], "o", ms=10, color=SKY, mec="white", zorder=5)
-    ax.text(50, 50, money(d9["api"]), ha="right", color=AMB, fontsize=14, fontweight="bold")
-    ax.text(54, d9["ded"] - 10, money(d9["ded"]), color=SKY, fontsize=14, fontweight="bold")
+    ax.text(us - 2, 76, f"u* = {val('ow_cross_pct')}%", color=VIO, fontsize=15, fontweight="bold", ha="right")
+    load = d9["load"] * 100
+    ax.plot([load], [d9["api"]], "o", ms=10, color=AMB, mec="white", zorder=5)
+    ax.plot([load], [d9["ded"]], "o", ms=10, color=SKY, mec="white", zorder=5)
+    ax.text(load - 2, 50, f"${val('ow_api_h')}", ha="right", color=AMB, fontsize=14, fontweight="bold")
+    ax.text(load + 2, d9["ded"] - 10, f"${val('ow_ded_h')}", color=SKY, fontsize=14, fontweight="bold")
     ax.set_xlabel("Delivered load (% of reference rate)", fontsize=15)
     ax.set_ylabel("Dollars per hour", fontsize=15)
     ax.set_xlim(0, 100)
@@ -521,7 +536,9 @@ breakeven()
 
 
 # ======================================================== budget conservation
-b = calcs.nm1910()
+G = calcs.BUD.result
+b = {"table": [(None, st / G.units_per_dollar, rs / G.units_per_dollar, fr / G.units_per_dollar)
+               for st, rs, fr in G.states]}
 
 
 def budget(step):
@@ -551,11 +568,11 @@ def budget(step):
     ax.text(0.0, 4.62, "settled", color=GRY, fontsize=14, fontweight="bold")
     ax.text(1.0, 4.62, "reserved", color=AMB, fontsize=14, fontweight="bold")
     ax.text(3.2, 4.62, "free", color=GRN, fontsize=14, fontweight="bold")
-    ax.set_xlim(0, 5)
+    ax.set_xlim(0, num("bg_budget"))
     ax.set_ylim(-0.5, 5.0)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Root budget of $5 (NM 19.10, illustrative)", fontsize=13)
+    ax.set_xlabel(f"Root budget of ${val('bg_budget')} (NM 19.10, illustrative)", fontsize=13)
     ax.tick_params(labelsize=13)
     sp.save(fig, out / f"budget_step{step}.svg")
 
@@ -565,13 +582,15 @@ for k in range(1, 6):
 
 
 # ======================================================== architectures
-a11 = calcs.nm1911()
+AR = calcs.ARCH.result
+a11 = {"d": {n: {"per_auto": calcs.usd(AR.automated_per_accepted[n]), "per_res": calcs.usd(AR.per_resolved[n])}
+             for n in (calcs.RULES, calcs.CALL, calcs.LOOP)}}
 
 
 def arch(step):
-    fig, axes = plt.subplots(1, 2, figsize=(5.8, 2.3))
+    fig, axes = plt.subplots(1, 2, figsize=(6.4, 1.95))
     names = list(a11["d"])
-    short = ["Rewriter", "Single call", "3-turn loop"]
+    short = ["Rewriter", "Single call", f"{len(calcs.ARCH.turn_acceptance)}-turn loop"]
     cols = [GRY, AMB, VIO]
     for j, (ax, key, title, nd) in enumerate((
             (axes[0], "per_auto", "Automated spend per\nautomated acceptance", 3),
@@ -582,14 +601,14 @@ def arch(step):
             y = 2 - i
             ax.barh(y, v if show else 0, height=0.6, color=cols[i])
             if show:
-                ax.text(v + max(vals) * 0.03, y, money(v, nd), va="center", fontsize=11.5,
+                ax.text(v + max(vals) * 0.03, y, money(v, nd), va="center", fontsize=13.5,
                         fontweight="bold", color=cols[i])
         ax.set_yticks([2, 1, 0])
-        ax.set_yticklabels(short if j == 0 else ["", "", ""], fontsize=11.5)
+        ax.set_yticklabels(short if j == 0 else ["", "", ""], fontsize=13.5)
         ax.set_xlim(0, max(vals) * 1.55)
         ax.set_xticks([])
         ax.spines["bottom"].set_visible(False)
-        ax.set_title(title, fontsize=11.5, color=C["text"] if show else "white", loc="left")
+        ax.set_title(title, fontsize=13.5, color=C["text"] if show else "white", loc="left")
     sp.save(fig, out / f"arch_step{step}.svg")
 
 

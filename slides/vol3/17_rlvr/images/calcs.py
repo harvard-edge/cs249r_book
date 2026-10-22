@@ -1,295 +1,347 @@
-"""Lecture 17 (Reinforcement Learning from Verifiable Rewards): every derived number.
+#!/usr/bin/env python3
+"""Every number on the Volume III Lecture 17 slides and notes, read from MLSysIM.
 
-Run: python3 calcs.py
-Each block names the slide that shows its values, the inputs with their
-sources, and prints the values with the labels used on the slide. Inputs typed
-here come straight from a source (the chapter, a paper's table, our own runs in
-data/); everything printed is derived. make_figs.py imports these functions.
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: the verifier's false accepts (VerifierFalseAcceptsAtTenPercentPass and
+its 5 and 40 percent variants), fixed baselines (BinaryRewardFixedBaseline,
+BinaryRewardAveragePassBaseline), shaped rewards (ShapedRewardOverlappingWeights,
+ShapedRewardOrderedWeights), forked continuations (DebuggerTurnForkValue,
+ThirtyTurnForksAtEveryBoundary and its two-fork variant), group-relative
+coefficients (RepairGroupOnePassOfThree and its TRL-convention variant,
+LonePassInGroupOfSixteen), length normalization (ShortAndLongFailureLengths),
+reward contrast per update (HardTaskRolloutStep and its variants), the all-pass
+rule (FlakyRaceTestAllPassRule), the ratio clip (DominantTokenRatioClip,
+RareTokenRatioClip), the slot cycle (RepairRolloutSlotResets), the group
+barrier (RolloutGroupOfFourBarrier), and the verifier pool (RepairVerifierPool),
+backed by engine/solvers/reinforcement.py. Lecture 16's target mask is
+RecoveryRecordTargetMask. Published data are Literature entries: METR's
+reward-hacking counts (Literature.AgentEvaluation), Yue et al.'s pass@k series
+(Literature.GrpoPassAtKSteps), and the DeepSeek-R1-Zero and DAPO curve readings
+(Literature.RlTrainingDynamics). The one other source is the deck's own data
+(data/): a local model's recorded log probabilities. This file only selects
+values, converts units, and formats them; it types no numbers. Each value is
+recorded with v() under the key the deck prints as \\val{key}; running this
+file writes images/numbers.tex. make_figs.py imports the curve functions below.
+
+Run from this folder: python3 calcs.py
 """
 
 import json
 import math
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Scenarios = mlsysim.Scenarios
+Literature = mlsysim.Literature
+solvers = mlsysim.solvers
 HERE = Path(__file__).resolve().parent
+DATA = HERE / "data"
+
+METR = Literature.AgentEvaluation
+RLD = Literature.RlTrainingDynamics
+YUE = sorted(Literature.GrpoPassAtKSteps.entries, key=lambda r: r["step"])
+
+FA_S = Scenarios.VerifierFalseAcceptsAtTenPercentPass
+FA5_S = Scenarios.VerifierFalseAcceptsAtFivePercentPass
+FA40_S = Scenarios.VerifierFalseAcceptsAtFortyPercentPass
+BASE_S = Scenarios.BinaryRewardAveragePassBaseline
+SHAPE_S = Scenarios.ShapedRewardOverlappingWeights
+SHAPE_OK_S = Scenarios.ShapedRewardOrderedWeights
+FORK_S = Scenarios.DebuggerTurnForkValue
+EVERY_S = Scenarios.ThirtyTurnForksAtEveryBoundary
+TWO_S = Scenarios.ThirtyTurnForksAfterTurnsTenAndTwenty
+GRPO_S = Scenarios.RepairGroupOnePassOfThree
+TRL_S = Scenarios.RepairGroupOnePassOfThreeTrlConvention
+LONE_S = Scenarios.LonePassInGroupOfSixteen
+LEN_S = Scenarios.ShortAndLongFailureLengths
+HARD_S = Scenarios.HardTaskRolloutStep
+BIG_S = Scenarios.HardTaskRolloutStepDoubledGroup
+TGT_S = Scenarios.TargetedTaskRolloutStep
+PAIR_S = Scenarios.PairGroupsAtTenPercentPass
+FLAKY_S = Scenarios.FlakyRaceTestAllPassRule
+CLIP_HI_S = Scenarios.DominantTokenRatioClip
+CLIP_LO_S = Scenarios.RareTokenRatioClip
+SLOT_S = Scenarios.RepairRolloutSlotResets
+BAR_S = Scenarios.RolloutGroupOfFourBarrier
+POOL_S = Scenarios.RepairVerifierPool
+MASK = Scenarios.RecoveryRecordTargetMask.result
 
 
-def show(label, value, fmt="{:.4g}"):
-    print(f"  {label}: {fmt.format(value)}")
+def pct(x):
+    return 100 * x
 
 
-# ---------------------------------------------------------------- hook (METR)
-# Von Arx, Chan, Barnes, "Recent Frontier Models Are Reward Hacking", METR blog,
-# 2025-06-05, task table (o3) and prompt table (Optimize LLM Foundry, 20 runs).
-METR_TASKS = [  # (task, hacks, runs)
-    ("Optimize LLM Foundry", 21, 21),
-    ("Rust Codecontest scaffold", 12, 28),
-    ("Optimize a Kernel", 6, 24),
-    ("RE-Bench, all tasks", 39, 128),
-    ("HCAST, all tasks", 8, 1087),
+def sec(q):
+    return q.to("s").magnitude
+
+
+def ms(q):
+    return q.to("ms").magnitude
+
+
+# ---------------------------------------------------------------- curves for make_figs.py
+def false_share(p):
+    """Share of accepted rollouts that failed, at pass rate p, under the deck's verifier."""
+    return FA_S.variant(pass_rate=p).result.false_share
+
+
+def contrast(p, group):
+    """P(a group of `group` rollouts at pass rate p holds a pass and a failure)."""
+    return HARD_S.variant(group=group, pass_rate=p).result.contrast
+
+
+def coefficients(rewards):
+    """GRPO coefficients of one group under the worked example's convention."""
+    return solvers.GroupCoefficientsModel().solve(rewards, GRPO_S.stabilizer).coefficients
+
+
+def lone_pass(group):
+    """The lone pass's coefficient in a group of `group` binary rewards, stabilizer omitted."""
+    rewards = [1.0] + [0.0] * (group - 1)
+    return solvers.GroupCoefficientsModel().solve(rewards, LONE_S.stabilizer).coefficients[0]
+
+
+def all_pass(trials):
+    """(correct accepted, incorrect accepted) when all `trials` must pass."""
+    r = FLAKY_S.variant(trials=trials).result
+    return 1 - r.correct_rejected, r.incorrect_accepted
+
+
+print("== Hook and prompt table (Literature.AgentEvaluation, METR 2025)")
+METR_TASKS = [  # (label, hacks, runs, kind) in the task table's order
+    ("LLM Foundry", METR.MetrO3FoundryHackRuns, METR.MetrO3FoundryRuns, "task"),
+    ("Rust scaffold", METR.MetrO3RustScaffoldHackRuns, METR.MetrO3RustScaffoldRuns, "task"),
+    ("Kernel", METR.MetrO3KernelHackRuns, METR.MetrO3KernelRuns, "task"),
+    ("RE-Bench, all", METR.MetrO3ReBenchHackRuns, METR.MetrO3ReBenchRuns, "rebench"),
+    ("HCAST, all", METR.MetrO3HcastHackRuns, METR.MetrO3HcastRuns, "hcast"),
 ]
-METR_PROMPTS = [  # (appended instruction, percent hacking as published)
-    ("Original prompt", 80),
-    ("“Only methods the designer intended”", 95),
-    ("“Please do not cheat”", 80),
-    ("“Please do not reward hack”", 70),
-    ("“Researchers on Alzheimer's rely on this”", 70),
+METR_TASK_ROWS = [(label, h, n, kind, pct(h / n)) for label, h, n, kind in METR_TASKS]
+METR_PROMPTS = [  # (label, percent planning a hack)
+    ("Original prompt", METR.MetrO3PromptOriginalHackPct),
+    ("Designer's intent", METR.MetrO3PromptDesignerIntentHackPct),
+    ("Do not cheat", METR.MetrO3PromptDoNotCheatHackPct),
+    ("Do not reward hack", METR.MetrO3PromptDoNotRewardHackPct),
+    ("Alzheimer's stakes", METR.MetrO3PromptResearchStakesHackPct),
 ]
+v("metr_rebench_hacks", METR.MetrO3ReBenchHackRuns, "{:.0f}", "RE-Bench runs that hacked")
+v("metr_rebench_runs", METR.MetrO3ReBenchRuns, "{:.0f}", "RE-Bench runs")
+v("metr_rebench_pct", pct(METR.MetrO3ReBenchHackRuns / METR.MetrO3ReBenchRuns), "{:.0f}", "RE-Bench share, %")
+v("metr_hcast_hacks", METR.MetrO3HcastHackRuns, "{:.0f}", "HCAST runs that hacked")
+v("metr_hcast_runs", METR.MetrO3HcastRuns, "{:,.0f}", "HCAST runs")
+v("metr_hcast_pct", pct(METR.MetrO3HcastHackRuns / METR.MetrO3HcastRuns), "{:.1f}", "HCAST share, %")
+v("metr_foundry_runs", METR.MetrO3FoundryRuns, "{:.0f}", "Foundry runs, all hacked")
+v("metr_intent_no", METR.MetrO3IntentNoAnswers, "{:.0f}", "answered no")
+v("metr_intent_asked", METR.MetrO3IntentQuestions, "{:.0f}", "times asked")
+v("metr_prompt_runs", METR.MetrO3PromptVariantRuns, "{:.0f}", "runs per prompt")
+v("metr_base_pct", METR.MetrO3PromptOriginalHackPct, "{:.0f}", "original prompt, %")
+v("metr_intent_pct", METR.MetrO3PromptDesignerIntentHackPct, "{:.0f}", "designer's intent, %")
+v("metr_cheat_pct", METR.MetrO3PromptDoNotCheatHackPct, "{:.0f}", "do not cheat, %")
+v("metr_nohack_pct", METR.MetrO3PromptDoNotRewardHackPct, "{:.0f}", "do not reward hack, %")
+v("metr_stakes_pct", METR.MetrO3PromptResearchStakesHackPct, "{:.0f}", "research stakes, %")
 
+print("== Recall: Lecture 16's target mask (Scenarios.RecoveryRecordTargetMask)")
+v("mask_obs_pct", pct(MASK.observation_share), "{:.1f}", "observation share, %")
+v("mask_tgt_pct", pct(MASK.share_without_rationale), "{:.1f}", "selected targets, %")
 
-def metr():
-    return [(t, 100 * h / n) for t, h, n in METR_TASKS]
+print("== False accepts (Scenarios.VerifierFalseAcceptsAtTenPercentPass and variants)")
+FA = FA_S.result
+v("fa_tasks", FA_S.tasks, "{:,.0f}", "tasks")
+v("fa_group", FA_S.group, "{:.0f}", "rollouts per task")
+v("fa_rollouts", FA.rollouts, "{:,.0f}", "rollouts")
+v("fa_rate", pct(FA_S.false_accept_rate), "{:.1f}", "false-acceptance rate, %")
+v("fa_pass", pct(FA_S.pass_rate), "{:.0f}", "pass rate, %")
+v("fa_true", FA.true_accepts, "{:.1f}", "true accepts")
+v("fa_false", FA.false_accepts, "{:.2f}", "false accepts")
+v("fa_share", pct(FA.false_share), "{:.1f}", "false share at 10%, %")
+v("fa5_pass", pct(FA5_S.pass_rate), "{:.0f}", "lower pass rate, %")
+v("fa5_share", pct(FA5_S.result.false_share), "{:.1f}", "false share at 5%, %")
+v("fa40_pass", pct(FA40_S.pass_rate), "{:.0f}", "higher pass rate, %")
+v("fa40_share", pct(FA40_S.result.false_share), "{:.1f}", "false share at 40%, %")
 
+print("== Shaping (Scenarios.ShapedRewardOrderedWeights and ShapedRewardOverlappingWeights)")
+SH = SHAPE_S.result
+v("shape_ok_alpha", SHAPE_OK_S.format_weight, "{:.1f}", "ordered alpha")
+v("shape_ok_lambda", SHAPE_OK_S.length_weight, "{:.1f}", "ordered lambda")
+v("shape_alpha", SHAPE_S.format_weight, "{:.1f}", "Exercise 2 alpha")
+v("shape_lambda", SHAPE_S.length_weight, "{:.1f}", "Exercise 2 lambda")
+v("shape_sum", SH.weight_sum, "{:.1f}", "alpha + lambda")
+v("shape_low_pass", SH.lowest_pass, "{:.2f}", "lowest pass, 1 - lambda")
+v("shape_high_fail", SH.highest_failure, "{:.2f}", "highest failure, alpha")
+v("shape_pass_tokens", SHAPE_S.pass_tokens, "{:,.0f}", "example pass, tokens")
+v("shape_pass_format", SHAPE_S.pass_format, "{:.1f}", "example pass, format score")
+v("shape_pass_score", SH.example_pass, "{:.3f}", "example pass, score")
+v("shape_fail_tokens", SHAPE_S.failure_tokens, "{:.0f}", "example failure, tokens")
+v("shape_fail_score", SH.example_failure, "{:.3f}", "example failure, score")
 
-# ---------------------------------------------------------------- baselines
-# Chapter Sec. 17.2.2: fixed baseline 0.25 on a binary reward.
-def baseline_scores(b=0.25):
-    return 1 - b, 0 - b
+print("== Credit (Scenarios.BinaryRewardAveragePassBaseline, DebuggerTurnForkValue)")
+FK = FORK_S.result
+v("credit_base", BASE_S.baseline, "{:.1f}", "baseline")
+v("credit_fail", BASE_S.result.failing_score, "{:.1f}", "failed rollout coefficient")
+v("fork_k", FORK_S.continuations, "{:.0f}", "continuations per fork")
+v("fork_before", FORK_S.passes_before, "{:.0f}", "passes before the debugger turn")
+v("fork_after", FORK_S.passes_after, "{:.0f}", "passes after")
+v("fork_v0", FK.value_before, "{:.2f}", "value before")
+v("fork_v1", FK.value_after, "{:.2f}", "value after")
+v("fork_diff", FK.difference, "{:.2f}", "difference")
+v("fork_bound", FK.resolution_threshold, "{:.2f}", "noise bound (two difference SEs)")
 
+print("== Fork cost (Scenarios.ThirtyTurnForksAtEveryBoundary and its two-fork variant)")
+EV, TW = EVERY_S.result, TWO_S.result
+v("forks_turns", EVERY_S.turns, "{:.0f}", "turns")
+v("forks_tokens", EVERY_S.tokens_per_turn, "{:.0f}", "tokens per turn")
+v("forks_branches", EVERY_S.branches, "{:.0f}", "continuations per boundary")
+v("forks_base", EV.base_tokens, "{:,.0f}", "base tokens")
+v("forks_all_branches", EV.branches, "{:.0f}", "branches, every boundary")
+v("forks_all_tokens", EV.total_tokens, "{:,.0f}", "tokens, every boundary")
+v("forks_all_mult", EV.multiple, "{:.0f}", "multiple, every boundary")
+v("forks_two_first", TWO_S.boundaries[0], "{:.0f}", "first chosen boundary")
+v("forks_two_second", TWO_S.boundaries[1], "{:.0f}", "second chosen boundary")
+v("forks_two_branches", TW.branches, "{:.0f}", "branches, two forks")
+v("forks_two_mult", TW.multiple, "{:.0f}", "multiple, two forks")
 
-# ---------------------------------------------------------------- NM 17.1
-# Chapter NM 17.1: 8 rollouts x 1,024 tasks, pass rate 10%, verifier accepts every
-# success and 2.5% of failures. Checkpoint 17.1 asks the share at 5%.
-def false_share(p, fa=0.025, ta=1.0):
-    return (1 - p) * fa / (p * ta + (1 - p) * fa)
+print("== GRPO coefficients (Scenarios.RepairGroupOnePassOfThree, TRL variant, lone pass)")
+G3, TRL, LONE = GRPO_S.result, TRL_S.result, LONE_S.result
+v("grpo_eps_exp", math.log10(GRPO_S.stabilizer), "{:.0f}", "stabilizer, power of ten")
+v("grpo_mean", G3.mean, "{:.6f}", "mean")
+v("grpo_std", G3.std, "{:.6f}", "std, divisor G")
+v("grpo_std3", G3.std, "{:.3f}", "the same, three decimals")
+v("grpo_fail", G3.coefficients[0], "{:.6f}", "failure coefficient")
+v("grpo_fail3", G3.coefficients[0], "{:.3f}", "the same, three decimals")
+v("grpo_pass", G3.coefficients[1], "{:.6f}", "pass coefficient")
+v("grpo_pass3", G3.coefficients[1], "{:.3f}", "the same, three decimals")
+v("lone_g", LONE.group, "{:.0f}", "group size")
+v("lone_fails", LONE.group - 1, "{:.0f}", "failures in the group")
+v("lone_fails_words", LONE.group - 1, "words", "the same, in words")
+v("lone_pass", LONE.coefficients[0], "{:.2f}", "lone-pass coefficient")
+v("lone_fail", LONE.coefficients[1], "{:.2f}", "each failure's coefficient")
+v("trl_eps_exp", math.log10(TRL_S.stabilizer), "{:.0f}", "TRL stabilizer, power of ten")
+v("trl_pass", TRL.coefficients[1], "{:.3f}", "TRL pass coefficient")
+v("trl_fail", TRL.coefficients[0], "{:.3f}", "TRL failure coefficient")
 
+print("== Length (Scenarios.ShortAndLongFailureLengths; Literature.RlTrainingDynamics)")
+v("len_short", LEN_S.short_tokens, "{:.0f}", "short failure, tokens")
+v("len_long", LEN_S.long_tokens, "{:,.0f}", "long failure, tokens")
+v("len_ratio", LEN_S.result.per_token_ratio, "{:.0f}", "per-token push ratio")
+v("r1_len_start", RLD.R1ZeroResponseLengthStartBelowTokens, "{:,.0f}", "R1-Zero start, under, tokens")
+v("r1_len_end", RLD.R1ZeroResponseLengthEndAboutTokens, "{:,.0f}", "R1-Zero end, about, tokens")
+v("r1_steps", RLD.R1ZeroPlottedStepsAbout, "{:,.0f}", "R1-Zero steps plotted, about")
 
-def nm171():
-    n = 8 * 1024
-    true_acc = n * 0.10 * 1.0
-    false_acc = n * 0.90 * 0.025
-    return n, true_acc, false_acc, false_acc / (true_acc + false_acc)
+print("== Contrast and rollout budget (Scenarios.HardTaskRolloutStep and variants)")
+HD, BG, TG, PR = HARD_S.result, BIG_S.result, TGT_S.result, PAIR_S.result
+v("arch_g_words", HARD_S.group, "words", "group size, in words")
+v("arch_g", HARD_S.group, "{:.0f}", "group size")
+v("arch_big_g", BIG_S.group, "{:.0f}", "doubled group size")
+v("arch_hard_pct", pct(HARD_S.pass_rate), "{:.0f}", "hard pass rate, %")
+v("arch_tgt_pct", pct(TGT_S.pass_rate), "{:.0f}", "targeted pass rate, %")
+v("arch_hard_c", HD.contrast, "{:.2f}", "contrast at 5%")
+v("arch_hard_silent", pct(HD.silent_share), "{:.0f}", "silent groups at 5%, %")
+v("arch_tgt_c", TG.contrast, "{:.2f}", "contrast at 50%")
+v("arch_big_c", BG.contrast, "{:.2f}", "contrast at G 16")
+v("pair_g", PAIR_S.group, "{:.0f}", "small group")
+v("pair_p", PAIR_S.pass_rate, "{:.2f}", "small group's pass rate")
+v("pair_c_pct", pct(PR.contrast), "{:.0f}", "small group's contrast, %")
+v("budget_tasks", HARD_S.tasks, "{:.0f}", "tasks per update")
+v("budget_turns", HARD_S.turns, "{:.0f}", "turns per rollout")
+v("budget_tokens", HARD_S.tokens_per_turn, "{:.0f}", "tokens per turn")
+v("budget_step_m", HD.step_tokens / 10 ** 6, "{:.1f}", "tokens per step, millions")
+v("budget_hard_r", HD.rollouts_per_informative_group, "{:.1f}", "rollouts per informative group, G 8, 5%")
+v("budget_big_r", BG.rollouts_per_informative_group, "{:.1f}", "the same, G 16")
+v("budget_tgt_r", TG.rollouts_per_informative_group, "{:.1f}", "the same, 50%")
+v("budget_saving", HD.rollouts_per_informative_group / TG.rollouts_per_informative_group, "{:.1f}",
+  "targeting saving, x")
 
+print("== Our run's log probabilities (data/logprob_run.json)")
+_run = json.loads((DATA / "logprob_run.json").read_text())
+_runs = sorted(_run["runs"], key=lambda r: r["temperature"])
+_t_lo, _t_mid, _t_hi = (r["temperature"] for r in _runs)
+_tok = _runs[0]["tokens"][2]          # third sampled token at the lowest temperature
+_alt = _runs[-1]["tokens"][2]         # the same position at the highest temperature
+_top = dict(_tok["top"])
+_doc = next(t for t in _top if t not in (_tok["token"], _alt["token"]))
+_p_raw = math.exp(_tok["logprob"])
+# The sampled probability of the same token at the lowest temperature,
+# renormalized over the reported top 3 (the omitted tail is negligible after
+# the logits are divided by that temperature).
+_p_t = mlsysim.physics.agents.calc_tempered_softmax([lp for _, lp in _tok["top"]], _t_lo)[
+    [t for t, _ in _tok["top"]].index(_tok["token"])]
+v("lp_t_lo", _t_lo, "{:.1f}", "lowest temperature")
+v("lp_t_mid", _t_mid, "{:.1f}", "middle temperature")
+v("lp_t_hi", _t_hi, "{:.1f}", "highest temperature")
+v("lp_return", _tok["logprob"], "{:.3f}", "reported log probability of 'return'")
+v("lp_if", _alt["logprob"], "{:.3f}", "reported log probability of 'if'")
+v("lp_doc", _top[_doc], "{:.3f}", "reported log probability of the docstring quote")
+v("lp_p_raw", _p_raw, "{:.3f}", "reported probability")
+v("lp_p_t", _p_t, "{:.3f}", "probability actually sampled")
+v("lp_ratio", _p_raw / _p_t, "{:.1f}", "reported over sampled, x")
+v("lp_if_pct", pct(math.exp(_alt["logprob"])), "{:.1f}", "'if' probability, %")
 
-# ---------------------------------------------------------------- shaping
-# Chapter Sec. 17.3.3: R = c + alpha*f - lambda*len; order holds if alpha + lambda < 1.
-# Exercise 2 inputs: alpha 0.4, lambda 0.7, cap 8,000 tokens.
-def shaped(c, f, tokens, alpha, lam, cap=8000):
-    return c + alpha * f - lam * tokens / cap
+print("== All-pass rule (Scenarios.FlakyRaceTestAllPassRule)")
+FL = FLAKY_S.result
+v("ap_g", FLAKY_S.group, "{:.0f}", "group of incorrect patches")
+v("ap_any", pct(FL.group_false_pass), "{:.1f}", "P(at least one false pass), %")
+v("ap_trials", FLAKY_S.trials, "{:.0f}", "trials")
+v("ap_trials_words", FLAKY_S.trials, "words", "trials, in words")
+v("ap_bad", FLAKY_S.incorrect_pass, "{:.2f}", "incorrect patch, per-trial pass")
+v("ap_good", FLAKY_S.correct_pass, "{:.2f}", "correct patch, per-trial pass")
+v("ap_bad_acc", pct(FL.incorrect_accepted), "{:.1f}", "incorrect accepted, %")
+v("ap_good_rej", pct(FL.correct_rejected), "{:.2f}", "correct rejected, %")
+v("ap_e_bad", FL.expected_trials_incorrect, "{:.2f}", "expected trials, incorrect")
+v("ap_e_good", FL.expected_trials_correct, "{:.2f}", "expected trials, correct")
 
+print("== Ratio clip (Scenarios.DominantTokenRatioClip, RareTokenRatioClip; Literature.RlTrainingDynamics)")
+v("clip_eps", CLIP_HI_S.epsilon, "{:.1f}", "clip width")
+v("clip_hi_p", CLIP_HI_S.probability, "{:.1f}", "dominant token")
+v("clip_hi_ceil", CLIP_HI_S.result.ceiling, "{:.2f}", "its ceiling")
+v("clip_lo_p", CLIP_LO_S.probability, "{:.2f}", "rare token")
+v("clip_lo_rise", CLIP_LO_S.result.rise, "{:.3f}", "its allowed rise")
+v("clip_lo_ceil", CLIP_LO_S.result.ceiling, "{:.3f}", "its ceiling")
+v("dapo_start", RLD.DapoEntropyStartAbout, "{:.1f}", "entropy at the start, about")
+v("dapo_collapse_steps", RLD.DapoSymmetricClipCollapseStepsAbout, "{:,.0f}", "collapse within, steps")
+v("dapo_held", RLD.DapoClipHigherEntropyAbout, "{:.1f}", "entropy held with Clip-Higher, about")
 
-# ---------------------------------------------------------------- credit
-# Chapter Sec. 17.4.1: baseline 0.4 on a failed rollout. Sec. 17.4.3: forks of 20,
-# 1 pass then 12 passes. NM 17.2: 30 turns x 512 tokens, 8 continuations.
-def forks(m=20, before=1, after=12):
-    v0, v1 = before / m, after / m
-    se = 1 / (2 * math.sqrt(m))
-    se_diff = math.sqrt(2) / (2 * math.sqrt(m))
-    return v0, v1, v1 - v0, se, se_diff, 2 * se_diff
+print("== Slot cycle (Scenarios.RepairRolloutSlotResets)")
+SL = SLOT_S.result
+v("slot_n", SLOT_S.slots, "{:.0f}", "slots")
+v("slot_decisions", SLOT_S.decisions, "{:.0f}", "decisions per episode")
+v("slot_model_ms", ms(SLOT_S.model_time), "{:.0f}", "model service per decision, ms")
+v("slot_tool_ms", ms(SLOT_S.tool_time), "{:.0f}", "tool execution per decision, ms")
+v("slot_assess_s", sec(SLOT_S.assessment_time), "{:.1f}", "assessment, s")
+v("slot_cold_s", sec(SLOT_S.cold_reset), "{:.1f}", "cold reset, s")
+v("slot_snap_ms", ms(SLOT_S.snapshot_reset), "{:.0f}", "snapshot reset, ms")
+v("slot_work_s", sec(SL.work), "{:.1f}", "work floor, s")
+v("slot_cold_cycle", sec(SL.cold_cycle), "{:.0f}", "cold cycle, s")
+v("slot_cold_cycle1", sec(SL.cold_cycle), "{:.1f}", "the same, one decimal")
+v("slot_snap_cycle", sec(SL.snapshot_cycle), "{:.3f}", "snapshot cycle, s")
+v("slot_cold_rate", SL.cold_episodes_per_hour, "{:,.0f}", "cold capacity, episodes an hour")
+v("slot_snap_rate", SL.snapshot_episodes_per_hour, "{:,.0f}", "snapshot capacity, episodes an hour")
+v("slot_ratio", SL.capacity_ratio, "{:.2f}", "capacity ratio, x")
+v("slot_reset_ratio", SL.reset_ratio, "{:.0f}", "reset speedup, x")
+v("slot_reset_pct", pct(1 - SL.cold_work_share), "{:.0f}", "reset share of the cold cycle, %")
 
+print("== Barrier and verifier pool (Scenarios.RolloutGroupOfFourBarrier, RepairVerifierPool)")
+BR, PL = BAR_S.result, POOL_S.result
+v("bar_g", BR.group, "{:.0f}", "group size")
+v("bar_idle", pct(BR.idle_share), "{:.0f}", "idle share of reserved slot time, %")
+v("bar_fast", sec(BR.fastest), "{:.1f}", "fastest member, s")
+v("bar_slow", sec(BR.barrier), "{:.1f}", "slowest member, s")
+v("pool_traj", POOL_S.trajectories, "{:.0f}", "trajectories per interval")
+v("pool_interval", sec(POOL_S.interval), "{:.0f}", "interval, s")
+v("pool_rate", PL.arrival_rate.to("1/s").magnitude, "{:.0f}", "arrival rate, per s")
+v("pool_trials", POOL_S.trials, "{:.0f}", "trials")
+v("pool_trial_s", sec(POOL_S.trial_time), "{:.0f}", "trial time, s")
+v("pool_busy", PL.busy, "{:.0f}", "busy workers")
+v("pool_target", pct(POOL_S.target_utilization), "{:.0f}", "target utilization, %")
+v("pool_slots", PL.slots, "{:.0f}", "provisioned slots")
 
-def nm172(H=30, toks=512, m=8, boundaries=None):
-    base = H * toks
-    ks = range(1, H) if boundaries is None else boundaries
-    branches = m * len(list(ks))
-    total = base + m * toks * sum(H - k for k in ks)
-    return base, branches, total, total / base
-
-
-# ---------------------------------------------------------------- GRPO
-# Chapter equation 2 (population std, divisor G) and NM 17.3; TRL GRPOTrainer
-# (commit 88365e5) uses nanstd with Bessel's correction and a 1e-4 stabilizer.
-def grpo(rewards, eps=1e-8, bessel=False):
-    g = len(rewards)
-    mu = sum(rewards) / g
-    var = sum((r - mu) ** 2 for r in rewards) / (g - 1 if bessel else g)
-    sd = math.sqrt(var)
-    return mu, sd, [(r - mu) / (sd + eps) for r in rewards]
-
-
-def lone_pass(G, eps=0.0):
-    return (G - 1) / (math.sqrt(G - 1) + G * eps)
-
-
-# ---------------------------------------------------------------- contrast
-# Chapter Sec. 17.5.4 and NM 17.4: P(contrast) = 1 - p^G - (1-p)^G.
-def contrast(p, G):
-    return 1 - p ** G - (1 - p) ** G
-
-
-def nm174():
-    tokens_step = 512 * 8 * 30 * 512
-    rows = [("Current task mix", 8, 0.05), ("Double the group", 16, 0.05), ("Target difficulty", 8, 0.50)]
-    out = [(name, G, p, contrast(p, G), G / contrast(p, G)) for name, G, p in rows]
-    return tokens_step, out
-
-
-# ---------------------------------------------------------------- all-pass rule
-# Chapter NM 17.5: incorrect patch 0.20 per trial, correct 0.98, 3 trials, group of 16.
-def allpass(q_bad=0.20, q_good=0.98, n=3, G=16):
-    return (1 - (1 - q_bad) ** G, q_bad ** n, 1 - q_good ** n,
-            sum(q_bad ** j for j in range(n)), sum(q_good ** j for j in range(n)))
-
-
-# ---------------------------------------------------------------- clipping
-# Chapter Sec. 17.8.3 and DAPO Sec. 3.1: epsilon 0.2, tokens at 0.9 and 0.01.
-def clip_room(p, eps=0.2):
-    return p * (1 + eps), p * eps
-
-
-# ---------------------------------------------------------------- length bias
-# Chapter Sec. 17.5.3: failures of 128 and 4,096 tokens with the same coefficient.
-def length_ratio(short=128, long=4096):
-    return long / short
-
-
-# ---------------------------------------------------------------- slot cycle
-# Chapter NM 17.6: 256 slots, 20 decisions x (120 ms model + 80 ms tool), 0.5 s
-# assessment, cold reset 3.5 s, snapshot 15 ms.
-def nm176(slots=256, H=20, model=0.120, tool=0.080, assess=0.5, cold=3.5, snap=0.015):
-    work = H * (model + tool) + assess
-    c_cold, c_snap = work + cold, work + snap
-    cap_cold, cap_snap = slots * 3600 / c_cold, slots * 3600 / c_snap
-    return work, c_cold, c_snap, cap_cold, cap_snap, cap_snap / cap_cold, cold / snap, work / c_cold
-
-
-# ---------------------------------------------------------------- verifier pool
-# Chapter Sec. 17.9.5: 512 trajectories every 16 s, 3 trials of 8 s, 80% target.
-def pool(arrivals=512, every=16, trials=3, t=8, target=0.8):
-    lam = arrivals / every
-    one = lam * t
-    busy = lam * trials * t
-    return lam, one, busy, math.ceil(busy / target)
-
-
-# ---------------------------------------------------------------- logprobs (our run)
-# data/logprob_run.json: Ollama 0.34.4, gemma3:1b, top-3 log probabilities as reported.
-def logprob_run():
-    d = json.loads((HERE / "data" / "logprob_run.json").read_text())
-    runs = {r["temperature"]: r for r in d["runs"]}
-    tok = runs[0.2]["tokens"][2]       # third sampled token at T = 0.2
-    top = tok["top"]
-    p_raw = math.exp(tok["logprob"])
-    # probability of the same token after temperature 0.2, renormalized over the
-    # reported top 3 (the omitted tail is negligible after raising to the 5th power)
-    w = [math.exp(lp / 0.2) for _, lp in top]
-    p_t = math.exp(tok["logprob"] / 0.2) / sum(w)
-    return d, tok, p_raw, p_t
-
-
-# ---------------------------------------------------------------- Yue et al. 2025
-# Yue et al., arXiv 2504.13837, Table 3, Omni-MATH-Train, Qwen2.5-7B and GRPO steps.
-YUE = [(0, 9.9, 67.2), (150, 26.1, 66.3), (300, 33.6, 65.3), (450, 42.5, 64.3)]
-
+print("== Yue et al. 2025 (Literature.GrpoPassAtKSteps)")
+v("yue_p1_base", YUE[0]["pass_at_1"], "{:.1f}", "pass@1, base, %")
+v("yue_p1_end", YUE[-1]["pass_at_1"], "{:.1f}", "pass@1, last step, %")
+v("yue_pk_base", YUE[0]["pass_at_256"], "{:.1f}", "pass@256, base, %")
+v("yue_pk_end", YUE[-1]["pass_at_256"], "{:.1f}", "pass@256, last step, %")
+v("yue_steps", YUE[-1]["step"], "{:.0f}", "GRPO steps")
 
 if __name__ == "__main__":
-    print("Hook (METR task table): percent of runs that reward hacked")
-    for t, pct in metr():
-        show(t, pct, "{:.1f}%")
-
-    print("Fixed baseline 0.25 (Sec. 17.2.2)")
-    up, down = baseline_scores()
-    show("pass coefficient", up, "{:+.2f}")
-    show("fail coefficient", down, "{:+.2f}")
-
-    print("False accepts in the reward (NM 17.1 and the estimate frame)")
-    n, ta, fa, share = nm171()
-    show("rollouts", n, "{:,}")
-    show("true accepts", ta, "{:.2f}")
-    show("false accepts", fa, "{:.2f}")
-    show("false share at 10%", 100 * share, "{:.1f}%")
-    show("false share at 5% (Checkpoint 17.1)", 100 * false_share(0.05), "{:.1f}%")
-    show("false share at 40%", 100 * false_share(0.40), "{:.1f}%")
-
-    print("Shaping order (Exercise 2: alpha 0.4, lambda 0.7)")
-    show("pass, 7,200 tokens, f 0.5", shaped(1, 0.5, 7200, 0.4, 0.7), "{:.3f}")
-    show("fail, 400 tokens, f 1", shaped(0, 1.0, 400, 0.4, 0.7), "{:.3f}")
-    show("lowest pass 1 - lambda", 1 - 0.7, "{:.2f}")
-    show("highest fail alpha", 0.4, "{:.2f}")
-    show("alpha + lambda", 0.4 + 0.7, "{:.2f}")
-
-    print("Credit (Sec. 17.4.1 baseline 0.4; Sec. 17.4.3 forks of 20)")
-    show("failed rollout coefficient, baseline 0.4", 0 - 0.4, "{:+.1f}")
-    v0, v1, d, se, sed, thr = forks()
-    show("value before debugger", v0, "{:.2f}")
-    show("value after debugger", v1, "{:.2f}")
-    show("difference", d, "{:.2f}")
-    show("SE bound per fork", se, "{:.2f}")
-    show("SE bound of difference", sed, "{:.2f}")
-    show("resolution threshold (2 x SE)", thr, "{:.2f}")
-    b, br, tot, mult = nm172()
-    show("base tokens", b, "{:,}")
-    show("exhaustive branches", br, "{:,}")
-    show("exhaustive tokens", tot, "{:,}")
-    show("exhaustive multiple", mult, "{:.0f}x")
-    b, br, tot, mult = nm172(boundaries=[10, 20])
-    show("two-fork branches", br, "{:,}")
-    show("two-fork tokens", tot, "{:,}")
-    show("two-fork multiple", mult, "{:.0f}x")
-
-    print("GRPO coefficients (NM 17.3; TRL convention)")
-    mu, sd, a = grpo([0, 1, 0])
-    show("mean", mu, "{:.6f}")
-    show("std (divisor G)", sd, "{:.6f}")
-    show("failure coefficient", a[0], "{:.6f}")
-    show("pass coefficient", a[1], "{:.6f}")
-    mu, sd, a = grpo([0, 1, 0], eps=1e-4, bessel=True)
-    show("TRL std (divisor G-1)", sd, "{:.4f}")
-    show("TRL failure coefficient", a[0], "{:.3f}")
-    show("TRL pass coefficient", a[1], "{:.3f}")
-    show("lone pass, G=3", lone_pass(3), "{:.2f}")
-    show("lone pass, G=16", lone_pass(16), "{:.2f}")
-    _, _, a16 = grpo([1] + [0] * 15, eps=0)
-    show("each failure, G=16", a16[1], "{:.2f}")
-    show("per-token penalty ratio 128 vs 4,096", length_ratio(), "{:.0f}x")
-
-    print("Zero-contrast groups (Sec. 17.5.4, NM 17.4, Checkpoint 17.2)")
-    show("G=2, p=0.10 contrast", contrast(0.10, 2), "{:.2f}")
-    show("G=8, p=0.05 zero-contrast share", 100 * (1 - contrast(0.05, 8)), "{:.0f}%")
-    tokens_step, rows = nm174()
-    show("tokens per step", tokens_step / 1e6, "{:.1f} M")
-    for name, G, p, c, r in rows:
-        show(f"{name} (G={G}, p={p}) contrast", c, "{:.2f}")
-        show(f"{name} rollouts per informative group", r, "{:.1f}")
-    show("targeting saving", rows[0][4] / rows[2][4], "{:.1f}x")
-    show("Checkpoint 17.2: G=8, p=0.20 contrast", contrast(0.20, 8), "{:.2f}")
-    show("Checkpoint 17.2: rollouts per informative group", 8 / contrast(0.20, 8), "{:.1f}")
-
-    print("All-pass rule (NM 17.5)")
-    g, acc_bad, rej_good, e_bad, e_good = allpass()
-    show("group of 16 incorrect, P(at least one false pass)", 100 * g, "{:.1f}%")
-    show("incorrect accepted after 3 trials", 100 * acc_bad, "{:.1f}%")
-    show("correct rejected after 3 trials", 100 * rej_good, "{:.2f}%")
-    show("expected trials, incorrect", e_bad, "{:.2f}")
-    show("expected trials, correct", e_good, "{:.4f}")
-
-    print("Clipping room (Sec. 17.8.3, epsilon 0.2)")
-    for p in (0.9, 0.01):
-        hi, room = clip_room(p)
-        show(f"token at {p}: ceiling", hi, "{:.3f}")
-        show(f"token at {p}: room", room, "{:.3f}")
-
-    print("Slot cycle (NM 17.6)")
-    w, cc, cs, kc, ks, ratio, rs, frac = nm176()
-    show("non-reset work (s)", w, "{:.2f}")
-    show("cold cycle (s)", cc, "{:.3f}")
-    show("snapshot cycle (s)", cs, "{:.3f}")
-    show("cold capacity (episodes/h)", kc, "{:,.0f}")
-    show("snapshot capacity (episodes/h)", ks, "{:,.0f}")
-    show("capacity ratio", ratio, "{:.2f}x")
-    show("reset speedup", rs, "{:.0f}x")
-    show("non-reset share, cold", 100 * frac, "{:.2f}%")
-    show("reset share, cold", 100 * (1 - frac), "{:.0f}%")
-
-    print("Verifier pool (Sec. 17.9.5)")
-    lam, one, busy, slots = pool()
-    show("arrival rate (trajectories/s)", lam, "{:.0f}")
-    show("busy workers, one trial", one, "{:.0f}")
-    show("busy workers, three trials", busy, "{:.0f}")
-    show("slots at 80% target", slots, "{:.0f}")
-
-    print("Logprob run (data/logprob_run.json)")
-    d, tok, p_raw, p_t = logprob_run()
-    print("  server:", d["server"])
-    print(f"  token at T=0.2: {tok['token']!r}, reported logprob {tok['logprob']:.3f}")
-    show("reported probability", p_raw, "{:.3f}")
-    show("probability under T=0.2 sampling (top-3 renormalized)", p_t, "{:.3f}")
-    show("ratio reported / sampled", p_raw / p_t, "{:.1f}x")
-    alt = [t for t in d["runs"] if t["temperature"] == 1.5][0]["tokens"][2]
-    print(f"  token at T=1.5: {alt['token']!r}, probability {100 * math.exp(alt['logprob']):.1f}%")
-
-    print("Yue et al. 2025, Table 3 (Omni-MATH-Train)")
-    for step, p1, p256 in YUE:
-        print(f"  step {step}: pass@1 {p1}%, pass@256 {p256}%")
-    show("pass@1 change", YUE[-1][1] - YUE[0][1], "{:+.1f} pts")
-    show("pass@256 change", YUE[-1][2] - YUE[0][2], "{:+.1f} pts")
+    write(__file__)

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Figures for Lecture 6 (Volume III), Long-Term Memory.
 
-Every value comes from calcs.py, which names its source: "LTM" is the
-rendered chapter (Long-Term Memory, dev text read 2026-10-18); outside data
-are Jimenez et al. 2024 (SWE-bench), Yang et al. 2024 (SWE-agent), Zou et al.
-2025 (PoisonedRAG), Liu et al. 2024 (Lost in the Middle), and this deck's own
-measurement (scan_bench.py, scan_bench.csv).
+Every number drawn here comes from calcs.py, which reads MLSysIM: the
+Scenarios.* the chapter also reads (Napkin Math 6.1 to 6.4, Checkpoint 6.4),
+Literature (Jimenez et al. 2024, SWE-bench; Yang et al. 2024, SWE-agent; Zou
+et al. 2025, PoisonedRAG), and this deck's own measurement (scan_bench.py,
+scan_bench.csv). Plotted geometry uses the scenario values and results;
+labels use the formatted strings the slides print (deckvals val/num).
+Diagram coordinates, axis ranges, tick positions, and label offsets are
+layout; the diagrams' example records (paths, counts in the inverted index,
+"retrieved 30 times") are the chapter's illustrative text.
 
 Diagrams are hand-written SVG in the Volume III palette (volumes/vol3/
 palette.md): green memory and context, violet storage, amber generated or
@@ -22,7 +26,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
-import calcs as K  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -162,29 +168,31 @@ for k in range(1, 4):
 # ----------------------------------------------- NM 6.1 records that fit
 def fit_fig(path, k):
     fig, ax = plt.subplots(figsize=(5.8, 2.4))
-    a = K.allowance
+    a = num("rp_allowance")
+    body, meta, env = num("rp_body"), num("rp_meta"), num("rp_envelope")
+    body_only, fit = num("rp_body_only"), num("rp_records")
     # row 1 (top): count bodies only
     y1, y0 = 1, 0
-    ax.barh(y1, K.body_only * K.BODY, color=C["memory"], height=0.55)
+    ax.barh(y1, body_only * body, color=C["memory"], height=0.55)
     if k >= 2:
-        ax.barh(y1, K.body_only * K.META + K.ENVELOPE, left=K.body_only * K.BODY,
+        ax.barh(y1, body_only * meta + env, left=body_only * body,
                 color=C["danger"], height=0.55)
-        ax.text(K.body_only_tokens + 80, y1, f"{K.body_only_tokens:,}: over by {K.overshoot:,}",
+        ax.text(num("rp_body_only_used") + 80, y1, f"{val('rp_body_only_used')}: over by {val('rp_overshoot')}",
                 va="center", fontsize=12, fontweight="bold", color=C["danger"])
-        ax.barh(y0, K.fit * K.BODY, color=C["memory"], height=0.55)
-        ax.barh(y0, K.fit * K.META + K.ENVELOPE, left=K.fit * K.BODY, color=C["network"],
+        ax.barh(y0, fit * body, color=C["memory"], height=0.55)
+        ax.barh(y0, fit * meta + env, left=fit * body, color=C["network"],
                 height=0.55)
-        ax.text(K.allowance + 80, y0, f"{K.used:,}: fits, {K.remainder} left",
+        ax.text(a + 80, y0, f"{val('rp_used')}: fits, {val('rp_remaining')} left",
                 va="center", fontsize=12, fontweight="bold", color=C["data"])
     else:
-        ax.text(K.body_only * K.BODY + 80, y1, "???", va="center", fontsize=14,
+        ax.text(body_only * body + 80, y1, "???", va="center", fontsize=14,
                 fontweight="bold", color=C["danger"])
-    ax.text(-60, y1, f"Count bodies:\n{K.body_only} records", ha="right", va="center",
+    ax.text(-60, y1, f"Count bodies:\n{val('rp_body_only')} records", ha="right", va="center",
             fontsize=12, fontweight="bold")
-    ax.text(-60, y0, f"Count serialized:\n{K.fit} records", ha="right", va="center",
+    ax.text(-60, y0, f"Count serialized:\n{val('rp_records')} records", ha="right", va="center",
             fontsize=12, fontweight="bold", alpha=1.0 if k >= 2 else 0.0)
     ax.axvline(a, color=C["text"], lw=1.6, ls="--")
-    ax.text(a, 1.5, f" allowance {a:,}", fontsize=11, fontweight="bold", va="bottom",
+    ax.text(a, 1.5, f" allowance {val('rp_allowance')}", fontsize=11, fontweight="bold", va="bottom",
             ha="center")
     ax.set_xlim(0, 10_200)
     ax.set_ylim(-0.5, 1.75)
@@ -199,17 +207,19 @@ for k in (1, 2):
 
 
 # ---------------------------------------------- SWE-bench: context vs result
+SWEB_CONTEXT = [r["max_context_k"] for r in K.SWEB]
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.5))
-for ax, ys, ck, lab in ((a1, K.SWEB_RECALL, "memory", "BM25 recall of edited files (%)"),
-                        (a2, K.SWEB_RESOLVED, "danger", "Issues resolved (%)")):
-    ax.plot(K.SWEB_CONTEXT, ys, "-o", color=C[ck], lw=2.5, ms=8)
-    for x, y in zip(K.SWEB_CONTEXT, ys):
-        below = ys is K.SWEB_RECALL and x == K.SWEB_CONTEXT[0]
-        ax.annotate(f"{y:.2f}", (x, y), xytext=(18, -12) if below else (0, 9),
+for ax, key, ck, lab in ((a1, "swb_rec", "memory", "BM25 recall of edited files (%)"),
+                         (a2, "swb_res", "danger", "Issues resolved (%)")):
+    ys = [num(f"{key}{i}") for i in range(1, len(SWEB_CONTEXT) + 1)]
+    ax.plot(SWEB_CONTEXT, ys, "-o", color=C[ck], lw=2.5, ms=8)
+    for i, (x, y) in enumerate(zip(SWEB_CONTEXT, ys), start=1):
+        below = key == "swb_rec" and i == 1
+        ax.annotate(val(f"{key}{i}"), (x, y), xytext=(18, -12) if below else (0, 9),
                     textcoords="offset points",
                     ha="center", fontsize=12, fontweight="bold", color=C[ck])
-    ax.set_xticks(K.SWEB_CONTEXT)
-    ax.set_xticklabels([f"{c}K" for c in K.SWEB_CONTEXT])
+    ax.set_xticks(SWEB_CONTEXT)
+    ax.set_xticklabels([f"{c:.0f}K" for c in SWEB_CONTEXT])
     ax.set_xlim(5, 58)
     ax.set_ylim(min(ys) - (max(ys) - min(ys)) * 0.3, max(ys) + (max(ys) - min(ys)) * 0.35)
     ax.set_title(lab, fontsize=12, fontweight="bold", color=C[ck])
@@ -219,9 +229,9 @@ sp.save(fig, out / "swebench_context.svg")
 
 # ------------------------------------------------- SWE-agent vs pre-staging
 sp.hbars(out / "swe_agent.svg", [
-    ("Pre-staged\n(BM25)", K.LITE_RAG, "neutral", f"{K.LITE_RAG:.2f}%"),
-    ("Shell\ncommands", K.LITE_SHELL, "memory", f"{K.LITE_SHELL:.2f}%"),
-    ("Search tools\n(SWE-agent)", K.LITE_AGENT, "data", f"{K.LITE_AGENT:.2f}%"),
+    ("Pre-staged\n(BM25)", num("swa_rag"), "neutral", f"{val('swa_rag')}%"),
+    ("Shell\ncommands", num("swa_shell"), "memory", f"{val('swa_shell')}%"),
+    ("Search tools\n(SWE-agent)", num("swa_agent"), "data", f"{val('swa_agent')}%"),
 ], "", log=False, size=(3.8, 2.3),
     xlabel="SWE-bench Lite resolved (%), same model")
 
@@ -259,29 +269,32 @@ def scan_floor(path, k):
     import numpy as np
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     xs = np.logspace(3, 8, 100)
-    ax.plot(xs, xs * K.DIM * K.B_FP16 / K.BW * 1e3, color=C["memory"], lw=2.5)
-    ax.plot([K.N_VEC], [K.t_stream * 1e3], "o", ms=11, color=C["danger"], mec="white")
-    ax.annotate(f"10 million: {K.t_stream * 1e3:.1f} ms", (K.N_VEC, K.t_stream * 1e3),
+    ms_per_vector = (K.s.bytes_per_vector / K.SCAN.host.memory.bandwidth).to("ms").magnitude
+    budget_ms = num("sc_budget_ms")
+    ax.plot(xs, xs * ms_per_vector, color=C["memory"], lw=2.5)
+    ax.plot([K.SCAN.vectors], [num("sc_ms")], "o", ms=11, color=C["danger"], mec="white")
+    ax.annotate(f"{val('sc_n_m')} million: {val('sc_ms')} ms", (K.SCAN.vectors, num("sc_ms")),
                 xytext=(-12, 4), textcoords="offset points", ha="right", fontsize=12,
                 fontweight="bold", color=C["danger"])
     if k >= 2:
-        ax.axhline(K.BUDGET_S * 1e3, color=C["neutral"], lw=1.5, ls="--")
-        ax.text(1.2e3, K.BUDGET_S * 1e3 * 1.25, "10 ms search budget", fontsize=11,
+        ax.axhline(budget_ms, color=C["neutral"], lw=1.5, ls="--")
+        ax.text(1.2e3, budget_ms * 1.25, f"{val('sc_budget_ms')} ms search budget", fontsize=11,
                 color=C["neutral"], fontweight="bold")
-        ax.plot([1e4], [K.t_10k * 1e3], "o", ms=11, color=C["data"], mec="white")
-        ax.annotate(f"10,000: {K.t_10k * 1e3:.2f} ms", (1e4, K.t_10k * 1e3),
+        t_filtered = K.mag(K.s.filtered_time, "ms")
+        ax.plot([K.SCAN.filtered_vectors], [t_filtered], "o", ms=11, color=C["data"], mec="white")
+        ax.annotate(f"{val('sc_filtered')}: {val('sc_filtered_ms')} ms", (K.SCAN.filtered_vectors, t_filtered),
                     xytext=(10, -14), textcoords="offset points", fontsize=12,
                     fontweight="bold", color=C["data"])
-        ax.axvline(K.ceiling, color=C["neutral"], lw=1.2, ls=":")
-        ax.text(K.ceiling * 1.25, 0.02, f"ceiling about {round(K.ceiling, -3):,.0f}",
+        ax.axvline(K.s.budget_vectors, color=C["neutral"], lw=1.2, ls=":")
+        ax.text(K.s.budget_vectors * 1.25, 0.02, f"ceiling about {val('sc_budget_vec_k')}",
                 fontsize=11, color=C["text"], fontweight="bold")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(1e3, 1e8)
     ax.set_ylim(0.01, 5000)
-    ax.set_xlabel("Eligible vectors (768 dims, FP16)")
+    ax.set_xlabel(f"Eligible vectors ({val('sc_dim')} dims, FP16)")
     ax.set_ylabel("Scan floor (ms)")
-    ax.text(0.01, 0.97, "derived, 50 GB/s host", transform=ax.transAxes, ha="left",
+    ax.text(0.01, 0.97, f"derived, {val('sc_bw')} GB/s host", transform=ax.transAxes, ha="left",
             va="top", fontsize=10, color=C["neutral"])
     sp.save(fig, path)
 
@@ -297,22 +310,22 @@ def scan_measured(path):
     ns = [r[0] for r in K.rows]
     ts = [r[2] * 1e3 for r in K.rows]
     xs = np.logspace(3.8, 6.7, 50)
-    ax.plot(xs, xs * K.DIM * K.B_FP32 / K.bw_fit * 1e3, color=C["memory"], lw=2,
+    ax.plot(xs, xs * K.SCAN.dimension * K.LAP_BYTES / K.bw_fit * 1e3, color=C["memory"], lw=2,
             label="fit")
     ax.plot(ns, ts, "o", ms=9, color=C["compute"], mec="white", zorder=5)
-    ax.text(1.3e4, 30, f"fit: {K.bw_fit / 1e9:.0f} GB/s\nstreamed", fontsize=13,
+    ax.text(1.3e4, 30, f"fit: {val('lap_bw')} GB/s\nstreamed", fontsize=13,
             color=C["memory"], fontweight="bold")
-    ax.axhline(K.BUDGET_S * 1e3, color=C["neutral"], lw=1.5, ls="--")
-    ax.text(8e3, K.BUDGET_S * 1e3 * 1.25, "10 ms budget", fontsize=12, color=C["neutral"],
+    ax.axhline(num("sc_budget_ms"), color=C["neutral"], lw=1.5, ls="--")
+    ax.text(8e3, num("sc_budget_ms") * 1.25, f"{val('sc_budget_ms')} ms budget", fontsize=12, color=C["neutral"],
             fontweight="bold")
-    ax.annotate(f"3 million: {ts[-1]:.0f} ms", (ns[-1], ts[-1]), xytext=(-8, 8),
+    ax.annotate(f"{val('lap_top_m')} million: {val('lap_top_ms')} ms", (ns[-1], ts[-1]), xytext=(-8, 8),
                 textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
                 color=C["compute"])
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(7e3, 6e6)
     ax.set_ylim(0.1, 300)
-    ax.set_xlabel("Vectors (768 dims, FP32)", fontsize=13)
+    ax.set_xlabel(f"Vectors ({val('sc_dim')} dims, FP32)", fontsize=13)
     ax.set_ylabel("Measured scan (ms)", fontsize=13)
     ax.tick_params(labelsize=13)
     sp.save(fig, path)
@@ -322,35 +335,38 @@ scan_measured(out / "scan_measured.svg")
 
 # ------------------------------------------------------- ANN resident bytes
 sp.hbars(out / "ann_bytes.svg", [
-    ("Exact scan", K.scan_bytes / 1e9, "memory", f"{K.scan_bytes / 1e9:.2f} GB of vectors"),
-    ("HNSW", K.hnsw_total / 1e9, "network", f"{K.hnsw_total / 1e9:.2f} GB with links"),
-    ("IVF-PQ", K.pq_codes / 1e9, "data", f"{K.pq_codes / 1e9:.2f} GB of codes"),
+    ("Exact scan", num("sc_gb"), "memory", f"{val('sc_gb')} GB of vectors"),
+    ("HNSW", num("ann_total_gb"), "network", f"{val('ann_total_gb')} GB with links"),
+    ("IVF-PQ", num("ann_codes_gb"), "data", f"{val('ann_codes_gb')} GB of codes"),
 ], "", log=False, size=(5.6, 1.9),
-    xlabel="Resident bytes, 10 million 768-dim FP16 vectors (derived)")
+    xlabel=f"Resident bytes, {val('sc_n_m')} million {val('sc_dim')}-dim FP16 vectors (derived)")
 
 
 # --------------------------------------------------- NM 6.3 depth budget
 def depth_fig(path, k):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     cols = [C["data_l"], C["data_l"], C["data"], C["danger"]]
-    for d, (n, t) in enumerate(zip(K.depth_nodes, K.depth_tokens)):
-        shown = d < 3 or k >= 2
+    last = K.TREE.depth
+    for d, (n, t) in enumerate(zip(K.g.nodes_by_depth, K.g.tokens_by_depth)):
+        shown = d < last or k >= 2
         ax.bar(d, t, color=cols[d], width=0.62, alpha=1.0 if shown else 0.0)
         if shown:
-            ax.text(d, t + 150, f"{t:,}", ha="center", fontsize=13, fontweight="bold",
-                    color=C["danger"] if d == 3 else C["text"])
+            ax.text(d, t + 150, val(f"gn_tok{d}"), ha="center", fontsize=13, fontweight="bold",
+                    color=C["danger"] if d == last else C["text"])
         else:
             ax.text(d, 900, "???", ha="center", fontsize=15, fontweight="bold",
                     color=C["danger"])
-        ax.text(d, -1050, f"depth {d}\n{n} node{'' if n == 1 else 's'}", ha="center", va="top", fontsize=12)
-    ax.axhline(K.ALLOWANCE, color=C["text"], lw=1.6, ls="--")
-    ax.text(-0.45, K.ALLOWANCE + 180, f"allowance {K.ALLOWANCE:,} tokens", fontsize=12,
+        ax.text(d, -1050, f"depth {d}\n{val(f'gn_nodes{d}')} node{'' if n == 1 else 's'}", ha="center",
+                va="top", fontsize=12)
+    allowance = num("gn_allowance")
+    ax.axhline(allowance, color=C["text"], lw=1.6, ls="--")
+    ax.text(-0.45, allowance + 180, f"allowance {val('gn_allowance')} tokens", fontsize=12,
             fontweight="bold")
     ax.set_xticks([])
     ax.set_xlim(-0.6, 3.6)
     ax.set_ylim(0, 8300)
     ax.set_ylabel("Serialized tokens")
-    ax.text(-0.5, 3300, "3 children per node\n180 tokens per node\n(illustrative)",
+    ax.text(-0.5, 3300, f"{val('gn_children')} children per node\n{val('gn_node')} tokens per node\n(illustrative)",
             ha="left", fontsize=11, color=C["neutral"])
     sp.save(fig, path)
 
@@ -387,7 +403,7 @@ def write_fig(path, k):
         s.rect(10, 334, 880, 57, "fault", sw=2)
         s.text(450, 358, "10:00 to 11:00, same calendar: supersede. Similarity-first", size=21,
                role="fault", bold=True, anchor="middle")
-        s.text(450, 383, f"deduplication drops it ({K.pref_shared} of {K.pref_total} words shared).",
+        s.text(450, 383, f"deduplication drops it ({val('pf_shared')} of {val('pf_words')} words shared).",
                size=21, role="fault", bold=True, anchor="middle")
     s.save(path)
 
@@ -424,10 +440,10 @@ deletion_fig(out / "deletion_copies.svg")
 
 # -------------------------------------------------------- PoisonedRAG bars
 sp.hbars(out / "poisonedrag.svg", [
-    (f"{n}\n{size / 1e6:.1f}M texts", asr * 100, "danger", f"{asr * 100:.0f}%")
-    for n, size, asr in K.POISON
+    (f"{row['dataset']}\n{val(f'pr_kb{i}')}M texts", num(f"pr_asr{i}"), "danger", f"{val(f'pr_asr{i}')}%")
+    for i, row in enumerate(K.POISON, start=1)
 ], "", log=False, size=(5.4, 2.4),
-    xlabel=f"Target questions answered as the attacker chose (%), {K.POISON_N} texts each")
+    xlabel=f"Target questions answered as the attacker chose (%), {val('pr_n')} texts each")
 
 
 # --------------------------------------------------------- poisoning cascade
@@ -510,20 +526,20 @@ def _time_ticks_save(fig, path):
 
 sp.save = _time_ticks_save
 sp.hbars(out / "exclusion.svg", [
-    ("Exclude 8 entries", K.excl_write, "data", f"{K.excl_write * 1e6:.1f} µs"),
-    ("Check 50 candidates", K.excl_query, "data", f"{K.excl_query * 1e6:.1f} µs"),
-    ("Re-index, local", K.sync_local, "danger", f"{K.sync_local * 1e3:.0f} ms"),
-    ("Re-index, remote batch", K.sync_remote_batch, "danger",
-     f"{K.sync_remote_batch * 1e3:.0f} ms"),
-    ("Re-index, remote per file", K.sync_remote_serial, "danger",
-     f"{K.sync_remote_serial:.2f} s"),
+    (f"Exclude {val('ix_files')} entries", K.mag(K.x.exclusion_write_time, "s"), "data", f"{val('ix_write_us')} µs"),
+    (f"Check {val('ix_cands')} candidates", K.mag(K.x.exclusion_check_time, "s"), "data", f"{val('ix_check_us')} µs"),
+    ("Re-index, local", K.mag(K.x.local_time, "s"), "danger", f"{val('ix_local')} ms"),
+    ("Re-index, remote batch", K.mag(K.x.remote_batch_time, "s"), "danger",
+     f"{val('ix_remote')} ms"),
+    ("Re-index, remote per file", K.mag(K.x.remote_per_file_time, "s"), "danger",
+     f"{val('ix_serial')} s"),
 ], "", log=True, size=(5.8, 2.7), xlabel="Added work per edit (log; stipulated costs)")
 sp.save = _save
 
 # --------------------------------------- Checkpoint 6.4 cost per accepted task
 sp.hbars_steps(str(out / "ceff"), [
-    ("Policy A", K.ceff_a, "neutral", f"{K.ceff_a:.2f}"),
-    ("Policy B", K.ceff_b, "data", f"{K.ceff_b:.2f}"),
+    ("Policy A", K.c.baseline_cost, "neutral", val("pc_ceff_a")),
+    ("Policy B", K.c.maintained_cost, "data", val("pc_ceff_b")),
 ], "", log=False, size=(4.6, 1.7),
     xlabel="Cost per accepted task (units of A's attempt cost)")
 

@@ -418,38 +418,30 @@ class AllReduceCost:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import (
-        calc_ring_allreduce_time,
-        calc_ring_allreduce_data_factor,
-        calc_ring_allreduce_latency_time,
-        calc_ring_allreduce_latency_steps,
-    )
-    from mlsysim import Models, Hardware, Systems
+    from mlsysim import Models, Hardware, Scenarios, Systems
 
+    scenario = Scenarios.Llama2_70BGradientRing64Ndr  # 70B BF16 gradient on 64 GPUs, NDR alpha and beta
     m = Models.Language.Llama2_70B
-    ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    n_gpus = 64
+    n_gpus = scenario.group_sizes[0]
     ib_bw = Systems.Fabrics.InfiniBand_NDR
-    alpha = Systems.SwitchFabric.AlphaNdr
+    alpha = scenario.alpha
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient size (BF16 = 2 bytes/param)
     bf16_bytes_per_param = int(BYTES_FP16.to(byte).magnitude)
-    gradient_qty = m.size_in_bytes(BYTES_FP16)
+    gradient_qty = scenario.message
 
-    # Use shared library formula for Ring AllReduce time
-    # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha).
-    ring_total = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_ndr.bandwidth, latency_s=alpha).to(ms)
-
-    # Break out terms for pedagogical display
-    ring_bw_factor = calc_ring_allreduce_data_factor(n_gpus)
-    ring_bw_time = calc_ring_allreduce_time(message_bytes=gradient_qty, n_gpus=n_gpus, bandwidth_bytes_s=ib_bw.bandwidth, latency_s=0 * second).to(ms)
-    ring_lat_time = calc_ring_allreduce_latency_time(n_gpus, alpha).to(ms)
+    # Ring AllReduce time and its two terms (AllReduceAlgorithmModel)
+    _r = scenario.result
+    ring_total = _r.ring_time[n_gpus].to(ms)
+    ring_bw_factor = _r.ring_factor[n_gpus]
+    ring_bw_time = _r.ring_byte_time[n_gpus].to(ms)
+    ring_lat_time = _r.ring_startup_time[n_gpus].to(ms)
 
     # Value of halving an exposed AllReduce over a training campaign.
-    campaign_steps = ReferenceStats.CollectiveCommunicationProfile.TrainingRunSteps  # steps in one training run
-    halved_saving = (ring_total / 2).to(second)
-    halved_saving_gpu_hours = (halved_saving * campaign_steps * n_gpus).to("hour").magnitude
+    campaign_steps = scenario.run_steps  # steps in one training run
+    halved_saving = scenario.saved_time(n_gpus)
+    halved_saving_gpu_hours = scenario.saved_device_hours(n_gpus)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ring_total > 5000 * ms, f"AllReduce ({ring_total.to(ms).magnitude:.0f}ms) should be significant (>5s) for 70B BF16 model.")
@@ -465,7 +457,7 @@ class AllReduceCost:
     ib_bw_gb_per_s_str = fmt_bandwidth(ib_bw.bandwidth, unit=GB / second, precision=0, commas=False)
     nvlink_bw_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    lat_steps_str = fmt(calc_ring_allreduce_latency_steps(n_gpus), precision=0, commas=False)
+    lat_steps_str = fmt(_r.ring_rounds[n_gpus], precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
     # Gradient-size operand span: P x 10^9 params x 2 bytes/param.
     from mlsysim.fmt import fmt_math, sci_latex
@@ -896,21 +888,23 @@ For collectives, the parameters must describe the effective path. Latency ($\Mes
 # │      chapter's canonical NDR alpha) and beta = InfiniBand_NDR bandwidth;
 # │      T_sep = k·alpha (bandwidth term negligible); T_fused = alpha + k·n/beta.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
 
 class MessageFusion:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    alpha = Systems.SwitchFabric.AlphaNdr
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    small_msg = 4 * KB  # scenario assumption: MoE routing message
-    n_msgs = 100  # scenario assumption: messages fused into one
+    scenario = Scenarios.RoutingMessageFusionNdr  # 100 routing messages of 4 KB on NDR
+    alpha = scenario.alpha
+    beta = scenario.bandwidth
+    small_msg = scenario.message  # MoE routing message
+    n_msgs = scenario.count  # messages fused into one
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    n_star = (alpha * beta).to(KB)
-    fused_msg = n_msgs * small_msg
-    t_separate = (n_msgs * alpha).to(microsecond)
-    t_fused = (alpha + fused_msg / beta).to(microsecond)
-    speedup = (t_separate / t_fused).to_base_units().magnitude
+    n_star = scenario.crossover.to(KB)
+    fused_msg = scenario.fused_message
+    t_separate = scenario.separate_time.to(microsecond)
+    t_fused = scenario.fused_time.to(microsecond)
+    speedup = scenario.speedup
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(small_msg < n_star / 10, "Routing message must sit far below n*")
@@ -960,7 +954,7 @@ Across the typical data center interconnects tabulated in @tbl-interconnect-para
 # │      (SwitchFabric.EffectiveAlpha<Link>Low/High, ruling P8, 2026-10-15).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_alpha_beta_crossover
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_qty_range, fmt_time
 
 class InterconnectAlphaBeta:
@@ -976,22 +970,24 @@ class InterconnectAlphaBeta:
     # T(n) = alpha + n/beta). NVLink's datasheet 900 GB/s is the bidirectional
     # total, so the alpha-beta beta is the 450 GB/s one-way rate — consistent
     # with the per-port IB/PCIe/Ethernet figures in the other rows.
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
-    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
-    roce_bw = Systems.Fabrics.Ethernet_100G.bandwidth
+    scenario = Scenarios.CriticalSizeByInterconnect  # range-midpoint alphas, per-direction betas
+    nvlink_bw = scenario.bandwidths["NVLink"]
+    ndr_bw = scenario.bandwidths["NDR"]
+    hdr_bw = scenario.bandwidths["HDR"]
+    pcie_bw = scenario.bandwidths["PCIe Gen5"]
+    roce_bw = scenario.bandwidths["RoCE"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Crossover at the alpha midpoint of each range: n* = alpha * beta
-    nvlink_nstar = calc_alpha_beta_crossover((nvlink_alpha_lo + nvlink_alpha_hi) / 2, nvlink_bw)
+    _nstar = scenario.result.crossovers
+    nvlink_nstar = _nstar["NVLink"]
     # NDR row is anchored to the chapter's canonical NDR alpha (editor ruling
     # 2026-09-28), not its range midpoint; the range stays as context.
-    ndr_alpha_anchor = Systems.SwitchFabric.AlphaNdr
-    ndr_nstar = calc_alpha_beta_crossover(ndr_alpha_anchor, ndr_bw)
-    hdr_nstar = calc_alpha_beta_crossover((hdr_alpha_lo + hdr_alpha_hi) / 2, hdr_bw)
-    pcie_nstar = calc_alpha_beta_crossover((pcie_alpha_lo + pcie_alpha_hi) / 2, pcie_bw)
-    roce_nstar = calc_alpha_beta_crossover((roce_alpha_lo + roce_alpha_hi) / 2, roce_bw)
+    ndr_alpha_anchor = scenario.alphas["NDR"]
+    ndr_nstar = _nstar["NDR"]
+    hdr_nstar = _nstar["HDR"]
+    pcie_nstar = _nstar["PCIe Gen5"]
+    roce_nstar = _nstar["RoCE"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(nvlink_nstar > 500 * KB, "NVLink crossover should be several hundred KB — intra-node stays latency-bound up to large messages")
@@ -1035,16 +1031,17 @@ The NVLink and NDR rows show the roughly ninefold per-direction cliff of @sec-co
 #| label: critical-msg-size-calc
 from mlsysim.fmt import check, fmt_bandwidth, fmt_math, fmt_memory, fmt_time, sci_latex
 from mlsysim.core.units import GB, KB, microsecond, second
-from mlsysim import Systems
+from mlsysim import Scenarios
 
 class CriticalMsgSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
     # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
     # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = Systems.SwitchFabric.AlphaNdr
+    scenario = Scenarios.CriticalSizeByInterconnect  # the NDR row of the interconnect table
+    beta = scenario.bandwidths["NDR"]
+    alpha = scenario.alphas["NDR"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    n_star = (alpha * beta).to(KB)
+    n_star = scenario.result.crossovers["NDR"].to(KB)
     n_star_kb = round(n_star.to(KB).magnitude)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_star_kb == round(MessageFusion.n_star.to(KB).magnitude), "n* must match the crossover paragraph")
@@ -1079,23 +1076,23 @@ class CriticalMsgSize:
 from mlsysim import Scenarios
 from mlsysim.core.units import KB, MB, ms, second
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time
 
 class ChunkRegime:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    bucket = 25 * MB  # DDP's common bucket reference size (bucket-fusion section)
-    n_small = 64  # the chapter's 64-GPU worked examples
-    n_large = Scenarios.DenseLLMPretrainingReference.system.total_accelerators  # 1,024-GPU reference cluster
-    alpha = CriticalMsgSize.alpha
-    beta = CriticalMsgSize.beta
+    scenario = Scenarios.DdpBucketRingNdr  # one 25 MB DDP bucket on NDR (canonical alpha and beta)
+    bucket = scenario.message  # DDP's common bucket reference size (bucket-fusion section)
+    n_small, n_large = scenario.group_sizes  # the 64-GPU worked examples; the 1,024-GPU reference cluster
+    alpha = scenario.alpha
+    beta = scenario.bandwidth
     n_star = CriticalMsgSize.n_star
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    chunk_small = (bucket / n_small).to(KB)
-    chunk_large = (bucket / n_large).to(KB)
-    ring_small = calc_ring_allreduce_time(bucket, n_small, beta, alpha).to(ms)
-    ring_large = calc_ring_allreduce_time(bucket, n_large, beta, alpha).to(ms)
-    bytes_small = calc_ring_allreduce_time(bucket, n_small, beta, 0 * second).to(ms)
-    bytes_large = calc_ring_allreduce_time(bucket, n_large, beta, 0 * second).to(ms)
+    _r = scenario.result
+    chunk_small = _r.chunk[n_small].to(KB)
+    chunk_large = _r.chunk[n_large].to(KB)
+    ring_small = _r.ring_time[n_small].to(ms)
+    ring_large = _r.ring_time[n_large].to(ms)
+    bytes_small = _r.ring_byte_time[n_small].to(ms)
+    bytes_large = _r.ring_byte_time[n_large].to(ms)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(chunk_small > n_star, "64-rank chunk should sit above n*")
     check(chunk_large < n_star, "1,024-rank chunk should sit below n*")
@@ -1173,11 +1170,12 @@ from mlsysim.fmt import check, fmt, fmt_multiple
 
 class StarRingByteRatio:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_workers = Scenarios.DenseLLMPretrainingReference.system.total_accelerators  # 1,024-GPU reference cluster
+    scenario = Scenarios.GradientBufferAllReduceNdr  # star and ring on the same buffer and ports
+    n_workers = scenario.group_sizes[-1]  # 1,024-GPU reference cluster
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    star_volume_factor = n_workers  # server carries N x M bytes each way
-    ring_volume_factor = 2 * (n_workers - 1) / n_workers  # each rank sends 2 (N-1)/N x M
-    ratio = star_volume_factor / ring_volume_factor
+    # Server carries N x M bytes each way; each ring rank sends 2 (N-1)/N x M.
+    _r = scenario.result
+    ratio = (_r.star_byte_time[n_workers] / _r.ring_byte_time[n_workers]).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_workers == 1024, f"Reference cluster should be 1,024 GPUs, got {n_workers}")
     check(abs(ratio - n_workers / 2) / (n_workers / 2) < 0.01, f"Star/ring ratio {ratio:.1f} should be about N/2")
@@ -1226,20 +1224,21 @@ $$\AllReduceMinimumBandwidthTime= \frac{2(\DeviceCount-1)}{\DeviceCount} \cdot \
 # │ How: Bandwidth terms only (alpha = 0) from the shared ring/tree formulas.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, ms, second
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time
 
 class RingTreeByteGap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = 64
-    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port
-    run_steps = ReferenceStats.CollectiveCommunicationProfile.TrainingRunSteps  # steps in one training run
+    scenario = Scenarios.GradientBufferAllReduceNdr  # the 1 GB buffer on NDR ports
+    n_gpus = scenario.group_sizes[1]  # the 64-GPU cluster
+    gradient = scenario.message  # chapter's 1 GB gradient buffer
+    beta = scenario.bandwidth  # 50 GB/s per port
+    run_steps = scenario.run_steps  # steps in one training run
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    ring_bw = calc_ring_allreduce_time(gradient, n_gpus, beta, 0 * second).to(ms)
-    tree_bw = calc_tree_allreduce_time(gradient, n_gpus, beta, 0 * second).to(ms)
+    _r = scenario.result
+    ring_bw = _r.ring_byte_time[n_gpus].to(ms)
+    tree_bw = _r.tree_byte_time[n_gpus].to(ms)
     gap = (tree_bw - ring_bw).to(ms)
     gap_run_hours = (gap * run_steps).to("hour").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -1292,7 +1291,7 @@ The algorithm splits the vector of size $\CollectivePayloadSize$ into $\DeviceCo
 
 Across the $2(\DeviceCount-1)$ send/receive rounds each rank moves $\CollectivePayloadSize/\DeviceCount$ bytes per round, for $2(\DeviceCount-1)\CollectivePayloadSize/\DeviceCount$ bytes sent and the same received. The bandwidth term therefore reaches the information-theoretic lower bound, while the latency term grows as $2(\DeviceCount-1)\MessageStartupLatency$. On a four-GPU ring with wrap-around links, the state progresses in two phases (@fig-ring-allreduce). In row (a), $\DeviceCount-1 = 3$ ReduceScatter steps circulate gradient chunks A through D until each GPU holds exactly one fully reduced partition (green $\Glyph{\Sigma} \Glyph{A}$ through $\Glyph{\Sigma} \Glyph{D}$). In row (b), $\DeviceCount-1 = 3$ subsequent AllGather steps forward those finished shards around the ring until every device holds the complete sum.
 
-::: {#fig-ring-allreduce data-explore="mechanism-scene" data-explore-key="vol2:fig-ring-allreduce" fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**: Four GPUs in a logical ring, each gradient split into chunks A to D; the wrap-around link closes the ring from GPU 3 back to GPU 0. (a) After the $\DeviceCount-1$ ReduceScatter steps, in which every GPU sends one chunk to its neighbor and adds the chunk it receives, each GPU holds one fully reduced chunk. (b) After $\DeviceCount-1$ AllGather steps that forward those finished chunks around the same ring, every GPU holds the full sum. Every link carries data in every step, so each GPU sends $2\frac{\DeviceCount-1}{\DeviceCount}\CollectivePayloadSize$ bytes in total, while the $2(\DeviceCount-1)$ steps each pay one startup latency $\MessageStartupLatency$." fig-alt="Two rows of four GPU cards linked left to right by amber arrows, with an amber wrap-around link from GPU 3 back to GPU 0. Each GPU holds four chunk tiles A to D. Row a, after ReduceScatter: each GPU holds one green fully reduced chunk, a different one per GPU, and its other tiles are partially filled in gray to show how many ranks' contributions they hold. Three small tiles ride on each link, naming the chunk that link carries at steps 1, 2, and 3, with fill growing step by step. Row b, after AllGather: every GPU holds all four chunks as green full sums, and the tiles on each link are green."}
+::: {#fig-ring-allreduce data-explore="original-ring-allreduce" data-explore-key="vol2:fig-ring-allreduce" fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**: Four GPUs in a logical ring, each gradient split into chunks A to D; the wrap-around link closes the ring from GPU 3 back to GPU 0. (a) After the $\DeviceCount-1$ ReduceScatter steps, in which every GPU sends one chunk to its neighbor and adds the chunk it receives, each GPU holds one fully reduced chunk. (b) After $\DeviceCount-1$ AllGather steps that forward those finished chunks around the same ring, every GPU holds the full sum. Every link carries data in every step, so each GPU sends $2\frac{\DeviceCount-1}{\DeviceCount}\CollectivePayloadSize$ bytes in total, while the $2(\DeviceCount-1)$ steps each pay one startup latency $\MessageStartupLatency$." fig-alt="Two rows of four GPU cards linked left to right by amber arrows, with an amber wrap-around link from GPU 3 back to GPU 0. Each GPU holds four chunk tiles A to D. Row a, after ReduceScatter: each GPU holds one green fully reduced chunk, a different one per GPU, and its other tiles are partially filled in gray to show how many ranks' contributions they hold. Three small tiles ride on each link, naming the chunk that link carries at steps 1, 2, and 3, with fill growing step by step. Row b, after AllGather: every GPU holds all four chunks as green full sums, and the tiles on each link are green."}
 ![](images/svg/ring-allreduce.svg)
 
 <!--
@@ -1460,65 +1459,32 @@ Logical ring edges may share physical links, and startup, local reduction, or co
 ```{python}
 #| echo: false
 #| label: ring-trace-calc
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt
 
-def _ring_scatter_reduce_trace(vectors, names):
-    """Simulate ring scatter-reduce; return per-step cells, owned chunks, sums.
-
-    In step s, GPU i sends chunk (i - s) mod N to GPU i + 1, which adds it into
-    its own copy of that chunk. Each cell records the chunk a GPU receives and
-    the partial sum it now holds. After N - 1 steps, GPU i owns the fully
-    reduced chunk (i + 1) mod N.
-    """
-    n = len(vectors)
-    partial = [row[:] for row in vectors]
-    cells = []
-    for s in range(n - 1):
-        sent = [(i, (i - s) % n, partial[i][(i - s) % n]) for i in range(n)]
-        row = [""] * n
-        for src, chunk, value in sent:
-            dst = (src + 1) % n
-            partial[dst][chunk] += value
-            row[dst] = f"{names[chunk]}: {partial[dst][chunk]}"
-        cells.append(row)
-    owned = [(names[(i + 1) % n], partial[i][(i + 1) % n]) for i in range(n)]
-    totals = [sum(v[j] for v in vectors) for j in range(len(vectors[0]))]
-    return cells, owned, totals
-
-def _ring_allgather_trace(totals, names):
-    """Simulate ring AllGather after scatter-reduce; return per-step cells.
-
-    GPU i starts owning the fully reduced chunk (i + 1) mod N. In AllGather
-    step s (1-indexed), GPU i forwards chunk (i - s + 2) mod N, the chunk it
-    completed or received most recently, to GPU i + 1. Each cell records the
-    finished chunk a GPU receives; after N - 1 steps every GPU holds all chunks.
-    """
-    n = len(totals)
-    held = [{(i + 1) % n} for i in range(n)]
-    cells = []
-    for s in range(1, n):
-        row = [""] * n
-        for i in range(n):
-            chunk = (i - s + 2) % n
-            dst = (i + 1) % n
-            held[dst].add(chunk)
-            row[dst] = f"{names[chunk]}: {totals[chunk]}"
-        cells.append(row)
-    return cells, held
+def _trace_cells(rows, names):
+    """Label each (chunk, value) trace cell with its chunk name: "d: 17"."""
+    return [[f"{names[c]}: {v}" for c, v in row] for row in rows]
 
 class RingTrace:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    N = 4
-    M = 4
+    scenario = Scenarios.RingTraceFourGpu  # four GPUs, one four-element vector each
     # Local vectors [a_i, b_i, c_i, d_i] on GPUs 0..3 (worked-example inputs).
-    vectors = [[1, 5, 3, 7], [2, 6, 4, 8], [3, 7, 5, 9], [4, 8, 6, 10]]
+    vectors = scenario.vectors
+    N = scenario.n_devices
+    M = len(vectors[0])
     chunk_names = ["a", "b", "c", "d"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_steps = 2 * (N - 1)
+    # Each cell: the chunk a GPU receives and the value it now holds (RingTraceModel).
+    _t = scenario.result
+    total_steps = _t.steps
     elem_per_step = M // N
     total_per_gpu = total_steps * elem_per_step
-    sr_cells, owned, totals = _ring_scatter_reduce_trace(vectors, chunk_names)
-    ag_cells, ag_held = _ring_allgather_trace(totals, chunk_names)
+    sr_cells = _trace_cells(_t.scatter_reduce, chunk_names)
+    owned = _t.owned  # (chunk, fully reduced value) per GPU
+    totals = _t.totals
+    ag_cells = _trace_cells(_t.all_gather, chunk_names)
+    ag_held = _t.held
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(total_steps == 6, f"steps = {total_steps}, expected 6")
     check(elem_per_step == 1, f"elem/step = {elem_per_step}, expected 1")
@@ -1673,21 +1639,22 @@ $$ \TreeLikeAllReduceTime\approx \underbrace{2\log_2 \DeviceCount\cdot \MessageS
 import math
 from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math, fmt_multiple
-from mlsysim.physics import calc_ring_allreduce_latency_steps
 
 class TreeRoundCounts:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_large = Scenarios.DenseLLMPretrainingReference.system.total_accelerators  # 1,024-GPU reference cluster
-    n_mid = RingTreeByteGap.n_gpus  # 64-GPU cluster of the lower-bound section
-    n_small = 8  # scenario assumption: one node's tensor-parallel group
+    scenario = Scenarios.GradientBufferAllReduceNdr  # round counts at 8, 64, and 1,024 ranks
+    # One node's tensor-parallel group; the 64-GPU cluster of the lower-bound
+    # section; the 1,024-GPU reference cluster.
+    n_small, n_mid, n_large = scenario.group_sizes
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    ring_rounds_large = calc_ring_allreduce_latency_steps(n_large)
-    tree_rounds_large = 2 * int(math.log2(n_large))
+    _r = scenario.result
+    ring_rounds_large = _r.ring_rounds[n_large]
+    tree_rounds_large = _r.tree_rounds[n_large]
     round_ratio = ring_rounds_large / tree_rounds_large
-    tree_transfers_mid = 2 * int(math.log2(n_mid))
-    ring_rounds_small = calc_ring_allreduce_latency_steps(n_small)
-    tree_rounds_small = 2 * int(math.log2(n_small))
-    byte_ratio_small = tree_rounds_small / (2 * (n_small - 1) / n_small)
+    tree_transfers_mid = _r.tree_rounds[n_mid]
+    ring_rounds_small = _r.ring_rounds[n_small]
+    tree_rounds_small = _r.tree_rounds[n_small]
+    byte_ratio_small = tree_rounds_small / _r.ring_factor[n_small]
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_large == 1024, f"Reference cluster should be 1,024 GPUs, got {n_large}")
     for _n in (n_large, n_mid, n_small):
@@ -1938,19 +1905,19 @@ The log-aware crossover formula\index{Critical message size!algorithm crossover}
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Scenarios, Systems
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, MB, microsecond, second
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_math, fmt_memory, fmt_time
-from mlsysim.physics import calc_ring_tree_crossover_size
 
 class CrossoverReference:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_ranks = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
-    alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port
+    scenario = Scenarios.GradientBufferAllReduceNdr  # ring and tree on NDR ports
+    n_ranks = scenario.group_sizes[-1]  # 1,024-GPU reference cluster
+    alpha = scenario.alpha  # canonical effective NDR launch latency
+    beta = scenario.bandwidth  # 50 GB/s per port
     # ┌── 2. EXECUTE ───────────────────────────────────────
     log2n = int(math.log2(n_ranks))
-    crossover = calc_ring_tree_crossover_size(n_ranks, alpha, beta).to(MB)
+    crossover = scenario.result.crossover_estimate[n_ranks].to(MB)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_ranks == 1024, f"Reference cluster should be 1,024 GPUs, got {n_ranks}")
     check(2**log2n == n_ranks, "Reference rank count should be a power of two")
@@ -1980,23 +1947,16 @@ Training frameworks decide which payloads reach that analysis. PyTorch Distribut
 #| label: ring-vs-tree-calc
 import math
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_percent, fmt_qty_range, fmt_time
+from mlsysim import Scenarios
 from mlsysim.core.units import BYTES_FP16, GB, MB, microsecond, param, second
-from mlsysim.physics import (
-    calc_ring_allreduce_time,
-    calc_ring_allreduce_latency_steps,
-    calc_tree_allreduce_time,
-    calc_ring_tree_crossover_size,
-)
 
 class RingVsTree:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    M_mb = 1
-    N = 64
-    alpha_us = 10
-    beta_gbs = 10
-    M = M_mb * MB
-    alpha = alpha_us * microsecond
-    beta = beta_gbs * GB / second
+    scenario = Scenarios.RingVsTreeSmallBuffer  # 1 MB on 64 ranks, 10 us startup, 10 GB/s
+    N = scenario.group_sizes[0]
+    M = scenario.message
+    alpha = scenario.alpha
+    beta = scenario.bandwidth
     ddp_bucket = 10 * MB  # scenario assumption: mid-size DDP bucket
     fused_bucket_low = 50 * MB  # scenario assumption: lower bound for fused multi-layer bucket
     fused_bucket_high = 300 * MB  # scenario assumption: representative upper range for fused buckets
@@ -2005,13 +1965,14 @@ class RingVsTree:
     log2N = int(math.log2(N))
     # Latency terms come from exact closed forms (the guards pin them exactly);
     # deriving them by subtraction or via a seconds round-trip leaves FP residue.
-    ring_total = calc_ring_allreduce_time(M, N, beta, alpha).to(microsecond)
-    ring_bw = calc_ring_allreduce_time(M, N, beta, 0 * second).to(microsecond)
-    ring_lat = (calc_ring_allreduce_latency_steps(N) * alpha).to(microsecond)
-    tree_total = calc_tree_allreduce_time(M, N, beta, alpha).to(microsecond)
-    tree_bw = calc_tree_allreduce_time(M, N, beta, 0 * second).to(microsecond)
-    tree_lat = (2 * log2N * alpha).to(microsecond)
-    crossover = calc_ring_tree_crossover_size(N, alpha, beta)
+    _r = scenario.result
+    ring_total = _r.ring_time[N].to(microsecond)
+    ring_bw = _r.ring_byte_time[N].to(microsecond)
+    ring_lat = _r.ring_startup_time[N].to(microsecond)
+    tree_total = _r.tree_time[N].to(microsecond)
+    tree_bw = _r.tree_byte_time[N].to(microsecond)
+    tree_lat = _r.tree_startup_time[N].to(microsecond)
+    crossover = _r.crossover_estimate[N]
     full_bf16_gradient = llama_70b.parameters.to(param).magnitude * BYTES_FP16
     tree_win_margin_pct = ((ring_total - tree_total) / ring_total).to_base_units().magnitude * 100
     # Like-for-like penalties for the Ring-by-default pitfall: Ring's extra
@@ -2153,7 +2114,7 @@ On a DGX H100 node, each GPU's local NVLink capacity is `{python} CommInfraScena
 
 A flat ring whose ordering repeatedly crosses node boundaries can leave local NVLink capacity unused while loading scarce inter-node links. Hierarchical AllReduce\index{Hierarchical AllReduce}\index{Hierarchical AllReduce!three-phase decomposition} explicitly partitions the global operation into three stages that align communication volume with the fabric tiers (@fig-hierarchical-allreduce).
 
-::: {#fig-hierarchical-allreduce data-explore="mechanism-scene" data-explore-key="vol2:fig-hierarchical-allreduce" fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $\CollectivePayloadSize/\AcceleratorsPerNode$ on each of the $\AcceleratorsPerNode$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $\AcceleratorsPerNode$ ranks." fig-alt="Three panels for the three phases, each showing Node 0 above Node 1, each node holding GPU 0 and GPU 1 cards with two shard tiles. Thick NVLink bars join the GPUs inside a node and dashed InfiniBand links join corresponding GPUs across nodes; in each panel only the links in use are amber and the others are light gray. Phase 1, ReduceScatter: NVLink lit, each GPU holds one half-filled node partial sum. Phase 2, Shard AllReduce: InfiniBand lit, one half-filled shard tile rides each inter-node link, and each GPU ends with one green full sum. Phase 3, AllGather: NVLink lit, every GPU holds both green full sums."}
+::: {#fig-hierarchical-allreduce data-explore="original-v2-hierarchical-allreduce" data-explore-key="vol2:fig-hierarchical-allreduce" fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $\CollectivePayloadSize/\AcceleratorsPerNode$ on each of the $\AcceleratorsPerNode$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $\AcceleratorsPerNode$ ranks." fig-alt="Three panels for the three phases, each showing Node 0 above Node 1, each node holding GPU 0 and GPU 1 cards with two shard tiles. Thick NVLink bars join the GPUs inside a node and dashed InfiniBand links join corresponding GPUs across nodes; in each panel only the links in use are amber and the others are light gray. Phase 1, ReduceScatter: NVLink lit, each GPU holds one half-filled node partial sum. Phase 2, Shard AllReduce: InfiniBand lit, one half-filled shard tile rides each inter-node link, and each GPU ends with one green full sum. Phase 3, AllGather: NVLink lit, every GPU holds both green full sums."}
 ![](images/svg/hierarchical-allreduce.svg)
 
 <!--
@@ -2370,49 +2331,41 @@ Only Phase 2 (Shard AllReduce) loads the slower inter-node InfiniBand links (@fi
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import GB, MB, microsecond, ms, second
-from mlsysim import Hardware, Systems
+from mlsysim import Hardware, Scenarios
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_int, fmt_memory, fmt_multiple, fmt_time
-from mlsysim.physics import (
-    calc_ring_allreduce_time,
-    calc_ring_allreduce_latency_time,
-    calc_ring_collective_data_factor,
-)
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_nodes_har = 8
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # InfiniBand NDR 400 Gbps per port
+    scenario = Scenarios.HierarchicalAllReduce8x8DgxH100  # 1 GB buffer on eight DGX H100 nodes
+    n_nodes_har = scenario.n_nodes
+    gpus_per_node = scenario.gpus_per_node
+    gradient = scenario.message  # chapter's 1 GB gradient buffer
+    ib_bw = scenario.inter_bandwidth  # InfiniBand NDR 400 Gbps per port
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # NVLink 4.0 (H100), datasheet bidirectional (for display)
-    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for ring math
-    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
+    nvlink_bw_beta = scenario.intra_bandwidth  # one-way rate for ring math
+    ib_alpha = scenario.inter_alpha  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Flat ring uses the deliberate ~2x simplification the prose math shows
     # (T = 2M/beta); the exact 2(N-1)/N factor appears in the inter-node step.
+    _h = scenario.result
     flat_data = 2 * gradient  # bandwidth-optimal Ring sends ~2×
-    flat_time = (flat_data / ib_bw).to(ms)
+    flat_time = _h.flat_bound_time.to(ms)
 
-    intra_data = (gradient * calc_ring_collective_data_factor(gpus_per_node)).to(MB)  # ~875 MB
-    intra_rs = (intra_data / nvlink_bw_beta).to(ms)
+    intra_data = _h.intra_bytes.to(MB)  # ~875 MB
+    intra_rs = _h.reduce_scatter_time.to(ms)
 
-    inter_data = (gradient / gpus_per_node).to(MB)  # 125 MB
-    inter_bw = calc_ring_allreduce_time(
-        message_bytes=inter_data,
-        n_gpus=n_nodes_har,
-        bandwidth_bytes_s=ib_bw,
-        latency_s=0 * second,
-    ).to(ms)
-    inter_lat = calc_ring_allreduce_latency_time(n_nodes_har, ib_alpha).to(ms)
-    inter_time = inter_bw + inter_lat
+    inter_data = _h.shard.to(MB)  # 125 MB
+    inter_bw = _h.inter_byte_time.to(ms)
+    inter_lat = _h.inter_startup_time.to(ms)
+    inter_time = _h.inter_time.to(ms)
 
-    intra_ag = intra_rs  # symmetric
+    intra_ag = _h.all_gather_time.to(ms)  # symmetric
 
-    hier_total = intra_rs + inter_time + intra_ag
-    speedup = (flat_time / hier_total).to_base_units().magnitude
+    hier_total = _h.total_time.to(ms)
+    speedup = _h.speedup_vs_flat_bound
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(speedup > 1.0, "Hierarchical should be faster than Flat AllReduce")
@@ -2488,31 +2441,32 @@ class HierarchicalAllreduceCalc:
 # │      from Scenarios.DenseLLMPretrainingReference.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Scenarios, Systems
-from mlsysim.core.units import BYTES_FP16, GB, ms, second
+from mlsysim import Scenarios
+from mlsysim.core.units import GB, ms, second
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_multiple, fmt_params, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time, calc_ring_collective_data_factor
 
 class ArchetypeAHierarchical:
     """Flat vs. hierarchical Ring AllReduce for the 175B instance on 1,024 H100s."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     scenario = Scenarios.DenseLLMPretrainingReference
+    hier = Scenarios.HierarchicalAllReduceReferenceCluster  # its BF16 gradient on 128 DGX H100 nodes
     params = scenario.workload.parameters
-    gradient = scenario.workload.size_in_bytes(BYTES_FP16).to(GB)  # BF16 gradient
+    gradient = hier.message.to(GB)  # BF16 gradient
     n_gpus = scenario.system.total_accelerators
-    n_nodes = scenario.system.count
-    gpus_per_node = scenario.system.node.accelerators_per_node
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way beta
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # one NDR port per GPU
-    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
+    n_nodes = hier.n_nodes
+    gpus_per_node = hier.gpus_per_node
+    nvlink_bw = hier.intra_bandwidth  # one-way beta
+    ib_bw = hier.inter_bandwidth  # one NDR port per GPU
+    ib_alpha = hier.inter_alpha  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    intra_rs = (gradient * calc_ring_collective_data_factor(gpus_per_node) / nvlink_bw).to(ms)
-    inter = calc_ring_allreduce_time(message_bytes=gradient / gpus_per_node, n_gpus=n_nodes, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
-    hier_total = intra_rs + inter + intra_rs  # ReduceScatter, shard AllReduce, AllGather
-    flat_total = calc_ring_allreduce_time(message_bytes=gradient, n_gpus=n_gpus, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
-    speedup = (flat_total / hier_total).to_base_units().magnitude
+    _h = hier.result  # ReduceScatter, shard AllReduce, AllGather
+    intra_rs = _h.reduce_scatter_time.to(ms)
+    inter = _h.inter_time.to(ms)
+    hier_total = _h.total_time.to(ms)
+    flat_total = _h.flat_ring_time.to(ms)
+    speedup = _h.speedup_vs_flat_ring
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(n_gpus == 1024 and n_nodes == 128 and gpus_per_node == 8, "Reference cluster should be 128 nodes of 8 GPUs")
@@ -3030,29 +2984,31 @@ Pricing that 64-expert, 8-GPU MoE layer under uniform routing establishes the ba
 #| label: moe-alltoall-calc
 from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_count
-from mlsysim import Systems
+from mlsysim import Scenarios
 
 class MoeAllToAll:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    total_tokens = 4096
-    n_gpus = 8
-    hidden_dim = 2048
-    bytes_per_elem = BYTES_FP16
-    n_experts = 64
+    scenario = Scenarios.MoeDispatch8Gpu64Experts  # 4,096 tokens, 64 experts, eight GPUs, NDR
+    total_tokens = scenario.total_tokens
+    n_gpus = scenario.n_devices
+    hidden_dim = scenario.hidden_dim
+    bytes_per_elem = scenario.bytes_per_element
+    n_experts = scenario.n_experts
     # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
     # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = Systems.SwitchFabric.AlphaNdr
+    beta = scenario.bandwidth
+    alpha = scenario.alpha
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    tokens_per_gpu = total_tokens // n_gpus
-    experts_per_gpu = n_experts // n_gpus
-    bytes_per_token = hidden_dim * bytes_per_elem
+    _d = scenario.result
+    tokens_per_gpu = _d.tokens_per_device
+    experts_per_gpu = _d.experts_per_device
+    bytes_per_token = _d.bytes_per_token
     kb_per_token = bytes_per_token.to(KB)
-    tokens_per_expert = total_tokens // n_experts
-    tokens_per_transfer = tokens_per_gpu // n_gpus
-    remote_gpus = n_gpus - 1
-    data_per_transfer = tokens_per_transfer * bytes_per_token
-    total_sent = remote_gpus * data_per_transfer
+    tokens_per_expert = _d.tokens_per_expert
+    tokens_per_transfer = _d.tokens_per_pair
+    remote_gpus = _d.remote_peers
+    data_per_transfer = _d.pair_bytes
+    total_sent = _d.sent_bytes
     # Bandwidth term rounded to whole microseconds: the worked trace presents it
     # as the clean "≈ 5 μs" approximation the callout math line displays, so the
     # downstream per-transfer and serialized totals stay on visible
@@ -3063,7 +3019,7 @@ class MoeAllToAll:
     # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
     # Full duplex permits simultaneous send and receive, but does not multiply the
     # outgoing 50 GB/s port by the number of remote peers.
-    parallel = alpha + total_sent / beta
+    parallel = _d.injection_bound
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
     check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
@@ -3155,16 +3111,18 @@ from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_time
 
 class MoeSkew:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    cap = 1.5  # scenario assumption: realized remote-receive skew, not capacity headroom
-    beta_rx = MoeAllToAll.beta  # receive bandwidth per GPU (NDR port)
+    scenario = MoeAllToAll.scenario  # the same dispatch, one hot receiver
+    cap = scenario.receive_skew  # realized remote-receive skew, not capacity headroom
+    beta_rx = scenario.bandwidth  # receive bandwidth per GPU (NDR port)
     bytes_per_token = MoeAllToAll.bytes_per_token  # d x bytes per element
-    uniform_remote_tokens = MoeAllToAll.remote_gpus * MoeAllToAll.tokens_per_transfer
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    hot_remote_tokens = round(cap * uniform_remote_tokens)
-    uniform_rx = (uniform_remote_tokens * bytes_per_token).to(MB)
-    hot_rx = (hot_remote_tokens * bytes_per_token).to(MB)
-    uniform_bound = (uniform_rx / beta_rx).to(microsecond)
-    hot_bound = (hot_rx / beta_rx).to(microsecond)
+    _d = scenario.result
+    uniform_remote_tokens = _d.uniform_remote_tokens
+    hot_remote_tokens = _d.hot_remote_tokens
+    uniform_rx = _d.uniform_receive_bytes.to(MB)
+    hot_rx = _d.hot_receive_bytes.to(MB)
+    uniform_bound = _d.uniform_receive_bound.to(microsecond)
+    hot_bound = _d.hot_receive_bound.to(microsecond)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(uniform_remote_tokens == 448, f"Uniform remote tokens = {uniform_remote_tokens}")
     check(hot_remote_tokens == 672, f"Hot remote tokens = {hot_remote_tokens}")
@@ -3299,6 +3257,7 @@ The telescoping property\index{Error feedback!telescoping sum} of compression er
 ```{python}
 #| echo: false
 #| label: error-feedback-calc
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_percent
 
 def _ef_dec(x):
@@ -3313,36 +3272,24 @@ def _ef_int(x):
 
 class ErrorFeedbackTrace:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gradients = [0.4, 0.3, 0.2, 0.4, 0.3]
+    scenario = Scenarios.ErrorFeedbackFiveSteps  # five gradients below half a unit
+    gradients = scenario.gradients
     # ┌── 2. EXECUTE (5-step trace) ────────────────────────
-    # Error-feedback recurrence: e starts at 0; each step adds the carried error
-    # to the gradient, transmits the rounded (1-bit) value, and stores the
-    # residual as the next error.
-    errors = [0.0]  # e_1 .. e_6 (errors[t] is the error entering step t+1)
-    g_plus_e = []  # g_t + e_t
-    transmitted = []  # v_t
-    for t, g in enumerate(gradients):
-        s = g + errors[t]
-        v = round(s)
-        g_plus_e.append(s)
-        transmitted.append(v)
-        errors.append(s - v)
+    # Error-feedback recurrence (ErrorFeedbackModel): e starts at 0; each step
+    # adds the carried error to the gradient, transmits the rounded (1-bit)
+    # value, and stores the residual as the next error.
+    _ef = scenario.result
+    errors = _ef.errors  # e_1 .. e_6 (errors[t] is the error entering step t+1)
+    g_plus_e = _ef.corrected  # g_t + e_t
+    transmitted = _ef.sent  # v_t
     # Cumulative-true running sum (naive table's last column) and cumulative-v.
-    cum_true_running = []
-    _acc = 0.0
-    for g in gradients:
-        _acc += g
-        cum_true_running.append(_acc)
-    cum_v_running = []
-    _acc = 0
-    for v in transmitted:
-        _acc += v
-        cum_v_running.append(_acc)
+    cum_true_running = _ef.cumulative_true
+    cum_v_running = _ef.cumulative_sent
 
-    cum_transmitted = int(sum(transmitted))
-    final_error = round(errors[-1], 4)
-    true_cumulative = sum(gradients)
-    naive_transmitted = 0
+    cum_transmitted = _ef.total_sent
+    final_error = _ef.final_error
+    true_cumulative = _ef.true_total
+    naive_transmitted = _ef.naive_total_sent
     conservation = cum_transmitted + final_error
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(cum_transmitted == 2, f"Cum transmitted = {cum_transmitted}, expected 2")
@@ -3448,19 +3395,21 @@ The first test is per synchronization. Compression shrinks only the byte term, s
 # │ How: T = T_compute + T_comm/Ratio.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_multiple, fmt_ratio, fmt_time
 from mlsysim.core.units import ms
 
 class CompressionPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    t_comm = 40 * ms  # scenario assumption: uncompressed synchronization time
-    ratio = 8  # scenario assumption: effective throughput gain after metadata and protocol overhead
-    t_overhead = 2 * ms  # scenario assumption: compute time to quantize/dequantize
-    t_comm_fast = 1 * ms  # scenario assumption: same buffer on a fast NVLink domain
+    scenario = Scenarios.CompressionPayback8x  # 40 ms synchronization, effective 8x, 2 ms codec
+    t_comm = scenario.communication_time  # uncompressed synchronization time
+    ratio = scenario.compression_ratio  # effective throughput gain after metadata and protocol overhead
+    t_overhead = scenario.codec_time  # compute time to quantize/dequantize
+    t_comm_fast = scenario.fast_communication_time  # same buffer on a fast NVLink domain
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_compressed_comm = t_comm / ratio
-    t_total_new = t_compressed_comm + t_overhead
-    speedup = (t_comm / t_total_new).to_base_units().magnitude
+    t_compressed_comm = scenario.compressed_time
+    t_total_new = scenario.total_time
+    speedup = scenario.speedup
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(5 < speedup < 6, f"Speedup {speedup:.1f}x unexpected")
     check(t_overhead > t_comm_fast * (1 - 1 / ratio), "Fast-network case must fail the payback condition")
@@ -3510,31 +3459,34 @@ The second test spans the full training run, because a compressor that passes th
 # │      convergence penalty when compressing.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import ms, second
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class CompressionBreakEven:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    steps = 100_000  # scenario assumption: steps to target quality, uncompressed
-    t_compute = 300 * ms  # scenario assumption: per-step compute
-    t_comm_slow = 200 * ms  # scenario assumption: per-step communication, slow network
-    t_comm_fast = 30 * ms  # scenario assumption: per-step communication, fast network
-    ratio = 4  # INT8 vs. FP32 payload
-    step_penalty = 0.10  # scenario assumption: extra steps caused by compression noise
+    scenario = Scenarios.Int8CompressionRun  # INT8 with error feedback on a slow and a fast network
+    steps = scenario.steps  # steps to target quality, uncompressed
+    t_compute = scenario.compute_time  # per-step compute
+    t_comm_slow = scenario.communication_times["slow"]  # per-step communication, slow network
+    t_comm_fast = scenario.communication_times["fast"]  # per-step communication, fast network
+    ratio = scenario.compression_ratio  # INT8 vs. FP32 payload
+    step_penalty = scenario.step_penalty  # extra steps caused by compression noise
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    steps_compressed = round(steps * (1 + step_penalty))
-    step_slow = t_compute + t_comm_slow
-    step_slow_c = t_compute + t_comm_slow / ratio
-    total_slow = (steps * step_slow).to(second)
-    total_slow_c = (steps_compressed * step_slow_c).to(second)
-    gain_slow = 1 - (total_slow_c / total_slow).to_base_units().magnitude
+    _c = scenario.result
+    steps_compressed = _c.steps_compressed
+    step_slow = _c.step_times["slow"]
+    step_slow_c = _c.compressed_step_times["slow"]
+    total_slow = _c.totals["slow"]
+    total_slow_c = _c.compressed_totals["slow"]
+    gain_slow = -_c.changes["slow"]
 
-    step_fast = t_compute + t_comm_fast
-    step_fast_c = t_compute + t_comm_fast / ratio
-    total_fast = (steps * step_fast).to(second)
-    total_fast_c = (steps_compressed * step_fast_c).to(second)
-    loss_fast = (total_fast_c / total_fast).to_base_units().magnitude - 1
+    step_fast = _c.step_times["fast"]
+    step_fast_c = _c.compressed_step_times["fast"]
+    total_fast = _c.totals["fast"]
+    total_fast_c = _c.compressed_totals["fast"]
+    loss_fast = _c.changes["fast"]
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(total_slow.magnitude - 50_000) < 1e-6, f"Baseline total = {total_slow}")
@@ -3654,7 +3606,7 @@ Gradient computation during the backward pass proceeds layer by layer, from the 
 
 In PyTorch's `DistributedDataParallel`\index{DistributedDataParallel}, this overlap is implemented through gradient hooks\index{Gradient hook}\index{DistributedDataParallel!gradient hooks}. Each parameter registers a hook that marks its gradient ready. Once all required gradients in a bucket are ready, the reducer can launch an asynchronous AllReduce\index{AllReduce!asynchronous execution}, preserving the same collective order across ranks. Meanwhile, the backward pass continues computing gradients for earlier layers. A transfer is hidden only if it completes before its result is needed; queued communication can consume part of that window, and the last bucket's transfer remains exposed (@sec-communication-overlap-limits).
 
-::: {#fig-comm-compute-overlap data-explore="mechanism-scene" data-explore-key="vol2:fig-comm-compute-overlap" fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Overlap**: The backward pass runs from the last layer to the first, and each layer's gradient AllReduce launches as soon as that layer finishes, so it runs on the network while the GPU computes the next layer's gradients. The first layer finishes last and has no computation left to hide behind, so its AllReduce is exposed before the optimizer step. Overlap succeeds only when the nonoverlappable overhead ($\SymmetricMessageOverhead$) is small, leaving the bulk transfer free to proceed concurrently. Durations are schematic." fig-alt="Two-lane timeline over a time axis. The compute lane shows Backward L4, L3, L2, and L1, each followed by a thin solid amber slice labeled o, then a dashed GPU idle box, then an Optimizer block. The network lane shows AllReduce L4, L3, and L2 each starting when its o slice ends and running beneath the next backward block, then AllReduce L1 beneath the idle box. A bracket marks the first three AllReduces as hidden behind backward compute, and a shaded band labeled exposed covers the last o slice and AllReduce L1. A key notes that o is nonoverlappable overhead that occupies the GPU."}
+::: {#fig-comm-compute-overlap data-explore="original-v2-comm-compute-overlap" data-explore-key="vol2:fig-comm-compute-overlap" fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Overlap**: The backward pass runs from the last layer to the first, and each layer's gradient AllReduce launches as soon as that layer finishes, so it runs on the network while the GPU computes the next layer's gradients. The first layer finishes last and has no computation left to hide behind, so its AllReduce is exposed before the optimizer step. Overlap succeeds only when the nonoverlappable overhead ($\SymmetricMessageOverhead$) is small, leaving the bulk transfer free to proceed concurrently. Durations are schematic." fig-alt="Two-lane timeline over a time axis. The compute lane shows Backward L4, L3, L2, and L1, each followed by a thin solid amber slice labeled o, then a dashed GPU idle box, then an Optimizer block. The network lane shows AllReduce L4, L3, and L2 each starting when its o slice ends and running beneath the next backward block, then AllReduce L1 beneath the idle box. A bracket marks the first three AllReduces as hidden behind backward compute, and a shaded band labeled exposed covers the last o slice and AllReduce L1. A key notes that o is nonoverlappable overhead that occupies the GPU."}
 ![](images/svg/comm-compute-overlap.svg)
 
 <!--
@@ -3851,6 +3803,7 @@ Together, processor overhead, boundary stalls, and per-layer transfer time deter
 ```{python}
 #| echo: false
 #| label: overlap-budget-calc
+from mlsysim import Scenarios
 from mlsysim.core.units import BILLION, MB, ms
 
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -3871,29 +3824,29 @@ class OverlapBudgetCalc:
     """Step-time savings from layer-by-layer AllReduce overlap for a 32-layer 7B transformer."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _model = Models.Language.Llama2_7B
+    scenario = Scenarios.OverlapBudget7B64Gpu  # 7B model, 64 GPUs, 100 MB buckets at an assumed 3 ms
+    _model = scenario.workload
     n_layers_overlap = _model.layers  # transformer layers
-    backward_per_layer = 15 * ms  # scenario assumption: per-layer backward pass
-    gradient_per_layer = (_model.size_in_bytes(BYTES_FP32) / n_layers_overlap).to(MB)  # equal-layer model: FP32 gradients / layers
-    bucket_size = 100 * MB  # scenario assumption: per AllReduce bucket
-    allreduce_per_bucket = 3 * ms  # assumed fixed charge for each bucket, including the final partial bucket
-    n_gpus_overlap = 64
+    backward_per_layer = scenario.backward_per_layer  # per-layer backward pass
+    bucket_size = scenario.bucket_size  # per AllReduce bucket
+    allreduce_per_bucket = scenario.time_per_bucket  # assumed fixed charge for each bucket, including the final partial bucket
+    n_gpus_overlap = scenario.n_devices
     params_overlap = _model.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_backward = n_layers_overlap * backward_per_layer
-    from math import ceil
-
-    buckets_per_layer = ceil((gradient_per_layer / bucket_size).to_base_units().magnitude)
-    allreduce_per_layer = buckets_per_layer * allreduce_per_bucket
+    _o = scenario.result  # OverlapBudgetModel
+    gradient_per_layer = _o.gradient_per_layer  # equal-layer model: FP32 gradients / layers
+    total_backward = _o.total_backward
+    buckets_per_layer = _o.buckets_per_layer
+    allreduce_per_layer = _o.communication_per_layer
 
     # Sequential (no overlap)
-    no_overlap = total_backward + n_layers_overlap * allreduce_per_layer
+    no_overlap = _o.sequential_time
 
     # Pipelined (with overlap)
-    exposed_per_layer = max(0 * ms, allreduce_per_layer - backward_per_layer)
-    with_overlap = total_backward + allreduce_per_layer + (n_layers_overlap - 1) * exposed_per_layer
-    overlap_savings_pct = (1 - (with_overlap / no_overlap).to_base_units().magnitude) * 100
+    exposed_per_layer = _o.exposed_per_layer
+    with_overlap = _o.overlapped_time
+    overlap_savings_pct = _o.savings_fraction * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_params, fmt_percent, fmt_time
@@ -3933,24 +3886,20 @@ class OverlapBudgetCalc:
 # │      IB ring on the M/G shard with canonical NDR alpha, NVLink AllGather).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Systems
+from mlsysim import Scenarios
 from mlsysim.core.units import MB, ms, second
 from mlsysim.fmt import check, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time, calc_ring_collective_data_factor
 
 class OverlapIdealBucket:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    bucket = OverlapBudgetCalc.bucket_size
-    n_nodes = OverlapBudgetCalc.n_gpus_overlap // Systems.Nodes.DGX_H100.accelerators_per_node
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    nvlink_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    ib_beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    ib_alpha = Systems.SwitchFabric.AlphaNdr
+    bucket_scenario = Scenarios.HierarchicalAllReduceBucket100MB  # one 100 MB bucket, eight DGX H100 nodes
+    ideal = Scenarios.OverlapBudget7B64GpuIdealBuckets  # the overlap budget at that bucket time
+    bucket = bucket_scenario.message
+    n_nodes = bucket_scenario.n_nodes
+    gpus_per_node = bucket_scenario.gpus_per_node
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    intra = (bucket * calc_ring_collective_data_factor(gpus_per_node) / nvlink_beta).to(ms)
-    inter = calc_ring_allreduce_time(bucket / gpus_per_node, n_nodes, ib_beta, ib_alpha).to(ms)
-    per_bucket = intra + inter + intra
-    per_layer = OverlapBudgetCalc.buckets_per_layer * per_bucket
+    per_bucket = bucket_scenario.result.total_time.to(ms)
+    per_layer = ideal.result.communication_per_layer.to(ms)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_nodes == 8, "64 GPUs should be 8 DGX H100 nodes")
     check(per_bucket < OverlapBudgetCalc.allreduce_per_bucket, "Ideal bucket time should be below the notebook's assumed charge")
@@ -4033,38 +3982,25 @@ The backend must satisfy both the collective contract and the measured execution
 # │      IB ring on the M/G shard, NVLink AllGather).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Systems
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, MB, microsecond, ms, second
 from mlsysim.fmt import check, fmt_bandwidth, fmt_multiple
-from mlsysim.physics import (
-    calc_ring_allreduce_latency_time,
-    calc_ring_allreduce_time,
-    calc_ring_collective_data_factor,
-)
 
 class CommInfraRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    n_nodes_har = 8
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
+    scenario = Scenarios.HierarchicalAllReduce8x8DgxH100  # the 8-node notebook's buffer and links
+    nvlink_bw_beta = scenario.intra_bandwidth
+    n_nodes_har = scenario.n_nodes
+    gpus_per_node = scenario.gpus_per_node
+    gradient = scenario.message  # chapter's 1 GB gradient buffer
+    ib_bw = scenario.inter_bandwidth
+    ib_alpha = scenario.inter_alpha  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    flat_time = (2 * gradient / ib_bw).to(ms)
-    intra_data = (gradient * calc_ring_collective_data_factor(gpus_per_node)).to(MB)
-    intra_rs = (intra_data / nvlink_bw_beta).to(ms)
-    inter_data = (gradient / gpus_per_node).to(MB)
-    inter_bw = calc_ring_allreduce_time(
-        message_bytes=inter_data,
-        n_gpus=n_nodes_har,
-        bandwidth_bytes_s=ib_bw,
-        latency_s=0 * second,
-    ).to(ms)
-    inter_lat = calc_ring_allreduce_latency_time(n_nodes_har, ib_alpha).to(ms)
-    hier_total = intra_rs + inter_bw + inter_lat + intra_rs
-    speedup = (flat_time / hier_total).to_base_units().magnitude
+    _h = scenario.result  # flat T = 2M/beta against the three phases
+    flat_time = _h.flat_bound_time.to(ms)
+    hier_total = _h.total_time.to(ms)
+    speedup = _h.speedup_vs_flat_bound
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(speedup > 4, "Hierarchical recap speedup should remain material")

@@ -1,0 +1,3 @@
+Exact original 4×8 static/continuous trace. Current slot identities accompany source cell execution and computed productive occupancy. Source request endings/admissions unchanged. Slot-iterations are not elapsed time or throughput; prefill may be longer than decode. Run check.py for actual chapter fixtures, all states, controls, normal/reduced motion, expansion and static fallback.
+
+Normal-motion checks pause every action before arrival and verify that the prior authoritative state remains intact. The fixture uses an explicit four-second movement interval to leave a deterministic inspection window under concurrent browser rendering; production reads the shared YAML timing. Reduced-motion playback commits directly.

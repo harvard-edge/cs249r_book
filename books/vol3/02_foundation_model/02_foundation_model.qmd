@@ -226,16 +226,18 @@ from mlsysim import *
 
 class InvocationTokenBudget:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    window = 8_192  # hypothetical combined context limit, tokens
-    output = 1_024  # scenario: reserved generation allowance, tokens
-    text_input = 6_000  # scenario: complete serialized text request, tokens
-    image_input = 2_048  # scenario: service-reported additional image charge
+    scenario = Scenarios.MultimodalContextAdmission  # hypothetical service counts
+    window = scenario.window  # combined context limit, tokens
+    output = scenario.output_reserve  # reserved generation allowance, tokens
+    text_input = scenario.text_tokens  # complete serialized text request, tokens
+    image_input = scenario.image_tokens  # service-reported additional image charge
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    input_ceiling = window - output
-    headroom = input_ceiling - text_input
-    multimodal_total = text_input + image_input + output
-    excess = multimodal_total - window
+    admission = scenario.result
+    input_ceiling = admission.input_ceiling
+    headroom = admission.headroom
+    multimodal_total = admission.total_demand
+    excess = admission.excess
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(input_ceiling == 7_168, "Unexpected input ceiling")
@@ -335,7 +337,6 @@ Neither filter tells valid file paths, true claims, or safe commands from wrong 
 # │ Show: Sharpening and truncation redistribute probability, not correctness.
 # │ How: Normalize exponentials, select a cumulative-probability prefix, renormalize.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.fmt import check, fmt, fmt_math, fmt_multiple, fmt_percent
 
@@ -343,32 +344,22 @@ class LogitScalingTruncation:
     """Sampling transformations for a fixed hypothetical vocabulary."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    logits = [12.0, 10.5, 9.0, 6.0, 3.0]
-    tau_base = 1.0
-    tau_sharp = 0.5
-    p_nucleus = 0.90
+    scenario = Scenarios.TemperatureNucleusExample  # hypothetical logits
+    logits = scenario.logits
+    tau_base = scenario.base_temperature
+    tau_sharp = scenario.sharp_temperature
+    p_nucleus = scenario.top_p
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    exp_tau1 = []
-    for z in logits:
-        exp_tau1.append(math.exp(z / tau_base))
-    sum_exp_tau1 = sum(exp_tau1)
-    probs_tau1 = []
-    for e in exp_tau1:
-        probs_tau1.append(e / sum_exp_tau1)
-    exp_tau05 = []
-    for z in logits:
-        exp_tau05.append(math.exp(z / tau_sharp))
-    sum_exp_tau05 = sum(exp_tau05)
-    probs_tau05 = []
-    for e in exp_tau05:
-        probs_tau05.append(e / sum_exp_tau05)
-    sum_nuc = probs_tau1[0] + probs_tau1[1]
-    p_nuc_v1 = probs_tau1[0] / sum_nuc
-    p_nuc_v2 = probs_tau1[1] / sum_nuc
-    tail_base = 1 - probs_tau1[0]  # probability of drawing any non-top token
-    tail_sharp = 1 - probs_tau05[0]
-    tail_ratio = tail_base / tail_sharp
+    sampled = scenario.result
+    sum_exp_tau1 = sampled.partition_sum
+    probs_tau1 = sampled.base_probabilities
+    probs_tau05 = sampled.sharp_probabilities
+    sum_nuc = sampled.nucleus_mass
+    p_nuc_v1, p_nuc_v2 = sampled.nucleus_probabilities
+    tail_base = sampled.base_tail  # probability of drawing any non-top token
+    tail_sharp = sampled.sharp_tail
+    tail_ratio = sampled.tail_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sum(probs_tau1) - 1.0) < 1e-12, "Baseline distribution must normalize")
@@ -436,12 +427,14 @@ Greedy decoding removes sampling variance from a fixed logit vector, but it does
 # │       tool's users with at least one misrouted message.
 # │ How: Values as reported in anthropic2025postmortem; no computation.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.fmt import check, fmt_percent
 
 class ServingPostmortem:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    worst_hour_share = 0.16  # sourced: anthropic2025postmortem, worst hour, one model's requests misrouted
-    user_share = 0.30  # sourced: anthropic2025postmortem, approx. share of coding-tool users affected
+    incident = Literature.ServingIncidents  # anthropic2025postmortem
+    worst_hour_share = incident.Anthropic2025MisroutedShareWorstHour  # one model's requests misrouted
+    user_share = incident.Anthropic2025AffectedUserShare  # approx. share of coding-tool users affected
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Reported values only.
@@ -573,21 +566,18 @@ Rejection and cancellation are distinct events. When the stream monitor spots a 
 # │      the same floor that CallPrice uses in @sec-vol3-foundation-model-cost.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import BYTES_INT8, param
 from mlsysim.fmt import check, fmt_count, fmt_time
 
 class StreamCancel:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    weight_bytes = BYTES_INT8
-    k_cap = 4_096  # scenario: output allowance of the canceled call (as drawn in the figure)
-    k_cut = 96  # scenario: decode step at which the stream monitor rejects (as drawn)
+    scenario = Scenarios.CanceledStreamDecodeSavings  # Llama-3 70B, 8-bit weights, one H100
+    k_cap = scenario.output_allowance  # output allowance of the canceled call (as drawn in the figure)
+    k_cut = scenario.reject_step  # decode step at which the stream monitor rejects (as drawn)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_dec = ((model.parameters / param * weight_bytes) / accel.memory.bandwidth).to(second)
-    cancel_steps = k_cap - k_cut
-    cancel_s = cancel_steps * t_dec
+    t_dec = scenario.floors.result.memory_time.to(second)
+    cancel_steps = scenario.skipped_steps
+    cancel_s = scenario.decode_time_avoided
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cancel_steps == 4_000, "The figure labels 4,000 decode steps not run")
@@ -603,7 +593,7 @@ class StreamCancel:
 
 Consider a call with an output allowance of `{python} StreamCancel.k_cap_str` tokens whose stream validator detects a schema violation at step $\RejectionDecodeStep =$ `{python} StreamCancel.k_cut_str`. The runtime's part of the response finishes at once. It records the rejection, discards the partial proposal, and sends a cancel request. The service's part depends on whether that request is honored (@fig-vol3-streaming-cancellation).
 
-::: {#fig-vol3-streaming-cancellation data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-streaming-cancellation" fig-env="figure" fig-pos="htb" fig-cap="**Reject, Then Cancel**: The runtime's stream validator advances a parser state as each prefix arrives and holds the output rather than acting on it. At step `{python} StreamCancel.k_cut_str` the proposal introduces a key outside the schema, so the runtime records a rejection, discards the partial proposal, and sends a cancel request. The runtime outcomes on the left hold regardless of the service; the service outcomes on the right hold only if the service receives and honors the cancel request." fig-alt="Three lanes. Top, model service: an output allowance bar drawn to scale for 4,096 steps, with a thin solid sliver for the first 96 steps and a long dashed region labeled up to 4,000 decode steps not run. Middle, token stream: a zoom into the sliver shows step 1, an opening brace, step 2, a query key, steps 3 to 95 elided, and step 96, a force key outlined in red. Bottom, agent runtime stream validator: parser transitions q0 to q1 and q1 to q2, each held, and at step 96 a red box marked REJECTED, key not in schema. A red cancel request arrow runs from the rejection up to the dashed region of the allowance bar. Below, runtime outcomes: partial proposal never dispatched, rejection recorded in the envelope, error returned to the model next turn. Service outcomes, if honored: decoding stops at step 96, request leaves the batch, KV cache memory released."}
+::: {#fig-vol3-streaming-cancellation data-explore="original-v3-streaming-cancellation" data-explore-key="vol3:fig-vol3-streaming-cancellation" fig-env="figure" fig-pos="htb" fig-cap="**Reject, Then Cancel**: The runtime's stream validator advances a parser state as each prefix arrives and holds the output rather than acting on it. At step `{python} StreamCancel.k_cut_str` the proposal introduces a key outside the schema, so the runtime records a rejection, discards the partial proposal, and sends a cancel request. The runtime outcomes on the left hold regardless of the service; the service outcomes on the right hold only if the service receives and honors the cancel request." fig-alt="Three lanes. Top, model service: an output allowance bar drawn to scale for 4,096 steps, with a thin solid sliver for the first 96 steps and a long dashed region labeled up to 4,000 decode steps not run. Middle, token stream: a zoom into the sliver shows step 1, an opening brace, step 2, a query key, steps 3 to 95 elided, and step 96, a force key outlined in red. Bottom, agent runtime stream validator: parser transitions q0 to q1 and q1 to q2, each held, and at step 96 a red box marked REJECTED, key not in schema. A red cancel request arrow runs from the rejection up to the dashed region of the allowance bar. Below, runtime outcomes: partial proposal never dispatched, rejection recorded in the envelope, error returned to the model next turn. Service outcomes, if honored: decoding stops at step 96, request leaves the batch, KV cache memory released."}
 ![](images/svg/streaming_token_cancellation.svg)
 :::
 
@@ -652,18 +642,19 @@ from mlsysim import *
 
 class CandidateCheckerPosterior:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    defect_rate = 0.18  # hypothetical share violating the specified property
-    false_accept_rate = 0.65  # hypothetical P(PASS | Defective)
-    valid_accept_rate = 0.85  # hypothetical P(PASS | Valid)
+    scenario = Scenarios.PatchCheckerPosterior  # hypothetical checker rates
+    halved = Scenarios.PatchCheckerHalvedFalseAccept  # sensitivity: half the false-accept rate
+    defect_rate = scenario.defect_rate  # share violating the specified property
+    false_accept_rate = scenario.false_accept_rate  # P(PASS | Defective)
+    valid_accept_rate = scenario.valid_accept_rate  # P(PASS | Valid)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    defective_pass = false_accept_rate * defect_rate
-    valid_pass = valid_accept_rate * (1 - defect_rate)
-    posterior = defective_pass / (defective_pass + valid_pass)
-    catch_rate = 1 - false_accept_rate  # share of defective patches rejected
-    valid_reject = 1 - valid_accept_rate  # share of valid patches rejected
-    fa_half = false_accept_rate / 2  # sensitivity: a checker with half the false-accept rate
-    posterior_half = (fa_half * defect_rate) / (fa_half * defect_rate + valid_pass)
+    checked = scenario.result
+    posterior = checked.posterior
+    catch_rate = checked.catch_rate  # share of defective patches rejected
+    valid_reject = checked.valid_reject_rate  # share of valid patches rejected
+    fa_half = halved.false_accept_rate
+    posterior_half = halved.result.posterior
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(posterior - 0.1437346437346437) < 1e-12, "The assumed rates must leave about 14.37 percent defective passes")
@@ -819,7 +810,7 @@ When TTFT includes sampling and delivering the first token, the remaining decode
 
 The first-token boundary separates these two measurements in @fig-vol3-first-token-accounting. The service produces the initial logits during prefill, but the client must still wait for sampling and delivery before its TTFT interval ends.
 
-::: {#fig-vol3-first-token-accounting data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-first-token-accounting" fig-env="figure" fig-pos="htb" fig-cap="**First-Token Accounting**: A schematic timeline separates server prefill from client time to first token. Here K is the total number of output tokens. Prefill supplies the initial logits; only the remaining output tokens require subsequent generation passes. The later tokens arrive together in an illustrative buffered chunk, so client arrivals do not identify individual service steps. Distances are not measured durations." fig-alt="Service boxes show queueing, prompt prefill, first-token sampling, and later generation passes. Paths connect the service to the first client token and a later chunk. Separate brackets mark client TTFT and server prefill."}
+::: {#fig-vol3-first-token-accounting data-explore="original-v3-vol3-first-token-accounting" data-explore-key="vol3:fig-vol3-first-token-accounting" fig-env="figure" fig-pos="htb" fig-cap="**First-Token Accounting**: A schematic timeline separates server prefill from client time to first token. Here K is the total number of output tokens. Prefill supplies the initial logits; only the remaining output tokens require subsequent generation passes. The later tokens arrive together in an illustrative buffered chunk, so client arrivals do not identify individual service steps. Distances are not measured durations." fig-alt="Service boxes show queueing, prompt prefill, first-token sampling, and later generation passes. Paths connect the service to the first client token and a later chunk. Separate brackets mark client TTFT and server prefill."}
 ![](images/svg/first_token_accounting.svg)
 :::
 
@@ -846,59 +837,68 @@ Capping `max_output_tokens` bounds how many tokens the model can emit, not how f
 # │      allowance. Neither includes attention, queueing, or serving overhead.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import BYTES_INT8, flop, param
+from mlsysim.core.units import BYTES_INT8, flop
 from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_flop_rate, fmt_flops, fmt_math, fmt_memory, fmt_multiple, fmt_percent, fmt_time
 
 class CallPrice:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    agent = Agents.Coding.SWE_Bench_Runner
+    floors = Scenarios.Llama3_70B_Int8DecodeH100  # 8-bit weights, FP8 peak, batch 1
+    model = floors.workload
+    accel = floors.hardware
     weight_bytes = BYTES_INT8
-    s0 = 8_000  # scenario: initial serialized prompt tokens
-    delta = 1_500  # scenario: appended model output plus tool-observation tokens
-    k_turn = 200  # scenario: output tokens per turn
-    turns = agent.max_trajectory_steps
-    k_full = 1_850  # scenario: whole-file response tokens
-    k_diff = 80  # scenario: localized-edit response tokens
-    dm_full = 350  # scenario: additional whole-file format instruction tokens
-    dm_diff = 120  # scenario: additional localized-edit instruction tokens
-    deadline = 15.0 * second  # scenario: call deadline
-    syntax_ok = 0.95  # hypothetical fraction of localized edits that apply
-    fix_rate = 0.60  # hypothetical test-pass fraction conditional on applying
+    resend = Scenarios.CodingAgentResend30Turns  # scenario token counts; horizon = harness step budget
+    resend_2x = Scenarios.CodingAgentResend60Turns  # sensitivity: doubled horizon
+    resend_3x = Scenarios.CodingAgentResend90Turns  # checkpoint horizon (answer left to the reader)
+    first_call = Scenarios.CodingAgentFirstTurnCall
+    full_edit = Scenarios.CodingAgentWholeFileEdit
+    diff_edit = Scenarios.CodingAgentLocalizedEdit
+    s0 = resend.first_prompt  # initial serialized prompt tokens
+    delta = resend.appended  # appended model output plus tool-observation tokens
+    k_turn = resend.output_per_turn  # output tokens per turn
+    turns = resend.turns
+    k_full = full_edit.output_tokens  # whole-file response tokens
+    k_diff = diff_edit.output_tokens  # localized-edit response tokens
+    dm_full = full_edit.instruction_tokens  # additional whole-file format instruction tokens
+    dm_diff = diff_edit.instruction_tokens  # additional localized-edit instruction tokens
+    deadline = full_edit.deadline  # call deadline
+    syntax_ok = diff_edit.stage_success["applies"]  # fraction of localized edits that apply
+    fix_rate = diff_edit.stage_success["passes tests"]  # test-pass fraction conditional on applying
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    weights = model.parameters / param * weight_bytes
-    t_dec = (weights / accel.memory.bandwidth).to(second)
-    t_pre = (model.inference_flops / accel.compute.precision_flops["fp8"]).to(second)
-    call1_pre = s0 * t_pre
-    call1_dec = k_turn * t_dec
-    call1_total = call1_pre + call1_dec
-    sent_nocache = turns * s0 + delta * turns * (turns - 1) // 2
+    floor = floors.result
+    weights = floor.weight_bytes
+    t_dec = floor.memory_time.to(second)
+    t_pre = floor.compute_time.to(second)
+    call1 = first_call.result
+    call1_pre = call1.prefill_time
+    call1_dec = call1.decode_time
+    call1_total = call1.total_time
+    trajectory = resend.result
+    sent_nocache = trajectory.resent_tokens
     # Reuse earlier PROMPT prefixes only; reprocess the whole appended suffix.
-    sent_cache = s0 + delta * (turns - 1)
-    out_total = turns * k_turn
-    cache_saving = sent_nocache / sent_cache
-    input_share = sent_nocache / (sent_nocache + out_total)
-    pre_nocache = sent_nocache * t_pre
-    pre_cache = sent_cache * t_pre
-    dec_total = out_total * t_dec
-    t_full = (s0 + dm_full) * t_pre + k_full * t_dec
-    t_diff = (s0 + dm_diff) * t_pre + k_diff * t_dec
-    speedup = t_full / t_diff
-    pass_diff = syntax_ok * fix_rate
-    ratio = (t_dec / t_pre).to("").magnitude
+    sent_cache = trajectory.reused_prefix_tokens
+    out_total = trajectory.output_tokens
+    cache_saving = trajectory.reuse_reduction
+    input_share = trajectory.input_share
+    pre_nocache = trajectory.prefill_time
+    pre_cache = trajectory.reused_prefill_time
+    dec_total = trajectory.decode_time
+    full = full_edit.result
+    diff = diff_edit.result
+    t_full = full.total_time
+    t_diff = diff.total_time
+    speedup = (t_full / t_diff).to("").magnitude
+    pass_diff = diff.acceptance
+    ratio = floor.bound_ratio
     ratio_closed = (accel.compute.precision_flops["fp8"] * weight_bytes / (2 * flop * accel.memory.bandwidth)).to("").magnitude
-    call1_out_share = (call1_dec / call1_total).to("").magnitude  # output share of first-turn work
-    call1_tok_share = k_turn / (s0 + k_turn)  # output share of first-turn tokens
-    full_out_share = (k_full * t_dec / t_full).to("").magnitude  # output share of whole-file work
-    deadline_margin = (deadline / t_diff).to("").magnitude
-    turns_2x = 2 * turns  # sensitivity: doubled horizon
-    sent_nocache_2x = turns_2x * s0 + delta * turns_2x * (turns_2x - 1) // 2
-    sent_cache_2x = s0 + delta * (turns_2x - 1)
-    growth_nocache = sent_nocache_2x / sent_nocache
-    growth_cache = sent_cache_2x / sent_cache
-    turns_3x = 3 * turns  # checkpoint horizon (answer left to the reader)
+    call1_out_share = call1.output_time_share  # output share of first-turn work
+    call1_tok_share = call1.output_token_share  # output share of first-turn tokens
+    full_out_share = full.output_time_share  # output share of whole-file work
+    deadline_margin = diff.deadline_margin
+    turns_2x = resend_2x.turns
+    growth_nocache = resend_2x.result.resent_tokens / sent_nocache
+    growth_cache = resend_2x.result.reused_prefix_tokens / sent_cache
+    turns_3x = resend_3x.turns
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_pre > 0 * second and t_dec > 0 * second, "Positive work allowances")
@@ -1042,19 +1042,18 @@ from mlsysim.fmt import check, fmt_count, fmt_time
 
 class LatencyByArchetype:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_pre = CallPrice.t_pre  # registry-derived prefill floor per prompt token
-    t_dec = CallPrice.t_dec  # registry-derived decode floor per output token
-    support = Agents.Support.CustomerOps
-    sup_prompt = support.session_context.to("token").magnitude  # policy, customer record, conversation
-    sup_shared = support.shared_prefix.to("token").magnitude  # prefix identical across sessions
-    sup_reply = support.reply_tokens.to("token").magnitude  # support reply tokens
+    scenario = Scenarios.SupportAgentTurnCall  # CallPrice's floors; Agents.Support.CustomerOps lengths
+    sup_prompt = scenario.prompt_tokens  # policy, customer record, conversation
+    sup_shared = scenario.shared_prefix_tokens  # prefix identical across sessions
+    sup_reply = scenario.output_tokens  # support reply tokens
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    sup_prefill = (sup_prompt * t_pre).to(second)
-    sup_reply_t = (sup_reply * t_dec).to(second)
-    stream_rate = (1 / t_dec).to(1 / second).magnitude  # tokens per second
+    turn = scenario.result
+    sup_prefill = turn.prefill_time
+    sup_reply_t = turn.decode_time
+    stream_rate = turn.decode_rate.to(1 / second).magnitude  # tokens per second
     sup_fresh = sup_prompt - sup_shared
-    sup_prefill_cached = (sup_fresh * t_pre).to(second)
+    sup_prefill_cached = turn.fresh_prefill_time
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(sup_prefill < 1 * second < sup_reply_t, "Prefill well under a second; full reply takes seconds")

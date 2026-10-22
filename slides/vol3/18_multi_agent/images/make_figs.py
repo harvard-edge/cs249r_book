@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Figures for Lecture 18 (Multi-Agent Coordination), Volume III.
 
-Every value comes from calcs.py, which this script imports, so figures and
-slides agree. "MA" is the rendered chapter, Multi-Agent Coordination. The book
+Every value comes from calcs.py, which reads MLSysIM; this script imports it
+and prints labels with val() and num(), so figures and slides agree. "MA" is the rendered chapter, Multi-Agent Coordination. The book
 SVGs (coordination topologies, supervisor isolation, OCC worktrees, write
 collision, correlated ensemble, barrier odds, USL retrograde) are page-sized
 and fall below the legibility floor on a slide, so they are redrawn here at
@@ -21,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics import calc_full_mesh_deliveries, calc_supervisor_deliveries  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -128,13 +130,13 @@ def col_axes(size=(5.4, 3.6), fs=15):
 
 # ============================================================ recall (L17)
 def recall_bars():
-    r = calcs.recall()
+    r = calcs.RC
     fig, ax = plt.subplots(figsize=(5.4, 2.4))
-    ax.barh([1], [r["true_accepts"]], color=C["data"], height=0.6)
-    ax.barh([0], [r["false_accepts"]], color=C["danger"], height=0.6)
+    ax.barh([1], [r.true_accepts], color=C["data"], height=0.6)
+    ax.barh([0], [r.false_accepts], color=C["danger"], height=0.6)
     ax.set_yticks([0, 1], ["false accepts", "true accepts"], fontsize=14)
-    ax.set_xlabel("Rewarded rollouts of 8,192", fontsize=13)
-    ax.text(r["false_accepts"] + 15, 0, f"{100 * r['false_share']:.1f}% of rewards",
+    ax.set_xlabel(f"Rewarded rollouts of {val('rc_rollouts')}", fontsize=13)
+    ax.text(r.false_accepts + 15, 0, f"{val('rc_false_pct')}% of rewards",
             va="center", fontsize=14, color=C["danger"], fontweight="bold")
     ax.set_xlim(0, 1000)
     sp.save(fig, out / "recall_bars.svg")
@@ -180,24 +182,25 @@ for k in (1, 2):
 
 # ================================================== NM 18.1 screen (speedup)
 def screen_plot():
-    a, b = calcs.screen(0.80, 0.02), calcs.screen(0.80, 0.01)
-    ns = list(range(1, 17))
+    a, b = calcs.SCR, calcs.SCR_H
+    ns = list(a.elapsed)
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
-    ax.axhline(a["ceiling"], color=C["neutral"], ls="--", lw=1.8)
-    ax.text(16, a["ceiling"] - 0.12, "ceiling 1/(1−p) = 5× (no overhead)", ha="right",
+    ax.axhline(a.speedup_cap, color=C["neutral"], ls="--", lw=1.8)
+    ax.text(ns[-1], a.speedup_cap - 0.12, f"ceiling 1/(1−p) = {val('scr_cap')}× (no overhead)", ha="right",
             va="top", fontsize=12, color=C["neutral"], fontweight="bold")
-    ax.plot(ns, [1 / a["t"][n] for n in ns], "-o", color=C["network"], lw=2.4, ms=5)
-    ax.plot(ns, [1 / b["t"][n] for n in ns], "-o", color=C["memory"], lw=2.0, ms=4, alpha=0.8)
-    ax.plot([a["best"]], [a["speedup"]], "o", ms=12, color=C["danger"], zorder=5)
-    ax.annotate(f"c = 0.02: best {a['best']} workers, {a['speedup']:.1f}×",
-                (a["best"], a["speedup"]), xytext=(10, -40), textcoords="offset points",
+    ax.plot(ns, [1 / a.elapsed[n] for n in ns], "-o", color=C["network"], lw=2.4, ms=5)
+    ax.plot(ns, [1 / b.elapsed[n] for n in ns], "-o", color=C["memory"], lw=2.0, ms=4, alpha=0.8)
+    ax.plot([a.best_workers], [a.best_speedup], "o", ms=12, color=C["danger"], zorder=5)
+    ax.annotate(f"c = {val('scr_c')}: best {val('scr_best')} workers, {val('scr_speedup')}×",
+                (a.best_workers, a.best_speedup), xytext=(10, -40), textcoords="offset points",
                 fontsize=12, color=C["network"], fontweight="bold")
-    ax.annotate(f"c = 0.01: best {b['best']}, {b['speedup']:.1f}×", (b["best"], b["speedup"]),
+    ax.annotate(f"c = {val('scr_c_half')}: best {val('scr_half_best')}, {val('scr_half_speedup')}×",
+                (b.best_workers, b.best_speedup),
                 xytext=(14, 8), textcoords="offset points", fontsize=12,
                 color=C["memory"], fontweight="bold")
     ax.set_xlim(0.5, 16.5)
     ax.set_ylim(0, 5.4)
-    ax.set_xlabel("Workers N (p = 0.80, overhead c per added worker)", fontsize=12)
+    ax.set_xlabel(f"Workers N (p = {val('scr_p')}, overhead c per added worker)", fontsize=12)
     ax.set_ylabel("Speedup", fontsize=12)
     ax.grid(color=C["grid"], linewidth=0.6)
     sp.save(fig, out / "screen.svg")
@@ -208,20 +211,20 @@ screen_plot()
 
 # ======================================================= USL (retrograde)
 def usl_plot():
-    u, r = calcs.usl_summary(), calcs.usl_summary(0.10, 0.002, nmax=600)
+    u, r = calcs.USL, calcs.USL_R
     ns = list(range(1, 61))
     fig, ax = col_axes()
-    ax.axvspan(u["first_slower"], 60, color=C["danger_l"], zorder=0)
+    ax.axvspan(u.first_slower, 60, color=C["danger_l"], zorder=0)
     ax.axhline(1, color=C["neutral"], ls="--", lw=1.6)
-    ax.plot(ns, [calcs.usl(n, 0.2, 0.02) for n in ns], color=C["network"], lw=2.8)
-    ax.plot(ns, [calcs.usl(n, 0.1, 0.002) for n in ns], color=C["data"], lw=2.8)
-    ax.plot([u["best"]], [u["peak"]], "o", ms=10, color=C["network"])
-    ax.plot([r["best"]], [r["peak"]], "o", ms=10, color=C["data"])
-    ax.text(u["best"] + 2, u["peak"] + 0.15, f"repair: peak {u['best']}, {u['peak']:.1f}×",
+    ax.plot(ns, [u.capacity[n] for n in ns], color=C["network"], lw=2.8)
+    ax.plot(ns, [r.capacity[n] for n in ns], color=C["data"], lw=2.8)
+    ax.plot([u.best_workers], [u.peak_capacity], "o", ms=10, color=C["network"])
+    ax.plot([r.best_workers], [r.peak_capacity], "o", ms=10, color=C["data"])
+    ax.text(u.best_workers + 2, u.peak_capacity + 0.15, f"repair: peak {val('usl_best')}, {val('usl_peak')}×",
             fontsize=14, color=C["network"], fontweight="bold")
-    ax.text(r["best"] - 3, r["peak"] + 0.25, f"research: {r['best']}, {r['peak']:.1f}×",
+    ax.text(r.best_workers - 3, r.peak_capacity + 0.25, f"research: {val('usl_rbest')}, {val('usl_rpeak')}×",
             fontsize=14, color=C["data"], fontweight="bold")
-    ax.text(42, 1.25, f"slower than one\nworker from {u['first_slower']}", fontsize=14,
+    ax.text(42, 1.25, f"slower than one\nworker from {val('usl_slower')}", fontsize=14,
             color=C["danger"], fontweight="bold")
     ax.set_xlim(0, 60)
     ax.set_ylim(0, 6.6)
@@ -235,16 +238,15 @@ usl_plot()
 
 # =================================================== NM 18.6 break-even
 def breakeven_plot():
-    h = calcs.hook()
-    m, be = h["token_multiple"], h["breakeven_single_success"]
+    m, be = calcs.BE.token_multiple, calcs.BE.max_single_acceptance
     fig, ax = col_axes()
     xs = [i / 200 for i in range(0, 201)]
     ax.fill_between([x for x in xs if x >= be], 0, 1.0, color=C["danger_l"], zorder=0)
     ax.plot([x for x in xs if x <= be], [m * x for x in xs if x <= be], color=C["network"], lw=3)
     ax.plot([be], [1.0], "o", ms=11, color=C["danger"], zorder=5)
-    ax.text(be + 0.04, 0.62, f"single agent above\n{100 * be:.1f}%: no acceptance\nrate can pay back",
+    ax.text(be + 0.04, 0.62, f"single agent above\n{val('hook_breakeven_pct')}%: no acceptance\nrate can pay back",
             fontsize=14, color=C["danger"], fontweight="bold", va="top")
-    ax.text(0.10, 0.20, f"slope\n{m:.2f}", fontsize=14,
+    ax.text(0.10, 0.20, f"slope\n{val('hook_m')}", fontsize=14,
             color=C["network"], fontweight="bold", va="top")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.05)
@@ -323,12 +325,11 @@ for k in (1, 2, 3):
 def mesh_plot():
     ns = list(range(1, 11))
     fig, ax = col_axes()
-    ax.plot(ns, [calcs.deliveries(n)["mesh"] for n in ns], "-o", color=C["danger"], lw=2.8)
-    ax.plot(ns, [calcs.deliveries(n)["supervisor"] for n in ns], "-o", color=C["network"], lw=2.8)
-    d8 = calcs.deliveries(8)
-    ax.text(0.9, 72, f"full mesh N(N−1):\n{d8['mesh']} at N = 8", fontsize=14,
+    ax.plot(ns, [calc_full_mesh_deliveries(n) for n in ns], "-o", color=C["danger"], lw=2.8)
+    ax.plot(ns, [calc_supervisor_deliveries(n) for n in ns], "-o", color=C["network"], lw=2.8)
+    ax.text(0.9, 72, f"full mesh N(N−1):\n{val('msg_mesh')} at N = {calcs.MSG.workers}", fontsize=14,
             color=C["danger"], fontweight="bold")
-    ax.text(6.2, 25, f"supervisor 2N: {d8['supervisor']}", fontsize=14, color=C["network"],
+    ax.text(6.2, 25, f"supervisor 2N: {val('msg_sup')}", fontsize=14, color=C["network"],
             fontweight="bold")
     ax.set_xlabel("Agents N", fontsize=14)
     ax.set_ylabel("Deliveries per round", fontsize=14)
@@ -342,34 +343,34 @@ mesh_plot()
 
 # =============================================================== DAG Gantt
 def gantt(k):
-    g = calcs.dag()
-    rows = [("v1 spec", "v1"), ("v2 module", "v2"), ("v3 module", "v3"), ("v4 module", "v4"),
-            ("v5 assess", "v5"), ("v6 bindings", "v6"), ("v7 integrate", "v7")]
-    crit = {"v1", "v2", "v5", "v7"}
+    g = calcs.DAG
+    rows = [("v1 spec", 1), ("v2 module", 2), ("v3 module", 3), ("v4 module", 4),
+            ("v5 assess", 5), ("v6 bindings", 6), ("v7 integrate", 7)]
+    crit = {1, 2, 5, 7}
     fig, ax = plt.subplots(figsize=(5.8, 2.8))
     n = len(rows)
     for i, (lab, key) in enumerate(rows):
         y = n - 1 - i
-        dur = calcs.DAG[key][0]
+        dur = g.durations[key].to("s").magnitude
         oncrit = k >= 2 and key in crit
-        color = C["network"] if oncrit else (C["memory"] if key != "v7" else C["data"])
-        ax.barh(y, dur, left=g["start"][key], height=0.62, color=color,
+        color = C["network"] if oncrit else (C["memory"] if key != 7 else C["data"])
+        ax.barh(y, dur, left=g.start[key].to("s").magnitude, height=0.62, color=color,
                 edgecolor=C["danger"] if oncrit else "none", linewidth=2.4 if oncrit else 0)
         ax.text(-3, y, lab, ha="right", va="center", fontsize=12, color=C["text"],
                 fontweight="bold")
     if k >= 2:
         ys = n - 1 - 5
-        ax.annotate("", xy=(g["start"]["v7"], ys), xytext=(g["finish"]["v6"], ys),
+        ax.annotate("", xy=(g.start[7].to("s").magnitude, ys), xytext=(g.finish[6].to("s").magnitude, ys),
                     arrowprops=dict(arrowstyle="<->", color=C["data"], lw=2))
-        ax.text(g["start"]["v7"] + 2, ys, f"{g['slack_v6']:.1f} s slack", fontsize=12,
+        ax.text(g.start[7].to("s").magnitude + 2, ys, f"{val('dag_slack')} s slack", fontsize=12,
                 color=C["data"], fontweight="bold", va="center")
-        ax.text(g["makespan"], n - 0.8, f"done at {g['makespan']:.1f} s", ha="right",
+        ax.text(num("dag_span"), n - 0.8, f"done at {val('dag_span')} s", ha="right",
                 fontsize=12, color=C["danger"], fontweight="bold")
     ax.set_xlim(0, 180)
     ax.set_ylim(-0.6, n - 0.2)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Seconds (4 slots; illustrative durations)", fontsize=12)
+    ax.set_xlabel(f"Seconds ({val('dag_slots')} slots; illustrative durations)", fontsize=12)
     ax.tick_params(axis="x", labelsize=11)
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
@@ -455,20 +456,23 @@ for k in (1, 2, 3):
 
 # ================================================ equation 4: shared writes
 def birthday_plot():
-    c = calcs.collisions()
-    ns = list(range(1, 17))
+    w = calcs.WR
+    p = w.collision
+    ns = list(p)
+    even = w.even_odds_fleet
     fig, ax = col_axes()
     ax.axhline(0.5, color=C["neutral"], ls="--", lw=1.6)
-    ax.plot(ns, [c["p"][n] for n in ns], "-", color=C["network"], lw=3)
-    for n, dx, dy in ((2, 1.0, -0.07), (c["even"], 0.6, -0.1), (8, 0.6, -0.05)):
-        ax.plot([n], [c["p"][n]], "o", ms=10, color=C["danger"] if n == c["even"] else C["network"])
-        ax.text(n + dx, c["p"][n] + dy, f"{n} workers: {100 * c['p'][n]:.1f}%", fontsize=14,
-                color=C["danger"] if n == c["even"] else C["network"], fontweight="bold")
+    ax.plot(ns, [p[n] for n in ns], "-", color=C["network"], lw=3)
+    for n, dx, dy, key in ((w.small_fleet, 1.0, -0.07, "bd_p2"), (even, 0.6, -0.1, "bd_p5"),
+                           (w.large_fleet, 0.6, -0.05, "bd_p8")):
+        ax.plot([n], [p[n]], "o", ms=10, color=C["danger"] if n == even else C["network"])
+        ax.text(n + dx, p[n] + dy, f"{n} workers: {val(key)}%", fontsize=14,
+                color=C["danger"] if n == even else C["network"], fontweight="bold")
     ax.text(1, 0.53, "even odds", ha="left", fontsize=13, color=C["neutral"])
     ax.set_xticks([1, 4, 8, 12, 16])
     ax.set_xlim(0.5, 16.5)
     ax.set_ylim(0, 1.05)
-    ax.set_xlabel("Workers (1,000 files; 10 written each)", fontsize=14)
+    ax.set_xlabel(f"Workers ({val('bd_files')} files; {val('bd_w')} written each)", fontsize=14)
     ax.set_ylabel("P(at least one shared write)", fontsize=14)
     sp.save(fig, out / "birthday.svg")
 
@@ -505,12 +509,13 @@ for k in (1, 2, 3, 4):
 # ===================================================== Kim et al. (real data)
 def kim_plot():
     fig, ax = plt.subplots(figsize=(5.4, 2.6))
-    ax.barh([1], [100 * calcs.KIM_RANDOM], color=C["neutral_l"], height=0.6)
-    ax.barh([0], [100 * calcs.KIM_MEASURED], color=C["danger"], height=0.6)
+    rnd, meas = 100 / calcs.HELM.HelmIncorrectChoices, calcs.HELM.HelmSameWrongAnswerPct
+    ax.barh([1], [rnd], color=C["neutral_l"], height=0.6)
+    ax.barh([0], [meas], color=C["danger"], height=0.6)
     ax.set_yticks([0, 1], ["measured", "if errors\nwere random"], fontsize=14)
-    ax.text(100 * calcs.KIM_RANDOM + 1.5, 1, "33%", va="center", fontsize=15,
+    ax.text(rnd + 1.5, 1, f"{val('kim_random_pct')}%", va="center", fontsize=15,
             color=C["neutral"], fontweight="bold")
-    ax.text(100 * calcs.KIM_MEASURED + 1.5, 0, "about 60%", va="center", fontsize=15,
+    ax.text(meas + 1.5, 0, f"about {val('kim_pct')}%", va="center", fontsize=15,
             color=C["danger"], fontweight="bold")
     ax.set_xlim(0, 80)
     ax.set_xlabel("Same wrong answer, when both models err (%)", fontsize=13)
@@ -524,28 +529,32 @@ kim_plot()
 
 # ============================================ NM 18.4 the correlated floor
 def floor_plot(k):
-    r = calcs.reviewers()
-    ns = sorted(r["ind"])
+    rv = calcs.RV
+    ns = rv.panels
+    ind = {n: rv.independent_majority(n) for n in ns}
+    mix = {n: rv.correlated_majority(n) for n in ns}
+    floor = rv.floor
+    n5, n15 = rv.reviewers, rv.large_ensemble
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
-    ax.plot(ns, [100 * r["ind"][n] for n in ns], "-o", color=C["memory"], lw=2.6)
-    ax.text(9.4, 100 * r["ind"][9] + 2.0, "independent errors", fontsize=12,
+    ax.plot(ns, [100 * ind[n] for n in ns], "-o", color=C["memory"], lw=2.6)
+    ax.text(9.4, 100 * ind[9] + 2.0, "independent errors", fontsize=12,
             color=C["memory"], fontweight="bold")
     sh = k >= 2
-    ax.axhline(100 * r["floor"], color=C["danger"], ls="--", lw=1.8, alpha=1 if sh else 0)
-    ax.plot(ns, [100 * r["mix"][n] for n in ns], "-o", color=C["network"], lw=2.6,
+    ax.axhline(100 * floor, color=C["danger"], ls="--", lw=1.8, alpha=1 if sh else 0)
+    ax.plot(ns, [100 * mix[n] for n in ns], "-o", color=C["network"], lw=2.6,
             alpha=1 if sh else 0)
-    ax.text(15, 100 * r["mix"][15] + 1.2, f"shared difficulty: {100 * r['mix'][15]:.1f}% at 15",
+    ax.text(n15, 100 * mix[n15] + 1.2, f"shared difficulty: {val('rv_maj15_mix')}% at {val('rv_large')}",
             ha="right", fontsize=12, color=C["network"], fontweight="bold", alpha=1 if sh else 0)
-    ax.text(15, 100 * r["floor"] - 1.0, f"floor {100 * r['floor']:.1f}%", ha="right", va="top",
+    ax.text(n15, 100 * floor - 1.0, f"floor {val('rv_floor')}%", ha="right", va="top",
             fontsize=12, color=C["danger"], fontweight="bold", alpha=1 if sh else 0)
-    ax.text(5.2, 100 * r["mix"][5] + 1.6, f"{100 * r['mix'][5]:.2f}%", fontsize=12,
+    ax.text(n5 + 0.2, 100 * mix[n5] + 1.6, f"{val('rv_maj_mix')}%", fontsize=12,
             color=C["network"], fontweight="bold", alpha=1 if sh else 0)
-    ax.text(5.3, 100 * r["ind"][5] + 0.8, f"{100 * r['ind'][5]:.2f}%", fontsize=12,
+    ax.text(n5 + 0.3, 100 * ind[n5] + 0.8, f"{val('rv_maj_ind')}%", fontsize=12,
             color=C["memory"], fontweight="bold")
     ax.set_xticks(ns)
     ax.set_xlim(0.5, 15.5)
     ax.set_ylim(0, 22)
-    ax.set_xlabel("Reviewers (each falsely approves 20%; correlation 0.40)", fontsize=12)
+    ax.set_xlabel(f"Reviewers (each falsely approves {val('rv_q')}%; correlation {val('rv_rho')})", fontsize=12)
     ax.set_ylabel("Majority false\napproval (%)", fontsize=12)
     ax.grid(color=C["grid"], linewidth=0.6)
     sp.save(fig, out / f"floor_step{k}.svg")
@@ -557,23 +566,24 @@ for k in (1, 2):
 
 # =================================================== NM 18.5 the barrier
 def barrier_plot():
-    b = calcs.barrier()
-    ns = list(range(1, 17))
+    fo = calcs.FO
+    allp = fo.all_on_time_by_fleet
+    ns = list(allp)
     fig, ax = col_axes()
     ax.axhline(0.5, color=C["neutral"], ls="--", lw=1.6)
-    ax.plot(ns, [b["all"][n] for n in ns], "-", color=C["network"], lw=3)
-    n7 = b["below_half"]
-    ax.plot([n7], [b["all"][n7]], "o", ms=11, color=C["danger"])
-    ax.text(1, 0.30, f"{n7} workers:\n{100 * b['all'][n7]:.0f}%, below even",
+    ax.plot(ns, [allp[n] for n in ns], "-", color=C["network"], lw=3)
+    n7 = fo.even_odds_workers
+    ax.plot([n7], [allp[n7]], "o", ms=11, color=C["danger"])
+    ax.text(1, 0.30, f"{n7} workers:\n{100 * allp[n7]:.0f}%, below even",
             fontsize=14, color=C["danger"], fontweight="bold")
     ax.set_xticks([1, 4, 8, 12, 16])
-    ax.plot([8], [b["quorum"]], "s", ms=11, color=C["data"])
-    ax.text(8.6, b["quorum"] - 0.02, f"any 6 of 8: {100 * b['quorum']:.2f}%", fontsize=14,
+    ax.plot([fo.workers], [fo.quorum_on_time], "s", ms=11, color=C["data"])
+    ax.text(fo.workers + 0.6, fo.quorum_on_time - 0.02, f"any {val('fo_k')} of {val('fo_n')}: {val('fo_quorum')}%", fontsize=14,
             color=C["data"], fontweight="bold", va="top")
     ax.text(15.5, 0.53, "even odds", ha="right", fontsize=13, color=C["neutral"])
     ax.set_xlim(0.5, 16.5)
     ax.set_ylim(0, 1.05)
-    ax.set_xlabel("Workers, each on time 90%", fontsize=14)
+    ax.set_xlabel(f"Workers, each on time {val('fo_p_pct')}%", fontsize=14)
     ax.set_ylabel("P(all on time)", fontsize=14)
     sp.save(fig, out / "barrier.svg")
 
@@ -583,15 +593,15 @@ barrier_plot()
 
 # ===================================================== credit window bars
 def credit_plot():
-    c = calcs.credit()
+    c = calcs.CW
     fig, ax = plt.subplots(figsize=(5.4, 1.9))
-    vals = [c["wait_h"] * 3600, c["residence"]]
+    vals = [c.backlog_wait.to("s").magnitude, c.window_residence.to("s").magnitude]
     ax.barh([1, 0], vals, color=[C["danger"], C["data"]], height=0.62)
     ax.set_xscale("log")
-    ax.set_yticks([0, 1], ["window of 8", "no window"], fontsize=16)
-    ax.text(vals[0] / 1.15, 1, f"{c['wait_h']:.1f} h", ha="right", va="center", fontsize=17,
+    ax.set_yticks([0, 1], [f"window of {val('cw_w')}", "no window"], fontsize=16)
+    ax.text(vals[0] / 1.15, 1, f"{val('cw_wait')} h", ha="right", va="center", fontsize=17,
             color="white", fontweight="bold")
-    ax.text(vals[1] * 1.2, 0, f"{c['residence']:.0f} s", va="center", fontsize=17,
+    ax.text(vals[1] * 1.2, 0, f"{val('cw_res')} s", va="center", fontsize=17,
             color=C["data"], fontweight="bold")
     ax.set_xlim(10, 1e5)
     ax.set_xticks([10, 100, 1000, 10000, 100000], ["10 s", "100 s", "17 min", "2.8 h", "28 h"])
@@ -636,13 +646,13 @@ for k in (1, 2, 3):
 # ================================================ attenuation (build 2)
 def atten(k):
     s = Svg(900, 400)
-    s.box(290, 8, 320, 100, "Root", ("read repo, edit callers,", "publish; $39 available"), "store",
+    s.box(290, 8, 320, 100, "Root", ("read repo, edit callers,", f"publish; ${val('al_avail')} available"), "store",
           tsize=22, ssize=20)
     s.arrow([(450, 108), (210, 150)], VIO)
-    s.box(30, 152, 360, 100, "worker_caller_01", ("edit callers only;", "$13 reserved"), "think",
+    s.box(30, 152, 360, 100, "worker_caller_01", ("edit callers only;", f"${val('al_equal')} reserved"), "think",
           tsize=22, ssize=20)
     s.arrow([(210, 252), (210, 290)], VIO)
-    s.box(30, 292, 360, 100, "inspection child", ("read one file;", "$5 out of the $13"), "think",
+    s.box(30, 292, 360, 100, "inspection child", ("read one file;", f"${val('al_nested')} out of the ${val('al_equal')}"), "think",
           tsize=22, ssize=20)
     sh = k >= 2
     s.arrow([(390, 342), (600, 342), (600, 112)], RED, dash=True, show=sh)
@@ -669,14 +679,14 @@ def mast_plot():
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     for i, (lab, v, cat) in enumerate(rows):
         ax.barh(i, v, color=col[cat], height=0.7)
-        ax.text(v + 0.3, i, f"{v:.1f}%", va="center", fontsize=14, color=col[cat], fontweight="bold")
+        ax.text(v + 0.3, i, f"{float(v):.1f}%", va="center", fontsize=14, color=col[cat], fontweight="bold")
         ax.text(-0.4, i, short.get(lab, lab), ha="right", va="center", fontsize=13,
                 color=C["text"], linespacing=0.9)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xlim(0, 20)
     ax.set_xticks([0, 5, 10, 15])
-    ax.set_xlabel("Share of failures, 1,642 traces (%)", fontsize=13)
+    ax.set_xlabel(f"Share of failures, {val('mast_traces')} traces (%)", fontsize=13)
     ax.tick_params(labelsize=13)
     sp.save(fig, out / "mast.svg")
 
@@ -686,13 +696,47 @@ mast_plot()
 
 # ======================================================== next lecture thumb
 def next_bars():
-    co = calcs.cohort()
+    co = calcs.CO
     fig, ax = plt.subplots(figsize=(5.4, 2.4))
-    ax.bar([0, 1], [co["single"]["per_acc"], co["delegated"]["per_acc"]],
+    ax.bar([0, 1], [num("co_s_pa"), num("co_m_pa")],
            color=[C["memory"], C["network"]], width=0.6)
     ax.set_xticks([0, 1], ["single", "delegated"])
     ax.set_ylabel("Cost per accepted task")
     sp.save(fig, out / "next_bars.svg")
+
+
+# ============================================ visual-review additions (2026-10-21)
+def worktrees():
+    """Private worktrees over one object store; publish is a compare-and-swap."""
+    s = Svg(560, 366)
+    for i, w in enumerate(("interface worker", "caller worker")):
+        x = 10 + i * 280
+        s.box(x, 10, 260, 100, f"worktree: {w.split()[0]}", ("own files, index, HEAD",),
+              "think", tsize=25, ssize=22)
+        s.arrow([(x + 130, 110), (x + 130 if i == 0 else x + 130, 160)], SKY, width=3)
+    s.box(10, 162, 540, 70, "one shared object store", (), "store", tsize=26)
+    s.arrow([(280, 232), (280, 290)], GRN, width=3.5)
+    s.text(296, 268, "compare-and-swap", 22, P["ok"][2], anchor="start", bold=True)
+    s.box(100, 292, 360, 70, "branch head", ("moves only if unchanged",), "ok", tsize=25, ssize=22)
+    s.save("worktrees.svg")
+
+
+worktrees()
+
+
+def shuttle_vote():
+    """Four computers run identical code and vote; a fifth runs other code."""
+    s = Svg(560, 334)
+    for i in range(4):
+        s.box(10 + i * 112, 30, 98, 80, f"GPC {i + 1}", ("PASS",), "think", tsize=21, ssize=19)
+        s.arrow([(59 + i * 112, 110), (59 + i * 112, 150)], SKY, width=2.6)
+    s.box(10, 152, 434, 60, "vote: masks one independent fault", (), "store", tsize=21)
+    s.box(10, 254, 434, 70, "same code: one bug fails all four", (), "fault", tsize=21)
+    s.box(462, 30, 90, 294, "GPC 5", ("backup", "code", "other", "team"), "ok", tsize=21, ssize=19)
+    s.save("shuttle_vote.svg")
+
+
+shuttle_vote()
 
 
 next_bars()

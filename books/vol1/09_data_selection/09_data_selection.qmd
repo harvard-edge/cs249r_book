@@ -106,7 +106,7 @@ Scaling laws\index{Scaling laws!data-compute asymmetry}[^fn-scaling-laws-origin]
 # │ How:     Registry corpus size and training FLOPs, Chinchilla constants from
 # │          the literature registry, H100 peak rate, TDP, and reference MFU.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Literature
+from mlsysim import Models, Hardware, Literature, Scenarios
 from mlsysim.engine import calibration
 from mlsysim.core.units import GB, byte, count, param, flop, second, day, kWh, joule
 from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_multiple, fmt_percent, fmt_sci_flops, fmt_time, fmt_energy, fmt_ratio
@@ -116,27 +116,28 @@ class GPT2DataWall:
     """GPT-2 XL on one eight-accelerator machine: compute outruns its own corpus."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    h100 = Hardware.Cloud.H100
-    corpus_bytes = gpt2.training_dataset_size  # WebText
-    training_flops = gpt2.training_ops  # estimate for the original run
-    flops_per_param_token = Literature.Chinchilla.ComputeConstant.value * flop / (param * count)
-    tokens_per_param_opt = Literature.Chinchilla.TokensPerParam.value
-    mfu = Literature.Training.MfuHigh  # same utilization as the training chapter's GPT-2 run
-    bytes_per_token = 4 * byte / count  # scenario assumption: English text averages about 4 bytes per BPE token
-    node_accelerators = 8  # one machine at the top of this book's scope
+    # Scenarios.Gpt2XlWebTextCorpus: WebText at about 4 bytes per token, the
+    # run's published FLOPs at six FLOPs per parameter per token, and one
+    # eight-H100 machine at the reference MFU (the training chapter's GPT-2 run).
+    run = Scenarios.Gpt2XlWebTextCorpus
+    gpt2 = run.workload
+    h100 = run.hardware
+    corpus_bytes = run.corpus_bytes  # WebText
+    training_flops = run.training_flops  # estimate for the original run
+    tokens_per_param_opt = run.tokens_per_param
+    mfu = run.utilization
+    bytes_per_token = run.bytes_per_token
+    node_accelerators = run.accelerators
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    params = gpt2.parameters.to(param).magnitude
-    unique_tokens = (corpus_bytes / bytes_per_token).to(count)
-    optimal_tokens = tokens_per_param_opt * params * count
-    shortfall = (optimal_tokens / unique_tokens).to("").magnitude
-    tokens_per_param_have = unique_tokens.magnitude / params
-    tokens_processed = (training_flops / (flops_per_param_token * gpt2.parameters.to(param))).to(count)
-    corpus_passes = (tokens_processed / unique_tokens).to("").magnitude
-    node_rate = node_accelerators * h100.compute.peak_flops * mfu
-    node_time = (training_flops / node_rate).to(second)
-    node_energy = (node_accelerators * h100.tdp * node_time).to(joule)
+    unique_tokens = run.unique_tokens
+    optimal_tokens = run.optimal_tokens
+    shortfall = run.shortfall
+    tokens_per_param_have = run.unique_tokens_per_param
+    tokens_processed = run.tokens_processed
+    corpus_passes = run.passes
+    node_time = run.run_time
+    node_energy = run.run_energy
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(9.5 < unique_tokens.magnitude / 1e9 < 10.5, f"Prose says about 10 billion unique tokens, got {unique_tokens}.")
@@ -539,7 +540,7 @@ The ratio becomes concrete on a *coreset*\index{Coreset!ICR example}, a delibera
 # │ Scope: chapter-anchor
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets, Models
+from mlsysim import Datasets, Models, Scenarios
 from mlsysim.core.units import GFLOPs, count, flop
 from mlsysim.fmt import fmt_percent, fmt, fmt_math, check, fmt_flops, fmt_pp, fmt_sci_flops, fmt_count, sci_latex
 
@@ -547,23 +548,26 @@ class IcrCoresetComparison:
     """Illustrative learning-per-FLOP comparison for random and selected data."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    imagenet_size = Datasets.ImageNet.training_examples.to(count)
-    acc_gain_random_pp = 5.0  # percentage-point gain per epoch
-    acc_gain_coreset_pp = 4.5  # percentage points with 50% coreset
-    coreset_fraction_value = 0.5  # keep 50% of data
+    # Scenarios.ResNet50HalfImageNetIcr: an assumed 5-point epoch-1 gain on all of
+    # ImageNet against 4.5 points on the half-size coreset.
+    icr = Scenarios.ResNet50HalfImageNetIcr
+    imagenet_size = icr.dataset.training_examples.to(count)
+    acc_gain_random_pp = icr.gain_full
+    acc_gain_coreset_pp = icr.gain_subset
+    coreset_fraction_value = icr.keep_fraction
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    m_resnet = Models.Vision.ResNet50
+    m_resnet = icr.workload
     resnet50_fwd_flops = m_resnet.inference_flops.to(GFLOPs)
-    resnet50_fwdbwd_flops = (m_resnet.inference_flops * 3).to(GFLOPs)
-    full_epoch_flops = imagenet_size * resnet50_fwdbwd_flops
+    resnet50_fwdbwd_flops = icr.training_flops_per_sample
+    full_epoch_flops = icr.epoch_flops
 
-    icr_random_value = acc_gain_random_pp / full_epoch_flops.to(flop).magnitude
+    icr_random_value = icr.icr_full
 
-    coreset_size = imagenet_size * coreset_fraction_value
-    coreset_flops = coreset_size * resnet50_fwdbwd_flops
-    icr_coreset_value = acc_gain_coreset_pp / coreset_flops.to(flop).magnitude
-    icr_ratio_value = icr_coreset_value / icr_random_value
+    coreset_size = icr.subset_examples
+    coreset_flops = icr.subset_flops
+    icr_coreset_value = icr.icr_subset
+    icr_ratio_value = icr.icr_ratio
     acc_diff_pp = acc_gain_random_pp - acc_gain_coreset_pp
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -788,19 +792,21 @@ from mlsysim.fmt import fmt_percent, fmt_ratio
 # ┌── LEGO ───────────────────────────────────────────────
 class ChinchillaDiagnostic:
     # LOAD
-    from mlsysim import Models
+    from mlsysim import Models, Scenarios
 
     m_gpt3 = Models.Language.GPT3
     m_llama2 = Models.Language.Llama2_70B
 
-    tokens_per_param_opt = 20
-    llama2_70b_training_tokens = 2.0 * c.TRILLION * c.count
-    compute_multiplier = 2.0
+    tokens_per_param_opt = Scenarios.Gpt2XlWebTextCorpus.tokens_per_param
+    llama2_70b_training_tokens = m_llama2.training_tokens.to(c.count)
+    # Scenarios.ChinchillaComputeDoubling: D_opt ~ C^0.50, compute doubled
+    doubling = Scenarios.ChinchillaComputeDoubling
+    compute_multiplier = doubling.compute_multiple
 
     # EXECUTE
     gpt3_dn_ratio = (Models.Language.GPT3.training_tokens.to(c.count) / m_gpt3.parameters.to(c.param)).to("").magnitude
     llama2_dn_ratio = (llama2_70b_training_tokens / m_llama2.parameters.to(c.param)).to("").magnitude
-    doubling_token_growth_pct = (math.sqrt(compute_multiplier) - 1) * 100
+    doubling_token_growth_pct = doubling.growth * 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tokens_per_param_opt_str = fmt_ratio(tokens_per_param_opt, precision=0, commas=False)
@@ -959,7 +965,7 @@ Equivalently, isolating the allowable selection overhead yields $\SelectionTime<
 # │ How: Registry FLOPs for ResNet-50 and ResNet-18, ImageNet size, and one H100
 # │      at the reference MFU; scoring is one forward pass over the pool.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Datasets
+from mlsysim import Models, Hardware, Datasets, Scenarios
 from mlsysim.engine import calibration
 from mlsysim.core.units import count, second, minute
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_count, fmt_time
@@ -969,30 +975,28 @@ class SelectionInequalityCalc:
     """Compare one-time target-model and proxy scoring at a fixed retained fraction."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    target = Models.Vision.ResNet50
-    proxy = Models.Vision.ResNet18
-    h100 = Hardware.Cloud.H100
-    # Same inputs as the training chapter's ResNetFeedH100: sustained fraction implied by
-    # A100 ResNet-50 training rate from the registry (anchor shared with the data engineering chapter)
-    a100 = Hardware.Cloud.A100
-    a100_sustained_img_s = float(Literature.Benchmarks.ResNet50A100TrainThroughput)
-    mfu = (a100_sustained_img_s * 3 * Models.Vision.ResNet50.inference_flops.to(flop).magnitude) / a100.compute.peak_flops.to(flop / second).magnitude
-    image_count = Datasets.ImageNet.training_examples.to(count)
-    coreset_fraction_value = 0.10  # scenario assumption: 10% coreset
-    training_epoch_count = 100  # scenario assumption: training epochs
+    # Scenarios.ResNet50TenPercentCoresetH100: the A100 ResNet-50 sustained fraction
+    # of peak (shared with the data engineering and training chapters) on one H100,
+    # a 10% coreset, 100 epochs; one forward pass scores the pool.
+    coreset = Scenarios.ResNet50TenPercentCoresetH100
+    target = coreset.workload
+    proxy = coreset.proxy
+    mfu = coreset.utilization
+    image_count = coreset.dataset.training_examples.to(count)
+    coreset_fraction_value = coreset.keep_fraction
+    training_epoch_count = coreset.epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    rate = h100.compute.peak_flops * mfu
-    score_a_time = (image_count.magnitude * target.inference_flops / rate).to(second)
-    score_b_time = (image_count.magnitude * proxy.inference_flops / rate).to(second)
-    baseline_time = (image_count.magnitude * training_epoch_count * 3 * target.inference_flops / rate).to(second)
-    train_a_time = coreset_fraction_value * baseline_time
-    total_a_time = score_a_time + train_a_time
-    total_b_time = score_b_time + train_a_time
-    savings_a_time = baseline_time - total_a_time
-    savings_a_fraction = (savings_a_time / baseline_time).to("").magnitude
-    savings_b_time = baseline_time - total_b_time
-    savings_b_fraction = (savings_b_time / baseline_time).to("").magnitude
+    score_a_time = coreset.score_time()
+    score_b_time = coreset.score_time(proxy)
+    baseline_time = coreset.full_time
+    train_a_time = coreset.subset_time
+    total_a_time = coreset.selection_time()
+    total_b_time = coreset.selection_time(proxy)
+    savings_a_time = coreset.saving()
+    savings_a_fraction = coreset.saving_fraction()
+    savings_b_time = coreset.saving(proxy)
+    savings_b_fraction = coreset.saving_fraction(proxy)
     b_beats_a_time = total_a_time - total_b_time
     coreset_image_count = round(image_count.magnitude * coreset_fraction_value)
 
@@ -1238,7 +1242,7 @@ For images, perceptual hashing\index{Perceptual hashing!image deduplication} pro
 # │ How:     Scale GPT2DataWall's one-machine time and energy by the removed
 # │          fraction; registry NVMe bandwidth for the read.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
+from mlsysim import Hardware, Scenarios
 from mlsysim.core.units import GB, byte, count, second, hour, kWh
 from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_percent, fmt_time, fmt_energy, fmt_bandwidth
 
@@ -1247,23 +1251,26 @@ class GPT2Deduplication:
     """Near-duplicate removal on GPT-2's token budget: training work saved vs. one hashing pass."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Scenarios.Gpt2WebTextNearDuplicates: Lee et al. (2022) near-duplicate shares of
+    # C4 and RealNews on GPT2DataWall's run; one read from the node's local NVMe;
+    # 128 32-bit MinHash values for each of WebText's 8 million documents.
+    dedup = Scenarios.Gpt2WebTextNearDuplicates
     node_time = GPT2DataWall.node_time
     node_energy = GPT2DataWall.node_energy
     corpus_bytes = GPT2DataWall.corpus_bytes
-    storage_bw = Hardware.Cloud.H100.storage.bandwidth  # local NVMe of the reference node
-    dup_fraction_low = 0.0304  # lee2022: near-duplicate removal affected 3.04% of C4
-    dup_fraction_high = 0.1363  # lee2022: and 13.63% of RealNews
-    document_count = 8_000_000 * count  # scenario assumption: WebText holds slightly over 8 million documents (Radford et al. 2019)
-    minhash_hashes = 128  # scenario assumption: signature length per document
-    hash_bytes = 4 * byte  # 32-bit hash values
+    storage_bw = dedup.read_bandwidth  # local NVMe of the reference node
+    dup_fraction_low = dedup.duplicate_shares["C4"]
+    dup_fraction_high = dedup.duplicate_shares["RealNews"]
+    document_count = dedup.documents * count
+    minhash_hashes = dedup.signature_hashes
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    time_saved_low = (dup_fraction_low * node_time).to(hour)
-    time_saved_high = (dup_fraction_high * node_time).to(hour)
-    energy_saved_low = (dup_fraction_low * node_energy).to(kWh)
-    energy_saved_high = (dup_fraction_high * node_energy).to(kWh)
-    signature_bytes = (document_count.magnitude * minhash_hashes * hash_bytes).to(GB)
-    read_time = (corpus_bytes / storage_bw).to(second)
+    time_saved_low = dedup.time_saved("C4")
+    time_saved_high = dedup.time_saved("RealNews")
+    energy_saved_low = dedup.energy_saved("C4")
+    energy_saved_high = dedup.energy_saved("RealNews")
+    signature_bytes = dedup.signature_bytes
+    read_time = dedup.read_time
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Prose: deduplication "returns hours of accelerator time" against seconds of reading
@@ -1426,7 +1433,7 @@ EL2N with a small proxy model\index{Proxy model!practical workflow} offers a pra
 # │ How: Model the selection of 100K high-uncertainty samples from a 1M image pool.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets
+from mlsysim import Datasets, Scenarios
 from mlsysim.core.units import count
 from mlsysim.fmt import fmt_percent, fmt, fmt_count, check
 
@@ -1434,9 +1441,11 @@ class CoresetPractice:
     """Practical 10% coreset workflow: a 5-epoch proxy selects the ResNet-50 training subset from ImageNet."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    train_image_count = Datasets.ImageNet.training_examples.to(count)
-    coreset_fraction_value = 0.1  # keep 10%
-    proxy_epoch_count = 5  # proxy training epochs
+    # Scenarios.ResNet50ProxyTrainedCoreset: keep 10%, a proxy trained 5 epochs.
+    practice = Scenarios.ResNet50ProxyTrainedCoreset
+    train_image_count = practice.dataset.training_examples.to(count)
+    coreset_fraction_value = practice.keep_fraction  # keep 10%
+    proxy_epoch_count = practice.proxy_epochs  # proxy training epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     coreset_image_count = round(train_image_count.magnitude * coreset_fraction_value)
@@ -1553,29 +1562,35 @@ The difficulty scorer is a systems choice because it trades probe-compute overhe
 # │ How: Calculate reductions from scenario epoch counts.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, fmt, check
 
 class CurriculumBenchmarks:
     """Illustrative curriculum-learning epoch scenarios."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cifar10_baseline_epochs = 150
-    cifar10_curriculum_epochs = 115
+    # Scenarios.Cifar10LinearCurriculum and its variants: illustrative epoch counts.
+    cifar10 = Scenarios.Cifar10LinearCurriculum
+    cifar100 = Scenarios.Cifar100Curriculum
+    imagenet = Scenarios.ImageNetCurriculum
+    mentornet = Scenarios.MentorNetCurriculum
+    cifar10_baseline_epochs = cifar10.baseline_epochs
+    cifar10_curriculum_epochs = cifar10.curriculum_epochs
 
-    cifar100_baseline_epochs = 220
-    cifar100_curriculum_epochs = 180
+    cifar100_baseline_epochs = cifar100.baseline_epochs
+    cifar100_curriculum_epochs = cifar100.curriculum_epochs
 
-    imagenet_baseline_epochs = 90
-    imagenet_curriculum_epochs = 80
+    imagenet_baseline_epochs = imagenet.baseline_epochs
+    imagenet_curriculum_epochs = imagenet.curriculum_epochs
 
-    mentornet_baseline_epochs = 90
-    mentornet_curriculum_epochs = 70
+    mentornet_baseline_epochs = mentornet.baseline_epochs
+    mentornet_curriculum_epochs = mentornet.curriculum_epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cifar10_speedup_pct = (cifar10_baseline_epochs - cifar10_curriculum_epochs) / cifar10_baseline_epochs * 100
-    cifar100_speedup_pct = (cifar100_baseline_epochs - cifar100_curriculum_epochs) / cifar100_baseline_epochs * 100
-    imagenet_speedup_pct = (imagenet_baseline_epochs - imagenet_curriculum_epochs) / imagenet_baseline_epochs * 100
-    mentornet_speedup_pct = (mentornet_baseline_epochs - mentornet_curriculum_epochs) / mentornet_baseline_epochs * 100
+    cifar10_speedup_pct = cifar10.epoch_reduction * 100
+    cifar100_speedup_pct = cifar100.epoch_reduction * 100
+    imagenet_speedup_pct = imagenet.epoch_reduction * 100
+    mentornet_speedup_pct = mentornet.epoch_reduction * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cifar10_speedup_pct > imagenet_speedup_pct, "CIFAR-10 (more redundant) should show larger speedup than ImageNet.")
@@ -1893,6 +1908,7 @@ Active learning pays off most clearly in domains where every label requires scar
 # │      uses 50K labels ($250K), saving $250K and halving per-epoch work.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import USD, count, month
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_time, fmt_count, fmt_usd, fmt_multiple, fmt_math, MarkdownStr
 
@@ -1900,21 +1916,25 @@ class ActiveLearningRoi:
     """Medical imaging active learning: 2× label ratio and $250K budget savings."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    unlabeled_scan_count = 1_000_000 * count  # scenario assumption: scans in pool
-    cost_per_label = 5.00 * (USD / count)  # scenario assumption: specialist label cost
-    budget = 500_000 * USD  # scenario assumption: available budget
-    deadline = 1 * month  # scenario assumption: time constraint
-    active_scan_count = 50_000 * count  # scenario assumption: samples needed with AL
+    # Scenarios.MedicalScanActiveLearning: one million scans at $5 a specialist
+    # label under a $500K budget and a one-month deadline; active learning needs
+    # 50,000 labels.
+    scans = Scenarios.MedicalScanActiveLearning
+    unlabeled_scan_count = scans.pool
+    cost_per_label = scans.label_price.to(USD / count)
+    budget = scans.budget.to(USD)
+    deadline = scans.deadline
+    active_scan_count = scans.active_labels
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_all = unlabeled_scan_count * cost_per_label
-    random_scan_count = (budget / cost_per_label).to(count)
+    cost_all = scans.full_cost.to(USD)
+    random_scan_count = scans.random_labels
 
-    cost_active = active_scan_count * cost_per_label
-    cost_active_under_budget = (budget - cost_active) / budget
-    speedup_value = (random_scan_count / active_scan_count).to("").magnitude
-    cost_saving = budget - cost_active
-    over_budget_ratio_value = (cost_all / budget).to("").magnitude
+    cost_active = scans.active_cost.to(USD)
+    cost_active_under_budget = scans.unspent_share
+    speedup_value = scans.label_ratio
+    cost_saving = scans.saving.to(USD)
+    over_budget_ratio_value = scans.over_budget_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cost_active < budget, "Active learning cost must be within budget.")
@@ -2357,6 +2377,7 @@ Label propagation\index{Label propagation!graph-based semi-supervised} frames se
 # │ How: Compare label counts, accuracy, and total cost for supervised vs. FixMatch.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios, Literature
 from mlsysim.fmt import fmt_percent, fmt, fmt_usd, fmt_multiple, fmt_count, check
 
 class FixmatchLabelEfficiency:
@@ -2365,42 +2386,48 @@ class FixmatchLabelEfficiency:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cifar10_full_labels = int(Datasets.CIFAR10.training_examples.to(count).magnitude)
 
-    cifar10_fixmatch_4k_labels = 4000
-    cifar10_fixmatch_4k_acc = 95.7
+    # Sohn et al. (2020), table 2: accuracy is 100 minus the best reported error
+    # rate at each label count (Literature.DataSelectionResults).
+    fm = Literature.DataSelectionResults
+    cifar10_fixmatch_4k_labels = int(fm.FixMatchCifar10LabelsLarge)
+    cifar10_fixmatch_4k_acc = 100 - float(fm.FixMatchCifar10Error4000LabelsPct)
 
-    cifar10_fixmatch_250_labels = 250
-    cifar10_fixmatch_250_acc = 94.9
+    cifar10_fixmatch_250_labels = int(fm.FixMatchCifar10LabelsMedium)
+    cifar10_fixmatch_250_acc = 100 - float(fm.FixMatchCifar10Error250LabelsPct)
 
-    cifar10_fixmatch_40_labels = 40
-    cifar10_fixmatch_40_acc = 88.6
+    cifar10_fixmatch_40_labels = int(fm.FixMatchCifar10LabelsSmall)
+    cifar10_fixmatch_40_acc = 100 - float(fm.FixMatchCifar10Error40LabelsPct)
 
     cifar10_num_classes = Datasets.CIFAR10.num_classes
-    cost_label = 1  # $/label
     cost_gpu_hr = Infrastructure.Pricing.Cloud.LowCostGpuPerHour.rate.to(USD / hour).magnitude
 
-    supervised_labels = 4000
-    supervised_compute_cost = 50
+    # Scenarios.FixMatchCifar10Cost: illustrative $1 labels, $50 of supervised
+    # compute, and five times that for FixMatch.
+    ssl = Scenarios.FixMatchCifar10Cost
+    cost_label = ssl.label_price.to(USD).magnitude  # $/label
+    supervised_labels = ssl.supervised_labels
+    supervised_compute_cost = ssl.supervised_compute.to(USD).magnitude
 
-    fixmatch_labels = 250
-    fixmatch_compute_cost = 250  # 5x more training
+    fixmatch_labels = ssl.ssl_labels
+    fixmatch_compute_cost = ssl.ssl_compute.to(USD).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cifar10_fixmatch_4k_eff = cifar10_full_labels / cifar10_fixmatch_4k_labels
     cifar10_fixmatch_250_eff = cifar10_full_labels / cifar10_fixmatch_250_labels
     cifar10_fixmatch_40_eff = cifar10_full_labels / cifar10_fixmatch_40_labels
 
-    supervised_label_cost = supervised_labels * cost_label
-    supervised_total = supervised_label_cost + supervised_compute_cost
+    supervised_label_cost = ssl.supervised_label_cost.to(USD).magnitude
+    supervised_total = ssl.supervised_total.to(USD).magnitude
 
-    fixmatch_label_cost = fixmatch_labels * cost_label
-    fixmatch_total = fixmatch_label_cost + fixmatch_compute_cost
+    fixmatch_label_cost = ssl.ssl_label_cost.to(USD).magnitude
+    fixmatch_total = ssl.ssl_total.to(USD).magnitude
 
-    fixmatch_compute_multiplier_value = fixmatch_compute_cost / supervised_compute_cost
-    cost_reduction = supervised_total / fixmatch_total
+    fixmatch_compute_multiplier_value = ssl.compute_multiple
+    cost_reduction = ssl.cost_reduction
     labels_per_class_250 = cifar10_fixmatch_250_labels // cifar10_num_classes
 
     # ROI baseline: FixMatch vs. 4,000-label supervised baseline
-    roi_label_efficiency = supervised_labels / fixmatch_labels
+    roi_label_efficiency = ssl.label_reduction
 
     # Label budgets as a fraction of the full training set
     cifar10_full_fraction = cifar10_full_labels / cifar10_full_labels
@@ -2534,6 +2561,7 @@ Pretraining a self-supervised model on a massive unlabeled corpus can consume th
 # │ How: Contrast total costs for 10 tasks trained from scratch vs. fine-tuned.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import USD, count, hour
 from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check
 
@@ -2541,24 +2569,26 @@ class FoundationCostAmortization:
     """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scratch_compute_per_task = 1000 * hour  # scenario assumption: GPU-hours per task
-    task_count = 10  # number of tasks
-    pretrain_compute = 10000 * hour  # scenario assumption: one-time GPU-hours
-    finetune_compute_per_task = 50 * hour  # scenario assumption: GPU-hours per task
-    labels_per_task_scratch = 100_000 * count  # scenario assumption: labels from scratch
-    cost_per_label = 1 * (USD / count)  # scenario assumption: label price
-    labels_per_task_finetune = 1_000 * count  # scenario assumption: labels for fine-tuning
+    # Scenarios.FoundationModelTenTasks: illustrative GPU-hours and labels per task.
+    fm = Scenarios.FoundationModelTenTasks
+    scratch_compute_per_task = fm.scratch_compute
+    task_count = fm.tasks
+    pretrain_compute = fm.pretrain_compute
+    finetune_compute_per_task = fm.finetune_compute
+    labels_per_task_scratch = fm.scratch_labels
+    cost_per_label = fm.label_price
+    labels_per_task_finetune = fm.finetune_labels
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    scratch_compute_total = scratch_compute_per_task * task_count
-    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
+    scratch_compute_total = fm.scratch_total
+    foundation_compute_total = fm.foundation_total
 
-    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
-    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
+    label_cost_scratch_total = fm.scratch_label_cost.to(USD)
+    label_cost_finetune_total = fm.finetune_label_cost.to(USD)
 
-    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
-    marginal_compute_reduction = (scratch_compute_per_task / finetune_compute_per_task).to("").magnitude
-    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
+    label_cost_reduction = fm.label_cost_reduction
+    marginal_compute_reduction = fm.marginal_compute_reduction
+    crossover_tasks_value = fm.crossover_tasks
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
@@ -2692,7 +2722,7 @@ The machine sets the scale for every one of those patterns. One ImageNet epoch o
 # │ How:     Registry ResNet-50 FLOPs, ImageNet size and archive, H100 peak rate,
 # │          TDP, NVMe and PCIe bandwidths, and the reference MFU.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Datasets, Systems
+from mlsysim import Models, Hardware, Datasets, Systems, Scenarios
 from mlsysim.engine import calibration
 from mlsysim.core.units import GB, byte, count, flop, GFLOPs, second, kJ, MJ, hour, watt
 from mlsysim.fmt import (
@@ -2714,41 +2744,39 @@ class ResNetEpochOnH100:
     """One ImageNet epoch of ResNet-50 on one H100, full and pruned: seconds, joules, bytes per stage."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    r50 = Models.Vision.ResNet50
-    imagenet = Datasets.ImageNet
-    h100 = Hardware.Cloud.H100
-    # Same inputs as the training chapter's ResNetFeedH100: sustained fraction implied by
-    # A100 ResNet-50 training rate from the registry (anchor shared with the data engineering chapter)
-    a100 = Hardware.Cloud.A100
-    a100_sustained_img_s = float(Literature.Benchmarks.ResNet50A100TrainThroughput)
-    mfu = (a100_sustained_img_s * 3 * Models.Vision.ResNet50.inference_flops.to(flop).magnitude) / a100.compute.peak_flops.to(flop / second).magnitude
-    keep_fraction = IcrCoresetComparison.coreset_fraction_value  # the half-size coreset of the ICR notebook
-    epochs = 90  # scenario assumption: standard ImageNet schedule
-    decoded_bytes_per_image = imagenet.image_width * imagenet.image_height * imagenet.image_channels * byte  # 8-bit RGB tensor
+    # Scenarios.ResNet50HalfCoresetEpochH100: the selection-inequality run's sustained
+    # fraction of peak (the A100 ResNet-50 anchor shared with the data engineering
+    # and training chapters) with the ICR notebook's half-size coreset, the standard
+    # 90-epoch schedule, 8-bit RGB tensors, and the training chapter's host of
+    # 14 cores per accelerator at the loader-worker rate.
+    epoch = Scenarios.ResNet50HalfCoresetEpochH100
+    r50 = epoch.workload
+    imagenet = epoch.dataset
+    h100 = epoch.hardware
+    mfu = epoch.utilization
+    keep_fraction = epoch.keep_fraction  # the half-size coreset of the ICR notebook
+    epochs = epoch.epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     images = imagenet.training_examples.to(count)
-    train_flops_per_image = 3 * r50.inference_flops  # forward plus backward
-    epoch_flops = (images.magnitude * train_flops_per_image).to(flop)
-    sustained_rate = h100.compute.peak_flops * mfu
-    epoch_time = (epoch_flops / sustained_rate).to(second)
-    epoch_energy = (h100.tdp * epoch_time).to(kJ)
-    image_rate = images.magnitude / epoch_time.magnitude
-    storage_bytes = imagenet.training_archive_size.to(GB)
-    storage_time = (storage_bytes / h100.storage.bandwidth).to(second)
-    pcie_bytes = (images.magnitude * decoded_bytes_per_image).to(GB)
-    pcie_time = (pcie_bytes / h100.interconnect.bandwidth).to(second)
-    pruned_time = keep_fraction * epoch_time
-    pruned_energy = keep_fraction * epoch_energy
-    score_flops = (images.magnitude * r50.inference_flops).to(flop)  # one forward pass over the full pool
-    score_time = (score_flops / sustained_rate).to(second)
-    score_energy = (h100.tdp * score_time).to(kJ)
-    node = Systems.Nodes.DGX_H100
-    host_supply = (node.host_cpu_cores // node.accelerators_per_node) * 375  # img/s, the training chapter's host
-    host_epoch_time = (images.magnitude / host_supply) * second
-    run_saving_energy = (epochs * (epoch_energy - pruned_energy)).to(MJ)
-    run_saving_time = (epochs * (epoch_time - pruned_time)).to(hour)
-    saving_over_score = (run_saving_energy / score_energy).to("").magnitude
+    train_flops_per_image = epoch.training_flops_per_sample  # forward plus backward
+    epoch_flops = epoch.epoch_flops
+    epoch_time = epoch.epoch_time
+    epoch_energy = epoch.epoch_energy
+    image_rate = epoch.sample_rate
+    storage_bytes = epoch.archive_bytes
+    storage_time = epoch.storage_time
+    pcie_bytes = epoch.link_bytes
+    pcie_time = epoch.link_time
+    pruned_time = epoch.pruned_epoch_time
+    pruned_energy = epoch.pruned_epoch_energy
+    score_time = epoch.score_time()  # one forward pass over the full pool
+    score_energy = epoch.score_energy()
+    host_supply = epoch.host_rate.to(count / second).magnitude  # img/s, the training chapter's host
+    host_epoch_time = epoch.host_epoch_time
+    run_saving_energy = epoch.run_saving_energy
+    run_saving_time = epoch.run_saving_time
+    saving_over_score = epoch.saving_over_score_energy
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Must agree with the training chapter: about 10,100 images/s of accelerator demand
@@ -2786,7 +2814,7 @@ class ResNetEpochOnH100:
     saving_over_score_mult_str = fmt_multiple(round(saving_over_score), precision=0)
 ```
 
-::: {#fig-data-selection-resnet-data-path data-explore="mechanism-scene" data-explore-key="vol1:fig-data-selection-resnet-data-path" fig-env="figure" fig-pos="htb" fig-cap="**ResNet-50 Data Path on One H100**: One ImageNet epoch crosses four stages: local storage, host decoding and augmentation, the PCIe link, and the accelerator. Loads under each stage are per full epoch at the compute-bound rate; notes above each stage name the lever that acts there. A materialized coreset halves the storage read and the arithmetic, stream-and-discard filtering halves only the arithmetic, offline distillation targets add bytes to every stage before the accelerator, and a scoring pass adds one third of an epoch of forward arithmetic once. The host stage, outlined in red, must decode and augment every image at the accelerator's rate." fig-alt="Four boxes left to right labeled local NVMe storage, host CPUs decode and augment, PCIe link, and H100 accelerator, joined by arrows. Under each box is its per-epoch load in bytes, images per second, or floating-point operations with time and energy. The host box has a thick red outline and a red note that it must keep pace with the accelerator. Above each box a colored note names the selection lever that acts on that stage."}
+::: {#fig-data-selection-resnet-data-path data-explore="original-v1-data-selection-resnet-data-path" data-explore-key="vol1:fig-data-selection-resnet-data-path" fig-env="figure" fig-pos="htb" fig-cap="**ResNet-50 Data Path on One H100**: One ImageNet epoch crosses four stages: local storage, host decoding and augmentation, the PCIe link, and the accelerator. Loads under each stage are per full epoch at the compute-bound rate; notes above each stage name the lever that acts there. A materialized coreset halves the storage read and the arithmetic, stream-and-discard filtering halves only the arithmetic, offline distillation targets add bytes to every stage before the accelerator, and a scoring pass adds one third of an epoch of forward arithmetic once. The host stage, outlined in red, must decode and augment every image at the accelerator's rate." fig-alt="Four boxes left to right labeled local NVMe storage, host CPUs decode and augment, PCIe link, and H100 accelerator, joined by arrows. Under each box is its per-epoch load in bytes, images per second, or floating-point operations with time and energy. The host box has a thick red outline and a red note that it must keep pace with the accelerator. Above each box a colored note names the selection lever that acts on that stage."}
 
 ```{python}
 #| echo: false
@@ -2977,6 +3005,7 @@ Those added costs surface in four places (scoring, storage reads, host preparati
 # │ How:     Reuse the one-H100 ResNet-50 scenario of the selection-inequality
 # │          example; rescoring repeats the target-model forward pass each epoch.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import minute
 from mlsysim.fmt import check, fmt_percent, fmt_time
 
@@ -2991,11 +3020,13 @@ class SelectionBottleneckAnchor:
     baseline = SelectionInequalityCalc.baseline_time
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    rescoring = (epochs * score_once).to(minute)
+    # Scenarios.ResNet50TenPercentCoresetH100 rescores before each of its epochs.
+    coreset = Scenarios.ResNet50TenPercentCoresetH100
+    rescoring = coreset.rescoring_time
     dynamic_total = rescoring + train_subset
-    dynamic_saving = ((baseline - dynamic_total) / baseline).to("").magnitude
+    dynamic_saving = coreset.rescoring_saving_fraction
     static_saving = SelectionInequalityCalc.savings_a_fraction
-    rescoring_over_training = (rescoring / train_subset).to("").magnitude
+    rescoring_over_training = coreset.rescoring_over_training
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(3.2 < rescoring_over_training < 3.5, f"Prose says rescoring exceeds three times the subset training, got {rescoring_over_training:.2f}.")
@@ -3151,7 +3182,7 @@ In this two-stage rate model, $\InputPipelineRatio> 1$ means the data pipeline t
 # │ How:  Accelerator demand from the one-H100 ResNet-50 notebook; host
 # │       preparation rate is a scenario assumption for heavy augmentation.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets
+from mlsysim import Datasets, Scenarios
 from mlsysim.core.units import count, second
 from mlsysim.fmt import fmt_percent, fmt_ratio, check, fmt_time, fmt_rate, fmt, fmt_math
 
@@ -3160,26 +3191,27 @@ class DataEchoingRoi:
     """ResNet-50 on one H100 fed by the training chapter's host: echo factor 2 removes the input stall."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Host supply from the training chapter: 14 host cores per accelerator on a DGX H100,
-    # each decoding and augmenting 375 images/s
-    node = Systems.Nodes.DGX_H100
-    worker_img_s = 375
-    pipeline_throughput = (node.host_cpu_cores // node.accelerators_per_node) * worker_img_s * (count / second)
-    gpu_throughput = round(ResNetEpochOnH100.image_rate, -2) * (count / second)  # compute-bound H100 demand
-    echo_epoch_count = 90  # standard ImageNet epochs
-    imagenet_size = Datasets.ImageNet.training_examples.to(count)
-    echo_factor_value = 2  # repeat each batch 2x
+    # Scenarios.ResNet50EchoingH100: the training chapter's host (14 cores per
+    # accelerator on a DGX H100, each decoding and augmenting at the loader-worker
+    # rate) against the compute-bound H100 demand of ResNetEpochOnH100, stated to
+    # the hundred images a second; 90 epochs; each prepared batch used twice.
+    echo = Scenarios.ResNet50EchoingH100
+    pipeline_throughput = echo.host_rate
+    gpu_throughput = echo.accelerator_rate  # compute-bound H100 demand
+    echo_epoch_count = echo.epochs
+    imagenet_size = echo.examples.to(count)
+    echo_factor_value = echo.echo_factor
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ratio_r_value = (gpu_throughput / pipeline_throughput).to("").magnitude
-    gpu_idle_fraction = 1 - (pipeline_throughput / gpu_throughput).to("").magnitude
+    ratio_r_value = echo.ratio
+    gpu_idle_fraction = echo.idle_fraction
 
     no_echo_throughput = pipeline_throughput
-    no_echo_time = echo_epoch_count * imagenet_size / no_echo_throughput
+    no_echo_time = echo.run_time
     gpu_util_no_echo = pipeline_throughput / gpu_throughput
 
-    echo_throughput = min(pipeline_throughput * echo_factor_value, gpu_throughput)  # echoing cannot exceed the accelerator
-    echo_time = echo_epoch_count * imagenet_size / echo_throughput
+    echo_throughput = echo.echoed_rate  # echoing cannot exceed the accelerator
+    echo_time = echo.echoed_run_time
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1.5 < ratio_r_value < 2.0, f"Expected the host about 1.8x slower than the accelerator, got {ratio_r_value:.2f}.")
@@ -3379,7 +3411,7 @@ The interplay of these four cost terms becomes concrete when evaluating an Image
 # │ How: Calculate total costs for raw data, labeling, storage, and training.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets, Infrastructure
+from mlsysim import Datasets, Infrastructure, Scenarios
 from mlsysim.core.units import GB, USD, count, hour, month
 from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_time, fmt_memory
 
@@ -3388,32 +3420,36 @@ class CostBreakdown:
     training campaign, not a single run, is counted."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
-    label_count = Datasets.ImageNet.training_examples.to(count)  # every training image is labeled
-    cost_per_label = Infrastructure.Pricing.Labeling.CrowdHigh.rate / count
-    storage_rate = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
-    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    storage_size = Datasets.ImageNet.training_archive_size.to(GB)  # retained training archive
-    storage_duration = 12 * month  # scenario assumption: retention time
-    train_epoch_count = 100
-    train_gpu_count = 1  # one H100
-    train_duration = (train_epoch_count * ResNetEpochOnH100.epoch_time).to(hour)  # compute-bound runtime of ONE run
-    # The dataset is paid for once; the accelerators are not. A published model
-    # is the survivor of a campaign of hyperparameter sweeps, restarts, and
-    # ablations, so costing a single run understates compute by that factor.
-    # 30 is a deliberately conservative campaign size for this scenario.
-    train_run_count = 30  # scenario assumption: runs in the training campaign
+    # Scenarios.ImageNetDataCostBreakdown: a $50K license, every training image
+    # labeled at the crowd rate, the archive kept 12 months in object storage, and
+    # a campaign of 30 runs. The dataset is paid for once; the accelerators are
+    # not. A published model is the survivor of hyperparameter sweeps, restarts,
+    # and ablations, so costing a single run understates compute by that factor;
+    # 30 is a deliberately conservative campaign size. Each run is 100 epochs on
+    # one H100 at the compute-bound rate of ResNetEpochOnH100.
+    bill = Scenarios.ImageNetDataCostBreakdown
+    raw_data_cost = bill.acquisition.to(USD)
+    label_count = bill.labels.to(count)  # every training image is labeled
+    cost_per_label = bill.label_price
+    storage_rate = bill.storage_rate
+    gpu_rate = bill.accelerator_rate
+    storage_size = bill.storage_bytes  # retained training archive
+    storage_duration = bill.storage_duration
+    train_epoch_count = Scenarios.ResNet50TenPercentCoresetH100.epochs
+    train_gpu_count = bill.accelerators  # one H100
+    train_duration = bill.run_time  # compute-bound runtime of ONE run
+    train_run_count = bill.runs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    label_cost = label_count * cost_per_label
-    storage_cost = (storage_size * storage_rate * storage_duration).to(USD)
-    train_gpu_hours_per_run = train_gpu_count * train_duration
-    train_gpu_hours = train_gpu_hours_per_run * train_run_count
-    train_compute_cost = (train_gpu_hours * gpu_rate).to(USD)
-    total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
+    label_cost = bill.label_cost.to(USD)
+    storage_cost = bill.storage_cost.to(USD)
+    train_gpu_hours_per_run = bill.accelerator_hours_per_run
+    train_gpu_hours = bill.accelerator_hours
+    train_compute_cost = bill.compute_cost.to(USD)
+    total_cost = bill.total.to(USD)
 
-    p_data = (raw_data_cost + label_cost + storage_cost) / total_cost
-    p_compute = train_compute_cost / total_cost
+    p_data = bill.data_share
+    p_compute = bill.compute_share
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(p_data > p_compute, "Data costs must dominate compute costs in this scenario.")
@@ -3523,27 +3559,32 @@ The profiles in @tbl-roi-profiles compare those costs directly. Deduplication re
 # │      exceeds inference cost.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import USD
 from mlsysim.fmt import fmt_count, fmt_percent, fmt, check, fmt_usd, fmt_math
 
 class BreakevenCalc:
     """Active learning break-even: 2K labels + $500 inference achieves same accuracy as 5K random labels."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cost_label = 10  # $/label
-    n_initial = 1000  # initial labeled set
-    n_queries_per_round = 100  # samples per round
-    cost_inference = 50  # $/round (scoring pool)
-    n_random = 5000  # random sampling needs
-    n_active = 2000  # active learning needs
-    n_rounds = 10  # AL query rounds
+    # Scenarios.ActiveLearningTenRounds: $10 labels, 1,000 to start, ten rounds of
+    # 100 queries at $50 of pool scoring each, against 5,000 random labels.
+    al = Scenarios.ActiveLearningTenRounds
+    cost_label = al.label_price.to(USD).magnitude  # $/label
+    n_initial = al.initial_labels  # initial labeled set
+    n_queries_per_round = al.labels_per_round  # samples per round
+    cost_inference = al.round_scoring_cost.to(USD).magnitude  # $/round (scoring pool)
+    n_random = al.random_labels  # random sampling needs
+    n_rounds = al.rounds  # AL query rounds
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_random_total = n_random * cost_label
-    cost_active_label = n_active * cost_label
-    cost_active_inference = n_rounds * cost_inference
-    cost_active_total = cost_active_label + cost_active_inference
+    n_active = al.active_labels  # active learning needs
+    cost_random_total = al.random_cost.to(USD).magnitude
+    cost_active_label = al.active_label_cost.to(USD).magnitude
+    cost_active_inference = al.scoring_cost.to(USD).magnitude
+    cost_active_total = al.active_cost.to(USD).magnitude
 
-    roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
+    roi_pct = al.roi * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cost_random_total > cost_active_total, "Active learning must be cheaper than random sampling.")
@@ -3594,23 +3635,28 @@ Charging the entire engineering and preprocessing bill of a static curation pipe
 # │ How: Calculate amortized ROI for data deduplication infrastructure over time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import USD
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_usd
 
 class DeduplicationAmortization:
     """Deduplication pipeline ROI: negative at 1 run, highly profitable at 50 runs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cost_build = 50000  # $ engineering time
-    cost_compute_once = 5000  # $ one-time MinHash compute
-    savings_per_run = 10000  # $ saved per training run
+    # Scenarios.MinHashPipelineAmortization: $50K of engineering, $5K of one-time
+    # MinHash compute, $10K saved per training run.
+    pipeline = Scenarios.MinHashPipelineAmortization
+    cost_build = pipeline.build_cost.to(USD).magnitude  # $ engineering time
+    cost_compute_once = pipeline.operating_cost.to(USD).magnitude  # $ one-time MinHash compute
+    savings_per_run = pipeline.saving_per_run.to(USD).magnitude  # $ saved per training run
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cost_investment = cost_build + cost_compute_once
-    runs = [1, 5, 10, 50]
+    runs = pipeline.run_counts
     # Step 1: For-loop (not list comprehension)—class bodies cannot access class attrs in comprehension scopes
     rois = []
     for _r in runs:
-        rois.append((_r * savings_per_run - cost_investment) / cost_investment)
+        rois.append(pipeline.net_return(_r))
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(rois[0] < 0, "Single-run ROI must be negative (investment not yet recovered).")
@@ -4218,6 +4264,7 @@ Scaling a training corpus tenfold can multiply storage, I/O, and accelerator bil
 # │ How: Pre-compute comparative stats for accuracy and cost scenarios.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import USD, count
 from mlsysim.fmt import fmt_percent, fmt, fmt_pp, check, fmt_count, fmt_usd
 
@@ -4226,9 +4273,11 @@ class FpFallacyCalc:
     """Quantitative backing for Fallacies in the F&P section."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    data_1m_count = 1_000_000 * count
-    data_10m_count = 10_000_000 * count
-    acc_gain_10x_pp = 4.0
+    # Scenarios.TenfoldDataFourPoints: ten times the data for about four points.
+    scaling = Scenarios.TenfoldDataFourPoints
+    data_1m_count = scaling.base_examples
+    data_10m_count = scaling.scaled_examples
+    acc_gain_10x_pp = scaling.accuracy_gain
     curated_sample_count = 100_000 * count
     raw_sample_count = 1_000_000 * count
     curated_accuracy_pct = 92.0
@@ -4244,7 +4293,7 @@ class FpFallacyCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     curated_cost_ratio_value = (raw_sample_count / curated_sample_count).to("").magnitude
-    data_scale_value = (data_10m_count / data_1m_count).to("").magnitude
+    data_scale_value = scaling.scale
     synthetic_acc_drop_pp = synthetic_gen1_acc_pct - synthetic_gen5_acc_pct
     savings = training_run_cost * efficiency_gain_pct_value / 100
 
@@ -4319,6 +4368,7 @@ Selection can look like a technique for resource-constrained teams, as if fronti
 # │ How: Pre-compute timing, sampling, and accuracy scenarios.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_percent, fmt_count, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4326,15 +4376,22 @@ class FpPitfallCalc:
     """Quantitative backing for Pitfalls in the F&P section."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    selection_time_bad = 10 * hour  # scenario assumption: expensive selection
-    training_time = 2 * hour  # scenario assumption: subset training run
-    full_training_time = 8 * hour  # scenario assumption: full training run
-    selection_time_good = 0.5 * hour  # scenario assumption: proxy scoring
-    total_sample_count = 1_000_000 * count
-    rare_class_pct_value = 0.1
-    coreset_pct_value = 10
-    min_sample_threshold = 150 * count
-    al_latency = 14 * day  # scenario assumption: annotation turnaround
+    # Scenarios.ExpensiveSelectionPitfall and ProxySelectionPitfall: 10 hours or
+    # half an hour of selection, a 2-hour subset run, an 8-hour full run.
+    # Scenarios.RareClassTenPercentCoreset: 0.1 percent rare in 1M, a 10% coreset,
+    # a floor of 150.
+    bad = Scenarios.ExpensiveSelectionPitfall
+    good = Scenarios.ProxySelectionPitfall
+    coverage = Scenarios.RareClassTenPercentCoreset
+    selection_time_bad = bad.selection_time  # scenario assumption: expensive selection
+    training_time = bad.subset_time  # scenario assumption: subset training run
+    full_training_time = bad.full_time  # scenario assumption: full training run
+    selection_time_good = good.selection_time  # scenario assumption: proxy scoring
+    total_sample_count = coverage.pool * count
+    rare_class_pct_value = coverage.rare_share * 100
+    coreset_pct_value = coverage.keep_fraction * 100
+    min_sample_threshold = coverage.floor * count
+    al_latency = Scenarios.ActiveLearningTenRounds.label_turnaround  # scenario assumption: annotation turnaround
     model_drift_epoch_count = 10
     batch_size_small_count = 100
     batch_size_large_count = 1000
@@ -4343,10 +4400,10 @@ class FpPitfallCalc:
     majority_class_acc_pct = 97
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    selection_overhead_ratio_value = (selection_time_bad / training_time).to("").magnitude
-    selection_overhead_good_fraction = selection_time_good / full_training_time
-    rare_class_count = total_sample_count * rare_class_pct_value / 100
-    expected_rare_in_coreset = rare_class_count * coreset_pct_value / 100
+    selection_overhead_ratio_value = bad.overhead_ratio
+    selection_overhead_good_fraction = good.selection_share
+    rare_class_count = coverage.rare * count
+    expected_rare_in_coreset = coverage.expected_kept * count
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(expected_rare_in_coreset < min_sample_threshold, "Random coreset should drop rare class below minimum threshold.")

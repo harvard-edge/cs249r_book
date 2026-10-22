@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from ..results import TrainingGrowthResult
+from ..results import DomainComputeGapResult, ScalingSeriesResult, TrainingGrowthResult
 from .base import ForwardModel
 
 
@@ -51,4 +51,167 @@ class TrainingGrowthModel(ForwardModel):
             duration_factor=duration, rate_factor=rate,
             fleet_share=(math.log(count) + math.log(duration)) / math.log(compute),
             span_orders=math.log10(max(r["training_compute_flop"] for r in window) / origin),
+        )
+
+
+# --- Training compute by domain (added 2026-10-20) --------------------------
+
+class DomainComputeGapModel(ForwardModel):
+    """
+    How far one model's training compute sits below the largest model of another domain that year.
+
+    Rows are the Epoch AI models-by-domain series (``domain_group``,
+    ``publication_date``, ``training_flop``). The gap is the largest
+    ``reference_group`` compute published in the model's year over the
+    model's own compute.
+    """
+    requires = ("series",)
+    produces = DomainComputeGapResult
+
+    def solve(self, rows, model: str, reference_group: str = "Language") -> DomainComputeGapResult:
+        row = next(r for r in rows if r["model"] == model)
+        year = str(row["publication_date"])[:4]
+        ref = max((r for r in rows if r["domain_group"] == reference_group and r["training_flop"]
+                   and str(r["publication_date"]).startswith(year)),
+                  key=lambda r: r["training_flop"])
+        return DomainComputeGapResult(
+            model=model, year=year, model_flop=row["training_flop"],
+            reference_model=ref["model"], reference_flop=ref["training_flop"],
+            gap=ref["training_flop"] / row["training_flop"],
+            domain_models_with_compute=sum(1 for r in rows if r["domain_group"] == row["domain_group"]
+                                           and r["training_flop"]),
+        )
+
+
+class ScalingSeriesModel(ForwardModel):
+    """
+    Relative scaling efficiency of benchmark series measured at several sizes.
+
+    A series is one submitter's same-round runs of one benchmark on one
+    accelerator. Its efficiency is ``(T0 N0) / (T N)`` between the smallest
+    configuration ``(N0, T0)`` and the largest ``(N, T)``: 1 when time falls in
+    proportion to accelerators, below 1 when the larger run wastes some of them.
+    Added 2026-10-20.
+    """
+    requires = ("series",)
+    produces = ScalingSeriesResult
+
+    def solve(self, rows, specs) -> ScalingSeriesResult:
+        labels, series, effs = [], [], []
+        for label, (rnd, submitter, benchmark, accelerator) in specs:
+            pts = sorted((r for r in rows if r["round"] == rnd and r["submitter"].startswith(submitter)
+                          and r["benchmark"] == benchmark and accelerator in r["accelerator"]),
+                         key=lambda r: r["accelerators"])
+            a, z = pts[0], pts[-1]
+            labels.append(label)
+            series.append(list(pts))
+            effs.append((a["score_minutes"] * a["accelerators"]) / (z["score_minutes"] * z["accelerators"]))
+        return ScalingSeriesResult(labels=labels, series=series, efficiencies=effs)
+
+
+class MemoryWallModel(ForwardModel):
+    """
+    Training-state demand against single-accelerator memory, and where they cross.
+
+    Demand is each model's parameter count times the bytes of training state
+    per parameter; capacity is each accelerator's memory at its release year
+    (vendors label 80 GiB as 80 GB, so capacity is read in GiB). The crossover is
+    the first model whose demand exceeds the largest accelerator available in
+    its publication year. Added 2026-10-20.
+    """
+    requires = ("models", "accelerators")
+
+    def solve(self, models, accelerators, bytes_per_param):
+        from ..results import MemoryWallResult
+        from ...hardware.registry import Hardware
+        from ...literature.registry import Literature
+        rows = []
+        for label, name in models:
+            r = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
+            rows.append({"Year": int(r["date"][:4]), "Date": r["date"], "Name": label, "Type": "Model",
+                         "Memory_GB": (r["parameters"] * bytes_per_param).to("GB").magnitude})
+        for key in accelerators:
+            h = getattr(Hardware.Cloud, key)
+            rows.append({"Year": int(h.release_year), "Date": None, "Name": key, "Type": "GPU",
+                         "Memory_GB": h.memory.capacity.to("GiB").magnitude})
+        gpus = sorted((r for r in rows if r["Type"] == "GPU"), key=lambda r: r["Year"])
+        demand = sorted((r for r in rows if r["Type"] == "Model"), key=lambda r: r["Year"])
+        cross = next(r for r in demand
+                     if r["Memory_GB"] > max((g["Memory_GB"] for g in gpus if g["Year"] <= r["Year"]),
+                                         default=float("inf")))  # no accelerator yet: no crossover
+        largest = max(g["Memory_GB"] for g in gpus if g["Year"] <= cross["Year"])
+        return MemoryWallResult(
+            rows=rows,
+            capacity_growth=max(g["Memory_GB"] for g in gpus) / min(g["Memory_GB"] for g in gpus),
+            demand_orders=math.log10(max(r["Memory_GB"] for r in demand) / min(r["Memory_GB"] for r in demand)),
+            crossover_name=cross["Name"], crossover_year=cross["Year"],
+            crossover_gap=cross["Memory_GB"] / largest,
+        )
+
+
+# --- Parameter counts of notable models over time (added 2026-10-20) ---------
+
+class ParameterGrowthModel(ForwardModel):
+    """
+    Doubling time of notable models' parameter counts, before and after a split year.
+
+    Two least-squares fits of log10(parameters) on publication date (decimal
+    year), one for models published before ``split_year`` and one from it on.
+    A slope ``s`` (decades per year) doubles every ``12 log10(2) / s`` months.
+    """
+    requires = ("series",)
+    produces = None
+
+    def solve(self, rows, split_year: int):
+        from ..results import ParameterGrowthResult
+        rows = [r for r in rows if r["parameters"]]
+        years = [_decimal_year(r["date"]) for r in rows]
+        logp = [float(np.log10(r["parameters"])) for r in rows]
+        early = [y < split_year for y in years]
+        ey = [y for y, e in zip(years, early) if e]
+        el = [v for v, e in zip(logp, early) if e]
+        ly = [y for y, e in zip(years, early) if not e]
+        ll = [v for v, e in zip(logp, early) if not e]
+        es, ei = (float(x) for x in np.polyfit(ey, el, 1))
+        ls, li = (float(x) for x in np.polyfit(ly, ll, 1))
+        months = lambda s: 12 * math.log10(2) / s
+        return ParameterGrowthResult(
+            models=[r["model"] for r in rows], domains=[r["domain"] for r in rows],
+            parameters=[r["parameters"] for r in rows], years=years, log_parameters=logp,
+            split_year=split_year, early_slope=es, early_intercept=ei, late_slope=ls, late_intercept=li,
+            early_doubling_months=months(es), late_doubling_months=months(ls),
+            largest_parameters=max(r["parameters"] for r in rows), model_count=len(rows),
+        )
+
+
+class DatasetGrowthModel(ForwardModel):
+    """
+    Doubling time of notable models' training dataset sizes, before and after a split year.
+
+    Two least-squares fits of log10(training_dataset_size) on publication date (decimal
+    year), one for models published before ``split_year`` and one from it on.
+    A slope ``s`` (decades per year) doubles every ``12 log10(2) / s`` months.
+    """
+    requires = ("series",)
+    produces = None
+
+    def solve(self, rows, split_year: int):
+        from ..results import DatasetGrowthResult
+        rows = [r for r in rows if r["training_dataset_size"]]
+        years = [_decimal_year(r["date"]) for r in rows]
+        logd = [float(np.log10(r["training_dataset_size"])) for r in rows]
+        early = [y < split_year for y in years]
+        ey = [y for y, e in zip(years, early) if e]
+        el = [v for v, e in zip(logd, early) if e]
+        ly = [y for y, e in zip(years, early) if not e]
+        ll = [v for v, e in zip(logd, early) if not e]
+        es, ei = (float(x) for x in np.polyfit(ey, el, 1))
+        ls, li = (float(x) for x in np.polyfit(ly, ll, 1))
+        months = lambda s: 12 * math.log10(2) / s
+        return DatasetGrowthResult(
+            models=[r["model"] for r in rows], domains=[r["domain"] for r in rows],
+            dataset_sizes=[r["training_dataset_size"] for r in rows], years=years, log_dataset_sizes=logd,
+            split_year=split_year, early_slope=es, early_intercept=ei, late_slope=ls, late_intercept=li,
+            early_doubling_months=months(es), late_doubling_months=months(ls),
+            largest_dataset_size=max(r["training_dataset_size"] for r in rows), model_count=len(rows),
         )

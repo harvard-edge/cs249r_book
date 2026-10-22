@@ -16,11 +16,12 @@ The stack has five levels, top to bottom Brain, Nervous System, Body, Boundary, 
 | `stack_governance` | The envelope lit (solid outline, filled header), every level dimmed | `layer=governance`: Lectures 14 to 17 |
 | `stack_build1` to `stack_build7` | Steps 1 to 5 add one level from World up; step 6 adds the proposal boundary; step 7 adds the governance envelope | Lecture 0, "What is the machine made of?" (`\mlsyssteps{\mlsyskit/stack_build}{7}`); Lecture 1 on the five levels |
 | `stack_roadmap` | Every lecture number on its level, L14 to L17 on the envelope header (L8 appears on Boundary and Brain) | Lecture 0, "How does the course run?"; a recap in Lecture 18 |
-| `course_order` | All eighteen lectures as cards in columns by part; Part III runs over two columns | Lecture 0 course slide; Lecture 18 retrospective |
+| `course_order` | All eighteen lectures in three columns by part, one line per lecture ("L8 Sensor Perception"), drawn for a 15 by 6 cm slot so titles land near 9.5 pt; no layer tag (it does not fit at that size; `stack_roadmap` places each lecture on its level) | Lecture 0 course slide; Lecture 18 retrospective |
 | `machine_step1` to `machine_step4` | One accelerator node built up: compute, SRAM, HBM, host and link | Lecture 3 (weight bytes streamed per evaluation, the memory wall); Lecture 13 (compute-board placement) |
 | `machine_hl_compute`, `_sram`, `_hbm`, `_link`, `_host` | The node with one component outlined | Same lectures; `machine_hl_hbm` for the streaming floor, `machine_hl_link` for host transfers |
 
-| `record_chain` | The sixteen records in the book's spine layout (fig-01-spine): Part I limit record above the handoff record, which forks into Part II and Part III; enforcement and placement lead down to Part IV; the residual-claims register closes. Nothing lit | Lecture 1 (owner, shown once in full), Lecture 18 synthesis; full width, `width=0.92\textwidth,height=5.2cm` |
+| `record_chain` | The sixteen records in the book's spine layout (fig-01-spine): Part I limit record above the handoff record, which forks into Part II and Part III; enforcement and placement lead down to Part IV; the residual-claims register closes. Each box names its record in one or two words ("record" is dropped, since every box is one); each column is as wide as its longest name, so names land near 9 to 10 pt at full width. Nothing lit | Lecture 1 (owner, shown once in full), Lecture 18 synthesis; full width, `width=0.92\textwidth,height=5.2cm` |
+| `record_chain_build1` to `record_chain_build4` | The same chain built one part per step: Part I, then Parts II, III, and IV; hidden parts leave their space empty, so nothing moves | Optional build for the first full showing (Lecture 1) or the synthesis (Lecture 18): `\mlsyssteps[width=0.92\textwidth,height=5.2cm,keepaspectratio]{\mlsyskit/record_chain_build}{4}` |
 | `record_chain_lNN` | The same figure with lecture NN's record lit (accent), earlier records normal, later ones dimmed. NN = 02, 04 to 18 (Lecture 3 has no record; its proposer limits enter the handoff record, the dashed arrow) | Each lecture's close, "the record this lecture adds", full width |
 | `thumb_record_chain` | The chain as shapes only, no text | Goal and recall thumbnails (`\thumbline`, height 1 to 2.4 cm) |
 | `budget_bar_step1` to `budget_bar_step7` | The aisle stopping budget at the drive limit, 1.5 m/s, one segment added per step (table below); step 7 overruns the 1,100 mm clear distance by 63.8 mm | Lectures 0, 1, 2, 4, 8, 11, 12; full width only (`width=0.95\textwidth,height=4.8cm`); in a column its labels fall below 5 pt |
@@ -43,6 +44,8 @@ One bar, one segment order for the whole volume. The order is the order the cour
 | 7 | L12 | Tracking bound | 40.0 | 40.0 |
 | 8 | L13 | Dispatch to admission, 63.3 ms (aisle series only) | | 82.3 |
 | 9 | L14 | In-loop takeover, 605 ms (aisle series only) | | 786.5 |
+
+The delay's pieces (observation age, lease path, brake onset) are too narrow for a leader each, so a bracket under the delay block groups them and a swatch legend below it names them in bar order; each legend row has a fixed place, so a later step only fills in its row.
 
 Steps 4 and 5 add a named segment without adding distance: the elementary delay of Lecture 1 already contains the lease path and the observation age (Napkin Math 1.1), so those lectures open up a piece of it rather than lengthen the bar. The L0 and L1 build is `\mlsyssteps[...]{\mlsyskit/budget_bar_step}{2}`; a later lecture shows its own step as one figure, or builds from the previous step to its own with `\only`.
 

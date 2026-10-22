@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Figures for Volume II, Lecture 11 (Edge Intelligence).
 
-Every value is sourced. "EI" is the rendered chapter, Edge Intelligence.
-Values computed here are labeled "derived" on the figure or its slide, and
-scenario values are labeled "illustrative", as the chapter labels them.
+Every number on a figure comes from MLSysIM through calcs.py (val/num) or
+from the MLSysIM scenario or Literature entry calcs.py names; positions and
+sizes are layout only. "EI" is the rendered chapter, Edge Intelligence.
+Scenario values are labeled "illustrative", as the chapter labels them.
 
   - Hook: Hard et al., "Federated Learning for Mobile Keyboard Prediction,"
     arXiv:1811.03604 (2018), Table 4, top-1 recall on client-owned caches:
@@ -48,8 +49,10 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(HERE))
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 import matplotlib  # noqa: E402
 
@@ -109,9 +112,9 @@ def arrow(ax, x0, y0, x1, y1, color, lw=1.8, alpha=1.0, style="-|>"):
 # Hook: Gboard recall (Hard et al. 2018, Table 4)
 # --------------------------------------------------------------------------
 def hook():
-    rows = [("N-gram (shipped)", 12.5, 0.2, C["neutral"]),
-            ("Data-center RNN", 15.0, 0.5, C["memory"]),
-            ("Federated RNN", 15.8, 0.3, C["data"])]
+    rows = [("N-gram (shipped)", num("gb_ngram"), num("gb_ngram_ci"), C["neutral"]),
+            ("Data-center RNN", num("gb_server"), num("gb_server_ci"), C["memory"]),
+            ("Federated RNN", num("gb_fed"), num("gb_fed_ci"), C["data"])]
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.4, 3.0))
         for i, (lab, v, e, col) in enumerate(rows):
@@ -152,7 +155,7 @@ def fleetlaw_edge():
             ha="center", va="center", fontsize=15, color=TXT)
     terms = [
         ("Compute", "training on the slowest\nphone the round awaits\n(not divided by N)", V["c1_l"], V["c1"]),
-        ("Communication", "update upload over\na 1 to 10 Mb/s uplink", V["c2_l"], V["c2"]),
+        ("Communication", f"update upload over\na {val('uplink_lo')} to {val('uplink_hi')} Mb/s uplink", V["c2_l"], V["c2"]),
         ("Synchronization", "wait until K valid\nreports arrive", V["c3_l"], V["c3"]),
         ("Overlap", "download and training\nthat run concurrently", V["fr_l"], V["fr"]),
     ]
@@ -235,17 +238,18 @@ def boundary():
 # Deadlines against the network round trip (EI Sec. 11.2.1)
 # --------------------------------------------------------------------------
 def deadlines():
-    rows = [("Safety control", 10), ("AR/VR motion to photon", 20),
-            ("Camera frame", 33), ("Voice response", 500)]
+    rows = [("Safety control", num("dl_control")), ("AR/VR motion to photon", num("dl_arvr")),
+            ("Camera frame", num("dl_camera")), ("Voice response", num("dl_voice"))]
+    lo, hi = num("rtt_lo"), num("rtt_hi")
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    ax.axvspan(50, 200, color=C["network_l"], alpha=0.9, zorder=0)
-    ax.text(100, 3.75, "network round trip\n50 to 200 ms", ha="center", va="center",
+    ax.axvspan(lo, hi, color=C["network_l"], alpha=0.9, zorder=0)
+    ax.text((lo * hi) ** 0.5, 3.75, f"network round trip\n{val('rtt_lo')} to {val('rtt_hi')} ms", ha="center", va="center",
             fontsize=13.2, color=C["network"], fontweight="bold")
     for i, (lab, v) in enumerate(rows):
         y = len(rows) - 1 - i
-        col = C["danger"] if v < 50 else C["data"]
+        col = C["danger"] if v < lo else C["data"]
         ax.barh(y, v, color=col, height=0.55, zorder=2)
-        ax.text(v * 1.12, y, f"{v} ms", va="center", fontsize=13.2, color=col, fontweight="bold")
+        ax.text(v * 1.12, y, f"{v:.0f} ms", va="center", fontsize=13.2, color=col, fontweight="bold")
         ax.text(5.6, y, lab, ha="right", va="center", fontsize=13.2, fontweight="bold", color=TXT)
     ax.set_xscale("log")
     ax.set_xlim(6, 1500)
@@ -261,30 +265,33 @@ def deadlines():
 # Training working set against the background allowance (EI figure 3)
 # --------------------------------------------------------------------------
 def amplifier():
-    segs = [("Weights", 40, "#9CA3AF"), ("Gradients", 40, "#93C5FD"),
-            ("Adam moments", 80, "#60A5FA"), ("Saved activations", 200, V["c1"])]
+    segs = [("Weights", num("stack_weights_mb"), "#9CA3AF"), ("Gradients", num("stack_grads_mb"), "#93C5FD"),
+            ("Adam moments", num("stack_adam_mb"), "#60A5FA"),
+            ("Saved activations", num("stack_acts_mb"), V["c1"])]
+    a_lo, a_hi, w = num("allow_lo_mb"), num("allow_hi_mb"), num("stack_weights_mb")
     for step in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(4.5, 3.5))
-        ax.axhspan(200, 300, color=C["danger_l"], zorder=0)
-        ax.text(-0.12, 250, "background\nallowance\n200 to\n300 MB", ha="center", va="center",
-                fontsize=13, color=C["danger"], fontweight="bold")
-        ax.bar(0, 40, width=0.6, color="#9CA3AF", zorder=2)
-        ax.text(0, 48, "40 MB", ha="center", va="bottom", fontsize=15, fontweight="bold", color=TXT)
+        ax.axhspan(a_lo, a_hi, color=C["danger_l"], zorder=0)
+        ax.text(-0.12, (a_lo + a_hi) / 2, f"background\nallowance\n{val('allow_lo_mb')} to\n{val('allow_hi_mb')} MB",
+                ha="center", va="center", fontsize=13, color=C["danger"], fontweight="bold")
+        ax.bar(0, w, width=0.6, color="#9CA3AF", zorder=2)
+        ax.text(0, w + 8, f"{val('stack_weights_mb')} MB", ha="center", va="bottom", fontsize=15, fontweight="bold",
+                color=TXT)
         upto = {1: 1, 2: 3, 3: 4}[step]
         bottom = 0
         for k, (lab, v, col) in enumerate(segs):
             shown = k < upto
             ax.bar(0.9, v if shown else 0, bottom=bottom, width=0.6, color=col, zorder=2,
                    edgecolor="white", lw=1)
-            if shown and v >= 40:
-                ax.text(1.25, bottom + v / 2, f"{lab} {v}", va="center", ha="left",
+            if shown and v >= w:
+                ax.text(1.25, bottom + v / 2, f"{lab} {v:.0f}", va="center", ha="left",
                         fontsize=15, color=TXT)
             if shown:
                 bottom += v
         total = sum(s[1] for s in segs[:upto])
-        lab = f"{total} MB" + ("  (9×)" if step == 3 else "")
+        lab = f"{total:.0f} MB" + (f"  ({val('stack_amp')}×)" if step == 3 else "")
         ax.text(0.9, total + 8, lab, ha="center", va="bottom", fontsize=15, fontweight="bold",
-                color=C["danger"] if total > 300 else TXT)
+                color=C["danger"] if total > a_hi else TXT)
         ax.set_xticks([0, 0.9])
         ax.set_xticklabels(["Inference\nweights", "Full\nfine-tune"], fontsize=15)
         ax.set_xlim(-0.62, 2.75)
@@ -298,8 +305,10 @@ def amplifier():
 # Device memory ladder (EI Sec. 11.3.4 figure)
 # --------------------------------------------------------------------------
 def memladder():
-    rows = [("Phone", 16e9, "16 GB"), ("IoT device", 1e9, "up to 1 GB"),
-            ("Microcontroller", 256e3, "256 KB")]
+    sp_ = K.SPECTRUM
+    rows = [("Phone", K.m(sp_.FlagshipSmartphoneRamHigh, "byte"), f"{val('phone_gb')} GB"),
+            ("IoT device", K.m(sp_.IotDeviceRamHigh, "byte"), f"up to {val('iot_gb')} GB"),
+            ("Microcontroller", K.m(sp_.MicrocontrollerSram, "byte"), f"{val('mcu_kb')} KB")]
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
     for i, (lab, v, s) in enumerate(rows):
         y = 2 - i
@@ -333,8 +342,8 @@ def npu_tops():
     ax.plot([2022.5, 2022.5], [0, 29], color=C["neutral"], ls=":", lw=1.5)
     ax.text(2022.25, 24, "rating precision\nnot stated", ha="right", va="center", fontsize=13,
             color=C["neutral"])
-    ax.text(2016.9, 9.0, "A11: 0.6", ha="left", va="bottom", fontsize=14, color=TXT, fontweight="bold")
-    ax.text(2023.3, 37.0, "A17 Pro: 35", ha="right", va="bottom", fontsize=14, color=TXT,
+    ax.text(2016.9, 9.0, f"A11: {val('ane_a11')}", ha="left", va="bottom", fontsize=14, color=TXT, fontweight="bold")
+    ax.text(2023.3, 37.0, f"A17 Pro: {val('ane_a17')}", ha="right", va="bottom", fontsize=14, color=TXT,
             fontweight="bold")
     ax.set_xticks([2017, 2019, 2021, 2023])
     ax.tick_params(labelsize=13)
@@ -395,8 +404,9 @@ def terms():
 # --------------------------------------------------------------------------
 def personalize():
     fig, ax = plt.subplots(figsize=(3.9, 2.0))
-    rows = [("10 full copies", 400, C["neutral"], "400 MB"),
-            ("Base + 10 adapters", 42, C["memory"], "42 MB")]
+    rows = [(f"{val('wall_contexts')} full copies", num("wall_copies_mb"), C["neutral"], f"{val('wall_copies_mb')} MB"),
+            (f"Base + {val('wall_contexts')} adapters", num("wall_shared_mb"), C["memory"],
+             f"{val('wall_shared_mb')} MB")]
     for i, (lab, v, col, t) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=col, height=0.55)
@@ -414,11 +424,12 @@ def personalize():
 # --------------------------------------------------------------------------
 def battery():
     fig, ax = plt.subplots(figsize=(3.7, 1.7))
-    ax.barh(0, 15, color=C["neutral_l"], height=0.55, edgecolor=C["neutral"])
-    ax.barh(0, 2.25, color=C["danger"], height=0.55)
-    ax.text(2.4, 0.5, "one update: 2.25 Wh", ha="left", va="bottom", fontsize=16,
+    b, e = num("battery_wh"), num("job_wh")
+    ax.barh(0, b, color=C["neutral_l"], height=0.55, edgecolor=C["neutral"])
+    ax.barh(0, e, color=C["danger"], height=0.55)
+    ax.text(e + 0.15, 0.5, f"one update: {val('job_wh')} Wh", ha="left", va="bottom", fontsize=16,
             color=C["danger"], fontweight="bold")
-    ax.text(14.8, 0, "15 Wh battery", ha="right", va="center", fontsize=16, color=TXT)
+    ax.text(b - 0.2, 0, f"{val('battery_wh')} Wh battery", ha="right", va="center", fontsize=16, color=TXT)
     ax.set_xlim(0, 15.3)
     ax.set_ylim(-0.5, 1.1)
     ax.set_yticks([])
@@ -444,8 +455,10 @@ def tiny_energy():
             if d["name"] in keep]
     rows.sort(key=lambda r: r[1])
     fig, ax = plt.subplots(figsize=(5.9, 2.5))
-    ax.axvspan(2e6, 3e6, color=C["danger_l"], zorder=0)
-    ax.text(2.4e6, 2.0, "one second\nof training\nat 2 to 3 W", ha="center", va="center",
+    t_lo, t_hi = (K.m(q, "microjoule") for q in (K.TRAIN_SEC.training_energy_low, K.TRAIN_SEC.training_energy_high))
+    ax.axvspan(t_lo, t_hi, color=C["danger_l"], zorder=0)
+    ax.text(t_lo * 1.2, 2.0, f"one second\nof training\nat {val('power_lo')} to {val('power_sus_hi')} W",
+            ha="center", va="center",
             fontsize=13.2, color=C["danger"], fontweight="bold")
     for i, (lab, e) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -475,7 +488,7 @@ def round_timeline():
         fig, ax = canvas(W, H)
         # coordinator lane
         ax.text(0.02, 2.51, "Server", ha="left", va="center", fontsize=15.5, fontweight="bold", color=V["c3_t"])
-        box(ax, 0.85, 2.3, 1.2, 0.42, V["c3_l"], V["c3"], "select 1.3K", fs=15.5)
+        box(ax, 0.85, 2.3, 1.2, 0.42, V["c3_l"], V["c3"], f"select {val('overselect')}K", fs=15.5)
         if step == 3:
             box(ax, 5.0, 2.3, 1.1, 0.42, V["c3_l"], V["c3"], "average K", fs=15.5)
         for i, (d, t, u) in enumerate(clients):
@@ -516,26 +529,28 @@ def round_timeline():
 # FedAvg rounds to target (McMahan et al. 2017, Table 2, MNIST CNN, 99%)
 # --------------------------------------------------------------------------
 def fedavg():
-    # (E, B, u, IID rounds, non-IID rounds); FedSGD first
-    rows = [(1, "inf", 1, 626, 483), (5, "inf", 5, 179, 1000), (1, 50, 12, 65, 600),
-            (20, "inf", 20, 234, 672), (1, 10, 60, 34, 350), (5, 50, 60, 29, 334),
-            (20, 50, 240, 32, 426), (5, 10, 300, 20, 229), (20, 10, 1200, 18, 173)]
+    # (E, B, u, IID rounds, non-IID rounds); FedSGD first (MLSysIM series)
+    from mlsysim import Literature
+    rows = [(r["local_epochs"], r["batch_size"], r["updates_per_round"], r["iid_rounds"], r["non_iid_rounds"])
+            for r in Literature.Series.FedAvgMnistCnnRounds.entries]
+    sgd_iid, sgd_non = num("fedsgd_iid"), num("fedsgd_noniid")
+    best_u, best_iid, best_non = num("fedavg_best_u"), num("fedavg_best_iid"), num("fedavg_best_noniid")
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.55))
         u = [r[2] for r in rows]
         ax.scatter(u[1:], [r[3] for r in rows[1:]], s=55, color=C["memory"], zorder=3)
-        ax.axhline(626, color=C["memory"], ls="--", lw=1.4)
-        ax.text(2600, 626 * 1.08, "one step per round: 626", ha="right", va="bottom", fontsize=12.1,
+        ax.axhline(sgd_iid, color=C["memory"], ls="--", lw=1.4)
+        ax.text(2600, sgd_iid * 1.08, f"one step per round: {val('fedsgd_iid')}", ha="right", va="bottom", fontsize=12.1,
                 color=C["memory"])
-        ax.text(1200, 18 * 0.75, "IID: 18", ha="center", va="top", fontsize=13.2,
+        ax.text(best_u, best_iid * 0.75, f"IID: {val('fedavg_best_iid')}", ha="center", va="top", fontsize=13.2,
                 color=C["memory"], fontweight="bold")
         if step == 2:
             ax.scatter(u[1:], [r[4] for r in rows[1:]], s=55, color=C["danger"], zorder=3, marker="s")
-            ax.axhline(483, color=C["danger"], ls="--", lw=1.4)
-            ax.text(2600, 483 * 0.92, "483", ha="right", va="top", fontsize=12.1, color=C["danger"])
-            ax.text(6.5, 1100, "non-IID, E = 5: 1,000", ha="left", va="bottom",
+            ax.axhline(sgd_non, color=C["danger"], ls="--", lw=1.4)
+            ax.text(2600, sgd_non * 0.92, val("fedsgd_noniid"), ha="right", va="top", fontsize=12.1, color=C["danger"])
+            ax.text(6.5, 1100, f"non-IID, E = {val('fedavg_e5_epochs')}: {val('fedavg_e5_noniid')}", ha="left", va="bottom",
                     fontsize=13.2, color=C["danger"], fontweight="bold")
-            ax.text(1200, 173 * 0.72, "non-IID: 173", ha="center", va="top", fontsize=13.2,
+            ax.text(best_u, best_non * 0.72, f"non-IID: {val('fedavg_best_noniid')}", ha="center", va="top", fontsize=13.2,
                     color=C["danger"], fontweight="bold")
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -557,15 +572,18 @@ def fedavg():
 def uplink():
     fig, ax = plt.subplots(figsize=(4.0, 3.0))
     r = list(range(0, 181))
-    ax.plot(r, [2.5 * k for k in r], color=C["network"], lw=2.6)
-    ax.axhline(200, color=C["data"], lw=2.2, ls="--")
-    ax.text(178, 188, "raw images:\n200 MB a week", ha="right", va="top", fontsize=15, color=C["data"], fontweight="bold")
-    ax.scatter([80], [200], s=70, color=TXT, zorder=3)
-    ax.text(66, 222, "break-even: 80", fontsize=15, ha="right", va="bottom", color=TXT)
-    ax.scatter([7], [17.5], s=70, color=C["data"], zorder=3)
-    ax.text(18, 17.5, "daily: 7 rounds", fontsize=15, va="center", color=C["data"])
-    ax.scatter([168], [420], s=70, color=C["danger"], zorder=3)
-    ax.text(160, 432, "hourly: 168", fontsize=15, ha="right", va="bottom", color=C["danger"])
+    upd, raw = num("upd_mb"), num("raw_mb")
+    be, d_r, d_mb, h_r, h_mb = (num(k) for k in ("break_even", "daily_rounds", "daily_mb", "hourly_rounds", "hourly_mb"))
+    ax.plot(r, [upd * k for k in r], color=C["network"], lw=2.6)
+    ax.axhline(raw, color=C["data"], lw=2.2, ls="--")
+    ax.text(178, raw - 12, f"raw images:\n{val('raw_mb')} MB a week", ha="right", va="top", fontsize=15, color=C["data"], fontweight="bold")
+    ax.scatter([be], [raw], s=70, color=TXT, zorder=3)
+    ax.text(be - 14, raw + 22, f"break-even: {val('break_even')}", fontsize=15, ha="right", va="bottom", color=TXT)
+    ax.scatter([d_r], [d_mb], s=70, color=C["data"], zorder=3)
+    ax.text(d_r + 11, d_mb, f"daily: {val('daily_rounds')} rounds", fontsize=15, va="center", color=C["data"])
+    ax.scatter([h_r], [h_mb], s=70, color=C["danger"], zorder=3)
+    ax.text(h_r - 8, h_mb + 12, f"hourly: {val('hourly_rounds')}", fontsize=15, ha="right", va="bottom",
+            color=C["danger"])
     ax.set_xlim(0, 182)
     ax.set_ylim(0, 470)
     ax.tick_params(labelsize=13)
@@ -578,12 +596,9 @@ def uplink():
 # Secure aggregation: masks cancel (EI figure 16, redrawn; values illustrative)
 # --------------------------------------------------------------------------
 def secagg():
-    da = [0.2, -0.1, 0.4, 0.3]
-    db = [0.1, 0.3, -0.2, 0.1]
-    s = [7.3, -4.6, 2.9, 9.1]
-    ya = [a + m for a, m in zip(da, s)]
-    yb = [b - m for b, m in zip(db, s)]
-    tot = [a + b for a, b in zip(da, db)]
+    M = K.MASK
+    da, db, s = M.update_a, M.update_b, M.mask
+    ya, yb, tot = M.upload_a, M.upload_b, M.total
     W, H = 6.4, 2.75
     cw = 0.42
 
@@ -650,15 +665,15 @@ def secagg_drop():
 # Session outcomes (Bonawitz et al. 2019, Appendix A, Table 1)
 # --------------------------------------------------------------------------
 def sessions():
-    rows = [("Completed and accepted", 1116401, C["data"], 75),
-            ("Completed, rejected as late", 327478, C["compute"], 22),
-            ("Interrupted (left idle)", 29771, C["danger"], 2)]
+    rows = [("Completed and accepted", num("sess_ok"), C["data"], val("sess_ok_pct")),
+            ("Completed, rejected as late", num("sess_late"), C["compute"], val("sess_late_pct")),
+            ("Interrupted (left idle)", num("sess_intr"), C["danger"], val("sess_intr_pct"))]
     tot = sum(r[1] for r in rows)
     fig, ax = plt.subplots(figsize=(5.8, 1.95))
     for i, (lab, v, col, pct) in enumerate(rows):
         y = 2 - i
         ax.barh(y, v / tot * 100, color=col, height=0.55)
-        ax.text(v / tot * 100 + 1.5, y, f"{pct}%  ({v:,} sessions)", va="center",
+        ax.text(v / tot * 100 + 1.5, y, f"{pct}%  ({v:,.0f} sessions)", va="center",
                 fontsize=13.2, color=col, fontweight="bold")
         ax.text(-1.5, y, lab, ha="right", va="center", fontsize=13.2, fontweight="bold", color=TXT)
     ax.set_xlim(0, 125)
@@ -677,26 +692,24 @@ def aibench():
     rows = [r for r in Literature.Series.AIBenchmarkSoCs.entries if r["ai_score"]]
     fam = [("Snapdragon", C["danger"]), ("Dimensity", C["compute"]), ("Exynos", C["memory"]),
            ("Google", C["data"]), ("Kirin", C["network"])]
-    fig, ax = plt.subplots(figsize=(5.9, 2.6))
+    fig, ax = plt.subplots(figsize=(5.4, 2.7))
     ax.axvspan(2019.5, 2026.5, color=C["neutral_l"], alpha=0.5, zorder=0)
     for r in rows:
         f = r["processor"].split()[0]
         col = dict(fam).get(f, "#BBBBBB")
         ax.scatter(r["year"], r["ai_score"], s=30, color=col, zorder=3)
-    win = [r for r in rows if 2020 <= r["year"] <= 2026]
-    lo = min(win, key=lambda r: r["ai_score"])
-    hi = max(win, key=lambda r: r["ai_score"])
+    lo, hi = K.SPREAD.lowest("fleet"), K.SPREAD.highest("fleet")
     g4 = next(r for r in rows if r["processor"] == "Google Tensor G4")
     ax.annotate("", xy=(2027.0, hi["ai_score"]), xytext=(2027.0, lo["ai_score"]),
                 arrowprops=dict(arrowstyle="<->", color=TXT, lw=1.4))
     ax.text(2027.25, (hi["ai_score"] * lo["ai_score"]) ** 0.5,
-            f"{hi['ai_score'] / lo['ai_score']:.0f}×", va="center", fontsize=14.3, fontweight="bold")
+            f"{val('ai_spread')}×", va="center", fontsize=14.3, fontweight="bold")
     ax.text(lo["year"] + 0.2, lo["ai_score"] * 0.75, lo["processor"], fontsize=12.1, va="top", color=TXT)
     ax.text(hi["year"] - 0.2, hi["ai_score"] * 1.6, hi["processor"], fontsize=12.1, ha="right",
             va="bottom", color=TXT)
     ax.text(g4["year"], g4["ai_score"] * 0.3, "Tensor G4", fontsize=12.1, ha="center", va="top",
             color=C["data"], fontweight="bold")
-    ax.text(2020.0, 0.6, "phones a fleet may still hold (2020 on)", fontsize=12.1, color=C["neutral"])
+    ax.text(2020.0, 0.6, f"phones a fleet may still hold ({val('ai_first_year')} on)", fontsize=12.1, color=C["neutral"])
     ax.set_yscale("log")
     ax.set_ylim(0.3, 2e5)
     ax.set_xlim(2009.5, 2028.6)
@@ -716,8 +729,9 @@ def aibench():
 # --------------------------------------------------------------------------
 def coverage():
     stages = ["Deployed", "Admitted", "Selected", "Completed"]
-    # counts per 100 deployed phones: flagship, mid-tier, budget (illustrative)
-    data = [(20, 60, 20), (16, 21, 3), (10, 14, 2), (8, 11, 1)]
+    # counts per 100 deployed phones: flagship, mid-tier, budget (illustrative, MLSysIM scenario)
+    cov = K.COVER
+    data = [tuple(cov.counts[c][i] for c in ("flagship", "mid-tier", "budget")) for i in range(len(cov.stages))]
     cols = [C["memory"], "#AAB2BD", C["danger"]]
     names = ["flagship", "mid-tier", "budget"]
     for step in (1, 2):
@@ -729,8 +743,8 @@ def coverage():
                 a1.bar(i, v, bottom=b, color=cols[kk], width=0.62, edgecolor="white")
                 b += v
             a1.text(i, b + 2, f"{sum(d)}", ha="center", va="bottom", fontsize=13.4, fontweight="bold")
-        a1.text(3.35, 1, "budget\n5%", fontsize=12.3, color=C["danger"], va="bottom", fontweight="bold")
-        a1.text(-0.3, 4, "20%", fontsize=12.3, color="white", fontweight="bold")
+        a1.text(3.35, 1, f"budget\n{val('cov_budget_done_pct')}%", fontsize=12.3, color=C["danger"], va="bottom", fontweight="bold")
+        a1.text(-0.3, 4, f"{val('cov_budget_fleet_pct')}%", fontsize=12.3, color="white", fontweight="bold")
         a1.set_xticks(range(4))
         a1.set_xticklabels(["Deployed", "\nAdmitted", "Selected", "\nCompleted"], fontsize=11.8)
         a1.set_xlim(-0.5, 4.1)
@@ -738,7 +752,7 @@ def coverage():
         a1.set_yticks([])
         a1.spines["left"].set_visible(False)
         a1.set_title("Phones per 100 deployed", fontsize=13.4)
-        ratios = [d / s for d, s in zip((8 / 20, 11 / 20, 1 / 20), (0.2, 0.6, 0.2))]
+        ratios = [cov.coverage_ratio(c) for c in ("flagship", "mid-tier", "budget")]
         for k, (n, r) in enumerate(zip(names, ratios)):
             y = 2 - k
             show = step == 2
@@ -787,8 +801,7 @@ def forget():
 # Shadow gate (EI figure 20, redrawn; letters illustrative)
 # --------------------------------------------------------------------------
 def gate():
-    base = list("AABCABCA")
-    cand = list("AABBABAA")
+    base, cand = list(K.GATE.frozen), list(K.GATE.adapted)
     W, H = 6.4, 2.7
     for step in (1, 2):
         fig, ax = canvas(W, H)
@@ -809,7 +822,7 @@ def gate():
             box(ax, x + 0.03, 1.0, cw - 0.06, 0.3, "white" if same else V["c3_l"],
                 V["fr"] if same else V["c3"], "=" if same else "≠", fs=13.4, r=0.03,
                 color=TXT if same else V["c3_t"])
-        ax.text(x0, 0.62, "2 of 8 disagree: 25% > τ = 10%", ha="left", va="center",
+        ax.text(x0, 0.62, f"{val('gate_dis')} of {val('gate_n')} disagree: {val('gate_pct')}% > τ = {val('gate_tau_pct')}%", ha="left", va="center",
                 fontsize=13.4, color=V["bad_t"], fontweight="bold")
         box(ax, 4.75, 1.45, 1.6, 0.6, V["bad_l"], V["bad"], "hold: candidate\nout of service", fs=12.3)
         arrow(ax, x0 + 8 * cw + 0.05, 1.15, 4.75, 1.6, V["bad"])

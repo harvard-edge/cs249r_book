@@ -183,16 +183,17 @@ Role delimiters define protocol syntax, but they carry no runtime authority: if 
 # PER-TURN EXAMPLE EXPANSION (LEGO)
 # Goal: Price one-example-per-invocation serialization against one transcript.
 # Scope: Stipulated horizon; each turn adds a similar number of tokens.
+# How: Scenarios.RepairTrajectoryPerCallExamples (PerInvocationSerializationModel).
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 class PerTurnExpansion:
     # 1. LOAD: stipulated horizon in turns.
-    horizon = 30
+    scenario = Scenarios.RepairTrajectoryPerCallExamples
+    horizon = scenario.turns
 
     # 2. EXECUTE: prefixes of 1..H turns versus one H-turn transcript.
-    per_turn_units = horizon * (horizon + 1) / 2
-    transcript_units = horizon
-    expansion = per_turn_units / transcript_units
+    expansion = scenario.result.expansion
 
     # 3. GUARD: closed form (H+1)/2.
     check(abs(expansion - (horizon + 1) / 2) < 1e-12, "Expansion is (H+1)/2")
@@ -308,39 +309,44 @@ Because every masked observation token still passes through self-attention, zero
 # │ Context: @nbk-15-gradient-budget-and-compute-allocation.
 # │ Goal: Separate stored positions from eligible imitation targets.
 # │ Show: Two masks on one hypothetical input retain identical context.
-# │ How: Sum segment counts; exclude unselected responses; count targets.
+# │ How: Scenarios.RecoveryRecordTargetMask (TargetMaskModel) and its
+# │      doubled-observation and checkpoint variants.
 # └─────────────────────────────────────────────────────────────────────
-from mlsysim import *
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
 
 class SelectedTargetAccounting:
     # ┌── 1. LOAD (Hypothetical Token Counts) ────────────────────────────
-    prompt = 1_200  # includes the initial context/boundary position
-    task = 184
-    optional_rationale = 1_400  # available, authorized, reviewed text
-    response = 960  # response content and authentic terminators
-    observation = 12_640
-    unselected_response = 160  # retained as context, not desired targets
-    checkpoint_observation = 30_000  # given for the reader's estimate in the checkpoint
+    record = Scenarios.RecoveryRecordTargetMask
+    prompt = record.prompt  # includes the initial context/boundary position
+    task = record.task
+    optional_rationale = record.rationale  # available, authorized, reviewed text
+    response = record.response  # response content and authentic terminators
+    observation = record.observation
+    unselected_response = record.unselected_response  # retained as context, not desired targets
+    # given for the reader's estimate in the checkpoint
+    checkpoint_observation = Scenarios.RecoveryRecordTargetMaskLongObservations.observation
 
     # ┌── 2. EXECUTE (One Input, Two Target Policies) ────────────────────
-    stored = prompt + task + optional_rationale + response + observation
-    selected_response = response - unselected_response
-    with_rationale = selected_response + optional_rationale
-    without_rationale = selected_response
-    observation_share = observation / stored
-    with_share = with_rationale / stored
-    without_share = without_rationale / stored
-    context_only_with = stored - with_rationale
-    context_only_without = stored - without_rationale
+    r = record.result
+    double_obs = Scenarios.RecoveryRecordTargetMaskDoubledObservations.result
+    stored = r.stored
+    selected_response = r.selected_response
+    with_rationale = r.targets_with_rationale
+    without_rationale = r.targets_without_rationale
+    observation_share = r.observation_share
+    with_share = r.share_with_rationale
+    without_share = r.share_without_rationale
+    context_only_with = r.context_with_rationale
+    context_only_without = r.context_without_rationale
     # The first stored boundary has no preceding-position prediction.
-    predicted = stored - 1
-    dilution_without = predicted / without_rationale
-    dilution_with = predicted / with_rationale
-    stored_double_obs = stored + observation
-    predicted_double_obs = stored_double_obs - 1
-    dilution_double_obs = predicted_double_obs / without_rationale
-    unselected_vs_selected = unselected_response / selected_response
+    predicted = r.predicted
+    dilution_without = r.dilution_without_rationale
+    dilution_with = r.dilution_with_rationale
+    stored_double_obs = double_obs.stored
+    predicted_double_obs = double_obs.predicted
+    dilution_double_obs = double_obs.dilution_without_rationale
+    unselected_vs_selected = r.unselected_vs_selected
 
     # ┌── 3. ASSERT (Partitions and Positive Denominators) ───────────────
     check(0 <= unselected_response < response, "valid response selection")
@@ -419,33 +425,29 @@ Recorded repair trajectories show that the hypothetical inventory's proportions 
 # │ Context: @fig-vol3-trajectory-composition and the paragraph after it.
 # │ Goal: Ground the hypothetical mask inventory in recorded trajectories.
 # │ Show: Range of observation and model-output shares across configurations.
-# │ How:  Literature.SweBenchTrajectories; characters pooled per
+# │ How:  Scenarios.SweBenchVerifiedRoleShares (TrajectoryRoleShareModel over
+# │       Literature.SweBenchTrajectories); characters pooled per
 # │       configuration, each message counted once.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class TrajectoryComposition:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    runs = Literature.SweBenchTrajectories.entries
+    shares = Scenarios.SweBenchVerifiedRoleShares
+    runs = shares.rows
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    totals = {}
-    for _r in runs:
-        _t = totals.setdefault((_r["scaffold"], _r["model"]), [0.0, 0.0, 0.0, 0.0])
-        _t[0] += _r["model_chars"]
-        _t[1] += _r["obs_chars"]
-        _t[2] += _r["prompt_chars"]
-        _t[3] += _r["total_chars"]
-    obs_shares = sorted(v[1] / v[3] for v in totals.values())
-    model_shares = sorted(v[0] / v[3] for v in totals.values())
+    configs = shares.result.configurations
+    obs_shares = sorted(c["observation_share"] for c in configs)
+    model_shares = sorted(c["model_share"] for c in configs)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(obs_shares[0] > 0.5, "Prose says observations are the majority in every configuration")
     check(model_shares[-1] < 1 / 3, "Prose says model output is under a third everywhere")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_configs_str = fmt_int(len(totals))
+    n_configs_str = fmt_int(len(configs))
     n_runs_str = fmt_int(len(runs))
     obs_lo_str = fmt_int(round(100 * obs_shares[0]))
     obs_hi_str = fmt_percent(round(obs_shares[-1], 2), precision=0, style="prose")
@@ -453,7 +455,7 @@ class TrajectoryComposition:
     model_hi_str = fmt_percent(round(model_shares[-1], 2), precision=0, style="prose")
 ```
 
-:::: {#fig-vol3-trajectory-composition fig-env="figure" fig-pos="htb" fig-cap="**Observations Dominate Recorded Trajectories**: Share of transcript characters by the role that produced them, pooled over every run of each configuration and counting each message once. Prompt covers the system message, demonstrations, and task statement; observations are tool and environment output; model output is everything the model generated, the only region from which training targets can be selected. Characters stand in for tokens because the configurations use different tokenizers. Trajectories from @jimenez2024swebench submissions." fig-alt="Five horizontal stacked bars, one per agent configuration, each spanning 0 to 100 percent of transcript characters. Each bar has a gray prompt segment, a long green observation segment between about 56 and 72 percent, and a dark model-output segment between about 12 and 31 percent, with the percentage printed inside each wide segment."}
+::: {#fig-vol3-trajectory-composition fig-env="figure" fig-pos="htb" fig-cap="**Observations Dominate Recorded Trajectories**: Share of transcript characters by the role that produced them, pooled over every run of each configuration and counting each message once. Prompt covers the system message, demonstrations, and task statement; observations are tool and environment output; model output is everything the model generated, the only region from which training targets can be selected. Characters stand in for tokens because the configurations use different tokenizers. Trajectories from @jimenez2024swebench submissions." fig-alt="Five horizontal stacked bars, one per agent configuration, each spanning 0 to 100 percent of transcript characters. Each bar has a gray prompt segment, a long green observation segment between about 56 and 72 percent, and a dark model-output segment between about 12 and 31 percent, with the percentage printed inside each wide segment."}
 
 ```{python}
 #| echo: false
@@ -464,44 +466,49 @@ class TrajectoryComposition:
 # │
 # │ Goal: Show how much of a recorded trajectory is observation.
 # │ Show: Stacked prompt / observation / model-output shares per configuration.
-# │ How: Literature.SweBenchTrajectories (MLSysIM); book_style.setup_plot().
+# │ How: Scenarios.SweBenchVerifiedRoleShares (MLSysIM); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.2))
-totals = {}
-for r in Literature.SweBenchTrajectories.entries:
-    t = totals.setdefault((r["scaffold"], r["model"]), [0.0, 0.0, 0.0, 0.0])
-    t[0] += r["prompt_chars"]
-    t[1] += r["obs_chars"]
-    t[2] += r["model_chars"]
-    t[3] += r["total_chars"]
-labels = [f"{s}, {m}" for s, m in totals]
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.3, 3.5))
+configs = Scenarios.SweBenchVerifiedRoleShares.result.configurations
+labels = [f"{c['scaffold']}\n{c['model']}" for c in configs]
 segments = [
-    ("Prompt", COLORS["grid"], COLORS["primary"]),
-    ("Observations", COLORS["GreenLine"], "white"),
-    ("Model output", COLORS["primary"], "white"),
+    ("Prompt", COLORS["grid"], COLORS["primary"], "prompt_share"),
+    ("Observations", COLORS["GreenLine"], "white", "observation_share"),
+    ("Model output", COLORS["primary"], "white", "model_share"),
 ]
-left = [0.0] * len(totals)
-for j, (name, color, text_color) in enumerate(segments):
-    share = [100 * v[j] / v[3] for v in totals.values()]
+left = [0.0] * len(configs)
+for name, color, text_color, key in segments:
+    share = [100 * c[key] for c in configs]
     ax.barh(labels, share, left=left, color=color, label=name, edgecolor="white", lw=0.8)
     for i, (x0, w) in enumerate(zip(left, share)):
         if w >= 9:
-            ax.text(x0 + w / 2, i, f"{w:.0f}%", ha="center", va="center", fontsize=8, color=text_color)
+            ax.text(x0 + w / 2, i, f"{w:.0f}%", ha="center", va="center", fontsize=9, color=text_color)
     left = [a + b for a, b in zip(left, share)]
 ax.set_xlim(0, 100)
 ax.set_xlabel("Share of transcript characters (%)")
 ax.invert_yaxis()
 ax.set_axisbelow(True)
 ax.grid(axis="y", visible=False)
-ax.legend(frameon=False, fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=3)
+ax.legend(
+    fontsize=9,
+    loc="upper center",
+    bbox_to_anchor=(0.5, -0.22),
+    ncol=3,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.5,
+)
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 Across the `{python} TrajectoryComposition.n_configs_str` configurations and `{python} TrajectoryComposition.n_runs_str` runs, observations make up `{python} TrajectoryComposition.obs_lo_str` to `{python} TrajectoryComposition.obs_hi_str` of the transcript, and model output only `{python} TrajectoryComposition.model_lo_str` to `{python} TrajectoryComposition.model_hi_str`. These shares count each message once. Serializing one example per invocation repeats the growing prefix in every example, so the observation share of the stored training input is larger still, approaching the inventory's proportion. The mask is therefore not a refinement applied to a few verbose tool calls; in recorded repair work it decides the fate of most of the sequence.
 
@@ -602,7 +609,7 @@ Under an ordinary causal mask, every query in a later example can score keys in 
 
 [^fn-packing-cross-contamination]: **Cross-Contamination**: @krell2021efficient used the term for attention and label leakage between sequences packed into one buffer, and showed that masks, position resets, and per-sequence loss handling make a packed model mathematically equivalent to the unpacked one. The equivalence is the property to test: a packed loader that trains faster but lets examples read one another has changed the learning problem, and no loss curve will show it.
 
-::: {#fig-vol3-block-diagonal-mask data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-block-diagonal-mask" fig-env="figure" fig-pos="htb" fig-cap="**Block-Diagonal Attention for Packed Examples**: Two independent examples share one buffer. Under an ordinary causal mask (a), every query in the second example scores keys in the first, so the second example can use context it will not have when served. The block-diagonal mask (b) keeps causal scores only inside each example and sets every cross-example entry to $-\infty$ before the softmax, as in @eq-vol3-block-diagonal-attention. The boundary offsets define the blocks; whether a kernel also skips the masked blocks is an implementation property." fig-alt="Two eight-by-eight attention grids, queries down the side and keys across the top, each split into example 1 with five positions and example 2 with three. In panel a, the lower triangle within each example is shaded as a score, the remaining upper cells are gray minus infinity, and the block where example 2 queries meet example 1 keys is shaded red and labeled leak. In panel b, the same lower triangles are shaded, the whole cross-example block is gray and labeled minus infinity, and the key axis carries the boundary offsets 0, s 1, and s 1 plus s 2. A legend defines the score, minus infinity before softmax, and cross-example score."}
+::: {#fig-vol3-block-diagonal-mask data-explore="original-v3-block-diagonal-mask" data-explore-key="vol3:fig-vol3-block-diagonal-mask" fig-env="figure" fig-pos="htb" fig-cap="**Block-Diagonal Attention for Packed Examples**: Two independent examples share one buffer. Under an ordinary causal mask (a), every query in the second example scores keys in the first, so the second example can use context it will not have when served. The block-diagonal mask (b) keeps causal scores only inside each example and sets every cross-example entry to $-\infty$ before the softmax, as in @eq-vol3-block-diagonal-attention. The boundary offsets define the blocks; whether a kernel also skips the masked blocks is an implementation property." fig-alt="Two eight-by-eight attention grids, queries down the side and keys across the top, each split into example 1 with five positions and example 2 with three. In panel a, the lower triangle within each example is shaded as a score, the remaining upper cells are gray minus infinity, and the block where example 2 queries meet example 1 keys is shaded red and labeled leak. In panel b, the same lower triangles are shaded, the whole cross-example block is gray and labeled minus infinity, and the key axis carries the boundary offsets 0, s 1, and s 1 plus s 2. A legend defines the score, minus infinity before softmax, and cross-example score."}
 ![](images/svg/ch13-block-diagonal-mask.svg)
 :::
 
@@ -620,30 +627,38 @@ Loss computation needs the same boundary isolation: shifting next-token labels a
 # PACKING OCCUPANCY (LEGO)
 # Goal: Compare stored-token occupancy, not measured training throughput.
 # Scope: Hypothetical independent examples and two fixed-capacity buffers.
+# How: Scenarios.EightExamplePackingBatch (SequencePackingModel) and
+#      Scenarios.RepairTraceWithLookupWeighting (LossNormalizationModel).
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_multiple, fmt_percent, check
 
 class PackingOccupancy:
     # 1. LOAD: stored lengths and a separate two-example weighting illustration.
-    lengths = [32768, 8192, 4096, 2048, 1024, 1024, 512, 512]
-    capacity = 32768
-    active_short = 256
-    active_long = 8192
+    batch = Scenarios.EightExamplePackingBatch
+    weighting = Scenarios.RepairTraceWithLookupWeighting
+    lengths = batch.lengths
+    capacity = batch.capacity
+    active_short = weighting.other_targets
+    active_long = weighting.focus_targets
 
     # 2. EXECUTE: the longest example occupies one buffer; all others fit another.
-    stored = sum(lengths)
-    padded = len(lengths) * max(lengths)
-    second_buffer = sum(lengths[1:])
-    packed = 2 * capacity
-    padded_occupancy = stored / padded
-    packed_occupancy = stored / packed
-    position_ratio = padded / packed
-    mean_length = stored / len(lengths)
-    coefficient_ratio = active_long / active_short
-    short_weight = active_short / (active_short + active_long)
-    long_weight = active_long / (active_short + active_long)
+    p = batch.result
+    w = weighting.result
+    stored = p.stored
+    padded = p.padded_positions
+    second_buffer = p.buffer_loads[1]
+    packed = p.packed_positions
+    padded_occupancy = p.padded_occupancy
+    packed_occupancy = p.packed_occupancy
+    position_ratio = p.position_ratio
+    mean_length = p.mean_length
+    coefficient_ratio = w.focus_over_other
+    short_weight = w.other_token_share
+    long_weight = w.focus_token_share
 
     # 3. GUARD: feasible layout and distinct normalization coefficients.
     check(max(lengths) == capacity, "Longest example fits exactly")
+    check(p.buffers == 2 and second_buffer == sum(lengths) - max(lengths), "Others share one buffer")
     check(0 < second_buffer <= capacity, "Remaining examples fit second buffer")
     check(0 < stored <= packed <= padded, "Occupancy bounds")
     check(abs(short_weight + long_weight - 1) < 1e-12, "Token weights sum to one")
@@ -723,25 +738,28 @@ Let $\ImmediateTaskCostScore(\DecisionProcessState,\PolicyAction)\in[0,1]$ be a 
 # CONDITIONAL COST BOUNDS (LEGO)
 # Goal: Show which assumptions distinguish expert-state and learner-state bounds.
 # Scope: Hypothetical normalized costs; not observed repair performance.
+# How: Scenarios.RepairPolicyImitationBounds (capped S^2 eps and u S eps bounds).
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent
 
 class DistributionBounds:
     # 1. LOAD: stipulated horizon, equal numerical errors on different distributions.
-    horizon = 30
-    epsilon_expert = 0.02
-    epsilon_learner = 0.02
-    local_disadvantage = 1.0
+    bounds = Scenarios.RepairPolicyImitationBounds
+    horizon = bounds.horizon_steps
+    epsilon_expert = bounds.per_step_error
+    epsilon_learner = bounds.per_step_error
+    local_disadvantage = bounds.recoverability
 
     # 2. EXECUTE: excess cost cannot exceed the bounded total horizon cost.
     horizon_sq = horizon * horizon
-    expert_bound = min(horizon, horizon_sq * epsilon_expert)
-    local_bound = min(horizon, local_disadvantage * horizon * epsilon_learner)
-    horizon_disadvantage_bound = min(horizon, horizon_sq * epsilon_learner)
-    bound_gap = expert_bound / local_bound
+    expert_bound = bounds.cloning_capped
+    local_bound = bounds.aggregation_capped
+    horizon_disadvantage_bound = bounds.variant(recoverability=horizon).aggregation_capped
+    bound_gap = bounds.capped_gap
     # Reference-state error needed to match the learner-state bound.
-    epsilon_matching = local_bound / horizon_sq
+    epsilon_matching = bounds.matching_error
     # Horizon at which H^2 eps reaches the cap H and the bound stops constraining cost.
-    saturation_horizon = 1 / epsilon_expert
+    saturation_horizon = bounds.saturation_horizon
 
     # 3. GUARD: these are bounds under distinct assumptions, not measured costs.
     check(expert_bound == 18, "Expert-distribution cost bound")
@@ -942,36 +960,42 @@ The gradient has three systems consequences. First, identical selected tokens sh
 # PREFERENCE MARGIN (LEGO)
 # Goal: Evaluate a reference-relative comparison, not a measured repair outcome.
 # Scope: Hypothetical natural-log probability sums over declared selected tokens.
+# How: Scenarios.RepairPreferencePair and its doubled-beta variant (PreferencePairModel).
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 class PreferenceMargin:
     # 1. LOAD: fixed scored records, reference, and dimensionless scale.
-    policy_w = -8.0
-    reference_w = -10.0
-    policy_l = -11.0
-    reference_l = -10.0
-    beta = 0.2
-    shared_prefix_ratio = 1.0
+    pair = Scenarios.RepairPreferencePair
+    doubled = Scenarios.RepairPreferencePairDoubledBeta
+    policy_w = pair.policy_preferred
+    reference_w = pair.reference_preferred
+    policy_l = pair.policy_dispreferred
+    reference_l = pair.reference_dispreferred
+    beta = pair.beta
+    shared_prefix_ratio = 1.0  # any shared-prefix log ratio; it cancels
 
     # 2. EXECUTE: scores, pair logit, and negative log-sigmoid loss.
-    score_w = policy_w - reference_w
-    score_l = policy_l - reference_l
-    margin = beta * (score_w - score_l)
-    preference_score = 1 / (1 + math.exp(-margin))
-    loss = math.log1p(math.exp(-margin))
-    initial_loss = math.log(2)
+    r = pair.result
+    r2 = doubled.result
+    score_w = r.score_preferred
+    score_l = r.score_dispreferred
+    margin = r.margin
+    preference_score = r.preference_score
+    loss = r.loss
+    initial_loss = r.initial_loss
     suffix_difference = (score_w - shared_prefix_ratio) - (score_l - shared_prefix_ratio)
     # Saturation factor and full coefficient beta*sigma(-z) on this pair.
-    saturation_factor = 1 / (1 + math.exp(margin))
-    initial_saturation_factor = 0.5
-    gradient_coefficient = beta * saturation_factor
-    initial_gradient_coefficient = beta * initial_saturation_factor
-    beta_doubled = 2 * beta
-    margin_doubled = beta_doubled * (score_w - score_l)
-    saturation_factor_doubled = 1 / (1 + math.exp(margin_doubled))
-    preference_score_doubled = 1 / (1 + math.exp(-margin_doubled))
-    gradient_coefficient_doubled = beta_doubled * saturation_factor_doubled
+    saturation_factor = r.saturation_factor
+    initial_saturation_factor = r.initial_saturation_factor
+    gradient_coefficient = r.gradient_coefficient
+    initial_gradient_coefficient = r.initial_gradient_coefficient
+    beta_doubled = doubled.beta
+    margin_doubled = r2.margin
+    saturation_factor_doubled = r2.saturation_factor
+    preference_score_doubled = r2.preference_score
+    gradient_coefficient_doubled = r2.gradient_coefficient
 
     # 3. GUARD: cancellation and loss identities.
     check(beta > 0, "Positive preference scale")
@@ -1088,7 +1112,10 @@ Because $\WeightMatrix_0$ participates in every forward and backward pass, freez
 # │ PARAMETER-STATE INVENTORY
 # │ Goal: Separate frozen-base storage from trainable parameter state.
 # │ Scope: Hypothetical architecture; aggregate unsharded resident arrays only.
+# │ How: Scenarios.Rank16AdaptersOnHypothetical8B (TrainingStateFitScenario) and
+# │      its rank-32 variant.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import byte, GB, MB
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple, fmt_percent, fmt_qty
 
@@ -1096,35 +1123,36 @@ class AdapterStateInventory:
     """One explicit precision convention, excluding activations and workspace."""
 
     # 1. LOAD — exact illustrative inputs, not a named model or measured run.
-    base_parameters = 8_000_000_000
-    layers = 32
-    matrices_per_layer = 2
-    input_width = 4096
-    output_width = 4096
-    rank = 16
-    weight_bytes = 2 * byte
-    gradient_bytes = 2 * byte
-    master_bytes = 4 * byte
-    moment_bytes = 4 * byte
+    run = Scenarios.Rank16AdaptersOnHypothetical8B
+    base_parameters = int(run.workload.parameters.to("count").magnitude)
+    layers = run.workload.layers
+    matrices_per_layer = run.adapted_matrices
+    input_width = run.adapter_in_dim
+    output_width = run.adapter_out_dim
+    rank = run.adapter_rank
+    weight_bytes = run.bytes_per_value
+    gradient_bytes = run.bytes_per_value
+    master_bytes = run.master_bytes_per_parameter
+    moment_bytes = run.optimizer_bytes_per_parameter / 2  # two Adam moments
 
     # 2. CALCULATE — one resident copy of each listed array.
-    adapter_parameters = layers * matrices_per_layer * rank * (input_width + output_width)
-    state_per_parameter = weight_bytes + gradient_bytes + master_bytes + 2 * moment_bytes
-    base_storage = base_parameters * weight_bytes
-    adapter_weights = adapter_parameters * weight_bytes
-    adapter_gradients = adapter_parameters * gradient_bytes
-    adapter_master = adapter_parameters * master_bytes
-    adapter_moments = adapter_parameters * 2 * moment_bytes
-    adapter_state = adapter_parameters * state_per_parameter
-    lora_state = base_storage + adapter_state
-    full_state = base_parameters * state_per_parameter
-    saved_state = full_state - lora_state
+    adapter_parameters = run.adapter_count
+    state_per_parameter = run.bytes_per_trained_parameter
+    base_storage = run.weights
+    adapter_weights = run.adapter_weights
+    adapter_gradients = run.adapter_gradients
+    adapter_master = run.adapter_master
+    adapter_moments = run.adapter_optimizer_state
+    adapter_state = run.adapter_state
+    lora_state = run.total
+    full_state = run.full_state
+    saved_state = run.adapter_saved
     # Sensitivities: which term dominates, and what rank costs.
-    parameter_fraction = adapter_parameters / base_parameters
-    lora_fraction_of_full = (lora_state / full_state).to("").magnitude
-    state_reduction = (full_state / lora_state).to("").magnitude
-    base_share = (base_storage / lora_state).to("").magnitude
-    rank_doubling_increment = adapter_state  # adapter state is linear in rank
+    parameter_fraction = run.adapter_fraction
+    lora_fraction_of_full = run.adapter_kept_share
+    state_reduction = run.adapter_reduction
+    base_share = run.frozen_share
+    rank_doubling_increment = Scenarios.Rank32AdaptersOnHypothetical8B.adapter_state - adapter_state
     frozen_state_per_parameter = weight_bytes
 
     # 3. ASSERT — bytes, not an invented device-capacity or throughput claim.

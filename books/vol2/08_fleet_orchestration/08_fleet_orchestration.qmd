@@ -107,29 +107,29 @@ Consider two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GP
 # │       production mix.
 # │ Show: Kalos (2023): 86% of 19,907 GPU jobs use one GPU and 0.1% of GPU
 # │       time; jobs of 256+ GPUs are ~4% of jobs and ~96% of GPU time.
-# │ How: Sums over Literature.Series.AcmeKalosJobSizes.
+# │ How: Scenarios.KalosJobSizeMix (JobSizeMixModel) over
+# │      Literature.Series.AcmeKalosJobSizes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
-
-def _share(rows, field, pred):
-    return sum(r[field] for r in rows if pred(r["gpu_num"])) / sum(r[field] for r in rows)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class JobSizeMix:
     """Job-count and GPU-time shares by job size in the Kalos LLM cluster."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.AcmeKalosJobSizes.entries
-    large_threshold = 256  # GPUs; the smallest job size in the trace's large-run cluster
+    _mix = Scenarios.KalosJobSizeMix
+    rows = _mix.series.entries
+    large_threshold = _mix.large_threshold  # GPUs; the smallest job size in the trace's large-run cluster
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    job_count = sum(r["jobs"] for r in rows)
-    single_job_share = _share(rows, "jobs", lambda n: n == 1)
-    single_time_share = _share(rows, "gpu_seconds", lambda n: n == 1)
-    large_job_share = _share(rows, "jobs", lambda n: n >= 256)
-    large_time_share = _share(rows, "gpu_seconds", lambda n: n >= 256)
+    _r = _mix.result
+    job_count = _r.job_count
+    single_job_share = _r.classes["single"]["job_share"]
+    single_time_share = _r.classes["single"]["time_share"]
+    large_job_share = _r.classes["large"]["job_share"]
+    large_time_share = _r.classes["large"]["time_share"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.8 <= single_job_share <= 0.9 and single_time_share < 0.005, "Prose: most jobs are single-GPU and use almost no GPU time.")
@@ -212,7 +212,8 @@ In the fleet stack (shown in the margin), orchestration occupies the Reliability
 # │
 # │ Goal: Provide cluster scale and economic statistics for orchestration.
 # │ Show: 10,000-GPU cluster; ~$480k/day operating cost.
-# │ How: Multiply GPU count, GPU-hour cost, and 24 hours.
+# │ How: Multiply GPU count, GPU-hour cost, and 24 hours; the held gang and the
+# │      idle-hour cost come from Scenarios.PartialGangHold and Training10KIdleHour.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_memory_capacity, fmt_percent, fmt_usd
@@ -229,7 +230,9 @@ class ClusterEconomicsContext:
     util_low = 0.50  # scenario assumption: poorly scheduled utilization; the chapter-wide improvement baseline (50 -> 80 percent)
     util_high = Systems.Orchestration.target_cluster_utilization
     gang_job_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
-    gang_held_gpus = 900  # scenario assumption: GPUs already held while the gang assembles
+    _gang_hold = Scenarios.PartialGangHold  # GPUs already held while the gang assembles
+    _cluster_idle_hour = Scenarios.Training10KIdleHour
+    gang_held_gpus = _gang_hold.gpus
     a100_mem = Hardware.Cloud.A100.memory.capacity
     h100_mem = Hardware.Cloud.H100.memory.capacity
 
@@ -240,12 +243,12 @@ class ClusterEconomicsContext:
     annual_waste_m = (daily_waste * DAYS_PER_YEAR) / MILLION
     productive_gpu_gain = cluster_size * (util_high - util_low)
     raw_gpu_equivalent_gain = productive_gpu_gain / util_low
-    gang_missing_gpus = gang_job_gpus - gang_held_gpus
-    gang_idle_burn = gang_held_gpus * gpu_hour_cost_usd
+    gang_missing_gpus = _gang_hold.missing_gpus
+    gang_idle_burn = _gang_hold.cost  # per hour
     # Value of the 50 -> 80 percent gain per day, and how many hours of a
     # whole-cluster hold-and-wait deadlock erase it (gang-scheduling section).
     daily_gain = productive_gpu_gain * gpu_hour_cost_usd * HOURS_PER_DAY
-    cluster_hourly_cost = cluster_size * gpu_hour_cost_usd
+    cluster_hourly_cost = _cluster_idle_hour.cost
     deadlock_hours_per_daily_gain = daily_gain / cluster_hourly_cost
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -369,19 +372,24 @@ Queueing adds a further conflict between utilization and latency, because a flee
 # │
 # │ Goal: Compute Pollaczek-Khinchine waiting-time multipliers for uniform
 # │       vs heavy-tailed ML workloads.
-# │ How: Compute the waiting-time multiplier from utilization and service-time variability.
+# │ How: Scenarios.Mg1ExponentialJobQueueAt80 and Mg1MixedJobQueueAt80
+# │      (calc_mg1_wait_ratio): the waiting-time multiplier from utilization
+# │      and service-time variability.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 class QueuingTheory:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    rho = 0.8
-    cs_uniform = 1
-    cs_ml = 3
+    _uniform = Scenarios.Mg1ExponentialJobQueueAt80
+    _ml = Scenarios.Mg1MixedJobQueueAt80
+    rho = _ml.utilization
+    cs_uniform = _uniform.service_cv
+    cs_ml = _ml.service_cv
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    wq_uniform = rho / (1 - rho) * (1 + cs_uniform**2) / 2
-    wq_ml = rho / (1 - rho) * (1 + cs_ml**2) / 2
+    wq_uniform = _uniform.wait_ratio
+    wq_ml = _ml.wait_ratio
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(wq_uniform - 4) < 1e-9, f"Expected 4, got {wq_uniform}")
     check(abs(wq_ml - 20) < 1e-9, f"Expected 20, got {wq_ml}")
@@ -411,7 +419,80 @@ Awarding the 64-GPU fine-tuning run its fair share of the cluster delivers zero 
 
 ### Dominant-resource fairness allocation {#sec-fleet-orchestration-drf-worked-allocation}
 
-Equalizing GPU counts alone fails when one tenant's jobs saturate host CPU and memory while another's saturate the network fabric, leaving free GPUs unusable behind exhausted auxiliary resources. Dominant-resource fairness (DRF)\index{Dominant resource fairness!worked allocation}\index{DRF|see{Dominant resource fairness}} makes a multi-resource entitlement comparable by normalizing each tenant's allocation against fleet capacity and taking its largest share [@ghodsi2011]. Consider the deliberately small cluster in @tbl-fleet-orchestration-drf-allocation: 8 GPUs, 32 CPU cores, 256 GB of memory, and 80 Gb/s of network capacity. Tenant A's replica requires 1 GPU, 4 cores, 32 GB, and 10 Gb/s; Tenant B's distributed worker requires 2 GPUs, 2 cores, 16 GB, and 20 Gb/s.
+```{python}
+#| echo: false
+#| label: lego-drf-allocation
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DRF WORKED ALLOCATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: DRF paragraph and @tbl-fleet-orchestration-drf-allocation below.
+# │
+# │ Goal: Fill two tenants' bundles progressively on a small four-resource
+# │       cluster and report each tenant's per-resource and dominant shares.
+# │ Show: A: 4 replicas, every share 0.50; B: 2 workers, 0.50 GPU and network,
+# │       0.125 CPU and memory; both dominant shares 0.50.
+# │ How:  Scenarios.DrfTwoTenantExample (progressive filling).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_math
+
+def _share_num(x):
+    """A share as the table prints it: two decimals, three when the third is not zero."""
+    return f"{x:.3f}" if round(x, 2) != round(x, 3) else f"{x:.2f}"
+
+def _share_expr(alloc, cap, key):
+    """One table cell: allocation over capacity, equal to the share."""
+    return f"{alloc[key]:.0f}/{cap[key]:.0f}={_share_num(alloc[key] / cap[key])}"
+
+class DrfAllocation:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.DrfTwoTenantExample
+    cap = scenario.capacity
+    bundle_a = scenario.bundles["A"]
+    bundle_b = scenario.bundles["B"]
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    _r = scenario.result
+    count_a = _r["bundle_counts"]["A"]
+    count_b = _r["bundle_counts"]["B"]
+    alloc_a = _r["tenants"]["A"]["allocation"]
+    alloc_b = _r["tenants"]["B"]["allocation"]
+    shares_a = _r["tenants"]["A"]["shares"]
+    shares_b = _r["tenants"]["B"]["shares"]
+    dom_a = _r["tenants"]["A"]["dominant_share"]
+    dom_b = _r["tenants"]["B"]["dominant_share"]
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(dom_a - dom_b) < 1e-9, "Prose: both tenants reach the same dominant share")
+    check(shares_b["cpu_cores"] < dom_b and shares_b["memory_gb"] < dom_b, "Prose: B's CPU and memory shares sit below its dominant share")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    cap_gpu_str = fmt(cap["accelerators"], precision=0)
+    cap_cpu_str = fmt(cap["cpu_cores"], precision=0)
+    cap_mem_str = fmt(cap["memory_gb"], precision=0)
+    cap_net_str = fmt(cap["network_gbps"], precision=0)
+    a_gpu_str = fmt(bundle_a["accelerators"], precision=0)
+    a_cpu_str = fmt(bundle_a["cpu_cores"], precision=0)
+    a_mem_str = fmt(bundle_a["memory_gb"], precision=0)
+    a_net_str = fmt(bundle_a["network_gbps"], precision=0)
+    b_gpu_str = fmt(bundle_b["accelerators"], precision=0)
+    b_cpu_str = fmt(bundle_b["cpu_cores"], precision=0)
+    b_mem_str = fmt(bundle_b["memory_gb"], precision=0)
+    b_net_str = fmt(bundle_b["network_gbps"], precision=0)
+    count_a_str = fmt(count_a, precision=0)
+    count_b_str = fmt(count_b, precision=0)
+    a_gpu_math = fmt_math(_share_expr(alloc_a, cap, "accelerators"))
+    a_cpu_math = fmt_math(_share_expr(alloc_a, cap, "cpu_cores"))
+    a_mem_math = fmt_math(_share_expr(alloc_a, cap, "memory_gb"))
+    a_net_math = fmt_math(_share_expr(alloc_a, cap, "network_gbps"))
+    b_gpu_math = fmt_math(_share_expr(alloc_b, cap, "accelerators"))
+    b_cpu_math = fmt_math(_share_expr(alloc_b, cap, "cpu_cores"))
+    b_mem_math = fmt_math(_share_expr(alloc_b, cap, "memory_gb"))
+    b_net_math = fmt_math(_share_expr(alloc_b, cap, "network_gbps"))
+    dom_a_math = fmt_math(_share_num(dom_a))
+    dom_b_math = fmt_math(_share_num(dom_b))
+    a_step_math = fmt_math(f"{bundle_a['accelerators']:.0f}/{cap['accelerators']:.0f}")
+    b_step_math = fmt_math(f"{bundle_b['accelerators']:.0f}/{cap['accelerators']:.0f}")
+```
+
+Equalizing GPU counts alone fails when one tenant's jobs saturate host CPU and memory while another's saturate the network fabric, leaving free GPUs unusable behind exhausted auxiliary resources. Dominant-resource fairness (DRF)\index{Dominant resource fairness!worked allocation}\index{DRF|see{Dominant resource fairness}} makes a multi-resource entitlement comparable by normalizing each tenant's allocation against fleet capacity and taking its largest share [@ghodsi2011]. Consider the deliberately small cluster in @tbl-fleet-orchestration-drf-allocation: `{python} DrfAllocation.cap_gpu_str` GPUs, `{python} DrfAllocation.cap_cpu_str` CPU cores, `{python} DrfAllocation.cap_mem_str` GB of memory, and `{python} DrfAllocation.cap_net_str` Gb/s of network capacity. Tenant A's replica requires `{python} DrfAllocation.a_gpu_str` GPU, `{python} DrfAllocation.a_cpu_str` cores, `{python} DrfAllocation.a_mem_str` GB, and `{python} DrfAllocation.a_net_str` Gb/s; Tenant B's distributed worker requires `{python} DrfAllocation.b_gpu_str` GPUs, `{python} DrfAllocation.b_cpu_str` cores, `{python} DrfAllocation.b_mem_str` GB, and `{python} DrfAllocation.b_net_str` Gb/s.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -419,12 +500,12 @@ Equalizing GPU counts alone fails when one tenant's jobs saturate host CPU and m
 
 | **Tenant** | **Allocation** | **GPU share** | **CPU share** | **Memory share** | **Network share** | **Dominant share** |
 |:-----------|:---------------|:-------------:|:-------------:|:----------------:|:-----------------:|:------------------:|
-| A          | 4 replicas     |   $4/8=0.50$  |  $16/32=0.50$ |  $128/256=0.50$  |    $40/80=0.50$   |       $0.50$       |
-| B          | 2 workers      |   $4/8=0.50$  |  $4/32=0.125$ |  $32/256=0.125$  |    $40/80=0.50$   |       $0.50$       |
+| A          | `{python} DrfAllocation.count_a_str` replicas | `{python} DrfAllocation.a_gpu_math` | `{python} DrfAllocation.a_cpu_math` | `{python} DrfAllocation.a_mem_math` | `{python} DrfAllocation.a_net_math` | `{python} DrfAllocation.dom_a_math` |
+| B          | `{python} DrfAllocation.count_b_str` workers | `{python} DrfAllocation.b_gpu_math` | `{python} DrfAllocation.b_cpu_math` | `{python} DrfAllocation.b_mem_math` | `{python} DrfAllocation.b_net_math` | `{python} DrfAllocation.dom_b_math` |
 
 : **Worked DRF Allocation**: Progressive filling gives Tenant A four one-GPU replicas and Tenant B a pair of two-GPU workers. Both tenants reach a dominant share of 0.50 even though their CPU and memory allocations differ. GPUs and network are jointly saturated; CPU and memory remain available but cannot increase either allocation without exceeding a saturated resource. {#tbl-fleet-orchestration-drf-allocation tbl-colwidths="[12,19,13,13,14,15,14]"}
 
-For tenant $\TenantIndex$, define its dominant share as $\DominantShare_i=\max_\ResourceTypeIndex(\TenantResourceAllocation/\FleetResourceCapacity)$, where $\TenantResourceAllocation$ is its allocation of resource $\ResourceTypeIndex$ and $\FleetResourceCapacity$ is fleet capacity for that resource. The calculation equalizes $\DominantShare_i$, not every resource share. One A replica raises A's dominant share by $1/8$; one B worker raises B's by $2/8$. Progressive filling therefore grants roughly two A replicas for each B worker until both dominant shares reach $0.50$. This is a fair policy target, but it is not yet a feasible placement. If B's two workers form one four-GPU gang, the four GPUs must become available atomically. If tensor parallelism requires one NVLink domain, four free GPUs scattered across nodes do not satisfy the allocation. If the job requires 80 GB HBM accelerators, four incompatible GPUs do not count at all. A production scheduler therefore applies capability, gang, and topology constraints to the feasible set, then uses DRF\index{Dominant resource fairness!progressive filling} to choose fairly among allocations that can actually run. The order is not a convenience. Feasibility comes before fairness (principle \ref{pri-feasibility-before-fairness}) because a fair share of accelerators on which the job cannot run delivers no progress to the tenant who holds it. When no equal-share placement exists, the scheduler should report the constraint causing the deviation rather than silently presenting an infeasible entitlement as service delivered.
+For tenant $\TenantIndex$, define its dominant share as $\DominantShare_i=\max_\ResourceTypeIndex(\TenantResourceAllocation/\FleetResourceCapacity)$, where $\TenantResourceAllocation$ is its allocation of resource $\ResourceTypeIndex$ and $\FleetResourceCapacity$ is fleet capacity for that resource. The calculation equalizes $\DominantShare_i$, not every resource share. One A replica raises A's dominant share by `{python} DrfAllocation.a_step_math`; one B worker raises B's by `{python} DrfAllocation.b_step_math`. Progressive filling therefore grants roughly two A replicas for each B worker until both dominant shares reach `{python} DrfAllocation.dom_a_math`. This is a fair policy target, but it is not yet a feasible placement. If B's two workers form one four-GPU gang, the four GPUs must become available atomically. If tensor parallelism requires one NVLink domain, four free GPUs scattered across nodes do not satisfy the allocation. If the job requires 80 GB HBM accelerators, four incompatible GPUs do not count at all. A production scheduler therefore applies capability, gang, and topology constraints to the feasible set, then uses DRF\index{Dominant resource fairness!progressive filling} to choose fairly among allocations that can actually run. The order is not a convenience. Feasibility comes before fairness (principle \ref{pri-feasibility-before-fairness}) because a fair share of accelerators on which the job cannot run delivers no progress to the tenant who holds it. When no equal-share placement exists, the scheduler should report the constraint causing the deviation rather than silently presenting an infeasible entitlement as service delivered.
 
 ::: {#lhs-fleet-orchestration-archetype-placement-fairness .callout-lighthouse title="Lighthouse archetypes: Placement changes fairness"}
 
@@ -456,32 +537,38 @@ Even when a cluster has dozens of free GPUs in total, a pending 8-GPU job will s
 # │       the NVLink-vs-InfiniBand locality cliff that forbids cross-node packs.
 # │ Show: total cluster GPUs, effective capacity after fragmentation, and the
 # │       intra-node NVLink vs inter-node InfiniBand bandwidth gap.
-# │ How: Compute wasted GPUs per node for a fixed job request; read NVLink and
-# │      InfiniBand bandwidths from the Hardware and Systems registries.
+# │ How: Scenarios.SixGpuJobsOnDgxH100Nodes (wasted GPUs per node for a fixed
+# │      job request) and FragmentedEightNodeSnapshot (the figure's free slots);
+# │      NVLink and InfiniBand bandwidths from the Hardware and Systems registries.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth
+from mlsysim import Scenarios
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_count, fmt_percent
 
 class FleetFragmentation:
     from mlsysim import Hardware
 
     h_h100 = Hardware.Cloud.H100
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    n_nodes = 64
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    total_gpus = n_nodes * gpus_per_node
-    job_request = 6
-    wasted_per_node = gpus_per_node - job_request
+    _packing = Scenarios.SixGpuJobsOnDgxH100Nodes
+    _snapshot = Scenarios.FragmentedEightNodeSnapshot  # @fig-fragmentation-problem layout
+    n_nodes = _packing.nodes
+    gpus_per_node = _packing.gpus_per_node
+    total_gpus = _packing.total_gpus
+    job_request = _packing.job_gpus
+    wasted_per_node = _packing.stranded_per_node
     frag_pct = (wasted_per_node / gpus_per_node) * 100
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_gpus_str = fmt_count(total_gpus, label="GPU")
     effective_capacity_pct_str = fmt_percent(round(100 - frag_pct) / 100, precision=0, commas=False, style='prose')
+    snapshot_free_str = fmt(_snapshot.free_slots, precision=0)
+    snapshot_free_pct_str = fmt_percent(round(_snapshot.free_share, 2), precision=0, commas=False, style='prose')
     # per-direction NVLink vs per-port IB — the like-with-like cliff comparison
     nvlink_h100_gb_per_s_str = fmt_bandwidth(h_h100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0)
     ib_ndr_gb_per_s_str = fmt_bandwidth(ib_ndr.bandwidth, unit=GB / second, precision=0)
 ```
 
-Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmentation.total_gpus_str`. If every job requires 6 GPUs within one node, only one such job fits per node, leaving 2 GPUs unused and reducing effective capacity for this workload to `{python} FleetFragmentation.effective_capacity_pct_str`. The remaining 2 GPUs per node cannot be combined across nodes into another feasible six-GPU allocation, although smaller compatible jobs could use them. With a mix of 1-GPU, 3-GPU, and 7-GPU jobs, fragmentation\index{Fragmentation!scheduling} depends on the placement and the pending requests; total free capacity can exceed a waiting job's demand while no individual node has enough space. @Fig-fragmentation-problem maps this stranded capacity across an $8{\times}8$ allocation grid. Although 19 slots (30 percent of cluster capacity, dashed white cells) sit idle across nodes 0 through 7, active allocations (J1 through J15) leave every node partially occupied, which blocks a pending 8-GPU job that requires an entire unfragmented node.
+Consider a 64-node cluster with 8 GPUs per node, totaling `{python} FleetFragmentation.total_gpus_str`. If every job requires 6 GPUs within one node, only one such job fits per node, leaving 2 GPUs unused and reducing effective capacity for this workload to `{python} FleetFragmentation.effective_capacity_pct_str`. The remaining 2 GPUs per node cannot be combined across nodes into another feasible six-GPU allocation, although smaller compatible jobs could use them. With a mix of 1-GPU, 3-GPU, and 7-GPU jobs, fragmentation\index{Fragmentation!scheduling} depends on the placement and the pending requests; total free capacity can exceed a waiting job's demand while no individual node has enough space. @Fig-fragmentation-problem maps this stranded capacity across an $8{\times}8$ allocation grid. Although `{python} FleetFragmentation.snapshot_free_str` slots (`{python} FleetFragmentation.snapshot_free_pct_str` of cluster capacity, dashed white cells) sit idle across nodes 0 through 7, active allocations (J1 through J15) leave every node partially occupied, which blocks a pending 8-GPU job that requires an entire unfragmented node.
 
 ML placement is a multi-dimensional packing problem. Jobs require GPUs together with CPU cores for data preprocessing, host memory for data loading and augmentation pipelines, local SSD storage for dataset caching, and network bandwidth for gradient synchronization. A job requesting 4 GPUs, 32 CPU cores, and 256 GB of RAM may not fit on a node that has 4 free GPUs but only 16 free CPU cores because other jobs have consumed the host CPU for preprocessing. The scheduler must simultaneously satisfy all resource dimensions, and the job fits only if every dimension has sufficient capacity on the selected node. A bottleneck in any one dimension can therefore strand capacity in the others.
 
@@ -619,7 +706,7 @@ plt.close()
 
 Partial allocation of rigid multi-GPU jobs creates a distributed scheduling failure mode in which two jobs each hold half the resources they need and block each other indefinitely while every allocated GPU sits idle. In the left panel of @fig-gang-scheduling-deadlock, jobs J1 and J2 each hold 4 of the 8 GPUs they require, and the whole pool stalls. Atomic gang scheduling\index{Gang scheduling!atomic allocation} (right panel) instead grants J1 all 8 GPUs as one allocation while J2 waits without holding any, which prevents this allocation deadlock.
 
-::: {#fig-gang-scheduling-deadlock data-explore="mechanism-scene" data-explore-key="vol2:fig-gang-scheduling-deadlock" fig-env="figure" fig-pos="htb" fig-cap="**The Distributed Deadlock (Hold and Wait)**: In a non-gang scheduler (left), job J1 acquires half the cluster and waits for the rest, while job J2 acquires the other half and waits for J1 to release its GPUs. Neither can proceed, and 100 percent of the cluster sits idle. Gang scheduling (right) solves this by mandating atomic allocation: a job is either granted its entire $\DeviceCount$-GPU requirement simultaneously or it waits in the queue without holding any resources." fig-alt="Two panels, each with a queue lane above eight GPU rows against a time axis. Left, partial allocation: J1 holds GPU rows 0 to 3 and J2 holds rows 4 to 7, both drawn as red hatched blocks labeled holds 4 of 8 that extend past the right edge with dashed ends; two curved red arrows form a cycle between them labeled waits, and the panel reads 8 GPUs held, none computing. Right, gang scheduling: a blue J1 block spans all eight rows, then a blue J2 block spans all eight rows after it, each labeled all 8 at once; above them, J2 waits in the queue in a dashed violet box labeled holds 0 until an arrow labeled J1 finishes drops it into the GPUs. The panel reads no partial holds, no deadlock."}
+::: {#fig-gang-scheduling-deadlock data-explore="original-v2-gang-scheduling-deadlock" data-explore-key="vol2:fig-gang-scheduling-deadlock" fig-env="figure" fig-pos="htb" fig-cap="**The Distributed Deadlock (Hold and Wait)**: In a non-gang scheduler (left), job J1 acquires half the cluster and waits for the rest, while job J2 acquires the other half and waits for J1 to release its GPUs. Neither can proceed, and 100 percent of the cluster sits idle. Gang scheduling (right) solves this by mandating atomic allocation: a job is either granted its entire $\DeviceCount$-GPU requirement simultaneously or it waits in the queue without holding any resources." fig-alt="Two panels, each with a queue lane above eight GPU rows against a time axis. Left, partial allocation: J1 holds GPU rows 0 to 3 and J2 holds rows 4 to 7, both drawn as red hatched blocks labeled holds 4 of 8 that extend past the right edge with dashed ends; two curved red arrows form a cycle between them labeled waits, and the panel reads 8 GPUs held, none computing. Right, gang scheduling: a blue J1 block spans all eight rows, then a blue J2 block spans all eight rows after it, each labeled all 8 at once; above them, J2 waits in the queue in a dashed violet box labeled holds 0 until an arrow labeled J1 finishes drops it into the GPUs. The panel reads no partial holds, no deadlock."}
 ![](images/svg/gang-deadlock.svg)
 
 :::
@@ -948,25 +1035,26 @@ A scattered allocation can place frequent collective traffic on shared cross-rac
 # │ placement callout share the same interconnect scenario.
 # │ Show: H100 NVLink and InfiniBand NDR bandwidths, the activation
 # │       transfer times over each, and the NVLink-to-InfiniBand slowdown.
-# │ How: Read NVLink and InfiniBand bandwidths from the Hardware and Systems
-# │      registries; divide a fixed activation size by each rate.
+# │ How: Scenarios.TensorParallelExchange1GB (TransferLadderModel) divides the
+# │      activation by NVLink and NDR rates; oversubscription from Systems.Fabrics.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
 
 class FleetTopologyInterconnect:
-    from mlsysim import Hardware
+    from mlsysim import Hardware, Scenarios
 
     h_h100 = Hardware.Cloud.H100
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     ib_ndr_2to1 = Systems.Fabrics.InfiniBand_NDR_Oversub2to1
     ib_ndr_4to1 = Systems.Fabrics.InfiniBand_NDR_Oversub4to1
-    activation = 1 * GB  # scenario assumption
+    _exchange = Scenarios.TensorParallelExchange1GB  # one activation over NVLink and one NDR port
+    activation = _exchange.payload
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # One-way deliverable NVLink rate (per-direction) for the transfer-time
     # comparison; the datasheet 900 GB/s is the bidirectional total.
-    nvlink_xfer = (activation / h_h100.nvlink.bandwidth_per_direction).to(ms)
-    ib_xfer = (activation / ib_ndr.bandwidth).to(ms)
+    nvlink_xfer = _exchange.result.times["NVLink"].to(ms)
+    ib_xfer = _exchange.result.times["InfiniBand NDR"].to(ms)
     xfer_slowdown = (ib_xfer / nvlink_xfer).to("").magnitude
     # Per-endpoint share of a saturated, oversubscribed spine (balanced load).
     oversub_hi_bw = ib_ndr_2to1.bandwidth / ib_ndr_2to1.oversubscription_ratio
@@ -1448,7 +1536,7 @@ class ElasticNodeRange:
 # │ Goal: Model eta_scaling for the 175B reference job from 64 to 4,096 GPUs.
 # │ Show: 89 -> 69 percent; the pipeline bubble dominates the losses at scale,
 # │       while throughput still rises at every step.
-# │ How:  DistributedModel sweep; TP = node size; PP = smallest power of two
+# │ How:  DistributedModel sweep; Scenarios.Gpt3SelfContainedReplicaDgxH100: TP = node size; PP = smallest power of two
 # │       that fits mixed-precision Adam state in HBM; fixed global batch from
 # │       Brown et al. (2020). Each sweep point is an unregistered in-memory
 # │       copy of the Training_1K fleet (HDR InfiniBand at every size).
@@ -1467,15 +1555,12 @@ class ElasticScalingCurve:
     batch_tokens = float(Literature.TrainingRuns.Gpt3BatchTokens)  # Brown et al. (2020), Table 2.1
     seq_len = model.context_length
     gpus_per_node = fleet.node.accelerators_per_node
-    hbm = fleet.node.accelerator.memory.capacity
     sweep_doublings = 7  # scenario assumption: 64 ... 4,096 GPUs
+    _replica = Scenarios.Gpt3SelfContainedReplicaDgxH100  # 16 B/param mixed-precision Adam, unsharded
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    state_bytes = 2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE  # 16 B/param mixed-precision Adam
-    tp = gpus_per_node  # TP confined to one node
-    pp = 1
-    while (model.parameters.magnitude * state_bytes / (tp * pp)).to(GiB) > hbm:
-        pp *= 2  # smallest pipeline depth that fits HBM
-    replica = tp * pp
+    tp = _replica.tensor_parallel  # TP confined to one node
+    pp = _replica.pipeline_depth  # smallest pipeline depth that fits HBM
+    replica = _replica.replica_gpus
     # Class scope: explicit loops, because comprehensions cannot see class variables.
     gpu_counts = []
     for _i in range(sweep_doublings):
@@ -1691,41 +1776,41 @@ This logic extends to the temporal dimension, where the scheduler must weigh the
 # │ Context: callout-notebook "The Elastic Scaling Decision"
 # │
 # │ Goal: Compare three elastic scaling strategies over a 24-hour window.
-# │ How: total_work = run_hours × throughput_at_scale
+# │ How: Scenarios.ElasticResizeDecision: total_work = run_hours × throughput_at_scale
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # │ Note: Scenario inputs from ReferenceStats.ElasticResizeProfile (2026-10-15),
 # │       shared with performance engineering's re-reading of this decision.
-from mlsysim import ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math, fmt_time
 
 class ElasticScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    scenario = ReferenceStats.ElasticResizeProfile
-    window_h = scenario.Window.to(hour).magnitude
-    wait_h = scenario.QueueWait.to(hour).magnitude
-    rescale_min = scenario.RescaleOverhead.to(minute).magnitude
-    rescale_h = rescale_min / 60
-    tp_128 = float(scenario.SmallThroughput)  # relative throughput, epochs/hour
-    tp_256 = float(scenario.StepUpThroughput)
-    tp_512 = float(scenario.FullThroughput)
-    s1_gpus = int(scenario.SmallGpus)
-    s2_gpus = int(scenario.FullGpus)
-    s3_gpus = int(scenario.StepUpGpus)
+    scenario = Scenarios.ElasticResizeDecision  # inputs: ReferenceStats.ElasticResizeProfile
+    window_h = scenario.window_h
+    wait_h = scenario.wait_h
+    rescale_min = scenario.rescale_overhead.to(minute).magnitude
+    rescale_h = scenario.rescale_h
+    tp_128 = scenario.small_throughput  # relative throughput, epochs/hour
+    tp_256 = scenario.step_up_throughput
+    tp_512 = scenario.full_throughput
+    s1_gpus = scenario.small_gpus
+    s2_gpus = scenario.full_gpus
+    s3_gpus = scenario.step_up_gpus
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    s1_work = window_h * tp_128
-    s2_run_h = window_h - wait_h
-    s2_work = s2_run_h * tp_512
-    s3_phase1 = wait_h * tp_128
-    s3_phase2_h = window_h - wait_h - rescale_h
-    s3_phase2 = s3_phase2_h * tp_256
-    s3_work = s3_phase1 + s3_phase2
-    elastic_trails_wait_pct = (s2_work - s3_work) / s2_work * 100
+    s1_work = scenario.start_small_epochs
+    s2_run_h = scenario.wait_run_h
+    s2_work = scenario.wait_epochs
+    s3_phase1 = scenario.step_up_phase1_epochs
+    s3_phase2_h = scenario.step_up_phase2_h
+    s3_phase2 = scenario.step_up_phase2_epochs
+    s3_work = scenario.step_up_epochs
+    elastic_trails_wait_pct = scenario.step_up_trails_wait * 100
     elastic_trails_wait_pct_r = round(elastic_trails_wait_pct)
-    elastic_vs_immediate = s3_work / s1_work
+    elastic_vs_immediate = scenario.step_up_over_small
     # Break-even re-scaling tax against Strategy 1: 4 + (24 - 4 - t) × 1.8 = 24
     # gives t = window - wait - (s1_work - s3_phase1) / tp_256 ≈ 8.9 h.
-    rescale_break_even_h = window_h - wait_h - (s1_work - s3_phase1) / tp_256
+    rescale_break_even_h = scenario.rescale_break_even_h
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(rescale_break_even_h - 8.9) < 0.05, f"Break-even: expected ~8.9 h, got {rescale_break_even_h}")
     check(s1_work == 24.0, f"S1: expected 24.0, got {s1_work}")
@@ -1814,7 +1899,7 @@ class IdleCostAnchors:
     util_mid = Systems.Orchestration.target_cluster_utilization  # same 50 -> 80 improvement as the chapter opening
     philly_util = float(Literature.FleetOperations.PhillyMeanGpuUtilization)
     perlmutter_jobs = float(Literature.FleetOperations.PerlmutterJobsUnder25PctMemoryFraction)
-    perlmutter_mem_threshold = 0.25  # threshold as reported by the study
+    perlmutter_mem_threshold = float(Literature.FleetOperations.PerlmutterJobMemoryThresholdFraction)  # threshold as reported by the study
     # ┌── 2. EXECUTE ───────────────────────────────────────
     waste_low = n_gpus * (1 - util_low) * gpu_hour_usd * HOURS_PER_YEAR
     recovered = n_gpus * (util_mid - util_low) * gpu_hour_usd * HOURS_PER_YEAR
@@ -1980,7 +2065,8 @@ When a high-priority job enters a saturated cluster, the scheduler must decide w
 # │ Goal: Quantify wasted cost and GPU-hours from repeated forced preemptions.
 # │ Show: 15 min lost + ~5.4 min relaunch, reload, warmup = ~20.4 min per
 # │       event; ~$44 per event; 12 per day -> ~4.1 h, ~261 GPU-hours a day.
-# │ How: Tax = lost work (ReferenceStats.ForcedPreemptionProfile) + the
+# │ How: Scenarios.ForcedPreemption175BFineTune64 (PreemptionTaxModel).
+# │      Tax = lost work (ReferenceStats.ForcedPreemptionProfile) + the
 # │      cold-restart steps of the recovery budget without detection
 # │      (Systems.Reliability.Recovery.cold_restart_time), so a preempted job
 # │      and a failed job pay the same relaunch, reload, and warmup.
@@ -1989,34 +2075,31 @@ When a high-priority job enters a saturated cluster, the scheduler must decide w
 # │       10-minute warmup, ~6x the recovery budget's steps for the same
 # │       checkpoint. Performance engineering reads the same two sources.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, ReferenceStats, Systems
-from mlsysim.physics import calc_checkpoint_size
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_time, fmt_usd
 
 class PreemptionTax:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    fleet = Systems.Clusters.Lab_64_H100
-    gpus = fleet.total_accelerators
-    scenario = ReferenceStats.ForcedPreemptionProfile
-    recovery = Systems.Reliability.Recovery
-    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 175B resumable checkpoint, 14 B/param
-    lost_duration = scenario.LostWork  # scenario: work since the last durable checkpoint
-    preemption_rate = scenario.UnbudgetedRate  # scenario: low-priority run without a budget
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    scenario = Scenarios.ForcedPreemption175BFineTune64  # ForcedPreemptionProfile + Recovery
+    gpus = scenario.n_devices
+    ckpt_bytes = scenario.checkpoint_bytes  # 175B resumable checkpoint, 14 B/param
+    lost_duration = scenario.lost_work  # scenario: work since the last durable checkpoint
+    gpu_hour_rate = scenario.device_hour_rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    restart_duration = float(recovery.restart_time_s) * second
-    reload_duration = (ckpt_bytes / (float(recovery.checkpoint_write_bw_gbs) * (GB / second))).to(second)
-    warmup_duration = float(recovery.warmup_time_s) * second
+    _r = scenario.result
+    restart_duration = _r.restart
+    reload_duration = _r.reload
+    warmup_duration = _r.warmup
     # No detection term: the scheduler itself stops the job.
-    relaunch_duration = recovery.cold_restart_time(ckpt_bytes, include_detection=False)
-    recovery_duration = (lost_duration + relaunch_duration).to(minute)
+    relaunch_duration = _r.relaunch
+    recovery_duration = _r.per_event
     recovery_minutes = recovery_duration.magnitude
     recovery_hours = recovery_duration.to(hour).magnitude
-    cost_per_event = gpus * recovery_hours * gpu_hour_rate
-    preemptions_per_day = (preemption_rate * day).to("").magnitude
-    wasted_duration_per_day = preemptions_per_day * recovery_duration
+    cost_per_event = _r.cost_per_event
+    preemptions_per_day = _r.events_per_day
+    wasted_duration_per_day = _r.lost_per_day
     wasted_hours_per_day = wasted_duration_per_day.to(hour).magnitude
-    wasted_gpu_hours_per_day = gpus * wasted_hours_per_day
+    wasted_gpu_hours_per_day = _r.gpu_hours_per_day
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(recovery_duration.check("[time]"), f"Expected recovery duration, got {recovery_duration}")
     check(
@@ -2151,33 +2234,34 @@ The constructed portfolio in @fig-fleet-orchestration-capacity-reservation divid
 # │ Context: callout-perspective "Spot vs. on-demand training"
 # │
 # │ Goal: Compare on-demand and spot costs for a 512-GPU, 14-day run.
-# │ How: Compare GPU-hours at on-demand and spot GPU-hour rates.
+# │ How: Scenarios.Llama2_70BSpotRun512: compare GPU-hours at on-demand and
+# │      spot GPU-hour rates.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class SpotTrainingEconomics:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    fleet = Systems.Clusters.Training_512_H100
-    gpus = fleet.total_accelerators
-    run_hours = 14 * HOURS_PER_DAY  # scenario assumption: 14-day run
-    on_demand_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    spot_rate = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
-    checkpoint_overhead_fraction = 0.05  # scenario assumption
-    interruptions_per_day = 14  # scenario assumption: fixed event budget per day of useful training, not wall-clock hazard
-    restart_hours = 0.5  # scenario assumption
+    scenario = Scenarios.Llama2_70BSpotRun512  # 14-day run; interruption budget per day of useful training
+    gpus = scenario.gpus
+    run_hours = scenario.run_hours
+    on_demand_rate = scenario.on_demand_rate.to(USD / hour).magnitude
+    spot_rate = scenario.spot_rate.to(USD / hour).magnitude
+    checkpoint_overhead_fraction = scenario.checkpoint_overhead_fraction
+    interruptions_per_day = scenario.interruptions_per_day
+    restart_hours = scenario.restart_per_interruption.to(hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    on_demand_cost = gpus * run_hours * on_demand_rate
-    spot_base_cost = gpus * run_hours * spot_rate
-    checkpoint_extra_hours = checkpoint_overhead_fraction * run_hours
+    on_demand_cost = scenario.on_demand_cost
+    spot_base_cost = scenario.spot_base_cost
+    checkpoint_extra_hours = scenario.checkpoint_extra_hours
     run_days = run_hours // HOURS_PER_DAY
-    restart_interruptions = interruptions_per_day * run_days
-    restart_total_hours = restart_interruptions * restart_hours
-    spot_total_hours = run_hours + checkpoint_extra_hours + restart_total_hours
-    spot_total_cost = gpus * spot_total_hours * spot_rate
-    savings = on_demand_cost - spot_total_cost
-    savings_pct = savings / on_demand_cost * 100
-    longer_pct = (spot_total_hours / run_hours - 1) * 100
+    restart_interruptions = scenario.interruptions
+    restart_total_hours = scenario.restart_total_hours
+    spot_total_hours = scenario.spot_total_hours
+    spot_total_cost = scenario.spot_total_cost
+    savings = scenario.savings
+    savings_pct = scenario.savings_share * 100
+    longer_pct = scenario.longer_share * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(on_demand_cost == 344064, f"Expected on-demand cost 344064, got {on_demand_cost}")
     check(abs(spot_total_hours - 450.8) < 1e-9, f"Expected 450.8 hours, got {spot_total_hours}")
@@ -2203,7 +2287,7 @@ class SpotTrainingEconomics:
     interruptions_per_day_str = fmt_count(interruptions_per_day, commas=False, label="interruption")
     restart_hours_each_str = fmt_time(restart_hours, 'hour', precision=1, commas=False, style='word')
     restart_min_str = fmt_time(round(restart_hours * 60), 'minute', precision=0, commas=False, style='word')
-    model_params_b_str = fmt_params(Models.Language.Llama2_70B.parameters, precision=0, commas=False)
+    model_params_b_str = fmt_params(scenario.workload.parameters, precision=0, commas=False)
     spot_run_days_str = fmt_time(round(run_hours // HOURS_PER_DAY), 'day', precision=0, commas=False, style='word')
     spot_discount_pct_str = fmt_percent(round(1 - spot_rate / on_demand_rate, 2), precision=0, commas=False, style='prose')
     spot_gpus_num_str = fmt(gpus, precision=0, commas=False)
@@ -2305,18 +2389,18 @@ Pollux uses statistical goodput\index{Goodput!statistical} to connect system thr
 # │
 # │ Goal: Anchor the Pollux discussion with its published headline result.
 # │ Show: 37 to 50 percent lower average JCT than the compared DL schedulers.
-# │ How:  Published values, held locally until Literature carries them.
+# │ How:  Literature.FleetOperations.PolluxJctReduction{Low,High}.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.fmt import check, fmt, fmt_percent
 
 class PolluxReportedJct:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    # scenario assumption: published observation, not yet in Literature.*.
     # Qiao et al. (OSDI 2021), abstract (arXiv:2008.12260): "Pollux reduces
     # average job completion times by 37-50% relative to state-of-the-art DL
     # schedulers."
-    jct_reduction_lo = 0.37
-    jct_reduction_hi = 0.50
+    jct_reduction_lo = float(Literature.FleetOperations.PolluxJctReductionLow)
+    jct_reduction_hi = float(Literature.FleetOperations.PolluxJctReductionHigh)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(0 < jct_reduction_lo < jct_reduction_hi < 1, "reported reduction must be a fractional range")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -2493,29 +2577,29 @@ The decision to co-locate multiple models on a single GPU trades potential capac
 # │       hosting of a 7B model on one 80 GB A100; size 175B FP16 weights.
 # │ Show: 14 GB weights, 26 GB footprint, 54 GB (67.5%) dark, ~35% dark under
 # │       MIG and MPS, 350 GB for 175B weights -> at least 5 A100s.
-# │ How:  Llama2_7B / GPT3 parameters x FP16; A100 capacity and 3g.40gb profile
-# │       in branded GB (as in the MIG table).
+# │ How:  Scenarios.ServingConsolidationA100: Llama2_7B / GPT3 parameters x
+# │       FP16; A100 capacity and 3g.40gb profile in branded GB (as in the MIG table).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Hardware, Models
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_params, fmt_percent
 
 class GpuSharingDensity:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    a100_mem = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude * GB  # branded decimal GB
-    mig3g_mem = {p.name: p for p in Hardware.Cloud.A100.mig_profiles}["3g.40gb"].gpu_memory.to(GiB).magnitude * GB
-    small_model = Models.Language.Llama2_7B
-    small_footprint = 26 * GB  # scenario assumption: weights + KV cache + activations
-    tenants = 2  # scenario assumption: MPS tenants per GPU
-    large_weights = Models.Language.GPT3.parameters * BYTES_FP16
+    scenario = Scenarios.ServingConsolidationA100
+    a100_mem = scenario.device_memory  # branded decimal GB
+    mig3g_mem = scenario.partition_memory  # MIG 3g.40gb
+    small_model = scenario.small_model
+    small_footprint = scenario.small_footprint  # weights + KV cache + activations
+    tenants = scenario.tenants  # MPS tenants per GPU
+    large_weights = scenario.large_weights
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    small_weights = small_model.parameters * BYTES_FP16
+    small_weights = small_model.parameters * scenario.bytes_per_param
     excl_dark = a100_mem - small_footprint
-    excl_dark_ratio = (excl_dark / a100_mem).to("").magnitude
-    mig_dark_ratio = ((mig3g_mem - small_footprint) / mig3g_mem).to("").magnitude
-    shared_mem = tenants * small_footprint
-    shared_dark_ratio = ((a100_mem - shared_mem) / a100_mem).to("").magnitude
-    min_gpus_large = math.ceil((large_weights / a100_mem).to("").magnitude)
+    excl_dark_ratio = scenario.exclusive_unused
+    mig_dark_ratio = scenario.partition_unused
+    shared_mem = scenario.shared_footprint
+    shared_dark_ratio = scenario.shared_unused
+    min_gpus_large = scenario.min_devices_large
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(mig_dark_ratio - shared_dark_ratio) < 0.01, "prose says MIG and MPS both leave ~35 percent dark")
     check(min_gpus_large == 5, "prose says 'at least five GPUs' for 175B FP16 weights")
@@ -2554,37 +2638,39 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 # │ Context: callout-notebook "GPU Sharing ROI"
 # │
 # │ Goal: Compare exclusive vs shared GPU hosting for inference fleets.
-# │ How: Pack 2 small models per GPU; compute savings in GPUs and dollars.
+# │ How: Scenarios.ServingConsolidationA100: pack 2 small models per GPU;
+# │      compute savings in GPUs and dollars.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_memory, fmt_memory_capacity, fmt_params, fmt_qty_int, fmt_usd
 
 class GpuSharingRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_small = 100
-    small_footprint = GpuSharingDensity.small_footprint  # same 7B serving footprint as the density prose
-    n_large = 10
-    large_footprint = Models.Language.GPT3.parameters * BYTES_FP16  # 175B FP16
+    scenario = Scenarios.ServingConsolidationA100  # same 7B serving footprint as the density prose
+    n_small = scenario.n_small
+    small_footprint = scenario.small_footprint
+    n_large = scenario.n_large
+    large_footprint = scenario.large_weights  # 175B FP16
     # nameplate magnitude in decimal GB: the model footprints in this
     # scenario are decimal, so utilization must share their unit space
-    a100_mem = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude * GB
-    gpus_per_large = 8
-    models_per_gpu_shared = 2
-    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    a100_mem = scenario.device_memory
+    gpus_per_large = scenario.gpus_per_large
+    models_per_gpu_shared = scenario.tenants
+    gpu_rate = scenario.device_hour_rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
     excl_small_gpus = n_small
     excl_total_mem = excl_small_gpus * a100_mem
-    excl_used_mem = n_small * small_footprint
-    excl_util_pct = (excl_used_mem / excl_total_mem).to("").magnitude * 100
-    excl_large_gpus = n_large * gpus_per_large
-    excl_total = excl_small_gpus + excl_large_gpus
-    shared_small_gpus = n_small // models_per_gpu_shared
-    shared_mem_per_gpu_q = models_per_gpu_shared * small_footprint
-    shared_util_pct = (shared_mem_per_gpu_q / a100_mem).to("").magnitude * 100
-    shared_total = shared_small_gpus + excl_large_gpus
-    saved_gpus = excl_total - shared_total
-    saved_pct = saved_gpus / excl_total * 100
-    annual_savings = saved_gpus * gpu_rate * HOURS_PER_YEAR
+    excl_util_pct = scenario.exclusive_utilization * 100
+    excl_large_gpus = scenario.large_gpus
+    excl_total = scenario.exclusive_gpus
+    shared_small_gpus = scenario.shared_small_gpus
+    shared_mem_per_gpu_q = scenario.shared_footprint
+    shared_util_pct = scenario.shared_utilization * 100
+    shared_total = scenario.shared_gpus
+    saved_gpus = scenario.saved_gpus
+    saved_pct = scenario.saved_share * 100
+    annual_savings = scenario.annual_value
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(excl_total == 180, f"Excl total: expected 180, got {excl_total}")
     check(shared_total == 130, f"Shared total: expected 130, got {shared_total}")
@@ -2602,8 +2688,8 @@ class GpuSharingRoi:
     gs_saved_gpus_str = fmt(saved_gpus, precision=0)
     gs_saved_pct_str = fmt_percent(saved_pct / 100, precision=1, style='prose')
     gs_annual_usd_str = fmt_usd(annual_savings, precision=0)
-    gs_small_model_b_str = fmt_params(Models.Language.Llama2_7B.parameters, precision=0, commas=False)
-    gs_large_model_b_str = fmt_params(Models.Language.GPT3.parameters, precision=0, commas=False)
+    gs_small_model_b_str = fmt_params(scenario.small_model.parameters, precision=0, commas=False)
+    gs_large_model_b_str = fmt_params(scenario.large_model.parameters, precision=0, commas=False)
     gs_n_small_str = fmt(n_small, precision=0, commas=False)
     gs_a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GB, precision=0, commas=False)
     gs_small_footprint_gb_str = fmt_memory_capacity(small_footprint, unit=GB, precision=0, commas=False)
@@ -2643,29 +2729,31 @@ Repurposing a GPU from training to serving can require saving training state, re
 # │          callout-notebook "The diurnal GPU shift".
 # │
 # │ Goal: Compare static partitioning vs dynamic sharing for training/serving.
-# │ How: Compare active GPUs to fleet size and convert recovered capacity into annual value.
+# │ How: Scenarios.DiurnalServingLending1K: compare active GPUs to fleet size and convert recovered capacity into annual value.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_percent, fmt_usd
 
 class DiurnalGpuShift:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    fleet = Systems.Clusters.Training_1K.total_accelerators
-    serving_peak = 400
-    serving_avg = 150
-    training_fixed = 618
-    reclaimed = 133
-    safety_buffer = 117
-    gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    scenario = Scenarios.DiurnalServingLending1K
+    fleet = scenario.fleet_gpus
+    serving_peak = scenario.serving_reservation  # reservation = peak demand + surge buffer
+    serving_avg = scenario.serving_average
+    training_fixed = scenario.training_base
+    safety_buffer = scenario.surge_buffer
+    gpu_rate = scenario.device_hour_rate.to(USD / hour).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    serving_reclaimable = serving_peak - serving_avg
-    peak_demand = serving_peak - safety_buffer  # reservation = peak demand + surge buffer
-    static_active = serving_avg + training_fixed
-    static_util_pct = static_active / fleet * 100
-    dynamic_active = serving_avg + training_fixed + reclaimed
-    dynamic_util_pct = dynamic_active / fleet * 100
-    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR * USD
-    ds_unallocated = fleet - serving_peak - training_fixed
+    serving_reclaimable = scenario.serving_reclaimable
+    reclaimed = scenario.lent
+    peak_demand = scenario.peak_demand
+    static_active = scenario.static_active
+    static_util_pct = scenario.static_utilization * 100
+    dynamic_active = scenario.dynamic_active
+    dynamic_util_pct = scenario.dynamic_utilization * 100
+    annual_value = scenario.annual_value * USD
+    ds_unallocated = scenario.headroom
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(static_active == 768, f"Static: expected 768, got {static_active}")
     check(static_util_pct == 75, f"Static util: expected 75%, got {static_util_pct}")
@@ -2866,7 +2954,37 @@ Hierarchical quotas, which Slurm expresses through its account hierarchy and fai
 
 $$ \EffectiveAdmissionCeiling= \min\left(\TeamQuotaCap,\ \DepartmentQuotaLimit- \sum_{\text{other teams}} \SiblingTeamAllocation\right) $$ {#eq-fleet-orchestration-quota}
 
-The second term inside the minimum is what lends idle guarantees across sibling teams. If Team A uses only 60 percent of its 500-GPU guarantee, its active allocation $\SiblingTeamAllocation$ drops below its guarantee and leaves the remaining 200 GPUs in $\DepartmentQuotaLimit - \sum_{\text{other teams}} \SiblingTeamAllocation$ for sibling teams to claim, up to each borrower's own cap $\TeamQuotaCap$. This ceiling bounds what a team may hold at admission, and it encodes neither fair-share weights nor guarantees. When several teams contend for that spare capacity at once, the scheduler still applies its fairness policy, the dominant-resource calculation of @sec-fleet-orchestration-drf-worked-allocation, to the feasible gangs that fit under each ceiling.
+```{python}
+#| echo: false
+#| label: lego-quota-lending
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUOTA LENDING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @eq-fleet-orchestration-quota.
+# │
+# │ Goal: Size the idle guarantee a team lends to its siblings.
+# │ Show: 60 percent of a 500-GPU guarantee in use leaves 200 GPUs to lend.
+# │ How:  Scenarios.TeamQuotaLending500 (QuotaLendingScenario).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class QuotaLending:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.TeamQuotaLending500
+    guarantee = scenario.guarantee
+    used_share = scenario.used_share
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    lendable = scenario.lendable
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0 < lendable < guarantee, "Prose: part of the guarantee sits idle and can be lent")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    used_pct_str = fmt_percent(used_share, precision=0, commas=False, style="prose")
+    guarantee_str = fmt(guarantee, precision=0, commas=False)
+    lendable_str = fmt(lendable, precision=0, commas=False)
+```
+
+The second term inside the minimum is what lends idle guarantees across sibling teams. If Team A uses only `{python} QuotaLending.used_pct_str` of its `{python} QuotaLending.guarantee_str`-GPU guarantee, its active allocation $\SiblingTeamAllocation$ drops below its guarantee and leaves the remaining `{python} QuotaLending.lendable_str` GPUs in $\DepartmentQuotaLimit - \sum_{\text{other teams}} \SiblingTeamAllocation$ for sibling teams to claim, up to each borrower's own cap $\TeamQuotaCap$. This ceiling bounds what a team may hold at admission, and it encodes neither fair-share weights nor guarantees. When several teams contend for that spare capacity at once, the scheduler still applies its fairness policy, the dominant-resource calculation of @sec-fleet-orchestration-drf-worked-allocation, to the feasible gangs that fit under each ceiling.
 
 ### Burst capacity and quota borrowing {#sec-fleet-orchestration-burst-capacity}
 
@@ -2913,20 +3031,20 @@ Quota accounting should remain close to the scheduling decision. Every admitted 
 # │ Context: callout-example "Quota hoarding"
 # │
 # │ Goal: Quantify idle reservation cost for 500 GPUs over three weeks.
-# │ How: Convert idle reserved GPUs and idle duration into GPU-hour cost.
+# │ How: Scenarios.ReservedGpusIdleThreeWeeks: convert idle reserved GPUs and idle duration into GPU-hour cost.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
 
 class QuotaHoardingCost:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 500
-    weeks = 3
-    hours_per_week = 7 * HOURS_PER_DAY
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    scenario = Scenarios.ReservedGpusIdleThreeWeeks
+    gpus = scenario.gpus
+    weeks = scenario.duration.to("week").magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    idle_hours = weeks * hours_per_week
-    cost = gpus * idle_hours * gpu_hour_rate
+    idle_hours = scenario.duration.to(hour).magnitude
+    cost = scenario.cost
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(idle_hours == 504, f"Expected 504 hours, got {idle_hours}")
     check(cost == 504000, f"Expected 504000, got {cost}")
@@ -3134,7 +3252,8 @@ Each tier narrows the investigation. Low allocated utilization\index{Utilization
 # │       cluster from 60% to 84% effective utilization via policy changes.
 # │ Show: 240 fully utilized GPU-equivalents; ~400 equivalent raw GPUs
 # │       recovered at the old utilization; ~$7M/year in equivalent capacity value.
-# │ How: Compute productive GPU-equivalent gain from the utilization improvement;
+# │ How: Scenarios.MixedFleetPolicyFix1K (UtilizationGainScenario). Compute
+# │      productive GPU-equivalent gain from the utilization improvement;
 # │      convert it to recovered raw-GPU capacity at the old utilization;
 # │      convert recovered GPU-equivalent capacity into annual dollar value.
 # │
@@ -3147,41 +3266,43 @@ class DebugValueCalc:
     """Annual dollar value recovered by raising a Training_1K cluster from 60% to 84% utilization."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    debug_cluster = Systems.Clusters.Training_1K.total_accelerators
-    debug_util_before = 0.60  # scenario assumption: observed pre-fix utilization
-    debug_util_after = 0.84  # scenario assumption: observed post-fix utilization
+    _fix = Scenarios.MixedFleetPolicyFix1K  # observed pre- and post-fix utilization, pool inventory
+    debug_cluster = _fix.fleet_gpus
+    debug_util_before = _fix.utilization_before
+    debug_util_after = _fix.utilization_after
     debug_target_util = Systems.Orchestration.target_cluster_utilization
-    a100_80_count = 400
-    a100_40_count = 424
-    v100_count = 200
+    a100_80_count = _fix.pools["A100-80GB"]
+    a100_40_count = _fix.pools["A100-40GB"]
+    v100_count = _fix.pools["V100-32GB"]
     a100_80_memory = Hardware.Cloud.A100.memory.capacity
     a100_40_memory = Hardware.Cloud.A100_40GB.memory.capacity
     v100_memory = Hardware.Cloud.V100.memory.capacity
     a100_gpus_per_node = Systems.Nodes.DGX_A100.accelerators_per_node
     v100_gpus_per_node = 4  # scenario assumption: legacy 4-GPU V100 servers
-    pending_jobs = 50  # scenario assumption: queue depth for the diagnostic example
+    pending_jobs = _fix.pending_jobs
     large_job_count = 15
     large_job_min_gpus = 64
     large_job_avg_gpus = 80
     medium_job_count = 8
     medium_job_gpus = 32
     v100_job_count = 0
-    large_job_peak_memory = 35 * GB
-    a100_80_alloc_before = 0.95
-    a100_80_eff_before = 0.72
-    a100_80_alloc_after = 0.89
-    a100_80_eff_after = 0.94
-    a100_40_alloc_before = 0.64
-    a100_40_alloc_after = 0.88
-    v100_alloc_before = 0.0
-    v100_alloc_after = 0.71
-    _gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    large_job_peak_memory = _fix.job_memory_need
+    _pools = _fix.pool_metrics
+    a100_80_alloc_before = _pools["A100-80GB"]["allocated_before"]
+    a100_80_eff_before = _pools["A100-80GB"]["active_before"]
+    a100_80_alloc_after = _pools["A100-80GB"]["allocated_after"]
+    a100_80_eff_after = _pools["A100-80GB"]["active_after"]
+    a100_40_alloc_before = _pools["A100-40GB"]["allocated_before"]
+    a100_40_alloc_after = _pools["A100-40GB"]["allocated_after"]
+    v100_alloc_before = _pools["V100-32GB"]["allocated_before"]
+    v100_alloc_after = _pools["V100-32GB"]["allocated_after"]
+    _gpu_rate = _fix.device_hour_rate.to(USD / hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    debug_improvement = debug_util_after - debug_util_before
-    debug_productive_gain = debug_cluster * debug_improvement
-    debug_recovered = debug_productive_gain / debug_util_before
-    debug_annual = debug_recovered * _gpu_rate * HOURS_PER_YEAR
+    debug_improvement = _fix.improvement
+    debug_productive_gain = _fix.productive_gain
+    debug_recovered = _fix.raw_gpu_equivalent
+    debug_annual = _fix.annual_value
     a100_80_nodes = a100_80_count // a100_gpus_per_node
     a100_40_nodes = a100_40_count // a100_gpus_per_node
     v100_nodes = v100_count // v100_gpus_per_node
@@ -3379,29 +3500,27 @@ Organizations commonly set team quotas to handle worst-case demand, reasoning th
 # │ Goal: Show how interruption overhead erodes the nominal spot discount.
 # │ Show: 15 + 30 = 45 minutes lost per interruption; every 2 productive hours
 # │       turns the 65 percent reference discount into ~52 percent savings.
-# │ How:  C_eff = C_spot x (T_productive + T_lost) / T_productive
+# │ How:  Scenarios.SpotInterruptionEffectiveCost:
+# │       C_eff = C_spot x (T_productive + T_lost) / T_productive
 # │       (@eq-fleet-orchestration-spot-cost).
 # └─────────────────────────────────────────────────────────────────────────────
 # │ Note: Scenario from ReferenceStats.SpotInterruptionProfile (2026-10-15),
 # │       shared with performance engineering's efficiency frontier. Slower
 # │       than the cluster recovery budget by design: spot capacity is
 # │       reacquired and the checkpoint goes to slow storage.
-from mlsysim import ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_percent, fmt_time
 
 class SpotDiscountFallacy:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    on_demand = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    spot = Infrastructure.Pricing.Fleet.SpotGpuHourRef.rate.to(USD / hour).magnitude
-    scenario = ReferenceStats.SpotInterruptionProfile
-    ckpt_min = scenario.CheckpointOverhead.to(minute).magnitude  # graceful save to slow storage
-    restart_min = scenario.RestartOverhead.to(minute).magnitude  # reacquire capacity, restart, reload
-    interval_h = scenario.RetainedInterval.to(hour).magnitude  # retained hours between interruptions
+    scenario = Scenarios.SpotInterruptionEffectiveCost  # ReferenceStats.SpotInterruptionProfile
+    ckpt_min = scenario.checkpoint_overhead.to(minute).magnitude  # graceful save to slow storage
+    restart_min = scenario.restart_overhead.to(minute).magnitude  # reacquire capacity, restart, reload
+    interval_h = scenario.retained_interval.to(hour).magnitude  # retained hours between interruptions
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    lost_min = ckpt_min + restart_min
-    nominal_discount = 1 - spot / on_demand
-    effective_spot = spot * (interval_h * 60 + lost_min) / (interval_h * 60)
-    effective_savings = 1 - effective_spot / on_demand
+    lost_min = scenario.lost_per_interruption.magnitude
+    nominal_discount = scenario.nominal_discount
+    effective_savings = scenario.effective_savings
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(nominal_discount - 0.65) < 1e-9, "prose quotes a 65 percent nominal discount")
     check(0.50 < effective_savings < 0.54, "prose says savings shrink to about 52 percent")

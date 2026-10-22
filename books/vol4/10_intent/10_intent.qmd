@@ -94,65 +94,70 @@ from mlsysim.fmt import (
 )
 from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
-    calc_tracked_evidence_horizon,
-    calc_linear_invalidation_horizon,
     calc_latch_contact_stopping_profile,
-    calc_contact_force,
 )
 
 class IntentLeaseArchetypes:
-    # ┌── 1. LOAD: the running machine, plus chapter-local scenario inputs ─────────
+    # ┌── 1. LOAD: the running machine and the MLSysIM scenarios of the mug pick ───
     RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
     AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; lease chosen)
+    CADENCE = Scenarios.ConveyorMugIntentCadence  # evidence horizons against the intent model's cadence
+    SETTLING = Scenarios.ConveyorMugSettlingDrift  # the same mug sliding to rest
+    SLOW_BELT = Scenarios.ConveyorMugSlowBelt  # the same mug on a slowed belt (checkpoint)
+    REACH = Scenarios.ConveyorMugDynamicReach  # transit lower bound against the evidence windows
+    OCCUPANCY = Scenarios.AisleCoworkerForwardOccupancy  # a coworker's forward occupancy set
+    GOAL_SET = Scenarios.ConveyorMugGoalSetOffsets  # terminal offsets against the goal set
+    LATCH = Scenarios.LatchUnbrakedStall  # the guarded latch approach with no local trip
 
-    delta_t_stall_intent = 200.0 * millisecond  # category: illustrative (stalled proposer holds the mug target)
-    delta_t_stall_arm = 200.0 * millisecond  # category: illustrative (unbraked contact interval)
-    v_drift_slow = 20.0 * millimeter / second  # category: illustrative (slow-drift case in the figure)
-    d_target_offset = 300.0 * millimeter  # category: illustrative (scenario assumption: gripper-to-handle distance at proposal)
-    pi0_chunk_len = 50  # category: literature (Black et al. 2024, pi0: action chunk length H = 50)
-    pi0_action_rate = 50.0 * hertz  # category: literature (Black et al. 2024, pi0: executed at up to 50 Hz)
-    d_goal_in = 10.0 * millimeter  # category: illustrative (terminal TCP offset along x, inside case)
-    d_goal_out = 20.0 * millimeter  # category: illustrative (terminal TCP offset along x, outside case)
-    t_forecast_long = 2.0 * second  # category: illustrative (multi-second planning horizon for the freezing contrast)
-    v_drift_check = 50.0 * millimeter / second  # category: illustrative (checkpoint drift speed)
+    delta_t_stall_intent = CADENCE.stall  # category: illustrative (stalled proposer holds the mug target)
+    delta_t_stall_arm = LATCH.stall  # category: illustrative (unbraked contact interval)
+    v_drift_slow = SETTLING.target_speed  # category: illustrative (slow-drift case in the figure)
+    d_target_offset = REACH.target_distance  # category: illustrative (scenario assumption: gripper-to-handle distance at proposal)
+    pi0_chunk_len = int(Literature.VlaSystems.Pi0ChunkHorizon)  # category: literature (Black et al. 2024, pi0: action chunk length H = 50)
+    pi0_action_rate = Literature.VlaSystems.Pi0ControlRateHz * hertz  # category: literature (Black et al. 2024, pi0: executed at up to 50 Hz)
+    d_goal_in, d_goal_out = GOAL_SET.offsets  # category: illustrative (terminal TCP offsets along x, inside and outside cases)
+    t_forecast_long = OCCUPANCY.forecast  # category: illustrative (multi-second planning horizon for the freezing contrast)
+    v_drift_check = SLOW_BELT.target_speed  # category: illustrative (checkpoint drift speed)
 
     # ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact ───────────
     # Mug on the conveyor: untracked and tracked target-evidence horizons. Both
-    # horizons charge the 3 mm initial error against the 15 mm tolerance.
-    grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
-    # Linear root: Ch9's invalidation law T_inv = (E_max - E_0)/r (@eq-mem-linear-horizon).
-    tau_ev_untracked = calc_linear_invalidation_horizon(AISLE.grasp_initial_error, AISLE.v_conveyor, AISLE.grasp_tolerance).to(millisecond)
-    tau_ev_tracked = calc_tracked_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.a_conveyor_slip).to(
-        millisecond
-    )  # sqrt(2 (r_tol - e_0) / a_slip); shared with Ch3
-    t_intent_period = (1.0 / RM.intent_rate).to(millisecond)
-    err_at_intent_period = (AISLE.grasp_initial_error + AISLE.v_conveyor * t_intent_period).to(millimeter)
-    err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millimeter)
+    # horizons charge the 3 mm initial error against the 15 mm tolerance. The
+    # untracked root is Ch9's invalidation law T_inv = (E_max - E_0)/r
+    # (@eq-mem-linear-horizon); the tracked one is sqrt(2 (r_tol - e_0) / a_slip),
+    # shared with Ch3.
+    cadence = CADENCE.result
+    grasp_error_budget = cadence.margin
+    tau_ev_untracked = cadence.untracked_horizon
+    tau_ev_tracked = cadence.tracked_horizon
+    t_intent_period = cadence.intent_period
+    err_at_intent_period = cadence.error_at_period
+    err_excess_at_period = cadence.excess_at_period
     # 2026-09-29 audit: the former 650 ms "illustrative tail" had no source; the
     # overrun now uses the computed intent latency (M2).
-    t_infer_overrun = (RM.intent_inference_latency - tau_ev_untracked).to(millisecond)
+    t_infer_overrun = cadence.inference_overrun
     n_intent_tokens = RM.intent_model.action_dim  # values one intent evaluation decodes (Ch3)
-    tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, v_drift_slow).to(millisecond)
+    tau_ev_slow_drift = SETTLING.result.untracked_horizon
     # Cadence gap: worst-case evidence age at a model-only renewal is one period plus
     # one inference (@eq-brain-min-supply's T_replan + t_infer), and the drift speed
     # at which that age just fits the error budget is the model's renewal ceiling.
-    t_renew_age = (t_intent_period + RM.intent_inference_latency).to(millisecond)
-    v_renew_max = (grasp_error_budget / t_renew_age).to(millimeter / second)
-    v_renew_pct = (100 * v_renew_max / AISLE.v_conveyor).to(dimensionless).magnitude
+    t_renew_age = cadence.renewal_age
+    v_renew_max = cadence.renewal_speed_ceiling
+    v_renew_pct = 100 * cadence.renewal_share
 
     # Dynamic reachability: the TCP speed ceiling bounds the reach inside the tracked
     # horizon, and a proposal farther away fails the transit lower bound.
-    d_reach_tracked = (RM.tcp_speed_limit * tau_ev_tracked).to(millimeter)
-    d_reach_untracked = (RM.tcp_speed_limit * tau_ev_untracked).to(millimeter)
-    t_transit_floor = (d_target_offset / RM.tcp_speed_limit).to(millisecond)
-    n_captures_min = math.ceil((t_transit_floor / tau_ev_tracked).to(dimensionless).magnitude)
+    reach = REACH.result
+    d_reach_tracked = reach.reach_tracked
+    d_reach_untracked = reach.reach_untracked
+    t_transit_floor = reach.transit_floor
+    n_captures_min = reach.fresh_captures
 
     # Mug intent lapse: a stalled proposer holds the target; untracked drift at the
     # conveyor speed, tracked drift from residual slip only; arm stop onset after
     # intent expiry is one permission tick, one bus cycle, and the brake onset.
-    err_stalled_untracked = (AISLE.grasp_initial_error + AISLE.v_conveyor * delta_t_stall_intent).to(millimeter)
-    err_stalled_tracked = (AISLE.grasp_initial_error + 0.5 * AISLE.a_conveyor_slip * delta_t_stall_intent**2).to(millimeter)
-    t_arm_onset_after_expiry = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    err_stalled_untracked = cadence.stall_error_untracked
+    err_stalled_tracked = cadence.stall_error_tracked
+    t_arm_onset_after_expiry = cadence.stop_onset
 
     # Latch contact: force at brake command, then the arm stop that keeps it under the limit.
     latch_profile = calc_latch_contact_stopping_profile(scenario=AISLE)
@@ -161,23 +166,23 @@ class IntentLeaseArchetypes:
     x_remaining = latch_profile["x_remaining"]
     a_arm_needed = latch_profile["a_arm_needed"]
     t_arm_stop = latch_profile["t_arm_stop"]
-    delta_x_unbounded = (AISLE.v_latch_approach * delta_t_stall_arm).to(millimeter)
-    f_unbounded = calc_contact_force(AISLE.k_latch, delta_x_unbounded)
+    delta_x_unbounded = LATCH.stall_travel
+    f_unbounded = LATCH.stall_force
 
     # Goal-set membership: ellipsoidal norm with all three semi-axes at the grasp
     # tolerance, for a pure x offset.
-    norm_goal_in = (d_goal_in / AISLE.grasp_tolerance).to(dimensionless).magnitude
-    norm_goal_out = (d_goal_out / AISLE.grasp_tolerance).to(dimensionless).magnitude
+    norm_goal_in, norm_goal_out = GOAL_SET.norms
 
     # Coworker forward occupancy: growth of the speed-bound set over the tracked
     # mug horizon and over a multi-second planning horizon, against the aisle width.
-    d_occ_tracked = (AISLE.v_human_approach * tau_ev_tracked).to(millimeter)
-    d_occ_untracked = (AISLE.v_human_approach * tau_ev_untracked).to(millimeter)
-    d_occ_long = (AISLE.v_human_approach * t_forecast_long).to(meter)
-    occ_to_aisle = (d_occ_long / AISLE.aisle_width).to(dimensionless).magnitude
+    occupancy = OCCUPANCY.result
+    d_occ_tracked = occupancy.growth_tracked
+    d_occ_untracked = occupancy.growth_untracked
+    d_occ_long = occupancy.growth_forecast
+    occ_to_aisle = occupancy.forecast_over_aisle
     # Freezing crossover: the screening horizon at which the growth term alone
     # reaches the aisle width, so one person's set spans the aisle.
-    t_occ_block = (AISLE.aisle_width / AISLE.v_human_approach).to(millisecond)
+    t_occ_block = occupancy.aisle_span_horizon
 
     # ┌── 3. GUARD: canon values quoted in the prose ──────────────────────────────
     check(abs(tau_ev_untracked.magnitude - 60.0) < 1e-6, "Untracked mug horizon is 60 ms")
@@ -488,24 +493,24 @@ import math
 
 class ConformalAmbiguity:
     # ┌── 1. LOAD: illustrative detector scores and calibration ───────────────────
-    score_mug = 0.62  # category: illustrative (retained box score for the mug)
-    score_jar = 0.48  # category: illustrative (retained box score for the glass jar)
-    score_jar_low = 0.10  # category: illustrative (jar score in the contrast case)
-    n_cal = 200  # category: illustrative (labeled calibration scenes)
-    eps_cal = 0.10  # category: chosen (allowed miscoverage)
-    q_hat = 0.60  # category: illustrative (stands in for the quantile a measured calibration set would give)
+    BESIDE = Scenarios.MugJarReferentSet  # the jar beside the mug
+    LOW_JAR = Scenarios.MugJarReferentSetLowJar  # the contrast case
+    score_mug, score_jar = BESIDE.scores  # category: illustrative (retained box scores for the mug and the glass jar)
+    score_jar_low = LOW_JAR.scores[1]  # category: illustrative (jar score in the contrast case)
+    n_cal = BESIDE.calibration_count  # category: illustrative (labeled calibration scenes)
+    eps_cal = BESIDE.alpha  # category: chosen (allowed miscoverage)
+    q_hat = BESIDE.threshold_score  # category: illustrative (stands in for the quantile a measured calibration set would give)
 
     # ┌── 2. EXECUTE: normalization, entropy, calibration rank, prediction sets ────
-    c_mug = score_mug / (score_mug + score_jar)
-    c_jar = score_jar / (score_mug + score_jar)
-    h_c = -(c_mug * math.log(c_mug) + c_jar * math.log(c_jar))
-    h_max = math.log(2)
-    k_rank = math.ceil((n_cal + 1) * (1 - eps_cal))
-    c_threshold = 1 - q_hat
-    set_size = int(c_mug >= c_threshold) + int(c_jar >= c_threshold)
-    c_mug_low = score_mug / (score_mug + score_jar_low)
-    c_jar_low = score_jar_low / (score_mug + score_jar_low)
-    set_size_low = int(c_mug_low >= c_threshold) + int(c_jar_low >= c_threshold)
+    beside, low_jar = BESIDE.result, LOW_JAR.result
+    c_mug, c_jar = beside.normalized
+    h_c = beside.entropy
+    h_max = beside.max_entropy
+    k_rank = beside.rank
+    c_threshold = beside.threshold
+    set_size = beside.set_size
+    c_mug_low, c_jar_low = low_jar.normalized
+    set_size_low = low_jar.set_size
 
     # ┌── 3. GUARD: the claims the prose makes ────────────────────────────────────
     check(abs(c_mug + c_jar - 1.0) < 1e-12, "Normalized scores sum to one")
@@ -715,9 +720,10 @@ OK-Robot shows the same division in a modular pipeline (@fig-10-real-open-vocab-
 # └─────────────────────────────────────────────────────────────────────────────┘
 class StateOfPractice:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────────
-    n_action_bins = 256  # category: literature (Brohan et al. 2023, RT-1; Kim et al. 2024, OpenVLA)
+    n_action_bins = int(Literature.VlaSystems.Rt1ActionBins)  # category: literature (Brohan et al. 2023, RT-1; Kim et al. 2024, OpenVLA)
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
+    check(n_action_bins == Literature.VlaSystems.OpenVlaActionBins, "RT-1 and OpenVLA use the same bin count")
     check(n_action_bins == 2**8, "Uniform action bins fit one byte per dimension")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────────────────────────
@@ -756,16 +762,14 @@ import math
 
 class HandleEllipsoid:
     # ┌── 1. LOAD: illustrative single-view localization model ────────────────────
-    sigma_lat_x = 4.0 * millimeter  # category: illustrative (distant pre-approach wrist-camera view, lateral std. dev.)
-    sigma_lat_y = 5.0 * millimeter  # category: illustrative (wrist-camera lateral std. dev.)
-    sigma_depth = 12.0 * millimeter  # category: illustrative (wrist-camera depth std. dev.)
-    chi2_3dof_95 = 7.815  # category: constant (chi-square quantile, 3 degrees of freedom, 0.95)
+    REGION = Scenarios.DistantHandleConfidenceRegion  # distant pre-approach wrist-camera view
+    sigma_lat_x, sigma_lat_y, sigma_depth = REGION.sigmas  # category: illustrative (wrist-camera lateral, lateral, and depth std. devs.)
 
     # ┌── 2. EXECUTE: principal semi-axes of the 95 percent region ────────────────
-    k_region = math.sqrt(chi2_3dof_95)
-    semi_x = (k_region * sigma_lat_x).to(millimeter)
-    semi_y = (k_region * sigma_lat_y).to(millimeter)
-    semi_z = (k_region * sigma_depth).to(millimeter)
+    region = REGION.result
+    chi2_3dof_95 = region.quantile  # chi-square quantile, 3 degrees of freedom, 0.95
+    k_region = region.radius
+    semi_x, semi_y, semi_z = region.semi_axes
     chi2_cdf = math.erf(math.sqrt(chi2_3dof_95 / 2)) - math.sqrt(2 * chi2_3dof_95 / math.pi) * math.exp(-chi2_3dof_95 / 2)
 
     # ┌── 3. GUARD: the claims the prose makes ────────────────────────────────────
@@ -841,12 +845,13 @@ This scenario marks the boundary between physical verification and semantic prem
 # └─────────────────────────────────────────────────────────────────────────────┘
 class AutoRTFilter:
     # ┌── 1. LOAD: reported counts ────────────────────────────────────────────────
-    n_total = 259  # category: literature (Ahn et al. 2024, tasks sampled)
-    n_ok = 228  # category: literature (acceptable before filtering)
-    n_kept = 214  # category: literature (kept by the filter)
-    n_kept_ok = 200  # category: literature (acceptable among kept)
-    n_bad = 31  # category: literature (unsuitable tasks in the sample)
-    n_caught = 17  # category: literature (unsuitable tasks the filter rejected)
+    AUTORT = Literature.RobotGrounding  # Ahn et al. 2024, Sec. 5.3
+    n_total = int(AUTORT.AutoRtSampledTasks)  # category: literature (Ahn et al. 2024, tasks sampled)
+    n_ok = int(AUTORT.AutoRtAcceptableTasks)  # category: literature (acceptable before filtering)
+    n_kept = int(AUTORT.AutoRtKeptTasks)  # category: literature (kept by the filter)
+    n_kept_ok = int(AUTORT.AutoRtKeptAcceptableTasks)  # category: literature (acceptable among kept)
+    n_bad = int(AUTORT.AutoRtUnsuitableTasks)  # category: literature (unsuitable tasks in the sample)
+    n_caught = int(AUTORT.AutoRtRejectedUnsuitable)  # category: literature (unsuitable tasks the filter rejected)
 
     # ┌── 2. EXECUTE: fractions and recall ────────────────────────────────────────
     n_missed = n_bad - n_caught
@@ -992,7 +997,7 @@ Examining a host processor stall illustrates the protection each horizon provide
 
 On one clock, the proposer's timing loses to both horizons (@fig-10-mug-lease-timeline). Both idealized zero-additional-reserve countdowns end before the `{python} IntentLeaseArchetypes.t_intent_infer_str` inference returns and well before the next proposal at `{python} IntentLeaseArchetypes.t_intent_period_str`, so the model can renew neither lease. Absent other renewals, each expiry is followed by the `{python} IntentLeaseArchetypes.t_arm_onset_str` stop onset. Under a qualified tracker the tracked countdown restarts with every tracked frame, long before it reaches `{python} IntentLeaseArchetypes.tau_tracked_str`, so the tracked bar in the figure shows what happens only when those renewals stop, as they do when the host stalls. What follows that expiry is still motion, as panel (b) of @fig-10-intent-lease-envelope sketches in speed against time. The drive begins braking `{python} IntentLeaseArchetypes.t_arm_onset_str` after expiry, and the stopping distance under the falling curve must already fit the clearance that remains. This is why the lease carries the stopping deadline as a term of its own (@sec-intent-lease).
 
-::: {#fig-10-mug-lease-timeline data-explore="mechanism-scene" data-explore-key="vol4:fig-10-mug-lease-timeline" fig-env="figure" fig-pos="t" fig-cap="**Mug lease against the intent model's timing**: The top lane charges the conveyor mug's modeled target error against the `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance. Without tracking, belt speed exhausts it at `{python} IntentLeaseArchetypes.tau_untracked_str`; with a tracker that cancels belt velocity, residual slip exhausts it at `{python} IntentLeaseArchetypes.tau_tracked_str`. The bottom lane puts idealized countdowns with zero additional controller reserve on the Safety MCU's clock beside the `{python} IntentLeaseArchetypes.t_intent_infer_str` inference and the `{python} IntentLeaseArchetypes.t_intent_period_str` proposal period; each expiry is followed by the `{python} IntentLeaseArchetypes.t_arm_onset_str` stop onset (hatched). Neither lease can wait for the next proposal. After a `{python} IntentLeaseArchetypes.t_stall_intent_str` host stall the untracked target sits `{python} IntentLeaseArchetypes.err_stalled_untracked_str` off and the tracked one `{python} IntentLeaseArchetypes.err_stalled_tracked_str`." fig-alt="Two stacked panels sharing a time axis from 0 to 560 milliseconds. Top: target error in millimeters against time. A dashed bronze line rises from 3 millimeters and crosses a dashed 15-millimeter tolerance line at 60 milliseconds; a solid teal curve crosses it at 219 milliseconds. Square markers at 200 milliseconds mark 43 and 13 millimeters. Bottom: three rows. An intent-model bar ends at 336 milliseconds, with a marker for the next proposal at 500 milliseconds. Two idealized zero-additional-reserve lease bars end at 60 and 219 milliseconds, each followed by a hatched 22-millisecond stop-onset segment."}
+::: {#fig-10-mug-lease-timeline data-explore="original-v4-10-mug-lease-timeline" data-explore-key="vol4:fig-10-mug-lease-timeline" fig-env="figure" fig-pos="t" fig-cap="**Mug lease against the intent model's timing**: The top lane charges the conveyor mug's modeled target error against the `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance. Without tracking, belt speed exhausts it at `{python} IntentLeaseArchetypes.tau_untracked_str`; with a tracker that cancels belt velocity, residual slip exhausts it at `{python} IntentLeaseArchetypes.tau_tracked_str`. The bottom lane puts idealized countdowns with zero additional controller reserve on the Safety MCU's clock beside the `{python} IntentLeaseArchetypes.t_intent_infer_str` inference and the `{python} IntentLeaseArchetypes.t_intent_period_str` proposal period; each expiry is followed by the `{python} IntentLeaseArchetypes.t_arm_onset_str` stop onset (hatched). Neither lease can wait for the next proposal. After a `{python} IntentLeaseArchetypes.t_stall_intent_str` host stall the untracked target sits `{python} IntentLeaseArchetypes.err_stalled_untracked_str` off and the tracked one `{python} IntentLeaseArchetypes.err_stalled_tracked_str`." fig-alt="Two stacked panels sharing a time axis from 0 to 560 milliseconds. Top: target error in millimeters against time. A dashed bronze line rises from 3 millimeters and crosses a dashed 15-millimeter tolerance line at 60 milliseconds; a solid teal curve crosses it at 219 milliseconds. Square markers at 200 milliseconds mark 43 and 13 millimeters. Bottom: three rows. An intent-model bar ends at 336 milliseconds, with a marker for the next proposal at 500 milliseconds. Two idealized zero-additional-reserve lease bars end at 60 and 219 milliseconds, each followed by a hatched 22-millisecond stop-onset segment."}
 
 ```{python}
 #| label: plot-intent-mug-lease-timeline
@@ -1569,19 +1574,21 @@ class MugLeaseExpiry:
     t_estop = RM.arm.emergency_stop_time  # FER handbook worst case: 3 kg, maximum velocity, 48 V cut
     # Assumption: that stop began at the Cartesian limit; the handbook states only
     # "maximum velocity" and reports the stop in joint angles, so a_arm is derived.
-    t_admin = 100.0 * millisecond  # category: chosen (scenario's administrative lease, six wrist-camera frames)
-    d_clear_arm = 300.0 * millimeter  # category: chosen (scenario's verified clearance ahead of the gripper)
+    EXPIRY = Scenarios.ConveyorMugIntentLeaseExpiry  # the three terms of the expiry bound
+    t_admin = EXPIRY.administrative_lease  # category: chosen (scenario's administrative lease, six wrist-camera frames)
+    d_clear_arm = EXPIRY.clearance  # category: chosen (scenario's verified clearance ahead of the gripper)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     t_frame = (1.0 / RM.wrist_camera.frame_rate).to(millisecond)
     # Credible deceleration: the worst-case stop, averaged over a stop from the
     # Cartesian velocity limit. A lower bound on what the arm delivers, not the
-    # controller's 13 m/s^2 command ceiling.
-    a_arm = (v_cart_max / t_estop).to(meter / second**2)
-    d_stop = (v_tcp * t_post + v_tcp**2 / (2 * a_arm)).to(millimeter)
-    t_stop_deadline = ((d_clear_arm - d_stop) / v_tcp).to(millisecond)
-    expiry_untracked = min(tau_untracked, t_admin, t_stop_deadline)
-    expiry_tracked = min(tau_tracked, t_admin, t_stop_deadline)
+    # controller's 13 m/s^2 command ceiling. Stop distance v t_post + v^2/(2 a).
+    expiry = EXPIRY.result
+    a_arm = expiry.credible_deceleration
+    d_stop = expiry.stop_distance
+    t_stop_deadline = expiry.stopping_deadline
+    expiry_untracked = expiry.expiry_untracked
+    expiry_tracked = expiry.expiry_tracked
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_admin > 5 * t_frame, "Prose: the administrative lease outlasts several wrist-camera frames")

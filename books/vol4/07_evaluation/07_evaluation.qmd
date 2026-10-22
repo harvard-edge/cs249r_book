@@ -80,8 +80,8 @@ A robot that repeatedly opens one door has supplied evidence about that door, it
 # │       the completed record carries (scenario cells, supported cells,
 # │       known absences, manifest omissions).
 # │ How: registry fields of the warehouse mobile manipulator and its aisle;
-# │      the standoff and the scenario-table counts (from @sec-data and
-# │      @sec-training) are chapter-local inputs.
+# │      the standoff, the scenario table, and the omission count from
+# │      Scenarios.LatchEvaluationCampaign.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -94,7 +94,8 @@ class EvalMachine:
     """The latch campaign Ch7 evaluates, on the book's running machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    standoff = 2.0 * meter  # category: illustrative; base start distance from the door
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign)
+    standoff = campaign.standoff  # category: illustrative; base start distance from the door
     v_approach = AISLE.v_latch_approach  # category: illustrative; guarded approach, the declared ODD's speed
     f_latch_limit = AISLE.f_latch_limit  # category: illustrative; latch damage limit
     f_trip = AISLE.f_latch_tripwire  # category: illustrative; contact tripwire that ends an attempt (@sec-data)
@@ -102,16 +103,16 @@ class EvalMachine:
     chunk_rate = RM.chunk_rate  # category: chosen; chunk policy rate
     t_chunk_infer = RM.chunk_inference_latency  # category: illustrative; P99 of the ACT chunk policy incl. vision (M5)
     t_lease = AISLE.t_lease  # category: chosen; chunk lease
-    n_plate_positions = 3  # category: illustrative; nominal and two displaced plates, the scenario table of @sec-data
-    scenario_speeds = [AISLE.v_latch_approach, AISLE.v_latch_high]  # category: illustrative; the scenario table's two approach speeds
-    n_supported = 1  # category: illustrative; the nominal plate at the guarded approach (LatchScenarioTable in @sec-data)
-    n_omissions = 2  # category: illustrative; soft penalty contact and missing transport lag, the manifest's omission log
+    n_plate_positions = len(campaign.table.offsets)  # category: illustrative; nominal and two displaced plates, the scenario table of @sec-data
+    scenario_speeds = campaign.table.speeds  # category: illustrative; the scenario table's two approach speeds
+    n_omissions = campaign.omissions  # category: illustrative; soft penalty contact and missing transport lag, the manifest's omission log
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     chunk_period = (1 / chunk_rate).to(millisecond)
     n_speeds = len(scenario_speeds)
-    n_cells = n_plate_positions * n_speeds
-    n_absences = n_cells - n_supported
+    n_cells = campaign.table.cells
+    n_supported = campaign.table.supported  # the nominal plate at the guarded approach
+    n_absences = campaign.table.absences
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(v_approach.to(meter / second).magnitude - 0.03) < 1e-9, "Guarded approach is not 0.03 m/s")
@@ -230,11 +231,12 @@ class JamReset:
     """Occupancy share of a manual reset after a jammed latch."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_run = 25.0 * second  # category: illustrative; door run, same as DoorCycle.t_run
-    t_jam_reset = 60.0 * second  # category: illustrative; clear a jammed pin, recalibrate, return to standoff
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign)
+    t_run = campaign.run  # category: illustrative; door run, same as DoorCycle.t_run
+    t_jam_reset = campaign.jam_reset  # category: illustrative; clear a jammed pin, recalibrate, return to standoff
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    reset_share = (t_jam_reset / (t_run + t_jam_reset)).to(dimensionless).magnitude
+    reset_share = campaign.jam_reset_share
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(0.70 < reset_share < 0.72, "Jammed-latch reset should take about 71 percent of occupancy")
@@ -311,10 +313,10 @@ That feedback path turns small one-step tracking residuals into growing state de
 # │          and the takeaways.
 # │ Show: where a persistent 1 degree heading bias of the navigation stack
 # │       (not the evaluated latch policy) spends the aisle's side clearance.
-# │ How: y(t) = v sin(eps) t; t_impact = W_clear / (v sin(eps)); the side
-# │      clearance is (aisle width - machine width) / 2.
+# │ How: y(t) = v sin(eps) t; t_impact = W_clear / (v sin(eps)), in
+# │      Scenarios.AisleHeadingDrift; the side clearance is
+# │      (aisle width - machine width) / 2.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_length, fmt_velocity, fmt_time, fmt_angle, fmt_math, sci_latex, check
@@ -326,20 +328,21 @@ class AisleDrift:
     """Closed-loop drift of a biased navigation policy on the running machine's aisle."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity  # category: illustrative; drive limit
+    drift = Scenarios.AisleHeadingDrift  # category: illustrative (a heading bias at the drive limit in the aisle)
+    v = drift.speed  # category: illustrative; drive limit
     clearance = AISLE.side_clearance  # category: illustrative; side clearance each side
     aisle_width = AISLE.aisle_width  # category: illustrative; site geometry
     aisle_length = AISLE.aisle_length  # category: illustrative; site geometry
     machine_width = RM.footprint_width  # category: illustrative; base footprint
-    heading_offset_deg = 1.0  # category: illustrative; persistent heading bias
+    heading_offset_deg = drift.heading_offset.to(degree).magnitude  # category: illustrative; persistent heading bias
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    eps = math.radians(heading_offset_deg)
+    eps = drift.heading
     eps_q = eps * radian
-    angular_mse = (eps_q**2).to(radian**2)  # open-loop score on recorded centerline states
-    t_impact = (clearance / (v * math.sin(eps))).to(second)
-    x_impact = (v * t_impact).to(meter)
-    aisle_fraction = (x_impact / aisle_length).to(dimensionless).magnitude
+    angular_mse = drift.angular_mse  # open-loop score on recorded centerline states
+    t_impact = drift.time_to_clearance
+    x_impact = drift.distance_to_clearance
+    aisle_fraction = drift.aisle_fraction
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, "Drive limit is not 1.5 m/s")
@@ -411,7 +414,7 @@ This warehouse scenario highlights the two structural mechanisms that cause open
      unicycle paragraph, and the takeaways; the guard pins it.
      The figure cell below recomputes theta**2 for its panel label from the same heading_offset_deg. -->
 
-::: {#fig-07-open-vs-closed-loop data-explore="mechanism-scene" data-explore-key="vol4:fig-07-open-vs-closed-loop" fig-env="figure" fig-pos="t" fig-cap="**Open vs. closed loop divergence**: A persistent $1.0^\circ$ heading offset gives `{python} AisleDrift.angular_mse_math` angular mean squared error on recorded centerline states. On the mobile manipulator's aisle, the navigation stack's admitted motion with that fixed heading drifts linearly and reaches the `{python} AisleDrift.clearance_str` side clearance after `{python} AisleDrift.t_impact_str` at the `{python} AisleDrift.v_str` drive limit. The example concerns the navigation stack, not the latch policy under evaluation." fig-alt="Two-panel aisle example, stacked. Top: recorded-state replay scores a constant one-degree heading offset with angular mean squared error 3.05 times 10 to the minus four radians squared and resets the next input to the recorded centerline. Bottom: if that heading persists in a physical rollout at 1.5 meters per second, lateral drift grows linearly and reaches the 15-centimeter side clearance after about 5.7 seconds, 8.6 meters along the aisle. Policy proposals pass through the permission path before the plant moves."}
+::: {#fig-07-open-vs-closed-loop data-explore="original-v4-07-open-vs-closed-loop" data-explore-key="vol4:fig-07-open-vs-closed-loop" fig-env="figure" fig-pos="t" fig-cap="**Open vs. closed loop divergence**: A persistent $1.0^\circ$ heading offset gives `{python} AisleDrift.angular_mse_math` angular mean squared error on recorded centerline states. On the mobile manipulator's aisle, the navigation stack's admitted motion with that fixed heading drifts linearly and reaches the `{python} AisleDrift.clearance_str` side clearance after `{python} AisleDrift.t_impact_str` at the `{python} AisleDrift.v_str` drive limit. The example concerns the navigation stack, not the latch policy under evaluation." fig-alt="Two-panel aisle example, stacked. Top: recorded-state replay scores a constant one-degree heading offset with angular mean squared error 3.05 times 10 to the minus four radians squared and resets the next input to the recorded centerline. Bottom: if that heading persists in a physical rollout at 1.5 meters per second, lateral drift grows linearly and reaches the 15-centimeter side clearance after about 5.7 seconds, 8.6 meters along the aisle. Policy proposals pass through the permission path before the plant moves."}
 
 ```{python}
 #| echo: false
@@ -504,7 +507,7 @@ plt.show()
 # │          @sec-evaluation-non-lipschitz-contact.
 # │ Show: the reaction force a small commanded penetration attempts against a
 # │       hypothetical stiff surface (not the running machine's latch).
-# │ How: dF = k_contact * dx (linear spring).
+# │ How: dF = k_contact * dx (linear spring), in Scenarios.StiffSurfaceResidual.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -514,11 +517,12 @@ class StiffContact:
     """Force a millimeter-scale residual attempts against a stiff surface."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    k_contact = 5e5 * newton / meter  # category: illustrative; hypothetical stiff surface
-    dx = 2.0 * millimeter  # category: illustrative; tracking residual / commanded penetration
+    contact = Scenarios.StiffSurfaceResidual  # category: illustrative (a residual against a hypothetical stiff surface)
+    k_contact = contact.stiffness  # category: illustrative; hypothetical stiff surface
+    dx = contact.residual  # category: illustrative; tracking residual / commanded penetration
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dF = (k_contact * dx).to(newton)
+    dF = contact.residual_force
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────
     check(abs(dF.to(newton).magnitude - 1000.0) < 1e-6, "2 mm into 5e5 N/m should attempt 1,000 N")
@@ -692,7 +696,8 @@ When these conditions hold, the sample mean provides an unbiased point estimate 
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @nbk-evaluation-derivation-20-run-lower-bound, @sec-evaluation-logs, and the takeaways.
 # │ Show: One-sided confidence limits for iid zero-failure trials, not a rate estimate.
-# │ How: p_lower = alpha^(1/n); failure_upper = 1 - p_lower.
+# │ How: p_lower = alpha^(1/n); failure_upper = 1 - p_lower, in
+# │      Scenarios.LatchEvaluationCampaign.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -703,36 +708,35 @@ class ClopperPearsonZeroFailure:
     """Exact binomial confidence bounds for physical robotics qualification."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_runs = 20  # category: illustrative; the opening campaign's clean runs
-    confidence = 0.95  # category: chosen; one-sided confidence level
-    alpha = 1.0 - confidence  # category: derived; significance level
-    n_one_in = 8  # category: illustrative; a policy that fails one run in eight
-    n_fallacy = 1000  # category: illustrative; clean openings in the perfect-record fallacy
-    n_looks = 5  # category: illustrative; independent 5 percent looks in the optional-stopping example
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign)
+    n_runs = campaign.clean_runs  # category: illustrative; the opening campaign's clean runs
+    confidence = campaign.confidence  # category: chosen; one-sided confidence level
+    alpha = campaign.alpha  # category: derived; significance level
+    n_one_in = campaign.weak_policy_one_in  # category: illustrative; a policy that fails one run in eight
+    n_fallacy = campaign.fallacy_runs  # category: illustrative; clean openings in the perfect-record fallacy
+    n_looks = campaign.looks  # category: illustrative; independent 5 percent looks in the optional-stopping example
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_lower = calc_clopper_pearson_zero_failure_bound(n_runs, confidence=confidence)
-    failure_upper = 1.0 - p_lower
-    p_clean_one_in = (1.0 - 1.0 / n_one_in) ** n_runs  # chance that policy still logs n_runs clean runs
+    p_lower = campaign.lower_bound
+    failure_upper = campaign.failure_upper
+    p_clean_one_in = campaign.weak_policy_clean_probability  # chance that policy still logs n_runs clean runs
 
     p_clean_at_bound = p_lower**n_runs  # probability of n clean runs at the bound itself; equals alpha
 
     # Scaling to 90, 99, and 99.9% reliability
-    p_target_90 = 0.90  # category: chosen; pilot target in the fallacy and the SPRT contrast
-    p_target_99 = 0.99  # category: chosen; industrial target in the prose
-    p_target_999 = 0.999  # category: chosen; the target the chapter argues toward
-    n_req_90 = calc_zero_failure_sample_size(p_target_90, confidence=confidence)
-    n_req_99 = calc_zero_failure_sample_size(p_target_99, confidence=confidence)
-    n_req_999 = calc_zero_failure_sample_size(p_target_999, confidence=confidence)
-    rule_of_three_20 = 3.0 / n_runs  # Rule of Three approximation to failure_upper at n_runs
-    n_cells_joint = 2  # category: illustrative; nominal and displaced-plate cells of the recovery branch
-    n_req_999_joint = calc_zero_failure_sample_size(p_target_999, confidence=1.0 - alpha / n_cells_joint)  # Bonferroni split
-    p_lower_fallacy = calc_clopper_pearson_zero_failure_bound(n_fallacy, confidence=confidence)
-    p_any_false_positive = 1.0 - (1.0 - alpha) ** n_looks  # chance of at least one false positive across independent looks
-    ln_inv_alpha = math.log(1.0 / alpha)  # the numerator of every zero-failure count; about 3 at 95 percent
+    p_target_90, p_target_99, p_target_999 = campaign.nine_targets  # pilot, industrial, and the target the chapter argues toward
+    n_req_90 = campaign.runs_for(p_target_90)
+    n_req_99 = campaign.runs_for(p_target_99)
+    n_req_999 = campaign.target_runs
+    rule_of_three_20 = campaign.rule_of_three  # Rule of Three approximation to failure_upper at n_runs
+    n_cells_joint = campaign.joint_cells  # nominal and displaced-plate cells of the recovery branch
+    n_req_999_joint = campaign.joint_runs  # Bonferroni split of alpha over the cells
+    p_lower_fallacy = campaign.fallacy_lower_bound
+    p_any_false_positive = campaign.any_false_positive  # chance of at least one false positive across independent looks
+    ln_inv_alpha = campaign.ln_inv_alpha  # the numerator of every zero-failure count; about 3 at 95 percent
     ln_inv_alpha_per_run = ln_inv_alpha / n_runs  # exponent of the 20-run bound, shown in the notebook
     ln_inv_999 = -math.log(p_target_999)  # per-run log cost of a 99.9 percent target, shown in the notebook
-    p_target_chk = 0.995  # category: chosen; target in the bounds checkpoint's budget estimate
+    p_target_chk = campaign.estimate_target  # target in the bounds checkpoint's budget estimate
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(p_lower - 0.8609) < 0.001, "Unexpected 20-run lower bound")
@@ -918,43 +922,27 @@ The bound inherits the iid condition of @sec-evaluation-trial-protocol. Twenty r
 # │ Context: @sec-evaluation-bounds-with-failures.
 # │ Show: the 95 percent lower bound when a twenty-run campaign has one failure,
 # │       beside the zero-failure bound.
-# │ How: solve P(X >= k | n, p) = alpha for p by bisection, X ~ Binomial(n, p);
-# │      at k = n this reduces to p^n = alpha (the zero-failure case).
+# │ How: solve P(X >= k | n, p) = alpha for p by bisection, X ~ Binomial(n, p)
+# │      (calc_clopper_pearson_lower_bound); at k = n this reduces to
+# │      p^n = alpha (the zero-failure case).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.fmt import fmt_percent, check
-
-def _binom_upper_tail(k, n, p):
-    """P(X >= k) for X ~ Binomial(n, p)."""
-    return sum(math.comb(n, j) * p**j * (1.0 - p) ** (n - j) for j in range(k, n + 1))
-
-def _cp_lower(k, n, alpha):
-    """One-sided Clopper-Pearson lower limit on p after k successes in n trials."""
-    if k == 0:
-        return 0.0
-    lo, hi = 0.0, 1.0
-    for _ in range(200):
-        mid = 0.5 * (lo + hi)
-        if _binom_upper_tail(k, n, mid) > alpha:
-            hi = mid
-        else:
-            lo = mid
-    return 0.5 * (lo + hi)
 
 class BoundWithFailures:
     """Lower confidence bound for a campaign that records failures."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_runs = ClopperPearsonZeroFailure.n_runs  # category: illustrative; the opening campaign size
-    n_fail = 1  # category: illustrative; one failed run in the same campaign
-    alpha = ClopperPearsonZeroFailure.alpha  # category: chosen; one-sided significance level
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign)
+    n_runs = campaign.clean_runs  # category: illustrative; the opening campaign size
+    n_fail = campaign.recorded_failures  # category: illustrative; one failed run in the same campaign
+    alpha = campaign.alpha  # category: chosen; one-sided significance level
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     k_success = n_runs - n_fail
-    p_lower_one_fail = _cp_lower(k_success, n_runs, alpha)
-    p_lower_zero_fail = _cp_lower(n_runs, n_runs, alpha)
-    p_hat = k_success / n_runs
+    p_lower_one_fail = campaign.lower_bound_with_failures
+    p_lower_zero_fail = calc_clopper_pearson_lower_bound(n_runs, n_runs, confidence=campaign.confidence)
+    p_hat = campaign.observed_rate_with_failures
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(p_lower_zero_fail - ClopperPearsonZeroFailure.p_lower) < 1e-9, "k = n must reproduce alpha^(1/n)")
@@ -993,7 +981,7 @@ While a million software unit tests consume only processor cycles, each closed-l
 # │ Show: one door trial's test-cell time (run plus reset) and what the
 # │       opening campaign and a 99.9 percent campaign occupy at that cycle.
 # │ How: T_cycle = t_run + t_reset; T_campaign = n * T_cycle, with n from
-# │      calc_zero_failure_sample_size.
+# │      calc_zero_failure_sample_size, in Scenarios.LatchEvaluationCampaign.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1003,22 +991,23 @@ class DoorCycle:
     """Test-cell time per door trial and per zero-failure campaign."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_run = 25.0 * second  # category: illustrative; drive-in from the standoff, stop, guarded unlatch and swing
-    t_reset = 15.0 * second  # category: illustrative; re-latch, return to the standoff, telemetry flush
-    n_opening = 20  # category: illustrative; the opening campaign's clean runs
-    confidence = 0.95  # category: chosen; one-sided confidence level
-    p_target = 0.999  # category: chosen; success lower limit the section argues toward
-    n_operators = 2  # category: illustrative; safety operators watching each run
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign)
+    t_run = campaign.run  # category: illustrative; drive-in from the standoff, stop, guarded unlatch and swing
+    t_reset = campaign.reset  # category: illustrative; re-latch, return to the standoff, telemetry flush
+    n_opening = campaign.clean_runs  # category: illustrative; the opening campaign's clean runs
+    confidence = campaign.confidence  # category: chosen; one-sided confidence level
+    p_target = campaign.target  # category: chosen; success lower limit the section argues toward
+    n_operators = campaign.operators  # category: illustrative; safety operators watching each run
     table_n = (10, 20, 50, 100, 250, 500, 1000, 2995)  # category: chosen; rows of @tbl-07-confidence-bounds
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_cycle = (t_run + t_reset).to(second)
-    n_target = calc_zero_failure_sample_size(p_target, confidence=confidence)
-    t_opening = (n_opening * t_cycle).to(minute)
-    t_target = (n_target * t_cycle).to(hour)
+    t_cycle = campaign.cycle
+    n_target = campaign.target_runs
+    t_opening = campaign.campaign_time(n_opening).to(minute)
+    t_target = campaign.campaign_time(n_target).to(hour)
     t_target_days = t_target.to(day)
-    t_target_operator = t_target * n_operators
-    shifts_target = (t_target_operator / (8.0 * hour)).to(dimensionless).magnitude
+    t_target_operator = campaign.operator_time(n_target)
+    shifts_target = campaign.shifts(n_target)  # eight-hour operator shifts
     table_hours = [n * c for n, c in zip(table_n, [t_cycle.to(hour)] * len(table_n))]  # zip: class scope is not visible inside the comprehension
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
@@ -1221,10 +1210,11 @@ class ConfidenceBoundsTable:
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     table_n = DoorCycle.table_n  # category: chosen; rows of @tbl-07-confidence-bounds
+    campaign = Scenarios.LatchEvaluationCampaign  # category: illustrative (the evaluated latch campaign, 95 percent)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     lo90 = [calc_clopper_pearson_zero_failure_bound(n, confidence=0.90) for n in table_n]
-    lo95 = [calc_clopper_pearson_zero_failure_bound(n, confidence=0.95) for n in table_n]
+    lo95 = list(map(campaign.lower_bound_at, table_n))  # map: class scope is not visible inside a comprehension
     lo99 = [calc_clopper_pearson_zero_failure_bound(n, confidence=0.99) for n in table_n]
     up95 = [1.0 - p for p in lo95]
 
@@ -1287,32 +1277,34 @@ $$\SequentialLogLikelihoodRatio = \ObservedTrialFailureCount \ln \left(\frac{\Hy
 # │       at alpha = 0.05, beta = 0.10; clean runs to accept; Ville/Wald error
 # │       bounds alpha/(1 - beta) and beta/(1 - alpha); the score after 25
 # │       successes and one failure; and the fixed-sample contrast.
-# │ How: Lambda_m = k ln(p1/p0) + (m - k) ln((1 - p1)/(1 - p0)).
+# │ How: Lambda_m = k ln(p1/p0) + (m - k) ln((1 - p1)/(1 - p0)), in
+# │      Scenarios.LatchSequentialTest.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 
 class Sprt:
     """Wald's SPRT for the latch campaign in the failure-probability convention."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    p0 = 0.10  # category: chosen; unacceptable per-run failure probability (H0)
-    p1 = 0.01  # category: chosen; acceptable per-run failure probability (H1)
-    alpha = 0.05  # category: chosen; allowed false acceptance of H1 under H0
-    beta = 0.10  # category: chosen; allowed false rejection of H1 under H1
-    m_before_fail = 25  # category: illustrative; clean runs before the first failure in the trace example
+    test = Scenarios.LatchSequentialTest  # category: chosen (Wald's test declared for the latch campaign)
+    p0 = test.p_unacceptable  # category: chosen; unacceptable per-run failure probability (H0)
+    p1 = test.p_acceptable  # category: chosen; acceptable per-run failure probability (H1)
+    alpha = test.alpha  # category: chosen; allowed false acceptance of H1 under H0
+    beta = test.beta  # category: chosen; allowed false rejection of H1 under H1
+    m_before_fail = test.trace_clean_runs  # category: illustrative; clean runs before the first failure in the trace example
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    inc_success = math.log((1 - p1) / (1 - p0))
-    inc_failure = math.log(p1 / p0)
-    A = math.log((1 - beta) / alpha)
-    B = math.log(beta / (1 - alpha))
-    n_accept = math.ceil(A / inc_success)
-    false_accept_bound = math.exp(-A)  # Ville: P(sup L_m >= e^A | H0) <= e^-A = alpha / (1 - beta)
-    false_reject_bound = math.exp(B)  # reciprocal martingale under H1: beta / (1 - alpha)
-    score_trace = m_before_fail * inc_success + inc_failure
-    n_fixed_90 = ClopperPearsonZeroFailure.n_req_90  # fixed-sample zero-failure count for a 90% success lower limit
-    p_good_rejected_fixed = 1.0 - (1.0 - p1) ** n_fixed_90  # a p1 policy fails the fixed zero-failure test
+    inc_success = test.success_increment
+    inc_failure = test.failure_increment
+    A = test.accept
+    B = test.reject
+    n_accept = test.runs_to_accept
+    false_accept_bound = test.false_accept_bound  # Ville: P(sup L_m >= e^A | H0) <= e^-A = alpha / (1 - beta)
+    false_reject_bound = test.false_reject_bound  # reciprocal martingale under H1: beta / (1 - alpha)
+    score_trace = test.trace_score
+    n_fixed_90 = test.fixed_runs  # fixed-sample zero-failure count for a 90% success lower limit
+    p_good_rejected_fixed = test.fixed_rejects_acceptable  # a p1 policy fails the fixed zero-failure test
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(inc_success - 0.09531) < 1e-5 and abs(inc_failure + 2.30259) < 1e-5, "SPRT increments changed")
@@ -1322,6 +1314,7 @@ class Sprt:
     check(B < score_trace < A, "After 25 successes and one failure the test must still be running")
     check(abs(false_accept_bound - alpha / (1 - beta)) < 1e-12, "Ville bound must equal alpha/(1-beta)")
     check(n_fixed_90 == 29 and abs(p_good_rejected_fixed - 0.2528) < 0.001, "Fixed 29-run test rejects a p1 policy about 25 percent of the time")
+    check(n_fixed_90 == ClopperPearsonZeroFailure.n_req_90, "The fixed test must be the 90 percent zero-failure count")
     # margin_sprt_corridor_trace.svg fig-alt hand-types 2.89, minus 2.25, 31 clean runs, 25 runs, and 2.30
     check(
         f"{A:.2f}" == "2.89" and f"{B:.2f}" == "-2.25" and f"{abs(inc_failure):.2f}" == "2.30" and m_before_fail == 25,
@@ -1385,43 +1378,31 @@ The error guarantees follow directly from the likelihood ratio itself. Under $\S
 # │      (Cohen 1988, Table 6.4.1: h = 0.2 needs 392 per arm; audit 2026-09-29
 # │      corrected an earlier one-sample formula that gave 98, about 51% power).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from statistics import NormalDist
+from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
-
-def _fisher_two_sided(a, b, c, d):
-    """Two-sided Fisher exact p for the table [[a, b], [c, d]] (rows are policies)."""
-    r1, c1, n = a + b, a + c, a + b + c + d
-
-    def _prob(x):
-        return math.comb(c1, x) * math.comb(n - c1, r1 - x) / math.comb(n, r1)
-
-    p_obs = _prob(a)
-    lo, hi = max(0, r1 + c1 - n), min(r1, c1)
-    return sum(_prob(x) for x in range(lo, hi + 1) if _prob(x) <= p_obs * (1 + 1e-9))
 
 class PolicyComparison:
     """Can twenty runs per arm separate two latch checkpoints?"""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_arm = 20  # category: illustrative; interleaved runs per checkpoint on the nominal cell
-    k_a = 20  # category: illustrative; successes of latch-bc-01
-    k_b = 16  # category: illustrative; successes of the comparison candidate
-    alpha = 0.05  # category: chosen; two-sided significance level
-    power = 0.80  # category: chosen; probability of detecting the stated effect
-    p_high = 0.90  # category: chosen; success rate of the better policy in the sizing example
-    p_low = 0.80  # category: chosen; success rate of the worse policy
+    comparison = Scenarios.LatchCheckpointComparison  # category: illustrative (two latch checkpoints, 20 runs each)
+    n_arm = comparison.arm_runs  # category: illustrative; interleaved runs per checkpoint on the nominal cell
+    k_a = comparison.successes_a  # category: illustrative; successes of latch-bc-01
+    k_b = comparison.successes_b  # category: illustrative; successes of the comparison candidate
+    alpha = comparison.alpha  # category: chosen; two-sided significance level
+    power = comparison.power  # category: chosen; probability of detecting the stated effect
+    p_high = comparison.p_high  # category: chosen; success rate of the better policy in the sizing example
+    p_low = comparison.p_low  # category: chosen; success rate of the worse policy
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_fisher = _fisher_two_sided(k_a, n_arm - k_a, k_b, n_arm - k_b)
-    n_fail_total = (n_arm - k_a) + (n_arm - k_b)  # failures across both arms
-    p_all_in_one_arm = math.comb(n_arm, n_fail_total) / math.comb(2 * n_arm, n_fail_total)  # every failure lands in arm B
-    z_a = NormalDist().inv_cdf(1 - alpha / 2)  # two-sided critical value
-    z_b = NormalDist().inv_cdf(power)
-    cohen_h = 2 * math.asin(math.sqrt(p_high)) - 2 * math.asin(math.sqrt(p_low))
-    _z = NormalDist().inv_cdf
-    n_per_arm = math.ceil(2 * ((_z(1 - alpha / 2) + _z(power)) / cohen_h) ** 2)
-    n_check_h02 = math.ceil(2 * ((_z(1 - alpha / 2) + _z(power)) / 0.2) ** 2)  # Cohen's table value for h = 0.2
+    p_fisher = comparison.fisher_p
+    n_fail_total = comparison.failures  # failures across both arms
+    p_all_in_one_arm = comparison.all_in_one_arm  # every failure lands in arm B
+    z_a = comparison.z_alpha  # two-sided critical value
+    z_b = comparison.z_power
+    cohen_h = comparison.cohens_h
+    n_per_arm = comparison.runs_per_arm
+    n_check_h02 = comparison.runs_per_arm_for(0.2)  # Cohen's table value for h = 0.2
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(p_fisher - 0.1060) < 0.0005, "Fisher two-sided p for 20/20 vs 16/20 should be about 0.106")
@@ -1579,31 +1560,32 @@ A clean record on a bounded manipulation task, such as cycling a warehouse door 
 # │          notebook, and @psp-evaluation-untestable-reliability.
 # │ Show: Failure-free hours a zero-event test needs to bound a constant hazard
 # │       rate at 95 percent confidence, stated per single machine.
-# │ How: T = -ln(1 - C) / lambda via calc_empirical_testing_exposure.
+# │ How: T = -ln(1 - C) / lambda via calc_empirical_testing_exposure, in
+# │      Scenarios.HazardExposureWall.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-import math
 from mlsysim.fmt import fmt, fmt_int, fmt_math, sci_latex, check
 
 class ExposureWall:
     """Zero-event exposure needed to bound a constant hazard rate, per single machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    confidence = 0.95  # category: chosen; one-sided confidence level
-    rate_e6 = 1e-6 / hour  # category: chosen; teaching target
-    rate_e9 = 1e-9 / hour  # category: chosen; teaching target
-    fleet_rigs = 100  # category: illustrative; fleet for the Fleet Testing Fallacy
-    t_rig_year = (1.0 * year).to(hour)  # category: derived; one rig running continuously for a year
+    wall = Scenarios.HazardExposureWall  # category: chosen (the exposure wall at three hazard rates)
+    confidence = wall.confidence  # category: chosen; one-sided confidence level
+    rate_e6 = wall.rates[1]  # category: chosen; teaching target
+    rate_e9 = wall.rates[2]  # category: chosen; teaching target
+    fleet_rigs = wall.rigs  # category: illustrative; fleet for the Fleet Testing Fallacy
+    t_rig_year = wall.rig_time.to(hour)  # category: derived; one rig running continuously for a year
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_e6 = calc_empirical_testing_exposure(rate_e6, confidence=confidence)
-    t_e9 = calc_empirical_testing_exposure(rate_e9, confidence=confidence)
-    t_e9_fleet = t_e9 / fleet_rigs
-    ln_inv_alpha = math.log(1.0 / (1.0 - confidence))
-    rate_rig_year = (ln_inv_alpha / t_rig_year).to(1 / hour)  # smallest rate one rig-year can bound
-    gap_e6 = (rate_rig_year / rate_e6).to(dimensionless).magnitude
-    gap_e9 = (rate_rig_year / rate_e9).to(dimensionless).magnitude
+    t_e6 = wall.exposure(rate_e6)
+    t_e9 = wall.exposure(rate_e9)
+    t_e9_fleet = wall.fleet_time(rate_e9)
+    ln_inv_alpha = wall.ln_inv_alpha
+    rate_rig_year = wall.rig_rate  # smallest rate one rig-year can bound
+    gap_e6 = wall.shortfall(rate_e6)
+    gap_e9 = wall.shortfall(rate_e9)
 
     # Calendar years, rounded to three significant figures for prose
     yr_e6 = int(float(f"{t_e6.to(year).magnitude:.3g}"))
@@ -1681,35 +1663,36 @@ evaluated at a 95 percent confidence level ($\HypothesisTestSignificanceLevel = 
 # │ Show: RAND's miles-to-demonstrate requirements for three human-driver
 # │       benchmark rates and three statistical questions, beside Waymo's
 # │       rider-only mileage through January 2025.
-# │ How: literature values, transcribed; Q1 is re-derived as -ln(0.05)/rate to
-# │      guard the transcription. Promotion candidate: literature registry.
+# │ How: Literature.RoadVehicleSafety through Scenarios.RoadMilesToDemonstrate;
+# │      Q1 is re-derived as -ln(0.05)/rate to guard the transcription.
 # │ Sources: Kalra and Paddock, RAND RR-1478 (2016), Table 1; Kusano et al.,
 # │          Traffic Injury Prevention 26(sup1), 2025.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr
 
 class AvExposure:
     """RAND Table 1 mileage requirements and one dated fleet exposure total."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    road = Scenarios.RoadMilesToDemonstrate  # category: literature (RAND RR-1478 Table 1; Kusano et al. 2025)
     # Human-driver benchmark rates, events per 100 million miles (RAND Table 1 column heads)
-    rate_fatal = 1.09  # category: literature; RAND RR-1478 Table 1 (A)
-    rate_injury = 77.0  # category: literature; RAND RR-1478 Table 1 (B), reported injuries
-    rate_crash = 190.0  # category: literature; RAND RR-1478 Table 1 (C), reported crashes
+    rate_fatal = float(road.rates["fatalities"])  # category: literature; RAND RR-1478 Table 1 (A)
+    rate_injury = float(road.rates["injuries"])  # category: literature; RAND RR-1478 Table 1 (B), reported injuries
+    rate_crash = float(road.rates["crashes"])  # category: literature; RAND RR-1478 Table 1 (C), reported crashes
     # Miles required, millions: rows (1) zero failures, 95% upper limit at the benchmark;
     # (2) rate within 20% at 95%; (3) 20% better than human at 95% and 80% power
-    miles_fatal = (275.0, 8800.0, 11000.0)  # category: literature; RAND RR-1478 Table 1
-    miles_injury = (3.9, 125.0, 161.0)  # category: literature; RAND RR-1478 Table 1
-    miles_crash = (1.6, 51.0, 65.0)  # category: literature; RAND RR-1478 Table 1
-    waymo_ro_miles = 56.7  # category: literature; millions of rider-only miles through Jan 2025 (Kusano et al. 2025)
-    waymo_injury_reduction = 0.79  # category: literature; any-injury-reported crashed-vehicle rate vs aligned benchmark
-    waymo_airbag_reduction = 0.81  # category: literature; airbag-deployment crashed-vehicle rate vs aligned benchmark
+    miles_fatal = road.requirements("fatalities")  # category: literature; RAND RR-1478 Table 1
+    miles_injury = road.requirements("injuries")  # category: literature; RAND RR-1478 Table 1
+    miles_crash = road.requirements("crashes")  # category: literature; RAND RR-1478 Table 1
+    waymo_ro_miles = float(road.fleet_miles)  # category: literature; millions of rider-only miles through Jan 2025 (Kusano et al. 2025)
+    waymo_injury_reduction = float(Literature.RoadVehicleSafety.WaymoInjuryCrashReduction)  # category: literature; any-injury-reported crashed-vehicle rate vs aligned benchmark
+    waymo_airbag_reduction = float(Literature.RoadVehicleSafety.WaymoAirbagCrashReduction)  # category: literature; airbag-deployment crashed-vehicle rate vs aligned benchmark
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    q1_check = [-math.log(0.05) / (r / 100.0) for r in (rate_fatal, rate_injury, rate_crash)]  # millions of miles
-    fatal_zero_ratio = miles_fatal[0] / waymo_ro_miles
-    cleared = [m for m, w in zip(miles_injury + miles_crash, [waymo_ro_miles] * 6) if m < w]  # requirements the fleet total exceeds; zip: class scope
+    q1_check = list(map(road.recomputed_zero_failure, ("fatalities", "injuries", "crashes")))  # millions of miles
+    fatal_zero_ratio = road.shortfall("fatalities")
+    cleared = road.cleared  # requirements the fleet total exceeds
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     for q, m in zip(q1_check, (miles_fatal[0], miles_injury[0], miles_crash[0])):
@@ -1827,9 +1810,9 @@ Nevertheless, tens of millions of operational miles can validate claims regardin
 # │       The hub bearings' L10 rating is not in the data sheet (needs source),
 # │       so the prose names the measurement instead of comparing against it.
 # │ How: T = -ln(alpha) / lambda via calc_empirical_testing_exposure;
-# │      N = ln(alpha) / ln(1 - lambda t_mission); N_rev = N v t / (pi D).
+# │      N = ln(alpha) / ln(1 - lambda t_mission); N_rev = N v t / (pi D);
+# │      all in Scenarios.WarehouseMissionExposure.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_int, fmt_length, fmt_velocity, fmt_time, fmt_math, sci_latex, fmt, check
@@ -1840,23 +1823,24 @@ class MtbfCampaign:
     """Zero-failure mission campaign that bounds a 1e-4 per hour rate on one machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    confidence = 0.95  # category: chosen; one-sided confidence level
-    rate = 1e-4 / hour  # category: chosen; teaching target (MTBF 10,000 h)
-    v = RM.base.max_velocity  # category: illustrative; drive limit
-    t_mission = 360.0 * second  # category: illustrative; one retrieval mission
-    t_reset = 120.0 * second  # category: illustrative; dock recharge and telemetry reset
-    d_wheel = RM.drive_unit.wheel_diameter  # category: datasheet; direct-drive hub-motor wheel (ZLTECH ZLLG10ASM800-48)
-    mtbf_relaxed = 1000.0 * hour  # category: chosen; relaxed target in @chk-eval-sample-size-mtbf
+    mission = Scenarios.WarehouseMissionExposure  # category: illustrative (zero-failure retrieval missions on the running machine)
+    confidence = mission.confidence  # category: chosen; one-sided confidence level
+    rate = mission.hazard_rate  # category: chosen; teaching target (MTBF 10,000 h)
+    v = mission.machine.base.max_velocity  # category: illustrative; drive limit
+    t_mission = mission.mission  # category: illustrative; one retrieval mission
+    t_reset = mission.reset  # category: illustrative; dock recharge and telemetry reset
+    d_wheel = mission.machine.drive_unit.wheel_diameter  # category: datasheet; direct-drive hub-motor wheel (ZLTECH ZLLG10ASM800-48)
+    mtbf_relaxed = mission.relaxed_mtbf  # category: chosen; relaxed target in @chk-eval-sample-size-mtbf
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     alpha = 1 - confidence
-    t_cycle = t_mission + t_reset
-    d_mission = (v * t_mission).to(meter)
-    t_continuous = calc_empirical_testing_exposure(rate, confidence=confidence).to(hour)
-    p_fail_mission = (rate * t_mission).to(dimensionless).magnitude
-    n_req = math.log(alpha) / math.log(1 - p_fail_mission)
-    t_calendar = (n_req * t_cycle).to(hour)
-    n_rev = (n_req * d_mission / (math.pi * d_wheel)).to(dimensionless).magnitude
+    t_cycle = mission.cycle
+    d_mission = mission.mission_distance
+    t_continuous = mission.continuous_exposure
+    p_fail_mission = mission.mission_failure_probability
+    n_req = mission.missions_needed
+    t_calendar = mission.calendar_time
+    n_rev = mission.wheel_revolutions
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, "Drive limit is not 1.5 m/s")
@@ -1866,10 +1850,8 @@ class MtbfCampaign:
     check(abs(d_mission.to(meter).magnitude - 540) < 1e-6, "Mission distance should be 540 m")
     check(abs(d_wheel.to(millimeter).magnitude - 266.0) < 1e-9, "Hub-motor wheel diameter is not 266 mm")
     check(abs(n_rev - 1.94e8) < 0.01e8, "Wheel revolutions should be about 1.94e8")
-    check(
-        calc_empirical_testing_exposure(1 / mtbf_relaxed, confidence=confidence) < 1.0 * year,
-        "The relaxed target must fit in one rig-year (checkpoint)",
-    )
+    check(mission.relaxed_exposure < 1.0 * year, "The relaxed target must fit in one rig-year (checkpoint)")
+    check(rate == Scenarios.HazardExposureWall.rates[0], "The mission target is the exposure wall's site rate")
     # margin_exposure_wall_ladder.svg fig-alt hand-types 33.3, 29,957, 3.0 million, and 3.0 billion hours
     check(
         f"{DoorCycle.t_target.to(hour).magnitude:.1f}" == "33.3"
@@ -1918,54 +1900,32 @@ Because the hub motor drives the wheel without an intermediate gearbox, every wh
 # │       95 percent interval on the intervention rate for 38 interventions in
 # │       100 retrieval missions of the MTBF campaign's mission.
 # │ How: T = n t_mission; L = n d_mission; MTBI = T / N; D = N / L; the Garwood
-# │      interval solves the Poisson tails P(N >= k) = P(N <= k) = alpha / 2.
+# │      interval solves the Poisson tails P(N >= k) = P(N <= k) = alpha / 2;
+# │      all in Scenarios.WarehouseSupervisedMissions.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_length, check
-
-def _poisson_cdf(k, mu):
-    """P(N <= k) for N ~ Poisson(mu)."""
-    term, total = math.exp(-mu), math.exp(-mu)
-    for j in range(1, k + 1):
-        term *= mu / j
-        total += term
-    return total
-
-def _garwood(k, alpha):
-    """Exact two-sided (1 - alpha) interval on a Poisson mean after k events."""
-
-    def _solve(f):
-        lo, hi = 0.0, 10.0 * (k + 10)
-        for _ in range(200):
-            mid = 0.5 * (lo + hi)
-            lo, hi = (mid, hi) if f(mid) > 0 else (lo, mid)
-        return 0.5 * (lo + hi)
-
-    lower = 0.0 if k == 0 else _solve(lambda mu: alpha / 2 - (1.0 - _poisson_cdf(k - 1, mu)))
-    upper = _solve(lambda mu: _poisson_cdf(k, mu) - alpha / 2)
-    return lower, upper
 
 class InterventionCampaign:
     """Supervised mission campaign: intervention burden, not failure rate."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_missions = 100  # category: illustrative; retrieval missions in the supervised campaign
-    n_int = 38  # category: illustrative; recorded interventions of the declared class
-    t_mission = MtbfCampaign.t_mission  # category: illustrative; one retrieval mission (MTBF campaign)
-    d_mission = MtbfCampaign.d_mission  # category: derived; mission distance at the drive limit
-    alpha = 0.05  # category: chosen; two-sided interval level
+    campaign = Scenarios.WarehouseSupervisedMissions  # category: illustrative (a supervised mission campaign)
+    n_missions = campaign.missions  # category: illustrative; retrieval missions in the supervised campaign
+    n_int = campaign.interventions  # category: illustrative; recorded interventions of the declared class
+    t_mission = campaign.mission.mission  # category: illustrative; one retrieval mission (MTBF campaign)
+    d_mission = campaign.mission.mission_distance  # category: derived; mission distance at the drive limit
+    alpha = campaign.alpha  # category: chosen; two-sided interval level
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_active = (n_missions * t_mission).to(hour)
-    d_total = (n_missions * d_mission).to(kilometer)
-    mtbi = (t_active / n_int).to(minute)
-    d_int = (n_int / d_total).to(1 / kilometer)
-    rate = (n_int / t_active).to(1 / hour)
-    _lo, _hi = _garwood(n_int, alpha)
-    rate_lo = (_lo / t_active).to(1 / hour)
-    rate_hi = (_hi / t_active).to(1 / hour)
+    t_active = campaign.active_time
+    d_total = campaign.distance
+    mtbi = campaign.mtbi
+    d_int = campaign.density
+    rate = campaign.rate
+    _lo, _hi = campaign.count_interval
+    rate_lo, rate_hi = campaign.rate_interval
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(t_active.to(hour).magnitude - 10.0) < 1e-9, "100 missions of 360 s must be 10 active hours")
@@ -1973,6 +1933,7 @@ class InterventionCampaign:
     check(abs(mtbi.to(minute).magnitude - 15.79) < 0.01, "MTBI should be about 15.8 min")
     check(abs(d_int.magnitude - 0.704) < 0.001, "Intervention density should be about 0.70 per km")
     check(abs(_lo - 26.89) < 0.01 and abs(_hi - 52.16) < 0.01, "Garwood interval for 38 events should be 26.9 to 52.2")
+    check(t_mission == MtbfCampaign.t_mission, "The supervised missions are the MTBF campaign's missions")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     n_missions_str = fmt_int(n_missions)
@@ -2013,7 +1974,8 @@ The corner cases an engineering team most needs to characterize, such as loss of
 # │ Context: "Peak loads and unvisited conditions" in @sec-evaluation-limits.
 # │ Show: an illustrative policy whose mean latch force sits under the contact
 # │       tripwire while its 99th-percentile peak exceeds the latch limit.
-# │ How: stipulated values; guards pin the ordering the prose relies on.
+# │ How: stipulated values in Scenarios.LatchForceTail; guards pin the
+# │      ordering the prose relies on.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -2023,8 +1985,9 @@ class MeanVsPeak:
     """A benign mean and a damaging tail on the latch."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    f_mean = 12.0 * newton  # category: illustrative; mean latch contact force over nominal trials
-    f_p99 = 115.0 * newton  # category: illustrative; 99th-percentile peak at an angular offset
+    tail = Scenarios.LatchForceTail  # category: illustrative (a benign mean and a damaging tail on the latch)
+    f_mean = tail.mean_force  # category: illustrative; mean latch contact force over nominal trials
+    f_p99 = tail.p99_force  # category: illustrative; 99th-percentile peak at an angular offset
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(f_mean < EvalMachine.f_trip, "The mean must sit below the contact tripwire")
@@ -2147,12 +2110,58 @@ During execution on a clean holdout unit, optional stopping and multi-look infla
 
 After the runs finish, a fifth distortion occurs when the denominator is quietly filtered, breaking the full-denominator condition of @sec-evaluation-trial-protocol. A team that discards runs ending on timeouts, emergency stops, sensor communication drops, or permission-path overrides as invalid test artifacts reports success over the surviving trials only. Every metric of @sec-evaluation-what-measured then moves in the flattering direction: ACR rises, MTBI grows, intervention density falls toward zero, and the reset time spent clearing a jammed gripper disappears from the budget. If the arm opens the door on nine of ten attempts and the tenth needs an operator takeover to stop the gripper wedging against the latch, removing that attempt raises the apparent success rate from 90 percent to 100 percent. The batch then reports an infinite MTBI. Infrastructure aborts, such as dropped wireless packets, stalled kernel threads, or bus brownouts, also stay in the denominator. A base that stalls in the aisle because an operating system thread locked has failed its mission, whichever subsystem caused it, and removing such aborts evaluates an abstraction rather than the deployed machine. When physical constraints or safety limits truncate a run before its deadline $\CompletionDeadline$ expires, the trial stays in the trial log as not unassisted ($\UnassistedSuccessIndicator_i = 0, {\TrialInterventionCount}_i \ge 1$), and for the unassisted-failure event it is right-censored rather than omitted. Reading survival on truncated trajectories as operational competence is the censored trial fallacy\index{Censored trial fallacy} of @sec-evaluation-evidence-regimes. Denominator filtering\index{Denominator filtering} is detected by cross-referencing low-level actuator telemetry and permission-path logs against the trial log, confirming that every power-on cycle, autonomy engagement, and physical reset corresponds to a recorded outcome.
 
+```{python}
+#| label: calc-evaluation-autosteer-denominator
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE AUTOSTEER CRASH-RATE DENOMINATOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @ws-evaluation-nhtsa-40-percent-mirage.
+# │ Show: the reported airbag-deployment rates before and after Autosteer
+# │       installation, and the same comparison on the cohort with complete
+# │       exposure.
+# │ How: Literature.IncidentReports (NHTSA PE 16-007; Quality Control Systems
+# │      2019) through Scenarios.AutosteerCrashRateDenominator.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt, fmt_int, check
+
+class AutosteerDenominator:
+    """A reported crash-rate drop against the cohort whose exposure is complete."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    record = Scenarios.AutosteerCrashRateDenominator  # category: literature (NHTSA PE 16-007; Quality Control Systems 2019)
+    rate_before = record.reported_before  # category: literature; crashes per million miles before installation
+    rate_after = record.reported_after  # category: literature; crashes per million miles after installation
+    cohort_before = record.cohort_before  # category: literature; complete-exposure cohort, before
+    cohort_after = record.cohort_after  # category: literature; complete-exposure cohort, after
+    exact_share = record.exact_exposure_share  # category: literature; vehicles with exact exposure
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    reported_change = record.reported_change
+    cohort_change = record.cohort_change
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(-0.40 < reported_change < -0.35, "The report rounds its drop to almost 40 percent")
+    check(cohort_change > 0, "The complete-exposure cohort must show a rise")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    rate_before_str = fmt(rate_before, precision=1)
+    rate_after_str = fmt(rate_after, precision=1)
+    cohort_before_str = fmt(cohort_before, precision=2)
+    cohort_after_str = fmt(cohort_after, precision=2)
+    exact_share_str = fmt_int(round(100 * exact_share))
+    cohort_change_str = fmt_int(round(100 * cohort_change))
+```
+
 ::: {#ws-evaluation-nhtsa-40-percent-mirage .callout-war-story title="The 2017 NHTSA Autopilot crash rate mirage"}
-**Context**: In January 2017, the National Highway Traffic Safety Administration (NHTSA) closed Preliminary Evaluation PE 16-007, which it had opened after a fatal Florida crash of a Model S operating in Autopilot mode [@nhtsa2017pe16007]. The closing report compared airbag-deployment crash rates in the subject Tesla vehicles before and after Autosteer was installed and stated that "the Tesla vehicles crash rate dropped by almost 40 percent after Autosteer installation," from 1.3 to 0.8 crashes per million miles.
+**Context**: In January 2017, the National Highway Traffic Safety Administration (NHTSA) closed Preliminary Evaluation PE 16-007, which it had opened after a fatal Florida crash of a Model S operating in Autopilot mode [@nhtsa2017pe16007]. The closing report compared airbag-deployment crash rates in the subject Tesla vehicles before and after Autosteer was installed and stated that "the Tesla vehicles crash rate dropped by almost 40 percent after Autosteer installation," from `{python} AutosteerDenominator.rate_before_str` to `{python} AutosteerDenominator.rate_after_str` crashes per million miles.
 
-**Mechanism**: The rate divided airbag deployments by miles driven before and after installation, and the report's own footnote noted that the rates "are for all miles travelled before and after Autopilot installation and are not limited to actual Autopilot use." The denominator therefore never measured exposure to Autosteer itself, and it was incomplete as well. A replication by Quality Control Systems Corporation found that the odometer reading at installation appears to have been reported for fewer than half of the vehicles, and that exact exposure before and after installation could be computed for only 13 percent of them [@qcs2019nhtsa]. The mileage NHTSA left uncounted, because it could be assigned to neither period, was concentrated among the vehicles with the least exposure before installation.
+**Mechanism**: The rate divided airbag deployments by miles driven before and after installation, and the report's own footnote noted that the rates "are for all miles travelled before and after Autopilot installation and are not limited to actual Autopilot use." The denominator therefore never measured exposure to Autosteer itself, and it was incomplete as well. A replication by Quality Control Systems Corporation found that the odometer reading at installation appears to have been reported for fewer than half of the vehicles, and that exact exposure before and after installation could be computed for only `{python} AutosteerDenominator.exact_share_str` percent of them [@qcs2019nhtsa]. The mileage NHTSA left uncounted, because it could be assigned to neither period, was concentrated among the vehicles with the least exposure before installation.
 
-**Impact**: In the one cohort with complete exposure in both periods, the airbag-deployment crash rate rose 59 percent after installation, from 0.76 to 1.21 per million miles, a result the replication qualified with "if these data are to be believed." Its authors concluded that the overall 40 percent reduction was "an artifact of the Agency's treatment of mileage information that is actually missing in the underlying dataset." The replication does not measure Autosteer's effect either. It shows that the published denominator could not support the reported reduction.
+**Impact**: In the one cohort with complete exposure in both periods, the airbag-deployment crash rate rose `{python} AutosteerDenominator.cohort_change_str` percent after installation, from `{python} AutosteerDenominator.cohort_before_str` to `{python} AutosteerDenominator.cohort_after_str` per million miles, a result the replication qualified with "if these data are to be believed." Its authors concluded that the overall 40 percent reduction was "an artifact of the Agency's treatment of mileage information that is actually missing in the underlying dataset." The replication does not measure Autosteer's effect either. It shows that the published denominator could not support the reported reduction.
 
 **Response**: The correction came from outside the agency and two years after the closing report, because the per-vehicle mileage records that exposed the denominator were released only after a Freedom of Information Act lawsuit against the Department of Transportation [@qcs2019nhtsa].
 

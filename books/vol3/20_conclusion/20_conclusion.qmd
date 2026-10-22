@@ -251,9 +251,12 @@ The introduction placed the remediation agent at a horizon of tens of turns, mut
 # │       with rho = 0.
 # │ Note: Agents.Remediation.OnCall workload profile (teaching assumptions,
 # │       not measured incident data), the profile Agent Economics prices for
-# │       this lighthouse.
+# │       this lighthouse. The attempt account is
+# │       Scenarios.RemediationIncidentAttempt, the time to mitigate
+# │       Scenarios.RepairRemediationApprovalEscrow, and the unchecked loss
+# │       Scenarios.RemediationCanaryPivotLoss.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents, USD
+from mlsysim import Agents, Scenarios, USD
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent, fmt_usd
 
 class IncidentPrice:
@@ -266,20 +269,21 @@ class IncidentPrice:
     c_approval = remed.approval_cost_per_attempt.to(USD).magnitude  # reviewer time x hourly rate
     p_acc = remed.acceptance_probability
     t_diag = remed.diagnosis_time.to("minute").magnitude
-    t_approve = remed.approval_decision_time.to("minute").magnitude
-    t_apply = remed.apply_verify_time.to("minute").magnitude
     p_bad = remed.wrong_change_probability
     impact = remed.wrong_change_impact.to(USD).magnitude
+    price = Scenarios.RemediationIncidentAttempt.result
+    mitigate = Scenarios.RepairRemediationApprovalEscrow.result
+    pivot = Scenarios.RemediationCanaryPivotLoss.result
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    c_attempt = c_model + c_env + c_assess + c_approval
-    c_eff = c_attempt / p_acc
-    model_share = c_model / c_attempt
-    approval_share = c_approval / c_attempt
-    t_total = t_diag + t_approve + t_apply
-    approve_time_share = t_approve / t_total
+    c_attempt = price.attempt_cost
+    c_eff = price.cost_per_accepted
+    model_share = price.token_share
+    approval_share = remed.approval_share
+    t_total = mitigate.time_to_mitigate.to("minute").magnitude
+    approve_time_share = mitigate.approval_share
     diag_time_share = t_diag / t_total
-    loss_unchecked = p_bad * impact * (1 - 0)
+    loss_unchecked = pivot.loss_without_check.to(USD).magnitude
     loss_vs_attempt = loss_unchecked / c_attempt
 
     # ┌── 3. GUARD (Invariants the prose relies on) ───────────────────────
@@ -547,24 +551,24 @@ Causal attribution is narrower than the execution record, because an audit log e
 # │       replay time to search that window.
 # │ How:  Paths = branching factor ^ steps. Window search time = window paths
 # │       x seconds per replayed check. All inputs are illustrative scenario
-# │       values, not measurements.
+# │       values, not measurements (Scenarios.CheckedWindowBlameSearch).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.fmt import fmt_math
 
 class CreditSearch:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    branch = 4  # scenario: candidate actions per step
-    horizon = 50  # scenario: steps in the task
-    window = 5  # scenario: steps between intermediate checks
-    t_check = 1.2 * second  # scenario: time per replayed check
+    search = Scenarios.CheckedWindowBlameSearch
+    branch = search.branching  # candidate actions per step
+    horizon = search.horizon  # steps in the task
+    window = search.window  # steps between intermediate checks
+    t_check = search.replay_time  # time per replayed check
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    full_paths = branch**horizon
-    full_exp = round(math.log10(full_paths))
-    window_paths = branch**window
-    search_time = (window_paths * t_check).to(minute)
+    full_paths = search.full_paths
+    full_exp = round(search.full_exponent)
+    window_paths = search.window_paths
+    search_time = search.window_search_time.to(minute)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check((branch, horizon, window) == (4, 50, 5), "Prose spells out four actions, fifty steps, and a five-step window")
@@ -620,29 +624,32 @@ Accepting an automated remediation safely depends on keeping four concerns apart
 # │ Show: Trajectories with a residual violating proposal; invalid share of a
 # │       passing set; interval widening when an observation window is halved.
 # │ How:  1 - (1 - eps)^H; Bayes precision of a check; 1/sqrt(window fraction).
-# │ Note: All inputs are illustrative scenario values, not measurements.
+# │ Note: All inputs are illustrative scenario values, not measurements:
+# │       Scenarios.ResidualViolationsFiftyTurns, ThirtyPercentValidPassingSet,
+# │       and HalvedHealthWindow.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_ratio
 
 class FallacyPrices:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    eps_violate = 0.001  # scenario: residual per-step rate of violating proposals after training
-    horizon = 50  # scenario: turns per trajectory
-    traj_per_day = 10_000  # scenario: trajectories per day
-    p_valid = 0.30  # scenario: fraction of candidates that are valid
-    alpha_fa = 0.05  # scenario: check's false-accept rate on invalid candidates
-    beta_miss = 0.10  # scenario: check's miss rate on valid candidates
-    window_share = 0.5  # scenario: shortened window as a fraction of the adopted one
+    residual = Scenarios.ResidualViolationsFiftyTurns
+    passing = Scenarios.ThirtyPercentValidPassingSet
+    window = Scenarios.HalvedHealthWindow
+    eps_violate = residual.step_violation  # residual per-step rate of violating proposals after training
+    horizon = residual.horizon  # turns per trajectory
+    traj_per_day = residual.trajectories_per_day
+    p_valid = 1 - passing.defect_rate  # fraction of candidates that are valid
+    alpha_fa = passing.false_accept_rate  # check's false-accept rate on invalid candidates
+    beta_miss = 1 - passing.valid_accept_rate  # check's miss rate on valid candidates
+    window_share = window.window_share  # shortened window as a fraction of the adopted one
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_any_violation = 1 - (1 - eps_violate) ** horizon
-    violating_per_day = p_any_violation * traj_per_day
-    pass_valid = p_valid * (1 - beta_miss)
-    pass_invalid = (1 - p_valid) * alpha_fa
-    precision_v = pass_valid / (pass_valid + pass_invalid)
-    invalid_share = 1 - precision_v
-    widen = 1 / math.sqrt(window_share)
+    p_any_violation = residual.trajectory_violation
+    violating_per_day = residual.violating_per_day
+    invalid_share = passing.result.posterior
+    widen = window.interval_widening
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.04 < p_any_violation < 0.06, "About one trajectory in twenty carries a violating proposal")
@@ -732,27 +739,28 @@ The incident connects the book's components through one concrete task rather tha
 # │ Show: Unchecked success at two horizons; cost per accepted task at the
 # │       baseline, with halved token prices, and with higher acceptance.
 # │ How:  (1 - eps)^H; C_eff = E[C_attempt] / p_acc.
-# │ Note: Hypothetical scenario values, matching @sec-vol3-intro-horizon-arithmetic.
+# │ Note: Hypothetical scenario values, matching @sec-vol3-intro-horizon-arithmetic
+# │       (Scenarios.UncheckedRepairHorizon and RepairAttemptCostLevers).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_usd
 
 class Fundamentals:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    step_ok = 0.99  # hypothetical per-step probability of a correct step
-    h_short, h_long = 10, 100  # horizons in turns
-    c_model = 1.30  # scenario USD of model tokens per attempt
-    c_other = 0.80  # scenario USD per attempt for sandbox, tests, and review
-    p_acc = 0.40  # probability an attempt is accepted
-    token_cut = 0.5  # fraction of token price removed by a cheaper tariff
-    p_acc_better = 0.60  # acceptance after a context or tool improvement
+    horizon = Scenarios.UncheckedRepairHorizon
+    levers = Scenarios.RepairAttemptCostLevers
+    step_ok = horizon.step_success  # hypothetical per-step probability of a correct step
+    h_short, h_long = horizon.short_horizon, horizon.long_horizon  # horizons in turns
+    p_acc = levers.acceptance  # probability an attempt is accepted
+    p_acc_better = levers.improved_acceptance  # acceptance after a context or tool improvement
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_short = step_ok**h_short
-    p_long = step_ok**h_long
-    c_attempt = c_model + c_other
-    c_eff = c_attempt / p_acc
-    c_eff_cheap = (c_model * (1 - token_cut) + c_other) / p_acc
-    c_eff_better = c_attempt / p_acc_better
+    p_short = horizon.result.success[h_short]
+    p_long = horizon.result.success[h_long]
+    c_attempt = levers.result.attempt_cost
+    c_eff = levers.result.cost_per_accepted
+    c_eff_cheap = levers.result.cost_per_accepted_cheaper_tokens
+    c_eff_better = levers.result.cost_per_accepted_improved
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(p_long < 0.5 < p_short, "Long horizon fails most unchecked tasks; short horizon passes most")

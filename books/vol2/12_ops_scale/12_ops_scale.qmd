@@ -230,18 +230,17 @@ import numpy as np
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 3.6))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-n_models_axis = np.arange(1, 501)
-monitoring_alerts = 20 * n_models_axis
-deployment_coordination = n_models_axis * np.log(n_models_axis)
-deployment_coordination[0] = 0
-dependency_conflicts = 0.5 * n_models_axis**2
+_load = Scenarios.OperationalLoadSketch
+n_models_axis = _load.model_counts()
+monitoring_alerts = _load.alerts(n_models_axis)
+deployment_coordination = _load.deployments(n_models_axis)
+dependency_conflicts = _load.conflicts(n_models_axis)
 
-total_operational_load = monitoring_alerts + deployment_coordination + dependency_conflicts
+total_operational_load = _load.total(n_models_axis)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-capacity_threshold = 2500
-crossing_idx = int(np.argmax(total_operational_load >= capacity_threshold))
-crossing_n = n_models_axis[crossing_idx]
+capacity_threshold = _load.team_capacity
+crossing_n = _load.crossing_models
 
 # Zone shading: neutral before the crossing, a light red wash once load exceeds capacity.
 ax.axvspan(crossing_n, 500, color=COLORS['RedL'], alpha=0.35, ec='none', zorder=0)
@@ -385,20 +384,22 @@ from mlsysim.fmt import check, fmt, fmt_percent, fmt_ratio, fmt_time, fmt_usd
 
 class PlatformRoi:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_models = 50
-    savings_h_per_month = 20  # Engineering time saved per model
-    engineer_rate = Infrastructure.Pricing.Labor.MlEngineerLoadedHourly.rate.to(USD / hour).magnitude  # loaded ML-engineer rate
-    platform_cost_per_month = 120000  # Platform team + infra
+    _platform = Scenarios.SharedPlatformBenefit50
+    n_models = _platform.models
+    savings_h_per_month = _platform.hours_saved.to("hour/month").magnitude  # Engineering time saved per model
+    engineer_rate = _platform.engineer_rate.to(USD / hour).magnitude  # loaded ML-engineer rate
+    platform_cost_per_month = _platform.platform_cost.to("USD/month").magnitude  # Platform team + infra
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_savings = n_models * savings_h_per_month * engineer_rate
-    roi_ratio = total_savings / platform_cost_per_month
+    total_savings = _platform.gross_benefit.to("USD/month").magnitude
+    roi_ratio = _platform.benefit_cost_ratio
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(roi_ratio == 1.25, f"ROI {roi_ratio} unexpected")
     # Scaling-threshold scenario: a smaller fleet flips the sign of the return.
-    n_models_low = 20
+    _platform_low = Scenarios.SharedPlatformBenefit20
+    n_models_low = _platform_low.models
     return_pct_high = (roi_ratio - 1) * 100  # return above platform cost at n_models
-    savings_low = n_models_low * savings_h_per_month * engineer_rate
-    loss_pct_low = (platform_cost_per_month - savings_low) / platform_cost_per_month * 100
+    savings_low = _platform_low.gross_benefit.to("USD/month").magnitude
+    loss_pct_low = (1 - _platform_low.benefit_cost_ratio) * 100
     check(return_pct_high == 25.0, f"Return {return_pct_high} unexpected")
     check(loss_pct_low == 50.0, f"Loss {loss_pct_low} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1232,7 +1233,7 @@ Joining a noon training example against a midnight batch table leaks six afterno
 
 [^fn-data-leakage-pitfall]: **Data leakage**\index{Data leakage!feature store risk}: Future information can inflate offline metrics when a model learns signals unavailable at prediction time. Shared feature infrastructure should enforce historical availability boundaries, but model and data owners must still specify the prediction moment and verify how features were computed. A timestamped join cannot remove future information already embedded inside an incorrectly constructed feature.
 
-::: {#fig-time-travel data-explore="mechanism-scene" data-explore-key="vol2:fig-time-travel" fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**: A training example at noon should see only the clicks already logged by noon (solid green, 4), not the clicks that arrive later (dashed gray). A naive join that reads the midnight batch value of `total_clicks_today` counts all 10 and leaks six future events into the example. A point-in-time join pairs each training event with feature values as they existed *at the event timestamp*, so the example contains only information that would have been available at inference time." fig-alt="Timeline from 00:00 to 24:00 with a dashed vertical line at 12:00 labeled training example at 12:00 and a dotted line at 24:00 labeled batch job. Four solid green click markers fall before noon and six dashed gray markers after it. A green bracket spans the four early clicks, labeled 4 clicks, with an arrow to a green box reading point-in-time join, total_clicks_today equals 4. A red dashed bracket spans all ten clicks, labeled 10 clicks by midnight, with an arrow to a red box reading naive join, midnight value, total_clicks_today equals 10."}
+::: {#fig-time-travel data-explore="original-v2-time-travel" data-explore-key="vol2:fig-time-travel" fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**: A training example at noon should see only the clicks already logged by noon (solid green, 4), not the clicks that arrive later (dashed gray). A naive join that reads the midnight batch value of `total_clicks_today` counts all 10 and leaks six future events into the example. A point-in-time join pairs each training event with feature values as they existed *at the event timestamp*, so the example contains only information that would have been available at inference time." fig-alt="Timeline from 00:00 to 24:00 with a dashed vertical line at 12:00 labeled training example at 12:00 and a dotted line at 24:00 labeled batch job. Four solid green click markers fall before noon and six dashed gray markers after it. A green bracket spans the four early clicks, labeled 4 clicks, with an arrow to a green box reading point-in-time join, total_clicks_today equals 4. A red dashed bracket spans all ten clicks, labeled 10 clicks by midnight, with an arrow to a red box reading naive join, midnight value, total_clicks_today equals 10."}
 ![](images/svg/time-travel.svg)
 
 :::
@@ -1271,35 +1272,33 @@ The query assumes that `feature_timestamp` records when the value became availab
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: point-in-time storage cost for the recommendation feature store.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import MILLION, BILLION, PB, byte
+from mlsysim.core.units import DAYS_PER_YEAR, PB, byte
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_time
 
 class FeatureStoreStorage:
     """Feature-history storage footprint for a 100M-user recommendation store."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    storage_users = 100 * MILLION
-    storage_features = 1000
-    storage_retention_years = 1
-    storage_update_interval_hr = 1
-    hours_per_year = 365 * 24
-    # scenario assumption: one stored row = 8 B value + 8 B entity key
-    # + 8 B event timestamp + 8 B availability timestamp (the point-in-time
-    # join needs both times). Full snapshots, no compression.
-    value_bytes = 8
-    key_bytes = 8
-    timestamp_bytes = 8
-    storage_bytes_per_value = (value_bytes + key_bytes + 2 * timestamp_bytes) * byte
+    # One stored row = value + entity key + event and availability timestamps
+    # (the point-in-time join needs both times). Full snapshots, no compression.
+    _history = Scenarios.RecommendationFeatureHistory
+    storage_users = _history.entities
+    storage_features = _history.features
+    storage_retention_years = round(_history.retention.to("day").magnitude / DAYS_PER_YEAR)
+    storage_update_interval_hr = round(_history.update_interval.to("hour").magnitude)
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    storage_versions_per_feature = storage_retention_years * hours_per_year / storage_update_interval_hr
-    storage_feature_values = storage_users * storage_features * storage_versions_per_feature
-    storage_total_bytes = storage_feature_values * storage_bytes_per_value
+    storage_bytes_per_value = _history.row_bytes
+    storage_versions_per_feature = _history.versions_per_feature
+    storage_feature_values = _history.values
+    storage_total_bytes = _history.total_bytes
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(storage_feature_values == 876_000_000_000_000, "Feature-history count drifted.")
     check(27 < storage_total_bytes.to(PB).magnitude < 29, "Storage should remain about 28 PB.")
+    check(_history.metadata_share == 0.75, "Prose says three quarters of each row is metadata")
     check(
-        (key_bytes + 2 * timestamp_bytes) / (value_bytes + key_bytes + 2 * timestamp_bytes) == 0.75,
-        "Prose says three quarters of each row is metadata",
+        all(q.to(byte).magnitude == 8 for q in (_history.value_bytes, _history.key_bytes, _history.timestamp_bytes))
+        and _history.timestamps == 2,
+        "Prose names an 8-byte value, an 8-byte key, and two 8-byte timestamps",
     )
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     storage_users_str = fmt_count(storage_users, scale="million", precision=0, scale_style="word", label="user")
@@ -1366,21 +1365,21 @@ class FeatureStoreLatency:
     """Request volume and per-request latency budget for the recommendation store."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    daily_recommendations = 1 * BILLION
-    features_per_recommendation = 100
-    seconds_per_day = 24 * 60 * 60
-    peak_traffic_min = 5
-    peak_traffic_max = 10
-    recommendation_budget_ms = 50
-    feature_budget_min_ms = 5
-    feature_budget_max_ms = 10
-    network_overhead_min_ms = 1
-    network_overhead_max_ms = 2
-    store_lookup_min_ms = 3
-    store_lookup_max_ms = 8
+    _lookups = Scenarios.DailyBillionRecommendationLookups
+    daily_recommendations = _lookups.request_rate.to("1/day").magnitude
+    features_per_recommendation = _lookups.reads_per_request
+    peak_traffic_min = 5  # scenario assumption: peak over mean, low
+    peak_traffic_max = 10  # scenario assumption: peak over mean, high
+    recommendation_budget_ms = _lookups.request_budget.to("ms").magnitude
+    feature_budget_min_ms = _lookups.lookup_budget_low.to("ms").magnitude
+    feature_budget_max_ms = _lookups.lookup_budget_high.to("ms").magnitude
+    network_overhead_min_ms = 1  # scenario assumption
+    network_overhead_max_ms = 2  # scenario assumption
+    store_lookup_min_ms = 3  # scenario assumption
+    store_lookup_max_ms = 8  # scenario assumption
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    lookups_per_day = daily_recommendations * features_per_recommendation
-    avg_lookups_per_s = lookups_per_day / seconds_per_day
+    lookups_per_day = _lookups.reads_per_day
+    avg_lookups_per_s = _lookups.reads_per_second
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(1.1 * 10**6 < avg_lookups_per_s < 1.2 * 10**6, "Average lookup rate should be about 1.16M/s.")
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
@@ -1460,26 +1459,28 @@ class DataQualityIncident:
     """A feature-computation bug that silently degrades CTR over five days."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    ctr_drop = 0.08
-    incident_days = 5
-    ctr_before = 0.042
-    ctr_after = 0.0387
-    freshness_slo_hr = 1
-    engagement_before = 0.42
-    engagement_after = 0.31
-    weekly_revenue = 15 * MILLION
-    alert_detection_hr = 4
-    feature_shift_threshold = 0.10
+    _incident = Scenarios.AggregationWindowRevenueIncident
+    ctr_drop = _incident.relative_drop
+    incident_days = round(_incident.undetected.to("day").magnitude)
+    ctr_before = _incident.metric_before
+    ctr_after = _incident.metric_after
+    freshness_slo_hr = round(_incident.freshness_slo.to("hour").magnitude)
+    engagement_before = _incident.feature_mean_before
+    engagement_after = _incident.feature_mean_after
+    weekly_revenue = _incident.weekly_revenue.to("USD").magnitude
+    alert_detection_hr = round(_incident.alerted.to("hour").magnitude)
+    feature_shift_threshold = _incident.shift_threshold
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    engagement_decline = (engagement_before - engagement_after) / engagement_before
-    revenue_impact = ctr_drop * weekly_revenue * incident_days / 7
-    impact_reduction = 1 - (alert_detection_hr / (incident_days * 24))
+    engagement_decline = -_incident.feature_shift
+    revenue_impact = _incident.undetected_loss.to("USD").magnitude
+    impact_reduction = _incident.impact_reduction
     engagement_decline_rounded = round(engagement_decline, 2)
     revenue_impact_rounded = round(revenue_impact / 1000) * 1000
     impact_reduction_rounded = round(impact_reduction, 2)
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(850_000 < revenue_impact < 860_000, "Revenue-impact example should remain about $857K.")
     check(0.96 < impact_reduction < 0.98, "Alert reduction should remain about 97%.")
+    check(round(-_incident.metric_change, 2) == ctr_drop, "The CTR values should round to the stated drop")
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     ctr_drop_pct_str = fmt_percent(ctr_drop, precision=0, commas=False, style="prose")
     incident_days_str = fmt_time(incident_days, "day", precision=0, commas=False, style="word")
@@ -1723,7 +1724,7 @@ Offline validation on static holdouts cannot catch a candidate model that double
 
 Shadow deployment\index{Shadow deployment!traffic mirroring}\index{Deployment!shadow mode} runs the new model alongside production, receiving copied inputs and logging outputs without returning them to users. @Fig-shadow-deployment contrasts mirroring to an isolated candidate (Panel A) with canary deployment (Panel B), which exposes a controlled share of traffic to candidate responses. Shadow execution can reveal defects absent from offline tests, but its resource consumption and external side effects still require containment. It also cannot reveal how users would react to outputs they never receive.
 
-::: {#fig-shadow-deployment data-explore="mechanism-scene" data-explore-key="vol2:fig-shadow-deployment" fig-env="figure" fig-pos="htb" fig-cap="**Shadow and Canary Deployment**: In shadow deployment (A), the proxy mirrors all production traffic to the candidate; users receive only the production response, and both outputs are compared offline. No user sees the candidate's output, but mirroring every request doubles inference load, so the shadow path needs its own capacity and must be isolated so it cannot slow production. In canary deployment (B), the splitter sends a small weighted slice of live traffic to the candidate (here the 5 percent stage) and widens it through the 1, 5, 25, 50, and 100 percent stages as evidence accumulates, rolling back if SLO or error metrics drift." fig-alt="Two panels. Panel A, shadow deployment: live traffic enters an amber traffic proxy. One lane carries a row of 20 solid request ticks labeled every request to the production model, whose output becomes the user response; a second dashed lane carries 20 hollow ticks labeled every request, copied, to a dashed candidate shadow model, labeled 2 times inference load, whose output is logged but not returned. Both outputs feed a violet offline diff box comparing outputs and latency. Panel B, canary deployment: live traffic enters an amber traffic splitter. The production lane, labeled 95 percent, carries 19 of the 20 request ticks with one empty slot, and the candidate canary lane, labeled 5 percent, carries the single tick from that slot. Beside it, five bars drawn to scale show canary shares of 1, 5, 25, 50, and 100 percent with the 5 percent bar highlighted, above a red dashed box reading roll back if SLO or error metrics drift."}
+::: {#fig-shadow-deployment data-explore="original-v2-shadow-deployment" data-explore-key="vol2:fig-shadow-deployment" fig-env="figure" fig-pos="htb" fig-cap="**Shadow and Canary Deployment**: In shadow deployment (A), the proxy mirrors all production traffic to the candidate; users receive only the production response, and both outputs are compared offline. No user sees the candidate's output, but mirroring every request doubles inference load, so the shadow path needs its own capacity and must be isolated so it cannot slow production. In canary deployment (B), the splitter sends a small weighted slice of live traffic to the candidate (here the 5 percent stage) and widens it through the 1, 5, 25, 50, and 100 percent stages as evidence accumulates, rolling back if SLO or error metrics drift." fig-alt="Two panels. Panel A, shadow deployment: live traffic enters an amber traffic proxy. One lane carries a row of 20 solid request ticks labeled every request to the production model, whose output becomes the user response; a second dashed lane carries 20 hollow ticks labeled every request, copied, to a dashed candidate shadow model, labeled 2 times inference load, whose output is logged but not returned. Both outputs feed a violet offline diff box comparing outputs and latency. Panel B, canary deployment: live traffic enters an amber traffic splitter. The production lane, labeled 95 percent, carries 19 of the 20 request ticks with one empty slot, and the candidate canary lane, labeled 5 percent, carries the single tick from that slot. Beside it, five bars drawn to scale show canary shares of 1, 5, 25, 50, and 100 percent with the 5 percent bar highlighted, above a red dashed box reading roll back if SLO or error metrics drift."}
 ![](images/svg/shadow-deployment.svg)
 
 :::
@@ -1826,13 +1827,14 @@ from mlsysim.fmt import check, fmt_count, fmt_time
 
 class AbSampleSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    z_alpha = 1.96
-    z_beta = 0.84
-    p_baseline = 0.05
-    delta = 0.005  # 0.5 percentage-point absolute effect
-    requests_per_day = 1_000_000
+    _test = Scenarios.CtrLiftExperiment
+    z_alpha = _test.z_alpha
+    z_beta = _test.z_beta
+    p_baseline = _test.baseline_rate
+    delta = _test.lift  # 0.5 percentage-point absolute effect
+    requests_per_day = _test.daily_requests.to("1/day").magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    n_exact = (z_alpha + z_beta) ** 2 * 2 * p_baseline * (1 - p_baseline) / delta**2
+    n_exact = _test.per_variant
     n_per_variant = round(n_exact, -3)  # ≈ 30,000 (reader-facing rounding)
     n_total = 2 * n_per_variant
     duration_h = n_total / requests_per_day * 24
@@ -1846,7 +1848,7 @@ class AbSampleSize:
 
 Each variant requires approximately `{python} AbSampleSize.per_variant_str`, totaling `{python} AbSampleSize.total_str`. If requests supply independent eligible observations with immediately available outcomes, 1 million requests per day split evenly between variants collects that sample in less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
 
-$$\RequiredUsersPerVariant = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.1552}{0.00000025} = 620{,}800$$
+$$\RequiredUsersPerVariant = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.155232}{0.00000025} = 620{,}928$$
 
 Now each variant needs approximately 621K samples. Under the same independence and outcome-availability assumptions, 1M total requests/day split evenly between the two variants collects that sample in about 30 hours. Required observation windows can extend either experiment beyond its collection time. Here, the lower baseline and smaller relative improvement also imply a much smaller absolute effect. At a fixed relative improvement, rarer outcomes require more observations; a fixed absolute effect would give a different comparison.
 
@@ -2024,13 +2026,14 @@ from mlsysim.fmt import check, fmt, fmt_math, fmt_multiple, fmt_percent
 
 class DeploymentSafety:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    full_cutover_pct = 1.0  # 100% blue-green cutover
-    canary_pct = 0.05  # 5% canary traffic
-    detection_time_h = 2  # hours to detect a major crash/bug
+    _exposure = Scenarios.CanaryVersusCutoverExposure
+    full_cutover_pct = _exposure.full_share  # 100% blue-green cutover
+    canary_pct = _exposure.canary_share  # 5% canary traffic
+    detection_time_h = _exposure.time_to_rollback.to("hour").magnitude  # hours to detect a major crash/bug
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Risk exposure is the expected number of broken requests
     # Ratio of exposure: (100% * T) / (5% * T)
-    risk_reduction = full_cutover_pct / canary_pct
+    risk_reduction = _exposure.exposure_ratio
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(risk_reduction == 20.0, f"Risk reduction {risk_reduction} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -2094,16 +2097,20 @@ from mlsysim.fmt import check, fmt, fmt_math
 
 class CanaryDuration:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    samples_needed = 10_000  # canary guardrail sample per variant (scenario input)
-    request_rate_per_h = 1_000_000  # requests/hour
-    p_1pct = 0.01
-    p_5pct = 0.05
+    _schedule = Scenarios.CanaryGuardrailSchedule
+    samples_needed = _schedule.samples_per_variant  # canary guardrail sample per variant
+    request_rate_per_h = _schedule.request_rate.to("1/hour").magnitude  # requests/hour
+    p_1pct = _schedule.stages[0][0]  # first configured stage, 1 percent
+    p_5pct = _schedule.stages[1][0]  # second configured stage, 5 percent
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_1pct_h = samples_needed / (request_rate_per_h * p_1pct)
-    t_5pct_h = samples_needed / (request_rate_per_h * p_5pct)
-    t_5pct_min = t_5pct_h * 60
+    t_1pct_h = _schedule.stage_minimum(p_1pct).to("hour").magnitude
+    t_5pct_h = _schedule.stage_minimum(p_5pct).to("hour").magnitude
+    t_5pct_min = _schedule.stage_minimum(p_5pct).to("minute").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(t_1pct_h == 1.0 and t_5pct_min == 12.0, "Canary durations drift")
+    # The prose lists the configured ladder and its total by hand.
+    check(_schedule.first_stage_buffer == 2 and round(_schedule.total.to("hour").magnitude) == 4,
+          "Configured ladder drifted from the prose (1% for 2 h, about 4 h in all)")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     t_1pct_eq_math = fmt_math(
         rf"\CanaryStageDuration = \frac{{{fmt(samples_needed, precision=0)}}}"
@@ -2160,17 +2167,18 @@ from mlsysim.core.units import SEC_PER_HOUR
 
 class SilentFailure:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    qps = 5000
-    t_detection_h = 24  # 1 day to detect and rollback
-    ctr_baseline = 0.05
-    ctr_new = 0.045  # 0.5 percentage-point absolute drop (10% relative)
-    value_per_click = 0.50  # $0.50 per click
+    _loss = Scenarios.DelayedAlertClickLoss
+    qps = _loss.request_rate.to("1/s").magnitude
+    t_detection_h = _loss.detection_time.to("hour").magnitude  # 1 day to detect and rollback
+    ctr_baseline = _loss.ctr_before
+    ctr_new = _loss.ctr_after  # 0.5 percentage-point absolute drop (10% relative)
+    value_per_click = _loss.value_per_click.to("USD").magnitude  # $0.50 per click
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    total_requests = qps * SEC_PER_HOUR * t_detection_h
-    ctr_drop = ctr_baseline - ctr_new  # 0.005 absolute CTR drop
-    lost_clicks = total_requests * ctr_drop
+    total_requests = _loss.requests
+    ctr_drop = _loss.ctr_drop  # 0.005 absolute CTR drop
+    lost_clicks = _loss.lost_clicks
     lost_clicks_count = round(lost_clicks)
-    total_loss = lost_clicks * value_per_click
+    total_loss = _loss.loss.to("USD").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(1000000 < total_loss < 1500000, f"Loss ${total_loss:,.0f} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -2454,16 +2462,17 @@ class FalseAlarmTax:
     """Quantify the impact of scale on monitoring noise."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_models = 100
-    n_metrics = 10
-    specificity = 0.997  # 3-sigma
-    check_interval_min = 5
+    _alerts = Scenarios.ThreeSigmaModelFleetAlerts
+    n_models = _alerts.models
+    n_metrics = _alerts.metrics_per_model
+    fpr = _alerts.false_positive_rate  # 3-sigma
+    check_interval_min = round(_alerts.check_interval.to("minute").magnitude)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    n_monitors = n_models * n_metrics
-    fpr = 1 - specificity
-    checks_per_day = (24 * 60) / check_interval_min
-    daily_alerts = n_monitors * checks_per_day * fpr
+    n_monitors = _alerts.monitors
+    specificity = 1 - fpr
+    checks_per_day = _alerts.checks_per_day
+    daily_alerts = _alerts.daily_false_alerts
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt_int
@@ -2528,15 +2537,16 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_math
 
 class TwoSigmaAlerts:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_models = 100
-    n_metrics = 10
-    fpr = 0.05  # 2-sigma false positive rate
-    check_interval_min = 5
-    dedup_resolved = 0.99  # 99% auto-resolved
+    _alerts = Scenarios.TwoSigmaModelFleetAlerts
+    n_models = _alerts.models
+    n_metrics = _alerts.metrics_per_model
+    fpr = _alerts.false_positive_rate  # 2-sigma false positive rate
+    check_interval_min = round(_alerts.check_interval.to("minute").magnitude)
+    dedup_resolved = _alerts.dedup_share  # 99% auto-resolved
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    checks_per_day = (24 * 60) / check_interval_min
-    daily_alerts = n_models * n_metrics * fpr * checks_per_day
-    remaining = daily_alerts * (1 - dedup_resolved)
+    checks_per_day = _alerts.checks_per_day
+    daily_alerts = _alerts.daily_false_alerts
+    remaining = _alerts.remaining_after_dedup
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(daily_alerts == 14_400 and abs(remaining - 144) < 1e-6, "Alert-volume drift")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -3170,14 +3180,15 @@ from mlsysim.fmt import check, fmt, fmt_usd
 
 class FleetCapexRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    _cluster = Systems.Clusters.Training_10K
-    cluster_gpus = _cluster.total_accelerators
-    cluster_nodes = _cluster.count
-    node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
+    _own = Scenarios.OwnVsRentH100Cluster10K
+    cluster_gpus = _own.gpus
+    node_price_usd = _own.node_price.to(USD).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    hardware_capex_usd = cluster_nodes * node_price_usd
+    cluster_nodes = _own.nodes
+    hardware_capex_usd = _own.hardware_capex.to(USD).magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(hardware_capex_usd - 437_500_000) < 1, "Cluster CapEx drift")
+    check(cluster_nodes == Systems.Clusters.Training_10K.count, "Scenario nodes should match the reference cluster")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     node_price_str = fmt_usd(node_price_usd, precision=0)
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
@@ -3246,24 +3257,27 @@ class InfraFrontierTcoClusterRecap:
     pue = Infrastructure.FacilityCooling.StateOfArt.pue
     lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
     cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    runs_per_year = 6  # scenario assumption: bursty training cadence
-    run_weeks_low, run_weeks_high = 2, 4  # scenario assumption: run length
+    _campaign = Scenarios.BurstyTrainingOn1KCluster
+    _own = _campaign.ownership
+    runs_per_year = _campaign.runs_per_year  # bursty training cadence
+    run_weeks_low = round(_campaign.run_low.to("week").magnitude)  # run length
+    run_weeks_high = round(_campaign.run_high.to("week").magnitude)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    hardware_capex_usd = cluster_nodes * node_price_usd
-    upfront_capex_usd = hardware_capex_usd + network_capex_usd + facility_capex_usd
-    lifecycle_total_usd = upfront_capex_usd + lifecycle_years * annual_opex_usd
-    runs_total = runs_per_year * lifecycle_years
-    cost_per_run_usd = lifecycle_total_usd / runs_total
+    hardware_capex_usd = _own.hardware_capex.to(USD).magnitude
+    upfront_capex_usd = _own.upfront.to(USD).magnitude
+    lifecycle_total_usd = _own.owned_total.to(USD).magnitude
+    runs_total = _campaign.runs
+    cost_per_run_usd = _campaign.owned_cost_per_run.to(USD).magnitude
     racks = cluster_nodes // _rack.nodes_per_rack
     facility_power = (racks * _rack.it_power * pue).to(MW)
     annual_electricity_usd = (facility_power * HOURS_PER_YEAR * hour).to(kWh).magnitude * electricity_rate
     electricity_opex_share = annual_electricity_usd / annual_opex_usd
     hardware_capex_share = hardware_capex_usd / upfront_capex_usd
-    run_hours_low = run_weeks_low * 7 * 24
-    run_hours_high = run_weeks_high * 7 * 24
-    cloud_run_low_usd = cluster_gpus * run_hours_low * cloud_gpu_hour_usd
-    cloud_run_high_usd = cluster_gpus * run_hours_high * cloud_gpu_hour_usd
+    run_hours_low = _campaign.run_low.to("hour").magnitude
+    run_hours_high = _campaign.run_high.to("hour").magnitude
+    cloud_run_low_usd = _campaign.rented_cost_per_run(_campaign.run_low).to(USD).magnitude
+    cloud_run_high_usd = _campaign.rented_cost_per_run(_campaign.run_high).to(USD).magnitude
     cloud_lifecycle_low_usd = cloud_run_low_usd * runs_total
     cloud_lifecycle_high_usd = cloud_run_high_usd * runs_total
     onprem_247_gpu_hour_usd = lifecycle_total_usd / (cluster_gpus * HOURS_PER_YEAR * lifecycle_years)
@@ -3273,6 +3287,8 @@ class InfraFrontierTcoClusterRecap:
     check(annual_electricity_usd < annual_opex_usd, "Electricity must fit inside the annual OpEx anchor")
     check(onprem_247_gpu_hour_usd < cloud_gpu_hour_usd, "Continuous on-premises use should undercut the cloud rate")
     check(runs_per_year == 6, "Prose spells out six runs per year")
+    check(_own.gpus == cluster_gpus and _own.opex_per_year.to(USD).magnitude == annual_opex_usd,
+          "The campaign's cluster should be the running 1,024-GPU example")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
@@ -3341,27 +3357,23 @@ class BuildVsBuyFigureScenario:
     """Cluster-level assumptions for the build-vs-buy figure."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    gpus = Systems.Clusters.Training_1K.total_accelerators
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
-    network_capex_usd = ReferenceStats.ClusterTcoProfile.Reference1KNetworkCapex.to(USD).magnitude
-    facility_capex_usd = ReferenceStats.ClusterTcoProfile.Reference1KFacilityCapex.to(USD).magnitude
-    annual_opex_usd = ReferenceStats.ClusterTcoProfile.Reference1KAnnualOpex.to(USD).magnitude
-    cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    utilization = Systems.Orchestration.target_cluster_utilization
-    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
+    _own = Scenarios.OwnVsRentH100Cluster1K
+    gpus = _own.gpus
+    gpus_per_node = _own.gpus_per_node
+    annual_opex_usd = _own.owned_cost_per_year.to(USD).magnitude
+    cloud_gpu_hour_usd = _own.rent_rate.to(USD / hour).magnitude
+    utilization = _own.utilization
+    lifecycle_years = _own.years
     horizon_months = 30  # scenario assumption: local plotting horizon
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    nodes = gpus // gpus_per_node
-    upfront_capex_usd = nodes * node_price_usd + network_capex_usd + facility_capex_usd
-    monthly_opex_usd = annual_opex_usd / 12
-    cloud_monthly_usd = gpus * cloud_gpu_hour_usd * utilization * HOURS_PER_YEAR / 12
+    nodes = _own.nodes
+    upfront_capex_usd = _own.upfront.to(USD).magnitude
+    monthly_opex_usd = _own.owned_cost_per_month.to(USD).magnitude
+    cloud_monthly_usd = _own.rent_per_month.to(USD).magnitude
     cloud_horizon_usd = cloud_monthly_usd * horizon_months
-    breakeven_month = upfront_capex_usd / (cloud_monthly_usd - monthly_opex_usd)
-    lifecycle_breakeven_util = (upfront_capex_usd + lifecycle_years * annual_opex_usd) / (
-        gpus * cloud_gpu_hour_usd * HOURS_PER_YEAR * lifecycle_years
-    )
+    breakeven_month = _own.crossover_months
+    lifecycle_breakeven_util = _own.breakeven_utilization
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(nodes == Systems.Clusters.Training_1K.count, "Training_1K should require 128 nodes")
@@ -3536,37 +3548,26 @@ class TcoScenario:
     """Namespace for build-vs-buy economics."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cloud_h100_hourly = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    dgx_h100_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
-    amortization_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
-    utilization = Systems.Orchestration.target_cluster_utilization
+    _node = Scenarios.OwnVsRentDgxH100Node
+    cloud_h100_hourly = _node.rent_rate.to(USD / hour).magnitude
+    gpus_per_node = _node.gpus_per_node
+    dgx_h100_price = _node.node_price.to(USD).magnitude
+    amortization_years = _node.years
+    utilization = _node.utilization
     spot_discount_low = Infrastructure.Pricing.Cloud.SpotDiscountLow.rate
     spot_discount_high = Infrastructure.Pricing.Cloud.SpotDiscountHigh.rate
     reserved_discount_low = Infrastructure.Pricing.Cloud.ReservedDiscountLow.rate
     reserved_discount_high = Infrastructure.Pricing.Cloud.ReservedDiscountHigh.rate
-    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude  # dollar/kWh
-    pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    h100_tdp = Hardware.Cloud.H100.tdp
+    electricity_rate = _node.electricity_price.to(USD / kWh).magnitude  # dollar/kWh
+    pue = _node.pue
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    hours_per_year = HOURS_PER_YEAR
-    cloud_node_annual = cloud_h100_hourly * gpus_per_node * hours_per_year * utilization
-
-    # On-prem: CapEx + OpEx
-    node_power = Systems.Racks.DGX_H100_4Node.total_power / Systems.Racks.DGX_H100_4Node.nodes_per_rack
-    annual_energy = node_power.to(kW) * (hours_per_year * hour) * utilization * pue
-    annual_elec = annual_energy.to(kWh).magnitude * electricity_rate
-    onprem_node_annual = (dgx_h100_price / amortization_years) + annual_elec
-
-    # Breakeven utilization (rough estimate)
-    # cloud_rate * hours * util = (price/3) + facility energy * elec_rate
-    # util * (cloud_rate * hours - power energy * elec_rate) = price/3
-    numerator = dgx_h100_price / amortization_years
-    denominator = (cloud_h100_hourly * gpus_per_node * hours_per_year) - (
-        (node_power.to(kW) * (hours_per_year * hour) * pue).to(kWh).magnitude * electricity_rate
-    )
-    breakeven = (numerator / denominator) * 100
+    # Owning: the node price amortized over its life plus energy drawn while
+    # busy; renting: on-demand GPU-hours for the same busy hours.
+    cloud_node_annual = _node.rent_per_year.to(USD).magnitude
+    annual_elec = (_node.utilization * _node.use_cost_per_year_full).to(USD).magnitude
+    onprem_node_annual = _node.owned_cost_per_year_amortized.to(USD).magnitude
+    breakeven = _node.breakeven_utilization * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(onprem_node_annual < cloud_node_annual, "On-prem should be cheaper at 80% util")
@@ -3624,31 +3625,31 @@ class TenKGpuClusterTco:
     """TCO for the 10,000-GPU reference cluster."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    gpus = Systems.Clusters.Training_10K.total_accelerators
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
-    network_capex_usd = ReferenceStats.ClusterTcoProfile.Reference10KNetworkCapex.to(USD).magnitude
-    facility_capex_usd = ReferenceStats.ClusterTcoProfile.Reference10KFacilityCapex.to(USD).magnitude
-    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
-    pue = Infrastructure.FacilityCooling.StateOfArt.pue
-    annual_staffing_usd = ReferenceStats.ClusterTcoProfile.Reference10KAnnualStaffing.to(USD).magnitude
-    cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    utilization = Systems.Orchestration.target_cluster_utilization
-    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
+    _own = Scenarios.OwnVsRentH100Cluster10K
+    gpus = _own.gpus
+    gpus_per_node = _own.gpus_per_node
+    node_price_usd = _own.node_price.to(USD).magnitude
+    network_capex_usd = _own.network_capex.to(USD).magnitude
+    facility_capex_usd = _own.facility_capex.to(USD).magnitude
+    electricity_rate = _own.electricity_price.to(USD / kWh).magnitude
+    pue = _own.pue
+    annual_staffing_usd = _own.staffing_per_year.to(USD).magnitude
+    cloud_gpu_hour_usd = _own.rent_rate.to(USD / hour).magnitude
+    utilization = _own.utilization
+    lifecycle_years = _own.years
     gpu_tdp = Hardware.Cloud.H100.tdp
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    nodes = gpus // gpus_per_node
-    hardware_capex_usd = nodes * node_price_usd
-    upfront_capex_usd = hardware_capex_usd + network_capex_usd + facility_capex_usd
-    annual_gpu_energy = (gpus * gpu_tdp).to(kW) * (HOURS_PER_YEAR * hour) * pue
-    annual_electricity_usd = annual_gpu_energy.to(kWh).magnitude * electricity_rate
-    annual_opex_usd = annual_electricity_usd + annual_staffing_usd
-    three_year_total_usd = upfront_capex_usd + lifecycle_years * annual_opex_usd
-    cloud_annual_usd = gpus * cloud_gpu_hour_usd * HOURS_PER_YEAR * utilization
-    cloud_three_year_usd = cloud_annual_usd * lifecycle_years
-    savings_usd = cloud_three_year_usd - three_year_total_usd
-    breakeven_utilization = three_year_total_usd / (gpus * cloud_gpu_hour_usd * HOURS_PER_YEAR * lifecycle_years)
+    nodes = _own.nodes
+    hardware_capex_usd = _own.hardware_capex.to(USD).magnitude
+    upfront_capex_usd = _own.upfront.to(USD).magnitude
+    annual_electricity_usd = _own.electricity_per_year_full.to(USD).magnitude
+    annual_opex_usd = _own.owned_cost_per_year.to(USD).magnitude
+    three_year_total_usd = _own.owned_total.to(USD).magnitude
+    cloud_annual_usd = _own.rent_per_year.to(USD).magnitude
+    cloud_three_year_usd = _own.rented_total.to(USD).magnitude
+    savings_usd = _own.savings.to(USD).magnitude
+    breakeven_utilization = _own.breakeven_utilization
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(nodes == 1250, f"Expected 1,250 nodes, got {nodes}")
@@ -4680,28 +4681,27 @@ from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_usd
 
 class TcoComparison:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_training = 5_000
-    s_inference = 2_000
-    s_data = 500
-    s_iteration = 40_000
-
-    p_training = 150_000
-    p_inference = 400_000
-    p_data = 80_000
-    p_iteration = 350_000
+    _startup, _company = Scenarios.StartupOneModelTco, Scenarios.FiftyModelCompanyTco
+    s_training = _startup.monthly["training"].to("USD/month").magnitude
+    s_inference = _startup.monthly["inference"].to("USD/month").magnitude
+    s_data = _startup.monthly["data"].to("USD/month").magnitude
+    s_iteration = _startup.monthly["iteration"].to("USD/month").magnitude
+    p_training = _company.monthly["training"].to("USD/month").magnitude
+    p_inference = _company.monthly["inference"].to("USD/month").magnitude
+    p_data = _company.monthly["data"].to("USD/month").magnitude
+    p_iteration = _company.monthly["iteration"].to("USD/month").magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    s_total = s_training + s_inference + s_data + s_iteration
-    p_total = p_training + p_inference + p_data + p_iteration
-
-    sc_training = p_training / s_training
-    sc_inference = p_inference / s_inference
-    sc_data = p_data / s_data
-    sc_iteration = p_iteration / s_iteration
-    sc_total = p_total / s_total
-
-    s_dom_pct = round(s_iteration / s_total * 100)
-    p_dom_pct = round(p_inference / p_total * 100)
+    s_total = _startup.total.to("USD/month").magnitude
+    p_total = _company.total.to("USD/month").magnitude
+    _scale = _company.ratios_to(_startup)
+    sc_training = _scale["training"]
+    sc_inference = _scale["inference"]
+    sc_data = _scale["data"]
+    sc_iteration = _scale["iteration"]
+    sc_total = _scale["total"]
+    s_dom_pct = round(_startup.shares["iteration"] * 100)
+    p_dom_pct = round(_company.shares["inference"] * 100)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(s_total == 47_500, f"Startup total ({s_total})")
@@ -4709,6 +4709,7 @@ class TcoComparison:
     check(abs(sc_total - 20.6) < 0.1, f"Total scaling ({sc_total:.1f})")
     check(s_dom_pct == 84, f"Startup dominant pct ({s_dom_pct})")
     check(p_dom_pct == 41, f"Production dominant pct ({p_dom_pct})")
+    check(_startup.dominant == "iteration" and _company.dominant == "inference", "Dominant terms drifted")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     s_training_usd_str = fmt_usd(s_training, precision=0, per="month")
@@ -4795,16 +4796,17 @@ from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_text, fmt_time, f
 
 class OptimizationBreakeven:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    impl_cost = 80_000
-    infer_monthly = 400_000
-    infer_reduction = 0.40
-    train_monthly = 150_000
-    train_reduction = 0.30
+    _infer, _train = Scenarios.Int8InferencePayback, Scenarios.TrainingOptimizationPayback
+    impl_cost = _infer.implementation_cost.to("USD").magnitude
+    infer_monthly = _infer.monthly_bill.to("USD/month").magnitude
+    infer_reduction = _infer.reduction
+    train_monthly = _train.monthly_bill.to("USD/month").magnitude
+    train_reduction = _train.reduction
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    infer_savings = infer_monthly * infer_reduction
-    infer_breakeven_months = impl_cost / infer_savings
-    train_savings = train_monthly * train_reduction
-    train_breakeven_months = impl_cost / train_savings
+    infer_savings = _infer.monthly_savings.to("USD/month").magnitude
+    infer_breakeven_months = _infer.payback.to("month").magnitude
+    train_savings = _train.monthly_savings.to("USD/month").magnitude
+    train_breakeven_months = _train.payback.to("month").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(infer_savings == 160_000 and infer_breakeven_months == 0.5, "Inference breakeven drift")
     check(train_savings == 45_000 and abs(train_breakeven_months - 1.8) < 0.05, "Training breakeven drift")

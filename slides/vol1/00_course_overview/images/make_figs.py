@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 0 (course overview).
 
-Every value is sourced, and every derived value comes from calcs.py:
-  - Google's measured median Gemini text prompt, 0.24 Wh = 864 J
-    (Elsworth et al. 2025); charging a phone, about 40,000 J (Model
-    Serving, Napkin Math 13.5).
-  - Daily chat prompts: about 2.5 billion (OpenAI to Axios, July 2025);
-    GPT-3 training, 1,287 MWh (Patterson et al. 2021).
-  - Datacenter electricity: 415 TWh in 2024, about 945 TWh projected for 2030
-    (IEA, Energy and AI, 2025, executive summary).
-  - Deployment power: cloud 3 MW, edge 200 W, mobile 5 W, TinyML 1 mW
-    (System Paradigms, Sec. 2.1).
+Every value comes from calcs.py, which reads MLSysIM:
+  - Google's measured median Gemini text prompt (Literature.Series.
+    GeminiPromptEnergy) against charging a phone (ReferenceStats.EnergyAnchors).
+  - One day of ChatGPT prompts against training GPT-3 once
+    (Scenarios.ChatGptDayAtGeminiMedianPrompt).
+  - Datacenter electricity, 2024 and the 2030 projection
+    (Literature.DatacenterElectricity, IEA).
+  - Deployment power by tier (the Lecture 2 power ladder).
   - The stack with each lecture on its layer (kit stack_build8 canvas).
 
 Run from this folder: python3 make_figs.py
@@ -43,39 +41,36 @@ sp.save = _save_with_commas
 # One measured prompt against charging a phone, on a linear axis so the
 # ratio reads true (two steps). Values from calcs.py.
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 sp.hbars_steps(out / "energy_answer", [
-    ("One prompt (Google, measured)", round(calcs.google_j), "compute",
-     f"{calcs.google_j:,.0f} J"),
-    ("Charging a phone", calcs.PHONE_J, "neutral",
-     f"{calcs.PHONE_J:,} J = {calcs.PHONE_J / calcs.google_j:.0f} prompts"),
+    ("One prompt (Google, measured)", num("prompt_j"), "compute", f"{val('prompt_j')} J"),
+    ("Charging a phone", num("phone_j"), "neutral",
+     f"{val('phone_j')} J = {val('phone_prompts')} prompts"),
 ], "J", log=False, xlabel="Energy (joules)")
 
-# Fleet scale: about 2.5 billion ChatGPT prompts a day (OpenAI to Axios,
-# July 2025) at Google's measured 0.24 Wh each, against the energy to train
-# GPT-3 once (Patterson et al. 2021). Estimate: the per-prompt figure is
+# Fleet scale: one day of ChatGPT prompts at Google's measured median prompt,
+# against the energy to train GPT-3 once. Estimate: the per-prompt figure is
 # Gemini's median, applied to another service.
 sp.hbars_steps(out / "fleet_daily", [
-    ("Chat prompts, one day (estimate)", round(calcs.fleet_mwh), "compute",
-     f"about {calcs.fleet_mwh:,.0f} MWh"),
-    ("Training GPT-3, once", calcs.GPT3_MWH, "neutral", f"{calcs.GPT3_MWH:,} MWh"),
+    ("Chat prompts, one day (estimate)", num("fleet_mwh"), "compute", f"about {val('fleet_mwh')} MWh"),
+    ("Training GPT-3, once", num("gpt3_mwh"), "neutral", f"{val('gpt3_mwh')} MWh"),
 ], "MWh", log=False, xlabel="Energy (megawatt-hours)", size=sp.SHORT)
 
 # Datacenter electricity (IEA, Energy and AI, 2025)
 sp.hbars_steps(out / "datacenter_electricity", [
-    ("2024", calcs.DC_TWH_2024, "neutral"),
-    ("2030 (projected)", calcs.DC_TWH_2030, "danger"),
+    ("2024", num("dc_twh_2024"), "neutral"),
+    ("2030 (projected)", num("dc_twh_2030"), "danger"),
 ], "TWh", log=False, xlabel="Datacenter electricity per year (TWh)",
     size=sp.SHORT)
 
-# One field, four machines: power envelope by deployment tier
-# (System Paradigms, Sec. 2.1). Tick labels at 14 pt for the column slot.
+# One field, four machines: power envelope by deployment tier (Lecture 2's
+# ladder). Tick labels at 14 pt for the column slot.
+TIER_LABEL = {"Cloud": f"{val('cloud_mw')} MW", "Edge": f"{val('edge_w')} W",
+              "Mobile": f"{val('mobile_w')} W", "TinyML": f"{val('tiny_mw')} mW"}
 with sp.plt.rc_context({"xtick.labelsize": 14}):
     sp.hbars_steps(out / "power_tiers", [
-        ("Cloud", 3e6, "neutral", "3 MW"),
-        ("Edge", 200, "neutral", "200 W"),
-        ("Mobile", 5, "neutral", "5 W"),
-        ("TinyML", 1e-3, "neutral", "1 mW"),
+        (name, watts, "neutral", TIER_LABEL[name]) for name, watts in calcs.TIERS
     ], "W", xlabel="Power (watts, log scale)", value_fmt="{:g}")
 
 # The stack as the map of the course: the kit's final stack (same canvas, so
@@ -93,7 +88,7 @@ ON_LAYER = {"Hardware": ["L11", "L11b", "L12", "L12b"], "Frameworks": ["L7"],
             "Operations": ["L14", "L14b"], "Applications": ["L15", "L15b"]}
 
 
-def badge(x, y, w, h, label, size=24):
+def badge(x, y, w, h, label, size=28):
     return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{h / 2}" '
             f'fill="#FFFFFF" stroke="{ACCENT}" stroke-width="1.5"/>\n'
             f'<text x="{x + w / 2}" y="{y + h / 2}" font-family="Helvetica, Arial, '
@@ -106,12 +101,12 @@ for layer, labels in ON_LAYER.items():
     y0 = LAYER_Y[layer]
     right = 688
     for label in reversed(labels):
-        w = 66 if len(label) <= 3 else 80
-        badges += badge(right - w, y0 + 7, w, 40, label)
+        w = 72 if len(label) <= 3 else 88
+        badges += badge(right - w, y0 + 4, w, 46, label)
         right -= w + 6
 # Data lectures sit inside the data bar, below its label
-for label, y in (("L4", 300), ("L4b", 352), ("L9", 404)):
-    badges += badge(715, y, 54, 40, label, 24 if len(label) <= 2 else 20)
+for label, y in (("L4", 292), ("L4b", 348), ("L9", 404)):
+    badges += badge(715, y, 54, 46, label, 26 if len(label) <= 2 else 21)
 (out / "stack_lectures.svg").write_text(stack_svg.replace("</svg>", badges + "</svg>"))
 
 print("figures written")

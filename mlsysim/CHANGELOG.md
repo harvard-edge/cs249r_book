@@ -212,6 +212,8 @@ Release body. Omit any section that has no entries for a given release.
 
 ### Infrastructure & Systems Registry
 
+- **PUE tier provenance (2026-10-21)**: each `Infrastructure.FacilityCooling` tier now cites its own primary source: liquid-cooled 1.06 (NREL ESIF), best air-cooled 1.12 (Microsoft design PUE, 2022), industry average 1.55 (Uptime 2022) and 1.58 (Uptime 2023, display name "Industry Average (2023)", formerly "Legacy"), simple air 1.5 (LBNL small server rooms, 2013), state of the art 1.10 (Google fleet TTM, Q4 2023). No values changed.
+
 - `Infrastructure.FacilityCooling.Typical` PUE is 1.55, the Uptime Institute
   2022 survey's global average annual PUE, replacing 1.40. The duplicate
   `FacilityCooling.UptimeSurvey2022Average` anchor (also 1.55, same source) is

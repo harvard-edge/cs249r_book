@@ -1,34 +1,26 @@
 #!/usr/bin/env python3
 """Plots and diagrams for Volume II, Lecture 6 (Distributed Training).
 
-Every value is from the rendered chapter (Distributed Training) unless noted.
+Every value is read from MLSysIM through calcs.py (the same Scenarios.* the
+chapter reads) or from a cited Literature series:
 
-  - Hook: Goyal et al. 2017, Table 1 (ResNet-50, ImageNet top-1 validation
-    error, mean of 5 runs): batch 256 23.60%; batch 8k with no warmup 24.84%,
-    constant warmup 25.88%, gradual warmup 23.74%.
-  - Batch sweep: Goyal et al. 2017, legends of Figure 3 (gradual warmup and
-    the linear scaling rule): 128 23.49, 256 23.60, 512 23.48, 1k 23.53,
-    2k 23.49, 4k 23.56, 8k 23.74, 16k 24.79, 32k 27.55, 64k 33.96.
-  - 175B data-parallel step: 2.1 s compute, 11.9 s exposed AllReduce,
-    efficiency 15% (Napkin Math 6.5).
-  - GPT-2: 1,800 ms compute; 11.7 ms NVLink; 4,661.7 ms over 10 GbE;
-    99.4% and 27.9% (Napkin Math 6.1, 6.2).
-  - MLPerf Training: MLCommons results v3.1 to v5.1 via MLSysIM
-    (Literature.Series.MLPerfTrainingLLMScaling), the chapter's five series.
-  - Straggler: 0.99^N, derived from the chapter's 1% per-GPU example (section 6.3.1).
+  - Hook and batch sweep: Literature.Series.GoyalLargeMinibatchResNet50
+    (Goyal et al. 2017, Table 1 and Figure 3).
+  - 175B data-parallel step and the hybrid scoreboard: Scenarios.Gpt3DataParallel1K,
+    Gpt3TensorDataParallel1K, Gpt3ThreeDParallel1K.
+  - GPT-2 inside and across nodes: Scenarios.Gpt2DataParallelOneNode and
+    Gpt2DataParallelFourNodes10GbE.
+  - MLPerf Training: Scenarios.MLPerfLlmScalingSeries.
+  - Straggler: Scenarios.StragglerFreeStep1K (a^N, calc_all_up_availability).
   - Critical batch: gradient-noise model of McCandlish et al. 2018 as the
-    chapter plots it, steps 1 + Bcrit/B and samples 1 + B/Bcrit (section 6.4.6).
-  - Memory wall: Epoch AI notable models x 16 B per parameter, and
-    accelerator capacities, via MLSysIM, as in the chapter's figure 1.
-  - ZeRO: 7B model, 16 B per parameter, 64 GPUs (Napkin Math 6.4, table 3);
-    ZeRO-1 and ZeRO-2 per-GPU values derived from table 3's convention.
-  - Pipeline: (p-1)/(m+p-1) (section 6.5.2); GPipe p = m = 4 leaves 6 of 14 slots
-    idle; naive layer split leaves 6 of 8 idle (figures 12, 13).
-  - Tensor parallelism: GPT-3 layer split 8 ways, 1.9 ms compute, 0.4 ms over
-    NVLink, 3.5 ms over one NDR port (Systems Perspective 6.1).
-  - Megatron-LM weak scaling: Shoeybi et al. 2019, Figure 5.
-  - Hybrid configurations: section 6.6 (15%, 83%, 87%; 2,800, 350, 87.5 GB
-    per GPU; about 24 GB with ZeRO-1).
+    chapter plots it, steps 1 + Bcrit/B and samples 1 + B/Bcrit (dimensionless).
+  - Memory wall: Scenarios.NotableModelMemoryWall.
+  - ZeRO: Scenarios.Llama2_7B_ZeroStages64.
+  - Pipeline: Scenarios.NaiveFourStagePipeline, GPipeFourStageWalkthrough,
+    Pipeline8Stage32Micro, Pipeline16Stage32Micro (calc_pipeline_bubble).
+  - Tensor parallelism: Scenarios.Gpt3TensorParallelLayerTp8.
+  - Megatron-LM weak scaling: Literature.Series.MegatronLmWeakScaling.
+  - The top half of the scaling-wall figure and the timelines are schematic.
 
 Run from this folder: python make_figs.py
 """
@@ -40,8 +32,11 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
+sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics import calc_all_up_availability, calc_pipeline_bubble  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -108,18 +103,20 @@ class SVG:
 # ---------------------------------------------------------------------------
 # 1. Hook: Goyal et al. 2017, Table 1 (step 1 baseline only, then the 8k runs)
 # ---------------------------------------------------------------------------
-rows = [("8 GPUs, batch 256", 23.60, "neutral"),
-        ("256 GPUs, batch 8k, no warmup", 24.84, "danger"),
-        ("256 GPUs, batch 8k, gradual warmup", 23.74, "data")]
+k8 = f"{val('goyal_batch_k')}k"
+rows = [(f"{val('goyal_base_gpus')} GPUs, batch {val('goyal_base_batch')}", "goyal_err_base", "neutral"),
+        (f"{val('goyal_gpus')} GPUs, batch {k8}, no warmup", "goyal_err_nowarm", "danger"),
+        (f"{val('goyal_gpus')} GPUs, batch {k8}, gradual warmup", "goyal_err_warm", "data")]
 def hook_warmup(path, k, size, fs, names):
     fig, ax = plt.subplots(figsize=size)
-    for i, (name, v, ck) in enumerate(rows):
+    for i, (name, key, ck) in enumerate(rows):
         y = 2 - i
         shown = i < k
+        v = num(key)
         ax.barh(y, v - 23.0, left=23.0, color=C[ck], height=0.6, alpha=1 if shown else 0)
         ax.text(22.97, y, names[i], ha="right", va="center", fontsize=fs, fontweight="bold",
                 color=C["text"])
-        label(ax, v + 0.04, y, f"{v:.2f}%", C[ck], shown, va="center", fontsize=fs + 0.5)
+        label(ax, v + 0.04, y, f"{val(key)}%", C[ck], shown, va="center", fontsize=fs + 0.5)
         if not shown:
             ax.text(23.1, y, "?", va="center", fontsize=fs + 3, fontweight="bold", color=C["neutral"])
     ax.set_xlim(23.0, 25.6)
@@ -137,7 +134,7 @@ def hook_warmup(path, k, size, fs, names):
 for k in (1, 3):
     hook_warmup(out / f"hook_warmup_step{k}.svg", k, (5.8, 1.6), 12.5, [r[0] for r in rows])
 hook_warmup(out / "hook_warmup_col.svg", 3, (5.4, 3.0), 15,
-            ["batch 256", "8k, no warmup", "8k, warmup"])
+            [f"batch {val('goyal_base_batch')}", f"{k8}, no warmup", f"{k8}, warmup"])
 
 # ---------------------------------------------------------------------------
 # 2. Data-parallel flow (diagram, 3 steps): replicas, local gradients, AllReduce
@@ -182,13 +179,15 @@ for k in (1, 2):
     a1.set_ylim(-0.5, 1.7)
     a1.axis("off")
     sh = k >= 2
-    a2.barh(0, 2.1, color=V["c1"], height=0.6, alpha=1 if sh else 0)
-    a2.barh(0, 11.9, left=2.1, color=V["c2"], height=0.6, alpha=1 if sh else 0)
-    a2.text(-0.15, 0, "175B, 1,024 GPUs", ha="right", va="center", fontsize=13.5, fontweight="bold",
-            alpha=1 if sh else 0)
-    label(a2, 1.05, 0, "2.1 s", "white", sh, ha="center", va="center", fontsize=11)
-    label(a2, 8.0, 0, "11.9 s exposed AllReduce", "white", sh, ha="center", va="center", fontsize=13)
-    label(a2, 14.2, 0, "15%", C["danger"], sh, va="center", fontsize=15)
+    tc, te = num("t_compute_s"), num("exposed_a_s")
+    a2.barh(0, tc, color=V["c1"], height=0.6, alpha=1 if sh else 0)
+    a2.barh(0, te, left=tc, color=V["c2"], height=0.6, alpha=1 if sh else 0)
+    a2.text(-0.15, 0, f"{val('params_b')}B, {val('ref_gpus')} GPUs", ha="right", va="center", fontsize=13.5,
+            fontweight="bold", alpha=1 if sh else 0)
+    label(a2, tc / 2, 0, f"{val('t_compute_s')} s", "white", sh, ha="center", va="center", fontsize=11)
+    label(a2, 8.0, 0, f"{val('exposed_a_s')} s exposed AllReduce", "white", sh, ha="center",
+          va="center", fontsize=13)
+    label(a2, tc + te + 0.2, 0, f"{val('eff_a_pct')}%", C["danger"], sh, va="center", fontsize=15)
     a2.set_xlim(0, 16.5)
     a2.set_ylim(-0.5, 0.5)
     a2.set_yticks([])
@@ -206,20 +205,23 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    data = [("8 GPUs, one node\n(NVLink)", 1800, 11.7, "99.4%"),
-            ("32 GPUs, four nodes\n(10 Gb Ethernet)", 1800, 4661.7, "27.9%")]
-    for i, (name, comp, comm, eff) in enumerate(data):
+    data = [(f"{val('gpt2_gpus_1')} GPUs, one node\n(NVLink)", num("gpt2_step_ms"), num("gpt2_comm1_ms"),
+             f"{val('gpt2_eff1_pct')}%", val("gpt2_step1_ms")),
+            (f"{val('gpt2_gpus_4')} GPUs, four nodes\n({val('eth10_gbps')} Gb Ethernet)", num("gpt2_step_ms"),
+             num("gpt2_comm4_ms"), f"{val('gpt2_eff4_pct')}%", val("gpt2_step4_round_ms"))]
+    for i, (name, comp, comm, eff, total) in enumerate(data):
         y = 1 - i
         shown = i == 0 or k >= 2
         a = 1 if shown else 0
         ax.barh(y, comp, color=V["c1"], height=0.6, alpha=a)
         ax.barh(y, comm, left=comp, color=V["c2"], height=0.6, alpha=a)
         ax.text(-60, y, name, ha="right", va="center", fontsize=12, fontweight="bold")
-        label(ax, comp + comm + 80, y, f"{comp + comm:,.0f} ms   {eff}", C["data"] if i == 0 else C["danger"],
+        label(ax, comp + comm + 80, y, f"{total} ms   {eff}", C["data"] if i == 0 else C["danger"],
               shown, va="center", fontsize=12.5)
     label(ax, 900, 1, "compute", "white", True, ha="center", va="center", fontsize=11)
     label(ax, 900, 0, "compute", "white", k >= 2, ha="center", va="center", fontsize=11)
-    label(ax, 4100, 0, "communication 4,662 ms", "white", k >= 2, ha="center", va="center", fontsize=11)
+    label(ax, 4100, 0, f"communication {val('gpt2_comm4_round_ms')} ms", "white", k >= 2, ha="center",
+          va="center", fontsize=11)
     ax.set_xlim(0, 8500)
     ax.set_ylim(-0.5, 1.5)
     ax.set_yticks([])
@@ -230,24 +232,15 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 5. MLPerf Training: measured time to train against accelerators (real data)
 # ---------------------------------------------------------------------------
-from mlsysim import Hardware, Literature  # noqa: E402
-from mlsysim.core.units import BYTES_TRAINING_STATE_MIXED_PRECISION, GB, GiB  # noqa: E402
-
-rows_ml = Literature.Series.MLPerfTrainingLLMScaling.entries
-specs = [
-    ("GPT-3, H100 (NVIDIA Eos)", ("v3.1", "NVIDIA", "gpt3", "H100-SXM5"), C["memory"]),
-    ("GPT-3, TPU v5p", ("v4.1", "Google", "gpt3", "TPU-v5p"), C["data"]),
-    ("GPT-3, TPU Trillium", ("v4.1", "Google", "gpt3", "TPU-trillium"), C["compute"]),
-    ("Llama 3.1 405B, H100", ("v5.0", "NVIDIA", "llama31_405b", "H100-SXM5"), C["network"]),
-    ("Llama 3.1 405B, GB200", ("v5.0", "IBM+CoreWeave", "llama31_405b", "Blackwell"), C["danger"]),
-]
+# Short legend names for the scenario's five series, in its order.
+names_ml = [("GPT-3, H100 (NVIDIA Eos)", C["memory"]), ("GPT-3, TPU v5p", C["data"]),
+            ("GPT-3, TPU Trillium", C["compute"]), ("Llama 3.1 405B, H100", C["network"]),
+            ("Llama 3.1 405B, GB200", C["danger"])]
+ml = K.MLPERF.result
 fig, ax = plt.subplots(figsize=(5.8, 2.4))
-for name, (rnd, sub, bench, acc), col in specs:
-    pts = sorted([r for r in rows_ml if r["round"] == rnd and r["submitter"].startswith(sub)
-                  and r["benchmark"] == bench and acc in r["accelerator"]], key=lambda r: r["accelerators"])
+for (name, col), pts, eff, (_, (_, _, _, acc)) in zip(names_ml, ml.series, ml.efficiencies, K.MLPERF.specs):
     n = [r["accelerators"] for r in pts]
     t = [r["score_minutes"] for r in pts]
-    eff = (t[0] * n[0]) / (t[-1] * n[-1])
     ax.plot(n, t, "-o", ms=5, lw=2.2, color=col, zorder=3)
     ax.plot([n[0], n[-1]], [t[0], t[0] * n[0] / n[-1]], "--", lw=1.2, color=col, alpha=0.7)
     dy = -11 if acc == "TPU-trillium" else (5 if acc == "Blackwell" else 0)
@@ -275,9 +268,12 @@ sp.save(fig, out / "mlperf_scaling.svg")
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(5.4, 3.4))
 N = np.logspace(0, 4, 200)
-ax.plot(N, 100 * 0.99 ** N, color=V["bad"], lw=3)
-for n_, lab, dy in [(8, "8 GPUs: 92%", 12), (100, "100: 37%", 12), (1000, "1,000: 0.004%", 14)]:
-    v = 100 * 0.99 ** n_
+on_time = np.vectorize(lambda n: 100 * calc_all_up_availability(K.STRAG.availability, n))
+ax.plot(N, on_time(N), color=V["bad"], lw=3)
+for n_, lab, dy in [(num("gpus_per_node"), f"{val('gpus_per_node')} GPUs: {val('strag_node_pct')}%", 12),
+                    (100, f"100: {val('strag_100_pct')}%", 12),
+                    (num("strag_n"), f"{val('strag_n')}: {val('strag_1k_pct')}%", 14)]:
+    v = on_time(n_)
     ax.plot([n_], [max(v, 0.4)], "o", ms=9, color=V["bad"], mec="white", mew=1.5)
     ax.annotate(lab, (n_, max(v, 0.4)), xytext=(8, dy), textcoords="offset points", fontsize=15,
                 fontweight="bold", color=V["text"])
@@ -361,16 +357,17 @@ sp.save(fig, out / "critical_batch.svg")
 # ---------------------------------------------------------------------------
 # 9. Goyal et al. 2017 batch sweep (Figure 3 legends), real data
 # ---------------------------------------------------------------------------
-bs = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]
-err = [23.49, 23.60, 23.48, 23.53, 23.49, 23.56, 23.74, 24.79, 27.55, 33.96]
+sweep = sorted((r["global_batch"], r["top1_error_pct"]) for r in K.GOYAL.entries if r["source"] == "figure3")
+bs = [b for b, _ in sweep]
+err = [e for _, e in sweep]
 fig, ax = plt.subplots(figsize=(5.4, 3.4))
 ax.axvspan(11000, 90000, color=C["danger_l"], zorder=0)
 ax.plot(bs, err, "-o", color=C["memory"], lw=3, ms=8, zorder=3)
-ax.annotate("8k: 23.74%", (8192, 23.74), xytext=(-110, 22), textcoords="offset points",
-            fontsize=15, fontweight="bold", color=C["memory"])
-ax.annotate("64k: 33.96%", (65536, 33.96), xytext=(-125, -6), textcoords="offset points",
-            fontsize=15, fontweight="bold", color=C["danger"])
-ax.text(14000, 31, "past\n8k", fontsize=15, fontweight="bold", color=C["danger"])
+ax.annotate(f"{k8}: {val('goyal_err_warm')}%", (num("goyal_batch"), num("goyal_err_warm")), xytext=(-110, 22),
+            textcoords="offset points", fontsize=15, fontweight="bold", color=C["memory"])
+ax.annotate(f"{val('goyal_up3_k')}k: {val('goyal_up3_err')}%", (bs[-1], err[-1]), xytext=(-125, -6),
+            textcoords="offset points", fontsize=15, fontweight="bold", color=C["danger"])
+ax.text(14000, 31, f"past\n{k8}", fontsize=15, fontweight="bold", color=C["danger"])
 ax.set_xscale("log", base=2)
 ax.set_xticks([128, 512, 2048, 8192, 32768])
 ax.set_xticklabels(["128", "512", "2k", "8k", "32k"])
@@ -384,22 +381,24 @@ sp.save(fig, out / "goyal_batch.svg")
 # ---------------------------------------------------------------------------
 # 10. Memory wall (Epoch AI notable models x 16 B/param; vendor capacities)
 # ---------------------------------------------------------------------------
-models = [("AlexNet", "AlexNet"), ("", "VGG16"), ("", "BERT-Large"),
-          ("GPT-2", "GPT-2 (1.5B)"), ("GPT-3", "GPT-3 175B (davinci)"), ("PaLM", "PaLM (540B)"),
-          ("Llama 3 405B", "Llama 3.1-405B")]
+# The scenario's models, with the deck's shorter labels; ResNet-152 is not drawn here.
+deck_label = {"AlexNet": "AlexNet", "VGG-16": "", "BERT-Large": "", "GPT-2": "GPT-2", "GPT-3": "GPT-3",
+              "PaLM": "PaLM", "Llama 3 (405B)": "Llama 3 405B"}
+wall_rows = K.WALL.result.rows
 mx, my, ml = [], [], []
-for lab, name in models:
-    r_ = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
-    d = r_["date"]
-    mx.append(int(d[:4]) + (int(d[5:7]) - 1) / 12)
-    my.append((r_["parameters"] * BYTES_TRAINING_STATE_MIXED_PRECISION).to(GB).magnitude)
-    ml.append(lab)
+for r_ in wall_rows:
+    if r_["Type"] == "Model" and r_["Name"] in deck_label:
+        d = r_["Date"]
+        mx.append(int(d[:4]) + (int(d[5:7]) - 1) / 12)
+        my.append(r_["Memory_GB"])
+        ml.append(deck_label[r_["Name"]])
 gx, gy, gl = [], [], []
-for key in ("K80", "V100", "A100", "H100", "B200"):
-    h = getattr(Hardware.Cloud, key)
-    gx.append(int(h.release_year))
-    gy.append(h.memory.capacity.to(GiB).magnitude)
-    gl.append(key)
+for r_ in wall_rows:
+    if r_["Type"] == "GPU":
+        gx.append(r_["Year"])
+        gy.append(r_["Memory_GB"])
+        gl.append(r_["Name"])
+gpt3 = next(r_ for r_ in wall_rows if r_["Name"] == "GPT-3")
 fig, ax = plt.subplots(figsize=(5.8, 2.35))
 ax.plot(gx, gy, "--s", color=C["memory"], lw=2.5, ms=7)
 ax.plot(mx, my, "-o", color=C["danger"], lw=2.5, ms=7)
@@ -412,11 +411,12 @@ for x, y, lab in zip(mx, my, ml):
     ax.annotate(lab, (x, y), xytext=offs[lab], textcoords="offset points",
                 ha="right" if lab == "GPT-3" else ("left" if lab == "GPT-2" else "center"),
                 fontsize=10.5, fontweight="bold", color=C["danger"])
-ax.annotate("GPT-3: 2.8 TB of state,\n35× one 80 GB GPU", (2020.4, 2794), xytext=(2013.6, 1500),
+ax.annotate(f"GPT-3: {val('state_tb')} TB of state,\n{val('wall_gap')}× one {val('a100_gb')} GB GPU",
+            (2020.4, gpt3["Memory_GB"]), xytext=(2013.6, 1500),
             fontsize=11, fontweight="bold", color=C["text"],
             arrowprops=dict(arrowstyle="->", color=C["text"], lw=1.2))
 ax.text(2012.3, 70, "one accelerator's memory", fontsize=11, fontweight="bold", color=C["memory"])
-ax.text(2015.6, 0.35, "training state, 16 B per parameter", fontsize=11, fontweight="bold",
+ax.text(2015.6, 0.35, f"training state, {val('state_bpp')} B per parameter", fontsize=11, fontweight="bold",
         color=C["danger"])
 ax.set_yscale("log")
 ax.set_ylim(0.2, 30000)
@@ -430,26 +430,27 @@ sp.save(fig, out / "memory_wall.svg")
 # ---------------------------------------------------------------------------
 # 11. ZeRO stages, 7B model on 64 GPUs: per-GPU state (4 steps)
 # ---------------------------------------------------------------------------
-P = 7e9
-Ng = 64
-stages = [("DDP", 2, 2, 12, "1×"),
-          ("ZeRO-1", 2, 2, 12 / Ng, "1×"),
-          ("ZeRO-2", 2, 2 / Ng, 12 / Ng, "1×"),
-          ("ZeRO-3", 2 / Ng, 2 / Ng, 12 / Ng, "1.5×")]
+z7 = K.ZERO7.result
+Ng = K.ZERO7.n_devices
+W, G, O = (q.to("GB").magnitude for q in (z7.weights, z7.gradients, z7.optimizer_state))
+stage_key = {"DDP": "z7_ddp_gb", "ZeRO-1": "z7_z1_gb", "ZeRO-2": "z7_z2_gb", "ZeRO-3": "z7_z3_gb"}
+stages = [("DDP", W, G, O), ("ZeRO-1", W, G, O / Ng), ("ZeRO-2", W, G / Ng, O / Ng),
+          ("ZeRO-3", W / Ng, G / Ng, O / Ng)]
+cap = num("a100_gb")
 for k in (1, 2, 3, 4):
     fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    for i, (name, w, g, o, traffic) in enumerate(stages):
+    for i, (name, wv, gv, ov) in enumerate(stages):
         a = 1 if i < k else 0
-        wv, gv, ov = w * P / 1e9, g * P / 1e9, o * P / 1e9
+        traffic = f"{z7.traffic_multiple[name]:g}×"
         ax.bar(i, wv, 0.58, color=C["memory"], alpha=a)
         ax.bar(i, gv, 0.58, bottom=wv, color=C["network"], alpha=a)
         ax.bar(i, ov, 0.58, bottom=wv + gv, color=C["compute"], alpha=a)
         tot = wv + gv + ov
-        label(ax, i, tot + 4, (f"{tot:.2f} GB" if tot < 10 else f"{tot:.1f} GB") if tot < 100 else f"{tot:.0f} GB",
-              C["danger"] if tot > 80 else C["data"], i < k, ha="center", fontsize=13)
+        label(ax, i, tot + 4, f"{val(stage_key[name])} GB",
+              C["danger"] if tot > cap else C["data"], i < k, ha="center", fontsize=13)
         label(ax, i, -26, f"traffic {traffic}", C["neutral"], i < k, ha="center", fontsize=11)
-    ax.axhline(80, color=C["danger"], lw=2, ls="--")
-    ax.text(3.45, 82, "80 GB GPU", color=C["danger"], fontsize=11, fontweight="bold", ha="right",
+    ax.axhline(cap, color=C["danger"], lw=2, ls="--")
+    ax.text(3.45, cap + 2, f"{val('a100_gb')} GB GPU", color=C["danger"], fontsize=11, fontweight="bold", ha="right",
             va="bottom")
     ax.text(1.55, 120, "weights", color=C["memory"], fontsize=11, fontweight="bold", ha="left")
     ax.text(1.55, 108, "gradients", color=C["network"], fontsize=11, fontweight="bold", ha="left")
@@ -481,15 +482,16 @@ def pipe_grid(s, y0, slots, title, op, cw=46):
                 s.text(x + (cw - 4) / 2, y + 16, cell, 20, V["c1"] if fwd else "#b45309", op=op)
 
 
-def naive():
-    g = [[None] * 8 for _ in range(4)]
-    for st in range(4):
+def naive(p=K.NAIVE.stages):
+    T = K.NAIVE.slots
+    g = [[None] * T for _ in range(p)]
+    for st in range(p):
         g[st][st] = "F"
-        g[st][7 - st] = "B"
+        g[st][T - 1 - st] = "B"
     return g
 
 
-def gpipe(p=4, m=4):
+def gpipe(p=K.GPIPE.stages, m=K.GPIPE.microbatches):
     T = 2 * (m + p - 1)
     g = [[None] * T for _ in range(p)]
     for st in range(p):
@@ -501,9 +503,10 @@ def gpipe(p=4, m=4):
 
 for k in (1, 2):
     s = SVG(900, 345)
-    pipe_grid(s, 30, naive(), "One batch through 4 stages: each GPU idles 6 of 8 slots", 1.0)
-    pipe_grid(s, 210, gpipe(), "Four microbatches (GPipe): each GPU idles 6 of 14 slots, 43%",
-              1.0 if k >= 2 else 0.0, cw=55)
+    pipe_grid(s, 30, naive(), f"One batch through {val('pipe_p')} stages: each GPU idles "
+              f"{val('naive_idle')} of {val('naive_slots')} slots", 1.0)
+    pipe_grid(s, 210, gpipe(), f"Four microbatches (GPipe): each GPU idles {val('pipe_idle')} of "
+              f"{val('pipe_slots')} slots, {val('pipe_bubble_pct')}%", 1.0 if k >= 2 else 0.0, cw=55)
     s.save(out / f"pipe_step{k}.svg")
 
 # ---------------------------------------------------------------------------
@@ -512,15 +515,18 @@ for k in (1, 2):
 m = np.arange(1, 257)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
-    for p, col, show in [(4, C["memory"], True), (8, C["compute"], True), (16, C["network"], k >= 2)]:
-        f = (p - 1) / (m + p - 1)
+    curves = [(K.GPIPE.stages, C["memory"], True, 90), (K.P8M32.stages, C["compute"], True, 79),
+              (K.P16M32.stages, C["network"], k >= 2, 68)]
+    for p, col, show, ly in curves:
+        f = np.array([calc_pipeline_bubble(p, int(mm)) for mm in m])
         ax.plot(m, 100 * f, color=col, lw=2.6, alpha=1 if show else 0)
-        label(ax, 240, {4: 90, 8: 79, 16: 68}[p], f"p = {p} stages", col, show, fontsize=15, ha="right")
-    pts = [(4, 4, C["memory"], "p=4, m=4: 43%", None, True),
-           (8, 32, C["compute"], "p=8, m=32: 18%", (-10, -22), True),
-           (16, 32, C["network"], "m=32: 32%", (8, 8), k >= 2)]
-    for p, mm, col, lab, off, show in pts:
-        v = 100 * (p - 1) / (mm + p - 1)
+        label(ax, 240, ly, f"p = {p} stages", col, show, fontsize=15, ha="right")
+    pts = [(K.GPIPE, C["memory"], f"p={val('pipe_p')}, m={val('pipe_p')}: {val('pipe_bubble_pct')}%", None, True),
+           (K.P8M32, C["compute"], f"p={val('p8m32_p')}, m={val('p8m32_m')}: {val('p8m32_bubble_pct')}%",
+            (-10, -22), True),
+           (K.P16M32, C["network"], f"m={val('p16m32_m')}: {val('p16m32_bubble_round_pct')}%", (8, 8), k >= 2)]
+    for sc, col, lab, off, show in pts:
+        p, mm, v = sc.stages, sc.microbatches, 100 * sc.bubble
         ax.plot([mm], [v], "o", ms=9, color=col, mec="white", mew=1.5, alpha=1 if show else 0)
         if p in (4, 8):
             ax.annotate(lab, (mm, v), xytext=(1.15, 19 if p == 4 else 3), fontsize=15, fontweight="bold",
@@ -528,8 +534,9 @@ for k in (1, 2):
             continue
         ax.annotate(lab, (mm, v), xytext=off, textcoords="offset points", fontsize=15,
                     fontweight="bold", color=col, alpha=1 if show else 0)
-    ax.axhline(10, color=C["neutral"], lw=1.4, ls="--")
-    ax.text(1.05, 12, "10%", color=C["neutral"], fontsize=14, fontweight="bold")
+    ax.axhline(num("bubble_target_pct"), color=C["neutral"], lw=1.4, ls="--")
+    ax.text(1.05, num("bubble_target_pct") + 2, f"{val('bubble_target_pct')}%", color=C["neutral"], fontsize=14,
+            fontweight="bold")
     ax.set_xscale("log", base=2)
     ax.set_xticks([1, 4, 16, 64, 256])
     ax.set_xticklabels(["1", "4", "16", "64", "256"])
@@ -582,14 +589,15 @@ for k in (1, 2, 3):
 # 15. Tensor-parallel feasibility per layer (column figure)
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(5.4, 3.4))
-bars = [("compute", 1.9, V["c1"]), ("TP over NVLink\n450 GB/s", 0.4, V["ok"]),
-        ("TP over one NDR\nport, 50 GB/s", 3.5, V["bad"])]
-for i, (n_, v, col) in enumerate(bars):
+bars = [("compute", "tp_compute_ms", V["c1"]), (f"TP over NVLink\n{val('nvlink_gbs')} GB/s", "tp_nvlink_ms", V["ok"]),
+        (f"TP over one NDR\nport, {val('ndr_gbs')} GB/s", "tp_ndr_ms", V["bad"])]
+for i, (n_, key, col) in enumerate(bars):
     y = 2 - i
+    v = num(key)
     ax.barh(y, v, color=col, height=0.6)
     ax.text(-0.08, y, n_, ha="right", va="center", fontsize=15, fontweight="bold")
-    ax.text(v + 0.06, y, f"{v} ms", va="center", fontsize=16, fontweight="bold", color=col)
-ax.axvline(1.9, color=V["c1"], lw=1.5, ls="--")
+    ax.text(v + 0.06, y, f"{val(key)} ms", va="center", fontsize=16, fontweight="bold", color=col)
+ax.axvline(num("tp_compute_ms"), color=V["c1"], lw=1.5, ls="--")
 ax.set_xlim(0, 4.6)
 ax.set_ylim(-0.6, 2.6)
 ax.set_yticks([])
@@ -602,17 +610,18 @@ sp.save(fig, out / "tp_tiers.svg")
 # 16. Megatron-LM weak scaling (Shoeybi et al. 2019, Figure 5)
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(5.8, 1.95))
-xs_ = ["1", "2", "4", "8", "64", "128", "256", "512"]
-vals = [100, 95, 82, 77, 96, 83, 79, 74]
-cols = [C["memory"]] * 4 + [C["compute"]] * 4
+meg = sorted(K.MEGATRON.entries, key=lambda r: (r["mode"] != "model", r["gpus"]))
+xs_ = [f"{r['gpus']:.0f}" for r in meg]
+vals = [r["efficiency_pct"] for r in meg]
+cols = [C["memory"] if r["mode"] == "model" else C["compute"] for r in meg]
 for i, (x_, v, c_) in enumerate(zip(xs_, vals, cols)):
     xi = i + (0.6 if i >= 4 else 0)
     ax.bar(xi, v, 0.62, color=c_)
-    ax.text(xi, v + 3, f"{v}%", ha="center", fontsize=12, fontweight="bold", color=c_)
+    ax.text(xi, v + 3, f"{v:.0f}%", ha="center", fontsize=12, fontweight="bold", color=c_)
 ax.set_xticks([i + (0.6 if i >= 4 else 0) for i in range(8)], xs_)
 ax.text(1.5, 122, "tensor parallel, one server", ha="center", fontsize=11.5, fontweight="bold",
         color=C["memory"])
-ax.text(6.1, 122, "8-way TP × data parallel", ha="center", fontsize=11.5, fontweight="bold",
+ax.text(6.1, 122, f"{max(r['gpus'] for r in meg if r['mode'] == 'model'):.0f}-way TP × data parallel", ha="center", fontsize=11.5, fontweight="bold",
         color=C["compute"])
 ax.set_ylim(0, 130)
 ax.set_yticks([0, 50, 100])
@@ -623,22 +632,26 @@ sp.save(fig, out / "megatron_scaling.svg")
 # ---------------------------------------------------------------------------
 # 17. Hybrid scoreboard for the 175B job on 1,024 GPUs (3 steps)
 # ---------------------------------------------------------------------------
-cfg = [("A: DP-1024", 15, 2800, None), ("B: TP8 × DP128", 83, 350, None),
-       ("C: TP8 × PP4 × DP32", 87, 87.5, 23.9)]
+cfg = [(f"A: DP-{val('dp_a')}", "eff_a_pct", "state_gb", None),
+       (f"B: TP{val('tp_b')} × DP{val('dp_b')}", "eff_b_pct", "state_b_gb", None),
+       (f"C: TP{val('tp_b')} × PP{val('pp_c')} × DP{val('dp_c')}", "eff_c_pct", "state_c_gb", "zero1_c_gb")]
+cap = num("hbm_gb")
 for k in (1, 2, 3):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.9, 2.15), gridspec_kw={"width_ratios": [1, 1]})
-    for i, (name, eff, mem, z1) in enumerate(cfg):
+    for i, (name, eff_key, mem_key, z1_key) in enumerate(cfg):
         y = 2 - i
         sh = i < k
+        eff, mem = num(eff_key), num(mem_key)
+        z1 = num(z1_key) if z1_key else None
         a1.barh(y, eff, color=C["data"] if eff > 50 else C["danger"], height=0.6, alpha=1 if sh else 0)
         a1.text(-3, y, name, ha="right", va="center", fontsize=11.5, fontweight="bold")
-        label(a1, eff + 2, y, f"{eff}%", C["data"] if eff > 50 else C["danger"], sh, va="center", fontsize=12.5)
-        a2.barh(y, mem, color=C["danger"] if mem > 80 else C["data"], height=0.6, alpha=1 if sh else 0)
-        label(a2, mem * 1.15, y, f"{mem:,.0f} GB" if mem >= 100 else f"{mem} GB", C["danger"], sh, va="center",
+        label(a1, eff + 2, y, f"{val(eff_key)}%", C["data"] if eff > 50 else C["danger"], sh, va="center",
               fontsize=12.5)
+        a2.barh(y, mem, color=C["danger"] if mem > cap else C["data"], height=0.6, alpha=1 if sh else 0)
+        label(a2, mem * 1.15, y, f"{val(mem_key)} GB", C["danger"], sh, va="center", fontsize=12.5)
         if z1:
             a2.barh(y - 0.36, z1, color=C["data"], height=0.28, alpha=1 if sh else 0)
-            label(a2, 160, y - 0.36, "with ZeRO-1: 24 GB", C["data"], sh, va="center", fontsize=11)
+            label(a2, 160, y - 0.36, f"with ZeRO-1: {val(z1_key)} GB", C["data"], sh, va="center", fontsize=11)
     a1.set_xlim(0, 110)
     a1.set_ylim(-0.7, 2.6)
     a1.set_yticks([])
@@ -647,8 +660,8 @@ for k in (1, 2, 3):
     a2.set_xscale("log")
     a2.set_xlim(10, 20000)
     a2.set_ylim(-0.7, 2.6)
-    a2.axvline(80, color=C["danger"], lw=1.6, ls="--")
-    a2.text(80, 2.55, " 80 GB", color=C["danger"], fontsize=10.5, fontweight="bold", va="bottom")
+    a2.axvline(cap, color=C["danger"], lw=1.6, ls="--")
+    a2.text(cap, 2.55, f" {val('hbm_gb')} GB", color=C["danger"], fontsize=10.5, fontweight="bold", va="bottom")
     a2.set_yticks([])
     a2.spines["left"].set_visible(False)
     a2.set_xticks([10, 100, 1000, 10000])
@@ -664,28 +677,58 @@ for k in (1, 2, 3):
 s = SVG(900, 330)
 for rrow, (y, lab) in enumerate([(30, "replica 1"), (130, "replica 2")]):
     s.text(18, y + 40, lab, 21, V["gray"], anchor="start")
-    for n_ in range(4):
+    for n_ in range(K.C.pp_size):
         x = 120 + n_ * 190
         s.rect(x, y, 160, 80, V["c1_l"], V["c1"], 2.5, 8)
-        for gi in range(8):
+        for gi in range(K.C.tp_size):
             gx_ = x + 10 + gi * 18.4
             s.rect(gx_, y + 10, 14, 26, "white", V["c1"], 1.5, 2)
         s.text(x + 80, y + 60, f"stage {n_ + 1}", 23, V["c1"])
-        if n_ < 3:
+        if n_ < K.C.pp_size - 1:
             s.line(x + 162, y + 40, x + 186, y + 40, V["c3"], 3.5, arrow=True)
-s.text(450, 228, "... 32 replicas in all", 22, V["gray"])
-for n_ in range(4):
+s.text(450, 228, f"... {val('dp_c')} replicas in all", 22, V["gray"])
+for n_ in range(K.C.pp_size):
     x = 120 + n_ * 190 + 80
     s.line(x, 112, x, 128, V["c2"], 3.5, arrow=True)
 s.rect(20, 250, 280, 66, V["c1_l"], V["c1"], 2, 6)
-s.text(160, 270, "TP = 8 inside a node", 23, V["c1"])
-s.text(160, 296, "NVLink, 450 GB/s", 21, V["c1"], weight="normal")
+s.text(160, 270, f"TP = {val('tp_b')} inside a node", 23, V["c1"])
+s.text(160, 296, f"NVLink, {val('nvlink_gbs')} GB/s", 21, V["c1"], weight="normal")
 s.rect(310, 250, 280, 66, V["c3_l"], V["c3"], 2, 6)
-s.text(450, 270, "PP = 4 across nodes", 23, "#6d28d9")
+s.text(450, 270, f"PP = {val('pp_c')} across nodes", 23, "#6d28d9")
 s.text(450, 296, "activations, point to point", 21, "#6d28d9", weight="normal")
 s.rect(600, 250, 280, 66, V["c2_l"], V["c2"], 2, 6)
-s.text(740, 270, "DP = 32 across replicas", 23, "#b45309")
-s.text(740, 296, "10.9 GB gradient shard", 21, "#b45309", weight="normal")
+s.text(740, 270, f"DP = {val('dp_c')} across replicas", 23, "#b45309")
+s.text(740, 296, f"{val('shard_c_gb')} GB gradient shard", 21, "#b45309", weight="normal")
 s.save(out / "grid3d.svg")
 
 print("figures written to", out)
+
+# ---------------------------------------------------------------------------
+# PPO against DPO: static state per model, stacked (frame "PPO alignment
+# holds four models"). Values from calcs.py (Distributed Training, table 7).
+# Added 2026-10-21 so the footprints compare at a glance.
+# ---------------------------------------------------------------------------
+_pol, _ref = num("rlhf_policy_gb"), num("rlhf_ref_gb")
+_rew, _valg = num("rlhf_reward_gb"), num("rlhf_value_gb")
+fig, ax = plt.subplots(figsize=(5.8, 1.1))
+for y, parts, tot in ((1, [(_pol, C["memory"], "policy"), (_ref, C["neutral"], "ref."),
+                           (_rew, C["data"], ""), (_valg, C["compute"], "value")],
+                       f"PPO {val('rlhf_ppo_gb')} GB"),
+                      (0, [(_pol, C["memory"], "policy"), (_ref, C["neutral"], "ref.")],
+                       f"DPO {val('rlhf_dpo_gb')} GB")):
+    left = 0
+    for w, col, lab in parts:
+        ax.barh(y, w, 0.62, left=left, color=col, edgecolor="white", lw=1)
+        if lab:
+            ax.text(left + w / 2, y, lab, ha="center", va="center", fontsize=11.5,
+                    fontweight="bold", color="white")
+        left += w
+    ax.text(left + 15, y, tot, va="center", fontsize=12.5, fontweight="bold", color=C["text"])
+_x = _pol + _ref + _rew / 2
+ax.annotate("reward", (_x, 1.31), xytext=(_x - 25, 1.62), ha="right", va="center",
+            fontsize=11, fontweight="bold", color=C["data"],
+            arrowprops=dict(arrowstyle="-", color=C["data"], lw=1.2))
+ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.32)
+ax.set_ylim(-0.4, 1.8)
+ax.axis("off")
+sp.save(fig, out / "rlhf_state.svg")

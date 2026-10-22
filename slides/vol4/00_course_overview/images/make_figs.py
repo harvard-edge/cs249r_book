@@ -2,7 +2,8 @@
 
 Run:  python3 make_figs.py          (the figures this deck shows)
 Writes SVGs here; `make deck V=4 D=00_course_overview` converts them to PDF.
-Data plots read the MLSysIM registry; derived values come from calcs.py.
+Every value comes from calcs.py, which reads MLSysIM; this file types only
+layout, axis ticks, and label offsets.
 
 The stopping-budget bar and the record chain live in the Volume IV kit
 (slides/assets/kit/vol4); Lecture 0 shows neither, and Lecture 1 owns both.
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
 import matplotlib.pyplot as plt  # noqa: E402
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val  # noqa: E402
 
 # Volume IV roles (rules/volumes/vol4/palette.md)
 AMBER = "#D97706"
@@ -45,18 +47,18 @@ def waymo_miles(step):
     ys = [m for _, m in rows]
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     ax.plot(xs, ys, "o-", color=sp.C["data"], lw=2.5, ms=6, zorder=3)
-    ax.text(xs[0], ys[0] + 22, f"{ys[0]:.1f} million\nJune 2024", color=sp.C["data"],
+    ax.text(xs[0], ys[0] + 22, f"{val('wm_first')} million\nJune 2024", color=sp.C["data"],
             fontsize=12, fontweight="bold", ha="left", va="bottom")
-    ax.text(xs[-1] - 0.06, ys[-1], f"{ys[-1]:.1f} million\nJune 2026", color=sp.C["data"],
+    ax.text(xs[-1] - 0.06, ys[-1], f"{val('wm_last')} million\nJune 2026", color=sp.C["data"],
             fontsize=12, fontweight="bold", ha="right", va="center")
     if step >= 2:
         d = dict(rows)
-        x0, x1 = _year("2025-06"), _year("2026-06")
-        ax.plot([x0, x0], [0, d["2025-06"]], color=AMBER, lw=1.5, ls="--")
-        ax.plot([x1, x1], [0, d["2026-06"]], color=AMBER, lw=1.5, ls="--")
+        x0, x1 = _year(calcs.YEAR_START), _year(calcs.YEAR_END)
+        ax.plot([x0, x0], [0, d[calcs.YEAR_START]], color=AMBER, lw=1.5, ls="--")
+        ax.plot([x1, x1], [0, d[calcs.YEAR_END]], color=AMBER, lw=1.5, ls="--")
         ax.annotate("", xy=(x1, 30), xytext=(x0, 30),
                     arrowprops=dict(arrowstyle="<->", color=AMBER, lw=1.8))
-        ax.text((x0 + x1) / 2, 40, f"{calcs.waymo_last_year():.0f} million miles\nin 12 months",
+        ax.text((x0 + x1) / 2, 40, f"{val('wm_year')} million miles\nin 12 months",
                 color=AMBER, fontsize=12, fontweight="bold", ha="center", va="bottom")
     ax.set_xlim(2024.25, 2026.6)
     ax.set_ylim(0, 300)

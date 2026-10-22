@@ -4,72 +4,10 @@ and Evidence).
 
 Plots use the shared slideplot helper; diagrams are written as SVG with the
 same small builder Lecture 15 uses, one file per build step, every step on the
-same canvas so nothing moves. Every value is sourced:
-
-  - Architecture-search estimate: Strubell, Ganesh, McCallum, ACL 2019,
-    Table 1: 626,155 lb (284 t) for Transformer (big) with neural
-    architecture search; one car over its lifetime 126,000 lb (57 t).
-    Measured: Patterson et al. 2021 (arXiv 2104.10350), Table 4 and
-    Sec. 4.1: 3.2 net tCO2e, "88X off in emissions for energy-efficient
-    organizations like Google", 18.7X too high for the average organization.
-  - Gemini median text prompt, May 2025: Elsworth et al. 2025 (arXiv
-    2508.15734), Table 1 (0.14 accelerators, 0.06 host CPU and DRAM, 0.02 idle
-    machines, 0.02 overhead; 0.24 Wh), Table 2 (0.023 g Scope 2 market-based,
-    0.010 g Scope 1+3, 0.03 g total), Sec. 4.3 (33x energy, 44x emissions
-    over 12 months; fleet PUE 1.09).
-  - Four factors on one training job: Patterson et al. 2021, Table 1
-    (0.1357 t for Transformer (Big) on P100 in an average US datacenter;
-    0.0024 t net for Evolved Transformer (Medium) on TPU v2 in Google Iowa)
-    and Figure 1 (cumulative CO2e gain read from its labels: 1.3, 7.4, 10.5,
-    56.5). Only these printed values are drawn.
-  - Four 175B-scale models: Luccioni, Viguier, Ligozat 2023 (arXiv
-    2211.02001), Table 4, CO2e x PUE: GPT-3 552 t, Gopher 380 t, OPT 76.3 t,
-    BLOOM 30 t. Entries in italics in that table were inferred by the
-    authors: GPT-3's 502 t before PUE; Gopher's 1,066 MWh and 352 t; OPT's
-    PUE 1.09, 231 g/kWh, 324 MWh, and 76.3 t. Those are starred here.
-  - BLOOM life cycle: Luccioni et al. 2023, Table 3: embodied 11.2 t
-    (22.2 percent), dynamic 24.69 t (48.9 percent), idle 14.6 t
-    (28.9 percent), total 50.5 t.
-  - DLRM three-year TCO (book scenario, chapter Sec. 15.4.2 and table 10):
-    200 million inferences a day, 10 ms unbatched, 556 GPU-hours a day,
-    23.1 GPUs, $2.50 per GPU-hour, $506,944 a year; training $38K, inference
-    $1.52M, operations $510K; modeled accelerator carbon 1.5 t and 97.3 t.
-    Checkpoint 15.4 and Summary: a 20 percent serving cut saves $304K and
-    about 19 t; halving all training saves $19.2K and 0.75 t (derived).
-  - Measured fleets: Patterson et al. 2022 (inference about 3/5 of Google's
-    ML energy, 2019 to 2021); Wu et al. 2022, Fig. 3 (Meta AI power capacity
-    10:20:70 for experimentation, training, inference).
-  - Embodied share per GPU-hour (derived): Luccioni et al. 2023 Sec. 4.1,
-    0.056 kg per server-hour and 0.003 kg per GPU-hour; 8 GPUs per server
-    (assumption), so 0.003 + 0.056 / 8 = 0.010 kg per GPU-hour. Operational
-    0.4 kW x 0.4 kg/kWh = 0.160 kg (Napkin Math 15.4) and 0.4 kW x 0.057 =
-    0.023 kg (French grid, Luccioni et al. 2023).
-  - Explanation cost (chapter Sec. 15.3.3 and 15.5.3): 1 million decisions a
-    day; 47.5 percent denied (constructed credit service, 6,300 of 12,000
-    approved); 1,000-sample attributor; exact Shapley 2^20 = 1,048,576.
-  - Review staffing: chapter Sec. 15.5.3 (0.1 percent of 1 million = 1,000
-    cases a day); 6 minutes per case (assumption); ProPublica and The Capitol
-    Forum, March 25, 2023: Cigna doctors denied over 300,000 requests in two
-    months, 1.2 seconds each on average.
-  - Machine unlearning: Bourtoule et al. 2021 (arXiv 1912.03817), abstract:
-    SISA unlearning 4.63x, 2.45x, 1.36x faster than retraining (Purchase,
-    SVHN, ImageNet).
-  - Differentially private accuracy: De et al. 2022 (arXiv 2204.13650v2),
-    abstract: CIFAR-10 81.4 percent at (8, 1e-5)-DP from scratch, previous
-    best 71.7; Sec. 3: WRN-40-4 above 95 percent without privacy; Table 6:
-    ImageNet 86.7 percent at (8, 8e-7)-DP fine-tuning an NFNet-F3
-    pre-trained on JFT-4B, 88.5 for the same model without privacy; Fig. 1:
-    the best non-private ImageNet model 91.0 (Yu et al. 2022), 4.3 points
-    above.
-  - Raw audio against a model update: 16 kHz, 16-bit audio (assumption)
-    = 32,000 bytes a second, 115.2 MB an hour; 200K FP32 parameters = 800 KB
-    (chapter Sec. 15.5.2); ratio 144.
-  - Audit volume (chapter Sec. 15.5.5 and table 12): 1 million decisions a
-    day x 256 bytes (assumption) x 760 days (25 months, 12 CFR
-    1002.12(b)(1)) = 195 GB. DLRM, 200 million a day for a year: 18.7 TB of
-    256-byte manifests against 976 TB of 13,364-byte inputs (constructed:
-    13 dense and 26 categorical features with 128-dimensional FP32 embeddings,
-    as in MLPerf DLRM on Criteo Terabyte), 52x.
+same canvas so nothing moves. Every value comes from MLSysIM through calcs.py
+(K below; formatted labels through deckvals.val and plotted values through
+deckvals.num or the scenarios themselves); calcs.py names each source. Layout
+coordinates and the illustrative review minimum are the only typed numbers.
 
 Moved from Lecture 15 (same generator code, same sources): tco_step*,
 fleet_shares_step*, dpsgd_step1, the lineage graph (rebuilt in four steps).
@@ -84,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import calcs as K  # noqa: E402  (every derived value on a figure comes from here)
+import calcs as K  # noqa: E402  (every value on a figure comes from MLSysIM through calcs.py)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -157,11 +96,11 @@ def stacked(ax, y, parts, alpha=1.0, height=0.6):
 
 # Hook: estimated against measured (log scale)
 _hook_rows = [
-    ("One car, whole lifetime", K.CAR_T, "neutral", f"{K.CAR_T:.0f} t"),
+    ("One car, whole lifetime", K.CAR_T, "neutral", f"{val('car_t')} t"),
     ("Search, estimated in 2019", K.NAS_EST_T, "compute",
-     f"{K.NAS_EST_T:.0f} t = {K.NAS_EST_T / K.CAR_T:.0f} car lifetimes"),
-    # 3.2 t and 88x are the values Patterson et al. print (Table 4, App. D)
-    ("Same search, measured in 2021", 3.2, "data", "3.2 t, 88× lower"),
+     f"{val('nas_est_t')} t = {val('nas_cars')} car lifetimes"),
+    # the measured value and the error factor as Patterson et al. print them (Table 4, App. D)
+    ("Same search, measured in 2021", num("nas_meas_t"), "data", f"{val('nas_meas_t')} t, {val('nas_err')}× lower"),
 ]
 bar_steps("hook_nas", [r + (3 if i == 2 else 1,) for i, r in enumerate(_hook_rows)],
           3, (5.8, 2.0), 30000, "Tonnes of CO₂e (log scale)", log=True, xmin=1)
@@ -194,16 +133,17 @@ for k in (2,):
 for k in (1, 2):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5.4, 1.75),
                                    gridspec_kw={"height_ratios": [1, 1], "hspace": 1.6})
-    stacked(ax1, 0, [(0.14, "compute", "Accelerators 0.14"),
-                     (0.06, "memory", "Host 0.06"),
-                     (0.02, "neutral_l", ""), (0.02, "neutral", "")])
-    ax1.annotate("Idle 0.02", (0.21, 0.32), xytext=(0.212, 0.85),
+    _gp = [r["comprehensive_wh"] for r in K.GEM]   # accelerators, host, idle, overhead
+    stacked(ax1, 0, [(_gp[0], "compute", f"Accelerators {_gp[0]:.2f}"),
+                     (_gp[1], "memory", f"Host {_gp[1]:.2f}"),
+                     (_gp[2], "neutral_l", ""), (_gp[3], "neutral", "")])
+    ax1.annotate(f"Idle {_gp[2]:.2f}", (0.21, 0.32), xytext=(0.212, 0.85),
                  ha="right", va="bottom", fontsize=11, fontweight="bold", color=C["text"],
                  arrowprops=dict(arrowstyle="-", color=C["neutral"], lw=1))
-    ax1.annotate("Overhead 0.02 (PUE 1.09)", (0.23, 0.32), xytext=(0.228, 0.85),
+    ax1.annotate(f"Overhead {_gp[3]:.2f} (PUE {val('gem_pue')})", (0.23, 0.32), xytext=(0.228, 0.85),
                  ha="left", va="bottom", fontsize=11, fontweight="bold", color=C["text"],
                  arrowprops=dict(arrowstyle="-", color=C["neutral"], lw=1))
-    ax1.text(0.255, 0, f"= {K.GEM_WH:.2f} Wh", va="center", fontsize=13, fontweight="bold",
+    ax1.text(0.255, 0, f"= {val('gem_wh')} Wh", va="center", fontsize=13, fontweight="bold",
              color=C["text"])
     ax1.set_xlim(0, 0.36)
     ax1.set_ylim(-0.5, 0.5)
@@ -211,9 +151,9 @@ for k in (1, 2):
     ax1.spines["left"].set_visible(False)
     ax1.set_xlabel("Energy per prompt (Wh)")
     a = 1.0 if k >= 2 else 0.0
-    stacked(ax2, 0, [(0.023, "network", "Grid 0.023"),
-                     (0.010, "neutral", "")], alpha=a)
-    ax2.text(0.0335, 0, f" + 0.010 Scope 1 and 3  = {K.GEM_TOTAL_G:.2f} g", va="center",
+    stacked(ax2, 0, [(K.GEM_S2, "network", f"Grid {val('gem_s2')}"),
+                     (K.GEM_S13, "neutral", "")], alpha=a)
+    ax2.text(0.0335, 0, f" + {val('gem_s13')} Scope 1 and 3  = {val('gem_total')} g", va="center",
              fontsize=12, fontweight="bold", color=C["text"], alpha=a)
     ax2.set_xlim(0, 0.0473 * 0.36 / 0.34)
     ax2.set_ylim(-0.5, 0.5)
@@ -228,10 +168,10 @@ for k in (1, 2):
 # Redrawn 2026-10-19 for a 0.58-width column (about 8.5 x 5 cm) beside the
 # Iowa photo and the grid map.
 gains = [("Base\nP100", 1.0, "neutral", "1×", 1),
-         ("Model\nEvolved", K.CUM["model"], "compute", "1.3×", 1),
-         ("Chip\nTPU v2", K.CUM["processor"], "compute", "7.4×", 2),
-         ("PUE\n1.11", K.CUM["datacenter"], "memory", "10.5×", 3),
-         ("Grid\n0.080", K.CUM["grid"], "data", "56.5×", 4)]
+         ("Model\nEvolved", K.CUM["model"], "compute", f"{val('ff_model')}×", 1),
+         ("Chip\nTPU v2", K.CUM["processor"], "compute", f"{val('ff_processor')}×", 2),
+         (f"PUE\n{val('ff_pue_b')}", K.CUM["datacenter"], "memory", f"{val('ff_datacenter')}×", 3),
+         (f"Grid\n{val('ff_grid_b')}", K.CUM["grid"], "data", f"{val('ff_grid')}×", 4)]
 for k in (1, 2, 3, 4):
     fig, ax = plt.subplots(figsize=(3.7, 2.05))
     for i, (lab, v, ck, txt, first) in enumerate(gains):
@@ -252,19 +192,27 @@ for k in (1, 2, 3, 4):
     sp.save(fig, out / f"factors_step{k}.svg")
 
 # Four 175B-scale models (Luccioni et al. 2023, Table 4, CO2e x PUE)
+def _llm(name, color, first):
+    """One Table 4 bar; a star marks a value Luccioni et al. inferred."""
+    d = K.LLM[name]
+    star = lambda k: "*" if d[k + "_inferred"] else ""  # noqa: E731
+    t = f"{d['tco2e_pue']:g} t{star('tco2e')}: {d['energy_mwh']:,.0f} MWh{star('energy')} at {d['grid_g_per_kwh']:.0f} g/kWh{star('grid')}"
+    return (name, d["tco2e_pue"], color, t, first)
+
+
 bar_steps("llm4", [
-    ("GPT-3", 552, "danger", "552 t: 1,287 MWh at 429 g/kWh", 1),
-    ("Gopher", 380, "neutral", "380 t: 1,066 MWh* at 330 g/kWh", 2),
-    ("OPT", 76.3, "neutral", "76.3 t*: 324 MWh* at 231 g/kWh*", 2),
-    ("BLOOM", 30, "data", "30 t: 433 MWh at 57 g/kWh", 1),
+    _llm("GPT-3", "danger", 1),
+    _llm("Gopher", "neutral", 2),
+    _llm("OPT", "neutral", 2),
+    _llm("BLOOM", "data", 1),
 ], 2, (5.8, 2.3), 1150, "Training emissions × PUE (t CO₂e)", label_size=12)
 # The footnote ("* inferred by Luccioni et al.") is slide text since 2026-10-19.
 
 # BLOOM life cycle (Luccioni et al. 2023, Table 3)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 1.8))
-    parts = [(24.69, "compute", "Dynamic\n24.7 t", 1), (14.6, "neutral", "Idle\n14.6 t", 2),
-             (11.2, "network", "Embodied\n11.2 t", 3)]
+    parts = [(K.B_DYN, "compute", f"Dynamic\n{val('b_dyn')} t", 1), (K.B_IDLE, "neutral", f"Idle\n{val('b_idle')} t", 2),
+             (K.B_EMB, "network", f"Embodied\n{val('b_emb')} t", 3)]
     left = 0
     for v, ck, txt, first in parts:
         a = 1.0 if k >= first else 0.0
@@ -272,9 +220,9 @@ for k in (1, 2, 3):
         ax.text(left + v / 2, 0, txt, ha="center", va="center", fontsize=12,
                 fontweight="bold", color="white", alpha=a)
         left += v
-    ax.text(K.B_DYN / 2, 0.5, f"What most papers report ({K.B_DYN_SHARE:.1f}%)", ha="center", va="bottom",
+    ax.text(K.B_DYN / 2, 0.5, f"What most papers report ({val('b_dyn_share')}%)", ha="center", va="bottom",
             fontsize=11, fontweight="bold", color=C["compute"])
-    ax.text(51.2, 0, f"= {K.B_TOTAL:.1f} t", va="center", fontsize=13, fontweight="bold",
+    ax.text(51.2, 0, f"= {val('b_total')} t", va="center", fontsize=13, fontweight="bold",
             color=C["text"], alpha=1.0 if k >= 3 else 0.0)
     ax.set_xlim(0, 62)
     ax.set_ylim(-0.5, 0.95)
@@ -292,17 +240,19 @@ for k in (1, 2, 3):
 for k in (1, 2):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5.8, 2.9),
                                    gridspec_kw={"height_ratios": [1, 1.25], "hspace": 0.9})
-    parts = [("Training", K.TRAIN_3Y / 1e6, "neutral"), ("Inference", K.INF_3Y / 1e6, "compute"),
-             ("Operations", K.OPS_3Y / 1e6, "neutral_l")]
+    _m = lambda q: K.mag(q, "dollar") / 10 ** 6  # noqa: E731
+    TRAIN_M, INF_M, OPS_M = _m(K.TCO.training_cost), _m(K.TCO.inference_cost), _m(K.TCO.operations_cost)
+    parts = [("Training", TRAIN_M, "neutral"), ("Inference", INF_M, "compute"),
+             ("Operations", OPS_M, "neutral_l")]
     left = 0
     for name, v, ck in parts:
         ax1.barh(0, v, left=left, height=0.6, color=C[ck], edgecolor="white")
         left += v
-    ax1.text(0.04, 0.55, f"Training ${K.TRAIN_3Y / 1e3:.0f}K ({K.TRAIN_SHARE:.1f}%)", fontsize=11, color=C["text"],
+    ax1.text(0.04, 0.55, f"Training ${val('train_3y_k')}K ({val('train_share')}%)", fontsize=11, color=C["text"],
              va="bottom", fontweight="bold")
-    ax1.text(K.TRAIN_3Y / 1e6 + K.INF_3Y / 2e6, 0, f"Inference ${K.INF_3Y / 1e6:.2f}M ({K.INF_SHARE:.1f}%)", fontsize=11,
+    ax1.text(TRAIN_M + INF_M / 2, 0, f"Inference ${val('inf_3y_m')}M ({val('inf_share')}%)", fontsize=11,
              color="white", ha="center", va="center", fontweight="bold")
-    ax1.text((K.TRAIN_3Y + K.INF_3Y + K.OPS_3Y / 2) / 1e6, 0, f"Ops ${K.OPS_3Y / 1e3:.0f}K", fontsize=11, ha="center",
+    ax1.text(TRAIN_M + INF_M + OPS_M / 2, 0, f"Ops ${val('ops_3y_k')}K", fontsize=11, ha="center",
              va="center", color=C["text"], fontweight="bold")
     ax1.set_xlim(0, 2.2)
     ax1.set_ylim(-0.4, 1.2)
@@ -310,14 +260,14 @@ for k in (1, 2):
     ax1.spines["left"].set_visible(False)
     ax1.set_xlabel("Three-year cost (US$ millions)")
     a = 1.0 if k == 2 else 0.0
-    for y, (name, v, ck) in zip((1, 0), (("12 training cycles", round(K.TRAIN_T, 1), "neutral"),
-                                         ("3 years of inference", round(K.INF_T, 1), "compute"))):
+    for y, (name, v, ck) in zip((1, 0), ((f"{K.TCO.cycles} training cycles", num("train_t"), "neutral"),
+                                         (f"{val('years')} years of inference", num("inf_t"), "compute"))):
         ax2.barh(y, v, height=0.6, color=C[ck], alpha=a)
         ax2.text(-0.01, y, name, transform=ax2.get_yaxis_transform(), ha="right",
                  va="center", fontsize=11, fontweight="bold", color=C["text"], alpha=a)
         ax2.text(v + 1.5, y, f"{v:g} t", va="center", fontsize=11, fontweight="bold",
                  color=C[ck], alpha=a)
-    ax2.text(118, 0, f"{K.CARBON_RATIO_DLRM:.0f}×", va="center", fontsize=14, fontweight="bold",
+    ax2.text(118, 0, f"{val('carbon_x_dlrm')}×", va="center", fontsize=14, fontweight="bold",
              color=C["danger"], alpha=a)
     ax2.set_xlim(0, 135)
     ax2.set_ylim(-0.5, 1.5)
@@ -331,17 +281,18 @@ for k in (1, 2):
 
 # Estimate: serving cut against halving all training (book scenario)
 bar_steps("saving", [
-    ("Cut serving cost 20%", K.SAVE_SERVE / 1e3, "compute",
-     f"${K.SAVE_SERVE / 1e3:.0f}K, about {K.SAVE_SERVE_T:.0f} t", 1),
-    ("Halve all training", K.SAVE_TRAIN / 1e3, "neutral",
-     f"${K.SAVE_TRAIN / 1e3:.0f}K, {K.SAVE_TRAIN_T:.1f} t", 1),
-], 1, (4.6, 1.3), 520, "Three-year saving (US$ thousands)")
+    (f"Cut serving cost {val('serve_cut_pct')}%", K.mag(K.TCO.serving_saving, "dollar") / 10 ** 3, "compute",
+     f"${val('save_serve_k')}K, about {val('save_serve_t')} t", 1),
+    ("Halve all training", K.mag(K.TCO.training_saving, "dollar") / 10 ** 3, "neutral",
+     f"${val('save_train_k')}K, {val('save_train_t')} t", 1),
+], 1, (4.6, 1.3), 620, "Three-year saving (US$ thousands)")
 
 # Measured fleets (moved from Lecture 15; two rows)
-fleet = [("Google, ML energy, 2019 to 2021", [("Training ~2/5", 40, "neutral_l"),
-                                             ("Inference ~3/5", 60, "compute")], 1),
-         ("Meta, AI power capacity", [("10", 10, "neutral_l"), ("Train 20", 20, "neutral"),
-                                     ("Inference 70", 70, "compute")], 2)]
+fleet = [("Google, ML energy, 2019 to 2021", [("Training ~2/5", num("g_train_share"), "neutral_l"),
+                                             ("Inference ~3/5", num("g_inf_share"), "compute")], 1),
+         ("Meta, AI power capacity", [(val("m_exp"), num("m_exp"), "neutral_l"),
+                                     (f"Train {val('m_train')}", num("m_train"), "neutral"),
+                                     (f"Inference {val('m_inf')}", num("m_inf"), "compute")], 2)]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.9, 2.3))
     for i, (label, segs, first) in enumerate(fleet):
@@ -366,8 +317,11 @@ for k in (1, 2):
 # Embodied share of one GPU-hour on two grids (derived)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    rows = [("Grid 0.4 kg/kWh", K.OP_DIRTY_G, K.EMB_G, f"embodied {K.EMB_SHARE_DIRTY:.0f}%"),
-            ("Grid 0.057 kg/kWh", K.OP_CLEAN_G, K.EMB_G, f"embodied {K.EMB_SHARE_CLEAN:.0f}%")]
+    _emb = K.mag(K.EMB.embodied_per_gpu_hour, "g")
+    rows = [(f"Grid {val('fleet_grid')} kg/kWh", K.mag(K.EMB.operational_per_gpu_hour("fleet"), "g"), _emb,
+             f"embodied {val('emb_dirty_pct')}%"),
+            (f"Grid {val('bloom_grid')} kg/kWh", K.mag(K.EMB.operational_per_gpu_hour("France"), "g"), _emb,
+             f"embodied {val('emb_clean_pct')}%")]
     for i, (lab, op, emb, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, op, height=0.6, color=C["neutral_l"], edgecolor="white")
@@ -375,7 +329,7 @@ for k in (1, 2):
         ax.barh(y, emb, left=op, height=0.6, color=C["network"], edgecolor="white", alpha=a)
         ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=12, fontweight="bold", color=C["text"])
-        ax.text(op + emb + 3, y, f"{op:.0f} + {emb:.1f} g   {txt}" if k >= 2 else f"{op:.0f} g",
+        ax.text(op + emb + 3, y, f"{op:.0f} + {val('emb_g')} g   {txt}" if k >= 2 else f"{op:.0f} g",
                 va="center", fontsize=12, fontweight="bold",
                 color=C["network"] if k >= 2 else C["text"])
     ax.set_xlim(0, 260)
@@ -390,11 +344,17 @@ for k in (1, 2):
 # Segment 3: duties have machine costs
 # =============================================================================
 
+def _sup(digits):
+    """Digits as Unicode superscripts, for an exponent in a label."""
+    return digits.translate(str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹"))
+
+
 bar_steps("explain", [
-    ("Decisions", K.DECISIONS, "memory", "1 million", 1),
-    ("Reasons, 1,000-sample attributor", K.SAMPLED, "compute",
-     f"{K.SAMPLED / 1e6:.0f} million, {K.SAMPLED_X:.0f}×", 2),
-    ("Reasons, exact (2²⁰ per denial)", K.EXACT, "danger", f"{K.EXACT / 1e11:.0f} × 10¹¹", 3),
+    ("Decisions", K.EXPL.decisions_per_day, "memory", f"{val('decisions_m')} million", 1),
+    (f"Reasons, {val('samples')}-sample attributor", K.EXPL.sampled_evaluations, "compute",
+     f"{val('sampled_m')} million, {val('sampled_x')}×", 2),
+    (f"Reasons, exact (2{_sup(val('features'))} per denial)", K.EXPL.exact_evaluations, "danger",
+     f"{val('exact_mant')} × 10{_sup(val('exact_exp'))}", 3),
 ], 3, (5.8, 1.7), 1e15, "Model evaluations per day (log scale)", log=True, xmin=1e5)
 
 
@@ -415,12 +375,12 @@ for k in (1, 2):
             fontsize=11, color=C["danger"], fontweight="bold", va="top", ha="right")
     ax.text(1.15, 2.0, "Rubber-stamp zone", fontsize=12, color=C["danger"],
             fontweight="bold", va="center")
-    ax.plot([K.PER_H_CREDIT], [3600 / K.PER_H_CREDIT], "o", color=C["memory"], ms=8)
-    ax.text(14, 520, "Credit service: 6 min each,\n1,000 per 100 reviewer-hours",
+    ax.plot([K.REVIEW.cases_per_hour], [3600 / K.REVIEW.cases_per_hour], "o", color=C["memory"], ms=8)
+    ax.text(14, 520, f"Credit service: {val('case_min')} min each,\n{val('appeals')} per {val('review_h')} reviewer-hours",
             fontsize=11, color=C["memory"], fontweight="bold", va="bottom")
     a = 1.0 if k >= 2 else 0.0
-    ax.plot([K.PER_H_CIGNA], [3600 / K.PER_H_CIGNA], "o", color=C["danger"], ms=8, alpha=a)
-    ax.text(2400, 0.42, "Cigna: 1.2 s each,\n300,000 per 100 h ", fontsize=11,
+    ax.plot([K.REVIEW.compare_cases_per_hour], [3600 / K.REVIEW.compare_cases_per_hour], "o", color=C["danger"], ms=8, alpha=a)
+    ax.text(2400, 0.42, f"Cigna: {val('cigna_s')} s each,\n{val('cigna_cases')} per {val('cigna_h')} h ", fontsize=11,
             color=C["danger"], fontweight="bold", ha="right", va="center", alpha=a)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -440,22 +400,22 @@ for k in (1, 2):
 # =============================================================================
 
 bar_steps("sisa", [
-    ("Purchase", 4.63, "data", "4.63×", 1),
-    ("SVHN", 2.45, "data", "2.45×", 1),
-    ("ImageNet", 1.36, "data", "1.36×", 1),
+    ("Purchase", num("sisa_purchase"), "data", f"{val('sisa_purchase')}×", 1),
+    ("SVHN", num("sisa_svhn"), "data", f"{val('sisa_svhn')}×", 1),
+    ("ImageNet", num("sisa_imagenet"), "data", f"{val('sisa_imagenet')}×", 1),
 ], 1, (4.2, 1.7), 6.2, "Unlearning speedup over retraining")
 
 # DP-SGD per-sample gradient memory (moved from Lecture 15)
 # Redrawn 2026-10-19 for a half-width column beside the Opacus code: labels
 # sit above the bars so the plot can be narrow.
-fig, ax = plt.subplots(figsize=(3.0, 1.25))
-ax.barh(0.9, K.KWS_BATCH_MB, height=0.45, color=C["memory"])
-ax.text(36, 1.17, f"KWS: {K.KWS_BATCH_MB:.1f} MB", fontsize=11,
+fig, ax = plt.subplots(figsize=(3.4, 1.75))
+ax.barh(0.9, K.mag(K.GRADS.per_batch("KWS"), "MB"), height=0.45, color=C["memory"])
+ax.text(36, 1.17, f"KWS: {val('kws_batch_mb')} MB", fontsize=13,
         fontweight="bold", color=C["memory"], va="bottom")
-ax.barh(0, K.GPT2_BATCH_TB * 1e6, height=0.5, color=C["danger"])
-ax.text(40, 0, f"GPT-2: {K.GPT2_BATCH_TB:.1f} TB", fontsize=11, fontweight="bold",
+ax.barh(0, K.mag(K.GRADS.per_batch("GPT-2"), "MB"), height=0.5, color=C["danger"])
+ax.text(40, 0, f"GPT-2: {val('gpt2_batch_tb')} TB", fontsize=13, fontweight="bold",
         color="white", va="center")
-ax.axvline(8e4, color=C["neutral"], lw=1.6, ls="--")
+ax.axvline(num("h100_gb") * 10 ** 3, color=C["neutral"], lw=1.6, ls="--")
 # dashed line: one H100, 80 GB (labeled in the slide text)
 ax.set_xscale("log")
 ax.set_xlim(30, 1e8)
@@ -464,7 +424,8 @@ ax.set_yticks([])
 ax.spines["left"].set_visible(False)
 ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
-ax.set_xlabel("Batch of 256, MB (log)", fontsize=11)
+ax.tick_params(axis="x", labelsize=12)
+ax.set_xlabel(f"Batch of {val('batch')}, MB (log)", fontsize=12)
 sp.save(fig, out / "dpsgd_step1.svg")
 
 # Corrected 2026-10-19: the ImageNet result fine-tunes a model pre-trained on
@@ -473,28 +434,28 @@ sp.save(fig, out / "dpsgd_step1.svg")
 # higher (De et al. 2022, Table 6). CIFAR-10 is trained from scratch; the
 # same architecture reaches above 95 percent without privacy.
 bar_steps("dp_accuracy", [
-    ("CIFAR-10, no privacy", K.CIFAR_NONPRIV, "neutral", "above 95%", 1),
-    ("CIFAR-10, ε = 8, from scratch", K.CIFAR_DP, "data",
-     f"{K.CIFAR_DP:.1f}%: over {int(K.CIFAR_GAP)} points lower", 1),
-    ("ImageNet, ε = 8, public pre-training", K.IMNET_DP, "data", f"{K.IMNET_DP:.1f}%", 1),
-    ("Same model, no privacy", K.IMNET_SAME, "neutral",
-     f"{K.IMNET_SAME:.1f}%: {K.IMNET_GAP_SAME:.1f} points higher", 1),
-    ("Best non-private model", K.IMNET_BEST, "neutral",
-     f"{K.IMNET_BEST:.1f}%: {K.IMNET_GAP_BEST:.1f} points higher", 1),
+    ("CIFAR-10, no privacy", K.CIFAR_NP, "neutral", f"above {val('cifar_np')}%", 1),
+    (f"CIFAR-10, ε = {val('eps')}, from scratch", K.CIFAR_DP, "data",
+     f"{val('cifar_dp')}%: over {val('cifar_gap')} points lower", 1),
+    (f"ImageNet, ε = {val('eps')}, public pre-training", K.IM_DP, "data", f"{val('im_dp')}%", 1),
+    ("Same model, no privacy", K.IM_SAME, "neutral",
+     f"{val('im_same')}%: {val('im_gap_same')} points higher", 1),
+    ("Best non-private model", K.IM_BEST, "neutral",
+     f"{val('im_best')}%: {val('im_gap_best')} points higher", 1),
 ], 1, (5.4, 2.2), 150, "Top-1 accuracy (%)", label_size=11)
 
 bar_steps("kws_bytes", [
-    ("One hour of raw audio", K.AUDIO_MB_H, "danger", f"{K.AUDIO_MB_H:.1f} MB", 1),
-    ("One model update", K.UPDATE_MB, "data", f"{K.UPDATE_MB:.1f} MB, {K.AUDIO_RATIO:.0f}× smaller", 1),
+    ("One hour of raw audio", num("audio_mb_h"), "danger", f"{val('audio_mb_h')} MB", 1),
+    ("One model update", num("update_mb"), "data", f"{val('update_mb')} MB, {val('audio_x')}× smaller", 1),
 ], 1, (5.8, 1.1), 5000, "Bytes leaving the home (MB, log scale)", log=True, xmin=0.1)
 
 bar_steps("audit", [
-    ("Credit: 25 months, 256 B each", K.LOG_GB, "memory", f"{K.LOG_GB:.0f} GB", 1),
-    ("DLRM: 1 year, 256 B each", K.DLRM_MANIFEST_TB * 1e3, "memory", f"{K.DLRM_MANIFEST_TB:.1f} TB", 2),
-    ("DLRM: 1 year, full input", K.DLRM_INPUT_TB * 1e3, "danger",
-     f"{K.DLRM_INPUT_TB:.0f} TB, {K.PAYLOAD_RATIO:.0f}×", 2),
+    (f"Credit: {val('ret_months')} months, {val('rec_b')} B each", K.mag(K.LOG.total, "GB"), "memory", f"{val('log_gb')} GB", 1),
+    (f"DLRM: 1 year, {val('rec_b')} B each", K.mag(K.DLOG.total, "GB"), "memory", f"{val('dlrm_manifest_tb')} TB", 2),
+    ("DLRM: 1 year, full input", K.mag(K.DLOG.payload_total, "GB"), "danger",
+     f"{val('dlrm_input_tb')} TB, {val('payload_x')}×", 2),
 ], 2, (5.8, 1.8), 3e8, "Audit log size (GB, log scale)", log=True, xmin=10,
-    note="256 B per record is an assumption; DLRM input as in MLPerf DLRM (constructed)")
+    note=f"{val('rec_b')} B per record is an assumption; DLRM input as in MLPerf DLRM (constructed)")
 
 
 # =============================================================================
@@ -558,10 +519,10 @@ class Svg:
 
 # DLRM derivation strip (book scenario)
 g = Svg(900, 185)
-boxes = [("10M users × 20 items", f"{K.INF_DAY / 1e6:.0f}M inferences\na day", 1),
-         ("× 10 ms each", f"{K.GPU_H_DAY:.0f} GPU-hours\na day", 2),
-         ("÷ 24 hours", f"{K.GPUS:.1f} GPUs\nalways on", 3),
-         ("× $2.50 an hour", f"${K.SERVE_YEAR / 1e3:.0f}K\na year", 4)]
+boxes = [(f"{val('users_m')}M users × {val('items')} items", f"{val('inf_day_m')}M inferences\na day", 1),
+         (f"× {val('service_ms')} ms each", f"{val('gpu_h_day')} GPU-hours\na day", 2),
+         ("÷ 24 hours", f"{val('gpus')} GPUs\nalways on", 3),
+         (f"× ${val('inf_rate')} an hour", f"${val('serve_year_k')}K\na year", 4)]
 for i, (op, res, first) in enumerate(boxes):
     x = 10 + i * 225
     g.text(x + 100, 26, op, 22, C["neutral"], "bold", first=first)
@@ -595,6 +556,19 @@ g.text(815, 270, "Recall\nthe model", 19, C["danger"], "bold", first=4)
 g.text(450, 360, "Answer within one month, extendable by two (GDPR Art. 12(3))", 19,
        C["danger"], "bold", first=4)
 g.write("lineage", 4)
+
+# Erasure without unlearning: the request forces a retraining, a new
+# checkpoint, and an update to every deployed device (chapter Sec. 15.5.5).
+g = Svg(900, 96)
+steps_ = [("Erasure\nrequest", "danger"), ("Retrain without\nthe record", "compute"),
+          ("Replacement\ncheckpoint", "memory"), ("Update every\ndeployed device", "data")]
+for i, (lab, ck) in enumerate(steps_):
+    x = 8 + i * 225
+    g.rect(x, 8, 195, 80, C[ck + "_l"], C[ck], sw=2.5)
+    g.text(x + 97, 48, lab, 22, C["text"], "bold")
+    if i:
+        g.line(x - 27, 48, x - 4, 48, C["neutral"])
+g.write("erasure_flow", 1)
 
 # DP-SGD mechanism
 g = Svg(900, 330)

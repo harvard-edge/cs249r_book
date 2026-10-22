@@ -17,6 +17,7 @@ import csv
 from pathlib import Path
 
 from ..core.provenance import Provenance, ProvenanceKind
+from ..core import provenance_catalog as _catalog  # added 2026-10-20
 
 _SERIES = Path(__file__).parent / "data" / "series"
 
@@ -65,10 +66,11 @@ AgentTimeHorizon = _Series(
             "Copied from METR's published YAML (benchmark METR-Horizon-v1.1). "
             "METR's stated 2023-on doubling time is 128.744 days (CI 104.4-158.0), "
             "fit on frontier models with p50 <= 16 h; refitting these rows the same "
-            "way reproduces it."
+            "way reproduces it. The p80 columns (80% task-completion horizon, "
+            "p80_horizon_length estimate and CI) were added 2026-10-20 from the same YAML."
         ),
     ),
-    "50%-success task horizon by model release (METR Time Horizon v1.1).",
+    "50%- and 80%-success task horizons by model release (METR Time Horizon v1.1).",
 )
 
 LowestPriceAtCapability = _Series(
@@ -145,6 +147,24 @@ CybenchSolveRate = _Series(
     "Fraction of Cybench CTF tasks solved without subtask hints, by model release.",
 )
 
+FirecrackerBootPreconfigured = _Series(
+    "firecracker_boot_preconfigured",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Agache et al. (2020), Firecracker: Lightweight Virtualization for Serverless "
+             "Applications (NSDI '20), released boot-time CDFs, pre-configured microVMs on m5d.metal"),
+        url="https://github.com/firecracker-microvm/nsdi2020-data",
+        verified="2026-10-20",
+        notes=(
+            "Second data block (gnuplot index 1, plotted as 'FC-pre') of "
+            "data/m5d.metal/boot-serial-fc-api-cdf.dat, boot-parallel-50-fc-api-cdf.dat, and "
+            "boot-parallel-100-fc-api-cdf.dat, copied row for row: boot time in ms and the "
+            "cumulative fraction booted. Concurrency 1 is the serial run. Apache-2.0."
+        ),
+    ),
+    "Firecracker pre-configured microVM boot-time CDF (ms) by number booting at once.",
+)
+
 OSWorldStepBudget = _Series(
     "osworld_step_budget",
     Provenance(
@@ -192,6 +212,113 @@ SweBenchTrajectories = _Series(
         ),
     ),
     "Per-trajectory model calls, role-split characters, tokens, and cost for public repair-agent runs.",
+)
+
+# --- DAgger on Super Tux Kart (added 2026-10-20) -----------------------------
+ImitationSuperTuxKart = _Series(
+    "ross_dagger_supertuxkart",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Ross, Gordon, and Bagnell (2011), A Reduction of Imitation Learning and Structured "
+             "Prediction to No-Regret Online Learning, AISTATS, Figure 2 and Sec. 5.1"),
+        url="https://arxiv.org/abs/1011.0686",
+        verified="2026-10-19",
+        notes=(
+            "Super Tux Kart, Star Track: average falls per lap of a linear controller on image "
+            "features after 1, 5, 10, 15, and 20 training iterations, for supervised cloning, "
+            "SMILe, and DAgger. Falls are read from Figure 2 (the plot has 95 percent "
+            "confidence bars), so the decimals are by eye; Sec. 5.1 gives about 1,000 data "
+            "points collected per iteration."
+        ),
+    ),
+    "Falls per lap against training iterations for three imitation methods on one racing track.",
+)
+
+# --- pass@1 and pass@256 across GRPO steps (added 2026-10-20) ----------------
+GrpoPassAtKSteps = _Series(
+    "yue_grpo_pass_at_k",
+    _catalog.YUE_2025_RL_REASONING_BOUNDARY,
+    "Qwen2.5-7B pass@1 and pass@256 (percent) on Omni-MATH-Train at the base model and after GRPO steps.",
+)
+
+# --- One mini-SWE-agent run, per task (added 2026-10-20) ---------------------
+SweBenchMiniSonnet4Run = _Series(
+    "swe_bench_verified_mini_v1_sonnet4_run",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "SWE-bench Verified submission 20250726_mini-v1.0.0_claude-sonnet-4-20250514 "
+            "(mini-swe-agent 1.0.0 with Claude 4 Sonnet, bash only, one attempt per task), per task"
+        ),
+        url=(
+            "https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/"
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514"
+        ),
+        verified="2026-10-17",
+        notes=(
+            "500 tasks. Cost, model calls, and resolved flag from the submission's "
+            "per_instance_details.json; exit status, observations, nonzero exit codes, "
+            "truncation warnings, syntax errors seen, command classes (read, write, run, "
+            "net, by command pattern), and files in the submitted diff from the public "
+            "trajectories (swe-bench-submissions S3 bucket, bash-only/<submission>/trajs). "
+            "Reduced by extract_run.py (slides tree, images/ of the deck that plots it); command "
+            "classes are pattern matches and so approximate."
+        ),
+    ),
+    "Per-task cost, model calls, acceptance, and command classes of one public repair-agent run.",
+)
+
+# Model calls and agent trajectories (added 2026-10-20)
+LlmInferenceTraceCode2023 = _Series(
+    "azure_llm_inference_code_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, code (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_code.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 8,819 requests on 2023-11-16 to a "
+            "production code-completion service. Raw: raw.githubusercontent.com/Azure/"
+            "AzurePublicDataset/master/data/AzureLLMInferenceTrace_code.csv. License CC BY 4.0."
+        ),
+    ),
+    "Prompt (context) and output (generated) tokens of production code-completion requests.",
+)
+
+# Serving at scale: request traces (added 2026-10-20)
+LlmInferenceTraceConversation2023 = _Series(
+    "azure_llm_inference_conv_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, conversation (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_conv.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 19,366 requests in one hour on "
+            "2023-11-16 to a production conversation service. Raw: raw.githubusercontent.com/"
+            "Azure/AzurePublicDataset/master/data/AzureLLMInferenceTrace_conv.csv. License CC BY 4.0."
+        ),
+    ),
+    "Arrival time, prompt (context) tokens, and output (generated) tokens of production chat requests.",
+)
+
+LlmInferenceTraceConversation2024TenMinute = _Series(
+    "azure_llm_inference_conv_2024_10min",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2024, conversation, one week (Stojkovic et al., DynamoLLM, HPCA 2025)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2024.md",
+        verified="2026-10-18",
+        notes=(
+            "Requests and tokens per 10-minute bin, 2024-05-12 00:00 to 2024-05-18 23:50, counted "
+            "from the released AzureLLMInferenceTrace_conv_1week.csv by aggregate_azure_2024.py "
+            "(slides tree, images/data of the serving lecture): a bin is the timestamp truncated "
+            "to its ten-minute digit. License CC BY 4.0."
+        ),
+    ),
+    "Requests, prompt tokens, and output tokens per 10-minute bin over one week of a chat service.",
 )
 
 _MONKEYS_NOTES = (
@@ -318,6 +445,25 @@ LeRobotEpisodeHistogram = _Series(
     "Distribution of episodes per public LeRobot dataset.",
 )
 
+# Sim-to-real ablations of a dexterous hand (added 2026-10-20)
+DactylPhysicalTrials = _Series(
+    "dactyl_physical_trials",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="OpenAI: Andrychowicz et al. (2020), Learning Dexterous In-Hand Manipulation, IJRR 39(1), "
+            "Tables 4 and 5 (block, state), arXiv:1808.00177v5",
+        url="https://arxiv.org/abs/1808.00177",
+        verified="2026-10-18",
+        notes=(
+            "Consecutive rotations in each of 10 physical trials per condition, sorted values as "
+            "published; printed_median is the table's own median column. Table 4 holds randomization "
+            "groups out; Table 5 compares LSTM and feed-forward policy and value networks under all "
+            "randomizations (its LSTM row repeats Table 4's all-randomizations row)."
+        ),
+    ),
+    "Dactyl's physical-hand trials by training condition.",
+)
+
 EdgeInferenceOrin = _Series(
     "mlperf_inference_edge_orin",
     Provenance(
@@ -369,6 +515,43 @@ CaliforniaDisengagements = _Series(
         ),
     ),
     "Autonomous testing miles and reported disengagements filed with the California DMV.",
+)
+
+TakeoverTimeMeta = _Series(
+    "zhang2019_mean_takeover_times",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Zhang, B., de Winter, J., Varotto, S., Happee, R., and Martens, M. (2019), Determinants of "
+            "take-over time from automated driving: A meta-analysis of 129 studies, Transportation "
+            "Research Part F 64:285-307; supplementary data (CC0), mastersheet.xlsx",
+        url="https://doi.org/10.4121/uuid:75c28abe-6559-4273-85f4-927e969c1c59",
+        verified="2026-10-19",
+        notes=(
+            "The 520 mean take-over times (column MTOT, sheet 1 rows 2 to 521), in file order. "
+            "Reproduces the paper's mean 2.72 s and SD 1.45 s, range 0.69 to 19.79 s, and the "
+            "inverted-CDF percentiles p50 2.37 s, p90 4.33 s, p99 7.0 s stored on "
+            "Embodied.Scenario.WarehouseAisle (prov:zhang-2019-takeover-meta-analysis). "
+            "Added 2026-10-20 (data.4tu.nl item 12704915, version 1)."
+        ),
+    ),
+    "Mean take-over time of each of 520 study conditions in 129 automated-driving studies.",
+)
+
+# Per-group pedestrian detection (added 2026-10-20)
+from ..core import provenance_catalog as _pc  # noqa: E402
+
+PedestrianAp75BySkinType = _Series(
+    "wilson2019_bdd100k_person_ap75",
+    _pc.WILSON_2019_PREDICTIVE_INEQUITY,
+    "AP75 (percent) for lighter- and darker-skinned pedestrians, eight COCO-trained detectors on "
+    "BDD100K validation people (Wilson et al. 2019, Table 4; Average row in Literature.Fairness).",
+)
+
+PedestrianMissRateByAge = _Series(
+    "li2025_pedestrian_miss_rate_by_age",
+    _pc.LI_2025_BIAS_BEHIND_THE_WHEEL,
+    "Miss rate (percent) for adults and children, eight pedestrian detectors (Li et al. 2025, "
+    "Table 7; Average row in Literature.Fairness).",
 )
 
 WaymoSafetyImpact = _Series(
@@ -500,6 +683,15 @@ class Series:
         "Parameters, training cost, domain, and publication date of notable models.",
         numeric=("parameters", "training_cost_2023usd", "frontier"),
     )
+    NotableModelDatasets = TrendSeries(
+        "notable_model_datasets",
+        _lit("Epoch AI, Notable AI Models database (CC BY 4.0), snapshot 2026-10-12",
+             "https://epoch.ai/data/notable-ai-models",
+             "training_dataset_size is Epoch's Training dataset size (total) column in datapoints; "
+             "frontier = Epoch's frontier-model flag"),
+        "Training dataset size (datapoints), domain, and publication date of notable models.",
+        numeric=("training_dataset_size", "frontier"),
+    )
     PretrainingTokens = TrendSeries(
         "pretraining_tokens",
         _lit("Pre-training token counts as reported in each model's paper or release (see source column)",
@@ -543,6 +735,25 @@ class Series:
         "Performance on test data from the training period versus a later period, six datasets.",
         numeric=("id_mean", "id_std", "ood_mean", "ood_std"),
     )
+    OutagesByMlness = TrendSeries(
+        "outages_by_mlness",
+        _lit("Papasian and Underwood (2020), How ML Breaks: A Decade of Outages for One Large ML Pipeline, "
+             "USENIX OpML 2020, slide 21 (Finding #1)",
+             "https://www.usenix.org/conference/opml20/presentation/papasian",
+             "counts read from the bar chart (red bars, matching outages); the slides give no table"),
+        "Outages of one large ML pipeline by how characteristic of ML their cause was, 0 to 4.",
+        numeric=("mlness", "outages"),
+    )  # added 2026-10-20
+    LabelFreeShiftDetection = TrendSeries(
+        "rabanser2019_label_free_detection",
+        _lit("Rabanser, Guennemann, and Lipton (2019), Failing Loudly: An Empirical Study of Methods for "
+             "Detecting Dataset Shift, NeurIPS 2019, Table 2a",
+             "https://arxiv.org/abs/1810.11953",
+             "best label-free detector (univariate tests on softmax outputs, BBSDs), MNIST and CIFAR-10, "
+             "simulated shifts; detection accuracy by number of new samples and shift size"),
+        "Detection accuracy of a label-free shift test against the number of new samples, by shift size.",
+        numeric=("samples", "large", "medium", "small"),
+    )  # added 2026-10-20
     PyTorchOperatorSchemas = TrendSeries(
         "pytorch_operator_schemas",
         _lit("PyTorch aten/src/ATen/native/native_functions.yaml at each release tag (mined 2026-10-12)",
@@ -676,6 +887,32 @@ class Series:
         "Time-to-train of MLPerf Training LLM benchmarks by accelerator count and system.",
         numeric=("accelerators", "runs", "min_minutes", "mean_minutes", "score_minutes", "global_batch_size", "trained_samples_median"),
     )
+    # Added 2026-10-20 (verified against the arXiv HTML on 2026-10-20).
+    GoyalLargeMinibatchResNet50 = TrendSeries(
+        "goyal_resnet50_large_minibatch",
+        _lit("Goyal et al. (2017), Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour, "
+             "arXiv:1706.02677, Table 1 and Figure 3",
+             "https://arxiv.org/abs/1706.02677",
+             "ResNet-50 ImageNet top-1 validation error, mean of 5 runs. source=table1: the 256 baseline "
+             "and the three 8k warmup variants of Table 1 (text). source=figure3: the validation errors in "
+             "the legends of Figure 3 (linear scaling rule with gradual warmup), read from the figure; "
+             "256 to 16k match Table 3(a) in the text, while 128, 32k and 64k appear only in the figure"),
+        "ResNet-50 ImageNet validation error by global minibatch and warmup schedule.",
+        numeric=("global_batch", "top1_error_pct"),
+    )
+    MegatronLmWeakScaling = TrendSeries(
+        "megatron_lm_weak_scaling",
+        _lit("Shoeybi et al. (2019), Megatron-LM, arXiv:1909.08053, Figure 5 and Section 5.1.1",
+             "https://arxiv.org/abs/1909.08053",
+             "weak-scaling efficiency against the 1.2B-parameter one-GPU baseline on DGX-2H V100 servers "
+             "(NVSwitch, 300 GB/s inside a server); mode=model is tensor parallelism inside one server, "
+             "model+data adds data parallelism across servers. Bar values read from Figure 5; the 8-GPU "
+             "77 percent and 512-GPU 74 percent are also stated in Section 5.1.1. The abstract's 76 percent "
+             "(Literature.TrainingRuns.MegatronLm2019ScalingEfficiency) is sustained FLOP/s against the "
+             "39 TFLOP/s single-GPU baseline, a different measure"),
+        "Megatron-LM weak-scaling efficiency by GPU count, model and model-plus-data parallel.",
+        numeric=("gpus", "efficiency_pct"),
+    )
     Llama3Interruptions = TrendSeries(
         "llama3_interruptions",
         _lit("Llama Team, AI @ Meta (2024), The Llama 3 Herd of Models, arXiv:2407.21783 v3, Table 5 "
@@ -794,6 +1031,26 @@ class Series:
         "Measured NCCL all-reduce time and bandwidth by message size on one eight-H100 node.",
         numeric=("size_bytes", "count", "oop_time_us", "oop_algbw_GBps", "oop_busbw_GBps", "ip_time_us", "ip_algbw_GBps", "ip_busbw_GBps"),
     )
+    HorovodScaling128Gpu = TrendSeries(
+        "horovod_scaling_128gpu",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, scaling bar chart (Figure 6 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "images per second at 128 NVIDIA Pascal GPUs over 25GbE TCP: ideal (one-GPU rate times 128), "
+             "standard distributed TensorFlow, and Horovod; bar heights read from the figure to about "
+             "+/-250 images/s, added 2026-10-20"),
+        "Training throughput of two image models at 128 GPUs: ideal, distributed TensorFlow, and Horovod.",
+        numeric=("ideal_images_per_s", "tensorflow_images_per_s", "horovod_images_per_s"),
+    )
+    HorovodTimelineTrace = TrendSeries(
+        "horovod_timeline_trace",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, Horovod Timeline screenshot (Figure 5 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "phase edges of five gradient tensors' AllReduces, read against the screenshot's 100 ms ticks to "
+             "about +/-2 ms, in ms after its first tick (Literature.Communication.HorovodTimelineOriginMs); "
+             "tensors 0-1 and 2-4 share their rows' phases; added 2026-10-20"),
+        "Phase edges (negotiate, wait, schedule, NCCL, copy) of AllReduces in a Horovod Timeline trace.",
+        numeric=("start_ms", "end_ms"),
+    )
     InterconnectGenerations = TrendSeries(
         "interconnect_generations",
         _lit("Interconnect generation rates and dates from IEEE 802.3, IBTA, PCI-SIG, and NVIDIA primary "
@@ -818,6 +1075,35 @@ class Series:
         "Apple Neural Engine peak ratings by A-series chip, with the basis of each value.",
         numeric=("year", "tops"),
     )
+    # Added 2026-10-20: FedAvg rounds to target accuracy against local work.
+    FedAvgMnistCnnRounds = TrendSeries(
+        "fedavg_mnist_cnn_rounds",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="McMahan et al. (2017), Communication-Efficient Learning of Deep Networks from Decentralized "
+                       "Data, AISTATS 2017, Table 2 (MNIST CNN, 99% accuracy)",
+                   url="https://arxiv.org/abs/1602.05629", verified="2026-10-20",
+                   notes="Rounds to reach 99% test accuracy with 100 clients (C = 0.1); first row is FedSGD; "
+                         "batch_size inf means the full local dataset; updates_per_round u = E n / (K B); "
+                         "non-IID is the pathological two-digits-per-client split."),
+        "Communication rounds to 99% MNIST CNN accuracy for FedSGD and FedAvg, IID and non-IID.",
+        numeric=("local_epochs", "updates_per_round", "iid_rounds", "non_iid_rounds"),
+    )
+    # Added 2026-10-20: MNIST accuracy against epsilon for @fig-privacy-utility-frontier.
+    GaussianDpMnistNoisySgd = TrendSeries(
+        "bu_gdp_mnist_noisysgd",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Bu, Dong, Long, and Su (2020), Deep Learning with Gaussian Differential Privacy, Harvard "
+                       "Data Science Review 2(3), Table 1 (Experimental results for NoisySGD and their privacy "
+                       "analyses on MNIST)",
+                   url="https://pmc.ncbi.nlm.nih.gov/articles/PMC7695347/", verified="2026-10-20",
+                   notes="Columns transcribed exactly from Table 1: learning rate eta, clipping norm R, noise "
+                         "multiplier sigma, epochs, test accuracy (%), CLT mu, CLT epsilon, and moments-accountant "
+                         "epsilon; both epsilon columns are with respect to delta = 1e-5. The table has no "
+                         "nonprivate row."),
+        "MNIST NoisySGD test accuracy against privacy budget under the Gaussian DP central limit theorem.",
+        numeric=("learning_rate", "clip_norm", "noise_multiplier", "epochs", "test_accuracy_pct", "clt_mu",
+                 "clt_epsilon", "ma_epsilon"),
+    )
     GeminiPromptEnergy = TrendSeries(
         "gemini_prompt_energy",
         _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "
@@ -840,3 +1126,927 @@ class Series:
         "Emission factors, WUE, PUE, and per-prompt water and emissions reported for Gemini serving.",
         numeric=("value",),
     )
+
+    # --- Silent degradation and memory-bound decode evidence (added 2026-10-20) ---
+    GoogleFluTrendsVsCdc = TrendSeries(
+        "google_flu_trends_cdc_ilinet",
+        Provenance(
+            kind=ProvenanceKind.LITERATURE,
+            ref="Google Flu Trends US national estimate and CDC ILINet weighted ILI (US national), as archived "
+                "by the Delphi Epidata API (Carnegie Mellon); failure analysis in Lazer et al. (2014), "
+                "The Parable of Google Flu, Science 343:1203",
+            url="https://api.delphi.cmu.edu/epidata/gft/?locations=nat",
+            verified="2026-10-20",
+            notes=("weekly rows (epiweek = year*100 + MMWR week) where both series report, 2003-40 to 2015-32; "
+                   "gft_ili_pct is Google's estimate of influenza-like illness per 100,000 doctor visits "
+                   "divided by 1,000 (percent of visits); cdc_wili_pct is ILINet weighted percent of visits "
+                   "(https://api.delphi.cmu.edu/epidata/fluview/?regions=nat), retrieved 2026-10-16; the CDC "
+                   "series is the current revised one, not the 2013 real-time release"),
+        ),
+        "Weekly Google Flu Trends estimate against the CDC count of doctor visits for flu-like illness.",
+        numeric=("epiweek", "gft_ili_pct", "cdc_wili_pct"),
+    )
+    ImageNetV2MatchedFrequency = TrendSeries(
+        "imagenetv2_matched_frequency_top1",
+        _lit("Recht, Roelofs, Schmidt, and Shankar (2019), Do ImageNet Classifiers Generalize to ImageNet?, "
+             "ICML, appendix tables imagenetv2-b-33_top1_model_results_table.{1,2}.tex (arXiv 1902.10811 source)",
+             "https://arxiv.org/abs/1902.10811",
+             "top-1 accuracy (%) of 67 models on the original ImageNet validation set and on ImageNetV2 "
+             "MatchedFrequency, with the paper's rounded gap in points; models named fv_* are the Fisher-vector "
+             "baselines, the rest neural networks; extracted by pattern from the LaTeX rows, not typed"),
+        "Top-1 accuracy of 67 ImageNet models on the original test set and on a re-collected one.",
+        numeric=("original_rank", "original_top1", "imagenet_v2_top1", "gap"),
+    )
+    MLPerfInferenceV4Llama2Offline = TrendSeries(
+        "mlperf_inference_v4_llama2_70b_offline",
+        _lit("MLCommons, MLPerf Inference datacenter v4.0 (Apache-2.0), closed division, NVIDIA, "
+             "llama2-70b-99.9 Offline, closed/NVIDIA/results/<system>/llama2-70b-99.9/Offline/performance/"
+             "run_1/mlperf_log_summary.txt", "https://github.com/mlcommons/inference_results_v4.0",
+             "tokens per second for eight-GPU H100-SXM-80GB and H200-SXM-141GB systems; the CTS system is "
+             "NVIDIA's H200 with a custom thermal solution and a higher power limit; accelerator count from "
+             "each system name; all results VALID"),
+        "Llama 2 70B offline throughput on eight H100 and eight H200 GPUs (MLPerf Inference v4.0).",
+        numeric=("accelerators", "tokens_per_s"),
+    )
+
+    # --- Deployment-tier measurements (added 2026-10-20) --------------------
+    # Measured field data behind the light-barrier, memory-wall, TPU roofline,
+    # and TinyML energy comparisons; each row transcribed from the cited source.
+    AwsInterRegionRtt = TrendSeries(
+        "aws_interregion_rtt_p50",
+        Provenance(
+            kind=ProvenanceKind.INDUSTRY_REPORT,
+            ref="cloudping.co AWS inter-region latency, /api/latencies?percentile=p_50&timeframe=1W, "
+                "retrieved 2026-10-18",
+            url="https://www.cloudping.co/",
+            verified="2026-10-18",
+            notes=("p50_rtt_ms is the one-week median round trip measured from us-east-1 (N. Virginia) "
+                   "to each region, as the API returned it. Coordinates are those of the metro area AWS "
+                   "names for each region (Wikipedia city coordinates); AWS does not publish building "
+                   "locations, so great-circle distances from them are approximate."),
+        ),
+        "Measured median round trips from AWS us-east-1 to four regions, with metro coordinates.",
+        numeric=("source_lat", "source_lon", "dest_lat", "dest_lon", "p50_rtt_ms"),
+    )
+    TpuV1ProductionApps = TrendSeries(
+        "tpu_v1_production_apps",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1 and Table 3",
+             "https://arxiv.org/abs/1704.04760",
+             "ops_per_weight_byte: Table 1, TPU Ops / Weight Byte; measured_tops: Table 3, row 9, "
+             "TeraOps/sec measured with hardware counters (92 peak); six applications that were 95% "
+             "of the TPU datacenter workload in July 2016"),
+        "Arithmetic intensity and measured throughput of the six production applications on TPU v1.",
+        numeric=("ops_per_weight_byte", "measured_tops"),
+    )
+    TpuV1DeploymentMix = TrendSeries(
+        "tpu_v1_deployment_mix",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1, percent of deployed TPUs in July 2016",
+             "https://arxiv.org/abs/1704.04760"),
+        "Share of deployed TPU v1s by application family, July 2016.",
+        numeric=("deployed_share_pct",),
+    )
+    MLPerfTinyV12KwsEnergy = TrendSeries(
+        "mlperf_tiny_v1_2_kws_energy",
+        _lit("MLCommons, MLPerf Tiny v1.2 results (Apache-2.0), summary.csv, retrieved 2026-10-18",
+             "https://github.com/mlcommons/tiny_results_v1.2",
+             "keyword spotting (kws), closed division, rows with an energy measurement (HasPower); "
+             "energy_uj is the reported Power column, microjoules per inference"),
+        "Measured energy per keyword-spotting inference in MLPerf Tiny v1.2, closed division.",
+        numeric=("energy_uj",),
+    )
+    MemoryWallHardwareScaling = TrendSeries(
+        "memory_wall_hardware_scaling",
+        _lit("Gholami et al. (2024), AI and Memory Wall, IEEE Micro 44(3) (arXiv:2403.14123), Fig. 1",
+             "https://arxiv.org/abs/2403.14123",
+             "markers digitized from the vector figure in the arXiv source (figs/hw_scaling.pdf): each "
+             "filled marker's center read back to (year, value) through the figure's own axis ticks; "
+             "series: flops (server chips' peak FLOP/s), dram (DRAM bandwidth), interconnect "
+             "(interconnect bandwidth), each normalized to its first point"),
+        "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
+        numeric=("year", "normalized"),
+    )
+    # --- Responsible AI (added 2026-10-20) ----------------------------------
+    OfqualGradeMatrix2020 = TrendSeries(
+        "ofqual_2020_grade_matrix",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 1 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "one row per centre assessment grade (CAG): entries is N for that CAG grade; columns A* to U "
+             "are the row percentages of entries by calculated grade as printed; cells printed as '~' "
+             "(under 0.5 percent) are entered as 0, so a row may not sum to exactly 100"),
+        "A level entries by teacher-assessed grade against the grade the 2020 standardization calculated.",
+        numeric=("entries", "A*", "A", "B", "C", "D", "E", "U"),
+    )
+    OfqualCandidatesLowered2020 = TrendSeries(
+        "ofqual_2020_candidates_lowered",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 2 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "candidates by the number of their A levels whose CAG exceeded the calculated grade, as "
+             "printed (rounded to the nearest 10)"),
+        "A level candidates by how many of their grades the 2020 standardization lowered.",
+        numeric=("grades_lowered", "candidates"),
+    )
+    CompasTwoYearConfusion = TrendSeries(
+        "compas_two_year_confusion",
+        _lit("ProPublica, compas-analysis, compas-scores-two-years.csv (Angwin et al. 2016), recomputed "
+             "2026-10-18", "https://github.com/propublica/compas-analysis",
+             "ProPublica's filters: |days_b_screening_arrest| <= 30, is_recid != -1, c_charge_degree != 'O', "
+             "score_text != 'N/A'; flagged = score_text Medium or High; outcome two_year_recid; "
+             "tp flagged and reoffended, fp flagged and did not, fn not flagged and reoffended, tn neither; "
+             "race as coded in the file"),
+        "COMPAS decile-score flags against two-year recidivism, by race, from ProPublica's released data.",
+        numeric=("tp", "fp", "fn", "tn"),
+    )
+    AbadiDpSgdAccuracy = TrendSeries(
+        "abadi_dpsgd_accuracy",
+        _lit("Abadi et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016, Sec. 5.2 and Fig. 6",
+             "https://arxiv.org/abs/1607.00133",
+             "test accuracy (%) of DP-SGD at each reported (epsilon, delta): MNIST 90, 95, 97 percent at "
+             "epsilon 0.5, 2, 8; CIFAR-10 67, 70, 73 percent at epsilon 2, 4, 8; nonprivate baselines in "
+             "Literature.DifferentialPrivacy"),
+        "Differentially private training accuracy by privacy budget on MNIST and CIFAR-10.",
+        numeric=("epsilon", "delta", "accuracy_pct"),
+    )
+
+    # --- Training and fleet footprints (added 2026-10-20) ---------------------
+    PattersonTrainingFootprints = TrendSeries(
+        "patterson_training_footprints",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Patterson et al. (2021), Carbon Emissions and Large Neural Network Training, Table 4 "
+                       "(arXiv:2104.10350)",
+                   url="https://arxiv.org/abs/2104.10350", verified="2026-10-20",
+                   notes=("Final-run figures for the five NLP models (the Evolved Transformer NAS column is "
+                          "omitted); kg_per_kwh is the data center's CO2e per kWh when the model ran, gross "
+                          "and net of carbon-free purchases; measured_w is the measured system average power "
+                          "per accelerator including memory, network interface, fans, and host CPU; "
+                          "activated_pct is the percent of the model activated on every token; transcribed "
+                          "exactly from the PDF table.")),
+        "Final-run energy, grid factor, PUE, measured power, and emissions of five NLP models (2021).",
+        numeric=("params_b", "activated_pct", "gross_kg_per_kwh", "net_kg_per_kwh", "pue", "tdp_w",
+                 "measured_w", "chips", "days", "energy_mwh", "gross_tco2e", "net_tco2e"),
+    )
+    BloomProjectEmissions = TrendSeries(
+        "bloom_project_emissions",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B "
+                       "Parameter Language Model, JMLR 24(253), Table 5 (arXiv:2211.02001)",
+                   url="https://arxiv.org/abs/2211.02001", verified="2026-10-20",
+                   notes=("Dynamic-power emissions of the BigScience project by process, t CO2eq, French grid "
+                          "at 57 gCO2eq/kWh, GPU energy on a TDP basis; transcribed for the Sustainable AI "
+                          "lecture and moved into MLSysIM 2026-10-20.")),
+        "Dynamic-power emissions of the BLOOM project by model and process.",
+        numeric=("tco2e",),
+    )
+    LuccioniLlmTrainingComparison = TrendSeries(
+        "luccioni_llm_training_comparison",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B "
+                       "Parameter Language Model, JMLR 24(253), Table 4 (arXiv:2211.02001)",
+                   url="https://arxiv.org/abs/2211.02001", verified="2026-10-20",
+                   notes=("Four 175B-scale models: training energy, grid intensity, and emissions times PUE "
+                          "as Table 4 prints them; *_inferred = 1 marks a value in italics there, inferred "
+                          "by the authors because the model's paper did not report it. Added 2026-10-20.")),
+        "Training energy, grid intensity, and emissions of GPT-3, Gopher, OPT, and BLOOM.",
+        numeric=("energy_mwh", "energy_inferred", "grid_g_per_kwh", "grid_inferred", "tco2e_pue", "tco2e_inferred"),
+    )
+    CsoIrelandDatacenterElectricity = TrendSeries(
+        "cso_ireland_datacenter_electricity",
+        Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,
+                   ref="Central Statistics Office (Ireland), Data Centres Metered Electricity Consumption 2023, "
+                       "statistical release of 23 July 2024, Table 1",
+                   url="https://www.cso.ie/en/releasesandpublications/ep/p-dcmec/datacentresmeteredelectricityconsumption2023/",
+                   verified="2026-10-20",
+                   notes=("share_pct is data centers' percent of total metered electricity consumption; gwh is "
+                          "their consumption, transcribed for 2015 and 2023 only (other years left empty).")),
+        "Irish data centers' share of metered electricity, 2015 to 2023.",
+        numeric=("year", "share_pct", "gwh"),
+    )
+    EuropeGenerationWeek47 = TrendSeries(
+        "europe_generation_2023w47",
+        Provenance(kind=ProvenanceKind.DATASHEET,
+                   ref="Energy-Charts (Fraunhofer ISE), public net electricity generation and load, EU, "
+                       "20 to 26 November 2023, hourly (api.energy-charts.info/public_power, country=eu)",
+                   url="https://api.energy-charts.info/public_power?country=eu",
+                   verified="2026-10-20",
+                   notes=("Hourly generation by source class in MW (time_cet is the hour start in CET); "
+                          "coal_oil groups hard coal, lignite, and oil; copied from the Sustainable AI "
+                          "chapter's data file, which this series replaces.")),
+        "Hourly EU electricity generation by source and load, one week of November 2023 (MW).",
+        numeric=("nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil", "load"),
+    )
+    # --- Fleet-scale measurements recalled by the Volume II conclusion (added 2026-10-20) ---
+    MegaScaleStrongScaling = TrendSeries(
+        "megascale_strong_scaling",
+        _lit("Jiang et al. (2024), MegaScale: Scaling Large Language Model Training to More Than 10,000 "
+             "GPUs, NSDI 2024, Table 2 (arXiv:2402.15627 v1)",
+             "https://arxiv.org/abs/2402.15627",
+             "Strong scaling of the 175B model at a fixed batch of 768 sequences (sequence 2,048) on "
+             "NVIDIA Ampere GPUs: MegaScale training throughput in tokens per second and MFU, with "
+             "Megatron-LM's MFU on the same configuration. Read from the paper's table."),
+        "MegaScale strong scaling of a 175B model at batch 768: throughput and MFU by GPU count.",
+        numeric=("gpus", "megascale_tokens_s", "megascale_mfu_pct", "megatron_mfu_pct"),
+    )
+    TailAtScaleLeafLatency = TrendSeries(
+        "tail_at_scale_leaf_latency",
+        _lit("Dean and Barroso (2013), The Tail at Scale, Communications of the ACM 56(2), Table 1",
+             "https://doi.org/10.1145/2408776.2408794",
+             "Latency measured at the root of a Google service whose requests fan out through "
+             "intermediate servers to many leaf servers, by how many leaves the root waits for. Only "
+             "the cells the books cite are transcribed (the 50th and 99th percentiles of one random "
+             "leaf and of all leaves, and the 99th percentile of 95 percent of the leaves). The paper "
+             "names neither the service nor its leaf count. Read from the paper."),
+        "Root-measured latency of a fan-out service by the share of leaves awaited and percentile.",
+        numeric=("percentile", "latency_ms"),
+    )
+
+    # --- Model compression (added 2026-10-20) ---
+    MobileNetV3Table3 = TrendSeries(
+        "mobilenetv3_table3_pixel1",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Howard et al. (2019), Searching for MobileNetV3, ICCV 2019, Table 3",
+                   url="https://arxiv.org/abs/1905.02244",
+                   verified="2026-10-20",
+                   notes=("ImageNet top-1 (percent), Pixel 1 latency in floating point (ms; TFLite "
+                          "benchmark tool, one large core, batch 1), multiply-adds and parameters "
+                          "(millions) of the classification models of Table 3.")),
+        "Accuracy and measured phone latency of efficient ImageNet models (MobileNetV3 Table 3).",
+        numeric=("top1", "pixel1_ms", "madds_m", "params_m"),
+    )
+    HanAlexNetPruning = TrendSeries(
+        "han2015_alexnet_pruning",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Pool, Tran, and Dally (2015), Learning both Weights and Connections for "
+                       "Efficient Neural Networks, NeurIPS 2015, figure 5",
+                   url="https://arxiv.org/abs/1506.02626",
+                   verified="2026-10-20",
+                   notes=("AlexNet, ImageNet top-5 change (points) against the share of parameters "
+                          "pruned (percent), L2-regularized runs: curve no_retrain, retrain (one prune "
+                          "then retraining), iterative (pruning and retraining repeated). Points taken "
+                          "from the vector paths of the published figure (arXiv v3, p. 7).")),
+        "Pruning without retraining, with one retraining, and iteratively (AlexNet, Han et al. 2015).",
+        numeric=("pruned_pct", "top5_change"),
+    )
+    DeepCompressionMethods = TrendSeries(
+        "han2016_compression_methods",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Mao, and Dally (2016), Deep Compression, ICLR 2016, figure 6",
+                   url="https://arxiv.org/abs/1510.00149",
+                   verified="2026-10-20",
+                   notes=("AlexNet on ImageNet: accuracy change (points) against model size kept "
+                          "(percent of original) for four methods, as transcribed in the Model "
+                          "Compression chapter's figure; extension=True marks a line's continuation "
+                          "off the plotted axis, not a reported point.")),
+        "Accuracy against model size for pruning, quantization, both, and SVD (Deep Compression).",
+        numeric=("size_pct", "accuracy_change"),
+    )
+    MishraInt8SparseGemm = TrendSeries(
+        "mishra2021_int8_sparse_gemm",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Mishra et al. (2021), Accelerating Sparse Deep Neural Networks, figure 3",
+                   url="https://arxiv.org/abs/2104.08378",
+                   verified="2026-10-20",
+                   notes=("Measured INT8 2:4 sparse-over-dense GEMM speedup on an A100 at M = N = 10240 "
+                          "for three inner dimensions K; values read from the published plot "
+                          "(approximate).")),
+        "2:4 sparse INT8 GEMM speedup over dense by inner dimension (A100).",
+        numeric=("k", "speedup"),
+    )
+    # --- Benchmarking (added 2026-10-20) ---------------------------------------
+    MLPerfTrainingV40ResNetRuns = TrendSeries(
+        "mlperf_training_v4_0_resnet_runs",
+        _lit("MLCommons, MLPerf Training v4.0 results (Apache-2.0), closed division, resnet, result_N.txt "
+             "MLLOG lines (run_start, run_stop, last eval_accuracy, status, seed), retrieved 2026-10-17",
+             "https://github.com/mlcommons/training_results_v4.0",
+             "One row per run of four submissions: NVIDIA eos_ngc24.04_mxnet (8x H100), Dell "
+             "XE9680x8H100-SXM-80GB (8x H100), NVIDIA h200_ngc24.04_mxnet (8x H200), and NVIDIA "
+             "eos_n8_ngc24.04_mxnet (64x H100). minutes is run_stop minus run_start; top1 is the last "
+             "eval_accuracy in percent; status 'aborted' marks a run that missed the quality target. "
+             "The published score is the mean of the middle three of five runs (a missed run counts as "
+             "the slowest) times the scaling.json factor (Literature.Benchmarks."
+             "MLPerfTrainingV40ResNetScalingFactor)."),
+        "Per-run time to the ResNet-50 quality target in MLPerf Training v4.0 for four 8- and 64-accelerator systems.",
+        numeric=("run", "minutes", "top1", "epochs", "seed"),
+    )
+    SandlerMobileNetV2Pixel1 = TrendSeries(
+        "sandler2018_mobilenetv2_pixel1",
+        _lit("Sandler et al. (2018), MobileNetV2: Inverted Residuals and Linear Bottlenecks, CVPR, Table 4",
+             "https://arxiv.org/abs/1801.04381",
+             "ImageNet top-1 (%) and latency (ms) on one large core of a Google Pixel 1 with TF-Lite; the rows "
+             "of Table 4 that report a latency (ShuffleNet has none). Transcribed from the table (added "
+             "2026-10-20)."),
+        "Accuracy against single-core phone latency for four ImageNet mobile models.",
+        numeric=("top1", "latency_ms"),
+    )
+    ChuPixel4CpuDspLatency = TrendSeries(
+        "chu2021_pixel4_cpu_dsp",
+        _lit("Chu et al. (2021), Discovering Multi-Hardware Mobile Models via Architecture Search, CVPRW, Table 1",
+             "https://arxiv.org/abs/2008.08178",
+             "ImageNet top-1 (%) and latency (ms) on a Pixel 4: CPU in floating point and the DSP, for "
+             "four models of similar accuracy. Transcribed from the table, retrieved 2026-10-17 (added "
+             "2026-10-20)."),
+        "Latency of four mobile models on a Pixel 4 CPU (float) and DSP.",
+        numeric=("top1", "cpu_float_ms", "dsp_ms"),
+    )
+    MLPerfTrainingV40EosResNetEvals = TrendSeries(
+        "mlperf_training_v4_0_eos_resnet_result0_evals",
+        _lit("MLCommons, MLPerf Training v4.0 results (Apache-2.0), closed/NVIDIA/results/"
+             "eos_ngc24.04_mxnet/resnet/result_0.txt, eval_accuracy and run_start MLLOG lines, retrieved 2026-10-17",
+             "https://github.com/mlcommons/training_results_v4.0",
+             "One row per evaluation of run 0 on NVIDIA Eos (8x H100): epoch, wall-clock minutes since "
+             "run_start, and ImageNet top-1 in percent."),
+        "ImageNet top-1 by epoch of one MLPerf Training v4.0 ResNet-50 run on eight H100s (time to quality).",
+        numeric=("epoch", "minutes", "top1"),
+    )
+    MLPerfInferenceV50ResNet50 = TrendSeries(
+        "mlperf_inference_v5_0_resnet50",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, resnet50, "
+             "summary_results.json, results 5.0-0032, 5.0-0010, 5.0-0065",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "One RTX 4090 (SingleStream p90 latency and Offline throughput) and two 8x H100-SXM servers "
+             "(Offline and Server throughput); system totals as reported, all VALID."),
+        "ResNet-50 MLPerf Inference v5.0 results by scenario for one RTX 4090 and two eight-H100 servers.",
+        numeric=("accelerators", "value"),
+    )
+    MLPerfTinyV12VwwEnergy = TrendSeries(
+        "mlperf_tiny_v1_2_vww_energy",
+        _lit("MLCommons, MLPerf Tiny v1.2 results (Apache-2.0), summary.csv, retrieved 2026-10-18",
+             "https://github.com/mlcommons/tiny_results_v1.2",
+             "visual wake words (vww), closed division, rows with an energy measurement; energy_uj is the "
+             "reported Power column, microjoules per inference; throughput_ips is the reported "
+             "inferences per second where the slides use it; clock_mhz and voltage_v are the operating point "
+             "the submission's system description names (syntiant_9120_0v9_30mhz: 0.9 V, 30.7 MHz)"),
+        "Measured energy per visual-wake-words inference in MLPerf Tiny v1.2, closed division.",
+        numeric=("clock_mhz", "voltage_v", "throughput_ips", "energy_uj"),
+    )
+    LeeMobileGpuLatency = TrendSeries(
+        "lee2019_mobile_gpu_latency",
+        _lit("Lee et al. (2019), On-Device Neural Net Inference with Mobile GPUs, Tables 4 and 5",
+             "https://arxiv.org/abs/1907.01989",
+             "MobileNet v1 latency in ms, mean of 100 runs after 10 warm-up runs, by device and software path"),
+        "MobileNet v1 latency on one iPhone XS and one Pixel 3 through different software paths.",
+        numeric=("latency_ms",),
+    )
+    LeeSustainedLatency = TrendSeries(
+        "lee2019_sustained_latency",
+        _lit("Lee et al. (2019), On-Device Neural Net Inference with Mobile GPUs, Figure 8",
+             "https://arxiv.org/abs/1907.01989",
+             "MobileNet v1 latency in ms at the start and after 200 s of continuous inference; values "
+             "read from the published plot (approximate)"),
+        "MobileNet v1 latency at the start and after 200 s of sustained load, by device and processor.",
+        numeric=("start_ms", "end_ms"),
+    )
+    TummalapalliIphoneThermal = TrendSeries(
+        "tummalapalli2026_iphone_thermal",
+        _lit("Tummalapalli et al. (2026), arXiv 2603.23640 (preprint)",
+             "https://arxiv.org/abs/2603.23640",
+             "Qwen 2.5 1.5B decode rate on an iPhone 16 Pro at peak, once warm, and once hot, tokens per second"),
+        "Small-language-model decode rate on an iPhone 16 Pro by thermal state.",
+        numeric=("tokens_per_s",),
+    )
+
+    # --- Quantization (added 2026-10-20) ---
+    KrishnamoorthiQuantization = TrendSeries(
+        "krishnamoorthi2018_quantization",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Krishnamoorthi (2018), Quantizing deep convolutional networks for efficient "
+                       "inference: A whitepaper, Tables 3, 4, and 5",
+                   url="https://arxiv.org/abs/1806.08342",
+                   verified="2026-10-20",
+                   notes=("ImageNet top-1 as a fraction, TensorFlow-Slim checkpoints. Table 3: post-training "
+                          "INT8 weights and activations (per_tensor is the paper's per-layer); Table 4: "
+                          "quantization-aware training, symmetric per-channel weights; Table 5: 4-bit "
+                          "weights with 8-bit activations. Transcribed from the paper.")),
+        "ImageNet top-1 of float, post-training, and quantization-aware INT8 and INT4 models.",
+        numeric=("table", "weight_bits", "activation_bits", "top1"),
+    )
+    WuInt8Calibration = TrendSeries(
+        "wu2020_int8_calibration",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Wu, Judd, Zhang, Isaev, and Micikevicius (2020), Integer Quantization for Deep "
+                       "Learning Inference: Principles and Empirical Evaluation, Table 5",
+                   url="https://arxiv.org/abs/2004.09602",
+                   verified="2026-10-20",
+                   notes=("INT8 post-training accuracy (top-1 percent; BERT Large: SQuAD F1) with per-channel "
+                          "max weights and activations calibrated by max, entropy, or the 99.9, 99.99, and "
+                          "99.999th percentile. The paper's 99.9999 column is not transcribed.")),
+        "INT8 post-training accuracy by activation calibration method.",
+        numeric=("fp32", "max", "entropy", "pct_99_9", "pct_99_99", "pct_99_999"),
+    )
+    DettmersInt8Perplexity = TrendSeries(
+        "dettmers2022_int8_perplexity",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Dettmers, Lewis, Belkada, and Zettlemoyer (2022), LLM.int8(): 8-bit Matrix "
+                       "Multiplication for Transformers at Scale, NeurIPS 2022, Table 1",
+                   url="https://arxiv.org/abs/2208.07339",
+                   verified="2026-10-20",
+                   notes=("C4 validation perplexity of fairseq dense transformers (125M to 13B parameters): "
+                          "32-bit float, INT8 absmax (one scale per tensor), and absmax LLM.int8().")),
+        "Language-model perplexity in float, INT8 absmax, and LLM.int8() by model size.",
+        numeric=("params_b", "fp32", "absmax", "llm_int8"),
+    )
+    Llama2_7BGgufFiles = TrendSeries(
+        "thebloke_llama2_7b_gguf_files",
+        Provenance(kind=ProvenanceKind.DATASHEET,
+                   ref="TheBloke/Llama-2-7B-GGUF on Hugging Face (commit b4e04e1), README 'Provided files'; "
+                       "ggml-org/Llama-2-7B-GGUF, Llama-2-7B-F16.gguf",
+                   url="https://huggingface.co/TheBloke/Llama-2-7B-GGUF",
+                   verified="2026-10-18",
+                   notes=("Nominal bits from the README table; bytes are the file sizes the Hub API lists "
+                          "(api/models/<repo>/tree/main), read 2026-10-18. The F16 row is the ggml-org "
+                          "repository's unquantized file.")),
+        "Llama 2 7B GGUF files: quantization type, nominal bits per weight, and file size in bytes.",
+        numeric=("nominal_bits", "bytes"),
+    )
+    LlamaBenchAppleSilicon = TrendSeries(
+        "llamacpp_bench_apple_silicon",
+        Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,
+                   ref="ggml-org/llama.cpp, discussion 4167, 'Performance of llama.cpp on Apple Silicon "
+                       "M-series' (summary table and the M2 Ultra post), build 8e672ef",
+                   url="https://github.com/ggml-org/llama.cpp/discussions/4167",
+                   verified="2026-10-18",
+                   notes=("llama-bench on Llama 2 7B (llama-bench reports 6.74 B parameters), Metal, all "
+                          "layers on the GPU: prompt processing of 512 tokens (pp512) and generation of 128 "
+                          "tokens at batch one (tg128), tokens per second; size is llama-bench's GiB column; "
+                          "bandwidth (GB/s) and GPU cores are the thread's chip labels. Read via the GitHub "
+                          "API.")),
+        "llama-bench prompt and generation throughput of Llama 2 7B in F16, Q8_0, and Q4_0 on Apple chips.",
+        numeric=("bandwidth_gbs", "gpu_cores", "size_gib", "pp512_tps", "tg128_tps"),
+    )
+    # Copied verbatim from the v1-12 benchmarking branch (same name, file, and rows);
+    # on merge keep one copy.
+    # --- Model serving on one machine (added 2026-10-20) ---------------------
+    MLPerfInferenceV50ResNet50L4 = TrendSeries(
+        "mlperf_inference_v5_0_resnet50_l4",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, edge suite, resnet50, "
+             "summary_results.json, result 5.0-0047 (HPE ProLiant DL145 Gen11, 3x L4-PCIe-24GB, TensorRT), "
+             "Performance_Result, retrieved 2026-10-20",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "SingleStream is the 90th-percentile latency of one query of one image; MultiStream the "
+             "99th-percentile latency of one query of eight images (samples per query from the MLPerf "
+             "Inference rules, inference_policies commit 61ca74a, scenario table); Offline the system "
+             "throughput of all three L4s. The summary does not say how many L4s the latency runs used."),
+        "ResNet-50 MLPerf Inference v5.0 edge results for one three-L4 server, by scenario.",
+        numeric=("accelerators", "samples_per_query", "value"),
+    )
+    MLPerfInferenceV50Llama2_70B = TrendSeries(
+        "mlperf_inference_v5_0_llama2_70b",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, datacenter, result "
+             "5.0-0020 (Dell PowerEdge XE9680, 8x H100-SXM-80GB, TensorRT), summary_results.json, "
+             "retrieved 2026-10-20; latency bounds from the MLPerf Inference rules (inference_rules.adoc at "
+             "mlcommons/inference_policies commit 61ca74a, datacenter benchmark table)",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "Tokens per second of the whole server for llama2-70b-99 (Offline, and Server under the "
+             "conversational TTFT/TPOT bounds) and llama2-70b-interactive-99 (Server under the interactive "
+             "bounds). Bounds are the rules' time to first token and time per output token, ms. The "
+             "llama2-70b-interactive-99 Offline row (added 2026-10-20) is that benchmark entry's own Offline "
+             "run, 30989.5 tokens/s in its mlperf_log_summary.txt and summary.html (VALID)."),
+        "Llama 2 70B MLPerf Inference v5.0 throughput on one eight-H100 server, by latency bound.",
+        numeric=("accelerators", "ttft_bound_ms", "tpot_bound_ms", "tokens_per_s"),
+    )
+    # --- Serving a stream of tokens (added 2026-10-20) -----------------------
+    VllmServingBenchmarkH100 = TrendSeries(
+        "vllm_serving_benchmark_h100",
+        Provenance(
+            id="prov:vllm-issue-24684-series",
+            kind=ProvenanceKind.DATASHEET,
+            ref="vllm-project/vllm issue 24684 (opened 2025-09-11), two printed outputs of vLLM's serving "
+                "benchmark",
+            url="https://github.com/vllm-project/vllm/issues/24684",
+            verified="2026-10-20",
+            notes="Llama-3.1-8B-Instruct, vLLM 0.10.1.1, NVIDIA H100 80GB HBM3, 640 requests at maximum "
+                  "request concurrency 64. The sharegpt row is benchmark_serving.py before PR 24411; the "
+                  "random row is vllm bench serve after its default dataset changed to random prompts. "
+                  "Columns transcribed exactly as printed (E2EL lines omitted).",
+        ),
+        "Two vLLM serving-benchmark runs of Llama 3.1 8B on one H100 at 64 concurrent requests.",
+        numeric=("requests", "max_concurrency", "duration_s", "input_tokens", "output_tokens", "request_rate",
+                 "output_tok_s", "mean_ttft_ms", "median_ttft_ms", "p99_ttft_ms", "mean_tpot_ms",
+                 "median_tpot_ms", "p99_tpot_ms", "mean_itl_ms", "median_itl_ms", "p99_itl_ms"),
+    )
+
+# --- Context engineering (added 2026-10-20) ----------------------------------
+RulerEffectiveLength = _Series(
+    "ruler_effective_length",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Hsieh et al. (2024), RULER: What's the Real Context Size of Your Long-Context Language Models?, COLM 2024, Table 3",
+        url="https://arxiv.org/abs/2404.06654",
+        verified="2026-10-20",
+        notes=(
+            "Rows with a claimed length up to 128K, transcribed from Table 3 of arXiv 2404.06654v3: "
+            "claimed and effective length in thousands of tokens, model names as printed. LongChat "
+            "(7B) prints an effective length of <4K (empty effective_k). Effective length is the "
+            "longest tested length scoring above 85.6 (Literature.ContextUse.RulerEffectiveLengthThreshold)."
+        ),
+    ),
+    "Claimed and effective context length (thousand tokens) of long-context models on RULER.",
+)
+
+AnswerPositionAccuracy = _Series(
+    "lost_in_the_middle_gpt35_turbo_20docs",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Liu et al. (2024), Lost in the Middle: How Language Models Use Long Contexts, TACL 12, Table 6",
+        url="https://arxiv.org/abs/2307.03172",
+        verified="2026-10-20",
+        notes=(
+            "GPT-3.5-Turbo (gpt-3.5-turbo-0613) multi-document QA accuracy in percent with the answer "
+            "document at each reported position among 20 total retrieved documents (about 4K tokens), "
+            "transcribed from Table 6 of arXiv 2307.03172v3. Closed-book accuracy: "
+            "Literature.ContextUse.Gpt35TurboClosedBook."
+        ),
+    ),
+    "Multi-document QA accuracy by position of the answer document among 20 (GPT-3.5-Turbo).",
+)
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+SweBenchBm25Context = _Series(
+    "swe_bench_bm25_context",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub "
+             "Issues?, ICLR 2024, Table 2 (Claude 2) and Table 3 (Avg. row)"),
+        url="https://arxiv.org/abs/2310.06770",
+        verified="2026-10-20",
+        notes=(
+            "By maximum retrieved context in thousand tokens (BM25 over the repository, the issue "
+            "text as the query): recall of the files the reference fix edits, in percent, and "
+            "Claude 2's percent of issues resolved. Transcribed from arXiv 2310.06770v3."
+        ),
+    ),
+    "SWE-bench BM25 retrieval by context limit: oracle-file recall and Claude 2 resolve rate (percent).",
+)
+
+PoisonedRagBlackBox = _Series(
+    "poisonedrag_black_box_palm2",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zou et al. (2025), PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented "
+             "Generation of Large Language Models, USENIX Security 2025, Section 5.1 and Table 1"),
+        url="https://arxiv.org/abs/2402.07867",
+        verified="2026-10-20",
+        notes=(
+            "Clean knowledge-base size in texts (Section 5.1) and black-box attack success rate "
+            "with PaLM 2 as the generator (Table 1), five malicious texts per target question "
+            "(Literature.AgentRetrieval.PoisonedRagTextsPerQuestion). Transcribed from arXiv "
+            "2402.07867v3."
+        ),
+    ),
+    "PoisonedRAG black-box attack: knowledge-base size and attack success rate per dataset (PaLM 2).",
+)
+
+# --- KV cache management (added 2026-10-20) ----------------------------------
+PagedAttentionMemoryBreakdown = _Series(
+    "pagedattention_kv_memory_breakdown",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kwon et al. (2023), Efficient Memory Management for Large Language Model Serving with "
+            "PagedAttention, SOSP 2023, Figure 2",
+        url="https://arxiv.org/abs/2309.06180",
+        verified="2026-10-18",
+        notes=(
+            "Average percentage of KV cache memory by use in three Orca variants (reservation for the "
+            "maximum length, the next power of two, or the exact final length) and vLLM, OPT-13B on one "
+            "A100 (Section 6.2 setup), read from the bar labels of Figure 2. vLLM reports only its token "
+            "states (96.3); the remaining columns are empty."
+        ),
+    ),
+    "KV memory holding token states, reservations, internal and external fragmentation (percent).",
+)
+
+# --- Network architectures (added 2026-10-20) ---------------------------------
+FlashAttentionBenchmark = _Series(
+    "flashattention_a100_benchmark",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Dao et al. (2022), FlashAttention: Fast and Memory-Efficient Exact Attention with "
+            "IO-Awareness, NeurIPS 2022, Tables 20 and 21",
+        url="https://arxiv.org/abs/2205.14135",
+        verified="2026-10-20",
+        notes=(
+            "arXiv 2205.14135v2: forward plus backward runtime (ms, no dropout or masking, Table 20) and "
+            "memory (MB, Table 21) of standard PyTorch attention and FlashAttention on one A100 40 GB, "
+            "batch 16, 8 heads of 64, FP16. PyTorch runs out of memory beyond 4,096 tokens (empty cells)."
+        ),
+    ),
+    "Attention runtime and memory against sequence length, standard PyTorch and FlashAttention (A100).",
+)
+
+# --- Fitting a training step on one accelerator (added 2026-10-20) -------------
+SsdGradientHistogram = _Series(
+    "micikevicius_ssd_gradient_histogram",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Micikevicius et al. (2018), Mixed Precision Training, ICLR 2018, Figure 3",
+        url="https://arxiv.org/abs/1710.03740",
+        verified="2026-10-18",
+        notes=(
+            "Activation-gradient magnitudes of the SSD detector in FP32 training, binned by log2 magnitude "
+            "[log2_low, log2_high). bar_top_px is the pixel row of each bar top, read from the figure "
+            "image (arXiv 1710.03740v3, page 4, 898 x 575 px; log-scale y axis, gridline rows 35 at 64 "
+            "percent and 504 at 1/512 percent). An empty cell marks an empty bin; the 67 percent of "
+            "exact zeros (caption) is not a bar."
+        ),
+    ),
+    "SSD activation-gradient histogram by log2 magnitude, read from Micikevicius et al. (2018), Figure 3.",
+)
+
+ToolInterceptionTimes = _Series(
+    "infercept_interception_times",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Abhyankar et al. (2024), InferCept: Efficient Intercept Support for Augmented Large "
+            "Language Model Inference, ICML 2024, Table 1",
+        url="https://arxiv.org/abs/2402.01869",
+        verified="2026-10-18",
+        notes=(
+            "Mean interception (tool or human pause) time per augmentation, in seconds, read from "
+            "Table 1; the chatbot and image-generation times are partly estimated by the authors. "
+            "Recomputation share of forwarding time: Literature.ToolInterception."
+        ),
+    ),
+    "Mean pause per augmentation type while an LLM waits on a tool or a person (seconds).",
+)
+
+AttentionSinkPerplexity = _Series(
+    "streamingllm_attention_sink_perplexity",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Xiao et al. (2024), Efficient Streaming Language Models with Attention Sinks, ICLR 2024, "
+            "Tables 1 and 2",
+        url="https://arxiv.org/abs/2309.17453",
+        verified="2026-10-18",
+        notes=(
+            "PG19 perplexity with a KV cache of cache_tokens holding only the most recent tokens "
+            "(window_perplexity) against the same cache with the first sink_tokens kept "
+            "(sink_perplexity, 4 + cache_tokens - 4); Llama-2-13B from Table 1, Llama-2-7B from Table 2."
+        ),
+    ),
+    "Sliding-window perplexity with and without the first four tokens kept (PG19).",
+)
+
+MetastableFailures = _Series(
+    "metastable_failures_in_the_wild",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Huang et al. (2022), Metastable Failures in the Wild, OSDI 2022, Table 1",
+        url="https://www.usenix.org/conference/osdi22/presentation/huang-lexiang",
+        verified="2026-10-20",
+        notes=(
+            "One row per incident of Table 1 (21 rows): date and duration in hours as printed "
+            "(empty where the table prints NA), and whether 'retry' is listed among its sustaining "
+            "effects (12 rows). The text names 11 of them (GGL2, GGL3, AWS1, AWS2, AWS3, AZR2, AZR4, "
+            "IBM1, SPF1, SPF2, CAS2) and omits AWS4, whose row lists retry; it describes the share as "
+            "'more than 50% of the studied incidents'. Read from the paper PDF."
+        ),
+    ),
+    "Metastable failures from public sources: duration and whether retries sustained them.",
+)
+
+
+# --- Agent evaluation results (added 2026-10-20) -------------------------------
+JudgePositionBias = _Series(
+    "judge_position_bias",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zheng et al. (2023), Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, "
+             "Table 2 (position bias, default prompt)"),
+        url="https://arxiv.org/abs/2306.05685",
+        verified="2026-10-20",
+        notes=("Three rows transcribed from Table 2 of the HTML version (arxiv.org/html/2306.05685) and "
+               "checked against it: percent of answer pairs, each judged twice with the order swapped, "
+               "that kept the verdict, favored the first or second position, or produced an error."),
+    ),
+    "Pairwise model judges: verdict consistency and position bias when two answers swap places.",
+)
+
+HumanEvalAgentCost = _Series(
+    "humaneval_agent_cost_accuracy",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kapoor et al. (2024), AI Agents That Matter, Table A1 (HumanEval accuracy and total cost)",
+        url="https://arxiv.org/abs/2407.01502",
+        verified="2026-10-20",
+        notes=("Nine rows transcribed from Table A1 (arxiv.org/html/2407.01502): mean accuracy (percent) "
+               "and mean total API cost (US dollars, 2024 prices) over five runs on the 164 problems. "
+               "role: published agent, author baseline (Retry, Warming, Escalation), or single call."),
+    ),
+    "Code agents on HumanEval: accuracy against total cost, mean of five runs.",
+)
+
+DapperSamplingOverhead = _Series(
+    "dapper_sampling_overhead",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
+            "Google Technical Report dapper-2010-1, Table 2",
+        url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
+        verified="2026-10-20",
+        notes=(
+            "One row per non-adaptive sampling frequency of Table 2: the change in average latency and "
+            "in average throughput of a Web search cluster, percent as printed. The caption gives "
+            "experimental errors of 2.5 and 0.15 percent (Literature.DistributedTracing). Read from "
+            "the report PDF with pdftotext."
+        ),
+    ),
+    "Dapper tracing overhead on a Web search cluster at six sampling frequencies (added 2026-10-20).",
+)
+
+
+# --- Mapping a computation onto an accelerator (added 2026-10-20) ------------
+NvidiaGemmTileQuantizationA100 = _Series(
+    "nvidia_gemm_tile_quantization_a100",
+    Provenance(
+        kind=ProvenanceKind.DATASHEET,
+        ref="NVIDIA, Matrix Multiplication Background User's Guide, Sec. 3.1, figure 7(a)",
+        url="https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html",
+        verified="2026-10-17",
+        notes=(
+            "Achieved TFLOP/s against N in steps of 8 on an A100-SXM4-80GB (CUDA 11.2, cuBLAS 11.4), "
+            "M = 27,648, K = 4,096, cuBLAS forced to 256x128 tiles. Read from the vector paths of the "
+            "published SVG plot."
+        ),
+    ),
+    "Tile quantization measured on an A100: achieved TFLOP/s by output width N (tiles 128 wide along N).",
+)
+
+
+# --- Fault injection, proof scale, and rare-event estimation (added 2026-10-20) ---
+VnnComp2025ScoredBenchmarks = _Series(
+    "vnncomp2025_scored_benchmarks",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Kaulen, K. et al. (2025), The 6th International Verification of Neural Networks Competition "
+             "(VNN-COMP 2025): Summary and Results, arXiv:2512.19007, Table 3"),
+        url="https://arxiv.org/abs/2512.19007",
+        verified="2026-10-20",
+        notes=("Table 3, Overview of all scored benchmarks: the '# Params' column, transcribed from the PDF text "
+               "layer. A single value fills both columns; 'CORA 575k, 1.1M' gives the two networks as low and "
+               "high."),
+    ),
+    "Scored VNN-COMP 2025 benchmarks and the parameter range of their networks.",
+)
+
+OKelly2018RareEventTable1 = _Series(
+    "okelly2018_rare_event_table1",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("O'Kelly, M., Sinha, A., Namkoong, H., Duchi, J., Tedrake, R. (2018), Scalable End-to-End "
+             "Autonomous Vehicle Testing via Rare-event Simulation, NeurIPS 2018, Table 1"),
+        url="https://arxiv.org/abs/1811.00145",
+        verified="2026-10-20",
+        notes=("Table 1, estimate of the rare-event probability p_gamma (non-vision ego policy) with standard "
+               "errors, transcribed from the PDF and checked against the ar5iv rendering. Sec. 4 text: the "
+               "cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold level'."),
+    ),
+    "Rare-event probability estimates of an autonomous-driving policy: naive Monte Carlo and cross-entropy.",
+)
+
+Wang2025OpenVlaLiberoUntargeted = _Series(
+    "wang2025_openvla_libero_untargeted",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Wang, T. et al. (2025), Exploring the Adversarial Vulnerabilities of Vision-Language-Action "
+             "Models in Robotics, ICCV 2025, arXiv:2411.13587v4, Table 1(a)"),
+        url="https://arxiv.org/abs/2411.13587",
+        verified="2026-10-20",
+        notes=("Table 1(a), untargeted results in LIBERO simulation: failure rate of OpenVLA without attack "
+               "(Benign; average 23.5 percent) and under the UADA patch attack (DoF1-3)."),
+    ),
+    "OpenVLA task failure rates on the four LIBERO suites, benign and with an adversarial patch in view.",
+)
+
+ChallengerORingDistressRecord = _Series(
+    "challenger_oring_distress_record",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Dalal, S. R., Fowlkes, E. B., Hoadley, B. (1989), Risk Analysis of the Space Shuttle: "
+             "Pre-Challenger Prediction of Failure, JASA 84(408), Table 1; as posted in the UCI Machine "
+             "Learning Repository, Challenger USA Space Shuttle O-Ring data set"),
+        url="https://archive.ics.uci.edu/dataset/92/challenger+usa+space+shuttle+o+ring",
+        verified="2026-10-20",
+        notes=("File o-ring-erosion-or-blowby.data, converted column for column (no value typed): O-rings at "
+               "risk (6), O-rings with thermal distress (erosion or blow-by), launch temperature (F), "
+               "leak-check pressure (psi), temporal order. The 23 flights before Challenger whose boosters "
+               "were recovered; the temperatures are the calculated joint temperatures of the Rogers "
+               "Commission's figure 7. Added 2026-10-20."),
+    ),
+    "O-ring thermal distress of the 23 inspected Space Shuttle flights before Challenger, with joint temperature.",
+)
+
+
+# --- SWE-bench Verified leaderboard and one run's calls (added 2026-10-20) ---
+SweBenchVerifiedLeaderboard = _Series(
+    "swe_bench_verified_leaderboard",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="SWE-bench Verified leaderboard submissions, github.com/SWE-bench/experiments, evaluation/verified",
+        url="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified",
+        verified="2026-10-20",
+        notes=(
+            "One row per submission folder with a results/results.json: folder, date (the folder's "
+            "date prefix), name and attempts (metadata.yaml), resolved (length of the 'resolved' list "
+            "in results.json, of 500 tasks). Extracted by swebench_trend.py (slides tree, vol3 "
+            "course-overview images/); four rows re-checked against results.json on 2026-10-20."
+        ),
+    ),
+    "Resolved count of every SWE-bench Verified submission with a results file, by date and attempts.",
+)
+SweBenchMiniSonnet4Django12050Calls = _Series(
+    "swe_bench_verified_mini_v1_sonnet4_django_12050_calls",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "SWE-bench Verified submission 20250726_mini-v1.0.0_claude-sonnet-4-20250514, "
+            "trajectory django__django-12050, per model call"
+        ),
+        url=(
+            "https://swe-bench-submissions.s3.amazonaws.com/bash-only/"
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514/trajs/django__django-12050/"
+        ),
+        verified="2026-10-20",
+        notes=(
+            "Characters of message text in the context each call read (context_chars), cumulative "
+            "characters sent, and cumulative characters newly added; the trajectories store text "
+            "without token counts. Extracted by swebench_data.py (slides tree, vol3 course-overview "
+            "images/)."
+        ),
+    ),
+    "Context read by each of the 22 model calls of one public repair-agent run, in characters.",
+)
+
+
+# --- Vercel AI Gateway Production Index (added 2026-10-21) -------------------
+VercelGatewayUsageSpendPrice = _Series(
+    "vercel_gateway_usage_spend_price_index",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: October 2026, "
+            "'Usage, spend, and price per token' (indexed to April 2026 = 100)"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index-october-2026",
+        verified="2026-10-21",
+        notes=(
+            "Monthly index (April 2026 = 100) of production token usage, total inference spend, "
+            "and average price per token across 200,000+ unique teams on the Vercel AI Gateway, "
+            "extracted directly from the published chart payload."
+        ),
+    ),
+    "Monthly production token usage, total spend, and average price per token indexed to April 2026 = 100.",
+)
+VercelGatewayUseCaseShares = _Series(
+    "vercel_gateway_use_case_shares",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: May 2026, "
+            "'Token volume vs. cost share by use case, through April 2026'"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index",
+        verified="2026-10-21",
+        notes=(
+            "Share of total production token volume and market cost across eight workload classes "
+            "over seven months of production traffic (Oct 2025 - Apr 2026) across 200,000+ unique "
+            "teams on the Vercel AI Gateway."
+        ),
+    ),
+    "Share of production token volume and total spend by workload category on a multi-provider inference gateway.",
+)
+VercelGatewayOpenWeightShare = _Series(
+    "vercel_gateway_open_weight_share",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: October 2026, "
+            "'Open-weight share of tokens and spend' (Dec 2025 - Sep 2026)"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index-october-2026",
+        verified="2026-10-21",
+        notes=(
+            "Monthly percentage of total gateway token volume and total spend served by open-weight "
+            "models from December 2025 through September 2026."
+        ),
+    ),
+    "Monthly open-weight share of production token volume and inference spend on a multi-provider gateway.",
+)
+VercelGatewayToolCallShare = _Series(
+    "vercel_gateway_tool_call_share",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: May 2026, "
+            "'The rise of agents: Share of requests and tokens ending in tool calls'"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index",
+        verified="2026-10-21",
+        notes=(
+            "Percentage of production inference requests and total tokens consumed by requests that "
+            "end in a tool call in October 2025 and April 2026 across 200,000+ unique teams."
+        ),
+    ),
+    "Share of gateway requests and total tokens accounted for by tool-calling invocations.",
+)
+

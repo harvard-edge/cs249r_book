@@ -1,266 +1,319 @@
-"""Lecture 13 (Agent Evaluation): every derived number on the slides.
+#!/usr/bin/env python3
+"""Every number on the Volume III Lecture 13 slides and notes, read from MLSysIM.
 
-Run from anywhere: python3 calcs.py
-Each block names its slide, its inputs and their sources, and prints the
-values the slide and its note show. Inputs typed here are copied from the
-source named beside them; everything printed is computed.
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: repeated-run consistency (Scenarios.RecurringTaskConsistency and its
+variants, horizon compounding over recurrences), the four-verdict denominator
+(UnresolvedTrialsOfHundred), the judge's error rates (ResearchReportJudgeCalibration),
+chance agreement (IndependentJudgesNinetyPercent), tasks against repeats
+(RepairSuiteTaskRepeatBudget), Wald and Wilson at 50 tasks (FiftyTaskIntervals),
+the paired comparison of candidate_v2 and baseline_v1
+(RepairCandidatePairedComparison), one task against new tasks
+(TwoTaskTypeConsistency), and batch against sequential selection
+(CappedCandidateSelection), all backed by engine/solvers/acceptance.py. Public
+data are Literature entries: Terminal-Bench scaffolds and SWE-bench Verified
+runs (read through TerminalBenchScaffoldSpread and SweBenchVerifiedRankTies),
+the tau-bench and METR figures (AgentEvaluation), Zheng et al.'s judges
+(JudgePositionBias), and Kapoor et al.'s cost table (HumanEvalAgentCost). The
+one other source is the deck's own data (data/): a small real evaluation run
+for this lecture (eval_run.json, written by eval_run.py), summarized by
+mlsysim.solvers.PairedRunEvaluationModel. This file only selects values,
+converts units, and formats them; it types no numbers. Each value is recorded
+with v() under the key the deck prints as \\val{key}; running this file writes
+images/numbers.tex.
+
+Run from this folder: python3 calcs.py
 """
 
+import importlib.util
 import json
-import math
 import sys
 from pathlib import Path
 
-from scipy.stats import binom, norm
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+from mlsysim.physics import calc_independent_success  # noqa: E402
+from mlsysim.solvers import PairedRunEvaluationModel  # noqa: E402
 
+Scenarios = mlsysim.Scenarios
+Literature = mlsysim.Literature
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-from mlsysim import Literature  # noqa: E402
+DATA = HERE / "data"
 
-Z95 = norm.ppf(0.975)  # 1.96, two-sided 95 percent
+HOOK_S = Scenarios.RecurringTaskConsistency
+HOOK_LO_S = Scenarios.RecurringTaskConsistencyLowerRate
+VERD_S = Scenarios.UnresolvedTrialsOfHundred
+JUDGE_S = Scenarios.ResearchReportJudgeCalibration
+KAPPA_S = Scenarios.IndependentJudgesNinetyPercent
+KAPPA_CHK_S = Scenarios.IndependentJudgesEightyPercent
+TR_S = Scenarios.RepairSuiteTaskRepeatBudget
+WL_S = Scenarios.FiftyTaskIntervals
+PC_S = Scenarios.RepairCandidatePairedComparison
+MIX_S = Scenarios.TwoTaskTypeConsistency
+SEL_S = Scenarios.CappedCandidateSelection
+SC_S = Scenarios.TerminalBenchScaffoldSpread
+RK_S = Scenarios.SweBenchVerifiedRankTies
 
-
-def wilson(x, n, z=Z95):
-    """Wilson score interval, Agent Evaluation equation 2."""
-    c = (x + z * z / 2) / (n + z * z)
-    h = z / (n + z * z) * math.sqrt(x * (n - x) / n + z * z / 4)
-    return max(0.0, c - h), min(1.0, c + h)
-
-
-def wald(x, n, z=Z95):
-    p = x / n
-    h = z * math.sqrt(p * (1 - p) / n)
-    return p - h, p + h
-
-
-def newcombe10(both, cand_only, base_only, neither, z=Z95):
-    """Newcombe (1998) method 10 for a paired difference, candidate minus
-    baseline, with the continuity-corrected phi."""
-    a, b, c, d = both, cand_only, base_only, neither
-    n = a + b + c + d
-    p1, p2 = (a + b) / n, (a + c) / n
-    l1, u1 = wilson(a + b, n, z)
-    l2, u2 = wilson(a + c, n, z)
-    num = a * d - b * c
-    num = max(num - n / 2, 0) if num > 0 else num
-    den = math.sqrt((a + b) * (c + d) * (a + c) * (b + d))
-    phi = num / den if den else 0.0
-    dl = math.sqrt((p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2)
-    du = math.sqrt((u1 - p1) ** 2 - 2 * phi * (u1 - p1) * (p2 - l2) + (p2 - l2) ** 2)
-    theta = p1 - p2
-    return theta, theta - dl, theta + du
+HOOK = HOOK_S.result
+HOOK_LO = HOOK_LO_S.result
+VERD = VERD_S.result
+JUDGE = JUDGE_S.result
+TR = TR_S.result
+WL = WL_S.result
+PC = PC_S.result
+MIX = MIX_S.result
+SEL = SEL_S.result
+SC = SC_S.result
+RK = RK_S.result
+AE = Literature.AgentEvaluation
+ZHENG = {r["judge"]: r for r in Literature.JudgePositionBias.entries}
+KAPOOR = {r["agent"]: r for r in Literature.HumanEvalAgentCost.entries}
 
 
-def mcnemar_exact(b, c):
-    m = b + c
-    return min(1.0, 2 * binom.cdf(min(b, c), m, 0.5))
+def pct(x):
+    return x * 100
 
 
-def head(t):
-    print(f"\n== {t}")
+def usd(q):
+    return q.to("USD").magnitude
 
 
-# ---------------------------------------------------------------------------
-head("Hook: pass^k at 90 percent (NM 13.2, Agent Evaluation §13.5.4)")
-p, k, target = 0.90, 8, 0.90
-print(f"pass^8 at 0.90: {p**k:.3f}  ({100*p**k:.0f} percent)")
-print(f"pass^8 at 0.80: {0.8**k:.3f}  ({100*0.8**k:.0f} percent)")
-print(f"pass^8 at 0.95: {0.95**k:.3f}  ({100*0.95**k:.0f} percent)")
-print(f"pass@8 at 0.90: {1-(1-p)**k:.8f}")
-need = target ** (1 / k)
-print(f"single-run rate for 90% over 8: {need:.4f} ({100*need:.1f} percent); failure {100*(1-need):.1f}%; cut {(1-p)/(1-need):.1f}x")
-for kk in range(1, 9):
-    print(f"  k={kk}: pass^k {p**kk:.3f}  pass@k {1-(1-p)**kk:.6f}")
+print("== Hook: pass^k over recurrences (Scenarios.RecurringTaskConsistency)")
+_k = HOOK_S.long_horizon
+_p = HOOK_S.step_success
+v("hook_p", _p, "{:.1f}", "single-run acceptance")
+v("hook_p_pct", pct(_p), "{:.0f}", "the same, %")
+v("hook_fail_pct", pct(1 - _p), "{:.0f}", "single-run failure, %")
+v("hook_k", _k, "{:.0f}", "recurrences")
+v("hook_pow", HOOK.success[_k], "{:.2f}", "pass^k")
+v("hook_pow_pct", pct(HOOK.success[_k]), "{:.0f}", "the same, %")
+v("hook_p_lo_pct", pct(HOOK_LO_S.step_success), "{:.0f}", "lower single-run rate, %")
+v("hook_pow_lo_pct", pct(HOOK_LO.success[_k]), "{:.0f}", "pass^k at the lower rate, %")
+v("hook_at_k_pct", pct(calc_independent_success(_p, _k)), "{:.0f}", "pass@k, %")
+v("hook_target_pct", pct(HOOK_S.target_success), "{:.0f}", "consistency to hold, %")
+v("hook_need_pct", pct(1 - HOOK.required_step_error), "{:.1f}", "single-run rate that holds it, %")
+v("hook_fail_need_pct", pct(HOOK.required_step_error), "{:.1f}", "single-run failure that holds it, %")
+v("hook_cut", HOOK.error_ratio, "{:.1f}", "failure-rate cut, x")
 
-# ---------------------------------------------------------------------------
-head("Real data: Terminal-Bench 2.0 scaffold spread (MLSysIM, Literature.TerminalBenchHarness)")
-by = {}
-for r in Literature.TerminalBenchHarness.entries:
-    by.setdefault(r["model"], []).append(r["accuracy"])
-by = {m: v for m, v in by.items() if len(v) >= 5}
-spreads = {m: max(v) - min(v) for m, v in by.items()}
-widest = max(spreads, key=spreads.get)
-ses = sorted(r["accuracy_se"] for r in Literature.TerminalBenchHarness.entries if r["accuracy_se"])
-med = lambda xs: sorted(xs)[len(xs) // 2] if len(xs) % 2 else sum(sorted(xs)[len(xs)//2-1:len(xs)//2+1]) / 2
-print(f"models with >=5 scaffolds: {len(by)}")
-print(f"widest: {widest} {100*min(by[widest]):.0f} to {100*max(by[widest]):.0f} percent over {len(by[widest])} scaffolds")
-print(f"median spread: {100*med(list(spreads.values())):.0f} points; median reported SE: {100*med(ses):.0f} points")
+print("== tau-bench abstract (Literature.AgentEvaluation)")
+v("tau_success_pct", AE.TauBenchSuccessUpperBoundPct, "{:.0f}", "task success, upper bound, %")
+v("tau_pow_pct", AE.TauBenchRetailPassPowUpperBoundPct, "{:.0f}", "retail pass^k, upper bound, %")
+v("tau_k", AE.TauBenchPassPowK, "{:.0f}", "k")
 
-# ---------------------------------------------------------------------------
-head("Four verdicts: dropping unresolved trials (illustrative, §13.2.3)")
-n_pass, n_fail, n_unres = 60, 25, 15
-n = n_pass + n_fail + n_unres
-print(f"default (unresolved = not accepted): {100*n_pass/n:.0f} percent")
-print(f"bounds: {100*n_pass/n:.0f} to {100*(n_pass+n_unres)/n:.0f} percent")
-print(f"dropping unresolved: {100*n_pass/(n_pass+n_fail):.1f} percent")
+print("== Same model, many scaffolds (Scenarios.TerminalBenchScaffoldSpread)")
+v("sc_lo", pct(SC.widest_low), "{:.0f}", "widest model, lowest score, %")
+v("sc_hi", pct(SC.widest_high), "{:.0f}", "widest model, highest score, %")
+v("sc_n", SC.widest_count, "{:.0f}", "its scaffolds")
+v("sc_min", SC_S.min_scaffolds, "{:.0f}", "minimum scaffolds per model")
+v("sc_models", SC.models, "{:.0f}", "models kept")
+v("sc_median", pct(SC.median_spread), "{:.0f}", "median spread, points")
+v("sc_se", pct(SC.median_se), "{:.0f}", "median reported standard error, points")
 
-# ---------------------------------------------------------------------------
-head("METR reward hacking by o3 (METR, 5 June 2025, task table)")
-re_hacks, re_runs, hc_hacks, hc_runs = 39, 128, 8, 1087
-re_pct, hc_pct = 30.4, 0.7  # METR's stated percentages
-print(f"from counts: RE-Bench {100*re_hacks/re_runs:.2f}%  HCAST {100*hc_hacks/hc_runs:.2f}%")
-print(f"stated: RE-Bench {re_pct}%  HCAST {hc_pct}%  ratio of stated {re_pct/hc_pct:.1f}x (METR: more than 43x)")
-for name, h, rr in [("Optimize a Kernel", 6, 24), ("Rust Codecontest scaffold", 12, 28), ("Optimize LLM Foundry", 21, 21)]:
-    print(f"  {name}: {100*h/rr:.1f}%")
+print("== Unresolved trials (Scenarios.UnresolvedTrialsOfHundred)")
+v("vd_n", VERD.trials, "{:.0f}", "trials")
+v("vd_pass", VERD_S.passed, "{:.0f}", "accepted")
+v("vd_fail", VERD_S.failed, "{:.0f}", "failed")
+v("vd_unres", VERD_S.unresolved, "{:.0f}", "unresolved")
+v("vd_rate", pct(VERD.default_rate), "{:.0f}", "default rate, %")
+v("vd_upper", pct(VERD.upper_bound), "{:.0f}", "upper bound, %")
+v("vd_drop", pct(VERD.dropped_rate), "{:.1f}", "unresolved dropped, %")
 
-# ---------------------------------------------------------------------------
-head("Grader error rates (Agent Evaluation, exercise 3, §13.9; hypothetical)")
-ref_fail, b_acc_fail, ref_pass, b_acc_pass = 80, 16, 120, 114
-far = b_acc_fail / ref_fail
-lo, hi = wilson(b_acc_fail, ref_fail)
-fam = b_acc_fail / (b_acc_fail + b_acc_pass)
-print(f"false-acceptance rate {100*far:.0f}% (Wilson {100*lo:.1f} to {100*hi:.1f}%)")
-print(f"failure among accepted {b_acc_fail}/{b_acc_fail+b_acc_pass} = {100*fam:.1f}%")
-print(f"false rejection {100*(ref_pass-b_acc_pass)/ref_pass:.0f}%")
+print("== Our run (data/eval_run.json, PairedRunEvaluationModel)")
+RUN_DATA = json.loads((DATA / "eval_run.json").read_text())
+TASKS = [t["id"] for t in RUN_DATA["tasks"]]
+BASE, CAND = "baseline_v1", "candidate_v2"
+RUN = PairedRunEvaluationModel().solve(RUN_DATA["rows"], TASKS, RUN_DATA["runs_done"], BASE, CAND)
+_spec = importlib.util.spec_from_file_location("eval_run", DATA / "eval_run.py")
+_er = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_er)
+_orig_visible = sum(_er.run_checks(t["code"], [t["visible"]])[0] == "pass" for t in _er.TASKS)
+_hidden = [len(t["hidden"]) for t in RUN_DATA["tasks"]]
+v("run_tasks", RUN.tasks, "{:.0f}", "tasks")
+v("run_tasks_words", RUN.tasks, "words", "the same, in words")
+v("run_runs", RUN.runs, "{:.0f}", "runs per task and configuration")
+v("run_trials", RUN.trials[BASE], "{:.0f}", "trials per configuration")
+v("run_temp", RUN_DATA["temperature"], "{:.1f}", "sampling temperature")
+v("run_cutoff", RUN_DATA["cutoff_s"], "{:.0f}", "grader cutoff, s")
+v("run_hidden_min_words", min(_hidden), "words", "fewest hidden tests per task")
+v("run_hidden_max_words", max(_hidden), "words", "most hidden tests per task")
+v("run_orig_vis", _orig_visible, "{:.0f}", "buggy originals passing their visible test")
+for _cfg, _tag in ((BASE, "b"), (CAND, "c")):
+    v(f"run_{_tag}_vis", RUN.visible_pass[_cfg], "{:.0f}", f"{_cfg} visible passes")
+    v(f"run_{_tag}_vis_pct", pct(RUN.visible_pass[_cfg] / RUN.trials[_cfg]), "{:.1f}", f"{_cfg} visible pass, %")
+    v(f"run_{_tag}_vis_rej", RUN.visible_pass_sealed_reject[_cfg], "{:.0f}", f"{_cfg} visible passes the sealed tests reject")
+    v(f"run_{_tag}_vis_rej_pct", pct(RUN.visible_pass_sealed_reject[_cfg] / RUN.visible_pass[_cfg]), "{:.1f}",
+      f"{_cfg} share of visible passes rejected, %")
+    v(f"run_{_tag}_pct", pct(RUN.rate[_cfg]), "{:.1f}", f"{_cfg} sealed acceptance, %")
+    v(f"run_{_tag}_calls", RUN.calls[_cfg], "{:.0f}", f"{_cfg} model calls")
+    v(f"run_{_tag}_acc", RUN.accepted[_cfg], "{:.0f}", f"{_cfg} accepted")
+    v(f"run_{_tag}_tokens", RUN.tokens[_cfg], "{:,.0f}", f"{_cfg} tokens, all trials")
+    v(f"run_{_tag}_tpa", RUN.tokens_per_accepted[_cfg], "{:.0f}", f"{_cfg} tokens per accepted")
+v("run_extra_calls", RUN.calls[CAND] - RUN.calls[BASE], "{:.0f}", "calls the retry added")
+v("run_tpa_more_pct", pct(RUN.tokens_per_accepted_ratio - 1), "{:.0f}", "more tokens per accepted, %")
+v("run_both", RUN.both, "{:.0f}", "run pairs both accepted")
+v("run_cand_only", RUN.candidate_only, "{:.0f}", "candidate only")
+v("run_base_only", RUN.baseline_only, "{:.0f}", "baseline only")
+v("run_neither", RUN.neither, "{:.0f}", "neither")
+v("run_gain", pct(RUN.difference), "{:.1f}", "gain, points")
+v("run_lower_abs", -pct(RUN.lower), "{:.1f}", "paired interval lower limit, minus points")
+v("run_upper", pct(RUN.upper), "{:.1f}", "paired interval upper limit, points")
+v("run_p", RUN.exact_p, "{:.3f}", "McNemar exact p")
+v("run_c_at_max", pct(RUN.pass_at[CAND][RUN.runs]), "{:.1f}", "candidate pass@8, %")
+v("run_b_at_max", pct(RUN.pass_at[BASE][RUN.runs]), "{:.1f}", "baseline pass@8, %")
+v("run_pow_max", pct(RUN.pass_pow[CAND][RUN.runs]), "{:.1f}", "candidate pass^8, %")
+v("run_b_pow_max", pct(RUN.pass_pow[BASE][RUN.runs]), "{:.1f}", "baseline pass^8, %")
 
-# ---------------------------------------------------------------------------
-head("Kappa from chance agreement (§13.4.3; checkpoint uses 80 percent)")
-for rate in (0.9, 0.8):
-    po = rate * rate + (1 - rate) * (1 - rate)
-    pe = po  # independent raters: observed agreement equals chance
-    print(f"each passes {rate:.0%}: raw agreement {100*po:.0f}%, kappa {(po-pe)/(1-pe):.0f}")
+print("== METR, o3 (Literature.AgentEvaluation)")
+v("metr_hacks", AE.MetrO3ReBenchHackRuns, "{:.0f}", "RE-Bench runs judged reward hacking")
+v("metr_runs", AE.MetrO3ReBenchRuns, "{:.0f}", "RE-Bench runs")
 
-# ---------------------------------------------------------------------------
-head("Zheng et al. 2023, Table 2 (default prompt): position consistency")
-for j, cons in [("Claude-v1", 23.8), ("GPT-3.5", 46.2), ("GPT-4", 65.0)]:
-    print(f"  {j}: consistent {cons}%, verdict changed by order {100-cons:.1f}%")
+print("== Judge B against a reference (Scenarios.ResearchReportJudgeCalibration)")
+v("gr_reports", JUDGE_S.reference_failures + JUDGE_S.reference_passes, "{:.0f}", "reports")
+v("gr_ref_fail", JUDGE_S.reference_failures, "{:.0f}", "reference failures")
+v("gr_ref_pass", JUDGE_S.reference_passes, "{:.0f}", "reference passes")
+v("gr_acc_fail", JUDGE_S.accepted_failures, "{:.0f}", "failures accepted")
+v("gr_rej_fail", JUDGE_S.reference_failures - JUDGE_S.accepted_failures, "{:.0f}", "failures rejected")
+v("gr_acc_pass", JUDGE_S.accepted_passes, "{:.0f}", "passes accepted")
+v("gr_rej_pass", JUDGE_S.reference_passes - JUDGE_S.accepted_passes, "{:.0f}", "passes rejected")
+v("gr_accepted", JUDGE.accepted, "{:.0f}", "all accepted")
+v("gr_far", pct(JUDGE.false_accept_rate), "{:.0f}", "false-acceptance rate, %")
+v("gr_far_lo", pct(JUDGE.false_accept_low), "{:.1f}", "Wilson low, %")
+v("gr_far_hi", pct(JUDGE.false_accept_high), "{:.1f}", "Wilson high, %")
+v("gr_fam", pct(JUDGE.failure_among_accepted), "{:.1f}", "failure among accepted, %")
 
-# ---------------------------------------------------------------------------
-head("Tasks or repeats (Agent Evaluation, exercise 1, §13.9; hypothetical)")
-mean_p, var_between = 0.6, 0.08
-var_within = mean_p * (1 - mean_p) - var_between  # E[p(1-p)] = mean(1-mean) - Var(p)
-print(f"within-task variance {var_within:.2f}; ratio {var_within/var_between:.1f} runs per task")
-budget = 600
-for n_tasks, r in [(600, 1), (200, 3), (100, 6)]:
-    se = math.sqrt(var_between / n_tasks + var_within / (n_tasks * r))
-    print(f"  {n_tasks} tasks x {r}: SE {100*se:.2f} points")
-fixture = 10
-best = None
-for r in range(1, 31):
-    n_tasks = budget // (fixture + r)
-    v = var_between / n_tasks + var_within / (n_tasks * r)
-    if best is None or v < best[0]:
-        best = (v, r, n_tasks)
-    if r <= 6:
-        print(f"  fixture 10 runs, r={r}: {n_tasks} tasks, SE {100*math.sqrt(v):.2f}")
-print(f"best with fixture cost: r={best[1]}, {best[2]} tasks, SE {100*math.sqrt(best[0]):.2f} points")
+print("== Zheng et al. 2023, Table 2 (Literature.JudgePositionBias)")
+for _judge, _tag in (("GPT-4", "g4"), ("GPT-3.5", "g35"), ("Claude-v1", "cl")):
+    v(f"zh_{_tag}_cons", ZHENG[_judge]["consistency_pct"], "{:.1f}", f"{_judge} consistent, %")
+    v(f"zh_{_tag}_first", ZHENG[_judge]["biased_first_pct"], "{:.1f}", f"{_judge} favors first, %")
 
-# ---------------------------------------------------------------------------
-head("Wald and Wilson at 50 tasks (§13.5.2, figure 4 panel B)")
-for x in (0, 2, 25):
-    wl, wu = wald(x, 50)
-    sl, su = wilson(x, 50)
-    print(f"  {x}/50: Wald {100*wl:.2f} to {100*wu:.2f}; Wilson {100*sl:.2f} to {100*su:.2f}")
-print(f"half-width at p=0.5, 100 tasks: {100*Z95*math.sqrt(0.25/100):.1f} points; Wilson {100*(wilson(50,100)[1]-wilson(50,100)[0])/2:.1f}")
-print(f"tasks for 2-point half-width: {math.ceil((Z95/0.02)**2*0.25):,}")
+print("== Chance agreement (Scenarios.IndependentJudgesNinetyPercent)")
+_pass, _fail = KAPPA_S.class_shares
+v("kc_p_pct", pct(_pass), "{:.0f}", "each judge passes, %")
+v("kc_p", _pass, "{:.1f}", "the same, fraction")
+v("kc_q", _fail, "{:.1f}", "each judge fails, fraction")
+v("kc_both_pass", _pass * _pass, "{:.2f}", "both pass")
+v("kc_both_fail", _fail * _fail, "{:.2f}", "both fail")
+v("kc_both_pass_pct", pct(_pass * _pass), "{:.0f}", "both pass, %")
+v("kc_both_fail_pct", pct(_fail * _fail), "{:.0f}", "both fail, %")
+v("kc_split_pct", pct(_pass * _fail), "{:.0f}", "one passes, the other fails, %")
+v("kc_po_pct", pct(KAPPA_S.agreement), "{:.0f}", "observed agreement, %")
+v("kc_pe", KAPPA_S.chance_agreement, "{:.2f}", "chance agreement")
+v("kc_pe_pct", pct(KAPPA_S.chance_agreement), "{:.0f}", "the same, %")
+v("kc_kappa", KAPPA_S.kappa, "{:.0f}", "kappa")
+v("kc_chk_pct", pct(KAPPA_CHK_S.class_shares[0]), "{:.0f}", "checkpoint pass rate, %")
+v("kc_chk_po_pct", pct(KAPPA_CHK_S.agreement), "{:.0f}", "checkpoint agreement, %")
+v("kc_chk_kappa", KAPPA_CHK_S.kappa, "{:.0f}", "checkpoint kappa")
 
-# ---------------------------------------------------------------------------
-head("Real data: SWE-bench Verified, Epoch AI runs (MLSysIM, Literature.SweBenchVerifiedRuns)")
-rows = sorted(Literature.SweBenchVerifiedRuns.entries, key=lambda r: -r["mean_score"])
-top = rows[:25]
-pairs = list(zip(top[:-1], top[1:]))
-tied = sum(abs(a["mean_score"] - b["mean_score"]) < Z95 * math.hypot(a["stderr"], b["stderr"]) for a, b in pairs)
-se_typ = med([r["stderr"] for r in top])
-print(f"models {len(rows)}; top 25 neighbor pairs tied {tied} of {len(pairs)}; typical SE {100*se_typ:.1f}; gap needed {100*Z95*math.sqrt(2)*se_typ:.1f} points")
-print(f"median SE of top 25: {100*se_typ:.3f} points; 1.96 x sqrt(2) x median SE = {100*Z95*math.sqrt(2)*se_typ:.2f}")
-print(f"top score {100*top[0]['mean_score']:.1f} ({top[0]['model']}); 25th {100*top[-1]['mean_score']:.1f}")
+print("== Tasks or repeats (Scenarios.RepairSuiteTaskRepeatBudget)")
+v("tr_mean", TR_S.mean_rate, "{:.1f}", "pilot mean acceptance")
+v("tr_mean_c", 1 - TR_S.mean_rate, "{:.1f}", "its complement")
+v("tr_vb", TR_S.between_task_variance, "{:.2f}", "between-task variance")
+v("tr_vw", TR.within_variance, "{:.2f}", "within-task variance")
+v("tr_ratio", TR.variance_ratio, "{:.0f}", "variance ratio, runs")
+v("tr_budget", TR_S.budget_runs, "{:.0f}", "graded runs")
+v("tr_fixture", TR_S.fixture_cost_runs, "{:.0f}", "fixture cost, runs")
+for _r in TR_S.free_runs:
+    v(f"tr_free_n{_r}", TR.free_tasks[_r], "{:.0f}", f"tasks at {_r} runs, new tasks free")
+    v(f"tr_free_r{_r}", _r, "{:.0f}", "runs per task")
+    v(f"tr_free_se{_r}", pct(TR.free_se[_r]), "{:.2f}", "standard error, points")
+_free_best = min(TR.free_se, key=TR.free_se.get)
+v("tr_free_best_words", _free_best, "words", "best runs per task, new tasks free")
+v("tr_best_r", TR.best_runs, "{:.0f}", "best runs per task with fixture cost")
+v("tr_best_n", TR.best_tasks, "{:.0f}", "its tasks")
+v("tr_best_se", pct(TR.best_se), "{:.2f}", "its standard error, points")
+v("tr_one_n", TR.paid_tasks[1], "{:.0f}", "tasks run once with fixture cost")
+v("tr_one_se", pct(TR.paid_se[1]), "{:.2f}", "their standard error, points")
 
-# ---------------------------------------------------------------------------
-head("Paired comparison, NM 13.1 (§13.5.3, table 4)")
-both, cand, base, neither = 70, 18, 12, 50
-npairs = both + cand + base + neither
-th, lo10, hi10 = newcombe10(both, cand, base, neither)
-tol = 0.02
-print(f"gain {100*th:.0f} points; method 10 interval {100*lo10:.2f} to {100*hi10:.2f}")
-lw = th - lo10
-print(f"lower half-width {100*lw:.2f}; needed below {100*(th+tol):.0f}")
-print(f"pairs if gain holds: {math.ceil(npairs*(lw/(th+tol))**2)}")
-print(f"pairs if true gain zero: {math.ceil(npairs*(lw/tol)**2):,} (chapter: about 1,900)")
-print(f"McNemar exact p: {mcnemar_exact(base, cand):.3f}")
-disc = (cand + base) / npairs
-pc, pb = (both + cand) / npairs, (both + base) / npairs
-var_pair = (disc - th ** 2)
-var_ind = pc * (1 - pc) + pb * (1 - pb)
-print(f"discordant {100*disc:.0f}%; paired variance share {100*var_pair/var_ind:.0f}%; independent needs {var_ind/var_pair:.1f}x tasks")
-print(f"normal-approx half-width {100*Z95*math.sqrt(var_pair/npairs):.1f}")
-pbar = 0.5
-for d in (0.04, 0.02):
-    narm = 2 * (Z95 + norm.ppf(0.8)) ** 2 * pbar * (1 - pbar) / d ** 2
-    print(f"  independent arms, detect {100*d:.0f} points: {narm:,.0f} per arm")
+print("== Leaderboard ties (Scenarios.SweBenchVerifiedRankTies)")
+v("rk_models", RK.models, "{:.0f}", "models")
+v("rk_top", RK.top, "{:.0f}", "shown")
+v("rk_pairs", RK.pairs, "{:.0f}", "neighboring pairs")
+v("rk_tied", RK.tied, "{:.0f}", "tied pairs")
+v("rk_top_score", pct(RK.top_score), "{:.1f}", "top score, %")
+v("rk_last_score", pct(RK.last_score), "{:.1f}", "last shown score, %")
+v("rk_se", pct(RK.typical_se), "{:.2f}", "median standard error, points")
+v("rk_se_round", pct(RK.typical_se), "{:.0f}", "the same, whole points")
+v("rk_gap", pct(RK.needed_gap), "{:.2f}", "gap needed, points")
+v("rk_gap_round", pct(RK.needed_gap), "{:.1f}", "the same, one decimal")
+v("conf_pct", pct(RK_S.confidence), "{:.0f}", "confidence, %")
+v("z95", WL.z_critical, "{:.2f}", "two-sided 95 percent quantile")
 
-# ---------------------------------------------------------------------------
-head("Batch vs sequential, NM 13.3 (§13.5.5)")
-p, kc, gen, chk = 0.4, 3, 0.03, 0.01
-q = 1 - (1 - p) ** kc
-batch = kc * (gen + chk)
-en = q / p
-seq = en * (gen + chk)
-print(f"availability {100*q:.1f}%; batch per trial ${batch:.2f}; sequential mean candidates {en:.2f}, ${seq:.4f}")
-print(f"per accepted: batch ${batch/q:.3f}, sequential ${seq/q:.3f}; premium {100*(batch/q/(seq/q)-1):.0f}%")
-print(f"doubling p: ${(gen+chk)/(2*p):.2f}")
+print("== Wald and Wilson (Scenarios.FiftyTaskIntervals)")
+_x0, _x2, _x25 = WL_S.successes
+v("wl_n", WL_S.trials, "{:.0f}", "tasks")
+v("wl_cases_words", len(WL_S.successes), "words", "counts compared")
+v("wl_x0_words", _x0, "words", "first count, in words")
+v("wl_x0", _x0, "{:.0f}", "first count")
+v("wl_x2", _x2, "{:.0f}", "second count")
+v("wl_x25", _x25, "{:.0f}", "third count")
+v("wl_x0_hi_round", pct(WL.wilson[_x0][1]), "{:.0f}", "Wilson upper at the first count, whole %")
+v("wl_x0_hi", pct(WL.wilson[_x0][1]), "{:.2f}", "Wilson upper at the first count, %")
+v("wl_x2_wald_lo_abs", -pct(WL.wald[_x2][0]), "{:.2f}", "Wald lower at the second count, minus %")
+v("wl_x2_lo", pct(WL.wilson[_x2][0]), "{:.2f}", "Wilson lower at the second count, %")
+v("wl_x2_hi", pct(WL.wilson[_x2][1]), "{:.2f}", "Wilson upper at the second count, %")
 
-# ---------------------------------------------------------------------------
-head("Kapoor et al. 2024, Table A1 (HumanEval, 164 problems, 5 runs)")
-kap = [("LATS (GPT-4)", 88.0, 134.50), ("Warming (GPT-4)", 93.2, 2.45), ("GPT-4 baseline", 89.6, 1.93),
-       ("Reflexion (GPT-4)", 87.8, 3.90), ("LDB (GPT-4)", 93.3, 6.36)]
-print(f"LATS/Warming cost ratio {134.50/2.45:.0f}x; per problem LATS ${134.50/164:.2f}, Warming ${2.45/164:.3f}")
+print("== Paired comparison (Scenarios.RepairCandidatePairedComparison)")
+v("pc_n", PC.pairs, "{:.0f}", "task pairs")
+v("pc_both", PC_S.both, "{:.0f}", "both accepted")
+v("pc_cand", PC_S.candidate_only, "{:.0f}", "candidate only")
+v("pc_base", PC_S.baseline_only, "{:.0f}", "baseline only")
+v("pc_neither", PC_S.neither, "{:.0f}", "neither")
+v("pc_disc_diff", PC_S.candidate_only - PC_S.baseline_only, "{:.0f}", "discordant difference")
+v("pc_tol", pct(PC_S.tolerance), "{:.0f}", "tolerance, points")
+v("pc_gain", pct(PC.difference), "{:.0f}", "gain, points")
+v("pc_lower_abs", -pct(PC.lower), "{:.2f}", "lower limit, minus points")
+v("pc_upper", pct(PC.upper), "{:.2f}", "upper limit, points")
+v("pc_lower_width", pct(PC.lower_width), "{:.2f}", "lower half-width, points")
+v("pc_clear", pct(PC.clear_width), "{:.0f}", "half-width the gate needs, points")
+v("pc_gain_holds", PC.pairs_if_gain_holds, "{:,.0f}", "pairs if the gain holds")
+v("pc_no_gain", PC.pairs_if_no_gain, "{:,.0f}", "pairs if the true gain is zero")
+v("pc_no_gain_round", round(PC.pairs_if_no_gain, -2), "{:,.0f}", "the same, as the chapter rounds it")
+v("pc_p", PC.exact_p, "{:.3f}", "McNemar exact p")
+v("pc_share_pct", pct(PC.paired_share), "{:.0f}", "paired variance share, %")
+v("pc_mult", PC.independent_multiple, "{:.1f}", "tasks independent arms need, x")
 
-# ---------------------------------------------------------------------------
-head("Our run (images/data/eval_run.json)")
-run = HERE / "data" / "eval_run.json"
-if run.exists():
-    d = json.loads(run.read_text())
-    R = d["rows"]
-    tasks = [t["id"] for t in d["tasks"]]
-    runs = d["runs_done"]
-    print(f"model {d['model']}, T={d['temperature']}, runs {runs}, measured {d['measured']}, elapsed {d['elapsed_s']} s")
-    for cfg in ("baseline_v1", "candidate_v2"):
-        rr = [r for r in R if r["config"] == cfg]
-        acc = sum(r["verdict"] == "pass" for r in rr)
-        unk = sum(r["verdict"] == "unknown" for r in rr)
-        vis = sum(r["visible"] == "pass" for r in rr)
-        vis_but_fail = sum(r["visible"] == "pass" and r["verdict"] != "pass" for r in rr)
-        lo, hi = wilson(acc, len(rr))
-        tok = sum(r["input_tokens"] + r["output_tokens"] for r in rr)
-        outt = sum(r["output_tokens"] for r in rr)
-        sec = sum(r["seconds"] for r in rr)
-        calls = sum(r["calls"] for r in rr)
-        print(f"{cfg}: trials {len(rr)}, accepted {acc} ({100*acc/len(rr):.1f}%, Wilson {100*lo:.1f} to {100*hi:.1f}), unknown {unk}, "
-              f"visible pass {vis} ({100*vis/len(rr):.1f}%), visible pass but sealed not pass {vis_but_fail} ({100*vis_but_fail/max(vis,1):.1f}% of visible passes)")
-        print(f"   calls {calls}, tokens {tok:,} (output {outt:,}), seconds {sec:.0f}; tokens per accepted {tok/max(acc,1):,.0f}; "
-              f"seconds per accepted {sec/max(acc,1):.1f}")
-        per = []
-        for t in tasks:
-            vv = [r["verdict"] == "pass" for r in rr if r["task"] == t]
-            per.append(sum(vv) / len(vv))
-        print("   per-task pass rate: " + ", ".join(f"{t} {x:.2f}" for t, x in zip(tasks, per)))
-        for kk in (1, 2, 4, 8):
-            if kk <= runs:
-                pk = sum(math.comb(round(x * runs), kk) / math.comb(runs, kk) for x in per) / len(per)
-                ak = sum(1 - math.comb(runs - round(x * runs), kk) / math.comb(runs, kk) for x in per) / len(per)
-                print(f"   k={kk}: pass^k {100*pk:.1f}%  pass@k {100*ak:.1f}%")
-    tpa = {}
-    for cfg in ("baseline_v1", "candidate_v2"):
-        rr = [r for r in R if r["config"] == cfg]
-        tpa[cfg] = sum(r["input_tokens"] + r["output_tokens"] for r in rr) / sum(r["verdict"] == "pass" for r in rr)
-    print(f"tokens per accepted, candidate over baseline: {tpa['candidate_v2']/tpa['baseline_v1']:.3f} ({100*(tpa['candidate_v2']/tpa['baseline_v1']-1):.0f}% more)")
-    # paired, run by run
-    key = {(r["task"], r["run"], r["config"]): r["verdict"] == "pass" for r in R}
-    a = b = c = dd = 0
-    for t in tasks:
-        for rn in range(runs):
-            x, y = key[(t, rn, "candidate_v2")], key[(t, rn, "baseline_v1")]
-            a += x and y; b += x and not y; c += y and not x; dd += (not x) and (not y)
-    th, l, u = newcombe10(a, b, c, dd)
-    print(f"paired 2x2: both {a}, candidate only {b}, baseline only {c}, neither {dd}")
-    print(f"gain {100*th:.1f} points, method 10 {100*l:.1f} to {100*u:.1f}; McNemar exact p {mcnemar_exact(c, b):.3f}")
-    print("   (pairs share a task and run index; tasks repeat, so this interval treats runs as independent pairs)")
-    # buggy originals pass their own visible test
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("eval_run", HERE / "data" / "eval_run.py")
-    er = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(er)
-    orig_vis = sum(er.run_checks(t["code"], [t["visible"]])[0] == "pass" for t in er.TASKS)
-    print(f"buggy originals passing their visible test: {orig_vis} of {len(er.TASKS)}")
-else:
-    print("eval_run.json not yet written")
+print("== One task against new tasks (Scenarios.TwoTaskTypeConsistency)")
+v("mix_same_pct", pct(MIX.same_task_all), "{:.0f}", "one task repeated, %")
+v("mix_new_pct", pct(MIX.new_tasks_all), "{:.0f}", "new tasks, %")
+
+print("== Kapoor et al. 2024, Table A1 (Literature.HumanEvalAgentCost)")
+_lats, _warm = KAPOOR["LATS (GPT-4)"], KAPOOR["Warming (GPT-4)"]
+_retry, _gpt4 = KAPOOR["Retry (GPT-4)"], KAPOOR["GPT-4 (baseline)"]
+v("ha_problems", AE.HumanEvalProblems, "{:.0f}", "HumanEval problems")
+v("ha_runs", AE.KapoorRunsPerAgent, "{:.0f}", "runs per agent")
+v("ha_runs_words", AE.KapoorRunsPerAgent, "words", "the same, in words")
+v("ha_lats_acc", _lats["accuracy_pct"], "{:.1f}", "LATS (GPT-4) accuracy, %")
+v("ha_lats_cost", _lats["total_cost_usd"], "{:.2f}", "LATS (GPT-4) cost, $")
+v("ha_warm_acc", _warm["accuracy_pct"], "{:.1f}", "Warming accuracy, %")
+v("ha_warm_cost", _warm["total_cost_usd"], "{:.2f}", "Warming cost, $")
+v("ha_retry_acc", _retry["accuracy_pct"], "{:.1f}", "Retry accuracy, %")
+v("ha_retry_cost", _retry["total_cost_usd"], "{:.2f}", "Retry cost, $")
+v("ha_gpt4_acc", _gpt4["accuracy_pct"], "{:.1f}", "GPT-4 one call accuracy, %")
+v("ha_gpt4_cost", _gpt4["total_cost_usd"], "{:.2f}", "GPT-4 one call cost, $")
+v("ha_ratio", _lats["total_cost_usd"] / _warm["total_cost_usd"], "{:.0f}", "LATS over Warming cost, x")
+
+print("== Batch or sequential (Scenarios.CappedCandidateSelection)")
+_gen, _chk = usd(SEL_S.generation_cost), usd(SEL_S.check_cost)
+v("sel_p", SEL_S.pass_rate, "{:.1f}", "pass probability")
+v("sel_p_c", 1 - SEL_S.pass_rate, "{:.1f}", "its complement")
+v("sel_cap", SEL_S.cap, "{:.0f}", "candidate cap")
+v("sel_cap_words", SEL_S.cap, "words", "the same, in words")
+v("sel_gen", _gen, "{:.2f}", "generation, $")
+v("sel_chk", _chk, "{:.2f}", "checking, $")
+v("sel_unit", _gen + _chk, "{:.2f}", "one candidate, $")
+v("sel_q", SEL.availability, "{:.3f}", "availability")
+v("sel_q_pct", pct(SEL.availability), "{:.1f}", "the same, %")
+v("sel_en", SEL.expected_candidates, "{:.2f}", "sequential candidates")
+v("sel_batch", usd(SEL.batch_trial_cost), "{:.2f}", "batch per trial, $")
+v("sel_seq", usd(SEL.sequential_trial_cost), "{:.4f}", "sequential per trial, $")
+v("sel_batch_acc", usd(SEL.batch_per_accepted), "{:.3f}", "batch per accepted, $")
+v("sel_seq_acc", usd(SEL.sequential_per_accepted), "{:.3f}", "sequential per accepted, $")
+v("sel_doubled", usd(SEL.doubled_rate_per_accepted), "{:.2f}", "sequential with p doubled, $")
+v("sel_batch_cents", usd(SEL.batch_trial_cost) * 100, "{:.0f}", "batch per trial, cents")
+v("sel_seq_cents", usd(SEL.sequential_trial_cost) * 100, "{:.2f}", "sequential per trial, cents")
+v("sel_batch_acc_cents", usd(SEL.batch_per_accepted) * 100, "{:.1f}", "batch per accepted, cents")
+v("sel_seq_acc_cents", usd(SEL.sequential_per_accepted) * 100, "{:.1f}", "sequential per accepted, cents")
+v("sel_premium_pct", pct(SEL.batch_premium), "{:.0f}", "batch premium, %")
+
+if __name__ == "__main__":
+    write(__file__)

@@ -1,401 +1,340 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 9 (Data Selection).
+"""Every number on the Lecture 9 (Data Selection) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment
-("ch" is the rendered Data Selection chapter); each printed line is a value
-the slide or its note shows, under the label used there. make_figs.py
-imports from this file so figures and slides share one computation.
+MLSysIM holds the inputs (Models, Hardware, Datasets, Literature, and the
+data-selection Scenarios.*) and the calculations; the Data Selection chapter
+reads the same scenarios. This file only selects values, converts units, and
+formats them; it types no numbers. Each value is recorded with v() under the
+key the deck prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports this module, so figures and slides share one computation.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Literature, Models, Scenarios = mlsysim.Literature, mlsysim.Models, mlsysim.Scenarios
+DSR, CHIN = Literature.DataSelectionResults, Literature.Chinchilla
+
+CORPUS = Scenarios.PretrainingCorpusGrowth
+GPT2, GPT2_ONE = Scenarios.Gpt2XlWebTextCorpus, Scenarios.Gpt2XlRunOnOneH100
+DOUBLING = Scenarios.ChinchillaComputeDoubling
+DEDUP, BANDS = Scenarios.Gpt2WebTextNearDuplicates, Scenarios.FineWebMinHashBanding
+ICR = Scenarios.ResNet50HalfImageNetIcr
+CORESET, PRACTICE = Scenarios.ResNet50TenPercentCoresetH100, Scenarios.ResNet50ProxyTrainedCoreset
+EPOCH, ECHO = Scenarios.ResNet50HalfCoresetEpochH100, Scenarios.ResNet50EchoingH100
+CHECK, PITFALL = Scenarios.ProductionModelScoringCheck, Scenarios.ExpensiveSelectionPitfall
+COVER, CURRIC = Scenarios.RareClassTenPercentCoreset, Scenarios.Cifar10LinearCurriculum
+ROUNDS, SCANS = Scenarios.ActiveLearningTenRounds, Scenarios.MedicalScanActiveLearning
+SSL, FOUNDATION = Scenarios.FixMatchCifar10Cost, Scenarios.FoundationModelTenTasks
+BILL, PIPELINE = Scenarios.ImageNetDataCostBreakdown, Scenarios.MinHashPipelineAmortization
+SCALING = Scenarios.TenfoldDataFourPoints
+CIFAR10 = mlsysim.Datasets.CIFAR10
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def head(title):
-    print(f"\n[{title}]")
+def lit(entry):
+    """A Literature value as a plain number."""
+    return float(entry)
 
 
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-# GPT-2 XL on WebText (ch Sec. 9.1)
-P_GPT2 = 1.5e9              # parameters
-WEBTEXT_TOKENS = 10e9       # about 10 billion unique tokens (40 GB at ~4 B/token)
-RUN_FLOP = 1.5e21           # the original run
-FLOP_PER_PARAM_TOKEN = 6    # training costs ~6 FLOPs per parameter per token
-CHINCHILLA_TPP = 20         # Hoffmann et al. 2022 reference, tokens per parameter
-H100_PEAK16 = 989e12        # ch / Lecture 8: dense 16-bit peak, FLOP/s
-H100_W = 700                # board power, W
-GPT2_GPUS, GPT2_MFU = 8, 0.50   # ch Sec. 9.1: one 8-H100 machine at 50% MFU
-
-# Tokens per parameter (ch footnote 4; the papers)
-GPT3_P, GPT3_TOKENS = 175e9, 300e9      # Brown et al. 2020
-LLAMA2_P, LLAMA2_TOKENS = 70e9, 2.0e12  # Touvron et al. 2023 (2T tokens)
-
-# Hoffmann et al. 2022 (arXiv:2203.15556v1): Chinchilla 70B on 1.4T tokens,
-# Gopher 280B on 300B tokens, same compute budget (Sec. 1, Sec. 4);
-# Table 2 approach 1: N_opt ~ C^0.50, D_opt ~ C^0.50.
-CHIN_P, CHIN_TOKENS = 70e9, 1.4e12
-GOPHER_P, GOPHER_TOKENS = 280e9, 300e9
-EXP_B = 0.50
-
-# ResNet-50 on ImageNet, one H100 (ch Napkin Math 9.1, 9.4, 9.5)
-IMAGENET = 1_281_167        # ImageNet-1k training images ("1.28M")
-GFLOP_PER_IMAGE = 24.6e9    # forward + backward
-UTIL_RESNET = 0.25          # 25% of peak
-GAIN_FULL, GAIN_HALF = 5.0, 4.5   # assumed epoch-1 gains, points
-IMAGENET_GB = 148           # archive size
-NVME_GBS = 7                # local NVMe, GB/s
-PCIE_GBS = 64               # PCIe, GB/s
-DEMAND_IPS = 10_100         # images/s the H100 consumes
-HOST_IPS = 5_250            # images/s the host supplies
-EPOCHS_90 = 90
-CH_EPOCH_S = 126            # ch prints "about 126 seconds" per epoch
-
-# Example 9.2 (ch): 100 epochs, 10% coreset
-BASE_MIN = 211.0
-SAVE_A_MIN, SCORE_A_S = 188.8, 42
-SAVE_B_MIN, SCORE_B_S = 189.1, 18
-EPOCHS_100 = 100
-
-# MinHash (ch Sec. 9.3.2; FineWeb card and datatrove examples/fineweb.py)
-WEBTEXT_DOCS = 8e6
-WEBTEXT_GB = 40
-HASHES_CH = 128
-BYTES_PER_HASH = 4
-FW_BUCKETS, FW_PER_BUCKET, FW_NGRAM = 14, 8, 5
-
-# Lee et al. 2022: near-duplicate shares
-DUP_C4, DUP_REALNEWS = 3.04, 13.63
-
-# Coverage (ch Sec. 9.3.4)
-POOL, RARE_FRAC, CORESET_FRAC, FLOOR = 1_000_000, 0.001, 0.10, 150
-
-# Curriculum (ch Sec. 9.4.1), W illustrative
-W = 10
-
-# Active learning exercise (ch Sec. 9.8.2)
-LABEL_USD, RANDOM_LABELS, AL_LABELS, ROUNDS, ROUND_USD = 10, 5000, 2000, 10, 50
-START_LABELS, PER_ROUND = 1000, 100
-HOSP_SCANS, HOSP_USD, HOSP_BUDGET, HOSP_AL = 1_000_000, 5, 500_000, 50_000
-
-# FixMatch (Sohn et al. 2020), foundation-model amortization (ch)
-CIFAR_TRAIN, FM_LABELS = 50_000, 4000
-PRETRAIN_GPUH, FT_GPUH_BASE, FT_GPUH_FM = 10_000, 1000, 50
-
-# Cost breakdown (ch Napkin Math 9.6, recomputed at 1.28M images, 148 GB)
-ACQ_USD, LABEL_PRICE, STORE_USD_GB_MO, MONTHS = 50_000, 0.05, 0.02, 12
-COMPUTE_USD, GPU_HOUR_USD = 421, 4   # ch table: compute line $421 at $4/GPU-h
-
-# ROI (ch tables 13, 14)
-BUILD, OPERATE, SAVE_PER_RUN = 50_000, 5_000, 10_000
+def pct(x):
+    """A fraction as percent."""
+    return 100 * x
 
 
-# ---------------------------------------------------------------------------
-# Derived values, one block per slide
-# ---------------------------------------------------------------------------
-def gpt2():
-    tokens = RUN_FLOP / (FLOP_PER_PARAM_TOKEN * P_GPT2)
-    passes = tokens / WEBTEXT_TOKENS
-    optimal = CHINCHILLA_TPP * P_GPT2
-    secs = RUN_FLOP / (GPT2_GPUS * H100_PEAK16 * GPT2_MFU)
-    days = secs / 86400
-    hours = secs / 3600
-    kwh = GPT2_GPUS * H100_W * hours / 1000
-    one_h100_days = RUN_FLOP / (H100_PEAK16 * GPT2_MFU) / 86400
-    return dict(tokens=tokens, passes=passes, optimal=optimal, days=days,
-                hours=hours, kwh=kwh, one_h100_days=one_h100_days)
+def sci(key, x, label):
+    """Record x as a one-decimal mantissa (key_m) and a power of ten (key_e)."""
+    e = math.floor(math.log10(abs(x)))
+    v(f"{key}_m", x / 10 ** e, "{:.1f}", f"{label}, mantissa")
+    v(f"{key}_e", e, "{:.0f}", f"{label}, power of ten")
 
 
-def tokens_per_param():
-    g = gpt2()
-    return dict(gpt3=GPT3_TOKENS / GPT3_P,
-                gpt2_unique=WEBTEXT_TOKENS / P_GPT2,
-                gpt2_trained=g["tokens"] / P_GPT2,
-                llama2=LLAMA2_TOKENS / LLAMA2_P,
-                share=(WEBTEXT_TOKENS / P_GPT2) / CHINCHILLA_TPP)
+print("== The data wall (Literature.Series, Scenarios.PretrainingCorpusGrowth)")
+corpora = Literature.Series.PretrainingTokens.entries
+stock = {r["bound"]: r["tokens"] for r in Literature.Series.PublicTextStock.entries}
+v("corpus_growth", CORPUS.growth, "{:.1f}", "pre-training corpus growth per year")
+v("first_corpus_b", corpora[0]["tokens"] / 10 ** 9, "{:.0f}", "GPT-3 training tokens, billions")
+v("first_corpus_year", int(corpora[0]["date"].split("-")[0]), "{:.0f}", "GPT-3 year")
+v("last_corpus_t", corpora[-1]["tokens"] / 10 ** 12, "{:.0f}", "Qwen3 training tokens, trillions")
+v("last_corpus_year", int(corpora[-1]["date"].split("-")[0]), "{:.0f}", "Qwen3 year")
+v("stock_low_t", stock["low"] / 10 ** 12, "{:.0f}", "public text stock, low, trillions")
+v("stock_median_t", stock["median"] / 10 ** 12, "{:.0f}", "public text stock, median, trillions")
+v("stock_high_q", stock["high"] / 10 ** 15, "{:.0f}", "public text stock, high, quadrillions")
+v("stock_year", round(CORPUS.crossing(stock["median"])), "{:.0f}", "year the fit reaches the median stock")
 
+print("== GPT-2 XL on WebText (Scenarios.Gpt2XlWebTextCorpus)")
+v("gpt2_tokens_b", round(GPT2.tokens_processed.magnitude, -9) / 10 ** 9, "{:.0f}", "tokens processed, billions")
+v("webtext_tokens_b", GPT2.unique_tokens.magnitude / 10 ** 9, "{:.0f}", "WebText unique tokens, billions")
+v("webtext_gb", m(GPT2.corpus_bytes, "GB"), "{:.0f}", "WebText, GB")
+v("gpt2_passes", GPT2.passes, "{:.0f}", "passes over WebText")
+v("optimal_tokens_b", GPT2.optimal_tokens.magnitude / 10 ** 9, "{:.0f}", "compute-optimal tokens, billions")
+v("gpt2_params_b", GPT2.parameters / 10 ** 9, "{:.1f}", "GPT-2 XL parameters, billions")
+sci("gpt2_flops", m(GPT2.training_flops, "flop"), "original run, FLOPs")
+v("flops_per_pt", GPT2.flops_per_param_token, "{:.0f}", "training FLOPs per parameter per token")
+v("flops_per_pt_word", GPT2.flops_per_param_token, "words", "the same, in prose")
+v("node_gpus_word", GPT2.accelerators, "words", "accelerators in one machine, in prose")
+v("mfu_pct", pct(GPT2.utilization), "{:.0f}", "model FLOPs utilization, %")
+v("node_days", m(GPT2.run_time, "day"), "{:.1f}", "eight H100s, days")
+v("node_kwh", round(m(GPT2.run_energy, "kWh"), -1), "{:.0f}", "eight H100s, kWh (to the ten, as the chapter rounds)")
+v("node_hours", m(GPT2.run_time, "hour"), "{:.0f}", "eight H100s, hours")
+v("one_h100_days", m(GPT2_ONE.training_time, "day"), "{:.0f}", "one H100, days")
 
-def chinchilla():
-    c_chin = FLOP_PER_PARAM_TOKEN * CHIN_P * CHIN_TOKENS
-    c_goph = FLOP_PER_PARAM_TOKEN * GOPHER_P * GOPHER_TOKENS
-    # With D = 20 N and C = 6 N D: N = sqrt(C / 120), D = 20 N
-    n_opt = math.sqrt(RUN_FLOP / (FLOP_PER_PARAM_TOKEN * CHINCHILLA_TPP))
-    return dict(chin_tpp=CHIN_TOKENS / CHIN_P, goph_tpp=GOPHER_TOKENS / GOPHER_P,
-                c_chin=c_chin, c_goph=c_goph, c_ratio=c_chin / c_goph,
-                p_ratio=GOPHER_P / CHIN_P, d_ratio=CHIN_TOKENS / GOPHER_TOKENS,
-                double=(2 ** EXP_B - 1) * 100,
-                gpt2_n_opt=n_opt, gpt2_d_opt=CHINCHILLA_TPP * n_opt)
+print("== Model collapse (Shumailov et al. 2024)")
+v("shum_ppl", lit(DSR.ShumailovRealDataPerplexity), "{:.0f}", "real-data model, mean perplexity")
+v("shum_loss_lo", lit(DSR.ShumailovGeneratedLossLowPts), "{:.0f}", "perplexity points lost, low")
+v("shum_loss_hi", lit(DSR.ShumailovGeneratedLossHighPts), "{:.0f}", "perplexity points lost, high")
+v("shum_real_pct", lit(DSR.ShumailovPreservedRealPct), "{:.0f}", "real data kept each generation, %")
 
+print("== Value: learning per FLOP (Scenarios.ResNet50HalfImageNetIcr)")
+v("imagenet_m", ICR.examples / 10 ** 6, "{:.2f}", "ImageNet training images, millions")
+v("gflop_per_image", m(ICR.training_flops_per_sample, "GFLOP"), "{:.1f}", "training FLOPs per image, GFLOP")
+v("icr_gain_full", ICR.gain_full, "{:.0f}", "epoch-1 gain, all data, points")
+v("icr_gain_subset", ICR.gain_subset, "{:.1f}", "epoch-1 gain, half, points")
+v("icr_gain_share", pct(ICR.gain_subset / ICR.gain_full), "{:.0f}", "half's share of the gain, %")
+sci("epoch_flops", m(ICR.epoch_flops, "flop"), "one epoch, FLOPs")
+sci("half_flops", m(ICR.subset_flops, "flop"), "half an epoch, FLOPs")
+sci("icr_full", ICR.icr_full, "ICR, all data, per FLOP")
+sci("icr_half", ICR.icr_subset, "ICR, half, per FLOP")
+v("icr_ratio", ICR.icr_ratio, "{:.1f}", "half / all, learning per FLOP")
+v("paul_epoch", lit(DSR.PaulEl2nScoreEpoch), "{:.0f}", "EL2N scored at epoch")
+v("sorscher_discard_pct", lit(DSR.SorscherImageNetDiscardPct), "{:.0f}", "ImageNet discarded without loss, %")
+v("sorscher_kept_pct", 100 - lit(DSR.SorscherImageNetDiscardPct), "{:.0f}", "the same, kept, %")
 
-def icr():
-    flops = IMAGENET * GFLOP_PER_IMAGE
-    full = GAIN_FULL / flops
-    half = GAIN_HALF / (flops / 2)
-    return dict(flops=flops, full=full, half=half, ratio=half / full)
+print("== Tokens per parameter (Models, Scenarios.Gpt2XlWebTextCorpus)")
+gpt3, llama2 = Models.Language.GPT3, Models.Language.Llama2_70B
+v("gpt3_tokens_b", m(gpt3.training_tokens, "count") / 10 ** 9, "{:.0f}", "GPT-3 training tokens, billions")
+v("gpt3_params_b", m(gpt3.parameters, "param") / 10 ** 9, "{:.0f}", "GPT-3 parameters, billions")
+v("gpt3_tpp", m(gpt3.training_tokens, "count") / m(gpt3.parameters, "param"), "{:.1f}", "GPT-3 tokens per parameter")
+v("llama2_tpp", m(llama2.training_tokens, "count") / m(llama2.parameters, "param"), "{:.1f}",
+  "Llama 2 70B tokens per parameter")
+v("gpt2_unique_tpp", GPT2.unique_tokens_per_param, "{:.1f}", "GPT-2 XL unique tokens per parameter")
+v("gpt2_trained_tpp", GPT2.trained_tokens_per_param, "{:.0f}", "GPT-2 XL training tokens per parameter")
+v("tpp_ref", GPT2.tokens_per_param, "{:.0f}", "compute-optimal tokens per parameter")
+v("processed_over_optimal", (GPT2.tokens_processed / GPT2.optimal_tokens).to("").magnitude, "{:.1f}",
+  "processed / compute-optimal tokens")
 
+print("== The compute-optimal frontier (Literature.Chinchilla, Scenarios.ChinchillaComputeDoubling)")
+v("alloc_exp", DOUBLING.exponent, "{:.2f}", "approach 1 allocation exponent")
+v("alloc_exp_short", DOUBLING.exponent, "{:.1f}", "the same, one decimal")
+v("chin_models", lit(CHIN.ModelsTrained), "{:.0f}", "models trained, over")
+v("gopher_params_b", lit(CHIN.GopherParams) / 10 ** 9, "{:.0f}", "Gopher parameters, billions")
+v("gopher_tokens_b", lit(CHIN.GopherTokens) / 10 ** 9, "{:.0f}", "Gopher tokens, billions")
+v("chin_params_b", lit(CHIN.ChinchillaParams) / 10 ** 9, "{:.0f}", "Chinchilla parameters, billions")
+v("chin_tokens_t", lit(CHIN.ChinchillaTokens) / 10 ** 12, "{:.1f}", "Chinchilla tokens, trillions")
+v("chin_token_mult", lit(CHIN.ChinchillaTokens) / lit(CHIN.GopherTokens), "{:.1f}", "Chinchilla / Gopher tokens")
+v("chin_tpp", lit(CHIN.ChinchillaTokens) / lit(CHIN.ChinchillaParams), "{:.0f}", "Chinchilla tokens per parameter")
+v("doubling_pct", pct(DOUBLING.growth), "{:.0f}", "more tokens when compute doubles, %")
+v("c_over_n2", GPT2.flops_per_param_token * GPT2.tokens_per_param, "{:.0f}", "C / N^2 at D = 20 N")
+n_opt, d_opt = GPT2.compute_optimal
+v("gpt2_nopt_b", n_opt / 10 ** 9, "{:.1f}", "compute-optimal parameters, billions")
+v("gpt2_dopt_b", d_opt / 10 ** 9, "{:.0f}", "compute-optimal tokens, billions")
+v("dopt_over_webtext", d_opt / GPT2.unique_tokens.magnitude, "{:.1f}", "D_opt / WebText unique tokens")
 
-def scoreboard():
-    rescore_min = EPOCHS_100 * SCORE_A_S / 60
-    sub_min = BASE_MIN * 0.10
-    return dict(save_a_pct=SAVE_A_MIN / BASE_MIN * 100,
-                save_b_pct=SAVE_B_MIN / BASE_MIN * 100,
-                extra_s=(SAVE_B_MIN - SAVE_A_MIN) * 60,
-                score_diff_s=SCORE_A_S - SCORE_B_S,
-                rescore_min=rescore_min, sub_min=sub_min,
-                rescore_save_pct=(BASE_MIN - rescore_min - sub_min) / BASE_MIN * 100,
-                rescore_ratio=rescore_min / sub_min,
-                lost_share=(SAVE_A_MIN / BASE_MIN * 100
-                            - (BASE_MIN - rescore_min - sub_min) / BASE_MIN * 100)
-                / (SAVE_A_MIN / BASE_MIN * 100) * 100)
+print("== The selection inequality (Scenarios.ResNet50TenPercentCoresetH100)")
+v("util_pct", pct(CORESET.utilization), "{:.0f}", "sustained share of H100 peak, %")
+v("keep10_pct", pct(CORESET.keep_fraction), "{:.0f}", "coreset, %")
+v("train_epochs", CORESET.epochs, "{:.0f}", "training epochs")
+v("base_min", m(CORESET.full_time, "minute"), "{:.0f}", "full training, min")
+v("score_s", m(CORESET.score_time(), "second"), "{:.0f}", "ResNet-50 scores the pool, s")
+v("score_proxy_s", m(CORESET.score_time(CORESET.proxy), "second"), "{:.0f}", "ResNet-18 scores the pool, s")
+v("score_diff_s", m(CORESET.score_time() - CORESET.score_time(CORESET.proxy), "second"), "{:.0f}",
+  "proxy scoring saves, s")
+v("save_a_min", m(CORESET.saving(), "minute"), "{:.1f}", "saving, target scores once, min")
+v("save_a_pct", pct(CORESET.saving_fraction()), "{:.1f}", "the same, %")
+v("save_b_min", m(CORESET.saving(CORESET.proxy), "minute"), "{:.1f}", "saving, proxy scores once, min")
+v("save_b_pct", pct(CORESET.saving_fraction(CORESET.proxy)), "{:.1f}", "the same, %")
+v("rescore_min", m(CORESET.rescoring_time, "minute"), "{:.0f}", "rescoring every epoch, min")
+v("subset_min", m(CORESET.subset_time, "minute"), "{:.0f}", "subset training, min")
+v("rescore_ratio", CORESET.rescoring_over_training, "{:.1f}", "rescoring / subset training")
+v("rescore_save_pct", pct(CORESET.rescoring_saving_fraction), "{:.0f}", "saving with rescoring, %")
+v("rescore_lost_pct", pct(1 - CORESET.rescoring_saving_fraction / CORESET.saving_fraction()), "{:.0f}",
+  "share of the one-pass saving lost, %")
 
+print("== Estimate: 12 hours of scoring (Scenarios.ProductionModelScoringCheck)")
+v("est_pool", CHECK.pool, "{:,.0f}", "pool, images")
+v("est_kept", CHECK.kept, "{:,.0f}", "kept, images")
+v("est_cut_pct", pct(1 - CHECK.kept / CHECK.pool), "{:.0f}", "cut, %")
+v("est_full_h", m(CHECK.full_time, "hour"), "{:.0f}", "full training, h")
+v("est_subset_h", m(CHECK.subset_time, "hour"), "{:.0f}", "subset training, h")
+v("est_score_h", m(CHECK.selection_time, "hour"), "{:.0f}", "production-model scoring, h")
+v("est_total_h", m(CHECK.total_time, "hour"), "{:.0f}", "scoring + subset, h")
+v("est_loss_h", -m(CHECK.net_saving, "hour"), "{:.0f}", "hours lost")
+v("est_breakeven_h", m(CHECK.breakeven_selection, "hour"), "{:.0f}", "scoring must fall below, h")
 
-def estimate_12h():
-    return dict(total=12 + 1, breakeven=10 - 1)
+print("== Deduplication and MinHash (Scenarios.Gpt2WebTextNearDuplicates, FineWebMinHashBanding)")
+v("lee_repeats", lit(DSR.LeeC4SentenceRepeats), "{:,.0f}", "repeats of one C4 sentence")
+v("lee_words", lit(DSR.LeeC4SentenceWords), "{:.0f}", "words in that sentence")
+v("minhash_hashes", DEDUP.signature_hashes, "{:.0f}", "MinHash values per document")
+v("webtext_docs_m", DEDUP.documents / 10 ** 6, "{:.0f}", "WebText documents, millions")
+sci("all_pairs", DEDUP.all_pairs, "all-pairs comparisons")
+v("read_s", m(DEDUP.read_time, "second"), "{:.0f}", "one read of WebText, s")
+v("sig_gb", m(DEDUP.signature_bytes, "GB"), "{:.1f}", "MinHash signatures, GB")
+v("fw_tokens_t", lit(DSR.FineWebTokensT), "{:.0f}", "FineWeb, trillions of tokens")
+v("fw_snapshots", lit(DSR.FineWebSnapshots), "{:.0f}", "Common Crawl snapshots")
+v("fw_bands", BANDS.bands, "{:.0f}", "MinHash bands")
+v("fw_rows", BANDS.rows, "{:.0f}", "hashes per band")
+v("fw_shingle", BANDS.shingle_words, "{:.0f}", "shingle words")
+v("fw_hashes", BANDS.hashes, "{:.0f}", "hashes per document")
+v("fw_thresh", BANDS.threshold, "{:.2f}", "candidate threshold")
+v("fw_thresh_pct", pct(BANDS.threshold), "{:.0f}", "the same, %")
+probe_lo, probe_hi = BANDS.probe_similarities
+v("fw_probe_lo", probe_lo, "{:.1f}", "a dissimilar pair's Jaccard similarity")
+v("fw_probe_hi", probe_hi, "{:.1f}", "a near-duplicate pair's Jaccard similarity")
+v("fw_p_lo_pct", pct(BANDS.candidate_probability(probe_lo)), "{:.1f}", "candidate chance at the low probe, %")
+v("fw_p_hi_pct", pct(BANDS.candidate_probability(probe_hi)), "{:.1f}", "candidate chance at the high probe, %")
+v("lee_c4_pct", pct(DEDUP.duplicate_shares["C4"]), "{:.2f}", "C4 near-duplicates, %")
+v("lee_rn_pct", pct(DEDUP.duplicate_shares["RealNews"]), "{:.2f}", "RealNews near-duplicates, %")
+v("dedup_c4_h", m(DEDUP.time_saved("C4"), "hour"), "{:.0f}", "C4 share of the run, h")
+v("dedup_rn_h", m(DEDUP.time_saved("RealNews"), "hour"), "{:.0f}", "RealNews share of the run, h")
+v("dedup_c4_kwh", m(DEDUP.energy_saved("C4"), "kWh"), "{:.0f}", "C4 share of the run, kWh")
+v("dedup_rn_kwh", round(m(DEDUP.energy_saved("RealNews"), "kWh"), -1), "{:.0f}",
+  "RealNews share of the run, kWh (to the ten, as the chapter rounds)")
+v("lee_mem_word", lit(DSR.LeeMemorizationReduction), "words", "less memorized text, times, in prose")
+v("lee_overlap_pct", lit(DSR.LeeValidationOverlapPct), "{:.0f}", "validation examples also in training, over %")
 
+print("== Pruning with a proxy and a coverage floor (Scenarios.ResNet50ProxyTrainedCoreset, RareClassTenPercentCoreset)")
+v("proxy_epochs", PRACTICE.proxy_epochs, "{:.0f}", "proxy training epochs")
+v("std_epochs", EPOCH.epochs, "{:.0f}", "standard ImageNet schedule, epochs")
+v("cov_pool", COVER.pool, "{:,.0f}", "pool, examples")
+v("cov_pool_m", COVER.pool / 10 ** 6, "{:.0f}", "pool, millions")
+v("cov_rare_pct", pct(COVER.rare_share), "{:.1f}", "rare class, %")
+v("cov_keep_pct", pct(COVER.keep_fraction), "{:.0f}", "coreset, %")
+v("cov_floor", COVER.floor, "{:.0f}", "coverage floor")
+v("cov_rare", COVER.rare, "{:,.0f}", "rare examples in the pool")
+v("cov_kept", COVER.expected_kept, "{:.0f}", "kept by an unstratified coreset")
+v("cov_extra", COVER.shortfall, "{:.0f}", "extra rare examples the floor adds")
 
-def minhash():
-    pairs = WEBTEXT_DOCS ** 2 / 2
-    read_s = WEBTEXT_GB / NVME_GBS
-    sig_gb = WEBTEXT_DOCS * HASHES_CH * BYTES_PER_HASH / 1e9
-    return dict(pairs=pairs, read_s=read_s, sig_gb=sig_gb)
+print("== Curriculum, proxies, and active learning (Scenarios.Cifar10LinearCurriculum, ActiveLearningTenRounds, ...)")
+v("warm_w", CURRIC.warmup_epochs, "{:.0f}", "warmup epochs W")
+v("warm_served", CURRIC.warmup_samples, "{:.1f}", "warmup serves, dataset passes")
+v("cur_epochs", CURRIC.curriculum_epochs, "{:.0f}", "curriculum epochs to target")
+v("cur_base_epochs", CURRIC.baseline_epochs, "{:.0f}", "shuffled epochs to target")
+v("svp_speedup", lit(DSR.ColemanProxySpeedup), "{:.0f}", "proxy speedup, times")
+v("svp_speedup_word", lit(DSR.ColemanProxySpeedup), "words", "the same, in prose")
+v("svp_err_pct", lit(DSR.ColemanActiveErrorGapPct), "{:.1f}", "final-error gap, %")
+v("svp_end2end", lit(DSR.ColemanEndToEndSpeedup), "{:.1f}", "end-to-end speedup, times")
+v("svp_removed_pct", lit(DSR.ColemanCoresetRemovedPct), "{:.0f}", "CIFAR10 removed by the proxy, up to %")
+v("svp_datasets_word", lit(DSR.ColemanDatasets), "words", "datasets evaluated, in prose")
+v("al_price", m(ROUNDS.label_price, "USD"), "{:.0f}", "label price, $")
+v("al_start", ROUNDS.initial_labels, "{:,.0f}", "starting labels")
+v("al_per_round", ROUNDS.labels_per_round, "{:.0f}", "labels per round")
+v("al_rounds", ROUNDS.rounds, "{:.0f}", "rounds")
+v("al_round_usd", m(ROUNDS.round_scoring_cost, "USD"), "{:.0f}", "scoring per round, $")
+v("al_random", ROUNDS.random_labels, "{:,.0f}", "random labels needed")
+v("al_active", ROUNDS.active_labels, "{:,.0f}", "active labels after the rounds")
+v("al_random_usd", m(ROUNDS.random_cost, "USD"), "{:,.0f}", "random labeling, $")
+v("al_active_usd", m(ROUNDS.active_cost, "USD"), "{:,.0f}", "active learning, $")
+v("al_roi", pct(ROUNDS.roi), "{:.1f}", "return, %")
+v("al_turnaround_d", m(ROUNDS.label_turnaround, "day"), "{:.0f}", "annotation delay per round, days")
+v("hosp_scans_m", m(SCANS.pool, "count") / 10 ** 6, "{:.0f}", "scans, millions")
+v("hosp_price", m(SCANS.label_price, "USD/count"), "{:.0f}", "label, $")
+v("hosp_all_m", m(SCANS.full_cost, "USD") / 10 ** 6, "{:.0f}", "labeling every scan, $ millions")
+v("hosp_budget", m(SCANS.budget, "USD"), "{:,.0f}", "budget, $")
+v("hosp_random", m(SCANS.random_labels, "count"), "{:,.0f}", "random labels the budget buys")
+v("hosp_active", m(SCANS.active_labels, "count"), "{:,.0f}", "labels active learning needs")
+v("hosp_mult", SCANS.label_ratio, "{:.0f}", "random / active labels")
 
+print("== Creating data (Literature.DataSelectionResults, Scenarios.FixMatchCifar10Cost, FoundationModelTenTasks)")
+v("autoaug_gpuh", lit(DSR.AutoAugmentImageNetSearchGpuHours), "{:,.0f}", "AutoAugment search, GPU-hours")
+v("cutmix_pts", lit(DSR.CutMixResNet50Top1GainPts), "{:.2f}", "CutMix top-1 gain, points")
+for labels, entry in (("40", DSR.FixMatchCifar10Error40LabelsPct), ("250", DSR.FixMatchCifar10Error250LabelsPct),
+                      ("4k", DSR.FixMatchCifar10Error4000LabelsPct)):
+    v(f"fm_acc_{labels}", 100 - lit(entry), "{:.1f}", f"FixMatch accuracy, {labels} labels, %")
+cifar_train = m(CIFAR10.training_examples, "count")
+v("cifar_train", cifar_train, "{:,.0f}", "CIFAR-10 training images")
+v("fm_labels_4k", SSL.supervised_labels, "{:,.0f}", "labels, supervised baseline")
+v("fm_labels_250", SSL.ssl_labels, "{:.0f}", "labels, FixMatch")
+v("fm_share_pct", pct(SSL.supervised_labels / cifar_train), "{:.0f}", "4,000 of CIFAR-10, %")
+v("fm_labels_40", lit(DSR.FixMatchCifar10LabelsSmall), "{:.0f}", "labels, FixMatch's smallest budget")
+v("fm_per_class_word", lit(DSR.FixMatchCifar10LabelsSmall) / CIFAR10.num_classes, "words", "the same, per class, in prose")
+v("ssl_sup_usd", m(SSL.supervised_total, "USD"), "{:,.0f}", "supervised labels plus compute, $")
+v("ssl_usd", m(SSL.ssl_total, "USD"), "{:.0f}", "FixMatch labels plus compute, $")
+v("ssl_compute_mult", SSL.compute_multiple, "{:.0f}", "FixMatch compute / supervised")
+v("pretrain_gpuh", m(FOUNDATION.pretrain_compute, "hour"), "{:,.0f}", "pretraining, GPU-hours")
+v("ft_gpuh", m(FOUNDATION.finetune_compute, "hour"), "{:.0f}", "fine-tune per task, GPU-hours")
+v("scratch_gpuh", m(FOUNDATION.scratch_compute, "hour"), "{:,.0f}", "from scratch per task, GPU-hours")
+v("crossover_tasks", math.ceil(FOUNDATION.crossover_tasks), "{:.0f}", "tasks after which pretraining pays")
 
-def fineweb():
-    hashes = FW_BUCKETS * FW_PER_BUCKET
-    thresh = (1 / FW_BUCKETS) ** (1 / FW_PER_BUCKET)
+print("== The machine (Scenarios.ResNet50HalfCoresetEpochH100, ResNet50EchoingH100)")
+v("keep50_pct", pct(EPOCH.keep_fraction), "{:.0f}", "coreset, %")
+v("epoch_s", m(EPOCH.epoch_time, "second"), "{:.0f}", "full epoch, s")
+v("epoch_kj", m(EPOCH.epoch_energy, "kJ"), "{:.0f}", "full epoch, kJ")
+v("pruned_s", m(EPOCH.pruned_epoch_time, "second"), "{:.0f}", "pruned epoch, s")
+v("pruned_kj", m(EPOCH.pruned_epoch_energy, "kJ"), "{:.0f}", "pruned epoch, kJ")
+v("path_saved_h", m(EPOCH.run_saving_time, "hour"), "{:.1f}", "90 epochs saved, h")
+v("path_saved_h_round", m(EPOCH.run_saving_time, "hour"), "{:.0f}", "the same, whole hours (as the chapter rounds)")
+v("path_saved_mj", m(EPOCH.run_saving_energy, "MJ"), "{:.0f}", "90 epochs saved, MJ")
+v("path_ratio", EPOCH.saving_over_score_energy, "{:.0f}", "saved / scoring energy")
+v("archive_gb", m(EPOCH.archive_bytes, "GB"), "{:.0f}", "ImageNet archive, GB")
+v("nvme_gbs", m(EPOCH.hardware.storage.bandwidth, "GB/s"), "{:.0f}", "local NVMe, GB/s")
+v("read_archive_s", m(EPOCH.storage_time, "second"), "{:.0f}", "archive read, s")
+v("half_gb", m(EPOCH.materialized_bytes, "GB"), "{:.0f}", "materialized coreset, GB")
+v("link_gb", m(EPOCH.link_bytes, "GB"), "{:.0f}", "decoded tensors over PCIe per epoch, GB")
+v("link_s", m(EPOCH.link_time, "second"), "{:.0f}", "PCIe copy per epoch, s")
+v("demand_ips", m(ECHO.accelerator_rate, "count/second"), "{:,.0f}", "H100 demand, images/s")
+v("host_ips", m(ECHO.host_rate, "count/second"), "{:,.0f}", "host supply, images/s")
+v("host_epoch_s", m(EPOCH.host_epoch_time, "second"), "{:.0f}", "epoch at the host rate, s")
+v("tf_input_pct", lit(DSR.TfProfilerInputBoundPct), "{:.1f}", "profile: step time waiting for input, %")
+v("tf_input_round", lit(DSR.TfProfilerInputBoundPct), "{:.0f}", "the same, whole percent")
+v("tf_step_s", lit(DSR.TfProfilerStepSeconds), "{:.1f}", "profile: step time, s")
+v("tf_compute_s", lit(DSR.TfProfilerComputeSeconds), "{:.1f}", "profile: device compute per step, s")
+v("echo_idle_pct", pct(ECHO.idle_fraction), "{:.0f}", "accelerator waiting on input, %")
+v("echo_busy_pct", pct(ECHO.utilization), "{:.0f}", "accelerator busy without echo, %")
+v("echo_r", ECHO.ratio, "{:.2f}", "pipeline ratio r")
+v("echo_e", ECHO.echo_factor, "{:.0f}", "echo factor")
+v("echo_h_no", m(ECHO.run_time, "hour"), "{:.1f}", "90 epochs without echo, h")
+v("echo_h_e", m(ECHO.echoed_run_time, "hour"), "{:.1f}", "90 epochs with echo, h")
+v("choi_speedup", lit(DSR.ChoiSpeedupMax), "{:.2f}", "Choi et al., less wall time, times")
+v("choi_acc", lit(DSR.ChoiTargetAccuracyPct), "{:.0f}", "Choi et al., target accuracy, %")
+v("choi_ratio_word", lit(DSR.ChoiUpstreamRatio), "words", "upstream slowdown, in prose")
+v("choi_e_min", lit(DSR.ChoiEchoFactorMin), "{:.0f}", "smallest echo factor")
+v("choi_e_max", lit(DSR.ChoiEchoFactorMax), "{:.0f}", "largest echo factor")
+v("choi_runs_word", lit(DSR.ChoiRuns), "words", "runs each, in prose")
 
-    def p(s):
-        return 1 - (1 - s ** FW_PER_BUCKET) ** FW_BUCKETS
-    return dict(hashes=hashes, thresh=thresh, p50=p(0.5), p70=p(0.7),
-                p80=p(0.8), p90=p(0.9))
+print("== The bill (Scenarios.ImageNetDataCostBreakdown, MinHashPipelineAmortization)")
+v("cost_acq", m(BILL.acquisition, "USD"), "{:,.0f}", "acquisition, $")
+v("cost_labels", m(BILL.label_cost, "USD"), "{:,.0f}", "labels, $")
+v("cost_label_cents", pct(m(BILL.label_price, "USD/count")), "{:.0f}", "label, cents")
+v("cost_label_usd", m(BILL.label_price, "USD/count"), "{:.2f}", "label, $")
+v("cost_storage", m(BILL.storage_cost, "USD"), "{:.0f}", "storage, $")
+v("storage_months", m(BILL.storage_duration, "month"), "{:.0f}", "retention, months")
+v("storage_cents", pct(m(BILL.storage_rate, "USD/GB/month")), "{:.0f}", "storage, cents per GB-month")
+v("cost_runs", BILL.runs, "{:.0f}", "training runs")
+v("cost_run_h", m(BILL.run_time, "hour"), "{:.1f}", "one run, h")
+v("cost_gpuh", m(BILL.accelerator_hours, "hour"), "{:.0f}", "campaign, GPU-hours")
+v("gpu_rate", m(BILL.accelerator_rate, "USD/hour"), "{:.0f}", "GPU-hour, $")
+v("cost_compute", m(BILL.compute_cost, "USD"), "{:.0f}", "compute, $")
+v("cost_total", m(BILL.total, "USD"), "{:,.0f}", "total, $")
+v("cost_compute_pct", pct(m(BILL.compute_share, "")), "{:.1f}", "compute share, %")
+v("cost_data_pct", pct(m(BILL.data_share, "")), "{:.1f}", "data share, %")
+assert pct(m(BILL.compute_share, "")) < 1, "the vote's answer is 'under 1%'"
+v("roi_invest", m(PIPELINE.investment, "USD"), "{:,.0f}", "investment, $")
+v("roi_build", m(PIPELINE.build_cost, "USD"), "{:,.0f}", "build, $")
+v("roi_operate", m(PIPELINE.operating_cost, "USD"), "{:,.0f}", "operate, $")
+v("roi_save", m(PIPELINE.saving_per_run, "USD"), "{:,.0f}", "saved per run, $")
+for runs in PIPELINE.run_counts:
+    v(f"roi_mult_{runs}", PIPELINE.savings_multiple(runs), "{:.1f}", f"savings / investment after {runs} runs")
+    v(f"roi_runs_{runs}_word", runs, "words", "the run count, in prose")
+v("roi_breakeven", PIPELINE.breakeven_runs, "{:.1f}", "break-even, runs")
+v("roi_payback_word", math.ceil(PIPELINE.breakeven_runs), "words", "first whole run past break-even, in prose")
 
-
-def dedup():
-    g = gpt2()
-    return dict(c4_h=g["hours"] * DUP_C4 / 100, rn_h=g["hours"] * DUP_REALNEWS / 100,
-                c4_kwh=g["kwh"] * DUP_C4 / 100, rn_kwh=g["kwh"] * DUP_REALNEWS / 100,
-                run_h=g["hours"])
-
-
-def coverage():
-    rare = POOL * RARE_FRAC
-    kept = rare * CORESET_FRAC
-    return dict(rare=rare, kept=kept, extra=FLOOR - kept)
-
-
-def warmup():
-    return dict(served=(W + 1) / 2, full=W)
-
-
-def active_learning():
-    rnd = RANDOM_LABELS * LABEL_USD
-    al = AL_LABELS * LABEL_USD + ROUNDS * ROUND_USD
-    return dict(rnd=rnd, al=al, roi=(rnd - al) / al * 100,
-                labels_after=START_LABELS + ROUNDS * PER_ROUND,
-                hosp_all=HOSP_SCANS * HOSP_USD,
-                hosp_random=HOSP_BUDGET / HOSP_USD,
-                hosp_mult=(HOSP_BUDGET / HOSP_USD) / HOSP_AL)
-
-
-def fixmatch():
-    return dict(share=FM_LABELS / CIFAR_TRAIN * 100,
-                tasks=PRETRAIN_GPUH / (FT_GPUH_BASE - FT_GPUH_FM))
-
-
-def data_path():
-    flops = IMAGENET * GFLOP_PER_IMAGE
-    epoch_s = flops / (H100_PEAK16 * UTIL_RESNET)
-    pruned_s = CH_EPOCH_S / 2
-    epoch_kj = CH_EPOCH_S * H100_W / 1000
-    score_s = epoch_s / 3
-    saved_h = EPOCHS_90 * pruned_s / 3600
-    saved_mj = EPOCHS_90 * pruned_s * H100_W / 1e6
-    score_kj = SCORE_A_S * H100_W / 1000
-    decoded_gb = IMAGENET * 224 * 224 * 3 / 1e9
-    return dict(epoch_s=epoch_s, demand_epoch_s=IMAGENET / DEMAND_IPS,
-                pruned_s=pruned_s, epoch_kj=epoch_kj, pruned_kj=epoch_kj / 2,
-                score_s=score_s, score_kj=score_kj, saved_h=saved_h,
-                saved_mj=saved_mj, energy_ratio=saved_mj * 1000 / score_kj,
-                read_s=IMAGENET_GB / NVME_GBS, half_gb=IMAGENET_GB / 2,
-                decoded_gb=decoded_gb, pcie_s=decoded_gb / PCIE_GBS,
-                host_epoch_s=IMAGENET / HOST_IPS)
-
-
-def echo():
-    r = DEMAND_IPS / HOST_IPS
-    return dict(r=r, busy=HOST_IPS / DEMAND_IPS * 100,
-                h_no=EPOCHS_90 * IMAGENET / HOST_IPS / 3600,
-                h_e2=EPOCHS_90 * IMAGENET / DEMAND_IPS / 3600)
-
-
-def cost():
-    labels = 1.28e6 * LABEL_PRICE
-    storage = IMAGENET_GB * STORE_USD_GB_MO * MONTHS
-    total = ACQ_USD + labels + storage + COMPUTE_USD
-    return dict(labels=labels, storage=storage, compute=COMPUTE_USD,
-                gpu_h=COMPUTE_USD / GPU_HOUR_USD, total=total,
-                compute_pct=COMPUTE_USD / total * 100,
-                data_pct=(total - COMPUTE_USD) / total * 100)
-
-
-def roi():
-    invest = BUILD + OPERATE
-    vals = {n: (SAVE_PER_RUN * n - invest) / invest * 100 for n in (1, 5, 10, 50)}
-    # Panel fix L10: the slide shows savings as a multiple of the investment
-    # (savings / investment) instead of a percentage return such as +809%.
-    mult = {n: SAVE_PER_RUN * n / invest for n in (1, 5, 10, 50)}
-    return dict(invest=invest, vals=vals, mult=mult, breakeven=invest / SAVE_PER_RUN)
+print("== Fallacies (Scenarios.TenfoldDataFourPoints, ExpensiveSelectionPitfall)")
+v("data_scale", SCALING.scale, "{:.0f}", "data multiple")
+v("data_scale_word", SCALING.scale, "words", "the same, in prose")
+v("data_gain", SCALING.accuracy_gain, "{:.0f}", "accuracy gain, points")
+v("pitfall_sel_h", m(PITFALL.selection_time, "hour"), "{:.0f}", "expensive selection, h")
+v("pitfall_full_h", m(PITFALL.full_time, "hour"), "{:.0f}", "full training, h")
 
 
 if __name__ == "__main__":
-    g = gpt2()
-    head("Slide: Predict, how often did GPT-2 see each WebText token?")
-    show("tokens processed (billions)", f"{g['tokens'] / 1e9:.0f}")
-    show("passes over WebText", f"{g['passes']:.1f}")
-    show("compute-optimal tokens, 20 x 1.5B (billions)", f"{g['optimal'] / 1e9:.0f}")
-    show("days on 8 H100s at 50% MFU", f"{g['days']:.1f}")
-    show("run hours", f"{g['hours']:.1f}")
-    show("energy (kWh)", f"{g['kwh']:.0f}")
-    show("days on one H100 at 50% (Lecture 8)", f"{g['one_h100_days']:.0f}")
-
-    t = tokens_per_param()
-    head("Slide: WebText held a third of the unique tokens GPT-2's size calls for")
-    show("GPT-3 tokens per parameter", f"{t['gpt3']:.1f}")
-    show("GPT-2 XL unique tokens per parameter", f"{t['gpt2_unique']:.1f}")
-    show("GPT-2 XL training tokens per parameter", f"{t['gpt2_trained']:.0f}")
-    show("Llama 2 70B tokens per parameter", f"{t['llama2']:.1f}")
-    show("GPT-2 unique share of 20", f"{t['share']:.2f}")
-    show("processed / compute-optimal tokens", f"{g['tokens'] / g['optimal']:.1f}x")
-
-    c = chinchilla()
-    head("Slide: Chinchilla, the compute-optimal frontier")
-    show("Chinchilla tokens per parameter", f"{c['chin_tpp']:.0f}")
-    show("Gopher tokens per parameter", f"{c['goph_tpp']:.2f}")
-    show("Gopher / Chinchilla parameters", f"{c['p_ratio']:.0f}x")
-    show("Chinchilla / Gopher tokens", f"{c['d_ratio']:.1f}x")
-    show("6ND Chinchilla (FLOPs)", f"{c['c_chin']:.2e}")
-    show("6ND Gopher (FLOPs)", f"{c['c_goph']:.2e}")
-    show("6ND ratio Chinchilla/Gopher", f"{c['c_ratio']:.2f}")
-    show("doubling compute: more tokens (%)", f"{c['double']:.0f}")
-    show("GPT-2 budget: N_opt (billions)", f"{c['gpt2_n_opt'] / 1e9:.1f}")
-    show("GPT-2 budget: D_opt (billions)", f"{c['gpt2_d_opt'] / 1e9:.0f}")
-    show("D_opt / WebText unique tokens", f"{c['gpt2_d_opt'] / WEBTEXT_TOKENS:.1f}x")
-
-    i = icr()
-    head("Slide: Half of ImageNet returned 1.8x the learning per FLOP")
-    show("FLOPs per epoch", f"{i['flops']:.2e}")
-    show("full ICR (per FLOP)", f"{i['full']:.2e}")
-    show("half FLOPs", f"{i['flops'] / 2:.2e}")
-    show("half ICR (per FLOP)", f"{i['half']:.2e}")
-    show("ratio", f"{i['ratio']:.1f}x")
-
-    s = scoreboard()
-    head("Slide: Rescoring every epoch eats a third of the saving")
-    show("Option A saving (%)", f"{s['save_a_pct']:.1f}")
-    show("Option B saving (%)", f"{s['save_b_pct']:.1f}")
-    show("B over A, from rounded minutes (s)", f"{s['extra_s']:.0f}")
-    show("scoring time difference, 42 - 18 (s)", f"{s['score_diff_s']:.0f}")
-    show("rescoring 100 x 42 s (min)", f"{s['rescore_min']:.0f}")
-    show("subset training (min)", f"{s['sub_min']:.0f}")
-    show("rescoring / subset training", f"{s['rescore_ratio']:.1f}x")
-    show("saving with rescoring (%)", f"{s['rescore_save_pct']:.0f}")
-    show("share of the one-pass saving lost (%)", f"{s['lost_share']:.0f}")
-
-    e = estimate_12h()
-    head("Slide: Estimate, 12 hours of scoring")
-    show("scoring + subset (h)", e["total"])
-    show("scoring must fall below (h)", e["breakeven"])
-
-    m = minhash()
-    head("Slide: MinHash")
-    show("all pairs", f"{m['pairs']:.1e}")
-    show("40 GB read (s)", f"{m['read_s']:.1f}")
-    show("signatures (GB)", f"{m['sig_gb']:.1f}")
-
-    f = fineweb()
-    head("Slide: FineWeb card and MinHash config")
-    show("hashes per document, 14 x 8", f["hashes"])
-    show("candidate threshold (1/b)^(1/r)", f"{f['thresh']:.2f}")
-    for k in ("p50", "p70", "p80", "p90"):
-        show(f"P(candidate) at Jaccard 0.{k[1]}", f"{f[k] * 100:.1f}%")
-
-    d = dedup()
-    head("Slide: Deduplication returns 3 to 14 hours")
-    show("run hours", f"{d['run_h']:.1f}")
-    show("C4 share: hours, kWh", f"{d['c4_h']:.1f} h, {d['c4_kwh']:.0f} kWh")
-    show("RealNews share: hours, kWh", f"{d['rn_h']:.1f} h, {d['rn_kwh']:.0f} kWh")
-
-    v = coverage()
-    head("Slide: Predict, rare examples in a 10% coreset")
-    show("rare in pool", f"{v['rare']:.0f}")
-    show("kept unstratified", f"{v['kept']:.0f}")
-    show("extra to reach floor", f"{v['extra']:.0f}")
-
-    w = warmup()
-    head("Slide: Curriculum warmup")
-    show("served (D)", w["served"])
-    show("full (D)", w["full"])
-
-    a = active_learning()
-    head("Slide: Estimate, active learning")
-    show("labels after 10 rounds", a["labels_after"])
-    show("random cost ($)", f"{a['rnd']:,.0f}")
-    show("active cost ($)", f"{a['al']:,.0f}")
-    show("return (%)", f"{a['roi']:.1f}")
-    show("hospital: all labels ($)", f"{a['hosp_all']:,.0f}")
-    show("hospital: random labels for budget", f"{a['hosp_random']:,.0f}")
-    show("hospital: multiplier", f"{a['hosp_mult']:.0f}x")
-
-    x = fixmatch()
-    head("Slide: FixMatch")
-    show("4,000 of 50,000 (%)", f"{x['share']:.0f}")
-    show("pretraining pays back after (tasks)", f"{x['tasks']:.1f}")
-
-    p = data_path()
-    head("Slide: Pruning halves the arithmetic, but not always the reads")
-    show("epoch at 25% of peak, computed (s)", f"{p['epoch_s']:.1f}")
-    show("epoch at 10,100 images/s (s)", f"{p['demand_epoch_s']:.1f}")
-    show("chapter epoch (s), pruned (s)", f"{CH_EPOCH_S}, {p['pruned_s']:.0f}")
-    show("epoch energy, pruned (kJ)", f"{p['epoch_kj']:.0f}, {p['pruned_kj']:.0f}")
-    show("scoring = 1/3 epoch (s)", f"{p['score_s']:.0f}")
-    show("scoring energy (kJ)", f"{p['score_kj']:.0f}")
-    show("90 epochs saved (h)", f"{p['saved_h']:.2f}")
-    show("90 epochs saved (MJ)", f"{p['saved_mj']:.2f}")
-    show("saved / scoring energy", f"{p['energy_ratio']:.0f}x")
-    show("NVMe read (s)", f"{p['read_s']:.0f}")
-    show("subset shards (GB)", f"{p['half_gb']:.0f}")
-    show("decoded tensors (GB)", f"{p['decoded_gb']:.0f}")
-    show("PCIe copy (s)", f"{p['pcie_s']:.1f}")
-    show("epoch at host rate (s)", f"{p['host_epoch_s']:.0f}")
-
-    h = echo()
-    head("Slide: Predict, data echoing")
-    show("r", f"{h['r']:.2f}")
-    show("busy without echo (%)", f"{h['busy']:.0f}")
-    show("waiting on input without echo (%)", f"{100 - h['busy']:.0f}")
-    show("90 epochs, no echo (h)", f"{h['h_no']:.1f}")
-    show("90 epochs, e = 2 (h)", f"{h['h_e2']:.1f}")
-
-    k = cost()
-    head("Slide: Predict, share of the bill")
-    show("labels ($)", f"{k['labels']:,.0f}")
-    show("storage ($)", f"{k['storage']:.2f}")
-    show("compute GPU-hours", f"{k['gpu_h']:.0f}")
-    show("total ($)", f"{k['total']:,.0f}")
-    show("compute share (%)", f"{k['compute_pct']:.1f}")
-    show("data share (%)", f"{k['data_pct']:.1f}")
-
-    o = roi()
-    head("Slide: Deduplication pipeline ROI")
-    show("investment ($)", f"{o['invest']:,}")
-    for n, val in o["vals"].items():
-        show(f"return after {n} runs (%)", f"{val:+.0f}")
-    for n, m in o["mult"].items():
-        show(f"savings / investment after {n} runs (x)", f"{m:.1f}")
-    show("break-even (runs)", f"{o['breakeven']:.1f}")
+    write(__file__)

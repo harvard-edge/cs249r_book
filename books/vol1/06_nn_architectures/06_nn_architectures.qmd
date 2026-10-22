@@ -92,14 +92,12 @@ class InductiveBiasLocalityCalc:
     """ImageNet-sized locality-bias parameter reduction for one feature detector."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    img_dim = 224
-    img_channels = 3
-    kernel = 3
+    layer = Scenarios.ImageNetRgbFilterVersusDense  # 224x224 RGB, one 3x3 filter
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_input_weights = img_dim * img_dim * img_channels
-    local_filter_weights = kernel * kernel * img_channels
-    spatial_locality_reduction = dense_input_weights / local_filter_weights
+    dense_input_weights = layer.dense_weights
+    local_filter_weights = layer.weights
+    spatial_locality_reduction = layer.sharing_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(spatial_locality_reduction > 5_000, f"Expected ImageNet locality reduction above 5,000x, got {spatial_locality_reduction:.1f}x.")
@@ -456,11 +454,12 @@ class MLPDefinitionCosts:
     """Quantitative anchor for dense layer scaling in the MLP definition."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    layer_width = 1024
+    layer = Scenarios.Dense1024LayerFp16
+    layer_width = layer.in_features
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_params = layer_width * layer_width
-    dense_fp16_memory = dense_params * BYTES_FP16
+    dense_params = layer.weights
+    dense_fp16_memory = layer.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(dense_params == 1_048_576, f"1024x1024 dense layer should have 1,048,576 weights, got {dense_params}.")
@@ -569,33 +568,25 @@ class MLPvsCNN:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    mnist_train_examples = int(Datasets.MNIST.training_examples.to(count).magnitude)
-    img_w = Datasets.MNIST.image_width
-    img_h = Datasets.MNIST.image_height
-    mlp_in = img_w * img_h
-    mlp_out = Datasets.MNIST.num_classes
     # The 784-128-64-10 network used throughout @sec-neural-computation.
-    mlp_h1, mlp_h2 = 128, 64
-
+    mlp = Scenarios.MnistMlpLayerStack
+    # First layer: 32 features as 3x3 filters or as dense units.
+    first = Scenarios.MnistFirstConvLayer
     # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
-    c1_in_ch = 1  # MNIST grayscale input channel
-    c1_k, c1_out = 3, 32
-    c2_k, c2_out = 3, 64
-    fc1_spatial = 7  # feature-map side after two 2x2 pools (28 -> 14 -> 7)
-    fc1_in, fc1_out = c2_out * fc1_spatial * fc1_spatial, 128
+    cnn = Scenarios.MnistSmallCnn
+    c1_out = first.out_channels
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: First layer at equal feature count (c1_out features)
-    dense_first_w = mlp_in * c1_out  # one weight per pixel per feature
-    conv_first_w = c1_k * c1_k * c1_in_ch * c1_out  # one 3x3 filter per feature
-    ratio = dense_first_w / conv_first_w
-    conv_positions = img_w * img_h  # same-padded filter positions
+    dense_first_w = first.dense_weights  # one weight per pixel per feature
+    conv_first_w = first.weights  # one 3x3 filter per feature
+    ratio = first.sharing_ratio
+    conv_positions = first.positions  # same-padded filter positions
 
     # Step 2: Whole-network weights (biases omitted)
-    mlp_p = (mlp_in * mlp_h1) + (mlp_h1 * mlp_h2) + (mlp_h2 * mlp_out)
-    cnn_head_p = (fc1_in * fc1_out) + (fc1_out * mlp_out)
-    cnn_p = (c1_k * c1_k * c1_in_ch * c1_out) + (c2_k * c2_k * c1_out * c2_out) + cnn_head_p
-    cnn_head_share = cnn_head_p / cnn_p
+    mlp_p = mlp.weights
+    cnn_p = cnn.weights
+    cnn_head_share = cnn.dense_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio >= 10, f"Dense first layer ({dense_first_w}) is not significantly larger than conv ({conv_first_w}). Ratio: {ratio:.1f}x")
@@ -856,18 +847,19 @@ class MLPLayerStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    input_dim = Datasets.MNIST.image_width * Datasets.MNIST.image_height  # 784
-    hidden_dim = 128  # first hidden layer of the Neural Computation running network
+    layer = Scenarios.MnistMlpFirstLayer  # 784 -> 128, FP32, batch one
+    input_dim = layer.in_features  # 784
+    hidden_dim = layer.out_features  # first hidden layer of the Neural Computation running network
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # MACs = Input * Output
-    macs = input_dim * hidden_dim
+    macs = layer.macs_per_example
 
     # Memory Accesses per Neuron = Input (read) + Weight (read)
     # Note: Output write is negligible compared to reads
     mem_acc_per_neuron = input_dim + input_dim  # 2 * input_dim
-    dense_batch1_intensity = (2 * macs) / (4 * macs)  # FP32, batch size 1
-    weight_mem = macs * BYTES_FP32  # one FP32 weight per MAC
+    dense_batch1_intensity = layer.intensity  # FP32, batch size 1
+    weight_mem = layer.weight_bytes  # one FP32 weight per MAC
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(macs == 100_352, f"MLP single dense layer MAC mismatch: {macs}")
@@ -1010,11 +1002,12 @@ class LargeMLP:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    width = 2048
+    layer = Scenarios.Dense2048Layer
+    width = layer.in_features
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    params = width * width
-    mem = params * BYTES_FP32
+    params = layer.weights
+    mem = layer.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params >= MILLION, f"{width}x{width} layer should be large (>1M params).")
@@ -1367,7 +1360,7 @@ Here, $\ConvolutionActivation^{(\ell)}_{i,j,k}$ denotes the activation at spatia
 
 Convolutional layers typically use small spatial kernels ($3{\times}3$ or $5{\times}5$) to maintain compact parameter footprints while stacking layers to widen the effective receptive field. Each output activation depends on one small window of the input. In @fig-cnn, a $3{\times}3$ receptive field in a $7{\times}7$ input produces one value of the $5{\times}5$ output map, and sliding the same filter to every position fills in the rest. The interactive CNN Explainer tool [@wang2021] visualizes how these stacked sliding windows extract per-channel activation patterns across layers.
 
-::: {#fig-cnn data-explore="mechanism-scene" data-explore-key="vol1:fig-cnn" fig-env="figure" fig-pos="htb" fig-cap="**Convolution Operation**: A $3{\times}3$ orange receptive field in a dashed $7{\times}7$ input maps to one cell of the violet $5{\times}5$ valid-convolution output. Applying a $3{\times}3$ filter to that receptive field requires 9 multiply-accumulate operations per input channel for each output value. Sharing the filter across positions encodes translation equivariance: the same edge detector works at any image location." fig-alt="A dashed 7-by-7 input grid contains one orange 3-by-3 receptive field. Blue lines connect that receptive field to one highlighted cell in a separate violet 5-by-5 output grid, as produced by valid stride-1 convolution."}
+::: {#fig-cnn data-explore="convolution" data-explore-key="vol1:fig-cnn" fig-env="figure" fig-pos="htb" fig-cap="**Convolution Operation**: A $3{\times}3$ orange receptive field in a dashed $7{\times}7$ input maps to one cell of the violet $5{\times}5$ valid-convolution output. Applying a $3{\times}3$ filter to that receptive field requires 9 multiply-accumulate operations per input channel for each output value. Sharing the filter across positions encodes translation equivariance: the same edge detector works at any image location." fig-alt="A dashed 7-by-7 input grid contains one orange 3-by-3 receptive field. Blue lines connect that receptive field to one highlighted cell in a separate violet 5-by-5 output grid, as produced by valid stride-1 convolution."}
 
 ```{.tikz}
 \scalebox{0.7}{%
@@ -1557,22 +1550,18 @@ class CNNSharing:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # ImageNet input dimensions
-    img_dim = 224
-    img_channels = 3  # RGB
-
-    # CNN: 3x3 filter
-    cnn_k = 3
+    # ImageNet RGB input, one 3x3 filter against one dense unit
+    layer = Scenarios.ImageNetRgbFilterVersusDense
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # MLP: fully connected to all pixels
-    mlp_img_params = img_dim * img_dim * img_channels
+    mlp_img_params = layer.dense_weights
 
     # CNN: 3x3 filter across all input channels
-    cnn_filter_params = cnn_k * cnn_k * img_channels
+    cnn_filter_params = layer.weights
 
     # Parameter reduction
-    reduction = mlp_img_params / cnn_filter_params
+    reduction = layer.sharing_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(reduction) == 5575, f"Parameter reduction mismatch: {reduction}")
@@ -1653,7 +1642,7 @@ Flattening the filter weights into a column vector $\FlattenedFilterWeights= [\F
 
 [^fn-im2col-lowering-transformation]: **im2col (image to column)**\index{im2col!memory trade-off}: Rather than being a new learning algorithm, im2col-style lowering is an implementation technique used by CNN frameworks and libraries such as Caffe and cuDNN [@chellapilla2006high; @jia2014; @chetlur2014cudnn]: it converts convolutions into standard GEMM calls by unfolding overlapping patches into matrix columns. The trade-off is memory: in a simple fully materialized stride-1 $\KernelSize{\times}\KernelSize$ transform, interior input elements can appear in up to $\KernelSize^2$ columns (9 times for $3{\times}3$ filters), though borders, stride, padding, tiling, and direct-convolution algorithms reduce the realized expansion. This memory-for-simplicity exchange explains why mobile frameworks (TFLite, NNAPI) prefer direct convolution, while data center GPUs with abundant HBM may use GEMM-oriented lowering when it improves throughput. \index{im2col!data center vs. mobile}
 
-::: {#fig-im2col-diagram data-explore="mechanism-scene" data-explore-key="vol1:fig-im2col-diagram" fig-env="figure" fig-pos="htb" fig-cap="**im2col Transformation**: Lowering converts convolution to GEMM by unfolding image patches into a dense matrix. The two $3{\times}3$ input feature maps produce four sliding-window positions, represented here as rows of a $4{\times}8$ matrix; the two $2{\times}2$ filter kernels stack into an $8{\times}1$ column. Their product, not drawn, yields the four output positions. Lowering can exploit optimized matrix kernels but expands memory by an amount that depends on kernel size, stride, padding, and implementation, so its performance benefit is workload dependent." fig-alt="Two 3-by-3 input feature maps and two 2-by-2 filters feed a matrix multiplication. Four unfolded input patches form the rows of a 4-by-8 matrix, and the stacked filter values form an 8-by-1 column. A multiplication sign joins the matrix and the column."}
+::: {#fig-im2col-diagram data-explore="original-v1-im2col-diagram" data-explore-key="vol1:fig-im2col-diagram" fig-env="figure" fig-pos="htb" fig-cap="**im2col Transformation**: Lowering converts convolution to GEMM by unfolding image patches into a dense matrix. The two $3{\times}3$ input feature maps produce four sliding-window positions, represented here as rows of a $4{\times}8$ matrix; the two $2{\times}2$ filter kernels stack into an $8{\times}1$ column. Their product, not drawn, yields the four output positions. Lowering can exploit optimized matrix kernels but expands memory by an amount that depends on kernel size, stride, padding, and implementation, so its performance benefit is workload dependent." fig-alt="Two 3-by-3 input feature maps and two 2-by-2 filters feed a matrix multiplication. Four unfolded input patches form the rows of a 4-by-8 matrix, and the stacked filter values form an 8-by-1 column. A multiplication sign joins the matrix and the column."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
@@ -1797,31 +1786,27 @@ class CNNSysImpl:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    img_dim = IMAGE_DIM_RESNET  # 224
-    kernel_size = 3
-    c_out = 64  # output channels
-    c_in_single = 1  # single input channel (for weight illustration)
-    c_in = 64  # input channels of the full layer
+    layer = Scenarios.ImageNet64ChannelConv  # 224x224x64 -> 64, 3x3, FP32
+    c_in = layer.in_channels  # input channels of the full layer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Weight parameters for single input channel: K × K × C_in × C_out
-    weights_single_ch = kernel_size * kernel_size * c_in_single * c_out  # 576
+    weights_single_ch = layer.variant(in_channels=1).weights  # 576
 
     # Step 2: Spatial positions in the output feature map
-    spatial_positions = img_dim * img_dim  # 50,176
+    spatial_positions = layer.positions  # 50,176
 
     # Step 3: Activation values: H × W × C_out
-    activations = img_dim * img_dim * c_out  # 3,211,264
+    activations = layer.outputs  # 3,211,264
 
     # Step 4: Layer MACs: H x W x K x K x C_in x C_out
-    layer_macs = spatial_positions * kernel_size * kernel_size * c_in * c_out
+    layer_macs = layer.macs
     layer_gmac = layer_macs / BILLION
 
     # Step 5: Bytes for the full layer's weights and one sample's output activations
-    weights_full = kernel_size * kernel_size * c_in * c_out  # 36,864
-    weights_full_memory = weights_full * BYTES_FP32
-    activation_memory = activations * BYTES_FP32
+    weights_full = layer.weights  # 36,864
+    weights_full_memory = layer.weight_bytes
+    activation_memory = layer.activation_bytes
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(weights_single_ch == 576, f"Expected 576 weight params, got {weights_single_ch}")
@@ -1913,9 +1898,7 @@ class CNNLighthouseProfile:
     mobilenet_fp32 = mobilenet.size_in_bytes(BYTES_FP32)
     mobilenet_size_ratio = resnet.parameters.to(param).magnitude / mobilenet.parameters.to(param).magnitude
     mobilenet_flops_ratio = (resnet.inference_flops / mobilenet.inference_flops).to("").magnitude
-    resnet_3x3_macs_g = 1.850
-    resnet_total_macs_g = 3.858
-    resnet_3x3_share_pct = resnet_3x3_macs_g / resnet_total_macs_g * 100
+    resnet_3x3_share_pct = Scenarios.ResNet50ConvKernelShare.share * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(resnet_gflops - 8.2 * GFLOPs) <= 0.1 * GFLOPs, f"Expected ResNet-50 around 8.2 GFLOPs, got {resnet_gflops.to(GFLOPs).magnitude:.1f}.")
@@ -1969,7 +1952,7 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet most 
 
 The channel paths in @fig-depthwise-pointwise-channels show where the arithmetic reduction comes from. The depthwise stage produces one intermediate value per input channel at each output position, and the pointwise stage combines those values across channels.
 
-::: {#fig-depthwise-pointwise-channels data-explore="mechanism-scene" data-explore-key="vol1:fig-depthwise-pointwise-channels" fig-env="figure" fig-pos="htb" fig-cap="**Spatial Filtering and Channel Mixing**: At one output position, the standard layer combines spatial and channel sums separately for each output filter. The factorized layer first filters each input channel, then mixes the intermediate values into the same output shape. The lower panel uses one spatial filter per input channel, or depth multiplier one." fig-alt="Two panels show three input patches and two output channels. The upper panel connects all input channels to each output filter. The lower panel passes each channel through a separate spatial filter before a shared pointwise mixer."}
+::: {#fig-depthwise-pointwise-channels data-explore="original-v1-depthwise-pointwise-channels" data-explore-key="vol1:fig-depthwise-pointwise-channels" fig-env="figure" fig-pos="htb" fig-cap="**Spatial Filtering and Channel Mixing**: At one output position, the standard layer combines spatial and channel sums separately for each output filter. The factorized layer first filters each input channel, then mixes the intermediate values into the same output shape. The lower panel uses one spatial filter per input channel, or depth multiplier one." fig-alt="Two panels show three input patches and two output channels. The upper panel connects all input channels to each output filter. The lower panel passes each channel through a separate spatial filter before a shared pointwise mixer."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily,
@@ -2188,11 +2171,11 @@ class ResidualAddIntensity:
     """Arithmetic intensity of an unfused elementwise residual addition."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    operands_moved = 3  # two reads and one write per addition
+    add = Scenarios.ResidualAddFp32  # two reads and one write per addition
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bytes_per_add = (operands_moved * BYTES_FP32).to(byte)
-    intensity = (1 * flop) / bytes_per_add
+    bytes_per_add = add.bytes_per_element.to(byte)
+    intensity = add.intensity * flop / byte
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(intensity < 0.1 * flop / byte, "An unfused residual add should sit far below 1 FLOP/byte.")
@@ -2444,17 +2427,16 @@ class RNNCompute:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    input_dim = 100
-    hidden_dim = 128
+    step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Recurrent: h_prev x W_hh (H x H)
-    macs_recurrent = hidden_dim * hidden_dim
+    macs_recurrent = step.recurrent_macs
 
     # Step 2: Input: x_t x W_hx (I x H)
-    macs_input = input_dim * hidden_dim
+    macs_input = step.input_macs
 
-    macs_total = macs_recurrent + macs_input
+    macs_total = step.macs_per_step
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(macs_recurrent > macs_input, f"Recurrent cost ({macs_recurrent}) should dominate Input cost ({macs_input}) for large hidden states.")
@@ -2537,10 +2519,11 @@ class RecurrentStateSize:
     """Fixed inference state of a recurrent network."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hidden_dim = 512  # illustrative hidden-state width
+    state = Scenarios.RecurrentState512Fp32  # illustrative hidden-state width
+    hidden_dim = state.hidden_dim
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state_memory = (hidden_dim * BYTES_FP32).to(KiB)
+    state_memory = state.state_bytes.to(KiB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(state_memory < 1 * MiB, "A single recurrent state should be kilobytes.")
@@ -2852,12 +2835,13 @@ class QKVProjectionCosts:
     """MAC count for a 6-token GPT-2-style combined QKV projection."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tokens = 6
-    d_model = 768
-    qkv_dim = 2304
+    projection = Scenarios.Gpt2SmallSixTokenQkvProjection  # GPT-2 Small, six tokens
+    tokens = projection.tokens
+    d_model = projection.width
+    qkv_dim = projection.packed_width
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    qkv_macs = tokens * d_model * qkv_dim
+    qkv_macs = projection.macs
     qkv_macs_m = qkv_macs / MILLION
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -3149,19 +3133,19 @@ class AttentionMemory:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    seq_len = 100_000
-    bytes_per_element = BYTES_FP16.to(byte).magnitude
-    num_layers = 32
-    num_heads = 12
+    scores = Scenarios.TwelveHeadScoresAt100kTokens  # 12 heads, 32 layers, FP16
+    seq_len = scores.seq_len
+    bytes_per_element = scores.bytes_per_score.to(byte).magnitude
+    num_layers = scores.layers
+    num_heads = scores.heads
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: S^2 * heads
-    elements = seq_len * seq_len * num_heads
+    elements = scores.scores_per_layer
 
-    # Step 2: Memory
-    single_layer_memory = elements * BYTES_FP16
-    # Step 3: Use decimal GB for standard model size quotes.
-    total_memory = single_layer_memory * num_layers
+    # Step 2: Memory, in decimal GB for standard model size quotes.
+    single_layer_memory = scores.layer_bytes
+    total_memory = scores.total_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_memory >= 100 * GB, f"Materialized score memory ({total_memory.to(GB).magnitude:.1f} GB) is too small for a 'bottleneck'.")
@@ -3223,15 +3207,18 @@ class TransformerComplexityAnchor:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    base_seq_len = 512
-    doubled_seq_len = 1024
-    mid_seq_len = 2048
-    long_seq_len = 4096
+    doubled = Scenarios.BertWindowToOneK  # from BERT's 512 learned positions
+    mid = Scenarios.BertWindowToTwoK
+    long = Scenarios.BertWindowToFourK
+    base_seq_len = long.base_tokens
+    doubled_seq_len = doubled.tokens
+    mid_seq_len = mid.tokens
+    long_seq_len = long.tokens
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    scaling_ratio = (doubled_seq_len / base_seq_len) ** 2
-    mid_context_ratio = (mid_seq_len / base_seq_len) ** 2
-    long_context_ratio = (long_seq_len / base_seq_len) ** 2
+    scaling_ratio = doubled.score_ratio
+    mid_context_ratio = mid.score_ratio
+    long_context_ratio = long.score_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(scaling_ratio == 4.0, f"Doubling context should cost 4x materialized score memory, got {scaling_ratio}.")
@@ -3443,7 +3430,7 @@ The same mask is what lets training run in parallel. During next-token training 
 
 Generation splits into two phases with different machine profiles, drawn in @fig-prefill-decode. *Prefill*\index{Prefill} processes the whole prompt in one pass: every prompt token is known, so the model evaluates them in parallel, as in training, and stores each token's keys and values. *Decode*\index{Decode} then produces the remaining tokens one per step. Each step feeds a single token through the model, so its projections shrink from matrix-matrix to matrix-vector products, and its attention reads the stored keys and values of every earlier token instead of recomputing them. That store is the key-value (KV) cache, and @sec-network-architectures-inference-memory-bandwidth-wall-98d1 shows why decode, not prefill, usually sets a language model's serving cost.
 
-::: {#fig-prefill-decode data-explore="mechanism-scene" data-explore-key="vol1:fig-prefill-decode" fig-env="figure" fig-pos="htb" fig-cap="**Prefill and Decode**: Prefill (left) runs the whole prompt through the model in one pass of matrix-matrix products, reusing every weight across all prompt tokens, and writes each prompt token's keys and values to the KV cache. Decode (right) then generates one token per step: each output becomes the next input, each step runs matrix-vector products that re-read every weight, and each step reads the whole cache and appends one entry. The first phase is usually compute-bound; the second is usually bandwidth-bound at small batch." fig-alt="Left panel labeled Prefill: four blue prompt tokens, The, cat, sat, on, feed one wide box labeled one pass over all prompt tokens (matrix-matrix products), which writes four orange KV cache cells. An arrow leads to the right panel labeled Decode: three narrow boxes labeled one token (matrix-vector), each taking a green token (the, mat, today) and producing the next (mat, today, end), with dashed arrows showing each output becoming the next input; each box reads the cache and adds one orange cell. Captions beneath read: weights reused across every prompt token, usually compute-bound; and every weight and the whole cache re-read for each new token, usually bandwidth-bound at small batch."}
+::: {#fig-prefill-decode data-explore="original-prefill" data-explore-key="vol1:fig-prefill-decode" fig-env="figure" fig-pos="htb" fig-cap="**Prefill and Decode**: Prefill (left) runs the whole prompt through the model in one pass of matrix-matrix products, reusing every weight across all prompt tokens, and writes each prompt token's keys and values to the KV cache. Decode (right) then generates one token per step: each output becomes the next input, each step runs matrix-vector products that re-read every weight, and each step reads the whole cache and appends one entry. The first phase is usually compute-bound; the second is usually bandwidth-bound at small batch." fig-alt="Left panel labeled Prefill: four blue prompt tokens, The, cat, sat, on, feed one wide box labeled one pass over all prompt tokens (matrix-matrix products), which writes four orange KV cache cells. An arrow leads to the right panel labeled Decode: three narrow boxes labeled one token (matrix-vector), each taking a green token (the, mat, today) and producing the next (mat, today, end), with dashed arrows showing each output becoming the next input; each box reads the cache and adds one orange cell. Captions beneath read: weights reused across every prompt token, usually compute-bound; and every weight and the whole cache re-read for each new token, usually bandwidth-bound at small batch."}
 
 ```{.tikz}
 \scalebox{0.82}{
@@ -3566,12 +3553,13 @@ class AttentionCrossover:
     """Sequence length where dense attention overtakes the block's dense products."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    width = Models.Language.GPT2.hidden_dim
-    ffn_multiple = 4  # feed-forward width = 4 x model width
+    block = Scenarios.Gpt2XlBlockFullWindow  # GPT-2 XL, feed-forward width 4d
+    width = block.width
+    ffn_multiple = block.ffn_multiple
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_coeff = 4 + 2 * ffn_multiple  # projections (4) + FFN (2 x 4) => 12
-    crossover = dense_coeff * width / 2  # 12*S*d^2 = 2*S^2*d  =>  S = 6d
+    dense_coeff = block.block_coefficient  # projections (4) + FFN (2 x 4) => 12
+    crossover = block.crossover  # 12*S*d^2 = 2*S^2*d  =>  S = 6d
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(crossover == 6 * width, "Crossover should be six times the model width.")
@@ -3623,10 +3611,11 @@ class DecodeWeightStream:
     """Weight traffic per decoded token for a 70B-parameter model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model = Models.Language.Llama2_70B
+    stream = Scenarios.Llama2_70B_DecodeH100  # FP16 weights, batch one
+    model = stream.workload
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weight_bytes = model.size_in_bytes(BYTES_FP16)
+    weight_bytes = stream.result.weight_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(weight_bytes > 100 * GB, "A 70B model in FP16 should stream over 100 GB per token.")
@@ -3660,19 +3649,17 @@ class KVCacheSizing:
     """FP16 KV-cache memory for a 32-layer, 32-head transformer serving request."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    layers = 32
-    kv_tensors = 2
-    heads = 32
-    seq_len = 2048
-    head_dim = 128
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    request = Scenarios.Llama2_7BKvAt2048Tokens  # Llama 2 7B, FP16, one request
+    layers = request.workload.layers
+    kv_tensors = 2  # keys and values
+    heads = request.workload.heads
+    seq_len = request.tokens
+    head_dim = request.workload.head_width
+    bytes_per_elem = request.bytes_per_value.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from mlsysim.physics import calc_kv_cache_size
-
-    per_request_memory = calc_kv_cache_size(
-        n_layers=layers, n_heads=heads, head_dim=head_dim, seq_len=seq_len, batch_size=1, bytes_per_elem=BYTES_FP16
-    )
+    weights = request.weights
+    per_request_memory = request.total
     concurrent_2_memory = per_request_memory * 2
     concurrent_4_memory = per_request_memory * 4
     concurrent_8_memory = per_request_memory * 8
@@ -3690,6 +3677,7 @@ class KVCacheSizing:
     heads_str = fmt(heads, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     head_dim_str = fmt(head_dim, precision=0, commas=False)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     per_request_gb_str = fmt_memory(per_request_memory, unit=GB, precision=2, commas=False)
     concurrent_2_gb_str = fmt_memory(concurrent_2_memory, unit=GB, precision=2, commas=False)
     concurrent_4_gb_str = fmt_memory(concurrent_4_memory, unit=GB, precision=2, commas=False)
@@ -3723,15 +3711,11 @@ class ContextMemoryCrossings:
     """Where the linear KV cache and the quadratic score matrix cross fixed budgets."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    device_memory = Hardware.Cloud.H100.memory.capacity
+    memories = Scenarios.Gpt2XlContextMemoryOnH100  # GPT-2 XL, FP16, one H100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = gpt2.size_in_bytes(BYTES_FP16)
-    kv_per_token = 2 * gpt2.layers * gpt2.hidden_dim * BYTES_FP16  # keys + values, all layers
-    score_per_pair = gpt2.heads * BYTES_FP16  # one layer, all heads
-    kv_crossing = (weights / kv_per_token).to("").magnitude
-    score_crossing = ((device_memory / score_per_pair).to("").magnitude) ** 0.5
+    kv_crossing = memories.kv_crossing  # KV cache (keys + values, all layers) equals the weights
+    score_crossing = memories.score_crossing  # one layer's scores (all heads) fill the device
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(5_000 < kv_crossing < 20_000, f"KV cache should pass the weights near ten thousand tokens, got {kv_crossing:.0f}")
@@ -3778,8 +3762,8 @@ hbm_gb = Hardware.Cloud.H100.memory.capacity.to(GB).magnitude
 ctx = np.logspace(np.log10(512), np.log10(131072), 200)
 kv_gb = 2 * n_layers * ctx * width * bytes_fp16 / 1e9  # keys + values, all layers, one request
 scores_gb = n_heads * ctx**2 * bytes_fp16 / 1e9  # one layer's materialized score matrix
-cross_kv = weights_gb * 1e9 / (2 * n_layers * width * bytes_fp16)
-cross_scores = np.sqrt(hbm_gb * 1e9 / (n_heads * bytes_fp16))
+cross_kv = Scenarios.Gpt2XlContextMemoryOnH100.kv_crossing
+cross_scores = Scenarios.Gpt2XlContextMemoryOnH100.score_crossing
 
 # ┌── 3. RENDER ──────────────────────────────────────────────────────────────────
 ax.plot(ctx, np.full_like(ctx, weights_gb), color=COLORS["BlueLine"], lw=2.2, label="Weights (FP16), fixed")
@@ -3821,7 +3805,7 @@ plt.close()
 
 :::
 
-[^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
+[^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~`{python} KVCacheSizing.weights_gb_str`; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
 
 ```{python}
 #| echo: false
@@ -3889,12 +3873,12 @@ class GPT2ModernContext:
     """Where GPT-2 XL sits relative to current decoder-only serving."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    bw = Hardware.Cloud.H100.memory.bandwidth
+    decode = Scenarios.Gpt2XlDecodeH100  # GPT-2 XL, FP16 weights, batch one, one H100
+    cache = Scenarios.Gpt2XlKvFullWindow
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kv_per_token = (2 * gpt2.layers * gpt2.hidden_dim * BYTES_FP16).to(KB)  # keys + values, every layer
-    weight_read = (gpt2.size_in_bytes(BYTES_FP16) / bw).to(millisecond)
+    kv_per_token = cache.per_token.to(KB)  # keys + values, every layer
+    weight_read = decode.result.memory_time.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.5 * millisecond < weight_read < 2 * millisecond, f"Expected about a millisecond per weight read, got {weight_read}")
@@ -4010,14 +3994,15 @@ class DLRMEmbedding:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    num_users = 1_000_000_000
-    embed_dim = 128
-    bytes_per_param = BYTES_FP32
-    a100_capacity = Hardware.Cloud.A100.memory.capacity
+    table = Scenarios.BillionUserTable  # 128 FP32 values per row
+    num_users = table.rows
+    embed_dim = table.width
+    bytes_per_param = table.bytes_per_value
+    a100_capacity = table.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    table_memory = num_users * embed_dim * bytes_per_param
-    row_memory = (embed_dim * bytes_per_param).to(byte)
+    table_memory = table.table_bytes
+    row_memory = table.row_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -4223,16 +4208,17 @@ class CapacityWall:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    num_items = 100_000_000
-    embed_dim = 128
-    bytes_per_param = BYTES_FP32
-    a100_capacity = Hardware.Cloud.A100.memory.capacity
+    table = Scenarios.HundredMillionItemTableOnA100  # 128 FP32 values per row
+    num_items = table.rows
+    embed_dim = table.width
+    bytes_per_param = table.bytes_per_value
+    a100_capacity = table.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    table_memory = num_items * embed_dim * bytes_per_param
+    table_memory = table.table_bytes
     # The prose shows the reader `table size / nominal capacity = share`,
     # dividing decimal GB by the vendor-labeled 80 GB capacity.
-    utilization_pct = (table_memory.to(GB).magnitude / a100_capacity.to(GiB).magnitude) * 100
+    utilization_pct = table.labeled_share * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(50 <= utilization_pct <= 70, f"Capacity-wall example should consume roughly 60% of an 80 GB A100, got {utilization_pct:.1f}%.")
@@ -4457,7 +4443,7 @@ class LighthouseMemory:
     mobilenet = Models.Vision.MobileNetV2
     kws = Models.Tiny.DS_CNN
     device = Hardware.Cloud.H100.memory.capacity
-    training_copies = 4  # FP32 weights, gradients, and Adam's two moments
+    training_copies = Scenarios.Gpt2Fp32AdamOnH100.copies  # FP32 weights, gradients, and Adam's two moments
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
@@ -4891,21 +4877,21 @@ class ThroughputCeilingCalc:
     """Evaluate real-time vision feasibility: ResNet-50 at 30 FPS leaves ample headroom."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fps = 30  # target frame rate
-    midrange_gpu_throughput = 10 * (TFLOP / second)  # reference mid-range GPU
-    objdet_gflops = 100  # object detection model
-    util_low, util_high = 0.50, 0.60  # planning utilization range
+    stream = Scenarios.ResNet50ThirtyFpsStream
+    fps = round(stream.frame_rate.to("Hz").magnitude)  # target frame rate
+    midrange_gpu_throughput = stream.peak_rate  # reference mid-range GPU
+    util_low, util_high = stream.utilization_low, stream.utilization_high  # planning utilization range
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    resnet_flops = Models.Vision.ResNet50.inference_flops.to(GFLOPs)
-    objdet_flops = objdet_gflops * GFLOPs
-    sustained_throughput = fps * resnet_flops / second
-    effective_throughput_low = midrange_gpu_throughput * util_low
-    effective_throughput_high = midrange_gpu_throughput * util_high
-    headroom = (effective_throughput_low / sustained_throughput).to("").magnitude
+    resnet_flops = stream.flops_per_frame.to(GFLOPs)
+    objdet_flops = stream.alternative_flops.to(GFLOPs)
+    sustained_throughput = stream.required_rate.to(GFLOPs / second)
+    effective_throughput_low = stream.sustained_low
+    effective_throughput_high = stream.sustained_high
+    headroom = stream.headroom
 
-    objdet_sustained_throughput = fps * objdet_flops / second
-    objdet_headroom = (effective_throughput_low / objdet_sustained_throughput).to("").magnitude
+    objdet_sustained_throughput = stream.alternative_required_rate.to(GFLOPs / second)
+    objdet_headroom = stream.alternative_headroom
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(headroom > 1, "ResNet-50 at 30 FPS must leave compute headroom on a mid-range GPU.")
@@ -5275,19 +5261,16 @@ class KVCacheServingPitfall:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     device_memory = Hardware.Cloud.A100.memory.capacity
-    layers = 32
-    kv_tensors = 2
-    heads = 32
-    seq_len = 2048
-    head_dim = 128
-    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+    request = Scenarios.Llama2_7BKvAt2048Tokens  # Llama 2 7B, FP16, one request
+    layers = request.workload.layers
+    kv_tensors = 2  # keys and values
+    heads = request.workload.heads
+    seq_len = request.tokens
+    head_dim = request.workload.head_width
+    bytes_per_elem = request.bytes_per_value.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from mlsysim.physics import calc_kv_cache_size
-
-    per_request_memory = calc_kv_cache_size(
-        n_layers=layers, n_heads=heads, head_dim=head_dim, seq_len=seq_len, batch_size=1, bytes_per_elem=BYTES_FP16
-    )
+    per_request_memory = request.total
     concurrent_2_memory = per_request_memory * 2
     concurrent_4_memory = per_request_memory * 4
 

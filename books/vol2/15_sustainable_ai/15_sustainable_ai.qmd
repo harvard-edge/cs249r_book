@@ -323,22 +323,21 @@ The same run's emissions depend on where its electricity comes from. For a fixed
 # │ How: Carbon = Energy_kWh * Intensity_g/kWh.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, ReferenceStats
+from mlsysim import Infrastructure, ReferenceStats, Scenarios
 from mlsysim.fmt import check, fmt, fmt_carbon_intensity, fmt_emissions, fmt_energy
 from mlsysim.physics.quantities import carbon_from_energy
 from mlsysim.core.units import MWh, kWh, gram, metric_ton
 
 class CarbonFrontier:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy
-    quebec_grid = Infrastructure.Grids.Quebec
-    poland_grid = Infrastructure.Grids.Poland
-    intensity_quebec = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
-    intensity_poland = poland_grid.carbon_intensity_g_kwh * (gram / kWh)
+    placement = Scenarios.QuebecVersusPolandPlacement
+    energy = placement.energy
+    intensity_quebec = placement.intensities["Quebec"]
+    intensity_poland = placement.intensities["Poland"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
     energy_kwh = energy.to(kWh)
-    quebec_carbon = carbon_from_energy(energy, intensity_quebec)
-    poland_carbon = carbon_from_energy(energy, intensity_poland)
+    quebec_carbon = placement.result.emissions["Quebec"]
+    poland_carbon = placement.result.emissions["Poland"]
     ratio = (poland_carbon / quebec_carbon).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(40 < ratio < 42, f"Quebec-vs-Poland ratio {ratio:.1f} unexpected (prose and margin figure say 41x)")
@@ -641,7 +640,7 @@ The energy wall is therefore a workload-specific feasibility problem, not a univ
 # │ How: pulling Hardware.Cloud.H100.tdp from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.fmt import assert_qty_close, check, fmt, fmt_int, fmt_power
 from mlsysim.core.units import MW, watt
 
@@ -649,13 +648,13 @@ class ArchetypeATdp:
     """H100 per-chip TDP for the Archetype A energy framing."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fleet = Systems.Clusters.Reference_25K_H100
-    tdp = fleet.node.accelerator.tdp
-    cluster_gpus = fleet.total_accelerators
+    fleet_power = Scenarios.Reference25KFacilityPower
+    tdp = fleet_power.device_power
+    cluster_gpus = fleet_power.devices
     reference_gpus = Systems.Clusters.Training_1K.total_accelerators  # book's 1,024-GPU reference cluster
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    accelerator_power = cluster_gpus * tdp
+    accelerator_power = fleet_power.result.accelerator_power
     scale_vs_reference = cluster_gpus / reference_gpus
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -722,19 +721,20 @@ Concentration in time is what separates a training campaign from the same energy
 # │      Literature.KaplanScalingLaws (Kaplan et al. 2020).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, Scenarios
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
 
 class KaplanComputeExponentCost:
     """Compute multiple bought by one fixed fractional loss reduction."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    alpha_compute = next(e["alpha"] for e in Literature.KaplanScalingLaws.entries if e["axis"] == "compute")
-    loss_reduction = 0.10  # pedagogical target: a 10 percent lower loss within the studied range
+    law = Scenarios.KaplanTenPercentLowerLoss
+    alpha_compute = law.exponent
+    loss_reduction = law.loss_reduction  # pedagogical target: a 10 percent lower loss within the studied range
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     inverse_exponent = 1 / alpha_compute
-    compute_mult = (1 / (1 - loss_reduction)) ** inverse_exponent
+    compute_mult = law.reduction_multiple
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(alpha_compute - 0.050) < 1e-9, f"Prose quotes a compute exponent of 0.050, got {alpha_compute}")
@@ -973,18 +973,19 @@ $$\text{PUE} = \frac{\FacilityPower}{\InformationTechnologyPower}$$ {#eq-pue}
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_power, fmt_usd
 from mlsysim.core.units import MW, MWh, hour, kWh, USD, HOURS_PER_YEAR
-from mlsysim import Infrastructure
+from mlsysim import Infrastructure, Scenarios
 
 class PueEfficiency:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    p_it = 2.0 * MW  # pedagogical scenario — ~3000 H100s
-    pue_old = Infrastructure.FacilityCooling.Legacy.pue
-    pue_new = Infrastructure.FacilityCooling.StateOfArt.pue
-    electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
+    retrofit = Scenarios.PueRetrofit2MW  # 2 MW of IT load, about 3,000 H100s
+    p_it = retrofit.it_power
+    pue_old = retrofit.pue_before
+    pue_new = retrofit.pue_after
+    electricity_rate = retrofit.electricity_price
     # ┌── 2. EXECUTE ───────────────────────────────────────
     diff = pue_old - pue_new
-    annual_savings = (p_it * diff * HOURS_PER_YEAR * hour).to(MWh)
-    annual_savings_usd = (annual_savings * electricity_rate).to(USD)
+    annual_savings = retrofit.result.saved_energy.to(MWh)
+    annual_savings_usd = retrofit.result.saved_cost.to(USD)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(8000 < annual_savings.to(MWh).magnitude < 9000, f"Savings {annual_savings.to(MWh).magnitude:.0f} MWh unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1722,17 +1723,19 @@ Downstream use can also enter Scope 3, including end-user smartphones, IoT devic
 # │ How: overhead = k × f (final-run equivalents).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
 
 class SearchOverhead:
     """Final-run equivalents consumed by a development sweep."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    k = 50  # scenario assumption: candidates trained in the sweep
-    f = 0.1  # scenario assumption: each candidate's cost relative to the final run
+    sweep = Scenarios.CandidateSweep50
+    k = sweep.candidates  # candidates trained in the sweep
+    f = sweep.relative_cost  # each candidate's cost relative to the final run
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    overhead = k * f
+    overhead = sweep.result.final_run_equivalents
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(overhead > 1, "The sweep should exceed the reported run")
@@ -1805,38 +1808,24 @@ For its 2024 data centers, Google reports a location-based grid factor of `{pyth
 # │      The illustrative Iowa contrast grid is excluded.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, ReferenceStats
+from mlsysim import Infrastructure, ReferenceStats, Scenarios
 from mlsysim.core.units import MWh, gram, kWh, metric_ton
 from mlsysim.fmt import check, fmt_carbon_intensity, fmt_emissions, fmt_energy, fmt_multiple
 from mlsysim.physics.quantities import carbon_from_energy
-
-def _grid_tonnes(energy, g_per_kwh):
-    """Operational tonnes of CO2 for one energy under one grid factor."""
-    return carbon_from_energy(energy, g_per_kwh * (gram / kWh)).to(metric_ton).magnitude
 
 class RegionalGridCarbon:
     """Operational carbon of one fixed facility energy across regional grids."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy
-    region_names = {
-        "Norway": "Norway",
-        "Quebec": "Quebec",
-        "France": "France",
-        "EU_Avg": "EU average",
-        "Germany": "Germany",
-        "US_Avg": "US average",
-        "China_Avg": "China",
-        "India_Avg": "India",
-        "Poland": "Poland",
-    }
-    factors = {label: getattr(Infrastructure.Grids, key).carbon_intensity_g_kwh for key, label in region_names.items()}
+    placement = Scenarios.RegionalGridPlacement
+    energy = placement.energy
+    factors = {label: grid.carbon_intensity_g_kwh for label, grid in placement.grids.items()}
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    tonnes = dict(zip(factors, map(_grid_tonnes, [energy] * len(factors), factors.values())))
-    lowest = min(factors, key=factors.get)
-    highest = max(factors, key=factors.get)
-    spread = factors[highest] / factors[lowest]
+    tonnes = {label: t.to(metric_ton).magnitude for label, t in placement.result.emissions.items()}
+    lowest = placement.result.lowest
+    highest = placement.result.highest
+    spread = placement.result.spread
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(lowest == "Norway" and highest == "Poland", "Prose names Norway and Poland as the extremes")
@@ -1970,7 +1959,7 @@ from mlsysim.fmt import (
     fmt_percent,
     check,
 )
-from mlsysim import Hardware, Infrastructure, Models, ReferenceStats, Systems
+from mlsysim import Hardware, Infrastructure, Models, ReferenceStats, Scenarios, Systems
 from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
 from mlsysim.core.units import Wh, watt, hour, kilowatt, kWh, gram, kilogram, metric_ton
 
@@ -2002,15 +1991,16 @@ class TrainingEmissions:
     model_params = Models.Language.Llama2_7B.parameters  # the 7B model trained in this scenario
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpu_energy = energy_from_power(a100_tdp, training_duration) * n_gpus
+    run = Scenarios.Lab64A100TrainingFootprint.result
+    gpu_energy = run.accelerator_energy
     gpu_energy_kwh = gpu_energy.to(kWh)
-    it_energy_kwh = gpu_energy_kwh * it_power_multiplier
-    facility_energy_kwh = it_energy_kwh * pue
-    total_carbon = carbon_from_energy(facility_energy_kwh, grid_ci)
-    quebec_carbon = carbon_from_energy(facility_energy_kwh, quebec_ci)
-    emissions_ratio = (total_carbon / quebec_carbon).to("").magnitude
+    it_energy_kwh = run.it_energy.to(kWh)
+    facility_energy_kwh = run.facility_energy.to(kWh)
+    total_carbon = run.carbon["US average"]
+    quebec_carbon = run.carbon["Quebec"]
+    emissions_ratio = (grid_ci / quebec_ci).to("").magnitude  # same energy on both grids: the factor ratio
     embodied_daily_carbon = embodied_carbon_per_accelerator / (embodied_lifetime_years * days_per_year)
-    embodied_training_carbon = n_gpus * training_days * embodied_daily_carbon
+    embodied_training_carbon = run.embodied_allocated
     embodied_us_ratio_pct = (embodied_training_carbon / total_carbon).to("").magnitude * 100
     embodied_quebec_total_share_pct = (embodied_training_carbon / (quebec_carbon + embodied_training_carbon)).to("").magnitude * 100
     upfront_burden = n_gpus * embodied_carbon_per_accelerator  # unamortized cluster manufacturing burden
@@ -3089,22 +3079,22 @@ Verify the data center power path:
 # │ How: IT = n_gpus × H100 TDP × rack IT multiplier; facility = IT × effective_pue.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Systems
+from mlsysim import Hardware, Scenarios, Systems
 from mlsysim.fmt import check, fmt, fmt_power
 from mlsysim.core.units import watt, kilowatt, MW
 
 class MegaClusterFacilityPower:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    cluster_gpus = Systems.Clusters.Mega_100K.total_accelerators
-    gpu_tdp = Hardware.Cloud.H100.tdp
-    rack = Systems.Racks.DGX_H100_4Node
-    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
-    pue = Systems.Clusters.Mega_100K.effective_pue
+    cluster = Scenarios.Mega100KFacilityPower
+    cluster_gpus = cluster.devices
+    gpu_tdp = cluster.device_power
+    it_power_multiplier = cluster.it_ratio  # @tbl-rack-power total less its non-IT cooling allocation
+    pue = cluster.pue
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    accelerator_power = (cluster_gpus * gpu_tdp).to(MW)
-    it_power = accelerator_power * it_power_multiplier
-    facility_power = it_power * pue
+    accelerator_power = cluster.result.accelerator_power.to(MW)
+    it_power = cluster.result.it_power.to(MW)
+    facility_power = cluster.result.facility_power.to(MW)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(accelerator_power.magnitude - 70) < 0.5, f"Accelerator power drifted: {accelerator_power.magnitude} MW")
@@ -3237,8 +3227,8 @@ Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{p
 # │      Infrastructure.FacilityCooling.Typical.wue; ReferenceStats.WaterAnchors.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, ReferenceStats
-from mlsysim.physics.constants import WATER_SPECIFIC_HEAT
+from mlsysim import Infrastructure, ReferenceStats, Scenarios
+from mlsysim.physics.constants import WATER_LATENT_HEAT_VAPORIZATION, WATER_SPECIFIC_HEAT
 from mlsysim.core.units import K, kg, kJ, kWh, MW, hour, HOURS_PER_YEAR, liter
 from mlsysim.fmt import check, fmt, fmt_int, fmt_magnitude, fmt_power
 
@@ -3246,15 +3236,16 @@ class CoolingTowerWaterUse:
     """Annual evaporative water use of a reference IT load."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    it_load = ReferenceStats.FacilityScaleAnchors.ReferenceItLoad
-    wue = float(Infrastructure.FacilityCooling.Typical.wue) * liter / kWh
-    latent_heat = 2260 * kJ / kg  # physical constant (water, ~100 C); not yet in mlsysim.physics.constants
+    annual = Scenarios.ReferenceItLoadAnnualWater
+    it_load = annual.it_power
+    wue = annual.wue["evaporative"]
+    latent_heat = WATER_LATENT_HEAT_VAPORIZATION
     household_low = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterLow
     household_high = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterHigh
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    annual_it_energy = (it_load * HOURS_PER_YEAR * hour).to(kWh)
-    annual_water = (annual_it_energy * wue).to(liter)
+    annual_it_energy = annual.it_energy.to(kWh)
+    annual_water = annual.result.water["evaporative"].to(liter)
     household_years_low = (annual_water / household_high).to("").magnitude
     household_years_high = (annual_water / household_low).to("").magnitude
 
@@ -3307,7 +3298,7 @@ The viability of waste heat reuse depends on the proximity of heat consumers. Ur
 # │ How: energy = cluster GPUs × rollback duration × accelerator TDP.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.core.units import MWh, hour
 from mlsysim.fmt import check, fmt, fmt_energy
 
@@ -3315,14 +3306,14 @@ class CoolingFailureRollbackEnergy:
     """Accelerator energy repeated after a cooling-failure rollback."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    cluster = Systems.Clusters.Training_10K
-    gpus = cluster.total_accelerators
-    tdp = cluster.node.accelerator.tdp  # rated power: an upper-end scenario, not a trace
-    rollback_low, rollback_high = 0.5 * hour, 1.0 * hour  # scenario assumption: work lost to the last checkpoint
+    rollback = Scenarios.Training10KCoolingRollback
+    gpus = rollback.fleet.total_accelerators
+    tdp = rollback.fleet.node.accelerator.tdp  # rated power: an upper-end scenario, not a trace
+    rollback_low, rollback_high = rollback.rollbacks["low"], rollback.rollbacks["high"]  # work lost to the last checkpoint
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    energy_low = (gpus * tdp * rollback_low).to(MWh)
-    energy_high = (gpus * tdp * rollback_high).to(MWh)
+    energy_low = rollback.result.energy["low"].to(MWh)
+    energy_high = rollback.result.energy["high"].to(MWh)
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(energy_low.magnitude - 3.5) < 0.05 and abs(energy_high.magnitude - 7.0) < 0.05, f"Rollback energy drifted: {energy_low}, {energy_high}")
@@ -3535,19 +3526,20 @@ class InferenceLifecycleExample:
     """Inference emissions example for a high-volume deployed model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    queries_per_day = 10_000_000
-    kwh_per_query = 0.001 * kWh  # pedagogical per-query energy
+    serving = Scenarios.TenMillionQueriesAgainstLab64Training
+    queries_per_day = serving.requests_per_day
+    kwh_per_query = serving.energy_per_request.to(kWh)  # pedagogical per-query energy
     days_per_year = DAYS_PER_YEAR
     us_grid = Infrastructure.Grids.US_Avg
     grid_ci = us_grid.carbon_intensity_kg_kwh * (kilogram / kWh)
     training_carbon = TrainingEmissions.total_carbon  # the 64-A100 run from the training-emissions notebook
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    daily_energy = queries_per_day * kwh_per_query
+    daily_energy = serving.result.daily_energy.to(kWh)
     annual_energy = daily_energy * days_per_year
     annual_carbon = carbon_from_energy(annual_energy, grid_ci)
     daily_carbon = carbon_from_energy(daily_energy, grid_ci)
-    crossover_days = training_carbon.to(kilogram).magnitude / daily_carbon.to(kilogram).magnitude
+    crossover_days = serving.result.crossover_days  # same grid on both sides: the energy ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(annual_carbon.to(metric_ton).magnitude > 1500, f"Unexpected annual inference tCO2: {annual_carbon.to(metric_ton).magnitude:.1f}")
@@ -3743,7 +3735,7 @@ That split in dataflow governs per-token energy through data movement and arithm
 # │      only; KV-cache traffic would add to the movement term.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
+from mlsysim import Hardware, Scenarios
 from mlsysim.core.units import BYTES_FP16, byte, flop, pJ
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
 
@@ -3751,19 +3743,20 @@ class DecodeEnergySplit:
     """Modeled dynamic energy of one weight's use in a batch-1 decode step."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    e_compute = Hardware.Tech.EffectiveCompute.Gpu.energy_per_flop.to(pJ / flop).magnitude
-    e_move = Hardware.Tech.Memory.DRAM.energy_per_byte.to(pJ / byte).magnitude
-    bytes_per_param = BYTES_FP16.to(byte).magnitude
-    flops_per_param_token = 2  # one multiply-accumulate per weight per token
+    decode = Scenarios.BatchOneDecodeWeightEnergy
+    e_compute = decode.energy_per_flop.to(pJ / flop).magnitude
+    e_move = decode.energy_per_byte.to(pJ / byte).magnitude
+    bytes_per_param = decode.bytes_per_param.to(byte).magnitude
+    flops_per_param_token = decode.flops_per_param  # one multiply-accumulate per weight per token
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    intensity_batch1 = flops_per_param_token / bytes_per_param
-    compute_pj = flops_per_param_token * e_compute
-    move_pj = bytes_per_param * e_move
-    move_over_compute = move_pj / compute_pj
-    move_share = move_pj / (move_pj + compute_pj)
-    crossover = e_move / e_compute
-    balance_batch = crossover / intensity_batch1
+    intensity_batch1 = decode.result.intensity
+    compute_pj = decode.result.compute_energy.to(pJ).magnitude
+    move_pj = decode.result.movement_energy.to(pJ).magnitude
+    move_over_compute = decode.result.movement_over_compute
+    move_share = decode.result.movement_share
+    crossover = decode.result.crossover_intensity
+    balance_batch = decode.result.balance_batch
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(intensity_batch1 - 1) < 1e-9, "FP16 decode at batch 1 should sit at 1 FLOP/byte")
@@ -4068,7 +4061,7 @@ The local-processing decision compares the energy of the required computation wi
 # │      scenario range loaded below, and its per-byte form is computed here.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
+from mlsysim import Hardware, Systems
 from mlsysim.core.units import bit, byte, flop, microjoule, pJ
 from mlsysim.fmt import check, fmt_magnitude
 
@@ -4078,8 +4071,8 @@ class EdgeEnergyHierarchy:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     int32_add = Hardware.Tech.Op.AddInt32.energy
     fp32_mult = Hardware.Tech.Op.FlopFp32.energy
-    radio_bit_low = 100_000 * (pJ / bit)  # illustrative Bluetooth/Wi-Fi transmit range
-    radio_bit_high = 500_000 * (pJ / bit)  # illustrative Bluetooth/Wi-Fi transmit range
+    radio_bit_low = Systems.NetworkEnergy.RadioBitLow  # illustrative Bluetooth/Wi-Fi transmit range
+    radio_bit_high = Systems.NetworkEnergy.RadioBitHigh  # illustrative Bluetooth/Wi-Fi transmit range
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(int32_add < fp32_mult, "INT32 add should cost less than an FP32 multiply")
@@ -4175,22 +4168,24 @@ where $\CascadeEscalationProbability$ is the probability of requiring cloud infe
 # │ How: E = E_edge + p·(E_tx + E_cloud); saving = 1 − E / (E_tx + E_cloud).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_display_math, fmt_percent
 
 class CascadeEnergy:
     """Average energy per image for an edge-first cascade."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    e_edge_mj = 0.5  # scenario assumption: small edge classifier, mJ per image
-    e_cloud_mj = 50.0  # scenario assumption: large cloud model, mJ per inference
-    e_tx_mj = 10.0  # scenario assumption: cellular uplink of one image, mJ
-    p_escalate = 0.10  # scenario assumption: fraction of inputs escalated
+    cascade = Scenarios.EdgeFirstImageCascade
+    e_edge_mj = cascade.edge_energy.to("mJ").magnitude  # small edge classifier, per image
+    e_cloud_mj = cascade.cloud_energy.to("mJ").magnitude  # large cloud model, per inference
+    e_tx_mj = cascade.transmit_energy.to("mJ").magnitude  # cellular uplink of one image
+    p_escalate = cascade.escalation  # fraction of inputs escalated
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    escalated_mj = p_escalate * (e_tx_mj + e_cloud_mj)
-    e_cascade_mj = e_edge_mj + escalated_mj
-    e_cloud_only_mj = e_tx_mj + e_cloud_mj
-    saving = 1 - e_cascade_mj / e_cloud_only_mj
+    escalated_mj = cascade.result.escalated_energy.to("mJ").magnitude
+    e_cascade_mj = cascade.result.mean_energy.to("mJ").magnitude
+    e_cloud_only_mj = cascade.result.cloud_only_energy.to("mJ").magnitude
+    saving = cascade.result.saving
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(0.85 < saving < 0.95, f"Cascade saving drifted: {saving:.3f}")
@@ -4229,22 +4224,24 @@ Compared to always-cloud inference at `{python} CascadeEnergy.e_cloud_only_str` 
 # │ How: Sum always-on, speech-gated, and wake-word-gated power terms.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import milliwatt, watt, uW, second
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_display_math, fmt_multiple, fmt_percent, fmt_power, fmt_time
 
 class WakeWordPower:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    vad_power = 0.01 * milliwatt  # scenario assumption
-    speech_activity = 0.05
-    wake_detector_power = 0.1 * milliwatt  # scenario assumption
-    wake_rate = 0.001 / second  # illustrative events per second
-    full_model_power = 10 * milliwatt  # scenario assumption
-    full_model_duration = 0.05 * second
+    hierarchy = Scenarios.WakeWordHierarchyPower
+    vad_power = hierarchy.always_on_power.to(milliwatt)
+    speech_activity = hierarchy.stage_activity
+    wake_detector_power = hierarchy.stage_power.to(milliwatt)
+    wake_rate = hierarchy.event_rate.to(1 / second)  # illustrative events per second
+    full_model_power = hierarchy.full_power.to(milliwatt)
+    full_model_duration = hierarchy.full_duration.to(second)
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
-    avg_power = vad_power + speech_activity * wake_detector_power + wake_rate * full_model_power * full_model_duration
+    avg_power = hierarchy.result.average_power.to(milliwatt)
     avg_power_uw = avg_power.to(uW).magnitude
-    reduction = full_model_power.to(milliwatt).magnitude / avg_power.to(milliwatt).magnitude
+    reduction = hierarchy.result.reduction
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
     check(abs(avg_power.to(milliwatt).magnitude - 0.0155) < 1e-9, f"Expected 0.0155 mW, got {avg_power.to(milliwatt).magnitude}")
@@ -4362,28 +4359,34 @@ Public training-energy figures almost always report the single final run that pr
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import MWh, metric_ton
-from mlsysim import Models
+from mlsysim import Literature, Models
+
+def _table4_row(model):
+    """Parameters, energy, net emissions, and net grid factor of one Table 4 run."""
+    r = next(e for e in Literature.Series.PattersonTrainingFootprints.entries if e["model"] == model)
+    return r["params_b"] * 1e9, r["energy_mwh"] * MWh, r["net_tco2e"] * metric_ton, r["net_kg_per_kwh"]
 from mlsysim.fmt import check, fmt, fmt_int, fmt_magnitude, fmt_params
 
 class PublicTrainingFootprints:
     """Final-run training energy and emissions reported by Patterson et al. (2021)."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    # Literature values (Patterson et al. 2021, Table 4); not yet in the registry.
-    t5_params, t5_energy, t5_carbon = 11e9, 86 * MWh, 47 * metric_ton
-    meena_params, meena_energy, meena_carbon = 2.6e9, 232 * MWh, 96 * metric_ton
-    gshard_params, gshard_energy, gshard_carbon = 600e9, 24 * MWh, 4.3 * metric_ton
-    switch_params, switch_energy, switch_carbon = 1.5e12, 179 * MWh, 59 * metric_ton
+    # Patterson et al. (2021), Table 4: parameters, energy, net emissions, and the
+    # net grid factor the paper reports for each run.
+    t5_params, t5_energy, t5_carbon, t5_net_factor = _table4_row("T5")
+    meena_params, meena_energy, meena_carbon, meena_net_factor = _table4_row("Meena")
+    gshard_params, gshard_energy, gshard_carbon, gshard_net_factor = _table4_row("GShard-600B")
+    switch_params, switch_energy, switch_carbon, switch_net_factor = _table4_row("Switch Transformer")
     # GPT-3 comes from the registry and the opening notebook (US-average factor).
     gpt3_params = Models.Language.GPT3.parameters
     gpt3_energy = CarbonCostGPT3.energy
     gpt3_carbon = CarbonCostGPT3.total_carbon.to(metric_ton)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    t5_intensity = (t5_carbon / t5_energy).to(metric_ton / MWh).magnitude
-    meena_intensity = (meena_carbon / meena_energy).to(metric_ton / MWh).magnitude
-    gshard_intensity = (gshard_carbon / gshard_energy).to(metric_ton / MWh).magnitude
-    switch_intensity = (switch_carbon / switch_energy).to(metric_ton / MWh).magnitude
+    t5_intensity = t5_net_factor  # t/MWh = kg/kWh, as Table 4 prints it
+    meena_intensity = meena_net_factor
+    gshard_intensity = gshard_net_factor
+    switch_intensity = switch_net_factor
     gpt3_intensity = (gpt3_carbon / gpt3_energy).to(metric_ton / MWh).magnitude
     intensities = (t5_intensity, meena_intensity, gshard_intensity, switch_intensity, gpt3_intensity)
     factor_spread = max(intensities) / min(intensities)
@@ -4401,15 +4404,15 @@ class PublicTrainingFootprints:
     gshard_params_str = fmt_params(gshard_params)
     switch_params_str = fmt_params(switch_params)
     gpt3_params_str = fmt_params(gpt3_params)
-    t5_energy_str = fmt(t5_energy.to(MWh).magnitude, precision=0, commas=True)
-    meena_energy_str = fmt(meena_energy.to(MWh).magnitude, precision=0, commas=True)
-    gshard_energy_str = fmt(gshard_energy.to(MWh).magnitude, precision=0, commas=True)
-    switch_energy_str = fmt(switch_energy.to(MWh).magnitude, precision=0, commas=True)
+    t5_energy_str = fmt_int(t5_energy.to(MWh).magnitude, commas=True)  # Table 4 energies shown to the MWh
+    meena_energy_str = fmt_int(meena_energy.to(MWh).magnitude, commas=True)  # Table 4 energies shown to the MWh
+    gshard_energy_str = fmt_int(gshard_energy.to(MWh).magnitude, commas=True)  # Table 4 energies shown to the MWh
+    switch_energy_str = fmt_int(switch_energy.to(MWh).magnitude, commas=True)  # Table 4 energies shown to the MWh
     gpt3_energy_str = fmt(gpt3_energy.to(MWh).magnitude, precision=0, commas=True)
-    t5_tonnes_value_str = fmt_magnitude(t5_carbon, unit=metric_ton, precision=0, commas=False)
-    meena_tonnes_value_str = fmt_magnitude(meena_carbon, unit=metric_ton, precision=0, commas=False)
+    t5_tonnes_value_str = fmt_int(t5_carbon.to(metric_ton).magnitude, commas=False)  # whole tonnes
+    meena_tonnes_value_str = fmt_int(meena_carbon.to(metric_ton).magnitude, commas=False)  # whole tonnes
     gshard_tonnes_value_str = fmt_magnitude(gshard_carbon, unit=metric_ton, precision=1, commas=False)
-    switch_tonnes_value_str = fmt_magnitude(switch_carbon, unit=metric_ton, precision=0, commas=False)
+    switch_tonnes_value_str = fmt_int(switch_carbon.to(metric_ton).magnitude, commas=False)  # whole tonnes
     gpt3_tonnes_value_str = fmt_int(gpt3_carbon.magnitude, commas=False)
     t5_intensity_str = fmt(t5_intensity, precision=2, commas=False)
     meena_intensity_str = fmt(meena_intensity, precision=2, commas=False)
@@ -4572,11 +4575,12 @@ class LifespanExtension:
     """Embodied carbon per year of service under a longer hardware life."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    short_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
-    long_years = 5  # scenario assumption: extended five-year server life
+    extension = Scenarios.AcceleratorLifeExtension
+    short_years = extension.short_life.to("year").magnitude
+    long_years = extension.long_life.to("year").magnitude
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    reduction = 1 - short_years / long_years
+    reduction = extension.result.annual_charge_reduction
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(reduction - 0.4) < 1e-9, f"Lifespan reduction drifted: {reduction}")
@@ -4617,17 +4621,12 @@ class ReplacementBreakEven:
     """Time for a replacement accelerator to repay its manufacturing emissions."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    embodied = GpuEmissionsScenario.h100_embodied
-    power = GpuEmissionsScenario.h_h100_tdp  # rated power: continuous upper-end scenario
-    us_ci = GpuEmissionsScenario.us_grid_ci
-    quebec_ci = Infrastructure.Grids.Quebec.carbon_intensity_kg_kwh * (kilogram / kWh)
-    saved_fraction = 0.5  # replacement completes the same work at half the energy
+    payback = Scenarios.H100ReplacementPayback  # rated power: continuous upper-end scenario
+    saved_fraction = payback.saved_fraction  # replacement completes the same work at half the energy
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    us_saving_per_week = saved_fraction * (power * (1 * week)).to(kWh) * us_ci
-    quebec_saving_per_week = saved_fraction * (power * (1 * week)).to(kWh) * quebec_ci
-    us_weeks = (embodied / us_saving_per_week).to("").magnitude
-    quebec_years = ((embodied / quebec_saving_per_week).to("").magnitude * week).to(year).magnitude
+    us_weeks = payback.result.payback["US average"].to(week).magnitude
+    quebec_years = payback.result.payback["Quebec"].to(year).magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(5 < us_weeks < 8, f"US break-even drifted: {us_weeks:.1f} weeks")
@@ -4932,9 +4931,8 @@ A real placement decision weighs more than the grid factor. Adding electricity p
 # │      mlsysim.solvers.PlacementOptimizer over three regions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, Literature, ReferenceStats, Systems
+from mlsysim import Infrastructure, Literature, ReferenceStats, Scenarios, Systems
 from mlsysim.engine.solvers.economics import EconomicsModel
-from mlsysim.solvers import PlacementOptimizer
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_energy, fmt_time, fmt_usd
 from mlsysim.core.units import MWh
 
@@ -4946,23 +4944,21 @@ class AutoPlacement:
     '''
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    fleet = Systems.Clusters.Frontier_8K
-    energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy  # IT energy of the run
-    carbon_tax = 100.0  # scenario policy assumption: $/ton carbon tax
-    mfu = Literature.Training.MfuHigh
+    placement = Scenarios.CarbonPricedRegionPlacement
+    fleet = placement.fleet
+    energy = placement.it_energy  # IT energy of the run
+    carbon_tax = placement.carbon_price_per_ton  # policy assumption: $/ton carbon tax
+    mfu = placement.mfu
     # The fleet's modeled IT energy per day is region-independent (PUE enters
     # only at the facility boundary), so it sets the run duration.
-    it_energy_per_day = EconomicsModel().solve(fleet, duration_days=1, grid=Infrastructure.Grids.US_Avg, mfu=mfu).it_energy_kwh.to(MWh)
-    duration_days = (energy / it_energy_per_day).to("").magnitude
+    duration_days = placement.result.duration_days
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    optimizer = PlacementOptimizer()
-    res = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=carbon_tax, mfu=mfu)
+    res = placement.result
     best_region = res.best_region
     check_it_energy = EconomicsModel().solve(fleet, duration_days=duration_days, grid=Infrastructure.Grids.Quebec, mfu=mfu).it_energy_kwh.to(MWh)
-    res_no_tax = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=0.0, mfu=mfu)
-    objective_by_region = {c["region"]: c["objective"] for c in res.top_candidates}
-    no_tax_by_region = {c["region"]: c["objective"] for c in res_no_tax.top_candidates}
+    objective_by_region = res.objective
+    no_tax_by_region = res.objective_untaxed
     us_gap_usd = objective_by_region["US_Avg"] - objective_by_region["Quebec"]
     iowa_gap_usd = objective_by_region["Iowa"] - objective_by_region["Quebec"]
     no_tax_us_gap_usd = no_tax_by_region["US_Avg"] - no_tax_by_region["Quebec"]
@@ -4971,7 +4967,7 @@ class AutoPlacement:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(best_region == "Quebec", f"Quebec should be optimal with ${carbon_tax}/ton tax")
     check(abs((check_it_energy / energy).to("").magnitude - 1) < 1e-6, "Modeled run IT energy must equal the reference run energy")
-    check(res_no_tax.best_region == "Quebec", "Prose says Quebec already wins on facility overhead without a carbon price")
+    check(res.best_region_untaxed == "Quebec", "Prose says Quebec already wins on facility overhead without a carbon price")
     check(0 < no_tax_us_gap_usd < us_gap_usd < iowa_gap_usd, "Prose orders the no-tax, US-average, and Iowa gaps")
     check(carbon_share_of_us_gap > 0.5, "Prose says most of the taxed gap is the carbon charge")
 
@@ -5007,7 +5003,7 @@ Google's carbon-intelligent computing platform\index{Carbon-aware scheduling!res
 
 Because a scheduler asks how moving a job changes emissions, it needs a marginal signal\index{Carbon-aware scheduling!marginal vs. average emissions} rather than the average factor an inventory uses, and the providers compared above expose signals with different methodologies and coverage. A feasible schedule must satisfy three constraints on one time axis at once, the grid carbon signal $\text{CO}_{2,\text{grid}}(\TimeInstant)$, the job's execution state, and cluster headroom $\ClusterHeadroom(\TimeInstant)$ (@fig-carbon-aware-scheduling). The job waits, checkpointed, through the high-carbon peak, runs for $\JobDuration$ in a low-carbon trough where headroom exists, and still finishes with slack before its deadline. Waiting pays only when the avoided grid emissions exceed the checkpoint I/O, idle standby, and state migration that the wait itself causes.
 
-::: {#fig-carbon-aware-scheduling data-explore="mechanism-scene" data-explore-key="vol2:fig-carbon-aware-scheduling" fig-env="figure" fig-pos="htb" fig-cap="**A Feasible Carbon-Aware Schedule**: Three constraints share one time axis. The job waits, checkpointed, through the high-carbon hours of the grid signal and runs in the low-carbon window only where cluster headroom exists, finishing with slack before the deadline. The equation below the timeline charges the shift for its checkpoint, idle-wait, and migration carbon, so waiting pays only when the avoided emissions exceed those terms. The curve is schematic, not a measured grid trace." fig-alt="Timeline with three lanes over a shared time axis. The top lane shows a schematic grid carbon curve with a shaded high-carbon peak and a later low-carbon trough. The job lane shows a dashed waiting arrow, then a green block running under the trough, then a slack block before a red dashed deadline line. The capacity lane shows a hatched busy period followed by available headroom. An equation below sums integrated power times carbon intensity with checkpoint, idle, and migration terms."}
+::: {#fig-carbon-aware-scheduling data-explore="original-v2-carbon-aware-scheduling" data-explore-key="vol2:fig-carbon-aware-scheduling" fig-env="figure" fig-pos="htb" fig-cap="**A Feasible Carbon-Aware Schedule**: Three constraints share one time axis. The job waits, checkpointed, through the high-carbon hours of the grid signal and runs in the low-carbon window only where cluster headroom exists, finishing with slack before the deadline. The equation below the timeline charges the shift for its checkpoint, idle-wait, and migration carbon, so waiting pays only when the avoided emissions exceed those terms. The curve is schematic, not a measured grid trace." fig-alt="Timeline with three lanes over a shared time axis. The top lane shows a schematic grid carbon curve with a shaded high-carbon peak and a later low-carbon trough. The job lane shows a dashed waiting arrow, then a green block running under the trough, then a slack block before a red dashed deadline line. The capacity lane shows a hatched busy period followed by available headroom. An equation below sums integrated power times carbon intensity with checkpoint, idle, and migration terms."}
 
 ![](images/svg/carbon-scheduling-constraints.svg)
 
@@ -5034,10 +5030,11 @@ The **duck curve**\index{Duck curve!definition} describes the steep evening ramp
 # │ Show: wind 27 GW (Sunday) to 111 GW (Thursday); nuclear about 73 GW;
 # │       daily load peaks about 326 to 367 GW.
 # │ How: Energy-Charts hourly EU public net generation, 2023-11-20 to 2023-11-26
-# │      (CET), from data/europe_generation_2023w47.csv; values in MW.
+# │      (CET), from Literature.Series.EuropeGenerationWeek47; values in MW.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
+from mlsysim import Literature
 from mlsysim.core.units import GW, MW
 from mlsysim.fmt import check, fmt_power
 
@@ -5045,7 +5042,8 @@ class EuropeGridWeek:
     """Wind, nuclear, and load statistics for one late-November week."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _grid = pd.read_csv("vol2/15_sustainable_ai/data/europe_generation_2023w47.csv", parse_dates=["time_cet"])
+    _grid = pd.DataFrame(Literature.Series.EuropeGenerationWeek47.entries)
+    _grid["time_cet"] = pd.to_datetime(_grid["time_cet"])
     _days = _grid["time_cet"].dt.date
     _full = _grid[_days.map(_days.value_counts()) == 24]  # complete days only
 
@@ -5097,9 +5095,11 @@ Renewable generation variability complicates batch training dispatch across powe
 # └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
 import matplotlib.dates as mdates
+from mlsysim import Literature
 from binder.tools.figures import style as book_style
 
-_grid = pd.read_csv("vol2/15_sustainable_ai/data/europe_generation_2023w47.csv", parse_dates=["time_cet"])
+_grid = pd.DataFrame(Literature.Series.EuropeGenerationWeek47.entries)
+_grid["time_cet"] = pd.to_datetime(_grid["time_cet"])
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.1, 3.5))
 _layers = [
     ("nuclear", "Nuclear", "#94A3B8"),
@@ -5359,19 +5359,21 @@ Data-center operators report PUE in sustainability disclosures and engineers may
 # │ Show: $0.06 → $0.002 per 1,000 tokens = 30× gain; 100× volume → ~3.3× energy.
 # │ How: gain = old / new price (proportional energy); net = volume / gain.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_multiple, fmt_usd
 
 class ReboundScenario:
     """Net energy change when volume grows faster than per-query efficiency."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    price_old = 0.06  # scenario assumption: $ per 1,000 tokens before optimization
-    price_new = 0.002  # scenario assumption: $ per 1,000 tokens after optimization
-    volume_growth = 100  # scenario assumption: growth in query volume
+    rebound = Scenarios.TokenPriceRebound
+    price_old = rebound.unit_price_before  # $ per 1,000 tokens before optimization
+    price_new = rebound.unit_price_after  # $ per 1,000 tokens after optimization
+    volume_growth = rebound.volume_factor  # growth in query volume
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    unit_gain = price_old / price_new  # energy per query assumed proportional to price
-    net_growth = volume_growth / unit_gain
+    unit_gain = 1 / rebound.unit_factor  # energy per query assumed proportional to price
+    net_growth = rebound.result.net_factor
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(net_growth > 1, "Rebound scenario must raise total energy")

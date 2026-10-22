@@ -83,7 +83,7 @@
 \begin{frame}{Recall: which Fleet Law terms does hardware set?}
   \mlsysactivity{Retrieval}{1.5 min}
   \centering
-  {\Large\bfseries Close your notes.}\\[0.2cm]
+  {\Large\bfseries Question of the day}\\[0.2cm]
   {\normalsize Write the Fleet Law from Lecture 1. Circle the terms that depend on the hardware.}\\[0.5cm]
   \uncover<2->{%
     {\large $T_{\text{step}}(N) = \dfrac{\alert{T_{\text{compute}}}}{N} + \alert{T_{\text{comm}}(N)} + T_{\text{sync}}(N) - T_{\text{overlap}}$}\\[0.35cm]
@@ -239,25 +239,30 @@
   \only<2|handout:0>{\includegraphics[width=0.95\textwidth,height=4.2cm,keepaspectratio]{node_state_step1}}%
   \only<3-|handout:1>{\includegraphics[width=0.95\textwidth,height=4.2cm,keepaspectratio]{node_state_step2}}\\[0.02cm]
   {\footnotesize\uncover<3->{Per GPU: Adam \val{tp8_adam_gb}, master \val{tp8_master_gb}, weights and gradients \val{tp8_wg_gb}, other \val{tp8_other_gb} GB.}}
-  \mlsyscredit{Compute Infrastructure, \S2.5.3 (table 11) and Example 2.4. Activations and workspace (\val{tp8_other_gb} GB per GPU) are the scenario remainder, derived.}
+  \mlsyscredit{Compute Infrastructure, \S2.5.3 (table 11) and Example 2.4. Activations and workspace (\val{tp8_other_gb} GB per GPU) are a scenario assumption, as in Example 2.4.}
   \note{[3.5 min] [CORE] ENGAGE: pairs compute the total, then the per-GPU share under 8-way tensor parallelism (TP-8), which splits every layer's matrices across the eight GPUs. Two minutes. Step 2: 16 bytes per parameter times \val{gpt3_params_b} billion is \val{state_tb} TB of persistent state: \val{weights_gb} GB of weights, \val{weights_gb} of gradients, \val{master_gb} of FP32 master weights, and \val{adam_moment_gb} for each Adam moment. Activations add 100 to 400 GB. The node holds \val{node_hbm_gb} GB. The largest terms are the FP32 master weights and Adam moments. Step 3: split eight ways, each GPU holds \val{tp8_adam_gb} GB of Adam moments, \val{tp8_master_gb} GB of master weights, \val{tp8_wg_gb} GB of weights and gradients, and about \val{tp8_other_gb} GB of activations and workspace, \val{tp8_total_gb} GB in all against \val{h100_hbm_gb} GB. WARN: students who shard only the weights get \val{tp8_weights_gb} GB and declare victory; the optimizer state is the problem. Offloading the moments and master copy to host memory over PCIe still leaves \val{tp8_offload_gb} GB per GPU.}
 \end{frame}
 
 \begin{frame}{Adding 128-way data parallelism brings each GPU to about 45 GB}
   \begin{columns}[c]
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.40\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \small\textbf{Given:} \val{ref_gpus} GPUs as TP-8 inside each node $\times$ \val{ref_nodes} data-parallel replicas; optimizer state sharded across replicas (ZeRO).
       \end{mlsyscard}
     \end{column}
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.57\textwidth}
       \small
       \uncover<2->{Weights per GPU: $\val{weights_gb} / 8 = \val{tp8_weights_gb}$ GB\\[0.15cm]}
       \uncover<3->{Adam moments: $\val{adam_gb} / \val{ref_gpus} \approx \val{zero_adam_gb}$ GB\\[0.15cm]}
-      \uncover<4->{\textbf{Subtotal $\approx$ \val{zero_subtotal_gb} GB}, before gradients, activations, and buffers.}
+      \uncover<4->{\textbf{Subtotal $\approx$ \val{zero_subtotal_gb} GB}, before gradients, activations, and buffers.}\\[0.15cm]
+      \centering
+      \only<1|handout:0>{\phantom{\safeimg[width=\textwidth,height=2.5cm,keepaspectratio]{zero_mem_step1.pdf}}}%
+      \only<2|handout:0>{\safeimg[width=\textwidth,height=2.5cm,keepaspectratio]{zero_mem_step1.pdf}}%
+      \only<3|handout:0>{\safeimg[width=\textwidth,height=2.5cm,keepaspectratio]{zero_mem_step2.pdf}}%
+      \only<4-|handout:1>{\safeimg[width=\textwidth,height=2.5cm,keepaspectratio]{zero_mem_step3.pdf}}
     \end{column}
   \end{columns}
-  \vspace{0.35cm}
+  \vspace{0.2cm}
   \centering{\normalsize\uncover<4->{The full state fits only when it is sharded across many nodes.}}
   \mlsyscredit{Compute Infrastructure, \S2.5.3. ZeRO and sharded data parallelism: Lecture 6.}
   \note{[2 min] [OPTIONAL] The way out. Step 1: keep TP-8 inside each node, where NVLink is fast, and run \val{ref_nodes} such groups as data-parallel replicas, each training on different examples, \val{ref_gpus} GPUs in all. Step 2: each GPU holds one eighth of the weights, \val{tp8_weights_gb} GB. Step 3: shard the \val{adam_gb} GB of Adam moments across all \val{ref_gpus} GPUs as well, as ZeRO (the zero redundancy optimizer) does: about \val{zero_adam_gb} GB each, or \val{zero_adam_group_gb} GB per eight-GPU group. Step 4: about \val{zero_subtotal_gb} GB before gradients, activations, and buffers, which now fits under \val{h100_hbm_gb} GB. ENGAGE: why can the same eight GPUs not also give ZeRO an eight-way axis? (Expected: parallel degrees multiply to the device count; the eight GPUs are already the tensor-parallel axis.) WARN: this is only the starting point of a memory plan; Lecture 6 builds the plan and its traffic.}
@@ -325,7 +330,7 @@
 
 \begin{frame}{A barrier swings every GPU from \val{step_low_w} W to \val{tdp_h100} W at once}
   \begin{columns}[c]
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.42\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \small\textbf{One H100}, \val{rail_v} V core rail:\\
         \val{step_low_w} W $\rightarrow$ \val{tdp_h100} W: \textbf{+\val{swing_a} A}\\[0.1cm]
@@ -334,17 +339,16 @@
         over \val{rise_fast_ns} ns: \textbf{\val{droop_100ns_mv} mV (\val{droop_100ns_pct}\%)}
       \end{mlsyscard}
     \end{column}
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.55\textwidth}
       \centering
-      {\small \val{ref_gpus} GPUs step together in \val{ramp_us} \textmu s:}\\[0.15cm]
-      {\fontsize{30}{34}\selectfont\bfseries\textcolor{mlsysaccent}{\val{ramp_gws} GW/s}}\\[0.15cm]
-      {\small a \val{step_kw} kW step seen by shared upstream supplies}
+      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{droop.pdf}
     \end{column}
   \end{columns}
-  \vspace{0.3cm}
-  \centering{\small Average power and transient voltage need separate checks.}
+  \vspace{0.1cm}
+  \centering{\small \val{ref_gpus} GPUs stepping together in \val{ramp_us} \textmu s: \textbf{\textcolor{mlsysaccent}{\val{ramp_gws} GW/s}}, a \val{step_kw} kW step upstream.}\\[0.05cm]
+  {\small Average power and transient voltage need separate checks.}
   \mlsyscredit{Compute Infrastructure, \S2.6.1 (equation 2, table 13). Inductance, rise times, and the \val{ref_gpus}-GPU ramp are the chapter's scenario inputs.}
-  \note{[2 min] [OPTIONAL] Synchronous training makes the power draw jump. When a collective barrier releases the GPUs from communication into dense arithmetic, each one steps from about \val{step_low_w} W toward \val{tdp_h100} W within microseconds, and the barrier aligns the steps. Left: on a \val{rail_v} V core rail that step is \val{swing_a} A. Every conductor loop has inductance, which resists a change in current, so the voltage dips by $L\,dI/dt$. With an assumed \val{loop_ph} pH board loop, a \val{rise_slow_us} \textmu s rise gives \val{droop_1us_mv} mV, \val{droop_1us_pct} percent of the rail; a \val{rise_fast_ns} ns rise gives \val{droop_100ns_mv} mV, \val{droop_100ns_pct} percent, far outside a 5 percent band. The tenfold sensitivity to rise time is physical. Charge stored on the die, the package, and the board answers the fast edges, each tier faster than the one above. Right: \val{ref_gpus} GPUs stepping \val{swing_w} W each in \val{ramp_us} \textmu s is a \val{step_kw} kW step, \val{ramp_gws} GW per second, seen by the facility's shared supplies. WARN: these values are assumed scenario inputs. Lecture 15 takes the grid side of this ramp.}
+  \note{[2 min] [OPTIONAL] Synchronous training makes the power draw jump. When a collective barrier releases the GPUs from communication into dense arithmetic, each one steps from about \val{step_low_w} W toward \val{tdp_h100} W within microseconds, and the barrier aligns the steps. Left: on a \val{rail_v} V core rail that step is \val{swing_a} A. The plot on the right draws both edges: the power step on top, the droop it causes below, held for as long as the current is rising. Every conductor loop has inductance, which resists a change in current, so the voltage dips by $L\,dI/dt$. With an assumed \val{loop_ph} pH board loop, a \val{rise_slow_us} \textmu s rise gives \val{droop_1us_mv} mV, \val{droop_1us_pct} percent of the rail; a \val{rise_fast_ns} ns rise gives \val{droop_100ns_mv} mV, \val{droop_100ns_pct} percent, far outside a 5 percent band. The tenfold sensitivity to rise time is physical. Charge stored on the die, the package, and the board answers the fast edges, each tier faster than the one above. Right: \val{ref_gpus} GPUs stepping \val{swing_w} W each in \val{ramp_us} \textmu s is a \val{step_kw} kW step, \val{ramp_gws} GW per second, seen by the facility's shared supplies. WARN: these values are assumed scenario inputs. Lecture 15 takes the grid side of this ramp.}
 \end{frame}
 
 \begin{frame}{How much air carries away \val{rack_heat_kw} kW?}

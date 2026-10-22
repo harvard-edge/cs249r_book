@@ -512,28 +512,26 @@ Static inference\index{Static inference!precomputed predictions} (also called of
 # │ How: ResNet-50 eager FP16 profile on the H100 at batch 1 and batch 8.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
-from mlsysim.engine.serving_profile import resnet50_h100_profile
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
 
 class CostLatencyCalc:
     """Quantifies the economic trade-off between latency and hardware cost per million queries."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpu_cost_per_hour_value = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    _p = resnet50_h100_profile()  # the chapter's ResNet-50 reference profile
-    latency_a_ms_value = _p.eager_fp16(1).to(ms)
-    throughput_a_rps_value = (1 * count / latency_a_ms_value).to(count / second)
-    latency_b_ms_value = _p.eager_fp16(8).to(ms)
-    throughput_b_rps_value = (8 * count / latency_b_ms_value).to(count / second)
+    _s = Scenarios.ResNet50BatchOneVersusEightCostH100  # the chapter's ResNet-50 reference profile, batch 1 and 8
+    gpu_cost_per_hour_value = _s.price
+    batch_a, batch_b = _s.batch_sizes
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    queries_per_hour_a_value = (throughput_a_rps_value * hour).to(count)
-    cost_per_million_a_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_a_value / (MILLION * count))
-    queries_per_hour_b_value = (throughput_b_rps_value * hour).to(count)
-    cost_per_million_b_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_b_value / (MILLION * count))
-    cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
-    cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
+    latency_a_ms_value = _s.service.service_time(batch_a)
+    throughput_a_rps_value = _s.service.throughput(batch_a)
+    latency_b_ms_value = _s.service.service_time(batch_b)
+    throughput_b_rps_value = _s.service.throughput(batch_b)
+    cost_per_million_a_value = _s.cost_per_million(batch_a)
+    cost_per_million_b_value = _s.cost_per_million(batch_b)
+    cost_increase_pct_value = (_s.cost_ratio - 1) * 100
+    cost_ratio_value = _s.cost_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
@@ -635,9 +633,6 @@ class ResNetH100Profile:
     tf32_ceiling_img_s = _p.large_batch_throughput("fp32")
     int8_ceiling_img_s = int8_offline_img_s
 
-    def eager_ms(batch, _fixed=eager_fixed, _per=eager_per_image):
-        return (_fixed + batch * _per).to(millisecond)
-
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.245 < sustained_fraction < 0.26, f"Sustained fraction must match the training chapter (~0.25), got {sustained_fraction:.3f}.")
     check(3.4 < eager_b1.magnitude < 3.7, f"Eager batch-one forward pass should be about 3.5 ms, got {eager_b1}.")
@@ -679,21 +674,23 @@ class ResNetH100Profile:
 # │ How: Compare total batch time to per-request latency for photo classification.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_time, check
 
 class StaticBatchCalc:
     """Contrasts static vs. dynamic inference economics for photo classification."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_photos_value = 10_000  # photos in user library
-    inference_ms_value = ResNetH100Profile.eager_b1  # batch-one forward pass, reference profile
-    offline_img_s = ResNetH100Profile.int8_offline_img_s  # measured large-batch rate
-    dynamic_latency_budget_ms_value = 100 * ms  # scenario assumption: real-time latency budget
+    _s = Scenarios.PhotoLibraryPrecomputeH100  # 10,000 photos; batch-one profile against the MLPerf Offline rate
+    n_photos_value = _s.items
+    inference_ms_value = _s.on_demand_time
+    offline_img_s = _s.offline_rate.magnitude
+    dynamic_latency_budget_ms_value = _s.latency_budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    serial_total_s_value = (n_photos_value * inference_ms_value).to(second)
-    batch_total_s_value = (n_photos_value / (offline_img_s / second)).to(second)
-    speedup_value = (serial_total_s_value / batch_total_s_value).to("").magnitude
+    serial_total_s_value = _s.on_demand_total
+    batch_total_s_value = _s.offline_total
+    speedup_value = _s.ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(batch_total_s_value < 1 * second < serial_total_s_value, "Batched pass must take under a second; one at a time, tens of seconds.")
@@ -1359,27 +1356,29 @@ An engineer who measures only total request duration in a vision service sees a 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
 
 class LatencyTableCalc:
     """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    l_jpeg_value = 3.0 * ms  # scenario assumption: JPEG decode latency
-    l_resize_value = 1.0 * ms  # scenario assumption: resize to 224×224 latency
-    l_norm_value = 0.5 * ms  # scenario assumption: normalize latency
-    l_transfer_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    l_inf_value = ResNetH100Profile.eager_b1  # reference profile: eager batch-one forward pass on the H100
-    l_post_value = 0.1 * ms  # scenario assumption: softmax + top-5 latency
+    _path = Scenarios.ResNet50RequestPathH100  # host phases stated; forward pass from the reference profile
+    l_jpeg_value = _path.stages["JPEG decode"]
+    l_resize_value = _path.stages["resize"]
+    l_norm_value = _path.stages["normalize"]
+    l_transfer_value = _path.stages["copy to GPU"]
+    l_inf_value = _path.stages["forward pass"]
+    l_post_value = _path.stages["top-5"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    l_total_value = l_jpeg_value + l_resize_value + l_norm_value + l_transfer_value + l_inf_value + l_post_value
-    p_jpeg_value = l_jpeg_value / l_total_value * 100
-    p_resize_value = l_resize_value / l_total_value * 100
-    p_norm_value = l_norm_value / l_total_value * 100
-    p_transfer_value = l_transfer_value / l_total_value * 100
-    p_inf_value = l_inf_value / l_total_value * 100
-    p_post_value = l_post_value / l_total_value * 100
+    l_total_value = _path.total
+    p_jpeg_value = _path.share("JPEG decode") * 100
+    p_resize_value = _path.share("resize") * 100
+    p_norm_value = _path.share("normalize") * 100
+    p_transfer_value = _path.share("copy to GPU") * 100
+    p_inf_value = _path.share("forward pass") * 100
+    p_post_value = _path.share("top-5") * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(8 < l_total_value.to(ms).magnitude < 9, f"Expected about 8.6 ms total latency, got {l_total_value}")
@@ -1417,27 +1416,27 @@ class LatencyTableCalc:
 # │ How: Compare phase durations before and after model acceleration.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
-from mlsysim.physics import calc_amdahls_speedup
 
 class LatencyBudgetCalc:
     """Demonstrates the shifting bottleneck from inference to preprocessing after TensorRT optimization."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    jpeg_decode_ms_value = 3.0 * ms  # scenario assumption: JPEG decode latency
-    resize_ms_value = 1.0 * ms  # scenario assumption: resize latency
-    normalize_ms_value = 0.5 * ms  # scenario assumption: normalize latency
-    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    resnet_inference_ms_value = ResNetH100Profile.eager_b1  # reference profile: eager batch one
-    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
-    tensorrt_inference_ms_value = ResNetH100Profile.trt_fp16_b1  # modeled TensorRT FP16 engine, batch one
+    _path = Scenarios.ResNet50RequestPathH100  # eager FP16 forward pass
+    _trt = Scenarios.ResNet50RequestPathTensorRtH100  # the same path with the TensorRT FP16 engine
+    _host = ("JPEG decode", "resize", "normalize")
+    cpu_gpu_ms_value = _path.stages["copy to GPU"]
+    resnet_inference_ms_value = _path.stages["forward pass"]
+    postprocess_ms_value = _path.stages["top-5"]
+    tensorrt_inference_ms_value = _trt.stages["forward pass"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    preprocess_ms_value = jpeg_decode_ms_value + resize_ms_value + normalize_ms_value
-    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
-    preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
-    tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
-    tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
+    preprocess_ms_value = _path.subtotal(*_host)
+    total_latency_ms_value = _path.total
+    preprocess_pct_value = _path.share(*_host) * 100
+    tensorrt_total_ms_value = _trt.total
+    tensorrt_preprocess_pct_value = _trt.share(*_host) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(50 < preprocess_pct_value < 55, f"Expected about half the latency in preprocessing, got {preprocess_pct_value:.1f}%")
@@ -1448,7 +1447,7 @@ class LatencyBudgetCalc:
     cpu_gpu_ms_str = fmt_time(cpu_gpu_ms_value, 'millisecond', precision=1, commas=False)
     resnet_inference_ms_str = fmt_time(resnet_inference_ms_value, 'millisecond', precision=1, commas=False)
     tensorrt_inference_ms_str = fmt_time(tensorrt_inference_ms_value, 'millisecond', precision=2, commas=False)
-    model_10x_ms_str = fmt_time(resnet_inference_ms_value / 10, 'millisecond', precision=2, commas=False)
+    model_10x_ms_str = fmt_time(_path.accelerated_stage, 'millisecond', precision=2, commas=False)
     total_latency_ms_str = fmt_time(total_latency_ms_value, 'millisecond', precision=1, commas=False)
     preprocess_pct_str = fmt_percent(round(preprocess_pct_value) / 100, precision=0, commas=False, style='prose')
     tensorrt_preprocess_pct_str = fmt_percent(round(tensorrt_preprocess_pct_value) / 100, precision=0, commas=False, style='prose')
@@ -1596,7 +1595,7 @@ from mlsysim.fmt import fmt_int
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.core.units import GB
 from mlsysim.fmt import MarkdownStr, fmt, fmt_memory, fmt_percent, fmt_time, check
 
@@ -1604,15 +1603,16 @@ class DlrmLatencyCalc:
     """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dlrm_input_ms_value = 0.5 * ms  # scenario assumption: request parsing latency
-    dlrm_embed_ms_value = 6.0 * ms  # scenario assumption: embedding lookup latency
-    dlrm_mlp_ms_value = 1.5 * ms  # scenario assumption: MLP forward latency
-    dlrm_post_ms_value = 1.0 * ms  # scenario assumption: ranking and filtering latency
+    _path = Scenarios.DlrmRequestPath  # stated phase times of one recommendation request
+    dlrm_input_ms_value = _path.stages["parse"]
+    dlrm_embed_ms_value = _path.stages["embedding lookup"]
+    dlrm_mlp_ms_value = _path.stages["MLP forward"]
+    dlrm_post_ms_value = _path.stages["rank and filter"]
     dlrm_model_size = Models.Recommendation.DLRM.model_size  # registry reference model (embedding-dominated)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
-    dlrm_mlp_pct_value = dlrm_mlp_ms_value / dlrm_total_ms_value * 100
+    dlrm_total_ms_value = _path.total
+    dlrm_mlp_pct_value = _path.share("MLP forward") * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(dlrm_total_ms_value == 9.0 * ms, f"Expected 9.0 ms total DLRM latency, got {dlrm_total_ms_value}")
@@ -1673,27 +1673,26 @@ Together, @tbl-model-serving-resnet50-latency-budget and @tbl-model-serving-dlrm
 # │ How: Apply Amdahl's Law using the noninference latency share.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 
 class AmdahlServingCalc:
     """Applies Amdahl's Law to show that 10× model speedup yields only ~1.6× end-to-end improvement."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Re-derived from latency-budget-calc constants
-    preprocess_ms_value = (3.0 + 1.0 + 0.5) * ms  # scenario assumption: JPEG decode + resize + normalize
-    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    resnet_inference_ms_value = ResNetH100Profile.eager_b1  # reference profile: eager batch one
-    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
+    _path = Scenarios.ResNet50RequestPathH100  # the same request; its forward pass made 10x faster
+    _before_model = ("JPEG decode", "resize", "normalize", "copy to GPU")
+    resnet_inference_ms_value = _path.stages["forward pass"]
+    model_speedup = _path.speedup
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
-    non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
-    non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
-    model_speedup = 10
-    model_fraction = resnet_inference_ms_value / total_latency_ms_value
-    model_10x_ms_value = resnet_inference_ms_value / model_speedup
-    amdahl_speedup_value = calc_amdahls_speedup(model_fraction, model_speedup)
-    optimized_total_ms_value = total_latency_ms_value / amdahl_speedup_value
+    total_latency_ms_value = _path.total
+    non_model_ms_value = _path.subtotal(*_before_model)
+    non_model_pct_value = _path.share(*_before_model) * 100
+    model_fraction = _path.fraction
+    model_10x_ms_value = _path.accelerated_stage
+    amdahl_speedup_value = _path.overall_speedup
+    optimized_total_ms_value = _path.accelerated_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1.5 < amdahl_speedup_value < 1.7, f"Expected ~1.6x Amdahl speedup, got {amdahl_speedup_value:.2f}")
@@ -2015,7 +2014,7 @@ Executing each request in lockstep isolation leaves specialized accelerators hea
 
 @Fig-serving-pipeline-timing sequences execution across CPU preprocessing and GPU inference to demonstrate how request pipelining recovers lost compute capacity. In serial execution (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins, leaving the GPU idle for more than 50 percent of wall-clock time. Pipelining concurrent requests (B) overlaps CPU preprocessing of upcoming requests with active GPU inference on earlier inputs, eliminating the idle bubbles and maximizing accelerator duty cycle.
 
-::: {#fig-serving-pipeline-timing data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-pipeline-timing" fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
+::: {#fig-serving-pipeline-timing data-explore="original-v1-serving-pipeline-timing" data-explore-key="vol1:fig-serving-pipeline-timing" fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily, scale=0.8]
@@ -2075,19 +2074,21 @@ $$\text{System Efficiency} = \frac{\sum \KernelActiveTime}{\text{Wall Clock Time
 # │       pipelining with one host worker is capped by the slower CPU stage.
 # │ How: Stage times from LatencyTableCalc; pipelined duty = GPU stage / CPU stage.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_time, fmt_percent
 
 class DutyCycleCalc:
     """Accelerator duty cycle for the reference ResNet-50 request."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    L = LatencyTableCalc
-    cpu_stage = L.l_jpeg_value + L.l_resize_value + L.l_norm_value
-    gpu_stage = L.l_inf_value
+    _path = Scenarios.ResNet50RequestPathH100
+    _host = ("JPEG decode", "resize", "normalize")
+    cpu_stage = _path.subtotal(*_host)
+    gpu_stage = _path.stages["forward pass"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    serial_duty = (gpu_stage / L.l_total_value).to("").magnitude
-    pipelined_duty = min(1.0, (gpu_stage / cpu_stage).to("").magnitude)
+    serial_duty = _path.share("forward pass")
+    pipelined_duty = _path.overlapped_share("forward pass", *_host)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cpu_stage > gpu_stage, "Prose says the host stage is the slower one.")
@@ -2191,6 +2192,7 @@ Little's law holds regardless of the arrival distribution, service-time distribu
 # │ How: Apply Little's Law to throughput and mean time in system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2201,12 +2203,14 @@ class CapacityPlanning:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    lambda_qps = 1000.0
-    mean_latency_s = 0.050  # 50 ms mean time in system
+    _s = Scenarios.ImageServiceLittlesLaw  # 1,000 requests/s, 50 ms mean time in system
+    lambda_qps = _s.arrival_rate.to(1 / second).magnitude
+    mean_latency_s = _s.time_in_system.to(second).magnitude
+    gpu_batch = _s.batch_size  # largest batch the accelerator runs
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Q_req = lambda_arr * T_lat
-    concurrency = lambda_qps * mean_latency_s
+    concurrency = _s.in_flight
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(concurrency == 50, f"Math broken: 1000 * 0.05 should be 50, got {concurrency}")
@@ -2216,6 +2220,7 @@ class CapacityPlanning:
     littles_w_ms_str = fmt_time(round(mean_latency_s * MS_PER_SEC), 'millisecond', precision=0, commas=False)
     littles_w_s_str = fmt_time(mean_latency_s, 'second', precision=2, commas=False)
     littles_l_str = fmt_int(round(concurrency), commas=False)
+    gpu_batch_str = fmt_int(gpu_batch, commas=False)
 ```
 
 * **Arrival rate $(\ArrivalRate)$**, equal to throughput in a stable system: `{python} CapacityPlanning.littles_lambda_qps_str`.
@@ -2223,7 +2228,7 @@ class CapacityPlanning:
 
 **Math**: $\RequestConcurrency$ = `{python} CapacityPlanning.littles_lambda_qps_str` $\times$ `{python} CapacityPlanning.littles_w_s_str` = `{python} CapacityPlanning.littles_l_str` concurrent requests on average
 
-**Systems insight**: The system holds `{python} CapacityPlanning.littles_l_str` requests on average across batch and queue state. That population is a memory and concurrency requirement, not a limit on the accelerator. A server whose GPU executes at most 32 requests per batch can still sustain this load, because the requests not currently executing wait in host memory. Service rate, queueing behavior, and the tail distribution, not the population itself, determine whether the load is feasible.
+**Systems insight**: The system holds `{python} CapacityPlanning.littles_l_str` requests on average across batch and queue state. That population is a memory and concurrency requirement, not a limit on the accelerator. A server whose GPU executes at most `{python} CapacityPlanning.gpu_batch_str` requests per batch can still sustain this load, because the requests not currently executing wait in host memory. Service rate, queueing behavior, and the tail distribution, not the population itself, determine whether the load is feasible.
 
 :::
 
@@ -2255,6 +2260,7 @@ Because the denominator contains $1 - \ServingUtilization$, latency grows nonlin
 # │ How: Latency multiple = 1/(1-rho); example latency = multiple x reference service time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, fmt_time, fmt_multiple, check
 from mlsysim.core.units import ms
 
@@ -2262,14 +2268,15 @@ class UtilizationLatency:
     """M/M/1 time-in-system = service/(1-rho); example uses the reference batch-one service time."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rho_pct = [50, 70, 80, 90, 95]  # utilization points
-    service_ms_value = ResNetH100Profile.eager_b1  # reference profile: ResNet-50 batch-one service time
+    _plan = Scenarios.ResNet50FleetPlanH100  # batch-one ResNet-50 service on one H100, M/M/1
+    rho_pct = [round(u * 100) for u in _plan.utilization_points]  # utilization points
+    service_ms_value = _plan.service_time
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    latency_multiple_value = [1.0 / (1.0 - r / 100.0) for r in rho_pct]
-    example_ms_value = []
-    for _mult in latency_multiple_value:
-        example_ms_value.append(_mult * service_ms_value)
+    latency_multiple_value, example_ms_value = [], []
+    for _u in _plan.utilization_points:
+        example_ms_value.append(_plan.time_in_system(_u))
+        latency_multiple_value.append((example_ms_value[-1] / service_ms_value).to("").magnitude)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(latency_multiple_value == sorted(latency_multiple_value), "Latency multiple must grow with utilization.")
@@ -2410,6 +2417,7 @@ At 70 percent utilization, average latency is only 3.3 times service time, while
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import (
     fmt_int,
     fmt,
@@ -2426,25 +2434,26 @@ class CapacityPlanningCalc:
     """ResNet-50 capacity planning: GPUs needed for a 50 ms worker p99 subbudget with N+1 redundancy."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cp_peak_qps_value = 5000 * (count / second)  # scenario assumption: peak traffic
-    cp_service_ms_value = ResNetH100Profile.eager_b1  # reference profile: batch-one service time on the H100
-    cp_p99_target_ms_value = 50 * ms  # scenario assumption: queue-plus-GPU p99 subbudget
-    cp_single_gpu_rate_value = (1 * count / cp_service_ms_value).to(count / second)
-    cp_headroom_factor_value = 1.3  # 30% headroom for variance
+    _plan = Scenarios.ResNet50FleetPlanH100  # 5,000 req/s peak, 50 ms queue-plus-GPU p99, 30% headroom
+    cp_peak_qps_value = _plan.peak_rate.to(count / second)
+    cp_service_ms_value = _plan.service_time  # reference profile: batch-one service time on the H100
+    cp_p99_target_ms_value = _plan.tail_budget
+    cp_single_gpu_rate_value = _plan.service_rate.to(count / second)
+    cp_headroom_factor_value = _plan.headroom
     cp_fp32_bits_value = FP32_BITS  # FP32 bit width
     cp_int8_bits_value = INT8_BITS  # INT8 bit width
-    mm1_p99_factor_value = 4.6  # p99 multiplier for M/M/1
-    mm1_rho_example_util_value = 0.7  # example utilization
+    mm1_p99_factor_value = _plan.tail_factor  # p99 multiplier for M/M/1
+    mm1_rho_example_util_value = _plan.example_utilization  # example utilization
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cp_rho_safe_value = 1 - (mm1_p99_factor_value * cp_service_ms_value) / cp_p99_target_ms_value
-    cp_mu_required_value = cp_peak_qps_value / cp_rho_safe_value
-    cp_gpus_raw_value = (cp_mu_required_value / cp_single_gpu_rate_value).to("").magnitude
-    cp_gpus_ceil_value = math.ceil(cp_gpus_raw_value)
+    cp_rho_safe_value = _plan.max_utilization
+    cp_mu_required_value = _plan.required_rate.to(count / second)
+    cp_gpus_raw_value = _plan.accelerators_exact
+    cp_gpus_ceil_value = _plan.accelerators
     cp_final_raw_value = cp_gpus_ceil_value * cp_headroom_factor_value
-    cp_final_ceil_value = math.ceil(cp_final_raw_value)
+    cp_final_ceil_value = _plan.accelerators_planned
     cp_gpus_after_fail_value = cp_final_ceil_value - 1
-    cp_util_after_fail_value = (cp_peak_qps_value / (cp_single_gpu_rate_value * cp_gpus_after_fail_value)).to("").magnitude * 100
+    cp_util_after_fail_value = _plan.utilization_after_failure * 100
     cp_n_plus_2_min_value = cp_gpus_ceil_value + 2
     cp_n_plus_2_headroom_value = cp_final_ceil_value + 2
     cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
@@ -2552,17 +2561,19 @@ from mlsysim.core.units import *
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_rate
 
 class BlackFridayCalc:
     """Models the nonlinear failure mode of serving systems under a 10× traffic spike."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bf_latency_ms_value = 50 * ms  # scenario assumption: normal operation latency
-    bf_qps_normal_value = 1000  # normal queries per second
-    bf_qps_spike_value = 10000  # Black Friday peak QPS
-    bf_spike_factor_value = 10  # spike multiplier (10x)
-    bf_collapse_latency_s_value = 10 * second  # scenario assumption: latency during collapse
+    _s = Scenarios.RecommenderTrafficSurge  # sized for 1,000 QPS, receives ten times more
+    bf_latency_ms_value = _s.normal_latency  # normal operation latency
+    bf_qps_normal_value = round(_s.normal_rate.to(1 / second).magnitude)  # normal queries per second
+    bf_qps_spike_value = round(_s.surge_rate.to(1 / second).magnitude)  # Black Friday peak QPS
+    bf_spike_factor_value = round(_s.surge_factor)  # spike multiplier (10x)
+    bf_collapse_latency_s_value = _s.surge_latency  # latency during collapse
     bf_full_util_pct_value = 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2631,21 +2642,22 @@ Headroom keeps the queue stable by leaving capacity idle, and adding replicas cr
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Opening paragraph of the batching discussion.
 # │ Goal: Contrast batch one and batch 32 throughput and fixed-cost share.
-# │ How: ResNetH100Profile.eager_ms at batch 1 and 32.
+# │ How: Scenarios.ResNet50EagerFp16BatchingH100 at batch 1 and 32.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_rate, fmt_percent, fmt_multiple
 
 class BatchingIntroCalc:
     """Batch one versus batch 32 for the reference profile."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    P = ResNetH100Profile
+    P = Scenarios.ResNet50EagerFp16BatchingH100  # reference profile, eager FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t1, t32 = P.eager_ms(1), P.eager_ms(32)
-    rate1 = (1 / t1.to(second)).magnitude
-    rate32 = (32 / t32.to(second)).magnitude
-    fixed1 = (P.eager_fixed / t1).to("").magnitude
+    t1, t32 = P.service_time(1), P.service_time(32)
+    rate1 = P.throughput(1).magnitude
+    rate32 = P.throughput(32).magnitude
+    fixed1 = P.fixed_share(1)
     gain = rate32 / rate1
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2692,6 +2704,7 @@ A single request often leaves an accelerator's compute units idle because its op
 # │      batching window added to inference time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, check
 
 class BatchThroughputCalc:
@@ -2699,15 +2712,18 @@ class BatchThroughputCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     P = ResNetH100Profile
+    S = Scenarios.ResNet50EagerFp16BatchingH100  # the profile's affine service model
     batch_sizes = [1, 4, 8, 16, 32]
     batch_window_ms_value = 10.0 * ms  # scenario assumption: batching window
     slo_ms_value = 20.0 * ms  # scenario assumption: request SLO for the batch-8 example
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    inference_ms_value = [ResNetH100Profile.eager_ms(b) for b in batch_sizes]
-    per_image_ms_value = [(t / b).to(ms) for t, b in zip(inference_ms_value, batch_sizes)]
-    throughput_value = [(b / t.to(second)).magnitude for b, t in zip(batch_sizes, inference_ms_value)]
-    fixed_share_value = [(ResNetH100Profile.eager_fixed / t).to("").magnitude for t in inference_ms_value]
+    inference_ms_value, per_image_ms_value, throughput_value, fixed_share_value = [], [], [], []
+    for _b in batch_sizes:
+        inference_ms_value.append(S.service_time(_b))
+        per_image_ms_value.append(S.time_per_request(_b))
+        throughput_value.append(S.throughput(_b).magnitude)
+        fixed_share_value.append(S.fixed_share(_b))
     throughput_ratio_value = throughput_value[-1] / throughput_value[0]
     batch8_vs_batch1_ratio_value = throughput_value[2] / throughput_value[0]
     batch32_total_ms_value = batch_window_ms_value + inference_ms_value[-1]
@@ -2758,42 +2774,33 @@ Two fixed costs dominate at small batch sizes. Kernel launch overhead\index{Kern
 ↩ Per-kernel launch overhead, and why fusion and graph execution attack it, are established in @sec-ml-frameworks-dispatch-overhead-law-9e0a.
 :::
 
-Larger batches improve hardware efficiency but inflate per-request latency. The engineering objective is to identify the operating point that maximizes sustainable throughput while satisfying the request deadline. For the reference ResNet-50 profile quantified in @tbl-model-serving-batching-throughput-tradeoff below, serving batch size 8 with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window requires a mean formation-plus-inference budget of approximately `{python} BatchThroughputCalc.batch8_budget_ms_str`. An arriving request waits on average half the window (`{python} BatchThroughputCalc.half_window_ms_str`, as derived in @sec-model-serving-queue-waiting-time-analysis-8d5c) and requires `{python} BatchThroughputCalc.batch8_inference_ms_str` of inference. If the service must meet a `{python} BatchThroughputCalc.slo_ms_str` SLO, the remaining `{python} BatchThroughputCalc.batch8_headroom_ms_str` provides headroom for worker backlog and auxiliary pipeline stages, while delivering `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch 1 on identical hardware. On this accelerator the batching window, not the computation, is most of the batch-8 budget. Batch size cannot grow indefinitely, and @fig-throughput-latency-knee shows why by modeling this relationship across batch sizes on a logarithmic axis. To isolate the planning knee under worst-case scheduling conditions, the figure assumes a strictly serialized single worker that waits out the full batching window before executing each batch, without pipelined overlap ($\text{Latency} = \BatchingWindow + \BatchServiceTime(\BatchSize)$). Under this unpipelined assumption, batch-1 throughput is `{python} BatchThroughputCalc.serial_b1_rps_str` rather than the `{python} BatchThroughputCalc.b1_rps_str` sustained when inference runs back to back. Throughput rises almost in proportion to batch size while the fixed overhead dominates each batch, because each added image costs only `{python} ResNetH100Profile.per_image_fp16_us_str` of device time. The planning knee sits where the batch's total per-image work equals the fixed part of its latency, the window plus the fixed cost, near batch `{python} BatchThroughputCalc.knee_batch_str`. There latency is twice that of batch one and throughput is half its ceiling. Beyond it, each doubling of the batch roughly doubles latency while throughput gains less and less. In this model throughput never declines; it saturates, so latency, not throughput, sets the largest useful batch.
+Larger batches improve hardware efficiency but inflate per-request latency. The engineering objective is to identify the operating point that maximizes sustainable throughput while satisfying the request deadline. For the reference ResNet-50 profile quantified in @tbl-model-serving-batching-throughput-tradeoff below, serving batch size 8 with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window requires a mean formation-plus-inference budget of approximately `{python} BatchThroughputCalc.batch8_budget_ms_str`. An arriving request waits on average half the window (`{python} BatchThroughputCalc.half_window_ms_str`, as derived in @sec-model-serving-queue-waiting-time-analysis-8d5c) and requires `{python} BatchThroughputCalc.batch8_inference_ms_str` of inference. If the service must meet a `{python} BatchThroughputCalc.slo_ms_str` SLO, the remaining `{python} BatchThroughputCalc.batch8_headroom_ms_str` provides headroom for worker backlog and auxiliary pipeline stages, while delivering `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch 1 on identical hardware. On this accelerator the batching window, not the computation, is most of the batch-8 budget. Batch size cannot grow indefinitely, and @fig-throughput-latency-knee shows why by modeling this relationship across batch sizes on a logarithmic axis. To isolate the planning knee under worst-case scheduling conditions, the figure assumes a strictly serialized single worker that waits out the full batching window before executing each batch, without pipelined overlap ($\text{Latency} = \BatchingWindow + \BatchServiceTime(\BatchSize)$). Under this unpipelined assumption, batch-1 throughput is `{python} BatchThroughputCalc.serial_b1_rps_str` rather than the `{python} BatchThroughputCalc.b1_rps_str` sustained when inference runs back to back. Throughput rises almost in proportion to batch size while the fixed overhead dominates each batch, because each added image costs only `{python} ResNetH100Profile.per_image_fp16_us_str` of device time. The planning knee sits where the batch's total per-image work equals the fixed part of its latency, the window plus the fixed cost, near batch `{python} BatchThroughputCalc.knee_batch_str`. There latency is approximately twice that of batch one and throughput is half its ceiling. Beyond it, each doubling of the batch roughly doubles latency while throughput gains less and less. In this model throughput never declines; it saturates, so latency, not throughput, sets the largest useful batch.
 
-::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange) for the reference ResNet-50 profile on the H100. Throughput rises nearly in proportion to batch size while fixed overhead dominates, then flattens toward its ceiling. Latency grows slowly at first and roughly in proportion to batch size beyond the marked planning knee, where it is twice the batch-one latency and throughput reaches half its ceiling. Each throughput value is batch size divided by the plotted formation-plus-service latency, for a single worker that waits out a 10 ms window and then serves each batch; pipelined serving sustains higher throughput. Values are modeled, not measured." fig-alt="Dual-axis line chart on a log batch-size axis. Blue line (throughput) rises steeply and then flattens. Orange line (latency) stays nearly flat through batch 32 and then climbs. A vertical dashed line labeled Planning Knee marks batch size near 400."}
+::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: The top panel shows throughput and the bottom panel shows latency for the same batch sizes in the reference ResNet-50 profile on the H100. Aligned dashed markers locate the planning knee, where fixed and per-image costs contribute equally to latency and throughput reaches half its ceiling. Beyond it, latency continues to rise while throughput approaches its ceiling. Each throughput value is batch size divided by formation-plus-inference latency for a single worker that waits out the full batching window before serving each batch. Pipelined serving sustains higher throughput. Values are modeled, not measured." fig-alt="Two stacked line charts share a logarithmic batch-size axis. The top blue throughput curve rises and flattens; the bottom orange latency curve rises more sharply at larger batches. Aligned vertical dashed lines labeled Planning knee mark the same batch size in both panels."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THROUGHPUT-LATENCY KNEE FIGURE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-throughput-latency-knee—dual-axis plot preceding the
-# │          dynamic batching section, illustrating the throughput/latency trade-off
-# │
-# │ Goal: Show that throughput saturates and latency spikes at the same batch
-# │       size threshold, revealing the optimal operating point.
-# │ Show: Throughput (req/s) and latency (ms) as a function of batch size on
-# │       log-scale x-axis with an annotated optimal point.
-# │ How: Plot tabular BATCHING_DATA on dual y-axes; mark optimal with axvline.
-# │
+# │ Context: @fig-throughput-latency-knee—throughput optimization.
+# │ Goal: Compare throughput saturation with formation-plus-inference latency.
+# │ Show: Two vertically aligned panels with the same batch sizes and knee.
+# │ How: Retain the serialized-worker model; give each metric its own panel.
 # └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Show that throughput saturates and latency spikes at the same batch
 import pandas as pd
 from binder.tools.figures import style as book_style
 
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.5))
-# =============================================================================
-# DATA
-# =============================================================================
+fig, _, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.0))
+fig.clear()
+ax1, ax2 = fig.subplots(2, 1, sharex=True)
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 # One worker waits out the batching window, then serves the batch (reference profile).
 _window = BatchThroughputCalc.batch_window_ms_value
 BATCHING_DATA = []
 for _b in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]:
-    _lat = (_window + ResNetH100Profile.eager_ms(_b)).to(ms).magnitude
+    _lat = (_window + Scenarios.ResNet50EagerFp16BatchingH100.service_time(_b)).to(ms).magnitude
     BATCHING_DATA.append({'BatchSize': _b, 'Latency': _lat, 'Throughput': (_b * count / (_lat * ms)).to(count / second).magnitude})
 check(
     all(a['Throughput'] < b['Throughput'] for a, b in zip(BATCHING_DATA, BATCHING_DATA[1:])),
@@ -2801,46 +2808,39 @@ check(
 )
 df = pd.DataFrame(BATCHING_DATA)
 
-# =============================================================================
-# PLOT: The Throughput-Latency Knee
-# =============================================================================
-color_tp, color_lat = COLORS['BlueLine'], COLORS['OrangeLine']
-
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-
-ax1.plot(df['BatchSize'], df['Throughput'], 'o-', color=color_tp, label='Throughput')
-ax1.set_xlabel('Batch Size')
-ax1.set_ylabel('Throughput (Requests/sec)', color=color_tp, fontweight='bold')
-ax1.tick_params(axis='y', labelcolor=color_tp)
-ax1.set_xscale('log', base=2)
-
-ax2 = ax1.twinx()
-ax2.plot(df['BatchSize'], df['Latency'], 's-', color=color_lat, label='Latency')
-ax2.set_ylabel('Latency (ms)', color=color_lat, fontweight='bold', rotation=270, labelpad=15)
-ax2.tick_params(axis='y', labelcolor=color_lat)
-ax2.spines['right'].set_visible(True)
-ax2.spines['top'].set_visible(False)
-
-_knee = BatchThroughputCalc.knee_batch_value
-ax1.axvline(_knee, color='gray', linestyle='--', alpha=0.5)
-ax1.text(
-    _knee * 0.92,
-    df['Throughput'].max() * 0.62,
-    " Planning\n Knee",
-    ha='right',
-    color='gray',
-    fontsize=9,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-plt.show()
-plt.close()
+ax1.plot(df['BatchSize'], df['Throughput'], 'o-', color=COLORS['BlueLine'])
+ax1.set_title('(a) Throughput', loc='left')
+ax1.set_ylabel('Throughput (requests/s)')
+ax2.plot(df['BatchSize'], df['Latency'], 's-', color=COLORS['OrangeLine'])
+ax2.set_title('(b) Formation plus inference', loc='left')
+ax2.set_ylabel('Latency (ms)')
+ax2.set_xlabel('Batch size')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+_knee = BatchThroughputCalc.knee_batch_value
+for _ax in (ax1, ax2):
+    _ax.set_xscale('log', base=2)
+    _ax.axvline(_knee, color=COLORS['secondary'], linestyle='--', linewidth=1)
+    _ax.text(
+        _knee * 0.90,
+        0.84,
+        'Planning knee',
+        transform=_ax.get_xaxis_transform(),
+        ha='right',
+        va='top',
+        fontsize=book_style.MIN_FONT_PT,
+        color=COLORS['secondary'],
+        bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', pad=1),
+    )
+fig.tight_layout(h_pad=1.1)
+plt.show()
+plt.close()
 ```
 
 :::
 
-The vertical dashed marker near batch size `{python} BatchThroughputCalc.knee_batch_str` in @fig-throughput-latency-knee marks the point where per-image work equals the fixed part of a batch's latency. The knee illustrates a general systems trade-off rather than a fixed operating setting. Under unpipelined serial dispatch, throughput is bounded by $\BatchSize / (\BatchingWindow + \BatchServiceTime(\BatchSize))$. In contrast, when the serving runtime pipelines batch formation with accelerator execution, saturated throughput depends solely on accelerator service time ($\EffectiveServiceRate(\BatchSize) = \BatchSize / \BatchServiceTime(\BatchSize)$), achieving the higher capacities documented in @tbl-model-serving-batching-throughput-tradeoff.
+The aligned dashed markers near batch size `{python} BatchThroughputCalc.knee_batch_str` in @fig-throughput-latency-knee mark the point where per-image work equals the fixed part of a batch's latency. The knee illustrates a general systems trade-off rather than a fixed operating setting. Under unpipelined serial dispatch, throughput is bounded by $\BatchSize / (\BatchingWindow + \BatchServiceTime(\BatchSize))$. In contrast, when the serving runtime pipelines batch formation with accelerator execution, saturated throughput depends solely on accelerator service time ($\EffectiveServiceRate(\BatchSize) = \BatchSize / \BatchServiceTime(\BatchSize)$), achieving the higher capacities documented in @tbl-model-serving-batching-throughput-tradeoff.
 
 ::: {#nbk-model-serving-resnet-50-batching-efficiency .callout-notebook title="ResNet-50 batching efficiency"}
 
@@ -2887,6 +2887,7 @@ The inference times exclude queue wait. The window-plus-inference column is the 
 # │      assumption as the resolution estimate; the book's DRAM-byte and
 # │      FP32-operation energy constants (per FLOP = mean of multiply and add).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim import Models, Hardware, BYTES_FP32, MB, byte, flop
 from mlsysim.core.units import mJ as millijoule, pJ as picojoule
 from mlsysim.fmt import check, fmt_memory, fmt_arithmetic_intensity, fmt_energy, fmt_energy_per_byte, fmt_energy_per_flop, fmt_percent
@@ -2895,28 +2896,26 @@ class ResnetBatchBytes:
     """Per-image bytes, intensity, and energy for batched ResNet-50 serving."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    resnet = Models.Vision.ResNet50
-    act_per_image = 12.5 * MB  # scenario assumption: 224×224 activation footprint (as in the resolution estimate)
-    act_rw_factor = 2  # scenario assumption: each activation written once, read once
-    dram_energy = Hardware.Tech.Memory.DRAM.energy_per_byte
-    flop_energy = (Hardware.Tech.Op.FlopFp32.energy + Hardware.Tech.Op.AddFp32.energy) / 2
+    _s = Scenarios.ResNet50BatchEnergyPerImage  # FP32 weights per batch, 12.5 MB activations per image
+    resnet = _s.workload
+    act_per_image = _s.activation_bytes
+    act_rw_factor = _s.activation_passes
+    dram_energy = _s.byte_energy
+    flop_energy = _s.flop_energy
     batch_sizes = [1, 8, 32]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = resnet.size_in_bytes(BYTES_FP32)
+    weights = _s.weights
     flops = resnet.inference_flops
     # for-loops avoid Python 3 class-scope comprehension issues
     act_bytes = act_rw_factor * act_per_image
-    compute_energy = (flops * flop_energy).to(millijoule)
+    compute_energy = _s.compute_energy
     weight_per_image, intensity, total_energy, move_share = [], [], [], []
     for _b in batch_sizes:
-        _w = weights / _b
-        _bytes = _w + act_bytes
-        _move = (_bytes * dram_energy).to(millijoule)
-        weight_per_image.append(_w)
-        intensity.append((flops / _bytes).to(flop / byte))
-        total_energy.append(_move + compute_energy)
-        move_share.append(round((_move / (_move + compute_energy)).to("").magnitude, 2))
+        weight_per_image.append(_s.weight_per_image(_b))
+        intensity.append(_s.intensity(_b))
+        total_energy.append(_s.energy(_b))
+        move_share.append(round(_s.movement_share(_b), 2))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(flop_energy.to(picojoule / flop).magnitude - 2.3) < 0.01, f"Per-FLOP energy should be 2.3 pJ, got {flop_energy}.")
@@ -3044,20 +3043,22 @@ $$\mathbb{E}[\BatchingQueueWait] = \frac{\BatchingWindow}{2}$$ {#eq-avg-wait}
 # │ How: Calculate average wait time assuming uniform request arrival.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 
 class BatchingBudgetCalc:
     """Shows that a 20 ms batching window consumes 20% of a 50 ms SLO before any computation."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    batch_window_ms_value = 20 * ms  # scenario assumption: batching window
-    slo_ms_value = 50 * ms  # scenario assumption: latency SLO
+    _w = Scenarios.BatchWindow20msIn50msBudget  # 20 ms window inside a 50 ms latency SLO
+    batch_window_ms_value = _w.window
+    slo_ms_value = _w.latency_budget
     inference_ms_value = ResNetH100Profile.eager_b1  # reference profile: batch-one inference
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    avg_wait_ms_value = batch_window_ms_value / 2
+    avg_wait_ms_value = _w.mean_wait
     max_wait_ms_value = batch_window_ms_value
-    budget_pct_value = avg_wait_ms_value / slo_ms_value * 100
+    budget_pct_value = _w.budget_share * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(avg_wait_ms_value == 10 * ms, f"Expected 10 ms average wait, got {avg_wait_ms_value}")
@@ -3093,6 +3094,7 @@ where $\WindowArrivalCount$ is a nonnegative integer count of arrivals in the wi
 # │ How: mean = lambda*T; std = sqrt(mean); P(0) = e^-mean; survival P(X>=2*mean).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 import math
 from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 from mlsysim.core.units import ms
@@ -3101,22 +3103,17 @@ class BatchVariability:
     """Poisson batch-size statistics for a fixed 10 ms window across traffic levels."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    qps = [50, 200, 500, 1000]
-    window_ms_value = 10 * ms  # scenario assumption: 10 ms batching window
+    _w = Scenarios.BatchWindow10ms  # 10 ms window, Poisson arrivals at four rates
+    qps = [round(r.to(1 / second).magnitude) for r in _w.arrival_rates]
+    window_ms_value = _w.window
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mean_value = []
-    for _q in qps:
-        mean_value.append((_q * (window_ms_value / second)).to("").magnitude)
-    std_value = [math.sqrt(m) for m in mean_value]
-    p0_value = [math.exp(-m) for m in mean_value]
-    p_ge_value = []
-    for _m in mean_value:
-        _k = round(2 * _m)
-        _cdf = 0.0
-        for _i in range(_k):
-            _cdf += math.exp(-_m) * _m**_i / math.factorial(_i)
-        p_ge_value.append(1.0 - _cdf)
+    mean_value, std_value, p0_value, p_ge_value = [], [], [], []
+    for _r in _w.arrival_rates:
+        mean_value.append(_w.mean_arrivals(_r))
+        std_value.append(_w.arrival_spread(_r))
+        p0_value.append(_w.empty_share(_r))
+        p_ge_value.append(_w.count_at_least(_r, round(2 * mean_value[-1])))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(mean_value == sorted(mean_value), "Mean batch must grow with arrival rate.")
@@ -3158,19 +3155,15 @@ To analytically evaluate batching strategies across arbitrary batch sizes withou
 # │
 # │ Goal: Share one service-time and throughput function across batching cells.
 # │ Show: The reference profile's fixed cost plus per-image work, as functions.
-# │ How: Module-scope helpers over ResNetH100Profile.eager_fixed and eager_per_image.
+# │ How: Scenarios.ResNet50EagerFp16BatchingH100 (fixed cost plus per-image time).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-# Helper functions at module scope (used by the later batching cells);
-# defaults are the reference profile's affine service model.
-_FIXED = ResNetH100Profile.eager_fixed
-_PER_IMAGE = ResNetH100Profile.eager_per_image
-
-def service_time_value(b, _fixed=_FIXED, _per_image=_PER_IMAGE):
-    return (_fixed + _per_image * b).to(ms)
-
-def throughput_value(b, _fixed=_FIXED, _per_image=_PER_IMAGE):
-    return (b * count / (_fixed + _per_image * b)).to(count / second)
+# The reference profile's affine service model at module scope (used by the later
+# batching cells): service_time(B) and throughput(B) live in MLSysIM.
+from mlsysim import Scenarios
+_SERVICE = Scenarios.ResNet50EagerFp16BatchingH100
+_FIXED = _SERVICE.fixed_time
+_PER_IMAGE = _SERVICE.per_request_time
 ```
 
 The sweep, the formation wait, and the arrival statistics compose a calendar-window planning model. Average formation wait is half the window, Poisson arrivals make the window count fluctuate around $\ArrivalRate \BatchingWindow$, and saturated service capacity $\EffectiveServiceRate(\BatchSize)$ grows as batching amortizes fixed costs. An oldest-request timer, a maximum-batch trigger, or a busy worker changes the observed wait and batch distributions. Mean-latency screening can narrow candidate configurations; a percentile SLO requires their tail behavior under the intended dispatch policy and load.
@@ -3222,8 +3215,8 @@ class BatchingOptimization:
     s2_latency_batch = int(((s2_budget - _FIXED) / _PER_IMAGE).to("").magnitude)
     s1_batch = min(s1_latency_batch, engine_max_batch)
     s2_batch = min(s2_latency_batch, engine_max_batch)
-    s1_tput = throughput_value(s1_batch).magnitude
-    s2_tput = throughput_value(s2_batch).magnitude
+    s1_tput = _SERVICE.throughput(s1_batch).magnitude
+    s2_tput = _SERVICE.throughput(s2_batch).magnitude
     tput_gain = ((s2_tput / s1_tput) - 1) * 100
     latency_increase = s2_wait - s1_wait
 
@@ -3269,23 +3262,25 @@ This comparison quantifies the diminishing returns of expanding the batching win
 # │ How: Model request arrival and batch assembly to compare mean vs. envelope.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_time, check
 
 class SloViolationCalc:
     """Compares mean latency with a conservative tail envelope under Poisson arrivals."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    qps_value = 500 * (count / second)  # scenario assumption: request arrival rate
-    T_slo_value = 10.0 * ms  # scenario assumption: batching window
-    p99_batch_count_value = 12
+    _w = Scenarios.BatchWindow10ms  # 10 ms window; 500 requests/s is its third rate
+    qps_value = _w.arrival_rates[2].to(count / second)  # request arrival rate
+    T_slo_value = _w.window  # batching window
+    p99_batch_count_value = _w.seen_batch_tail(_w.arrival_rates[2])
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # service_time_value is a module-level function from batching-analysis-calc
-    mean_batch_value = 1 + (qps_value * T_slo_value).to(count).magnitude
+    # _SERVICE is the module-level service model from batching-analysis-calc
+    mean_batch_value = _w.seen_batch_mean(_w.arrival_rates[2])
     mean_wait_value = T_slo_value / 2
-    mean_service_value = service_time_value(int(mean_batch_value))
+    mean_service_value = _SERVICE.service_time(int(mean_batch_value))
     mean_latency_value = mean_wait_value + mean_service_value
-    p99_service_value = service_time_value(p99_batch_count_value)
+    p99_service_value = _SERVICE.service_time(p99_batch_count_value)
     tail_envelope_value = T_slo_value + p99_service_value
     envelope_to_mean_value = tail_envelope_value / mean_latency_value
 
@@ -3383,7 +3378,7 @@ class ParetoBatching:
     p99_ms = []
     throughput_value = []
     for _w, _b in zip(window_ms, max_batch):
-        _svc = service_time_value(_b).to(ms).magnitude
+        _svc = _SERVICE.service_time(_b).to(ms).magnitude
         avg_ms.append(_w / 2 + _svc)
         p99_ms.append(_w + _svc)
         throughput_value.append(_b / (_svc / 1000))  # images per second
@@ -3521,31 +3516,35 @@ For an illustrative ResNet-50 serving system with a 50 ms SLO and 500 QPS traffi
 # │ Context: Example "From a batching window to a dispatch decision".
 # │
 # │ Goal: Trace one dual-trigger batch from first arrival to completion.
-# │ How: Selected window from PracticalConfigCalc; affine service model.
+# │ How: Scenarios.DualTriggerBatchFourRequests (the selected window of
+# │      PracticalConfigCalc; affine service model).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+
 class BatchDispatchCalc:
     """Oldest-request latency for a four-request batch under the selected window."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Hypothetical trace: oldest request arrives at zero; three join before timeout.
-    arrivals = [0 * ms, 2 * ms, 5 * ms, 9 * ms]
-    worker_ready = 18 * ms
-    outside_remaining = 4 * ms
-    deadline = PracticalConfigCalc.pc_slo_ms_value
-    window = PracticalConfigCalc.pc_config_window_ms_value
+    _d = Scenarios.DualTriggerBatchFourRequests
+    arrivals = _d.arrivals
+    worker_ready = _d.worker_free
+    outside_remaining = _d.response_path
+    deadline = _d.deadline
+    window = _d.timeout
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    formation_end = arrivals[0] + window
-    dispatch = max(formation_end, worker_ready)
-    backlog_wait = dispatch - formation_end
-    service = service_time_value(len(arrivals))
-    response = dispatch + service + outside_remaining
-    oldest_latency = response - arrivals[0]
-    slack = deadline - oldest_latency
+    formation_end = _d.formation_end
+    dispatch = _d.dispatch
+    backlog_wait = _d.backlog_wait
+    service = _d.batch_time
+    oldest_latency = _d.oldest_latency
+    slack = _d.slack
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(arrivals[-1] < formation_end, "All four requests must join before timeout.")
     check(len(arrivals) < PracticalConfigCalc.pc_config_batch_count_value, "Timeout must trigger before the batch cap.")
+    check(window == PracticalConfigCalc.pc_config_window_ms_value and deadline == PracticalConfigCalc.pc_slo_ms_value, "The trace uses the selected window and the SLO.")
     check(5 * ms < backlog_wait < 7 * ms, f"Prose says about 6 ms of resource-queue wait, got {backlog_wait}.")
     check(slack > 15 * ms, f"The four-request batch must meet the deadline with room to spare, got {slack}.")
 
@@ -4214,22 +4213,24 @@ In multi-process serving deployments where multiple worker processes share a sin
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_time, fmt_time_range, check
 
 class ColdStartCalc:
     """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cs_ssd_value = 0.5 * second  # scenario assumption: weight loading from SSD
-    cs_s3_value = 4.0 * second  # scenario assumption: weight loading from S3
-    cs_cuda_value = 0.4 * second  # scenario assumption: CUDA context initialization
-    cs_compile_value = 30.0 * second  # scenario assumption: TensorRT compilation
-    cs_warmup_value = 0.2 * second  # scenario assumption: warmup inferences
-    cs_runtime_overhead_value = 0.4 * second  # scenario assumption: runtime overhead
+    _s = Scenarios.ResNet50ReplicaStartup  # representative startup phases
+    cs_ssd_value = _s.phases["weights from local SSD"]
+    cs_s3_value = _s.phases["weights from object storage"]
+    cs_cuda_value = _s.phases["CUDA context"]
+    cs_compile_value = _s.phases["TensorRT engine build"]
+    cs_warmup_value = _s.phases["warmup"]
+    cs_runtime_overhead_value = _s.phases["runtime"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
-    cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value + cs_runtime_overhead_value
+    cs_local_total_value = _s.warm_total
+    cs_cloud_total_value = _s.cold_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cs_local_total_value == 1.5 * second, f"Expected 1.5s local cold start, got {cs_local_total_value}")
@@ -4239,9 +4240,9 @@ class ColdStartCalc:
     cs_local_s_str = fmt_time(cs_local_total_value, 'second', precision=1, commas=False, approx=True)
     cs_cloud_s_str = fmt_time(cs_cloud_total_value, 'second', precision=0, commas=False, approx=True)
     cs_ssd_s_str = fmt_time(cs_ssd_value, 'second', precision=1, commas=False)
-    cs_s3_str = fmt_time_range(3 * second, 5 * second, "second", precision=0, commas=False)
-    cs_cuda_str = fmt_time_range(0.3 * second, 0.5 * second, "second", precision=1, commas=False)
-    cs_compile_str = fmt_time_range(15 * second, 30 * second, "second", precision=0, commas=False)
+    cs_s3_str = fmt_time_range(*_s.ranges["weights from object storage"], "second", precision=0, commas=False)
+    cs_cuda_str = fmt_time_range(*_s.ranges["CUDA context"], "second", precision=1, commas=False)
+    cs_compile_str = fmt_time_range(*_s.ranges["TensorRT engine build"], "second", precision=0, commas=False)
     cs_warmup_s_str = fmt_time(cs_warmup_value, 'second', precision=1, commas=False)
     cs_runtime_overhead_s_str = fmt_time(cs_runtime_overhead_value, 'second', precision=1, commas=False)
 ```
@@ -4390,12 +4391,12 @@ class ModelSwapCalc:
     """Quantifies the latency cost of swapping a reference model over PCIe Gen4."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    loading_scenario = ReferenceStats.ModelLoading
-    model_size = loading_scenario.PcieSwapReferenceModelSize
-    pcie_bw = Hardware.Cloud.A100.interconnect.bandwidth  # PCIe Gen4 x16 bandwidth
+    _s = Scenarios.ModelSwapPcieGen4  # 10 GB reference model over PCIe Gen4 x16
+    model_size = _s.payload
+    pcie_bw = _s.links["PCIe Gen4 x16"]  # PCIe Gen4 x16 bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_swap = transfer_time(model_size, pcie_bw)
+    model_swap = _s.transfer_time("PCIe Gen4 x16")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(model_swap.to(ms).magnitude, 1) == 312.5, f"Expected 312.5 ms model swap time, got {model_swap}")
@@ -4489,10 +4490,11 @@ A single "latency" number therefore hides the prefill/decode split. TTFT is the 
 # │ Show: Prefill time for a 512-token prompt; batch-one weight-read floor;
 # │       eager host submission time; per-token KV bytes (no grouped-query
 # │       sharing); bytes and time per decode step at batch 1 and 32.
-# │ How: Registry GPT-2 XL shape and H100 compute/bandwidth; runtime
-# │      overheads from the frameworks chapter's dispatch model.
+# │ How: Scenarios.Gpt2XlChatDecodeBatchesH100 (batched decode with cache
+# │      reads, prefill), Gpt2XlFp16DecodeOnH100 (weight floor, intensity),
+# │      and Gpt2XlEagerDecodeDispatch (eager host submission).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Ops, BYTES_FP16, GB, MB, KB, TB, second, millisecond, microsecond, byte, flop
+from mlsysim import Scenarios, GB, MB, KB, millisecond, flop, byte
 from mlsysim.fmt import check, fmt_memory, fmt_time, fmt_flops, fmt_arithmetic_intensity, fmt_multiple, fmt_percent, fmt_rate, fmt_count
 from mlsysim.core.units import TFLOPs
 
@@ -4500,38 +4502,34 @@ class Gpt2DecodeFloor:
     """GPT-2 XL prefill and decode on one H100, eager vs. graph-captured."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    h100 = Hardware.Cloud.H100
-    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
-    kernels_per_block = 12  # scenario assumption: eager kernels per transformer block (frameworks chapter count)
-    context_tokens = 1024  # GPT-2 context window (architecture constant)
-    prompt_tokens = 512  # scenario assumption: chat prompt length
-    prefill_efficiency = 0.4  # scenario assumption: fraction of FP16 peak sustained in prefill
-    batch_large = 32  # scenario assumption: concurrent sequences in a full decode batch
+    chat = Scenarios.Gpt2XlChatDecodeBatchesH100
+    decode = Scenarios.Gpt2XlFp16DecodeOnH100
+    eager = Scenarios.Gpt2XlEagerDecodeDispatch
+    context_tokens = chat.context_tokens
+    prompt_tokens = chat.prompt_tokens
+    prefill_efficiency = chat.prefill_efficiency
+    batch_large = chat.batch_sizes[2]  # the full decode batch: 32 concurrent sequences
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = gpt2.size_in_bytes(BYTES_FP16)
-    bw = h100.memory.bandwidth
-    peak_fp16 = h100.compute.precision_flops["fp16_dense"]
-    prefill_flops = gpt2.inference_flops * prompt_tokens
-    ttft = (prefill_flops / (peak_fp16 * prefill_efficiency)).to(millisecond)
-    floor_b1 = (weights / bw).to(millisecond)
-    n_kernels = kernels_per_block * gpt2.layers
-    host_time = (n_kernels * (kernel_launch + python_dispatch)).to(millisecond)
+    weights = chat.weights
+    prefill_flops = chat.prefill_ops
+    ttft = chat.prefill_time
+    floor_b1 = decode.result.memory_time.to(millisecond)
+    n_kernels = eager.launches
+    host_time = eager.host_time.to(millisecond)
     host_ratio = (host_time / floor_b1).to("").magnitude
-    intensity_b1 = (2 * flop / BYTES_FP16).to(flop / byte)
-    ridge = (peak_fp16 / bw).to(flop / byte)
-    kv_per_token = (2 * gpt2.layers * gpt2.hidden_dim * BYTES_FP16).to(byte)
-    kv_per_seq = (kv_per_token * context_tokens).to(MB)
-    step_bytes_b1 = (weights + kv_per_seq).to(GB)
-    step_bytes_bn = (weights + batch_large * kv_per_seq).to(GB)
-    step_b1 = (step_bytes_b1 / bw).to(millisecond)
-    step_bn = (step_bytes_bn / bw).to(millisecond)
-    rate_b1 = (1 / step_b1).to(1 / second).magnitude
-    rate_bn = (batch_large / step_bn).to(1 / second).magnitude
+    intensity_b1 = decode.result.intensity
+    ridge = chat.ridge
+    kv_per_token = chat.kv_per_token
+    kv_per_seq = chat.kv_per_sequence
+    step_bytes_b1 = chat.step_bytes(1)
+    step_bytes_bn = chat.step_bytes(batch_large)
+    step_b1 = chat.step_time(1)
+    step_bn = chat.step_time(batch_large)
+    rate_b1 = chat.token_rate(1).magnitude
+    rate_bn = chat.token_rate(batch_large).magnitude
     tpot_stretch = (step_bn / step_b1).to("").magnitude
-    kv_share_bn = ((batch_large * kv_per_seq) / step_bytes_bn).to("").magnitude
+    kv_share_bn = chat.cache_share(batch_large)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.8 < floor_b1.magnitude < 1.0, f"GPT-2 XL weight read should be ~0.9 ms on an H100, got {floor_b1}.")
@@ -4593,7 +4591,7 @@ Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve thro
 
 The scheduling boundary determines when an existing stream can emit its next token. @Fig-serving-chunked-prefill compares admission of one complete prompt with admission of the same prompt in chunks, while keeping the active stream visible in both schedules.
 
-::: {#fig-serving-chunked-prefill data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-chunked-prefill" fig-env="figure" fig-pos="htb" fig-cap="**Prefill Admission and Decode Cadence**: A new prompt P shares one worker with an active decode stream. Admitting P whole leaves a long interval between that stream's tokens. Admitting P in chunks inserts a decode step at each iteration boundary; P finishes later in the schedule shown. Both paths process the same prompt. Bar widths and token spacing are schematic, not measured durations or a throughput prediction." fig-alt="Two schedules have a prompt P row and an active-stream row. In panel a, one continuous prefill bar lies between two decode-output markers. In panel b, four labeled prefill chunks alternate with decode steps, with an output marker after each step. A horizontal arrow points right toward later time beneath both schedules. Dashed lines mark prompt completion in each panel."}
+::: {#fig-serving-chunked-prefill data-explore="original-v1-serving-chunked-prefill" data-explore-key="vol1:fig-serving-chunked-prefill" fig-env="figure" fig-pos="htb" fig-cap="**Prefill Admission and Decode Cadence**: A new prompt P shares one worker with an active decode stream. Admitting P whole leaves a long interval between that stream's tokens. Admitting P in chunks inserts a decode step at each iteration boundary; P finishes later in the schedule shown. Both paths process the same prompt. Bar widths and token spacing are schematic, not measured durations or a throughput prediction." fig-alt="Two schedules have a prompt P row and an active-stream row. In panel a, one continuous prefill bar lies between two decode-output markers. In panel b, four labeled prefill chunks alternate with decode steps, with an output marker after each step. A horizontal arrow points right toward later time beneath both schedules. Dashed lines mark prompt completion in each panel."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily,>=stealth,line width=0.75pt,
@@ -4656,32 +4654,30 @@ Chunking creates more opportunities to advance the active streams, but each chun
 # │       draft model proposes several tokens.
 # │ Show: Expected tokens per verification pass, time per generated token,
 # │       and the speedup over plain batch-one decode.
-# │ How: Bandwidth-bound step times for GPT-2 XL (target) and GPT-2 Small
-# │      (draft) on an H100; acceptance rate is a scenario assumption.
+# │ How: Scenarios.Gpt2XlSpeculativeGpt2SmallH100: bandwidth-bound step times
+# │      for GPT-2 XL (target) and GPT-2 Small (draft) on an H100; acceptance
+# │      rate is a scenario assumption.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, BYTES_FP16, MB, millisecond
+from mlsysim import Models, Scenarios, BYTES_FP16, MB, millisecond
 from mlsysim.fmt import check, fmt_memory, fmt_time, fmt_multiple, fmt_count, fmt_percent
 
 class SpeculativeDecoding:
     """Draft-and-verify decoding for GPT-2 XL with a GPT-2 Small draft on one H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    target = Models.Language.GPT2
+    spec = Scenarios.Gpt2XlSpeculativeGpt2SmallH100
     draft = Models.Language.GPT2_Small
-    h100 = Hardware.Cloud.H100
-    draft_tokens = 4  # scenario assumption: tokens proposed per round
-    acceptance = 0.7  # scenario assumption: per-token acceptance probability
+    draft_tokens = spec.draft_length
+    acceptance = spec.acceptance
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bw = h100.memory.bandwidth
-    target_step = (target.size_in_bytes(BYTES_FP16) / bw).to(millisecond)
+    target_step = spec.verify_time.to(millisecond)
     draft_weights = draft.size_in_bytes(BYTES_FP16)
-    draft_step = (draft_weights / bw).to(millisecond)
-    draft_cost = draft_tokens * draft_step
-    expected_tokens = (1 - acceptance ** (draft_tokens + 1)) / (1 - acceptance)
-    round_time = target_step + draft_cost
-    per_token = round_time / expected_tokens
-    speedup = (target_step / per_token).to("").magnitude
+    draft_cost = spec.draft_cost
+    expected_tokens = spec.expected_tokens
+    round_time = spec.round_time
+    per_token = spec.per_token_time
+    speedup = spec.tpot_gain
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1 < expected_tokens < draft_tokens + 1, f"Expected tokens must lie between 1 and k+1, got {expected_tokens:.2f}.")
@@ -4722,7 +4718,7 @@ Keeping decode batches full, however, shifts the primary serving bottleneck to m
 
 A block table separates a sequence's token order from its physical placement. @Fig-serving-paged-kv-mapping uses an eight-block pool: requests C and D occupy the middle pairs, leaving four free blocks in two separated runs. A request E that needs four blocks can use those scattered blocks without moving C or D.
 
-::: {#fig-serving-paged-kv-mapping data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-paged-kv-mapping" fig-env="figure" fig-pos="htb" fig-cap="**Logical Pages and Physical KV Blocks**: Request E's logical pages remain ordered even though its physical blocks are separated by other requests. Each table entry names one physical block; the partially filled last block remains allocated to E. After E completes and its pending accesses finish, its unshared blocks return to the free pool. C and D retain their blocks. The diagram assumes no prefix sharing and uses equal block sizes; paging changes placement, not the KV bytes per token." fig-alt="Four ordered logical pages of request E point downward to table entries 0, 1, 4, and 5. Elbow arrows connect those entries to blocks 0, 1, 4, and 5 in an eight-block physical pool. C occupies blocks 2 and 3, and D occupies blocks 6 and 7. Block 5 is partly filled and partly hatched. A second pool row shows E's four blocks marked free after release, while C and D remain in their original positions."}
+::: {#fig-serving-paged-kv-mapping data-explore="original-kv-paging" data-explore-key="vol1:fig-serving-paged-kv-mapping" fig-env="figure" fig-pos="htb" fig-cap="**Logical Pages and Physical KV Blocks**: Request E's logical pages remain ordered even though its physical blocks are separated by other requests. Each table entry names one physical block; the partially filled last block remains allocated to E. After E completes and its pending accesses finish, its unshared blocks return to the free pool. C and D retain their blocks. The diagram assumes no prefix sharing and uses equal block sizes; paging changes placement, not the KV bytes per token." fig-alt="Four ordered logical pages of request E point downward to table entries 0, 1, 4, and 5. Elbow arrows connect those entries to blocks 0, 1, 4, and 5 in an eight-block physical pool. C occupies blocks 2 and 3, and D occupies blocks 6 and 7. Block 5 is partly filled and partly hatched. A second pool row shows E's four blocks marked free after release, while C and D remain in their original positions."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily,>=stealth,line width=0.75pt,
@@ -4790,34 +4786,33 @@ Even after PagedAttention eliminates fragmentation waste, thirty-two long-contex
 # │ Show: Llama 3 8B FP16 KV bytes per token and per 8K-token conversation;
 # │       resident conversations after FP16 weights on an 80 GiB H100; the
 # │       70-billion-parameter scale-up (INT4 weights, batch 32 crossing).
-# │ How: Registry layer, KV-head, and hidden dimensions; registry H100 capacity.
+# │ How: Scenarios.Llama3_8BFp16ConversationsH100 and Llama3_70BInt4KvBudgetH100
+# │      (registry layer, KV-head, and hidden dimensions; registry H100 capacity).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, BYTES_FP16, BYTES_INT4, GB, GiB, KB, byte
+from mlsysim import Scenarios, GB, GiB, KB, byte
 from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity, fmt_count, fmt_multiple
 
 class KvBudget:
     """KV-cache budget for Llama 3 8B and a 70B-class model on one H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    llama8 = Models.Language.Llama3_8B
-    llama70 = Models.Language.Llama3_70B
-    h100 = Hardware.Cloud.H100
-    context_tokens = 8192  # scenario assumption: one long conversation (8K tokens)
-    batch_large = 32  # scenario assumption: concurrent conversations for the 70B scale-up
+    conv8 = Scenarios.Llama3_8BFp16ConversationsH100
+    budget70 = Scenarios.Llama3_70BInt4KvBudgetH100
+    llama8 = conv8.workload
+    context_tokens = conv8.context_tokens
+    batch_large = budget70.requests
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    capacity = h100.memory.capacity
-    head_dim = llama8.hidden_dim // llama8.heads
-    kv_per_token = (2 * llama8.layers * llama8.kv_heads * head_dim * BYTES_FP16).to(byte)
-    kv_per_seq = (kv_per_token * context_tokens).to(GB)
-    weights8 = llama8.size_in_bytes(BYTES_FP16).to(GB)
-    free8 = (capacity - weights8).to(GB)
-    n_seq = int((free8 / kv_per_seq).to("").magnitude)
+    capacity = conv8.hbm_per_accelerator
+    kv_per_token = conv8.result.kv_per_token
+    kv_per_seq = conv8.result.kv_per_request
+    weights8 = conv8.result.weights
+    free8 = conv8.result.kv_budget
+    n_seq = conv8.result.max_requests
     mha_ratio = llama8.heads // llama8.kv_heads
-    kv70_per_token = (2 * llama70.layers * llama70.kv_heads * (llama70.hidden_dim // llama70.heads) * BYTES_FP16).to(byte)
-    weights70 = llama70.size_in_bytes(BYTES_INT4).to(GB)
-    free70 = (capacity - weights70).to(GB)
-    crossing70 = (free70 / (batch_large * kv70_per_token)).to("").magnitude
+    weights70 = budget70.result.weights
+    free70 = budget70.result.kv_budget
+    crossing70 = budget70.context_fit()
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(kv_per_token.magnitude == 131072, f"Llama 3 8B KV should be 131,072 B per token, got {kv_per_token}.")
@@ -4845,7 +4840,7 @@ Once contexts grow, the cache rather than the weights sets how many conversation
 
 Larger models make the cache the binding constraint sooner. For a 70-billion-parameter-class model with grouped-query attention, 4-bit weights consume `{python} KvBudget.weights70_gb_str` of the same H100, leaving `{python} KvBudget.free70_gb_str` for FP16 cache before runtime workspace. A batch of `{python} KvBudget.batch_large_str` conversations exhausts that budget at roughly `{python} KvBudget.crossing70_str` tokens of context, so serving engines trade concurrent batch size against context length to avoid out-of-memory failures (@fig-kv-cache-growth).
 
-::: {#fig-kv-cache-growth data-explore="mechanism-scene" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
+::: {#fig-kv-cache-growth data-explore="original-v1-kv-cache-growth" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
 #| echo: false
@@ -4876,7 +4871,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 seq_len = np.linspace(0, 32000, 100)
-from mlsysim import Hardware, Models
+from mlsysim import Models
 
 _m70b = Models.Language.Llama3_70B  # 70-billion-parameter class, FP16
 layers, d_model, bytes_per_param = _m70b.layers, _m70b.hidden_dim, BYTES_FP16.to(byte).magnitude
@@ -4895,9 +4890,8 @@ for b, c in zip(batches, colors):
     gb = get_kv_gb(b, seq_len)
     ax.plot(seq_len, gb, label=f'Batch Size {b}', color=c, linewidth=2)
 
-device_capacity = Hardware.Cloud.H100.memory.capacity
-int4_weights = _m70b.size_in_bytes(BYTES_INT4)
-limit_gb = (device_capacity - int4_weights).to(GB).magnitude
+from mlsysim import Scenarios
+limit_gb = Scenarios.Llama3_70BInt4KvBudgetH100.result.kv_budget.to(GB).magnitude
 ax.axhline(limit_gb, color=COLORS['RedLine'], linestyle='--', linewidth=2)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
@@ -5012,10 +5006,10 @@ class CarbonCostH100Tdp:
 # │
 # │ Goal: Quantify the energy cost per LLM token.
 # │ Show: That poor utilization causes about 6× higher energy consumption per token.
-# │ How: Calculate J per token based on TDP and concurrent request volume.
-# │
+# │ How: Scenarios.H100ChatEnergyPerToken: J per token from TDP, host power,
+# │      and concurrent request volume.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import ReferenceStats
+from mlsysim import ReferenceStats, Scenarios
 from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_percent, fmt_rate, fmt_power, fmt_energy, fmt_multiple
 
 class CarbonCostCalc:
@@ -5025,23 +5019,22 @@ class CarbonCostCalc:
     # Energy anchors sourced from the mlsysim registry (ReferenceStats.EnergyAnchors).
     ENERGY_SMARTPHONE_CHARGE_J = ReferenceStats.EnergyAnchors.SmartphoneCharge
     ENERGY_BOILING_WATER_J = ReferenceStats.EnergyAnchors.BoilingWater
-    cc_concurrent_requests_value = 114  # concurrent requests per H100
-    cc_tokens_per_sec_req_value = 8 * (count / second)  # scenario assumption: decode tokens/s per request
-    cc_host_overhead = 300 * watt  # scenario assumption: host server power overhead
-    cc_response_tokens_value = 500  # typical response length
-    cc_low_util_pct_value = 10  # poor utilization scenario (%)
-    cc_idle_power = 300 * watt  # scenario assumption: GPU idle power
+    energy = Scenarios.H100ChatEnergyPerToken
+    cc_concurrent_requests_value = energy.concurrent_requests
+    cc_tokens_per_sec_req_value = energy.per_request_rate
+    cc_host_overhead = energy.host_power
+    cc_response_tokens_value = energy.response_tokens
+    cc_low_util_pct_value = energy.low_use_fraction * 100
+    cc_idle_power = energy.low_use_accelerator_power
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _h100_tdp = Hardware.Cloud.H100.tdp
-    cc_total_tokens_sec = cc_concurrent_requests_value * cc_tokens_per_sec_req_value
-    cc_total_power = _h100_tdp + cc_host_overhead
-    cc_joules_per_token = cc_total_power / cc_total_tokens_sec
-    cc_response_joules = cc_joules_per_token * cc_response_tokens_value * count
-    cc_low_util_tokens_sec = cc_total_tokens_sec * (cc_low_util_pct_value / 100)
-    cc_low_util_power = cc_idle_power + cc_host_overhead
-    cc_low_util_joules = cc_low_util_power / cc_low_util_tokens_sec
-    cc_low_util_ratio = (cc_low_util_joules / cc_joules_per_token).to("").magnitude
+    cc_total_tokens_sec = energy.token_rate
+    cc_total_power = energy.node_power
+    cc_joules_per_token = energy.joules_per_token
+    cc_response_joules = energy.response_energy
+    cc_low_util_power = energy.low_use_power
+    cc_low_util_joules = energy.low_use_joules_per_token
+    cc_low_util_ratio = energy.low_use_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -5343,31 +5336,29 @@ Choosing serving instances by hourly rental price alone, or by peak throughput a
 # │ How: Unit cost = hourly rate / images per hour; H100 rate from the registry, throughput from the sweep.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_rate, fmt_usd
 
 class CostAnalysisCalc:
     """ResNet-50 cost analysis: unit cost per million images on CPU, T4, and H100 instances."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ca_cpu_cost_value = 0.17 * (USD / hour)  # scenario assumption: c5.xlarge hourly cost
-    ca_cpu_throughput_value = 50 * (count / second)  # scenario assumption: CPU throughput
-    ca_t4_cost_value = 0.53 * (USD / hour)  # scenario assumption: g4dn.xlarge hourly cost
-    ca_t4_throughput_value = 400 * (count / second)  # scenario assumption: T4 throughput
-    ca_h100_cost_value = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate  # registry accelerator-hour rate
+    _s = Scenarios.ResNet50CloudInstanceCost  # c5.xlarge, g4dn.xlarge (T4), and an H100 at batch 32
+    ca_cpu_cost_value = _s.prices["CPU"]
+    ca_cpu_throughput_value = _s.rates["CPU"].to(count / second)
+    ca_t4_cost_value = _s.prices["T4"]
+    ca_t4_throughput_value = _s.rates["T4"].to(count / second)
+    ca_h100_cost_value = _s.prices["H100"]  # registry accelerator-hour rate
     # Saturated rate: the batch-32 point of the chapter's batching sweep (same eager engine class)
-    ca_h100_throughput_value = round(BatchThroughputCalc.throughput_value[-1], -1) * (count / second)
+    ca_h100_throughput_value = _s.rates["H100"].to(count / second)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ca_cpu_images_per_hour_value = (ca_cpu_throughput_value * hour).to(count)
-    ca_t4_images_per_hour_value = (ca_t4_throughput_value * hour).to(count)
-    ca_h100_images_per_hour_value = (ca_h100_throughput_value * hour).to(count)
-    ca_cpu_cpm_value = (ca_cpu_cost_value * hour) / (ca_cpu_images_per_hour_value / (MILLION * count))
-    ca_t4_cpm_value = (ca_t4_cost_value * hour) / (ca_t4_images_per_hour_value / (MILLION * count))
-    ca_h100_cpm_value = (ca_h100_cost_value * hour) / (ca_h100_images_per_hour_value / (MILLION * count))
-    ca_h100_price_increase_value = (ca_h100_cost_value / ca_t4_cost_value).to("").magnitude
+    ca_cpu_cpm_value = _s.cost_per_million("CPU")
+    ca_t4_cpm_value = _s.cost_per_million("T4")
+    ca_h100_cpm_value = _s.cost_per_million("H100")
+    ca_h100_price_increase_value = _s.price_ratio
     # Traffic below which one H100's hourly rate costs more per image than saturated T4 capacity
-    ca_breakeven_value = (ca_h100_cost_value / ca_t4_cost_value * ca_t4_throughput_value).to(count / second)
+    ca_breakeven_value = _s.breakeven_rate.to(count / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ca_h100_cpm_value < ca_t4_cpm_value < ca_cpu_cpm_value, "Prose: at full utilization the H100 has the lowest unit cost, then T4, then CPU.")
@@ -5381,7 +5372,7 @@ class CostAnalysisCalc:
     ca_t4_throughput_img_per_s_str = fmt_rate(ca_t4_throughput_value, 'img/s', precision=0, commas=False)
     ca_t4_cpm_usd_str = fmt_usd(ca_t4_cpm_value, precision=2, commas=False)
     ca_h100_cost_str = fmt_usd(ca_h100_cost_value * hour, precision=0, commas=False)
-    ca_h100_throughput_img_per_s_str = fmt_rate(ca_h100_throughput_value, 'img/s', precision=0, commas=True)
+    ca_h100_throughput_img_per_s_str = fmt_rate(round(ca_h100_throughput_value.magnitude, -1) * (count / second), 'img/s', precision=0, commas=True)
     ca_h100_cpm_usd_str = fmt_usd(ca_h100_cpm_value, precision=2, commas=False)
     ca_h100_price_increase_mult_str = fmt_multiple(round(ca_h100_price_increase_value, 1), precision=None, commas=False)
     ca_breakeven_img_per_s_str = fmt_rate(round(ca_breakeven_value.magnitude, -2) * (count / second), 'img/s', precision=0, commas=True)
@@ -5429,6 +5420,7 @@ The unit-cost comparison in @tbl-model-serving-resnet-cloud-cost evaluates each 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_rate, check
 
 class CapacityPlanningRecap:
@@ -5442,11 +5434,12 @@ class CapacityPlanningRecap:
     cp_gpus_ceil_value = C.cp_gpus_ceil_value
     cp_final_ceil_value = C.cp_final_ceil_value
     # Same sizing rule applied to the saturated batched H100 rate of @tbl-model-serving-resnet-cloud-cost
+    _plan = Scenarios.ResNet50FleetPlanH100
     cp_batched_rate_value = CostAnalysisCalc.ca_h100_throughput_value
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cp_batched_gpus_ceil_value = math.ceil((cp_peak_qps_value / (cp_rho_safe_value * cp_batched_rate_value)).to("").magnitude)
-    cp_batched_final_ceil_value = math.ceil(cp_batched_gpus_ceil_value * cp_headroom_factor_value)
+    cp_batched_gpus_ceil_value = _plan.batched_accelerators
+    cp_batched_final_ceil_value = _plan.batched_accelerators_planned
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cp_batched_final_ceil_value < cp_final_ceil_value, "batched plan must need fewer GPUs than batch-1 plan")
@@ -5456,7 +5449,7 @@ class CapacityPlanningRecap:
     cp_final_ceil_str = fmt_count(cp_final_ceil_value, commas=False, label="H100")
     cp_gpus_ceil_str = fmt_count(cp_gpus_ceil_value, commas=False)
     cp_final_ceil_n_str = fmt_count(cp_final_ceil_value, commas=False)
-    cp_batched_rate_img_per_s_str = fmt_rate(cp_batched_rate_value, 'img/s', precision=0, commas=True)
+    cp_batched_rate_img_per_s_str = fmt_rate(round(cp_batched_rate_value.magnitude, -1) * (count / second), 'img/s', precision=0, commas=True)
     cp_batched_gpus_ceil_str = fmt_count(cp_batched_gpus_ceil_value, commas=False)
     cp_batched_final_ceil_str = fmt_count(cp_batched_final_ceil_value, commas=False)
 ```
@@ -5481,33 +5474,23 @@ A team that deploys an 8-billion-parameter Llama 3 chat service on a single H100
 # │ Goal: Provide H100 memory capacity, INT4 weight footprint, and modeled TTFT
 # │       for the case study's workload profile.
 # │ Show: The H100 memory ceiling and the case study's model-side TTFT.
-# │ How: Retrieve constants from Hardware Digital Twins.
+# │ How: Scenarios.Llama3_8BInt4ChatServiceH100 (ServingModel prefill at 40
+# │      percent of peak; registry H100).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.solvers import ServingModel
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
 
 class LlmCaseStudyHwSpecs:
     """H100 memory, INT4 weights, and TTFT for the 8-billion-parameter Llama 3 case study."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_h100 = Hardware.Cloud.H100
-    m = Models.Language.Llama3_8B
-    prompt_tokens = 1000
-    decode_tokens = 256
+    service = Scenarios.Llama3_8BInt4ChatServiceH100
+    h_h100 = service.hardware
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _serving = ServingModel().solve(
-        m,
-        h_h100,
-        seq_len=prompt_tokens,
-        batch_size=1,
-        precision="int4",
-        efficiency=0.4,
-    )
-    case_study_model_weight = _serving.model_weights_size
-    case_study_ttft = _serving.ttft
+    case_study_model_weight = service.weights
+    case_study_ttft = service.ttft
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(case_study_ttft.to(ms).magnitude, 1) == 41.9, f"Expected 41.9 ms TTFT, got {case_study_ttft}")
@@ -5584,64 +5567,39 @@ The model generates 256 tokens sequentially. At batch one, this phase is memory-
 # │
 # │ Goal: Connect memory bandwidth, KV cache capacity, prefill throughput, and serving economics.
 # │ Show: That KV capacity bounds concurrency, while prefill throughput can bound full-request throughput.
-# │ How: Calculate TPOT, concurrent batch size, request throughput, and $/M
-# │      tokens for 8-billion-parameter Llama 3 on H100.
+# │ How: Scenarios.Llama3_8BInt4ChatServiceH100: TPOT, concurrent batch size,
+# │      request throughput, and $/M tokens for 8-billion-parameter Llama 3 on H100.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_count, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity
-from mlsysim.physics import transfer_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlmServingCalc:
     """8-billion-parameter Llama 3 serving economics: capacity bounds residency, prefill/decode bound throughput."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models, Hardware
-    from mlsysim.solvers import ServingModel
+    from mlsysim import Scenarios
 
-    m = Models.Language.Llama3_8B
-    h = Hardware.Cloud.H100
-
-    # Configuration
-    decode_tokens_value = 256
-    prompt_tokens_value = 1000
-    total_tokens = prompt_tokens_value + decode_tokens_value
+    service = Scenarios.Llama3_8BInt4ChatServiceH100
+    h = service.hardware
+    decode_tokens_value = service.decode_tokens
+    prompt_tokens_value = service.prompt_tokens
+    total_tokens = service.total_tokens
+    kv_cache_reserved = service.kv_reserve
+    prefill_tokens_per_s_value = service.prefill_rate
+    hourly_cost_value = service.price
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Use the authoritative ServingModel for LLM physics
-    res = ServingModel().solve(m, h, seq_len=total_tokens, batch_size=1, precision="int4", efficiency=0.4)  # realized efficiency
-
-    model_weight = res.model_weights_size
-    kv_per_token = m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16)
-    kv_for_request = m.get_kv_cache_size(seq_len=total_tokens, batch_size=1, precision=BYTES_FP16)
-    framework_tax = res.itl - transfer_time(res.total_memory_required, h.memory.bandwidth)
-    realized_tpot = transfer_time(model_weight + kv_for_request, h.memory.bandwidth) + framework_tax
-
-    # Theoretical weight-streaming floor (100% BW efficiency)
-    token_time_theoretical = transfer_time(model_weight, h.memory.bandwidth)
-
-    total_decode = decode_tokens_value * count * realized_tpot
-    total_decode_s = total_decode.to(second)
-
-    # KV Cache Sizing using library results
-    kv_cache_reserved = 72 * GiB
-    kv_capacity_tokens_value = int(round((kv_cache_reserved / kv_per_token).to(count).magnitude))
-
-    concurrent_batch_value = int(kv_capacity_tokens_value / total_tokens)
-    req_time_s = res.ttft + total_decode_s
-
-    # Throughput scaling
-    prefill_tokens_per_s_value = 10_000 * (count / second)  # scenario assumption: H100 prefill rate
-    prefill_req_per_s_value = (prefill_tokens_per_s_value / (prompt_tokens_value * count) * count).to(count / second)
-    decode_req_capacity_value = (concurrent_batch_value * count / req_time_s).to(count / second)
-
-    serving_req_per_s_value = min(prefill_req_per_s_value, decode_req_capacity_value)
-    sec_per_hr = SEC_PER_HOUR * second
-    tokens_per_hour_value = (serving_req_per_s_value * sec_per_hr * total_tokens).to(count)
-
-    hourly_cost_value = 3.00 * (USD / hour)  # scenario assumption: H100 SXM5 instance rental cost
-    cost_per_m_tokens_value = (hourly_cost_value * hour) / (tokens_per_hour_value / (MILLION * count))
-    remaining_vram = h.memory.capacity - model_weight
+    model_weight = service.weights
+    kv_per_token = service.kv_per_token
+    realized_tpot = service.tpot
+    token_time_theoretical = service.weight_floor
+    total_decode_s = service.decode_time
+    kv_capacity_tokens_value = service.kv_capacity_tokens
+    concurrent_batch_value = service.resident_requests
+    tokens_per_hour_value = service.tokens_per_hour * count
+    cost_per_m_tokens_value = service.cost_per_million_tokens
+    remaining_vram = service.remaining_memory
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -5715,28 +5673,31 @@ Serving inverts training priorities in ways that violate intuitions from batch p
 # │ How: M/M/1 wait for the eager reference profile vs. the TorchScript engine.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import dimensionless
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class FallacyLatencyCalc:
     """Shows system-level speedup far exceeds model-level speedup due to nonlinear queuing dynamics."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fl_utilization_high_value = 0.8
-    fl_service_slow_ms_value = ResNetH100Profile.eager_b1  # reference profile, eager
-    fl_service_fast_ms_value = ResNetH100Profile.torchscript_b1  # same model without per-op Python dispatch
+    _s = Scenarios.ResNet50FasterModelAt80PctH100  # eager against TorchScript at 80% load, M/M/1
+    fl_utilization_high_value = _s.utilization
+    fl_service_slow_ms_value = _s.slow_service  # reference profile, eager
+    fl_service_fast_ms_value = _s.fast_service  # same model without per-op Python dispatch
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # M/M/1: wait = service * rho / (1 - rho)
-    fl_wait_slow_ms_value = fl_service_slow_ms_value * fl_utilization_high_value / (1 - fl_utilization_high_value)
-    fl_total_slow_ms_value = fl_wait_slow_ms_value + fl_service_slow_ms_value
+    fl_wait_slow_ms_value = _s.slow_wait
+    fl_total_slow_ms_value = _s.slow_time
     # New utilization: rho_new = rho_old * (service_new/service_old)
-    fl_utilization_new_value = fl_utilization_high_value * (fl_service_fast_ms_value / fl_service_slow_ms_value)
-    fl_wait_fast_ms_value = fl_service_fast_ms_value * fl_utilization_new_value / (1 - fl_utilization_new_value)
-    fl_total_fast_ms_value = fl_wait_fast_ms_value + fl_service_fast_ms_value
-    fl_model_speedup_value = fl_service_slow_ms_value / fl_service_fast_ms_value
-    fl_system_speedup_value = fl_total_slow_ms_value / fl_total_fast_ms_value
-    fl_queuing_improvement_value = fl_wait_slow_ms_value / fl_wait_fast_ms_value
-    fl_inference_gain_ms_value = fl_service_slow_ms_value - fl_service_fast_ms_value
+    fl_utilization_new_value = _s.fast_utilization * dimensionless
+    fl_wait_fast_ms_value = _s.fast_wait
+    fl_total_fast_ms_value = _s.fast_time
+    fl_model_speedup_value = _s.service_gain * dimensionless
+    fl_system_speedup_value = _s.time_gain * dimensionless
+    fl_queuing_improvement_value = _s.wait_gain * dimensionless
+    fl_inference_gain_ms_value = (fl_service_slow_ms_value - fl_service_fast_ms_value).to(ms)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(fl_queuing_improvement_value > fl_model_speedup_value, "Prose: the queuing improvement must exceed the model speedup.")
@@ -5887,21 +5848,23 @@ Engineers assume identical model weights preserve validation-set performance\ind
 # │ How: M/M/1 mean vs. p99 approximation at typical serving utilization.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class TailLatencyCalc:
     """At 70% utilization, p99 latency is 4.6× the mean—invisible to average-based monitoring."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tl_util_value = 0.7
-    tl_service_ms_value = ResNetH100Profile.eager_b1.to(ms)  # the chapter's batch-one ResNet-50 service time
+    _plan = Scenarios.ResNet50FleetPlanH100  # the chapter's batch-one ResNet-50 service, M/M/1
+    tl_util_value = _plan.example_utilization
+    tl_service_ms_value = _plan.service_time.to(ms)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # M/M/1: avg time in system = service / (1 - rho)
-    tl_avg_ms_value = tl_service_ms_value / (1 - tl_util_value)
+    tl_avg_ms_value = _plan.time_in_system(tl_util_value)
     # M/M/1 p99 approximation: 4.6 * avg
-    tl_p99_ms_value = 4.6 * tl_avg_ms_value
-    tl_gap_value = tl_p99_ms_value / tl_avg_ms_value
+    tl_p99_ms_value = _plan.tail_time(tl_util_value)
+    tl_gap_value = (tl_p99_ms_value / tl_avg_ms_value).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(tl_gap_value, 1) == 4.6, f"Expected 4.6 gap, got {tl_gap_value}")
@@ -5938,26 +5901,28 @@ Engineers monitor average latency\index{Latency!mean, monitoring pitfall} becaus
 # │ How: Compare throughput and inference time across two batch sizes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt, fmt_percent, fmt_time, fmt_rate
 
 class FallacyBatchingCalc:
     """Batch 16 to 32 on the reference profile: large throughput gain, larger formation wait."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fb_batch_small_count_value = 16
-    fb_batch_large_count_value = 32
-    fb_qps = 500  # requests/s, the arrival rate of the batching analysis
+    _s = Scenarios.BatchCap16Or32At500Qps  # batches wait until full; reference profile
+    fb_batch_small_count_value = _s.small_cap
+    fb_batch_large_count_value = _s.large_cap
+    fb_qps = round(_s.arrival_rate.to(1 / second).magnitude)  # requests/s, the arrival rate of the batching analysis
     fb_padding_waste_min_pct_value = 15  # scenario assumption: padding waste, variable-size inputs
     fb_padding_waste_max_pct_value = 30
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fb_inf_small_ms_value = ResNetH100Profile.eager_ms(fb_batch_small_count_value)
-    fb_inf_large_ms_value = ResNetH100Profile.eager_ms(fb_batch_large_count_value)
-    fb_throughput_small_value = fb_batch_small_count_value / fb_inf_small_ms_value.to(second).magnitude
-    fb_throughput_large_value = fb_batch_large_count_value / fb_inf_large_ms_value.to(second).magnitude
-    fb_throughput_gain_pct_value = (fb_throughput_large_value / fb_throughput_small_value - 1) * 100
-    fb_wait_small_ms_value = (fb_batch_small_count_value - 1) / (2 * fb_qps) * 1000 * ms
-    fb_wait_large_ms_value = (fb_batch_large_count_value - 1) / (2 * fb_qps) * 1000 * ms
+    fb_inf_small_ms_value = _s.service.service_time(fb_batch_small_count_value)
+    fb_inf_large_ms_value = _s.service.service_time(fb_batch_large_count_value)
+    fb_throughput_small_value = _s.service.throughput(fb_batch_small_count_value).magnitude
+    fb_throughput_large_value = _s.service.throughput(fb_batch_large_count_value).magnitude
+    fb_throughput_gain_pct_value = _s.throughput_gain * 100
+    fb_wait_small_ms_value = _s.formation_wait(fb_batch_small_count_value)
+    fb_wait_large_ms_value = _s.formation_wait(fb_batch_large_count_value)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(fb_throughput_gain_pct_value > 50, "Prose: doubling the batch raises saturated throughput substantially.")

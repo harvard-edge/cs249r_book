@@ -1,377 +1,295 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 14 (Supervisory Intervention), one block per slide.
+"""Every number on the Lecture 14 slides and notes (Supervisory Intervention), read from MLSysIM.
 
-Inputs carry their source. "SI" is the rendered chapter, Supervisory
-Intervention (Volume IV, Chapter 14); "SE" is Safety Enforcement (Chapter 12),
-whose finished stopping budget this lecture reuses. Values that the MLSysIM
-registry holds (AISLE scenario) are typed here with that registry name.
-Every printed value is what the slide or its note shows, with the label used
-there. make_figs.py imports from this file.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle record
+with the sourced human-response terms; Literature.* for the California DMV
+filings, the Zhang et al. take-over series, the 49 CFR 563 recorder windows,
+UN R157, Sirius, Merat et al., ISO 10218-1, the Cortex-M4 cryptography cycle
+counts, and the Lufthansa 2904 report) and the calculations: the takeover
+budgets at each request speed (Scenarios.Warehouse*Takeover*,
+TakeoverBudgetModel over the finished S-curve stopping budget), the ceiling
+ladder (WarehouseTakeoverCeilingLadder), the bumpless transfer
+(WarehouseTakeoverBrakingBlend), authentication and the verifier flood
+(WarehouseRemoteCommandAuthentication), and the disengagement record
+(WaymoCaliforniaDisengagementRecord). The chapter reads the same scenarios.
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex. make_figs.py imports
+it for the scenario objects and plot inputs.
 
 Run from this folder: python3 calcs.py
 """
 
-import csv
-import math
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Q_ = mlsysim.core.units.Q_
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+TAKEOVER, CRYPTO, EDR = Literature.HumanTakeover, Literature.Crypto, Literature.EventDataRecorders
+REPORTS = Literature.IncidentReports
+
+RECORD = Scenarios.WaymoCaliforniaDisengagementRecord
+IN_AISLE = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed
+OOL_AISLE = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed
+IN_SLOW = Scenarios.WarehouseInLoopTakeoverAtRequestSpeed
+IN_RETIRED = Scenarios.WarehouseInLoopTakeoverAtRetiredSlowdown
+OOL_CRAWL = Scenarios.WarehouseOutOfLoopTakeoverAtCrawl
+OOL_CRAWL_P99 = Scenarios.WarehouseOutOfLoopTakeoverAtCrawlP99
+WINDOW_AISLE = Scenarios.WarehouseFixedWindowAtAisleSpeed
+WINDOW_CRAWL = Scenarios.WarehouseFixedWindowAtCrawl
+LADDER = Scenarios.WarehouseTakeoverCeilingLadder
+BLEND = Scenarios.WarehouseTakeoverBrakingBlend
+AUTH = Scenarios.WarehouseRemoteCommandAuthentication
 
 
-def head(title):
-    print(f"\n--- {title}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+aisle, ool, slow = IN_AISLE.result, OOL_AISLE.result, IN_SLOW.result
+crawl, rows, blend, auth = OOL_CRAWL.result, LADDER.result.rows, BLEND.result, AUTH.result
+
+print("== Hook: Waymo's California DMV filings (SI 14.1)")
+v("dmv_first", RECORD.first["miles_per_disengagement"], "{:,.0f}", "2015 miles per disengagement")
+v("dmv_2020", RECORD.row(RECORD.swing_from)["miles_per_disengagement"], "{:,.0f}", "2020 miles per disengagement")
+v("dmv_drop", RECORD.rate_drop, "{:.1f}", "2020 to 2021 rate fell, x")
+v("dmv_growth", RECORD.miles_growth, "{:.1f}", "2020 to 2021 miles grew, x")
+v("dmv_latest_n", RECORD.latest["disengagements"], "{:.0f}", "2025 safety-driver takeovers")
+v("dmv_latest", RECORD.latest["miles_per_disengagement"], "{:,.0f}", "2025 miles per disengagement")
+v("dmv_dl", RECORD.latest_driverless["miles_per_disengagement"], "{:,.0f}", "2025 driverless miles per disengagement")
+v("csv_rows", TAKEOVER.WaymoDisengagementRows2024, "{:.0f}", "2024 CSV rows, Waymo")
+v("csv_driver", TAKEOVER.WaymoDisengagementsByTestDriver2024, "{:.0f}", "begun by the test driver")
+v("csv_av", TAKEOVER.WaymoDisengagementsByAvSystem2024, "{:.0f}", "begun by the AV system")
+v("csv_driver_pct", 100 * TAKEOVER.WaymoDisengagementsByTestDriver2024 / TAKEOVER.WaymoDisengagementRows2024,
+  "{:.1f}", "share begun by the driver, %")
+
+print("== Recall: the finished budget at the aisle speed (SE Napkin Math 12.1)")
+machine = aisle.machine
+v("v_aisle", m(IN_AISLE.speed, "m/s"), "{:.1f}", "aisle speed, m/s")
+v("d_clear_m", m(AISLE.d_clear, "m"), "{:.2f}", "rack-end clear distance, m")
+v("d_clear_mm", m(AISLE.d_clear, "mm"), "{:,.0f}", "the same, mm")
+v("spare", m(machine.spare, "mm"), "{:.1f}", "spare at the aisle speed, mm")
+v("spare0", m(machine.spare, "mm"), "{:.0f}", "the same, whole mm")
+v("deadline", m(aisle.deadline, "ms"), "{:.1f}", "spare as delay (T_latest), ms")
+v("deadline2", m(aisle.deadline, "ms"), "{:.2f}", "the same, two decimals")
+v("d2a", m(AISLE.t_dispatch_to_admission, "ms"), "{:.1f}", "dispatch-to-admission allocation, ms")
+v("spare_da", m(aisle.machine_with_dispatch.spare, "mm"), "{:.1f}", "spare after the allocation, mm")
+v("deadline_da", m(aisle.deadline_after_admission, "ms"), "{:.1f}", "deadline after the allocation, ms")
+v("machine_stop1", m(machine.required_distance, "mm"), "{:.1f}", "finished budget at the aisle speed, mm")
+v("machine_stop", m(machine.required_distance, "mm"), "{:.2f}", "the same, two decimals")
+v("delay_travel", m(machine.delay_travel, "mm"), "{:.2f}", "travel during the pre-brake delay, mm")
+v("tau", m(AISLE.tau_delay, "ms"), "{:.1f}", "pre-brake delay, ms")
+v("scurve", m(machine.scurve_travel, "mm"), "{:.2f}", "resident S-curve stop at the aisle speed, mm")
+v("fixed", m(AISLE.fixed_overhead, "mm"), "{:.0f}", "fixed allowances, mm")
+v("over_spare_words", aisle.takeover_over_spare, "words", "in-loop travel over the spare, about")
+
+print("== The in-loop timing strip (SI eq. 1, figure 2)")
+v("t_in", m(IN_AISLE.takeover, "ms"), "{:.0f}", "in-loop takeover, ms")
+v("t_video", m(AISLE.t_video_glass_to_glass, "ms"), "{:.0f}", "video glass to glass, ms")
+v("t_perc", m(AISLE.t_human_perceptual_slow, "ms"), "{:.0f}", "perceive, slow bound, ms")
+v("t_cog", m(AISLE.t_human_cognitive_slow, "ms"), "{:.0f}", "decide, slow bound, ms")
+v("t_mot", m(AISLE.t_human_motor_slow, "ms"), "{:.0f}", "act, slow bound, ms")
+v("t_hs", m(AISLE.t_handshake, "ms"), "{:.0f}", "four-phase handshake, ms")
+v("t_console", m(AISLE.t_takeover_transport, "ms"), "{:.0f}", "console term, ms")
+v("travel_in", m(aisle.takeover_travel, "mm"), "{:.1f}", "travel during the in-loop takeover, mm")
+v("over_spare", aisle.takeover_over_spare, "{:.1f}", "that travel over the spare, x")
+
+print("== The takeover tax, partial budget (the stopping-budget bar plus the wait)")
+v("stop_in", m(aisle.with_takeover.required_distance, "mm"), "{:,.2f}", "stop with the in-loop takeover, mm")
+v("over_in", m(-aisle.with_takeover.spare, "mm"), "{:.1f}", "past the rack end, mm")
+v("t_ool_s", m(OOL_AISLE.takeover, "s"), "{:.1f}", "out-of-loop takeover, s")
+v("travel_ool", m(ool.takeover_travel, "mm"), "{:,.1f}", "travel during it, mm")
+v("stop_ool", m(ool.with_takeover.required_distance, "mm"), "{:,.2f}", "stop with the out-of-loop takeover, mm")
+v("over_ool_m", m(-ool.with_takeover.spare, "m"), "{:.2f}", "past the rack end, m")
+v("stop_in_da", m(aisle.with_takeover_and_dispatch.required_distance, "mm"), "{:,.2f}", "Napkin Math 14.1 in-loop stop, with the allocation, mm")
+v("stop_ool_da", m(ool.with_takeover_and_dispatch.required_distance, "mm"), "{:,.2f}", "Napkin Math 14.1 out-of-loop stop, with the allocation, mm")
+
+print("== Take-over times (Zhang et al. 2019) and the ceilings they allow (SI table 2)")
+MTOT = [r["mean_takeover_time_s"] for r in Literature.TakeoverTimeMeta.entries]
+v("n_cond", len(MTOT), "{:.0f}", "study conditions")
+v("n_studies", TAKEOVER.Zhang2019TakeoverStudies, "{:.0f}", "studies")
+v("tot_mean", m(AISLE.t_takeover_driving_mean, "s"), "{:.2f}", "mean condition, s")
+v("tot_p50", m(AISLE.t_takeover_driving_p50, "s"), "{:.2f}", "median condition, s")
+v("tot_p90", m(AISLE.t_takeover_driving_p90, "s"), "{:.2f}", "90th percentile, s")
+v("tot_p99", m(AISLE.t_takeover_driving_p99, "s"), "{:.1f}", "99th percentile, s")
+v("tot_p99_0", m(AISLE.t_takeover_driving_p99, "s"), "{:.0f}", "the same, whole seconds")
+v("tot_max", max(MTOT), "{:.1f}", "slowest condition, s")
+v("t_console_s", m(AISLE.t_takeover_transport, "s"), "{:.3f}", "console term, s")
+v("t_ool3", m(OOL_AISLE.takeover, "s"), "{:.3f}", "out-of-loop takeover, s")
+for key in ("p50", "mean", "p90", "p99"):
+    v(f"ceil_{key}", m(rows[key].with_takeover.speed_ceiling, "m/s"), "{:.2f}", f"ceiling, {key}, m/s")
+v("n_off_scale", sum(1 for x in MTOT if x > 10), "{:.0f}", "conditions above 10 s")
+CEIL = {k: m(r.with_takeover.speed_ceiling, "m/s") for k, r in rows.items()}
+TOT = {k: m(LADDER.responses[k], "s") for k in ("p50", "mean", "p90", "p99")}
+
+print("== The speed a human buys (SI Napkin Math 14.2, eq. 3)")
+part, comp = aisle.with_takeover, aisle.with_takeover_and_dispatch
+v("room", m(AISLE.d_clear - AISLE.fixed_overhead, "m"), "{:.2f}", "room to brake, m")
+v("a_brake", m(AISLE.a_brake, "m/s**2"), "{:.0f}", "credible deceleration, m/s^2")
+v("j_brake", m(AISLE.j_brake, "m/s**3"), "{:.2f}", "jerk bound, m/s^3")
+v("tau_s", m(AISLE.tau_delay, "s"), "{:.4f}", "pre-brake delay, s")
+v("t_in_s", m(IN_AISLE.takeover, "s"), "{:.3f}", "in-loop takeover, s")
+v("half_ramp", m(part.ramp_delay, "ms"), "{:.1f}", "half a jerk ramp, a/2j, ms")
+v("b_in", m(part.ceiling_lead_time, "s"), "{:.4f}", "time at full speed b, s")
+v("root_in", m(part.ceiling_root, "s"), "{:.4f}", "square-root term, s")
+v("ceil_in", m(part.speed_ceiling, "m/s"), "{:.3f}", "in-loop ceiling, m/s")
+v("ceil_in2", m(part.speed_ceiling, "m/s"), "{:.2f}", "the same, two decimals")
+v("knee", m(part.jerk_plateau_speed, "m/s"), "{:.3f}", "a^2/j, m/s")
+v("rigid", m(part.rigid_speed_ceiling, "m/s"), "{:.2f}", "perfect-brake ceiling, m/s")
+v("ceil_in_da", m(comp.speed_ceiling, "m/s"), "{:.3f}", "in-loop ceiling with the allocation, m/s")
+v("v_retired", m(IN_RETIRED.speed, "m/s"), "{:.1f}", "retired slow-down, m/s")
+v("short_retired", m(-IN_RETIRED.result.time_left_after_admission, "ms"), "{:.1f}", "it misses by, ms")
+v("ceil_ool", m(ool.with_takeover.speed_ceiling, "m/s"), "{:.2f}", "out-of-loop ceiling, m/s")
+
+print("== The fallback deadline (SI eq. 4, Napkin Math 14.3)")
+v("v_slow", m(IN_SLOW.speed, "m/s"), "{:.2f}", "in-loop request speed, m/s")
+v("dl_slow", m(slow.deadline, "ms"), "{:.1f}", "deadline at the request speed, ms")
+v("left_slow", m(slow.time_left, "ms"), "{:.1f}", "left after the in-loop takeover, ms")
+v("left_slow_da", m(slow.time_left_after_admission, "ms"), "{:.1f}", "and after the allocation, ms")
+v("v_step", m(AISLE.v_takeover_resolution, "m/s"), "{:.2f}", "speed resolution, m/s")
+v("dl_ratio", m(slow.deadline / aisle.deadline, ""), "{:.1f}", "deadline gain from slowing, x")
+v("v_crawl", m(OOL_CRAWL.speed, "m/s"), "{:.2f}", "crawl, m/s")
+v("dl_crawl_s", m(crawl.deadline, "s"), "{:.2f}", "deadline at the crawl, s")
+v("left_crawl_s", m(crawl.time_left, "s"), "{:.2f}", "left after the out-of-loop takeover, s")
+v("t_ool_p99", m(OOL_CRAWL_P99.takeover, "s"), "{:.1f}", "99th-percentile takeover with the console, s")
+r157 = Q_(TAKEOVER.R157MinimumRiskManoeuvreDelayS, "s")
+v("r157", m(r157, "s"), "{:.0f}", "UN R157 transition time, s")
+v("r157_travel", m(machine.travel_over(r157), "m"), "{:.0f}", "travel at the aisle speed, m")
+
+print("== Estimate: an expected brake signal (Checkpoint 14.1)")
+exp = rows["expected"]
+v("t_exp", m(LADDER.responses["expected"], "ms"), "{:.0f}", "expected brake signal, ms")
+v("w_exp", m(exp.takeover, "ms"), "{:.0f}", "with the console term, ms")
+v("b_exp", m(exp.with_takeover.ceiling_lead_time, "s"), "{:.4f}", "b, s")
+v("ceil_exp", m(exp.with_takeover.speed_ceiling, "m/s"), "{:.2f}", "ceiling, m/s")
+v("ceil_exp3", m(exp.with_takeover.speed_ceiling, "m/s"), "{:.3f}", "the same, three decimals")
+room = AISLE.d_clear - AISLE.fixed_overhead
+v("room2a", m((room + room) / AISLE.a_brake, "s**2"), "{:.2f}", "2 room / a, s^2")
+v("t_surp_s", m(LADDER.responses["surprise"], "s"), "{:.1f}", "surprise, s")
+v("ceil_surp", m(rows["surprise"].with_takeover.speed_ceiling, "m/s"), "{:.2f}", "surprise ceiling, m/s")
+
+print("== A person beside the machine (SI 14.3.1, footnote 5)")
+v_manual = Q_(TAKEOVER.Iso10218ManualReducedSpeedMmS, "mm/s")
+t_mhp = AISLE.t_human_simple_reaction_slow
+v("v_manual", m(v_manual, "mm/s"), "{:.0f}", "manual reduced speed, mm/s")
+v("t_mhp_slow", m(t_mhp, "ms"), "{:.0f}", "slow-bound human response, ms")
+v("manual_travel", m(v_manual * t_mhp, "mm"), "{:.1f}", "travel during it, mm")
+
+print("== Leases and the handshake (SI 14.3)")
+v("chunk_period", m(RM.chunk_period, "ms"), "{:.0f}", "chunk renewal period, ms")
+v("t_lease", m(AISLE.t_lease, "ms"), "{:.0f}", "chunk lease, ms")
+v("t_manual", m(IN_AISLE.manual_lease, "ms"), "{:.0f}", "manual lease, ms")
+v("lease_ext", m(slow.lease_extension, "ms"), "{:.0f}", "manual lease beyond the chunk lease, ms")
+v("lease_ext_travel", m(slow.lease_extension_travel, "mm"), "{:.0f}", "its travel at the request speed, mm")
+v("hs_req", m(AISLE.t_handshake_request, "ms"), "{:.0f}", "request, ms")
+v("hs_ack", m(AISLE.t_handshake_acknowledge, "ms"), "{:.0f}", "acknowledge, ms")
+v("hs_commit", m(AISLE.t_tick, "ms"), "{:.0f}", "commit (one tick), ms")
+v("hs_conf", m(AISLE.t_handshake_confirm, "ms"), "{:.0f}", "confirm, ms")
+v("hs_acked", m(AISLE.t_handshake_request + AISLE.t_handshake_acknowledge, "ms"), "{:.0f}", "commit begins, ms")
+v("tick", m(AISLE.t_tick, "ms"), "{:.0f}", "permission tick, ms")
+v("tick_khz", m(1 / AISLE.t_tick, "kHz"), "{:.0f}", "permission rate, kHz")
+
+print("== Vote: the handover timeout (SI eq. 4, Checkpoint 14.2)")
+v("timeout_cfg", m(IN_AISLE.configured_timeout, "ms"), "{:.0f}", "configured ceiling, ms")
+v("ticks_da", aisle.timeout_ticks_after_admission, "{:.0f}", "whole ticks after the allocation")
+v("timeout_tighter", m(IN_AISLE.configured_timeout - aisle.timeout_after_admission, "ms"), "{:.1f}",
+  "deadline tighter than the ceiling by, ms")
+v("fixed_stop", m(WINDOW_AISLE.result.with_takeover.required_distance, "m"), "{:.2f}", "500 ms window waited at 1.3 m/s, m")
+v("fixed_over", m(-WINDOW_AISLE.result.with_takeover.spare, "m"), "{:.2f}", "past the rack end, m")
+v("fixed_crawl", m(WINDOW_CRAWL.result.with_takeover.required_distance, "m"), "{:.2f}", "the same window at the crawl, m")
+
+print("== Bumpless transfer (SI 14.4, eq. 6 and 7)")
+v("step_jerk", m(blend.step_jerk, "m/s**3"), "{:,.0f}", "one-tick step as jerk, m/s^3")
+v("window", m(blend.window, "ms"), "{:.2f}", "base blend window, ms")
+v("window_ticks", blend.window_ticks, "{:,.0f}", "base window, whole ticks")
+v("arm_torque", m(BLEND.torque_change, "N*m"), "{:.0f}", "arm torque change, N m")
+v("arm_rate", m(BLEND.torque_rate_limit, "N*m/s"), "{:.0f}", "torque-rate ceiling, N m/s")
+v("arm_window", m(blend.arm_window, "ms"), "{:.1f}", "arm blend window, ms")
+v("arm_ticks", blend.arm_window_ticks, "{:.0f}", "arm window, whole ticks")
+v("blended", m(blend.blended_stop, "mm"), "{:.1f}", "blended stop from the request speed, mm")
+v("scurve_slow", m(blend.scurve_travel, "mm"), "{:.1f}", "resident stop from it, mm")
+v("step_slow", m(blend.step_stop, "mm"), "{:.1f}", "ideal step stop, mm")
+
+print("== The remote-assistant session at the request speed (SI table 7)")
+v("s_spare", m(slow.machine.spare, "mm"), "{:.1f}", "spare at the request speed, mm")
+v("s_travel", m(slow.takeover_travel, "mm"), "{:.1f}", "takeover travel, mm")
+v("s_after", m(slow.spare_after_takeover, "mm"), "{:.1f}", "left, mm")
+v("s_da_travel", m(slow.admission_travel, "mm"), "{:.1f}", "allocation travel, mm")
+v("s_after_da", m(slow.spare_after_admission, "mm"), "{:.1f}", "left, mm")
+v("s_after_lease", m(slow.spare_after_lease, "mm"), "{:.1f}", "left after the lease extension, mm")
+v("blend_reserve", m(blend.reserve_use, "mm"), "{:.0f}", "a braking blend would use up to, mm")
+v("crawl_left", m(crawl.spare_after_takeover, "mm"), "{:.1f}", "crawl's spare after the out-of-loop takeover, mm")
+
+print("== Authentication and the verifier flood (SI 14.5, 14.9)")
+v("t_ed", m(auth.verify_time, "ms"), "{:.1f}", "Ed25519 verification, ms")
+v("ed_travel", m(auth.verify_travel, "mm"), "{:.2f}", "its travel at the aisle speed, mm")
+v("n_miss", auth.forged_to_miss, "{:.0f}", "forged packets that push the veto past the deadline")
+v("veto_at", m(auth.veto_verified_at, "ms"), "{:.1f}", "veto verified at, ms")
+v("n_miss_da", auth.forged_to_miss_after_admission, "{:.0f}", "the same after the allocation")
+v("flood_rate", auth.forged_rate, "{:.0f}", "packets per second")
+v("fresh", m(auth.freshness_window, "ms"), "{:.0f}", "freshness window, ms")
+v("fresh_travel", m(auth.freshness_travel, "mm"), "{:.0f}", "its travel, mm")
+v("fresh_left", m(auth.spare_after_freshness, "mm"), "{:.1f}", "spare left, mm")
+
+print("== Flight 2904 (SI War Story 14.1; Warsaw accident report)")
+lh_gear = REPORTS.Dlh2904LeftGearContactAfterRightS
+v("lh_gear", lh_gear, "{:.0f}", "left gear touched after the right, s")
+v("lh_brake", lh_gear + REPORTS.Dlh2904WheelBrakesAfterLeftGearS, "{:.0f}", "wheel brakes acted after first touchdown, s")
+v("lh_kt", REPORTS.Dlh2904RunwayExitGroundSpeedKt, "{:.0f}", "ground speed at the runway end, kt")
+v("lh_dead_words", REPORTS.Dlh2904Fatalities, "words", "fatalities")
+
+print("== The record and the masks (SI 14.7, 14.8)")
+v("edr_old_s", EDR.LegacyPreCrashWindowS, "{:.0f}", "recorder window today, s")
+v("edr_old_hz", EDR.LegacyPreCrashRateHz, "{:.0f}", "recorder rate today, Hz")
+v("edr_old_n", EDR.LegacyPreCrashWindowS * EDR.LegacyPreCrashRateHz, "{:.0f}", "samples in that window")
+v("edr_new_s", EDR.PreCrashWindowS, "{:.0f}", "recorder window after the phase-in, s")
+v("edr_new_hz", EDR.PreCrashRateHz, "{:.0f}", "recorder rate after the phase-in, Hz")
+edr_period = 1 / Q_(EDR.PreCrashRateHz, "Hz")
+v("edr_period", m(edr_period, "ms"), "{:.0f}", "one sample per, ms")
+v("edr_ticks", m(edr_period / AISLE.t_tick, ""), "{:.0f}", "permission ticks per sample")
+v("pre_s", m(AISLE.pre_trigger_window, "s"), "{:.0f}", "pre-trigger window, s")
+v("tuples", m(AISLE.pre_trigger_window / AISLE.t_tick, ""), "{:,.0f}", "tuples in the pre-trigger window")
+v("drift_s", m(OOL_AISLE.takeover, "s"), "{:.1f}", "drift interval (the out-of-loop takeover), s")
+v("drift_ticks", m(OOL_AISLE.takeover / AISLE.t_tick, ""), "{:,.0f}", "drift interval, ticks")
+sirius = Q_(TAKEOVER.SiriusPreInterventionWindowS, "s")
+v("sirius_s", m(sirius, "s"), "{:.0f}", "Sirius pre-intervention window, s")
+v("sirius_left_s", m(OOL_AISLE.takeover - sirius, "s"), "{:.1f}", "drift left outside it, s")
+v("sirius_left_ticks", m((OOL_AISLE.takeover - sirius) / AISLE.t_tick, ""), "{:,.0f}", "the same in ticks")
+v("merat_lo", TAKEOVER.MeratLateralStabilizationLowS, "{:.0f}", "lateral control settles, low, s")
+v("merat_hi", TAKEOVER.MeratLateralStabilizationHighS, "{:.0f}", "high, s")
+
+# Plot inputs for make_figs.py, SI magnitudes at full precision.
+DMV = RECORD.rows
+DRV, DL = RECORD.drivered_permit, RECORD.driverless_permit
+DMV_LAST = RECORD.latest
+V_AISLE = m(IN_AISLE.speed, "m/s")
+SPARE = m(machine.spare, "m")
+T_VIDEO, T_PERC = m(AISLE.t_video_glass_to_glass, "s"), m(AISLE.t_human_perceptual_slow, "s")
+T_COG, T_MOT = m(AISLE.t_human_cognitive_slow, "s"), m(AISLE.t_human_motor_slow, "s")
+T_IN, T_OOL, T_HS = m(IN_AISLE.takeover, "s"), m(OOL_AISLE.takeover, "s"), m(AISLE.t_handshake, "s")
+T_DA, TICK = m(AISLE.t_dispatch_to_admission, "s"), m(AISLE.t_tick, "s")
+HS = {"Request": m(AISLE.t_handshake_request, "s"), "Acknowledge": m(AISLE.t_handshake_acknowledge, "s"),
+      "Commit": m(AISLE.t_tick, "s"), "Confirm": m(AISLE.t_handshake_confirm, "s")}
+V_SLOW, V_CRAWL = m(IN_SLOW.speed, "m/s"), m(OOL_CRAWL.speed, "m/s")
+DL_AISLE, DL_SLOW, DL_CRAWL = m(aisle.deadline, "s"), m(slow.deadline, "s"), m(crawl.deadline, "s")
+DA_BASE, W_BASE = m(AISLE.a_brake, "m/s**2"), m(blend.window, "s")
+S0, S1 = m(slow.machine.spare, "m"), m(slow.spare_after_takeover, "m")
+S2, S3 = m(slow.spare_after_admission, "m"), m(slow.spare_after_lease, "m")
+BLEND_RESERVE = m(blend.reserve_use, "m")
+T_ED, N_MISS, N_MISS_DA = m(auth.verify_time, "s"), auth.forged_to_miss, auth.forged_to_miss_after_admission
 
 
-# =============================================================================
-# Shared inputs: the running machine at the rack end (SI Napkin Math 14.1;
-# SE Napkin Math 12.1; MLSysIM Embodied.Scenario AISLE)
-# =============================================================================
-V_AISLE = 1.3          # m/s, chosen aisle speed (AISLE.v_aisle)
-D_CLEAR = 1.10         # m, rack-end clear distance (illustrative, AISLE.d_clear)
-LOC = 0.050            # m, localization bound (illustrative)
-PROT = 0.100           # m, protective clearance margin (chosen)
-TRACK = 0.040          # m, tracking bound (illustrative)
-ALLOW = LOC + PROT + TRACK          # 190 mm fixed allowances (SI Napkin Math 14.1)
-A_BRAKE = 2.0          # m/s^2, credible braking deceleration (illustrative)
-# Jerk bound: SE 12.10 gives the S-curve stop from the 1.5 m/s drive limit as
-# 1,031.25 ms against 750 ms at constant deceleration, so a/J = 0.28125 s.
-J = A_BRAKE / (1.03125 - 1.5 / A_BRAKE)   # prints as 7.11 m/s^3 (SI: 7.11, derived)
-T_ACT = 0.020          # s, brake onset (SE table 1)
-T_LEASE_PATH = 0.062   # s, 60 ms chunk lease + one tick + one bus cycle (SE table 1)
-T_AGE = 0.0516         # s, observation age (SE table 1)
-TAU = T_ACT + T_LEASE_PATH + T_AGE        # 133.6 ms pre-brake delay (SI: derived)
-T_DA = 0.0633          # s, dispatch-to-admission allocation (Lecture 13; SI 14.2.1)
-T_CHUNK = 0.060        # s, chunk lease (Lecture 4)
-T_MANUAL = 0.100       # s, manual lease, chosen (SI 14.3.4)
-TICK = 0.001           # s, permission tick, 1 kHz (SI 14.1)
-
-# Human and console terms (SI 14.2.2; AISLE registry, sourced)
-T_PERC, T_COG, T_MOT = 0.200, 0.170, 0.100   # Model Human Processor slow bounds (Card et al. 1983)
-T_PERC_N, T_COG_N, T_MOT_N = 0.100, 0.070, 0.070  # nominal cycles (same source)
-T_VIDEO = 0.104        # s, glass-to-glass, wired teleoperation link (Schimpe et al. 2022)
-HS = {"Request": 0.010, "Acknowledge": 0.005, "Commit": 0.001, "Confirm": 0.015}  # chosen (SI table 5)
-T_BRAKE_EXP, T_BRAKE_UNEXP, T_BRAKE_SURP = 0.75, 1.25, 1.5   # Green 2000
-TOT = {"p50": 2.37, "mean": 2.72, "p90": 4.33, "p99": 7.0}   # Zhang et al. 2019 condition means
+def deadline(speed):
+    """Fallback deadline T_latest in s at a request speed in m/s (TakeoverBudgetModel)."""
+    return m(IN_AISLE.variant(speed=Q_(speed, "m/s")).result.deadline, "s")
 
 
-def stop_dist(v, a=A_BRAKE, j=J):
-    """Jerk-limited resident stop from zero acceleration (SI eq. 11.17 form), m."""
-    if v >= a * a / j:
-        return v * v / (2 * a) + v * a / (2 * j)
-    return v * math.sqrt(v / j)       # triangular deceleration: t = 2 sqrt(v/j), d = v t / 2
-
-
-def stop_total(v, wait=0.0):
-    """SI equation 2: v (wait + tau) + resident stop + allowances, m."""
-    return v * (wait + TAU) + stop_dist(v) + ALLOW
-
-
-def ceiling(wait):
-    """Largest v with stop_total(v, wait) <= D_CLEAR (bisection), m/s."""
-    lo, hi = 0.0, 3.0
-    for _ in range(200):
-        m = (lo + hi) / 2
-        if stop_total(m, wait) <= D_CLEAR:
-            lo = m
-        else:
-            hi = m
-    return lo
-
-
-def deadline(v):
-    """SI equation 4: latest fallback deadline at speed v, s."""
-    return (D_CLEAR - ALLOW - stop_dist(v)) / v - TAU
-
-
-# =============================================================================
-# Hook: California DMV filings, Waymo (SI 14.1 figure 1; MLSysIM registry)
-# =============================================================================
-def dmv_rows():
-    from mlsysim import Literature
-    return [r for r in Literature.CaliforniaDisengagements.entries
-            if r["company"] == "Waymo" and r["filer_type"] in ("annual", "first_report")]
-
-
-def dmv_get(rows, year, permit):
-    return next(r for r in rows if r["report_year"] == year and r["permit_type"] == permit)
-
-
-DMV = dmv_rows()
-DRV, DL = "drivered_AVT", "driverless_AVDT"
-DMV_FIRST = dmv_get(DMV, 2015, DRV)
-DMV_LAST = dmv_get(DMV, 2025, DRV)
-DMV_DL = dmv_get(DMV, 2025, DL)
-DMV_DROP = dmv_get(DMV, 2020, DRV)["miles_per_disengagement"] / dmv_get(DMV, 2021, DRV)["miles_per_disengagement"]
-DMV_GROWTH = dmv_get(DMV, 2021, DRV)["autonomous_miles"] / dmv_get(DMV, 2020, DRV)["autonomous_miles"]
-
-head("Hook: Waymo DMV filings (SI 14.1)")
-show("2015 miles per disengagement", f"{DMV_FIRST['miles_per_disengagement']:,.1f} (about {round(DMV_FIRST['miles_per_disengagement'], -2):,.0f})")
-show("2025 miles per disengagement, safety driver", f"{DMV_LAST['miles_per_disengagement']:,.1f} (about {round(DMV_LAST['miles_per_disengagement'], -2):,.0f})")
-show("2025 takeovers, safety driver", f"{DMV_LAST['disengagements']:.0f}")
-show("2025 driverless miles per disengagement", f"{DMV_DL['miles_per_disengagement']:,.1f} (about {round(DMV_DL['miles_per_disengagement'], -2):,.0f}), {DMV_DL['disengagements']:.0f} events")
-show("2020 to 2021 rate fell", f"{DMV_DROP:.2f}x (3.8x)")
-show("2020 to 2021 miles grew", f"{DMV_GROWTH:.2f}x (3.7x)")
-show("2025 safety-driver miles (millions)", f"{DMV_LAST['autonomous_miles'] / 1e6:.2f}")
-
-# DMV 2024 CSV excerpt counts (raw rows; SOURCES.yml). Counted from the file by hand-run
-# script in the build folder; typed here as source values, not derived.
-DMV24_WAYMO_ROWS, DMV24_BY_DRIVER, DMV24_BY_AV = 244, 230, 14
-head("Hook artifact: DMV 2024 CSV, Waymo rows (source counts)")
-show("rows, by test driver, by AV system", f"{DMV24_WAYMO_ROWS}, {DMV24_BY_DRIVER}, {DMV24_BY_AV}")
-show("share initiated by the test driver", f"{100 * DMV24_BY_DRIVER / DMV24_WAYMO_ROWS:.1f} percent")
-show("registry 2024 drivered disengagements (cross-check)", f"{dmv_get(DMV, 2024, DRV)['disengagements']:.0f}")
-
-# =============================================================================
-# Recall: the finished budget at 1.3 m/s (SE Napkin Math 12.1)
-# =============================================================================
-D0 = stop_total(V_AISLE)
-SPARE = D_CLEAR - D0
-head("Recall: finished budget at the aisle speed")
-show("pre-brake delay tau", f"{TAU * 1e3:.1f} ms")
-show("jerk bound J", f"{J:.2f} m/s^3")
-show("delay travel v*tau", f"{V_AISLE * TAU * 1e3:.2f} mm")
-show("resident stop at 1.3 m/s", f"{stop_dist(V_AISLE) * 1e3:.2f} mm")
-show("machine-alone stop", f"{D0 * 1e3:.2f} mm")
-show("spare", f"{SPARE * 1e3:.1f} mm")
-show("spare as delay", f"{SPARE / V_AISLE * 1e3:.1f} ms")
-show("dispatch-to-admission travel", f"{V_AISLE * T_DA * 1e3:.1f} mm")
-show("delay left after dispatch-to-admission", f"{(SPARE / V_AISLE - T_DA) * 1e3:.1f} ms")
-show("mm left after dispatch-to-admission", f"{(SPARE - V_AISLE * T_DA) * 1e3:.1f} mm")
-
-# =============================================================================
-# Segment 1, timing strip: the in-loop takeover (SI 14.2.2, figure 2)
-# =============================================================================
-T_HS = sum(HS.values())
-T_CONSOLE = T_VIDEO + T_HS
-T_IN = T_PERC + T_COG + T_MOT + T_CONSOLE
-T_OOL = TOT["p90"] + T_CONSOLE
-head("Takeover timing strip (SI eq. 1)")
-show("four-phase handshake", f"{T_HS * 1e3:.0f} ms")
-show("console term (video + handshake)", f"{T_CONSOLE * 1e3:.0f} ms")
-show("operator end (video + perceive + decide + act)", f"{(T_VIDEO + T_PERC + T_COG + T_MOT) * 1e3:.0f} ms")
-show("in-loop takeover T1", f"{T_IN * 1e3:.0f} ms")
-show("travel during T1 at 1.3 m/s", f"{V_AISLE * T_IN * 1e3:.1f} mm")
-show("spare runs out at", f"{SPARE / V_AISLE * 1e3:.1f} ms (inside the 104 ms video stage)")
-show("travel / spare", f"{V_AISLE * T_IN / SPARE:.1f}x")
-show("out-of-loop takeover T2", f"{T_OOL:.3f} s (4.5 s)")
-
-# =============================================================================
-# Segment 1, predict: the takeover tax (SI Napkin Math 14.1)
-# =============================================================================
-D1 = stop_total(V_AISLE, T_IN)
-D2 = stop_total(V_AISLE, T_OOL)
-head("Takeover tax (Napkin Math 14.1)")
-show("d_stop,0 machine alone", f"{D0 * 1e3:.2f} mm")
-show("d_stop,1 in-loop", f"{D1 * 1e3:.2f} mm, overrun {(D1 - D_CLEAR) * 1e3:.1f} mm")
-show("d_stop,2 out-of-loop", f"{D2 * 1e3:.2f} mm, overrun {(D2 - D_CLEAR):.2f} m")
-show("travel during T2", f"{V_AISLE * T_OOL * 1e3:.1f} mm ({V_AISLE * T_OOL:.2f} m)")
-show("d2 / d1", f"{D2 / D1:.2f}x (3.9x)")
-show("T2 travel / clear distance", f"{V_AISLE * T_OOL / D_CLEAR:.1f}x")
-
-# =============================================================================
-# Segment 1, data: Zhang et al. 2019 condition means and the table 2 ceilings
-# =============================================================================
-MTOT = [float(r["mean_takeover_time_s"]) for r in csv.DictReader(open(HERE / "zhang2019_mean_takeover_times.csv"))]
-
-
-def pct(vals, p):
-    s = sorted(vals)
-    return s[max(math.ceil(p / 100 * len(s)) - 1, 0)]
-
-
-head("Zhang et al. 2019, 520 condition means (data file)")
-show("n", len(MTOT))
-show("mean, SD", f"{sum(MTOT) / len(MTOT):.2f} s, {math.sqrt(sum((x - sum(MTOT) / len(MTOT)) ** 2 for x in MTOT) / (len(MTOT) - 1)):.2f} s")
-show("p50, p90, p99", f"{pct(MTOT, 50):.2f}, {pct(MTOT, 90):.2f}, {pct(MTOT, 99):.2f} s")
-show("max", f"{max(MTOT):.2f} s")
-show("conditions above 10 s", sum(1 for x in MTOT if x > 10))
-show("conditions above 4.33 s", sum(1 for x in MTOT if x > 4.33))
-
-TABLE2 = [
-    ("In-loop, nominal pace", T_PERC_N + T_COG_N + T_MOT_N),
-    ("In-loop, slow bound (design)", T_PERC + T_COG + T_MOT),
-    ("Expected brake signal", T_BRAKE_EXP),
-    ("Unexpected but common signal", T_BRAKE_UNEXP),
-    ("Surprise event", T_BRAKE_SURP),
-    ("Out-of-loop, median condition", TOT["p50"]),
-    ("Out-of-loop, average condition", TOT["mean"]),
-    ("Out-of-loop, 90th percentile (design)", TOT["p90"]),
-    ("Out-of-loop, 99th percentile", TOT["p99"]),
-]
-CEIL = {}
-head("Table 2: speed ceilings (human + 135 ms console, partial budget)")
-for name, th in TABLE2:
-    w = th + T_CONSOLE
-    CEIL[name] = ceiling(w)
-    show(name, f"human {th * 1e3:,.0f} ms, with console {w * 1e3:,.0f} ms, travel {V_AISLE * w:.2f} m, ceiling {CEIL[name]:.2f} m/s")
-
-# =============================================================================
-# Segment 1, worked example: the speed a human buys (SI Napkin Math 14.2)
-# =============================================================================
-T_FULL = TAU + T_IN + A_BRAKE / (2 * J)
-ROOM = D_CLEAR - ALLOW
-V_IN = A_BRAKE * (math.sqrt(T_FULL ** 2 + 2 * ROOM / A_BRAKE) - T_FULL)
-V_PERFECT = ROOM / (TAU + T_IN)
-T_FULL_DA = T_FULL + T_DA
-V_IN_DA = A_BRAKE * (math.sqrt(T_FULL_DA ** 2 + 2 * ROOM / A_BRAKE) - T_FULL_DA)
-head("Speed a human buys (Napkin Math 14.2, eq. 3)")
-show("room to brake D - allowances", f"{ROOM:.2f} m")
-show("half jerk ramp a/(2J)", f"{A_BRAKE / (2 * J):.4f} s")
-show("T_full = tau + T1 + a/2J", f"{T_FULL:.4f} s")
-show("T_full^2 + 2 room / a", f"{T_FULL ** 2 + 2 * ROOM / A_BRAKE:.4f} s^2, root {math.sqrt(T_FULL ** 2 + 2 * ROOM / A_BRAKE):.4f} s")
-show("in-loop ceiling", f"{V_IN:.3f} m/s")
-show("transition speed a^2/J", f"{A_BRAKE ** 2 / J:.3f} m/s")
-show("perfect brake ceiling", f"{V_PERFECT:.2f} m/s")
-show("with dispatch-to-admission", f"{V_IN_DA:.3f} m/s")
-show("solver cross-check, in-loop", f"{ceiling(T_IN):.3f} m/s; with T_DA {ceiling(T_IN + T_DA):.3f} m/s")
-show("solver, out-of-loop", f"{ceiling(T_OOL):.3f} m/s; with T_DA {ceiling(T_OOL + T_DA):.3f} m/s")
-
-# =============================================================================
-# Segment 1, deadline (SI Napkin Math 14.3, eq. 4)
-# =============================================================================
-V_SLOW = 0.75   # m/s, the complete-budget in-loop ceiling 0.797 rounded down to 0.05 (SI 14.2.4)
-V_CRAWL = 0.15  # m/s, chosen crawl before an out-of-loop request (SI 14.2.4)
-DL_AISLE = deadline(V_AISLE)
-DL_SLOW = deadline(V_SLOW)
-DL_CRAWL = deadline(V_CRAWL)
-head("Fallback deadline (Napkin Math 14.3)")
-show("resident stop at 0.75 m/s", f"{stop_dist(V_SLOW):.4f} m")
-show("deadline at 1.3 m/s", f"{DL_AISLE * 1e3:.1f} ms; whole ticks {math.floor(DL_AISLE / TICK)} ms")
-show("deadline at 1.3 m/s after T_DA", f"{(DL_AISLE - T_DA) * 1e3:.1f} ms")
-show("deadline at 0.75 m/s", f"{DL_SLOW * 1e3:.1f} ms")
-show("left after the 605 ms takeover", f"{(DL_SLOW - T_IN) * 1e3:.1f} ms; after T_DA {(DL_SLOW - T_IN - T_DA) * 1e3:.1f} ms")
-show("ratio deadline 0.75 / 1.3", f"{DL_SLOW / DL_AISLE:.1f}x")
-show("spare at 0.75 m/s", f"{(D_CLEAR - stop_total(V_SLOW)) * 1e3:.1f} mm")
-show("deadline at 0.8 m/s, minus T1, minus T_DA", f"{(deadline(0.8) - T_IN) * 1e3:.1f} ms, {(deadline(0.8) - T_IN - T_DA) * 1e3:.1f} ms")
-show("deadline at 0.15 m/s", f"{DL_CRAWL:.2f} s; left after T2 {DL_CRAWL - T_OOL:.2f} s")
-show("UN R157 10 s over T2", f"{10 / T_OOL:.1f}x; travel at 1.3 m/s {10 * V_AISLE:.0f} m")
-show("takeover timeout: ceiling 500 ms vs deadline after T_DA", f"tighter by {(0.5 - (DL_AISLE - T_DA)) * 1e3:.1f} ms; whole ticks {math.floor(round((DL_AISLE - T_DA) / TICK, 6))}")
-
-# =============================================================================
-# Segment 1, estimate: an operator waiting for an expected brake signal
-# =============================================================================
-W_EXP = T_BRAKE_EXP + T_CONSOLE
-head("Estimate: expected brake signal (Checkpoint 14.1)")
-show("wait", f"{W_EXP * 1e3:.0f} ms")
-T_FULL_EXP = TAU + W_EXP + A_BRAKE / (2 * J)
-show("T_full", f"{T_FULL_EXP:.4f} s")
-show("ceiling by eq. 3", f"{A_BRAKE * (math.sqrt(T_FULL_EXP ** 2 + 2 * ROOM / A_BRAKE) - T_FULL_EXP):.3f} m/s")
-show("travel during the wait at 1.3 m/s", f"{V_AISLE * W_EXP:.2f} m")
-
-# =============================================================================
-# Segment 2: leases and the handshake (SI 14.3)
-# =============================================================================
-head("Leases and handshake")
-show("lease extension travel at 0.75 m/s v(T_man - T_chunk)", f"{V_SLOW * (T_MANUAL - T_CHUNK) * 1e3:.1f} mm")
-show("travel in one 100 ms manual lease at 1.3 m/s", f"{V_AISLE * T_MANUAL * 1e3:.0f} mm")
-show("handshake phases", ", ".join(f"{k} {v * 1e3:.0f} ms" for k, v in HS.items()) + f"; total {T_HS * 1e3:.0f} ms")
-
-# =============================================================================
-# Segment 3: bumpless transfer (SI 14.4, eq. 6 and 7)
-# =============================================================================
-PEAK = 30 / 16                     # peak slope of 10s^3 - 15s^4 + 6s^5
-DA_BASE = 2.0                      # m/s^2, base step to braking (SI 14.4.2)
-DTAU_ARM, TAU_RATE = 15.0, 750.0   # N m and N m/s (illustrative, SI 14.4.2)
-W_BASE = PEAK * DA_BASE / J
-W_ARM = PEAK * DTAU_ARM / TAU_RATE
-
-
-def blend_stop(v0, n=200000):
-    """Smoothstep acceleration ramp 0 -> -a over W_BASE, then full braking (SI 14.4.2)."""
-    dt = W_BASE / n
-    v, x = v0, 0.0
-    for i in range(n):
-        s = (i + 0.5) / n
-        acc = -DA_BASE * (10 * s ** 3 - 15 * s ** 4 + 6 * s ** 5)
-        x += v * dt + 0.5 * acc * dt * dt
-        v += acc * dt
-    return x, v, v * v / (2 * DA_BASE)
-
-
-BX, BV, BREST = blend_stop(V_SLOW)
-head("Bumpless transfer")
-show("smoothstep peak slope", f"{PEAK:.3f}")
-show("base window 1.875*2/J", f"{W_BASE * 1e3:.2f} ms -> {math.ceil(W_BASE / TICK)} ticks")
-show("arm window 1.875*15/750", f"{W_ARM * 1e3:.1f} ms -> {math.ceil(round(W_ARM / TICK, 6))} ticks")
-show("step in one 1 ms tick: jerk", f"{DA_BASE / TICK:,.0f} m/s^3")
-show("resident ramp a/J", f"{A_BRAKE / J * 1e3:.2f} ms")
-show("blend from 0.75: exit speed", f"{BV:.2f} m/s; travel {BX * 1e3:.1f} mm; then {BREST * 1e3:.1f} mm; total {(BX + BREST) * 1e3:.1f} mm")
-show("ideal step stop from 0.75", f"{V_SLOW ** 2 / (2 * A_BRAKE) * 1e3:.1f} mm")
-show("resident stop from 0.75", f"{stop_dist(V_SLOW) * 1e3:.1f} mm")
-show("blend minus step", f"{(BX + BREST - V_SLOW ** 2 / (2 * A_BRAKE)) * 1e3:.1f} mm; minus resident {(BX + BREST - stop_dist(V_SLOW)) * 1e3:.1f} mm")
-
-# =============================================================================
-# Segment 3: the remote-assistant session at 0.75 m/s (SI table 7)
-# =============================================================================
-S0 = D_CLEAR - stop_total(V_SLOW)
-S1 = S0 - V_SLOW * T_IN
-S2 = S1 - V_SLOW * T_DA
-S3 = S2 - V_SLOW * (T_MANUAL - T_CHUNK)
-BLEND_RESERVE = 0.1570  # m, "up to 157.0 mm" the braking blend would use (SI table 7, source value)
-head("Session admission waterfall (SI table 7)")
-show("finished budget's spare", f"{S0 * 1e3:.1f} mm")
-show("after takeover (travel)", f"{V_SLOW * T_IN * 1e3:.1f} mm -> {S1 * 1e3:.1f} mm")
-show("after dispatch-to-admission", f"{V_SLOW * T_DA * 1e3:.1f} mm -> {S2 * 1e3:.1f} mm")
-show("after manual lease extension", f"{V_SLOW * (T_MANUAL - T_CHUNK) * 1e3:.1f} mm -> {S3 * 1e3:.1f} mm")
-show("braking blend would use (SI)", f"up to {BLEND_RESERVE * 1e3:.1f} mm; short by {(BLEND_RESERVE - S3) * 1e3:.1f} mm")
-show("crawl remainder after T2", f"{(D_CLEAR - stop_total(V_CRAWL) - V_CRAWL * T_OOL) * 1e3:.1f} mm")
-
-# =============================================================================
-# Segment 3: authentication cost and verifier flooding (SI 14.5, 14.9)
-# =============================================================================
-T_ED = 0.0018     # s per Ed25519 verification, illustrative estimate (SI 14.5; Owens et al. 2024)
-head("Authentication and flooding")
-show("Ed25519 travel at 1.3 m/s", f"{V_AISLE * T_ED * 1e3:.2f} mm; spare left {(SPARE - V_AISLE * T_ED) * 1e3:.1f} mm")
-show("100 ms freshness window travel", f"{V_AISLE * 0.100 * 1e3:.0f} mm; spare left {(SPARE - V_AISLE * 0.100) * 1e3:.1f} mm")
-
-
-def forged_to_miss(budget):
-    n = 0
-    while (n + 1) * T_ED <= budget:
-        n += 1
-    return n   # with n forged queued ahead, the veto finishes at (n + 1) * T_ED > budget
-
-
-N_MISS = forged_to_miss(DL_AISLE)
-N_MISS_DA = forged_to_miss(DL_AISLE - T_DA)
-show("deadline (unrounded)", f"{DL_AISLE * 1e3:.2f} ms")
-show("forged packets to miss the partial deadline", f"{N_MISS} -> veto done at {(N_MISS + 1) * T_ED * 1e3:.2f} ms")
-show("forged packets to miss after T_DA", f"{N_MISS_DA} -> veto done at {(N_MISS_DA + 1) * T_ED * 1e3:.2f} ms")
-show("injection rate", f"{N_MISS / ((N_MISS + 1) * T_ED):.0f} packets per second")
-
-# =============================================================================
-# Segment 4: mode confusion and the record (SI 14.6 to 14.8)
-# =============================================================================
-head("Mode confusion and the record")
-show("base travel while the operator aligns the arm (605 ms at 1.3 m/s)", f"{V_AISLE * T_IN * 1e3:.1f} mm = {V_AISLE * T_IN / SPARE:.1f}x the spare")
-show("EDR today: samples in 5 s at 2 Hz", f"{5 * 2}")
-show("EDR from 2027: samples in 20 s at 10 Hz", f"{20 * 10}; one per {1000 / 10:.0f} ms = {0.1 / TICK:.0f} ticks")
-show("UN R157 timestamp accuracy 1 s in ticks", f"{1 / TICK:.0f}")
-show("authority record: tuples in the 5 s pre-trigger window", f"{5 / TICK:,.0f}")
-show("samples in the last 5 s: EDR 2 Hz, EDR 10 Hz, record 1 kHz", f"{5 * 2}, {5 * 10}, {5 / TICK:,.0f}")
-DRIFT = T_OOL
-show("interval 1 ticks for a 4.5 s takeover", f"{round(4.5 / TICK):,}")
-show("interval 2 ticks (arm blend)", f"{math.ceil(round(W_ARM / TICK, 6))}")
-show("Sirius window 2 s vs 4.5 s", f"{4.5 / 2.0:.1f}x; drift ticks outside the window {round((4.5 - 2.0) / TICK):,}")
-
-# =============================================================================
-# Pitfall: one fixed 500 ms window at two speeds (SI 14.9)
-# =============================================================================
-head("Fixed 500 ms window")
-show("at 1.3 m/s: travel, total, overrun", f"{V_AISLE * 0.5:.2f} m, {stop_total(V_AISLE, 0.5):.2f} m, {stop_total(V_AISLE, 0.5) - D_CLEAR:.2f} m")
-show("at 0.15 m/s: total", f"{stop_total(V_CRAWL, 0.5):.2f} m")
-
-# =============================================================================
-# Segment 2: a person beside the machine (SI 14.3.1 footnote 5)
-# =============================================================================
-V_MANUAL_REDUCED = 0.250   # m/s, ISO 10218-1:2025 manual reduced speed limit (SI footnote 5)
-head("Pendant at manual reduced speed")
-show("travel during a 470 ms in-loop human response at 250 mm/s", f"{V_MANUAL_REDUCED * (T_PERC + T_COG + T_MOT) * 1e3:.1f} mm")
-show("travel during the 605 ms remote in-loop takeover at 1.3 m/s", f"{V_AISLE * T_IN * 1e3:.1f} mm")
-show("ratio", f"{V_AISLE * T_IN / (V_MANUAL_REDUCED * (T_PERC + T_COG + T_MOT)):.1f}x")
+if __name__ == "__main__":
+    write(__file__)

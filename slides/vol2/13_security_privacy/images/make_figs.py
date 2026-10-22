@@ -1,48 +1,12 @@
 #!/usr/bin/env python3
 """Figures for Volume II, Lecture 13 (Security and Privacy).
 
-Every value is sourced. "SP" is the rendered chapter, Security & Privacy
-(Volume II, Chapter 13). Values computed here say "derived" on the figure
-or on its slide; scenario inputs say "illustrative" or "scenario".
-
-  - Recall (Lecture 12 chapter, Napkin Math 12.5): a 5 percent canary
-    against a 100 percent cutover, 20 times less exposure.
-  - Fleet interface map: the reference cluster of 1,024 GPUs in 128 nodes
-    of 8 (SP Sec. 13.6), its data feed, gradient exchange, node admission,
-    release path, query API, and shared accelerators (SP Sec. 13.1, 13.6).
-  - Extraction (SP Sec. 13.5.1, table 4, after Carlini et al. 2024):
-    ada 1,024 dims, < 2e6 queries; babbage 2,048, < 4e6; babbage-002
-    1,536, < 4e6; gpt-3.5-turbo-instruct and -1106, < 4e7 (dimension only,
-    costs estimated). Abstract: under $20 for the full projection matrix of
-    ada and babbage; under $2,000 estimated for gpt-3.5-turbo.
-  - Cumulative bill (SP Napkin Math 13.1, figure 6 inputs; scenario):
-    5M queries for 90 percent fidelity, training cost $5K, $0.001 per
-    query, paid tier $50 per 30 days for 10K queries/day, lifetime
-    allowance 100K queries. Daily-quota bill (5M / 10K) x 50 / 30 = $833;
-    lifetime bill 10 x 50 / 30 + 4.9M x 0.001 = $4,917 (as in the book).
-  - Nightshade dose-response (SP figure 12, Shan et al. 2024): the paper's
-    image grid, cropped; labels redrawn at slide size.
-  - Breakdown point (illustrative): 63 honest values near 1.0 and one
-    value v from a compromised worker; mean and median of the 64.
-  - Gather traffic (SP Sec. 13.6.1): ring AllReduce 2(N-1)/N x S per
-    worker; gathering every gradient (N-1) x S; N_DP = 64 gives 1.97 S
-    against 63 S, 32 times (derived).
-  - Enclave page cache (SP Sec. 13.8.1): 128 MiB = 134.2 MB; ResNet-18
-    INT8 11.7 MB, ResNet-50 INT8 25.6 MB, ResNet-50 FP32 102.4 MB.
-  - Trusted compute (SP Napkin Math 13.2, assumed overheads): plaintext
-    20 ms, AES 20.5 ms, FHE 200 s.
-  - GPT-2 extraction (SP Sec. 13.5.2, Carlini et al. 2021): 600,000
-    samples generated, 1,800 inspected, 604 confirmed memorized.
-  - Audit against the DP ceiling (SP figure 7): ceiling TPR <=
-    min(e^eps FPR, 1 - e^-eps (1 - FPR)) at eps = 1; audit curve
-    TPR = FPR + 0.6 FPR (1 - FPR), illustrative, as in the book.
-  - DP densities (illustrative): Laplace densities of scale b around f(D)
-    and f(D') one sensitivity apart.
-  - Salary mean (SP Napkin Math 13.3): sensitivity $200,000, eps = 1,
-    expected |error| $200 for 1,000 people, $2,000 for 100.
-  - Accountant (SP Sec. 13.9.2, Abadi et al. 2016): q = 0.01, sigma = 4,
-    delta = 1e-5: moments accountant eps 1.26 (100 epochs), 2.55 (400);
-    strong composition 9.34 and 24.22.
+Every number a figure shows comes from images/calcs.py, which reads it from
+MLSysIM (registry, Literature, and Scenarios.*); figures read the recorded
+values through val() and num(). Values computed there say "derived" on the
+figure or on its slide; scenario inputs say "illustrative" or "scenario".
+Shapes that carry no number (the Laplace densities, the breakdown plot's
+spread around the honest value, layout coordinates) are drawn here.
 
 Run from this folder: python3 make_figs.py
 """
@@ -54,7 +18,10 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
+import calcs  # noqa: E402  (records every value; figures read them through val/num)
+from deckvals import val, num  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
 
 C = sp.C
@@ -109,8 +76,8 @@ def save(fig, name):
 
 # ------------------------------------------------------------ recall canary
 sp.hbars(out / "recall_canary.svg", [
-    ("Cutover", 100, "danger", "100%"),
-    ("Canary", 5, "compute", "5%"),
+    ("Cutover", num("cutover_pct"), "danger", f"{val('cutover_pct')}%"),
+    ("Canary", num("canary_pct"), "compute", f"{val('canary_pct')}%"),
 ], "", log=False, size=(3.6, 1.0), xlabel="Traffic exposed until rollback")
 
 
@@ -124,7 +91,7 @@ def fleetmap(path, step):
                                 fc=V2["c1_l"], ec=V2["c1"], lw=1.6))
     ax.text(2.225, 2.22, "Training cluster", ha="center", va="center", fontsize=11, fontweight="bold",
             color=V2["text"])
-    ax.text(2.225, 1.98, "1,024 GPUs, 128 nodes", ha="center", va="center", fontsize=10,
+    ax.text(2.225, 1.98, f"{val('ref_gpus')} GPUs, {val('ref_nodes')} nodes", ha="center", va="center", fontsize=10,
             color=V2["text"])
     # ring of nodes
     for k in range(8):
@@ -241,9 +208,9 @@ theft("theft_types.svg")
 
 # ------------------------------------------------------------ Carlini et al. 2024 query counts
 fig, ax = plt.subplots(figsize=(5.8, 1.45))
-rows = [("ada", 2e6, "compute", "< 2M queries: weight matrix"),
-        ("babbage", 4e6, "compute", "< 4M queries: weight matrix"),
-        ("gpt-3.5-turbo", 4e7, "neutral", "< 40M queries: hidden width")]
+rows = [("ada", num("steal_ada_q_m") * 1e6, "compute", f"< {val('steal_ada_q_m')}M queries: weight matrix"),
+        ("babbage", num("steal_babbage_q_m") * 1e6, "compute", f"< {val('steal_babbage_q_m')}M queries: weight matrix"),
+        ("gpt-3.5-turbo", num("steal_gpt35_q_m") * 1e6, "neutral", f"< {val('steal_gpt35_q_m')}M queries: hidden width")]
 for i, (lab, v, ck, txt) in enumerate(rows):
     y = len(rows) - 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
@@ -261,36 +228,36 @@ sp.save(fig, out / "carlini_queries.svg")
 
 
 # ------------------------------------------------------------ cumulative bill (Napkin Math 13.1)
-QUERIES, PRICE, TRAIN = 5e6, 0.001, 5000.0
-TIER_Q, TIER_USD, DAYS = 1e4, 50.0, 30.0
-ALLOW = 1e5
+BUDGET = calcs.BUDGET
+QUERIES, TRAIN = BUDGET.extraction_queries, BUDGET.training_cost.to("USD").magnitude
+
+
+def pay_cost(q):
+    return BUDGET.pay_per_query_cost(q).to("USD").magnitude
 
 
 def tier_cost(q):
-    return q / TIER_Q * TIER_USD / DAYS
+    return BUDGET.tier_cost(q).to("USD").magnitude
 
 
 def life_cost(q):
-    return min(q, ALLOW) / TIER_Q * TIER_USD / DAYS + max(q - ALLOW, 0) * PRICE
-
-
-assert abs(tier_cost(QUERIES) - 833.3) < 1 and abs(life_cost(QUERIES) - 4916.7) < 1
+    return BUDGET.lifetime_cost(q).to("USD").magnitude
 
 
 def bill(path, step):
     fig, ax = plt.subplots(figsize=(3.7, 2.7))
     q = np.linspace(0, QUERIES, 400)
     ax.axhline(TRAIN / 1e3, color=C["neutral"], ls="--", lw=1.4)
-    ax.text(0.05, TRAIN / 1e3 + 0.12, "training cost, \\$5K", fontsize=11, color=C["neutral"], va="bottom")
-    ax.plot(q / 1e6, q * PRICE / 1e3, color=C["neutral"], lw=1.6, ls=":")
+    ax.text(0.05, TRAIN / 1e3 + 0.12, f"training cost, \\${val('ext_train_k')}K", fontsize=11, color=C["neutral"], va="bottom")
+    ax.plot(q / 1e6, [pay_cost(v) / 1e3 for v in q], color=C["neutral"], lw=1.6, ls=":")
     ax.text(3.3, 4.3, "pay per query", fontsize=11, color=C["neutral"], ha="right")
     a2 = 1.0 if step >= 2 else 0.0
     ax.plot(q / 1e6, [tier_cost(v) / 1e3 for v in q], color=C["danger"], lw=2.6, alpha=a2)
-    ax.text(4.95, tier_cost(QUERIES) / 1e3 + 0.2, "daily quota: \\$833\n500 days", ha="right",
+    ax.text(4.95, tier_cost(QUERIES) / 1e3 + 0.2, f"daily quota: \\${val('ext_tier_cost')}\n{val('ext_days')} days", ha="right",
             va="bottom", fontsize=11, color=C["danger"], fontweight="bold", alpha=a2)
     a3 = 1.0 if step >= 3 else 0.0
     ax.plot(q / 1e6, [life_cost(v) / 1e3 for v in q], color=C["memory"], lw=2.6, alpha=a3)
-    ax.text(2.3, 3.7, "lifetime budget:\n\\$4,917", ha="right", va="center", fontsize=11,
+    ax.text(2.3, 3.7, f"lifetime budget:\n\\${val('ext_life')}", ha="right", va="center", fontsize=11,
             color=C["memory"], fontweight="bold", alpha=a3)
     ax.set_xlim(0, 5)
     ax.set_ylim(0, 6.2)
@@ -346,7 +313,7 @@ def nightshade(path):
     ax = fig.add_axes([0.2, 0.11, 0.79, 0.79])
     ax.imshow(crop, aspect="auto")
     ax.axis("off")
-    for i, r in enumerate(["clean", "50", "100", "300"]):
+    for i, r in enumerate(["clean", val("ns_low"), val("ns_mid"), val("ns_high")]):
         fig.text(0.19, 0.11 + 0.79 * (1 - (i + 0.5) / 4), r, ha="right", va="center", fontsize=13,
                  fontweight="bold", color=C["danger"] if i else C["text"])
     fig.text(0.0, 0.5, "poison images", ha="left", va="center", fontsize=11, color=C["neutral"],
@@ -388,16 +355,17 @@ supply("supply_step2.svg", 2)
 
 # ------------------------------------------------------------ breakdown point of the mean
 rng = np.random.default_rng(13)
-honest = rng.normal(1.0, 0.1, 63)
-vs = np.logspace(0, 4, 200)
-means = [(honest.sum() + v) / 64 for v in vs]
+n_workers = int(num("bd_workers"))
+honest = rng.normal(num("bd_honest"), 0.1, int(num("bd_honest_n")))  # spread around the honest value: drawing only
+vs = np.logspace(0, math.log10(num("bd_attack")), 200)
+means = [(honest.sum() + v) / n_workers for v in vs]
 meds = [np.median(np.append(honest, v)) for v in vs]
 fig, ax = plt.subplots(figsize=(3.6, 2.2))
 ax.plot(vs, means, color=C["danger"], lw=2.6)
 ax.plot(vs, meds, color=C["data"], lw=2.6)
-ax.text(1.3, 120, "mean of 64\n(what AllReduce\naverages)", color=C["danger"], fontsize=11,
+ax.text(1.3, 120, f"mean of {val('bd_workers')}\n(what AllReduce\naverages)", color=C["danger"], fontsize=11,
         fontweight="bold", ha="left", va="top")
-ax.text(1.2e3, 0.55, "median of 64", color=C["data"], fontsize=11, fontweight="bold", ha="center")
+ax.text(1.2e3, 0.55, f"median of {val('bd_workers')}", color=C["data"], fontsize=11, fontweight="bold", ha="center")
 ax.set_xscale("log")
 ax.set_yscale("log")
 ax.set_ylim(0.4, 300)
@@ -411,24 +379,21 @@ ax.minorticks_off()
 sp.save(fig, out / "breakdown.svg")
 
 # ------------------------------------------------------------ gather traffic, N_DP = 64
-N = 64
-ring = 2 * (N - 1) / N
-gather = N - 1
-assert abs(gather / ring - 32) < 0.01
 sp.hbars(out / "gather_traffic.svg", [
-    ("Ring AllReduce (sum)", ring, "memory", f"{ring:.2f} S"),
-    ("Gather every gradient", gather, "danger", f"{gather} S  (32 times)"),
+    ("Ring AllReduce (sum)", calcs.FLEET.allreduce_factor, "memory", f"{val('ring')} S"),
+    ("Gather every gradient", num("gather"), "danger", f"{val('gather')} S  ({val('gather_ratio')} times)"),
 ], "", log=False, size=(5.8, 1.0), xlabel="Bytes each worker receives per step, S = gradient size (derived)")
 
 # ------------------------------------------------------------ enclave page cache
 fig, ax = plt.subplots(figsize=(3.0, 2.0))
 labels = ["ResNet-18\nINT8", "ResNet-50\nINT8", "ResNet-50\nFP32"]
-vals = [11.7, 25.6, 102.4]
+keys = ["r18_int8_mb", "r50_int8_mb", "r50_fp32_mb"]
+vals = [num(k) for k in keys]
 ax.bar(range(3), vals, color=[C["memory"], C["memory"], C["compute"]], width=0.62)
-for i, v in enumerate(vals):
-    ax.text(i, v + 3, f"{v:g} MB", ha="center", fontsize=11, fontweight="bold")
-ax.axhline(134.2, color=C["danger"], ls="--", lw=1.8)
-ax.text(2.4, 138, "EPC 128 MiB = 134.2 MB", ha="right", va="bottom", fontsize=11, color=C["danger"],
+for i, k in enumerate(keys):
+    ax.text(i, vals[i] + 3, f"{val(k)} MB", ha="center", fontsize=11, fontweight="bold")
+ax.axhline(num("epc_mb"), color=C["danger"], ls="--", lw=1.8)
+ax.text(2.4, num("epc_mb") + 3.8, f"EPC {val('epc_mib')} MiB = {val('epc_mb')} MB", ha="right", va="bottom", fontsize=11, color=C["danger"],
         fontweight="bold")
 ax.set_xticks(range(3))
 ax.set_xticklabels(labels, fontsize=11)
@@ -439,9 +404,10 @@ sp.save(fig, out / "epc.svg")
 # ------------------------------------------------------------ trusted compute latency
 fig, ax = plt.subplots(figsize=(3.0, 2.0))
 labels = ["Plaintext", "AES", "FHE"]
-vals = [20, 20.5, 200000]
+vals = [num("fhe_base_ms"), num("fhe_aes_total_ms"), num("fhe_s") * 1e3]
 ax.bar(range(3), vals, color=[C["neutral"], C["neutral"], C["danger"]], width=0.62)
-for i, (v, t) in enumerate(zip(vals, ["20 ms", "20.5 ms", "200 s"])):
+for i, (v, t) in enumerate(zip(vals, [f"{val('fhe_base_ms')} ms", f"{val('fhe_aes_total_ms')} ms",
+                                      f"{val('fhe_s')} s"])):
     ax.text(i, v * 1.4, t, ha="center", fontsize=11, fontweight="bold")
 ax.set_yscale("log")
 ax.set_ylim(5, 2e6)
@@ -455,27 +421,24 @@ sp.save(fig, out / "fhe.svg")
 
 # ------------------------------------------------------------ GPT-2 extraction funnel
 sp.hbars_steps(str(out / "gpt2_funnel"), [
-    ("Generated", 600000, "neutral", "600,000"),
-    ("Inspected", 1800, "compute", "1,800"),
-    ("Memorized", 604, "danger", "604"),
+    ("Generated", num("gpt2_gen"), "neutral", val("gpt2_gen")),
+    ("Inspected", num("gpt2_insp"), "compute", val("gpt2_insp")),
+    ("Memorized", num("gpt2_mem"), "danger", val("gpt2_mem")),
 ], "", log=True, size=(3.3, 1.2), xlabel="GPT-2 samples (log scale)")
 
 
 # ------------------------------------------------------------ audit lower bound, DP ceiling
-def ceiling(f, eps=1.0):
-    return min(math.exp(eps) * f, 1 - math.exp(-eps) * (1 - f))
-
-
+AUDIT = calcs.AUDIT
 fpr = np.linspace(0, 1, 301)
-ceil = np.array([ceiling(f) for f in fpr])
-aud = fpr + 0.6 * fpr * (1 - fpr)
+ceil = np.array([AUDIT.ceiling(f) for f in fpr])
+aud = np.array([AUDIT.audit(f) for f in fpr])
 assert np.all(aud <= ceil + 1e-12)
 fig, ax = plt.subplots(figsize=(3.2, 2.4))
 ax.fill_between(fpr, aud, ceil, color=C["compute_l"], alpha=0.9)
 ax.plot(fpr, fpr, color=C["neutral"], ls="--", lw=1.4)
 ax.plot(fpr, ceil, color=C["text"], lw=2.6)
 ax.plot(fpr, aud, color=C["memory"], lw=2.6)
-ax.text(0.04, 1.0, "DP ceiling, $\\epsilon$ = 1\n(upper bound)", fontsize=12, color=C["text"],
+ax.text(0.04, 1.0, f"DP ceiling, $\\epsilon$ = {val('audit_eps')}\n(upper bound)", fontsize=12, color=C["text"],
         fontweight="bold", va="top", ha="left")
 ax.text(0.62, 0.55, "audit\n(lower bound)", fontsize=12, color=C["memory"], fontweight="bold", va="top")
 ax.text(0.8, 0.70, "chance", fontsize=10.5, color=C["neutral"], ha="left", va="top")
@@ -519,20 +482,22 @@ dens("dp_step2.svg", 2)
 
 # ------------------------------------------------------------ salary mean error
 sp.hbars(out / "salary_err.svg", [
-    ("1,000 people", 200, "memory", "\\$200"),
-    ("100 people", 2000, "danger", "\\$2,000"),
+    (f"{val('sal_n')} people", num("sal_err"), "memory", f"\\${val('sal_err')}"),
+    (f"{val('sal_small_n')} people", num("sal_small_err"), "danger", f"\\${val('sal_small_err')}"),
 ], "", log=False, size=(3.4, 1.0), xlabel="Expected error of the mean")
 
 # ------------------------------------------------------------ accountant against composition
 fig, ax = plt.subplots(figsize=(3.3, 1.8))
-groups = [("100 epochs", 1.26, 9.34), ("400 epochs", 2.55, 24.22)]
-for i, (g, mom, strong) in enumerate(groups):
+groups = [(f"{val('ab_short')} epochs", "ab_acc_short", "ab_strong_short"),
+          (f"{val('ab_long')} epochs", "ab_acc_long", "ab_strong_long")]
+for i, (g, mom_key, strong_key) in enumerate(groups):
+    mom, strong = num(mom_key), num(strong_key)
     y = 1 - i
     ax.barh(y + 0.18, strong, height=0.34, color=C["neutral"])
     ax.barh(y - 0.18, mom, height=0.34, color=C["memory"])
-    ax.text(strong + 0.4, y + 0.18, f"{strong:g}", va="center", fontsize=11, color=C["neutral"],
+    ax.text(strong + 0.4, y + 0.18, val(strong_key), va="center", fontsize=11, color=C["neutral"],
             fontweight="bold")
-    ax.text(mom + 0.4, y - 0.18, f"{mom:g}", va="center", fontsize=11, color=C["memory"],
+    ax.text(mom + 0.4, y - 0.18, val(mom_key), va="center", fontsize=11, color=C["memory"],
             fontweight="bold")
     ax.text(-0.5, y, g, ha="right", va="center", fontsize=11, fontweight="bold")
 ax.text(13.6, 1.18, "strong composition", fontsize=10.5, color=C["neutral"], va="center")

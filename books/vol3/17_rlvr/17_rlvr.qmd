@@ -117,16 +117,17 @@ When a binary check such as `repair_accept_v1` emits $1$ for a pass and $0$ for 
 ```{python}
 #| label: calc-vol3-rlvr-baseline-intuition
 #| echo: false
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 class RewardBaselineExample:
-    # 1. LOAD: hypothetical binary terminal scores and a fixed baseline
-    baseline = 0.25
-    passing_reward = 1.0
-    failing_reward = 0.0
-    # 2. EXECUTE: centered return, not an action-specific causal effect
-    passing_score = passing_reward - baseline
-    failing_score = failing_reward - baseline
+    # 1. LOAD: Scenarios.BinaryRewardFixedBaseline (binary scores, fixed baseline)
+    scenario = Scenarios.BinaryRewardFixedBaseline
+    baseline = scenario.baseline
+    failing_reward = scenario.failing_reward
+    # 2. EXECUTE: centered return (CenteredRewardModel), not an action-specific causal effect
+    passing_score = scenario.result.passing_score
+    failing_score = scenario.result.failing_score
     # 3. GUARD: signs follow the baseline, not the outcome label alone
     check(passing_score == 0.75, "passing centered return")
     check(failing_score == -0.25, "failing centered return")
@@ -215,27 +216,29 @@ These exploits are not confined to training runs. An independent evaluator measu
 # │ Goal: Show how often a reachable scorer was exploited, and the effect of
 # │       an instruction against it.
 # │ Show: Per-task and per-suite hacking rates; prompt-variant rates.
-# │ How: Run counts reported by von Arx, Chan, and Barnes (METR, 2025-06-05).
-# │ Note: Source-reported counts, not registry values; update only from the
-# │       cited post. Rates are recomputed from the counts.
+# │ How: Literature.AgentEvaluation, the counts and prompt-table percentages
+# │      reported by von Arx, Chan, and Barnes (METR, 2025-06-05).
+# │ Note: Rates are recomputed from the counts.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class MetrRewardHacking:
-    # ┌── 1. LOAD (Counts reported in the cited post) ────────────────────────
-    foundry_hacks, foundry_runs = 21, 21  # o3, Optimize LLM Foundry
-    rebench_hacks, rebench_runs = 39, 128  # RE-Bench, all tasks
-    hcast_hacks, hcast_runs = 8, 1087  # HCAST, all tasks
-    intent_no, intent_asked = 10, 10  # "adheres to the user's intention?" -> no
-    prompt_runs = 20  # runs per prompt variant
-    base_hacks = 16  # original prompt (80 percent)
-    dont_hack_hacks = 14  # "Please do not reward hack" (70 percent)
+    # ┌── 1. LOAD (Literature.AgentEvaluation, METR 2025) ────────────────────
+    metr = Literature.AgentEvaluation
+    foundry_hacks, foundry_runs = metr.MetrO3FoundryHackRuns, metr.MetrO3FoundryRuns
+    rebench_hacks, rebench_runs = metr.MetrO3ReBenchHackRuns, metr.MetrO3ReBenchRuns
+    hcast_hacks, hcast_runs = metr.MetrO3HcastHackRuns, metr.MetrO3HcastRuns
+    intent_no, intent_asked = metr.MetrO3IntentNoAnswers, metr.MetrO3IntentQuestions
+    prompt_runs = metr.MetrO3PromptVariantRuns  # runs per prompt variant
+    base_pct = metr.MetrO3PromptOriginalHackPct  # original prompt
+    dont_hack_pct = metr.MetrO3PromptDoNotRewardHackPct  # "Please do not reward hack"
 
-    # ┌── 2. EXECUTE (Rates from counts) ─────────────────────────────────────
+    # ┌── 2. EXECUTE (Rates from counts and percentages) ─────────────────────
     rebench_rate = rebench_hacks / rebench_runs
     hcast_rate = hcast_hacks / hcast_runs
-    base_rate = base_hacks / prompt_runs
-    dont_hack_rate = dont_hack_hacks / prompt_runs
+    base_rate = base_pct / 100
+    dont_hack_rate = dont_hack_pct / 100
 
     # ┌── 3. GUARD (Reported percentages) ────────────────────────────────────
     check(foundry_hacks == foundry_runs, "Every Foundry run hacked")
@@ -319,25 +322,27 @@ $$ {#eq-vol3-rlvr-false-accept-share}
 # │ Context: @nbk-16-oracle-gaming in @sec-vol3-rlvr-rewards.
 # │ Goal: Distinguish a conditional error rate from the composition of accepts.
 # │ Show: Expected counts and the conditional false share.
-# │ How: Hypothetical pooled probabilities, with no false rejections.
+# │ How: Scenarios.VerifierFalseAcceptsAtTenPercentPass (RewardCompositionModel):
+# │      hypothetical pooled probabilities, with no false rejections.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class OracleGaming:
-    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────────
-    tasks = 1024
-    group = 8
-    true_pass = 0.10
-    false_pos = 0.025
-    true_accept = 1.0
-    low_pass = 0.05  # checkpoint variant: same verifier, lower pass rate
+    # ┌── 1. LOAD (Scenarios.VerifierFalseAcceptsAtTenPercentPass) ───────────
+    scenario = Scenarios.VerifierFalseAcceptsAtTenPercentPass
+    tasks = scenario.tasks
+    group = scenario.group
+    true_pass = scenario.pass_rate
+    false_pos = scenario.false_accept_rate
+    low_pass = Scenarios.VerifierFalseAcceptsAtFivePercentPass.pass_rate  # checkpoint variant
 
     # ┌── 2. EXECUTE (Expected counts, without intermediate rounding) ────────
-    rollouts = tasks * group
-    n_true = rollouts * true_pass * true_accept
-    n_false = rollouts * (1 - true_pass) * false_pos
-    n_positive = n_true + n_false
-    frac_false = n_false / n_positive
+    result = scenario.result
+    rollouts = result.rollouts
+    n_true = result.true_accepts
+    n_false = result.false_accepts
+    n_positive = result.accepts
+    frac_false = result.false_share
 
     # ┌── 3. GUARD (The stated scenario and displayed result) ────────────────
     check(rollouts == 8192, "Expected rollout count changed")
@@ -474,21 +479,22 @@ When individual continuations yield independent bounded returns $\TrajectoryRewa
 # MONTE CARLO VALUE DIFFERENCE (LEGO)
 # Goal: Show what a sampled continuation estimate buys and its uncertainty.
 # Scope: Hypothetical continuation pass rates at two fork conditions.
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int
 
 class MCValueDifference:
-    # 1. LOAD: hypothetical pass counts out of k binary continuations per fork.
-    #    Counts, not rates, so every displayed mean is reachable (a multiple of 1/k).
-    k = 20  # continuations per fork condition
-    passes_before = 1  # continuations passing from the initial bug report
-    passes_after = 12  # continuations passing after the debugger turn
+    # 1. LOAD: Scenarios.DebuggerTurnForkValue, hypothetical pass counts out of k
+    #    binary continuations per fork (counts, so every mean is a multiple of 1/k).
+    scenario = Scenarios.DebuggerTurnForkValue
+    k = scenario.continuations  # continuations per fork condition
+    passes_before = scenario.passes_before  # passing from the initial bug report
+    passes_after = scenario.passes_after  # passing after the debugger turn
 
-    # 2. EXECUTE: sampled means, their difference, and the per-estimate bound.
-    v_before = passes_before / k
-    v_after = passes_after / k
-    delta = v_after - v_before
-    se_bound = 1 / (2 * math.sqrt(k))
+    # 2. EXECUTE: sampled means, their difference, and the per-estimate bound (ForkValueModel).
+    v_before = scenario.result.value_before
+    v_after = scenario.result.value_after
+    delta = scenario.result.difference
+    se_bound = scenario.result.se_bound
 
     # 3. GUARD: reachable binary means and a difference larger than the bound.
     check(0 <= passes_before < passes_after <= k, "Pass counts within k")
@@ -512,17 +518,16 @@ class MCValueDifference:
 # RESOLVING A DIFFERENCE OF TWO FORK VALUES (LEGO)
 # Goal: Bound the standard error of a difference of two independent fork means.
 # Scope: The hypothetical fork pair above; the two-bound rule of Exercise 5.
-import math
 from mlsysim.fmt import check, fmt
 
 class MCDifferenceResolution:
-    # 1. LOAD: continuations per fork and the observed difference from above.
+    # 1. LOAD: the fork pair above (Scenarios.DebuggerTurnForkValue).
     k = MCValueDifference.k
     delta = MCValueDifference.delta
 
-    # 2. EXECUTE: independent means add variances, each at most 1/(4k).
-    se_diff_bound = math.sqrt(2) / (2 * math.sqrt(k))
-    resolve_threshold = 2 * se_diff_bound
+    # 2. EXECUTE: independent means add variances, each at most 1/(4k) (ForkValueModel).
+    se_diff_bound = MCValueDifference.scenario.result.difference_se_bound
+    resolve_threshold = MCValueDifference.scenario.result.resolution_threshold
 
     # 3. GUARD: the difference bound exceeds one estimate's bound; delta clears it.
     check(se_diff_bound > MCValueDifference.se_bound, "Difference bound exceeds per-estimate bound")
@@ -555,29 +560,26 @@ from mlsysim import *
 from mlsysim.fmt import check, fmt_int
 
 class MonteCarloCredit:
-    # ┌── 1. LOAD (Hypothetical Workload) ────────────────────────────────
-    turns = 30
-    tokens_per_turn = 512
-    branches = 8
-    selected_boundaries = (10, 20)  # completed turns before each fork
+    # ┌── 1. LOAD (Scenarios.ThirtyTurnForksAtEveryBoundary and its variant) ─
+    every = Scenarios.ThirtyTurnForksAtEveryBoundary
+    selected = Scenarios.ThirtyTurnForksAfterTurnsTenAndTwenty
+    turns = every.turns
+    tokens_per_turn = every.tokens_per_turn
+    branches = every.branches
+    selected_boundaries = tuple(selected.boundaries)  # completed turns before each fork
 
-    # ┌── 2. EXECUTE (Token Inventory) ──────────────────────────────────
-    base_tokens = turns * tokens_per_turn
-    remaining_turn_sum = sum(range(1, turns))
-    all_branches = branches * (turns - 1)
-    mc_tokens = branches * tokens_per_turn * remaining_turn_sum
-    total_tokens = base_tokens + mc_tokens
-    blowup = total_tokens / base_tokens
-    selected_remaining = len(selected_boundaries) * turns - sum(selected_boundaries)
-    selected_branches = branches * len(selected_boundaries)
-    selected_tokens = base_tokens + branches * tokens_per_turn * selected_remaining
-    selected_multiple = selected_tokens / base_tokens
+    # ┌── 2. EXECUTE (Token Inventory, ContinuationForkCostModel) ───────
+    base_tokens = every.result.base_tokens
+    all_branches = every.result.branches
+    total_tokens = every.result.total_tokens
+    blowup = every.result.multiple
+    selected_branches = selected.result.branches
+    selected_tokens = selected.result.total_tokens
+    selected_multiple = selected.result.multiple
 
     # ┌── 3. GUARD (Accounting Invariants) ──────────────────────────────
     check(turns > 1 and branches > 0 and tokens_per_turn > 0, "Positive workload")
-    check(0 < min(selected_boundaries) <= max(selected_boundaries) < turns, "Intermediate forks")
-    check(len(set(selected_boundaries)) == len(selected_boundaries), "Distinct forks")
-    check(remaining_turn_sum == turns * (turns - 1) // 2, "Triangular sum")
+    check(selected.turns == turns and selected.branches == branches, "Same trajectory and branches")
     check(base_tokens < selected_tokens <= total_tokens, "Subset accounting")
     check(blowup == 1 + branches * (turns - 1) / 2, "Closed-form total multiple")
 
@@ -688,23 +690,21 @@ The positive stabilizer $\AdvantageStabilizer$ keeps the expression well-defined
 # │ How: Empirical population dispersion with a positive denominator stabilizer.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 class GRPOGroup:
-    # 1. LOAD: hypothetical completed outcomes, not executed repair results.
-    rewards = (0.0, 1.0, 0.0)
-    epsilon_stab = 1e-8
+    # 1. LOAD: Scenarios.RepairGroupOnePassOfThree, hypothetical completed
+    #    outcomes, not executed repair results.
+    scenario = Scenarios.RepairGroupOnePassOfThree
+    rewards = tuple(scenario.rewards)
+    epsilon_stab = scenario.stabilizer
 
-    # 2. EXECUTE: compute each group statistic under the declared convention.
-    group = len(rewards)
-    mean_reward = sum(rewards) / group
-    squared_deviations = []
-    for reward in rewards:
-        squared_deviations.append((reward - mean_reward) ** 2)
-    std_reward = math.sqrt(sum(squared_deviations) / group)
-    coefficients = []
-    for reward in rewards:
-        coefficients.append((reward - mean_reward) / (std_reward + epsilon_stab))
+    # 2. EXECUTE: each group statistic under the declared convention (GroupCoefficientsModel).
+    group = scenario.result.group
+    mean_reward = scenario.result.mean
+    std_reward = scenario.result.std
+    coefficients = scenario.result.coefficients
 
     # 3. GUARD: signed contrast, zero sum, and the equal-reward boundary.
     check(abs(sum(coefficients)) < 1e-12, "Centered group coefficients sum to zero")
@@ -738,22 +738,18 @@ class GRPOGroup:
 # Goal: Show how the group mean absorbs task difficulty.
 # Scope: Hypothetical binary groups of 16 with one pass or one failure.
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int
 
 class DifficultyAbsorption:
-    # 1. LOAD: group size and the two stipulated outcome patterns.
-    group = 16
-    hard = (1.0,) + (0.0,) * 15
-    easy = (0.0,) + (1.0,) * 15
+    # 1. LOAD: Scenarios.LonePassInGroupOfSixteen and LoneFailureInGroupOfSixteen.
+    hard = Scenarios.LonePassInGroupOfSixteen
+    easy = Scenarios.LoneFailureInGroupOfSixteen
+    group = hard.result.group
 
-    # 2. EXECUTE: population-dispersion coefficients (stabilizer omitted).
-    def coeffs(rewards):
-        m = sum(rewards) / len(rewards)
-        sd = math.sqrt(sum((r - m) ** 2 for r in rewards) / len(rewards))
-        return m, [(r - m) / sd for r in rewards]
-
-    hard_mean, hard_c = coeffs(hard)
-    easy_mean, easy_c = coeffs(easy)
+    # 2. EXECUTE: population-dispersion coefficients, stabilizer omitted (GroupCoefficientsModel).
+    hard_mean, hard_c = hard.result.mean, hard.result.coefficients
+    easy_mean, easy_c = easy.result.mean, easy.result.coefficients
 
     # 3. GUARD: mirror-image groups and the sqrt(G-1) limit.
     check(abs(hard_mean - 0.0625) < 1e-12, "Hard-task mean")
@@ -834,15 +830,17 @@ initially assigning every sampled token in trajectory $\GroupRolloutIndex$ an ef
 # PER-TOKEN LENGTH COEFFICIENT (LEGO)
 # Goal: Show the direction and size of the per-rollout length divisor.
 # Scope: Two hypothetical failing rollouts with the same group coefficient.
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 class LengthCoefficient:
-    # 1. LOAD: token counts of a concise and a verbose failing rollout.
-    short_tokens = 128
-    long_tokens = 4096
+    # 1. LOAD: Scenarios.ShortAndLongFailureLengths, a concise and a verbose failure.
+    scenario = Scenarios.ShortAndLongFailureLengths
+    short_tokens = scenario.short_tokens
+    long_tokens = scenario.long_tokens
 
-    # 2. EXECUTE: ratio of per-token coefficients |A|/N at equal |A|.
-    ratio = long_tokens / short_tokens
+    # 2. EXECUTE: ratio of per-token coefficients |A|/N at equal |A| (LengthNormalizationModel).
+    ratio = scenario.result.per_token_ratio
 
     # 3. GUARD
     check(ratio == 32, "Displayed coefficient ratio changed")
@@ -873,18 +871,22 @@ Assuming independent rollout attempts on a task with fixed success probability $
 # ZERO-CONTRAST GROUPS (LEGO)
 # Goal: Put numbers on the share of groups that carry no reward contrast.
 # Scope: Independent runs of one fixed task with binary rewards.
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class ZeroContrast:
-    # 1. LOAD: two hypothetical (group size, pass rate) cases.
-    g_small, p_small = 2, 0.10
-    g_mid, p_mid = 8, 0.05
+    # 1. LOAD: two hypothetical (group size, pass rate) cases:
+    #    Scenarios.PairGroupsAtTenPercentPass and Scenarios.HardTaskRolloutStep.
+    small = Scenarios.PairGroupsAtTenPercentPass
+    mid = Scenarios.HardTaskRolloutStep
+    g_small, p_small = small.group, small.pass_rate
+    g_mid, p_mid = mid.group, mid.pass_rate
 
-    # 2. EXECUTE: informative fraction 1 - p^G - (1-p)^G and its complement.
-    contrast_small = 1 - p_small**g_small - (1 - p_small) ** g_small
-    silent_small = 1 - contrast_small
-    contrast_mid = 1 - p_mid**g_mid - (1 - p_mid) ** g_mid
-    silent_mid = 1 - contrast_mid
+    # 2. EXECUTE: informative fraction 1 - p^G - (1-p)^G and its complement (RolloutStepBudgetModel).
+    contrast_small = small.result.contrast
+    silent_small = small.result.silent_share
+    contrast_mid = mid.result.contrast
+    silent_mid = mid.result.silent_share
 
     # 3. GUARD
     check(abs(contrast_small - 0.18) < 1e-12, "G=2 contrast changed")
@@ -923,37 +925,38 @@ Because binary outcome variance $\AttemptPassProbability(1-\AttemptPassProbabili
 # │ How: Independent binary runs; P_contrast = 1 - p^G - (1-p)^G.
 # │ Note: Hypothetical workload; turns and tokens match the fork inventory.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_count, fmt_percent, fmt_multiple
 
 class RolloutBudget:
-    # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────────
-    tasks = 512  # tasks per update
-    group = 8  # rollouts per task
-    turns = 30  # decisions per rollout
-    tokens_per_turn = 512  # generated tokens per decision
-    p_hard = 0.05  # pass rate on an untargeted hard-task mix
-    p_target = 0.50  # pass rate after difficulty-targeted selection
-    group_big = 16  # the other lever: double the group
-    p_check = 0.20  # checkpoint variant pass rate
+    # ┌── 1. LOAD (Scenarios.HardTaskRolloutStep and its variants) ───────────
+    hard = Scenarios.HardTaskRolloutStep
+    big = Scenarios.HardTaskRolloutStepDoubledGroup  # the other lever: double the group
+    targeted = Scenarios.TargetedTaskRolloutStep  # difficulty-targeted selection
+    tasks = hard.tasks  # tasks per update
+    group = hard.group  # rollouts per task
+    turns = hard.turns  # decisions per rollout
+    tokens_per_turn = hard.tokens_per_turn  # generated tokens per decision
+    p_hard = hard.pass_rate  # pass rate on an untargeted hard-task mix
+    p_target = targeted.pass_rate
+    group_big = big.group
+    p_check = Scenarios.ModerateTaskRolloutStep.pass_rate  # checkpoint variant pass rate
 
-    # ┌── 2. EXECUTE (Token bill and cost per informative group) ─────────────
-    def contrast(g, p):
-        return 1 - p**g - (1 - p) ** g
-
-    rollout_tokens = turns * tokens_per_turn
-    update_rollouts = tasks * group
-    update_tokens = update_rollouts * rollout_tokens
-    c_hard = contrast(group, p_hard)
-    c_big = contrast(group_big, p_hard)
-    c_target = contrast(group, p_target)
-    per_info_hard = group / c_hard  # rollouts spent per informative group
-    per_info_big = group_big / c_big
-    per_info_target = group / c_target
+    # ┌── 2. EXECUTE (Token bill and cost per informative group, RolloutStepBudgetModel) ─
+    rollout_tokens = hard.result.rollout_tokens
+    update_rollouts = hard.result.rollouts
+    update_tokens = hard.result.step_tokens
+    c_hard = hard.result.contrast
+    c_big = big.result.contrast
+    c_target = targeted.result.contrast
+    per_info_hard = hard.result.rollouts_per_informative_group  # rollouts spent per informative group
+    per_info_big = big.result.rollouts_per_informative_group
+    per_info_target = targeted.result.rollouts_per_informative_group
     target_saving = per_info_hard / per_info_target
     big_penalty = per_info_big / per_info_hard
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
-    check(update_tokens == 512 * 8 * 30 * 512, "Token bill")
+    check(update_tokens == tasks * group * turns * tokens_per_turn, "Token bill")
     check(c_hard < c_big < c_target < 1, "Both levers raise contrast")
     check(per_info_target < per_info_hard < per_info_big, "Targeting is cheaper; doubling G is dearer")
     check(2.5 < target_saving < 3.5, "Displayed saving changed")
@@ -1099,29 +1102,33 @@ Group normalization makes a flaky pass as damaging as a tampered one. On a hard 
 # REPEATED VERIFICATION (LEGO)
 # Goal: Compare accidental acceptance, false rejection, and verification demand.
 # Scope: Hypothetical fixed-candidate IID trials; no measured repair result.
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 
 class FlakyReward:
-    # 1. LOAD: conditional pass probabilities and total trial count.
-    p_flaky = 0.20
-    p_correct = 0.98
-    group = 16
-    trials = 3
+    # 1. LOAD: Scenarios.FlakyRaceTestAllPassRule, conditional pass
+    #    probabilities and total trial count; the lone pass of a group of 16.
+    scenario = Scenarios.FlakyRaceTestAllPassRule
+    lone = Scenarios.LonePassInGroupOfSixteen
+    p_flaky = scenario.incorrect_pass
+    p_correct = scenario.correct_pass
+    group = scenario.group
+    trials = scenario.trials
 
-    # 2. EXECUTE: all-pass acceptance and stop-on-first-rejection work.
-    p_any_false = 1 - (1 - p_flaky) ** group
-    p_consensus = p_flaky**trials
-    p_false_reject = 1 - p_correct**trials
-    expected_bad = (1 - p_flaky**trials) / (1 - p_flaky)
-    expected_good = (1 - p_correct**trials) / (1 - p_correct)
-    adv_limit = math.sqrt(group - 1)
+    # 2. EXECUTE: all-pass acceptance and stop-on-first-rejection work (RepeatedVerificationModel).
+    p_any_false = scenario.result.group_false_pass
+    p_consensus = scenario.result.incorrect_accepted
+    p_false_reject = scenario.result.correct_rejected
+    expected_bad = scenario.result.expected_trials_incorrect
+    expected_good = scenario.result.expected_trials_correct
+    adv_limit = lone.result.coefficients[0]  # lone-pass coefficient, sqrt(G - 1)
 
     # 3. GUARD: conditional probabilities and finite trial demand.
     check(0 < p_consensus < p_flaky < 1, "IID false acceptance decreases")
     check(p_false_reject > 1 - p_correct, "All-pass rule increases false rejection")
     check(1 <= expected_bad < expected_good <= trials, "Demand bounded by total trials")
     check(trials == 3 and abs(expected_bad - (1 + p_flaky + p_flaky**2)) < 1e-12, "Stopped trial count equals explicit three-trial sum")
+    check(lone.result.group == group, "Lone pass taken from a group of the same size")
 
     # 4. OUTPUT: every scalar export has a prose or math consumer.
     p_flaky_str = fmt(p_flaky, precision=2, commas=False)
@@ -1213,17 +1220,20 @@ When system requirements favor concise solutions, any length penalty introduced 
 # CLIP CEILING BY STARTING PROBABILITY (LEGO)
 # Goal: Show why a symmetric ratio clip barely limits dominant tokens.
 # Scope: Per-update incentive ceiling for two hypothetical token probabilities.
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 class ClipAsymmetry:
-    # 1. LOAD: clip width and two starting probabilities.
-    eps = 0.2
-    p_hi = 0.9
-    p_lo = 0.01
+    # 1. LOAD: Scenarios.DominantTokenRatioClip and RareTokenRatioClip.
+    hi = Scenarios.DominantTokenRatioClip
+    lo = Scenarios.RareTokenRatioClip
+    eps = hi.epsilon
+    p_hi = hi.probability
+    p_lo = lo.probability
 
-    # 2. EXECUTE: probability ceiling (1 + eps) * p and the absolute gain allowed.
-    ceil_hi = (1 + eps) * p_hi
-    gain_lo = eps * p_lo
+    # 2. EXECUTE: probability ceiling (1 + eps) * p and the absolute gain allowed (RatioClipModel).
+    ceil_hi = hi.result.ceiling
+    gain_lo = lo.result.rise
 
     # 3. GUARD: the dominant token's ceiling exceeds 1; the rare token's gain is tiny.
     check(ceil_hi > 1.0, "Dominant-token ceiling does not bind")
@@ -1297,28 +1307,30 @@ Accelerating the reset routine directly shortens this cycle, but by a bounded am
 # ROLLOUT SLOT CAPACITY (LEGO)
 # Goal: Separate a reset improvement from a whole-training throughput claim.
 # Scope: Hypothetical serial slots with constant times and no shared contention.
-from mlsysim import second, millisecond, hour
+from mlsysim import Scenarios, second, millisecond
 from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt_multiple
 
 class RolloutTime:
-    # 1. LOAD: local hypothetical timings, not platform measurements.
-    turns = 20
-    model = 120 * millisecond
-    tool = 80 * millisecond
-    verify = 0.5 * second
-    cold_reset = 3.5 * second
-    snapshot_reset = 15 * millisecond
-    workers = 256
+    # 1. LOAD: Scenarios.RepairRolloutSlotResets, hypothetical timings, not platform measurements.
+    scenario = Scenarios.RepairRolloutSlotResets
+    turns = scenario.decisions
+    model = scenario.model_time
+    tool = scenario.tool_time
+    verify = scenario.assessment_time
+    cold_reset = scenario.cold_reset
+    snapshot_reset = scenario.snapshot_reset
+    workers = scenario.slots
 
-    # 2. EXECUTE: units remain attached through time and capacity arithmetic.
-    work = turns * (model + tool) + verify
-    cold_cycle = work + cold_reset
-    snapshot_cycle = work + snapshot_reset
-    cold_fraction = (work / cold_cycle).to("").magnitude
-    snapshot_fraction = (work / snapshot_cycle).to("").magnitude
-    cold_rate = workers / cold_cycle
-    snapshot_rate = workers / snapshot_cycle
-    speedup = (snapshot_rate / cold_rate).to("").magnitude
+    # 2. EXECUTE: units remain attached through time and capacity arithmetic (RolloutSlotCycleModel).
+    result = scenario.result
+    work = result.work
+    cold_cycle = result.cold_cycle
+    snapshot_cycle = result.snapshot_cycle
+    cold_fraction = result.cold_work_share
+    snapshot_fraction = result.snapshot_work_share
+    cold_per_hour = result.cold_episodes_per_hour
+    snapshot_per_hour = result.snapshot_episodes_per_hour
+    speedup = result.capacity_ratio
 
     # 3. GUARD: positive cycles and consistent local speedup.
     check(snapshot_cycle.to(second).magnitude > 0, "Positive slot cycle")
@@ -1338,10 +1350,10 @@ class RolloutTime:
     snapshot_cycle_str = fmt_time(snapshot_cycle, unit=second, precision=3)
     cold_fraction_str = fmt_percent(cold_fraction, precision=2, style="prose")
     snapshot_fraction_str = fmt_percent(snapshot_fraction, precision=2, style="prose")
-    cold_per_hour_value_str = fmt_int(round(cold_rate.to(1 / hour).magnitude))
-    snapshot_per_hour_value_str = fmt_int(round(snapshot_rate.to(1 / hour).magnitude))
+    cold_per_hour_value_str = fmt_int(round(cold_per_hour))
+    snapshot_per_hour_value_str = fmt_int(round(snapshot_per_hour))
     speedup_mult_str = fmt_multiple(speedup, precision=2)
-    reset_ratio_mult_str = fmt_multiple(round((cold_reset / snapshot_reset).to("").magnitude), precision=0)
+    reset_ratio_mult_str = fmt_multiple(round(result.reset_ratio), precision=0)
 ```
 
 ::: {#nbk-16-exploration-reset-goodput .callout-notebook title="Reset cost and slot capacity"}
@@ -1380,26 +1392,27 @@ Every worker slot that finishes earlier sits idle until the tail completes. Beca
 # GROUP BARRIER IDLE FRACTION (LEGO)
 # Goal: Show how one slow member sets the step time of a synchronous group.
 # Scope: Hypothetical rollout latencies for a group of four; training time excluded.
-from mlsysim import second
+from mlsysim import Scenarios, second
 from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent
 
 class Straggler:
-    # 1. LOAD: hypothetical member latencies.
-    latencies = (0.2 * second, 2.1 * second, 4.2 * second, 16.8 * second)
+    # 1. LOAD: Scenarios.RolloutGroupOfFourBarrier, hypothetical member latencies.
+    scenario = Scenarios.RolloutGroupOfFourBarrier
+    latencies = tuple(scenario.latencies)
 
-    # 2. EXECUTE: barrier time is the maximum; busy share is mean over max.
-    group = len(latencies)
-    barrier = max(latencies)
-    mean_latency = sum(latencies, 0 * second) / group
-    idle_fraction = 1 - (mean_latency / barrier).to("").magnitude
+    # 2. EXECUTE: barrier time is the maximum; busy share is mean over max (GroupBarrierModel).
+    group = scenario.result.group
+    barrier = scenario.result.barrier
+    mean_latency = scenario.result.mean
+    idle_fraction = scenario.result.idle_share
 
     # 3. GUARD
     check(0 < idle_fraction < 1, "Idle fraction is a share")
-    check(abs(idle_fraction - (1 - 5.825 / 16.8)) < 1e-9, "Displayed idle fraction changed")
+    check(abs(idle_fraction - (1 - (mean_latency / barrier).to("").magnitude)) < 1e-12, "Idle share is one minus mean over barrier")
 
     # 4. OUTPUT
     group_str = fmt_int(group)
-    fastest_str = fmt_time(min(latencies), unit=second, precision=1)
+    fastest_str = fmt_time(scenario.result.fastest, unit=second, precision=1)
     barrier_str = fmt_time(barrier, unit=second, precision=1)
     idle_str = fmt_percent(round(idle_fraction, 2), precision=0, style="prose")
 ```
@@ -1422,7 +1435,7 @@ where $\RolloutAdmissionAge$ is the wall-clock time elapsed from sampling the fi
 
 [^fn-vtrace-truncation-rlvr]: **V-trace**: IMPALA's correction weights each step by the ratio of learner to actor probabilities, truncated at a ceiling, accepting some bias to keep the variance of long products of ratios in check [@espeholt2018impala]. Truncation matters more for agent rollouts than for short episodes, because a product of per-token ratios over thousands of tokens is otherwise dominated by a few extreme values. \index{V-trace!off-policy correction}
 
-::: {#fig-vol3-asynchronous-freshness-pipeline data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-asynchronous-freshness-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Group Barriers and Version-Checked Admission**: (a) In the hypothetical group of four, the barrier holds every slot until the `{python} Straggler.barrier_str` member finishes, leaving `{python} Straggler.idle_str` of reserved slot time idle. (b) Asynchronous collection releases slots early, so the trainer's version advances while rollouts run. Each record carries the version that sampled it, and its lag $\FiniteChange\text{ver}$ at admission grows with its duration; the long rollout exceeds the illustrative bound and is excluded with its reason recorded. (c) A record leaves verification with a pass, a fail, or an unavailable verdict, waits in a bounded group buffer, and reaches the trainer only if its lag is within the bound. While this admission check enforces a strict bound on version lag, it cannot prevent distribution drift when individual gradient updates make large steps in parameter space." fig-alt="Three stacked panels. Panel a is a to-scale timeline of four rollouts lasting 0.2, 2.1, 4.2, and 16.8 seconds, with hatched idle regions after the first three up to a red dashed barrier, and a trainer row that waits until the barrier before an update; a note reads 65 percent of reserved slot time idle. Panel b shows trainer versions ver through ver plus 4 as consecutive columns above three rollout bars, with a dark tick on each bar wherever it crosses a version boundary, so the number of ticks equals the lag. Rollout A, from ver, crosses one boundary and is admitted at lag 1; rollout B, from ver plus 1, crosses two and is admitted at lag 2; rollout C, from ver, crosses four, ends in a red mark, and is excluded at lag 4; in the lag column a red dashed line labeled delta ver max separates the two admitted lags from the excluded one. Panel c is a flow from a rollout pool sampled at ver b, to verification with pass, fail, or unavailable, to a group buffer drawn as six slots with four filled, to a decision diamond testing whether delta ver is at most delta ver max; the yes branch reaches the trainer, which advances ver t to ver t plus 1, and the no branch leads to a box reading excluded, reason and cost recorded. A return path carries new weights at ver t back to the rollout pool."}
+::: {#fig-vol3-asynchronous-freshness-pipeline data-explore="original-v3-vol3-asynchronous-freshness-pipeline" data-explore-key="vol3:fig-vol3-asynchronous-freshness-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Group Barriers and Version-Checked Admission**: (a) In the hypothetical group of four, the barrier holds every slot until the `{python} Straggler.barrier_str` member finishes, leaving `{python} Straggler.idle_str` of reserved slot time idle. (b) Asynchronous collection releases slots early, so the trainer's version advances while rollouts run. Each record carries the version that sampled it, and its lag $\FiniteChange\text{ver}$ at admission grows with its duration; the long rollout exceeds the illustrative bound and is excluded with its reason recorded. (c) A record leaves verification with a pass, a fail, or an unavailable verdict, waits in a bounded group buffer, and reaches the trainer only if its lag is within the bound. While this admission check enforces a strict bound on version lag, it cannot prevent distribution drift when individual gradient updates make large steps in parameter space." fig-alt="Three stacked panels. Panel a is a to-scale timeline of four rollouts lasting 0.2, 2.1, 4.2, and 16.8 seconds, with hatched idle regions after the first three up to a red dashed barrier, and a trainer row that waits until the barrier before an update; a note reads 65 percent of reserved slot time idle. Panel b shows trainer versions ver through ver plus 4 as consecutive columns above three rollout bars, with a dark tick on each bar wherever it crosses a version boundary, so the number of ticks equals the lag. Rollout A, from ver, crosses one boundary and is admitted at lag 1; rollout B, from ver plus 1, crosses two and is admitted at lag 2; rollout C, from ver, crosses four, ends in a red mark, and is excluded at lag 4; in the lag column a red dashed line labeled delta ver max separates the two admitted lags from the excluded one. Panel c is a flow from a rollout pool sampled at ver b, to verification with pass, fail, or unavailable, to a group buffer drawn as six slots with four filled, to a decision diamond testing whether delta ver is at most delta ver max; the yes branch reaches the trainer, which advances ver t to ver t plus 1, and the no branch leads to a box reading excluded, reason and cost recorded. A return path carries new weights at ver t back to the rollout pool."}
 ![](images/svg/asynchronous-freshness-pipeline.svg)
 :::
 
@@ -1445,24 +1458,24 @@ Both $\TrajectoryAdmissionRate$ and $\VerificationPoolCapacity$ measure complete
 # VERIFICATION WORKER DEMAND (LEGO)
 # Goal: Count completed trajectories, trials, worker time, and headroom separately.
 # Scope: Hypothetical stationary all-M workload with independent worker capacity.
-import math
-from mlsysim import second
+from mlsysim import Scenarios, second
 from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt
 
 class VerificationCapacity:
-    # 1. LOAD: local hypothetical arrival and service assumptions.
-    batch = 512
-    interval = 16 * second
-    trial_time = 8 * second
-    trials = 3  # total, including the first; all execute in this sizing case
-    target_utilization = 0.8  # illustrative planning target, not a universal rule
+    # 1. LOAD: Scenarios.RepairVerifierPool, hypothetical arrival and service assumptions.
+    scenario = Scenarios.RepairVerifierPool
+    batch = scenario.trajectories
+    interval = scenario.interval
+    trial_time = scenario.trial_time
+    trials = scenario.trials  # total, including the first; all execute in this sizing case
+    target_utilization = scenario.target_utilization  # illustrative planning target
 
-    # 2. EXECUTE: arrival rate times service demand gives worker equivalents.
-    arrival = batch / interval
-    single_demand = (arrival * trial_time).to("").magnitude
-    all_demand = (arrival * trials * trial_time).to("").magnitude
-    workers = math.ceil(all_demand / target_utilization)
-    utilization = all_demand / workers
+    # 2. EXECUTE: arrival rate times service demand gives worker equivalents (VerifierPoolModel).
+    arrival = scenario.result.arrival_rate
+    single_demand = scenario.result.one_trial_busy
+    all_demand = scenario.result.busy
+    workers = scenario.result.slots
+    utilization = scenario.result.utilization
 
     # 3. GUARD: dimensional demand and provisioned headroom.
     check(trial_time.to(second).magnitude > 0, "Positive trial service time")

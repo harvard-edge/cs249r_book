@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 3 (Network Fabrics), Volume II.
 
-Every value is from the rendered chapter (Network Fabrics) or MLSysIM unless
-noted. Derived and illustrative values say so here and on the slide.
+Every number a figure prints or plots comes from calcs.py, which reads it from
+MLSysIM (registry values and Scenarios.*); the list below names the source of
+each figure. Derived and illustrative values say so here and on the slide.
   - Staircase recall: 10 GB at HBM 3,350 GB/s, NVLink 450 GB/s, InfiniBand
     50 GB/s: 3.0, 22.2, 200 ms (Compute Infrastructure, Napkin Math 2.3).
   - Interconnect generations: MLSysIM Literature.Series.InterconnectGenerations
@@ -40,7 +41,6 @@ Run from this folder: python3 make_figs.py
 """
 
 import random
-import statistics
 import sys
 from pathlib import Path
 
@@ -48,10 +48,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
-
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
-sys.path.insert(0, str(MLSYSIM))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 from mlsysim import Literature  # noqa: E402
+from mlsysim.core.units import Q_  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -132,10 +133,10 @@ def write(name, width, height, body):
 # 1. Recall: the staircase from Lecture 2
 # =============================================================================
 sp.hbars(out / "staircase_recall.svg", [
-    ("HBM", 3.0, "memory", "3.0 ms"),
-    ("NVLink", 22.2, "network", "22.2 ms"),
-    ("InfiniBand", 200, "compute", "200 ms"),
-], "ms", log=True, xlabel="Time to move 10 GB one hop (log scale)", size=(4.8, 1.5))
+    ("HBM", num("stair_hbm_ms"), "memory", f"{val('stair_hbm_ms')} ms"),
+    ("NVLink", num("stair_nvlink_ms"), "network", f"{val('stair_nvlink_ms')} ms"),
+    ("InfiniBand", num("stair_ib_ms"), "compute", f"{val('stair_ib_ms')} ms"),
+], "ms", log=True, xlabel=f"Time to move {val('buffer_gb')} GB one hop (log scale)", size=(4.8, 1.5))
 
 # =============================================================================
 # 2. Interconnect generations (MLSysIM, per direction, GB/s)
@@ -146,7 +147,7 @@ for r in rows:
     if r["first_product_year"] is None or r["family"] == "PCIe":
         continue
     key = (r["family"], int(r["first_product_year"]))
-    best[key] = max(best.get(key, 0.0), r["line_rate_gbps"] / 8.0)
+    best[key] = max(best.get(key, 0.0), Q_(r["line_rate_gbps"], "Gbps").to("GB/s").magnitude)
 fig, ax = plt.subplots(figsize=(4.2, 2.9))
 styles = {"NVLink": (V["coord"], "-", "o"), "InfiniBand": (V["comm"], "--", "o"),
           "Ethernet": (V["gray"], ":", "D")}
@@ -158,11 +159,11 @@ for fam, (col, ls, mk) in styles.items():
 ax.text(2009.8, 2600, "NVLink (one GPU)", color=V["coord"], fontsize=15, fontweight="bold")
 ax.text(2016.3, 6, "InfiniBand port", color=V["comm"], fontsize=15, fontweight="bold")
 ax.text(2009.8, 140, "Ethernet port", color=V["gray"], fontsize=15, fontweight="bold")
-ax.annotate("", xy=(2022, 50), xytext=(2022, 450),
+ax.annotate("", xy=(2022, num("ib_gbs")), xytext=(2022, num("nvlink_gbs")),
             arrowprops=dict(arrowstyle="<->", color=V["bad"], lw=2.2))
-ax.text(2022.35, 150, "9×", color=V["bad"], fontsize=18, fontweight="bold", va="center")
-ax.text(2021.6, 1300, "H100: 450", color=V["coord"], fontsize=14, fontweight="bold", ha="right")
-ax.text(2022.3, 18, "NDR: 50", color=V["comm"], fontsize=14, fontweight="bold", ha="left")
+ax.text(2022.35, 150, f"{val('nvlink_ib_ratio')}×", color=V["bad"], fontsize=18, fontweight="bold", va="center")
+ax.text(2021.6, 1300, f"H100: {val('nvlink_gbs')}", color=V["coord"], fontsize=14, fontweight="bold", ha="right")
+ax.text(2022.3, 18, f"NDR: {val('ib_gbs')}", color=V["comm"], fontsize=14, fontweight="bold", ha="left")
 ax.set_yscale("log")
 ax.set_ylim(3, 5000)
 ax.set_xlim(2009.5, 2025.8)
@@ -180,22 +181,24 @@ sp.save(fig, out / "bw_generations.svg")
 # =============================================================================
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.8, 1.65))
-    for row, (name, ar, shown) in enumerate([("Inter-node\n64 GPUs", 30, k >= 2),
-                                             ("Intra-node\n8 GPUs", 1, True)]):
+    fwd, bwd = num("step_fwd_ms"), num("step_bwd_ms")
+    for row, (name, key, shown) in enumerate([("Inter-node\n64 GPUs", "ar_inter_ms", k >= 2),
+                                              ("Intra-node\n8 GPUs", "ar_intra_ms", True)]):
         a = 1.0 if shown else 0.0
-        ax.barh(row, 100, left=0, color=V["comp_l"], edgecolor=V["comp"], lw=1.5, alpha=a, height=0.6)
-        ax.barh(row, 100, left=100, color=V["comp_l"], edgecolor=V["comp"], lw=1.5, alpha=a, height=0.6)
-        ax.barh(row, ar, left=200, color=V["bad"], alpha=a, height=0.6)
-        label(ax, 50, row, "forward", V["comp_t"], shown, ha="center", va="center", fontsize=12)
-        label(ax, 150, row, "backward", V["comp_t"], shown, ha="center", va="center", fontsize=12)
-        label(ax, 203 + ar, row, f"AllReduce {ar} ms", V["bad"], shown, va="center", fontsize=12)
+        ar = num(key)
+        ax.barh(row, fwd, left=0, color=V["comp_l"], edgecolor=V["comp"], lw=1.5, alpha=a, height=0.6)
+        ax.barh(row, bwd, left=fwd, color=V["comp_l"], edgecolor=V["comp"], lw=1.5, alpha=a, height=0.6)
+        ax.barh(row, ar, left=fwd + bwd, color=V["bad"], alpha=a, height=0.6)
+        label(ax, fwd / 2, row, "forward", V["comp_t"], shown, ha="center", va="center", fontsize=12)
+        label(ax, fwd + bwd / 2, row, "backward", V["comp_t"], shown, ha="center", va="center", fontsize=12)
+        label(ax, fwd + bwd + 3 + ar, row, f"AllReduce {val(key)} ms", V["bad"], shown, va="center", fontsize=12)
         label(ax, -4, row, name, V["ink"], shown, ha="right", va="center", fontsize=12)
-    label(ax, 115, -0.95, "30 of 230 ms exposed: 13% of every step", V["bad"], k >= 2,
-          ha="center", fontsize=13)
+    label(ax, 115, -0.95, f"{val('ar_inter_ms')} of {val('step_inter_ms')} ms exposed: "
+          f"{val('exposed_pct')}% of every step", V["bad"], k >= 2, ha="center", fontsize=13)
     ax.set_xlim(0, 300)
     ax.set_ylim(-1.3, 1.5)
     ax.set_yticks([])
-    ax.set_xticks([0, 100, 200, 230])
+    ax.set_xticks([0, fwd, fwd + bwd, num("step_inter_ms")])
     ax.set_xlabel("Time in one step (ms), illustrative")
     ax.spines["left"].set_visible(False)
     sp.save(fig, out / f"step_timeline_step{k}.svg")
@@ -243,9 +246,10 @@ for k in (1, 2, 3):
 # 5. ECMP: 8 flows on 4 equal-cost paths
 # =============================================================================
 flow_colors = ["#1F407A", "#d97706", "#7c3aed", "#16a34a", "#0e7490", "#be185d", "#a16207", "#475569"]
-layouts = {1: ([2, 2, 2, 2], "Even split: every path finishes at 2", V["ok_t"]),
-           2: ([4, 2, 2, 0], "Static hash: path 1 finishes at 4; path 4 idles", V["bad_t"]),
-           3: ([2, 2, 2, 2], "Adaptive routing: back to 2 on every path", V["ok_t"])}
+even = [round(calcs.ECMP.even_load)] * calcs.ECMP.paths
+layouts = {1: (even, "Even split", V["ok_t"]),
+           2: (list(calcs.ECMP.path_loads), "Static hash", V["bad_t"]),
+           3: (even, "Adaptive routing", V["ok_t"])}
 for k, (loads, caption, ccol) in layouts.items():
     fig, ax = plt.subplots(figsize=(4.8, 1.8))
     fid = 0
@@ -258,8 +262,8 @@ for k, (loads, caption, ccol) in layouts.items():
                 fontweight="bold", color=V["ink"])
         if n == 0:
             ax.text(0.1, y, "idle", va="center", fontsize=13, color=V["gray"], fontweight="bold")
-    ax.axvline(max(loads), color=V["bad"] if max(loads) > 2 else V["ok"], lw=2, ls="--")
-    ax.text(5.0, 1.5, caption.split(": ")[0] + ":", ha="center", va="center",
+    ax.axvline(max(loads), color=V["bad"] if max(loads) > max(even) else V["ok"], lw=2, ls="--")
+    ax.text(5.0, 1.5, caption + ":", ha="center", va="center",
             fontsize=13, fontweight="bold", color=ccol)
     ax.text(5.0, 0.9, "done at " + str(max(loads)), ha="center", va="center",
             fontsize=13, fontweight="bold", color=ccol)
@@ -359,19 +363,24 @@ write("ib_roce.svg", 1000, 265, "".join(b))
 # =============================================================================
 sizes = np.logspace(1, 9.3, 400)  # bytes, decimal
 fig, ax = plt.subplots(figsize=(4.8, 2.25))
-for alpha_us, beta_gb, col in ((1.5, 50.0, V["comm"]), (5.0, 12.5, V["gray"])):
+AB = calcs.AB
+paths = [(AB.alphas[p].to("microsecond").magnitude, AB.bandwidths[p].to("GB/s").magnitude, col)
+         for p, col in (("NDR", V["comm"]), ("RoCE 100G", V["gray"]))]
+for alpha_us, beta_gb, col in paths:
     t_us = alpha_us + sizes / (beta_gb * 1e9) * 1e6
     ax.plot(sizes, t_us, color=col, lw=2.8)
     knee = alpha_us * 1e-6 * beta_gb * 1e9
     ax.plot([knee], [2 * alpha_us], "o", ms=9, color=col, mec="white", mew=1.5, zorder=5)
-ax.text(15, 1.0e5, "RoCE, 100 Gb/s: α 5 μs, β 12.5 GB/s",
+ax.text(15, 1.0e5, f"RoCE, {val('roce_gbps')} Gb/s: α {val('roce_alpha_us')} μs, β {val('roce_beta_gbs')} GB/s",
         color=V["gray"], fontsize=11.5, fontweight="bold")
-ax.text(15, 2.0e4, "NDR: α 1.5 μs, β 50 GB/s",
+ax.text(15, 2.0e4, f"NDR: α {val('ndr_alpha_us')} μs, β {val('ib_gbs')} GB/s",
         color=V["comm"], fontsize=11.5, fontweight="bold")
-ax.plot([4e3, 350e6], [1.58, 7000], "s", ms=8, color=V["coord"], zorder=6)
-ax.annotate("4 KB control: 1.58 μs", (4e3, 1.58), xytext=(60, 0.35), color=V["coord"],
+ctrl_b, shard_b = (AB.messages[k].to("byte").magnitude for k in ("control", "shard"))
+ctrl_t, shard_t = num("ctrl_ndr_us"), num("shard_ndr_ms") * 10 ** 3
+ax.plot([ctrl_b, shard_b], [ctrl_t, shard_t], "s", ms=8, color=V["coord"], zorder=6)
+ax.annotate(f"{val('ctrl_kb')} KB control: {val('ctrl_ndr_us')} μs", (ctrl_b, ctrl_t), xytext=(60, 0.35), color=V["coord"],
             fontsize=12, fontweight="bold", arrowprops=dict(arrowstyle="-", color=V["coord"], lw=1.2))
-ax.annotate("350 MB shard: 7.0 ms", (350e6, 7000), xytext=(2e6, 2.5), color=V["coord"],
+ax.annotate(f"{val('shard_mb')} MB shard: {val('shard_ndr_ms')} ms", (shard_b, shard_t), xytext=(2e6, 2.5), color=V["coord"],
             fontsize=12, fontweight="bold", arrowprops=dict(arrowstyle="-", color=V["coord"], lw=1.2))
 ax.text(15, 150, "latency bound", color=V["ink"], fontsize=12, fontstyle="italic")
 ax.text(1.5e9, 0.25, "bandwidth bound", color=V["ink"], fontsize=12, fontstyle="italic", ha="right")
@@ -391,21 +400,21 @@ sp.save(fig, out / "alphabeta_crossover.svg")
 # =============================================================================
 # 9. Measured NCCL AllReduce against the two-parameter model (column)
 # =============================================================================
-nccl = Literature.Series.NCCLAllReduceH100Node.entries
-floor_us = statistics.median(r["oop_time_us"] for r in nccl if r["size_bytes"] <= 64 * 1024)
-bw_gbps = nccl[-1]["oop_algbw_GBps"]
-knee_b = floor_us * 1e-6 * bw_gbps * 1e9
+nccl = calcs.NCCL.rows
+fit = calcs.NCCL.result
+floor_us = fit.floor_time.to("microsecond").magnitude
+mid_lo, mid_hi = (q.to("byte").magnitude for q in (calcs.NCCL.mid_low, calcs.NCCL.mid_high))
 xs = np.array([r["size_bytes"] for r in nccl])
 ts = np.array([r["oop_time_us"] for r in nccl])
 grid = np.logspace(np.log10(xs.min()), np.log10(xs.max()), 300)
 fig, ax = plt.subplots(figsize=(4.2, 2.9))
-ax.axvspan(8 * 2**20, 128 * 2**20, color=V["bad_l"], alpha=0.8, lw=0)
-ax.plot(grid, floor_us + grid / (bw_gbps * 1e9) * 1e6, color=V["comp"], lw=2.6, zorder=2)
+ax.axvspan(mid_lo, mid_hi, color=V["bad_l"], alpha=0.8, lw=0)
+ax.plot(grid, [fit.model_time(Q_(g, "byte")).magnitude for g in grid], color=V["comp"], lw=2.6, zorder=2)
 ax.scatter(xs, ts, s=40, color=V["bad"], zorder=3)
-ax.text(30, 2.8, f"floor ≈ {floor_us:.0f} μs", color=V["comp"], fontsize=15, fontweight="bold")
-ax.text(16, 4e4, "model: floor + n / 274 GB/s", color=V["comp"], fontsize=13,
+ax.text(30, 2.8, f"floor ≈ {val('nccl_floor_us')} μs", color=V["comp"], fontsize=15, fontweight="bold")
+ax.text(16, 4e4, f"model: floor + n / {val('nccl_bw_gbs')} GB/s", color=V["comp"], fontsize=13,
         fontweight="bold", ha="left")
-ax.text(16, 250, "shaded, 8 to 128 MB:\nup to 1.7× the model", color=V["bad_t"], fontsize=14,
+ax.text(16, 250, f"shaded, {val('nccl_mid_lo_mb')} to {val('nccl_mid_hi_mb')} MB:\nup to {val('nccl_mid_ratio')}× the model", color=V["bad_t"], fontsize=14,
         fontweight="bold", ha="left")
 ax.text(16, 1.0e4, "red: measured", color=V["bad"], fontsize=15, fontweight="bold")
 ax.set_xscale("log", base=2)
@@ -430,9 +439,9 @@ def bisection(k):
     b = []
     b.append(box(40, 70, 290, 230, V["comp_l"], V["comp"], 2.5, 10))
     b.append(box(570, 70, 290, 230, V["comp_l"], V["comp"], 2.5, 10))
-    b.append(text(185, 165, "512 GPUs", 28, V["comp_t"], weight="bold"))
+    b.append(text(185, 165, f"{val('cut_half')} GPUs", 28, V["comp_t"], weight="bold"))
     b.append(text(185, 205, "half A", 22, V["comp_t"]))
-    b.append(text(715, 165, "512 GPUs", 28, V["comp_t"], weight="bold"))
+    b.append(text(715, 165, f"{val('cut_half')} GPUs", 28, V["comp_t"], weight="bold"))
     b.append(text(715, 205, "half B", 22, V["comp_t"]))
     b.append(line(450, 40, 450, 330, V["bad"], 3, dash="10 7"))
     b.append(text(450, 22, "the cut", 22, V["bad_t"], weight="bold"))
@@ -441,9 +450,11 @@ def bisection(k):
         live = k == 1 or i % 4 == 0
         b.append(line(332, y, 568, y, V["comm"], 4 if live else 2.5, opacity=1.0 if live else 0.22))
     if k == 1:
-        b.append(text(450, 362, "1:1 · 512 links × 50 GB/s = 25.6 TB/s each way", 24, V["comm_t"], weight="bold"))
+        b.append(text(450, 362, f"1:1 · {val('cut_half')} links × {val('ib_gbs')} GB/s = {val('cut_full_tbs')} TB/s each way",
+                      24, V["comm_t"], weight="bold"))
     else:
-        b.append(text(450, 362, "4:1 spine · 25.6 ÷ 4 = 6.4 TB/s each way", 24, V["bad_t"], weight="bold"))
+        b.append(text(450, 362, f"{val('oversub')}:1 spine · {val('cut_full_tbs')} ÷ {val('oversub')} = "
+                      f"{val('cut_over_tbs')} TB/s each way", 24, V["bad_t"], weight="bold"))
     write(f"bisection_step{k}.svg", 900, 385, "".join(b))
 
 
@@ -520,21 +531,22 @@ for k in (1, 2):
 # 12. Oversubscription: AllReduce bound and relative throughput (column)
 # =============================================================================
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.2, 2.8), gridspec_kw=dict(wspace=0.55))
-a1.bar([0, 1], [0.200, 0.799], color=[V["comm"], V["bad"]], width=0.6)
-for x, v in ((0, 0.200), (1, 0.799)):
-    a1.text(x, v + 0.03, f"{v:.3f} s", ha="center", fontsize=15, fontweight="bold",
+times = (("os_t_full_s", num("os_t_full_s")), ("os_t_over_s", num("os_t_over_s")))
+a1.bar([0, 1], [t for _, t in times], color=[V["comm"], V["bad"]], width=0.6)
+for x, (key, v) in enumerate(times):
+    a1.text(x, v + 0.03, f"{val(key)} s", ha="center", fontsize=15, fontweight="bold",
             color=V["comm_t"] if x == 0 else V["bad_t"])
 a1.set_ylim(0, 1.0)
 a1.set_title("Crossing time", fontsize=15, fontweight="bold")
-a2.bar([0, 1], [1.0, 0.53], color=[V["comm"], V["bad"]], width=0.6)
-for x, v in ((0, 1.0), (1, 0.53)):
-    a2.text(x, v + 0.03, f"{v:.2f}", ha="center", fontsize=15, fontweight="bold",
+a2.bar([0, 1], [1.0, num("os_rel")], color=[V["comm"], V["bad"]], width=0.6)
+for x, (v, s) in enumerate(((1.0, "1.00"), (num("os_rel"), val("os_rel")))):
+    a2.text(x, v + 0.03, s, ha="center", fontsize=15, fontweight="bold",
             color=V["comm_t"] if x == 0 else V["bad_t"])
 a2.set_ylim(0, 1.25)
 a2.set_title("Throughput", fontsize=15, fontweight="bold")
 for ax in (a1, a2):
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["1:1", "4:1"], fontsize=15)
+    ax.set_xticklabels(["1:1", f"{val('oversub')}:1"], fontsize=15)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
 sp.save(fig, out / "oversub_bars.svg")
@@ -587,14 +599,14 @@ for k in (1, 2, 3):
 # 14. Torus against fat-tree at 4,096 endpoints (column)
 # =============================================================================
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.2, 2.8), gridspec_kw=dict(wspace=0.6))
-a1.bar([0, 1], [102.4, 25.6], color=[V["comm"], V["coord"]], width=0.6)
-a1.text(0, 106, "102.4", ha="center", fontsize=15, fontweight="bold", color=V["comm_t"])
-a1.text(1, 30, "25.6", ha="center", fontsize=15, fontweight="bold", color=V["coord_t"])
+a1.bar([0, 1], [num("ft_cut_tbs"), num("torus_cut_tbs")], color=[V["comm"], V["coord"]], width=0.6)
+a1.text(0, num("ft_cut_tbs") + 3.6, val("ft_cut_tbs"), ha="center", fontsize=15, fontweight="bold", color=V["comm_t"])
+a1.text(1, num("torus_cut_tbs") + 4.4, val("torus_cut_tbs"), ha="center", fontsize=15, fontweight="bold", color=V["coord_t"])
 a1.set_ylim(0, 125)
 a1.set_title("Cut, TB/s", fontsize=14, fontweight="bold")
-a2.bar([0, 1], [5, 24], color=[V["comm"], V["coord"]], width=0.6)
-a2.text(0, 5.8, "5", ha="center", fontsize=15, fontweight="bold", color=V["comm_t"])
-a2.text(1, 24.8, "24", ha="center", fontsize=15, fontweight="bold", color=V["coord_t"])
+a2.bar([0, 1], [num("hops_core"), num("torus_hops")], color=[V["comm"], V["coord"]], width=0.6)
+a2.text(0, num("hops_core") + 0.8, val("hops_core"), ha="center", fontsize=15, fontweight="bold", color=V["comm_t"])
+a2.text(1, num("torus_hops") + 0.8, val("torus_hops"), ha="center", fontsize=15, fontweight="bold", color=V["coord_t"])
 a2.set_ylim(0, 29)
 a2.set_title("Worst path, hops", fontsize=14, fontweight="bold")
 for ax in (a1, a2):
@@ -705,10 +717,10 @@ write("dcqcn.svg", 560, 330, "".join(b))
 # 18. Incast: offered load against one egress (column)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(4.2, 1.9))
-ax.barh([1, 0], [12800, 50], color=[V["bad"], V["comm"]], height=0.55)
-ax.text(12800 * 1.15, 1, "12.8 TB/s", va="center", fontsize=15, fontweight="bold", color=V["bad_t"])
-ax.text(50 * 1.15, 0, "50 GB/s", va="center", fontsize=15, fontweight="bold", color=V["comm_t"])
-ax.text(-0.02, 1, "256 senders", transform=ax.get_yaxis_transform(), ha="right", va="center",
+ax.barh([1, 0], [num("incast_offered_gbs"), num("incast_egress_gbs")], color=[V["bad"], V["comm"]], height=0.55)
+ax.text(num("incast_offered_gbs") * 1.15, 1, f"{val('incast_offered_tbs')} TB/s", va="center", fontsize=15, fontweight="bold", color=V["bad_t"])
+ax.text(num("incast_egress_gbs") * 1.15, 0, f"{val('incast_egress_gbs')} GB/s", va="center", fontsize=15, fontweight="bold", color=V["comm_t"])
+ax.text(-0.02, 1, f"{val('incast_senders')} senders", transform=ax.get_yaxis_transform(), ha="right", va="center",
         fontsize=15, fontweight="bold")
 ax.text(-0.02, 0, "one egress", transform=ax.get_yaxis_transform(), ha="right", va="center",
         fontsize=15, fontweight="bold")
@@ -727,14 +739,17 @@ sp.save(fig, out / "incast_bars.svg")
 # =============================================================================
 # 19. Silent waste: cumulative GPU-hours lost over 30 days (scenario)
 # =============================================================================
-days = np.linspace(0, 30, 200)
+SW = calcs.SILENT
+run_days = SW.run_duration.to("day").magnitude
+days = np.linspace(0, run_days, 200)
+hours_per_day = Q_(1, "day").to("hour").magnitude
 fig, ax = plt.subplots(figsize=(4.8, 1.95))
-for frac, col in ((0.03, V["bad"]), (0.02, V["comm"])):
-    lost = 1024 * 24 * days * frac
+for case, col in (("high", V["bad"]), ("low", V["comm"])):
+    lost = SW.fleet.total_accelerators * hours_per_day * days * SW.slowdowns[case]
     ax.plot(days, lost, color=col, lw=3)
-    ax.text(30.6, lost[-1], f"{frac:.0%} slower:\n{lost[-1]:,.0f} GPU-h", color=col,
+    ax.text(run_days + 0.6, lost[-1], f"{val('sw_' + case + '_pct')}% slower:\n{val('sw_lost_' + case)} GPU-h", color=col,
             fontsize=12, fontweight="bold", va="center")
-ax.text(1, 26500, "1,024 GPUs, 30 days; no alarm fires", color=V["ink"], fontsize=12, fontweight="bold")
+ax.text(1, 26500, f"{val('ref_gpus')} GPUs, {val('sw_days')} days; no alarm fires", color=V["ink"], fontsize=12, fontweight="bold")
 ax.set_xlim(0, 39)
 ax.set_ylim(0, 29000)
 ax.set_xticks([0, 10, 20, 30])
@@ -750,11 +765,11 @@ sp.save(fig, out / "silent_waste.svg")
 # =============================================================================
 bus = np.array([r["oop_busbw_GBps"] for r in nccl])
 fig, ax = plt.subplots(figsize=(4.8, 2.0))
-ax.axvspan(8 * 2**20, 128 * 2**20, color=V["comm_l"], lw=0)
+ax.axvspan(mid_lo, mid_hi, color=V["comm_l"], lw=0)
 ax.plot(xs[xs >= 1024], bus[xs >= 1024], "o-", color=V["comp"], lw=2.4, ms=6)
-ax.text(3e5, 470, "8 to 128 MB:\n177 to 401 GB/s", color=V["comm_t"], fontsize=12,
+ax.text(3e5, 470, f"{val('nccl_mid_lo_mb')} to {val('nccl_mid_hi_mb')} MB:\n{val('nccl_mid_busbw_lo')} to {val('nccl_mid_busbw_hi')} GB/s", color=V["comm_t"], fontsize=12,
         fontweight="bold", ha="right", va="top")
-ax.text(16 * 2**30, 560, "480 GB/s at 16 GB", color=V["comp"], fontsize=12, fontweight="bold", ha="right")
+ax.text(xs[-1], 560, f"{val('nccl_top_busbw')} GB/s at {val('nccl_top_gb')} GB", color=V["comp"], fontsize=12, fontweight="bold", ha="right")
 ax.set_xscale("log", base=2)
 ax.set_xticks([2**10, 2**20, 2**30, 16 * 2**30])
 ax.set_xticklabels(["1 KB", "1 MB", "1 GB", "16 GB"])
@@ -790,14 +805,15 @@ write("diag_ladder.svg", 600, 330, "".join(b))
 # 22. SR-IOV slices and a checkpoint burst (column, optional slide)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(4.4, 1.7))
-for i in range(8):
-    ax.barh(1, 50, left=i * 50, color=V["comp"] if i == 0 else V["comp_l"],
+vf, nic = num("vf_gbps"), num("nic_gbps")
+for i in range(round(num("vf_count"))):
+    ax.barh(1, vf, left=i * vf, color=V["comp"] if i == 0 else V["comp_l"],
             edgecolor=V["comp"], lw=1.5, height=0.55)
-ax.text(25, 1, "50", ha="center", va="center", color="white", fontsize=13, fontweight="bold")
-ax.text(200, 1.55, "one 400 Gb/s NIC as 8 virtual functions", ha="center", fontsize=13,
+ax.text(vf / 2, 1, val("vf_gbps"), ha="center", va="center", color="white", fontsize=13, fontweight="bold")
+ax.text(nic / 2, 1.55, f"one {val('nic_gbps')} Gb/s NIC as {val('vf_count')} virtual functions", ha="center", fontsize=13,
         fontweight="bold", color=V["comp_t"])
-ax.barh(0, 400, color=V["bad_l"], edgecolor=V["bad"], lw=1.5, height=0.55)
-ax.text(200, 0, "100 GB checkpoint: port full for 2 s", ha="center", va="center",
+ax.barh(0, nic, color=V["bad_l"], edgecolor=V["bad"], lw=1.5, height=0.55)
+ax.text(nic / 2, 0, f"{val('burst_gb')} GB checkpoint: port full for {val('burst_s')} s", ha="center", va="center",
         fontsize=12.5, fontweight="bold", color=V["bad_t"])
 ax.set_xlim(0, 400)
 ax.set_ylim(-0.5, 1.9)
@@ -811,10 +827,10 @@ sp.save(fig, out / "sriov_slices.svg")
 # 23. Five levels with today's numbers (synthesis)
 # =============================================================================
 levels = [
-    ("L5", "Cluster design", "4 units of 256 GPUs = the 1,024-GPU job"),
+    ("L5", "Cluster design", f"{val('su_count')} units of {val('su_gpus')} GPUs = the {val('ref_gpus')}-GPU job"),
     ("L4", "Fabric behavior", "PAUSE loop froze Microsoft's lossless class"),
-    ("L3", "Switch, topology", "25.6 TB/s cut at 1:1; 4:1 gives 0.53"),
-    ("L2", "Transport", "α 1.5 μs, β 50 GB/s, crossover 75 KB"),
+    ("L3", "Switch, topology", f"{val('cut_full_tbs')} TB/s cut at 1:1; {val('oversub')}:1 gives {val('os_rel')}"),
+    ("L2", "Transport", f"α {val('ndr_alpha_us')} μs, β {val('ib_gbs')} GB/s, crossover {val('cross_ndr_kb')} KB"),
     ("L1", "Wire and link", "PAM4 + FEC; copper to 3 m, then optics"),
 ]
 b = []

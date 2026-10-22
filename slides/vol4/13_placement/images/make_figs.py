@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 13 (Workload Placement), Volume IV.
 
-Every derived value comes from calcs.py (inputs from the rendered chapter,
-Workload Placement, and the papers it cites). Values read from papers carry
-their figure or section in the comment beside them (see calcs.py). Each
+Every value comes from calcs.py, which reads it from MLSysIM (the scenarios
+and Literature entries named there): numbers drawn as labels are the strings
+the slides print (val), and plotted magnitudes are calcs' plot inputs. Each
 figure is drawn at the size of its slot (full width about 5.8 in wide; a
 column about 5.4 by 3.6 in) so its type stays legible on the slide. A figure
 revealed in steps is written as name_step1.svg ... name_stepN.svg with every
@@ -27,14 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402  (sets the shared rcParams)
 
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
 
-calcs.main()
-V = calcs.VALUES
-BACKLOG_TX = 88                       # ch Napkin Math 13.1: transactions in one backlog
-BACKLOG_B = f"{calcs.BACKLOG_BYTES:,}"  # ch Napkin Math 13.1: bytes in one backlog
 OUT = Path(__file__).parent
 
 P = {
@@ -48,11 +45,6 @@ P = {
     "violet": "#7E317B", "petrol": "#0D9488",
     "text": "#1A1A2E",
 }
-
-
-def f(key):
-    """A calcs value as a float (calcs prints strings with commas)."""
-    return float(str(V[key]).replace(",", ""))
 
 
 def save(fig, name):
@@ -98,10 +90,10 @@ def canvas(w, h, xlim, ylim):
 # Hook: the thermal hangover on a shared die (Napkin Math 13.2), 3 steps
 # ---------------------------------------------------------------------------
 def hook():
-    t_trip = f("t_trip_s")
-    rec = f("recover_s")
-    tq, tl = f("t_quiet"), f("t_loaded")
-    tau = calcs.TAU_S
+    t_trip = calcs.T_TO_TRIP
+    rec = calcs.RECOVERY
+    tq, tl = calcs.T_QUIET, calcs.T_LOADED
+    tau = calcs.TAU
     t_end = t_trip + rec + 5.5
     t1 = np.linspace(0, t_trip, 300)
     temp1 = tl - (tl - tq) * np.exp(-t1 / tau)
@@ -117,17 +109,17 @@ def hook():
         ax.plot(t1, temp1, color=P["slate"], lw=2.5)
         ax.plot(t2, temp2, color=P["slate"], lw=2.5, alpha=a(k >= 3))
         ax.axhline(calcs.T_TRIP, color=P["red"], lw=1.5, ls="--")
-        ax.text(0.4, calcs.T_TRIP - 4.5, f"trip {calcs.T_TRIP:.0f} °C", color=P["red"],
+        ax.text(0.4, calcs.T_TRIP - 4.5, f"trip {val('t_trip_c')} °C", color=P["red"],
                 fontsize=11, fontweight="bold")
         ax.axhline(calcs.T_CLEAR, color=P["green"], lw=1.5, ls="--", alpha=a(k >= 3))
-        ax.text(0.4, calcs.T_CLEAR - 4.5, f"clear {calcs.T_CLEAR:.0f} °C", color=P["green"],
+        ax.text(0.4, calcs.T_CLEAR - 4.5, f"clear {val('t_clear_c')} °C", color=P["green"],
                 fontsize=11, fontweight="bold", alpha=a(k >= 3))
         ax.plot([t_trip], [calcs.T_TRIP], "o", ms=8, color=P["red"], alpha=a(k >= 2))
-        ax.annotate(f"{V['t_trip_s']} s: clock halved", (t_trip, calcs.T_TRIP),
+        ax.annotate(f"{val('t_trip_s')} s: clock halved", (t_trip, calcs.T_TRIP),
                     xytext=(-12, 5), textcoords="offset points", ha="right",
                     fontsize=12, color=P["red_d"], fontweight="bold", alpha=a(k >= 2))
         ax.axvspan(t_trip, t_trip + rec, color=P["red_l"], lw=0, alpha=a(k >= 3) * 0.9)
-        ax.text(t_trip + rec + 0.3, 58, f"{V['recover_s']} s\nafter stop",
+        ax.text(t_trip + rec + 0.3, 58, f"{val('recover_s')} s\nafter stop",
                 fontsize=12, color=P["red_d"], fontweight="bold", alpha=a(k >= 3))
         ax.text(t_trip + 0.4, 66, "?", fontsize=20, color=P["red_d"], fontweight="bold",
                 alpha=a(k == 2))
@@ -141,11 +133,11 @@ def hook():
         bx.set_xlim(0, t_end)
         bx.set_ylim(0, 1)
         bx.add_patch(Rectangle((0, 0.15), t_trip, 0.7, color=P["green_l"], ec=P["green"]))
-        bx.text(t_trip / 2, 0.5, f"every tick on time: {V['resp_nom']} µs of 400",
+        bx.text(t_trip / 2, 0.5, f"every tick on time: {val('resp_nom')} µs of {val('deadline')}",
                 ha="center", va="center", fontsize=11, color=P["green_d"], fontweight="bold")
         bx.add_patch(Rectangle((t_trip, 0.15), rec, 0.7, color=P["red_l"], ec=P["red"],
                                alpha=a(k >= 2)))
-        bx.text(t_trip + rec / 2, 1.12, f"{V['resp_thr']} µs", ha="center", va="bottom",
+        bx.text(t_trip + rec / 2, 1.12, f"{val('resp_thr')} µs", ha="center", va="bottom",
                 fontsize=11, color=P["red_d"], fontweight="bold", alpha=a(k >= 2))
         bx.add_patch(Rectangle((t_trip + rec, 0.15), t_end - t_trip - rec, 0.7,
                                color=P["green_l"], ec=P["green"], alpha=a(k >= 3)))
@@ -164,36 +156,36 @@ def budget():
     for k in (1, 2, 3, 4):
         fig, ax = plt.subplots(figsize=(5.8, 2.2))
         y = 0.5
-        ax.barh(y, calcs.SENSE_US, left=0, height=0.42, color=P["petrol"])
-        ax.barh(y, calcs.CHECK_US, left=calcs.SENSE_US, height=0.42, color=P["green"])
-        ax.barh(y, calcs.STAGE_US, left=calcs.SENSE_US + calcs.CHECK_US, height=0.42,
+        ax.barh(y, calcs.SENSE, left=0, height=0.42, color=P["petrol"])
+        ax.barh(y, calcs.CHECK, left=calcs.SENSE, height=0.42, color=P["green"])
+        ax.barh(y, calcs.STAGE, left=calcs.SENSE + calcs.CHECK, height=0.42,
                 color=P["green_d"])
-        ax.text(0, 1.02, f"unloaded tick {V['unloaded_us']}", fontsize=12,
+        ax.text(0, 1.02, f"unloaded tick {val('unloaded_us')}", fontsize=12,
                 color=P["green_d"], fontweight="bold")
         # declared WCET
-        ax.plot([calcs.WCET_US] * 2, [0.15, 0.95], color=P["slate"], lw=2, ls="--",
+        ax.plot([calcs.WCET] * 2, [0.15, 0.95], color=P["slate"], lw=2, ls="--",
                 alpha=a(k >= 2))
-        ax.text(calcs.WCET_US, 0.02, f"WCET {calcs.WCET_US:.0f}", ha="center", va="top",
+        ax.text(calcs.WCET, 0.02, f"WCET {val('wcet')}", ha="center", va="top",
                 fontsize=12, color=P["slate"], fontweight="bold", alpha=a(k >= 2))
         # blocking + interference band and deadline
-        ax.add_patch(Rectangle((f("ceiling_us"), 0.2), calcs.DEADLINE_US - f("ceiling_us"),
+        ax.add_patch(Rectangle((calcs.CEILING, 0.2), calcs.DEADLINE - calcs.CEILING,
                                0.6, fc=P["gray_l"], hatch="//", ec=P["gray"], lw=1,
                                alpha=a(k >= 3)))
-        ax.text(calcs.DEADLINE_US + 12, 0.5, "90 µs: the MCU's own tasks", fontsize=12,
+        ax.text(calcs.DEADLINE + 12, 0.5, f"{val('b_plus_i')} µs: the MCU's own tasks", fontsize=12,
                 va="center", color=P["gray"], alpha=a(k >= 3))
-        ax.plot([calcs.DEADLINE_US] * 2, [0.15, 0.95], color=P["red"], lw=2.2,
+        ax.plot([calcs.DEADLINE] * 2, [0.15, 0.95], color=P["red"], lw=2.2,
                 alpha=a(k >= 3))
-        ax.text(calcs.DEADLINE_US + 8, 0.02, f"deadline {calcs.DEADLINE_US:.0f}", va="top",
+        ax.text(calcs.DEADLINE + 8, 0.02, f"deadline {val('deadline')}", va="top",
                 fontsize=12, color=P["red_d"], fontweight="bold", alpha=a(k >= 3))
         # the 60 us allowance
-        ax.add_patch(Rectangle((calcs.WCET_US, 0.2), f("ceiling_us") - calcs.WCET_US, 0.6,
+        ax.add_patch(Rectangle((calcs.WCET, 0.2), calcs.CEILING - calcs.WCET, 0.6,
                                fc=P["amber_l"], ec=P["amber"], lw=1.5, alpha=a(k >= 4)))
-        ax.text((calcs.WCET_US + f("ceiling_us")) / 2, y, f"{V['allowance_us']}",
+        ax.text((calcs.WCET + calcs.CEILING) / 2, y, f"{val('allowance_us')}",
                 ha="center", va="center", fontsize=13, color=P["amber"], fontweight="bold",
                 alpha=a(k >= 4))
-        ax.plot([calcs.PERIOD_US] * 2, [0.15, 0.95], color=P["slate"], lw=1.5,
+        ax.plot([calcs.PERIOD] * 2, [0.15, 0.95], color=P["slate"], lw=1.5,
                 alpha=a(k >= 4))
-        ax.text(calcs.PERIOD_US, 0.02, "next tick", ha="right", va="top", fontsize=12,
+        ax.text(calcs.PERIOD, 0.02, "next tick", ha="right", va="top", fontsize=12,
                 color=P["slate"], alpha=a(k >= 4))
         ax.set_xlim(0, 1010)
         ax.set_ylim(-0.3, 1.3)
@@ -259,7 +251,7 @@ def board():
         arrow(ax, 7.4, 1.65, 8.15, 2.55, P["slate"], shown=k >= 4)
         ax.text(7.5, 2.0, "board link", fontsize=11, color=P["slate"], ha="right",
                 fontweight="bold", alpha=0)
-        box(ax, 8.6, 1.3, 2.7, 0.7, "isolated rail, 2 s", P["green_l"], P["green"], fs=11,
+        box(ax, 8.6, 1.3, 2.7, 0.7, f"isolated rail, {val('rail_holdup_s')} s", P["green_l"], P["green"], fs=11,
             bold=False, shown=k >= 4, lw=1.3)
         # battery bar
         box(ax, 0.1, -0.0 + 0.02, 11.6, 0.0, "", "white", "white", shown=False)
@@ -287,15 +279,15 @@ def socmem():
     box(ax, 0.3, 0.3, 7.85, 1.7, "", P["red_l"], P["red"], lw=1.3)
     ax.text(0.5, 1.68, "One LPDDR5 controller, first come first served", fontsize=12,
             color=P["red_d"], fontweight="bold", va="center")
-    box(ax, 0.5, 0.5, 0.95, 0.85, "4 KB\nread", P["green_l"], P["green"], fs=11)
+    box(ax, 0.5, 0.5, 0.95, 0.85, f"{val('snapshot_kib')} KB\nread", P["green_l"], P["green"], fs=11)
     box(ax, 1.55, 0.5, 1.0, 0.85, "telem.", P["slate_l"], P["slate"], fs=11, bold=False)
     box(ax, 2.65, 0.5, 1.15, 0.85, "camera", P["slate_l"], P["slate"], fs=11, bold=False)
-    box(ax, 3.9, 0.5, 4.05, 0.85, "weight tile, 64 transactions", P["navy_l"], P["navy"],
+    box(ax, 3.9, 0.5, 4.05, 0.85, f"weight tile, {val('tile_tx')} transactions", P["navy_l"], P["navy"],
         fs=11)
     arrow(ax, 8.15, 0.92, 8.85, 0.92, P["slate"], lw=2.0)
     box(ax, 8.85, 0.3, 2.65, 1.7, "LPDDR5 DRAM", P["slate_l"], P["slate"], fs=12,
-        sub="204 GB/s peak", subfs=11)
-    ax.text(10.18, 3.15, f"{BACKLOG_TX} transactions,\n{BACKLOG_B} B\nserved before\nthe read",
+        sub=f"{val('bw_gbs')} GB/s peak", subfs=11)
+    ax.text(10.18, 3.15, f"{val('backlog_tx')} transactions,\n{val('backlog_bytes')} B\nserved before\nthe read",
             ha="center", va="center", fontsize=12, color=P["red_d"], fontweight="bold",
             linespacing=1.25)
     save(fig, "socmem")
@@ -305,39 +297,35 @@ def socmem():
 # Backlog budget on one 1 ms period (Napkin Math 13.1, ch figure 2), 5 steps
 # ---------------------------------------------------------------------------
 def backlog():
-    wait = f("backlog_us")
-    wait1 = f("backlog1_us")
-    snap = f("snap_us")
-    rows = [("unloaded", 0, wait), (f"{V['n_sense']} backlogs", V["n_sense"], wait),
-            (f"{V['n_wcet']} backlogs", V["n_wcet"], wait),
-            (f"{V['n_dead']} backlogs", V["n_dead"], wait),
-            (f"{V['n1_wcet']}, one channel", V["n1_wcet"], wait1)]
+    labels = ["unloaded", f"{val('n_sense')} backlogs", f"{val('n_wcet')} backlogs",
+              f"{val('n_dead')} backlogs", f"{val('n1_wcet')}, one channel"]
+    rows = [(lab, n, w, r) for lab, (n, w, r) in zip(labels, calcs.BACKLOG_ROWS)]
     for k in range(1, 6):
         fig, ax = plt.subplots(figsize=(5.8, 2.7))
-        for i, (lab, n, w) in enumerate(rows):
+        for i, (lab, n, w, r) in enumerate(rows):
             yy = len(rows) - 1 - i
             show = i < k
-            mem = calcs.SENSE_US if n == 0 else n * w + snap
+            mem = w + r
             if n == 0:
                 ax.barh(yy, mem, height=0.6, color=P["petrol"], alpha=a(show))
             else:
                 ax.barh(yy, mem, height=0.6, color=P["amber_l"], ec=P["amber"], hatch="///",
                         alpha=a(show), lw=1)
-            ax.barh(yy, calcs.LATER_WORK_US, left=mem, height=0.6, color=P["green"],
+            ax.barh(yy, calcs.COMPUTE_AFTER, left=mem, height=0.6, color=P["green"],
                     alpha=a(show))
             ax.text(-12, yy, lab, ha="right", va="center", fontsize=12,
                     fontweight="bold", color=P["text"], alpha=a(show))
-            ax.text(mem + calcs.LATER_WORK_US + 8, yy, f"{mem + calcs.LATER_WORK_US:.0f}",
+            ax.text(mem + calcs.COMPUTE_AFTER + 8, yy, f"{mem + calcs.COMPUTE_AFTER:.0f}",
                     va="center", fontsize=11, color=P["text"], alpha=a(show))
-        for x, lab, c, ha, yo in ((calcs.SENSE_US, "40", P["petrol"], "center", 0.0),
-                                  (calcs.WCET_US, "WCET 250", P["slate"], "center", 0.0),
-                                  (calcs.DEADLINE_US, "deadline 400", P["red"], "left", 0.0),
-                                  (calcs.PERIOD_US, "next tick", P["slate"], "right", 0.0)):
+        for x, lab, c, ha, yo in ((calcs.SENSE, val("sense_us"), P["petrol"], "center", 0.0),
+                                  (calcs.WCET, f"WCET {val('wcet')}", P["slate"], "center", 0.0),
+                                  (calcs.DEADLINE, f"deadline {val('deadline')}", P["red"], "left", 0.0),
+                                  (calcs.PERIOD, "next tick", P["slate"], "right", 0.0)):
             ax.axvline(x, color=c, lw=1.6, ls="--")
             ax.text(x + (6 if ha == "left" else -6 if ha == "right" else 0),
                     len(rows) - 0.35 + yo, lab, ha=ha, fontsize=11, color=c,
                     fontweight="bold")
-        ax.axvspan(f("ceiling_us"), calcs.DEADLINE_US, color=P["gray_l"], lw=0)
+        ax.axvspan(calcs.CEILING, calcs.DEADLINE, color=P["gray_l"], lw=0)
         ax.set_xlim(0, 1010)
         ax.set_ylim(-0.6, len(rows) + 0.05)
         ax.set_yticks([])
@@ -351,11 +339,8 @@ def backlog():
 # Published shared-cache interference (Valsan 2016; Bechtel and Yun 2019)
 # ---------------------------------------------------------------------------
 def measured():
-    rows = [("Cortex-A9, read co-runners", calcs.VALSAN_A9, "network", "2.1×"),
-            ("Nehalem, read co-runners", calcs.VALSAN_NEH, "network", "7.9×"),
-            ("Cortex-A15, read co-runners", calcs.VALSAN_A15, "network", "10.6×"),
-            ("Cortex-A15, write co-runners", calcs.VALSAN_A15_W, "danger", "21.4×"),
-            ("Cortex-A53, write attackers", calcs.BECHTEL_RPI3, "danger", "346×")]
+    kinds = ["network", "network", "network", "danger", "danger"]
+    rows = [(lab, x, kind, f"{val(key)}×") for (lab, x, key), kind in zip(calcs.MEASURED, kinds)]
     sp.hbars(str(OUT / "measured.svg"), rows, "", log=True,
              xlabel="Victim slowdown on its own core and cache partition", size=(5.8, 2.6))
 
@@ -365,9 +350,9 @@ def measured():
 # ---------------------------------------------------------------------------
 def stallshare():
     s = np.logspace(np.log10(1.5), np.log10(1000), 300)
-    u = f("unloaded_us")
-    wc = (calcs.WCET_US / u - 1) / (s - 1) * 100
-    dl = (f("ceiling_us") / u - 1) / (s - 1) * 100
+    u = calcs.UNLOADED
+    wc = (calcs.WCET / u - 1) / (s - 1) * 100
+    dl = (calcs.CEILING / u - 1) / (s - 1) * 100
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.4, 3.3))
         ax.fill_between(s, wc, 100, color=P["red_l"], lw=0)
@@ -376,8 +361,8 @@ def stallshare():
         ax.text(40, 25, "declared WCET\nrefuted", color=P["red_d"], fontsize=12,
                 fontweight="bold")
         ax.text(60, 4.5, "deadline", color=P["gray"], fontsize=11)
-        for sl, key, lab in ((21, "phi21", "21×: 4.3%"), (300, "phi300", "300×: 0.28%")):
-            yv = f(key)
+        for sl, yv, lab in ((calcs.S_MSHR, calcs.PHI_MSHR, f"{val('s_mshr')}×: {val('phi21')}%"),
+                            (calcs.S_WB, calcs.PHI_WB, f"{val('s_wb')}×: {val('phi300')}%")):
             ax.plot([sl], [yv], "o", ms=9, color=P["red"], alpha=a(k >= 2))
             ax.annotate(lab, (sl, yv), xytext=(-10, -22), textcoords="offset points",
                         ha="right", fontsize=12, color=P["red_d"], fontweight="bold",
@@ -401,9 +386,9 @@ def stallshare():
 # Thermal hangover worked example (Napkin Math 13.2, ch figure 3), 2 steps
 # ---------------------------------------------------------------------------
 def hangover():
-    rec = f("recover_s")
-    tq = f("t_quiet")
-    tau = calcs.TAU_S
+    rec = calcs.RECOVERY
+    tq = calcs.T_QUIET
+    tau = calcs.TAU
     t = np.linspace(0, 6, 300)
     temp = tq + (calcs.T_TRIP - tq) * np.exp(-t / tau)
     for k in (1, 2):
@@ -411,40 +396,40 @@ def hangover():
         ax = fig.add_axes([0.17, 0.56, 0.80, 0.40])
         bx = fig.add_axes([0.17, 0.12, 0.80, 0.30])
         ax.axvspan(0, rec, color=P["red_l"], lw=0)
-        ax.text(rec / 2, 59, "600 MHz", ha="center", fontsize=12, color=P["red_d"],
+        ax.text(rec / 2, 59, f"{val('f_thr_mhz')} MHz", ha="center", fontsize=12, color=P["red_d"],
                 fontweight="bold")
         ax.plot(t, temp, color=P["slate"], lw=2.5)
-        for yv, c, lab in ((calcs.T_TRIP, P["red"], "95"), (calcs.T_CLEAR, P["green"], "85"),
-                           (tq, P["gray"], "53")):
+        for yv, c, lab in ((calcs.T_TRIP, P["red"], val("t_trip_c")), (calcs.T_CLEAR, P["green"], val("t_clear_c")),
+                           (tq, P["gray"], val("t_quiet"))):
             ax.axhline(yv, color=c, lw=1.3, ls="--")
-        ax.text(rec + 0.1, 88, f"{V['recover_s']} s = {V['recover_ticks']} ticks",
+        ax.text(rec + 0.1, 88, f"{val('recover_s')} s = {val('recover_ticks')} ticks",
                 fontsize=12, color=P["red_d"], fontweight="bold")
         ax.set_xlim(0, 6)
         ax.set_ylim(50, 98)
-        ax.set_yticks([53, 85, 95])
+        ax.set_yticks([tq, calcs.T_CLEAR, calcs.T_TRIP])
         ax.set_ylabel("°C")
         ax.text(5.95, 62, "seconds after\ninference stops", ha="right", fontsize=11,
                 color=P["gray"])
         # tick bars
         bx.set_xlim(0, 1000)
         bx.set_ylim(-0.6, 1.6)
-        for yy, ex, lab, c, cl, show in ((1, calcs.WCET_US, "1.2 GHz", P["green"], P["green_l"], True),
-                                       (0, f("thr_us"), "600 MHz", P["red"], P["red_l"], k >= 2)):
+        for yy, ex, lab, c, cl, show in ((1, calcs.EXEC_NOM, f"{val('f_nom_ghz')} GHz", P["green"], P["green_l"], True),
+                                       (0, calcs.EXEC_THR, f"{val('f_thr_mhz')} MHz", P["red"], P["red_l"], k >= 2)):
             bx.barh(yy, ex, height=0.6, color=cl, ec=c, lw=1.5, alpha=a(show))
-            bx.barh(yy, f("overhead_us"), left=ex, height=0.6, color=P["gray_l"],
+            bx.barh(yy, calcs.B_PLUS_I, left=ex, height=0.6, color=P["gray_l"],
                     ec=P["gray"], hatch="//", lw=1, alpha=a(show))
             bx.text(-15, yy, lab, ha="right", va="center", fontsize=12, fontweight="bold",
                     color=c, alpha=a(show))
             bx.text(ex / 2, yy, f"{ex:.0f} µs", ha="center", va="center", fontsize=11,
                     color=P["text"], fontweight="bold", alpha=a(show))
-            bx.text(ex + f("overhead_us") + 10, yy, f"{ex + f('overhead_us'):.0f}" if yy == 0 else "",
+            bx.text(ex + calcs.B_PLUS_I + 10, yy, f"{ex + calcs.B_PLUS_I:.0f}" if yy == 0 else "",
                     va="center", fontsize=11, color=c, fontweight="bold", alpha=a(show))
-        bx.axvline(calcs.DEADLINE_US, color=P["red"], lw=2)
-        bx.text(calcs.DEADLINE_US + 8, 1.35, "deadline 400", ha="left", fontsize=11,
+        bx.axvline(calcs.DEADLINE, color=P["red"], lw=2)
+        bx.text(calcs.DEADLINE + 8, 1.35, f"deadline {val('deadline')}", ha="left", fontsize=11,
                 color=P["red_d"], fontweight="bold")
         bx.set_yticks([])
-        bx.set_xticks([0, 250, 400, 590, 1000])
-        bx.set_xticklabels(["0", "250", "400", "590", "1,000"])
+        bx.set_xticks([0, calcs.WCET, calcs.DEADLINE, num("resp_thr"), calcs.PERIOD])
+        bx.set_xticklabels(["0", val("wcet"), val("deadline"), val("resp_thr"), f"{calcs.PERIOD:,.0f}"])
         bx.set_xlabel("µs within one tick")
         for s in ("left", "top", "right"):
             bx.spines[s].set_visible(False)
@@ -455,12 +440,10 @@ def hangover():
 # Coupling-timescale ladder (ch 13.4)
 # ---------------------------------------------------------------------------
 def ladder():
-    rows = [("thermal recovery", f("recover_s"), P["red"], f"{V['recover_s']} s"),
-            ("permission tick", 1e-3, P["slate"], "1 ms"),
-            ("DRAM backlog", f("ladder_backlog_us") * 1e-6, P["amber"],
-             f"{V['ladder_backlog_us']} µs"),
-            ("bank conflict", f("conflict_ns") * 1e-9, P["amber"], f"{V['conflict_ns']} ns"),
-            ("droop rise", calcs.DT_S, P["violet"], "2 ns")]
+    colors = [P["red"], P["slate"], P["amber"], P["amber"], P["violet"]]
+    texts = [f"{val('recover_s')} s", f"{val('t_tick_ms')} ms", f"{val('ladder_backlog_us')} µs",
+             f"{val('conflict_ns')} ns", f"{val('rise_ns')} ns"]
+    rows = [(lab, x, c, t) for (lab, x), c, t in zip(calcs.LADDER, colors, texts)]
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     lo = 3e-10
     for i, (lab, v, c, txt) in enumerate(rows):
@@ -486,9 +469,8 @@ def ladder():
 # Regulation result (Bechtel and Yun 2019, Sec. VI), activity figure
 # ---------------------------------------------------------------------------
 def regulation():
-    rows = [("no regulation", calcs.BECHTEL_FIG13_UNREG, "danger", "345×"),
-            ("writes capped 100 MB/s", calcs.BECHTEL_W100, "data", "1.34×"),
-            ("writes capped 50 MB/s", calcs.BECHTEL_W50, "data", "1.2×")]
+    kinds = ["danger", "data", "data"]
+    rows = [(lab, x, kind, f"{val(key)}×") for (lab, x, key), kind in zip(calcs.REGULATION, kinds)]
     for k in (1, 2):
         sp.hbars(str(OUT / f"regulation_step{k}.svg"), rows, "", log=True, step=1 if k == 1 else None,
                  xlabel="Victim slowdown, Raspberry Pi 3, three write attackers", size=(5.8, 1.9))
@@ -498,10 +480,10 @@ def regulation():
 # Board-link toll (Napkin Math 13.3, ch figure), 2 steps
 # ---------------------------------------------------------------------------
 def boardlink():
-    segs = [("inference 40", calcs.INFER_MS, P["navy"], "white"),
-            ("", f("link_ms"), P["violet"], "white"),
-            ("18", calcs.VALID_MS, P["slate"], "white"),
-            ("", f("small_ms"), P["gray"], "white")]
+    segs = [(f"inference {val('chunk_infer_ms')}", calcs.INFER, P["navy"], "white"),
+            ("", calcs.LINK, P["violet"], "white"),
+            (val("valid_ms"), calcs.VALID, P["slate"], "white"),
+            ("", calcs.SMALL, P["gray"], "white")]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.1))
         x = 0
@@ -511,21 +493,21 @@ def boardlink():
                 ax.text(x + w / 2, 0, lab, ha="center", va="center", color=tc,
                         fontsize=12, fontweight="bold")
             x += w
-        ax.annotate(f"board link {V['link_ms']}", (calcs.INFER_MS + f("link_ms") / 2, 0.25),
-                    xytext=(calcs.INFER_MS - 6, 0.62), fontsize=12, color=P["violet"],
+        ax.annotate(f"board link {val('link_ms')}", (calcs.INFER + calcs.LINK / 2, 0.25),
+                    xytext=(calcs.INFER - 6, 0.62), fontsize=12, color=P["violet"],
                     fontweight="bold", ha="center",
                     arrowprops=dict(arrowstyle="-", color=P["violet"], lw=1.5))
-        ax.text(x, 0.38, f"{V['d2a_ms']} ms", ha="center", fontsize=12,
+        ax.text(x, 0.38, f"{val('d2a_ms')} ms", ha="center", fontsize=12,
                 fontweight="bold", color=P["text"])
-        ax.text(calcs.INFER_MS + f("link_ms") + calcs.VALID_MS / 2, -0.42, "validation",
+        ax.text(calcs.INFER + calcs.LINK + calcs.VALID / 2, -0.42, "validation",
                 ha="center", va="center", fontsize=11, color=P["slate"])
-        ax.add_patch(Rectangle((x, -0.25), f("ceil_ms") - x, 0.5, fill=False, ls=":",
+        ax.add_patch(Rectangle((x, -0.25), calcs.CEIL_MS - x, 0.5, fill=False, ls=":",
                                ec=P["green"], lw=2, alpha=a(k >= 2)))
-        ax.text((x + f("ceil_ms")) / 2, 0, f"reserve\n{V['reserve_ms']} ms",
+        ax.text((x + calcs.CEIL_MS) / 2, 0, f"reserve\n{val('reserve_ms')} ms",
                 ha="center", va="center", fontsize=11, color=P["green_d"],
                 fontweight="bold", alpha=a(k >= 2))
-        ax.axvline(f("ceil_ms"), color=P["red"], lw=2.2, alpha=a(k >= 2))
-        ax.text(f("ceil_ms"), 0.62, f"ceiling {V['ceil_ms']}", ha="center", fontsize=12,
+        ax.axvline(calcs.CEIL_MS, color=P["red"], lw=2.2, alpha=a(k >= 2))
+        ax.text(calcs.CEIL_MS, 0.62, f"ceiling {val('ceil_ms')}", ha="center", fontsize=12,
                 color=P["red_d"], fontweight="bold", alpha=a(k >= 2))
         ax.set_xlim(0, 112)
         ax.set_ylim(-0.7, 0.9)
@@ -577,22 +559,24 @@ def trace():
     labels = ["p50", "p99", "p99.9", "max"]
     cold = [calcs.COLD["p50"], calcs.COLD["p99"], None, calcs.COLD["max"]]
     hot = [calcs.HOT["p50"], calcs.HOT["p99"], calcs.HOT["p99.9"], calcs.HOT["max"]]
+    cold_txt = [val("cold_p50"), val("cold_p99"), None, val("cold_max")]
+    hot_txt = [val("hot_p50"), val("hot_p99"), val("hot_p999"), val("hot_max")]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(4.6, 3.1))
         xs = np.arange(len(labels))
         for i in range(len(labels)):
             if cold[i] is not None:
                 ax.bar(xs[i] - 0.2, cold[i], 0.38, color=P["blue_l"], ec=P["navy"])
-                ax.text(xs[i] - 0.2, cold[i] + 8, f"{cold[i]}", ha="center", fontsize=12,
+                ax.text(xs[i] - 0.2, cold[i] + 8, cold_txt[i], ha="center", fontsize=12,
                         color=P["navy"])
             ax.bar(xs[i] + 0.2, hot[i], 0.38, color=P["red_l"], ec=P["red"], alpha=a(k >= 2))
-            ax.text(xs[i] + 0.2, hot[i] + 8, f"{hot[i]}", ha="center", fontsize=12,
+            ax.text(xs[i] + 0.2, hot[i] + 8, hot_txt[i], ha="center", fontsize=12,
                     color=P["red_d"], fontweight="bold", alpha=a(k >= 2))
-        ax.axhline(calcs.WCET_US, color=P["slate"], lw=1.8, ls="--")
-        ax.text(1.42, calcs.WCET_US + 8, "WCET", ha="left", fontsize=12,
+        ax.axhline(calcs.WCET, color=P["slate"], lw=1.8, ls="--")
+        ax.text(1.42, calcs.WCET + 8, "WCET", ha="left", fontsize=12,
                 color=P["slate"], fontweight="bold")
-        ax.axhline(calcs.DEADLINE_US, color=P["red"], lw=1.8)
-        ax.text(-0.45, calcs.DEADLINE_US + 8, "deadline", fontsize=12,
+        ax.axhline(calcs.DEADLINE, color=P["red"], lw=1.8)
+        ax.text(-0.45, calcs.DEADLINE + 8, "deadline", fontsize=12,
                 color=P["red_d"], fontweight="bold")
         ax.text(0.02, 0.97, "cold, idle", transform=ax.transAxes, fontsize=12,
                 color=P["navy"], fontweight="bold", va="top")

@@ -74,6 +74,10 @@ class LiDARSensor(Sensor):
     time_sync_accuracy: Optional[Quantity] = None    # PTP / gPTP / PPS error bound
     internal_clock_drift: Optional[Quantity] = None  # free-running clock drift (ppm)
     laser_wavelength: Optional[Quantity] = None      # emitter wavelength (nm)
+    # Added 2026-10-20: bias on retroreflective targets, which datasheets state
+    # separately, and the vertical field of view.
+    range_accuracy_retroreflective: Optional[Quantity] = None  # mean range bias, retroreflectors
+    vertical_fov: Optional[Quantity] = None          # full vertical field of view
 
     @field_validator("laser_wavelength", mode="after")
     @classmethod
@@ -82,12 +86,20 @@ class LiDARSensor(Sensor):
             return v
         return require_dimensionality(v, ureg.meter, "laser_wavelength")
 
-    @field_validator("range_precision_min", "range_precision_max", "range_accuracy", mode="after")
+    @field_validator("range_precision_min", "range_precision_max", "range_accuracy",
+                     "range_accuracy_retroreflective", mode="after")
     @classmethod
     def _validate_range_specs(cls, v, info):
         if v is None:
             return v
         return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @field_validator("vertical_fov", mode="after")
+    @classmethod
+    def _validate_fov(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.radian, "vertical_fov")
 
     @field_validator("time_sync_accuracy", mode="after")
     @classmethod
@@ -183,6 +195,9 @@ class SafetyLaserScanner(Sensor):
     iec61496_type: str                 # e.g. "Type 3"
     performance_level: str             # ISO 13849-1, e.g. "PL d, Category 3"
     configuration: str                 # mode and object size the stored values describe
+    # Added 2026-10-20: the slower standard-mode response at the same scan count,
+    # for scanners whose datasheet states two modes (None where it states one).
+    response_time_standard_mode: Optional[Quantity] = None
 
     @field_validator("protective_field_range", mode="after")
     @classmethod
@@ -198,3 +213,41 @@ class SafetyLaserScanner(Sensor):
     @classmethod
     def _validate_scan_angle(cls, v):
         return require_dimensionality(v, ureg.degree, "scan_angle")
+
+    @field_validator("response_time_standard_mode", mode="after")
+    @classmethod
+    def _validate_response_standard(cls, v):
+        return v if v is None else require_dimensionality(v, ureg.second, "response_time_standard_mode")
+
+
+class SafetyLightCurtain(Sensor):
+    """Certified safety light curtain (an AOPD type-tested under IEC 61496-2), added 2026-10-20.
+
+    Like a safety scanner, its output reports only that a beam is interrupted.
+    The response time is its contribution to the certified stopping chain, and
+    ``pfh_d`` is the stated mean probability of a dangerous failure per hour.
+    """
+
+    resolution: Quantity                 # smallest detected object diameter
+    protective_field_height: Quantity
+    response_time: Quantity              # uncoded response
+    response_time_coded: Optional[Quantity] = None
+    iec61496_type: str                   # e.g. "Type 4"
+    performance_level: str               # ISO 13849-1, e.g. "PL e, Category 4"
+    safety_integrity_level: str          # IEC 61508, e.g. "SIL 3"
+    pfh_d: Quantity                      # dangerous failures per hour, single device
+
+    @field_validator("resolution", "protective_field_height", mode="after")
+    @classmethod
+    def _validate_lengths(cls, v):
+        return require_dimensionality(v, ureg.meter, "length")
+
+    @field_validator("response_time", mode="after")
+    @classmethod
+    def _validate_curtain_response(cls, v):
+        return require_dimensionality(v, ureg.second, "response_time")
+
+    @field_validator("response_time_coded", mode="after")
+    @classmethod
+    def _validate_curtain_coded(cls, v):
+        return v if v is None else require_dimensionality(v, ureg.second, "response_time_coded")

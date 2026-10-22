@@ -1,300 +1,352 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 2 (System Paradigms), computed from sourced inputs.
+"""Every number on the Lecture 2 (System Paradigms) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment;
-each printed line is a value the slide or its note shows, under the label
-used there. make_figs.py imports the inputs and loaders below so figures and
-slides share one computation.
+MLSysIM holds the inputs (registry, Literature) and the calculations
+(Scenarios.*); the chapter reads the same scenarios. This file only selects
+values, converts units, and formats them; it types no numbers. Each value is
+recorded with v() under the key the deck prints as \\val{key}; running this
+file writes images/numbers.tex. make_figs.py imports this module, so figures
+and slides share one computation.
 
 Run from this folder: python3 calcs.py
 """
 
-import csv
-import json
 import math
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-DATA = HERE / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Hardware, Models, Systems = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems
+Platforms, Literature, Scenarios = mlsysim.Platforms, mlsysim.Literature, mlsysim.Scenarios
+ReferenceStats = mlsysim.ReferenceStats
+LIT = Literature.DeviceMeasurements
+POD = Systems.Pods.TPUv4_4096
+TPU4, SPARK, ESP = Hardware.Cloud.TPUv4, Hardware.Workstation.DGX_Spark, Hardware.Tiny.ESP32_S3
+A100, TPU1 = Hardware.Cloud.A100, Hardware.Cloud.TPUv1
+PHONES = (Hardware.Mobile.Pixel8, Hardware.Mobile.iPhone15Pro, Hardware.Mobile.Snapdragon8Gen3)
+
+ARM = Scenarios.RoboticArmRegionalCloud
+COAST = Scenarios.CrossCountryFiberPath
+ROUTES = Scenarios.AwsUsEast1Routes.routes          # label -> propagation scenario
+CAMS = Scenarios.FactoryCameras1080p
+DRONE = Scenarios.Drone4KObstacleOffload
+RESNET, RESNET_NPU = Scenarios.ResNet50A100Batch1, Scenarios.ResNet50PhoneNpuBatch1
+SELF_CHECK = Scenarios.A100AtTenFlopPerByte
+DECODE = Scenarios.Llama3_70B_DecodeH100.variant(hardware=A100)
+TPU_ROOF = Scenarios.TpuV1ProductionRoofline
+BATTERY = Scenarios.AlwaysOnObjectDetectorPhone
+THERMAL = Scenarios.UnoptimizedVisionModelPhone
+ENERGY = Scenarios.EnergyPerInferenceTiers
+UPLOAD = Scenarios.RadioUploadVsMobileNetV2
+DOORBELL, CHIME = Scenarios.SmartDoorbell, Scenarios.SmartDoorbellResponsiveChime
+FRAME = Scenarios.SmartDoorbellFrame
+BRAKING = Scenarios.EmergencyBraking100kmh
+VOICE = Scenarios.VoiceAssistantBillionDevices
+CAMERA = Scenarios.PhoneCameraPipeline
+TRENDS = Scenarios.MicroprocessorTrendsAroundDennard
+WALL_FITS = {"flops": Scenarios.MemoryWallFlopsTrend, "dram": Scenarios.MemoryWallDramTrend,
+             "interconnect": Scenarios.MemoryWallInterconnectTrend}
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def head(title):
-    print(f"\n[{title}]")
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-# ---------------------------------------------------------------------------
-# Shared inputs
-# ---------------------------------------------------------------------------
-FIBER_KM_S = 200_000          # light in fiber (System Paradigms, eq. 1, S2.2)
-A100_TFLOPS = 312.0           # A100 FP16 dense (Napkin Math 2.1)
-A100_TBS = 2.04               # A100 HBM bandwidth, TB/s (Napkin Math 2.1)
-
-# AWS round trips, median (P50) over one week, from us-east-1 (N. Virginia).
-# Source: cloudping.co /api/latencies?percentile=p_50&timeframe=1W, retrieved
-# 2026-10-18, saved to data/cloudping_p50_1W_2026-10-18.json.
-# Coordinates are of the metro area AWS names for the region (Wikipedia city
-# coordinates); AWS does not publish building locations, so distances are
-# approximate.
-CITY = {
-    "us-east-1": ("N. Virginia (Ashburn)", 39.04, -77.49),
-    "us-east-2": ("Ohio (Columbus)", 39.96, -83.00),
-    "us-west-2": ("Oregon (Boardman)", 45.84, -119.70),
-    "eu-west-1": ("Ireland (Dublin)", 53.35, -6.26),
-    "ap-northeast-1": ("Tokyo", 35.68, 139.69),
-}
-ROUTES = [("us-east-2", "Ohio"), ("us-west-2", "Oregon"),
-          ("eu-west-1", "Ireland"), ("ap-northeast-1", "Tokyo")]
-
-# Jouppi et al., "In-Datacenter Performance Analysis of a Tensor Processing
-# Unit," ISCA 2017 (arXiv 1704.04760). Intensity: Table 1, "TPU Ops / Weight
-# Byte". Measured rate: Table 3, row 9, "TeraOps/sec (92 Peak)". Share of
-# deployed TPUs, July 2016: Table 1 (MLPs 61%, LSTMs 29%, CNNs 5%).
-TPU_PEAK = 92.0               # TOPS, Table 2 and Table 3
-TPU_RIDGE = 1350              # ops per weight byte, Fig. 5 caption
-TPU_APPS = [  # name, ops per weight byte, measured TOPS
-    ("MLP0", 200, 12.3), ("MLP1", 168, 9.7),
-    ("LSTM0", 64, 3.7), ("LSTM1", 96, 2.8),
-    ("CNN0", 2888, 86.0), ("CNN1", 1750, 14.1),
-]
-TPU_SHARE = {"MLP": 61, "LSTM": 29, "CNN": 5}
-
-# MLPerf Tiny v1.2, closed division, keyword spotting, energy track.
-# Source: github.com/mlcommons/tiny_results_v1.2, summary.csv (copied to
-# data/mlperf_tiny_v1.2_summary.csv).
-TINY_CSV = DATA / "mlperf_tiny_v1.2_summary.csv"
-
-# 3DMark Wild Life Stress Test on an iPhone 15 Pro Max, 20 loops: the app's
-# own result screen, published in GSMArena's review (2023-09-22 run).
-WL_BEST, WL_LOWEST = 10012, 7045
+def mobile_tdp_w():
+    """The mobile tier's sustained-power range (low, high) in watts."""
+    lo, hi = Platforms.Mobile.tdp_range_w.split("-")
+    return float(lo), float(hi)
 
 
-# Gholami et al., "AI and Memory Wall," IEEE Micro 2024 (arXiv 2403.14123),
-# Fig. 1. The figure ships as a vector PDF in the arXiv source
-# (figs/hw_scaling.pdf); data/gholami2024_hw_scaling_vectors.svg is that file
-# converted with pdftocairo -svg. Each marker is a filled circle whose centre
-# is read back to (year, normalized scaling) through the figure's own axis
-# ticks: major x ticks one year apart starting at 1996 (x = 186.50, 63.92 per
-# year), y ticks at 0.01 (88.92) and 1 (286.04), 197.12 per two decades.
-GHOLAMI_SVG = DATA / "gholami2024_hw_scaling_vectors.svg"
-GHOLAMI_COLORS = {"rgb(0%, 0%, 0%)": "flops", "rgb(0%, 50%, 0%)": "dram",
-                  "rgb(0%, 0%, 100%)": "interconnect"}
-
-
-def gholami_points():
-    """{series: [(year, normalized value)]} digitized from the vector figure."""
-    import re
-    t = GHOLAMI_SVG.read_text()
-    out = {k: [] for k in GHOLAMI_COLORS.values()}
-    for m in re.finditer(r"<path ([^>]*)/>", t):
-        a = m.group(1)
-        f = re.search(r'fill="(rgb\([^)]*\))"', a)
-        tr = re.search(r'transform="matrix\(([^)]*)\)"', a)
-        d = re.search(r'd="([^"]*)"', a).group(1)
-        # markers: filled closed curves of radius 11 drawn at a translation
-        if not (f and tr and f.group(1) in GHOLAMI_COLORS and d.startswith("M") and "C" in d
-                and "stroke-width=\"1\"" in a):
-            continue
-        v = [float(x) for x in tr.group(1).split(",")]
-        x = (v[4] - 0.150904) / 0.999492          # undo the page transform
-        y = (1009.97401 - v[5]) / 0.999492
-        year = 1996 + (x - 186.498439) / 63.9231
-        val = 10 ** (-2 + (y - 88.917577) / 197.1197 * 2)
-        out[GHOLAMI_COLORS[f.group(1)]].append((year, val))
-    return out
-
-
-def growth_per_2yr(pts):
-    """Least-squares fit of log10(value) on year; growth factor per two years."""
-    n = len(pts)
-    xs = [p[0] for p in pts]
-    ys = [math.log10(p[1]) for p in pts]
-    mx, my = sum(xs) / n, sum(ys) / n
-    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
-    return 10 ** (2 * b), b, my - b * mx
-
-
-def haversine_km(a, b):
-    """Great-circle distance between two (lat, lon) points, mean Earth radius."""
-    r = 6371.0
-    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
-    h = (math.sin((la2 - la1) / 2) ** 2
-         + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2)
-    return 2 * r * math.asin(math.sqrt(h))
-
-
-def rtt_floor_ms(km):
-    return 2 * km / FIBER_KM_S * 1000
-
-
-def aws_routes():
-    """(label, distance km, fiber floor ms, measured median ms) per route."""
-    d = json.load(open(DATA / "cloudping_p50_1W_2026-10-18.json"))["data"]
-    src = CITY["us-east-1"][1:]
-    out = []
-    for key, label in ROUTES:
-        km = haversine_km(src, CITY[key][1:])
-        out.append((label, km, rtt_floor_ms(km), d["us-east-1"][key]))
-    return out
+def mobile_ram_gb():
+    lo, hi = Platforms.Mobile.ram_range.split("-")
+    return float(lo), float(hi)
 
 
 def tiny_kws():
-    """KWS energy rows from the MLPerf Tiny v1.2 summary (closed, with power)."""
-    rows = []
-    for r in csv.DictReader(open(TINY_CSV)):
-        if r["Model"] == "kws" and r["HasPower"] == "True" and r["Division"] == "closed":
-            rows.append((r["Organization"], r["BoardName"], r["SystemDesc"], float(r["Power"])))
-    return rows
+    """MLPerf Tiny v1.2 keyword-spotting energy rows."""
+    return Literature.Series.MLPerfTinyV12KwsEnergy.entries
 
 
-def main():
-    head("Title / power ladder (slide 'Predict: how much power')")
-    # Inputs: cloud pod 3 MW, TinyML 1 mW (S2.1); 128 TB pod HBM, 512 KB SRAM (table 4)
-    show("power span, orders of magnitude (log10 3e6/1e-3)", f"{math.log10(3e6 / 1e-3):.2f}")
-    show("memory drop 128 TB / 512 KB (decimal)", f"{128e12 / 512e3:,.0f}")
-    show("memory drop 128 TiB / 512 KiB (binary)", f"{128 * 2**40 / (512 * 2**10):,.0f}")
+def wall_points():
+    """{series: [(year, normalized)]} from the memory-wall Literature series."""
+    return {k: s.points for k, s in WALL_FITS.items()}
 
-    head("Silicon contract")
-    # TPU v4 chip: 275 TFLOP/s BF16, 32 GiB HBM2, 1,200 GB/s (Jouppi et al., ISCA 2023,
-    # cited in the chapter); pod of 4,096 chips (chapter table 4)
-    show("TPU v4 pod peak, EFLOP/s (4,096 x 275 TFLOP/s)", f"{4096 * 275 / 1e6:.3f}")
-    show("TPU v4 pod HBM, TiB (4,096 x 32 GiB)", f"{4096 * 32 / 1024:.0f}")
 
-    head("Light in fiber / round trips")
-    show("robot arm floor, 1,500 km (ms)", f"{rtt_floor_ms(1500):.1f}")
-    show("California-Virginia floor, 3,600 km (ms)", f"{rtt_floor_ms(3600):.1f}")
-    show("arm overshoot past 10 ms budget (ms)", f"{rtt_floor_ms(1500) - 10:.1f}")
-    for label, km, floor, meas in aws_routes():
-        show(f"N. Virginia -> {label}: distance km / floor ms / measured median ms / ratio",
-             f"{km:,.0f} / {floor:.1f} / {meas:.1f} / {meas / floor:.1f}x")
+print("== Tiers: power ladder and memory")
+v("pod_mw", m(POD.power, "MW"), "{:.0f}", "TPU v4 pod power, MW")
+v("pod_chips", POD.chips, "{:,.0f}", "chips in the pod")
+v("pod_mem_tb", m(POD.memory, "TiB"), "{:.0f}", "pod HBM, labeled TB (128 TiB)")
+v("edge_w", m(SPARK.tdp, "W"), "{:.0f}", "DGX Spark power, W")
+v("edge_mem_gb", m(SPARK.memory.capacity, "GiB"), "{:.0f}", "DGX Spark memory, labeled GB")
+v("mobile_w", mobile_tdp_w()[1], "{:.0f}", "phone power, top of the mobile range, W")
+v("mobile_w_lo", mobile_tdp_w()[0], "{:.0f}", "bottom of the mobile range, W")
+v("mobile_ram_lo", mobile_ram_gb()[0], "{:.0f}", "phone RAM, low, GB")
+v("mobile_ram_hi", mobile_ram_gb()[1], "{:.0f}", "phone RAM, high, GB")
+v("tiny_mw", m(Platforms.Tiny.power_threshold, "mW"), "{:.0f}", "TinyML average-power target, mW")
+v("tiny_sram_kb", m(Platforms.Tiny.ram, "KiB"), "{:.0f}", "ESP32-S3 SRAM, labeled KB")
+v("tiny_price_word", m(ReferenceStats.EdgeDeviceSpectrum.MicrocontrollerBoardCost, "USD"), "words",
+  "microcontroller board price, dollars, in prose")
+v("tiny_price", m(ReferenceStats.EdgeDeviceSpectrum.MicrocontrollerBoardCost, "USD"), "{:.0f}",
+  "microcontroller board price, dollars")
+span_orders = math.log10(ratio(POD.power, Platforms.Tiny.power_threshold))
+v("power_span_word", math.floor(span_orders), "words", "whole orders of magnitude, megawatts to milliwatts")
+v("mem_drop_m", ratio(POD.memory, Platforms.Tiny.ram) / 10 ** 6, "{:.0f}",
+  "pod HBM over TinyML SRAM, millions (128 TiB / 512 KiB)")
 
-    head("Factory cameras (Napkin Math 2.4)")
-    cam = 1920 * 1080 * 3 * 30           # bytes/s per camera: 1080p, 3 B/pixel, 30 FPS
-    total = 100 * cam
-    link = 10e9 / 8                      # 10 Gb/s in bytes/s
-    meta = 1e3 * 20                      # 1 KB per detection, 20 per second
-    show("per camera (MB/s)", f"{cam / 1e6:.1f}")
-    show("100 cameras (GB/s)", f"{total / 1e9:.2f}")
-    show("10 Gb/s link (GB/s)", f"{link / 1e9:.2f}")
-    show("raw / link", f"{total / link:.1f}x")
-    show("metadata (KB/s)", f"{meta / 1e3:.0f}")
-    show("raw / metadata", f"{total / meta:,.0f}x")
+print("== Silicon contract")
+v("tpu4_tflops", m(TPU4.compute.peak_flops, "TFLOP/s"), "{:.0f}", "TPU v4 BF16, TFLOP/s")
+v("tpu4_bw_gbs", m(TPU4.memory.bandwidth, "GB/s"), "{:,.0f}", "TPU v4 HBM bandwidth, GB/s")
+v("tpu4_hbm_gib", m(TPU4.memory.capacity, "GiB"), "{:.0f}", "TPU v4 HBM, GiB")
+v("pod_eflops", m(Scenarios.TPUv4Pod4096.peak_flops, "EFLOP/s"), "{:.3f}", "pod BF16 peak, EFLOP/s")
+v("pod_mem_tib", m(Scenarios.TPUv4Pod4096.chip_memory_total, "TiB"), "{:.0f}", "pod HBM, TiB")
+v("edge_pflops", m(SPARK.compute.precision_flops["fp4_sparse"], "PFLOP/s"), "{:.0f}",
+  "DGX Spark sparse FP4, PFLOP/s")
+v("edge_bw_gbs", m(Platforms.Edge.bandwidth_threshold, "GB/s"), "{:.0f}", "edge tier bandwidth floor, GB/s")
+v("phone_tops_lo", min(m(p.compute.peak_flops, "TOPS") for p in PHONES), "{:.0f}", "phone NPU, low, TOPS")
+v("phone_tops_hi", max(m(p.compute.peak_flops, "TOPS") for p in PHONES), "{:.0f}", "phone NPU, high, TOPS")
+v("phone_bw_lo", min(m(p.memory.bandwidth, "GB/s") for p in PHONES), "{:.1f}", "phone bandwidth, low, GB/s")
+v("phone_bw_lo_int", min(m(p.memory.bandwidth, "GB/s") for p in PHONES), "{:.0f}",
+  "the same, whole GB/s (notes)")
+v("phone_bw_hi", max(m(p.memory.bandwidth, "GB/s") for p in PHONES), "{:.0f}", "phone bandwidth, high, GB/s")
+v("tiny_tops", m(Platforms.Tiny.compute_threshold, "TOPS"), "{:.0f}", "TinyML compute ceiling, TOPS")
 
-    head("Drone (Napkin Math 2.6)")
-    frame = 3840 * 2160 * 3              # 4K, 3 B/pixel
-    send_ms = frame * 8 / 100e6 * 1000   # 100 Mb/s uplink
-    deadline = 1000 / 60
-    show("4K frame (MB)", f"{frame / 1e6:.1f}")
-    show("send (ms)", f"{send_ms:.1f}")
-    show("remote path lower bound (ms), +110 ms", f"{send_ms + 110:.1f}")
-    show("deadline at 60 FPS (ms)", f"{deadline:.1f}")
-    show("lower bound / deadline", f"{(send_ms + 110) / deadline:.0f}x")
-    show("send after 100-fold compression (ms)", f"{send_ms / 100:.1f}")
+print("== Distance (propagation scenarios)")
+v("arm_km", m(ARM.distance, "km"), "{:,.0f}", "arm to cloud region, km")
+v("arm_budget_ms", m(ARM.budget, "ms"), "{:.0f}", "arm safety budget, ms")
+v("arm_rtt_ms", m(ARM.round_trip, "ms"), "{:.0f}", "arm fiber floor, ms")
+v("arm_overrun_ms", m(ARM.overrun, "ms"), "{:.0f}", "floor past the budget, ms")
+fiber = mlsysim.physics.SPEED_OF_LIGHT_FIBER_KM_S
+v("fiber_km_s", m(fiber, "km/s"), "{:,.0f}", "light in fiber, km/s")
+v("fiber_km_ms", m(fiber, "km/ms"), "{:.0f}", "light in fiber, km per ms")
+v("coast_km", m(COAST.distance, "km"), "{:,.0f}", "California to Virginia, km")
+v("coast_rtt_ms", m(COAST.round_trip, "ms"), "{:.0f}", "coast-to-coast floor, ms")
+for label, r in ROUTES.items():
+    k = label.lower()
+    v(f"rtt_{k}_km", m(r.distance, "km"), "{:,.0f}", f"N. Virginia to {label}, great circle, km")
+    v(f"rtt_{k}_floor", m(r.round_trip, "ms"), "{:.1f}", f"{label} fiber floor, ms")
+    v(f"rtt_{k}_meas", m(r.measured_round_trip, "ms"), "{:.1f}", f"{label} measured median, ms")
+    v(f"rtt_{k}_ratio", r.measured_over_floor, "{:.1f}", f"{label} measured / floor")
+v("rtt_ohio_km_under", math.ceil(m(ROUTES["Ohio"].distance, "km") / 100) * 100, "{:,.0f}",
+  "Ohio distance, next hundred km")
 
-    head("Memory wall (Gholami et al., IEEE Micro 2024, Fig. 1)")
-    # Printed on the figure: HW FLOPS 60,000x, DRAM BW 100x, interconnect 30x
-    # over 20 years (3.0x, 1.6x, 1.4x per two years). Refit here from the
-    # digitized markers to confirm the digitization.
-    show("FLOPS growth / DRAM bandwidth growth, paper's 20-year factors", f"{60000 / 100:.0f}x")
-    pts = gholami_points()
-    for k in ("flops", "dram", "interconnect"):
-        g = growth_per_2yr(pts[k])[0]
-        show(f"{k}: markers / refit growth per 2 years / over 20 years",
-             f"{len(pts[k])} / {g:.2f}x / {g ** 10:,.0f}x")
+print("== Factory cameras (sensor uplink scenario)")
+v("cam_count", CAMS.streams, "{:.0f}", "cameras")
+v("cam_w", CAMS.frame_width, "{:.0f}", "frame width, pixels")
+v("cam_h", CAMS.frame_height, "{:.0f}", "frame height, pixels")
+v("cam_bpp", m(CAMS.bytes_per_pixel, "byte"), "{:.0f}", "bytes per pixel")
+v("cam_fps", m(CAMS.frame_rate, "Hz"), "{:.0f}", "frames per second")
+v("cam_mbs", m(CAMS.stream_rate, "MB/s"), "{:.1f}", "one camera, MB/s")
+v("cam_total_gbs", m(CAMS.total_rate, "GB/s"), "{:.1f}", "100 cameras, GB/s")
+v("link_gbit", m(CAMS.link_bandwidth, "Gbit/s"), "{:.0f}", "factory link, Gb/s")
+v("link_gbs", m(CAMS.link_bandwidth, "GB/s"), "{:.2f}", "factory link, GB/s")
+v("cam_short", CAMS.link_shortfall, "{:.0f}", "raw / link")
+v("cam_short_1", CAMS.link_shortfall, "{:.1f}", "raw / link, one decimal (figure)")
+v("event_kb", m(CAMS.event_size, "KB"), "{:.0f}", "defect record, KB")
+v("event_rate", m(CAMS.event_rate, "1/s"), "{:.0f}", "defect records per second")
+v("event_kbs", m(CAMS.event_bandwidth, "KB/s"), "{:.0f}", "defect records, KB/s")
+v("event_reduction", round(CAMS.event_reduction, -3), "{:,.0f}", "raw / records, to the thousand")
 
-    head("A100 roofline")
-    ridge = A100_TFLOPS / A100_TBS
-    show("ridge (FLOP/byte)", f"{ridge:.1f}")
-    show("10 FLOP/byte: attainable TFLOP/s", f"{10 * A100_TBS:.1f}")
-    show("10 FLOP/byte: share of peak", f"{10 * A100_TBS / A100_TFLOPS * 100:.1f}%")
+print("== Drone (offload-deadline scenario)")
+v("drone_frame_mb", m(DRONE.payload, "MB"), "{:.1f}", "one 4K frame, MB")
+v("drone_uplink_mbit", m(DRONE.uplink_bandwidth, "Mbit/s"), "{:.0f}", "uplink, Mb/s")
+v("drone_remote_ms", m(DRONE.remote_response, "ms"), "{:.0f}", "remote round trip + compute, ms")
+v("drone_deadline_ms", m(DRONE.deadline, "ms"), "{:.1f}", "frame deadline, ms")
+v("drone_fps", m(DRONE.frame_rate, "Hz"), "{:.0f}", "frame rate, FPS")
+v("drone_send_ms", m(DRONE.transmit_time, "ms"), "{:,.1f}", "send one frame, ms")
+v("drone_send_s_word", m(DRONE.transmit_time, "s"), "words", "the same, whole seconds, in prose")
+v("drone_bound_ms", m(DRONE.remote_lower_bound, "ms"), "{:,.1f}", "remote-path lower bound, ms")
+v("drone_ratio", DRONE.deadline_ratio, "{:.0f}", "lower bound / deadline")
+v("drone_compressed_ms", m(Scenarios.Drone4KObstacleOffloadCompressed.transmit_time, "ms"), "{:.0f}",
+  "send after compression, ms")
 
-    head("ResNet-50, batch 1 (Napkin Math 2.1)")
-    # 8.2 GFLOP, 56.3 MB moved FP16 on A100; phone NPU 35 TOPS, 51.2 GB/s, 28.2 MB INT8
-    show("A100 compute (ms)", f"{8.2e9 / 312e12 * 1e3:.4f}")
-    show("A100 memory (ms)", f"{56.3e6 / 2.04e12 * 1e3:.4f}")
-    show("intensity (FLOP/byte)", f"{8.2e9 / 56.3e6:.1f}")
-    show("phone NPU compute (ms)", f"{8.2e9 / 35e12 * 1e3:.3f}")
-    show("phone NPU memory (ms)", f"{28.2e6 / 51.2e9 * 1e3:.3f}")
+print("== Memory wall (Gholami et al. 2024 via Literature; illustrative chapter rates)")
+v("wall_flops_20y", LIT.MemoryWallFlopsGrowth20Years, "{:,.0f}", "peak FLOP/s over 20 years")
+v("wall_dram_20y", LIT.MemoryWallDramGrowth20Years, "{:,.0f}", "DRAM bandwidth over 20 years")
+v("wall_ic_20y", LIT.MemoryWallInterconnectGrowth20Years, "{:,.0f}", "interconnect over 20 years")
+v("wall_flops_2y", LIT.MemoryWallFlopsGrowthPer2Years, "{:.1f}", "peak FLOP/s every 2 years")
+v("wall_dram_2y", LIT.MemoryWallDramGrowthPer2Years, "{:.1f}", "DRAM bandwidth every 2 years")
+v("wall_ic_2y", LIT.MemoryWallInterconnectGrowthPer2Years, "{:.1f}", "interconnect every 2 years")
+for k, s in WALL_FITS.items():
+    v(f"wall_fit_{k}", s.growth, "{:.1f}", f"{k}: refit growth every 2 years (figure)")
+illus = Scenarios.IllustrativeMemoryWall
+v("illus_compute_x", illus.compute_annual_factor, "{:.1f}", "chapter's compute growth per year")
+v("illus_bw_x", illus.bandwidth_annual_factor, "{:.1f}", "chapter's bandwidth growth per year")
 
-    head("Decode, batch 1")
-    show("attainable at 1 FLOP/byte (TFLOP/s)", f"{1 * A100_TBS:.2f}")
-    show("share of peak", f"{A100_TBS / A100_TFLOPS * 100:.2f}%")
+print("== A100 roofline (ResNet-50 scenario; self-check scenario; decode scenario on the A100)")
+p = RESNET.result
+v("a100_tflops", m(p.peak_flops_actual, "TFLOP/s"), "{:.0f}", "A100 FP16, TFLOP/s")
+v("a100_tbs", m(p.peak_bw_actual, "TB/s"), "{:.2f}", "A100 HBM, TB/s")
+v("a100_ridge", m(RESNET.ridge, "flop/byte"), "{:.0f}", "ridge, FLOP/byte")
+v("check_intensity", m(SELF_CHECK.intensity, "flop/byte"), "{:.0f}", "self-check intensity, FLOP/byte")
+v("check_tflops", m(SELF_CHECK.attainable, "TFLOP/s"), "{:.1f}", "self-check attainable, TFLOP/s")
+v("check_pct", 100 * SELF_CHECK.peak_fraction, "{:.1f}", "self-check share of peak, percent")
+v("resnet_gflop", m(RESNET.workload.inference_flops, "GFLOP"), "{:.1f}", "ResNet-50 per image, GFLOP")
+v("resnet_mb", m(RESNET.traffic, "MB"), "{:.1f}", "bytes moved at FP16, MB")
+v("resnet_compute_ms", m(p.latency_compute, "ms"), "{:.3f}", "A100 compute time, ms")
+v("resnet_memory_ms", m(p.latency_memory, "ms"), "{:.3f}", "A100 memory time, ms")
+v("resnet_intensity", m(RESNET.intensity, "flop/byte"), "{:.0f}", "intensity, FLOP/byte")
+q = RESNET_NPU.result
+v("npu_tops", m(q.peak_flops_actual, "TOPS"), "{:.0f}", "phone NPU INT8, TOPS")
+v("npu_gbs", m(q.peak_bw_actual, "GB/s"), "{:.1f}", "phone bandwidth, GB/s")
+v("npu_mb", m(RESNET_NPU.traffic, "MB"), "{:.1f}", "bytes moved at INT8, MB")
+v("npu_compute_ms", m(RESNET_NPU.workload.inference_flops / q.peak_flops_actual, "ms"), "{:.2f}",
+  "NPU compute time, ms")
+v("npu_memory_ms", m(q.latency_memory, "ms"), "{:.2f}", "NPU memory time, ms")
+d = DECODE.result
+v("decode_intensity", m(d.intensity, "flop/byte"), "{:.0f}", "decode intensity, FLOP/byte")
+v("decode_tflops", m(d.attainable_flops, "TFLOP/s"), "{:.0f}", "decode attainable, TFLOP/s")
+v("decode_pct_under", math.ceil(100 * d.peak_fraction), "{:.0f}", "decode share of peak, under this percent")
 
-    head("TPU roofline with production apps (Jouppi et al. 2017)")
-    # Fig. 5 draws the slope so it meets the 92 TOPS ceiling at 1,350; the slope
-    # is therefore 92 / 1350 TB/s. (Table 1 counts one op per multiply-add in the
-    # intensity while the 92 TOPS counts two, so the slope is twice the 34 GB/s
-    # DRAM figure in Table 2.)
-    slope = TPU_PEAK / TPU_RIDGE
-    show("slope implied by Fig. 5 (GB/s)", f"{slope * 1000:.1f}")
-    show("2 x 34 GB/s (Table 2)", f"{2 * 34} GB/s; ridge {TPU_PEAK / 0.068:.0f}")
-    for name, x, y in TPU_APPS:
-        roof = min(TPU_PEAK, x * slope)
-        side = "memory slope" if x < TPU_RIDGE else "compute ceiling"
-        show(f"{name}: roof / measured / % of roof / side", f"{roof:.1f} / {y} / {y / roof * 100:.0f}% / {side}")
-    show("share of deployed TPUs on memory-bound apps (MLP + LSTM)", f"{TPU_SHARE['MLP'] + TPU_SHARE['LSTM']}%")
+print("== TPU v1 roofline (Jouppi et al. 2017 via Literature)")
+apps = TPU_ROOF.apps
+mix = {r["family"]: r["deployed_share_pct"] for r in Literature.Series.TpuV1DeploymentMix.entries}
+bound_share = sum(mix[f] for f in {a["family"] for a in apps if a["bound"] == "memory"})
+v("tpu1_tops", m(TPU_ROOF.peak, "TOPS"), "{:.0f}", "TPU v1 INT8 peak, TOPS")
+v("tpu1_ridge", TPU_ROOF.ridge, "{:,.0f}", "ridge, ops per weight byte")
+v("tpu1_apps_word", len(apps), "words", "production applications")
+v("tpu1_slope_share", bound_share, "{:.0f}", "deployed share of slope-bound families, percent")
+v("tpu1_cnn_share", sum(mix[f] for f in {a["family"] for a in apps if a["bound"] == "compute"}), "{:.0f}",
+  "deployed share of ceiling-bound families, percent")
+v("tpu1_all_share", sum(mix.values()), "{:.0f}", "the six applications' share of the workload, percent")
+v("tpu1_cnn0_tops", next(a["measured_tops"] for a in apps if a["app"] == "CNN0"), "{:.0f}",
+  "CNN0 measured, TOPS")
 
-    head("Power wall")
-    show("2x clock, P ~ f^3", f"{2 ** 3}x power")
+print("== Lighthouse archetypes")
+v("gpt2_b", m(Models.Language.GPT2.parameters, "Gparam"), "{:.1f}", "GPT-2 parameters, billions")
+v("llama70_b", m(Models.Language.Llama2_70B.parameters, "Gparam"), "{:.0f}", "Llama 2 70B, billions")
+v("dlrm_gb", m(Models.Recommendation.DLRM.size_in_bytes(), "GB"), "{:.0f}", "DLRM embeddings, GB")
+v("mobilenet_x", ratio(Models.Vision.ResNet50.inference_flops, Models.Vision.MobileNetV2.inference_flops),
+  "{:.1f}", "ResNet-50 / MobileNetV2 FLOPs")
+v("kws_kb", m(Models.Tiny.DS_CNN.size_in_bytes(mlsysim.BYTES_INT8), "KB"), "{:.0f}", "KWS at INT8, KB")
 
-    head("Throttling (3DMark Wild Life Stress Test, iPhone 15 Pro Max)")
-    show("stability = lowest / best", f"{WL_LOWEST / WL_BEST * 100:.1f}%")
-    show("loss from best to lowest loop", f"{(1 - WL_LOWEST / WL_BEST) * 100:.1f}%")
-    show("napkin math: 12 W cut 4 times (W)", f"{12 / 4:.0f}")
+print("== Power wall (clock-scaling scenario; trends scenario)")
+clock = Scenarios.DoubledClockPower
+v("clock_x", clock.frequency_ratio, "{:.0f}", "clock multiplied by")
+v("clock_power_x", clock.power_ratio, "{:.0f}", "dynamic power multiplied by")
+v("clock_power_word", clock.power_ratio, "words", "the same, in prose")
+v("trend_ghz", m(TRENDS.peak("frequency", "after_2005") * mlsysim.core.units.MHz, "GHz"), "{:.1f}",
+  "fastest clock after 2005, GHz")
+v("trend_transistors_x", round(TRENDS.growth("transistors", "mid_2000s", "early_2020s"), -1), "{:.0f}",
+  "transistor growth, mid-2000s to early 2020s, to the ten")
 
-    head("Battery tax (Napkin Math 2.8)")
-    show("runtime 15 Wh / 2 W (h)", f"{15 / 2:.1f}")
-    show("a day at 2 W (Wh)", f"{2 * 24}")
-    show("share of battery", f"{2 * 24 / 15 * 100:.0f}%")
+print("== Throttling (3DMark via Literature; thermal scenario)")
+best, low = LIT.WildLifeStressBestLoopIphone15ProMax, LIT.WildLifeStressLowestLoopIphone15ProMax
+v("wl_loops", LIT.WildLifeStressLoopsRun, "{:.0f}", "loops in the run")
+v("wl_loops_word", LIT.WildLifeStressLoopsRun, "words", "the same, in prose")
+v("wl_best", best, "{:,.0f}", "best loop score")
+v("wl_low", low, "{:,.0f}", "lowest loop score")
+v("wl_stability", 100 * low / best, "{:.1f}", "stability, percent")
+v("phone_ceiling_w", m(THERMAL.sustained_limit, "W"), "{:.0f}", "passive-cooling ceiling, W")
+v("hot_model_w", m(THERMAL.power, "W"), "{:.0f}", "unoptimized model, W")
+v("heat_rate", m(THERMAL.heating_rate, "delta_degC/s"), "{:.0f}", "heating rate, degrees C per s")
+v("trip_c", m(THERMAL.trip_temperature, "degC"), "{:.0f}", "thermal trip point, degrees C")
+v("weight_shrink_x", ratio(mlsysim.BYTES_FP32, mlsysim.BYTES_INT8), "{:.0f}", "FP32 / INT8 bytes")
 
-    head("Energy per inference (fig. 7, Napkin Math 2.5, MLPerf Tiny)")
-    show("span 1 kJ / 10 uJ", f"{1e3 / 10e-6:,.0f}x")
-    show("send 1 MB / whole phone (100 mJ / 2.6 mJ)", f"{100 / 2.6:.1f}x")
-    show("send 1 MB / NPU alone (100 mJ / 0.1 mJ)", f"{100 / 0.1:,.0f}x")
-    kws = tiny_kws()
-    for org, board, desc, uj in kws:
-        show(f"MLPerf Tiny KWS {board} ({desc}) uJ", f"{uj}")
-    ndp = min(uj for *_, uj in kws)
-    m4 = [uj for o, b, d, uj in kws if b == "NUCLEO-L4R5ZI"][0]
-    show("Cortex-M4 (NUCLEO-L4R5ZI) / NDP9120 best", f"{m4 / ndp:.0f}x")
+print("== Battery tax (battery scenario)")
+v("batt_w", m(BATTERY.power_draw, "W"), "{:.0f}", "detector power, W")
+v("batt_wh", m(BATTERY.battery_energy, "Wh"), "{:.0f}", "battery, Wh")
+v("batt_day_h", m(BATTERY.required_runtime, "hour"), "{:.0f}", "required runtime, h")
+v("batt_runtime_h", m(BATTERY.runtime, "hour"), "{:.1f}", "runtime, h")
+v("batt_day_wh", m(BATTERY.required_energy, "Wh"), "{:.0f}", "a day at the draw, Wh")
+v("batt_pct", 100 * BATTERY.budget_ratio, "{:.0f}", "share of the battery, percent")
 
-    head("Doorbell (S2.3.2, fig. 3)")
-    show("weights in flash (0.5 / 4.2 MB)", f"{0.5 / 4.2 * 100:.1f}%")
-    lat = 25e6 / 0.25e9 * 1e3 + 1
-    show("latency per frame (ms)", f"{lat:.0f}")
-    show("share of 200 ms chime", f"{lat / 200 * 100:.1f}%")
-    show("share of 50 ms chime", f"{lat / 50 * 100:.0f}%")
+print("== Energy per inference (energy scenario; upload scenario; MLPerf Tiny via Literature)")
+e = ENERGY.energies
+v("e_kws_uj", m(e["kws"], "uJ"), "{:.0f}", "TinyML KWS anchor, uJ")
+v("e_mobile_mj", m(e["mobilenet_phone"], "mJ"), "{:.1f}", "MobileNetV2 on a phone, mJ")
+v("e_edge_mj", m(e["resnet_edge"], "mJ"), "{:.1f}", "ResNet-50 on a Jetson, mJ")
+v("e_cloud_mj", m(e["resnet_cloud"], "mJ"), "{:.1f}", "ResNet-50 on an A100, mJ")
+v("e_llm_kj", m(e["llm_query"], "kJ"), "{:.0f}", "cloud LLM query anchor, kJ")
+span = ENERGY.span("kws", "llm_query")
+v("e_span", span, "{:,.0f}", "LLM query / KWS")
+v("e_span_m", span / 10 ** 6, "{:.0f}", "the same, millions")
+v("e_span_word", math.log10(span), "words", "the same, orders of magnitude, in prose")
+v("upload_mb", m(UPLOAD.payload, "MB"), "{:.0f}", "payload, MB")
+v("upload_mj", m(UPLOAD.transmit_energy, "mJ"), "{:.0f}", "send it by radio, mJ")
+v("npu_mj", m(UPLOAD.accelerator_energy, "mJ"), "{:.1f}", "NPU alone, mJ")
+v("upload_npu_x", UPLOAD.ratio_accelerator, "{:,.0f}", "send / NPU")
+v("upload_phone_x", UPLOAD.ratio_device, "{:.0f}", "send / whole phone")
+kws = tiny_kws()
+best_kws = min(kws, key=lambda r: r["energy_uj"])
+m4 = next(r for r in kws if r["board"] == "NUCLEO-L4R5ZI")
+v("tiny_best_uj", best_kws["energy_uj"], "{:.1f}", "MLPerf Tiny KWS best (NDP9120), uJ")
+v("tiny_m4_uj", m4["energy_uj"], "{:,.0f}", "Cortex-M4 board, uJ")
+v("tiny_m4_x", m4["energy_uj"] / best_kws["energy_uj"], "{:.0f}", "Cortex-M4 / NDP9120")
 
-    head("Screening gates (Example 2.1)")
-    show("100 km/h for 100 ms (m)", f"{100 / 3.6 * 0.1:.2f}")
+print("== Doorbell (doorbell scenarios)")
+ev, ev_strict = DOORBELL.evaluate(), CHIME.evaluate()
+fp = FRAME.result
+weights, flash = ev_strict.feasibility.metrics["weight_size"], ev_strict.feasibility.metrics["capacity"]
+lat = ev_strict.performance.metrics["latency"]
+v("db_weights_mb", m(weights, "MB"), "{:.1f}", "16-bit weights, MB")
+v("db_flash_mb", m(flash, "MB"), "{:.1f}", "flash, MB")
+v("db_flash_pct", 100 * ratio(weights, flash), "{:.1f}", "weights / flash, percent")
+v("db_mflop", m(DOORBELL.workload.inference_flops, "MFLOP"), "{:.0f}", "operations per frame, millions")
+v("db_rate", m(fp.peak_flops_actual, "GFLOP/s"), "{:.2f}", "sustained rate, GFLOP/s")
+v("db_compute_ms", m(fp.latency_compute, "ms"), "{:.0f}", "compute time, ms")
+v("db_overhead_ms", m(fp.latency_overhead, "ms"), "{:.0f}", "fixed overhead, ms")
+v("db_latency_ms", m(lat, "ms"), "{:.0f}", "latency per frame, ms")
+v("db_sla_ms", m(DOORBELL.sla_latency, "ms"), "{:.0f}", "chime budget, ms")
+v("db_strict_ms", m(CHIME.sla_latency, "ms"), "{:.0f}", "responsive chime budget, ms")
+v("db_sla_pct", 100 * ratio(lat, DOORBELL.sla_latency), "{:.1f}", "latency / 200 ms budget, percent")
+v("db_strict_pct", 100 * round(ratio(lat, CHIME.sla_latency), 2), "{:.0f}", "latency / 50 ms budget, percent")
 
-    head("Voice assistant (Napkin Math 2.10)")
-    per_dev = 16_000 * 2                 # 16 kHz, 16-bit
-    show("per device (KB/s)", f"{per_dev / 1e3:.0f}")
-    show("1B devices (TB/s)", f"{per_dev * 1e9 / 1e12:.0f}")
-    show("reduction, 20 queries x 5 s a day", f"{86400 / (20 * 5):.0f}x (chapter: 860x)")
-    show("after the chapter's 860x (GB/s)", f"{per_dev * 1e9 / 860 / 1e9:.1f}")
-    show("cloud detection at $0.50/device/yr ($M)", f"{0.50 * 1e9 / 1e6:.0f}")
-    gpu_h = 20e9 * 0.2 / 3600
-    show("GPU-hours a day (20B x 200 ms), millions", f"{gpu_h / 1e6:.2f}")
-    show("datacenters, average (10,000 GPUs each)", f"{gpu_h / 24 / 10_000:.2f}")
-    show("datacenters at 4.5x peak", f"{gpu_h / 24 / 10_000 * 4.5:.1f}")
+print("== Screening gates (braking scenario)")
+v("brake_kmh", m(BRAKING.speed, "km/hour"), "{:.0f}", "speed, km/h")
+v("brake_ms", m(BRAKING.latency, "ms"), "{:.0f}", "budget, ms")
+v("brake_m", m(BRAKING.distance, "m"), "{:.1f}", "travel during the budget, m")
+v("brake_cloud_lo", m(BRAKING.remote_delay_low, "ms"), "{:.0f}", "cloud round trip, low, ms")
+v("brake_cloud_hi", m(BRAKING.remote_delay_high, "ms"), "{:.0f}", "cloud round trip, high, ms")
 
-    head("Hey Siri two-pass detector (Apple ML Research 2017)")
-    show("second-pass width / first-pass width (192 / 32 units)", f"{192 / 32:.0f}x")
+print("== Voice assistant (wake-word fleet scenario)")
+v("voice_devices_b", VOICE.devices / 10 ** 9, "{:.0f}", "devices, billions")
+v("voice_khz", m(VOICE.audio_sample_rate, "kHz"), "{:.0f}", "audio sample rate, kHz")
+v("voice_bits", m(VOICE.audio_sample_bits, "bit"), "{:.0f}", "bits per sample")
+v("voice_kbs", m(VOICE.stream_rate, "KB/s"), "{:.0f}", "one stream, KB/s")
+v("voice_tbs", m(VOICE.fleet_stream_rate, "TB/s"), "{:.0f}", "every microphone, TB/s")
+v("voice_queries", VOICE.queries_per_day, "{:.0f}", "queries per device per day")
+v("voice_query_s_word", m(VOICE.query_audio, "s"), "words", "audio per query, s, in prose")
+v("voice_cut", round(VOICE.upload_reduction, -1), "{:.0f}", "audio cut, to the ten")
+v("voice_after_gbs", m(VOICE.fleet_query_rate, "GB/s"), "{:.0f}", "audio after the cut, GB/s")
+v("voice_cost_usd", m(VOICE.cloud_detection_cost, "USD/year"), "{:.2f}", "cloud detection per device, $/year")
+v("voice_cost_m", m(VOICE.cloud_detection_cost_per_year, "USD/year") / 10 ** 6, "{:.0f}",
+  "cloud detection, $M a year")
+v("voice_local_mw_lo", m(VOICE.local_power_low, "mW"), "{:.1f}", "on-device detector, low, mW")
+v("voice_local_mw_hi", m(VOICE.local_power_high, "mW"), "{:.0f}", "on-device detector, high, mW")
+v("voice_queries_b", VOICE.queries_per_fleet_day / 10 ** 9, "{:.0f}", "queries a day, billions")
+v("voice_gpu_ms", m(VOICE.accelerator_time_per_query, "ms"), "{:.0f}", "GPU time per query, ms")
+v("voice_gpuh_m", VOICE.accelerator_hours_per_day / 10 ** 6, "{:.1f}", "GPU-hours a day, millions")
+v("voice_gpus_dc", VOICE.accelerators_per_datacenter, "{:,.0f}", "GPUs per datacenter")
+v("voice_dc_avg", VOICE.datacenters_average, "{:.1f}", "datacenters, average")
+v("voice_peak_x", VOICE.peak_ratio, "{:.1f}", "peak / average")
+v("voice_dc_peak", VOICE.datacenters_peak, "{:.1f}", "datacenters at peak")
 
-    head("Hybrid patterns")
-    show("training / inference bytes per parameter (16 / 2)", f"{16 / 2:.0f}x")
+print("== Hey Siri (Apple 2017 via Literature)")
+v("siri_layers_word", LIT.HeySiriFirstPassLayers, "words", "first-pass layers, in prose")
+v("siri_layers", LIT.HeySiriFirstPassLayers, "{:.0f}", "first-pass layers")
+v("siri_units", LIT.HeySiriFirstPassUnits, "{:.0f}", "first-pass units per layer")
+v("siri_units2", LIT.HeySiriSecondPassUnits, "{:.0f}", "second-pass units per layer")
+v("siri_wider", LIT.HeySiriSecondPassUnits / LIT.HeySiriFirstPassUnits, "{:.0f}", "second / first width")
 
-    head("True or false: camera pipeline (S2.12)")
-    new = 100 + 60 / 10 + 40
-    show("pipeline after 10x faster model (ms)", f"{new:.0f}")
-    show("speedup", f"{200 / new:.2f}x")
-    show("limit with an infinitely fast model", f"{200 / 140:.2f}x")
-
+print("== Camera pipeline (pipeline scenario)")
+v("cam_pipe_ms", m(CAMERA.total, "ms"), "{:.0f}", "pipeline, ms")
+v("cam_speedup", CAMERA.speedup, "{:.0f}", "faster ML stage")
+v("cam_isp_ms", m(CAMERA.stages["isp"], "ms"), "{:.0f}", "image processing, ms")
+v("cam_ml_ms", m(CAMERA.stages["ml"], "ms"), "{:.0f}", "ML stage, ms")
+v("cam_post_ms", m(CAMERA.stages["post"], "ms"), "{:.0f}", "tone mapping, ms")
+v("cam_ml_fast_ms", m(CAMERA.accelerated_stage, "ms"), "{:.0f}", "ML stage after, ms")
+v("cam_pipe_fast_ms", m(CAMERA.accelerated_total, "ms"), "{:.0f}", "pipeline after, ms")
+v("cam_overall_x", CAMERA.overall_speedup, "{:.2f}", "end-to-end speedup")
+v("cam_limit_x", CAMERA.limit, "{:.2f}", "limit with an infinitely fast model")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

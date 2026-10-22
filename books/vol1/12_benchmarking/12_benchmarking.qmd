@@ -97,7 +97,7 @@ from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time, fmt_multiple, fmt_
 # │ How:     Registry peak and model FLOPs; MLPerf Training per-accelerator
 # │          throughput anchor; training FLOPs = 3x forward FLOPs.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Literature
+from mlsysim import Scenarios
 from mlsysim.core.units import GFLOPs, TFLOP, second
 from mlsysim.fmt import check, fmt_count, fmt_flop_rate, fmt_flops, fmt_rate, fmt_percent
 
@@ -106,19 +106,19 @@ class ResNet50H100Sustained:
     """ResNet-50 training on one H100: peak dense FP16 rate vs. sustained model arithmetic."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    resnet = Models.Vision.ResNet50
-    h100 = Hardware.Cloud.H100
-    # MLPerf Training v3.1, NVIDIA Eos_n8: logged images/s divided by its accelerators
-    measured_rate = Literature.Benchmarks.ResNet50H100TrainThroughput.value / second
-    mlperf_accelerators = int(Literature.Benchmarks.ResNet50H100TrainThroughputAccelerators.value)
-    # convention: the backward pass costs about twice the forward pass
-    train_to_forward = 3
+    # MLPerf Training v3.1, NVIDIA Eos_n8: logged images/s divided by its accelerators;
+    # training work per image is three forward passes (Scenarios.ResNet50H100TrainingCeiling)
+    _scenario = Scenarios.ResNet50H100TrainingCeiling
+    resnet = _scenario.workload
+    h100 = _scenario.hardware
+    measured_rate = _scenario.sustained_rate
+    mlperf_accelerators = _scenario.accelerators
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     peak = h100.compute.peak_flops
-    flops_per_image = train_to_forward * resnet.inference_flops
-    achieved = (measured_rate * flops_per_image).to(TFLOP / second)
-    mfu = (achieved / peak).to("").magnitude
+    flops_per_image = _scenario.training_flops_per_sample
+    achieved = _scenario.achieved_flops.to(TFLOP / second)
+    mfu = _scenario.sustained_fraction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.08 < mfu < 0.2, f"Prose says ResNet-50 sustains about 12 percent of H100 peak, got {mfu:.3f}.")
@@ -127,7 +127,7 @@ class ResNet50H100Sustained:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     peak_tflop_per_s_str = fmt_flop_rate(peak, unit=TFLOP / second, precision=0, commas=False)
-    measured_ips_str = fmt_rate(measured_rate.to(1 / second).magnitude, "images/s", precision=0, commas=True)
+    measured_ips_str = fmt_rate(measured_rate.to("count/second").magnitude, "images/s", precision=0, commas=True)
     mlperf_accelerators_str = fmt_count(mlperf_accelerators, precision=0, commas=False)
     forward_gflop_str = fmt_flops(resnet.inference_flops, unit=GFLOPs, precision=1, commas=False)
     train_gflop_str = fmt_flops(flops_per_image, unit=GFLOPs, precision=1, commas=False)
@@ -254,14 +254,15 @@ The table already separates the halves of the chapter. ResNet-50 does `{python} 
 # │ Context: MobileNetV2 deployment validation lighthouse callout.
 # │ Goal: INT8 compression ratio and accelerator vs host-CPU latency for the pipeline.
 # │       Single source for the composite edge board's latencies; later cells read them.
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.core.units import BYTES_FP32, BYTES_INT8, MB, ms
 from mlsysim.fmt import fmt, fmt_memory, check
 
 class MobileNetLighthouseSetup:
     _mobilenet_v2 = Models.Vision.MobileNetV2
-    accel_latency = 2 * ms  # scenario assumption: INT8 MobileNetV2 on the board's attached accelerator (labeled composite)
-    cpu_int8_latency = 15 * ms  # scenario assumption: INT8 MobileNetV2 on the board's host CPU
+    _board = Scenarios.MobileNetV2CameraTrapBoard  # labeled composite edge board
+    accel_latency = _board.accelerator_latency  # INT8 MobileNetV2 on the board's attached accelerator
+    cpu_int8_latency = _board.host_int8_latency  # INT8 MobileNetV2 on the board's host CPU
     _mv2_size = _mobilenet_v2.size_in_bytes(BYTES_FP32)
     _mv2_int8_size = _mobilenet_v2.size_in_bytes(BYTES_INT8)
     _mv2_compress = (_mv2_size / _mv2_int8_size).to_base_units().magnitude
@@ -428,7 +429,7 @@ When host software initiates an inference or training step on an accelerator, th
 
 The timer endpoints determine which work enters the result. @Fig-benchmark-async-timing separates the host call, the synchronized host interval, and the device-event interval for one inference.
 
-::: {#fig-benchmark-async-timing fig-env="figure" fig-pos="htb" fig-cap="**Timing Across an Asynchronous Boundary**: The host call returns after enqueueing work, before the accelerator completes it. A synchronized host timer spans enqueueing through completion; device events measure elapsed time between their positions on the stream. The timing boundaries determine whether transfers and other queued work are included." fig-alt="Two aligned host and accelerator lanes with an enqueue block, a host waiting block, and an accelerator work block. Three arrows mark the call timer, the device-event interval, and the synchronized host interval."}
+::: {#fig-benchmark-async-timing data-explore="original-v1-benchmark-async-timing" data-explore-key="vol1:fig-benchmark-async-timing" fig-env="figure" fig-pos="htb" fig-cap="**Timing Across an Asynchronous Boundary**: The host call returns after enqueueing work, before the accelerator completes it. A synchronized host timer spans enqueueing through completion; device events measure elapsed time between their positions on the stream. The timing boundaries determine whether transfers and other queued work are included." fig-alt="Two aligned host and accelerator lanes with an enqueue block, a host waiting block, and an accelerator work block. Three arrows mark the call timer, the device-event interval, and the synchronized host interval."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily,line join=round,
@@ -1172,8 +1173,8 @@ class ResNet50RooflineCheck:
     measured_rate = ResNet50H100Sustained.measured_rate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    predicted_rate = (peak / flops_per_image).to(1 / second)
-    gap = (predicted_rate / measured_rate).to("").magnitude
+    predicted_rate = Scenarios.ResNet50H100TrainingCeiling.ceiling_rate
+    gap = Scenarios.ResNet50H100TrainingCeiling.ceiling_gap
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(predicted_rate > measured_rate, "The roofline ceiling must exceed the measured throughput.")
@@ -1255,24 +1256,25 @@ These component-level contributions explain why optimizing any single stage yiel
 # │ How: Apply Amdahl's Law: new total = nonoptimized + optimized/speedup.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
-from mlsysim.physics import calc_amdahls_speedup
 
 class AmdahlBenchmarkCalc:
     """Amdahl ceiling: 5× inference speedup → only 1.8× end-to-end when preprocessing dominates."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bench_preprocess_ms = 8
-    bench_inference_ms = 10
-    bench_inf_speedup = 5
+    _pipeline = Scenarios.PreprocessBoundVisionPipeline
+    bench_preprocess_ms = _pipeline.stages["preprocess"].to("ms").magnitude
+    bench_inference_ms = _pipeline.stages["inference"].to("ms").magnitude
+    bench_inf_speedup = _pipeline.speedup
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    bench_total_ms = bench_preprocess_ms + bench_inference_ms
-    preprocess_fraction = bench_preprocess_ms / bench_total_ms
-    bench_opt_inference_ms = bench_inference_ms / bench_inf_speedup
-    bench_opt_total_ms = bench_preprocess_ms + bench_opt_inference_ms
-    bench_e2e_improvement = calc_amdahls_speedup(1 - preprocess_fraction, bench_inf_speedup)
+    bench_total_ms = _pipeline.total.to("ms").magnitude
+    preprocess_fraction = 1 - _pipeline.fraction
+    bench_opt_inference_ms = _pipeline.accelerated_stage.to("ms").magnitude
+    bench_opt_total_ms = _pipeline.accelerated_total.to("ms").magnitude
+    bench_e2e_improvement = _pipeline.overall_speedup
     # The n->inf ceiling is exactly 1/f, matching the prose math.
-    amdahl_ceiling = 1 / preprocess_fraction
+    amdahl_ceiling = _pipeline.limit
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(bench_opt_inference_ms == 2.0, f"Expected optimized inference at 2 ms, got {bench_opt_inference_ms:.1f}")
     check(abs(bench_total_ms / bench_opt_total_ms - bench_e2e_improvement) < 1e-9, "Amdahl helper must agree with the direct timing arithmetic.")
@@ -1458,24 +1460,26 @@ A representative workload can still mislead if the evaluation metric fails to re
 # │          fix the 4x slowdown and 10x beam expansion.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_multiple
 
 class GoodhartBLEUCalc:
     """BLEU leaderboard gain that violates the serving latency budget."""
 
     # LOAD
-    original_bleu = 28.0
-    optimized_bleu = 28.5
-    original_latency_ms = 50
-    optimized_latency_ms = 200
-    original_beam_size = 1
-    optimized_beam_size = 10
-    latency_budget_ms = 100
+    _beam = Scenarios.WiderBeamSearchTranslation
+    original_bleu = _beam.original_metric
+    optimized_bleu = _beam.optimized_metric
+    original_latency_ms = _beam.original_latency.to("ms").magnitude
+    optimized_latency_ms = _beam.optimized_latency.to("ms").magnitude
+    original_beam_size = _beam.original_width
+    optimized_beam_size = _beam.optimized_width
+    latency_budget_ms = _beam.latency_budget.to("ms").magnitude
 
     # EXECUTE
-    bleu_gain = optimized_bleu - original_bleu
-    candidate_ratio = optimized_beam_size / original_beam_size
-    latency_slowdown = optimized_latency_ms / original_latency_ms
+    bleu_gain = _beam.metric_gain
+    candidate_ratio = _beam.width_ratio
+    latency_slowdown = _beam.slowdown
 
     # GUARD
     check(latency_slowdown == 4.0, f"Expected 4x latency slowdown, got {latency_slowdown:.1f}x")
@@ -1928,18 +1932,20 @@ Scalability\index{Scalability!distributed training metric} measures how effectiv
 # │ How: Calculate the efficiency ratio between single-GPU and multi-GPU training times.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, MarkdownStr
 
 class ScalingEfficiencyCalc:
     """Strong scaling efficiency for an illustrative 8-GPU image-classifier run: 75% efficiency, 25% overhead loss."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    t1_hours = 24  # scenario input: single-GPU training time for the illustrative run
-    n_gpus = 8
-    tn_hours = 4  # actual N-GPU training time
+    _scaling = Scenarios.ImageClassifierEightGpuScaling  # illustrative run, one GPU against eight
+    t1_hours = int(_scaling.base_time.to("hour").magnitude)
+    n_gpus = _scaling.scaled_devices
+    tn_hours = int(_scaling.scaled_time.to("hour").magnitude)
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ideal_hours = t1_hours / n_gpus
-    efficiency_pct = t1_hours / (n_gpus * tn_hours) * 100
+    ideal_hours = _scaling.ideal_time.to("hour").magnitude
+    efficiency_pct = _scaling.efficiency * 100
     loss_pct = 100 - efficiency_pct
     eff_denom = n_gpus * tn_hours
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2444,7 +2450,7 @@ class MobileNetTradeoffCalc:
     """MobileNetV2 FP32 vs INT8 edge-deployment trade-off."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    latency_fp32 = 50 * ms  # scenario assumption: FP32 on the board's host CPU
+    latency_fp32 = MobileNetLighthouseSetup._board.host_fp32_latency  # FP32 on the board's host CPU
     latency_int8 = MobileNetLighthouseSetup.cpu_int8_latency  # same composite board as the lighthouse setup
     acc_fp32 = 71.8
     acc_int8 = 70.9
@@ -2510,17 +2516,18 @@ class EdgeAccelSpeedupCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     accel_latency = MobileNetLighthouseSetup.accel_latency  # composite-board scenario, set once above
     cpu_latency = MobileNetLighthouseSetup.cpu_int8_latency
-    accel_e2e = 6 * ms  # scenario assumption: accelerator end-to-end latency
-    cpu_e2e = 18 * ms  # scenario assumption: host CPU end-to-end latency
-    accel_power = 500 * milliwatt  # scenario assumption: accelerator active power
-    cpu_power = 120 * milliwatt  # scenario assumption: host CPU active power
+    _board = MobileNetLighthouseSetup._board
+    accel_e2e = _board.accelerator_end_to_end  # accelerator end-to-end latency
+    cpu_e2e = _board.host_end_to_end  # host CPU end-to-end latency
+    accel_power = _board.accelerator_power  # accelerator active power
+    cpu_power = _board.host_power  # host CPU active power
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    inference_speedup = (cpu_latency / accel_latency).to_base_units().magnitude
-    e2e_speedup = (cpu_e2e / accel_e2e).to_base_units().magnitude
-    power_ratio = (accel_power / cpu_power).to_base_units().magnitude
-    cpu_energy = (cpu_power * cpu_latency).to(mJ)
-    accel_energy = (accel_power * accel_latency).to(mJ)
-    energy_ratio = (cpu_energy / accel_energy).to_base_units().magnitude
+    inference_speedup = _board.isolated_speedup
+    e2e_speedup = _board.end_to_end_speedup
+    power_ratio = _board.power_ratio
+    cpu_energy = _board.host_energy.to(mJ)
+    accel_energy = _board.accelerator_energy.to(mJ)
+    energy_ratio = _board.energy_ratio
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(e2e_speedup < inference_speedup, "Preprocessing overhead should narrow the end-to-end speedup.")
     check(energy_ratio > 1, "The accelerator should use less active inference energy despite higher power.")
@@ -2789,6 +2796,7 @@ The board now has a latency, a throughput, and a memory footprint. What it lacks
 # │ How:     Direct TOPS/W ratios for each operating point and their quotient.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_ops_rate, fmt_power, check
 from mlsysim.core.units import TOPS, watt
 
@@ -2796,15 +2804,16 @@ class PowerClaimGapCalc:
     """TOPS/W gap between a peak datasheet claim and sustained inference."""
 
     # LOAD
-    datasheet_tops = 10
-    datasheet_w = 0.5
-    sustained_tops = 3
-    sustained_w = 2
+    _claim = Scenarios.DatasheetVersusSustainedEdgeChip
+    datasheet_tops = _claim.claimed_rate.to(TOPS).magnitude
+    datasheet_w = _claim.claimed_power.to(watt).magnitude
+    sustained_tops = _claim.sustained_rate.to(TOPS).magnitude
+    sustained_w = _claim.sustained_power.to(watt).magnitude
 
     # EXECUTE
-    datasheet_tops_per_w = datasheet_tops / datasheet_w
-    sustained_tops_per_w = sustained_tops / sustained_w
-    efficiency_gap = datasheet_tops_per_w / sustained_tops_per_w
+    datasheet_tops_per_w = _claim.claimed_efficiency.to("TOPS/W").magnitude
+    sustained_tops_per_w = _claim.sustained_efficiency.to("TOPS/W").magnitude
+    efficiency_gap = _claim.gap
 
     # GUARD
     check(round(efficiency_gap, 1) == 13.3, f"Expected 13.3x efficiency gap, got {efficiency_gap:.1f}x")
@@ -3097,28 +3106,25 @@ The three architectural tiers in @fig-power-diagram (Tiny Example, Inference Exa
 # │ How: Literature.Series.GeminiPromptEnergy (Elsworth et al. 2025, Table 1).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.core.units import Wh
 from mlsysim.fmt import check, fmt_energy, fmt_multiple, fmt_percent
-
-def _full_stack_wh(rows, prefix):
-    return next(r["comprehensive_wh"] for r in rows if r["component"].startswith(prefix))
 
 class ServingEnergyBoundary:
     """Same median prompt, two measurement boundaries (Elsworth et al. 2025, Table 1)."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _rows = Literature.Series.GeminiPromptEnergy.entries
+    _boundary = Scenarios.GeminiMedianPromptEnergyBoundary
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    _full = sum(r["comprehensive_wh"] for r in _rows if r["comprehensive_counted"] == 1)
-    _narrow = sum(r["existing_wh"] for r in _rows if r["existing_counted"] == 1)
-    full = _full * Wh
-    accel_only = _narrow * Wh
-    ratio = _full / _narrow
-    accel_share = _full_stack_wh(_rows, "Active AI") / _full
-    host_share = _full_stack_wh(_rows, "Active host") / _full
-    idle_overhead_share = (_full_stack_wh(_rows, "Idle") + _full_stack_wh(_rows, "Data center")) / _full
+    full = _boundary.full
+    accel_only = _boundary.narrow
+    _full = full.to(Wh).magnitude
+    _narrow = accel_only.to(Wh).magnitude
+    ratio = _boundary.ratio
+    accel_share = _boundary.share("Active AI")
+    host_share = _boundary.share("Active host")
+    idle_overhead_share = _boundary.share("Idle", "Data center")
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(_full - 0.24) < 1e-9 and abs(_narrow - 0.10) < 1e-9, "Table 1 totals are 0.24 and 0.10 Wh.")
@@ -3292,7 +3298,7 @@ For intermittent workloads such as the camera trap waiting for motion ($\Inferen
 # │ How:     Registry DS-CNN FLOPs and ESP32-S3 INT8 rate, active (TDP) and
 # │          minimum power; duty-cycle average power identity.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware
+from mlsysim import Scenarios
 from mlsysim.core.units import second, ms, mJ, milliwatt, watt, MFLOPs
 from mlsysim.fmt import check, fmt_time, fmt_energy, fmt_power, fmt_percent, fmt_flops
 
@@ -3301,20 +3307,18 @@ class KwsDutyCycle:
     """Always-on keyword spotting on an ESP32-S3-class board: the idle floor dominates."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    kws = Models.Tiny.DS_CNN
-    mcu = Hardware.Tiny.ESP32_S3
-    int8_rate = mcu.compute.precision_flops["int8"]
-    active_power = mcu.tdp
-    idle_power = mcu.tdp_min
-    window = 1 * second  # scenario assumption: one inference per one-second audio window
+    _scenario = Scenarios.KeywordSpottingOnEsp32S3  # one inference per one-second audio window
+    kws = _scenario.workload
+    active_power = _scenario.active_power
+    idle_power = _scenario.idle_power
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t_inf = (kws.inference_flops / int8_rate).to(ms)
-    duty = (t_inf / window).to("").magnitude
-    e_inf = (active_power * t_inf).to(mJ)
-    p_avg = (duty * active_power + (1 - duty) * idle_power).to(milliwatt)
-    idle_share = ((1 - duty) * idle_power / p_avg).to("").magnitude
-    crossover_duty = (idle_power / (active_power + idle_power)).to("").magnitude
+    t_inf = _scenario.inference_time.to(ms)
+    duty = _scenario.duty
+    e_inf = _scenario.inference_energy.to(mJ)
+    p_avg = _scenario.average_power.to(milliwatt)
+    idle_share = _scenario.idle_share
+    crossover_duty = _scenario.crossover_duty
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(duty < 0.02, f"Keyword spotting should be active under 2 percent of the time, got {duty:.3f}.")
@@ -3396,31 +3400,29 @@ Even when run-to-run execution variance is fully controlled, benchmarking encoun
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: The statistical confidence trap callout below.
 # │ Goal: Binomial uncertainty for 95 percent vs 94 percent on 1,000 images.
-from math import sqrt, ceil
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_pp, check
 
 class StatisticalConfidenceTrap:
     """Binomial uncertainty for a 95% vs. 94% accuracy comparison on 1,000 images."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_images = 1000
-    baseline_accuracy = 0.95
-    compressed_accuracy = 0.94
-    z_95 = 1.96
-    target_margin = 0.01
-    ci_confidence_pct_value = 95
+    _cmp = Scenarios.NinetyFiveAgainstNinetyFourOnSameImages
+    _size = Scenarios.AccuracyWithinOnePointSampleSize
+    n_images = _cmp.n_samples
+    baseline_accuracy = _cmp.baseline_accuracy
+    compressed_accuracy = _cmp.candidate_accuracy
+    z_95 = _cmp.z
+    target_margin = _size.half_width
+    ci_confidence_pct_value = _cmp.confidence * 100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    baseline_error_rate = 1 - baseline_accuracy
-    compressed_error_rate = 1 - compressed_accuracy
-    baseline_errors = n_images * baseline_error_rate
-    compressed_errors = n_images * compressed_error_rate
-    sigma_errors = sqrt(n_images * baseline_error_rate * baseline_accuracy)
-    accuracy_diff = baseline_accuracy - compressed_accuracy
-    se_diff_independent = sqrt(baseline_accuracy * (1 - baseline_accuracy) / n_images + compressed_accuracy * (1 - compressed_accuracy) / n_images)
-    diff_ci_low = accuracy_diff - z_95 * se_diff_independent
-    diff_ci_high = accuracy_diff + z_95 * se_diff_independent
-    one_prop_n = ceil((z_95**2 * baseline_accuracy * (1 - baseline_accuracy)) / (target_margin**2))
+    baseline_errors = _cmp.baseline_errors
+    compressed_errors = _cmp.candidate_errors
+    sigma_errors = _cmp.baseline_error_sd
+    accuracy_diff = _cmp.accuracy_difference
+    diff_ci_low, diff_ci_high = _cmp.independent_interval
+    one_prop_n = _size.samples_needed
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(baseline_errors) == 50, f"Expected 50 baseline errors, got {baseline_errors:.1f}")
@@ -3450,21 +3452,21 @@ class StatisticalConfidenceTrap:
 # │ Context: The statistical confidence trap callout below (paired-test step).
 # │ Goal: Largest disagreement count at which McNemar's test still flags the
 # │       10-error gap between the two models as significant at 95 percent.
-from math import floor
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 class McNemarThreshold:
     """McNemar's test (no continuity correction) on the 95 vs. 94 percent same-image comparison."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    error_gap = round(StatisticalConfidenceTrap.compressed_errors - StatisticalConfidenceTrap.baseline_errors)
-    z_95 = StatisticalConfidenceTrap.z_95
+    _cmp = Scenarios.NinetyFiveAgainstNinetyFourOnSameImages
+    error_gap = _cmp.net_gap
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Statistic (n_base - n_comp)^2 / (n_base + n_comp) with n_base - n_comp = error_gap;
     # significant when it exceeds the 1-dof chi-square critical value z_95^2.
-    chi2_crit = z_95**2
-    max_discordant = floor(error_gap**2 / chi2_crit)
+    chi2_crit = _cmp.chi2_critical
+    max_discordant = _cmp.max_discordant
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(error_gap == 10, f"Expected a 10-error gap, got {error_gap}")
@@ -4046,7 +4048,7 @@ Pareto optimality identifies nondominated choices, but it does not establish tha
 # │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Scenarios
 from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB, lux
 from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
 
@@ -4054,26 +4056,27 @@ class MobileNetINT8Calc:
     """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_v2 = Models.Vision.MobileNetV2
-    acc_fp32 = 71.8
+    _gates = Scenarios.MobileNetV2Int8CameraTrapGates
+    _mobilenet_v2 = _gates.workload
+    acc_fp32 = _gates.float_top1
     params = _mobilenet_v2.parameters
     size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
     size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
-    acc_int8 = 70.9
-    top5_fp32 = 91.0
-    top5_int8 = 90.4
-    ece_fp32 = 0.031
-    ece_int8 = 0.089
-    edge_fp32 = 68.2
-    edge_int8 = 61.4
-    edge_occlusion_pct = 50
-    edge_lux = 100
-    edge_rotation_deg = 30
-    real_world_edge_pct = 5
-    confidence_threshold_pct = 85
+    acc_int8 = _gates.int_top1
+    top5_fp32 = _gates.float_top5
+    top5_int8 = _gates.int_top5
+    ece_fp32 = _gates.float_ece
+    ece_int8 = _gates.int_ece
+    edge_fp32 = _gates.float_edge
+    edge_int8 = _gates.int_edge
+    edge_occlusion_pct = _gates.edge_occlusion * 100
+    edge_lux = _gates.edge_illuminance.to(lux).magnitude
+    edge_rotation_deg = _gates.edge_rotation_deg
+    real_world_edge_pct = _gates.edge_share * 100
+    confidence_threshold_pct = _gates.confidence_threshold * 100
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    acc_drop = acc_fp32 - acc_int8
-    edge_drop = edge_fp32 - edge_int8
+    acc_drop = _gates.top1_loss
+    edge_drop = _gates.edge_drop
     size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
@@ -4534,6 +4537,7 @@ from mlsysim.fmt import (
     fmt_rate,
     fmt_time,
 )
+from mlsysim import Scenarios
 
 class FallaciesPitfallsSetup:
     """Quantitative backing for all Fallacy/Pitfall items in the benchmarking chapter."""
@@ -4544,9 +4548,10 @@ class FallaciesPitfallsSetup:
     production_accuracy_low_pct = 78
     production_accuracy_high_pct = 82
     # Fallacy 1: Latency gap (mean vs. p99)
-    benchmark_latency_mean_ms = 15
-    production_p99_low_ms = 150
-    production_p99_high_ms = 200
+    _tail = Scenarios.ModelOnlyMeanVersusProductionP99
+    benchmark_latency_mean_ms = _tail.mean.to("ms").magnitude
+    production_p99_low_ms = _tail.tail_low.to("ms").magnitude
+    production_p99_high_ms = _tail.tail_high.to("ms").magnitude
     # Pitfall 1 (Goodhart): Quantization speedup
     pre_quant_latency_ms = 12
     post_quant_latency_ms = 8
@@ -4632,8 +4637,8 @@ class FallaciesPitfallsSetup:
         style="prose",
     )
     latency_degradation_range_mult_str = fmt_multiple_range(
-        production_p99_low_ms / benchmark_latency_mean_ms,
-        production_p99_high_ms / benchmark_latency_mean_ms,
+        _tail.gap_low,
+        _tail.gap_high,
         precision=(0, 1),
         commas=False,
     )

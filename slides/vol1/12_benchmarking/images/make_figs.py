@@ -1,56 +1,16 @@
 #!/usr/bin/env python3
 """Figures for Lecture 12 (Benchmarking).
 
-Every value is sourced. "Chapter" means the rendered Benchmarking chapter.
-Values the chapter gives as a scenario, composite, or assumption are drawn
-with an "Illustrative" tag on the plot.
-
-  - Hook: "10 TOPS at 0.5 W" against 3 TOPS at 2 W under sustained load,
-    20 against 1.5 TOPS/W, 13.3x (chapter, Sec. 12.7 opening; illustrative).
-  - Fan-out tail: Dean and Barroso, "The Tail at Scale," CACM 2013, Table 1
-    (measured Google service): one random leaf p50 1 ms, p99 10 ms; all leaf
-    requests p50 40 ms, p99 140 ms. Model-only mean 15 ms against production
-    p99 150 to 200 ms (chapter, Sec. 12.10; illustrative).
-  - Roofline against MLPerf: 989 TFLOP/s / 24.6 GFLOP = 40,200 images/s;
-    about 5,000 images/s per H100, 12.4 percent MFU (chapter, Napkin Math
-    12.1). Published logs, MLPerf Training v4.0, NVIDIA closed division
-    (mlcommons/training_results_v4.0), ResNet, images/s per GPU derived as
-    35 epochs x 1,281,167 images / timed run / GPUs: Eos (8x H100-SXM5,
-    one node) about 7,000; Eos_n8 (64 H100-SXM5) about 4,660.
-  - Edge board waterfall: Lighthouse 12.2 and Example 12.3 (illustrative).
-  - Software stack: Lee et al. 2019 (arXiv 1907.01989), MobileNet v1, mean
-    of 100 runs after 10 warm-up runs: iPhone Xs TFLite GPU 2.3 ms, Metal
-    MPSCNN 4.1 ms, Core ML 7.1 ms; Pixel 3 TFLite GPU 12.5 ms, TFLite CPU
-    51.7 ms.
-  - Scenarios: MLPerf Inference rules and chapter Sec. 12.4.4.
-  - MLPerf Inference v5.0 closed, ResNet-50 (summary_results.json,
-    mlcommons/inference_results_v5.0): RTX 4090 (5.0-0032) SingleStream
-    0.281736 ms, Offline 44,411.1 samples/s; Cisco UCS C885A M8 8x H100
-    (5.0-0010) Offline 715,761, Server 652,002; Quanta D74H-7U 8x H100
-    (5.0-0065) Offline 712,859, Server 584,161.
-  - Boundary: Elsworth et al. 2025 via chapter Sec. 12.7.1: 0.10 Wh against
-    0.24 Wh; 58 / 25 / 17 percent.
-  - Throttling: Lee et al. 2019, Figure 8, read from the plot (approximate):
-    iPhone Xs TFLite CPU about 20 to 26 ms, GPU about 2.4 to 3.9 ms, Pixel 3
-    GPU about 12.8 ms throughout, over 200 s. Tummalapalli et al. 2026
-    (arXiv 2603.23640), iPhone 16 Pro, Qwen 2.5 1.5B: 40.49, 24.96, 23.67
-    tokens/s.
-  - MLPerf Tiny v1.2 closed, visual wake words (summary.csv,
-    mlcommons/tiny_results_v1.2): uJ per inference.
-  - Duty cycle: chapter Sec. 12.7.2 (8.3 ms at 0.4 W each 1 s, 50 mW idle).
-  - Fan-out: chapter footnote 20 (Dean and Barroso 2013): 1 - 0.99^100 = 63
-    percent; the curve 1 - 0.99^n is computed.
-  - Time to quality: mlperf_v40_eos_result0_evals.csv (this folder), the
-    eval_accuracy lines of MLPerf Training v4.0, NVIDIA eos_ngc24.04_mxnet,
-    resnet/result_0.txt (minutes since run_start, top-1 percent).
-  - Scaling: MLPerf Training v4.0 published scores, NVIDIA eos_ngc24.04_mxnet
-    (8x H100) and eos_n8_ngc24.04_mxnet (64x H100): mean of the middle three
-    runs (a non-converged run counts as slowest) times the scaling.json
-    factor 1.0042232; run times from the result_N.txt logs, typed below.
-  - Power boundaries: chapter Sec. 12.7.1 and figure 8 (after Tschand et al.).
-
-Derived values (ratios, products, percentages) come from calcs.py, which
-this script imports; the drawn labels print those values.
+Every drawn value comes from MLSysIM through calcs.py, which this script
+imports: the benchmarking Scenarios.* (datasheet gap, edge board, fan-out,
+training ceiling, duty cycle, measurement boundary, MLPerf scores) and the
+Literature series of published results (Dean and Barroso 2013; MLPerf
+Training v4.0, Inference v5.0, and Tiny v1.2; Lee et al. 2019; Tummalapalli
+et al. 2026). Labels print the values calcs.py records (deckvals.val), so a
+figure and its slide always show the same digits. Values the chapter gives
+as a scenario, composite, or assumption are drawn with an "Illustrative" tag.
+The closed-loop, granularity, scenario, and power-boundary figures are
+mechanism diagrams; their coordinates are layout, not data.
 
 Run from this folder: python3 make_figs.py
 """
@@ -62,11 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402
+from deckvals import val, num  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 
 plt = sp.plt
 C = sp.C
 out = Path(__file__).parent
+m = K.m
+EFF_DS, EFF_SUS = m(K.CLAIM.claimed_efficiency, "TOPS/W"), m(K.CLAIM.sustained_efficiency, "TOPS/W")
+CEIL, MEASURED = m(K.CEILING.ceiling_rate, "count/second"), m(K.CEILING.sustained_rate, "count/second")
+B = K.BOARD
 
 
 def tag(ax, text="Illustrative", where=(0.0, -0.32)):
@@ -117,18 +82,18 @@ def bars(ax, rows, k, log=False, xmax=None, value_pad=None):
 # Hook: datasheet against sustained efficiency (illustrative, Sec. 12.7)
 # -----------------------------------------------------------------------------
 hook_rows = [
-    dict(label="Datasheet: 10 TOPS at 0.5 W", value=K.hook_eff_ds, color="compute",
-         text=f"{K.f(K.hook_eff_ds, 0)} TOPS/W", step=1),
-    dict(label="Sustained: 3 TOPS at 2 W", value=K.hook_eff_sus, color="danger",
-         text=f"{K.f(K.hook_eff_sus, 1)} TOPS/W", step=3, pending="???", pending_from=2),
+    dict(label=f"Datasheet: {val('hook_tops')} TOPS at {val('hook_w')} W", value=EFF_DS, color="compute",
+         text=f"{val('hook_eff')} TOPS/W", step=1),
+    dict(label=f"Sustained: {val('hook_sus_tops')} TOPS at {val('hook_sus_w')} W", value=EFF_SUS, color="danger",
+         text=f"{val('hook_sus_eff')} TOPS/W", step=3, pending="???", pending_from=2),
 ]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     bars(ax, hook_rows, k, xmax=27)
     if k == 3:
-        ax.annotate("", xy=(K.hook_eff_sus, 0.5), xytext=(K.hook_eff_ds, 0.5),
+        ax.annotate("", xy=(EFF_SUS, 0.5), xytext=(EFF_DS, 0.5),
                     arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.5))
-        ax.text(K.hook_eff_ds + 0.5, 0.5, f"{K.f(K.hook_gap, 1)}× lower", ha="left", va="center", fontsize=13,
+        ax.text(EFF_DS + 0.5, 0.5, f"{val('hook_gap')}× lower", ha="left", va="center", fontsize=13,
                 fontweight="bold", color=C["text"])
     ax.set_xlabel("Efficiency (TOPS per watt)")
     tag(ax, "Illustrative (Benchmarking, §12.7)", (0.0, -0.5))
@@ -138,15 +103,18 @@ for k in (1, 2, 3):
 # Fan-out tail (Dean and Barroso 2013, Table 1) and the illustrative gap
 # -----------------------------------------------------------------------------
 tail_rows = [
-    dict(label="One leaf, median", value=1, color="memory", text="1 ms", step=1),
-    dict(label="One leaf, p99", value=10, color="memory", text="10 ms", step=1),
-    dict(label="All leaves, median", value=40, color="danger", text="40 ms", step=2),
-    dict(label="All leaves, p99", value=140, color="danger", text=f"140 ms  ({K.f(K.tail_ratio, 0)}× one leaf)", step=2),
+    dict(label="One leaf, median", value=K.leaf_p50, color="memory", text=f"{val('leaf_p50')} ms", step=1),
+    dict(label="One leaf, p99", value=K.leaf_p99, color="memory", text=f"{val('leaf_p99')} ms", step=1),
+    dict(label="All leaves, median", value=K.all_p50, color="danger", text=f"{val('all_p50')} ms", step=2),
+    dict(label="All leaves, p99", value=K.all_p99, color="danger",
+         text=f"{val('all_p99')} ms  ({val('tail_ratio')}× one leaf)", step=2),
 ]
+TAIL_LO, TAIL_HI = m(K.TAIL_GAP.tail_low, "ms"), m(K.TAIL_GAP.tail_high, "ms")
 gap_rows = [
-    dict(label="Model-only mean", value=15, color="neutral", text="15 ms", step=3),
-    dict(label="Production p99", value=200, color="danger",
-         text="150 to 200 ms", step=3),
+    dict(label="Model-only mean", value=m(K.TAIL_GAP.mean, "ms"), color="neutral",
+         text=f"{val('tail_mean')} ms", step=3),
+    dict(label="Production p99", value=TAIL_HI, color="danger",
+         text=f"{val('tail_p99_lo')} to {val('tail_p99_hi')} ms", step=3),
 ]
 for k in (1, 2, 3):
     fig, (ax, ax2) = plt.subplots(2, 1, figsize=(5.8, 3.3),
@@ -155,9 +123,10 @@ for k in (1, 2, 3):
     ax.set_xlabel("Latency (ms), measured Google service")
     bars(ax2, gap_rows, k, xmax=215)
     if k >= 3:
-        ax2.barh(0, 50, left=150, color=C["danger_l"], height=0.62)
-        ax2.plot([33, 33], [-0.31, 0.31], color="white", lw=2)
-        ax2.text(36, 0, "33 ms frame deadline", color="white", fontsize=10,
+        ax2.barh(0, TAIL_HI - TAIL_LO, left=TAIL_LO, color=C["danger_l"], height=0.62)
+        deadline = num("frame_budget")
+        ax2.plot([deadline, deadline], [-0.31, 0.31], color="white", lw=2)
+        ax2.text(deadline + 3, 0, f"{val('frame_budget')} ms frame deadline", color="white", fontsize=10,
                  fontweight="bold", va="center")
         tag(ax2, "Illustrative (Benchmarking, §12.10)", (0.62, 1.12))
     else:
@@ -259,25 +228,25 @@ for k in (1, 2, 3, 4):
 # Roofline ceiling against MLPerf measurement (Napkin Math 12.1)
 # -----------------------------------------------------------------------------
 mfu_rows = [
-    dict(label="Roofline ceiling", value=K.ceiling_ips, color="compute",
-         text=f"{K.r(K.ceiling_ips, -2):,.0f} images/s", step=1),
-    dict(label="MLPerf, per H100", value=5000, color="danger",
-         text="about 5,000 (chapter estimate)", step=3, pending="???", pending_from=2),
+    dict(label="Roofline ceiling", value=CEIL, color="compute",
+         text=f"{val('ceiling_ips')} images/s", step=1),
+    dict(label="MLPerf, per H100", value=MEASURED, color="danger",
+         text=f"about {val('measured_ips')} (chapter estimate)", step=3, pending="???", pending_from=2),
 ]
 for k in (1, 2, 3, 4):
     fig, ax = plt.subplots(figsize=(5.8, 2.0))
     bars(ax, mfu_rows, k, xmax=56000)
     if k >= 3:
-        ax.annotate("", xy=(K.CHAPTER_IPS, 0.5), xytext=(K.ceiling_ips, 0.5),
+        ax.annotate("", xy=(MEASURED, 0.5), xytext=(CEIL, 0.5),
                     arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.4))
-        ax.text(K.ceiling_ips + 800, 0.5, f"{K.f(K.mfu_gap, 1)}× below", ha="left", va="center", fontsize=12,
+        ax.text(CEIL + 800, 0.5, f"{val('ceiling_gap')}× below", ha="left", va="center", fontsize=12,
                 fontweight="bold", color=C["text"])
     if k >= 4:
         ax.plot([K.ips64, K.ips8], [-0.42, -0.42], color=C["text"], lw=2)
         for x in (K.ips64, K.ips8):
             ax.plot([x, x], [-0.52, -0.32], color=C["text"], lw=2)
-        ax.text(K.ips8 + 550, -0.42, f"MLPerf v4.0 logs: {K.r(K.ips8, -1):,.0f} (8 GPUs), "
-                f"{K.r(K.ips64, -1):,.0f} (64 GPUs)",
+        ax.text(K.ips8 + 550, -0.42, f"MLPerf v4.0 logs: {val('ips8')} (8 GPUs), "
+                f"{val('ips64')} (64 GPUs)",
                 va="center", fontsize=11, color=C["text"])
     ax.set_ylim(-0.75, 1.6)
     ax.set_xlabel("Training throughput (images/s per H100)")
@@ -291,16 +260,16 @@ for k in (1, 2, 3):
     fig, axes = plt.subplots(1, 3, figsize=(4.3, 2.35),
                              gridspec_kw=dict(width_ratios=[3, 2, 2], wspace=0.5))
     a1, a2, a3 = axes
-    iso = [K.HOST_FP32, K.HOST_INT8, K.ACC_INT8]
+    iso = [m(B.host_fp32_latency, "ms"), m(B.host_int8_latency, "ms"), m(B.accelerator_latency, "ms")]
     a1.bar([0, 1, 2], iso, color=[C["data"], C["data"], C["compute"]], width=0.62)
-    for x, v in zip([0, 1, 2], iso):
-        a1.text(x, v + 1.5, f"{v:.0f} ms", ha="center", fontsize=10.5, fontweight="bold")
+    for x, v, key in zip([0, 1, 2], iso, ("edge_fp32", "edge_host", "edge_acc")):
+        a1.text(x, v + 1.5, f"{val(key)} ms", ha="center", fontsize=10.5, fontweight="bold")
     a1.set_xticks([0, 1, 2])
     a1.set_xticklabels(["CPU\nFP32", "CPU\nINT8", "Acc.\nINT8"], fontsize=10)
     a1.set_ylim(0, 62)
     a1.set_xlim(-0.65, 2.5)
     a1.set_title("Model only", fontsize=11.5, fontweight="bold")
-    a1.text(1.5, 30, f"{K.f(K.edge_isolated, 1)}×", ha="center", fontsize=13,
+    a1.text(1.5, 30, f"{val('edge_iso')}×", ha="center", fontsize=13,
             fontweight="bold", color=C["compute"])
     a1.set_ylabel("ms per inference", fontsize=10)
     for ax, shown in ((a2, k >= 2), (a3, k >= 3)):
@@ -309,13 +278,15 @@ for k in (1, 2, 3):
             sp_.set_alpha(al)
         ax.tick_params(colors=C["text"] if shown else "white")
     al2 = 1.0 if k >= 2 else 0.0
-    a2.bar([0, 1], [K.HOST_INT8, K.ACC_INT8], color=[C["data"], C["compute"]], width=0.62, alpha=al2)
-    a2.bar([0, 1], [K.E2E_HOST - K.HOST_INT8, K.E2E_ACC - K.ACC_INT8],
-           bottom=[K.HOST_INT8, K.ACC_INT8], color=C["network_l"], hatch="///",
+    model = [m(B.host_int8_latency, "ms"), m(B.accelerator_latency, "ms")]
+    e2e = [m(B.host_end_to_end, "ms"), m(B.accelerator_end_to_end, "ms")]
+    a2.bar([0, 1], model, color=[C["data"], C["compute"]], width=0.62, alpha=al2)
+    a2.bar([0, 1], [e2e[0] - model[0], e2e[1] - model[1]],
+           bottom=model, color=C["network_l"], hatch="///",
            edgecolor=C["network"], width=0.62, alpha=al2)
-    for x, v in zip([0, 1], [K.E2E_HOST, K.E2E_ACC]):
-        a2.text(x, v + 1.5, f"{v:.0f} ms", ha="center", fontsize=10.5, fontweight="bold", alpha=al2)
-    a2.text(0.5, 32, f"{K.f(K.edge_e2e, 0)}×", ha="center", fontsize=13, fontweight="bold",
+    for x, v, key in zip([0, 1], e2e, ("edge_e2e_host", "edge_e2e_acc")):
+        a2.text(x, v + 1.5, f"{val(key)} ms", ha="center", fontsize=10.5, fontweight="bold", alpha=al2)
+    a2.text(0.5, 32, f"{val('edge_e2e')}×", ha="center", fontsize=13, fontweight="bold",
             color=C["compute"], alpha=al2)
     a2.text(0.5, 47, "hatched:\nprep + link", ha="center", fontsize=9, color=C["network"], alpha=al2)
     a2.set_ylim(0, 62)
@@ -323,9 +294,9 @@ for k in (1, 2, 3):
     a2.set_xticklabels(["CPU", "Acc."], fontsize=10)
     a2.set_title("End to end", fontsize=11.5, fontweight="bold", alpha=al2)
     al3 = 1.0 if k >= 3 else 0.0
-    ev_ = [K.edge_e_host, K.edge_e_acc]
+    ev_ = [m(B.host_energy, "mJ"), m(B.accelerator_energy, "mJ")]
     a3.bar([0, 1], ev_, color=[C["data"], C["compute"]], width=0.62, alpha=al3)
-    for x, v in zip([0, 1], [f"{K.f(K.edge_e_host, 1)}", f"{K.f(K.edge_e_acc, 0)}"]):
+    for x, v in zip([0, 1], [val("edge_e_host"), val("edge_e_acc")]):
         a3.text(x, ev_[x] + 0.06, v, ha="center", fontsize=10.5, fontweight="bold", alpha=al3)
     a3.set_ylim(0, 2.5)
     a3.set_xlim(-0.6, 1.6)
@@ -341,11 +312,13 @@ for k in (1, 2, 3):
 # Same phone, same model, different software (Lee et al. 2019)
 # -----------------------------------------------------------------------------
 lee_rows = [
-    dict(label="iPhone Xs, TFLite GPU", value=2.3, color="compute", text="2.3 ms", step=1),
-    dict(label="iPhone Xs, Metal (MPSCNN)", value=4.1, color="compute", text="4.1 ms", step=1),
-    dict(label="iPhone Xs, Core ML", value=7.1, color="compute", text=f"7.1 ms  ({K.f(K.lee_xs, 1)}×)", step=1),
-    dict(label="Pixel 3, TFLite GPU", value=12.5, color="memory", text="12.5 ms", step=2),
-    dict(label="Pixel 3, TFLite CPU", value=51.7, color="memory", text=f"51.7 ms  ({K.f(K.lee_px3, 1)}×)", step=2),
+    dict(label="iPhone Xs, TFLite GPU", value=K.xs_tflite, color="compute", text=f"{val('xs_tflite')} ms", step=1),
+    dict(label="iPhone Xs, Metal (MPSCNN)", value=K.xs_metal, color="compute", text=f"{val('xs_metal')} ms", step=1),
+    dict(label="iPhone Xs, Core ML", value=K.xs_coreml, color="compute",
+         text=f"{val('xs_coreml')} ms  ({val('lee_xs')}×)", step=1),
+    dict(label="Pixel 3, TFLite GPU", value=K.px_gpu, color="memory", text=f"{val('px_gpu')} ms", step=2),
+    dict(label="Pixel 3, TFLite CPU", value=K.px_cpu, color="memory",
+         text=f"{val('px_cpu')} ms  ({val('lee_px')}×)", step=2),
 ]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -401,12 +374,12 @@ for k in (1, 2, 3, 4):
 for k in (1, 2):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.2, 2.3),
                                  gridspec_kw=dict(wspace=0.9, width_ratios=[1, 1.25]))
-    a1.bar([0, 1], [K.rtx_serial, K.RTX_OFF], color=[C["memory"], C["compute"]], width=0.62)
-    a1.text(0, K.rtx_serial + 1500, f"≈{K.r(K.rtx_serial, -1):,.0f}\n(derived)", ha="center", fontsize=10, fontweight="bold",
+    a1.bar([0, 1], [K.rtx_serial, K.rtx_off], color=[C["memory"], C["compute"]], width=0.62)
+    a1.text(0, K.rtx_serial + 1500, f"≈{val('rtx_serial')}\n(derived)", ha="center", fontsize=10, fontweight="bold",
             color=C["memory"])
-    a1.text(1, 44411 + 1500, "44,411", ha="center", fontsize=11, fontweight="bold",
+    a1.text(1, K.rtx_off + 1500, val("rtx_off"), ha="center", fontsize=11, fontweight="bold",
             color=C["compute"])
-    a1.text(0, 30000, f"{K.f(K.rtx_ratio, 1)}×", ha="center", fontsize=13, fontweight="bold")
+    a1.text(0, 30000, f"{val('rtx_ratio')}×", ha="center", fontsize=13, fontweight="bold")
     a1.set_xticks([0, 1])
     a1.set_xticklabels(["Single-\nStream", "Offline"], fontsize=10)
     a1.set_ylim(0, 55000)
@@ -416,11 +389,12 @@ for k in (1, 2):
     a1.set_title("1× RTX 4090", fontsize=12, fontweight="bold")
     al = 1.0 if k >= 2 else 0.0
     xs = [0, 0.78, 1.95, 2.73]
-    vals = [715761, 652002, 712859, 584161]
+    vals = [K.cisco_off, K.cisco_srv, K.quanta_off, K.quanta_srv]
     cols = [C["compute"], C["danger"], C["compute"], C["danger"]]
     a2.bar(xs, vals, color=cols, width=0.6, alpha=al)
-    for x, v, lab in zip(xs, vals, ["716k", f"652k\n−{K.f(100 * K.cisco_drop, 0)}%", "713k",
-                                          f"584k\n−{K.f(100 * K.quanta_drop, 0)}%"]):
+    kilo = [f"{v / 1000:.0f}k" for v in vals]
+    for x, v, lab in zip(xs, vals, [kilo[0], f"{kilo[1]}\n−{val('cisco_drop')}%", kilo[2],
+                                          f"{kilo[3]}\n−{val('quanta_drop')}%"]):
         a2.text(x, v + 15000, lab, ha="center", fontsize=9.5, fontweight="bold", alpha=al)
     a2.set_xticks(xs)
     a2.set_xticklabels(["Off.", "Srv.", "Off.", "Srv."], fontsize=10)
@@ -440,11 +414,13 @@ for k in (1, 2):
 # -----------------------------------------------------------------------------
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.65))
-    ax.barh(1, 0.10, color=C["compute"], height=0.55)
-    ax.text(0.103, 1, "0.10 Wh", va="center", fontsize=12, fontweight="bold", color=C["compute"])
-    parts = [(0.24 * 0.58, C["compute"], "accelerators 58%"),
-             (0.24 * 0.25, C["memory"], "host CPU, DRAM 25%"),
-             (0.24 * 0.17, C["neutral"], "idle, facility 17%")]
+    narrow, full = m(K.GEMINI.narrow, "Wh"), m(K.GEMINI.full, "Wh")
+    ax.barh(1, narrow, color=C["compute"], height=0.55)
+    ax.text(narrow + 0.003, 1, f"{val('gem_narrow')} Wh", va="center", fontsize=12, fontweight="bold",
+            color=C["compute"])
+    parts = [(full * K.GEMINI.share("Active AI"), C["compute"], f"accelerators {val('gem_accel')}%"),
+             (full * K.GEMINI.share("Active host"), C["memory"], f"host CPU, DRAM {val('gem_host')}%"),
+             (full * K.GEMINI.share("Idle", "Data center"), C["neutral"], f"idle, facility {val('gem_idle')}%")]
     left = 0
     for i, (w, col, lab) in enumerate(parts):
         c = col if k >= 2 else C["danger"]
@@ -453,7 +429,7 @@ for k in (1, 2):
             ax.text(left + w / 2, -0.52 if i != 1 else 0.48, lab, ha="center",
                     va="center", fontsize=10, color=col, fontweight="bold")
         left += w
-    ax.text(0.243, 0, f"0.24 Wh ({K.f(K.gem_ratio, 1)}×)", va="center", fontsize=12, fontweight="bold",
+    ax.text(full + 0.003, 0, f"{val('gem_full')} Wh ({val('gem_ratio')}×)", va="center", fontsize=12, fontweight="bold",
             color=C["danger"])
     ax.text(-0.004, 1, "Active accelerators only", ha="right", va="center", fontsize=12,
             fontweight="bold")
@@ -473,9 +449,9 @@ for k in (1, 2):
     # drawn for a 0.70-width column beside the phone photos
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.4, 2.4),
                                  gridspec_kw=dict(wspace=0.5, width_ratios=[1.5, 1]))
-    groups = [("iPhone\nCPU", K.XS_CPU0, K.XS_CPU1, f"+{K.f(100 * K.thr_cpu, 0)}%"),
-              ("iPhone\nGPU", K.XS_GPU0, K.XS_GPU1, f"+{K.f(100 * K.thr_gpu, 0)}%"),
-              ("Pixel 3\nGPU", 12.8, 12.8, "flat")]
+    groups = [("iPhone\nCPU", K.xs_cpu["start_ms"], K.xs_cpu["end_ms"], f"+{val('thr_cpu')}%"),
+              ("iPhone\nGPU", K.xs_gpu["start_ms"], K.xs_gpu["end_ms"], f"+{val('thr_gpu')}%"),
+              ("Pixel 3\nGPU", K.px3["start_ms"], K.px3["end_ms"], "flat")]
     for i, (lab, s0, s1, d) in enumerate(groups):
         a1.bar(i - 0.17, s0, width=0.32, color=C["memory"])
         a1.bar(i + 0.17, s1, width=0.32, color=C["danger"])
@@ -491,12 +467,13 @@ for k in (1, 2):
             transform=a1.transAxes, va="top")
     a1.set_title("iPhone Xs, Pixel 3 (approx.)", fontsize=10.5, fontweight="bold")
     al = 1.0 if k >= 2 else 0.0
-    a2.bar([0, 1, 2], [40.49, 24.96, 23.67], color=[C["memory"], C["compute"], C["danger"]],
+    toks = [K.tok["peak"], K.tok["warm"], K.tok["hot"]]
+    a2.bar([0, 1, 2], toks, color=[C["memory"], C["compute"], C["danger"]],
            width=0.62, alpha=al)
-    for x, v in zip([0, 1, 2], ["40.5", "25.0", "23.7"]):
-        a2.text(x, [40.49, 24.96, 23.67][x] + 1.2, v, ha="center", fontsize=10,
+    for x, v in zip([0, 1, 2], [val("tok_peak"), val("tok_warm"), val("tok_hot")]):
+        a2.text(x, toks[x] + 1.2, v, ha="center", fontsize=10,
                 fontweight="bold", alpha=al)
-    a2.text(2, 33, f"−{K.f(100 * K.thr_llm, 1)}%", ha="center", fontsize=10,
+    a2.text(2, 33, f"−{val('tok_loss')}%", ha="center", fontsize=10,
             fontweight="bold", color=C["danger"], alpha=al)
     a2.set_xticks([0, 1, 2])
     a2.set_xticklabels(["peak", "warm", "hot"], fontsize=10)
@@ -513,12 +490,14 @@ for k in (1, 2):
 # MLPerf Tiny v1.2, visual wake words: energy per inference
 # -----------------------------------------------------------------------------
 tiny_rows = [
-    dict(label="NDP9120, 30.7 MHz", value=71.711, color="data", text="72 µJ", step=1),
-    dict(label="NDP9120, 98.7 MHz", value=97.164, color="data",
-         text=f"97 µJ  ({K.f(K.tiny_speed, 1)}× faster)", step=1),
-    dict(label="STM32U575", value=1354.685, color="neutral", text="1,355 µJ", step=2),
-    dict(label="STM32H7A3", value=2965.461, color="neutral", text="2,965 µJ", step=2),
-    dict(label="STM32L4R5", value=3894.566, color="neutral", text=f"3,895 µJ  ({K.f(K.tiny_worst, 0)}×)", step=2),
+    dict(label=f"NDP9120, {val('syn_lo_mhz')} MHz", value=K.syn_lo["energy_uj"], color="data",
+         text=f"{val('syn_lo_uj')} µJ", step=1),
+    dict(label=f"NDP9120, {val('syn_hi_mhz')} MHz", value=K.syn_hi["energy_uj"], color="data",
+         text=f"{val('syn_hi_uj')} µJ  ({val('tiny_speed')}× faster)", step=1),
+    dict(label="STM32U575", value=K.stm["NUCLEO-U575ZI-Q"], color="neutral", text=f"{val('stm_lo')} µJ", step=2),
+    dict(label="STM32H7A3", value=K.stm["NUCLEO-H7A3ZI-Q"], color="neutral", text=f"{val('stm_mid')} µJ", step=2),
+    dict(label="STM32L4R5", value=K.stm["NUCLEO-L4R5ZI"], color="neutral",
+         text=f"{val('stm_hi')} µJ  ({val('tiny_worst')}×)", step=2),
 ]
 for k in (1, 2):
     # drawn for a 0.70-width column beside the Nucleo photo
@@ -532,11 +511,12 @@ for k in (1, 2):
 # Duty cycle: average power of a keyword spotter (Sec. 12.7.2)
 # -----------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(5.8, 0.75))
-ax.barh(0, K.duty_idle, color=C["neutral"], height=0.8)
-ax.barh(0, K.duty_active, left=K.duty_idle, color=C["compute"], height=0.8)
-ax.text(K.duty_idle / 2, 0, f"idle {K.f(K.duty_idle, 1)} mW ({K.f(100 * K.duty_idle_share, 0)}%)", ha="center", va="center", color="white",
+IDLE_MW, ACTIVE_MW = m(K.KWS.idle_contribution, "mW"), m(K.KWS.active_contribution, "mW")
+ax.barh(0, IDLE_MW, color=C["neutral"], height=0.8)
+ax.barh(0, ACTIVE_MW, left=IDLE_MW, color=C["compute"], height=0.8)
+ax.text(IDLE_MW / 2, 0, f"idle {val('kws_idle_mw')} mW ({val('kws_idle_share')}%)", ha="center", va="center", color="white",
         fontsize=13, fontweight="bold")
-ax.text(54, 0, f"+ active {K.f(K.duty_active, 1)} mW = {K.f(K.duty_avg, 1)} mW", va="center", fontsize=13,
+ax.text(54, 0, f"+ active {val('kws_active_mw')} mW = {val('kws_avg_mw')} mW", va="center", fontsize=13,
         fontweight="bold", color=C["compute"])
 ax.set_xlim(0, 100)
 ax.set_ylim(-0.5, 0.5)
@@ -548,7 +528,7 @@ sp.save(fig, out / "duty.svg")
 # -----------------------------------------------------------------------------
 sp.roofline_steps(out / "recall_roof", [
     ("ResNet-50", 3000.0, "compute"),
-], ridge=295.0, xticks=[1, 10, 100, 1000], ridge_label="ridge: 295",
+], ridge=num("h100_ridge"), xticks=[1, 10, 100, 1000], ridge_label=f"ridge: {val('h100_ridge')}",
     xlabel="FLOPs per byte (log scale)", note="Schematic", size=(4.2, 2.4))
 
 
@@ -557,23 +537,24 @@ sp.roofline_steps(out / "recall_roof", [
 # -----------------------------------------------------------------------------
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.0, 2.5))
-    ns = list(range(1, 101))
-    pr = [100 * (1 - 0.99 ** n) for n in ns]
+    N, N10 = K.FANOUT.n_components, K.fan10.n_components
+    ns = list(range(1, N + 1))
+    pr = [100 * (1 - K.FANOUT.variant(n_components=n).all_up) for n in ns]
     if k >= 2:
         ax.plot(ns, pr, color=C["danger"], lw=3)
-        ax.plot(100, pr[-1], "o", ms=10, color=C["danger"])
-        ax.text(97, pr[-1] + 4, f"100 shards: {pr[-1]:.0f}%", ha="right", fontsize=12,
+        ax.plot(N, pr[-1], "o", ms=10, color=C["danger"])
+        ax.text(97, pr[-1] + 4, f"{val('shards')} shards: {val('any_slow_pct')}%", ha="right", fontsize=12,
                 fontweight="bold", color=C["danger"])
-        ax.plot(10, pr[9], "o", ms=8, color=C["text"])
-        ax.text(14, 1.5, f"10 shards: {pr[9]:.1f}%", fontsize=11, color=C["text"],
+        ax.plot(N10, pr[N10 - 1], "o", ms=8, color=C["text"])
+        ax.text(14, 1.5, f"{val('shards10')} shards: {val('any_slow10_pct')}%", fontsize=11, color=C["text"],
                 fontweight="bold")
     else:
         ax.text(100, 50, "???", ha="right", fontsize=16, fontweight="bold", color=C["danger"])
-    ax.plot(1, 1, "o", ms=10, color=C["memory"])
-    ax.text(2, 30, "1 shard: 1%", fontsize=11, color=C["memory"], fontweight="bold")
+    ax.plot(1, pr[0], "o", ms=10, color=C["memory"])
+    ax.text(2, 30, f"1 shard: {val('shard_slow_pct')}%", fontsize=11, color=C["memory"], fontweight="bold")
     ax.set_xlim(0, 105)
     ax.set_ylim(0, 78)
-    ax.set_xlabel("Shards per request (each slow 1%)")
+    ax.set_xlabel(f"Shards per request (each slow {val('shard_slow_pct')}%)")
     ax.set_ylabel("requests slowed (%)")
     ax.grid(color=C["grid"], lw=0.6)
     sp.save(fig, out / f"fanout_step{k}.svg")
@@ -581,18 +562,17 @@ for k in (1, 2):
 # -----------------------------------------------------------------------------
 # Time to quality: one MLPerf Training v4.0 run (Eos, 8x H100, result_0)
 # -----------------------------------------------------------------------------
-import csv  # noqa: E402
-ev = list(csv.DictReader(open(out / "mlperf_v40_eos_result0_evals.csv")))
-tm = [float(r["minutes"]) for r in ev]
-ac = [float(r["top1"]) for r in ev]
+tm = [r["minutes"] for r in K.EVALS]
+ac = [r["top1"] for r in K.EVALS]
+TARGET = num("target_top1")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.15))
     ax.plot(tm, ac, "-o", color=C["memory"], lw=2.5, ms=7)
-    ax.axhline(75.9, color=C["danger"], lw=1.5, ls="--")
-    ax.text(0.3, 78.2, "target 75.9%", fontsize=11, color=C["danger"], fontweight="bold")
+    ax.axhline(TARGET, color=C["danger"], lw=1.5, ls="--")
+    ax.text(0.3, 78.2, f"target {val('target_top1')}%", fontsize=11, color=C["danger"], fontweight="bold")
     if k >= 2:
         ax.plot(tm[-1], ac[-1], "o", ms=12, color=C["danger"], zorder=5)
-        ax.annotate(f"time to quality: {tm[-1]:.2f} min\n(epoch 35, {ac[-1]:.2f}%)",
+        ax.annotate(f"time to quality: {val('ev_last_min')} min\n(epoch {val('ev_last_epoch')}, {val('ev_last_top1')}%)",
                     (tm[-1], ac[-1]), xytext=(-4, -78), textcoords="offset points",
                     ha="right", fontsize=11, fontweight="bold", color=C["danger"])
     ax.set_xlim(0, 14.2)
@@ -605,15 +585,13 @@ for k in (1, 2):
 # -----------------------------------------------------------------------------
 # Strong scaling: 8 against 64 H100s (MLPerf Training v4.0, NVIDIA Eos)
 # -----------------------------------------------------------------------------
-# run times, middle-three means, and per-GPU rates: calcs.py
-s8, s64, speed, eff = K.score8, K.score64, K.scale_speed, K.scale_eff
-ips8, ips64 = K.ips8, K.ips64
-print("scaling: %.2f -> %.2f min, %.2fx, efficiency %.0f%%, %.0f -> %.0f images/s per GPU" % (
-    s8, s64, speed, 100 * eff, ips8, ips64))
+# run times, middle-three means, and per-GPU rates: Scenarios.EosResNetStrongScalingMLPerfV40
+s8, s64 = m(K.EOS8.published_score, "minute"), m(K.EOS64.published_score, "minute")
+ideal = m(K.SCALING.ideal_time, "minute")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.0, 1.75))
-    rows = [("8 H100s", s8, "memory", f"{s8:.2f} min"),
-            ("64 H100s", s64, "compute", f"{s64:.2f} min ({speed:.1f}×)")]
+    rows = [("8 H100s", s8, "memory", f"{val('score8')} min"),
+            ("64 H100s", s64, "compute", f"{val('score64')} min ({val('scale_speed')}×)")]
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 1 - i
         shown = (i == 0) or k >= 2
@@ -623,16 +601,16 @@ for k in (1, 2):
         if not shown:
             ax.text(0.3, y, "???", va="center", fontsize=15, fontweight="bold", color=C["danger"])
         ax.text(-0.25, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
-    ax.plot([s8 / 8, s8 / 8], [-0.45, 0.45], color=C["text"], lw=2, ls=":",
+    ax.plot([ideal, ideal], [-0.45, 0.45], color=C["text"], lw=2, ls=":",
             alpha=1.0 if k >= 2 else 0.0)
-    ax.text(s8 / 8, -0.62, f"perfect 8×: {s8 / 8:.2f}", ha="center", va="top", fontsize=10,
+    ax.text(ideal, -0.62, f"perfect {val('scale_ratio')}×: {val('scale_ideal')}", ha="center", va="top", fontsize=10,
             color=C["text"], alpha=1.0 if k >= 2 else 0.0)
     ax.set_xlim(0, 19.5)
     ax.set_xticks([0, 5, 10, 15])
     ax.set_ylim(-1.0, 1.5)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Minutes to 75.9% top-1 (published)")
+    ax.set_xlabel(f"Minutes to {val('target_top1')}% top-1 (published)")
     sp.save(fig, out / f"scale_step{k}.svg")
 
 # -----------------------------------------------------------------------------
@@ -680,13 +658,13 @@ for k in (1, 2, 3, 4):
 # 3.1 cm tall) so every label stays at slide size.
 # -----------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(4.4, 1.15))
-ax.barh(1, K.hook_eff_ds, color=C["compute"], height=0.6)
-ax.barh(0, K.hook_eff_sus, color=C["danger"], height=0.6)
-ax.text(K.hook_eff_ds + 0.4, 1, f"{K.f(K.hook_eff_ds, 0)} TOPS/W", va="center", fontsize=11,
+ax.barh(1, EFF_DS, color=C["compute"], height=0.6)
+ax.barh(0, EFF_SUS, color=C["danger"], height=0.6)
+ax.text(EFF_DS + 0.4, 1, f"{val('hook_eff')} TOPS/W", va="center", fontsize=11,
         fontweight="bold", color=C["compute"])
-ax.text(K.hook_eff_sus + 0.4, 0, f"{K.f(K.hook_eff_sus, 1)} TOPS/W", va="center", fontsize=11,
+ax.text(EFF_SUS + 0.4, 0, f"{val('hook_sus_eff')} TOPS/W", va="center", fontsize=11,
         fontweight="bold", color=C["danger"])
-ax.text(12.5, 0, f"{K.f(K.hook_gap, 1)}× lower", va="center", fontsize=11,
+ax.text(12.5, 0, f"{val('hook_gap')}× lower", va="center", fontsize=11,
         fontweight="bold", color=C["text"])
 ax.text(-0.4, 1, "Datasheet", ha="right", va="center", fontsize=11, fontweight="bold")
 ax.text(-0.4, 0, "Sustained", ha="right", va="center", fontsize=11, fontweight="bold")
@@ -731,11 +709,8 @@ def _boundary(ax):      # a short bar against a longer stacked bar
 
 
 def _ttq(ax):           # accuracy climbing to a dashed target
-    import csv as _csv
-    ev = list(_csv.DictReader(open(out / "mlperf_v40_eos_result0_evals.csv")))
-    ax.plot([float(r["minutes"]) for r in ev], [float(r["top1"]) for r in ev],
-            "-", color=C["memory"], lw=2)
-    ax.axhline(75.9, color=C["danger"], lw=1.2, ls="--")
+    ax.plot(tm, ac, "-", color=C["memory"], lw=2)
+    ax.axhline(TARGET, color=C["danger"], lw=1.2, ls="--")
     ax.set_ylim(25, 82)
 
 

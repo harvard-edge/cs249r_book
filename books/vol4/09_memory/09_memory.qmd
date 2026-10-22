@@ -148,41 +148,27 @@ class AisleKalman:
     """Scalar predict, update, two-sensor fusion, and a misdated update on the rack-end distance."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    sigma_prior = 20.0 * millimeter  # category: illustrative (posterior from the previous sweep)
-    sigma_v = 0.1 * meter / second  # category: illustrative (odometry speed error, e.g. wheel slip)
+    FUSION = Scenarios.WarehouseRackEndRangeFusion  # category: illustrative (prior, speed disturbance, stereo rig; MLSysIM scenario)
+    sigma_prior = FUSION.prior_sigma  # category: illustrative (posterior from the previous sweep)
+    sigma_v = FUSION.speed_sigma  # category: illustrative (odometry speed error, e.g. wheel slip)
     dt = (1 / RM.lidar.scan_rate).to(millisecond)  # category: datasheet (one 20 Hz sweep; LidarSweep.t_sweep in @sec-perception)
     sigma_lidar = RM.lidar.range_precision_max  # category: datasheet (OS1 precision, worst case, 1 sigma)
     bias_r = RM.lidar.range_accuracy  # category: datasheet (OS1 accuracy, a bias the filter cannot represent)
     z = AISLE.d_clear  # category: illustrative (range to the upright)
-    b = 0.20 * meter  # category: illustrative (stereo baseline; StereoDepthError.b in @sec-perception-error-clearance)
-    f_px = 800.0  # category: illustrative (focal length, pixels; StereoDepthError.f_px)
-    sigma_d_px = 0.5  # category: illustrative (disparity standard deviation, pixels; StereoDepthError.sigma_d_px)
-    tau_recv = (RM.nav_camera.exposure_time / 2 + RM.nav_camera.readout_time + AISLE.t_transport + AISLE.t_dma).to(
-        millisecond
-    )  # category: derived (ArrivalStampOffset.tau_recv in @sec-perception-handoff)
-    bias_misdate = calc_spatial_information_age_displacement(RM.base.max_velocity, tau_recv).to(
-        millimeter
-    )  # category: derived (arrival-stamp travel)
+    tau_recv = FUSION.age.result.arrival_offset.to(millisecond)  # category: derived (ArrivalStampOffset.tau_recv in @sec-perception-handoff)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    mm2 = millimeter**2
-    P0 = sigma_prior.to(millimeter) ** 2
-    q = ((sigma_v * dt).to(millimeter)) ** 2
-    P_pred = (P0 + q).to(mm2)
-    R_lidar = sigma_lidar.to(millimeter) ** 2
-    g_lidar = (P_pred / (P_pred + R_lidar)).to(dimensionless).magnitude
-    P_lidar = ((1 - g_lidar) * P_pred).to(mm2)
-    sigma_stereo = (z**2 * sigma_d_px / (f_px * b)).to(millimeter)
-    R_stereo = sigma_stereo**2
-    S_stereo = (P_lidar + R_stereo).to(mm2)
-    g_stereo = (P_lidar / S_stereo).to(dimensionless).magnitude
-    P_fused = ((1 - g_stereo) * P_lidar).to(mm2)
-    sigma_pred = P_pred**0.5
-    sigma_lidar_post = P_lidar**0.5
-    sigma_fused = P_fused**0.5
-    bias_post = (g_stereo * bias_misdate).to(millimeter)
-    bias_in_sigmas = (bias_post / sigma_fused).to(dimensionless).magnitude
-    nis_expected = 1 + (bias_misdate.to(millimeter) ** 2 / S_stereo).to(dimensionless).magnitude
+    R = FUSION.result
+    bias_misdate = R.misdating_bias  # arrival-stamp travel at the drive limit
+    sigma_pred = R.predicted_sigma
+    g_lidar = R.first_gain
+    sigma_lidar_post = R.first_sigma
+    sigma_stereo = R.second_sensor_sigma
+    g_stereo = R.second_gain
+    sigma_fused = R.fused_sigma
+    bias_post = R.misdated_shift
+    bias_in_sigmas = R.misdated_shift_sigmas
+    nis_expected = R.nis_expected
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dt.magnitude - 50.0) < 1e-9, f"Sweep period must match the perception chapter's 50 ms: {dt}")
@@ -203,7 +189,7 @@ class AisleKalman:
     sigma_prior_str = fmt_length(sigma_prior, unit=millimeter, precision=0)
     sigma_v_str = fmt(sigma_v.to(meter / second).magnitude, precision=1)
     dt_str = fmt_latency(dt, unit=millisecond, precision=0)
-    sigma_w_str = fmt_length((sigma_v * dt).to(millimeter), unit=millimeter, precision=0)
+    sigma_w_str = fmt_length(R.process_sigma, unit=millimeter, precision=0)
     sigma_pred_str = fmt_length(sigma_pred, unit=millimeter, precision=1)
     sigma_lidar_str = fmt_length(sigma_lidar, unit=millimeter, precision=0)
     g_lidar_str = fmt(g_lidar, precision=2)
@@ -258,18 +244,19 @@ class ImuErrorGrowth:
     b_gyro = imu.gyro_zero_rate_offset.to("deg/s").magnitude  # category: datasheet (BMI088 typical zero-rate offset, offset cancellation off)
     n_acc = (imu.accel_noise_density / g0).to("Hz**-0.5").magnitude  # category: datasheet (BMI088 accel noise density X/Y, in g/sqrt(Hz))
     b_acc = (imu.accel_zero_g_offset / g0).to("dimensionless").magnitude  # category: datasheet (BMI088 typical zero-g offset, in g)
-    t_coast = 1.0 * second  # category: illustrative (interval without a range update)
+    t_coast = Scenarios.WarehouseImuOneSecondCoast.duration  # category: illustrative (interval without a range update)
     z = AISLE.d_clear  # category: illustrative (rack-end distance)
     delta_loc = AISLE.delta_loc  # category: illustrative (along-travel localization allowance)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     T = t_coast.to(second).magnitude
-    ang_noise_deg = n_gyro * math.sqrt(T)
-    ang_bias_deg = b_gyro * T
-    lat_bias = (z * math.sin(math.radians(ang_bias_deg))).to(millimeter)
-    pos_noise = (n_acc * g0 * math.sqrt(T**3 / 3.0) * second**2).to(millimeter)
-    pos_bias = (0.5 * b_acc * g0 * t_coast**2).to(millimeter)
-    bias_over_loc = (pos_bias / delta_loc).to(dimensionless).magnitude
+    R = Scenarios.WarehouseImuOneSecondCoast.result
+    ang_noise_deg = R.heading_noise.to("deg").magnitude
+    ang_bias_deg = R.heading_bias.to("deg").magnitude
+    lat_bias = R.lateral_bias
+    pos_noise = R.position_noise
+    pos_bias = R.position_bias
+    bias_over_loc = R.bias_over_reference
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ang_noise_deg - 0.014) < 1e-9, f"Unexpected gyro-noise angle: {ang_noise_deg}")
@@ -412,10 +399,10 @@ Catching an overconfident covariance like the misdated stereo filter's requires 
 # │ Show:    mean-NEES band 0.65 to 1.43 (N = 50, scalar, 95 percent); NIS
 # │          gates 3.84 and 6.63, which one misdated update exceeds with
 # │          probability 0.63 and 0.39.
-# │ How:     chi-squared quantiles (scipy.stats.chi2); noncentral chi-squared
-# │          survival (scipy.stats.ncx2) for the misdated update's NIS.
+# │ How:     Scenarios.RackEndMisdatedUpdateConsistency: chi-squared quantiles
+# │          for the band and gates; noncentral chi-squared survival for the
+# │          misdated update's NIS (physics/statistics.py).
 # └─────────────────────────────────────────────────────────────────────────────
-from scipy.stats import chi2, ncx2
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
@@ -424,19 +411,17 @@ class EstimatorConsistency:
     """Acceptance bands and single-update gates for testing an estimator's covariance."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_runs = 50  # category: chosen (qualification runs with ground truth)
-    n_dim = 1  # category: derived (scalar rack-end distance)
-    conf = 0.95  # category: chosen (two-sided acceptance level)
+    CONSISTENCY = Scenarios.RackEndMisdatedUpdateConsistency  # category: chosen (campaign size, levels; MLSysIM scenario)
+    n_runs = CONSISTENCY.runs  # category: chosen (qualification runs with ground truth)
+    n_dim = CONSISTENCY.dimension  # category: derived (scalar rack-end distance)
+    conf = CONSISTENCY.confidence  # category: chosen (two-sided acceptance level)
     nis_expected = AisleKalman.nis_expected  # category: derived (misdated stereo update)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dof = n_runs * n_dim
-    nees_lo = chi2.ppf((1 - conf) / 2, dof) / n_runs
-    nees_hi = chi2.ppf(1 - (1 - conf) / 2, dof) / n_runs
-    nis_95 = chi2.ppf(0.95, n_dim)
-    nis_99 = chi2.ppf(0.99, n_dim)
-    p_catch_95 = ncx2.sf(nis_95, n_dim, nis_expected - n_dim)
-    p_catch_99 = ncx2.sf(nis_99, n_dim, nis_expected - n_dim)
+    R = CONSISTENCY.result
+    nees_lo, nees_hi = R.band_low, R.band_high
+    nis_95, nis_99 = R.gates
+    p_catch_95, p_catch_99 = R.detection
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(nees_lo - 0.65) < 0.005 and abs(nees_hi - 1.43) < 0.005, f"Unexpected NEES band: {nees_lo}, {nees_hi}")
@@ -528,8 +513,8 @@ class OosmBuffer:
     t_buffer = Embodied.Scenario.WarehouseAisle.perception_age  # category: derived (observation age at dispatch, @sec-perception-latency-waterfall)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dt_imu = (1 / f_imu).to(millisecond)
-    n_buffer = math.ceil((t_buffer / dt_imu).to(dimensionless).magnitude)
+    dt_imu = Scenarios.WarehouseObservationReplayBuffer.result.sample_period
+    n_buffer = Scenarios.WarehouseObservationReplayBuffer.result.slots
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_buffer * dt_imu >= t_buffer, "The buffer must reach back at least one observation age.")
@@ -566,7 +551,8 @@ End-to-end vision-language-action (VLA) policies confront this identical out-of-
 # │          printing the answer: with the stereo spread doubled, stereo still
 # │          dominates the fused estimate.
 # │ Show:    nothing (guards only); the item quotes AisleKalman's strings.
-# │ How:     g = P / (P + (2 sigma_stereo)^2) with P the LiDAR posterior.
+# │ How:     Scenarios.WarehouseRackEndRangeFusion's comparison update:
+# │          g = P / (P + (2 sigma_stereo)^2) with P the LiDAR posterior.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check
 from mlsysim.core.units import dimensionless
@@ -575,13 +561,11 @@ class EstimatorCheckpoint:
     """Guards for the estimator checkpoint's estimate item (answers stay private)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    factor = 2.0  # category: chosen (checkpoint given: stereo spread doubled)
+    factor = Scenarios.WarehouseRackEndRangeFusion.comparison_scale  # category: chosen (checkpoint given: stereo spread doubled)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    P = AisleKalman.P_lidar
-    R = (factor * AisleKalman.sigma_stereo) ** 2
-    g = (P / (P + R)).to(dimensionless).magnitude
-    sigma = ((1 - g) * P) ** 0.5
+    g = Scenarios.WarehouseRackEndRangeFusion.result.comparison_gain
+    sigma = Scenarios.WarehouseRackEndRangeFusion.result.comparison_sigma
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.5 < g < AisleKalman.g_stereo, f"Doubled stereo spread must lower the gain yet keep stereo dominant: {g}")
@@ -659,12 +643,12 @@ class SyncTravel:
     """Clearance term the clock-conversion bound adds at the drive limit."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    eps_sync = 0.2 * millisecond  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
+    eps_sync = Embodied.Scenario.WarehouseAisle.clock_conversion_bound  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
     v_rel = Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity  # category: datasheet (base drive limit)
     delta_loc = Embodied.Scenario.WarehouseAisle.delta_loc  # category: illustrative (localization bound)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_sync = (v_rel * eps_sync).to(millimeter)
+    d_sync = Scenarios.WarehouseLidarClockConversion.result.bound_travel  # v_rel x eps_sync
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(d_sync.magnitude - 0.3) < 1e-9, f"Sync travel at the drive limit should be 0.3 mm: {d_sync}")
@@ -702,12 +686,13 @@ from mlsysim.fmt import fmt_latency, check
 
 class MemoryEpochAlignment:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    t1 = 12.0 * millisecond  # category: illustrative (tactile array latches force)
-    t2 = 18.5 * millisecond  # category: illustrative (camera exposure midpoint)
-    t3 = 21.0 * millisecond  # category: illustrative (encoders sample angles)
+    EPOCHS = Scenarios.ArmSensorEpochGap.epochs  # category: illustrative (MLSysIM scenario)
+    t1 = EPOCHS["tactile"]  # category: illustrative (tactile array latches force)
+    t2 = EPOCHS["camera"]  # category: illustrative (camera exposure midpoint)
+    t3 = EPOCHS["encoders"]  # category: illustrative (encoders sample angles)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    gap = abs(t3 - t2).to(millisecond)
+    gap = Scenarios.ArmSensorEpochGap.result.gap
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(t1 < t2 < t3, "The illustrative epochs must be in sampling order.")
@@ -748,7 +733,7 @@ class EpochGapTravel:
     gap = MemoryEpochAlignment.gap  # category: illustrative (camera-to-encoder gap)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_gap = (v_cart * gap).to(millimeter)
+    d_gap = Scenarios.ArmSensorEpochGap.result.travel  # v_cart x gap
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(d_gap.magnitude - 4.25) < 1e-9, f"Gap travel should be 4.25 mm: {d_gap}")
@@ -908,19 +893,21 @@ AISLE = Embodied.Scenario.WarehouseAisle
 
 class LatchTransformStaleness:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    STALE = Scenarios.LatchSlotStaleWristTransform  # category: illustrative (MLSysIM scenario)
     frame_rate = RM.wrist_camera.frame_rate  # category: datasheet (wrist camera)
-    e0 = 0.1 * millimeter  # category: illustrative (finger-to-slot error at the wrist capture)
-    v_drift = 12.0 * millimeter / second  # category: illustrative (unobserved lateral velocity error bound)
-    e_max = 1.0 * millimeter  # category: illustrative (latch-release slot tolerance)
-    lever = 0.15 * meter  # category: illustrative (wrist-to-fingertip lever arm)
-    omega = 0.30 * radian / second  # category: illustrative (wrist rate while aligning the finger)
+    e0 = STALE.belief.initial_error  # category: illustrative (finger-to-slot error at the wrist capture)
+    v_drift = STALE.belief.growth_rate  # category: illustrative (unobserved lateral velocity error bound)
+    e_max = STALE.belief.tolerance  # category: illustrative (latch-release slot tolerance)
+    lever = STALE.lever  # category: illustrative (wrist-to-fingertip lever arm)
+    omega = STALE.angular_rate  # category: illustrative (wrist rate while aligning the finger)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    dt = (1 / frame_rate).to(millisecond)
-    e_trans = (v_drift * dt).to(millimeter)
-    e_rot = (lever * omega * dt / radian).to(millimeter)
-    e_tool = (e0 + e_trans + e_rot).to(millimeter)
-    ratio = (e_tool / e_max).to(dimensionless).magnitude
+    R = STALE.result
+    dt = R.interval
+    e_trans = R.drift_term
+    e_rot = R.lever_term
+    e_tool = R.total
+    ratio = 1 + R.over_tolerance
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(dt.magnitude - 16.667) < 1e-3, f"Wrist-camera frame period should be 16.7 ms, got {dt}.")
@@ -947,7 +934,7 @@ The vulnerability of high-precision manipulation to transform staleness becomes 
 
 The kinematic lever arm magnifies this displacement substantially. With the fingertip positioned at a distance $\LeverArmLength =$ `{python} LatchTransformStaleness.lever_str` beyond the wrist joint, an alignment rotation at angular rate $\JointAngularRate =$ `{python} LatchTransformStaleness.omega_str` sweeps the tip through an arc of $\LeverArmSweepError \approx \LeverArmLength\,\JointAngularRate\,\FiniteChange \TimeInstant =$ `{python} LatchTransformStaleness.e_rot_str`. The optical encoders register the wrist rotation correctly; the error comes from what the rotation is applied to. The cached camera-to-slot transform states where the slot sat relative to the camera at the previous frame, and the camera rides on the wrist. Application code that chains that cached transform with the current wrist pose therefore swings the computed slot along with the wrist, while the real slot, fixed in the door, stays where it was. The result is a hybrid pose that the arm never occupied. Correcting this error requires either querying the kinematic chain at the exact capture epoch of the camera frame or expiring the stale transform outright. Unchecked, the stale transform displaces the estimated finger position by $\ToolPositionError \approx \InitialTrackingError + \TranslationalDriftError + \LeverArmSweepError =$ `{python} LatchTransformStaleness.e_tool_str`, which exceeds the mechanical tolerance by `{python} LatchTransformStaleness.ratio_pct_str`. The lever arm contributes over three times as much error as translational drift alone. Because the matrix multiplications complete without raising a runtime exception, the control loop blindly aligns the tool to an invalid target, driving the finger into the surrounding strike plate.
 
-::: {#fig-frame-staleness-error data-explore="mechanism-scene" data-explore-key="vol4:fig-frame-staleness-error" fig-env="figure" fig-pos="t" fig-cap="**Transform staleness and lever-arm error at the latch-release slot**: Illustrative finger error over one frame period, with zero ingestion delay assumed to isolate this contribution. A deployed calculation must use full capture-to-use age. The camera-to-slot edge ages by duration $\\FiniteChange \\TimeInstant$. Lateral drift at the velocity bound $\\DriftSpeedBound$ moves the finger by $\\TranslationalDriftError = \\DriftSpeedBound\\,\\FiniteChange \\TimeInstant$, while the wrist turning at $\\JointAngularRate$ swings the fingertip, a lever arm $\\LeverArmLength$ beyond it, by $\\LeverArmSweepError \\approx \\LeverArmLength\\,\\JointAngularRate\\,\\FiniteChange \\TimeInstant$. Composing the stale edge with the current wrist pose adds both to the initial error $\\InitialTrackingError$, so the finger error $\\ToolPositionError \\approx \\InitialTrackingError + \\TranslationalDriftError + \\LeverArmLength\\,\\FiniteChange\\JointAngle$ exceeds the slot tolerance $\\PositionalTaskTolerance$." fig-alt="Transform staleness at the latch-release slot. A dashed ghost arm shows the wrist and finger as dated by the stale edge at t0, with a dashed circle marking the slot tolerance r_tol around the finger. The current arm at t0 + Δt shows the wrist shifted laterally by e_trans = v_drift Δt and the link of length r_arm turned by Δθ_joint = ω Δt, which swings the finger by e_rot ≈ r_arm Δθ_joint. A red vector from the stale finger position to the current finger, labeled e_tool ≈ e_0 + e_trans + r_arm Δθ_joint, ends well outside the r_tol circle."}
+::: {#fig-frame-staleness-error data-explore="original-v4-frame-staleness-error" data-explore-key="vol4:fig-frame-staleness-error" fig-env="figure" fig-pos="t" fig-cap="**Transform staleness and lever-arm error at the latch-release slot**: Illustrative finger error over one frame period, with zero ingestion delay assumed to isolate this contribution. A deployed calculation must use full capture-to-use age. The camera-to-slot edge ages by duration $\\FiniteChange \\TimeInstant$. Lateral drift at the velocity bound $\\DriftSpeedBound$ moves the finger by $\\TranslationalDriftError = \\DriftSpeedBound\\,\\FiniteChange \\TimeInstant$, while the wrist turning at $\\JointAngularRate$ swings the fingertip, a lever arm $\\LeverArmLength$ beyond it, by $\\LeverArmSweepError \\approx \\LeverArmLength\\,\\JointAngularRate\\,\\FiniteChange \\TimeInstant$. Composing the stale edge with the current wrist pose adds both to the initial error $\\InitialTrackingError$, so the finger error $\\ToolPositionError \\approx \\InitialTrackingError + \\TranslationalDriftError + \\LeverArmLength\\,\\FiniteChange\\JointAngle$ exceeds the slot tolerance $\\PositionalTaskTolerance$." fig-alt="Transform staleness at the latch-release slot. A dashed ghost arm shows the wrist and finger as dated by the stale edge at t0, with a dashed circle marking the slot tolerance r_tol around the finger. The current arm at t0 + Δt shows the wrist shifted laterally by e_trans = v_drift Δt and the link of length r_arm turned by Δθ_joint = ω Δt, which swings the finger by e_rot ≈ r_arm Δθ_joint. A red vector from the stale finger position to the current finger, labeled e_tool ≈ e_0 + e_trans + r_arm Δθ_joint, ends well outside the r_tol circle."}
 ![](images/svg/fig09_frame_staleness_error.svg){width="62%"}
 :::
 
@@ -998,26 +985,29 @@ class OdometryDrift:
     # Table I, experiment 1 (Fig. 11): TRC LabMate differential-drive base, bidirectional
     # 4 m x 4 m square path at 0.2 m/s with on-the-spot turns; E_max,syst before and after
     # calibration of wheelbase and wheel-diameter ratio; run-to-run std. dev. about 25 mm.
-    square_side = 4.0 * meter  # category: literature (UMBmark leg length)
-    n_legs = 4  # category: literature (legs per square run)
-    e_uncal = 317.0 * millimeter  # category: literature (E_max,syst, uncalibrated)
-    e_cal = 21.0 * millimeter  # category: literature (E_max,syst, calibrated)
-    sigma_run = 25.0 * millimeter  # category: literature (return-error std. dev., "about 25 mm")
-    v_test = 0.2 * (meter / second)  # category: literature (test speed on straight legs)
+    # Values from Literature.RobotPerception via Scenarios.WarehouseUmbmarkOdometryDrift.
+    UMB = Scenarios.WarehouseUmbmarkOdometryDrift
+    square_side = UMB.square_side  # category: literature (UMBmark leg length)
+    n_legs = UMB.legs  # category: literature (legs per square run)
+    e_uncal = UMB.return_error_uncalibrated  # category: literature (E_max,syst, uncalibrated)
+    e_cal = UMB.return_error_calibrated  # category: literature (E_max,syst, calibrated)
+    sigma_run = UMB.run_sigma  # category: literature (return-error std. dev., "about 25 mm")
+    v_test = UMB.test_speed  # category: literature (test speed on straight legs)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    path_length = (n_legs * square_side).to(meter)
-    eps_uncal = (e_uncal / path_length).to(dimensionless).magnitude
-    eps_cal = (e_cal / path_length).to(dimensionless).magnitude
-    d_uncal = (delta_loc / eps_uncal).to(meter)
-    d_cal = (delta_loc / eps_cal).to(meter)
-    t_uncal = (d_uncal / v_aisle).to(second)
-    t_cal = (d_cal / v_aisle).to(second)
-    e_aisle_uncal = (eps_uncal * aisle_length).to(millimeter)
-    e_aisle_cal = (eps_cal * aisle_length).to(millimeter)
-    aisle_ratio_uncal = (e_aisle_uncal / delta_loc).to(dimensionless).magnitude
-    cal_gain = (e_uncal / e_cal).to(dimensionless).magnitude
-    speed_ratio = (v_aisle / v_test).to(dimensionless).magnitude
+    R = UMB.result
+    path_length = R.path_length
+    eps_uncal = R.rate_uncalibrated
+    eps_cal = R.rate_calibrated
+    d_uncal = R.distance_uncalibrated
+    d_cal = R.distance_calibrated
+    t_uncal = R.time_uncalibrated
+    t_cal = R.time_calibrated
+    e_aisle_uncal = R.segment_error_uncalibrated
+    e_aisle_cal = R.segment_error_calibrated
+    aisle_ratio_uncal = R.segment_over_bound_uncalibrated
+    cal_gain = R.calibration_gain
+    speed_ratio = R.speed_ratio
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(path_length.magnitude - 16.0) < 1e-9, f"UMBmark path should be 16 m, got {path_length}.")
@@ -1145,24 +1135,24 @@ The laboratory rates above isolate the systematic part of wheel-odometry error o
 # │       Embodied.Scenario.WarehouseAisle; d = delta_loc / eps.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Embodied, Literature
+from mlsysim import Embodied, Literature, Scenarios
 from mlsysim.core.units import meter
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class KittiDrift:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     AISLE = Embodied.Scenario.WarehouseAisle
-    rows = Literature.KittiOdometry.entries
+    rows = Scenarios.WarehouseKittiOdometryDrift.entries  # Literature.KittiOdometry
     delta_loc_m = AISLE.delta_loc.to(meter).magnitude
     aisle_m = AISLE.aisle_length.to(meter).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    stereo = np.array([r["translation_err_pct"] for r in rows if r["sensor_group"] == "stereo"])
-    laser = np.array([r["translation_err_pct"] for r in rows if r["sensor_group"] == "laser"])
-    best = min(stereo.min(), laser.min())
-    d_best = delta_loc_m / (best / 100)
-    d_stereo_med = delta_loc_m / (np.median(stereo) / 100)
-    d_laser_med = delta_loc_m / (np.median(laser) / 100)
+    R = Scenarios.WarehouseKittiOdometryDrift.result
+    best = R.best_pct
+    stereo_med, laser_med = R.stereo_median_pct, R.laser_median_pct
+    d_best = R.distance_best.to(meter).magnitude
+    d_stereo_med = R.distance_stereo_median.to(meter).magnitude
+    d_laser_med = R.distance_laser_median.to(meter).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(d_best < aisle_m, "Prose says even the best method spends the bound within one aisle")
@@ -1173,8 +1163,8 @@ class KittiDrift:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_ranked_str = fmt_int(len(rows))
     best_pct_str = fmt(best, precision=2)
-    stereo_med_str = fmt(round(float(np.median(stereo)), 2), precision=2)
-    laser_med_str = fmt(round(float(np.median(laser)), 2), precision=2)
+    stereo_med_str = fmt(round(float(stereo_med), 2), precision=2)
+    laser_med_str = fmt(round(float(laser_med), 2), precision=2)
     d_best_str = fmt_int(round(d_best))
     d_stereo_med_str = fmt_int(round(d_stereo_med))
     d_laser_med_str = fmt_int(round(d_laser_med))
@@ -1277,7 +1267,8 @@ At the metric layer, a clearance query along a warehouse aisle demands a single,
 # │ Show:    the per-query read budget on the permission MCU; reads for a
 # │          dense occupancy scan, a worst-case octree scan, and an ESDF
 # │          lookup at 2, 5, and 10 cm; snapshot bytes against MCU SRAM.
-# │ How:     reads budget = t_query x SRAM bandwidth / cell bytes;
+# │ How:     Scenarios.WarehousePermissionClearanceQuery (ClearanceQueryModel):
+# │          reads budget = t_query x SRAM bandwidth / cell bytes;
 # │          occupancy scan = (4/3) pi ((r_hull + delta_margin) / r)^3 cells;
 # │          octree = scan x ceil(log2(L_map / r)) dependent reads;
 # │          ESDF = 8 geometric reads (plus fixed header checks); payload = V_slab / r^3 x
@@ -1291,51 +1282,46 @@ from mlsysim.core.units import byte, centimeter, dimensionless, kilobyte, kilohe
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
-def _representation_rows(pitches_cm, reach, l_map, v_slab, s_esdf, s_occ, n_trilinear):
-    rows = {}
-    for cm in pitches_cm:
-        r = cm * centimeter
-        scan = 4 / 3 * math.pi * (reach / r).to(dimensionless).magnitude ** 3
-        depth = math.ceil(math.log2((l_map / r).to(dimensionless).magnitude))
-        cells = (v_slab / r**3).to(dimensionless).magnitude
-        rows[cm] = dict(
-            occ_reads=scan,
-            depth=depth,
-            oct_reads=scan * depth,
-            esdf_reads=n_trilinear,
-            esdf_bytes=(cells * s_esdf).to(kilobyte),
-            occ_bytes=(cells * s_occ).to(kilobyte),
-            quant=(math.sqrt(3) / 2 * r).to(millimeter),
-        )
-    return rows
-
 class RepresentationQuery:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    QUERY = Scenarios.WarehousePermissionClearanceQuery  # category: illustrative (allocation, hulls, cell layouts; MLSysIM scenario)
     f_tick = RM.permission_rate  # category: chosen (permission-loop rate)
-    t_reflex = 100 * microsecond  # category: chosen (collision-check allocation within the permission tick)
-    n_hulls = 50  # category: illustrative (sphere hulls covering the machine, worked case)
-    n_hulls_min = 20  # category: illustrative (fewest evaluation spheres considered)
-    r_hull = 0.25 * meter  # category: illustrative (sphere-hull radius)
+    t_reflex = QUERY.collision_allocation  # category: chosen (collision-check allocation within the permission tick)
+    n_hulls = QUERY.hulls  # category: illustrative (sphere hulls covering the machine, worked case)
+    n_hulls_min = QUERY.fewest_hulls  # category: illustrative (fewest evaluation spheres considered)
+    r_hull = QUERY.hull_radius  # category: illustrative (sphere-hull radius)
     delta_margin = AISLE.delta_margin  # category: chosen (protective clearance)
     sram_bw = RM.permission_mcu.memory.sram_bandwidth  # category: datasheet (permission MCU SRAM, reference class)
     sram_cap = RM.permission_mcu.memory.sram_capacity  # category: datasheet (permission MCU SRAM, reference class)
-    s_esdf = 8 * byte  # category: illustrative (4 B distance, 2 B weight, 2 B evidence epoch)
-    s_occ = 4 * byte  # category: illustrative (2 B log-odds, 2 B evidence epoch)
-    l_map = 10.0 * meter  # category: illustrative (host-map edge, the 10 m workcell below)
+    s_esdf = QUERY.esdf_cell_bytes  # category: illustrative (4 B distance, 2 B weight, 2 B evidence epoch)
+    s_occ = QUERY.occupancy_cell_bytes  # category: illustrative (2 B log-odds, 2 B evidence epoch)
+    l_map = QUERY.map_edge  # category: illustrative (host-map edge, the 10 m workcell below)
     aisle_width = AISLE.aisle_width  # category: illustrative (aisle width)
     d_clear = AISLE.d_clear  # category: illustrative (clear distance ahead)
-    h_slab = 2.0 * meter  # category: chosen (snapshot height covering the arm's reach)
-    pitches_cm = (2, 5, 10)  # category: chosen (voxel pitches compared)
-    n_trilinear = 8  # category: derived (corner cells of one trilinear interpolation)
+    h_slab = QUERY.slab_height  # category: chosen (snapshot height covering the arm's reach)
+    n_trilinear = QUERY.trilinear_reads  # category: derived (corner cells of one trilinear interpolation)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    t_tick = (1 / f_tick).to(microsecond)
-    frac_spare = 1 - (t_reflex / t_tick).to(dimensionless).magnitude  # tick left for other permission work
-    t_query = (t_reflex / n_hulls).to(microsecond)
-    reads_budget = (t_query * sram_bw / s_esdf).to(dimensionless).magnitude
-    reach = (r_hull + delta_margin).to(meter)
-    v_slab = (aisle_width * d_clear * h_slab).to(meter**3)
-    rows = _representation_rows(pitches_cm, reach, l_map, v_slab, s_esdf, s_occ, n_trilinear)
+    R = QUERY.result
+    pitches_cm = tuple(R.rows)  # voxel pitches compared, cm
+    t_tick = R.tick
+    frac_spare = R.tick_spare_share  # tick left for other permission work
+    t_query = R.query_time
+    reads_budget = R.reads_budget
+    reach = R.reach
+    v_slab = R.slab_volume
+    rows = {
+        cm: dict(
+            occ_reads=row.occupancy_reads,
+            depth=row.octree_depth,
+            oct_reads=row.octree_reads,
+            esdf_reads=row.esdf_reads,
+            esdf_bytes=row.esdf_bytes,
+            occ_bytes=row.occupancy_bytes,
+            quant=row.quantization,
+        )
+        for cm, row in R.rows.items()
+    }
     r2, r5, r10 = rows[2], rows[5], rows[10]
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
@@ -1405,7 +1391,7 @@ class CollisionWcetShare:
     t_reflex = RepresentationQuery.t_reflex  # category: chosen (collision-check allocation)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    share = (t_reflex / t_wcet).to(dimensionless).magnitude
+    share = Scenarios.WarehousePermissionClearanceQuery.result.wcet_share  # t_reflex / t_wcet
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_reflex < t_wcet < t_deadline, "The collision allocation must sit inside the declared WCET, inside the deadline.")
@@ -1557,25 +1543,25 @@ from mlsysim.core.units import byte, centimeter, dimensionless, gigabyte, megaby
 
 class HashedVoxelPayload:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    l_x = 10.0 * meter  # category: illustrative (workcell length)
-    l_y = 10.0 * meter  # category: illustrative (workcell width)
-    l_z = 3.0 * meter  # category: illustrative (workcell height)
-    pitch = 0.01 * meter  # category: chosen (manipulation resolution)
-    voxel_bytes = 8 * byte  # category: illustrative (distance, weight, epoch payload)
-    a_surface = 120.0 * meter**2  # category: illustrative (obstacle surface area in the workcell)
-    delta_band = 0.04 * meter  # category: chosen (truncation band half-width)
-    block_side = 8  # category: illustrative (voxels per block edge, the nvblox layout)
+    HOST = Scenarios.WorkcellHostMapSizing  # category: illustrative (workcell, pitch, band; MLSysIM scenario)
+    l_x, l_y, l_z = HOST.extent  # category: illustrative (workcell length, width, height)
+    pitch = HOST.pitch  # category: chosen (manipulation resolution)
+    voxel_bytes = HOST.voxel_bytes  # category: illustrative (distance, weight, epoch payload)
+    a_surface = HOST.surface_area  # category: illustrative (obstacle surface area in the workcell)
+    delta_band = HOST.band_half_width  # category: chosen (truncation band half-width)
+    block_side = HOST.block_edge  # category: illustrative (voxels per block edge, the nvblox layout)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    v_ws = (l_x * l_y * l_z).to(meter**3)
-    n_dense = (v_ws / pitch**3).to(dimensionless).magnitude
-    m_dense = (n_dense * voxel_bytes).to(gigabyte)
-    v_band = (2 * delta_band * a_surface).to(meter**3)
-    blocks = (v_band / (block_side * pitch) ** 3).to(dimensionless).magnitude
-    payload = (blocks * block_side**3 * voxel_bytes).to(megabyte)
-    block_bytes = (block_side**3 * voxel_bytes).to(byte)
-    band_fraction = (v_band / v_ws).to(dimensionless).magnitude
-    ratio = (m_dense / payload).to(dimensionless).magnitude
+    R = HOST.result
+    v_ws = R.workspace_volume
+    n_dense = R.dense_voxels
+    m_dense = R.dense_bytes
+    v_band = R.band_volume
+    blocks = R.blocks
+    payload = R.hashed_bytes
+    block_bytes = R.block_bytes
+    band_fraction = R.band_share
+    ratio = R.ratio
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
     check(abs(m_dense.magnitude - 2.4) < 1e-9, f"Dense grid should be 2.4 GB, got {m_dense}.")
@@ -1680,19 +1666,21 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class RaymarchBandwidth:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    width_px = 640  # category: illustrative (VGA depth stream)
-    height_px = 480  # category: illustrative (VGA depth stream)
-    f_cam = 30 * hertz  # category: illustrative (depth frame rate)
-    d_ray = 2.0 * meter  # category: illustrative (mean marched distance)
-    pitch = 0.02 * meter  # category: chosen (voxel pitch)
-    s_rw = 8 * byte  # category: illustrative (read-modify-write traffic per voxel, low end)
+    RAYS = Scenarios.WarehouseDepthRaymarchTraffic  # category: illustrative (depth stream and map; MLSysIM scenario)
+    width_px = RAYS.width_px  # category: illustrative (VGA depth stream)
+    height_px = RAYS.height_px  # category: illustrative (VGA depth stream)
+    f_cam = RAYS.frame_rate  # category: illustrative (depth frame rate)
+    d_ray = RAYS.ray_length  # category: illustrative (mean marched distance)
+    pitch = RAYS.pitch  # category: chosen (voxel pitch)
+    s_rw = RAYS.bytes_per_step  # category: illustrative (read-modify-write traffic per voxel, low end)
     soc_bw = RM.brain_soc.memory.bandwidth  # category: datasheet (host SoC peak DRAM bandwidth)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    n_rays = width_px * height_px
-    n_steps = (d_ray / pitch).to(dimensionless).magnitude
-    bw = (f_cam * n_rays * n_steps * s_rw).to(gigabyte / second)
-    share = (bw / soc_bw).to(dimensionless).magnitude
+    R = RAYS.result
+    n_rays = R.rays
+    n_steps = R.steps
+    bw = R.traffic
+    share = R.share
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(bw.magnitude - 7.3728) < 1e-6, f"Ray-march traffic should be 7.37 GB/s, got {bw}.")
@@ -1733,7 +1721,7 @@ What a map can certify comes from how a range return updates it. Traversing the 
 
 [^fn-logodds-unknown-prior]: **Log-Odds**: Storing $\ell = \ln\big(\CellOccupancyProbability/(1-\CellOccupancyProbability)\big)$ turns each Bayesian occupancy update into an addition, with an uninformed prior at $\ell = 0$. A cell no ray has touched and a cell that received as many hits as misses both read $\ell = 0$, so the value alone cannot separate never observed from observed and ambiguous. The manifest of @tbl-09-schema-volumetric-belief therefore carries an explicit `cell_state`. \index{Log-odds!unknown state}
 
-::: {#fig-09-ray-update-epochs data-explore="mechanism-scene" data-explore-key="vol4:fig-09-ray-update-epochs" fig-env="figure" fig-pos="t" fig-cap="**One range return updates only the cells it touched**: Under the qualified coverage and geometric-error assumptions, the cells the ray crosses become free and take the capture epoch $\\TimeInstant_1$ of the return, which also retires a phantom obstacle left on that line; the cell holding the return becomes occupied at $\\TimeInstant_1$. Cells behind the return and every cell off the ray keep whatever epoch their own last evidence gave them, here $\\TimeInstant_0$, so the map's publication time dates none of them." fig-alt="A grid of square cells with a sensor at the left. An arrow runs from the sensor along one row of cells, which are tinted and labeled t1. One of them holds a dashed square labeled phantom retired. The arrow ends at a black cell labeled return, occupied, t1. The four cells beyond it in the same row are hatched and labeled t0, with a note reading behind return, not renewed. The other rows are blank."}
+::: {#fig-09-ray-update-epochs data-explore="original-ray-epochs" data-explore-key="vol4:fig-09-ray-update-epochs" fig-env="figure" fig-pos="t" fig-cap="**One range return updates only the cells it touched**: Under the qualified coverage and geometric-error assumptions, the cells the ray crosses become free and take the capture epoch $\\TimeInstant_1$ of the return, which also retires a phantom obstacle left on that line; the cell holding the return becomes occupied at $\\TimeInstant_1$. Cells behind the return and every cell off the ray keep whatever epoch their own last evidence gave them, here $\\TimeInstant_0$, so the map's publication time dates none of them." fig-alt="A grid of square cells with a sensor at the left. An arrow runs from the sensor along one row of cells, which are tinted and labeled t1. One of them holds a dashed square labeled phantom retired. The arrow ends at a black cell labeled return, occupied, t1. The four cells beyond it in the same row are hatched and labeled t0, with a note reading behind return, not renewed. The other rows are blank."}
 ![](images/svg/fig09_ray_update_cell_epochs.svg){width="100%"}
 :::
 
@@ -1814,16 +1802,17 @@ class EncoderAtCameraRate:
     """Sustained throughput a per-frame foundation encoder would need."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    encoder_tflop = 3.0  # category: illustrative (assumed encoder cost per frame, TFLOP)
+    ENCODER = Scenarios.WarehouseFoundationEncoderAtCameraRate  # category: illustrative (MLSysIM scenario)
+    encoder_tflop = ENCODER.flop_per_frame.to(TFLOP).magnitude  # category: illustrative (assumed encoder cost per frame, TFLOP)
     f_frame = RM.nav_camera.frame_rate  # category: datasheet
     orin_fp16_dense = RM.brain_soc.compute.precision_flops["fp16"]  # category: datasheet (NVIDIA Jetson AGX Orin technical brief, dense FP16 peak)
-    f_semantic_lo = 1.0 * hertz  # category: illustrative (semantic keyframe rate, low end)
-    f_semantic_hi = 5.0 * hertz  # category: illustrative (semantic keyframe rate, high end)
+    f_semantic_lo = ENCODER.keyframe_rate_low  # category: illustrative (semantic keyframe rate, low end)
+    f_semantic_hi = ENCODER.keyframe_rate_high  # category: illustrative (semantic keyframe rate, high end)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     orin_fp16_dense_tflops = orin_fp16_dense.to(TFLOPs / second).magnitude
-    required_tflops = encoder_tflop * f_frame.to(hertz).magnitude
-    shortfall = required_tflops / orin_fp16_dense_tflops
+    required_tflops = ENCODER.result.required.to(TFLOPs / second).magnitude
+    shortfall = ENCODER.result.shortfall
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(required_tflops - 180.0) < 1e-9, f"Unexpected required throughput: {required_tflops}")
@@ -1891,14 +1880,14 @@ Forward propagation updates the state estimate and expands its uncertainty envel
 # │          for the aisle ahead (clear distance); what the frame's age leaves
 # │          of the second; the running total memory leaves unchanged; the
 # │          walking-person term at the drive limit against the clear distance.
-# │ How:     calc_free_space_expiry: max(0, (d_free - dloc - dmargin) / v_h); the
-# │          running total from the RM/AISLE terms at the drive limit; the
+# │ How:     Scenarios.WarehouseRackEndFreeSpace (calc_free_space_expiry:
+# │          max(0, (d_free - dloc - dmargin) / v_h)); the running total from
+# │          Scenarios.WarehouseBaseStopFullDelay at the drive limit; the
 # │          walking term v_h (tau_delay + v / a_brake) for a constant-
 # │          deceleration stop at the drive limit (the C2 suffix is Ch11's, and
 # │          the speed ceiling this term implies is computed in Ch12).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_free_space_expiry
 from mlsysim.core.units import dimensionless, meter, millimeter, second
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1918,29 +1907,23 @@ class RackEndBelief:
     tau_delay = AISLE.tau_delay  # category: derived (pre-brake delay, excl. dispatch-to-admission)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    t_exp_abreast = calc_free_space_expiry(side_clearance, delta_loc, delta_margin, v_h).to(millisecond)
-    t_exp_ahead = calc_free_space_expiry(d_clear, delta_loc, delta_margin, v_h).to(millisecond)
-    t_left_at_dispatch = (t_exp_ahead - t_age).to(millisecond)
+    R = Scenarios.WarehouseRackEndFreeSpace.result
+    t_exp_abreast = R.horizon_abreast
+    t_exp_ahead = R.horizon_ahead
+    t_left_at_dispatch = R.time_left_at_dispatch
     frame_period = (1 / frame_rate).to(millisecond)
-    frames_bridged = (t_left_at_dispatch / frame_period).to(dimensionless).magnitude
-    d_age_eroded = (v_h * t_age).to(millimeter)
-    slack_abreast = (side_clearance - delta_loc - delta_margin).to(millimeter)
+    frames_bridged = R.frames_bridged
+    d_age_eroded = R.depth_eroded_by_age
+    slack_abreast = R.certified_depth_abreast
 
     # rows 1-5 of the stopping budget at the drive limit (Ch2, Ch4, Ch8 terms)
-    running_total = calc_safe_stopping_distance(
-        v_drive,
-        AISLE.t_brake_onset + AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + t_age,
-        a_brake,
-        delta_loc,
-        delta_margin,
-    ).to(millimeter)
+    running_total = Scenarios.WarehouseBaseStopFullDelay.result.required_distance.to(millimeter)
 
     # walking person: a person approaching at v_h for the whole stop adds
     # v_h (tau_delay + T_stop); at the drive limit with a constant-deceleration
     # stop, T_stop = v / a_brake.
-    t_stop_const = (v_drive / a_brake).to(second)
-    d_walk_term = (v_h * (tau_delay + t_stop_const)).to(meter)
-    ms_per_mm = (1 / v_h).to(millisecond / millimeter)
+    d_walk_term = R.walker_intrusion
+    ms_per_mm = R.time_per_depth
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(slack_abreast.magnitude) < 1e-9, f"Abreast of the rack end the free depth should be exactly spent, got {slack_abreast}.")
@@ -2031,7 +2014,7 @@ and the frame's age at dispatch leaves
 
 In the open aisle, spatial memory reliably bridges temporary camera frame drops. However, the notebook's deadline is computed for a hull standing at its current pose. A hull that drives toward the rack end at speed $\SpeedAtDetection$ closes on the occlusion boundary while the hidden person closes on it from the other side. The depth certified ahead therefore shrinks at $\SpeedAtDetection + \HumanWalkingSpeedBound$ rather than at $\HumanWalkingSpeedBound$. Each successive swept volume along the planned path starts closer to the boundary, until the horizon reaches zero abreast of the rack uprights. The stopping budget makes the same point in distance. At the `{python} RackEndBelief.v_drive_str` drive limit, the stopping-budget terms charged before memory enters already claim `{python} RackEndBelief.running_total_str` of the `{python} RackEndBelief.d_clear_str` clear distance before anyone moves in the cross aisle. The safety enforcement path must therefore evaluate @eq-mem-free-space-expiry along the entire planned trajectory. The robot must bring itself to a controlled stop, or reacquire line-of-sight visibility into the cross aisle, before any point on the swept path breaches its invalidation deadline. The clear distance the sensors can still see caps the speed at which the hull may approach an occluded rack end, a ceiling that @sec-enforcement-phase-portraits plots against clearance. Memory certifies clearance only to a depth governed by the physical distance to the occlusion boundary. At the rack corner, that geometric depth vanishes completely.
 
-::: {#fig-09-rack-end-erosion data-explore="mechanism-scene" data-explore-key="vol4:fig-09-rack-end-erosion" fig-env="figure" fig-pos="t" fig-cap="**Free-space erosion at the rack end**: (a) Top view. The navigation camera's sightline passes the rack end, so the cross aisle behind the rack is unknown from the moment of capture. A person hidden there can advance at $\\HumanWalkingSpeedBound$ = `{python} RackEndBelief.v_h_str`; the dashed disc is the region that person may occupy when the claim lapses, which stops $\\LocalizationBound + \\ProtectiveClearanceMargin$ short of the hull's front. (b) The depth memory still certifies, $\\FreeSpaceDepth - \\LocalizationBound - \\ProtectiveClearanceMargin - \\HumanWalkingSpeedBound \\TimeInstant$. For the hull's current position it falls from the initial clear distance less localization error and protective clearance to zero at `{python} RackEndBelief.t_exp_ahead_str`, and the frame's `{python} RackEndBelief.t_age_str` age at dispatch is spent before memory receives it; abreast of the rack end, the `{python} RackEndBelief.side_clearance_str` side clearance certifies nothing even at capture." fig-alt="Two stacked panels. Top panel a, a top view: a hull in an aisle between two racks, the upper rack ending 1.10 m ahead of the hull's front where a cross aisle opens. A dashed teal sightline runs from a camera on the hull's front past the rack end, and the cross aisle above the sightline is hatched and labeled unknown, hidden cross aisle. A pink dashed disc centered on the rack end, clipped to the floor, is labeled reach at T_inv, 0.95 m, and a small ring at its center is labeled at dispatch, 83 mm. Dimensions show D_clear 1.10 m ahead and a side gap of 150 mm between hull and rack. Bottom panel b: certified free depth in millimeters against time since the frame, 0 to 700 ms. A solid blue line falls from 950 mm to zero at 593.75 ms, marked with a red dot. A dashed gray line for the hull abreast of the rack end lies at zero, with a red dot at 0 ms. A gray band covers the first 51.6 ms, labeled frame age at dispatch."}
+::: {#fig-09-rack-end-erosion data-explore="original-v4-09-rack-end-erosion" data-explore-key="vol4:fig-09-rack-end-erosion" fig-env="figure" fig-pos="t" fig-cap="**Free-space erosion at the rack end**: (a) Top view. The navigation camera's sightline passes the rack end, so the cross aisle behind the rack is unknown from the moment of capture. A person hidden there can advance at $\\HumanWalkingSpeedBound$ = `{python} RackEndBelief.v_h_str`; the dashed disc is the region that person may occupy when the claim lapses, which stops $\\LocalizationBound + \\ProtectiveClearanceMargin$ short of the hull's front. (b) The depth memory still certifies, $\\FreeSpaceDepth - \\LocalizationBound - \\ProtectiveClearanceMargin - \\HumanWalkingSpeedBound \\TimeInstant$. For the hull's current position it falls from the initial clear distance less localization error and protective clearance to zero at `{python} RackEndBelief.t_exp_ahead_str`, and the frame's `{python} RackEndBelief.t_age_str` age at dispatch is spent before memory receives it; abreast of the rack end, the `{python} RackEndBelief.side_clearance_str` side clearance certifies nothing even at capture." fig-alt="Two stacked panels. Top panel a, a top view: a hull in an aisle between two racks, the upper rack ending 1.10 m ahead of the hull's front where a cross aisle opens. A dashed teal sightline runs from a camera on the hull's front past the rack end, and the cross aisle above the sightline is hatched and labeled unknown, hidden cross aisle. A pink dashed disc centered on the rack end, clipped to the floor, is labeled reach at T_inv, 0.95 m, and a small ring at its center is labeled at dispatch, 83 mm. Dimensions show D_clear 1.10 m ahead and a side gap of 150 mm between hull and rack. Bottom panel b: certified free depth in millimeters against time since the frame, 0 to 700 ms. A solid blue line falls from 950 mm to zero at 593.75 ms, marked with a red dot. A dashed gray line for the hull abreast of the rack end lies at zero, with a red dot at 0 ms. A gray band covers the first 51.6 ms, labeled frame age at dispatch."}
 
 ```{python}
 #| label: plot-memory-rack-end-erosion
@@ -2247,7 +2230,6 @@ In the rack-end scenario, a linear velocity bound set the erosion rate; at the c
 # │          positive root of E(t) = E_max.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_linear_invalidation_horizon
 from mlsysim.fmt import fmt_math, fmt_magnitude, fmt_qty_int
 from mlsysim.core.units import dimensionless, millimeter, second
 
@@ -2255,26 +2237,23 @@ class LatchSlotBelief:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
     e0 = LatchTransformStaleness.e0  # category: illustrative (initial error at the wrist capture, calc-memory-latch-transform-staleness)
     v_drift = LatchTransformStaleness.v_drift  # category: illustrative (unobserved velocity error bound, calc-memory-latch-transform-staleness)
-    a_dist = 50.0 * millimeter / second**2  # category: illustrative (disturbance acceleration bound)
+    a_dist = Scenarios.LatchSlotFingerBelief.growth_acceleration  # category: illustrative (disturbance acceleration bound)
     e_max = LatchTransformStaleness.e_max  # category: illustrative (latch-release slot tolerance, calc-memory-latch-transform-staleness)
-    e_max_tight = 0.30 * millimeter  # category: illustrative (tighter machined slot)
-    eps_sync = 0.2 * millisecond  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
+    e_max_tight = Scenarios.LatchSlotFingerBeliefTightSlot.tolerance  # category: illustrative (tighter machined slot)
+    eps_sync = Embodied.Scenario.WarehouseAisle.clock_conversion_bound  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    def _root(e0, v, a, e_max):
-        qa, qb, qc = a / 2, v, e0 - e_max
-        return ((-qb + (qb**2 - 4 * qa * qc) ** 0.5) / (2 * qa)).to(millisecond)
-
-    t_exp = _root(e0, v_drift, a_dist, e_max)
-    t_exp_tight = _root(e0, v_drift, a_dist, e_max_tight)
+    R = Scenarios.LatchSlotFingerBelief.result
+    t_exp = R.horizon
+    t_exp_tight = Scenarios.LatchSlotFingerBeliefTightSlot.result.horizon
     tol_ratio = (e_max / e_max_tight).to(dimensionless).magnitude
     horizon_ratio = (t_exp / t_exp_tight).to(dimensionless).magnitude
-    t_linear = calc_linear_invalidation_horizon(e0, v_drift, e_max).to(millisecond)
-    e_linear = (e0 + v_drift * t_linear + a_dist * t_linear**2 / 2).to(millimeter)
-    overshoot = (e_linear / e_max - 1).to(dimensionless).magnitude
-    t_extra = (t_linear - t_exp).to(millisecond)
+    t_linear = R.constant_velocity_horizon
+    e_linear = R.error_at_constant_velocity_horizon
+    overshoot = R.overshoot
+    t_extra = R.overrun
     dt_frame = LatchTransformStaleness.dt
-    e_one_frame = (e0 + v_drift * dt_frame + a_dist * dt_frame**2 / 2).to(millimeter)
+    e_one_frame = Scenarios.LatchSlotStaleWristTransform.result.same_epoch_error
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(t_exp.magnitude - 65.9) < 0.05, f"Latch-slot expiry should be 65.9 ms, got {t_exp}.")
@@ -2478,12 +2457,13 @@ from mlsysim.core.units import millimeter, second
 
 class MachineExpiryRoots:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    cw_e0 = 15.0 * millimeter  # category: illustrative (coworker position error at last observation)
-    cw_v = RackEndBelief.v_h.to(millimeter / second)  # category: datasheet (ISO 13855 walking speed, calc-memory-rack-end)
-    cw_e_max = 150.0 * millimeter  # category: chosen (belief tolerance to the arm's swept volume; not the planner's obstacle clearance)
+    COWORKER = Scenarios.CoworkerBesideArmBelief  # category: illustrative (MLSysIM scenario)
+    cw_e0 = COWORKER.initial_error  # category: illustrative (coworker position error at last observation)
+    cw_v = COWORKER.growth_rate.to(millimeter / second)  # category: datasheet (ISO 13855 walking speed, calc-memory-rack-end)
+    cw_e_max = COWORKER.tolerance  # category: chosen (belief tolerance to the arm's swept volume; not the planner's obstacle clearance)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    cw_t_exp = ((cw_e_max - cw_e0) / cw_v).to(millisecond)  # v_h bounds speed directly, so a_dist = 0
+    cw_t_exp = COWORKER.result.horizon  # v_h bounds speed directly, so a_dist = 0
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(cw_t_exp.magnitude - 84.375) < 1e-9, f"Coworker expiry should be 84.375 ms, got {cw_t_exp}.")
@@ -2543,10 +2523,10 @@ class ExpiryCheckpoint:
     """Given and guard for the expiry checkpoint's estimate item."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    cw_e_max_new = 100.0 * millimeter  # category: chosen (checkpoint given: tighter swept-volume tolerance)
+    cw_e_max_new = Scenarios.CoworkerBesideArmBeliefTightTolerance.tolerance  # category: chosen (checkpoint given: tighter swept-volume tolerance)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_new = ((cw_e_max_new - MachineExpiryRoots.cw_e0) / MachineExpiryRoots.cw_v).to(millisecond)
+    t_new = Scenarios.CoworkerBesideArmBeliefTightTolerance.result.horizon
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -2601,19 +2581,20 @@ from mlsysim.fmt import fmt, fmt_force, fmt_int, check
 
 class MemoryBiasDrift:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    y_read = 5.0 * newton  # category: illustrative (steady strain-gauge reading)
-    sigma_claim = 0.05 * newton  # category: illustrative (estimator's reported P99 bound)
-    drift_rate = 0.2 * newton / minute  # category: illustrative (thermoelastic bias drift)
-    span = 15 * minute  # category: illustrative (drift interval)
-    t_excite = 40 * millisecond  # category: illustrative (deliberate contact break)
+    BIAS = Scenarios.WristForceBiasDrift  # category: illustrative (MLSysIM scenario)
+    y_read = BIAS.reading  # category: illustrative (steady strain-gauge reading)
+    sigma_claim = BIAS.reported_sigma  # category: illustrative (estimator's reported P99 bound)
+    drift_rate = BIAS.drift_rate  # category: illustrative (thermoelastic bias drift)
+    span = BIAS.span  # category: illustrative (drift interval)
+    t_excite = BIAS.excitation  # category: illustrative (deliberate contact break)
     f_sample = (
         Embodied.MobileManipulator.WarehouseMobileManipulator.arm.control_frequency
     )  # category: datasheet (sampled at the arm's joint-control rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    shift = (drift_rate * span).to(newton)
-    x_true = (y_read - shift).to(newton)
-    pct = (shift / y_read).to("dimensionless").magnitude * 100
+    shift = BIAS.result.shift
+    x_true = BIAS.result.true_value
+    pct = BIAS.result.lost_share * 100
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(shift.magnitude - 3.0) < 1e-9, "Bias shift is 3 N.")
@@ -2704,18 +2685,19 @@ from mlsysim.core.units import meter
 
 class MemoryFrozenTransform:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    t_repub = 1 * millisecond  # category: illustrative (middleware republish period)
-    tau_max = 5 * millisecond  # category: illustrative (publish-time freshness threshold)
-    t_loss = 10 * millisecond  # category: illustrative (sensor stops producing evidence)
+    FROZEN = Scenarios.ConveyorMugFrozenTransform  # category: illustrative (MLSysIM scenario)
+    t_repub = FROZEN.republish_period  # category: illustrative (middleware republish period)
+    tau_max = FROZEN.freshness_threshold  # category: illustrative (publish-time freshness threshold)
+    t_loss = FROZEN.loss_time  # category: illustrative (sensor stops producing evidence)
     v_obj = Embodied.Scenario.WarehouseAisle.v_conveyor  # category: illustrative (pick-station conveyor speed carrying the mug)
     e_grasp = Embodied.Scenario.WarehouseAisle.grasp_tolerance  # category: illustrative (mug grasp tolerance)
-    t_window = 100 * millisecond  # category: illustrative (elapsed time with static transform)
+    t_window = FROZEN.window  # category: illustrative (elapsed time with static transform)
     d_tool = 150 * millimeter  # category: illustrative (tool tip beyond the arm's mounting flange; MLSysIM carries no TCP offset)
     t_predict_long = 200 * millisecond  # category: illustrative (extended open-loop prediction span)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    f_repub = (1 / t_repub).to(hertz)
-    err = (v_obj * t_window).to(millimeter)
+    f_repub = FROZEN.result.republish_rate
+    err = FROZEN.result.error
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(t_repub < tau_max, "A republished copy must pass the freshness threshold.")
@@ -2835,16 +2817,17 @@ class MugHandleBelief:
     e0 = AISLE.grasp_initial_error  # category: illustrative (handle-pose error at the wrist capture)
     v_conv = AISLE.v_conveyor  # category: illustrative (takeaway-conveyor speed bound)
     e_max = AISLE.grasp_tolerance  # category: chosen (task-profile grasp tolerance)
-    t_use = 35.0 * millisecond  # category: illustrative (capture-to-use age on the consumer's clock)
+    t_use = Scenarios.ConveyorMugHandleBelief.use_age  # category: illustrative (capture-to-use age on the consumer's clock)
     eps_sync = LatchSlotBelief.eps_sync  # category: illustrative (clock-conversion bound, as in the latch record)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    t_exp = ((e_max - e0) / v_conv).to(millisecond)
-    age_upper = (t_use + eps_sync).to(millisecond)
-    e_use = (e0 + v_conv * age_upper).to(millimeter)
-    e_margin = (e_max - e_use).to(millimeter)
-    t_left = (t_exp - age_upper).to(millisecond)
-    t_latest = (t_exp - eps_sync).to(millisecond)
+    R = Scenarios.ConveyorMugHandleBelief.result
+    t_exp = R.horizon
+    age_upper = R.use_age_upper
+    e_use = R.error_at_use
+    e_margin = R.margin_at_use
+    t_left = R.time_left
+    t_latest = R.latest_use_age
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(e0.to(millimeter).magnitude - 3.0) < 1e-9, f"Handle initial error should be 3 mm, got {e0}.")
@@ -2936,8 +2919,9 @@ from mlsysim.core.units import hertz, kilohertz, meter, millimeter, second
 
 class SkewedRecords:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    separation = 200.0 * millimeter  # category: illustrative (available separation in this separate skew scenario)
-    skew = 20.0 * millisecond  # category: illustrative (acquisition-time gap between the two records)
+    SKEW = Scenarios.WarehouseSkewedRecordPair  # category: illustrative (MLSysIM scenario)
+    separation = SKEW.separation  # category: illustrative (available separation in this separate skew scenario)
+    skew = SKEW.skew  # category: illustrative (acquisition-time gap between the two records)
     v_drive = RackEndBelief.v_drive  # category: illustrative (drive limit, as in the rack-end cell)
     v_h = RackEndBelief.v_h  # category: datasheet (ISO 13855 walking speed)
     t_vision = (
@@ -2947,9 +2931,9 @@ class SkewedRecords:
     f_base = Embodied.MobileManipulator.WarehouseMobileManipulator.base.control_frequency  # category: illustrative (base drive-controller rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    v_close = (v_drive + v_h).to(meter / second)
-    d_skew = (v_close * skew).to(millimeter)
-    slack = (separation - RackEndBelief.delta_loc - RackEndBelief.delta_margin).to(millimeter)
+    v_close = SKEW.result.speed
+    d_skew = SKEW.result.travel
+    slack = SKEW.result.slack
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(skew < RackEndBelief.t_exp_ahead, "The stipulated ages, skew and zero, are inside the aisle-ahead expiry window.")

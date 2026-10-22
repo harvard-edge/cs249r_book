@@ -164,7 +164,7 @@ An admitted request passes through routing, preprocessing, queueing, batch forma
 ↩ Prefill's arithmetic-bound regime and decode's bandwidth floor, measured as MBU, are established in @sec-performance-engineering-fleet-efficiency-metric-dff4.
 :::
 
-::: {#fig-inference-lifecycle data-explore="mechanism-scene" data-explore-key="vol2:fig-inference-lifecycle" fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**: One language-model request crosses between CPU and GPU twice. The load balancer routes and admits it and the CPU tokenizes it; prefill then processes the whole prompt in one pass and writes its keys and values to the KV cache, and decode reads and appends that cache one token per step before the CPU detokenizes the stream. The strip orders one request's latency, with illustrative segment widths. Everything up to the end of prefill counts against time to first token, and the routing and CPU segments are serving-tax work that spends latency budget outside GPU compute." fig-alt="Two regions labeled CPU and GPU. In the CPU region, requests flow down through a load balancer and a tokenizer. Token IDs pass right to a prefill box in the GPU region, which writes to a KV cache box. A decode box reads from and appends to the KV cache, loops on itself, and sends generated token IDs left to a detokenize box that feeds a response stream. Below, a horizontal strip divides one request's latency into route, pre, prefill, decode steps, and post segments, the decode segment ticked into per-token steps, with brackets marking time to first token and TPOT times output tokens."}
+::: {#fig-inference-lifecycle data-explore="original-v2-inference-lifecycle" data-explore-key="vol2:fig-inference-lifecycle" fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**: One language-model request crosses between CPU and GPU twice. The load balancer routes and admits it and the CPU tokenizes it; prefill then processes the whole prompt in one pass and writes its keys and values to the KV cache, and decode reads and appends that cache one token per step before the CPU detokenizes the stream. The strip orders one request's latency, with illustrative segment widths. Everything up to the end of prefill counts against time to first token, and the routing and CPU segments are serving-tax work that spends latency budget outside GPU compute." fig-alt="Two regions labeled CPU and GPU. In the CPU region, requests flow down through a load balancer and a tokenizer. Token IDs pass right to a prefill box in the GPU region, which writes to a KV cache box. A decode box reads from and appends to the KV cache, loops on itself, and sends generated token IDs left to a detokenize box that feeds a response stream. Below, a horizontal strip divides one request's latency into route, pre, prefill, decode steps, and post segments, the decode segment ticked into per-token steps, with brackets marking time to first token and TPOT times output tokens."}
 ![](images/svg/serving-pipeline.svg)
 
 <!--
@@ -450,9 +450,52 @@ The same targets also define the serving system's capacity metric. **SLO goodput
 
 ### The serving tax {#sec-inference-scale-serving-tax-budget}
 
-If an interactive request carries a 100 ms latency target and model execution takes 70 ms on an idle replica, routing, network transfers, serialization, coordination, and queueing must all fit inside the remaining 30 ms. Distributing inference adds transfers and coordination to a request that already spends time in host processing and queues. This "serving tax" is the exposed work outside model execution that consumes the request's latency budget, and its size depends on which components the request crosses and which costs can overlap.
+```{python}
+#| echo: false
+#| label: serving-tax-budget
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERVING TAX BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-inference-scale-serving-tax-budget opening paragraphs and the
+# │          paragraph after @eq-serving-tax.
+# │
+# │ Goal: Split an interactive request's latency target into model execution
+# │       and the budget left for everything outside the model.
+# │ Show: 100 ms target, 70 ms model, 30 ms outside; four exchanges of
+# │       50-500 us cost 200 us to 2 ms.
+# │ How: Scenarios.InteractiveRequestServingTax.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_time
 
-Network communication contributes setup and transfer time at each cross-machine dependency. Synchronization between GPUs\index{Synchronization!multi-node latency overhead} can expose that cost when the next operation needs a remote result. For an illustrative path with four sequential exchanges taking 50–500 microseconds each, the exposed contribution is 200 microseconds to 2 milliseconds. Actual collective time also depends on payload, topology, contention, and the number of communication rounds; a generic network round-trip time cannot be charged once per collective without checking its implementation.
+class ServingTaxBudget:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.InteractiveRequestServingTax
+    target = scenario.latency_target
+    model_time = scenario.model_time
+    exchange_low = scenario.exchange_low
+    exchange_high = scenario.exchange_high
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    outside = scenario.outside_model
+    exchanges_low = scenario.exchanges_low
+    exchanges_high = scenario.exchanges_high
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(scenario.exchanges == 4, "Prose says four sequential exchanges")
+    check(exchanges_high < outside, "The exchanges must fit inside the non-compute slack")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    target_ms_str = fmt_time(target, millisecond, precision=0, commas=False)
+    model_ms_str = fmt_time(model_time, millisecond, precision=0, commas=False)
+    outside_ms_str = fmt_time(outside, millisecond, precision=0, commas=False)
+    exchange_low_us_str = fmt_int(round(exchange_low.to(microsecond).magnitude), commas=False)
+    exchange_high_us_str = fmt_time(exchange_high, microsecond, precision=0, commas=False, style="word")
+    exchanges_low_us_str = fmt_time(exchanges_low, microsecond, precision=0, commas=False, style="word")
+    exchanges_high_ms_word_str = fmt_time(exchanges_high, millisecond, precision=0, commas=False, style="word")
+    exchanges_high_ms_str = fmt_time(exchanges_high, millisecond, precision=0, commas=False)
+```
+
+If an interactive request carries a `{python} ServingTaxBudget.target_ms_str` latency target and model execution takes `{python} ServingTaxBudget.model_ms_str` on an idle replica, routing, network transfers, serialization, coordination, and queueing must all fit inside the remaining `{python} ServingTaxBudget.outside_ms_str`. Distributing inference adds transfers and coordination to a request that already spends time in host processing and queues. This "serving tax" is the exposed work outside model execution that consumes the request's latency budget, and its size depends on which components the request crosses and which costs can overlap.
+
+Network communication contributes setup and transfer time at each cross-machine dependency. Synchronization between GPUs\index{Synchronization!multi-node latency overhead} can expose that cost when the next operation needs a remote result. For an illustrative path with four sequential exchanges taking `{python} ServingTaxBudget.exchange_low_us_str`–`{python} ServingTaxBudget.exchange_high_us_str` each, the exposed contribution is `{python} ServingTaxBudget.exchanges_low_us_str` to `{python} ServingTaxBudget.exchanges_high_ms_word_str`. Actual collective time also depends on payload, topology, contention, and the number of communication rounds; a generic network round-trip time cannot be charged once per collective without checking its implementation.
 
 ::: {.column-margin .margin-pointer}
 ↩ The $\MessageStartupLatency$-$\LinkBandwidth$ model, which splits each transfer into a fixed startup latency plus a bandwidth-dependent term, is established in @sec-network-fabrics-performance-model.
@@ -468,7 +511,7 @@ The serving tax\index{Serving tax!latency breakdown} must be measured on the sam
 
 $$\EndToEndRequestLatency= \InferenceLatency+ \NetworkLatency+ \SerializationLatency+ \CoordinationLatency+ \QueueingLatency$$ {#eq-serving-tax}
 
-In the 100 ms request budget above, the four sequential exchanges alone can claim up to 2 ms of the 30 ms non-compute slack before any request waits for a busy replica. The measured contribution determines the intervention: co-location removes a network hop, fewer dependent exchanges reduce startup costs, and a faster link shortens large transfers, whereas queueing requires controlling admitted work or increasing usable capacity. Each choice spends resources to recover latency budget, connecting the request-level diagnosis to lifetime serving cost.
+In the `{python} ServingTaxBudget.target_ms_str` request budget above, the four sequential exchanges alone can claim up to `{python} ServingTaxBudget.exchanges_high_ms_str` of the `{python} ServingTaxBudget.outside_ms_str` non-compute slack before any request waits for a busy replica. The measured contribution determines the intervention: co-location removes a network hop, fewer dependent exchanges reduce startup costs, and a faster link shortens large transfers, whereas queueing requires controlling admitted work or increasing usable capacity. Each choice spends resources to recover latency budget, connecting the request-level diagnosis to lifetime serving cost.
 
 ## Serving Cost Dominance in Production {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
@@ -500,23 +543,24 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_math, fmt_percent, f
 
 class ServingCostSimple:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    training_cost = 2_000_000  # scenario assumption: one-time training spend
-    dau = 1_000_000  # scenario assumption: daily active users
-    reqs_per_day = 50  # scenario assumption: requests per user per day
-    days_per_year = DAYS_PER_YEAR
-    cost_per_request = 0.001  # scenario assumption: serving cost per request
-    efficiency_gain = 0.10  # scenario assumption: efficiency improvement
+    scenario = Scenarios.LlmServingFirstYear
+    training_cost = scenario.training_cost
+    dau = scenario.daily_users
+    reqs_per_day = scenario.requests_per_user_per_day
+    days_per_year = scenario.days_per_year
+    cost_per_request = scenario.cost_per_request
+    efficiency_gain = scenario.efficiency_gain
     dau_exp = 6  # 10^6 users, displayed in scientific form
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    annual_reqs = dau * reqs_per_day * days_per_year
+    annual_reqs = scenario.annual_requests
     annual_reqs_b = annual_reqs / BILLION
-    annual_serving_cost = annual_reqs * cost_per_request
-    serving_training_ratio = annual_serving_cost / training_cost
-    efficiency_savings = annual_serving_cost * efficiency_gain
+    annual_serving_cost = scenario.annual_serving_cost
+    serving_training_ratio = scenario.serving_to_training
+    efficiency_savings = scenario.efficiency_savings
     # Scenario B of @fig-serving-cost-crossover: serving spend matches training spend.
-    monthly_serving_cost = annual_serving_cost / 12
-    crossover_months = training_cost / monthly_serving_cost
-    crossover_weeks = crossover_months * days_per_year / 12 / 7
+    monthly_serving_cost = scenario.monthly_serving_cost
+    crossover_months = scenario.crossover_months
+    crossover_weeks = scenario.crossover_weeks
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(annual_reqs > 10e9, "Should be >10B annual requests")
     check(round(serving_training_ratio) == 9, "Serving/training ratio should round to 9x")
@@ -1424,23 +1468,14 @@ from mlsysim.fmt import check, fmt, fmt_int
 class BatchingEfficiency:
     # ┌── 1. LOAD ──────────────────────────────────────────
     # LLM (Weights limited)
-    t_fixed_llm = 40  # ms
-    t_var_llm = 0.5  # ms
+    llm = Scenarios.LlmDecodeBatchingKnee
     # Vision (Compute limited)
-    t_fixed_vis = 2  # ms
-    t_var_vis = 1.0  # ms
+    vis = Scenarios.VisionBatchingKnee
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    def get_x(b, tf, tv):
-        return b / (tf + b * tv) * THOUSAND  # req/s
-
-    # Knee occurs where marginal throughput gain slows significantly
-    # Approximate: B where B*T_var ≈ T_fixed
-    b_knee_llm = int(t_fixed_llm / t_var_llm)
-    b_knee_vis = int(t_fixed_vis / t_var_vis)
-
-    x_knee_llm = get_x(b_knee_llm, t_fixed_llm, t_var_llm)
-    x_knee_vis = get_x(b_knee_vis, t_fixed_vis, t_var_vis)
+    # Knee: B where B*T_var = T_fixed (half the throughput ceiling)
+    b_knee_llm = int(llm.knee)
+    b_knee_vis = int(vis.knee)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(b_knee_llm == 80, f"LLM knee mismatch: {b_knee_llm}")
     check(b_knee_vis == 2, f"Vision knee mismatch: {b_knee_vis}")
@@ -1481,32 +1516,21 @@ The knee occurs where the variable compute cost $(\BatchSize\times \MarginalRequ
 # │ Show: B200 frontier spans ~30× from peak throughput to 100 tok/s/user;
 # │       at 50 tok/s/user GB200 NVL72 delivers ~44× an H100 per GPU, against
 # │       a ~2.3× gap in peak dense FP8 rate.
-# │ How: Pareto upper envelope per accelerator over
-# │      Literature.Series.InferenceXDeepSeekR1; peak rates from Hardware.Cloud.
+# │ How: Scenarios.InferenceXServingFrontier (frontier and best rate at a
+# │      target over Literature.Series.InferenceXDeepSeekR1); peak rates from
+# │      Hardware.Cloud.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Literature
+from mlsysim import Hardware, Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
-
-def _frontier(rows, hw):
-    """Configurations that no other configuration beats on both axes."""
-    pts = sorted(((r["interactivity_tok_s_user"], r["output_tok_s_gpu"]) for r in rows if r["hardware"] == hw), key=lambda p: -p[0])
-    out, best = [], -1.0
-    for x, y in pts:
-        if y > best:
-            out.append((x, y))
-            best = y
-    return sorted(out)
-
-def _best_at(rows, hw, tps_user):
-    return max(r["output_tok_s_gpu"] for r in rows if r["hardware"] == hw and r["interactivity_tok_s_user"] >= tps_user)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ServingFrontier:
     """Measured throughput-interactivity frontier of LLM serving by accelerator."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.InferenceXDeepSeekR1.entries
+    measured = Scenarios.InferenceXServingFrontier
+    rows = measured.series.entries
     hardware = (("h100", "H100"), ("h200", "H200"), ("b200", "B200"), ("gb200", "GB200 NVL72"), ("mi355x", "MI355X"))
     target_tps_user = 50  # scenario assumption: a comfortable streaming rate for chat
     high_tps_user = 100
@@ -1516,15 +1540,15 @@ class ServingFrontier:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     frontiers = {}
     for _hw, _ in hardware:
-        frontiers[_hw] = _frontier(rows, _hw)
-    h100_at_target = _best_at(rows, "h100", target_tps_user)
-    gb200_at_target = _best_at(rows, "gb200", target_tps_user)
+        frontiers[_hw] = measured.frontier(_hw)
+    h100_at_target = measured.best_at("h100", target_tps_user)
+    gb200_at_target = measured.best_at("gb200", target_tps_user)
     gen_ratio = gb200_at_target / h100_at_target
     gb200_fp8_per_gpu = gb200_rack.compute.precision_flops["fp8"] / gb200_rack.accelerator_count
     peak_ratio = (gb200_fp8_per_gpu / h100_fp8).to("").magnitude
     b200_peak = max(y for _, y in frontiers["b200"])
     b200_peak_tps_user = max(frontiers["b200"], key=lambda p: p[1])[0]
-    b200_at_high = _best_at(rows, "b200", high_tps_user)
+    b200_at_high = measured.best_at("b200", high_tps_user)
     b200_span = b200_peak / b200_at_high
     config_count = len(rows)
 
@@ -1633,22 +1657,23 @@ from mlsysim.fmt import check, fmt_int, fmt_math, fmt_percent, fmt_time
 
 class LittlesLawExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    target_throughput = 1000  # scenario assumption: target requests/sec
-    mean_latency = 0.1 * second  # scenario assumption: mean end-to-end latency
-    batch_size = 8  # scenario assumption: per-replica batch size
-    batch_service_time = 0.08 * second  # scenario assumption: batch execution time
-    utilization_target = 0.8  # scenario assumption: maximum mean service utilization
+    scenario = Scenarios.VisionServingLittlesLaw
+    target_throughput = int(round(scenario.arrival_rate.to(1 / second).magnitude))
+    mean_latency = scenario.time_in_system
+    batch_size = scenario.batch_size
+    batch_service_time = scenario.batch_service_time
+    utilization_target = scenario.utilization_target
     # ┌── 2. EXECUTE ───────────────────────────────────────
     mean_latency_s = mean_latency.to(second).magnitude
     batch_service_time_s = batch_service_time.to(second).magnitude
-    mean_inflight = int(target_throughput * mean_latency_s)
-    replica_throughput = int(batch_size / batch_service_time_s)
-    throughput_floor = math.ceil(target_throughput / replica_throughput)
-    replicas_needed = math.ceil(target_throughput / (utilization_target * replica_throughput))
-    executing_positions = replicas_needed * batch_size
-    mean_executing = int(target_throughput * batch_service_time_s)
+    mean_inflight = int(round(scenario.in_flight))
+    replica_throughput = int(round(scenario.replica_throughput.to(1 / second).magnitude))
+    throughput_floor = scenario.throughput_floor
+    replicas_needed = scenario.replicas_needed
+    executing_positions = scenario.executing_positions
+    mean_executing = int(round(scenario.mean_executing))
     mean_waiting = mean_inflight - mean_executing
-    service_utilization = target_throughput / (replicas_needed * replica_throughput)
+    service_utilization = scenario.service_utilization
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(mean_inflight == 100, "Mean in-flight work should be 100 requests")
     check(throughput_floor == 10, "Throughput-only lower bound should be 10 replicas")
@@ -1865,7 +1890,7 @@ The waste grows with the spread of output lengths, a dependence that @sec-infere
 
 Admitting, completing, and refilling slots on every iteration lets waiting work use capacity released before the longest sequence finishes. The illustrated preemption path adds HBM-to-CPU-DRAM transfers under memory pressure, so recovered capacity must repay both scheduling and state-movement costs. Counted in slot-iterations (@fig-continuous-batching-comparison), fixed membership leaves only 20 of 32 productive, while continuous admission fills all 32 under the illustrated arrival and capacity assumptions. Prefill and decode cells do not necessarily take equal time. Slot occupancy therefore measures the opportunity; the realized throughput gain depends on how much longer the inserted prefill cells take than the decode steps they share an iteration with.
 
-::: {#fig-continuous-batching-comparison data-explore="mechanism-scene" data-explore-key="vol2:fig-continuous-batching-comparison" fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**: In static batching (a), completed slots cannot be reused until the longest request finishes, although completed responses may already be released. Continuous batching (b) admits waiting requests into freed slots at iteration boundaries, starting each with a prefill step. Over the eight iterations shown, 20 of 32 slot-iterations do useful work under static batching and all 32 under continuous batching; the hatched idle slots are the capacity recovered when arrivals and cache capacity permit." fig-alt="Two stacked grids of four slots by eight iterations. Top: static batching, where requests R1 to R4 end at iterations 3, 8, 5, and 4, and every later cell in the finished slots is hatched as idle; a note reads 20 of 32 slots busy. Bottom: continuous batching, where requests R5, R6, and R7 enter the freed slots with a dark prefill cell and continue decoding, leaving no idle cells; a note reads 32 of 32 slots busy. Final-token cells are green."}
+::: {#fig-continuous-batching-comparison data-explore="original-v2-continuous-batching-comparison" data-explore-key="vol2:fig-continuous-batching-comparison" fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**: In static batching (a), completed slots cannot be reused until the longest request finishes, although completed responses may already be released. Continuous batching (b) admits waiting requests into freed slots at iteration boundaries, starting each with a prefill step. Over the eight iterations shown, 20 of 32 slot-iterations do useful work under static batching and all 32 under continuous batching; the hatched idle slots are the capacity recovered when arrivals and cache capacity permit." fig-alt="Two stacked grids of four slots by eight iterations. Top: static batching, where requests R1 to R4 end at iterations 3, 8, 5, and 4, and every later cell in the finished slots is hatched as idle; a note reads 20 of 32 slots busy. Bottom: continuous batching, where requests R5, R6, and R7 enter the freed slots with a dark prefill cell and continue decoding, leaving no idle cells; a note reads 32 of 32 slots busy. Final-token cells are green."}
 ![](images/svg/continuous-batching.svg)
 
 <!--
@@ -2195,11 +2220,12 @@ class BatchingRequestTotals:
     """Compute total tokens per request (prompt + output)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    prompt_lengths = [100, 80, 120, 90]
-    output_lengths = [50, 200, 100, 150]
+    batch = Scenarios.FourRequestDecodeBatch
+    prompt_lengths = batch.prompt_lengths
+    output_lengths = batch.output_lengths
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    totals = [p + o for p, o in zip(prompt_lengths, output_lengths)]
+    totals = batch.total_tokens
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(totals == [150, 280, 220, 240], f"Total tokens mismatch: {totals}")
@@ -2245,18 +2271,19 @@ class BatchingWorkedExample:
     """Quantify latency difference between traditional and continuous batching."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    output_lengths = [50, 200, 100, 150]  # R1, R2, R3, R4 output tokens
+    batch = Scenarios.FourRequestDecodeBatch
+    output_lengths = batch.output_lengths  # R1, R2, R3, R4 output tokens
     n_requests = len(output_lengths)
-    decode_time_ms = 20  # ms per iteration for batch of 4
+    decode_time_ms = int(batch.iteration_time.to(millisecond).magnitude)  # ms per iteration for batch of 4
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mean_output = sum(output_lengths) / n_requests
-    max_output = max(output_lengths)
+    mean_output = batch.mean_output
+    max_output = batch.max_output
 
     total_iterations = max_output
     total_batch_time_ms = total_iterations * decode_time_ms
-    total_seq_iters = n_requests * max_output
-    useful_seq_iters = sum(output_lengths)
+    total_seq_iters = batch.slot_iterations
+    useful_seq_iters = batch.useful_iterations
 
     # Step 1: Continuous batching latencies
     r1_latency_ms = output_lengths[0] * decode_time_ms
@@ -2277,7 +2304,7 @@ class BatchingWorkedExample:
     r4_improvement = trad_latency_ms / r4_latency_ms
 
     # Step 5: Waste ratio (mean / max), per @eq-waste-ratio
-    waste_ratio = mean_output / max_output  # 125 / 200 = 0.625
+    waste_ratio = 1 - batch.idle_share  # 125 / 200 = 0.625
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(latency_reduction_pct == 37.5, f"Expected 37.5% reduction, got {latency_reduction_pct}")
@@ -2928,12 +2955,12 @@ class LogicScaling:
     """The latency cost of test-time reasoning."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128  # pedagogical reasoning-steps example
-    t_std = 100 * ms  # pedagogical standard 1-token decode
-    reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE  # tokens of 'thought' before the answer
+    scenario = Scenarios.ReasoningTokenLatency
+    t_std = scenario.per_token_time  # pedagogical standard 1-token decode
+    reasoning_steps = scenario.reasoning_tokens  # tokens of 'thought' before the answer
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_reasoning = (t_std * reasoning_steps).to(second)
-    latency_expansion = reasoning_steps
+    t_reasoning = scenario.reasoning_time
+    latency_expansion = scenario.expansion
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(latency_expansion == 128, f"Exp {latency_expansion} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -3220,29 +3247,27 @@ class KVCacheCapacityEstimator:
     """KV-cache capacity estimator for a long-context 70B GQA deployment."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _model = Models.Language.Llama3_70B
+    scenario = Scenarios.Llama3_70BLongContextAdmissionDgxH100
+    _model = scenario.workload
     n_layers = _model.layers
     n_kv_heads = _model.kv_heads or _model.heads
-    d_head = _model.hidden_dim // _model.heads
-    bytes_per_elem = 2
-    context_tokens = 131_072
-    node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    h100_vendor_capacity = ReferenceStats.ServingProfiles.H100VendorMemoryBudget
-    total_hbm = node_gpus * h100_vendor_capacity
-    weight = _model.size_in_bytes(BYTES_FP16)
-    system_reserved = 20 * GB  # scenario reserve
+    bytes_per_elem = int(scenario.kv_bytes_per_elem.to(byte).magnitude)
+    context_tokens = scenario.context_tokens
+    node_gpus = scenario.accelerators
+    system_reserved = scenario.reserve  # scenario reserve
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from mlsysim.physics import calc_kv_cache_size
-
-    # Use library formula for per-token KV bytes
-    kv_cache_one_token = calc_kv_cache_size(n_layers, n_kv_heads, d_head, 1, 1, bytes_per_elem)
+    admission = scenario.result
+    d_head = admission.head_dim
+    total_hbm = admission.hbm_total
+    weight = admission.weights
+    kv_cache_one_token = admission.kv_per_token
     kv_bytes_per_token = int(kv_cache_one_token.to(byte).magnitude)
 
-    kv_cache_full = calc_kv_cache_size(n_layers, n_kv_heads, d_head, context_tokens, 1, bytes_per_elem)
+    kv_cache_full = admission.kv_per_request
 
-    available_kv = total_hbm - weight - system_reserved
-    max_batch = int((available_kv / kv_cache_full).to("").magnitude)
+    available_kv = admission.kv_budget
+    max_batch = admission.max_requests
     kv_mb_per_token_display = kv_cache_one_token.to(MB).magnitude
     kv_gb_per_request_display = kv_cache_full.to(GB).magnitude
     available_kv_display = available_kv.to(GB).magnitude
@@ -3396,7 +3421,7 @@ With on-demand allocation, each suitcase receives any free locker, and a directo
 
 In vLLM\index{vLLM!PagedAttention integration}\index{vLLM!paged KV cache} [@kwon2023], this paged memory layout\index{Paged memory management}\index{KV cache!paged memory allocation} divides the KV cache into fixed-size pages, using 16-token blocks in the original paper's default configuration, and allocates them on demand. Whereas contiguous reservation strands non-adjacent free slots when earlier sequences finish, each sequence's block table maps logical token pages to scattered physical HBM slots as generation proceeds (@fig-paged-attention). The block size\index{PagedAttention!block size trade-off} fixes how many tokens each page holds, so a sequence's pages need not form one contiguous allocation run.
 
-::: {#fig-paged-attention data-explore="mechanism-scene" data-explore-key="vol2:fig-paged-attention" fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: The panels replay the eight-slot example from the text. (a) Contiguous reservation holds the maximum length of four slots per sequence, so the slots Seq A and Seq B never fill sit idle (internal fragmentation). (b) After sequences finish, four slots are free but the largest contiguous gap is two, so Seq E, which needs four contiguous slots, cannot be admitted (external fragmentation). (c) PagedAttention maps Seq E's logical pages through a block table onto any free physical blocks, so the same memory now holds it; only the unfilled tail of its final block remains unused." fig-alt="Three panels built from eight memory slots. Panel a: Seq A uses two of its four reserved slots and Seq B uses three of four; the unused reserved slots are hatched. Panel b: slots 2 and 3 hold Seq C and slots 6 and 7 hold Seq D, leaving two 2-slot gaps; four dashed red cells for Seq E, which needs four contiguous slots, do not fit. Panel c: Seq E's logical pages 0 to 3 pass through a block table mapping them to physical slots 0, 1, 4 and 5 among the C and D slots; page 3's slot is only partly filled. A legend identifies in-use entries, reserved but unused slots, free slots and other sequences."}
+::: {#fig-paged-attention data-explore="original-v2-paged-attention" data-explore-key="vol2:fig-paged-attention" fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: The panels replay the eight-slot example from the text. (a) Contiguous reservation holds the maximum length of four slots per sequence, so the slots Seq A and Seq B never fill sit idle (internal fragmentation). (b) After sequences finish, four slots are free but the largest contiguous gap is two, so Seq E, which needs four contiguous slots, cannot be admitted (external fragmentation). (c) PagedAttention maps Seq E's logical pages through a block table onto any free physical blocks, so the same memory now holds it; only the unfilled tail of its final block remains unused." fig-alt="Three panels built from eight memory slots. Panel a: Seq A uses two of its four reserved slots and Seq B uses three of four; the unused reserved slots are hatched. Panel b: slots 2 and 3 hold Seq C and slots 6 and 7 hold Seq D, leaving two 2-slot gaps; four dashed red cells for Seq E, which needs four contiguous slots, do not fit. Panel c: Seq E's logical pages 0 to 3 pass through a block table mapping them to physical slots 0, 1, 4 and 5 among the C and D slots; page 3's slot is only partly filled. A legend identifies in-use entries, reserved but unused slots, free slots and other sequences."}
 ![](images/svg/kv-cache-fragmentation.svg)
 
 <!--
@@ -3685,30 +3710,28 @@ class PrefixCachingAnalysis:
     """Quantify KV cache memory savings from prefix caching for a 70B-class LLM chatbot."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    system_prompt_tokens = 2000
-    concurrent_users = 1000
-    avg_response_tokens = 500
-    _model = Models.Language.Llama2_70B
+    scenario = Scenarios.ChatbotSharedSystemPrompt
+    system_prompt_tokens = scenario.prefix_tokens
+    concurrent_users = scenario.users
+    avg_response_tokens = scenario.unique_tokens_per_user
+    _model = scenario.workload
     n_kv_pairs = 2  # key + value
     n_layers = _model.layers
-    hidden_dim = _model.hidden_dim
-    bytes_per_element = 2  # FP16
+    hidden_dim = scenario.kv_width
+    bytes_per_element = int(scenario.bytes_per_elem.to(byte).magnitude)  # FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Without prefix caching: every user stores full system_prompt + response tokens
-    tokens_per_user = system_prompt_tokens + avg_response_tokens  # 2500
-    total_tokens_no_cache = tokens_per_user * concurrent_users
-    kv_no_cache = calc_kv_cache_size(n_layers, 1, hidden_dim, total_tokens_no_cache, 1, bytes_per_element)
+    tokens_per_user = scenario.tokens_per_user  # 2500
+    kv_no_cache = scenario.kv_unshared
 
     # Step 2: With prefix caching: system prompt stored once; only response tokens per user
-    shared_tokens = system_prompt_tokens  # stored once
-    unique_tokens = avg_response_tokens * concurrent_users
-    total_tokens_cached = shared_tokens + unique_tokens
-    kv_cached = calc_kv_cache_size(n_layers, 1, hidden_dim, total_tokens_cached, 1, bytes_per_element)
+    total_tokens_cached = scenario.tokens_shared
+    kv_cached = scenario.kv_shared
 
     # Step 3: Savings
-    memory_reduction_pct_val = (1 - (kv_cached / kv_no_cache).to("").magnitude) * 100
-    concurrent_multiplier_val = (kv_no_cache / kv_cached).to("").magnitude
+    memory_reduction_pct_val = scenario.reduction * 100
+    concurrent_multiplier_val = scenario.capacity_ratio
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(kv_cached < kv_no_cache, "Cached must be smaller than uncached")
@@ -3851,44 +3874,43 @@ from mlsysim.fmt import check, fmt_int, fmt_memory
 
 class PrecisionDividend:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    int4_bits = BYTES_INT4.to(byte).magnitude * 8
-    fp16_bits = BYTES_FP16.to(byte).magnitude * 8
     # The reference replica: registry serving profile (eight-way tensor
     # parallelism). The MHA row isolates precision; the GQA row (absorbed
     # from the former performance-engineering dividend) is the replica's own
     # eight-KV-head layout.
-    tensor_parallel_degree = int(ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree)
-    # vendor nameplate magnitude kept in decimal GB: every other number in
-    # this example (weights, KV cache) is decimal, so the printed budget
-    # arithmetic only holds if the budget shares their unit space
-    h100_mem = ReferenceStats.ServingProfiles.H100VendorMemoryBudget.to(GiB).magnitude * GB
-    fp16_weight_total = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
-    fp16_weight_per_gpu = fp16_weight_total / tensor_parallel_degree
+    # MHA row: Scenarios.Llama2_70BPrecisionDividendMhaTp8; GQA row:
+    # Scenarios.Llama2_70BPrecisionDividendGqaTp8 (both on a decimal 80 GB
+    # nameplate budget, so the printed budget arithmetic shares one unit space).
+    mha = Scenarios.Llama2_70BPrecisionDividendMhaTp8
+    gqa = Scenarios.Llama2_70BPrecisionDividendGqaTp8
+    tensor_parallel_degree = gqa.tp_size
+    h100_mem = gqa.hbm_per_accelerator
+    _model = gqa.workload
+    fp16_weight_total = _model.size_in_bytes(gqa.weight_bytes)
+    kv_seq_len = gqa.context_tokens
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    avail_kv_fp16 = h100_mem - fp16_weight_per_gpu
-    int4_weight_per_gpu = fp16_weight_per_gpu * (int4_bits / fp16_bits)
-    avail_kv_int4 = h100_mem - int4_weight_per_gpu
+    mha_result = mha.result
+    gqa_result = gqa.result
+    fp16_weight_per_gpu = gqa_result.weights_per_device
+    avail_kv_fp16 = gqa_result.kv_budget_per_device
+    int4_weight_per_gpu = gqa_result.weights_per_device_low
+    avail_kv_int4 = gqa_result.kv_budget_per_device_low
     # MHA baseline shape, matching KVCacheCalc.kv_fp16 quoted in the problem statement.
-    _model = Models.Language.Llama2_70B
-    kv_layers = _model.layers
-    kv_heads = _model.heads
-    kv_head_dim = _model.hidden_dim // _model.heads
-    kv_seq_len = int(ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens)
-    kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
-    kv_fp16_per_gpu = kv_fp16 / tensor_parallel_degree
-    kv_int8_total = kv_fp16 / 2
-    kv_int8_per_gpu = kv_int8_total / tensor_parallel_degree
-    max_batch_fp16 = int((avail_kv_fp16 / kv_fp16_per_gpu).to("").magnitude)
-    max_batch_int8 = int((avail_kv_int4 / kv_int8_per_gpu).to("").magnitude)
+    kv_fp16 = mha_result.kv_per_request
+    kv_fp16_per_gpu = mha_result.kv_per_request_per_device
+    kv_int8_total = mha_result.kv_per_request_low
+    kv_int8_per_gpu = mha_result.kv_per_request_per_device_low
+    max_batch_fp16 = mha_result.max_batch
+    max_batch_int8 = mha_result.max_batch_low
     # GQA row: the same budget with the replica's eight KV heads.
-    gqa_kv_heads = _model.kv_heads
-    gqa_kv_fp16 = calc_kv_cache_size(kv_layers, gqa_kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
-    gqa_kv_fp16_per_gpu = gqa_kv_fp16 / tensor_parallel_degree
-    gqa_kv_int8_per_gpu = gqa_kv_fp16_per_gpu / 2
-    gqa_max_batch_fp16 = int((avail_kv_fp16 / gqa_kv_fp16_per_gpu).to("").magnitude)
-    gqa_max_batch_int8 = int((avail_kv_int4 / gqa_kv_int8_per_gpu).to("").magnitude)
-    mha_dividend = max_batch_int8 / max_batch_fp16
-    gqa_dividend = gqa_max_batch_int8 / gqa_max_batch_fp16
+    gqa_kv_heads = gqa.kv_heads
+    gqa_kv_fp16 = gqa_result.kv_per_request
+    gqa_kv_fp16_per_gpu = gqa_result.kv_per_request_per_device
+    gqa_kv_int8_per_gpu = gqa_result.kv_per_request_per_device_low
+    gqa_max_batch_fp16 = gqa_result.max_batch
+    gqa_max_batch_int8 = gqa_result.max_batch_low
+    mha_dividend = mha_result.dividend
+    gqa_dividend = gqa_result.dividend
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs((avail_kv_fp16 - 62.5 * GB).to(GB).magnitude) < 1e-9, f"Expected 62.5 GB, got {avail_kv_fp16.to(GB).magnitude:.1f} GB")
     check(abs((int4_weight_per_gpu - 4.375 * GB).to(GB).magnitude) < 0.01, f"Expected 4.375 GB, got {int4_weight_per_gpu.to(GB).magnitude:.3f} GB")
@@ -3958,7 +3980,7 @@ When a lightly loaded replica serves one or a few interactive streams, batching 
 
 On a shared time axis (@fig-speculative-decoding), standard decoding uses four target passes to emit four tokens. In the speculative round, the draft model proposes $\DraftedToken_1$ through $\DraftedToken_4$ sequentially and the target evaluates those positions in one pass; three drafts are accepted, and the first rejected token, $\DraftedToken_4$, is replaced by $\ResampledReplacementToken$ sampled from the target. The shorter timeline holds only when drafting, verification, and correction together cost less than the target passes they replace. If too many drafts are rejected, the target streams its weights and keeps little of the work; if the draft model is too expensive, its own sequential passes consume the time that one-pass verification saved.
 
-::: {#fig-speculative-decoding data-explore="mechanism-scene" data-explore-key="vol2:fig-speculative-decoding" fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $\SpeculativeDraftLength$ tokens. The target model verifies all $\SpeculativeDraftLength$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines above a shared time axis. Top lane, standard decoding: four equal-width target passes in sequence, each emitting one green token, T1 to T4, at its end. Bottom lane, speculative decoding: four narrow gray draft steps labeled T1 to T4 followed by one target pass that verifies T1 to T4. Beneath the verify pass, green tokens T1 to T3 are marked accepted, draft T4 is crossed out in red and marked rejected, and a resampled token T4 prime sits below it. Dashed guides and ticks on the time axis, labeled speculative and standard, mark where each lane has four tokens, and a green double arrow between them marks the time saved for the same four tokens."}
+::: {#fig-speculative-decoding data-explore="original-v2-speculative-decoding" data-explore-key="vol2:fig-speculative-decoding" fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $\SpeculativeDraftLength$ tokens. The target model verifies all $\SpeculativeDraftLength$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines above a shared time axis. Top lane, standard decoding: four equal-width target passes in sequence, each emitting one green token, T1 to T4, at its end. Bottom lane, speculative decoding: four narrow gray draft steps labeled T1 to T4 followed by one target pass that verifies T1 to T4. Beneath the verify pass, green tokens T1 to T3 are marked accepted, draft T4 is crossed out in red and marked rejected, and a resampled token T4 prime sits below it. Dashed guides and ticks on the time axis, labeled speculative and standard, mark where each lane has four tokens, and a green double arrow between them marks the time saved for the same four tokens."}
 
 ![](images/svg/speculative-decoding.svg){width="100%"}
 
@@ -4034,8 +4056,9 @@ class SpeculativeSpeedup:
     alpha_high = 0.9  # acceptance rate for "easy" text
     alpha_med = 0.7  # medium-difficulty text
     alpha_low = 0.5  # "hard" text
-    alpha_case = 0.78  # scenario input: the 70B decode-budget case study's draft/target pair
-    K = 5  # draft length
+    case = Scenarios.Llama3_70B_ReplicaSpeculation  # the 70B decode-budget case study's draft/target pair
+    alpha_case = case.acceptance
+    K = case.draft_length  # draft length
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Use ServingModel to calculate speedup (logic from library)
@@ -4056,7 +4079,7 @@ class SpeculativeSpeedup:
     et_high = (1 - alpha_high ** (K + 1)) / (1 - alpha_high)
     et_med = (1 - alpha_med ** (K + 1)) / (1 - alpha_med)
     et_low = (1 - alpha_low ** (K + 1)) / (1 - alpha_low)
-    et_case = (1 - alpha_case ** (K + 1)) / (1 - alpha_case)
+    et_case = case.expected_tokens
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt
@@ -4311,13 +4334,47 @@ $$\HybridIterationTime\gtrsim \max\left(\frac{\WeightMemory}{\SustainedMemoryBan
 
 where $\ActiveParameterCount$ is the active parameter count, $\SustainedMemoryBandwidth$ is HBM memory bandwidth, and $\PeakRate$ is peak accelerator compute throughput. These quantities must describe the same device or shard. Balancing the total prefill token allocation against weight streaming can amortize weight-loading cost across both phases, but this lower bound cannot guarantee $\HybridIterationTime\le \text{SLO}_{\text{TBT}}$. Chunk sizing must leave room for the omitted costs and be validated against measured tail latency under the intended workload.
 
+```{python}
+#| echo: false
+#| label: chunked-prefill-iterations
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHUNKED PREFILL ITERATIONS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @exmp-inference-sarathi-chunked-prefill-implementation.
+# │
+# │ Goal: Count the iterations a long prompt needs when it advances one chunk
+# │       per iteration.
+# │ Show: 10,000-token prompt, 512-token chunks, at least 20 iterations.
+# │ How: Scenarios.LongPromptChunkedPrefill (ceil(prompt / chunk)).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_math
+
+class ChunkedPrefillIterations:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.LongPromptChunkedPrefill
+    prompt_tokens = scenario.prompt_tokens
+    chunk_tokens = scenario.chunk_tokens
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    iterations = scenario.iterations
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(iterations * chunk_tokens >= prompt_tokens > (iterations - 1) * chunk_tokens, "Iterations must be the ceiling")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    _prompt_tex = f"{prompt_tokens:,}".replace(",", "{,}")
+    prompt_plus_math = fmt_math(f"{_prompt_tex}+")
+    prompt_math = fmt_math(_prompt_tex)
+    chunk_math = fmt_math(f"{chunk_tokens}")
+    iterations_math = fmt_math(rf"\lceil {_prompt_tex}/{chunk_tokens} \rceil = {iterations}")
+    iterations_str = fmt_int(iterations, commas=False)
+```
+
 ::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
 
-**Scenario**: An LLM inference server receives a mix of long input prompts ($10{,}000+$ tokens) and interactive short decode requests [@agrawal2024sarathi].
+**Scenario**: An LLM inference server receives a mix of long input prompts (`{python} ChunkedPrefillIterations.prompt_plus_math` tokens) and interactive short decode requests [@agrawal2024sarathi].
 
 **Diagnosis**: When the worker schedules a full long-prompt prefill before returning to decode, that prefill can occupy execution for hundreds of milliseconds and create a TBT spike for active streams.
 
-**Systems lesson**: Chunking moves the cost of a long prompt rather than removing it. At $512$ tokens per chunk, a $10{,}000$-token prompt needs at least $\lceil 10{,}000/512 \rceil = 20$ iterations to finish its prefill. With this prompt as the only prefill request, active streams share each decode iteration with at most one of its chunks, while the prompt's own time to first token stretches across those 20 iterations. Multiple waiting prompts can contribute additional chunks within the total iteration budget. The chunk budget sets that exchange between other streams' TBT and the long prompt's TTFT, so it must be tuned against both measured tails.
+**Systems lesson**: Chunking moves the cost of a long prompt rather than removing it. At `{python} ChunkedPrefillIterations.chunk_math` tokens per chunk, a `{python} ChunkedPrefillIterations.prompt_math`-token prompt needs at least `{python} ChunkedPrefillIterations.iterations_math` iterations to finish its prefill. With this prompt as the only prefill request, active streams share each decode iteration with at most one of its chunks, while the prompt's own time to first token stretches across those `{python} ChunkedPrefillIterations.iterations_str` iterations. Multiple waiting prompts can contribute additional chunks within the total iteration budget. The chunk budget sets that exchange between other streams' TBT and the long prompt's TTFT, so it must be tuned against both measured tails.
 
 :::
 
@@ -4993,25 +5050,26 @@ class TpSpeedupCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     _model = Models.Language.Llama2_70B
-    # scenario assumption: per-layer phase timings (1 GPU vs 8-way TP)
-    att_seq_ms = 12.0  # attention compute, sequential (1 GPU)
-    att_tp_ms = 1.5  # attention compute, 8-way TP
-    ff_seq_ms = 18.0  # feed-forward compute, sequential (1 GPU)
-    ff_tp_ms = 2.25  # feed-forward compute, 8-way TP
-    allreduce_tp_ms = 0.3  # AllReduce overhead per collective, 8-way TP
-    tp_theoretical = 8  # linear scaling limit
-    n_layers = _model.layers
+    # Per-layer phase timings (1 GPU vs 8-way TP): Scenarios.Llama2_70BPrefillTensorParallel8
+    tp = Scenarios.Llama2_70BPrefillTensorParallel8
+    att_seq_ms = tp.serial_layer_times["attention"].to(millisecond).magnitude  # attention compute, sequential (1 GPU)
+    ff_seq_ms = tp.serial_layer_times["feed-forward"].to(millisecond).magnitude  # feed-forward compute, sequential (1 GPU)
+    allreduce_tp_ms = tp.allreduce_time.to(millisecond).magnitude  # AllReduce overhead per collective, 8-way TP
+    tp_theoretical = tp.tp_size  # linear scaling limit
+    n_layers = tp.layers
     weight_fp16 = _model.size_in_bytes(BYTES_FP16)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Per-layer totals from the phase breakdown (two AllReduce ops per layer)
-    seq_per_layer_ms = att_seq_ms + ff_seq_ms
-    tp8_per_layer_ms = att_tp_ms + ff_tp_ms + 2 * allreduce_tp_ms
-    tp_speedup = seq_per_layer_ms / tp8_per_layer_ms
+    att_tp_ms = tp.sharded("attention").to(millisecond).magnitude  # attention compute, 8-way TP
+    ff_tp_ms = tp.sharded("feed-forward").to(millisecond).magnitude  # feed-forward compute, 8-way TP
+    seq_per_layer_ms = tp.serial_layer_time.to(millisecond).magnitude
+    tp8_per_layer_ms = tp.parallel_layer_time.to(millisecond).magnitude
+    tp_speedup = tp.speedup
 
     # Step 1: Full-model prefill-pass timing
-    seq_total_ms = seq_per_layer_ms * n_layers
-    tp8_total_ms = tp8_per_layer_ms * n_layers
+    seq_total_ms = tp.serial_total.to(millisecond).magnitude
+    tp8_total_ms = tp.parallel_total.to(millisecond).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_params, fmt_time
@@ -5343,9 +5401,10 @@ class MoEEconomics:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim.physics import memory_from_params
 
-    _moe = Models.Language.DeepSeek_V3
+    _traffic = Scenarios.DeepSeekV3WeightTraffic
+    _moe = _traffic.workload
     _mixtral = Models.Language.Mixtral_8x7B
-    dense_params = 400 * Bparam  # illustrative dense baseline
+    dense_params = _traffic.dense_parameters  # illustrative dense baseline (scenario assumption)
     moe_active_params = _moe.active_parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -5754,11 +5813,12 @@ class ArchetypeBTailAtScale:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     profile = ReferenceStats.RecommenderAtScaleProfile
     p99_slo = profile.P99LatencySlo
-    qps = profile.PlatformQps.to(count / second).magnitude
-    tail_probability = 1e-4  # scenario assumption: rare slow-request event
+    scenario = Scenarios.RecommenderTailEvents
+    qps = scenario.request_rate.to(count / second).magnitude
+    tail_probability = scenario.event_probability  # rare slow-request event
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tail_events_per_s = qps * tail_probability
+    tail_events_per_s = scenario.events_per_second
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(tail_events_per_s >= 100, "Rare tail events should still occur hundreds of times per second")
@@ -5798,12 +5858,13 @@ from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class FanoutTailBudget:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    leaves = 100  # scenario assumption: leaf sub-requests per request
-    leaf_slow_prob = 0.01  # each leaf exceeds its own p99 threshold
-    request_slow_target = 0.01  # request-level p99 target
+    fanout = Scenarios.ServingFanout100Leaves
+    leaves = fanout.n_components  # leaf sub-requests per request
+    leaf_slow_prob = 1 - fanout.availability  # each leaf exceeds its own p99 threshold
+    request_slow_target = 1 - fanout.availability  # request-level p99 target
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    request_slow_prob = 1 - (1 - leaf_slow_prob) ** leaves
-    leaf_slow_budget = 1 - (1 - request_slow_target) ** (1 / leaves)
+    request_slow_prob = 1 - fanout.all_up
+    leaf_slow_budget = 1 - fanout.required_availability(1 - request_slow_target)
     leaf_percentile = 100 * (1 - leaf_slow_budget)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(0.62 < request_slow_prob < 0.64, "100 leaves at p99 should leave ~63% of requests slow")
@@ -5920,31 +5981,28 @@ class HeterogeneousGpuCluster:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100 = Hardware.Cloud.H100
     a100 = Hardware.Cloud.A100
-    profile = ReferenceStats.ServingProfiles
-    n_h100 = int(profile.HeterogeneousRoutingH100Servers)
-    n_a100 = int(profile.HeterogeneousRoutingA100Servers)
-    h100_cap_qps = int(profile.HeterogeneousRoutingH100CapacityQps)
-    a100_cap_qps = int(profile.HeterogeneousRoutingA100CapacityQps)
-    target_qps = int(profile.HeterogeneousRoutingTargetQps)
+    routing = Scenarios.HeterogeneousH100A100Routing
+    n_h100 = routing.servers["H100"]
+    n_a100 = routing.servers["A100"]
+    h100_cap_qps = routing.capacity["H100"]
+    a100_cap_qps = routing.capacity["A100"]
+    target_qps = routing.offered
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_cap = n_h100 * h100_cap_qps + n_a100 * a100_cap_qps
-    total_servers = n_h100 + n_a100
+    total_cap = routing.total_capacity
 
     # Step 1: Capacity-proportional weights
-    h100_weight = h100_cap_qps / total_cap
-    a100_weight = a100_cap_qps / total_cap
+    h100_weight = routing.weight("H100")
+    a100_weight = routing.weight("A100")
 
     # Step 2: Weighted routing: each server receives weight × total_qps
-    h100_load = target_qps * h100_weight
-    a100_load = target_qps * a100_weight
-    h100_util = h100_load / h100_cap_qps * 100
-    a100_util = a100_load / a100_cap_qps * 100
+    h100_util = routing.utilization("H100") * 100
+    a100_util = routing.utilization("A100") * 100
 
     # Step 3: Equal routing: each server receives target_qps/total_servers
-    equal_load = target_qps / total_servers
-    h100_util_equal = equal_load / h100_cap_qps * 100
-    a100_util_equal = equal_load / a100_cap_qps * 100
+    equal_load = routing.equal_split_load
+    h100_util_equal = routing.equal_split_utilization("H100") * 100
+    a100_util_equal = routing.equal_split_utilization("A100") * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(target_qps <= total_cap, "Target QPS must not exceed total cluster capacity")
@@ -6372,25 +6430,24 @@ class NoisyNeighborImpact:
     """KV-pool contention and quota protection for a shared serving pool."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    kv_pool = 60 * GB  # scenario assumption: shared KV-cache pool
-    pool_tenants = 3  # scenario assumption: tenants sharing that pool
-    swollen_share = 45 * GB  # scenario assumption: long-context tenant's share
-    base_seqs = 200  # scenario assumption: sequences per equal share
-    tenant_base_qps = 100  # scenario assumption: per-tenant request rate
-    tenant_burst_qps = 500  # scenario assumption: bursting tenant's rate
-    slo_ms = 50  # scenario assumption: P99 SLO
-    p99_low_ms = 22  # scenario assumption: unprotected pool P99, low end
-    p99_high_ms = 45  # scenario assumption: unprotected pool P99, high end
-    throttled_qps = 120  # scenario assumption: quota-enforced rate
-    protected_p99_ms = 15  # scenario assumption: protected tenants' P99
+    scenario = Scenarios.SharedPoolNoisyNeighbor
+    kv_pool = scenario.kv_pool  # shared KV-cache pool
+    pool_tenants = scenario.pool_tenants  # tenants sharing that pool
+    swollen_share = scenario.swollen_share  # long-context tenant's share
+    base_seqs = scenario.base_sequences  # sequences per equal share
+    tenant_base_qps = int(scenario.base_rate)  # per-tenant request rate
+    tenant_burst_qps = int(scenario.burst_rate)  # bursting tenant's rate
+    slo_ms = int(round(scenario.slo.to(millisecond).magnitude))  # P99 SLO
+    p99_low_ms = int(round(scenario.unprotected_p99_low.to(millisecond).magnitude))  # unprotected pool P99, low end
+    p99_high_ms = int(round(scenario.unprotected_p99_high.to(millisecond).magnitude))  # unprotected pool P99, high end
+    throttled_qps = int(scenario.quota_rate)  # quota-enforced rate
+    protected_p99_ms = int(round(scenario.protected_p99.to(millisecond).magnitude))  # protected tenants' P99
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    base_share = kv_pool / pool_tenants
-    gb_per_seq = base_share / base_seqs
-    other_share = (kv_pool - swollen_share) / (pool_tenants - 1)
-    other_seqs = int((other_share / gb_per_seq).to("").magnitude)
-    batch_reduction = 1 - other_seqs / base_seqs
-    burst_mult = tenant_burst_qps / tenant_base_qps
+    base_share = scenario.base_share
+    other_seqs = scenario.other_sequences
+    batch_reduction = scenario.batch_reduction
+    burst_mult = scenario.burst_multiple
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(other_seqs < base_seqs, "The burst must shrink the other tenants' batches")
@@ -6579,19 +6636,19 @@ class ColdStartTimeline:
     """Cold-start decomposition and predictive-scaling saving."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    artifact = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)
-    cold_start = ReferenceStats.ReplicaColdStartProfile  # shared replica cold-start scenario
-    storage_bw = cold_start.ArtifactFetchBandwidth  # effective object-storage read rate
-    t_provision = cold_start.ProvisioningTime  # instance acquisition and boot
-    t_load_warmup = cold_start.LoadWarmupTime  # device load and warmup
-    reactive_peak_replicas = 45  # scenario assumption: reactive-only peak fleet
-    predictive_peak_replicas = 30  # scenario assumption: forecast peak fleet (schedule table)
-    lead_min = 30  # scenario assumption: pre-warm lead before each ramp
+    cold_start = Scenarios.Llama70BReplicaColdStart  # shared replica cold-start scenario
+    artifact = cold_start.artifact
+    storage_bw = cold_start.fetch_bandwidth  # effective object-storage read rate
+    t_provision = cold_start.provisioning_time  # instance acquisition and boot
+    t_load_warmup = cold_start.load_warmup_time  # device load and warmup
+    reactive_peak_replicas = cold_start.reactive_peak_replicas  # reactive-only peak fleet
+    predictive_peak_replicas = cold_start.predictive_peak_replicas  # forecast peak fleet (schedule table)
+    lead_min = int(round(cold_start.prewarm_lead.to("minute").magnitude))  # pre-warm lead before each ramp
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t_fetch = (artifact / storage_bw).to(second)
-    t_cold = t_provision + t_fetch + t_load_warmup
-    spend_saving = 1 - predictive_peak_replicas / reactive_peak_replicas
+    t_fetch = cold_start.fetch_time
+    t_cold = cold_start.cold_start_time
+    spend_saving = cold_start.peak_saving
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(t_fetch > t_provision + t_load_warmup, "Artifact fetch should dominate the cold start")
@@ -7946,46 +8003,37 @@ class ReplicaDecodeBudget:
     """Constructed batch-one decode budget for the reference 70B replica."""
 
     # ┌── 1. LOAD (Constants and scenario assumptions) ─────────────────────
-    model = Models.Language.Llama2_70B
-    tensor_parallel_degree = int(ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree)
-    hbm_bw = Hardware.Cloud.H100.memory.bandwidth
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    tpot_target_ms = 50.0  # illustrative endpoint TPOT target
-    baseline_ms = 85.0
-    baseline_shares = [0.40, 0.24, 0.12, 0.12, 0.12]  # GEMM, attention, element-wise, AllReduce, launch/runtime
-    gemm_cut = 0.45  # round 1: assumed reduction in exposed GEMM time from INT4 weights
-    attention_cut = 0.25  # round 2: assumed reduction from a fused decode-attention kernel
-    fused_elementwise_ms = 3.4  # round 2: assumed fused element-wise interval
-    replay_overhead_ms = 2.0  # round 2: assumed graph-replay launch and runtime interval
-    draft_ms = 4.0  # round 3: assumed draft time for K proposals
-    launch_overhead = 5 * microsecond  # assumed collective launch latency
-    allreduces_per_layer = 2  # attention and feed-forward outputs under tensor parallelism
+    budget = Scenarios.Llama3_70B_ReplicaDecodeBudget
+    spec = Scenarios.Llama3_70B_ReplicaSpeculation
+    model = budget.workload
+    tensor_parallel_degree = budget.tp_size
+    tpot_target_ms = budget.tpot_target.to(ms).magnitude  # illustrative endpoint TPOT target
+    gemm_cut = budget.gemm_cut  # round 1: assumed reduction in exposed GEMM time from INT4 weights
+    attention_cut = budget.attention_cut  # round 2: assumed reduction from a fused decode-attention kernel
+    fused_elementwise_ms = budget.fused_elementwise.to(ms).magnitude  # round 2: assumed fused element-wise interval
+    replay_overhead_ms = budget.replay_overhead.to(ms).magnitude  # round 2: assumed graph-replay launch and runtime interval
+    draft_ms = spec.draft_time.to(ms).magnitude  # round 3: assumed draft time for K proposals
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    baseline = [total * share for total, share in zip([baseline_ms] * len(baseline_shares), baseline_shares)]
-    round1 = baseline.copy()
-    round1[0] *= 1 - gemm_cut
-    round2 = round1.copy()
-    round2[1] *= 1 - attention_cut
-    round2[2] = fused_elementwise_ms
-    round2[4] = replay_overhead_ms
-    totals = [sum(baseline), sum(round1), sum(round2)]
+    baseline = budget.baseline
+    round1 = budget.after_precision
+    round2 = budget.after_fusion
+    totals = budget.totals
 
-    weight_shard = model.size_in_bytes(BYTES_FP16) / tensor_parallel_degree
-    floor_ms = (weight_shard / hbm_bw).to(ms).magnitude
+    weight_shard = budget.weight_shard
+    floor_ms = budget.floor.to(ms).magnitude
     baseline_mbu = floor_ms / totals[0]
     final_over_floor = totals[2] / floor_ms
 
-    allreduces_per_step = allreduces_per_layer * model.layers
-    allreduce_per_collective_us = baseline[3] * 1000 / allreduces_per_step
-    b1_payload = 2 * model.hidden_dim * BYTES_FP16
-    collective_estimate_us = (launch_overhead + b1_payload / nvlink_bw).to(microsecond).magnitude
+    allreduces_per_step = budget.allreduces_per_step
+    allreduce_per_collective_us = budget.allreduce_per_collective.to(microsecond).magnitude
+    collective_estimate_us = budget.collective_estimate.to(microsecond).magnitude
     allreduce_estimate_ms = collective_estimate_us * allreduces_per_step / 1000
 
-    emitted = SpeculativeSpeedup.et_case
-    round_ms = draft_ms + totals[2]
-    speculative_ms = round_ms / emitted
-    speedup = totals[2] / speculative_ms
+    emitted = spec.expected_tokens
+    round_ms = spec.round_time.to(ms).magnitude
+    speculative_ms = spec.per_token_time.to(ms).magnitude
+    speedup = spec.tpot_gain
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(totals[0] - 85.0) < 1e-9, "Baseline budget should total 85 ms")

@@ -141,31 +141,29 @@ To quantify where latency optimizations yield true wall-clock savings, systems e
 # OBSERVED SPANS AND A CHANGING CRITICAL PATH (LEGO)
 # Goal: Separate overlapping work, unexplained time, and a conditional speedup.
 # Scope: Hypothetical host-observed intervals in seconds, not benchmark data.
-from mlsysim import second
+from mlsysim import second, Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_qty, check
 
 class ObservedCriticalPath:
     # 1. LOAD: one clock; parallel checks start together; no other dependencies.
-    retrieval = (0.0, 0.2)
-    planning = (0.2, 3.2)
-    tests = (3.2, 9.2)
-    lint = (3.2, 5.2)
-    synthesis = (9.7, 11.7)
-    segment = (0.0, 11.7)
-    faster_test_s = 1.0  # intervention assumption, not an observed improvement
+    trial = Scenarios.RepairTrialSpanTimeline
+    retrieval = tuple(t.to(second).magnitude for t in trial.intervals["retrieve"])
+    planning = tuple(t.to(second).magnitude for t in trial.intervals["propose"])
+    tests = tuple(t.to(second).magnitude for t in trial.intervals["tests"])
+    lint = tuple(t.to(second).magnitude for t in trial.intervals["lint"])
+    synthesis = tuple(t.to(second).magnitude for t in trial.intervals["synthesize"])
+    faster_test_s = trial.intervention["tests"].to(second).magnitude  # intervention assumption, not an observed improvement
 
     # 2. EXECUTE: seconds throughout; enclosing span is not added to children.
-    retrieval_s = retrieval[1] - retrieval[0]
-    planning_s = planning[1] - planning[0]
+    path = trial.result
     tests_s = tests[1] - tests[0]
     lint_s = lint[1] - lint[0]
-    synthesis_s = synthesis[1] - synthesis[0]
-    wall_s = segment[1] - segment[0]
-    leaf_sum_s = retrieval_s + planning_s + tests_s + lint_s + synthesis_s
-    accounted_s = retrieval_s + planning_s + max(tests_s, lint_s) + synthesis_s
-    gap_s = synthesis[0] - max(tests[1], lint[1])
-    changed_s = retrieval_s + planning_s + max(faster_test_s, lint_s) + gap_s + synthesis_s
-    saving_s = wall_s - changed_s
+    wall_s = path.elapsed.to(second).magnitude
+    leaf_sum_s = path.leaf_sum.to(second).magnitude
+    accounted_s = path.critical_path.to(second).magnitude
+    gap_s = path.unexplained.to(second).magnitude
+    changed_s = path.changed_elapsed.to(second).magnitude
+    saving_s = path.saving.to(second).magnitude
     reduction_s = tests_s - faster_test_s
 
     # 3. GUARD: boundaries, overlap, and independent path enumeration.
@@ -175,6 +173,7 @@ class ObservedCriticalPath:
     check(abs(leaf_sum_s - 13.2) < 1e-9, "Overlapping leaf-duration sum")
     check(abs(accounted_s + gap_s - wall_s) < 1e-9, "Complete elapsed accounting")
     check(abs(wall_s - 11.7) < 1e-9 and abs(gap_s - 0.5) < 1e-9, "Declared observation window")
+    check(abs(gap_s - (synthesis[0] - max(tests[1], lint[1]))) < 1e-9, "Gap sits before synthesis")
     check(abs(changed_s - max(0.2 + 3 + 1 + 0.5 + 2, 0.2 + 3 + 2 + 0.5 + 2)) < 1e-9, "Recompute both paths")
     check(abs(saving_s - 4.0) < 1e-9, "Saving limited by the other branch")
 
@@ -196,7 +195,7 @@ class ObservedCriticalPath:
 
 The hypothetical intervals used in notebook \ref{nbk-13-critical-path-latency-and-bottleneck} share a single host clock. @Fig-vol3-overlapping-trace-intervals places them on a common axis so that the parallel checks, their join, and the unaccounted interval remain visible together.
 
-::: {#fig-vol3-overlapping-trace-intervals data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-overlapping-trace-intervals" fig-env="figure" fig-pos="htb" fig-cap="**Overlapping Spans and Late Outcomes**: Panel A plots the notebook's hypothetical host-observed intervals, not benchmark measurements. Tests and lint begin after planning; synthesis waits for both. The dark outline identifies tests as the longer parallel branch, while the gap before synthesis remains unattributed. The enclosing trajectory is elapsed time, not another duration to add to its children. Panel B is a separate operation example: a client timeout ends a span but leaves the operation unresolved until correlated evidence arrives." fig-alt="A common time axis shows an enclosing trajectory, retrieval and planning, concurrent tests and lint, and later synthesis. A bracket marks a half-second gap. Below, a separate linked sequence connects a timed-out client span to an unresolved operation and a later callback."}
+::: {#fig-vol3-overlapping-trace-intervals data-explore="original-v3-vol3-overlapping-trace-intervals" data-explore-key="vol3:fig-vol3-overlapping-trace-intervals" fig-env="figure" fig-pos="htb" fig-cap="**Overlapping Spans and Late Outcomes**: Panel A plots the notebook's hypothetical host-observed intervals, not benchmark measurements. Tests and lint begin after planning; synthesis waits for both. The dark outline identifies tests as the longer parallel branch, while the gap before synthesis remains unattributed. The enclosing trajectory is elapsed time, not another duration to add to its children. Panel B is a separate operation example: a client timeout ends a span but leaves the operation unresolved until correlated evidence arrives." fig-alt="A common time axis shows an enclosing trajectory, retrieval and planning, concurrent tests and lint, and later synthesis. A bracket marks a half-second gap. Below, a separate linked sequence connects a timed-out client span to an unresolved operation and a later callback."}
 ![](images/svg/overlapping_trace_intervals.svg)
 :::
 
@@ -256,25 +255,30 @@ Diagnostic detail also expands substantially faster than the underlying trajecto
 # RARE FAILURES UNDER HEAD SAMPLING (LEGO)
 # Goal: Probability that a failure mode leaves no detailed trace.
 # Scope: Independent retention with fixed probability, decided before outcomes.
+from mlsysim import Scenarios, Literature
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class HeadSamplingMiss:
     # 1. LOAD: hypothetical head-sampling probability and occurrence counts.
-    theta = 0.10
-    rare_count = 5
-    common_count = 50
-    chk_theta, chk_count = 0.05, 20  # checkpoint exercise givens
+    rare = Scenarios.RareFailureUnderHeadSampling
+    common = Scenarios.RecurringFailureUnderHeadSampling
+    chk = Scenarios.FailureUnderFivePercentHeadSample  # checkpoint exercise givens
+    theta = rare.retention_probability
+    rare_count = rare.occurrences
+    common_count = common.occurrences
+    chk_theta, chk_count = chk.retention_probability, chk.occurrences
     # Dapper's first production sampling: one trace per 1024 candidates
     # (Sigelman et al. 2010, Google Technical Report dapper-2010-1).
-    dapper_denominator = 1024
+    dapper_denominator = Literature.DistributedTracing.DapperFirstProductionSamplingDenominator
 
     # 2. EXECUTE: each occurrence retained independently with probability theta.
-    miss_rare = (1 - theta) ** rare_count
-    miss_common = (1 - theta) ** common_count
+    miss_rare = rare.miss
+    miss_common = common.miss
 
     # 3. GUARD
     check(abs(miss_rare - 0.59049) < 1e-9, "Five occurrences, ten percent")
     check(miss_common < 0.01, "Fifty occurrences")
+    check(common.retention_probability == theta, "One sampling probability")
 
     # 4. OUTPUT
     theta_str = fmt_percent(theta, precision=0, style="prose")
@@ -312,7 +316,7 @@ If a tail-sampling buffer evicts trace bodies before a slow regression suite fin
 
 Physical buffer limits inevitably govern this architecture. Buffer managers must enforce four concurrent bounds: active trace count, aggregate byte volume, individual trace size limits, and maximum staging age. Sizing from averages, such as mean concurrent traces multiplied by mean trace size, is a frequent engineering trap, because cascading failures typically produce bursts of unusually long, tool-heavy trajectories that quickly exhaust buffer memory. Telemetry systems must expose real-time metrics for head-dropped records, buffer evictions, and span truncations broken down by cohort and selection class. Without this visibility, correlated loss during incidents will silently purge the exact failure traces engineers need to diagnose system outages. Furthermore, while deferred tail selection curtails long-term downstream storage, it does not reduce the network ingress and memory needed to buffer traces prior to selection, and strict privacy restrictions apply to these staging buffers as well. The accounting record therefore sits outside the buffer (@fig-vol3-tail-sampling-pipeline). Every admitted trial enters it directly, together with every recorded drop, eviction, and truncation, so the denominator survives whatever the buffer loses.
 
-::: {#fig-vol3-tail-sampling-pipeline data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-tail-sampling-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Verdict-Aware Trace Selection**: Trace bodies pass a fallible minimization boundary into a bounded buffer that holds them until task verdicts, which can arrive late, reach the selector. Selection applies a declared precedence among the classes of @tbl-vol3-tail-sampling-policies, keeps inclusion probabilities with retained traces, and discards unselected bodies. Every admitted trial also enters the accounting record directly, together with recorded drops, evictions, and truncation, so the denominator does not depend on which bodies survived. Assigning high retention priority protects failure traces under moderate load, though severe buffer saturation can still force evictions before verdicts arrive." fig-alt="Left-to-right flow diagram. An admitted-trials box sends traces through a dashed amber capture boundary, labeled minimize, redact, into a green bounded buffer drawn as a row of eight slots, some shaded red for failures, some dashed for pending verdicts, one gray, the rest plain, held until verdict. One plain slot drops below the buffer, labeled evicted. The buffer feeds a selection precedence ladder that also receives late task verdicts from above. Its four numbered rungs are failed or violation, shaded red; pending or unknown, dashed; accepted, slow or costly, gray; and ordinary accepted, plain, matching the slot styles. The ladder sends selected traces to a violet trace store that keeps inclusion probability and, from its bottom edge, unselected traces to a dashed discarded box. Along the bottom, a violet evaluation accounting record spans the width, receiving an arrow labeled every trial straight from admitted trials and a red dashed arrow from the evicted slot labeled drops, evictions, truncation."}
+::: {#fig-vol3-tail-sampling-pipeline data-explore="original-v3-vol3-tail-sampling-pipeline" data-explore-key="vol3:fig-vol3-tail-sampling-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Verdict-Aware Trace Selection**: Trace bodies pass a fallible minimization boundary into a bounded buffer that holds them until task verdicts, which can arrive late, reach the selector. Selection applies a declared precedence among the classes of @tbl-vol3-tail-sampling-policies, keeps inclusion probabilities with retained traces, and discards unselected bodies. Every admitted trial also enters the accounting record directly, together with recorded drops, evictions, and truncation, so the denominator does not depend on which bodies survived. Assigning high retention priority protects failure traces under moderate load, though severe buffer saturation can still force evictions before verdicts arrive." fig-alt="Left-to-right flow diagram. An admitted-trials box sends traces through a dashed amber capture boundary, labeled minimize, redact, into a green bounded buffer drawn as a row of eight slots, some shaded red for failures, some dashed for pending verdicts, one gray, the rest plain, held until verdict. One plain slot drops below the buffer, labeled evicted. The buffer feeds a selection precedence ladder that also receives late task verdicts from above. Its four numbered rungs are failed or violation, shaded red; pending or unknown, dashed; accepted, slow or costly, gray; and ordinary accepted, plain, matching the slot styles. The ladder sends selected traces to a violet trace store that keeps inclusion probability and, from its bottom edge, unselected traces to a dashed discarded box. Along the bottom, a violet evaluation accounting record spans the width, receiving an arrow labeled every trial straight from admitted trials and a red dashed arrow from the evicted slot labeled drops, evictions, truncation."}
 ![](images/svg/tail-sampling-pipeline.svg)
 :::
 
@@ -322,33 +326,34 @@ Physical buffer limits inevitably govern this architecture. Buffer managers must
 # VERDICT-AWARE RETAINED VOLUME (LEGO)
 # Goal: Compare expected downstream diagnostic bytes under two selections.
 # Scope: Hypothetical disjoint classes, equal trace sizes, no capture loss.
-from mlsysim import Q_
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_memory, fmt_int, fmt_multiple, fmt_percent, check
 
 class TelemetryIngestionInvertedEconomics:
     # 1. LOAD: one hourly cohort, not measured workload characteristics.
-    trials = 10_000
-    failed = 400
-    unresolved = 100
-    ordinary = 9_500
-    trace_size = Q_(1.4, "megabyte")  # decimal MB, complete permitted body
-    hours = 24
-    head_probability = 0.05
-    control_probability = 0.02
-    control_step = 0.01  # one percentage point of control sampling
+    cohort = Scenarios.VerdictAwareTraceRetention
+    trials = cohort.trials
+    failed = cohort.failed
+    unresolved = cohort.unresolved
+    ordinary = cohort.ordinary
+    trace_size = cohort.trace_size  # decimal MB, complete permitted body
+    hours = cohort.window.to("hour").magnitude
+    head_probability = cohort.head_probability
+    control_probability = cohort.control_probability
 
     # 2. EXECUTE: high-priority classes all fit in the assumed window.
-    head_count = trials * head_probability
-    head_failed = failed * head_probability
-    head_unresolved = unresolved * head_probability
-    tail_ordinary = ordinary * control_probability
-    tail_count = failed + unresolved + tail_ordinary
-    full_volume = trials * hours * trace_size
-    head_volume = head_count * hours * trace_size
-    tail_volume = tail_count * hours * trace_size
-    ratio = (full_volume / tail_volume).to("").magnitude
-    floor_volume = (failed + unresolved) * hours * trace_size
-    per_point_volume = ordinary * control_step * hours * trace_size
+    kept = cohort.result
+    head_count = kept.head_count
+    head_failed = kept.head_failed
+    head_unresolved = kept.head_unresolved
+    tail_ordinary = kept.tail_control
+    tail_count = kept.tail_count
+    full_volume = kept.full_volume
+    head_volume = kept.head_volume
+    tail_volume = kept.tail_volume
+    ratio = kept.full_over_tail
+    floor_volume = kept.floor_volume
+    per_point_volume = kept.per_point_volume
 
     # 3. GUARD: conservation and independently stated byte totals.
     check(failed + unresolved + ordinary == trials, "Disjoint complete cohort")
@@ -469,27 +474,27 @@ If an engineer ships an omission marker and pagination together while external s
 # DIAGNOSTIC EXPERIMENT COUNTS AND WHAT A CLEAN RUN BOUNDS (LEGO)
 # Goal: Stipulated branch outcomes; Wilson upper failure bound after all-accepted runs.
 # Scope: Hypothetical continuations from one saved prefix; not a task-population sample.
-from math import ceil
-from statistics import NormalDist
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class DiagnosticCounts:
     # 1. LOAD: stipulated outcomes per condition, and a checkpoint target bound.
-    runs = 20
-    original_accepted = 1
-    warning_accepted = 8
-    revised_accepted = 20
-    target_bound = 0.05  # checkpoint exercise: failure-rate bound to demonstrate
-    z = NormalDist().inv_cdf(0.975)
+    branches = Scenarios.InterfaceRepairBranches
+    runs = branches.runs("paginated")
+    original_accepted = branches.accepted("original")
+    warning_accepted = branches.accepted("warning")
+    revised_accepted = branches.accepted("paginated")
+    target_bound = branches.target_bound  # checkpoint exercise: failure-rate bound to demonstrate
 
     # 2. EXECUTE: Wilson upper limit on failure after zero observed failures.
-    revised_fail_upper = z * z / (runs + z * z)
-    runs_for_target = ceil(z * z * (1 - target_bound) / target_bound)
+    revised_fail_upper = branches.failure_upper("paginated")
+    runs_for_target = branches.clean_runs_for_target
 
     # 3. GUARD
     check(revised_accepted == runs, "Revised condition accepts every run")
     check(0 <= original_accepted < warning_accepted < runs, "Stipulated ordering")
     check(0.15 < revised_fail_upper < 0.17, "Twenty clean runs bound failure near sixteen percent")
+    check(list(map(branches.runs, branches.outcomes)) == [runs] * len(branches.outcomes), "Equal runs per branch")
     check(runs_for_target > 3 * runs, "Target bound needs far more runs")
 
     # 4. OUTPUT
@@ -594,28 +599,25 @@ $$\JensenShannonDivergence(\BaselineToolCallDistribution\,\|\,\CandidateToolCall
 # THE SCALE OF TOOL-CALL DRIFT (LEGO)
 # Goal: Give the Jensen-Shannon divergence a worked magnitude for a visible shift.
 # Scope: Hypothetical two-tool call distributions; natural logarithms.
-from math import log
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, check
 
 class ToolDriftScale:
     # 1. LOAD: hypothetical share of tool calls that run tests (the rest run lint).
-    base_test_share = 0.70
-    cand_test_share = 0.50
+    drift = Scenarios.TestLintToolDrift
+    base_test_share = drift.baseline["tests"]
+    cand_test_share = drift.candidate["tests"]
 
     # 2. EXECUTE: divergence through the mixture distribution m.
-    pb = (base_test_share, 1 - base_test_share)
-    pc = (cand_test_share, 1 - cand_test_share)
-    mix = tuple((x + y) / 2 for x, y in zip(pb, pc))
-    kl_b = sum(x * log(x / y) for x, y in zip(pb, mix))
-    kl_c = sum(x * log(x / y) for x, y in zip(pc, mix))
-    js = 0.5 * kl_b + 0.5 * kl_c
-    js_max = log(2)
-    js_share = js / js_max
+    js = drift.divergence
+    js_max = drift.maximum
+    js_share = drift.share_of_maximum
 
     # 3. GUARD: inside the range and matching hand arithmetic.
     check(0 < js < js_max, "Divergence inside its range")
     check(abs(js - 0.0210) < 0.0005, "Worked two-tool divergence")
     check(0.02 < js_share < 0.04, "A visible shift is a few percent of the maximum")
+    check(abs(sum(drift.baseline.values()) - 1) < 1e-12 and set(drift.baseline) == set(drift.candidate), "Two tools, complete distributions")
 
     # 4. OUTPUT
     base_test_pct_str = fmt_percent(base_test_share, precision=0, style="prose")
@@ -692,27 +694,29 @@ The numerator in @eq-vol3-release-sprt-samples averages both terminal decisions,
 # │ How: Hypothetical stationary Bernoulli model with regular admissions.
 # │ Note: Separate later configuration; no promotion of the inconclusive pair.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import log
 from mlsysim import *
 
 class SizingCanaryTrafficCircuitBreaker:
     # 1. LOAD: hypothetical monitor inputs, not production measurements.
-    p0, p1 = 0.90, 0.75
-    alpha, beta = 0.01, 0.05
-    arrival_per_hr = 60
-    fraction = 0.05
-    label_delay = 0.5 * hour
+    monitor = Scenarios.AcceptanceCanaryMonitor
+    p0, p1 = monitor.p_base, monitor.p_degraded
+    alpha, beta = monitor.alpha, monitor.beta
+    arrival_per_hr = monitor.arrival_rate.to("1/hour").magnitude
+    fraction = monitor.fraction
+    label_delay = monitor.label_delay
 
     # 2. EXECUTE: approximate boundary mixture includes BOTH decisions.
-    upper = log((1 - beta) / alpha)
-    lower = log(beta / (1 - alpha))
-    drift = p1 * log(p1 / p0) + (1 - p1) * log((1 - p1) / (1 - p0))
-    expected_terminal = (1 - beta) * upper + beta * lower
-    expected_samples = expected_terminal / drift
-    canary_per_hr = arrival_per_hr * fraction
-    sampling_time = expected_samples / canary_per_hr * hour
-    label_time = sampling_time + label_delay
-    doubled_time = expected_samples / (2 * canary_per_hr) * hour + label_delay
+    sprt = monitor.result
+    upper = sprt.upper
+    lower = sprt.lower
+    drift = sprt.drift
+    expected_terminal = sprt.terminal
+    expected_samples = sprt.expected_samples
+    canary_per_hr = sprt.candidate_rate.to("1/hour").magnitude
+    sampling_time = sprt.admission_time
+    label_time = sprt.decision_time
+    doubled = Scenarios.AcceptanceCanaryMonitorDoubled
+    doubled_time = doubled.result.decision_time
 
     # 3. GUARD: numerical scale and distinction between samples and time.
     check(0 < p1 < p0 < 1, "Specified degraded Bernoulli alternative")
@@ -722,6 +726,7 @@ class SizingCanaryTrafficCircuitBreaker:
     check(canary_per_hr == 3, "Assigned arrival rate")
     check(abs(label_time.to(hour).magnitude - 15.5793544806) < 1e-9, "Regular arrivals plus fixed label delay")
     check(label_time > sampling_time, "Labels arrive after admission")
+    check(abs(doubled.fraction - 2 * fraction) < 1e-12 and doubled.p_degraded == p1, "Doubled allocation, same monitor")
 
     # 4. OUTPUT: every export is consumed in the notebook below.
     p0_str, p1_str = fmt(p0, precision=2), fmt(p1, precision=2)
@@ -736,7 +741,7 @@ class SizingCanaryTrafficCircuitBreaker:
     canary_arrivals_str = fmt_int(canary_per_hr)
     sampling_time_str = fmt_qty(sampling_time, hour, precision=2)
     label_time_str = fmt_qty(label_time, hour, precision=2)
-    doubled_fraction_str = fmt_percent(2 * fraction, precision=0, style="prose")
+    doubled_fraction_str = fmt_percent(doubled.fraction, precision=0, style="prose")
     doubled_time_str = fmt_qty(doubled_time, hour, precision=1)
 ```
 
@@ -760,8 +765,7 @@ Candidate admissions occur at `{python} SizingCanaryTrafficCircuitBreaker.canary
 # WHICH HARM THE CANARY FRACTION CONTROLS (LEGO)
 # Goal: Separate excess failures from a measured regression from exposure rate.
 # Scope: Same hypothetical monitor as the sequential-evidence notebook, under p1.
-from mlsysim import hour
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt_int, check
 
 class CanaryExcessFailures:
     # 1. LOAD: reuse the monitor's design inputs; compare with full allocation.
@@ -769,19 +773,18 @@ class CanaryExcessFailures:
     full_fraction = 1.0
 
     # 2. EXECUTE: tasks admitted by the decision = labeled samples + admitted during label delay.
-    gap = m.p0 - m.p1
-    delay_hr = m.label_delay.to(hour).magnitude
-    pending_canary = m.arrival_per_hr * m.fraction * delay_hr
-    pending_full = m.arrival_per_hr * full_fraction * delay_hr
-    excess_canary = (m.expected_samples + pending_canary) * gap
-    excess_full = (m.expected_samples + pending_full) * gap
-    exposure_ratio = full_fraction / m.fraction
+    pending_canary = m.sprt.pending
+    pending_full = m.sprt.full_pending
+    excess_canary = m.sprt.excess_failures
+    excess_full = m.sprt.full_excess_failures
+    exposure_ratio = full_fraction / m.sprt.exposure_share
 
     # 3. GUARD: the fraction enters only through the label delay.
     check(abs(pending_canary - 1.5) < 1e-9 and abs(pending_full - 30) < 1e-9, "Tasks admitted while labels pend")
     check(6.9 < excess_canary < 7.1, "Excess failures at the canary fraction")
     check(11.2 < excess_full < 11.4, "Excess failures at full allocation")
     check(abs(exposure_ratio - 20) < 1e-9, "Admission-rate ratio")
+    check(abs(excess_canary - (m.expected_samples + pending_canary) * (m.p0 - m.p1)) < 1e-9, "Labeled plus pending tasks")
 
     # 4. OUTPUT
     excess_canary_str = fmt_int(round(excess_canary))
@@ -857,70 +860,42 @@ The paired comparison, diagnostic experiment, and sequential monitor answer diff
 #| label: calc-vol3-operations-paired-comparison
 #| echo: false
 # PAIRED ACCEPTANCE DIFFERENCE, REDECLARED (LEGO)
-# Copy of calc-vol3-evaluation-paired-comparison in the Agent Evaluation
-# chapter, which owns this computation; each chapter runs in its own kernel.
-# Keep the two cells identical above the OUTPUT block.
+# The Agent Evaluation chapter owns this computation; both chapters read the
+# same MLSysIM scenario, since each chapter runs in its own kernel.
 # Goal: Estimate one rate and compare paired configurations at a fixed endpoint.
 # Scope: Illustrative independent task pairs, complete verdicts, fixed protocol.
-from math import sqrt, comb, ceil
 from statistics import NormalDist
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
-
-def evaluation_wilson(x, n, z):
-    if not isinstance(x, int) or not isinstance(n, int) or not 0 <= x <= n or n <= 0:
-        raise ValueError("Require integer counts 0 <= x <= n and n > 0")
-    center = (x + z * z / 2) / (n + z * z)
-    spread = z * sqrt(x * (n - x) / n + z * z / 4) / (n + z * z)
-    return max(0.0, center - spread), min(1.0, center + spread)
-
-def evaluation_paired_score(n11, b, c, n00, z):
-    # Newcombe (1998), method 10. b=baseline-only; c=candidate-only.
-    cells = (n11, b, c, n00)
-    if any(not isinstance(v, int) or v < 0 for v in cells) or sum(cells) <= 0:
-        raise ValueError("Require nonnegative integer cells and positive total")
-    n = sum(cells)
-    pc, pb = (n11 + c) / n, (n11 + b) / n
-    lc, uc = evaluation_wilson(n11 + c, n, z)
-    lb, ub = evaluation_wilson(n11 + b, n, z)
-    denominator = sqrt((n11 + c) * (b + n00) * (n11 + b) * (c + n00))
-    numerator = n11 * n00 - b * c
-    if numerator > 0:
-        numerator = max(numerator - n / 2, 0)
-    rho = numerator / denominator if denominator else 0.0
-    lower_width = sqrt(max(0.0, (pc - lc) ** 2 + (ub - pb) ** 2 - 2 * rho * (pc - lc) * (ub - pb)))
-    upper_width = sqrt(max(0.0, (uc - pc) ** 2 + (pb - lb) ** 2 - 2 * rho * (uc - pc) * (pb - lb)))
-    return pc - pb, pc - pb - lower_width, pc - pb + upper_width
+from mlsysim import Scenarios
+from mlsysim.physics.statistics import calc_newcombe_paired_difference
+from mlsysim.fmt import fmt_int, check
 
 class PairedAcceptance:
     # 1. LOAD: prespecified illustrative counts, nominal level, and tolerance.
-    n11, b, c, n00 = 70, 12, 18, 50
-    z = NormalDist().inv_cdf(0.975)
-    tolerance = 0.02  # acceptable loss chosen before seeing outcomes
+    pair = Scenarios.RepairCandidatePairedComparison
+    n11, b, c, n00 = pair.both, pair.baseline_only, pair.candidate_only, pair.neither
+    tolerance = pair.tolerance  # acceptable loss chosen before seeing outcomes
 
     # 2. EXECUTE: two-sided interval and exact conditional equality test.
-    n = n11 + b + c + n00
-    delta, lower, upper = evaluation_paired_score(n11, b, c, n00, z)
-    discordant = b + c
-    tail_count = 0
-    for j in range(min(b, c) + 1):
-        tail_count += comb(discordant, j)
-    exact_p = min(1.0, 2 * tail_count / 2**discordant) if discordant else 1.0
-    noninferiority = lower > -tolerance
-    zero_upper = evaluation_wilson(0, 50, z)[1]
+    paired = pair.result
+    z = NormalDist().inv_cdf(0.5 + pair.confidence / 2)
+    n = paired.pairs
+    delta, lower, upper = paired.difference, paired.lower, paired.upper
+    exact_p = paired.exact_p
+    noninferiority = paired.noninferior
     # Planning: lower half-width scales as 1/sqrt(N); what N clears the margin?
-    lower_width = delta - lower
-    n_if_gain_holds = ceil(n * (lower_width / (delta + tolerance)) ** 2)
-    n_if_no_gain = ceil(n * (lower_width / tolerance) ** 2)
+    lower_width = paired.lower_width
+    n_if_gain_holds = paired.pairs_if_gain_holds
+    n_if_no_gain = paired.pairs_if_no_gain
 
     # 3. GUARD: arithmetic plus independent published method-10 examples.
     check(n == 150 and n11 + b == 82 and n11 + c == 88, "Paired totals")
     check(abs(delta - 0.04) < 1e-12, "Candidate-minus-baseline direction")
     check(abs(lower - (-0.032062854)) < 1e-8 and abs(upper - 0.111211210) < 1e-8, "Worksheet interval")
     check(not noninferiority and lower < 0 < upper, "Inconclusive gate and superiority")
-    check(abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
     check(n < n_if_gain_holds < 2 * n < n_if_no_gain, "Planning counts ordered")
     for cells, expected in [((20, 2, 12, 16), (0.0562, 0.3292)), ((27, 0, 0, 27), (-0.0351, 0.0351))]:
-        _, lo, hi = evaluation_paired_score(*cells, z)
+        n11_t, b_t, c_t, n00_t = cells
+        _, lo, hi = calc_newcombe_paired_difference(n11_t, c_t, b_t, n00_t, z)
         check(abs(lo - expected[0]) < 0.00005 and abs(hi - expected[1]) < 0.00005, "Newcombe Table III")
 
     # 4. OUTPUT: only the exports the decision record cites.

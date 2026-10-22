@@ -114,12 +114,13 @@ Adversarial fault injection\index{Adversarial fault injection!definition} answer
 # │       arithmetic of the reference-event notebook (217.1 mm between the capture-
 # │       referenced subtotal and the F1 oracle) and the supply-headroom notebook
 # │       (headroom vanishes near 129 mOhm); checkpoint givens (a 90 ms onset).
-# │ How: the jerk-limited S-curve stop (calc_scurve_stop_distance / _time,
-# │      calc_scurve_max_permitted_velocity) with the jerk bound taken as the
-# │      reference C2 polynomial's peak jerk at the drive limit, as in
-# │      @sec-planning-c2-stopping-suffix, and the three fixed overheads;
-# │      calc_voltage_droop for the 48 V drive bus (M6); tank arithmetic by
-# │      conservation of volume.
+# │ How: MLSysIM scenarios: the finished stopping budgets
+# │      (Scenarios.WarehouseFinishedStop*, the jerk bound being the reference
+# │      C2 polynomial's peak jerk, @sec-planning-c2-stopping-suffix), the
+# │      renewal- and flag-referenced oracles (Scenarios.WarehouseRenewal*,
+# │      WarehouseFlagReferencedStop), the onset trials, the drive bus
+# │      (WarehouseDriveBusStop), and the permission-rail hold-up
+# │      (WarehousePermissionRailHoldUp); tank arithmetic by conservation of volume.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import (
@@ -138,13 +139,6 @@ from mlsysim.core.units import (
     watt,
     standard_gravity,
 )
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_scurve_stop_time,
-    calc_scurve_max_permitted_velocity,
-)
-from mlsysim.physics import calc_voltage_droop
 from mlsysim.fmt import (
     fmt,
     fmt_latency,
@@ -166,6 +160,14 @@ from mlsysim.fmt import (
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
+INSPECTED = Scenarios.WarehouseFinishedStopInspectedFloor
+RENEWAL = Scenarios.WarehouseRenewalReferencedStop
+RESTRICTED = Scenarios.WarehouseRenewalReferencedStopRestricted
+LATE = Scenarios.WarehouseRenewalStopLateOnsetTrial
+CHK = Scenarios.WarehouseRenewalStopNinetyMsOnsetTrial
+HOLDUP = Scenarios.WarehousePermissionRailHoldUp
+BUS = Scenarios.WarehouseDriveBusStop
 
 def _num(q, unit, p):
     # Plain magnitude for the notebooks' visible arithmetic (no thousands separator inside math);
@@ -213,12 +215,10 @@ class RackEndVerification:
     # Scenario assumptions local to this chapter
     ambient_lo = ureg.Quantity(5.0, degC)  # scenario assumption; category: chosen
     ambient_hi = ureg.Quantity(35.0, degC)  # scenario assumption; category: chosen
-    lease_probe = 5 * millisecond  # proposal injected after expiry; scenario assumption; category: chosen
-    v_restricted = (
-        1.0 * meter / second
-    )  # candidate speed in the optimistic all-weight inspected-floor screen, below its ceiling; scenario assumption; category: chosen
-    late_onset = 30 * millisecond  # example late powered deceleration onset (STL margin); scenario assumption; category: illustrative
-    chk_onset = 90 * millisecond  # checkpoint given: a measured onset after the last valid renewal; scenario assumption; category: illustrative
+    lease_probe = LATE.probe_after_expiry  # proposal injected after expiry; category: chosen
+    v_restricted = RESTRICTED.speed  # candidate speed in the optimistic all-weight inspected-floor screen, below its ceiling; category: chosen
+    late_onset = (LATE.onset - LATE.oracle.delay).to(millisecond)  # example late powered deceleration onset (STL margin); category: illustrative
+    chk_onset = CHK.onset  # checkpoint given: a measured onset after the last valid renewal; category: illustrative
     soc_power = RM.brain_soc.tdp_max  # category: datasheet (application SoC maximum module power)
     converter_eff = RM.drive_bus_converter_efficiency  # category: datasheet (typical converter efficiency)
     drive_current_limit = RM.drive_current_limit  # category: chosen (per-motor datasheet peak)
@@ -227,59 +227,62 @@ class RackEndVerification:
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     overhead = (delta_loc + delta_margin + eps_track).to(millimeter)
     # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
-    onset_bound = (t_lease + t_tick + t_bus + t_act).to(millisecond)
+    j_brake = AISLE.j_brake.to(meter / second**3)
+    onset_bound = RENEWAL.delay.to(millisecond)  # lease, tick, bus, and brake onset after the last valid renewal
     upper_age = (t_age + eps_sync).to(millisecond)  # F2: dispatch-only upper-age threshold; admission/execution age continues
     lease_probe_at = (t_lease + lease_probe).to(millisecond)
     chunk_period = (1 / chunk_rate).to(millisecond)
-    c2_distance = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
-    budget = (v_aisle * tau_delay + c2_distance + overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)
-    t_spare = (spare / v_aisle).to(millisecond)
+    stop = STOP.result  # the finished budget at the aisle speed
+    c2_distance = (stop.braking_travel + stop.jerk_ramp_travel).to(millimeter)
+    budget = stop.required_distance.to(millimeter)
+    spare = stop.spare.to(millimeter)
+    t_spare = stop.delay_spare.to(millisecond)
     per_ms = (v_aisle * (1 * millisecond)).to(millimeter)
-    budget_takeover = (v_takeover * tau_delay + calc_scurve_stop_distance(v_takeover, a_brake, j_brake) + overhead).to(millimeter)
-    spare_takeover = (d_clear - budget_takeover).to(millimeter)
-    t_spare_takeover = (spare_takeover / v_takeover).to(millisecond)
-    ceiling_dry = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
+    stop_takeover = STOP.variant(speed=v_takeover).result
+    budget_takeover = stop_takeover.required_distance.to(millimeter)
+    spare_takeover = stop_takeover.spare.to(millimeter)
+    t_spare_takeover = stop_takeover.delay_spare.to(millisecond)
+    ceiling_dry = stop.speed_ceiling.to(meter / second)
     mu_min = float((a_brake / g).to("dimensionless").magnitude)
     # Optimistic all-weight traction screen (phi_drive = 1), not loaded qualification.
     # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
-    a_insp = min(a_brake, (mu_insp * g).to(meter / second**2))
-    budget_insp = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_insp, j_brake) + overhead).to(millimeter)
-    ceiling_insp = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay, a_insp, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
-    bus_sag = calc_voltage_droop(i_rail, bus_r).to(volt)
-    bus_min = (bus_low - bus_sag).to(volt)  # sustained screen from the depleted pack
-    bus_margin = (bus_min - bus_uvlo).to(volt)
-    i_cross = ((bus_low - bus_uvlo) / bus_r).to(ampere)  # step that would reach the lockout
+    a_insp = INSPECTED.deceleration.to(meter / second**2)
+    budget_insp = INSPECTED.result.required_distance.to(millimeter)
+    ceiling_insp = INSPECTED.result.speed_ceiling.to(meter / second)
+    bus = BUS.result
+    bus_sag = bus.sag.to(volt)
+    bus_min = bus.sustained_depleted.to(volt)  # sustained screen from the depleted pack
+    bus_margin = bus.margin_depleted.to(volt)
+    i_cross = bus.crossing_current.to(ampere)  # step that would reach the lockout
     # F4: from the undervoltage or feed-loss flag, stop onset, the longest resident
     # stop in this screening branch (inspected floor at its optimistic ceiling), and brakes set
-    flag_onset = (t_tick + t_bus + t_act).to(millisecond)
-    stop_insp_ceiling = calc_scurve_stop_time(ceiling_insp, a_insp, j_brake).to(millisecond)
-    flag_to_set = (flag_onset + stop_insp_ceiling + brake_engage_max).to(millisecond)
-    holdup_margin = (rail_holdup - flag_to_set).to(millisecond)
+    holdup = HOLDUP.result
+    flag_onset = holdup.flag_path.to(millisecond)
+    stop_insp_ceiling = holdup.stop_time.to(millisecond)
+    flag_to_set = holdup.flag_to_set.to(millisecond)
+    holdup_margin = holdup.margin.to(millisecond)
     # F1 record at the restricted point, scored from the last valid renewal
-    f1_preonset = (v_restricted * onset_bound).to(millimeter)
-    f1_c2 = calc_scurve_stop_distance(v_restricted, a_insp, j_brake).to(millimeter)
-    f1_stop_bound = (f1_preonset + f1_c2 + eps_track).to(millimeter)
+    restricted = RESTRICTED.result
+    f1_preonset = restricted.delay_travel.to(millimeter)
+    f1_c2 = (restricted.braking_travel + restricted.jerk_ramp_travel).to(millimeter)
+    f1_stop_bound = restricted.required_distance.to(millimeter)
     # F1 at the aisle speed, scored from the same event (last valid renewal)
-    f1_aisle_stop_bound = (v_aisle * onset_bound + c2_distance + eps_track).to(millimeter)
-    budget_restricted = (v_restricted * tau_delay + f1_c2 + overhead).to(millimeter)
-    late_extra = (v_aisle * late_onset).to(millimeter)
+    renewal = RENEWAL.result
+    f1_aisle_stop_bound = renewal.required_distance.to(millimeter)
+    budget_restricted = Scenarios.WarehouseFinishedStopRestricted.result.required_distance.to(millimeter)
     # Signed margins of one late-onset F1 trace against the renewal-referenced oracle
-    onset_late = (onset_bound + late_onset).to(millisecond)
-    travel_nominal = (v_aisle * onset_bound + c2_distance).to(millimeter)
-    travel_late = (travel_nominal + late_extra).to(millimeter)
-    rho_onset = (onset_bound - onset_late).to(millisecond)
-    rho_dist = (f1_aisle_stop_bound - travel_late).to(millimeter)
+    late = LATE.result
+    late_extra = late.extra_travel.to(millimeter)
+    onset_late = late.onset.to(millisecond)
+    travel_nominal = renewal.stop_distance.to(millimeter)
+    travel_late = late.travel.to(millimeter)
+    rho_onset = late.onset_margin.to(millisecond)
+    rho_dist = late.distance_margin.to(millimeter)
     # Normalized by chosen scales equal to the bounds themselves
-    rho_onset_n = float((rho_onset / onset_bound).to("dimensionless").magnitude)
-    rho_dist_n = float((rho_dist / f1_aisle_stop_bound).to("dimensionless").magnitude)
+    rho_onset_n = late.onset_margin_normalized
+    rho_dist_n = late.distance_margin_normalized
     # Notebook nbk-verification-reference-event-gap: both sums term by term
-    f1_preonset_aisle = (v_aisle * onset_bound).to(millimeter)
+    f1_preonset_aisle = renewal.delay_travel.to(millimeter)
     capture_preonset = (v_aisle * tau_delay).to(millimeter)
     age_travel = (v_aisle * t_age).to(millimeter)
     ref_gap = (budget - f1_aisle_stop_bound).to(millimeter)
@@ -291,13 +294,13 @@ class RackEndVerification:
     speed_cut = 1.0 - float((v_restricted / v_aisle).to("dimensionless").magnitude)
     oracle_cut = 1.0 - float((f1_stop_bound / f1_aisle_stop_bound).to("dimensionless").magnitude)
     # Notebook nbk-verification-supply-headroom: stop time T = v/a + a/j from the inspected-floor ceiling
-    tstop_va = (ceiling_insp / a_insp).to(millisecond)
-    tstop_aj = (a_insp / j_brake).to(millisecond)
-    r_cross = ((bus_low - bus_uvlo) / i_rail).to(milliohm)  # source resistance at which the transient alone reaches lockout
+    tstop_va = holdup.velocity_term.to(millisecond)
+    tstop_aj = holdup.jerk_term.to(millisecond)
+    r_cross = bus.crossing_resistance.to(milliohm)  # source resistance at which the transient alone reaches lockout
     step_ratio = float((i_cross / i_rail).to("dimensionless").magnitude)
     # Checkpoint given: onset and pre-braking travel of a late F1 onset
-    chk_rho = (onset_bound - chk_onset).to(millisecond)
-    chk_extra = (v_aisle * (chk_onset - onset_bound)).to(millimeter)
+    chk_rho = CHK.result.onset_margin.to(millisecond)
+    chk_extra = CHK.result.extra_travel.to(millimeter)
     # Shared-bus sag attribution: the application SoC's maximum draw from the depleted bus
     soc_current = (soc_power / (bus_low * converter_eff)).to(ampere)
     drive_peak = (drive_current_limit * drive_wheels).to(ampere)
@@ -546,7 +549,7 @@ class RackEndVerification:
 # │ How: Delta_da is AISLE.t_dispatch_to_admission (MLSysIM), an allocation,
 # │      not a measurement; remainders by subtraction from RackEndVerification.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied
+from mlsysim import Embodied, Scenarios
 from mlsysim.core.units import millisecond, millimeter
 from mlsysim.fmt import fmt_latency, fmt_length, check
 
@@ -560,11 +563,12 @@ class AdmissionChargeVerification:
     )  # category: illustrative (allocation of @sec-placement-dispatch-admission, not a measurement)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    travel_da = (R.v_aisle * delta_da).to(millimeter)
-    spare_left = (R.spare - travel_da).to(millimeter)
-    t_left = (R.t_spare - delta_da).to(millisecond)
+    travel_da = R.stop.travel_over(delta_da).to(millimeter)
+    charged = Scenarios.WarehouseFinishedStopWithDispatch.result  # pre-brake delay plus Delta_da
+    spare_left = charged.spare.to(millimeter)
+    t_left = charged.delay_spare.to(millisecond)
     # F4a with surviving drive authority: flag-referenced onset, resident stop, tracking inset
-    f4a_bound = (R.v_aisle * R.flag_onset + R.c2_distance + R.eps_track).to(millimeter)
+    f4a_bound = Scenarios.WarehouseFlagReferencedStop.result.required_distance.to(millimeter)
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(delta_da.to(millisecond).magnitude - 63.3) < 0.05, "Canon: Delta_da allocation 63.3 ms.")
@@ -1183,7 +1187,7 @@ To guard against false confidence, every empirical verification claim must expli
 # │ Show: 138 million parameters; the 7B proposer is about 51x larger.
 # │ How: ratio of parameter counts.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied
+from mlsysim import Embodied, Literature
 from mlsysim.core.units import param
 from mlsysim.fmt import fmt_params, fmt_multiple, check
 
@@ -1193,7 +1197,7 @@ class NNVerificationScale:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     proposer_params = Embodied.MobileManipulator.WarehouseMobileManipulator.intent_model.parameters  # category: datasheet
     # Largest scored network in VNN-COMP 2025 (VGGNet16 benchmark), @kaulen2025vnncomp; category: sourced
-    vnn_max_params = 138e6 * param
+    vnn_max_params = max(e["params_high"] for e in Literature.VnnComp2025ScoredBenchmarks.entries) * param
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     ratio = float((proposer_params / vnn_max_params).to("dimensionless").magnitude)
@@ -1441,7 +1445,7 @@ For this reason @eq-verification-f1-oracle keeps its two predicates apart. The o
 
 To illustrate this dual evaluation numerically, consider an F1 trace at aisle speed, timed channel by channel in @fig-15-hardware-fault-injection, where powered deceleration begins `{python} RackEndVerification.late_onset_str` late, occurring `{python} RackEndVerification.onset_late_str` after the last valid renewal. The onset margin against the `{python} RackEndVerification.onset_bound_str` bound evaluates to `{python} RackEndVerification.rho_onset_str`. Because the mobile base travels `{python} RackEndVerification.late_extra_str` further before braking engages, total travel from renewal to rest reaches `{python} RackEndVerification.travel_late_str`, yielding a distance margin of `{python} RackEndVerification.rho_dist_str` against the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle. The onset predicate fails, while nominal travel remains within the distance allowance. The verification results retain both margins in their native physical units; the tracking inset belongs in the oracle and is not additional travel in the plotted speed integral. Because taking an unweighted minimum across milliseconds and millimeters produces an uninterpretable quantity, synthesizing them into a unified score via `min` requires normalizing each margin by a predeclared positive scale in its corresponding unit. Logging both the raw margins and their normalization factors ensures the synthesized verdict remains physically meaningful. Choosing scales equal to the verification bounds themselves yields normalized margins of `{python} RackEndVerification.rho_onset_n_str` for onset timing and `{python} RackEndVerification.rho_dist_n_str` for stopping distance, making the onset predicate the governing term in the combined score. When several predicates have negative margins, alternative scales can change which one governs the compound score, so test engineers must fix normalization factors before executing verification runs. In this nominal trace only onset fails, so positive rescaling cannot make distance the governing predicate. These numerical values reflect model arithmetic over a stipulated reference trace rather than empirical physical measurements.
 
-::: {#fig-15-hardware-fault-injection data-explore="mechanism-scene" data-explore-key="vol4:fig-15-hardware-fault-injection" fig-env="figure" fig-pos="t" fig-cap="**One F1 trace against its oracle**: Model timelines, not measurements, of the channels an F1 trial must witness at `{python} RackEndVerification.v_aisle_str`, timed from the last valid renewal. The chunk lease expires at `{python} RackEndVerification.t_lease_str`, the next permission tick commands the stop, the fieldbus delivers it, and powered deceleration must begin by `{python} RackEndVerification.onset_bound_str`; a proposal probed after expiry is refused. The dashed trace brakes `{python} RackEndVerification.late_onset_str` late, so its onset margin is `{python} RackEndVerification.rho_onset_str` and its `{python} RackEndVerification.travel_late_str` of nominal travel retains `{python} RackEndVerification.rho_dist_str` against the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle. The on-time curve travels `{python} RackEndVerification.travel_nominal_str`; the tracking inset is an allowance in the oracle, not extra travel in either curve." fig-alt="Two stacked panels sharing time after the last valid renewal. The upper panel, from 0 to 130 milliseconds, shows five logic channels, each labeled with its witness instrument: proposer renewals with a pulse at 0, a task-killed mark just after it, and a refused probe at 65 ms; the chunk lease high until it expires at 60 ms; the stop command rising at the next tick, 61 ms; the drive frame rising at 62 ms; and powered deceleration rising at the 82 ms bound in green, with a dashed red trace rising at 112 ms and a 30 ms onset margin marked between them. A shaded onset allowance spans 62 to 82 ms. The lower panel, from 0 to about 1,200 ms, shows base speed falling in an S-curve from 1.3 m/s to rest at 1,013 ms for the green trace, 711.9 mm of nominal travel with 40 mm of distance allowance remaining, and at 1,043 ms for the dashed red trace, 750.9 mm and a positive distance margin of 1 mm against the 751.9 mm oracle."}
+::: {#fig-15-hardware-fault-injection data-explore="original-v4-15-hardware-fault-injection" data-explore-key="vol4:fig-15-hardware-fault-injection" fig-env="figure" fig-pos="t" fig-cap="**One F1 trace against its oracle**: Model timelines, not measurements, of the channels an F1 trial must witness at `{python} RackEndVerification.v_aisle_str`, timed from the last valid renewal. The chunk lease expires at `{python} RackEndVerification.t_lease_str`, the next permission tick commands the stop, the fieldbus delivers it, and powered deceleration must begin by `{python} RackEndVerification.onset_bound_str`; a proposal probed after expiry is refused. The dashed trace brakes `{python} RackEndVerification.late_onset_str` late, so its onset margin is `{python} RackEndVerification.rho_onset_str` and its `{python} RackEndVerification.travel_late_str` of nominal travel retains `{python} RackEndVerification.rho_dist_str` against the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle. The on-time curve travels `{python} RackEndVerification.travel_nominal_str`; the tracking inset is an allowance in the oracle, not extra travel in either curve." fig-alt="Two stacked panels sharing time after the last valid renewal. The upper panel, from 0 to 130 milliseconds, shows five logic channels, each labeled with its witness instrument: proposer renewals with a pulse at 0, a task-killed mark just after it, and a refused probe at 65 ms; the chunk lease high until it expires at 60 ms; the stop command rising at the next tick, 61 ms; the drive frame rising at 62 ms; and powered deceleration rising at the 82 ms bound in green, with a dashed red trace rising at 112 ms and a 30 ms onset margin marked between them. A shaded onset allowance spans 62 to 82 ms. The lower panel, from 0 to about 1,200 ms, shows base speed falling in an S-curve from 1.3 m/s to rest at 1,013 ms for the green trace, 711.9 mm of nominal travel with 40 mm of distance allowance remaining, and at 1,043 ms for the dashed red trace, 750.9 mm and a positive distance margin of 1 mm against the 751.9 mm oracle."}
 
 ```{python}
 #| echo: false
@@ -1686,35 +1690,38 @@ Counting passed trials in an adversarial campaign can easily mislead a release r
 # │ Show: Zero-miss injections needed to put a one-sided upper limit on the miss probability,
 # │       and the coverage (98.98 and 99.90 percent) and injection counts (293 and 2,935)
 # │       that the notebook's illustrative FIT rates and chosen targets imply.
-# │ How: n = ceil(ln(1 - C) / ln(1 - p)), the zero-failure sizing of @sec-evaluation-trial-limits.
+# │ How: n = ceil(ln(1 - C) / ln(1 - p)), the zero-failure sizing of @sec-evaluation-trial-limits,
+# │      in Scenarios.WarehouseDiagnosticCoverageHundredFit and ...TenFit (DiagnosticCoverageModel).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics.robotics import calc_zero_failure_sample_size
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_percent, fmt_int, fmt_display_math, check
 
 class InjectedPopulationTrials:
     """Zero-miss injection counts for a declared fault population."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    confidence = 0.95  # category: chosen
-    # Component fault rates for the coverage notebook, in FIT (faults per 1e9 h)
-    fit_sensors = 1500  # scenario assumption; category: illustrative
-    fit_compute = 1000  # scenario assumption; category: illustrative
-    fit_power = 2500  # transceivers and power management; scenario assumption; category: illustrative
-    fit_gate = 4800  # gate drivers; scenario assumption; category: illustrative
-    fit_target_1 = 100  # unmitigated-rate target; category: chosen
-    fit_target_2 = 10  # tighter unmitigated-rate target; category: chosen
+    cov_1 = Scenarios.WarehouseDiagnosticCoverageHundredFit  # category: illustrative strata, chosen target
+    cov_2 = Scenarios.WarehouseDiagnosticCoverageTenFit  # category: chosen (tighter target, same strata)
+    confidence = cov_1.confidence  # category: chosen
+    # Component fault rates for the coverage notebook, in FIT (faults per 1e9 h); integers as stated
+    fit_sensors = round(cov_1.strata["sensors"])  # category: illustrative
+    fit_compute = round(cov_1.strata["compute"])  # category: illustrative
+    fit_power = round(cov_1.strata["transceivers and power"])  # transceivers and power management; category: illustrative
+    fit_gate = round(cov_1.strata["gate drivers"])  # gate drivers; category: illustrative
+    fit_target_1 = round(cov_1.target)  # unmitigated-rate target; category: chosen
+    fit_target_2 = round(cov_2.target)  # tighter unmitigated-rate target; category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    fit_raw = fit_sensors + fit_compute + fit_power + fit_gate
-    c_diag_1 = 1.0 - fit_target_1 / fit_raw  # required coverage: lambda_raw (1 - C) <= target
-    c_diag_2 = 1.0 - fit_target_2 / fit_raw
+    r_1, r_2 = cov_1.result, cov_2.result
+    fit_raw = round(r_1.raw_rate)
+    c_diag_1 = r_1.coverage  # required coverage: lambda_raw (1 - C) <= target
+    c_diag_2 = r_2.coverage
     # Injections that demonstrate each coverage: miss probability p = 1 - C_diag
-    n_cov_1 = calc_zero_failure_sample_size(c_diag_1, confidence=confidence)
-    n_cov_2 = calc_zero_failure_sample_size(c_diag_2, confidence=confidence)
-    n_cov_1_exact = math.log(1.0 - confidence) / math.log(c_diag_1)
-    rule3_1 = 3.0 * fit_raw / fit_target_1  # the rule-of-three approximation 3/p
-    rule3_2 = 3.0 * fit_raw / fit_target_2
+    n_cov_1 = r_1.injections
+    n_cov_2 = r_2.injections
+    n_cov_1_exact = r_1.injections_exact
+    rule3_1 = r_1.rule_of_three  # the rule-of-three approximation 3/p
+    rule3_2 = r_2.rule_of_three
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(fit_raw == 9800, "Component fault rates must sum to 9,800 FIT")
@@ -1809,33 +1816,24 @@ Naive Monte Carlo sampling from nominal operating conditions cannot estimate rar
 # │       the cross-entropy proposal (mean 105.8 ms after 4 levels) needs about
 # │       2,700 runs, within 0.1 percent of the best exponential proposal.
 # │ How: closed forms for an exponential operational delay and an exponential
-# │      proposal; the expected (large-sample) cross-entropy iteration
-# │      (calc_monte_carlo_sample_size, calc_importance_sampling_exponential,
-# │      calc_cross_entropy_exponential_proposal,
-# │      calc_optimal_exponential_proposal_mean).
+# │      proposal; the expected (large-sample) cross-entropy iteration, in
+# │      Scenarios.WarehouseQueueDelaySpareExhaustion (ExponentialRareEventModel).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.core.units import millisecond
-from mlsysim.physics.robotics import calc_zero_failure_sample_size
-from mlsysim.physics import (
-    calc_monte_carlo_sample_size,
-    calc_importance_sampling_exponential,
-    calc_cross_entropy_exponential_proposal,
-    calc_optimal_exponential_proposal_mean,
-)
 from mlsysim.fmt import fmt, fmt_int, fmt_sci, fmt_latency, fmt_percent, check
 
 class RareEventOvershoot:
     """Likelihood-ratio estimate of the rack-end reserve-exhaustion probability."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_exhaust = RackEndVerification.t_spare  # queue delay that spends the reserve (T_latest); category: derived
-    d_mean = (
-        5 * millisecond
-    )  # mean unbudgeted queue delay per stop, exponential; scenario assumption; category: illustrative (a loaded-trial delay histogram would replace it)
-    elite_share = 0.1  # cross-entropy elite fraction; category: chosen
-    rel_err = 0.1  # target relative standard error of the estimate; category: chosen
-    confidence = 0.95  # category: chosen
+    RARE = Scenarios.WarehouseQueueDelaySpareExhaustion  # the queue-delay model against the aisle-speed spare
+    t_exhaust = RARE.failure_threshold  # queue delay that spends the reserve (T_latest); category: derived
+    d_mean = RARE.mean  # mean unbudgeted queue delay per stop, exponential; category: illustrative (a loaded-trial delay histogram would replace it)
+    elite_share = RARE.elite_share  # cross-entropy elite fraction; category: chosen
+    rel_err = RARE.relative_error  # target relative standard error of the estimate; category: chosen
+    confidence = RARE.confidence  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     gamma = float(t_exhaust.to(millisecond).magnitude)
@@ -1843,25 +1841,23 @@ class RareEventOvershoot:
     # Cross-entropy iteration (expected, large-sample form): raise the level to the
     # (1 - elite_share) quantile of the current proposal, refit the proposal mean
     # to the likelihood-weighted elite samples, which for this family is the
-    # conditional mean E_p[D | D > level] = level + m0.
-    ce = calc_cross_entropy_exponential_proposal(t_exhaust, d_mean, elite_share)
-    levels = [lv.to(millisecond).magnitude for lv in ce["levels"]]
-    n_levels = ce["n_levels"]
-    m_ce = ce["proposal_mean"].to(millisecond).magnitude
-    is_ce = calc_importance_sampling_exponential(t_exhaust, d_mean, ce["proposal_mean"])
-    p_true = is_ce["failure_probability"]  # P(D > T_latest) under the operational model
-    n_mc = calc_monte_carlo_sample_size(p_true, rel_err)  # plain Monte Carlo runs for the target error
-    n_zero = calc_zero_failure_sample_size(1.0 - p_true, confidence=confidence)  # @sec-evaluation-trial-limits
-    relvar_ce = is_ce["relative_variance"]  # per-sample relative variance
-    n_is = relvar_ce / rel_err**2
-    p_q_fail = is_ce["proposal_failure_share"]  # share of proposal draws that land in the failure set
-    ess_per_draw = is_ce["ess_per_draw"]  # expected (sum w)^2 / sum w^2 per draw
-    n_ess = n_is * ess_per_draw
+    # conditional mean E_p[D | D > level] = level + m0 (ExponentialRareEventModel).
+    rare = RARE.result
+    levels = [lv.to(millisecond).magnitude for lv in rare.levels]
+    n_levels = rare.n_levels
+    m_ce = rare.proposal_mean.to(millisecond).magnitude
+    p_true = rare.failure_probability  # P(D > T_latest) under the operational model
+    n_mc = rare.monte_carlo_runs  # plain Monte Carlo runs for the target error
+    n_zero = rare.zero_failure_runs  # @sec-evaluation-trial-limits
+    relvar_ce = rare.relative_variance  # per-sample relative variance
+    n_is = rare.importance_runs
+    p_q_fail = rare.proposal_failure_share  # share of proposal draws that land in the failure set
+    ess_per_draw = rare.ess_per_draw  # expected (sum w)^2 / sum w^2 per draw
+    n_ess = rare.effective_sample_size
     # Best exponential proposal (minimum second moment)
-    m_opt = calc_optimal_exponential_proposal_mean(t_exhaust, d_mean)
-    relvar_opt = calc_importance_sampling_exponential(t_exhaust, d_mean, m_opt)["relative_variance"]
-    ce_penalty = relvar_ce / relvar_opt - 1.0
-    speedup = n_mc / n_is
+    m_opt = rare.optimal_proposal_mean
+    ce_penalty = rare.proposal_penalty
+    speedup = rare.speedup
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(gamma - 100.775) < 5e-3, "Failure threshold is the 100.8 ms spare-exhaustion delay.")
@@ -1910,9 +1906,9 @@ class RareEventOvershoot:
 # │       37.5 ms left once the dispatch-to-admission allocation is charged.
 # │ Show: p = exp(-37.5/5) = 5.6e-4 against 1.8e-9, about 3e5 times larger.
 # │ How: closed form P(D > t) = exp(-t / mean) for the exponential delay model
-# │      of RareEventOvershoot; t from AdmissionChargeVerification.
+# │      of RareEventOvershoot, Scenarios.WarehouseQueueDelayChargedSpareExhaustion.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_sci, check
 
 class RareEventCharged:
@@ -1924,7 +1920,7 @@ class RareEventCharged:
     p_uncharged = RareEventOvershoot.p_true  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_charged = math.exp(-float((t_left / d_mean).to("dimensionless").magnitude))
+    p_charged = Scenarios.WarehouseQueueDelayChargedSpareExhaustion.result.failure_probability  # exp(-t_left / mean)
     ratio = p_charged / p_uncharged
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────

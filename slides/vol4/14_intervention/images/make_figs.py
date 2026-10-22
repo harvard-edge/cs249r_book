@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Figures for Lecture 14 (Supervisory Intervention).
 
-Every value is sourced. "SI" is the rendered chapter, Supervisory Intervention
-(Volume IV, Chapter 14). Derived values come from calcs.py (imported as K).
-Outside data:
-  - California DMV disengagement filings, Waymo 2015 to 2025, via the MLSysIM
-    registry Literature.CaliforniaDisengagements (SI 14.1 figure 1).
-  - Zhang et al. 2019, 520 mean take-over times, supplementary data (CC0),
-    in zhang2019_mean_takeover_times.csv (SI 14.2.2).
-  - Lufthansa 2904 timeline (SI War Story 14.1, from the Warsaw accident report).
+Every value comes from MLSysIM through calcs.py (imported as K); printed
+numbers use the formatted strings calcs.py records (deckvals.val). "SI" is the
+rendered chapter, Supervisory Intervention (Volume IV, Chapter 14). Data:
+  - California DMV disengagement filings, Waymo 2015 to 2025
+    (Literature.CaliforniaDisengagements; SI 14.1 figure 1).
+  - Zhang et al. 2019, 520 mean take-over times (Literature.TakeoverTimeMeta).
+  - Lufthansa 2904 timeline (Literature.IncidentReports; SI War Story 14.1).
 Diagram colors follow the Volume IV causal-boundary palette
 (rules/volumes/vol4/palette.md); red only for veto, hazard, and limits.
 Figures are drawn at the size of their slot: full-width SVG 900 px wide with
@@ -30,6 +29,7 @@ import slideplot as sp  # noqa: E402
 from slideplot import plt  # noqa: E402
 
 import calcs as K  # noqa: E402  (prints its table on import)
+from deckvals import val, num  # noqa: E402
 
 # Volume IV roles
 NAVY, BLUE, GREEN, RED, AMBER, SLATE, PETROL = (
@@ -229,7 +229,7 @@ def strip():
             b.append(line(X(t_in), 44, X(t_in), ay, GREEN, 2.5, dash="6,4"))
             b += bracket(X(0), X(t_in), 36, f"in-loop takeover, {t_in:.0f} ms, before any command changes", GREEN, 23)
             b.append(box(X(spare_ms), ty + 6, X(t_in) - X(spare_ms), 34, "url(#hatch)", RED, rx=2))
-            b.append(text(X(0), ty - 8, f"spare 131 mm, then {K.V_AISLE * K.T_IN * 1e3:.1f} mm in all",
+            b.append(text(X(0), ty - 8, f"spare {val('spare0')} mm, then {val('travel_in')} mm in all",
                           22, RED, anchor="start", weight="bold"))
         svg(f"strip_step{step}", 900, 412, b)
 
@@ -246,12 +246,12 @@ def zhang():
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     bins = np.arange(0, 10.01, 0.25)
     ax.hist(vals[vals <= 10], bins=bins, color=sp.C["memory_l"], edgecolor=sp.C["memory"], lw=0.8)
-    marks = [("median", K.TOT["p50"], "Out-of-loop, median condition", 123),
-             ("mean", K.TOT["mean"], "Out-of-loop, average condition", 123),
-             ("90th pct.", K.TOT["p90"], "Out-of-loop, 90th percentile (design)", 80),
-             ("99th pct.", K.TOT["p99"], "Out-of-loop, 99th percentile", 80)]
+    marks = [("median", K.TOT["p50"], "p50", 123),
+             ("mean", K.TOT["mean"], "mean", 123),
+             ("90th pct.", K.TOT["p90"], "p90", 80),
+             ("99th pct.", K.TOT["p99"], "p99", 80)]
     for lab, x, key, y in marks:
-        col = RED if "design" in key else SLATE
+        col = RED if key == "p90" else SLATE  # the design percentile
         ax.axvline(x, color=col, lw=2, ls="--")
         ha = "right" if lab == "median" else "left"
         dx = -0.08 if ha == "right" else 0.08
@@ -261,7 +261,7 @@ def zhang():
     ax.set_ylim(0, 126)
     ax.set_xlabel("Mean take-over time of one study condition (s)", fontsize=12)
     ax.set_ylabel("Conditions", fontsize=12)
-    ax.text(9.95, 36, "1 condition at\n19.8 s off scale", ha="right", fontsize=10.5, color=sp.C["neutral"])
+    ax.text(9.95, 36, f"{val('n_off_scale')} condition at\n{val('tot_max')} s off scale", ha="right", fontsize=10.5, color=sp.C["neutral"])
     save(fig, "zhang_hist")
 
 
@@ -277,21 +277,21 @@ def deadline():
         ax.text(0.22, 42, "longest wait before\nthe stop must begin", color="#047857", fontsize=11.5,
                 fontweight="bold")
         ax.plot([K.V_AISLE], [K.DL_AISLE * 1e3], "o", color=RED, ms=8)
-        ax.text(K.V_AISLE - 0.02, K.DL_AISLE * 1e3 * 0.62, f"1.3 m/s: {K.DL_AISLE * 1e3:.1f} ms",
+        ax.text(K.V_AISLE - 0.02, K.DL_AISLE * 1e3 * 0.62, f"{val('v_aisle')} m/s: {val('deadline')} ms",
                 color=RED, fontsize=11.5, fontweight="bold", ha="right", va="top")
         if step >= 2:
             ax.axhline(K.T_IN * 1e3, color=AMBER, lw=2, ls="--")
-            ax.text(0.22, K.T_IN * 1e3 * 0.88, "in-loop takeover 605 ms", color="#B45309", fontsize=11,
+            ax.text(0.22, K.T_IN * 1e3 * 0.88, f"in-loop takeover {val('t_in')} ms", color="#B45309", fontsize=11,
                     fontweight="bold", ha="left", va="top")
             ax.plot([K.V_SLOW], [K.DL_SLOW * 1e3], "o", color=NAVY, ms=8)
-            ax.text(K.V_SLOW + 0.03, K.DL_SLOW * 1e3 * 1.25, f"0.75 m/s: {K.DL_SLOW * 1e3:.1f} ms",
+            ax.text(K.V_SLOW + 0.03, K.DL_SLOW * 1e3 * 1.25, f"{val('v_slow')} m/s: {val('dl_slow')} ms",
                     color=NAVY, fontsize=11.5, fontweight="bold", va="bottom")
         if step >= 3:
             ax.axhline(K.T_OOL * 1e3, color=AMBER, lw=2, ls=":")
-            ax.text(1.42, K.T_OOL * 1e3 * 1.12, "out-of-loop takeover 4.5 s", color="#B45309", fontsize=11,
+            ax.text(1.42, K.T_OOL * 1e3 * 1.12, f"out-of-loop takeover {val('t_ool_s')} s", color="#B45309", fontsize=11,
                     fontweight="bold", ha="right", va="bottom")
             ax.plot([K.V_CRAWL], [K.DL_CRAWL * 1e3], "o", color=NAVY, ms=8)
-            ax.text(K.V_CRAWL + 0.02, K.DL_CRAWL * 1e3 * 1.3, f"0.15 m/s: {K.DL_CRAWL:.2f} s",
+            ax.text(K.V_CRAWL + 0.02, K.DL_CRAWL * 1e3 * 1.3, f"{val('v_crawl')} m/s: {val('dl_crawl_s')} s",
                     color=NAVY, fontsize=11.5, fontweight="bold", va="bottom")
         ax.set_yscale("log")
         ax.set_ylim(30, 20000)
@@ -312,8 +312,9 @@ def leases():
     x0, x1, tmax = 20, 548, 272.0
     X = lambda ms: x0 + (x1 - x0) * ms / tmax  # noqa: E731
     b = []
-    specs = [("Autonomous: chunk lease 60 ms", 34, [0, 50, 100], 60, NAVY, "renewal"),
-             ("Manual: lease 100 ms", 206, [0, 25, 50, 75, 100], 100, BLUE, "heartbeat")]
+    lease, manual, period = num("t_lease"), num("t_manual"), num("chunk_period")
+    specs = [(f"Autonomous: chunk lease {val('t_lease')} ms", 34, [0, period, period + period], lease, NAVY, "renewal"),
+             (f"Manual: lease {val('t_manual')} ms", 206, [0, 25, 50, 75, 100], manual, BLUE, "heartbeat")]
     for title, y, ev, lease, col, lab in specs:
         b.append(text(x0, y, title, 23, col, anchor="start", weight="bold"))
         b.append(line(x0, y + 66, x1, y + 66, SLATE, 2))
@@ -322,7 +323,7 @@ def leases():
         last = ev[-1]
         b.append(text(X(last), y + 28, f"last {lab}", 21, col, anchor="middle"))
         b.append(box(X(last), y + 72, X(last + lease) - X(last), 22, BLUE_F, col, rx=3, sw=2))
-        b.append(text((X(last) + X(last + lease)) / 2, y + 120, f"{lease} ms, MCU clock", 21, col))
+        b.append(text((X(last) + X(last + lease)) / 2, y + 120, f"{lease:.0f} ms, MCU clock", 21, col))
         b.append(line(X(last + lease), y + 30, X(last + lease), y + 98, RED, 3))
         b.append(box(X(last + lease) + 6, y + 34, 122, 32, RED_F, RED, rx=4, sw=2))
         b.append(text(X(last + lease) + 67, y + 58, "FALLBACK", 20, RED, weight="bold"))
@@ -409,18 +410,18 @@ def handshake():
         t += d * 1e3
     r0, r1 = starts["Request"]
     b.append(box(X(r0), 72, X(r1) - X(r0), 40, BLUE_F, BLUE, rx=3))
-    b.append(text((X(r0) + X(r1)) / 2, 100, "Request 10", 22, "#1D4ED8", weight="bold"))
+    b.append(text((X(r0) + X(r1)) / 2, 100, f"Request {val('hs_req')}", 22, "#1D4ED8", weight="bold"))
     b.append(arrow(X(r1) - 4, 114, X(r1) + 6, 172, BLUE, marker="ahb"))
     a0, a1 = starts["Acknowledge"]
     b.append(box(X(a0), 174, X(a1) - X(a0), 40, GREEN_F, GREEN, rx=3))
-    b.append(text((X(a0) + X(a1)) / 2, 240, "Ack 5", 22, "#047857", weight="bold"))
+    b.append(text((X(a0) + X(a1)) / 2, 240, f"Ack {val('hs_ack')}", 22, "#047857", weight="bold"))
     c0, c1 = starts["Commit"]
     b.append(box(X(c0), 168, X(c1) - X(c0) + 2, 52, RED_F, RED, rx=2))
     b.append(line(X(c0), 44, X(c0), 326, RED, 2.5, dash="6,4"))
-    b.append(text(X(c0), 36, "Commit on one 1 ms tick changes the owner", 22, RED, weight="bold"))
+    b.append(text(X(c0), 36, f"Commit on one {val('tick')} ms tick changes the owner", 22, RED, weight="bold"))
     f0, f1 = starts["Confirm"]
     b.append(box(X(f0) + 2, 174, X(f1) - X(f0) - 2, 40, GREEN_F, GREEN, rx=3))
-    b.append(text((X(f0) + X(f1)) / 2, 202, "Confirm 15", 22, "#047857", weight="bold"))
+    b.append(text((X(f0) + X(f1)) / 2, 202, f"Confirm {val('hs_conf')}", 22, "#047857", weight="bold"))
     b.append(arrow(X(f1) - 6, 172, X(f1) + 4, 114, GREEN, marker="ahg"))
     b.append(text(X(f1) - 8, 100, "if lost, alarm only", 22, RED, anchor="end", italic=True))
     b.append(box(X(0), 274, X(c0) - X(0), 40, BLUE_F, NAVY, rx=3))
@@ -429,7 +430,8 @@ def handshake():
     b.append(text((X(c1) + X(tmax)) / 2, 302, "enforcer blend", 22, "#047857"))
     ay = 344
     b.append(line(x0, ay, x1, ay, SLATE, 2))
-    for ms, lab in [(0, "0"), (10, "10"), (15, "15"), (31, "31 ms")]:
+    for ms, lab in [(0, "0"), (num("hs_req"), val("hs_req")), (num("hs_acked"), val("hs_acked")),
+                    (num("t_hs"), f"{val('t_hs')} ms")]:
         b.append(line(X(ms), ay, X(ms), ay + 8, SLATE, 2))
         b.append(text(X(ms), ay + 32, lab, 22, SLATE))
     svg("handshake", 900, 385, b)
@@ -477,10 +479,10 @@ def quintic():
 # The remote-assistant session at 0.75 m/s (SI table 7)
 # =============================================================================
 def session():
-    rows = [("Spare at 0.75 m/s", K.S0, 0.0),
-            ("− takeover 605 ms", K.S1, K.S0 - K.S1),
+    rows = [(f"Spare at {val('v_slow')} m/s", K.S0, 0.0),
+            (f"− takeover {val('t_in')} ms", K.S1, K.S0 - K.S1),
             ("− dispatch to admission", K.S2, K.S1 - K.S2),
-            ("− manual lease, 40 ms longer", K.S3, K.S2 - K.S3)]
+            (f"− manual lease, {val('lease_ext')} ms longer", K.S3, K.S2 - K.S3)]
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     n = len(rows) + 1
     for i, (lab, left, spent) in enumerate(rows):
@@ -491,7 +493,7 @@ def session():
         ax.text(left * 1e3 + (spent * 1e3 if spent else 0) + 10, y, f"{left * 1e3:.1f} mm left",
                 va="center", fontsize=12, fontweight="bold", color="#047857")
     ax.barh(0, K.BLEND_RESERVE * 1e3, color=RED_F, edgecolor=RED, hatch="//", height=0.6, lw=1.2)
-    ax.text(K.BLEND_RESERVE * 1e3 + 10, 0, f"braking blend needs up to {K.BLEND_RESERVE * 1e3:.0f} mm",
+    ax.text(K.BLEND_RESERVE * 1e3 + 10, 0, f"braking blend needs up to {val('blend_reserve')} mm",
             va="center", fontsize=12, fontweight="bold", color=RED)
     ax.axvline(K.S3 * 1e3, color=RED, lw=1.6, ls="--")
     ax.set_yticks(range(n))
@@ -531,8 +533,8 @@ def flood():
     fin = (n + 1) * K.T_ED * 1e3
     fig, ax = plt.subplots(figsize=(5.4, 2.5))
     ax.plot(n, fin, color=SLATE, lw=2.6)
-    for budget, lab, col, nn in [(K.DL_AISLE * 1e3, "deadline 100.8 ms", RED, K.N_MISS),
-                                 ((K.DL_AISLE - K.T_DA) * 1e3, "after admission 37.5 ms", AMBER, K.N_MISS_DA)]:
+    for budget, lab, col, nn in [(K.DL_AISLE * 1e3, f"deadline {val('deadline')} ms", RED, K.N_MISS),
+                                 ((K.DL_AISLE - K.T_DA) * 1e3, f"after admission {val('deadline_da')} ms", AMBER, K.N_MISS_DA)]:
         ax.axhline(budget, color=col, lw=2, ls="--")
         ax.text(1 if nn > 30 else 30, budget + 3, lab, color=col, fontsize=11.5, fontweight="bold", va="bottom")
         ax.plot([nn], [(nn + 1) * K.T_ED * 1e3], "o", color=col, ms=8)
@@ -542,7 +544,7 @@ def flood():
     ax.set_ylim(0, 115)
     ax.set_xlabel("Forged signed packets queued ahead of the veto", fontsize=12)
     ax.set_ylabel("Veto verified at (ms)", fontsize=12)
-    ax.text(58, 8, "1.8 ms per Ed25519 check\n(illustrative)", ha="right", fontsize=10.5, color=sp.C["neutral"])
+    ax.text(58, 8, f"{val('t_ed')} ms per Ed25519 check\n(illustrative)", ha="right", fontsize=10.5, color=sp.C["neutral"])
     save(fig, "flood")
 
 
@@ -562,7 +564,7 @@ def channels():
         b.append(box(X(0), 66, X(t_in) - X(0), 46, BLUE_F, BLUE, rx=3))
         b.append(text((X(0) + X(t_in)) / 2, 97, "operator aligns the gripper (MAN)", 23, "#1D4ED8", weight="bold"))
         b.append(box(X(0), 152, X(t_in) - X(0), 46, RED_F, RED, rx=3))
-        b.append(text((X(0) + X(t_in)) / 2, 183, f"policy still drives at 1.3 m/s, {K.V_AISLE * K.T_IN * 1e3:.1f} mm",
+        b.append(text((X(0) + X(t_in)) / 2, 183, f"policy still drives at {val('v_aisle')} m/s, {val('travel_in')} mm",
                       23, RED, weight="bold"))
         if step == 1:
             b.append(box(X(0), 238, X(t_in) - X(0), 46, SLATE_F, GRAY, rx=3))
@@ -584,31 +586,32 @@ def channels():
 def lh2904():
     x0, x1, tmax = 270, 880, 15.0
     X = lambda s: x0 + (x1 - x0) * s / tmax  # noqa: E731
+    G, B = num("lh_gear"), num("lh_brake")  # left gear contact; wheel brakes act
     rows = [("Right gear", 40), ("Left gear", 102), ("Crew", 164), ("Spoilers, reversers", 226), ("Wheel brakes", 288)]
     b = []
     for name, y in rows:
         b.append(text(x0 - 12, y + 30, name, 24, TXT, anchor="end", weight="bold"))
     b.append(box(X(0), 44, X(15) - X(0), 36, GREEN_F, GREEN, rx=3))
     b.append(text(X(7.5), 71, "on the runway", 23, "#047857"))
-    b.append(box(X(0), 106, X(9) - X(0), 36, "white", GRAY, dash="6,4", rx=3))
+    b.append(box(X(0), 106, X(G) - X(0), 36, "white", GRAY, dash="6,4", rx=3))
     b.append(text(X(4.5), 133, "not compressed", 23, SLATE, italic=True))
-    b.append(box(X(9), 106, X(15) - X(9), 36, GREEN_F, GREEN, rx=3))
+    b.append(box(X(G), 106, X(15) - X(G), 36, GREEN_F, GREEN, rx=3))
     b.append(box(X(0), 168, X(15) - X(0), 36, BLUE_F, BLUE, rx=3))
     b.append(text(X(7.5), 195, "brakes and reversers commanded", 23, "#1D4ED8", weight="bold"))
-    b.append(box(X(0), 230, X(9) - X(0), 36, RED_F, RED, rx=3))
+    b.append(box(X(0), 230, X(G) - X(0), 36, RED_F, RED, rx=3))
     b.append(text(X(4.5), 257, "locked out", 23, RED, weight="bold"))
-    b.append(box(X(9), 230, X(15) - X(9), 36, GREEN_F, GREEN, rx=3))
-    b.append(box(X(0), 292, X(13) - X(0), 36, RED_F, RED, rx=3))
+    b.append(box(X(G), 230, X(15) - X(G), 36, GREEN_F, GREEN, rx=3))
+    b.append(box(X(0), 292, X(B) - X(0), 36, RED_F, RED, rx=3))
     b.append(text(X(6.5), 319, "no braking, aquaplaning", 23, RED, weight="bold"))
-    b.append(box(X(13), 292, X(15) - X(13), 36, GREEN_F, GREEN, rx=3))
+    b.append(box(X(B), 292, X(15) - X(B), 36, GREEN_F, GREEN, rx=3))
     ay = 352
     b.append(line(x0, ay, x1, ay, SLATE, 2))
-    for s, lab in [(0, "0"), (3, "3"), (6, "6"), (9, "9"), (13, "13"), (15, "15 s")]:
+    for s, lab in [(0, "0"), (3, "3"), (6, "6"), (G, val("lh_gear")), (B, val("lh_brake")), (15, "15 s")]:
         b.append(line(X(s), ay, X(s), ay + 8, SLATE, 2))
-        b.append(text(X(s), ay + 32, lab, 23, RED if s == 13 else SLATE, weight="bold" if s == 13 else "normal"))
-    b.append(line(X(9), 30, X(9), ay, RED, 2, dash="5,4"))
-    b.append(line(X(13), 286, X(13), ay, RED, 2, dash="5,4"))
-    b.append(text(X(9), 24, "9 s", 23, RED, weight="bold"))
+        b.append(text(X(s), ay + 32, lab, 23, RED if s == B else SLATE, weight="bold" if s == B else "normal"))
+    b.append(line(X(G), 30, X(G), ay, RED, 2, dash="5,4"))
+    b.append(line(X(B), 286, X(B), ay, RED, 2, dash="5,4"))
+    b.append(text(X(G), 24, f"{val('lh_gear')} s", 23, RED, weight="bold"))
     svg("lh2904", 900, 392, b)
 
 
@@ -616,8 +619,8 @@ def lh2904():
 # Causal intervention masks (SI 14.8.3)
 # =============================================================================
 def masks():
-    cells = [("drift", "policy drifts", "4.5 s", "M = 0", RED_F, RED),
-             ("blend", "enforcer spline", "38 ms", "M = 0", GREEN_F, GREEN),
+    cells = [("drift", "policy drifts", f"{val('drift_s')} s", "M = 0", RED_F, RED),
+             ("blend", "enforcer spline", f"{val('arm_ticks')} ms", "M = 0", GREEN_F, GREEN),
              ("re-orient", "operator hunts", "until settled", "M = 0", AMBER_F, AMBER),
              ("stable", "operator steady", "after a dwell", "M = 1", BLUE_F, BLUE)]
     xs = [10, 233, 456, 679]
@@ -639,12 +642,12 @@ def masks():
             b.append(text(xx, 64, st, 21, SLATE, anchor="start" if x == 10 else "middle"))
         b += bracket(679, 890, 262, "trains", BLUE, 22, up=False)
         if step == 2:
-            wx = 10 + w * (2.5 / 4.5)
+            wx = 10 + w * (K.T_OOL - num("sirius_s")) / K.T_OOL
             b.append(box(wx, 194, 10 + w - wx, 12, AMBER, AMBER, rx=2, sw=1))
-            b.append(text(10 + w - 6, 188, "2 s", 21, "#92400E", anchor="end", weight="bold"))
-            b.append(text(10, 326, "A fixed 2 s window (Sirius) masks the last 2 s of a 4.5 s drift;", 22,
+            b.append(text(10 + w - 6, 188, f"{val('sirius_s')} s", 21, "#92400E", anchor="end", weight="bold"))
+            b.append(text(10, 326, f"A fixed {val('sirius_s')} s window (Sirius) masks the last {val('sirius_s')} s of a {val('drift_s')} s drift;", 22,
                           "#92400E", anchor="start"))
-            b.append(text(10, 354, "the first 2.5 s stay in the data as if they were good.", 22,
+            b.append(text(10, 354, f"the first {val('sirius_left_s')} s stay in the data as if they were good.", 22,
                           "#92400E", anchor="start"))
         svg(f"masks_step{step}", 900, 365, b)
 

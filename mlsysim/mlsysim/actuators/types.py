@@ -205,6 +205,7 @@ class FramelessMotor(BaseModel):
     rotor_inertia: Quantity
     pole_pairs: int
     mass: Quantity
+    no_load_speed: Optional[Quantity] = None  # at rated voltage, theoretical (added 2026-10-20)
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("rated_voltage", mode="after")
@@ -258,3 +259,22 @@ class FramelessMotor(BaseModel):
     def rated_copper_loss(self):
         """Copper loss at rated current and 20 C: I_r^2 * loss_resistance."""
         return (self.rated_current**2 * self.loss_resistance).to(ureg.watt)
+
+
+class SafetyRelay(BaseModel):
+    """Dual-channel safety relay that removes a drive's torque enables when an E-stop opens.
+
+    No processor sits in its path; its datasheet states the delay from the
+    E-stop opening to its outputs opening as a typical and a maximum value.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
+    name: str
+    estop_release_typical: Quantity       # delay-on de-energisation with E-STOP, typical
+    estop_release_max: Quantity           # the same, maximum
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("estop_release_typical", "estop_release_max", mode="after")
+    @classmethod
+    def _validate_times(cls, v):
+        return require_dimensionality(v, ureg.second, "estop_release")

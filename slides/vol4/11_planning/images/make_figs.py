@@ -52,6 +52,7 @@ from matplotlib.patches import Ellipse, FancyBboxPatch, Polygon  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs as K  # noqa: E402  every derived value comes from calcs.py
+from deckvals import val, num  # noqa: E402  formatted labels, as the slides print them
 
 plt = sp.plt
 C = sp.C
@@ -105,10 +106,10 @@ RK = read_ruckig()
 # ============================================================== hook
 def hook(step):
     rows = [
-        ("p99 budget,\nper handoff", K.P_LATE, V4["gray"], "1 in 100"),
-        ("Mission target,\nwhole run", K.MISSION_BUDGET, V4["lag"], "1 in 1,000"),
+        ("p99 budget,\nper handoff", K.P_LATE, V4["gray"], f"1 in {val('p99_of')}"),
+        ("Mission target,\nwhole run", K.MISSION_BUDGET, V4["lag"], f"1 in {val('mission_one_in')}"),
         ("Design target,\nper handoff", K.P_TARGET, V4["veto"],
-         f"1 in {1 / K.P_TARGET:,.0f}"),
+         f"1 in {val('p_target_one_in')}"),
     ]
     fig, ax = plt.subplots(figsize=cm(14.2, 4.6))
     fig.subplots_adjust(left=0.24, right=0.97, top=0.95, bottom=0.27)
@@ -132,7 +133,7 @@ def hook(step):
         ax.annotate("", xy=(-math.log10(K.P_TARGET), -0.42), xytext=(2, -0.42),
                     arrowprops=dict(arrowstyle="<->", color=V4["veto"], lw=1.4))
         ax.text(-math.log10(K.P_TARGET) + 0.15, -0.42,
-                f"{math.log10(K.P_LATE / K.P_TARGET):.1f} orders deeper than p99",
+                f"{val('orders_deeper')} orders deeper than p99",
                 fontsize=FS_S, color=V4["veto"], ha="left", va="center")
     save_slot(fig, f"hook_step{step}.svg")
 
@@ -146,14 +147,14 @@ def obligations(step):
     """Tool speed against time: the three things a plan carries."""
     fig, ax = plt.subplots(figsize=cm(9.4, 5.6))
     fig.subplots_adjust(left=0.15, right=0.97, top=0.93, bottom=0.2)
-    t_pred = np.linspace(0, 400, 200)
+    t_pred = np.linspace(0, K.T_NOMINAL, 200)
     # proposed continuation, dashed (not authorized)
     ax.plot(t_pred, np.ones_like(t_pred), color=V4["proposal"], lw=1.6, ls="--")
-    ax.text(395, 0.95, "predicted to 400 ms", color=V4["proposal"],
+    ax.text(395, 0.95, f"predicted to {val('t_nominal')} ms", color=V4["proposal"],
             fontsize=FS_S, ha="right", va="top")
     # admitted prefix with setpoints
-    ax.plot([0, 50], [1, 1], color=V4["nervous"], lw=3.5)
-    ax.plot([0, 25, 50], [1, 1, 1], "o", color=V4["nervous"], ms=6)
+    ax.plot([0, K.T_RENEW], [1, 1], color=V4["nervous"], lw=3.5)
+    ax.plot(np.arange(0, K.T_RENEW + 1, K.T_SETPOINT), [1, 1, 1], "o", color=V4["nervous"], ms=6)
     ax.text(5, 0.86, "1. timed prefix", color=V4["nervous"], fontsize=FS,
             fontweight="bold", va="top")
     if step >= 2:
@@ -189,7 +190,7 @@ for s in (1, 2, 3):
 def jac_ellipse():
     fig, axes = plt.subplots(1, 2, figsize=cm(9.6, 5.4))
     fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02, wspace=0.05)
-    for ax, (q2d, q1d) in zip(axes, ((90, 15), (10, 30))):
+    for ax, (q2d, q1d) in zip(axes, ((K.Q2_GOOD, 15), (K.Q2_BAD, 30))):
         q1, q2 = math.radians(q1d), math.radians(q2d)
         p0 = np.array([0.0, 0.0])
         p1 = p0 + K.L1 * np.array([math.cos(q1), math.sin(q1)])
@@ -216,7 +217,7 @@ def jac_ellipse():
         ax.text(0.98, 0.17, f"Elbow {q2d}°", transform=ax.transAxes, fontsize=FS,
                 fontweight="bold", va="bottom", ha="right", color=V4["text"],
                 bbox=dict(fc="white", ec="none", pad=1))
-        ax.text(0.98, 0.03, f"{K.JAC[key]['exact']:.1f} rad/s", transform=ax.transAxes,
+        ax.text(0.98, 0.03, f"{val('qd_norm_good' if key == K.Q2_GOOD else 'qd_norm_bad')} rad/s", transform=ax.transAxes,
                 fontsize=FS + 2, fontweight="bold", va="bottom", ha="right", color=V4["veto"],
                 bbox=dict(fc="white", ec="none", pad=1))
         ax.set_aspect("equal")
@@ -241,23 +242,24 @@ def dls():
         dm.append(K.dls_rate(smin))
     ax.plot(el, ex, color=V4["veto"], lw=2.5)
     ax.plot(el, dm, color=V4["nervous"], lw=2.5)
-    ax.axhline(1 / (2 * K.LAMBDA), color=V4["nervous"], lw=1.2, ls="--")
+    ax.axhline(num("qd_bound"), color=V4["nervous"], lw=1.2, ls="--")
     ax.axhline(K.QDOT_MAX, color=V4["plant"], lw=1.2, ls=":")
-    ax.text(72, 1 / (2 * K.LAMBDA) * 1.08, "damped ceiling 10 rad/s", color=V4["nervous"],
+    ax.text(72, num("qd_bound") * 1.08, f"damped ceiling {val('qd_bound')} rad/s", color=V4["nervous"],
             fontsize=FS_S, ha="left")
-    ax.text(88, K.QDOT_MAX * 0.80, "joint limit 2.175 rad/s", color=V4["plant"],
+    ax.text(88, K.QDOT_MAX * 0.80, f"joint limit {val('qd_max')} rad/s", color=V4["plant"],
             fontsize=FS_S, ha="left", va="top")
     ax.text(22, 40, "exact inverse", color=V4["veto"], fontsize=FS, fontweight="bold", ha="right")
     ax.text(62, 3.1, "damped least squares", color=V4["nervous"], fontsize=FS,
             fontweight="bold", ha="left", va="center")
-    for e in (90, 10):
+    g, b = K.Q2_GOOD, K.Q2_BAD
+    for e in (g, b):
         ax.plot([e], [K.JAC[e]["exact"]], "o", color=V4["veto"], ms=7)
         ax.plot([e], [K.JAC[e]["damped"]], "o", color=V4["nervous"], ms=7)
-    ax.annotate(f"{K.JAC[10]['exact']:.1f}", (10, K.JAC[10]["exact"]), xytext=(8, -2),
+    ax.annotate(val("qd_norm_bad"), (b, K.JAC[b]["exact"]), xytext=(8, -2),
                 textcoords="offset points", fontsize=FS, color=V4["veto"], fontweight="bold")
-    ax.annotate(f"{K.JAC[10]['damped']:.1f}", (10, K.JAC[10]["damped"]), xytext=(-6, -16), ha="right",
+    ax.annotate(val("qd_dls_bad"), (b, K.JAC[b]["damped"]), xytext=(-6, -16), ha="right",
                 textcoords="offset points", fontsize=FS, color=V4["nervous"], fontweight="bold")
-    ax.annotate(f"{K.JAC[90]['exact']:.1f} / {K.JAC[90]['damped']:.1f}", (90, K.JAC[90]["exact"]),
+    ax.annotate(f"{val('qd_norm_good')} / {val('qd_dls_good')}", (g, K.JAC[g]["exact"]),
                 xytext=(6, 9), textcoords="offset points", fontsize=FS_S, color=V4["text"],
                 ha="left")
     ax.set_yscale("log")
@@ -297,21 +299,21 @@ def record(step):
         ["frame: robot base", "evidence time", "parent lease digest"],
         V4["navy"], "#EEF2F8")
     box(ax, 0.01, 0.02, 0.30, 0.46, "Motion",
-        ["16 setpoints, 25 ms apart", "seam state: position,", "velocity, acceleration"],
+        [f"{val('n_setpoints')} setpoints, {val('t_setpoint')} ms apart", "seam state: position,", "velocity, acceleration"],
         V4["proposal"], V4["proposal_l"], dashed=True)
     a = 1 if step >= 2 else 0
     box(ax, 0.34, 0.52, 0.32, 0.46, "Stop (latched)",
-        [f"S-curve: {K.A_ARM:.0f} m/s², {K.J_ARM:.1f} m/s³",
-         f"{K.D_STOP_ARM:.1f} mm in {1000 * K.T_STOP_ARM:.0f} ms",
+        [f"S-curve: {val('a_arm')} m/s², {val('j_arm')} m/s³",
+         f"{val('d_stop_arm')} mm in {val('t_stop_arm')} ms",
          "runs without the proposer"],
         V4["veto"], V4["veto_l"], alpha=a)
     box(ax, 0.34, 0.02, 0.32, 0.46, "Deadlines (MCU clock)",
-        [f"chunk lease: {K.T_LEASE:.0f} ms", f"commitment: {K.T_COMMIT:.0f} ms",
-         f"nominal end: {K.N_SETPOINTS * K.T_SETPOINT:.0f} ms", f"at rest: {K.T_END:.0f} ms"],
+        [f"chunk lease: {val('t_lease')} ms", f"commitment: {val('t_commit')} ms",
+         f"nominal end: {val('t_nominal')} ms", f"at rest: {val('t_rest')} ms"],
         V4["lag"], V4["lag_l"], alpha=a)
     b = 1 if step >= 3 else 0
     box(ax, 0.69, 0.52, 0.30, 0.46, "Sidecar",
-        ["payload at most 3 kg", "obstacle-map epoch", "inside the ODD"],
+        [f"payload at most {val('m_payload')} kg", "obstacle-map epoch", "inside the ODD"],
         V4["plant"], V4["plant_l"], alpha=b)
     box(ax, 0.69, 0.02, 0.30, 0.46, "Read by",
         ["tracking controller:", "  setpoints, feedforward", "permission path:",
@@ -330,28 +332,29 @@ def repl(step):
     fig.subplots_adjust(left=0.22, right=0.97, top=0.92, bottom=0.2)
     y0 = 3.0
     ax.barh(y0, K.T_AGE, color=V4["lag"], height=0.6)
-    ax.text(K.T_AGE / 2, y0, f"{K.T_AGE}", ha="center", va="center",
+    ax.text(K.T_AGE / 2, y0, val("t_age"), ha="center", va="center",
             fontsize=FS_S, color="white", fontweight="bold")
     ax.text(K.T_AGE / 2, y0 - 0.38, "capture to\ndispatch", ha="center", va="top",
             fontsize=FS_S - 1, color=V4["lag"])
     a2 = 1 if step >= 2 else 0
-    segs = [("inference", K.T_INFER, V4["proposal"]),
-            ("check", K.T_VALIDATE, V4["nervous"]),
-            ("", K.T_DA - K.T_INFER - K.T_VALIDATE, V4["gray"])]
+    segs = [("inference", K.T_INFER, V4["proposal"], val("t_infer")),
+            ("check", K.T_VALIDATE, V4["nervous"], val("t_validate")),
+            ("", K.T_DA - K.T_INFER - K.T_VALIDATE, V4["gray"], "")]
     x = K.T_AGE
-    for lab, w, col in segs:
+    for lab, w, col, txt in segs:
         ax.barh(y0, w, left=x, color=col, height=0.6, alpha=a2)
         if lab:
-            ax.text(x + w / 2, y0, f"{w:.0f}", ha="center", va="center", fontsize=FS_S,
+            ax.text(x + w / 2, y0, txt, ha="center", va="center", fontsize=FS_S,
                     color="white", fontweight="bold", alpha=a2)
             ax.text(x + w / 2, y0 - (0.75 if lab == "check" else 0.38), lab, ha="center",
                     va="top", fontsize=FS_S - 1,
                     color=col, alpha=a2)
         x += w
-    ax.text(x + 2, y0, f"{K.T_REPL:.1f} ms", va="center", fontsize=FS + 1,
+    ax.text(x + 2, y0, f"{val('t_repl')} ms", va="center", fontsize=FS + 1,
             fontweight="bold", color=V4["text"], alpha=a2)
     ax.text(-3, y0, "One replacement", ha="right", va="center", fontsize=FS, fontweight="bold")
-    for xv, lab, ls, ha in ((K.T_RENEW, "renewal 50 ", "--", "right"), (K.T_LEASE, " lease 60", ":", "left")):
+    for xv, lab, ls, ha in ((K.T_RENEW, f"renewal {val('t_renew')} ", "--", "right"),
+                            (K.T_LEASE, f" lease {val('t_lease')}", ":", "left")):
         ax.plot([xv, xv], [2.55, 3.55], color=V4["veto"], lw=1.5, ls=ls)
         ax.text(xv, 3.58, lab, color=V4["veto"], fontsize=FS_S, ha=ha, va="bottom")
     a3 = 1 if step >= 3 else 0
@@ -381,7 +384,7 @@ for s in (1, 2, 3):
 def chunks():
     fig, ax = plt.subplots(figsize=cm(14.2, 4.4))
     fig.subplots_adjust(left=0.34, right=0.97, top=0.95, bottom=0.27)
-    for i, (n, h, e, _) in enumerate(K.CHUNKS):
+    for i, (n, h, e) in enumerate(K.CHUNKS):
         y = 2 - i
         ax.barh(y, h, color=V4["proposal_l"], ec=V4["proposal"], height=0.6, ls="--")
         ax.barh(y, e, color=V4["nervous"], height=0.6)
@@ -415,7 +418,7 @@ def stale():
     ax.plot([0, t_s], [0, 0], color=V4["veto"], lw=1, ls=":")
     ax.text(8, -0.0105, "request: stale anchor", color=V4["veto"], fontsize=FS_S, ha="left",
             va="bottom")
-    ax.text(t_s + 4, K.GAP / 2, f"{K.GAP:.3f} rad\nstep back", color=V4["veto"],
+    ax.text(t_s + 4, K.GAP / 2, f"{val('gap')} rad\nstep back", color=V4["veto"],
             fontsize=FS_S, va="center")
     ax.text(t_s - 4, K.GAP + 0.004, "seam: plan\nfrom here", color=V4["nervous"],
             fontsize=FS_S, ha="right", va="bottom")
@@ -465,15 +468,17 @@ def seam(step):
     fig.subplots_adjust(left=0.10, right=0.98, top=0.9, bottom=0.17, hspace=0.25, wspace=0.18)
     # left: one-tick step
     t = np.linspace(-10, 60, 701)
-    v_step = np.where(t < 0, 0, np.where(t < 1, 0.2 * t, 0.2))
-    tau_step = np.where((t >= 0) & (t < 1), K.TAU_STEP, 0)
-    tb = np.clip(t / 50, 0, 1)
-    v_br = 0.2 * (10 * tb ** 3 - 15 * tb ** 4 + 6 * tb ** 5)
-    acc_br = np.where((t >= 0) & (t <= 50),
-                      0.2 / 0.05 * (30 * tb ** 2 - 60 * tb ** 3 + 30 * tb ** 4), 0)
+    v_step = np.where(t < 0, 0, np.where(t < K.T_TICK, K.DW * t / K.T_TICK, K.DW))
+    tau_step = np.where((t >= 0) & (t < K.T_TICK), K.TAU_STEP, 0)
+    # The quintic bridge of Napkin Math 11.2: velocity gap x (3u^2 - 2u^3),
+    # acceleration 6 gap u (1 - u) / T, peak 1.5 gap / T at mid-bridge.
+    tb = np.clip(t / K.T_BRIDGE, 0, 1)
+    v_br = K.DW * (3 * tb ** 2 - 2 * tb ** 3)
+    acc_br = np.where((t >= 0) & (t <= K.T_BRIDGE), 6 * K.DW * tb * (1 - tb) / (K.T_BRIDGE / 1000), 0)
     tau_br = K.J_REFL * acc_br
+    assert abs(tau_br.max() - K.TAU_BRIDGE) < 1e-3 * K.TAU_BRIDGE, "plotted bridge peak disagrees with MLSysIM"
     cols = [(v_step, tau_step, "One servo tick", V4["veto"]),
-            (v_br, tau_br, "50 ms quintic bridge", V4["nervous"])]
+            (v_br, tau_br, f"{val('t_bridge')} ms quintic bridge", V4["nervous"])]
     for c, (v, tau, title, col) in enumerate(cols):
         a = 1 if (c == 0 or step >= 2) else 0
         axv, axt = axes[0, c], axes[1, c]
@@ -481,11 +486,12 @@ def seam(step):
         axv.set_title(title, fontsize=FS, fontweight="bold", color=col, alpha=a)
         axt.fill_between(t, 0, tau, color=col, alpha=0.35 * a, lw=0)
         axt.plot(t, tau, color=col, lw=2, alpha=a)
-        for yv, lab in ((K.TAU_RATED, f"rated {K.TAU_RATED:.0f}"), (K.TAU_PEAK, f"peak {K.TAU_PEAK:.0f}")):
+        for yv, lab in ((K.TAU_RATED, f"rated {val('tau_rated')}"), (K.TAU_PEAK, f"peak {val('tau_peak')}")):
             axt.axhline(yv, color=V4["plant"], lw=1, ls="--")
             axt.text(58, yv + 3, lab, fontsize=FS_S - 1, color=V4["plant"], ha="right", va="bottom")
-        pk = K.TAU_STEP if c == 0 else K.J_REFL * K.A_BRIDGE
-        axt.text(5 if c == 0 else 25, 70 if c == 0 else pk + 12, f"{pk:.1f} N·m", fontsize=FS, color=col,
+        pk = K.TAU_STEP if c == 0 else K.TAU_BRIDGE
+        axt.text(5 if c == 0 else 25, 70 if c == 0 else pk + 12, f"{val('tau_step' if c == 0 else 'tau_bridge')} N·m",
+                 fontsize=FS, color=col,
                  fontweight="bold", ha="left" if c == 0 else "center", alpha=a)
         axv.set_ylim(-0.03, 0.26)
         axt.set_ylim(0, 150)
@@ -537,8 +543,7 @@ def phase():
     fig, ax = plt.subplots(figsize=cm(14.2, 5.2))
     fig.subplots_adjust(left=0.1, right=0.97, top=0.95, bottom=0.22)
     s = np.linspace(0, K.SWING, 300)
-    up = (K.TAU_MAX - K.TAU_GRAV) / K.J_EFF
-    dn = (K.TAU_MAX + K.TAU_GRAV) / K.J_EFF
+    up, dn = K.A_UP, K.A_DN
     ax.plot(s, np.sqrt(2 * up * s), color=V4["gray"], lw=1.3, ls="--")
     ax.plot(s, np.sqrt(2 * dn * (K.SWING - s)), color=V4["gray"], lw=1.3, ls="--")
     ax.text(0.03, 3.3, "torque limit alone", fontsize=FS_S, color=V4["gray"])
@@ -548,15 +553,15 @@ def phase():
     p, v = scurve_profile(K.SWING, a, K.JERK_SW)
     ax.plot(p, v, color=V4["nervous"], lw=1.8)
     ax.axhline(K.QDOT_MAX, color=V4["plant"], lw=1.2, ls=":")
-    ax.text(0.10, K.QDOT_MAX + 0.06, "velocity limit 2.175", fontsize=FS_S,
+    ax.text(0.10, K.QDOT_MAX + 0.06, f"velocity limit {val('qd_max')}", fontsize=FS_S,
             color=V4["plant"], ha="left", va="bottom")
     ax.plot([K.SWING / 2], [K.V_PEAK_SW], "o", color=V4["veto"], ms=7)
-    ax.annotate(f"switch point: {2 * K.J_EFF * a:.1f} N·m torque step",
+    ax.annotate(f"switch point: {val('tau_switch')} N·m torque step",
                 (K.SWING / 2, K.V_PEAK_SW), xytext=(0.25, 2.9), fontsize=FS_S, ha="center",
                 color=V4["veto"], arrowprops=dict(arrowstyle="-", color=V4["veto"], lw=1))
-    ax.text(0.13, 0.75, f"bang-bang {1000 * K.T_BANG:.1f} ms", fontsize=FS, color=V4["veto"],
+    ax.text(0.13, 0.75, f"bang-bang {val('t_bang')} ms", fontsize=FS, color=V4["veto"],
             fontweight="bold", ha="left")
-    ax.text(0.13, 0.42, f"jerk-limited {1000 * K.T_S:.1f} ms", fontsize=FS,
+    ax.text(0.13, 0.42, f"jerk-limited {val('t_scurve_sw')} ms", fontsize=FS,
             color=V4["nervous"], fontweight="bold", ha="left")
     ax.set_xlim(0, K.SWING)
     ax.set_ylim(0, 3.6)
@@ -575,10 +580,11 @@ def ruckig_arm():
     fig, (av, aa) = plt.subplots(2, 1, figsize=cm(9.6, 6.0), sharex=True)
     fig.subplots_adjust(left=0.17, right=0.97, top=0.97, bottom=0.17, hspace=0.12)
     t = 1000 * d["t"]
-    tc = np.array([0, 1000 * K.V_TCP / K.A_ARM])
+    tc = np.array([0, num("t_brake_arm")])
     av.plot(tc, [K.V_TCP, 0], color=V4["gray"], lw=1.6, ls="--")
     av.plot(t, d["v"], color=V4["veto"], lw=2.6)
-    av.text(8, 0.06, "constant 5 m/s²:\n200 ms, 100 mm", fontsize=FS_S, color=V4["gray"])
+    av.text(8, 0.06, f"constant {val('a_arm')} m/s²:\n{val('t_brake_arm')} ms, {val('d_brake_arm')} mm", fontsize=FS_S,
+            color=V4["gray"])
     av.text(1000 * K.T_STOP_ARM - 4, 0.55,
             f"Ruckig: {1000 * d['t'][-1]:.0f} ms,\n{1000 * d['p'][-1]:.1f} mm",
             fontsize=FS, color=V4["veto"], fontweight="bold", ha="right")
@@ -601,28 +607,28 @@ ruckig_arm()
 def runway(step):
     fig, ax = plt.subplots(figsize=cm(14.2, 3.9))
     fig.subplots_adjust(left=0.21, right=0.97, top=0.93, bottom=0.3)
-    rows = [("Empty gripper", K.D_STOP_ARM, K.TOTAL_ARM, f"{K.A_ARM:.0f} m/s²"),
-            ("Open mug", K.D_STOP_MUG, K.TOTAL_MUG, f"{K.A_MUG:.2f} m/s²")]
-    for i, (lab, stop, tot, acc) in enumerate(rows):
+    rows = [("Empty gripper", K.D_STOP_ARM, K.TOTAL_ARM, f"{val('a_arm')} m/s²", val("d_stop_arm"), val("total_arm")),
+            ("Open mug", K.D_STOP_MUG, K.TOTAL_MUG, f"{val('a_mug')} m/s²", val("d_stop_mug"), val("total_mug"))]
+    for i, (lab, stop, tot, acc, stop_txt, tot_txt) in enumerate(rows):
         y = 1 - i
         a = 1 if i < step else 0
         ax.barh(y, K.D_PATH, color=V4["lag"], height=0.55, alpha=a)
         ax.barh(y, stop, left=K.D_PATH, color=V4["veto"], height=0.55, alpha=a)
-        ax.text(K.D_PATH / 2, y, f"{K.D_PATH:.0f}", ha="center", va="center", color="white",
+        ax.text(K.D_PATH / 2, y, val("d_path"), ha="center", va="center", color="white",
                 fontsize=FS, fontweight="bold", alpha=a)
-        ax.text(K.D_PATH + stop / 2, y, f"stop {stop:.1f} ({acc})", ha="center",
+        ax.text(K.D_PATH + stop / 2, y, f"stop {stop_txt} ({acc})", ha="center",
                 va="center", color="white", fontsize=FS_S, fontweight="bold", alpha=a)
-        ax.text(tot + 4, y, f"{tot:.1f}", va="center", fontsize=FS + 1, fontweight="bold",
+        ax.text(tot + 4, y, tot_txt, va="center", fontsize=FS + 1, fontweight="bold",
                 color=V4["veto"] if tot > K.D_CLEAR_ARM else V4["nervous"], alpha=a)
         ax.text(-5, y, lab, ha="right", va="center", fontsize=FS, fontweight="bold")
     ax.axvline(K.D_CLEAR_ARM, color=V4["plant"], lw=2, ls="--")
-    ax.text(K.D_CLEAR_ARM + 4, 1.45, "clearance 300", ha="left", fontsize=FS_S, color=V4["plant"])
+    ax.text(K.D_CLEAR_ARM + 4, 1.45, f"clearance {val('d_clear_arm')}", ha="left", fontsize=FS_S, color=V4["plant"])
     ax.text(K.D_PATH / 2, 1.45, "lease path", ha="center", fontsize=FS_S, color=V4["lag"])
     ax.set_xlim(0, 410)
     ax.set_ylim(-0.5, 1.75)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Travel after the last admission at 1 m/s (mm)", fontsize=FS)
+    ax.set_xlabel(f"Travel after the last admission at {val('v_tcp')} m/s (mm)", fontsize=FS)
     ax.tick_params(labelsize=FS_S)
     save_slot(fig, f"runway_step{step}.svg")
 
@@ -649,25 +655,25 @@ def timeline(step):
     seg(y1, K.T_LEASE, K.T_PATH, V4["lag"])
     seg(y1, K.T_PATH, K.T_PATH + 1000 * K.T_STOP_ARM, V4["veto"], "S-curve stop")
     ax.text(K.T_PATH + 1000 * K.T_STOP_ARM + 6, y1,
-            f"{K.TOTAL_ARM:.1f} of 300 mm", va="center", fontsize=FS, color=V4["text"])
-    ax.text(K.T_LEASE, y1 + 0.26, "lease lapses 60", ha="center", fontsize=FS_S, color=V4["lag"])
+            f"{val('total_arm')} of {val('d_clear_arm')} mm", va="center", fontsize=FS, color=V4["text"])
+    ax.text(K.T_LEASE, y1 + 0.26, f"lease lapses {val('t_lease')}", ha="center", fontsize=FS_S, color=V4["lag"])
     ax.text(-8, y1, "Running lease", ha="right", va="center", fontsize=FS, fontweight="bold")
     a = 1 if step >= 2 else 0
     seg(y2, 0, K.T_COMMIT, V4["nervous"], "track", a=a)
     ax.plot([K.T_COMMIT, K.N_SETPOINTS * K.T_SETPOINT], [y2 - 0.48, y2 - 0.48], color=V4["proposal"],
             lw=2, ls="--", alpha=a)
-    ax.text(K.N_SETPOINTS * K.T_SETPOINT + 6, y2 - 0.48, "setpoints to 400, unused",
+    ax.text(K.N_SETPOINTS * K.T_SETPOINT + 6, y2 - 0.48, f"setpoints to {val('t_nominal')}, unused",
             color=V4["proposal"], fontsize=FS_S - 1, va="center", alpha=a)
     seg(y2, K.T_COMMIT, K.T_END, V4["veto"], a=a)
     ax.text((K.T_COMMIT + K.T_END) / 2, y2, "stop", ha="center", va="center",
             fontsize=FS_S, color="white", fontweight="bold", alpha=a)
-    for xv, lab, ha in ((K.T_PREF, "preferred 240 ", "right"), (K.T_CUTOFF, "cutoff 278 ", "below"),
-                        (K.T_COMMIT, " commit 300", "left")):
+    for xv, lab, ha in ((K.T_PREF, f"preferred {val('t_pref')} ", "right"), (K.T_CUTOFF, f"cutoff {val('t_cutoff')} ", "below"),
+                        (K.T_COMMIT, f" commit {val('t_commit')}", "left")):
         ax.plot([xv, xv], [y2 - 0.22, y2 + 0.32], color=V4["text"], lw=1.5, alpha=a)
         below = ha == "below"
         ax.text(xv, y2 - 0.24 if below else y2 + 0.34, lab, ha="right" if below else ha,
                 fontsize=FS_S, color=V4["text"], alpha=a, va="top" if below else "bottom")
-    ax.text(K.T_END + 6, y2, f"{K.TOTAL_ALT:.1f} of 300 mm", va="center", fontsize=FS,
+    ax.text(K.T_END + 6, y2, f"{val('total_alt')} of {val('d_clear_arm')} mm", va="center", fontsize=FS,
             color=V4["text"], alpha=a)
     ax.text(-8, y2, "Longer lease", ha="right", va="center", fontsize=FS, fontweight="bold",
             alpha=a)
@@ -691,14 +697,14 @@ def base_speed():
     fig, av = plt.subplots(figsize=cm(11.0, 5.3))
     fig.subplots_adjust(left=0.13, right=0.97, top=0.92, bottom=0.21)
     d = RK["base"]
-    tc = 1000 * K.V_BASE / K.A_BASE
+    tc = K.T_CONST
     av.plot([0, tc], [K.V_BASE, 0], color=V4["gray"], lw=2, ls="--")
     av.plot(1000 * d["t"], d["v"], color=V4["veto"], lw=2.6)
     tp = np.linspace(0, 1, 200)
     av.plot(K.T_POLY * tp, K.V_BASE * (1 - 3 * tp ** 2 + 2 * tp ** 3), color=V4["lag"], lw=2)
-    for i, (lab, col) in enumerate(((f"constant {tc:.0f} ms, {K.D_CONST:,.1f} mm", V4["gray"]),
-                                    (f"S-curve {K.T_SC:,.2f} ms, {K.D_SC:,.2f} mm", V4["veto"]),
-                                    (f"polynomial {K.T_POLY:,.0f} ms, {K.D_POLY:,.2f} mm", V4["lag"]))):
+    for i, (lab, col) in enumerate(((f"constant {val('t_const')} ms, {val('d_const')} mm", V4["gray"]),
+                                    (f"S-curve {val('t_sc')} ms, {val('d_sc')} mm", V4["veto"]),
+                                    (f"polynomial {val('t_poly')} ms, {val('d_poly')} mm", V4["lag"]))):
         av.text(1290, 1.55 - i * 0.2, lab, color=col, fontsize=FS_S - 1, ha="right",
                 va="top", fontweight="bold")
     av.set_xlabel("ms from stop onset", fontsize=FS_S)
@@ -715,12 +721,12 @@ base_speed()
 # ============================================================== generator timing
 def gen_timing():
     rows = [
-        ("Ruckig, mean", K.RUCKIG_MEAN, "nervous", "19.8 µs"),
-        ("Ruckig, worst case", K.RUCKIG_WORST, "nervous", "123 µs"),
-        ("Servo tick", 1.0, "neutral", "1 ms"),
-        ("Plan validation", K.T_VALIDATE, "neutral", "18 ms"),
-        ("Chunk policy pass", K.T_INFER, "memory", "40 ms"),
-        ("Capture to admission", K.T_REPL, "danger", f"{K.T_REPL:.1f} ms"),
+        ("Ruckig, mean", K.RUCKIG_MEAN, "nervous", f"{val('ruckig_mean')} µs"),
+        ("Ruckig, worst case", K.RUCKIG_WORST, "nervous", f"{val('ruckig_worst')} µs"),
+        ("Servo tick", K.T_TICK, "neutral", f"{val('t_tick')} ms"),
+        ("Plan validation", K.T_VALIDATE, "neutral", f"{val('t_validate')} ms"),
+        ("Chunk policy pass", K.T_INFER, "memory", f"{val('t_infer')} ms"),
+        ("Capture to admission", K.T_REPL, "danger", f"{val('t_repl')} ms"),
     ]
     fig, ax = plt.subplots(figsize=cm(14.2, 5.2))
     fig.subplots_adjust(left=0.31, right=0.97, top=0.97, bottom=0.24)

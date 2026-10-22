@@ -143,33 +143,32 @@ The right-hand side represents the theoretical wall-clock time saved by distribu
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Goal: Find the integer worker count minimizing modeled elapsed time.
 # │ Show: Normalized times at four, eight, and the best feasible worker count.
-# │ How:  Enumerate (1-f) + f/M + gamma(M-1) under a finite resource ceiling.
+# │ How:  Enumerate (1-f) + f/M + gamma(M-1) under a finite resource ceiling
+# │       (Scenarios.RepairPartitionScreen and its halved-overhead variant).
 # │ Note: Dimensionless hypothetical assumptions, not a measured comparison
 # │       with an already-parallel single-controller runtime.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_ratio, fmt_int, fmt_multiple
 
 class DelegationScreen:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    parallel_fraction = 0.8
-    overhead_per_extra_worker = 0.02
-    max_workers = 16
+    screen = Scenarios.RepairPartitionScreen
+    halved = Scenarios.RepairPartitionScreenHalvedOverhead
+    parallel_fraction = screen.parallel_fraction
+    overhead_per_extra_worker = screen.overhead_per_extra_worker
+    max_workers = screen.max_workers
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    normalized_times = {}
-    for workers in range(1, max_workers + 1):
-        normalized_times[workers] = 1 - parallel_fraction + parallel_fraction / workers + overhead_per_extra_worker * (workers - 1)
-    best_workers = min(normalized_times, key=normalized_times.get)
-    best_time = normalized_times[best_workers]
-    best_speedup = 1 / best_time
-    speedup_cap = 1 / (1 - parallel_fraction)
+    normalized_times = screen.elapsed
+    best_workers = screen.best_workers
+    best_time = screen.best_time
+    best_speedup = screen.best_speedup
+    speedup_cap = screen.speedup_cap
     # Sensitivity: halve the per-worker overhead, same serial fraction.
-    halved_overhead = overhead_per_extra_worker / 2
-    halved_times = {}
-    for workers in range(1, max_workers + 1):
-        halved_times[workers] = 1 - parallel_fraction + parallel_fraction / workers + halved_overhead * (workers - 1)
-    halved_best_workers = min(halved_times, key=halved_times.get)
-    halved_best_speedup = 1 / halved_times[halved_best_workers]
+    halved_overhead = halved.overhead_per_extra_worker
+    halved_best_workers = halved.best_workers
+    halved_best_speedup = halved.best_speedup
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(isinstance(max_workers, int) and max_workers >= 1, "Worker ceiling must be a positive integer")
@@ -286,36 +285,27 @@ The aggregate work bound $\AggregateSlotWork/\WorkerCount$ reflects the capacity
 # │ Context: @nbk-17-critical-path-makespan-and-dag-scheduling and its table.
 # │ Goal: Compare aggregate work with an attainable idealized DAG schedule.
 # │ Show: Node durations, earliest starts/finishes, bounds, and speedup.
-# │ How: Assumed slot durations; predecessor-max recurrence in topological order.
+# │ How: Assumed slot durations (Scenarios.InterfaceMigrationSchedule);
+# │      predecessor-max recurrence in topological order.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class DagSchedule:
     # ┌── 1. LOAD (Illustrative assumptions) ─────────────────────────────────
-    workers = 4
-    duration = {1: 20.5 * second, 2: 42 * second, 3: 42 * second, 4: 42 * second, 5: 43 * second, 6: 16.5 * second, 7: 69 * second}
-    predecessors = {1: (), 2: (1,), 3: (1,), 4: (1,), 5: (2, 3), 6: (4,), 7: (5, 6)}
+    plan = Scenarios.InterfaceMigrationSchedule
+    workers = plan.slots
+    duration = plan.durations
+    predecessors = plan.predecessors
 
     # ┌── 2. EXECUTE (Unlimited-slot earliest schedule; check capacity below) ─
-    start = {}
-    finish = {}
-    for node in duration:
-        ready = 0 * second
-        for parent in predecessors[node]:
-            ready = max(ready, finish[parent])
-        start[node] = ready
-        finish[node] = ready + duration[node]
-    work = sum(duration.values(), 0 * second)
-    critical = finish[7]
-    work_bound = work / workers
-    peak_slots = 0
-    for instant in start.values():
-        occupied = 0
-        for node in duration:
-            occupied += int(start[node] <= instant < finish[node])
-        peak_slots = max(peak_slots, occupied)
-    speedup = (work / critical).to("").magnitude
-    slack6 = start[7] - finish[6]  # float on the only off-critical branch into v7
+    start = plan.start
+    finish = plan.finish
+    work = plan.work
+    critical = plan.makespan
+    work_bound = plan.work_bound
+    peak_slots = plan.peak_slots
+    speedup = plan.speedup
+    slack6 = plan.free_float[6]  # float on the only off-critical branch into v7
 
     # ┌── 3. GUARD (Feasible capacity and the stated comparison) ──────────────
     check(work == 275 * second, "Aggregate work changed")
@@ -386,19 +376,21 @@ In contrast, **dynamic spawning**\index{Dynamic spawning!definition} provisions 
 # │ Show: Early fan-out, token multiples over chat, and the evaluation gain.
 # │ How: Constants quoted from @anthropic2025multiagent; no derivation here.
 # │      The two token multiples live on the Agents.Research.OrchestratorWorker
-# │      profile, whose provenance cites the report.
+# │      profile, whose provenance cites the report; the fan-out count and the
+# │      evaluation gain are Literature.MultiAgentSystems entries.
 # │ Note: Reported by the system's builders on their own internal evaluation.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
+from mlsysim import Agents, Literature
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
 
 class ResearchReport:
     # ┌── 1. LOAD (Quoted from anthropic2025multiagent) ────────────────────
     research = Agents.Research.OrchestratorWorker
-    early_subagents = 50  # subagents spawned for simple queries in early versions
+    report = Literature.MultiAgentSystems
+    early_subagents = report.ResearchSystemEarlySubagents  # subagents spawned for simple queries in early versions
     single_agent_tokens_vs_chat = research.agent_token_multiple  # "about 4x more tokens than chat"
     multi_agent_tokens_vs_chat = research.fanout_token_multiple  # "about 15x more tokens than chats"
-    eval_gain = 0.902  # multi-agent over single-agent, internal research eval
+    eval_gain = report.ResearchSystemEvalGainPct / 100  # multi-agent over single-agent, internal research eval
 
     # ┌── 2. EXECUTE (None: quoted values) ─────────────────────────────────
 
@@ -451,7 +443,7 @@ The two policies differ in blast radius (@fig-vol3-supervisor-tree-isolation): o
 ::: {#chk-17-amdahl-concurrency .callout-checkpoint title="Evaluating multi-agent coordination topologies"}
 
 - [ ] **Dependency vs. routing**: The interface and caller workers communicate only through their supervisor. Why can they still produce interdependent patches, and which of the three structures records that?
-- [ ] **Critical-path estimate**: Using the durations in @tbl-vol3-multiagent-dag-schedule, estimate how much completion changes if $\DependencyGraphVertex_6$ takes 20 s less, and how much if $\DependencyGraphVertex_5$ takes 20 s less. Which node should an engineering team speed up?
+- [ ] **Critical-path estimate**: Using the durations in @tbl-vol3-multiagent-dag-schedule, estimate how much completion changes if $\DependencyGraphVertex_6$ is removed entirely, and how much if $\DependencyGraphVertex_5$ takes 20 s less. Which node should an engineering team speed up?
 - [ ] **Worker-count screen**: With $\ParallelFraction=0.9$ and the notebook's overhead $\WorkerOverheadSlope=$ `{python} DelegationScreen.overhead_str` per extra worker, estimate the best worker count from $\sqrt{\ParallelFraction/\WorkerOverheadSlope}$ and the speedup ceiling $1/(1-\ParallelFraction)$. Is it worth halving $\WorkerOverheadSlope$ or halving $1-\ParallelFraction$?
 - [ ] **Aggregate admission**: Why can granting every child less than its parent's remaining budget still oversubscribe the task? What must happen atomically?
 :::
@@ -570,25 +562,26 @@ Instead of inlining an entire repository tree into a child task's context prompt
 # │ Show: Pasted, selectively retrieved, and fully retrieved input totals.
 # │ How: Each supplied token is charged once at an illustrative input price.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import check, fmt_int, fmt_multiple, fmt_percent, fmt_usd, USD
+from mlsysim import Scenarios, check, fmt_int, fmt_multiple, fmt_percent, fmt_usd, USD
 
 class RefPassing:
     # ┌── 1. LOAD (Hypothetical repository-delivery inputs) ─────────────────
-    workers = 6
-    slice_tokens = 48_000
-    envelope_ref_tokens = 350
-    files_read_tokens = 3_600
-    input_price_per_mtok = 3 * USD
+    handoff = Scenarios.SixChildReferencePassing
+    workers = handoff.workers
+    slice_tokens = handoff.slice_tokens
+    envelope_ref_tokens = handoff.reference_tokens
+    files_read_tokens = handoff.read_tokens
+    input_price_per_mtok = handoff.input_price.to("USD / Mtoken").magnitude * USD
 
     # ┌── 2. EXECUTE (Charge each supplied token once) ──────────────────────
-    pasted_tokens = workers * slice_tokens
-    ref_tokens = workers * (envelope_ref_tokens + files_read_tokens)
-    full_read_tokens = workers * (envelope_ref_tokens + slice_tokens)
-    pasted_usd = pasted_tokens / 1_000_000 * input_price_per_mtok
-    ref_usd = ref_tokens / 1_000_000 * input_price_per_mtok
-    ratio = pasted_tokens / ref_tokens
-    read_fraction = files_read_tokens / slice_tokens
-    breakeven_read_tokens = slice_tokens - envelope_ref_tokens  # reads at which the saving vanishes
+    pasted_tokens = handoff.pasted_tokens
+    ref_tokens = handoff.reference_total_tokens
+    full_read_tokens = handoff.full_read_tokens
+    pasted_usd = handoff.pasted_cost
+    ref_usd = handoff.reference_cost
+    ratio = handoff.reduction
+    read_fraction = handoff.read_fraction
+    breakeven_read_tokens = handoff.break_even_read_tokens  # reads at which the saving vanishes
 
     # ┌── 3. GUARD (Selective and full-retrieval ordering) ──────────────────
     check(0 < ref_tokens < pasted_tokens < full_read_tokens, "Input ordering")
@@ -647,35 +640,28 @@ Operating multiple agents within a single shared working directory introduces th
 # │ Show: Collision probability for two and eight workers, and the smallest
 # │       fleet for which a collision is more likely than not.
 # │ How: Exact sequential product of disjoint-draw probabilities, checked
-# │      against the exponential (birthday) approximation.
+# │      against the exponential (birthday) approximation
+# │      (Scenarios.ThousandFileSharedWrites).
 # │ Note: Hypothetical repository and write-set sizes, not measured workloads.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import comb, exp
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class WriteCollision:
     # ┌── 1. LOAD (Hypothetical repository and write sets) ─────────────────
-    files = 1_000
-    writes_per_worker = 10
-    small_fleet = 2
-    large_fleet = 8
-    max_fleet = 16
+    workspace = Scenarios.ThousandFileSharedWrites
+    files = workspace.files
+    writes_per_worker = workspace.writes_per_worker
+    small_fleet = workspace.small_fleet
+    large_fleet = workspace.large_fleet
+    max_fleet = workspace.max_fleet
 
     # ┌── 2. EXECUTE (Probability that N write sets are pairwise disjoint) ─
-    no_collision = {}
-    approx_no_collision = {}
-    for fleet in range(1, max_fleet + 1):
-        disjoint = 1.0
-        for earlier in range(1, fleet):
-            disjoint *= comb(files - earlier * writes_per_worker, writes_per_worker) / comb(files, writes_per_worker)
-        no_collision[fleet] = disjoint
-        approx_no_collision[fleet] = exp(-fleet * (fleet - 1) * writes_per_worker**2 / (2 * files))
-    small_collision = 1 - no_collision[small_fleet]
-    large_collision = 1 - no_collision[large_fleet]
-    even_odds_fleet = None
-    for fleet in range(max_fleet, 0, -1):
-        if no_collision[fleet] < 0.5:
-            even_odds_fleet = fleet
+    no_collision = workspace.disjoint
+    approx_no_collision = workspace.disjoint_approx
+    small_collision = workspace.collision[small_fleet]
+    large_collision = workspace.collision[large_fleet]
+    even_odds_fleet = workspace.even_odds_fleet
 
     # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
     check(abs(no_collision[1] - 1) < 1e-12, "One worker cannot collide")
@@ -764,7 +750,7 @@ def integrate(repo, task, receipt, contract, max_attempts):
 
 :::
 
-::: {#fig-vol3-occ-worktrees data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-occ-worktrees" fig-env="figure" fig-pos="htb" fig-cap="**Private Workspaces and Guarded Publication**: Linked worktrees (a) give each worker its own files, index, and HEAD while sharing repository storage; the sandbox around each one, not the worktree, scopes its writes. The caller edits files the interface change never touched (b), so the staged merge is textually clean even though the caller relies on the interface as of $\WorkerBaseCommitHash$. Publication (c) therefore revalidates dependencies at the captured head, checks the exact integration candidate, and advances the target only if the head is unchanged and the publication guard holds. A moved head returns the attempt to validation, and every other exit returns an explicit status." fig-alt="Three panels. Panel a: a shared repository storage box linked to an interface worktree and a caller worktree, each holding files, index, and HEAD inside a dashed amber sandbox. Panel b: a commit graph in which h base has an interface-change arrow to h head and a caller-edits arrow to h worker; a dashed red arrow labeled stale dependency points from h worker back to h base; h head and h worker both lead to h candidate, the worker by a staged merge. Panel c: four numbered steps in a row, 1 revalidate h base vs. h head, 2 build candidate makes h candidate, 3 checks on h candidate, and 4 atomic update expects h head and the guard, ending in published with evidence; each step has a red exit, request revision, request reconciliation, reject, and reconcile outcome, and a dashed arrow labeled head moved returns from step 4 to step 1."}
+::: {#fig-vol3-occ-worktrees data-explore="original-v3-occ-worktrees" data-explore-key="vol3:fig-vol3-occ-worktrees" fig-env="figure" fig-pos="htb" fig-cap="**Private Workspaces and Guarded Publication**: Linked worktrees (a) give each worker its own files, index, and HEAD while sharing repository storage; the sandbox around each one, not the worktree, scopes its writes. The caller edits files the interface change never touched (b), so the staged merge is textually clean even though the caller relies on the interface as of $\WorkerBaseCommitHash$. Publication (c) therefore revalidates dependencies at the captured head, checks the exact integration candidate, and advances the target only if the head is unchanged and the publication guard holds. A moved head returns the attempt to validation, and every other exit returns an explicit status." fig-alt="Three panels. Panel a: a shared repository storage box linked to an interface worktree and a caller worktree, each holding files, index, and HEAD inside a dashed amber sandbox. Panel b: a commit graph in which h base has an interface-change arrow to h head and a caller-edits arrow to h worker; a dashed red arrow labeled stale dependency points from h worker back to h base; h head and h worker both lead to h candidate, the worker by a staged merge. Panel c: four numbered steps in a row, 1 revalidate h base vs. h head, 2 build candidate makes h candidate, 3 checks on h candidate, and 4 atomic update expects h head and the guard, ending in published with evidence; each step has a red exit, request revision, request reconciliation, reject, and reconcile outcome, and a dashed arrow labeled head moved returns from step 4 to step 1."}
 ![](images/svg/fig-vol3-occ-worktrees.svg)
 :::
 
@@ -862,34 +848,28 @@ where $\mathrm{B}$ denotes the beta function. A stipulated marginal error rate a
 # │ Purpose: Compare two assumed joint error models at the same marginal rate.
 # │ Inputs: Five reviewers, marginal false approval 0.20, mixture correlation 0.40.
 # │ Show: Majority and unanimous false-approval probabilities.
-# │ How: Binomial masses and a beta-binomial mixture evaluated with log gamma.
+# │ How: Binomial masses and a beta-binomial mixture evaluated with log gamma
+# │      (Scenarios.FiveCorrelatedReviewers).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
+from mlsysim.physics import calc_beta_binomial_pmf
 
 class ReviewCorrelation:
     # 1. LOAD: dimensionless illustrative error-model inputs.
-    reviewers, failure_p, rho = 5, 0.20, 0.40
+    panel = Scenarios.FiveCorrelatedReviewers
+    reviewers, failure_p, rho = panel.reviewers, panel.false_approval, panel.correlation
     check(isinstance(reviewers, int) and reviewers > 0 and reviewers % 2 == 1, "positive odd reviewer count")
     check(0 < failure_p < 1 and 0 < rho < 1, "interior mixture parameters")
 
     # 2. EXECUTE: integrate the conditional binomial with log beta functions.
-    a = failure_p * (1 / rho - 1)
-    b = (1 - failure_p) * (1 / rho - 1)
-    independent, mixture = [], []
+    independent = []
     for k in range(reviewers + 1):
         independent.append(math.comb(reviewers, k) * failure_p**k * (1 - failure_p) ** (reviewers - k))
-        log_beta_ratio = (
-            math.lgamma(k + a)
-            + math.lgamma(reviewers - k + b)
-            - math.lgamma(reviewers + a + b)
-            - math.lgamma(a)
-            - math.lgamma(b)
-            + math.lgamma(a + b)
-        )
-        mixture.append(math.comb(reviewers, k) * math.exp(log_beta_ratio))
-    independent_majority = sum(independent[reviewers // 2 + 1 :])
-    mixture_majority = sum(mixture[reviewers // 2 + 1 :])
+    mixture = calc_beta_binomial_pmf(reviewers, failure_p, rho)
+    independent_majority = panel.independent_majority(reviewers)
+    mixture_majority = panel.correlated_majority(reviewers)
 
     # 3. GUARD: distributions normalize and preserve the stipulated marginal.
     check(math.isclose(sum(independent), 1), "binomial mass")
@@ -927,40 +907,24 @@ class ReviewCorrelation:
 # │       false approval, compared with independent reviewers.
 # │ Show: Majority false approval at a larger odd ensemble under both models,
 # │       and the limiting floor P(Q > 1/2).
-# │ How: Reuse the mixture inputs of ReviewCorrelation; beta-binomial masses via
-# │      log gamma; the floor by composite Simpson integration of the beta
-# │      density on [1/2, 1], where it is smooth.
+# │ How: Reuse the mixture of ReviewCorrelation (Scenarios.FiveCorrelatedReviewers);
+# │      beta-binomial masses via log gamma; the floor is the regularized
+# │      incomplete beta mass of the propensity above 1/2.
 # │ Note: Reads ReviewCorrelation (calc-vol3-review-correlation) inputs only.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ReviewFloor:
     # ┌── 1. LOAD (Same stipulated error model as the notebook) ────────────
+    panel = ReviewCorrelation.panel
     failure_p = ReviewCorrelation.failure_p
     rho = ReviewCorrelation.rho
-    large_ensemble = 15
-    simpson_intervals = 2_000
+    large_ensemble = panel.large_ensemble
 
     # ┌── 2. EXECUTE (Majority tails and the limiting floor) ───────────────
-    a = failure_p * (1 / rho - 1)
-    b = (1 - failure_p) * (1 / rho - 1)
-    log_norm = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
-    independent_large = 0.0
-    mixture_large = 0.0
-    for k in range(large_ensemble // 2 + 1, large_ensemble + 1):
-        independent_large += math.comb(large_ensemble, k) * failure_p**k * (1 - failure_p) ** (large_ensemble - k)
-        mixture_large += math.comb(large_ensemble, k) * math.exp(
-            math.lgamma(k + a) + math.lgamma(large_ensemble - k + b) - math.lgamma(large_ensemble + a + b) + log_norm
-        )
-    step = 0.5 / simpson_intervals
-    floor = 0.0
-    for i in range(simpson_intervals + 1):
-        q = 0.5 + i * step
-        density = 0.0 if q >= 1 else math.exp(log_norm + (a - 1) * math.log(q) + (b - 1) * math.log(1 - q))
-        weight = 1 if i in (0, simpson_intervals) else (4 if i % 2 else 2)
-        floor += weight * density
-    floor *= step / 3
+    independent_large = panel.independent_majority(large_ensemble)
+    mixture_large = panel.correlated_majority(large_ensemble)
+    floor = panel.floor
 
     # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
     check(abs(ReviewCorrelation.mixture_majority - 0.1668) < 0.001, "Notebook majority value changed")
@@ -1087,30 +1051,28 @@ where $\WorkerCompletionTime_{(k)}$ denotes the arrival time of the $\RequiredRe
 # │ Context: @sec-vol3-multiagent-backpressure, notebook immediately below.
 # │ Goal: Compare two stopping rules when the contract permits k of N_workers results.
 # │ Show: Scenario inputs and probabilities of sufficient results by a deadline.
-# │ How: Evaluate the binomial tail and independently enumerate all outcomes.
+# │ How: Evaluate the binomial tail (Scenarios.EightWorkerDeadlineFanout) and
+# │      independently enumerate all outcomes.
 # │ Note: Hypothetical probabilities, not measured agent or provider latency.
 # └─────────────────────────────────────────────────────────────────────────────
 from itertools import product
-from math import comb
+from mlsysim import Scenarios
 from mlsysim.core.units import second
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time
 
 class FanoutCompletion:
     # ┌── 1. LOAD (Scenario assumptions) ───────────────────────────────────
-    workers = 8
-    required = 6
-    deadline = 10 * second
-    admissible_probability = 0.90
+    fanout = Scenarios.EightWorkerDeadlineFanout
+    workers = fanout.workers
+    required = fanout.required
+    deadline = fanout.deadline
+    admissible_probability = fanout.on_time_probability
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    all_probability = admissible_probability**workers
+    all_probability = fanout.all_on_time
     # Smallest fan-out whose all-results barrier falls below even odds.
-    even_odds_workers = 1
-    while admissible_probability**even_odds_workers >= 0.5:
-        even_odds_workers += 1
-    enough_probability = 0.0
-    for completed in range(required, workers + 1):
-        enough_probability += comb(workers, completed) * admissible_probability**completed * (1 - admissible_probability) ** (workers - completed)
+    even_odds_workers = fanout.even_odds_workers
+    enough_probability = fanout.quorum_on_time
     enumeration_probability = 0.0
     total_probability = 0.0
     for outcomes in product((0, 1), repeat=workers):
@@ -1175,25 +1137,27 @@ Even when every child agent stays within its own token budget, a rate mismatch b
 # │       that queue, and the Little's-law residence under a fixed window.
 # │ How: mu = decode rate / tokens per item; dQ/dt = lambda - mu; residence
 # │      of a full window = W / mu.
-# │ Note: Stipulated rates for a hypothetical pipeline, not measured serving.
+# │ Note: Stipulated rates for a hypothetical pipeline, not measured serving
+# │       (Scenarios.DiffReviewCreditWindow).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import second, minute, hour
+from mlsysim import Scenarios, second, minute, hour
 from mlsysim.fmt import check, fmt_int, fmt_ratio, fmt_time
 
 class RateMismatch:
     # ┌── 1. LOAD (Stipulated rates) ───────────────────────────────────────
-    consumer_tokens_per_s = 40
-    tokens_per_item = 500
-    producer_items_per_s = 5
-    horizon = 600 * second
-    credits = 8
+    pipeline = Scenarios.DiffReviewCreditWindow
+    consumer_tokens_per_s = pipeline.decode_rate.to("token/s").magnitude
+    tokens_per_item = pipeline.tokens_per_item.to("token").magnitude
+    producer_items_per_s = pipeline.producer_rate.to("1/s").magnitude
+    horizon = pipeline.horizon
+    credits = pipeline.credits
 
     # ┌── 2. EXECUTE (Service rate, divergence, and bounded residence) ─────
-    service_rate = consumer_tokens_per_s / tokens_per_item  # items/s
-    growth_rate = producer_items_per_s - service_rate  # items/s
-    backlog = growth_rate * horizon.to(second).magnitude  # items
-    backlog_wait = (backlog / service_rate) * second
-    window_residence = (credits / service_rate) * second
+    service_rate = pipeline.service_rate.to("1/s").magnitude  # items/s
+    growth_rate = pipeline.growth_rate.to("1/s").magnitude  # items/s
+    backlog = pipeline.backlog  # items
+    backlog_wait = pipeline.backlog_wait
+    window_residence = pipeline.window_residence
 
     # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
     check(abs(service_rate - 0.08) < 1e-12, "Consumer service rate")
@@ -1316,22 +1280,25 @@ Cost accounting must encompass the complete system boundary: supervisor orchestr
 # │ Show: Token ratio, the baseline acceptance above which break-even is
 # │       impossible, and the cost ratio if the reported gain were acceptance.
 # │ How: C_eff = E[C_attempt]/p_acc with cost proportional to tokens.
-# │ Note: Applies ResearchReport's quoted multiples; the fixed price per token
+# │ Note: Applies ResearchReport's quoted multiples through
+# │       Scenarios.ResearchSystemTokenBreakEven; the fixed price per token
 # │       and gain-as-acceptance mapping are assumptions, not report claims.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_ratio
 
 class TokenBreakEven:
     # ┌── 1. LOAD (Quoted multiples; assumed fixed price per token) ────────
-    multi_vs_chat = ResearchReport.multi_agent_tokens_vs_chat
-    single_vs_chat = ResearchReport.single_agent_tokens_vs_chat
-    eval_gain = ResearchReport.eval_gain
+    break_even = Scenarios.ResearchSystemTokenBreakEven
+    multi_vs_chat = break_even.multi_agent_tokens_vs_chat
+    single_vs_chat = break_even.agent_tokens_vs_chat
+    eval_gain = break_even.reported_gain
 
     # ┌── 2. EXECUTE (Cost ratio of C_eff = token ratio x p_single / p_multi) ─
-    token_ratio = multi_vs_chat / single_vs_chat
-    max_single_acceptance = 1 / token_ratio  # p_multi <= 1 caps the baseline
-    acceptance_multiplier = 1 + eval_gain
-    c_eff_ratio_if_gain_is_acceptance = token_ratio / acceptance_multiplier
+    token_ratio = break_even.token_multiple
+    max_single_acceptance = break_even.max_single_acceptance  # p_multi <= 1 caps the baseline
+    acceptance_multiplier = break_even.acceptance_multiplier
+    c_eff_ratio_if_gain_is_acceptance = break_even.cost_ratio_if_gain_is_acceptance
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(token_ratio > 1, "Delegation must use more tokens in this scenario")
@@ -1377,29 +1344,26 @@ A matched trial is expensive, so before running one a team must decide which wor
 # │ Show: sigma, kappa, the continuous peak, the retrograde threshold, and
 # │       agreement between the USL and the earlier screen's integer optimum.
 # │ How: sigma = 1 - f and kappa = per-worker overhead from DelegationScreen
-# │      (calc-vol3-delegation-screen); evaluate the USL on integer counts.
+# │      (calc-vol3-delegation-screen), as Scenarios.RepairPartitionScalability;
+# │      evaluate the USL on integer counts.
 # │ Note: Reads DelegationScreen inputs only; hypothetical coefficients.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_ratio
-from mlsysim.physics import calc_universal_scalability_law, calc_usl_optimal_concurrency
 
 class UslScreen:
     # ┌── 1. LOAD (Coefficients implied by the earlier screen) ─────────────
-    sigma = 1 - DelegationScreen.parallel_fraction
-    kappa = DelegationScreen.overhead_per_extra_worker
-    search_limit = 64
+    law = Scenarios.RepairPartitionScalability
+    sigma = law.contention
+    kappa = law.coherency
+    search_limit = law.search_limit
 
     # ┌── 2. EXECUTE (Peak, retrograde threshold, integer optimum) ─────────
-    peak = calc_usl_optimal_concurrency(sigma, kappa)
-    retrograde = (1 - sigma) / kappa
-    capacity = {}
-    for workers in range(1, search_limit + 1):
-        capacity[workers] = calc_universal_scalability_law(workers, sigma, kappa)
-    best_workers = max(capacity, key=capacity.get)
-    first_slower = None
-    for workers in range(search_limit, 1, -1):
-        if capacity[workers] < 1:
-            first_slower = workers
+    peak = law.continuous_peak
+    retrograde = law.retrograde_threshold
+    capacity = law.capacity
+    best_workers = law.best_workers
+    first_slower = law.first_slower
 
     # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
     check(best_workers == DelegationScreen.best_workers, "USL optimum must match the screen's integer optimum")
@@ -1453,31 +1417,27 @@ The architectural remedy depends on the measured source of overhead. Supervisor 
 # │ Show: Research and repair optima and capacity at each optimum.
 # │ How: USL capacity evaluated on integer worker counts.
 # │ Note: Research coefficients come from Agents.Research.OrchestratorWorker
-# │       (teaching assumptions, not measurements); repair coefficients
-# │       reuse UslScreen.
+# │       through Scenarios.ResearchFanoutScalability (teaching assumptions,
+# │       not measurements); repair coefficients reuse UslScreen.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_ratio
-from mlsysim.physics import calc_universal_scalability_law
 
 class ResearchLighthouse:
     # ┌── 1. LOAD (Scenario coefficients) ──────────────────────────────────
-    research = Agents.Research.OrchestratorWorker
-    research_sigma = research.serial_fraction  # lead agent's planning and synthesis, assumed
-    research_kappa = research.coherency_coefficient  # rare cross-subagent reconciliation, assumed
+    research_law = Scenarios.ResearchFanoutScalability
+    repair_law = UslScreen.law
+    research_sigma = research_law.contention  # lead agent's planning and synthesis, assumed
+    research_kappa = research_law.coherency  # rare cross-subagent reconciliation, assumed
     repair_sigma = UslScreen.sigma
     repair_kappa = UslScreen.kappa
-    search_limit = 64
+    search_limit = research_law.search_limit
 
     # ┌── 2. EXECUTE (Integer optima and capacities) ───────────────────────
-    research_cap = {}
-    repair_cap = {}
-    for m in range(1, search_limit + 1):
-        research_cap[m] = calc_universal_scalability_law(m, research_sigma, research_kappa)
-        repair_cap[m] = calc_universal_scalability_law(m, repair_sigma, repair_kappa)
-    research_best = max(research_cap, key=research_cap.get)
-    repair_best = max(repair_cap, key=repair_cap.get)
-    research_capacity = research_cap[research_best]
-    repair_capacity = repair_cap[repair_best]
+    research_best = research_law.best_workers
+    repair_best = repair_law.best_workers
+    research_capacity = research_law.peak_capacity
+    repair_capacity = repair_law.peak_capacity
     fanout_ratio = research_best / repair_best
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1523,56 +1483,53 @@ Once the scalability fit has nominated a configuration, the matched trial decide
 # │ Goal: Close an objective-first decision with outcomes, time, and priced work.
 # │ Show: Settled total and discarded-work costs, acceptance, and screen outcome.
 # │ How: Price all input/output tokens and aggregate service; test declared floors.
-# │ Scope: Hypothetical cohort results, not benchmark or provider data.
+# │ Scope: Hypothetical cohort results, not benchmark or provider data
+# │        (Scenarios.MatchedDelegationCohort).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import USD, second, token
+from mlsysim import Scenarios, USD, second, token
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_usd, fmt_time, fmt_percent
 
 class DelegationDecision:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    # Local scenario inputs; both policies share these screen conditions.
-    attempted = 100
-    accepted_floor = 80
-    on_time_floor = 75
-    deadline = 300 * second
-    cutoff = 600 * second
-    budget = 20 * USD
-    input_price = 3 * USD / (1_000_000 * token)
-    output_price = 10 * USD / (1_000_000 * token)
-    service_price = 0.01 * USD / second
-    single_accepted = 80
-    multi_accepted = 80
-    single_on_time = 70
-    multi_on_time = 78
-    single_median = 240 * second  # stipulated median among accepted tasks only
-    multi_median = 180 * second
-    single_in = 2_000_000 * token
-    single_out = 400_000 * token
-    single_service = 200 * second  # aggregate metered tool/assessment/cleanup time
-    multi_in = 3_000_000 * token
-    multi_out = 600_000 * token
-    multi_service = 300 * second
+    # Scenario inputs; both policies share these screen conditions.
+    cohort = Scenarios.MatchedDelegationCohort
+    single, multi = cohort.single, cohort.delegated
+    attempted = cohort.attempted
+    accepted_floor = cohort.accepted_floor
+    on_time_floor = cohort.on_time_floor
+    deadline = cohort.deadline
+    cutoff = cohort.cutoff
+    budget = cohort.budget.to(USD)
+    input_price = cohort.input_price.to(USD / token)
+    output_price = cohort.output_price.to(USD / token)
+    service_price = cohort.service_price.to(USD / second)
+    single_accepted = single.accepted
+    multi_accepted = multi.accepted
+    single_on_time = single.on_time
+    multi_on_time = multi.on_time
+    single_median = single.median_accepted_time  # stipulated median among accepted tasks only
+    multi_median = multi.median_accepted_time
+    single_in = single.input_tokens
+    single_out = single.output_tokens
+    single_service = single.service_time  # aggregate metered tool/assessment/cleanup time
+    multi_in = multi.input_tokens
+    multi_out = multi.output_tokens
+    multi_service = multi.service_time
     # Tagged subset already included in totals: failed attempts and canceled branches.
-    single_discard_in = 500_000 * token
-    single_discard_out = 100_000 * token
-    single_discard_service = 50 * second
-    multi_discard_in = 1_000_000 * token
-    multi_discard_out = 200_000 * token
-    multi_discard_service = 100 * second
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Same prices, all initiated work, no refunds for discarded work.
-    single_cost = single_in * input_price + single_out * output_price + single_service * service_price
-    multi_cost = multi_in * input_price + multi_out * output_price + multi_service * service_price
-    single_discard = single_discard_in * input_price + single_discard_out * output_price + single_discard_service * service_price
-    multi_discard = multi_discard_in * input_price + multi_discard_out * output_price + multi_discard_service * service_price
-    single_per_accepted = single_cost / single_accepted
-    multi_per_accepted = multi_cost / multi_accepted
-    marginal_on_time_cost = (multi_cost - single_cost) / (multi_on_time - single_on_time)
-    per_accepted_ratio = multi_per_accepted / single_per_accepted
-    discard_share = multi_discard / multi_cost
-    single_pass = single_accepted >= accepted_floor and single_on_time >= on_time_floor and single_cost <= budget
-    multi_pass = multi_accepted >= accepted_floor and multi_on_time >= on_time_floor and multi_cost <= budget
+    single_cost = cohort.spend(single)
+    multi_cost = cohort.spend(multi)
+    single_discard = cohort.discarded(single)
+    multi_discard = cohort.discarded(multi)
+    single_per_accepted = cohort.cost_per_accepted(single)
+    multi_per_accepted = cohort.cost_per_accepted(multi)
+    marginal_on_time_cost = cohort.marginal_on_time_cost
+    per_accepted_ratio = cohort.cost_ratio
+    discard_share = cohort.discard_share
+    single_pass = cohort.passes(single)
+    multi_pass = cohort.passes(multi)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Counts, settlement boundary, and stated screen decision.

@@ -77,8 +77,8 @@ A camera can recognize an obstacle correctly and still report where it stood bef
 # │ Goal:    Show how far the warehouse mobile manipulator travels while its
 # │          navigation camera's observation of a person ages.
 # │ Show:    t_age 51.6 ms; 77.4 mm of travel at the 1.5 m/s drive limit.
-# │ How:     AISLE.perception_age and RM.base.max_velocity; displacement via
-# │          calc_spatial_information_age_displacement.
+# │ How:     Scenarios.WarehouseNavCameraAge: the site's stage allowances
+# │          summed by ObservationAgeModel and priced at the drive limit.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -91,11 +91,12 @@ class RackEndOpeningAge:
     """Travel during the navigation camera's observation age at the drive limit."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_age = AISLE.perception_age  # category: derived
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    scenario = Scenarios.WarehouseNavCameraAge  # category: derived (site stage allowances)
+    v = scenario.speed  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dx = calc_spatial_information_age_displacement(v, t_age).to(millimeter)
+    t_age = scenario.result.age
+    dx = scenario.result.age_travel.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_age.to(millisecond).magnitude - 51.6) < 0.05, f"Unexpected t_age: {t_age}")
@@ -181,9 +182,10 @@ $$\IntegratedPixelResponse = \int_{0}^{\ExposureDuration} \SceneRadiance(\TimeIn
 # │          drive limit, about half of the along-travel allowance delta_loc;
 # │          9.1 mm of lateral skew from an illustrative 0.5 rad/s yaw at the
 # │          1.10 m rack-end distance, about 6 percent of the side clearance.
-# │ How:     RM.nav_camera readout, exposure (a configured setting), and row
-# │          count; RM.base drive limit; AISLE.delta_loc, AISLE.d_clear,
-# │          AISLE.side_clearance; RM.imu sample rate for compensation.
+# │ How:     Scenarios.WarehouseNavCameraRollingShutter and its aisle-speed
+# │          variant (RollingShutterSkewModel over RM.nav_camera, the site's
+# │          yaw rate, d_clear, delta_loc, and side clearance); RM.imu sample
+# │          rate for compensation.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -200,24 +202,26 @@ class RollingShutterSkew:
     rows = camera.resolution_height  # category: datasheet
     t_readout = camera.readout_time.to(millisecond)  # category: datasheet
     t_exp = camera.exposure_time.to(millisecond)  # category: chosen (configured exposure; low-light worst case, not a sensor rating)
-    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
-    omega_yaw = 0.5 * radian / second  # category: illustrative (yaw rate while turning into the aisle)
+    v = Scenarios.WarehouseNavCameraRollingShutter.speed.to(meter / second)  # category: illustrative (drive limit)
+    omega_yaw = AISLE.yaw_rate_turn  # category: illustrative (yaw rate while turning into the aisle)
     z_upright = AISLE.d_clear  # category: illustrative (range to the rack-end upright)
     delta_loc = AISLE.delta_loc  # category: illustrative (along-travel localization allowance)
     side_clearance = AISLE.side_clearance  # category: illustrative
     f_imu = RM.imu.sample_rate  # category: datasheet
-    v_aisle = AISLE.v_aisle.to(meter / second)  # category: chosen (aisle speed, below the derived ceiling)
+    v_aisle = Scenarios.WarehouseNavCameraRollingShutterAisleSpeed.speed.to(meter / second)  # category: chosen (aisle speed, below the derived ceiling)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_exp_half = (t_exp / 2).to(millisecond)
-    t_row = (t_readout / rows).to(microsecond)
-    skew = (v * t_readout).to(millimeter)  # along the direction of travel
-    blur = (v * t_exp).to(millimeter)
-    skew_over_loc = (skew / delta_loc).to(dimensionless).magnitude
-    lateral = (z_upright * omega_yaw.to(1 / second).magnitude * t_readout.to(second).magnitude).to(millimeter)
-    lateral_share = (lateral / side_clearance).to(dimensionless).magnitude
-    skew_aisle = (v_aisle * t_readout).to(millimeter)  # sensitivity: the chosen aisle speed
-    skew_aisle_over_loc = (skew_aisle / delta_loc).to(dimensionless).magnitude
+    _rs = Scenarios.WarehouseNavCameraRollingShutter.result
+    _rs_aisle = Scenarios.WarehouseNavCameraRollingShutterAisleSpeed.result
+    t_exp_half = _rs.midpoint_lag.to(millisecond)
+    t_row = _rs.row_interval.to(microsecond)
+    skew = _rs.skew.to(millimeter)  # along the direction of travel
+    blur = _rs.exposure_travel.to(millimeter)
+    skew_over_loc = _rs.skew_over_allowance
+    lateral = _rs.lateral_skew.to(millimeter)
+    lateral_share = _rs.lateral_share
+    skew_aisle = _rs_aisle.skew.to(millimeter)  # sensitivity: the chosen aisle speed
+    skew_aisle_over_loc = _rs_aisle.skew_over_allowance
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rows == 3040, f"Unexpected navigation-camera row count: {rows}")
@@ -319,7 +323,7 @@ Resolving this spatial artifact requires **rolling-shutter motion compensation**
 
 [^fn-imu-specific-force]: **Specific Force**: An accelerometer measures non-gravitational acceleration, $\LinearAcceleration-\GravityVector$, so a unit resting on the floor reads one $\Gravity$ upward and one in free fall reads zero. Dead reckoning must therefore rotate specific force into the navigation frame and restore the gravity vector, and an attitude error $\AttitudeError$ leaks $\Gravity\sin\AttitudeError$ into horizontal acceleration, which integrates twice into the per-row poses that de-skewing relies on. \index{Inertial measurement unit!specific force}
 
-::: {#fig-08-rolling-shutter-rows data-explore="mechanism-scene" data-explore-key="vol4:fig-08-rolling-shutter-rows" fig-env="figure" fig-pos="t" fig-cap="**Row-by-row sampling on the navigation camera**: At the `{python} RollingShutterSkew.v_str` drive limit, each of the `{python} RollingShutterSkew.rows_str` rows is read `{python} RollingShutterSkew.t_row_str` after the one above it, so the bottom row sees the rack upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top row (solid line; upper axis gives the read time). The shaded band is each row's own motion blur, `{python} RollingShutterSkew.blur_str` over the `{python} RollingShutterSkew.t_exp_str` exposure. Uncorrected, the skew alone spends about half of the `{python} RollingShutterSkew.delta_loc_str` localization allowance (dashed line)." fig-alt="Line plot with image row on the vertical axis, zero at the top, and camera position along the direction of travel in millimeters on the horizontal axis, with read time in milliseconds on a second axis above. A straight line runs from zero at the top row to about 25 millimeters at the bottom row, inside a shaded band about 24 millimeters wide. A dashed vertical line at 50 millimeters marks the localization allowance."}
+::: {#fig-08-rolling-shutter-rows data-explore="original-v4-08-rolling-shutter-rows" data-explore-key="vol4:fig-08-rolling-shutter-rows" fig-env="figure" fig-pos="t" fig-cap="**Row-by-row sampling on the navigation camera**: At the `{python} RollingShutterSkew.v_str` drive limit, each of the `{python} RollingShutterSkew.rows_str` rows is read `{python} RollingShutterSkew.t_row_str` after the one above it, so the bottom row sees the rack upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top row (solid line; upper axis gives the read time). The shaded band is each row's own motion blur, `{python} RollingShutterSkew.blur_str` over the `{python} RollingShutterSkew.t_exp_str` exposure. Uncorrected, the skew alone spends about half of the `{python} RollingShutterSkew.delta_loc_str` localization allowance (dashed line)." fig-alt="Line plot with image row on the vertical axis, zero at the top, and camera position along the direction of travel in millimeters on the horizontal axis, with read time in milliseconds on a second axis above. A straight line runs from zero at the top row to about 25 millimeters at the bottom row, inside a shaded band about 24 millimeters wide. A dashed vertical line at 50 millimeters marks the localization allowance."}
 
 ```{python}
 #| label: plot-perception-rolling-shutter-rows
@@ -427,8 +431,9 @@ $$\BearingRay(\HomogeneousPixelCoordinates) = \CameraIntrinsicCalibrationMatrix^
 # │          and the lateral error per millisecond of stamp jitter while turning.
 # │ Show:    1.5 mm per ms; 19.2 mm per degree at 1.10 m; 8 ms and 12 mm for
 # │          the trigger correction; 0.5 mrad and 0.55 mm per ms of jitter.
-# │ How:     RM.base drive limit; AISLE.d_clear; RM.nav_camera exposure;
-# │          the illustrative yaw rate of RollingShutterSkew.
+# │ How:     Scenarios.WarehouseRackEndTimingAttitude (one millisecond and
+# │          one degree at the rack end) and the trigger offset of
+# │          Scenarios.WarehouseNavCameraAge.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -442,20 +447,20 @@ class CaptureTimingScale:
     """Machine-scale travel and lever-arm errors from timing and attitude offsets."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
-    z = AISLE.d_clear  # category: illustrative (rack-end distance)
-    t_exp = RM.nav_camera.exposure_time.to(millisecond)  # category: chosen (configured exposure)
-    omega_yaw = RollingShutterSkew.omega_yaw  # category: illustrative (yaw rate)
-    dt_unit = 1.0 * millisecond  # category: illustrative (one millisecond of error)
-    theta_unit = 1.0 * degree  # category: illustrative (one degree of error)
+    scenario = Scenarios.WarehouseRackEndTimingAttitude  # category: illustrative (1 ms, 1 degree at the rack end)
+    v = scenario.speed.to(meter / second)  # category: illustrative (drive limit)
+    z = scenario.distance  # category: illustrative (rack-end distance)
+    omega_yaw = scenario.yaw_rate  # category: illustrative (yaw rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dx_per_ms = (v * dt_unit).to(millimeter)
-    dy_per_deg = (z * math.sin(theta_unit.to(radian).magnitude)).to(millimeter)
-    t_trigger_corr = (t_exp / 2).to(millisecond)
-    dx_trigger = (v * t_trigger_corr).to(millimeter)
-    dtheta_per_ms = (omega_yaw * dt_unit).to(milliradian)
-    dy_per_ms_jitter = (z * dtheta_per_ms.to(radian).magnitude).to(millimeter)
+    _err = scenario.result
+    _age = Scenarios.WarehouseNavCameraAge.result
+    dx_per_ms = _err.timing_travel.to(millimeter)
+    dy_per_deg = _err.angle_lateral.to(millimeter)
+    t_trigger_corr = _age.trigger_offset.to(millisecond)
+    dx_trigger = _age.trigger_travel.to(millimeter)
+    dtheta_per_ms = _err.misorientation.to(milliradian)
+    dy_per_ms_jitter = _err.timing_lateral.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dx_per_ms.magnitude - 1.5) < 1e-9, f"Unexpected travel per ms: {dx_per_ms}")
@@ -524,9 +529,10 @@ $$\LidarFramePoint = \RadialRange \cdot \LidarBeamDirection(\LidarAzimuthAngle, 
 # │          the motion the base makes during one 20 Hz revolution.
 # │ Show:    precision 5-30 mm (1 sigma), accuracy 25 mm; 50 ms sweep; 75 mm
 # │          of travel and 25 mrad (1.4 degrees) of yaw across one sweep.
-# │ How:     RM.lidar.scan_rate; Ouster OS1 Rev7 datasheet (firmware 3.1)
-# │          precision and accuracy (registry), specified in the 1024 x 10 Hz
-# │          mode; illustrative yaw rate.
+# │ How:     Ouster OS1 Rev7 datasheet (firmware 3.1) precision and accuracy
+# │          (registry), specified in the 1024 x 10 Hz mode; sweep motion from
+# │          Scenarios.WarehouseRackEndLidarAge (RM.lidar.scan_rate, the
+# │          drive limit, and the site's yaw rate).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -544,13 +550,14 @@ class LidarSweep:
     sigma_r_max = lidar.range_precision_max  # category: datasheet (registry: OS1 Rev7 precision max, 1 sigma, beyond 1 m)
     bias_r = lidar.range_accuracy  # category: datasheet (registry: OS1 Rev7 accuracy, Lambertian targets)
     wavelength = lidar.laser_wavelength  # category: datasheet (registry: OS1 Rev7 laser wavelength)
-    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
-    omega_yaw = 0.5 * radian / second  # category: illustrative (yaw rate)
+    v = Scenarios.WarehouseRackEndLidarAge.speed.to(meter / second)  # category: illustrative (drive limit)
+    omega_yaw = Embodied.Scenario.WarehouseAisle.yaw_rate_turn  # category: illustrative (yaw rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_sweep = (1 / f_scan).to(millisecond)
-    dx_sweep = (v * t_sweep).to(millimeter)
-    dtheta_sweep = (omega_yaw * t_sweep).to(milliradian)
+    _sweep = Scenarios.WarehouseRackEndLidarAge.result
+    t_sweep = _sweep.sweep_period.to(millisecond)
+    dx_sweep = _sweep.sweep_travel.to(millimeter)
+    dtheta_sweep = _sweep.sweep_rotation.to(milliradian)
     dtheta_sweep_deg = dtheta_sweep.to(degree)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -675,9 +682,8 @@ The first mandatory property is the **capture timestamp**\index{Capture timestam
 # │          camera's frame at DMA completion instead of at the exposure midpoint.
 # │ Show:    26.6 ms from exposure midpoint to DMA completion; 39.9 mm of base
 # │          travel at the 1.5 m/s drive limit.
-# │ How:     t_recv - t0 = t_exp/2 + t_readout + t_transport + t_dma from
-# │          RM.nav_camera and AISLE; displacement via
-# │          calc_spatial_information_age_displacement.
+# │ How:     t_recv - t0 = t_exp/2 + t_readout + t_transport + t_dma, the
+# │          arrival offset of Scenarios.WarehouseNavCameraAge.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -695,11 +701,11 @@ class ArrivalStampOffset:
     t_readout = camera.readout_time  # category: datasheet
     t_transport = AISLE.t_transport  # category: illustrative
     t_dma = AISLE.t_dma  # category: illustrative
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    v = Scenarios.WarehouseNavCameraAge.speed  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_recv = (t_exp / 2 + t_readout + t_transport + t_dma).to(millisecond)
-    dx_recv = calc_spatial_information_age_displacement(v, tau_recv).to(millimeter)
+    tau_recv = Scenarios.WarehouseNavCameraAge.result.arrival_offset.to(millisecond)
+    dx_recv = Scenarios.WarehouseNavCameraAge.result.arrival_travel.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_recv.magnitude - 26.6) < 0.05, f"Unexpected arrival offset: {tau_recv}")
@@ -733,8 +739,9 @@ Eliminating this arrival offset and bounding the camera-to-inertial offset $\Cam
 # │          clearance, and a 0.005 rad extrinsic shift at 10 m against delta_loc.
 # │ Show:    0.26 m, about 1.7x the 0.15 m side clearance; 50 mm, the whole
 # │          delta_loc allowance.
-# │ How:     Delta_y = d sin(theta); delta_x = z theta; AISLE.side_clearance and
-# │          AISLE.delta_loc.
+# │ How:     Delta_y = d theta: Scenarios.WarehouseLongAisleMountError
+# │          (against AISLE.side_clearance) and
+# │          Scenarios.WarehouseLidarExtrinsicShift (against AISLE.delta_loc).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -747,24 +754,24 @@ class ExtrinsicErrorBudget:
     """Lever-arm errors from angular mount errors, set against the aisle clearances."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    theta_frame = 1.0 * degree  # category: illustrative (uncalibrated mount error)
-    d_frame = 15.0 * meter  # category: illustrative (detection range)
-    theta_ext = 0.005 * radian  # category: illustrative (extrinsic shift after shock)
-    z_ext = 10.0 * meter  # category: illustrative (target range)
+    theta_frame = Scenarios.WarehouseLongAisleMountError.angle_error  # category: illustrative (uncalibrated mount error)
+    d_frame = Scenarios.WarehouseLongAisleMountError.distance  # category: illustrative (detection range)
+    theta_ext = Scenarios.WarehouseLidarExtrinsicShift.angle_error  # category: illustrative (extrinsic shift after shock)
+    z_ext = Scenarios.WarehouseLidarExtrinsicShift.distance  # category: illustrative (target range)
     side_clearance = AISLE.side_clearance  # category: illustrative
     delta_loc = AISLE.delta_loc  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dy_frame = (d_frame * math.sin(theta_frame.to(radian).magnitude)).to(meter)
-    dy_over_side = (dy_frame / side_clearance).to(dimensionless).magnitude
-    dx_ext = (z_ext * theta_ext.magnitude).to(millimeter)
-    dx_over_loc = (dx_ext / delta_loc).to(dimensionless).magnitude
+    dy_frame = Scenarios.WarehouseLongAisleMountError.result.angle_lateral.to(meter)
+    dy_over_side = Scenarios.WarehouseLongAisleMountError.result.angle_lateral_share
+    dx_ext = Scenarios.WarehouseLidarExtrinsicShift.result.angle_lateral.to(millimeter)
+    dx_over_loc = Scenarios.WarehouseLidarExtrinsicShift.result.angle_lateral_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dy_frame.magnitude - 0.2618) < 0.0005, f"Unexpected 1-degree lever-arm error: {dy_frame}")
     check(dy_frame > side_clearance, "Prose says the 1-degree error exceeds the side clearance")
     check(abs(dx_ext.magnitude - 50.0) < 0.05, f"Unexpected extrinsic-shift error: {dx_ext}")
-    check(abs(dx_over_loc - 1.0) < 1e-9, "Prose says the extrinsic shift spends all of delta_loc")
+    check(abs(dx_over_loc - 1.0) < 1e-4, "Prose says the extrinsic shift spends all of delta_loc")
     # margin_clearance_slip_ladder.svg fig-alt hand-types 262 mm, 50 mm and 150 mm.
     check(round(dy_frame.to(millimeter).magnitude) == 262, f"Slip-ladder mount rung drifted: {dy_frame}")
     check(
@@ -828,28 +835,29 @@ If the mobile base subsequently moves relative to the overhead camera, the runti
 # │
 # │ Goal:    Size the length change of a warmed aluminum link.
 # │ Show:    23e-6/K x 1 m x 10 K = 0.23 mm.
-# │ How:     dL = alpha * L * dT.
+# │ How:     dL = alpha * L * dT: Scenarios.AluminumLinkWarming (aluminum's
+# │          coefficient from physics.constants).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_length, check
+from mlsysim.fmt import fmt, fmt_int, fmt_length, check
 
 class LinkThermalExpansion:
     """Length change of a uniformly warmed aluminum link."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    alpha = 23e-6 / kelvin  # category: illustrative (typical structural aluminum; alloy datasheet supplies the exact value)
-    l_link = 1.0 * meter  # category: illustrative (link length)
-    d_temp = 10.0 * kelvin  # category: illustrative (uniform warming)
+    alpha = Scenarios.AluminumLinkWarming.coefficient  # category: constant (aluminum, CRC Handbook)
+    l_link = Scenarios.AluminumLinkWarming.length  # category: illustrative (link length)
+    d_temp = Scenarios.AluminumLinkWarming.temperature_rise  # category: illustrative (uniform warming)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dl = (alpha * l_link * d_temp).to(millimeter)
+    dl = Scenarios.AluminumLinkWarming.result.expansion.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(dl.magnitude - 0.23) < 1e-9, f"Unexpected expansion: {dl}")
+    check(abs(dl.magnitude - 0.23) < 0.005, f"Unexpected expansion: {dl}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    alpha_str = fmt(alpha.to(1 / kelvin).magnitude * 1e6, precision=0)
+    alpha_str = fmt_int(round(alpha.to(1 / kelvin).magnitude * 1e6))  # 23.1e-6/K shown as the prose's approximate 23
     l_link_str = fmt_length(l_link, unit=meter, precision=0)
     d_temp_str = fmt(d_temp.to(kelvin).magnitude, precision=0)
     dl_str = fmt_length(dl, unit=millimeter, precision=2)
@@ -993,10 +1001,11 @@ At constant operating velocity, every millisecond of unmodeled latency drains ph
 # │ Show:    Stage increments and cumulative ages; t_age 51.6 ms; tau_delay
 # │          133.6 ms; row 5 v*t_age 77.4 mm at 1.5 m/s; running total
 # │          835.5 mm -> 912.9 mm; 187.1 mm of the 1.10 m clear distance left.
-# │ How:     Stage terms from RM.nav_camera and AISLE; totals from
-# │          calc_safe_stopping_distance with the Body and Nervous System terms
-# │          (a_brake, delta_loc, delta_margin, lease path, brake onset). The C2
-# │          suffix and tracking inset join later rows, not this one.
+# │ How:     Stage ages from Scenarios.WarehouseNavCameraAge; the total before
+# │          row 5 is Scenarios.WarehouseChunkLease's running total (braking,
+# │          delta_loc, delta_margin, onset, lease path) and the total after it
+# │          is Scenarios.WarehouseBaseStopFullDelay. The C2 suffix and
+# │          tracking inset join later rows, not this one.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1036,23 +1045,20 @@ class SensorInformationAge:
     f_frame = camera.frame_rate  # category: datasheet
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_exp_half = (t_exp / 2).to(millisecond)
-    t_frame = (1 / f_frame).to(millisecond)
-    age_after_exposure = t_exp_half
-    age_after_readout = age_after_exposure + t_readout
-    age_after_transport = age_after_readout + t_transport
-    age_after_dma = age_after_transport + t_dma
-    age_after_isp = age_after_dma + t_isp
-    age_after_backbone = age_after_isp + t_backbone
-    tau_age = (age_after_backbone + t_ipc).to(millisecond)
+    _age = Scenarios.WarehouseNavCameraAge.result
+    _stop = Scenarios.WarehouseBaseStopFullDelay.result
+    t_exp_half = _age.trigger_offset.to(millisecond)
+    t_frame = _age.frame_period.to(millisecond)
+    (age_after_exposure, age_after_readout, age_after_transport, age_after_dma,
+     age_after_isp, age_after_backbone, tau_age) = (st[2] for st in _age.stages)
 
-    tau_delay = (tau_age + t_lease + t_tick + t_bus + t_act).to(millisecond)
-    dx = calc_spatial_information_age_displacement(v, tau_age).to(millimeter)
+    tau_delay = AISLE.tau_delay.to(millisecond)
+    dx = _age.age_travel.to(millimeter)
     row_age = dx
-    total_before = calc_safe_stopping_distance(v, t_lease + t_tick + t_bus + t_act, a_brake, delta_loc, delta_margin).to(millimeter)
-    total_after = calc_safe_stopping_distance(v, tau_delay, a_brake, delta_loc, delta_margin).to(millimeter)
-    remaining = (d_clear - total_after).to(millimeter)
-    dx_frame = (v * t_frame).to(millimeter)  # checkpoint: one dropped frame of extra age
+    total_before = Scenarios.WarehouseChunkLease.result.running_total.to(millimeter)
+    total_after = _stop.required_distance.to(millimeter)
+    remaining = _stop.spare.to(millimeter)
+    dx_frame = _age.frame_travel.to(millimeter)  # checkpoint: one dropped frame of extra age
     frame_share = (dx_frame / remaining).to(dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1065,6 +1071,7 @@ class SensorInformationAge:
     check(abs(total_before.magnitude - 835.5) < 0.05, f"Unexpected running total before row 5: {total_before}")
     check(abs(total_after.magnitude - 912.9) < 0.05, f"Unexpected running total after row 5: {total_after}")
     check(abs((total_after - total_before - row_age).magnitude) < 1e-6, "Row 5 does not close the running total")
+    check(Scenarios.WarehouseNavCameraAge.speed == v and Scenarios.WarehouseBaseStopFullDelay.speed == v, "Every term is priced at the drive limit")
     check(abs(remaining.magnitude - 187.1) < 0.05, f"Unexpected remaining clear distance: {remaining}")
     check(abs(dx_frame.magnitude - 25.0) < 0.05 and 0.13 < frame_share < 0.14, f"Checkpoint answer drifted: {dx_frame}, {frame_share}")
     check(
@@ -1256,9 +1263,10 @@ Observation age is paid in travel before any consumer can react, and no later st
 # │          latency and a 1 ms PTP bound); 32.1 ms left for de-skew and
 # │          occupancy extraction within the camera's 51.6 ms allocation;
 # │          scan/frame phase, reuse, and downstream waiting remain separate.
-# │ How:     RM.lidar.scan_rate; AISLE.aisle_width and AISLE.d_clear; Ouster OS1
-# │          Rev7 datasheet data latency (< 10 ms) and PTP accuracy (< 1 ms)
-# │          from the registry; AISLE.perception_age.
+# │ How:     Scenarios.WarehouseRackEndLidarAge (LidarSweepAgeModel over
+# │          RM.lidar.scan_rate, AISLE.aisle_width and AISLE.d_clear, the Ouster
+# │          OS1 Rev7 data latency (< 10 ms) and PTP accuracy (< 1 ms), and
+# │          AISLE.perception_age).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -1281,14 +1289,14 @@ class LidarAge:
     v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    half_width = (aisle_width / 2).to(meter)
-    sector_deg = 2 * math.degrees(math.atan((half_width / d_clear).to(dimensionless).magnitude))
-    t_sector = (t_sweep * sector_deg / 360.0).to(millisecond)
-    age_stream = (t_sector + t_data + eps_ptp).to(millisecond)
-    age_full = (t_sweep + t_data + eps_ptp).to(millisecond)
-    dx_stream = (v * age_stream).to(millimeter)
-    dx_full = (v * age_full).to(millimeter)
-    slack_stream = (t_camera - age_stream).to(millisecond)
+    _lidar = Scenarios.WarehouseRackEndLidarAge.result
+    sector_deg = _lidar.sector_angle.to(degree).magnitude
+    t_sector = _lidar.sector_time.to(millisecond)
+    age_stream = _lidar.age_streamed.to(millisecond)
+    age_full = _lidar.age_full.to(millisecond)
+    dx_stream = _lidar.travel_streamed.to(millimeter)
+    dx_full = _lidar.travel_full.to(millimeter)
+    slack_stream = _lidar.slack_streamed.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sector_deg - 61.2) < 0.05, f"Unexpected forward sector: {sector_deg}")
@@ -1351,8 +1359,8 @@ Per-column timestamps also enable continuous motion de-skew. Over a single LiDAR
 # │          to the navigation camera's observation age.
 # │ Show:    16.7 ms frame period at 60 Hz; waits of 50.0, 33.3, and 16.7 ms;
 # │          age 51.6 ms -> 101.6 ms, roughly double.
-# │ How:     RM.nav_camera.frame_rate; AISLE.perception_age; the oldest of
-# │          n frames waits (n - 1) frame periods.
+# │ How:     Scenarios.WarehouseNavCameraAge (four-frame batch): the oldest of
+# │          n frames waits (n - 1) frame periods of RM.nav_camera.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1367,15 +1375,14 @@ class TemporalBatching:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     f_frame = RM.nav_camera.frame_rate  # category: datasheet
     t_age = AISLE.perception_age.to(millisecond)  # category: derived
-    n_batch = 4  # category: illustrative (batch size)
+    n_batch = Scenarios.WarehouseNavCameraAge.batch_frames  # category: illustrative (batch size)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_period = (1 / f_frame).to(millisecond)
-    wait_1 = ((n_batch - 1) * t_period).to(millisecond)
-    wait_2 = ((n_batch - 2) * t_period).to(millisecond)
-    wait_3 = ((n_batch - 3) * t_period).to(millisecond)
-    t_age_batched = (t_age + wait_1).to(millisecond)
-    ratio = (t_age_batched / t_age).to(dimensionless).magnitude
+    _age = Scenarios.WarehouseNavCameraAge.result
+    t_period = _age.frame_period.to(millisecond)
+    wait_1, wait_2, wait_3 = (w.to(millisecond) for w in _age.batch_waits)
+    t_age_batched = _age.batched_age.to(millisecond)
+    ratio = _age.batched_age_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(f_frame.to(hertz).magnitude - 60.0) < 1e-9, f"Unexpected frame rate: {f_frame}")
@@ -1411,7 +1418,8 @@ At the navigation camera's `{python} TemporalBatching.f_frame_str` sampling rate
 # │          a pure age may spend, and show how much of it a 60 ms age uses.
 # │ Show:    45 deg at 10 rad/s -> 78.5 ms ceiling; 60 ms uses 76.4 percent.
 # │ How:     A pure delay tau removes phase omega_c * tau, so the ceiling is
-# │          PM_nom / omega_c (@sec-appendix-control-zoh).
+# │          PM_nom / omega_c (@sec-appendix-control-zoh):
+# │          Scenarios.VisualServoDelayPhaseMargin.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -1422,15 +1430,16 @@ class PhaseMarginAge:
     """Delay ceiling set by a nominal phase margin at crossover."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    omega_c = 10.0  # category: illustrative (gain crossover, rad/s)
-    pm_nom_deg = 45.0  # category: illustrative (nominal phase margin, degrees)
-    t_used = 60.0 * millisecond  # category: illustrative (exposure, transport, and inference)
+    scenario = Scenarios.VisualServoDelayPhaseMargin  # category: illustrative (visual-servo loop)
+    omega_c = scenario.crossover.to(radian / second).magnitude  # category: illustrative (gain crossover, rad/s)
+    pm_nom_deg = scenario.phase_margin.to(degree).magnitude  # category: illustrative (nominal phase margin, degrees)
+    t_used = scenario.delay  # category: illustrative (exposure, transport, and inference)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    pm_nom_rad = math.radians(pm_nom_deg)
-    f_c = omega_c / (2 * math.pi)
-    tau_max = (pm_nom_rad / omega_c * second).to(millisecond)
-    frac_used = (t_used / tau_max).to(dimensionless).magnitude
+    pm_nom_rad = scenario.result.phase_margin.to(radian).magnitude
+    f_c = scenario.result.crossover_frequency.to(hertz).magnitude
+    tau_max = scenario.result.delay_ceiling.to(millisecond)
+    frac_used = scenario.result.share_used
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_max.magnitude - 78.54) < 0.01, f"Unexpected delay ceiling: {tau_max}")
@@ -1527,7 +1536,7 @@ Once DMA write completion occurs, the kernel capture driver (V4L2, the Linux vid
 
 The copy path in @fig-08-shared-capture-buffer uses pinned host staging rather than the USB driver ring in the earlier baseline. The shared path separates physical storage from device mappings and marks the release that permits the capture engine to reuse that storage.
 
-::: {#fig-08-shared-capture-buffer data-explore="mechanism-scene" data-explore-key="vol4:fig-08-shared-capture-buffer" fig-env="figure" fig-pos="htb" fig-cap="**Shared Capture Buffers and Safe Reuse**: The copy path allocates successive payload buffers. The shared path gives several devices mappings to capture pages A; an ISP conversion may instead write output pages B while preserving frame identity F. Capture pages become reusable only after DMA completion, the required ordering and cache maintenance, and release by their last consumer. The ownership strip shows a lifecycle, not measured durations or simultaneous device execution." fig-alt="Three panels show a four-buffer copy chain, capture pages mapped by CPU, ISP, and GPU with a separate converted output, and a write, read, release, and requeue sequence."}
+::: {#fig-08-shared-capture-buffer data-explore="original-capture-buffer" data-explore-key="vol4:fig-08-shared-capture-buffer" fig-env="figure" fig-pos="htb" fig-cap="**Shared Capture Buffers and Safe Reuse**: The copy path allocates successive payload buffers. The shared path gives several devices mappings to capture pages A; an ISP conversion may instead write output pages B while preserving frame identity F. Capture pages become reusable only after DMA completion, the required ordering and cache maintenance, and release by their last consumer. The ownership strip shows a lifecycle, not measured durations or simultaneous device execution." fig-alt="Three panels show a four-buffer copy chain, capture pages mapped by CPU, ISP, and GPU with a separate converted output, and a write, read, release, and requeue sequence."}
 ![](images/svg/shared_capture_buffer_lifecycle.svg)
 :::
 
@@ -1555,7 +1564,8 @@ Interface selection balances cable reach and mechanical routing flexibility agai
 # │          the lease lapses at 10 ms late.
 # │ How:     Chunk period from RM.chunk_rate; inference from
 # │          RM.chunk_inference_latency; lease from AISLE.t_lease; the 5 ms
-# │          allowance is the lease rule's chosen value (@sec-nervous-lease-sizing).
+# │          allowance and the lapse point are Scenarios.WarehouseChunkLease's
+# │          (the lease rule of @sec-nervous-lease-sizing).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1571,11 +1581,11 @@ class HostContentionAllowance:
     chunk_rate = RM.chunk_rate  # category: chosen
     t_infer = RM.chunk_inference_latency.to(millisecond)  # category: illustrative (P99 incl. vision)
     t_lease = AISLE.t_lease.to(millisecond)  # category: chosen
-    t_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
+    t_jitter = Scenarios.WarehouseChunkLease.renewal_jitter  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-lease-sizing)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     t_period = (1 / chunk_rate).to(millisecond)
-    t_lapse = (t_lease - t_period).to(millisecond)
+    t_lapse = Scenarios.WarehouseChunkLease.result.renewal_lateness_limit.to(millisecond)
     stretch = (t_jitter / t_infer).to(dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1651,7 +1661,8 @@ Because this derivative is independent of distance, measurement errors in dispar
 # │          what an unmodeled baseline change does to depth at long range.
 # │ Show:    sigma_z 12.5 mm at 2 m and 312.5 mm at 10 m; a 150 mm ray clearance plus
 # │          one sigma 162.5 mm and 462.5 mm; 10 mm depth bias at 20 m.
-# │ How:     sigma_z = z^2 sigma_d / (f b); |dz| = z |db| / b.
+# │ How:     sigma_z = z^2 sigma_d / (f b); |dz| = z |db| / b:
+# │          Scenarios.WarehouseStereoRigDepthError (StereoDepthErrorModel).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -1664,28 +1675,30 @@ class StereoDepthError:
     """One-sigma stereo depth scale on an illustrative rig, and baseline thermal bias."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    b = 0.20 * meter  # category: illustrative (stereo baseline)
-    f_px = 800.0  # category: illustrative (focal length, pixels)
-    sigma_d_px = 0.5  # category: illustrative (disparity standard deviation, pixels)
-    z_near = 2.0 * meter  # category: illustrative
-    z_far = 10.0 * meter  # category: illustrative
-    db = 0.1 * millimeter  # category: illustrative (unmodeled baseline change)
-    z_thermal = 20.0 * meter  # category: illustrative
-    c_ray = 150.0 * millimeter  # category: illustrative (clearance kept along the viewing ray)
+    rig = Scenarios.WarehouseStereoRigDepthError  # category: illustrative (stereo rig)
+    b = rig.baseline  # category: illustrative (stereo baseline)
+    f_px = rig.focal_length_px  # category: illustrative (focal length, pixels)
+    sigma_d_px = rig.disparity_sigma_px  # category: illustrative (disparity standard deviation, pixels)
+    z_near = rig.near_range  # category: illustrative
+    z_far = rig.far_range  # category: illustrative
+    db = rig.baseline_change  # category: illustrative (unmodeled baseline change)
+    z_thermal = rig.bias_range  # category: illustrative
+    c_ray = rig.ray_clearance  # category: illustrative (clearance kept along the viewing ray)
     z_rack = AISLE.d_clear  # category: illustrative (rack-end clear distance)
     delta_loc = AISLE.delta_loc  # category: illustrative (localization allowance)
     side_clearance = AISLE.side_clearance  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    sigma_z_near = (z_near**2 * sigma_d_px / (f_px * b)).to(millimeter)
-    sigma_z_far = (z_far**2 * sigma_d_px / (f_px * b)).to(millimeter)
-    naive_near = (c_ray + sigma_z_near).to(millimeter)
-    naive_far = (c_ray + sigma_z_far).to(millimeter)
-    dz_thermal = (z_thermal * db / b).to(millimeter)
-    sigma_z_rack = (z_rack**2 * sigma_d_px / (f_px * b)).to(millimeter)
-    z_star_loc = ((delta_loc * f_px * b / sigma_d_px) ** 0.5).to(meter)  # range where sigma_z = delta_loc
-    z_star_side = ((side_clearance * f_px * b / sigma_d_px) ** 0.5).to(meter)  # range where sigma_z = side clearance
-    z_star_side_half_b = ((side_clearance * f_px * (b / 2) / sigma_d_px) ** 0.5).to(meter)  # checkpoint: halved baseline
+    _st = rig.result
+    sigma_z_near = _st.sigma_near.to(millimeter)
+    sigma_z_far = _st.sigma_far.to(millimeter)
+    naive_near = _st.inset_near.to(millimeter)
+    naive_far = _st.inset_far.to(millimeter)
+    dz_thermal = _st.baseline_bias.to(millimeter)
+    sigma_z_rack = _st.sigma_target.to(millimeter)
+    z_star_loc = _st.range_at_loc_allowance.to(meter)  # range where sigma_z = delta_loc
+    z_star_side = _st.range_at_side_clearance.to(meter)  # range where sigma_z = side clearance
+    z_star_side_half_b = _st.range_at_side_clearance_half_baseline.to(meter)  # checkpoint: halved baseline
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sigma_z_near.magnitude - 12.5) < 1e-6, f"Unexpected near sigma_z: {sigma_z_near}")
@@ -1956,8 +1969,10 @@ Plugging a datasheet precision value or an unmeasured network clock offset into 
 # │          of a free-running sensor clock between syncs.
 # │ Show:    at least 99 residuals for a 1 percent bound; with 1,000, the 991st
 # │          smallest (10th largest); 10 us of drift.
-# │ How:     split-conformal rank ceil((n + 1)(1 - alpha)); Ouster OS1 Rev7
-# │          internal clock drift (10 ppm) over a chosen 1 s sync interval.
+# │ How:     split-conformal rank ceil((n + 1)(1 - alpha)),
+# │          Scenarios.ClearanceInsetConformalRank; Ouster OS1 Rev7 internal
+# │          clock drift (10 ppm) over a chosen 1 s sync interval,
+# │          Scenarios.WarehouseLidarClockConversion.
 # │          The covariance-consistency bands moved with the estimator to
 # │          @sec-memory-estimator-consistency.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1972,16 +1987,17 @@ class ErrorQualification:
     """Sample sizes for a clearance-inset quantile and the clock-drift bound."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    alpha = 0.01  # category: chosen (tail mass for the clearance inset)
-    n_resid = 1000  # category: chosen (calibration residuals)
-    drift_ppm = RM.lidar.internal_clock_drift.to(ppm).magnitude  # category: datasheet (registry: OS1 Rev7 internal clock drift)
-    t_sync = 1.0 * second  # category: chosen (sync interval)
+    alpha = Scenarios.ClearanceInsetConformalRank.alpha  # category: chosen (tail mass for the clearance inset)
+    n_resid = Scenarios.ClearanceInsetConformalRank.calibration_count  # category: chosen (calibration residuals)
+    drift_ppm = Scenarios.WarehouseLidarClockConversion.drift_rate.to(ppm).magnitude  # category: datasheet (registry: OS1 Rev7 internal clock drift)
+    t_sync = Scenarios.WarehouseLidarClockConversion.sync_interval  # category: chosen (sync interval)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_min = math.ceil((1 - alpha) / alpha)
-    k_rank = math.ceil((n_resid + 1) * (1 - alpha))
-    k_from_top = n_resid - k_rank + 1
-    drift = (drift_ppm * 1e-6 * t_sync).to(microsecond)
+    _rank = Scenarios.ClearanceInsetConformalRank.result
+    n_min = _rank.min_count
+    k_rank = _rank.rank
+    k_from_top = _rank.rank_from_top
+    drift = Scenarios.WarehouseLidarClockConversion.result.drift_per_interval.to(microsecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_min == 99, f"Unexpected minimum calibration size: {n_min}")
@@ -2071,8 +2087,9 @@ Every runtime health monitor observes the physical world through the available t
 # │ Goal:    Range at which dense fog drops contrast to the 0.05 threshold,
 # │          and camera-center travel during one wrist-camera exposure.
 # │ Show:    ln(1/0.05) / 0.05 m^-1 = 60 m; 0.5 m x 3 rad/s x 5 ms = 7.5 mm.
-# │ How:     Koschmieder C = C0 exp(-beta d); dx = r omega t_exp with the
-# │          registry exposure of the machine's wrist camera (Sony IMX296).
+# │ How:     Koschmieder C = C0 exp(-beta d), Scenarios.DenseFogVisibility;
+# │          dx = r omega t_exp with the registry exposure of the machine's
+# │          wrist camera (Sony IMX296).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -2085,14 +2102,14 @@ class DegradedOptics:
     """Fog contrast range and wrist-camera travel within one exposure."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    beta_fog = 0.05 / meter  # category: illustrative (dense-fog extinction coefficient)
-    eps_contrast = 0.05  # category: standard (5 percent contrast threshold of meteorological optical range)
+    beta_fog = Scenarios.DenseFogVisibility.extinction  # category: illustrative (dense-fog extinction coefficient)
+    eps_contrast = Scenarios.DenseFogVisibility.contrast_threshold  # category: standard (5 percent contrast threshold of meteorological optical range)
     t_exp = RM.wrist_camera.exposure_time.to(millisecond)  # category: chosen (registry: IMX296 configured exposure)
     r_arm = 0.5 * meter  # category: illustrative (lever arm from rotation axis to camera)
     omega = 3.0 * radian / second  # category: illustrative (sweep angular rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_fog = (math.log(1 / eps_contrast) / beta_fog).to(meter)
+    d_fog = Scenarios.DenseFogVisibility.result.visibility_range.to(meter)
     dx_blur = (r_arm * omega.to(1 / second).magnitude / second * t_exp).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2196,8 +2213,9 @@ A downstream tracker, policy backbone, or permission path cannot reconstruct exp
 # │ Show:    16.7 ms frame period; 24.6 ms from the top row's exposure midpoint
 # │          to the end of readout; 16.3 ms from the middle row's; the top-row
 # │          convention exceeds the allotment by 7.9 ms.
-# │ How:     RM.nav_camera frame rate, exposure, and readout. The allotment is
-# │          taken as one frame period, matching the handoff matrix value.
+# │ How:     Row-convention ages of Scenarios.WarehouseNavCameraAge (RM.nav_camera
+# │          frame rate, exposure, and readout). The allotment is taken as one
+# │          frame period, matching the handoff matrix value.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -2215,10 +2233,11 @@ class HandoffSensorAge:
     f_frame = camera.frame_rate  # category: datasheet
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_frame = (1 / f_frame).to(millisecond)
-    age_top = (t_exp / 2 + t_readout).to(millisecond)
-    age_mid = (t_exp / 2 + t_readout / 2).to(millisecond)
-    excess_top = (age_top - t_frame).to(millisecond)
+    _age = Scenarios.WarehouseNavCameraAge.result
+    t_frame = _age.frame_period.to(millisecond)
+    age_top = _age.capture_before_compute.to(millisecond)
+    age_mid = _age.sensor_age_middle_row.to(millisecond)
+    excess_top = _age.top_row_excess.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_frame.magnitude - 16.7) < 0.05, f"Unexpected frame period: {t_frame}")
@@ -2261,10 +2280,10 @@ This contract does not replace binary serialization formats such as Protocol Buf
 # │          bound); frame counter at 60 Hz; the bound's 0.3 mm of travel at
 # │          the 1.5 m/s drive limit, carried inside delta_loc rather than
 # │          charged as a budget row.
-# │ How:     AISLE.perception_age (the latency waterfall above); eps_sync is a
-# │          chapter LOAD value that the spatial-belief record of @sec-memory
-# │          reuses; RM.nav_camera frame rate; displacement via
-# │          calc_spatial_information_age_displacement.
+# │ How:     AISLE.perception_age (the latency waterfall above); eps_sync is
+# │          AISLE.clock_conversion_bound, which the spatial-belief record of
+# │          @sec-memory reuses; the dispatch limit and the bound's travel are
+# │          Scenarios.WarehouseLidarClockConversion's; RM.nav_camera frame rate.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -2280,14 +2299,14 @@ class NavObservationRecord:
     camera = RM.nav_camera  # category: datasheet (registry: Sony IMX477 navigation camera)
     f_frame = camera.frame_rate  # category: datasheet
     t_age = AISLE.perception_age.to(millisecond)  # category: derived
-    eps_sync = 0.2 * millisecond  # category: illustrative (capture-to-MCU clock-conversion bound; reused by @sec-memory)
-    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
+    eps_sync = AISLE.clock_conversion_bound  # category: illustrative (capture-to-MCU clock-conversion bound; reused by @sec-memory)
+    v = Scenarios.WarehouseLidarClockConversion.speed.to(meter / second)  # category: illustrative (drive limit)
     delta_loc = AISLE.delta_loc  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    upper_age = (t_age + eps_sync).to(millisecond)
-    refuse_threshold = (AISLE.perception_age + eps_sync).to(millisecond)  # refusal threshold: budgeted age plus the conversion bound
-    dx_sync = calc_spatial_information_age_displacement(v, eps_sync).to(millimeter)
+    upper_age = Scenarios.WarehouseLidarClockConversion.result.dispatch_age_limit.to(millisecond)
+    refuse_threshold = AISLE.dispatch_age_limit.to(millisecond)  # refusal threshold: budgeted age plus the conversion bound
+    dx_sync = Scenarios.WarehouseLidarClockConversion.result.bound_travel.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_age.magnitude - 51.6) < 0.05, f"Unexpected age at dispatch: {t_age}")

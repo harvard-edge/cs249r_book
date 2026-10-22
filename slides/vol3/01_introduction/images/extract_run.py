@@ -16,8 +16,10 @@ folder holding <id>.json for each task), then run
 
     python3 extract_run.py <that folder>
 
-It writes data/swebench_verified_mini_sonnet4.csv next to this script. The
-deck's calcs.py and make_figs.py read only that CSV. Each trajectory is read
+It writes the MLSysIM series Literature.SweBenchMiniSonnet4Run
+(mlsysim/mlsysim/literature/data/series/swe_bench_verified_mini_v1_sonnet4_run.csv);
+the deck and the chapter read the run only through MLSysIM
+(Scenarios.MiniSweAgentSonnet4Run). Each trajectory is read
 as data; nothing in it is executed.
 
 Command classes (side-effect class in the container, an A1 sandbox):
@@ -103,8 +105,8 @@ def main(folder):
             "cmd_net": counts["net"],
             "files_in_submission": len(files),
         })
-    out = Path(__file__).resolve().parent / "data" / "swebench_verified_mini_sonnet4.csv"
-    out.parent.mkdir(exist_ok=True)
+    out = (Path(__file__).resolve().parents[4] / "mlsysim" / "mlsysim" / "literature" / "data"
+           / "series" / "swe_bench_verified_mini_v1_sonnet4_run.csv")
     with out.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()

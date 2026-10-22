@@ -1,8 +1,8 @@
 """Figures for Volume IV, Lecture 18 (Engineering Physical AI).
 
 Run:  python3 make_figs.py   (writes SVGs here; `make deck V=4 D=18_frontier`
-converts them to PDF). Every derived value comes from calcs.py; data plots read
-the MLSysIM registry or a typed table with its source named on the slide.
+converts them to PDF). Every value comes from calcs.py, which reads MLSysIM;
+labels print the recorded strings (val) so figure and slide text agree.
 Figures are drawn at the size of their slot: full width 5.8 in wide with
 12 to 13 pt type, a column slot about 5.4 by 3.6 in with 15 to 16 pt type.
 """
@@ -13,13 +13,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))   # slides/assets/kit
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
 
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle, Polygon  # noqa: E402
 import numpy as np  # noqa: E402
 import slideplot as sp  # noqa: E402
 import calcs as c  # noqa: E402
+from deckvals import val  # noqa: E402
 
 # Volume IV roles (rules/volumes/vol4/palette.md)
 NAVY = "#1F407A"      # cognitive deliberation (learned model)
@@ -62,9 +62,9 @@ def closed_loop(step):
     ax.set_ylim(0, 3.7)
     ax.axis("off")
     levels = [  # name, y, fill, edge, rate
-        ("Brain", 3.05, "#EFF6FF", NAVY, "proposes at 2 Hz"),
-        ("Nervous System", 2.05, NERVE_L, NERVE, "admits at 1 kHz"),
-        ("Body", 1.45, "#F8FAFC", PLANT, "current loop 20 kHz"),
+        ("Brain", 3.05, "#EFF6FF", NAVY, f"proposes at {val('intent_hz')} Hz"),
+        ("Nervous System", 2.05, NERVE_L, NERVE, f"admits at {val('permission_khz')} kHz"),
+        ("Body", 1.45, "#F8FAFC", PLANT, f"current loop {val('current_khz')} kHz"),
         ("Boundary", 0.85, "#F8FAFC", PLANT, "event-timed"),
         ("World", 0.25, "#F0FDFA", PETROL, "continuous"),
     ]
@@ -109,7 +109,7 @@ def cell_schematic():
     ax.add_patch(Rectangle((2.3, 2.15), 0.5, 0.3, fc="white", ec=PLANT, lw=1.4))
     arrow(ax, 2.55, 2.15, 2.55, 1.8, PLANT)
     arrow(ax, 3.15, 1.24, 3.75, 1.24, PLANT)
-    ax.text(3.45, 1.32, "1.50 m/s", fontsize=12, ha="center", color=PLANT)
+    ax.text(3.45, 1.32, f"{val('cell_v')} m/s", fontsize=12, ha="center", color=PLANT)
     ax.add_patch(Rectangle((4.7, 1.05), 0.12, 0.6, fc="white", ec=PLANT, lw=1.4))
     ax.plot([4.6, 4.6], [0.55, 2.0], color=RED, lw=2, ls="--")
     ax.text(4.85, 1.85, "gate", fontsize=14, color=PLANT, fontweight="bold")
@@ -159,12 +159,10 @@ def audit(step):
 # Segment 2: the delay wall, stop bars at 1.50 and 0.50 m/s (Napkin Math 18.1)
 # ---------------------------------------------------------------------------
 def cell_stop(step):
-    tau = c.cell_tau()
-    rows = [(f"{c.CELL_V:.2f} m/s", *c.cell_stop(c.CELL_V, tau)),
-            (f"{c.CELL_V_MODE:.2f} m/s", *c.cell_stop(c.CELL_V_MODE, tau))]
+    rows = [(f"{v:.2f} m/s", d1, d2) for v, d1, d2 in c.CELL_ROWS]
     fig, ax = plt.subplots(figsize=(5.8, 2.0))
-    clear = c.CELL_CLEAR * 1000
-    res = c.CELL_RESERVE * 1000
+    clear = c.CELL_CLEAR_MM
+    res = c.CELL_RESERVE_MM
     ax.add_patch(Rectangle((clear - res, -0.6), res, 2.15, fc="none", ec=GRAY, hatch="///", lw=0))
     ax.text(clear - res - 2, 1.62, "reserve", fontsize=11, color=PLANT, ha="right", va="bottom")
     ax.axvline(clear, color=RED, lw=2, ls="--")
@@ -172,7 +170,6 @@ def cell_stop(step):
     for i, (lab, d1, d2) in enumerate(rows):
         y = 1 - i
         a = 1.0 if i < step else 0.0
-        d1, d2 = d1 * 1000, d2 * 1000
         ax.barh(y, d1, color=AMBER, height=0.55, alpha=a)
         ax.barh(y, d2, left=d1, color=PLANT, height=0.55, alpha=a)
         ax.text(-4, y, lab, ha="right", va="center", fontsize=12, fontweight="bold", color=TEXT, alpha=a)
@@ -198,16 +195,11 @@ def cell_stop(step):
 # Segment 2: what moves the ceiling (sec. 18.2.2 and the deTec4 datasheet)
 # ---------------------------------------------------------------------------
 def cell_ceilings():
-    tau = c.cell_tau()
-    budget = c.CELL_CLEAR - c.CELL_RESERVE
-    half = [(n, v / 2 if n.startswith("transfer") else v) for n, v in c.CELL_CHAIN]
-    curtain = [("curtain", c.CURTAIN_MS), ("bus", 2.0), ("brake onset", 10.0)]
-    rows = [
-        ("Certified curtain,\n22 ms chain", c.ceiling(c.cell_tau(curtain), c.CELL_A, budget), NERVE),
-        ("Processing halved,\n46 ms chain", c.ceiling(c.cell_tau(half), c.CELL_A, budget), NERVE),
-        ("As planned,\n64 ms chain", c.ceiling(tau, c.CELL_A, budget), PLANT),
-        ("Brake halved,\n7.5 m/s²", c.ceiling(tau, c.CELL_A / 2, budget), RED),
-    ]
+    labels = [(f"Certified curtain,\n{val('cell_tau_curtain')} ms chain", NERVE),
+              (f"Processing halved,\n{val('cell_tau_fastproc')} ms chain", NERVE),
+              (f"As planned,\n{val('cell_tau')} ms chain", PLANT),
+              (f"Brake halved,\n{val('cell_a_half')} m/s²", RED)]
+    rows = [(lab, v, col) for (lab, col), (_, v) in zip(labels, c.CEILINGS)]
     fig, ax = plt.subplots(figsize=(5.4, 3.5))
     for i, (lab, v, col) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -215,8 +207,8 @@ def cell_ceilings():
         ax.text(0.03, y, f"{v:.2f} m/s", va="center", fontsize=15, fontweight="bold", color="white")
         ax.text(-0.02, y, lab, va="center", ha="right", fontsize=14, color=TEXT, fontweight="bold",
                 linespacing=1.0)
-    ax.axvline(c.CELL_V_MODE, color=PINE, lw=2, ls="--")
-    ax.text(c.CELL_V_MODE, 3.55, "0.50 m/s mode", color=PINE, fontsize=14, ha="center", va="bottom",
+    ax.axvline(c.V_MODE, color=PINE, lw=2, ls="--")
+    ax.text(c.V_MODE, 3.55, f"{val('cell_v_mode')} m/s mode", color=PINE, fontsize=14, ha="center", va="bottom",
             fontweight="bold", bbox=dict(fc="white", ec="none", pad=1))
     ax.set_xlim(0, 1.15)
     ax.set_ylim(-0.5, 3.9)
@@ -234,18 +226,19 @@ def cell_ceilings():
 def derate_gap():
     fig, ax = plt.subplots(figsize=(5.4, 3.0))
     v = np.linspace(0, 2.0, 400)
-    ev = np.exp(-0.5 * ((v - 1.5) / 0.12) ** 2)
+    v_nom, v_ceil = c.CELL_ROWS[0][0], c.CEILINGS[2][1]
+    ev = np.exp(-0.5 * ((v - v_nom) / 0.12) ** 2)
     rt = np.exp(-0.5 * ((v - 0.45) / 0.06) ** 2)
     ax.fill_between(v, 0, ev, color=NAVY, alpha=0.25)
     ax.plot(v, ev, color=NAVY, lw=2.5)
     ax.fill_between(v, 0, rt, color=RED, alpha=0.2)
     ax.plot(v, rt, color=RED, lw=2.5)
-    ax.text(1.5, 1.08, "states evaluated\nat 1.50 m/s", color=NAVY, fontsize=15, ha="center",
+    ax.text(v_nom, 1.08, f"states evaluated\nat {val('cell_v')} m/s", color=NAVY, fontsize=15, ha="center",
             fontweight="bold", va="bottom")
-    ax.text(0.02, 1.38, "states admitted\nat 0.50 m/s", color=RED, fontsize=15, ha="left",
+    ax.text(0.02, 1.38, f"states admitted\nat {val('cell_v_mode')} m/s", color=RED, fontsize=15, ha="left",
             fontweight="bold", va="bottom")
-    ax.plot([0.55, 0.55], [0, 1.25], color=PINE, lw=2, ls="--")
-    ax.text(0.6, 0.45, "ceiling\n0.55 m/s", color=PINE, fontsize=14, va="center")
+    ax.plot([v_ceil, v_ceil], [0, 1.25], color=PINE, lw=2, ls="--")
+    ax.text(v_ceil + 0.05, 0.45, f"ceiling\n{val('cell_ceiling')} m/s", color=PINE, fontsize=14, va="center")
     ax.set_xlim(0, 2.0)
     ax.set_ylim(0, 1.95)
     ax.set_yticks([])
@@ -259,7 +252,7 @@ def derate_gap():
 # Segment 3: the friction floor, a = min(a_brake, mu g) (Napkin Math 18.2)
 # ---------------------------------------------------------------------------
 def friction_knee():
-    mu_min = c.A_BRAKE / c.G
+    mu_min = c.MU_MIN
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
     mu = np.linspace(0, 0.7, 300)
     a = np.minimum(c.A_BRAKE, mu * c.G)
@@ -268,11 +261,11 @@ def friction_knee():
     ax.axvline(mu_min, color=PLANT, lw=1.5, ls="--")
     ax.text(mu_min / 2, 2.35, "floor binds", color=RED, fontsize=15, ha="center", fontweight="bold")
     ax.text(0.47, 2.35, "brake binds", color=PLANT, fontsize=15, ha="center", fontweight="bold")
-    ax.text(mu_min + 0.01, 0.1, f"μ = {mu_min:.3f}", color=PLANT, fontsize=14)
-    pts = [("dry 0.60", c.MU_DRY, PLANT, (0.6, 1.62)), ("inspected 0.12", c.MU_INSP, AMBER, (0.25, 1.05)),
-           ("film 0.05", c.MU_OIL, RED, (0.25, 0.4))]
-    for lab, m, col, xy in pts:
-        y = c.a_avail(m)
+    ax.text(mu_min + 0.01, 0.1, f"μ = {val('mu_min')}", color=PLANT, fontsize=14)
+    pts = [(f"dry {val('mu_dry')}", c.MU_DRY, c.A_AVAIL["dry"], PLANT, (0.6, 1.62)),
+           (f"inspected {val('mu_insp')}", c.MU_INSP, c.A_AVAIL["insp"], AMBER, (0.25, 1.05)),
+           (f"film {val('mu_oil')}", c.MU_OIL, c.A_AVAIL["film"], RED, (0.25, 0.4))]
+    for lab, m, y, col, xy in pts:
         ax.plot([m], [y], "o", ms=10, color=col, mec="white", mew=1.5, zorder=5)
         ax.annotate(f"{lab}: {y:.2f} m/s²", (m, y), xytext=xy, textcoords="data",
                     fontsize=13, color=col, fontweight="bold", ha="right" if m > 0.5 else "left",
@@ -289,7 +282,7 @@ def friction_knee():
 # Segment 3: measured locked-wheel friction (TRL PPR073, table 5.1), full width
 # ---------------------------------------------------------------------------
 def trl_friction():
-    mu_min = c.A_BRAKE / c.G
+    mu_min = c.MU_MIN
     rows = c.TRL_ROWS
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     for i, (lab, mu) in enumerate(rows):
@@ -299,7 +292,7 @@ def trl_friction():
         ax.text(mu + 0.012, y, f"{mu:.2f}", va="center", fontsize=12, fontweight="bold", color=col)
         ax.text(-0.012, y, lab, va="center", ha="right", fontsize=11.5, color=TEXT, fontweight="bold")
     ax.axvline(mu_min, color=RED, lw=1.8, ls="--")
-    ax.text(mu_min + 0.01, 5.55, f"floor binds below {mu_min:.3f}", color=RED, fontsize=11,
+    ax.text(mu_min + 0.01, 5.55, f"floor binds below {val('mu_min')}", color=RED, fontsize=11,
             fontweight="bold", va="bottom")
     ax.set_xlim(0, 1.0)
     ax.set_ylim(-0.6, 6.1)
@@ -316,13 +309,11 @@ def trl_friction():
 def film_terms(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.1))
     names = [("delay", AMBER), ("braking", PLANT), ("ramp", GRAY), ("overhead", "#64748B")]
-    for i, (lab, mu) in enumerate((("dry floor", c.MU_DRY), ("film", c.MU_OIL))):
+    for i, (lab, row) in enumerate((("dry floor", "dry"), ("film", "film"))):
         y = 1 - i
         a = 1.0 if i < step else 0.0
-        t = c.budget_terms(c.V_AISLE, mu)
         x = 0
-        for key, col in names:
-            v = t[key] * 1000
+        for (key, col), v in zip(names, c.TERMS[row]):
             ax.barh(y, v, left=x, color=col, height=0.55, alpha=a, edgecolor="white", lw=1)
             if v > 300:
                 ax.text(x + min(v / 2, 230), y, f"{v:,.1f}", color="white", ha="center", va="center", fontsize=11,
@@ -330,13 +321,13 @@ def film_terms(step):
             x += v
         ax.text(-20, y, lab, ha="right", va="center", fontsize=12, fontweight="bold", color=TEXT, alpha=a)
         tot = x / 1000
-        ax.text(max(x, c.D_CLEAR * 1000) + 30, y, f"{tot * 1000:,.1f} mm" if tot < 1.5 else f"{tot:.2f} m", va="center",
-                fontsize=12, fontweight="bold", color=RED if tot > c.D_CLEAR else PLANT, alpha=a)
-    ax.axvline(c.D_CLEAR * 1000, color=RED, lw=2, ls="--")
-    ax.text(c.D_CLEAR * 1000 + 15, 1.5, "clear distance 1,100 mm", color=RED, fontsize=11,
+        total = val("budget") + " mm" if row == "dry" else val("film_m") + " m"
+        ax.text(max(x, c.D_CLEAR_MM) + 30, y, total, va="center",
+                fontsize=12, fontweight="bold", color=RED if x > c.D_CLEAR_MM else PLANT, alpha=a)
+    ax.axvline(c.D_CLEAR_MM, color=RED, lw=2, ls="--")
+    ax.text(c.D_CLEAR_MM + 15, 1.5, f"clear distance {val('d_clear_mm')} mm", color=RED, fontsize=11,
             fontweight="bold", va="bottom")
-    td = c.budget_terms(c.V_AISLE, c.MU_DRY)
-    legend = f"delay {td['delay']*1000:.1f}   ramp {td['ramp']*1000:.1f}   overheads {td['overhead']*1000:.0f} mm"
+    legend = f"delay {val('reaction')}   ramp {val('ramp')}   overheads {val('allowances')} mm"
     ax.text(1150, -0.72, legend, color=PLANT, fontsize=11, fontweight="bold", va="top")
     ax.set_xlim(0, 2600)
     ax.set_ylim(-1.05, 1.85)
@@ -382,34 +373,25 @@ def indist():
 # Segment 3: time form against distance form (pitfall, sec. 18.3.4)
 # ---------------------------------------------------------------------------
 def overreserve():
-    from mlsysim.physics import calc_scurve_stop_time, calc_scurve_stop_distance
-    from mlsysim.core.units import meter, second, ms, millimeter
-    vv = c.V_AISLE * meter / second
-    a = c.A_BRAKE * meter / second**2
-    j = c.J_BRAKE * meter / second**3
-    t_stop = calc_scurve_stop_time(vv, a, j).to(ms).magnitude
-    d_stop = calc_scurve_stop_distance(vv, a, j).to(millimeter).magnitude
-    t_eq = d_stop / c.V_AISLE
-    t = c.budget_terms(c.V_AISLE, c.MU_DRY)
-    spare_ms = (c.D_CLEAR - sum(t.values())) / c.V_AISLE * 1000
+    t_stop, t_eq, spare_ms = c.T_STOP_MS, c.T_EQ_MS, c.SPARE_MS
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     ax.barh(2, t_eq, color=PLANT, height=0.55)
     ax.barh(2, t_stop - t_eq, left=t_eq, color=RED, height=0.55)
-    ax.text(t_eq / 2, 2, f"{t_eq:.1f}", color="white", ha="center", va="center", fontsize=12, fontweight="bold")
-    ax.text(t_eq + (t_stop - t_eq) / 2, 2, f"+{t_stop - t_eq:.1f} over", color="white", ha="center",
+    ax.text(t_eq / 2, 2, val("t_eq"), color="white", ha="center", va="center", fontsize=12, fontweight="bold")
+    ax.text(t_eq + (t_stop - t_eq) / 2, 2, f"+{val('t_over')} over", color="white", ha="center",
             va="center", fontsize=12, fontweight="bold")
     ax.barh(1, t_eq, color=PLANT, height=0.55)
-    ax.text(t_eq + 10, 1, f"{t_eq:.1f} ms", va="center", fontsize=12, fontweight="bold", color=PLANT)
+    ax.text(t_eq + 10, 1, f"{val('t_eq')} ms", va="center", fontsize=12, fontweight="bold", color=PLANT)
     ax.barh(0, spare_ms, color=GRAY, height=0.55)
-    ax.text(spare_ms + 10, 0, f"{spare_ms:.1f} ms", va="center", fontsize=12, fontweight="bold", color=PLANT)
-    for y, lab in ((2, f"stop time {t_stop:.1f} ms"), (1, "distance / speed"), (0, "the whole spare")):
+    ax.text(spare_ms + 10, 0, f"{val('t_spare')} ms", va="center", fontsize=12, fontweight="bold", color=PLANT)
+    for y, lab in ((2, f"stop time {val('t_stop')} ms"), (1, "distance / speed"), (0, "the whole spare")):
         ax.text(-10, y, lab, ha="right", va="center", fontsize=12, fontweight="bold", color=TEXT)
     ax.set_xlim(0, 1000)
     ax.set_ylim(-0.5, 2.5)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.tick_params(labelsize=10)
-    ax.set_xlabel("ms at 1.3 m/s", fontsize=11)
+    ax.set_xlabel(f"ms at {val('v_aisle')} m/s", fontsize=11)
     sp.save(fig, out("overreserve.svg"))
 
 
@@ -452,15 +434,8 @@ def responses(step):
 # Segment 3: peak latch force with torque removed (sec. 18.3.4), column slot
 # ---------------------------------------------------------------------------
 def latch_bars():
-    import math
-    k_eq = (c.F_FLOOR - c.F_TRIP) / (c.V_FAST * c.T_RESP + c.V_FAST**2 / (
-        2 * c.V_GUARD**2 / (2 * ((c.F_FLOOR - c.F_TRIP) / c.K_PLATE - c.V_GUARD * c.T_RESP))))
-
-    def coast(k, v):
-        return math.sqrt(c.F_TRIP**2 + k * c.M_EFF * v**2)
-    rows = [("rigid plate,\n0.03 m/s", coast(c.K_PLATE, c.V_GUARD)),
-            ("rigid plate,\n0.10 m/s", coast(c.K_PLATE, c.V_FAST)),
-            ("series spring,\n0.10 m/s", coast(k_eq, c.V_FAST))]
+    names = ("rigid plate", "rigid plate", "series spring")
+    rows = [(f"{n},\n{v:.2f} m/s", f) for n, (v, f) in zip(names, c.LATCH_BARS)]
     fig, ax = plt.subplots(figsize=(5.4, 3.2))
     for i, (lab, f) in enumerate(rows):
         y = 2 - i
@@ -473,14 +448,14 @@ def latch_bars():
             ax.text(f / 2, y, f"{f:.1f} N", va="center", ha="center", fontsize=15, fontweight="bold", color="white")
         ax.text(-4, y, lab, va="center", ha="right", fontsize=14, color=TEXT, fontweight="bold", linespacing=1.0)
     ax.axvline(c.F_FLOOR, color=RED, lw=2, ls="--")
-    ax.text(c.F_FLOOR + 5, 2.55, "100 N declared floor", color=RED, fontsize=14, ha="left", va="bottom",
+    ax.text(c.F_FLOOR + 5, 2.55, f"{val('f_floor')} N declared floor", color=RED, fontsize=14, ha="left", va="bottom",
             fontweight="bold")
     ax.set_xlim(0, 290)
     ax.set_ylim(-0.5, 2.95)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.tick_params(labelsize=13)
-    ax.set_xlabel("Peak latch force, torque removed at 15 N", fontsize=13)
+    ax.set_xlabel(f"Peak latch force, torque removed at {val('f_trip')} N", fontsize=13)
     sp.save(fig, out("latch_bars.svg"))
 
 
@@ -493,6 +468,10 @@ def latch_bars():
 
 
 # The record chain is the course kit's (assets/kit/vol4/record_chain_l18).
+
+# thumb_indist.svg, thumb_friction_knee.svg and thumb_derate_gap.svg (the
+# missing-evidence grid) are those figures run through tools/greek_thumbs.py;
+# rerun it after regenerating them.
 
 
 # ---------------------------------------------------------------------------

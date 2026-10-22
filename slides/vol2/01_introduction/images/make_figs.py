@@ -447,8 +447,8 @@ c3(out / "c3.svg")
 
 # 13. Fleet Law timeline: N devices, then 2N ------------------------------------
 def fl_bar(ax, x0, x1, y, fc, ec, text, tc):
-    rbox(ax, x0, y - 0.32, x1 - x0, 0.64, fc, ec, lw=1.6, r=0.05)
-    ax.text((x0 + x1) / 2, y, text, ha="center", va="center", fontsize=13, color=tc, fontweight="bold")
+    rbox(ax, x0, y - 0.4, x1 - x0, 0.8, fc, ec, lw=1.6, r=0.05)
+    ax.text((x0 + x1) / 2, y + 0.03, text, ha="center", va="center", fontsize=12.5, color=tc, fontweight="bold")
 
 
 def fleetlaw(path, k):

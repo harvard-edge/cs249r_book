@@ -149,33 +149,34 @@ Here $\SystemInstructionTokenCount$ counts the static system instructions, $\Too
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
-from mlsysim.core.units import token
 
 class UsableContextBudget:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    window = int(agent.context_window.to(token).magnitude)  # registry window
-    horizon = agent.max_trajectory_steps  # registry step budget, turns
-    output_reserve = 8_000  # scenario K_max, tokens
-    system_tokens = 3_000  # scenario application instructions
-    tool_tokens = 12_000  # scenario tool declarations
-    state_tokens = 24_000  # scenario constraints, progress record, excerpts
-    obs_per_turn = 4_000  # scenario tool-result tokens appended per turn
-    obs_selected = 8_000  # scenario observation share a selecting policy keeps
+    scenario = Scenarios.RepairContextBudget  # registry window and step budget; scenario role sizes
+    window = scenario.window
+    horizon = scenario.turns
+    output_reserve = scenario.output_reserve
+    system_tokens = scenario.system_tokens
+    tool_tokens = scenario.tool_tokens
+    state_tokens = scenario.state_tokens
+    obs_per_turn = scenario.observation_per_turn
+    obs_digest = scenario.digest_tokens
+    obs_selected = scenario.selected_observation
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    input_limit = window - output_reserve
-    evidence = input_limit - system_tokens - tool_tokens
-    evidence_share = evidence / window
-    obs_budget = evidence - state_tokens
-    turns_fit = obs_budget // obs_per_turn
-    turns_fit_half = obs_budget // (obs_per_turn // 2)
-    digest_max = obs_budget // horizon
-    fixed = system_tokens + tool_tokens + state_tokens
-    append_bill = horizon * fixed + obs_per_turn * horizon * (horizon + 1) // 2
-    select_bill = horizon * (fixed + obs_selected)
-    bill_ratio = append_bill / select_bill
-    window_needed = fixed + horizon * obs_per_turn + output_reserve
+    r = scenario.result
+    input_limit = r.input_limit
+    evidence = r.evidence_tokens
+    evidence_share = r.evidence_share
+    obs_budget = r.observation_budget
+    turns_fit = r.turns_fit
+    turns_fit_half = r.digest_turns
+    digest_max = r.max_observation_per_turn
+    fixed = r.fixed_tokens
+    append_bill = r.append_bill
+    select_bill = r.select_bill
+    bill_ratio = r.bill_ratio
+    window_needed = r.final_append_with_reserve
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(turns_fit < horizon <= turns_fit_half, "Appending overflows inside the step budget; halving fits it")
@@ -191,14 +192,14 @@ class UsableContextBudget:
     tool_str = fmt_int(tool_tokens)
     state_str = fmt_int(state_tokens)
     obs_str = fmt_int(obs_per_turn)
-    obs_half_str = fmt_int(obs_per_turn // 2)
+    obs_half_str = fmt_int(obs_digest)
     obs_selected_str = fmt_int(obs_selected)
     input_limit_str = fmt_int(input_limit)
     evidence_str = fmt_int(evidence)
     evidence_pct_str = fmt_percent(evidence_share, style="prose", precision=1)
     obs_budget_str = fmt_int(obs_budget)
     turns_fit_str = fmt_int(turns_fit)
-    overflow_turn_str = fmt_int(turns_fit + 1)
+    overflow_turn_str = fmt_int(r.overflow_turn)
     turns_fit_half_str = fmt_int(turns_fit_half)
     digest_max_str = fmt_int(digest_max)
     append_bill_str = fmt_int(append_bill)
@@ -305,33 +306,32 @@ Length degrades comprehension even when every required fact remains in the input
 # │ How:  Literature.LongContextComprehension, models scored at every
 # │       length through 60K tokens.
 # └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ContextLengthComprehension:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    lengths = ("0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k")
-    cols = tuple("score_" + n for n in lengths)
+    scenario = Scenarios.FictionLiveBenchThrough60K  # Literature.LongContextComprehension
     questions = 36  # questions per length, from the benchmark methodology
-    hold_bar = 0.90
+    hold_bar = scenario.hold_bar
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    scored = tuple(filter(lambda e, c=cols: all(e[k] is not None for k in c), Literature.LongContextComprehension.entries))
-    median_short = float(np.median([e["score_0"] for e in scored]))
-    median_8k = round(float(np.median([e["score_8k"] for e in scored])), 2)  # whole percent: 36 questions per cell
-    median_60k = round(float(np.median([e["score_60k"] for e in scored])), 2)
-    n_hold = len(tuple(filter(lambda e, bar=hold_bar: e["score_60k"] >= bar, scored)))
-    lo_60k = min(e["score_60k"] for e in scored)
-    hi_60k = max(e["score_60k"] for e in scored)
+    r = scenario.result
+    n_scored = r.scored_models
+    median_short = r.median["0"]
+    median_8k = round(r.median["8k"], 2)  # whole percent: 36 questions per cell
+    median_60k = round(r.median["60k"], 2)
+    n_hold = r.held_count
+    lo_60k = r.lowest_last
+    hi_60k = r.highest_last
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_short > median_8k >= median_60k, "Prose says the median falls with length")
-    check(n_hold < len(scored) / 10, "Prose says only a few models hold 90% at 60K")
+    check(n_hold < n_scored / 10, "Prose says only a few models hold 90% at 60K")
     check(median_short - median_60k > 1 / 3, "Caption says the median model loses more than a third by 60K")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_scored_str = fmt_int(len(scored))
+    n_scored_str = fmt_int(n_scored)
     n_hold_str = fmt_int(n_hold)
     questions_str = fmt_int(questions)
     median_short_str = fmt_percent(median_short, style="prose")
@@ -342,7 +342,7 @@ class ContextLengthComprehension:
     hi_60k_str = fmt_percent(round(hi_60k, 2), precision=0, style="prose")
 ```
 
-:::: {#fig-vol3-context-length-comprehension fig-env="figure" fig-pos="htb" fig-cap="**Comprehension Falls with Context Length**: Accuracy on the same stories as the version placed in context grows from the shortest rewrite to 192K tokens. The shaded band spans the middle half of the `{python} ContextLengthComprehension.n_scored_str` models scored at every length through 60K tokens; colored lines trace six individual models. A few models stay near the top at every length, while the median model loses more than a third of its accuracy by 60K tokens. Each point rests on `{python} ContextLengthComprehension.questions_str` questions, so single-length wiggles are within sampling noise. Data from @fictionlive2025bench via @epochai2026benchmarks." fig-alt="Line chart of comprehension accuracy from 0 to 100 percent against story length placed in context, with eleven categories from 0 to 192k tokens. A gray band falls from near 100 percent at 0 tokens to roughly between 40 and 70 percent at 60k. Three colored lines stay between about 80 and 100 percent across all lengths. One orange line falls to about 50 percent, and two lines fall below 40 percent by 8k tokens and stop at 60k. A legend below the chart names the band and six models."}
+::: {#fig-vol3-context-length-comprehension fig-env="figure" fig-pos="htb" fig-cap="**Comprehension Falls with Context Length**: Accuracy on the same stories as the version placed in context grows from the shortest rewrite to 192K tokens. The shaded band spans the middle half of the `{python} ContextLengthComprehension.n_scored_str` models scored at every length through 60K tokens; colored lines trace six individual models. A few models stay near the top at every length, while the median model loses more than a third of its accuracy by 60K tokens. Each point rests on `{python} ContextLengthComprehension.questions_str` questions, so single-length wiggles are within sampling noise. Data from @fictionlive2025bench via @epochai2026benchmarks." fig-alt="Line chart of comprehension accuracy from 0 to 100 percent against story length placed in context, with eleven categories from 0 to 192k tokens. A gray band falls from near 100 percent at 0 tokens to roughly between 40 and 70 percent at 60k. Three colored lines stay between about 80 and 100 percent across all lengths. One orange line falls to about 50 percent, and two lines fall below 40 percent by 8k tokens and stop at 60k. A legend below the chart names the band and six models."}
 
 ```{python}
 #| echo: false
@@ -357,17 +357,17 @@ class ContextLengthComprehension:
 # │ How: Literature.LongContextComprehension (MLSysIM); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Literature
+from mlsysim import Literature, Scenarios
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.4))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
 entries = Literature.LongContextComprehension.entries
 lengths = ["0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k", "120k", "192k"]
 x = np.arange(len(lengths))
-band_cols = ["score_" + n for n in lengths[: lengths.index("60k") + 1]]
-band = np.array([[e[c] for c in band_cols] for e in entries if all(e[c] is not None for c in band_cols)]) * 100
+sweep = Scenarios.FictionLiveBenchThrough60K.result  # models scored at every length through 60k
+band_lengths = sweep.lengths
 traces = [
     ("gpt-5-2025-08-07_medium", "GPT-5 (medium)", "BlueLine", "o"),
     ("grok-4-0709", "Grok 4", "VioletLine", "s"),
@@ -379,19 +379,19 @@ traces = [
 
 # ┌── 2. RENDER ───────────────────────────────────────────────────────────────
 ax.fill_between(
-    x[: len(band_cols)],
-    np.percentile(band, 25, axis=0),
-    np.percentile(band, 75, axis=0),
+    x[: len(band_lengths)],
+    [100 * sweep.q25[n] for n in band_lengths],
+    [100 * sweep.q75[n] for n in band_lengths],
     color=COLORS["grid"],
     alpha=0.35,
     lw=0,
-    label=f"Middle half of {len(band)} models",
+    label=f"Middle half ({sweep.scored_models} models)",
 )
 for key, label, color, marker in traces:
     row = next(e for e in entries if e["model"] == key)
     y = np.array([row["score_" + n] if row["score_" + n] is not None else np.nan for n in lengths]) * 100
     ok = ~np.isnan(y)
-    ax.plot(x[ok], y[ok], "-", marker=marker, color=COLORS[color], ms=4, lw=1.6, label=label)
+    ax.plot(x[ok], y[ok], "-", marker=marker, color=COLORS[color], ms=4.5, lw=1.8, label=label)
 
 # ┌── 3. DECORATE ─────────────────────────────────────────────────────────────
 ax.set_xticks(x)
@@ -399,12 +399,23 @@ ax.set_xticklabels(lengths)
 ax.set_ylim(0, 105)
 ax.set_xlabel("Story length placed in context (tokens)")
 ax.set_ylabel("Comprehension accuracy (%)")
-ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=4)
+ax.legend(
+    fontsize=9,
+    loc="upper center",
+    bbox_to_anchor=(0.5, -0.18),
+    ncol=3,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.6,
+)
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 Two features of @fig-vol3-context-length-comprehension bear directly on the working budget: the decline starts early and runs deep, and models differ widely at any fixed length. Across the `{python} ContextLengthComprehension.n_scored_str` fully scored models, the median falls from `{python} ContextLengthComprehension.median_short_str` on the shortest version to `{python} ContextLengthComprehension.median_8k_str` at 8K tokens and `{python} ContextLengthComprehension.median_60k_str` at 60K, with only `{python} ContextLengthComprehension.n_hold_str` models staying at or above `{python} ContextLengthComprehension.hold_bar_str` at 60K. At 60K tokens, scores also span from `{python} ContextLengthComprehension.lo_60k_str` to `{python} ContextLengthComprehension.hi_60k_str`. This spread is the empirical content of the definition above. Usable working context belongs to a specified model, configuration, and workload, so the budget must be found by evaluation rather than read from the window.
 
@@ -425,19 +436,20 @@ $$ {#eq-vol3-softmax-dilution}
 # │ Show: Target attention weight at two context lengths.
 # │ How: Toy logits held fixed; only the number of background keys changes.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import exp
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class SoftmaxDilution:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    z_target = 6  # toy scaled logit for the target key
-    z_background = -2  # toy scaled logit for every other key
-    short_len = 100  # total keys, short context
-    long_len = 100_000  # total keys, long context
+    scenario = Scenarios.ToyHeadAttentionDilution  # toy logits held fixed
+    z_target = int(scenario.target_logit)  # toy scaled logit for the target key
+    z_background = int(scenario.background_logit)  # toy scaled logit for every other key
+    short_len = scenario.short_keys  # total keys, short context
+    long_len = scenario.long_keys  # total keys, long context
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    alpha_short = exp(z_target) / (exp(z_target) + (short_len - 1) * exp(z_background))
-    alpha_long = exp(z_target) / (exp(z_target) + (long_len - 1) * exp(z_background))
+    alpha_short = scenario.result.short_weight
+    alpha_long = scenario.result.long_weight
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(0 < alpha_long < alpha_short < 1, "More fixed-logit keys lower the target weight")
@@ -520,7 +532,7 @@ Because causal self-attention computes each token's keys and values from all pre
 
 [^fn-automatic-prefix-reuse]: **Automatic Prefix Reuse**: Serving systems such as SGLang index cached attention state by token prefix within a radix tree, allowing an incoming request that shares an existing token prefix to reuse cached KV blocks transparently [@zheng2024sglang]. Because radix tree lookups evaluate exact token equality rather than semantic equivalence, two requests that diverge on an early timestamp share zero cache entries past that offset. Layout discipline directly determines cache hit rates. \index{Prefix cache!radix tree}
 
-::: {#fig-vol3-context-zones data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-context-zones" fig-env="figure" fig-pos="htb" fig-cap="**Reuse Ends at the First Changed Token**: Three consecutive requests follow the root, trunk, and leaf order of @tbl-vol3-context-zone-stratification, with the output reserve $\OutputLimit$ beyond the input limit $\ContextWindow-\OutputLimit$. A new observation changes only the leaf, so the root and trunk remain a reusable prefix. Refreshing the trunk to r18 moves the first changed token to the end of the root, and every later token is processed again. The figure assumes compatible cached state on the serving side; an identical prefix alone does not guarantee reuse." fig-alt="Three horizontal request bars labeled call n cold start, call n plus 1 new observation, and call n plus 2 trunk refreshed. Each bar has root, trunk, and leaf segments with tick marks for token positions, followed by a hatched output reserve past a dotted line labeled S max minus K max. In call n every segment is marked processed. In call n plus 1 the root and the trunk at r17 are marked prefix reused, and a red dashed line labeled first changed token sits at the leaf boundary, with the first leaf token outlined in red. In call n plus 2 only the root is reused, the trunk is at r18, and the red dashed line and outlined token sit at the root boundary. Headers name the zones above an arrow running from changes rarely to changes every call."}
+::: {#fig-vol3-context-zones data-explore="original-context-invalidation" data-explore-key="vol3:fig-vol3-context-zones" fig-env="figure" fig-pos="htb" fig-cap="**Reuse Ends at the First Changed Token**: Three consecutive requests follow the root, trunk, and leaf order of @tbl-vol3-context-zone-stratification, with the output reserve $\OutputLimit$ beyond the input limit $\ContextWindow-\OutputLimit$. A new observation changes only the leaf, so the root and trunk remain a reusable prefix. Refreshing the trunk to r18 moves the first changed token to the end of the root, and every later token is processed again. The figure assumes compatible cached state on the serving side; an identical prefix alone does not guarantee reuse." fig-alt="Three horizontal request bars labeled call n cold start, call n plus 1 new observation, and call n plus 2 trunk refreshed. Each bar has root, trunk, and leaf segments with tick marks for token positions, followed by a hatched output reserve past a dotted line labeled S max minus K max. In call n every segment is marked processed. In call n plus 1 the root and the trunk at r17 are marked prefix reused, and a red dashed line labeled first changed token sits at the leaf boundary, with the first leaf token outlined in red. In call n plus 2 only the root is reused, the trunk is at r18, and the red dashed line and outlined token sit at the root boundary. Headers name the zones above an arrow running from changes rarely to changes every call."}
 ![](images/svg/context_staging_layout.svg)
 :::
 
@@ -549,33 +561,33 @@ Placing fast-changing metadata near the start of a request forfeits prefix reuse
 # │ Note: Hypothetical prices; retained compatible cache; no latency estimate.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import dimensionless
 
 class ContextLayoutPrice:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    turns = agent.max_trajectory_steps  # registry step budget, one call per turn
-    root_tokens = 3_000 + 12_000  # scenario instructions + tool declarations
-    trunk_tokens = 24_000  # scenario task state (constraints, record, excerpts)
-    leaf_tokens = 8_000  # scenario selected observations, replaced each call
-    trunk_changes = 2  # after the cold first call
-    input_price = 3.00 * USD / Mtoken  # hypothetical, not a provider schedule
-    cached_fraction = 0.10
+    scenario = Scenarios.RepairPrefixLayoutBill  # registry step budget; scenario zone sizes
+    turns = scenario.turns  # one call per turn
+    root_tokens = scenario.root_tokens  # instructions + tool declarations
+    trunk_tokens = scenario.trunk_tokens  # task state (constraints, record, excerpts)
+    leaf_tokens = scenario.leaf_tokens  # selected observations, replaced each call
+    trunk_changes = scenario.trunk_rewrites  # after the cold first call
+    input_price = scenario.input_price.to(USD / Mtoken)  # hypothetical, not a provider schedule
+    cached_fraction = scenario.cached_fraction
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    context_tokens = root_tokens + trunk_tokens + leaf_tokens
-    suffix_tokens = trunk_tokens + leaf_tokens
-    total_input = turns * context_tokens
-    warm_turns = turns - 1 - trunk_changes
+    r = scenario.result
+    context_tokens = r.request_tokens
+    suffix_tokens = r.rewrite_tokens
+    total_input = r.total_input
+    warm_turns = r.warm_calls
     unstable_prefill = total_input
-    stable_prefill = context_tokens + trunk_changes * suffix_tokens + warm_turns * leaf_tokens
-    stable_cached = total_input - stable_prefill
-    hit_rate = stable_cached / total_input
-    unstable_cost = (unstable_prefill * token * input_price).to(USD)
-    stable_cost = ((stable_prefill + cached_fraction * stable_cached) * token * input_price).to(USD)
-    cost_ratio = (unstable_cost / stable_cost).to(dimensionless).magnitude
-    prefill_ratio = unstable_prefill / stable_prefill
-    refresh_ratio = suffix_tokens / leaf_tokens  # trunk rewrite vs. warm call
+    stable_prefill = r.uncached_tokens
+    stable_cached = r.cached_tokens
+    hit_rate = r.hit_rate
+    unstable_cost = r.unstable_cost
+    stable_cost = r.stable_cost
+    cost_ratio = r.cost_ratio
+    prefill_ratio = r.prefill_ratio
+    refresh_ratio = r.rewrite_in_leaf_calls  # trunk rewrite vs. warm call
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(warm_turns == turns - 3, "One cold call, two trunk changes, the rest leaf changes")
@@ -605,8 +617,8 @@ class ContextLayoutPrice:
     hit_rate_pct_str = fmt_percent(hit_rate, style="prose", precision=1)
     unstable_cost_usd_str = fmt_usd(unstable_cost, precision=2)
     stable_cost_usd_str = fmt_usd(stable_cost, precision=2)
-    unstable_turn_usd_str = fmt_usd(unstable_cost / turns, precision=3)
-    stable_turn_usd_str = fmt_usd(stable_cost / turns, precision=3)
+    unstable_turn_usd_str = fmt_usd(r.unstable_cost_per_call, precision=3)
+    stable_turn_usd_str = fmt_usd(r.stable_cost_per_call, precision=3)
     cost_mult_str = fmt_multiple(cost_ratio, precision=1)
     prefill_mult_str = fmt_multiple(prefill_ratio, precision=1)
     suffix_tokens_str = fmt_int(suffix_tokens)
@@ -757,32 +769,31 @@ Any cache misses caused by rewriting the trunk already appear in the uncached to
 # │ How: Registry window and step budget; the scenario sizes of
 # │      calc-vol3-usable-context-budget; hypothetical watermarks; exact reset.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil
 from mlsysim import *
 from mlsysim.fmt import check, fmt_int, fmt_math, fmt_multiple
-from mlsysim.core.units import token
 
 class CompactionCadence:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    window = int(agent.context_window.to(token).magnitude)  # registry window
-    horizon = agent.max_trajectory_steps  # registry step budget, turns
-    output_reserve = 8_000  # scenario K_max, tokens
-    low = 3_000 + 12_000 + 24_000 + 8_000  # target: the selecting-policy request
-    high = 92_000  # hypothetical high watermark, serialized input tokens
-    narrow_low = 81_000  # alternate target with the same trigger and arrivals
-    arrival = 4_000  # scenario tool result appended per turn, tokens
+    scenario = Scenarios.RepairCompactionWatermarks  # registry window and step budget
+    window = scenario.window
+    horizon = scenario.turns  # registry step budget, turns
+    output_reserve = scenario.output_reserve  # scenario K_max, tokens
+    low = scenario.target  # target: the selecting-policy request
+    high = scenario.trigger  # hypothetical high watermark, serialized input tokens
+    narrow_low = scenario.alternate_target  # alternate target with the same trigger and arrivals
+    arrival = scenario.tokens_per_turn  # scenario tool result appended per turn, tokens
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    input_limit = window - output_reserve
-    cadence = ceil((high - low) / arrival)
-    trigger_length = low + cadence * arrival
-    overshoot = trigger_length - high
-    combined_at_trigger = trigger_length + output_reserve
-    narrow_cadence = ceil((high - narrow_low) / arrival)
+    r = scenario.result
+    input_limit = r.input_limit
+    cadence = r.cycle_turns
+    trigger_length = r.trigger_length
+    overshoot = r.overshoot
+    combined_at_trigger = r.length_with_reserve
+    narrow_cadence = r.alternate_cycle_turns
     narrow_trigger = narrow_low + narrow_cadence * arrival
-    frequency_ratio = cadence / narrow_cadence  # passes per turn, narrow vs. wide
-    passes = horizon // cadence  # passes within the step budget
+    frequency_ratio = r.frequency_ratio  # passes per turn, narrow vs. wide
+    passes = r.passes  # passes within the step budget
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(0 < low < narrow_low < high <= input_limit, "Ordered watermarks")
@@ -1049,25 +1060,26 @@ Appending a notice at the end of the prompt preserves the KV-cache prefix across
 # │ Note: Excerpt, marker, and notice sizes are hypothetical serialized counts.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import dimensionless
 
 class ContextInvalidationTokens:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    original = (3_000 + 12_000 + 24_000 + 8_000) * count  # selecting-policy request
-    prefix = (3_000 + 12_000) * count  # root: instructions + tool declarations
-    old_excerpt = 850 * count  # superseded r17 excerpt at the start of the trunk
-    marker = 24 * count
-    notice = 128 * count
+    scenario = Scenarios.SupersededExcerptInvalidation
+    original = scenario.request_tokens * count  # selecting-policy request
+    prefix = scenario.prefix_tokens * count  # root: instructions + tool declarations
+    old_excerpt = scenario.superseded_tokens * count  # superseded r17 excerpt at the start of the trunk
+    marker = scenario.marker_tokens * count
+    notice = scenario.notice_tokens * count
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Unchanged other content; no new read or output included.
-    removed_total = original - old_excerpt
-    removed_suffix = removed_total - prefix
-    replaced_total = removed_total + marker
-    replaced_suffix = replaced_total - prefix
-    appended_total = original + notice
-    appended_suffix = notice
-    suffix_ratio = (replaced_suffix / appended_suffix).to(dimensionless).magnitude
+    r = scenario.result
+    removed_total = r.removed_total * count
+    removed_suffix = r.removed_suffix * count
+    replaced_total = r.replaced_total * count
+    replaced_suffix = r.replaced_suffix * count
+    appended_total = r.appended_total * count
+    appended_suffix = r.appended_suffix * count
+    suffix_ratio = r.suffix_ratio
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(prefix + old_excerpt < original, "Excerpt must precede a retained suffix")
@@ -1165,17 +1177,19 @@ $$ {#eq-vol3-constraint-retention}
 # │ Show: Single-item survival probability after a short and a long run.
 # │ How: Hypothetical independent per-round loss; one specified item only.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ConstraintRetention:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    loss_per_round = 0.05  # hypothetical probability one item is lost per round
-    short_rounds = 10
-    long_rounds = 40
+    scenario = Scenarios.CompactionConstraintRetention
+    loss_per_round = 1 - scenario.step_success  # hypothetical probability one item is lost per round
+    short_rounds = scenario.short_horizon
+    long_rounds = scenario.long_horizon
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    survive_short = (1 - loss_per_round) ** short_rounds
-    survive_long = (1 - loss_per_round) ** long_rounds
+    survive_short = scenario.result.success[short_rounds]
+    survive_long = scenario.result.success[long_rounds]
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────
     check(0 < survive_long < survive_short < 1, "Survival falls with more rounds")
@@ -1377,8 +1391,8 @@ class ContextExerciseGivens:
     input_price = ContextLayoutPrice.input_price  # hypothetical, per token
     cached_fraction = ContextLayoutPrice.cached_fraction
     output_price = 15.00 * USD / Mtoken  # hypothetical output price
-    attempt_cost = 2.00 * USD  # hypothetical repair attempt cost (Problem 6)
-    correction_cost = 0.05 * USD  # hypothetical correction call (Problem 6)
+    attempt_cost = Scenarios.ProtectedFieldCheckPayback.attempt_cost.to(USD)  # hypothetical repair attempt (Problem 6)
+    correction_cost = Scenarios.ProtectedFieldCheckPayback.check_cost_per_round.to(USD)  # hypothetical correction call (Problem 6)
     escalation_cost = 4.00 * USD  # hypothetical human escalation (Problem 7)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────

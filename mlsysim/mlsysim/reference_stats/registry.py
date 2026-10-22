@@ -11,6 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
+from ..models.registry import Models
 from ..core.units import (
     ureg,
     GB,
@@ -52,12 +53,25 @@ class Workloads(Registry):
         13.7e9, pc.GOOGLE_SEARCH_VOLUME_2025,  # 5e12 / 365, rounded
         name="Google searches per day",
         description="Lower bound from Google's disclosure of more than 5 trillion searches a year (2025).")
+    ChatGptPromptsPerDay = sourced(  # added 2026-10-20
+        2.5e9, pc.CHATGPT_DAILY_PROMPTS_2025,
+        name="ChatGPT prompts per day",
+        description="Prompts ChatGPT receives from users worldwide each day, July 2025 (OpenAI to Axios).")
     WaymoDataPerHourLow = sourced_qty(
         1 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (low)", description="Lower-bound AV sensor data generation rate.")
     WaymoDataPerHourHigh = sourced_qty(
         19 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (high)", description="Upper-bound AV sensor data generation rate.")
+
+
+class TextTokenization(Registry):
+    """Rules of thumb that convert tokens to words of English text (added 2026-10-20)."""
+
+    WordsPerToken = sourced(
+        0.75, pc.OPENAI_TOKENIZER_GUIDE,
+        name="English words per token",
+        description="OpenAI's rule of thumb: one token is roughly 3/4 of an English word (100 tokens ~ 75 words).")
 
 
 class AnomalyModel(Registry):
@@ -282,6 +296,17 @@ class FleetUtilizationSnapshot(Registry):
     InputWaitShare = sourced(
         0.05, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
         name="Input-wait share", description="In-service capacity in complete allocations waiting for input.")
+
+
+class ProfilerTraceProfile(Registry):
+    """Trace volume of a short GPU profiling window (added 2026-10-20)."""
+
+    NsightTracePerGpu = sourced_qty(
+        500 * ureg.MB, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Nsight Systems trace per GPU", description="Trace bytes for one GPU over one window.")
+    TraceWindow = sourced_qty(
+        5 * ureg.second, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Trace window", description="Length of the traced window.")
 
 
 class TrainingCostAnchors(Registry):
@@ -791,6 +816,13 @@ class EdgeDeviceSpectrum(Registry):
         name="Flagship smartphone RAM endpoint",
         description="Upper mobile memory endpoint used for edge device-spectrum examples.",
     )
+    # Added 2026-10-20: the IoT rung of the device-class memory ladder.
+    IotDeviceRamHigh = sourced_qty(
+        1 * GiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="IoT-class device RAM upper endpoint",
+        description="Upper memory endpoint of an IoT-class edge device, between microcontroller and phone.",
+    )
     CortexMClock = sourced_qty(
         48 * ureg.megahertz,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
@@ -1159,13 +1191,31 @@ class PhysicalAINumbers(Registry):
     Compute = PhysicalAICompute
 
 
+class TorchvisionParameterCounts(Registry):
+    """Exact parameter counts of three torchvision model constructors (a counted run, added 2026-10-20).
+
+    ``Models.Vision`` holds these exact counts for ResNet-50, VGG-16, and MobileNetV2
+    (provenance prov:torchvision-0-28-parameter-counts); the aliases below keep the run's
+    three counts together for slides that show the run.
+    """
+
+    MobileNetV2 = sourced_qty(Models.Vision.MobileNetV2.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                              name="torchvision mobilenet_v2 parameters")
+    ResNet50 = sourced_qty(Models.Vision.ResNet50.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                           name="torchvision resnet50 parameters")
+    VGG16 = sourced_qty(Models.Vision.VGG16.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                        name="torchvision vgg16 parameters")
+
+
 class ReferenceStats(Registry):
     """Registry namespace for non-executable real-world scenario statistics."""
 
     Workloads = Workloads
+    TextTokenization = TextTokenization  # added 2026-10-20
     AnomalyModel = AnomalyModel
     OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging
+    TorchvisionParameterCounts = TorchvisionParameterCounts  # added 2026-10-20
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
@@ -1174,6 +1224,7 @@ class ReferenceStats(Registry):
     ElasticResizeProfile = ElasticResizeProfile
     UtilizationTierProfile = UtilizationTierProfile
     FleetUtilizationSnapshot = FleetUtilizationSnapshot
+    ProfilerTraceProfile = ProfilerTraceProfile  # added 2026-10-20
     TrainingCostAnchors = TrainingCostAnchors
     FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus

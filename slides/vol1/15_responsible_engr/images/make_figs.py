@@ -3,41 +3,15 @@
 
 Plots use the shared slideplot helper; diagrams are written as SVG with a
 small builder below, one file per build step, every step on the same canvas
-so nothing moves. Every value is sourced:
-
-  - Care-management algorithm: Obermeyer, Powers, Vogeli, Mullainathan,
-    Science 366:447 (2019), read from the full text. 6,079 Black and 43,539
-    White patients, 2013 to 2015, one academic hospital; auto-enrollment at
-    the 97th percentile of risk; Black share of auto-enrolled 17.7 percent,
-    46.5 percent after removing the gap in health at a given score (Fig. 1B);
-    26.3 percent more chronic illnesses at the 97th percentile (4.8 against
-    3.8); $1,801 less spent per year at the same number of chronic illnesses;
-    Table 2, Black share of the top 3 percent by training label: total cost
-    0.141, avoidable cost 0.210, active chronic conditions 0.267.
-  - Gender Shades (Buolamwini and Gebru 2018, Table 4), Face++ error:
-    all 10.0, darker female 34.5, darker male 0.7, lighter female 9.8,
-    lighter male 0.8 percent (chapter table 3 for the four groups).
-  - Raji and Buolamwini 2019, Tables 1 and 2: darker-female error August 2018,
-    Face++ 4.1, Microsoft 1.52, IBM 16.97, Amazon 31.37, Kairos 22.50; May 2017
-    values from Gender Shades Table 4: Face++ 34.5, Microsoft 20.8, IBM 34.7.
-  - Representation budget: Napkin Math 15.1, margin 1.96 sqrt(0.25/n).
-  - COMPAS: ProPublica, "How We Analyzed the COMPAS Recidivism Algorithm"
-    (2016): false positive rate 44.85 and 23.45, false negative rate 27.99 and
-    47.72, PPV 0.63 and 0.59 (Black, White); base rates derived from its
-    contingency tables, 1,901/3,696 and 966/2,454.
-  - Credit service (constructed, chapter Sec. 15.3.2.1, tables 5 to 7) and the
-    price of fairness (Napkin Math 15.2): $150 baseline, $75 after.
-  - Feedback (Napkin Math 15.3, illustrative): gap 3.0 points, factor 1.10 and
-    0.90 per quarter, gate 5 points.
-  - Shared threshold (chapter figure 2 and Sec. 15.3.2.1): 75 percent overall
-    accuracy at one line, 81.25 percent at the other; Subgroup B's errors
-    triple (1 to 3) while Subgroup A's fall to 0.
-  - Interventions (chapter Sec. 15.3.2.1): reweighting, adversarial debiasing
-    with a reversed gradient, threshold adjustment (legally restricted).
-  - Next-lecture teaser: Strubell et al. 2019 (284 t estimate; car lifetime
-    57 t); the measured value is revealed in Lecture 15b.
-
-Derived values come from calcs.py (imported below), never typed here.
+so nothing moves. Every value comes from calcs.py (imported below), which
+reads MLSysIM: Literature.Fairness (Obermeyer et al. 2019, Gender Shades,
+ProPublica's COMPAS analysis), Literature.Series.GenderShadesAudit (Raji and
+Buolamwini 2019), Literature.TrainingRuns (Strubell et al. 2019), and the
+fairness Scenarios.* (credit service, its price and feedback loop, the
+evaluation budget, the shared threshold, the frontier, the proxy and goal).
+Figure-only values are layout: coordinates, axis limits, and the illustrative
+gate slices A, B, and D (slice C's interval is the evaluation budget's).
+The verification panel quotes the chapter quiz's recruiting-tool figures.
 
 The Patterson, DLRM TCO, fleet-share, lineage, and DP-SGD figures moved to
 Lecture 15b on 2026-10-17 and are generated there; their generators were
@@ -57,6 +31,7 @@ import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as calc  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -110,9 +85,9 @@ def bar_steps(stem, rows, steps, size, xmax, xlabel, note=None, vlines=None,
 
 
 # Hook: share of Black patients among the auto-enrolled (Obermeyer Fig. 1B)
-fig_rows = [("Ranked by predicted cost", calc.HOOK_COST, "neutral", f"{calc.HOOK_COST}%", 1),
-            ("Ranked by health", calc.HOOK_HEALTH, "danger",
-             f"{calc.HOOK_HEALTH}%   {calc.f(calc.HOOK_MULT)}× as many", 3)]
+fig_rows = [("Ranked by predicted cost", num("hook_cost"), "neutral", f"{val('hook_cost')}%", 1),
+            ("Ranked by health", num("hook_health"), "danger",
+             f"{val('hook_health')}%   {val('hook_mult')}× as many", 3)]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
     for i, (label, v, ck, txt, first) in enumerate(fig_rows):
@@ -125,7 +100,7 @@ for k in (1, 2, 3):
                 color=C[ck], alpha=1.0 if on else 0.0)
     # the hidden bar's slot: a dashed outline and ??? until the reveal
     show_q = k == 2
-    ax.barh(0, calc.HOOK_HEALTH, height=0.6, fill=False, ls="--", lw=1.2,
+    ax.barh(0, num("hook_health"), height=0.6, fill=False, ls="--", lw=1.2,
             edgecolor=C["neutral"], alpha=1.0 if show_q else 0.0)
     ax.text(23, 0, "???", ha="center", va="center", fontsize=16,
             fontweight="bold", color=C["danger"], alpha=1.0 if show_q else 0.0)
@@ -140,40 +115,42 @@ for k in (1, 2, 3):
 
 # Segment 1 measured: the training label decides who is selected (Table 2)
 bar_steps("label_choice", [
-    ("Label: total cost", calc.LABEL_COST, "neutral", f"{calc.LABEL_COST}%", 1),
-    ("Label: avoidable cost", calc.LABEL_AVOID, "compute", f"{calc.LABEL_AVOID}%", 2),
-    ("Label: active chronic illnesses", calc.LABEL_CHRONIC, "data",
-     f"{calc.LABEL_CHRONIC}%   {calc.f(calc.LABEL_MULT)}× the cost label", 3),
-], 3, (5.8, 2.2), 40, "Black patients among the top 3% of predicted risk (%)")
+    ("Label: total cost", num("label_cost"), "neutral", f"{val('label_cost')}%", 1),
+    ("Label: avoidable cost", num("label_avoid"), "compute", f"{val('label_avoid')}%", 2),
+    ("Label: active chronic illnesses", num("label_chronic"), "data",
+     f"{val('label_chronic')}%   {val('label_mult')}× the cost label", 3),
+], 3, (5.8, 2.2), 40, f"Black patients among the top {val('top_pct')}% of predicted risk (%)")
 
 # Proxy and goal (illustrative, after Systems Perspective 15.2)
 t = np.linspace(0, 1, 200)
-knee = 0.5
-proxy = 1.0 + 0.2 * t
-goal = np.where(t <= knee, 1.0 + 0.2 * t, 1.1 - 0.3 * (t - knee))
+knee = 0.5                 # layout: where the curves part
+P = calc.PROXY
+proxy = P.start + (P.proxy_end - P.start) * t
+at_knee = P.start + (P.proxy_end - P.start) * knee
+goal = np.where(t <= knee, proxy, at_knee + (P.goal_end - at_knee) * (t - knee) / (1 - knee))
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     m = t <= knee if k == 1 else np.ones_like(t, dtype=bool)
     ax.plot(t[m], proxy[m], color=C["memory"], lw=3.5)
     ax.plot(t[m], goal[m], color=C["data"], lw=3.5, ls=(0, (6, 2)) if k == 1 else "-")
-    ax.plot([knee], [1.1], "o", ms=11, color=C["danger"], zorder=5)
-    ax.annotate("Knee", (knee, 1.1), xytext=(-8, 12), textcoords="offset points",
+    ax.plot([knee], [at_knee], "o", ms=11, color=C["danger"], zorder=5)
+    ax.annotate("Knee", (knee, at_knee), xytext=(-8, 12), textcoords="offset points",
                 ha="right", fontsize=12, fontweight="bold", color=C["danger"])
     ax.text(0.03, 1.22, "Clicks and satisfaction\nrise together", fontsize=11,
             color=C["text"], va="bottom")
     if k == 2:
         ax.fill_between(t[t >= knee], goal[t >= knee], proxy[t >= knee],
                         color=C["danger_l"], alpha=0.8)
-        ax.text(1.02, 1.20, "Clicks  1.20", color=C["memory"], fontsize=12,
+        ax.text(1.02, P.proxy_end, f"Clicks  {val('clicks_end')}", color=C["memory"], fontsize=12,
                 fontweight="bold", va="center", transform=ax.transData)
-        ax.text(1.02, 0.95, "Satisfaction  0.95", color=C["data"], fontsize=12,
+        ax.text(1.02, P.goal_end, f"Satisfaction  {val('sat_end')}", color=C["data"], fontsize=12,
                 fontweight="bold", va="center")
-        ax.text(0.80, 1.09, f"Gap {calc.f(calc.PROXY_GAP, 2)}", color=C["danger"], fontsize=12,
+        ax.text(0.80, 1.09, f"Gap {val('proxy_gap')}", color=C["danger"], fontsize=12,
                 fontweight="bold", ha="center")
     else:
-        ax.text(1.02, 1.20, "Clicks  1.20", color=C["memory"], fontsize=12,
+        ax.text(1.02, P.proxy_end, f"Clicks  {val('clicks_end')}", color=C["memory"], fontsize=12,
                 fontweight="bold", va="center", alpha=0.0)
-        ax.text(1.02, 0.95, "Satisfaction  0.95", color=C["data"], fontsize=12,
+        ax.text(1.02, P.goal_end, f"Satisfaction  {val('sat_end')}", color=C["data"], fontsize=12,
                 fontweight="bold", va="center", alpha=0.0)
     ax.set_xlim(0, 1)
     ax.set_ylim(0.85, 1.32)
@@ -189,22 +166,24 @@ for k in (1, 2):
 # Gender Shades: one aggregate number, then the groups (Face++)
 # drawn for the right column of its frame (about 8.7 by 5.2 cm)
 bar_steps("gender_shades", [
-    ("All faces (reported)", calc.GS_ALL, "neutral", f"{calc.GS_ALL}%", 1),
-    ("Lighter men", calc.GS_LM, "memory", f"{calc.GS_LM}%", 2),
-    ("Darker men", calc.GS_DM, "memory", f"{calc.GS_DM}%", 2),
-    ("Lighter women", calc.GS_LF, "memory", f"{calc.GS_LF}%", 2),
-    ("Darker women", calc.GS_DF, "danger", f"{calc.GS_DF}%  ({calc.f(calc.GS_MULT, 0)}×)", 2),
+    ("All faces (reported)", num("gs_all"), "neutral", f"{val('gs_all')}%", 1),
+    ("Lighter men", num("gs_lm"), "memory", f"{val('gs_lm')}%", 2),
+    ("Darker men", num("gs_dm"), "memory", f"{val('gs_dm')}%", 2),
+    ("Lighter women", num("gs_lf"), "memory", f"{val('gs_lf')}%", 2),
+    ("Darker women", num("gs_df"), "danger", f"{val('gs_df')}%  ({val('gs_mult')}×)", 2),
 ], 2, (3.45, 2.05), 62, "Face++ gender-classification error (%)")
 
 # Margin of error against the number of examples in one group
 n = np.logspace(2, 5, 300)
-marg = 1.96 * np.sqrt(0.25 / n) * 100
+B = calc.BUDGET
+marg = B.z * np.sqrt(B.variance / n) * 100
+target = B.half_width * 100
 fig, ax = plt.subplots(figsize=(3.6, 2.0))
 ax.plot(n, marg, color=C["memory"], lw=3)
-ax.axhline(1.0, color=C["danger"], lw=1.5, ls="--")
-ax.text(125, 1.35, "Target: ±1 point", color=C["danger"], fontsize=10, fontweight="bold")
-ax.plot([calc.N_ONE_1PT], [1.0], "o", ms=10, color=C["danger"], zorder=5)
-ax.annotate(f"{calc.N_ONE_1PT:,.0f}", (calc.N_ONE_1PT, 1.0), xytext=(0, 12), textcoords="offset points",
+ax.axhline(target, color=C["danger"], lw=1.5, ls="--")
+ax.text(125, target + 0.35, f"Target: ±{val('margin_pts')} point", color=C["danger"], fontsize=10, fontweight="bold")
+ax.plot([B.samples_needed], [target], "o", ms=10, color=C["danger"], zorder=5)
+ax.annotate(val("n_one"), (B.samples_needed, target), xytext=(0, 12), textcoords="offset points",
             ha="center", fontsize=12, fontweight="bold", color=C["danger"])
 ax.set_xscale("log")
 ax.set_xlim(100, 1e5)
@@ -216,8 +195,9 @@ ax.set_ylabel("95% margin, one group\n(points)")
 sp.save(fig, out / "margin_curve.svg")
 
 # Raji and Buolamwini 2019: darker-female error before and after the audit
-vendors = [("Face++", 34.5, 4.1), ("IBM", 34.7, 16.97), ("Microsoft", 20.8, 1.52),
-           ("Amazon", None, 31.37), ("Kairos", None, 22.50)]
+vendors = [("Face++", num("raji_fpp_may"), num("raji_fpp_aug")), ("IBM", num("raji_ibm_may"), num("raji_ibm_aug")),
+           ("Microsoft", num("raji_msft_may"), num("raji_msft_aug")),
+           ("Amazon", None, num("raji_amzn_aug")), ("Kairos", None, num("raji_kai_aug"))]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
     nv = len(vendors)
@@ -249,10 +229,10 @@ for k in (1, 2):
     sp.save(fig, out / f"raji_step{k}.svg")
 
 # COMPAS (ProPublica 2016): error rates, then precision and base rates
-metrics = [("False positive rate", 44.85, 23.45, 1),
-           ("False negative rate", 27.99, 47.72, 1),
-           ("Precision (PPV)", 63.0, 59.0, 2),
-           ("Base rate (derived)", calc.r(calc.BASE_BLACK_PCT), calc.r(calc.BASE_WHITE_PCT), 2)]
+metrics = [("False positive rate", num("c_blk_fpr_pub"), num("c_wht_fpr_pub"), 1),
+           ("False negative rate", num("c_blk_fnr_pct"), num("c_wht_fnr_pct"), 1),
+           ("Precision (PPV)", num("c_blk_ppv_pct"), num("c_wht_ppv_pct"), 2),
+           ("Base rate (derived)", 100 * calc.COMPAS.base_rate("Black"), 100 * calc.COMPAS.base_rate("White"), 2)]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.45, 1.85))
     nm = len(metrics)
@@ -283,30 +263,31 @@ for k in (1, 2):
 
 # Price of fairness, Group B utility per applicant (constructed scenario)
 bar_steps("price", [
-    ("Before (TPR 60%)", calc.U_BEFORE, "memory", f"${calc.U_BEFORE:,.0f}", 1),
-    ("TPR raised to 90%", calc.U_AFTER, "danger", f"${calc.U_AFTER:,.0f}   half the utility", 1),
+    (f"Before (TPR {val('pr_tpr0_pct')}%)", num("pr_before"), "memory", f"${val('pr_before')}", 1),
+    (f"TPR raised to {val('pr_tpr1_pct')}%", num("pr_after"), "danger", f"${val('pr_after')}   half the utility", 1),
 ], 1, (4.4, 1.3), 260, "Group B utility per applicant (US$)")
 
 # Feedback: projected TPR gap by quarter (Napkin Math 15.3, illustrative)
 # drawn at its slot (about 13.5 by 5.2 cm); "illustrative" is in the slide credit
+L = calc.LOOP
 q = np.arange(0, 9)
-grow = calc.GAP0 * calc.ALPHA ** q
-decay = calc.GAP0 * calc.ALPHA_EXPL ** q
+grow = np.array([L.gap_at(k) for k in q])
+decay = np.array([L.gap_at(k, L.sampled_factor) for k in q])
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.3, 2.05))
-    ax.axhline(calc.GATE, color=C["danger"], lw=1.6, ls="--")
-    ax.text(0.1, 4.85, "Release gate: 5 points", color=C["danger"], fontsize=11,
+    ax.axhline(L.gate, color=C["danger"], lw=1.6, ls="--")
+    ax.text(0.1, L.gate - 0.15, f"Release gate: {val('gate_pts')} points", color=C["danger"], fontsize=11,
             fontweight="bold", va="top")
     ax.plot(q, grow, "-o", color=C["compute"], lw=3, ms=6)
-    ax.plot([calc.K_FAIL], [calc.GAP_AT_FAIL], "o", ms=12, color=C["danger"], zorder=5)
-    ax.annotate(f"Quarter {calc.K_FAIL}: {calc.f(calc.GAP_AT_FAIL)}", (calc.K_FAIL, calc.GAP_AT_FAIL), xytext=(-10, 10),
+    ax.plot([L.breach_cycle], [L.gap_at_breach], "o", ms=12, color=C["danger"], zorder=5)
+    ax.annotate(f"Quarter {val('fb_fail_q')}: {val('fb_gap_fail')}", (L.breach_cycle, L.gap_at_breach), xytext=(-10, 10),
                 textcoords="offset points", ha="right", fontsize=11,
                 fontweight="bold", color=C["danger"])
-    ax.text(8.15, grow[-1], f"factor {calc.f(calc.ALPHA, 2)}", color=C["compute"], fontsize=11,
+    ax.text(8.15, grow[-1], f"factor {val('fb_alpha')}", color=C["compute"], fontsize=11,
             fontweight="bold", va="center")
     a = 1.0 if k == 2 else 0.0
     ax.plot(q, decay, "-o", color=C["data"], lw=3, ms=6, alpha=a)
-    ax.text(8.15, decay[-1], f"factor {calc.f(calc.ALPHA_EXPL, 2)}\n(randomized\napprovals)", color=C["data"],
+    ax.text(8.15, decay[-1], f"factor {val('fb_alpha_expl')}\n(randomized\napprovals)", color=C["data"],
             fontsize=11, fontweight="bold", va="center", alpha=a)
     ax.set_xlim(0, 8)
     ax.set_ylim(0, 7.5)
@@ -387,7 +368,7 @@ g.text(80, 150, "The program's\ngoal", 21, C["memory"], "bold")
 # step 2: the access gap
 g.rect(5, 200, 510, 120, C["danger_l"], C["danger"], first=2)
 g.text(260, 228, "Unequal access: at the same illness,", 22, C["danger"], "bold", first=2)
-g.text(260, 260, "$1,801 less is spent per year", 22, C["danger"], "bold", first=2)
+g.text(260, 260, f"${val('spend_gap')} less is spent per year", 22, C["danger"], "bold", first=2)
 g.text(260, 292, "on a Black patient", 22, C["danger"], "bold", first=2)
 g.line(170, 196, 170, 72, C["danger"], first=2)
 g.write("care_chain", 2)
@@ -433,18 +414,19 @@ g.write("fanout", 2)
 # Release gate: point estimates with confidence intervals, three outcomes
 g = Svg(900, 400)
 x0, x1 = 260, 660          # axis: 0 to 10 points
+GATE, SLICE_C = calc.LOOP.gate, 100 * calc.BUDGET.gap_half_width
 def gx(v):
     return x0 + (x1 - x0) * v / 10.0
 g.add(1, f'<line x1="{x0}" y1="330" x2="{x1}" y2="330" stroke="{C["neutral"]}" stroke-width="2"/>')
-for v in (0, 5, 10):
-    g.text(gx(v), 355, f"{v}", 22, C["neutral"])
+for v in (0, GATE, 10):
+    g.text(gx(v), 355, f"{v:.0f}", 22, C["neutral"])
 g.text((x0 + x1) / 2, 388, "TPR gap between groups (points)", 22, C["neutral"])
-g.add(1, f'<line x1="{gx(5)}" y1="30" x2="{gx(5)}" y2="330" stroke="{C["danger"]}" '
+g.add(1, f'<line x1="{gx(GATE)}" y1="30" x2="{gx(GATE)}" y2="330" stroke="{C["danger"]}" '
          f'stroke-width="2.5" stroke-dasharray="8 5"/>')
-g.text(gx(5), 18, "Gate: 5 points", 22, C["danger"], "bold")
-slices = [("Slice A", 1.8, 0.8, "PASS", "data", 1, 70),
-          ("Slice B", 8.0, 1.0, "FAIL", "danger", 1, 145),
-          ("Slice C: few labels", 3.5, 3.5, "INSUFFICIENT", "compute", 2, 220),
+g.text(gx(GATE), 18, f"Gate: {val('gate_pts')} points", 22, C["danger"], "bold")
+slices = [("Slice A", 1.8, 0.8, "PASS", "data", 1, 70),          # illustrative
+          ("Slice B", 8.0, 1.0, "FAIL", "danger", 1, 145),       # illustrative
+          ("Slice C: few labels", SLICE_C, SLICE_C, "INSUFFICIENT", "compute", 2, 220),
           ("Slice D", 2.6, 1.0, "PASS", "data", 3, 295)]
 for name, v, h, verdict, ck, first, y in slices:
     g.text(10, y, name, 22, C["text"], "bold", "start", first=first)
@@ -459,8 +441,9 @@ g.write("gate", 3)
 
 # Credit service confusion matrices (constructed; chapter tables 5 and 6)
 g = Svg(900, 420)
-mats = [("Group A: 10,000", 175, (4500, 500, 1000, 4000)),
-        ("Group B: 2,000", 615, (600, 400, 200, 800))]
+cells = lambda grp: tuple(int(calc.CREDIT.groups[grp][k]) for k in ("tp", "fn", "fp", "tn"))  # noqa: E731
+mats = [(f"Group A: {val('credit_a_n')}", 175, cells("A")),
+        (f"Group B: {val('credit_b_n')}", 615, cells("B"))]
 cw, ch = 135, 62
 for title, gx0, (tp, fn, fp, tn) in mats:
     g.text(gx0 + cw, 22, title, 24, C["text"], "bold")
@@ -476,9 +459,9 @@ for title, gx0, (tp, fn, fp, tn) in mats:
     g.rect(gx0 - 4, 68, cw + 2, 2 * ch + 2, "none", C["compute"], first=2, last=2, sw=4)
     g.rect(gx0 - 4, 68, 2 * cw + 2, ch + 2, "none", C["memory"], first=3, last=3, sw=4)
     g.rect(gx0 - 4, 68 + ch, 2 * cw + 2, ch + 2, "none", C["network"], first=4, last=4, sw=4)
-rows = [("Approval rate (demographic parity)", "55%", "40%", "15 pts", "compute", 2, 250),
-        ("Of those who would repay, share approved (TPR)", "90%", "60%", "30 pts", "memory", 3, 300),
-        ("Of those who would default, share approved (FPR)", "20%", "20%", "0 pts", "network", 4, 350)]
+rows = [("Approval rate (demographic parity)", f"{val('appr_a')}%", f"{val('appr_b')}%", f"{val('appr_gap')} pts", "compute", 2, 250),
+        ("Of those who would repay, share approved (TPR)", f"{val('tpr_a')}%", f"{val('tpr_b')}%", f"{val('tpr_gap')} pts", "memory", 3, 300),
+        ("Of those who would default, share approved (FPR)", f"{val('fpr_a')}%", f"{val('fpr_b')}%", f"{val('fpr_gap')} pts", "network", 4, 350)]
 g.text(650, 222, "A", 20, C["neutral"], "bold")
 g.text(740, 222, "B", 20, C["neutral"], "bold")
 g.text(845, 222, "Gap", 20, C["neutral"], "bold")
@@ -486,8 +469,8 @@ for lab, a, b, gap, ck, first, y in rows:
     g.text(10, y, lab, 21, C[ck], "bold", "start", first=first)
     g.text(650, y, a, 24, C["text"], "bold", first=first)
     g.text(740, y, b, 24, C["text"], "bold", first=first)
-    g.text(845, y, gap, 24, C["danger"] if gap != "0 pts" else C["data"], "bold", first=first)
-g.text(450, 400, "Constructed example (chapter credit service). Both groups repay at 50%.",
+    g.text(845, y, gap, 24, C["danger"] if not gap.startswith("0 ") else C["data"], "bold", first=first)
+g.text(450, 400, f"Constructed example (chapter credit service). Both groups repay at {val('credit_base_pct')}%.",
        18, C["neutral"])
 g.write("matrices", 4)
 
@@ -512,73 +495,74 @@ g.text(270, 270, "retrain", 18, C["data"], "bold", "start")
 g.write("censored_loop", 1)
 
 # Shared threshold on two score distributions (chapter figure 2, regenerated in
-# two steps). Left of the line is approved; circles would repay, crosses would
-# not. 75 percent overall at the first line (A 3 errors, B 1); 81.25 percent at
-# the second (A 0, B 3).
+# two steps) from Scenarios.SharedThresholdSixteenApplicants: each applicant's
+# position on the axis is 1 minus its score, and left of a line is approved.
+# Circles would repay, crosses would not.
+T = calc.THRESH
+x_lo, x_hi = 150, 890          # layout: the axis in SVG units
+def ax_x(score):
+    return x_lo + (x_hi - x_lo) * (1 - score)
 g = Svg(900, 330)
-xs = 0.643
-a_pos = [(497, "o"), (615, "o"), (697, "o"), (780, "o"),
-         (1010, "+"), (1085, "+"), (1170, "+"), (1255, "+")]
-b_pos = [(262, "o"), (343, "o"), (425, "o"), (617, "+"), (697, "o"),
-         (780, "+"), (862, "+"), (1085, "+")]
-for row, pts, ck, y in (("Subgroup A", a_pos, "memory", 95), ("Subgroup B", b_pos, "danger", 200)):
-    g.add(1, f'<line x1="150" y1="{y + 32}" x2="890" y2="{y + 32}" stroke="{C["neutral"]}" stroke-width="4"/>')
-    g.text(10, y + 32, row, 22, C["text"], "bold", "start")
-    for x, m in pts:
-        cx = 40 + x * xs
-        if m == "o":
-            g.circle(cx, y, 16, "none", C[ck], sw=4)
-        else:
-            g.add(1, f'<path d="M{cx - 16},{y} H{cx + 16} M{cx},{y - 16} V{y + 16}" '
-                     f'stroke="{C[ck]}" stroke-width="7"/>')
-for x, lab, first, last in ((555, "75%", 1, 99), (945, "81.25%", 2, 99)):
-    cx = 40 + x * xs
+for grp, ck, y in (("A", "memory", 95), ("B", "danger", 200)):
+    g.add(1, f'<line x1="{x_lo}" y1="{y + 32}" x2="{x_hi}" y2="{y + 32}" stroke="{C["neutral"]}" stroke-width="4"/>')
+    g.text(10, y + 32, f"Subgroup {grp}", 22, C["text"], "bold", "start")
+    for score in T.scores[grp]["qualified"]:
+        g.circle(ax_x(score), y, 16, "none", C[ck], sw=4)
+    for score in T.scores[grp]["default"]:
+        cx = ax_x(score)
+        g.add(1, f'<path d="M{cx - 16},{y} H{cx + 16} M{cx},{y - 16} V{y + 16}" '
+                 f'stroke="{C[ck]}" stroke-width="7"/>')
+for thr, key, first in ((T.uniform_threshold, "acc_line1", 1), (T.alternative_threshold, "acc_line2", 2)):
+    cx = ax_x(thr)
     g.add(first, f'<line x1="{cx}" y1="55" x2="{cx}" y2="260" stroke="{C["text"]}" '
                  f'stroke-width="3" stroke-dasharray="8 6"/>')
-    g.text(cx, 38, f"overall {lab}", 20, C["text"], "bold", first=first)
+    g.text(cx, 38, f"overall {val(key)}%", 20, C["text"], "bold", first=first)
 g.text(450, 290, "Left of a line: approved.  Circle: would repay.  Cross: would default.",
        19, C["neutral"])
-g.text(160, 322, "At 75%: A errors 3, B errors 1", 20, C["memory"], "bold", "start", first=1, last=1)
-g.text(160, 322, "At 81.25%: A errors 0, B errors 3 (tripled)", 20, C["danger"], "bold", "start", first=2)
+g.text(160, 322, f"At {val('acc_line1')}%: A errors {val('err_a1')}, B errors {val('err_b1')}", 20, C["memory"], "bold", "start", first=1, last=1)
+g.text(160, 322, f"At {val('acc_line2')}%: A errors {T.errors('A', T.alternative_threshold)}, B errors {val('err_b2')} (tripled)", 20, C["danger"], "bold", "start", first=2)
 g.write("threshold", 2)
 
 # Three places to intervene; during training, an adversary head with a reversed
 # gradient (chapter Sec. 15.3.2.1)
 g = Svg(560, 470)
-stages = [("Before training", "Reweight the\ntraining examples", 1, "data"),
-          ("During training", "", 2, "compute"),
-          ("After training", "Move Group B's\nthreshold", 3, "danger")]
-for i, (stage, body, first, ck) in enumerate(stages):
-    y = 10 + i * 155
-    g.rect(10, y, 540, 140, C[ck + "_l"], C[ck], first=first, sw=2.5)
-    g.text(25, y + 24, stage, 25, C[ck], "bold", "start", first=first)
-    if body:
-        g.text(280, y + 80, body, 27, C["text"], "bold", first=first)
-y = 165
-g.rect(25, y + 50, 125, 62, "white", C["neutral"], first=2)
-g.text(87, y + 81, "Encoder", 22, C["text"], "bold", first=2)
-g.rect(205, y + 36, 140, 44, "white", C["data"], first=2)
-g.text(275, y + 58, "Task head", 21, C["text"], "bold", first=2)
-g.rect(205, y + 88, 140, 44, "white", C["danger"], first=2)
-g.text(275, y + 110, "Adversary", 21, C["danger"], "bold", first=2)
-g.line(152, y + 72, 201, y + 60, C["neutral"], first=2)
-g.line(152, y + 92, 201, y + 106, C["neutral"], first=2)
-g.text(448, y + 58, "repay?", 22, C["data"], "bold", first=2)
-g.text(448, y + 104, "group?\ngradient reversed", 19, C["danger"], "bold", first=2)
-g.text(280, 448, "Legally restricted in US credit", 22, C["danger"], "bold", first=3)
+# Before (short), during (tall: the adversary diagram needs room), after.
+g.rect(10, 10, 540, 105, C["data_l"], C["data"], first=1, sw=2.5)
+g.text(25, 34, "Before training", 25, C["data"], "bold", "start", first=1)
+g.text(280, 80, "Reweight the training examples", 27, C["text"], "bold", first=1)
+y = 125
+g.rect(10, y, 540, 205, C["compute_l"], C["compute"], first=2, sw=2.5)
+g.text(25, y + 24, "During training", 25, C["compute"], "bold", "start", first=2)
+g.rect(25, y + 72, 135, 76, "white", C["neutral"], first=2)
+g.text(92, y + 110, "Encoder", 26, C["text"], "bold", first=2)
+g.rect(220, y + 52, 165, 52, "white", C["data"], first=2)
+g.text(302, y + 78, "Task head", 24, C["text"], "bold", first=2)
+g.rect(220, y + 120, 165, 52, "white", C["danger"], first=2)
+g.text(302, y + 146, "Adversary", 24, C["danger"], "bold", first=2)
+g.line(162, y + 100, 216, y + 80, C["neutral"], first=2)
+g.line(162, y + 120, 216, y + 142, C["neutral"], first=2)
+g.text(470, y + 78, "repay?", 25, C["data"], "bold", first=2)
+g.text(470, y + 146, "group?", 25, C["danger"], "bold", first=2)
+g.text(302, y + 190, "gradient reversed into the encoder", 21, C["danger"], "bold", first=2)
+y = 340
+g.rect(10, y, 540, 120, C["danger_l"], C["danger"], first=3, sw=2.5)
+g.text(25, y + 24, "After training", 25, C["danger"], "bold", "start", first=3)
+g.text(280, y + 62, "Move Group B's threshold", 27, C["text"], "bold", first=3)
+g.text(280, y + 98, "Legally restricted in US credit", 22, C["danger"], "bold", first=3)
 g.write("interventions", 3)
 
 # Fairness-accuracy frontier, slide variant of the chapter's figure 3
-# (hypothetical): A unconstrained at disparity 0.18, B 91 percent accuracy at
-# 0.05, C strict equality at 0 with a large drop. Curve drawn through the
-# three points as y = 0.85 + 0.1729 x^0.337.
-xx = np.linspace(0, 0.18, 200)
-yy = calc.frontier(xx)
+# (hypothetical), drawn from Scenarios.FairnessAccuracyFrontierSketch: A
+# unconstrained, B the compromise, C strict equality with a large drop.
+FR = calc.FRONTIER
+xx = np.linspace(0, FR.candidates["A"], 200)
+yy = FR.accuracy(xx)
 fig, ax = plt.subplots(figsize=(3.9, 3.0))
 ax.plot(xx, yy, color=C["neutral"], lw=2.5, ls="--")
-for x, y, ck, lab, off, ha in ((calc.DISP_A, calc.frontier(calc.DISP_A), "danger", "A: unconstrained", (-6, 10), "left"),
-                               (calc.DISP_B, calc.frontier(calc.DISP_B), "data", f"B: {calc.frontier(calc.DISP_B)*100:.0f}% accuracy,\ndisparity {calc.DISP_B}", (-12, -36), "right"),
-                               (0.0, 0.85, "memory", "C: strict equality,\nlarge drop", (-8, 4), "right")):
+(xa, ya), (xb, yb), (xc, yc) = FR.point("A"), FR.point("B"), FR.point("C")
+for x, y, ck, lab, off, ha in ((xa, ya, "danger", "A: unconstrained", (-6, 10), "left"),
+                               (xb, yb, "data", f"B: {val('acc_b_pct')}% accuracy,\ndisparity {val('disp_b')}", (-12, -36), "right"),
+                               (xc, yc, "memory", "C: strict equality,\nlarge drop", (-28, -2), "right")):
     ax.plot([x], [y], "o", ms=11, color=C[ck], zorder=5)
     ax.annotate(lab, (x, y), xytext=off, textcoords="offset points", ha=ha,
                 fontsize=11, fontweight="bold", color=C[ck])
@@ -592,9 +576,9 @@ sp.save(fig, out / "frontier.svg")
 
 # Next lecture teaser: the architecture-search estimate (Lecture 15b's hook)
 fig, ax = plt.subplots(figsize=(4.6, 1.9))
-for i, (label, v, ck, txt) in enumerate((("One car, lifetime", 57, "neutral", "57 t"),
-                                         ("Search, estimated", 284, "compute", "284 t"),
-                                         ("Search, measured", 3.2, "data", "???"))):
+for i, (label, v, ck, txt) in enumerate((("One car, lifetime", num("car_t"), "neutral", f"{val('car_t')} t"),
+                                         ("Search, estimated", num("nas_t"), "compute", f"{val('nas_t')} t"),
+                                         ("Search, measured", 1, "data", "???"))):  # hidden until Lecture 15b
     y = 2 - i
     ax.barh(y, v, color=C[ck], height=0.62, alpha=0.0 if txt == "???" else 1.0)
     ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",

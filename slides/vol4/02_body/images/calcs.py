@@ -1,373 +1,326 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 2 (The Physical Body), one block per slide.
+"""Every number on the Lecture 2 slides and notes (The Physical Body), read from MLSysIM.
 
-Inputs carry their source. "PB" is the rendered chapter, The Physical Body
-(Volume IV, Chapter 2); "NM 2.x" is its Napkin Math 2.x. Values the chapter
-labels illustrative stay illustrative on the slides. Every printed value is
-what the slide or its note shows, with the label used there. make_figs.py
-imports from this file.
+MLSysIM holds the inputs (the Embodied.* machine and its site record, the
+Actuators.* parts, Literature.*) and the calculations (Scenarios.*, each backed
+by a solver in engine/solvers/plant.py); the chapter reads the same scenarios.
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex. make_figs.py imports
+it for the scenario objects.
 
 Run from this folder: python3 calcs.py
 """
 
-import math
+import sys
+from pathlib import Path
 
-G = 9.80665                    # standard gravity, m/s^2
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+Embodied, Actuators, Scenarios, Literature = (mlsysim.Embodied, mlsysim.Actuators,
+                                              mlsysim.Scenarios, mlsysim.Literature)
+ureg = mlsysim.core.units.ureg
 
-def head(title):
-    print(f"\n--- {title}")
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+HUB = RM.drive_unit
+MOTOR = Actuators.FramelessMotor.TQ_ILM70x18
+JOINT = Actuators.PandaClassJoint.CSG_25_50_ILM70x18
+ESA = Literature.SpaceflightAnomalies
 
-
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-# =============================================================================
-# Shared inputs: the running machine (PB NM 2.2, NM 2.3, NM 2.7)
-# =============================================================================
-MASS = 368.0                   # kg, loaded upper bound (PB NM 2.2, derived upper bound)
-V_DRIVE = 1.5                  # m/s, drive limit (PB NM 2.2, illustrative)
-D_CLEAR = 1.10                 # m, clear distance to the person (PB NM 2.2, illustrative)
-A_BRAKE = 2.0                  # m/s^2, credible deceleration (PB NM 2.2, illustrative)
-LOC = 0.050                    # m, localization bound (PB NM 2.2, illustrative)
-MARGIN = 0.100                 # m, protective clearance (PB NM 2.2, chosen)
-T_ACT = 0.020                  # s, brake onset (PB NM 2.2, illustrative)
-TAU_ELEM = 0.1336              # s, elementary pre-brake delay (PB 2.3.1; Lecture 1, NM 1.1)
-V_FAST = 2.0                   # m/s, hypothetical speed above the drive limit (PB NM 2.2)
-
-# Hub motor, ZLTECH ZLLG10ASM800-48 datasheet (PB NM 2.3; MLSysIM HubMotors)
-R_WHEEL = 0.133                # m, rolling radius
-KT_HUB = 2.4                   # N m/A, peak torque / peak current
-I_PEAK = 25.0                  # A, peak current = configured limit
-TAU_RATED_HUB = 20.0           # N m, rated torque (datasheet)
-HUB_MASS = 9.5                 # kg, motor mass, bounds the rotor term
-LOAD_PAIR = 300.0              # kg, rated load per pair
-KE_HUB_RPM = 0.262             # V/rpm, line-to-line back-EMF constant
-R_LINE = 0.7                   # ohm, line resistance
-L_LINE = 1.885e-3              # H, line inductance
-POLE_PAIRS_HUB = 20
-MU_DRY = 0.60                  # dry floor friction (PB NM 2.3)
-MU_INSPECTED = 0.12            # inspected low-traction floor (PB NM 2.3)
-
-# Bus (PB NM 2.7)
-V_FULL, V_DEPLETED = 54.0, 42.0      # V, pack envelope (MiR250 class)
-R_BUS = 0.060                  # ohm, source resistance (illustrative)
-C_BUS = 22000e-6               # F, bulk link capacitance
-V_UVLO = 33.0                  # V, converter lockout (MEAN WELL DDR-240)
-V_CONV_MAX = 67.2              # V, converter continuous input max
-V_SWITCH = 100.0               # V, inverter switch rating
-V_CLAMP = 60.0                 # V, chopper clamp (chosen)
-I_STEP = 70.0                  # A, coincident load step (illustrative)
-REGEN_SHARE = 0.75             # share of kinetic energy returned (illustrative)
+GRASP = Scenarios.WristCameraGraspAgeProfile
+BODY = Scenarios.WarehouseBaseStopBodyTerms
+FULL = Scenarios.WarehouseBaseStopFullDelay
+FAST = Scenarios.WarehouseBaseStopFastSetpoint
+INSPECTED = Scenarios.WarehouseBaseStopInspectedFloor
+STEP = Scenarios.WarehouseBaseSpeedStep
+CEIL = Scenarios.WarehouseBaseBrakingCeilings
+ELEC = Scenarios.WarehouseBaseHubDriveElectrical
+ROTOR = Scenarios.GearedRotorFlywheel
+GEARS = Scenarios.PandaClassJointGearRatios
+BURST = Scenarios.PandaClassJointBurst
+STALL = Scenarios.PandaClassElbowStall
+DERATE = Scenarios.SealedJointCatalogDerating
+BUS = Scenarios.WarehouseDriveBusStop
+CAMPAIGN = Scenarios.CleanLoadedStopCampaign
+THROTTLE = Scenarios.ThrottledNavigationBackbone
 
 
-# =============================================================================
-# Hook: Schiaparelli (PB War Story 2.1; ESA 2017 press release)
-# =============================================================================
-head("Hook: Schiaparelli")
-impact_kmh = 540.0                                  # ESA press release
-show("impact speed m/s (from 540 km/h)", f"{impact_kmh / 3.6:.0f}")
-show("thruster burn share of plan (3 s of 30 s)", f"{3 / 30:.0%}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-# =============================================================================
-# Recall (Lecture 1, NM 1.1): the elementary stop
-# =============================================================================
-head("Recall: elementary stop")
-blind_elem = V_DRIVE * TAU_ELEM * 1000
-brake = V_DRIVE ** 2 / (2 * A_BRAKE) * 1000
-show("blind travel mm", f"{blind_elem:.1f}")
-show("braking travel mm", f"{brake:.1f}")
-show("elementary stop mm", f"{blind_elem + brake:.1f}")
-show("crossover speed m/s (2 a tau)", f"{2 * A_BRAKE * TAU_ELEM:.2f}")
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-# =============================================================================
-# Five budgets slide
-# =============================================================================
-head("Five budgets: kinetic energy")
-KE = 0.5 * MASS * V_DRIVE ** 2
-show("kinetic energy J", f"{KE:.0f}")
+def degc(q):
+    """A temperature in degrees Celsius."""
+    return q.to(ureg.degC).magnitude
 
 
-# =============================================================================
-# Segment 1: freshness (PB 2.2, table 1, NM 2.1)
-# =============================================================================
-head("Freshness: stage medians (table 1, illustrative)")
-STAGES_P50 = [("Exposure and readout", 11.2), ("Transport and DMA", 1.4),
-              ("Backbone and policy", 18.5), ("Scheduling and IPC", 0.6),
-              ("Fieldbus", 1.0), ("Current rise", 2.3)]
-STAGES_P99 = [16.6, 3.2, 24.1, 2.1, 1.0, 3.0]
-P99_E2E = 46.2                 # ms, system-level p99 (table 1)
-P999_E2E = 68.4                # ms, p99.9 age (NM 2.1)
-p50_sum = sum(v for _, v in STAGES_P50)
-show("p50 chain ms", f"{p50_sum:.1f}")
-show("p99 stage sum ms", f"{sum(STAGES_P99):.1f}")
-show("inference share of median age", f"{18.5 / p50_sum:.0%}")
-show("benchmark rate Hz (1 / 18.5 ms)", f"{1000 / 18.5:.1f}")
-show("non-inference median ms", f"{p50_sum - 18.5:.1f}")
+print("== Hook: Schiaparelli (ESA inquiry, 2017)")
+v("esa_sat_ms", ESA.SchiaparelliSaturationAcceptanceMs, "{:.0f}", "saturation accepted, ms")
+v("esa_drift_deg", ESA.SchiaparelliAttitudeDriftDeg, "{:.0f}", "attitude drift, degrees")
+v("esa_alt_km", ESA.SchiaparelliReleaseAltitudeKm, "{:.1f}", "release altitude, km")
+v("esa_burn_s", ESA.SchiaparelliThrusterBurnS, "{:.0f}", "thruster burn, s")
+v("esa_plan_s", ESA.SchiaparelliPlannedBurnS, "{:.0f}", "planned burn, s")
+v("esa_impact_kmh", ESA.SchiaparelliImpactKmh, "{:.0f}", "impact, km/h")
+v("esa_impact_ms", m(ESA.SchiaparelliImpactKmh * ureg("km/hour"), "m/s"), "{:.0f}", "impact, m/s (derived)")
 
-head("Freshness deadline (NM 2.1)")
-TOL, INIT_ERR, V_BELT = 15.0, 3.0, 0.20   # mm, mm, m/s (illustrative)
-e_max = TOL - INIT_ERR
-E_DEADLINE = e_max / V_BELT                # mm / (m/s) = ms
-show("allowed error mm", f"{e_max:.0f}")
-show("freshness deadline ms", f"{E_DEADLINE:.0f}")
-mug_p50 = V_BELT * p50_sum
-mug_tail = V_BELT * P999_E2E
-show("mug travel at median mm", f"{mug_p50:.0f}")
-show("mug travel at p99.9 mm", f"{mug_tail:.1f}")
-show("tail overrun mm", f"{mug_tail - e_max:.1f}")
-show("median slack mm", f"{e_max - mug_p50:.0f}")
+print("== The running machine")
+v("mass", m(RM.loaded_mass, "kg"), "{:.0f}", "loaded mass, kg (upper bound)")
+v("v_drive", m(RM.base.max_velocity, "m/s"), "{:.1f}", "drive limit, m/s")
+v("ke", m(BUS.result.kinetic_energy, "J"), "{:.0f}", "kinetic energy at the drive limit, J")
+v("a_brake", m(AISLE.a_brake, "m/s**2"), "{:.0f}", "credible deceleration, m/s^2")
+v("a_brake_1", m(AISLE.a_brake, "m/s**2"), "{:.1f}", "the same, one decimal")
+v("d_clear_mm", m(AISLE.d_clear, "mm"), "{:,.0f}", "clear distance, mm")
+v("d_clear_m", m(AISLE.d_clear, "m"), "{:.2f}", "clear distance, m")
+v("d_clear_m1", m(AISLE.d_clear, "m"), "{:.1f}", "the same, one decimal (figure label)")
+v("d_loc_mm", m(AISLE.delta_loc, "mm"), "{:.0f}", "localization bound, mm")
+v("d_margin_mm", m(AISLE.delta_margin, "mm"), "{:.0f}", "protective clearance, mm")
+v("t_onset_ms", m(AISLE.t_brake_onset, "ms"), "{:.0f}", "brake onset, ms")
+v("tau_delay_ms", m(AISLE.tau_delay, "ms"), "{:.1f}", "full pre-brake delay, ms")
+v("tau_delay_s", m(AISLE.tau_delay, "s"), "{:.4f}", "the same, s")
 
-head("Encoder quantization (PB 2.2.1)")
-step12 = 2 * math.pi / 2 ** 12
-show("12-bit step mrad", f"{step12 * 1000:.2f}")
-show("one-count spike at 1 kHz deg/s", f"{math.degrees(step12 / 1e-3):.0f}")
+print("== Recall: the elementary stop (full delay, no allowances)")
+full = FULL.result
+v("blind_full", m(full.delay_travel, "mm"), "{:.1f}", "blind travel, mm")
+v("brake_mm", m(full.braking_travel, "mm"), "{:.1f}", "braking travel at the drive limit, mm")
+v("rest_full", m(full.stop_distance, "mm"), "{:.1f}", "travel to rest, mm")
+v("two_a", m(FULL.speed ** 2 / full.braking_travel, "m/s**2"), "{:.0f}", "2 a_brake, m/s^2")
+v("crossover", m(full.crossover_speed, "m/s"), "{:.2f}", "crossover speed 2 a tau, m/s")
 
+print("== Freshness: the grasp age profile (illustrative)")
+g = GRASP.result
+stages = {name: (p50, p99, mx) for name, p50, p99, mx in GRASP.stages}
+v("st_exposure", m(stages["Exposure and readout"][0], "ms"), "{:.1f}", "exposure and readout P50, ms")
+v("st_transport", m(stages["Transport and DMA"][0], "ms"), "{:.1f}", "transport and DMA P50, ms")
+v("st_backbone", m(g.focus_stage, "ms"), "{:.1f}", "backbone and policy P50, ms")
+v("st_sched", m(stages["Scheduling and IPC"][0], "ms"), "{:.1f}", "scheduling and IPC P50, ms")
+v("st_fieldbus", m(stages["Fieldbus"][0], "ms"), "{:.0f}", "fieldbus P50, ms")
+v("st_current", m(stages["Current rise"][0], "ms"), "{:.1f}", "current rise P50, ms")
+v("p50_sum", m(g.stage_sum_p50, "ms"), "{:.0f}", "median chain, ms")
+v("p99_sum", m(g.stage_sum_p99, "ms"), "{:.0f}", "stage P99 sum, ms")
+v("p99_sys", m(GRASP.system_p99, "ms"), "{:.1f}", "system P99, ms")
+v("p999_sys", m(GRASP.system_p999, "ms"), "{:.1f}", "system P99.9, ms")
+v("backbone_hz", m(g.focus_rate, "Hz"), "{:.1f}", "loop rate the benchmark suggests, Hz")
+v("backbone_pct", 100 * g.focus_share, "{:.0f}", "backbone share of the median, %")
+v("belt", m(AISLE.v_conveyor, "m/s"), "{:.2f}", "conveyor speed, m/s")
+v("tol_mm", m(AISLE.grasp_tolerance, "mm"), "{:.0f}", "grasp tolerance, mm")
+v("err0_mm", m(AISLE.grasp_initial_error, "mm"), "{:.0f}", "initial error, mm")
+v("emax_mm", m(g.allowed_error, "mm"), "{:.0f}", "allowed error, mm")
+v("deadline", m(g.deadline, "ms"), "{:.0f}", "freshness deadline, ms")
+v("mug_p50", m(g.travel_p50, "mm"), "{:.0f}", "mug travel at the median, mm")
+v("mug_slack", m(g.slack_p50, "mm"), "{:.0f}", "median slack, mm")
+v("mug_tail", m(g.travel_tail, "mm"), "{:.1f}", "mug travel at P99.9, mm")
+v("mug_over", m(g.overrun_tail, "mm"), "{:.1f}", "tail overrun, mm")
 
-# =============================================================================
-# Segment 2: stopping (PB 2.3, NM 2.2, figure 2)
-# =============================================================================
-head("Stopping: three cases")
-overhead = (LOC + MARGIN) * 1000
-onset = V_DRIVE * T_ACT * 1000
-case_body = brake + overhead + onset
-case_elem = blind_elem + brake + overhead
-blind_fast = V_FAST * TAU_ELEM * 1000
-brake_fast = V_FAST ** 2 / (2 * A_BRAKE) * 1000
-case_fast = blind_fast + brake_fast + overhead
-show("overhead mm", f"{overhead:.0f}")
-show("brake onset travel mm", f"{onset:.0f}")
-show("case 1 body terms mm", f"{case_body:.1f}")
-show("left for delays the body does not own mm", f"{D_CLEAR * 1000 - case_body:.1f}")
-show("case 2 elementary delay mm", f"{case_elem:.1f}")
-show("case 2 margin mm", f"{D_CLEAR * 1000 - case_elem:.1f}")
-show("case 3 at 2 m/s mm", f"{case_fast:.1f}")
-show("case 3 breach mm", f"{case_fast - D_CLEAR * 1000:.1f}")
+print("== Stopping (equation 2, Napkin Math 2.2)")
+body = BODY.result
+fast = FAST.result
+v("overhead", m(body.overhead, "mm"), "{:.0f}", "allowances, mm")
+v("onset_mm", m(body.delay_travel, "mm"), "{:.0f}", "travel during the brake onset, mm")
+v("stop_body", m(body.required_distance, "mm"), "{:.1f}", "body-owned terms, mm")
+v("left_body", m(body.spare, "mm"), "{:.1f}", "left for other delays, mm")
+v("stop_full", m(full.required_distance, "mm"), "{:.1f}", "full-delay stop, mm")
+v("left_full", m(full.spare, "mm"), "{:.1f}", "full-delay margin, mm")
+v("v_fast", m(FAST.speed, "m/s"), "{:.0f}", "faster setpoint, m/s")
+v("stop_fast", m(fast.required_distance, "mm"), "{:,.1f}", "stop at the faster setpoint, mm")
+v("breach_fast", m(-fast.spare, "mm"), "{:.1f}", "breach, mm")
+v("blind_fast", m(fast.delay_travel, "mm"), "{:.1f}", "blind travel at the faster setpoint, mm")
+v("brake_fast", m(fast.braking_travel, "mm"), "{:,.0f}", "braking at the faster setpoint, mm")
+v("brake_fast_m", m(fast.braking_travel, "m"), "{:.0f}", "the same, m")
+v("brake_growth", 100 * STEP.result.braking_growth, "{:.1f}", "braking growth, %")
+v("brake_added", m(STEP.result.braking_added, "mm"), "{:.1f}", "braking added, mm")
+v("dt_equiv", m(STEP.result.equivalent_delay, "ms"), "{:.1f}", "equivalent delay at the drive limit, ms")
+v("dt_equiv_s", m(STEP.result.equivalent_delay, "s"), "{:.1f}", "the same, s")
+v("speed_up_pct", 100 * (ratio(FAST.speed, BODY.speed) - 1), "{:.0f}", "faster setpoint over the drive limit, %")
+v("dt_step", m(BODY.added_delay, "ms"), "{:.0f}", "delay step, ms")
+v("dt_step_mm", m(body.added_delay_travel, "mm"), "{:.0f}", "travel per delay step, mm")
+v("v_mm_per_ms", m(BODY.speed, "mm/ms"), "{:.1f}", "drive limit, mm per ms")
 
-head("Estimate: speed against delay (NM 2.2 step 5)")
-extra = brake_fast - brake
-show("braking at 2 m/s mm", f"{brake_fast:.0f}")
-show("growth over drive limit", f"{brake_fast / brake - 1:.1%}")
-show("braking added mm", f"{extra:.1f}")
-show("equivalent delay at 1.5 m/s ms", f"{extra / V_DRIVE:.1f}")
-show("each 100 ms of delay at 1.5 m/s mm", f"{V_DRIVE * 100:.0f}")
+print("== Velocity ceiling (equation 3)")
+v("vmax_body", m(body.speed_ceiling, "m/s"), "{:.2f}", "body-only ceiling, m/s")
+v("vmax_full", m(full.speed_ceiling, "m/s"), "{:.2f}", "full-delay ceiling, m/s")
+v("dneed_full", m(full.required_distance, "m"), "{:.3f}", "clear distance the drive limit needs, m")
+v("mu_insp", AISLE.mu_inspected_floor, "{:.2f}", "inspected floor friction")
+v("a_insp", m(INSPECTED.a_brake, "m/s**2"), "{:.2f}", "inspected floor ceiling, m/s^2")
+v("vmax_insp", m(INSPECTED.result.speed_ceiling, "m/s"), "{:.2f}", "inspected-floor ceiling, m/s")
 
+print("== Credible deceleration (Napkin Math 2.3)")
+c = CEIL.result
+v("hub_tau_peak", m(c.wheel_torque, "N*m"), "{:.0f}", "torque per wheel at the current limit, N m")
+v("hub_i_peak", m(RM.drive_current_limit, "A"), "{:.0f}", "current limit, A")
+v("hub_tau_rated", m(HUB.rated_torque, "N*m"), "{:.0f}", "rated torque, N m")
+v("hub_i_rated", m(HUB.rated_current, "A"), "{:.1f}", "rated current, A")
+v("hub_kt", m(HUB.torque_constant, "N*m/A"), "{:.1f}", "torque constant, N m/A")
+v("load_pair", m(HUB.load_rating_per_pair, "kg"), "{:.0f}", "load rating per pair, kg")
+v("phi_max", c.drive_load_share, "{:.3f}", "driven-wheel load share bound")
+v("a_dry", m(c.a_traction_dry, "m/s**2"), "{:.2f}", "dry floor ceiling, m/s^2")
+v("force", m(c.force, "N"), "{:.1f}", "floor force, N")
+v("m_eff", m(c.m_eff, "kg"), "{:.0f}", "effective mass bound, kg")
+v("a_torque", m(c.a_torque, "m/s**2"), "{:.2f}", "peak-current ceiling, m/s^2")
+v("torque_margin", 100 * c.torque_margin, "{:.1f}", "margin over a_brake, %")
+v("a_rated", m(c.a_torque_rated, "m/s**2"), "{:.2f}", "rated-current ceiling, m/s^2")
+v("mu_min", c.mu_required, "{:.3f}", "friction premise, all weight driven")
 
-def v_ceiling(d_clear, tau, a):
-    """Equation 3: the admissible speed for a clear distance."""
-    d_avail = d_clear - LOC - MARGIN
-    if d_avail <= 0:
-        return 0.0
-    return -a * tau + math.sqrt((a * tau) ** 2 + 2 * a * d_avail)
+print("== Actuators (2.4.2, Napkin Math 2.3 step 4)")
+e = ELEC.result
+v("tau_e", m(e.time_constant, "ms"), "{:.1f}", "electrical time constant, ms")
+v("t_ramp", m(e.ramp_time, "ms"), "{:.1f}", "current ramp to the limit, ms")
+v("ramp_pct", 100 * e.ramp_share, "{:.1f}", "ramp share of the brake onset, %")
+v("v_low", m(RM.drive_bus_battery_low, "V"), "{:.0f}", "depleted pack, V")
+v("l_line", m(HUB.line_inductance, "mH"), "{:.3f}", "line inductance, mH")
+v("r_line", m(HUB.line_resistance, "ohm"), "{:.1f}", "line resistance, ohm")
+v("ke_hub", m(HUB.back_emf_constant, "V/rpm"), "{:.3f}", "back-EMF constant, V/rpm")
+v("rpm_drive", m(c.wheel_speed, "rpm"), "{:.1f}", "wheel speed at the drive limit, rpm")
+v("bemf", m(c.back_emf, "V"), "{:.1f}", "back-EMF at the drive limit, V")
+v("v_brake", m(c.v_brake, "V"), "{:.1f}", "braking terminal voltage, V")
+v("v_drive_need", m(c.v_drive, "V"), "{:.1f}", "driving terminal voltage, V")
+v("i_full_step", m(e.full_step_current, "A"), "{:.0f}", "full-bus step current, A")
 
+print("== Gearing (2.4.3)")
+rr = ROTOR.result
+v("rotor_g", m(ROTOR.rotor_mass, "g"), "{:.0f}", "rotor mass, g")
+v("n_gear", ROTOR.gear_ratio, "{:.0f}", "joint reduction")
+v("j_ref", m(rr.reflected_inertia, "kg*m**2"), "{:.3f}", "reflected inertia, kg m^2")
+v("fly_kg", m(rr.flywheel_mass, "kg"), "{:.1f}", "equivalent flywheel, kg")
+v("fly_cm", m(ROTOR.flywheel_radius, "cm"), "{:.0f}", "flywheel radius, cm")
+v("n_star", rr.matched_ratio, "{:.0f}", "matched ratio N*")
+v("accel_pct", 100 * rr.acceleration_share, "{:.1f}", "acceleration kept at the stated ratio, %")
+v("j_rotor_mant", m(ROTOR.rotor_inertia, "kg*m**2") * 10 ** 6, "{:.1f}", "rotor inertia, x 10^-6 kg m^2")
+v("j_load_mant", m(ROTOR.load_inertia, "kg*m**2") * 10 ** 3, "{:.1f}", "link inertia, x 10^-3 kg m^2")
 
-head("Velocity ceiling (equation 3)")
-show("body-only ceiling at 1.10 m (tau 20 ms) m/s", f"{v_ceiling(D_CLEAR, T_ACT, A_BRAKE):.2f}")
-show("elementary-delay ceiling at 1.10 m (tau 133.6 ms) m/s", f"{v_ceiling(D_CLEAR, TAU_ELEM, A_BRAKE):.2f}")
-show("inspected floor ceiling at 1.10 m (a 1.18) m/s", f"{v_ceiling(D_CLEAR, TAU_ELEM, MU_INSPECTED * G):.2f}")
+print("== Heat against inertia (Napkin Math 2.4)")
+gr = GEARS.result
+n_joint, n_high, n_qdd = GEARS.ratios
+v("tau_out", m(GEARS.output_torque, "N*m"), "{:.0f}", "held joint torque, N m")
+v("motor_peak", m(MOTOR.peak_torque, "N*m"), "{:.2f}", "motor peak torque, N m")
+v("motor_rated", m(MOTOR.rated_torque, "N*m"), "{:.2f}", "motor rated torque, N m")
+v("eta", GEARS.gear_efficiency, "{:.2f}", "gear efficiency")
+v("eta_pct", 100 * GEARS.gear_efficiency, "{:.0f}", "the same, %")
+v("km", m(gr.motor_constant, "N*m/W**0.5"), "{:.3f}", "motor constant, N m/sqrt(W)")
+v("n_joint", n_joint, "{:.0f}", "joint ratio")
+v("n_high", n_high, "{:.0f}", "catalog ratio")
+v("n_qdd", n_qdd, "{:.0f}", "QDD-class ratio")
+v("tm_high", m(gr.motor_torque[n_high], "N*m"), "{:.2f}", "motor torque at the catalog ratio, N m")
+v("tm_joint", m(gr.motor_torque[n_joint], "N*m"), "{:.2f}", "motor torque at the joint ratio, N m")
+v("tm_qdd", m(gr.motor_torque[n_qdd], "N*m"), "{:.1f}", "motor torque at the QDD ratio, N m")
+v("loss_high", m(gr.copper_loss[n_high], "W"), "{:.1f}", "copper loss at the catalog ratio, W")
+v("loss_joint", m(gr.copper_loss[n_joint], "W"), "{:.1f}", "copper loss at the joint ratio, W")
+v("jr_high", m(gr.reflected_inertia[n_high], "kg*m**2"), "{:.3f}", "reflected inertia at the catalog ratio")
+v("jr_joint", m(gr.reflected_inertia[n_joint], "kg*m**2"), "{:.3f}", "reflected inertia at the joint ratio")
+v("qdd_over", gr.over_peak[n_qdd], "{:.1f}", "QDD motor torque over the motor peak")
+v("loss_ratio_words", ratio(gr.copper_loss[n_joint], gr.copper_loss[n_high]), "words", "loss ratio, joint to catalog")
+v("product", m(gr.loss_inertia_product[n_joint], "W*kg*m**2"), "{:.2f}", "loss x reflected inertia")
+v("peak_over_rated", gr.peak_over_rated, "{:.1f}", "peak over continuous torque")
 
-# smallest clear distance at which the drive limit is still admissible
-def d_for_v(v, tau, a):
-    return v * tau + v ** 2 / (2 * a) + LOC + MARGIN
+print("== Torque-speed envelope (figure 6a) and derating pitfall")
+v("n0_rpm", m(MOTOR.no_load_speed, "rpm"), "{:,.0f}", "no-load speed, rpm")
+n_pk = mlsysim.calc_voltage_limited_speed(MOTOR.peak_torque, MOTOR.torque_constant, MOTOR.terminal_resistance,
+                                          MOTOR.rated_voltage, MOTOR.no_load_speed)
+v("n_pk_rpm", round(m(n_pk, "rpm"), -1), "{:,.0f}", "voltage-limited speed at peak torque, rpm (to tens)")
+v("t_catalog", degc(DERATE.catalog_ambient), "{:.0f}", "catalog ambient, C")
+v("derate_ambient", 100 * (1 - DERATE.result.ambient_share), "{:.1f}", "loss to ambient alone, %")
+v("derate_both", 100 * (1 - DERATE.result.combined_share), "{:.1f}", "loss with theta doubled, %")
 
+print("== Thermal burst (Napkin Math 2.5)")
+b = BURST.result
+v("burst_words", BURST.burst_factor, "words", "burst factor")
+v("burst_x", BURST.burst_factor, "{:.0f}", "burst factor")
+v("heat_words", ratio(b.burst_loss, b.rated_loss), "words", "heat factor")
+v("p_burst", m(b.burst_loss, "W"), "{:.0f}", "burst loss, W")
+v("tau_th", m(b.time_constant, "s"), "{:.0f}", "thermal time constant, s")
+v("c_th", m(BURST.thermal_capacitance, "J/K"), "{:.0f}", "thermal capacitance, J/K")
+v("theta_burst", m(BURST.thermal_resistance, "K/W"), "{:.1f}", "thermal resistance, K/W")
+v("t_amb", degc(BURST.ambient), "{:.0f}", "ambient, C")
+v("t_limit", degc(BURST.limit), "{:.0f}", "Class F limit, C")
+v("t_inf", degc(b.asymptote), "{:.0f}", "burst asymptote, C")
+v("t_cold", m(b.horizon_cold, "s"), "{:.1f}", "cold-start horizon, s")
+v("t_cold_0", m(b.horizon_cold, "s"), "{:.0f}", "the same, whole seconds")
+v("t_hot", m(b.horizon_hot, "s"), "{:.1f}", "heat-soaked horizon, s")
+v("t_hot_0", m(b.horizon_hot, "s"), "{:.0f}", "the same, whole seconds")
+v("t_eq", degc(b.rated_equilibrium), "{:.1f}", "rated-current equilibrium, C")
+v("hot_cut", 100 * b.hot_cut, "{:.1f}", "heat-soaked shortfall, %")
+v("duty_pct", 100 * b.duty, "{:.0f}", "duty-cycle screen, %")
+v("burst_on", m(BURST.burst_on, "s"), "{:.0f}", "burst length, s")
+v("burst_period", m(BURST.burst_on + b.off_time_scheduled, "s"), "{:.0f}", "screened period, s")
+v("t_peak", degc(b.periodic_peak), "{:.1f}", "periodic peak, C")
+v("t_ceiling", degc(BURST.ceiling), "{:.0f}", "working ceiling, C")
 
-show("clear distance needed for 1.5 m/s, tau 133.6 ms, a 2 (m)", f"{d_for_v(V_DRIVE, TAU_ELEM, A_BRAKE):.3f}")
-show("clear distance needed for 1.5 m/s, inspected floor (m)", f"{d_for_v(V_DRIVE, TAU_ELEM, MU_INSPECTED * G):.3f}")
+print("== Stall derating (Napkin Math 2.6)")
+s = STALL.result
+v("kt_motor", m(MOTOR.torque_constant, "N*m/A"), "{:.3f}", "motor torque constant, N m/A")
+v("r_loss", m(JOINT.internal_resistance, "ohm"), "{:.3f}", "loss resistance at 20 C, ohm")
+v("t_ref", degc(mlsysim.COPPER_COEFFICIENT_REFERENCE_TEMPERATURE), "{:.0f}", "resistance reference, C")
+v("theta_stall", m(STALL.thermal_resistance, "K/W"), "{:.2f}", "limb thermal resistance, K/W")
+v("alpha_pct", m(mlsysim.COPPER_TEMPERATURE_COEFFICIENT, "1/K") * 100, "{:.3f}", "copper coefficient, % per K")
+v("i_stall", m(s.stall_current, "A"), "{:.1f}", "stall current, A")
+v("gain", s.feedback_gain, "{:.4f}", "feedback factor")
+v("rise_ss", m(s.steady_rise, "K"), "{:.1f}", "steady rise, K")
+v("t_wind", degc(s.winding_temperature), "{:.1f}", "stall equilibrium, C")
+v("t_wind_0", degc(s.winding_temperature), "{:.0f}", "the same, whole degrees")
+v("r_hot", m(s.hot_resistance, "ohm"), "{:.3f}", "hot resistance, ohm")
+v("p_sus", m(s.sustainable_loss, "W"), "{:.2f}", "sustainable loss, W")
+v("i_sus", m(s.sustainable_current, "A"), "{:.2f}", "sustainable current, A")
+v("tau_sus", m(s.sustainable_hold, "N*m"), "{:.1f}", "sustainable hold, N m")
+v("derating", 100 * s.derating, "{:.1f}", "derating, %")
 
-head("Credible deceleration ceilings (NM 2.3)")
-mu_min_all = A_BRAKE / G
-phi_rated = LOAD_PAIR / MASS
-mu_min_rated = mu_min_all / phi_rated
-phi_min_dry = mu_min_all / MU_DRY
-a_dry = MU_DRY * G * phi_rated
-a_inspected = MU_INSPECTED * G * 1.0
-tau_wheel = KT_HUB * I_PEAK
-force = 2 * tau_wheel / R_WHEEL
-m_eff = MASS + 2 * HUB_MASS
-a_torque = force / m_eff
-a_rated = 2 * TAU_RATED_HUB / R_WHEEL / m_eff
-cg_ratio = G / A_BRAKE
-A_CEIL = {"dry": a_dry, "peak": a_torque, "inspected": a_inspected, "rated": a_rated}
-show("mu needed, all weight on driven wheels", f"{mu_min_all:.3f}")
-show("rated load share phi", f"{phi_rated:.3f}")
-show("mu needed at rated share", f"{mu_min_rated:.3f}")
-show("min driven-wheel share on dry floor", f"{phi_min_dry:.2f}")
-show("dry floor ceiling m/s^2", f"{a_dry:.2f}")
-show("inspected floor ceiling m/s^2", f"{a_inspected:.2f}")
-show("torque per wheel N m", f"{tau_wheel:.0f}")
-show("floor force N", f"{force:.1f}")
-show("m_eff upper bound kg", f"{m_eff:.0f}")
-show("peak-current ceiling m/s^2", f"{a_torque:.2f}")
-show("margin over 2 m/s^2", f"{a_torque / A_BRAKE - 1:.1%}")
-show("rated-current ceiling m/s^2", f"{a_rated:.2f}")
-show("tip-over h_cg/d_lead max", f"{cg_ratio:.2f}")
-show("rotating mass share of loaded mass", f"{2 * HUB_MASS / MASS:.1%}")
+print("== Drive bus (Napkin Math 2.7)")
+u = BUS.result
+v("v_full", m(RM.drive_bus_full_charge, "V"), "{:.0f}", "full pack, V")
+v("i_step", m(AISLE.i_rail_transient, "A"), "{:.0f}", "coincident step, A")
+v("r_bus_mohm", m(RM.drive_bus_resistance, "milliohm"), "{:.0f}", "source resistance, mOhm")
+v("r_bus_ohm", m(RM.drive_bus_resistance, "ohm"), "{:.3f}", "the same, ohm")
+v("sag", m(u.sag, "V"), "{:.1f}", "sustained sag, V")
+v("v_sag_full", m(u.sustained_full, "V"), "{:.1f}", "full pack under the step, V")
+v("v_sag_low", m(u.sustained_depleted, "V"), "{:.1f}", "depleted pack under the step, V")
+v("v_margin", m(u.margin_depleted, "V"), "{:.1f}", "margin above lockout, V")
+v("v_headroom", m(u.headroom_depleted, "V"), "{:.0f}", "depleted pack to lockout, V")
+v("i_cross", m(u.crossing_current, "A"), "{:.0f}", "step that spends it, A")
+v("v_uvlo", m(RM.drive_bus_uvlo, "V"), "{:.0f}", "converter lockout, V")
+v("i_drive", m(u.drive_current, "A"), "{:.1f}", "drive share of the step, A")
+v("i_compute", m(u.compute_current, "A"), "{:.1f}", "compute share of the step, A")
+v("p_soc", m(RM.brain_soc.tdp, "W"), "{:.0f}", "application processor, W")
+v("regen_pct", 100 * BUS.regen_fraction, "{:.0f}", "share returned, %")
+v("regen_frac", BUS.regen_fraction, "{:.2f}", "the same, fraction")
+v("c_bus", m(BUS.link_capacitance, "microfarad"), "{:,.0f}", "bus capacitance, uF")
+v("t_stop", m(u.stop_time, "ms"), "{:.0f}", "stop duration, ms")
+v("e_regen", m(u.regenerated, "J"), "{:.1f}", "regenerated energy, J")
+v("v_final", m(u.capacitor_only_endpoint, "V"), "{:.1f}", "capacitor-only endpoint, V")
+v("v_conv_max", m(RM.drive_bus_converter_max, "V"), "{:.1f}", "converter input maximum, V")
+v("v_switch", m(RM.drive_bus_switch_rating, "V"), "{:.0f}", "switch rating, V")
+v("v_clamp", m(RM.drive_bus_clamp, "V"), "{:.0f}", "chopper clamp, V")
+v("e_clamp", m(u.capacitor_to_clamp, "J"), "{:.1f}", "capacitor energy to the clamp, J")
+v("p_peak", m(u.peak_power, "W"), "{:.0f}", "peak regenerated power, W")
+v("r_max", m(u.resistor_max, "ohm"), "{:.2f}", "largest chopper resistor, ohm")
+v("r_cand", m(BUS.candidate_resistor, "ohm"), "{:.1f}", "chosen resistor, ohm")
+v("p_cand", m(BUS.candidate_power, "kW"), "{:.0f}", "its pulse rating, kW")
 
+print("== Unpowered states and the permission rail (2.6.2, 2.8.2)")
+v("brake_min", m(RM.spring_brake_engage_min, "ms"), "{:.0f}", "spring brake, fast end, ms")
+v("brake_max", m(RM.spring_brake_engage_max, "ms"), "{:.0f}", "spring brake, slow end, ms")
+v("rpm_short", m(e.short_peak_wheel_speed, "rpm"), "{:.1f}", "phase-short peak, wheel rpm")
+v("pole_pairs", HUB.pole_pairs, "{:.0f}", "hub pole pairs")
+v("c_hold", m(RM.permission_rail_holdup_capacitance, "F"), "{:.3f}", "hold-up store, F")
+v("v_hold_hi", m(RM.control_rail_battery_low, "V"), "{:.1f}", "store charged to, V")
+v("v_hold_lo", m(RM.control_rail_dropout, "V"), "{:.0f}", "regulator dropout, V")
+v("e_hold", m(RM.permission_rail_holdup_energy, "J"), "{:.0f}", "usable store energy, J")
+v("t_hold", m(RM.permission_rail_holdup, "s"), "{:.1f}", "hold-up time, s")
+v("p_perm", m(RM.permission_rail_load, "W"), "{:.0f}", "permission load, W")
+v("t_backbone", m(AISLE.t_backbone, "ms"), "{:.0f}", "navigation backbone, ms")
+v("t_throttled", m(THROTTLE.result.throttled, "ms"), "{:.0f}", "throttled backbone, ms")
+v("d_throttle", m(THROTTLE.result.added_travel, "mm"), "{:.1f}", "added blind travel, mm")
 
-# =============================================================================
-# Segment 3: actuators (PB 2.4, NM 2.3 step 4, NM 2.4)
-# =============================================================================
-head("Torque is current (PB 2.4.2)")
-tau_e = L_LINE / R_LINE
-t_rise = I_PEAK * L_LINE / V_DEPLETED
-rpm = V_DRIVE / R_WHEEL * 60 / (2 * math.pi)
-e_bemf = KE_HUB_RPM * rpm
-show("electrical time constant ms", f"{tau_e * 1000:.1f}")
-show("resistance-free rise to 25 A on 42 V ms", f"{t_rise * 1000:.1f}")
-show("rise share of 20 ms brake onset", f"{t_rise / T_ACT:.1%}")
-show("wheel speed at drive limit rpm", f"{rpm:.1f}")
-show("back-EMF at drive limit V", f"{e_bemf:.1f}")
-show("braking terminal voltage needed V", f"{e_bemf - I_PEAK * R_LINE:.1f}")
-show("driving terminal voltage needed V", f"{e_bemf + I_PEAK * R_LINE:.1f}")
-show("depleted pack above back-EMF V", f"{V_DEPLETED - e_bemf:.1f}")
-
-head("Reflected inertia (PB 2.4.3)")
-J_ROTOR = 5.6e-6               # kg m^2, illustrative rotor (PB 2.4.3)
-J_LOAD = 8.5e-3                # kg m^2, illustrative link (PB 2.4.3)
-N_GEAR = 100.0
-j_ref = N_GEAR ** 2 * J_ROTOR
-m_fly = 2 * j_ref / 0.10 ** 2
-N_STAR = math.sqrt(J_LOAD / J_ROTOR)
-x = N_GEAR / N_STAR
-share100 = 2 * x / (1 + x ** 2)
-show("reflected inertia at 100:1 kg m^2", f"{j_ref:.3f}")
-show("equivalent 10 cm solid flywheel kg", f"{m_fly:.1f}")
-show("matched ratio N*", f"{N_STAR:.1f}")
-show("acceleration share at 100:1", f"{share100:.1%}")
-show("acceleration lost at 100:1", f"{1 - share100:.1%}")
-
-head("Heat against inertia (NM 2.4)")
-KT_J, R_EFF = 0.187, 0.495     # TQ ILM 70x18: N m/A; effective loss resistance, ohm
-J_IN = 7.34e-5                 # kg m^2, rotor + CSG-25 input (NM 2.4)
-TAU_OUT, ETA = 87.0, 0.85      # N m max joint torque; gear efficiency (illustrative)
-TAU_PEAK_MOTOR, TAU_CONT_MOTOR = 4.05, 1.25   # N m, TQ datasheet
-km = KT_J / math.sqrt(R_EFF)
-show("motor constant N m/sqrt(W)", f"{km:.3f}")
-GEAR_ROWS = []
-for n in (10, 50, 100):
-    tm = TAU_OUT / (ETA * n)
-    loss = (tm / km) ** 2
-    jr = n ** 2 * J_IN
-    GEAR_ROWS.append((n, tm, loss, jr))
-    show(f"{n}:1 motor torque N m", f"{tm:.2f}")
-    show(f"{n}:1 copper loss W", f"{loss:.1f}")
-    show(f"{n}:1 reflected inertia kg m^2", f"{jr:.3f}")
-    show(f"{n}:1 loss x inertia W kg m^2", f"{loss * jr:.2f}")
-show("10:1 demand over peak", f"{GEAR_ROWS[0][1] / TAU_PEAK_MOTOR:.1f}x")
-show("peak to continuous ratio", f"{TAU_PEAK_MOTOR / TAU_CONT_MOTOR:.1f}")
-
-head("Contact (Systems Perspective 2.3)")
-K_PLATE = 4.0e5                # N/m, steel plate under the latch
-for v in (0.03, 0.10):
-    rate = K_PLATE * v / 1000  # N per ms
-    show(f"force ramp at {v} m/s N/ms", f"{rate:.0f}")
-    show(f"time to the 100 N latch limit at {v} m/s ms", f"{100 / rate:.1f}")
-
-
-# =============================================================================
-# Segment 4: heat and power (PB 2.5, 2.6, NM 2.5 to 2.7)
-# =============================================================================
-head("Thermal burst (NM 2.5)")
-I_RATED, C_TH, R_TH, T_AMB, T_LIM = 6.7, 120.0, 2.5, 40.0, 155.0
-TAU_TH = R_TH * C_TH
-t_eq_rated = T_AMB + I_RATED ** 2 * R_EFF * R_TH
-I_BURST = 3 * I_RATED
-P_BURST = I_BURST ** 2 * R_EFF
-T_INF = T_AMB + P_BURST * R_TH
-
-
-def t_survive(t0):
-    return TAU_TH * math.log((T_INF - t0) / (T_INF - T_LIM))
-
-
-t_cold, t_hot = t_survive(T_AMB), t_survive(t_eq_rated)
-show("thermal time constant s", f"{TAU_TH:.0f}")
-show("rated-current equilibrium C", f"{t_eq_rated:.1f}")
-show("burst current A", f"{I_BURST:.1f}")
-show("burst dissipation W", f"{P_BURST:.1f}")
-show("burst asymptote C", f"{T_INF:.1f}")
-show("cold-start horizon s", f"{t_cold:.1f}")
-show("heat-soaked horizon s", f"{t_hot:.1f}")
-show("heat-soaked shortfall", f"{1 - t_hot / t_cold:.1%}")
-T_CEIL = 140.0
-duty = (T_CEIL - T_AMB) / (P_BURST * R_TH)
-show("duty-cycle screen", f"{duty:.1%}")
-show("rest after a 3 s burst s", f"{3 * (1 - duty) / duty:.0f}")
-t_on, period = 3.0, 3.0 / duty
-peak_rise = P_BURST * R_TH * (1 - math.exp(-t_on / TAU_TH)) / (1 - math.exp(-period / TAU_TH))
-show("periodic peak C", f"{T_AMB + peak_rise:.1f}")
-
-head("Stall derating (NM 2.6)")
-N_ELBOW, R_TH_STALL, ALPHA, T_REF = 50, 1.80, 0.00393, 20.0
-tm = TAU_OUT / (ETA * N_ELBOW)
-i_stall = tm / KT_J
-p_cold = i_stall ** 2 * R_EFF
-gain = i_stall ** 2 * R_EFF * R_TH_STALL * ALPHA
-num = i_stall ** 2 * R_EFF * (1 + ALPHA * (T_AMB - T_REF)) * R_TH_STALL
-rise = num / (1 - gain)
-r_hot = R_EFF * (1 + ALPHA * (T_LIM - T_REF))
-p_sus = (T_LIM - T_AMB) / R_TH_STALL
-i_sus = math.sqrt(p_sus / r_hot)
-tau_sus = ETA * N_ELBOW * KT_J * i_sus
-show("stall current A", f"{i_stall:.1f}")
-show("cold stall loss W", f"{p_cold:.1f}")
-show("feedback factor", f"{gain:.4f}")
-show("steady rise K", f"{rise:.1f}")
-show("stall equilibrium C", f"{T_AMB + rise:.1f}")
-show("sustainable loss W", f"{p_sus:.2f}")
-show("hot resistance ohm", f"{r_hot:.3f}")
-show("sustainable current A", f"{i_sus:.2f}")
-show("sustainable hold N m", f"{tau_sus:.1f}")
-show("derating", f"{1 - tau_sus / TAU_OUT:.1%}")
-show("copper resistance rise 20 to 140 C", f"{ALPHA * (T_CEIL - T_REF):.1%}")
-
-head("Bus sag (NM 2.7)")
-sag = I_STEP * R_BUS
-show("sustained sag V", f"{sag:.1f}")
-show("full pack under step V", f"{V_FULL - sag:.1f}")
-show("depleted pack under step V", f"{V_DEPLETED - sag:.1f}")
-show("margin above lockout V", f"{V_DEPLETED - sag - V_UVLO:.1f}")
-show("depleted pack to lockout V", f"{V_DEPLETED - V_UVLO:.0f}")
-show("step that spends it A", f"{(V_DEPLETED - V_UVLO) / R_BUS:.0f}")
-show("processor current A (60 W / 0.91 / 48 V)", "1.4 (chapter value)")
-
-head("Regenerative surge (NM 2.7)")
-e_regen = REGEN_SHARE * KE
-v_final = math.sqrt(V_FULL ** 2 + 2 * e_regen / C_BUS)
-e_to_clamp = 0.5 * C_BUS * (V_CLAMP ** 2 - V_FULL ** 2)
-t_stop = V_DRIVE / A_BRAKE
-p_peak = 2 * e_regen / t_stop
-r_max = V_CLAMP ** 2 / p_peak
-show("regenerated energy J", f"{e_regen:.1f}")
-show("capacitor-only endpoint V", f"{v_final:.1f}")
-show("energy capacitor absorbs to 60 V J", f"{e_to_clamp:.1f}")
-show("stop duration ms", f"{t_stop * 1000:.0f}")
-show("peak regenerated power W", f"{p_peak:.0f}")
-show("largest chopper resistor ohm", f"{r_max:.2f}")
-
-head("Unpowered states and permission rail (PB 2.6.2, 2.8.2)")
-w_e = R_LINE / L_LINE
-rpm_peak = w_e / POLE_PAIRS_HUB * 60 / (2 * math.pi)
-show("phase-short torque peak, wheel rpm", f"{rpm_peak:.1f}")
-show("drive-limit wheel rpm", f"{rpm:.1f}")
-C_HOLD, V_HI, V_LO, P_PERM = 2.025, 21.5, 18.0, 70.0
-e_hold = 0.5 * C_HOLD * (V_HI ** 2 - V_LO ** 2)
-show("hold-up energy J", f"{e_hold:.0f}")
-show("hold-up time at 70 W s", f"{e_hold / P_PERM:.1f}")
-show("stop plus slow brake ms", f"{t_stop * 1000 + 80:.0f}")
-show("DVFS added travel mm (11 ms at 1.5 m/s)", f"{V_DRIVE * 11:.1f}")
-
-
-# =============================================================================
-# Segment 5: limit record (PB 2.7)
-# =============================================================================
-head("Zero-failure bound (PB 2.7.2)")
-show("rule of three, 3,000 stops", f"1 in {3000 / 3:.0f}")
-show("stops for 1 in 10,000", f"{3 * 10000:,}")
+print("== Limits (2.7)")
+v("n_stops", CAMPAIGN.trials, "{:,.0f}", "clean loaded stops")
+v("one_in", round(CAMPAIGN.result.one_in, -2), "{:,.0f}", "rate bound, one stop in")
+v("conf_pct", 100 * CAMPAIGN.confidence, "{:.0f}", "confidence, %")
 
 
 if __name__ == "__main__":
-    pass
+    write(__file__)

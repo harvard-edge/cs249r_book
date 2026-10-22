@@ -94,3 +94,55 @@ def test_epoch_compute_history_joins_without_overlap():
     assert all(e["date"] >= "2012-01-01" for e in post)
     assert all(e["training_compute_flop"] and e["training_compute_flop"] > 0 for e in pre)
     assert not {e["model"] for e in pre} & {e["model"] for e in post}
+
+
+def test_robot_trajectory_series_agrees_with_scalar_registries():
+    from mlsysim import viz
+
+    series = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
+    assert any(c.startswith("# Source:") for c in series.provenance_comments)
+    traj = {r["dataset"]: r for r in series.entries}
+    rl = Literature.RobotLearning
+    rds = Literature.RobotDataSystems
+    oxe_total = sum(r["episodes"] for r in Literature.OpenXEmbodimentComposition.entries if r["episodes"])
+
+    assert int(traj["Pinto & Gupta"]["episodes"]) == int(rds.PintoGraspingAttempts)
+    assert int(traj["Levine Grasping Farm"]["episodes"]) == int(rl.GraspingFarmAttempts)
+    assert int(traj["QT-Opt"]["episodes"]) == int(rl.QtOptGraspAttempts)
+    assert int(traj["BridgeData V2"]["episodes"]) == int(rds.BridgeDataV2Trajectories)
+    assert int(traj["OpenVLA pretraining"]["episodes"]) == int(rl.OpenVlaPretrainingEpisodes)
+    assert int(traj["DROID"]["episodes"]) == int(rds.DroidTrajectories)
+    assert int(traj["AgiBot World"]["episodes"]) == int(rds.AgibotTrajectories)
+    assert int(traj["Open X-Embodiment"]["episodes"]) == int(oxe_total) == int(rds.OxeTotalTrajectories)
+    assert all("arXiv:" in str(r["source"]) for r in series.entries)
+
+
+def test_models_scale_by_domain_agrees_with_vla_and_token_series():
+    from mlsysim import viz
+
+    for rel_path in (
+        "vol4/03_brain/data/epoch_models_scale_by_domain.csv",
+        "vol4/05_data/data/epoch_models_scale_by_domain.csv",
+        "vol1/04_data_engineering/data/notable_model_datasets.csv",
+        "vol1/05_nn_computation/data/notable_models.csv",
+    ):
+        s = viz.load_series(rel_path)
+        assert any(c.startswith("# Source:") for c in s.provenance_comments), rel_path
+
+    scale_series = viz.load_series("vol4/03_brain/data/epoch_models_scale_by_domain.csv")
+    rob = scale_series.where(domain_group="Robotics")
+    assert all("Cosmos" not in str(r["model"]) for r in rob)
+
+    by_model = {r["model"]: r for r in rob}
+    vla = Literature.VlaSystems
+    assert by_model["π0 (pi-zero)"]["parameters"] == float(vla.Pi0TotalParams)
+    assert by_model["Helix"]["parameters"] == float(vla.HelixSlowParams) + float(vla.HelixFastParams)
+    assert by_model["RT-1"]["parameters"] == float(vla.Rt1Params)
+    assert by_model["RT-2"]["parameters"] == float(vla.Rt2Params)
+    assert by_model["PaLM-E"]["parameters"] == float(vla.PalmEParams)
+
+    toks = {r["model"]: r["tokens"] for r in Literature.Series.PretrainingTokens.entries}
+    notable_ds = {r["model"]: r["training_dataset_size"] for r in viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries}
+    assert toks["DeepSeek-V3"] == notable_ds["DeepSeek-V3"] == Models.Language.DeepSeek_V3.training_tokens.to("count").magnitude
+    assert toks["Qwen3"] == notable_ds["Qwen3-235B-A22B"]
+

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Volume IV Lecture 6 (Policy Training).
 
-Every value comes from calcs.py (which names its source) or from a paper
-table typed there. Illustrative figures say so on the figure.
+Every plotted value and every number in a label comes from calcs.py, which
+reads it from MLSysIM (the Scenarios.* entries and Literature.RobotLearning);
+coordinates and schematic shapes are layout. Illustrative figures say so on
+the figure.
 
   - Dactyl hook and ablation: Andrychowicz et al. 2020, Tables 3, 4, 5 and
     section 6.3 (simulated hours), arXiv 1808.00177.
@@ -30,11 +32,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
 out = Path(__file__).parent
 # Volume IV diagram roles (rules/volumes/vol4/palette.md)
+ureg = calcs.mlsysim.core.units.ureg
+SUPERSCRIPT = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
 PROP = "#2563EB"     # unprivileged proposal
 NERV = "#059669"     # deterministic, verified
 VETO = "#DC2626"     # limit, hazard
@@ -50,24 +55,26 @@ def a(shown):
 # ---------------------------------------------------------------------------
 def dactyl_hook(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.1))
-    ax.barh(1, calcs.DACTYL_SIM_MEDIAN, height=0.5, color=C["neutral_l"],
+    sim_median = num("dactyl_sim_median")
+    ax.barh(1, sim_median, height=0.5, color=C["neutral_l"],
             edgecolor=C["neutral"])
-    ax.text(calcs.DACTYL_SIM_MEDIAN + 1, 1, "median 50", va="center",
+    ax.text(sim_median + 1, 1, f"median {val('dactyl_sim_median')}", va="center",
             fontsize=13, fontweight="bold", color=C["neutral"])
-    trials = calcs.DACTYL_REAL["All randomizations"]
+    trials = calcs.DACTYL.trials(calcs.ALL, "4")
     ys = 0 + np.linspace(-0.18, 0.18, len(trials))
     ax.scatter(trials, ys, s=70, color=C["memory"], alpha=a(k >= 2), zorder=3)
-    med = calcs.DACTYL_MEDIAN["All randomizations"]
+    med = num("dactyl_all_median")
     ax.plot([med, med], [-0.32, 0.32], color=C["danger"], lw=3, alpha=a(k >= 2))
-    ax.text(med + 1, -0.42, "median 13", color=C["danger"], fontsize=13,
+    ax.text(med + 1, -0.42, f"median {val('dactyl_all_median')}", color=C["danger"], fontsize=13,
             fontweight="bold", va="top", alpha=a(k >= 2))
     ax.text(25, 0, "?", fontsize=26, fontweight="bold", color=C["neutral"],
             ha="center", va="center", alpha=a(k == 1))
-    ax.set_yticks([1, 0], ["Simulation\n(100 trials)", "Physical hand\n(10 trials)"],
+    ax.set_yticks([1, 0], [f"Simulation\n({val('dactyl_sim_trials')} trials)",
+                           f"Physical hand\n({val('dactyl_phys_trials')} trials)"],
                   fontsize=12)
     ax.set_xlim(0, 60)
     ax.set_ylim(-0.75, 1.45)
-    ax.set_xlabel("Consecutive rotations before a drop or timeout (cap 50)")
+    ax.set_xlabel(f"Consecutive rotations before a drop or timeout (cap {val('dactyl_cap')})")
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, out / f"dactyl_hook_step{k}.svg")
@@ -180,28 +187,28 @@ def drift():
 # 5. Decoder slack (Napkin Math 6.1)
 # ---------------------------------------------------------------------------
 def decoder(k):
-    per, flow = calcs.per_eval, calcs.flow_ms
-    rows = [("ACT, 1 pass", calcs.ACT_MS, C["memory"], 1),
-            ("Flow, 4 steps", flow, C["data"], 2),
-            ("DDIM, 16 steps", calcs.DDIM_MS, C["compute"], 2),
-            ("DDIM + 5 ms jitter", calcs.DDIM_MS + calcs.JITTER_MS, C["compute"], 3)]
+    renew = num("renew_ms")
+    rows = [("ACT, 1 pass", num("act_ms"), C["memory"], 1),
+            (f"Flow, {val('flow_n')} steps", num("flow_ms"), C["data"], 2),
+            (f"DDIM, {val('ddim_n')} steps", num("ddim_ms"), C["compute"], 2),
+            (f"DDIM + {val('jitter_ms')} ms jitter", num("ddim_ms") + num("jitter_ms"), C["compute"], 3)]
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     n = len(rows)
     for i, (lab, v, col, s) in enumerate(rows):
         y = n - 1 - i
         sh = k >= s
-        ax.barh(y, min(v, calcs.RENEW_MS), color=col, height=0.6, alpha=a(sh))
-        if v > calcs.RENEW_MS:
-            ax.barh(y, v - calcs.RENEW_MS, left=calcs.RENEW_MS, color=VETO,
+        ax.barh(y, min(v, renew), color=col, height=0.6, alpha=a(sh))
+        if v > renew:
+            ax.barh(y, v - renew, left=renew, color=VETO,
                     height=0.6, alpha=a(sh))
-        ax.text((calcs.RENEW_MS if 0 < calcs.RENEW_MS - v < 4 else v) + 0.8, y, f"{v:g} ms", va="center", fontsize=13,
+        ax.text((renew if 0 < renew - v < 4 else v) + 0.8, y, f"{v:g} ms", va="center", fontsize=13,
                 bbox=dict(facecolor="white", edgecolor="none", pad=0.5),
-                fontweight="bold", color=VETO if v > calcs.RENEW_MS else col,
+                fontweight="bold", color=VETO if v > renew else col,
                 alpha=a(sh))
         ax.text(-1, y, lab, ha="right", va="center", fontsize=12.5,
                 fontweight="bold", color=C["text"], alpha=a(sh))
-    for xv, lab, col in ((calcs.STEP_MS, "setpoint step 25 ms", VETO),
-                         (calcs.RENEW_MS, "renewal 50 ms", C["neutral"])):
+    for xv, lab, col in ((num("step_ms"), f"setpoint step {val('step_ms')} ms", VETO),
+                         (renew, f"renewal {val('renew_ms')} ms", C["neutral"])):
         ax.axvline(xv, color=col, lw=2, ls="--")
         ax.text(xv, n - 0.25, lab, color=col, fontsize=11.5, fontweight="bold",
                 ha="center", va="bottom",
@@ -218,23 +225,26 @@ def decoder(k):
 # 6. Discount weight across one opening
 # ---------------------------------------------------------------------------
 def discount():
-    steps, gmin = calcs.n_steps, calcs.g_half
+    o = calcs.OPENING
+    steps, gmin = o.decisions, o.retaining_discount
     k = np.arange(0, int(steps) + 1)
-    tsec = k * calcs.STEP_MS / 1000
+    tsec = k * o.step.to("s").magnitude
+    rollout, horizon = num("rollout_s"), num("horizon_s")
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ax.plot(tsec, calcs.GAMMA ** (steps - k), color=C["danger"], lw=3)
+    ax.plot(tsec, o.discount ** (steps - k), color=C["danger"], lw=3)
     ax.plot(tsec, gmin ** (steps - k), color=C["memory"], lw=3)
-    ax.text(0.15, 0.2, "γ = 0.99: weight 0.04", color=C["danger"],
+    ax.text(0.15, 0.2, f"γ = {val('gamma')}: weight {val('w_terminal')}", color=C["danger"],
             fontsize=12.5, fontweight="bold")
-    ax.text(0.15, 0.8, "γ = 0.9978: weight 0.50", color=C["memory"],
+    ax.text(0.15, 0.8, f"γ = {val('gamma_half')}: weight {val('w_retained')}", color=C["memory"],
             fontsize=12.5, fontweight="bold")
-    ax.axvspan(8 - 2.5, 8, color=C["danger_l"], alpha=0.6, zorder=0)
-    ax.text(6.75, 1.05, "last 2.5 s\n(100 steps)", ha="center", fontsize=11,
+    ax.axvspan(rollout - horizon, rollout, color=C["danger_l"], alpha=0.6, zorder=0)
+    ax.text(rollout - horizon / 2, 1.05, f"last {val('horizon_s')} s\n({val('horizon_steps')} steps)",
+            ha="center", fontsize=11,
             color=C["danger"], fontweight="bold", linespacing=1.0)
-    ax.set_xlim(0, 8)
+    ax.set_xlim(0, rollout)
     ax.set_ylim(0, 1.25)
     ax.set_yticks([0, 0.5, 1.0])
-    ax.set_xlabel("Time of the decision in an 8 s opening (s)")
+    ax.set_xlabel(f"Time of the decision in an {val('rollout_s')} s opening (s)")
     ax.set_ylabel("Weight of the\ndoor-open reward", fontsize=11)
     ax.grid(color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
@@ -283,7 +293,7 @@ def offline(k):
 # 8. Coverage cells: pretraining joins none
 # ---------------------------------------------------------------------------
 PLATES = ["nominal", "displaced +", "displaced −"]
-SPEEDS = ["guarded\n0.03 m/s", "fast\n0.10 m/s"]
+SPEEDS = [f"guarded\n{val('v_guard')} m/s", f"fast\n{val('v_fast')} m/s"]
 
 
 def grid(ax, fills, labels, title=None, fs=13):
@@ -325,7 +335,8 @@ def cells_support():
 
 
 def odd(k):
-    fig, axs = plt.subplots(1, 3, figsize=(5.9, 2.9))
+    fig, axs = plt.subplots(1, 3, figsize=(6.6, 3.0),
+                            gridspec_kw={"width_ratios": [1.6, 1, 1]})
     fast = RED
     specs = [
         ("latch-bc-01", [[GREEN, fast], [GRAY, fast], [GRAY, fast]],
@@ -335,12 +346,22 @@ def odd(k):
         ("bc-recovery-02", [[GREEN, fast], [ASK, fast], [GRAY, fast]],
          [["declared", "out"], ["requested", "out"], ["absent", "out"]], 3),
     ]
-    for ax, (title, fills, labels, s) in zip(axs, specs):
-        grid(ax, fills, labels, title, fs=11.5)
+    for i, (ax, (title, fills, labels, s)) in enumerate(zip(axs, specs)):
+        grid(ax, fills, labels, None, fs=10.5)
+        for c, sp_ in enumerate(("guarded", "fast")):
+            ax.text(c + 0.47, 3.0, sp_, ha="center", va="bottom", fontsize=11, color=C["text"])
+        ax.text(0.97, 3.42, title, ha="center", va="bottom", fontsize=12, fontweight="bold",
+                color=C["text"])
+        if i == 0:
+            for r, pl in enumerate(PLATES):
+                ax.text(-0.08, 2 - r + 0.45, pl, ha="right", va="center", fontsize=11,
+                        color=C["text"])
+            ax.set_xlim(-1.25, 2.0)
+        ax.set_ylim(-0.05, 3.85)
         for art in ax.patches + ax.texts:
-            art.set_alpha(a(k >= s))
-        ax.title.set_alpha(a(k >= s))
-    fig.tight_layout(w_pad=0.6)
+            if i > 0 or not hasattr(art, "get_text") or art.get_position()[0] >= 0:
+                art.set_alpha(a(k >= s))
+    fig.tight_layout(w_pad=0.4)
     sp.save(fig, out / f"odd_step{k}.svg")
 
 
@@ -348,13 +369,14 @@ def odd(k):
 # 9. Reset wall (Napkin Math 6.2), log days
 # ---------------------------------------------------------------------------
 def reset_wall():
-    r = calcs.wall
-    rows = [("Manual resets", r["man"], "danger", f"{r['man']:.1f} days"),
-            ("Automated resets", r["auto"], "compute", f"{r['auto']:.1f} days"),
-            ("Execution only", r["exe"], "neutral", f"{r['exe']:.1f} days"),
-            ("14 rigs, manual", r["farm"], "network", f"{r['farm']:.1f} days"),
-            ("HIL-SERL budget", r["hil_days"], "data", "2.5 h, 750 trials"),
-            ("Simulation", r["sim_days"], "memory", f"{r['sim_days'] * 1440:.1f} min")]
+    c = calcs.CAMPAIGN
+    rows = [("Manual resets", num("manual_days"), "danger", f"{val('manual_days')} days"),
+            ("Automated resets", num("auto_days"), "compute", f"{val('auto_days')} days"),
+            ("Execution only", num("exec_days"), "neutral", f"{val('exec_days')} days"),
+            (f"{val('farm_rigs')} rigs, manual", num("farm_days"), "network", f"{val('farm_days')} days"),
+            ("HIL-SERL budget", c.seeded_budget.to("day").magnitude, "data",
+             f"{val('hil_hours')} h, {val('hil_trials')} trials"),
+            ("Simulation", c.simulated_time.to("day").magnitude, "memory", f"{val('sim_min')} min")]
     for k, n in ((1, 3), (2, 4), (3, 6)):
         fig, ax = plt.subplots(figsize=(5.8, 2.4))
         for i, (lab, v, ck, txt) in enumerate(rows):
@@ -383,24 +405,28 @@ def reset_wall():
 # 10. Soft-spring exploit (Napkin Math 6.3)
 # ---------------------------------------------------------------------------
 def spring(k):
-    s = calcs.spring_vals
+    e = calcs.EXPLOIT
+    f_lim = num("f_lim")
     kr = np.logspace(3, 8, 400)
-    keff = 1 / (1 / calcs.K_PLATE + 1 / kr)
-    f = calcs.V_FAST * np.sqrt(keff * calcs.MASS)
+    f = np.array([e.chain_peak_force(x * ureg("N/m")).to("N").magnitude for x in kr])
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
-    ax.axhspan(calcs.F_LIMIT, 220, color=C["danger_l"], alpha=0.5, zorder=0)
-    ax.axhline(calcs.F_LIMIT, color=VETO, lw=2, ls="--")
-    ax.text(1.2e3, calcs.F_LIMIT + 6, "latch limit 100 N", color=VETO, fontsize=12,
+    ax.axhspan(f_lim, 220, color=C["danger_l"], alpha=0.5, zorder=0)
+    ax.axhline(f_lim, color=VETO, lw=2, ls="--")
+    ax.text(1.2e3, f_lim + 6, f"latch limit {val('f_lim')} N", color=VETO, fontsize=12,
             fontweight="bold")
-    ax.plot([s["k_pen"]], [s["f_sim"]], "o", ms=12, color=C["memory"])
-    ax.text(1.2e3, 55, "simulator's spring:\n37.5 N",
+    ax.plot([e.penalty_stiffness.to("N/m").magnitude], [e.simulated_peak.to("N").magnitude],
+            "o", ms=12, color=C["memory"])
+    ax.text(1.2e3, 55, f"simulator's spring:\n{val('f_sim')} N",
             color=C["memory"], fontsize=12, fontweight="bold", linespacing=1.0)
-    ax.axhline(s["f_rigid"], color=SLATE, lw=2, ls=":", alpha=a(k >= 2))
-    ax.text(1.2e3, s["f_rigid"] + 6, "rigid arm on the real plate: 189.7 N",
+    f_rigid = e.rigid_peak.to("N").magnitude
+    ax.axhline(f_rigid, color=SLATE, lw=2, ls=":", alpha=a(k >= 2))
+    ax.text(1.2e3, f_rigid + 6, f"rigid arm on the real plate: {val('f_rigid')} N",
             color=SLATE, fontsize=12, fontweight="bold", alpha=a(k >= 2))
     ax.plot(kr, f, color=C["compute"], lw=3, alpha=a(k >= 3))
-    ax.plot([s["k_rob_star"]], [calcs.F_LIMIT], "o", ms=11, color=VETO, alpha=a(k >= 3))
-    ax.text(2.2e6, 50, "arm stiffer than\n1.54×10⁵ N/m\nexceeds the limit",
+    ax.plot([e.break_even_arm_stiffness.to("N/m").magnitude], [f_lim], "o", ms=11, color=VETO,
+            alpha=a(k >= 3))
+    k_star = f"{val('k_star_m')}×10{val('k_star_e').translate(SUPERSCRIPT)}"
+    ax.text(2.2e6, 50, f"arm stiffer than\n{k_star} N/m\nexceeds the limit",
             color=VETO, fontsize=12, fontweight="bold", alpha=a(k >= 3), linespacing=1.0)
     ax.set_xscale("log")
     ax.set_xlim(1e3, 1e8)
@@ -410,7 +436,7 @@ def spring(k):
     ax.minorticks_off()
     ax.set_ylim(0, 220)
     ax.set_xlabel("Robot-side stiffness, N/m (log scale)")
-    ax.set_ylabel("Peak force at 0.10 m/s, N", fontsize=11)
+    ax.set_ylabel(f"Peak force at {val('v_fast')} m/s, N", fontsize=11)
     ax.grid(color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, out / f"spring_step{k}.svg")
@@ -427,18 +453,24 @@ def gap_vector(k):
     # (a) dynamics
     ax = axs[0, 0]
     t = np.linspace(0, 60, 300)
-    ax.plot(t, np.clip(t * 0.5, 0, 10), **sim_kw)
-    ax.plot(t, np.clip(t * 0.25, 0, 10), **hw_kw)
-    ax.text(21, 2.6, "20 ms", color=C["neutral"], fontsize=12, fontweight="bold")
-    ax.text(41, 5.0, "40 ms", color=C["memory"], fontsize=12, fontweight="bold")
-    ax.set_title("Dynamics: time to 10 N", fontsize=13)
+    g = calcs.GAP
+    f_target = num("gap_f")
+    ax.plot(t, np.clip(t * g.simulated_rise_rate.to("N/ms").magnitude, 0, f_target), **sim_kw)
+    ax.plot(t, np.clip(t * g.physical_rise_rate.to("N/ms").magnitude, 0, f_target), **hw_kw)
+    ax.text(num("gap_t_sim") + 1, 2.6, f"{val('gap_t_sim')} ms", color=C["neutral"], fontsize=12,
+            fontweight="bold")
+    ax.text(num("gap_t_real") + 1, 5.0, f"{val('gap_t_real')} ms", color=C["memory"], fontsize=12,
+            fontweight="bold")
+    ax.set_title(f"Dynamics: time to {val('gap_f')} N", fontsize=13)
     ax.set_xlabel("ms", fontsize=12, labelpad=0)
     # (b) timing
     ax = axs[0, 1]
     t = np.linspace(0, 120, 300)
-    ax.plot(t, 0.2 * t, **sim_kw)
-    ax.plot(t, 0.2 * np.clip(t - 49.5, 0, None), **hw_kw)
-    ax.text(3, 26, "p99 delay 49.5 ms:\n9.9 mm unobserved", color=C["memory"],
+    mm_per_ms = g.approach_speed.to("mm/ms").magnitude
+    ax.plot(t, mm_per_ms * t, **sim_kw)
+    ax.plot(t, mm_per_ms * np.clip(t - num("gap_p99_ms"), 0, None), **hw_kw)
+    ax.text(3, 26, f"p99 delay {val('gap_p99_ms')} ms:\n{val('gap_travel_mm')} mm unobserved",
+            color=C["memory"],
             fontsize=12, fontweight="bold", linespacing=1.0)
     ax.set_ylim(0, 40)
     ax.set_title("Timing: command to motion", fontsize=13)
@@ -447,23 +479,25 @@ def gap_vector(k):
     ax = axs[1, 0]
     t = np.linspace(0, 10, 200)
     ax.plot(t, 0 * t, **sim_kw)
-    y = 3.2 + 0 * t
+    y = num("gap_bias_mm") + 0 * t
     y[(t > 5) & (t < 6.6)] = np.nan
     ax.plot(t, y, **hw_kw)
     ax.axvspan(5, 6.6, color=C["neutral_l"])
-    ax.text(0.3, 1.0, "bias +3.2 mm", color=C["memory"], fontsize=12, fontweight="bold")
+    ax.text(0.3, 1.0, f"bias +{val('gap_bias_mm')} mm", color=C["memory"], fontsize=12, fontweight="bold")
     ax.text(5.8, 4.3, "dropout", ha="center", fontsize=11.5, color=C["neutral"],
             fontweight="bold", linespacing=1.0)
     ax.set_ylim(-1, 6)
     ax.set_title("Sensing: range error", fontsize=13)
     # (d) appearance
     ax = axs[1, 1]
-    ax.axvspan(-2, 2, color=C["data_l"])
+    tol, shift = num("gap_tol_mm"), num("gap_patch_mm")
+    ax.axvspan(-tol, tol, color=C["data_l"])
     ax.plot([0], [0.5], "o", ms=10, color=C["neutral"])
-    ax.plot([6], [0.5], "o", ms=10, color=VETO)
+    ax.plot([shift], [0.5], "o", ms=10, color=VETO)
     ax.text(0, 0.8, "sim", ha="center", fontsize=12, color=C["neutral"], fontweight="bold")
-    ax.text(6, 0.8, "real: 6 mm", ha="center", fontsize=12, color=VETO, fontweight="bold")
-    ax.text(0, 0.15, "±2 mm tolerance", ha="center", fontsize=12, color=C["data"],
+    ax.text(shift, 0.8, f"real: {val('gap_patch_mm')} mm", ha="center", fontsize=12, color=VETO,
+            fontweight="bold")
+    ax.text(0, 0.15, f"±{val('gap_tol_mm')} mm tolerance", ha="center", fontsize=12, color=C["data"],
             fontweight="bold")
     ax.set_xlim(-4, 9)
     ax.set_ylim(0, 1.1)
@@ -483,19 +517,17 @@ def gap_vector(k):
 
 
 if __name__ == "__main__":
-    calcs.n_steps, calcs.g_half = calcs.discount()
-    calcs.per_eval, calcs.flow_ms = calcs.decoder()
-    calcs.wall = calcs.reset_wall()
-    calcs.spring_vals = calcs.spring()
     for k in (1, 2):
         dactyl_hook(k)
-    dotrows(out / "dactyl_ablation.svg", calcs.DACTYL_REAL, calcs.DACTYL_MEDIAN,
+    ablation = {c: calcs.DACTYL.trials(c, "4") for c in calcs.DACTYL.conditions("4")}
+    memory = {c: calcs.DACTYL.trials(c, "5") for c in calcs.DACTYL.conditions("5")}
+    dotrows(out / "dactyl_ablation.svg", ablation, {c: calcs.DACTYL.median(c) for c in ablation},
             (4.0, 2.7), highlight=("All randomizations",),
             names={"All randomizations": "All", "No observation noise": "No obs. noise",
                    "No physics randomizations": "No physics",
                    "No unmodeled effects": "No added effects",
                    "No randomizations": "None"})
-    dotrows(out / "dactyl_memory.svg", calcs.DACTYL_MEMORY, calcs.DACTYL_MEMORY_MEDIAN,
+    dotrows(out / "dactyl_memory.svg", memory, {c: calcs.DACTYL.median(c) for c in memory},
             (2.9, 1.9), highlight=("LSTM policy",),
             names={"LSTM policy": "LSTM", "FF policy, LSTM value": "FF, LSTM V",
                    "FF policy, FF value": "FF, FF V"})

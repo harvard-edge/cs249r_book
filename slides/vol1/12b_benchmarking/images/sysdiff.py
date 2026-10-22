@@ -25,9 +25,16 @@ def flat(name):
     return out
 
 
-a, b = flat(sys.argv[1]), flat(sys.argv[2])
-keys = sorted(set(a) | set(b))
-diff = [k for k in keys if a.get(k) != b.get(k)]
-print(f"{len(diff)} of {len(keys)} fields differ")
-for k in diff:
-    print(f"  {k}: {a.get(k)!r} | {b.get(k)!r}")
+def differ(name_a, name_b):
+    """The fields that differ between two systems, and every field either names."""
+    a, b = flat(name_a), flat(name_b)
+    keys = sorted(set(a) | set(b))
+    return [k for k in keys if a.get(k) != b.get(k)], keys
+
+
+if __name__ == "__main__":
+    a, b = flat(sys.argv[1]), flat(sys.argv[2])
+    diff, keys = differ(sys.argv[1], sys.argv[2])
+    print(f"{len(diff)} of {len(keys)} fields differ")
+    for k in diff:
+        print(f"  {k}: {a.get(k)!r} | {b.get(k)!r}")
