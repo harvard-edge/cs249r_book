@@ -47,7 +47,7 @@ files to generate HTML. Keep dated offering URLs stable when a new term begins.
   offerings, archives, and courses at other institutions. The former
   `community/courses.html` address forwards here, preserving filters and anchors.
   Adopter data still comes from `site/community/adopters.yml` and its refresh cache.
-- The [Instructor Hub / AI Engineering Blueprint](../instructors/index.qmd)
+- The [Instructor Hub](../instructors/index.qmd)
   holds reusable syllabi, pedagogy, assessment guidance, and adoption resources.
 - The [labs directory](../labs/README.md) holds reusable experiments. Course
   offerings link to those instructions and specify their local deadlines.
@@ -119,16 +119,21 @@ projects: Volumes III and IV and the Volume IV labs
 currently use the working development site because their production routes are
 not yet published. Course navigation stays relative to this Quarto project.
 Remove the draft URL overrides when those production routes become available.
-The Lab Instructions sidebar item opens the course homepage's lab sequence.
 
 ## Course families and navigation
 
 The directory groups hosted material by course family. Each card links the
-family overview and its offerings or resources. Physical AI and TinyML have
-separate sidebar IDs in `_quarto.yml`; page-level `sidebar` metadata selects the
-appropriate family. Offering pages can hide the sidebar when they provide their
-own local navigation. New course families should receive their own card and
-sidebar when their student pages are available.
+family overview and its offerings or resources. All course pages share one
+sidebar (`courses` in `_quarto.yml`) that lists every course, so a reader can move
+between them; the page's table of contents covers its own sections. Offering pages
+can hide the sidebar when they provide their own local navigation.
+
+Every course overview uses the same sections, in this order, and omits any that
+do not apply: Overview (`#overview`), Syllabus and schedule (`#syllabus`),
+Materials (`#materials`), For instructors (`#for-instructors`), and Offerings
+(`#offerings`). The subtitle states the course's status and volume, matching the
+labels in the directory and the Instructor Hub. A new course family receives a
+card, a sidebar entry, and an overview page in this form.
 
 The Edge AI page is a learning path through existing textbook and hardware
 materials, not a dated course offering. Keep its external materials attributed
@@ -143,7 +148,9 @@ preview, and deploy the updated instructor artifact with the course artifact.
 ## Instructor entry point
 
 The main site keeps Instructor Hub at `/instructors/`. Its landing page starts
-with course selection and then presents the AI Engineering Blueprint and shared
-teaching guidance. `/courses/intro/` and `/courses/scaling/` provide student-facing
+with a short getting-started note, then one kit per course linking its page here,
+its syllabus or guide, slides, and hands-on materials, then the shared guides. The
+introductory and scaling courses can run as a two-semester sequence; the hub's
+course map covers that case. `/courses/intro/` and `/courses/scaling/` provide student-facing
 overviews of the existing curriculum; the instructor syllabi remain canonical.
 Course packages can combine reusable materials with dated institutional examples.

@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🗺️ The AI Engineering Blueprint: Instructor Site</h1>
+  <h1>🗺️ MLSysBook Instructor Hub</h1>
 </div>
 
 <!-- EARLY-RELEASE-CALLOUT:START -->
@@ -15,7 +15,7 @@
 
 ## 📖 What This Is
 
-"The AI Engineering Blueprint" is the instructor-facing companion site for the [Machine Learning Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI engineering as a university course.
+The Instructor Hub is the instructor-facing companion site for the [Machine Learning Systems textbook](https://mlsysbook.ai). It holds the syllabi, shared materials, and teaching guidance for every course built on the book. Course descriptions and community offerings live in the separate [course catalog](https://mlsysbook.ai/courses/) (`../courses/`).
 
 <table width="100%" style="width:100%">
   <thead>
@@ -27,7 +27,7 @@
   <tbody>
     <tr>
       <td width="15%" align="center"><b>📅 Syllabi</b></td>
-      <td><b>Week-by-week syllabi</b> for two semesters (Foundations + Scale).</td>
+      <td><b>Week-by-week syllabi</b> for the introductory, scaling, and TinyML courses, plus the Physical AI instructor guide.</td>
     </tr>
     <tr>
       <td width="15%" align="center"><b>⚖️ Assessment</b></td>
@@ -68,12 +68,13 @@ Requires [Quarto](https://quarto.org/) 1.4+.
 ```text
 instructors/
 ├── _quarto.yml              # Site configuration
-├── index.qmd                # Landing page (hero + overview)
+├── index.qmd                # Hub page: getting started, course kits, guides
 ├── getting-started.qmd      # 8-step adoption checklist
-├── course-map.qmd           # Integration matrix + SVG diagrams
-├── foundations-syllabus.qmd # Semester 1: 16-week schedule
-├── scale-syllabus.qmd       # Semester 2: 16-week schedule
-├── vol4/README.md          # Volume IV project seminar working draft (GitHub only)
+├── course-map.qmd           # Introduction + Scaling as a two-semester sequence
+├── foundations-syllabus.qmd # Introduction course: 16-week schedule
+├── scale-syllabus.qmd       # Scaling course: 16-week schedule
+├── tinyml-syllabus.qmd      # TinyML short course: 10-week schedule
+├── vol4/                    # Physical AI instructor guide (index.qmd) and forwarding stub
 ├── pedagogy.qmd             # Learning science + facilitation
 ├── assessment.qmd           # Rubrics + sample work
 ├── ta-guide.qmd             # TA training + grading workflows
@@ -88,7 +89,7 @@ instructors/
 
 This site follows the MLSysBook ecosystem design system:
 
-*   **Accent color**: Indigo (`#6366f1` light, `#818cf8` dark)
+*   **Accent color**: Crimson (`#A51C30`) in light mode, indigo (`#818cf8`) in dark mode
 *   **Callout geometry**: 5px left border, 0.5rem radius, 8% opacity backgrounds
 *   **Typography**: Inter (body), Outfit (headings), JetBrains Mono (code)
 *   **Navbar**: Dark background (`#0a0a0f`), matching book sites

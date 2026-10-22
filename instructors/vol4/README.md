@@ -11,5 +11,5 @@ The student-facing course overview and syllabus have moved to the
 - [Studio labs](../../labs/vol4/README.md): reusable assignments and bench resources.
 
 The [first-offering teaching plan](first-offering-plan.md) remains an instructor
-planning document. For general curriculum adoption, see the
-[AI Engineering Blueprint](../index.qmd).
+planning document. For other courses and shared teaching guidance, see the
+[Instructor Hub](../index.qmd).
