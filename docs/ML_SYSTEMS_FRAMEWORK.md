@@ -72,8 +72,11 @@ A vocabulary that things are labeled with must label the same item the same way 
 |---|---|---|---|---|---|
 | 1 (first rules) | 78.7% (κ 0.78) | 82.3% (κ 0.81) | 74.6% | 37.1% | 93.0% |
 | 2 (rules revised) | 83.7% (κ 0.83) | 87.0% (κ 0.86) | 80.4% | 55.9% | 94.3% |
+| Held out (fresh 300) | 80.7% (κ 0.80) | 84.7% (κ 0.83) | 74.5% | 45.0% | 92.7% |
 
-*Compatible* means the taggers chose the same subject, shared a concept, or one chose a concept homed in the other's subject. Run 1 disagreements had three causes: filing by platform instead of mechanism (mobile and edge questions agreed only 65% and 69% of the time), filing calculations under the modeling method, and filing a technique's effect under the effect. The three rules above, a preference for one concept, and 13 concepts the taggers proposed came from them; mobile and edge rose to 78% and 76%. Run 2 is not an independent test, because the rules were revised on the same sample, and model taggers are not people. A fresh sample, ideally with human taggers, is the next measurement.
+*Compatible* means the taggers chose the same subject, shared a concept, or one chose a concept homed in the other's subject. Run 1 disagreements had three causes: filing by platform instead of mechanism (mobile and edge questions agreed only 65% and 69% of the time), filing calculations under the modeling method, and filing a technique's effect under the effect. The three rules above, a preference for one concept, and 13 concepts the taggers proposed came from them; mobile and edge rose to 78% and 76%. Run 2 is not an independent test, because the rules were revised on the same sample; the held-out row is, measured on 300 different questions after the rules were fixed (`staffml-300-heldout-2026-10.yml`). Model taggers are not people, so human taggers are the next measurement.
+
+The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/taxonomy-tagging-2026-10.yaml` records the method and the review queue of disagreements). Questions left without a concept proposed what was missing; the recurring proposals became eight concepts (Transformer variants, data transfer cost, duty cycling, priority inversion, randomized smoothing, sensor interconnect bandwidth, finite buffers, asynchronous on-device inference), and those questions were retagged.
 
 ## Website
 
@@ -89,7 +92,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,515 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,531 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
 
 ## Codes, downloads, and citation
 
