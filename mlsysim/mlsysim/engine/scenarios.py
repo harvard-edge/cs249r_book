@@ -5005,6 +5005,12 @@ class Scenarios(Registry):
         rows=_Literature.Series.NotableModels.entries,
         split_year=2010,  # scenario assumption: the deep-learning era begins
     )
+    NotableModelDatasetGrowth = _st.DatasetGrowthScenario(
+        name="Training dataset sizes of notable models, before and after 2010",
+        description="Epoch AI Notable AI Models that report training dataset size (datapoints), fit as log10(training_dataset_size) on date.",
+        rows=_Literature.Series.NotableModelDatasets.entries,
+        split_year=2010,  # scenario assumption: the deep-learning era begins
+    )
 
     # ── ML operations at scale (added 2026-10-20) ─────────────────────────────
     OperationalLoadSketch = _st.OperationalLoadScenario(
@@ -11192,4 +11198,29 @@ class Scenarios(Registry):
                     "the one-attempt submissions and their best score so far.",
         series_name="SweBenchVerifiedLeaderboard",
         tasks=int(_Literature.AgentEvaluation.SweBenchVerifiedTasks),
+    )
+
+    # --- Production gateway telemetry and repair trajectory calls (added 2026-10-21) ---
+    VercelGatewayTokenGrowth = _st.GatewayTokenGrowthScenario(
+        name="Production inference gateway usage, spend, price per token, and tool-call share (Vercel 2026)",
+        description="Monthly index (April 2026 = 100) of token usage, total spend, and price per token "
+                    "through September 2026, paired with the share of requests and tokens ending in tool calls.",
+        index_series_name="VercelGatewayUsageSpendPrice",
+        tool_series_name="VercelGatewayToolCallShare",
+        teams_covered=200_000,
+    )
+    MiniSweAgentDjango12050Calls = _st.RecordedRepairTrajectoryCallsScenario(
+        name="Per-call and cumulative context characters in django__django-12050 (mini-SWE-agent + Claude Sonnet 4)",
+        description="The 22 model calls of one public SWE-bench Verified repair trajectory "
+                    "(Literature.SweBenchMiniSonnet4Django12050Calls).",
+        series_name="SweBenchMiniSonnet4Django12050Calls",
+        run_series_name="SweBenchMiniSonnet4Run",
+        instance_id="django__django-12050",
+    )
+    VercelGatewayWorkloadSpend = _st.GatewayWorkloadSpendScenario(
+        name="Token volume share vs. spend share across gateway workloads and model weight tiers (Vercel 2026)",
+        description="Workload token and cost shares (Literature.VercelGatewayUseCaseShares) and "
+                    "open-weight vs. closed-weight token and spend shares (Literature.VercelGatewayOpenWeightShare).",
+        use_case_series_name="VercelGatewayUseCaseShares",
+        open_weight_series_name="VercelGatewayOpenWeightShare",
     )

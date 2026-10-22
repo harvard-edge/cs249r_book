@@ -2799,7 +2799,25 @@ class ParameterGrowthResult(SolverResult):
     model_count: int
 
 
-__all__ += ["ParameterGrowthResult"]
+class DatasetGrowthResult(SolverResult):
+    """Result from DatasetGrowthModel: dataset-size fits before and after a split year."""
+    models: List[str]
+    domains: List[str]
+    dataset_sizes: List[float]
+    years: List[float]                 # decimal publication years
+    log_dataset_sizes: List[float]
+    split_year: int
+    early_slope: float                 # decades of datapoints per year, before the split
+    early_intercept: float
+    late_slope: float
+    late_intercept: float
+    early_doubling_months: float
+    late_doubling_months: float
+    largest_dataset_size: float
+    model_count: int
+
+
+__all__ += ["ParameterGrowthResult", "DatasetGrowthResult"]
 
 
 # --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---

@@ -41,6 +41,8 @@ interface QuestionInfo {
   competency_area: string;
   topic?: string;
   zone?: string;
+  taxonomy_subject?: string;
+  taxonomy_concepts?: string[];
 }
 
 /** Build a GitHub issue URL for reporting a problem with a question */
@@ -59,6 +61,8 @@ export function buildReportUrl(
     `**Track:** ${q.track}`,
     `**Area:** ${q.competency_area}`,
     q.topic ? `**Topic:** ${q.topic}` : '',
+    q.taxonomy_subject ? `**Subject:** ${q.taxonomy_subject}` : '',
+    q.taxonomy_concepts?.length ? `**Concepts:** ${q.taxonomy_concepts.join(', ')}` : '',
     q.zone ? `**Zone:** ${q.zone}` : '',
     categoryLine ? `\n${categoryLine}` : '',
     `\n**What's wrong:**\n\n`,
@@ -105,6 +109,7 @@ export function buildContributeUrl(customBody?: string): string {
     '**Track:** <!-- cloud / edge / mobile / tinyml -->',
     '**Suggested Level:** <!-- L1 (recall) / L2 (understand) / L3 (apply) / L4 (analyze) / L5 (evaluate) / L6+ (create) -->',
     '**Topic:** <!-- Pick from existing topics or suggest a new one -->',
+    '**Subject and concepts:** <!-- Optional: ML Systems Taxonomy subject and concepts, see https://mlsysbook.ai/explore/ -->',
     '**Zone:** <!-- recall / analyze / design / implement / diagnosis / specification / fluency / evaluation / realization / optimization / mastery -->',
     '',
     '### Scenario',

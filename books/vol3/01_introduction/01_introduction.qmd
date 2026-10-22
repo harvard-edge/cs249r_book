@@ -90,7 +90,168 @@ Replacing the human operator in the interaction loop with a software runtime def
 
 :::
 
-Moving from conversational token generation to autonomous goal execution changes the metrics the system is engineered against. Model serving optimizes tokens per second, tail latency, and accelerator utilization; an agentic system is judged by task completion rate, cost per accepted task, and reliability across multi-turn horizons. An isolated-request service accounts for each call separately, retains no task state after the response, and treats an HTTP 200 status as success. None of those conventions suffices when a delegated task spans dozens of dependent steps, accumulates context and serving state between calls (the attention key-value cache retained for the growing prefix, so that the next turn need not recompute it, can occupy gigabytes of accelerator memory), and triggers side effects that permanently alter external systems. Turning a model's candidate output into a completed task therefore requires examining everything that must happen between a useful proposal and an accepted outcome.
+```{python}
+#| echo: false
+#| label: calc-vol3-intro-gateway-token-growth
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRODUCTION GATEWAY TOKEN VOLUME, SPEND, AND TOOL-CALL SHARE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-agentic-token-growth and the paragraphs around it in
+# │          @sec-vol3-intro-evolution.
+# │ Goal: Show that falling token prices expanded total inference spend as
+# │       multi-turn tool loops overtook production token volume.
+# │ Show: Tool-calling request share and token share; tokens-per-request ratio
+# │       over non-tool calls; five-month price drop, token-volume growth, and
+# │       total-spend growth on a production inference gateway.
+# │ How:  Scenarios.VercelGatewayTokenGrowth over
+# │       Literature.VercelGatewayUsageSpendPrice and
+# │       Literature.VercelGatewayToolCallShare.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent
+
+class GatewayTokenGrowth:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    scenario = Scenarios.VercelGatewayTokenGrowth
+    teams = scenario.teams_covered
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    req_start = scenario.tool_request_share_start
+    req_end = scenario.tool_request_share_end
+    tok_start = scenario.tool_token_share_start
+    tok_end = scenario.tool_token_share_end
+    density_ratio = scenario.tool_tokens_per_request_ratio
+    price_drop = scenario.price_drop_fraction
+    price_end = scenario.price_index_end
+    usage_growth = scenario.usage_growth
+    spend_growth = scenario.spend_growth
+    usage_end = scenario.end_row["usage_index"]
+    spend_end = scenario.end_row["spend_index"]
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(req_start - 0.114) < 1e-4 and abs(req_end - 0.222) < 1e-4, "Tool request share rose from 11.4% to 22.2%")
+    check(abs(tok_end - 0.589) < 1e-4 and abs(density_ratio - 5.02) < 0.05, "Tool calls carry 58.9% of tokens (~5.0x per request)")
+    check(
+        abs(price_drop - 0.567) < 1e-3 and abs(usage_growth - 7.908) < 1e-2 and abs(spend_growth - 3.427) < 1e-2,
+        "57% price drop, 7.9x usage, 3.4x spend",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    teams_str = fmt_int(teams)
+    req_start_str = fmt_percent(req_start, precision=1, style="prose")
+    req_end_str = fmt_percent(req_end, precision=1, style="prose")
+    tok_start_str = fmt_percent(tok_start, precision=1, style="prose")
+    tok_end_str = fmt_percent(tok_end, precision=1, style="prose")
+    density_mult_str = fmt_multiple(density_ratio, precision=1)
+    price_drop_str = fmt_percent(round(price_drop, 2), precision=0, style="prose")
+    price_end_str = fmt(price_end, precision=1)
+    usage_growth_mult_str = fmt_multiple(usage_growth, precision=1)
+    spend_growth_mult_str = fmt_multiple(spend_growth, precision=1)
+    usage_end_str = fmt(usage_end, precision=1)
+    spend_end_str = fmt(spend_end, precision=1)
+```
+
+Production traffic shows how rapidly that third arrangement has overtaken the volume of isolated prompts. Across a multi-provider inference gateway serving more than `{python} GatewayTokenGrowth.teams_str` production teams [@vercel2026aigateway], the share of requests ending in a tool call nearly doubled over six months, rising from `{python} GatewayTokenGrowth.req_start_str` to `{python} GatewayTokenGrowth.req_end_str`. Because each tool-using turn carries accumulated history and environment output, those `{python} GatewayTokenGrowth.req_end_str` of requests already consumed `{python} GatewayTokenGrowth.tok_end_str` of all production tokens (up from `{python} GatewayTokenGrowth.tok_start_str`), or `{python} GatewayTokenGrowth.density_mult_str` as many tokens per request as calls without tools. @Fig-vol3-agentic-token-growth tracks the aggregate token volume, total inference spend, and average price per token over the following five months on the same gateway.
+
+::: {#fig-vol3-agentic-token-growth fig-env="figure" fig-pos="htb" fig-cap="**Cheaper Tokens Fuel an Agentic Volume Surge**: Monthly production token volume, total inference spend, and average price per token across a multi-provider inference gateway, each indexed to 100 in April 2026. All three series share a common baseline so their divergence is directly comparable: while the per-token price index falls below half of its starting level by September, token volume climbs nearly eightfold and pulls total inference spend to more than three times its April level. Data from @vercel2026aigateway." fig-alt="Line chart of three monthly index series from April to September 2026, all starting at 100 in April 2026 along a dotted horizontal baseline. A green dashed line with triangle markers for average price per token rises slightly to 119 in May and then falls to 43 in September, labeled minus 57 percent. An orange solid line with square markers for total inference spend climbs steadily to 343 in September, labeled 3.4 times. A blue solid line with circle markers for token volume climbs steeply to 791 in September, labeled 7.9 times."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AGENTIC TOKEN VOLUME, SPEND, AND PRICE INDEX (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-agentic-token-growth
+# │
+# │ Goal: Show falling token prices driving an expansion in token volume and
+# │       total inference spend across production workloads.
+# │ Show: Monthly index (April 2026 = 100) for token volume, total spend, and
+# │       average price per token through September 2026.
+# │ How: Literature.VercelGatewayUsageSpendPrice (MLSysIM);
+# │      book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+rows = book_style.load_series("vol3/01_introduction/data/vercel_gateway_usage_spend_price_index.csv").entries
+months = ["Apr", "May", "Jun", "Jul", "Aug", "Sep"]
+x = np.arange(len(rows))
+usage = [r["usage_index"] for r in rows]
+spend = [r["spend_index"] for r in rows]
+price = [r["price_per_token_index"] for r in rows]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.axhline(100, color=COLORS["secondary"], ls=":", lw=1.0, zorder=1)
+ax.plot(x, usage, "-o", color=COLORS["BlueLine"], lw=2.2, ms=6, zorder=4, label="Token volume")
+ax.plot(x, spend, "-s", color=COLORS["OrangeLine"], lw=2.2, ms=5.5, zorder=3, label="Total inference spend")
+ax.plot(x, price, "--^", color=COLORS["GreenLine"], lw=2.0, ms=6, zorder=3, label="Average price per token")
+
+bbox = dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.4)
+ax.annotate(
+    f"{usage[-1]:.0f} ({usage[-1] / usage[0]:.1f}×)",
+    (x[-1], usage[-1]),
+    xytext=(0, 8),
+    textcoords="offset points",
+    ha="center",
+    va="bottom",
+    fontsize=9,
+    fontweight="bold",
+    color=COLORS["BlueLine"],
+    bbox=bbox,
+)
+ax.annotate(
+    f"{spend[-1]:.0f} ({spend[-1] / spend[0]:.1f}×)",
+    (x[-1], spend[-1]),
+    xytext=(0, 8),
+    textcoords="offset points",
+    ha="center",
+    va="bottom",
+    fontsize=9,
+    fontweight="bold",
+    color=COLORS["OrangeLine"],
+    bbox=bbox,
+)
+ax.annotate(
+    f"{price[-1]:.0f} (−{100 * (1 - price[-1] / price[0]):.0f}%)",
+    (x[-1], price[-1]),
+    xytext=(0, 8),
+    textcoords="offset points",
+    ha="center",
+    va="bottom",
+    fontsize=9,
+    fontweight="bold",
+    color=COLORS["GreenLine"],
+    bbox=bbox,
+)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xticks(x)
+ax.set_xticklabels(months)
+ax.set_xlim(-0.3, len(rows) - 0.5)
+ax.set_ylim(0, 890)
+ax.set_xlabel("Month (2026)")
+ax.set_ylabel("Production index (April 2026 = 100)")
+ax.legend(
+    loc="upper left",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.6,
+)
+plt.show()
+plt.close()
+```
+
+:::
+
+As the average price per token fell by `{python} GatewayTokenGrowth.price_drop_str` (to an index of `{python} GatewayTokenGrowth.price_end_str`), teams did not pocket the savings on a fixed request volume; they deployed multi-turn loops that consumed `{python} GatewayTokenGrowth.usage_growth_mult_str` as many tokens (reaching `{python} GatewayTokenGrowth.usage_end_str`) and raised total expenditure `{python} GatewayTokenGrowth.spend_growth_mult_str` (to `{python} GatewayTokenGrowth.spend_end_str`). Lower per-token prices made multi-step delegation affordable, and multi-step delegation in turn broke the assumptions of isolated-request serving. An isolated-request service accounts for each call separately, retains no task state after the response, and treats an HTTP 200 status as success. None of those conventions holds when a delegated task spans dozens of dependent steps, accumulates context and serving state between calls (the attention key-value cache retained for the growing prefix, so that the next turn need not recompute it, can occupy gigabytes of accelerator memory), and triggers side effects that permanently alter external systems. Turning a model's candidate output into a completed task therefore requires examining everything that must happen between a useful proposal and an accepted outcome.
 
 ## From a Useful Proposal to an Accepted Task {#sec-vol3-intro-existence-moment}
 
@@ -517,7 +678,7 @@ class MeasuredHorizon:
     growth_str = fmt_int(round(growth, -3))
 ```
 
-:::: {#fig-vol3-measured-task-horizon fig-env="figure" fig-pos="htb" fig-cap="**Measured Task Horizon**: Each point is one model's 50 percent time horizon, the expert-time length of task its agent completes in half its attempts, against the model's release date. The vertical axis is logarithmic, so the straight dashed fit to frontier models released since 2023 is exponential growth, doubling about every `{python} MeasuredHorizon.recent_months_str` months. Filled points were the frontier at release, open points were not, and bars are 95 percent confidence intervals. Data from @kwa2025measuring (Time Horizon v1.1)." fig-alt="Scatter plot on a logarithmic vertical axis labeled from 1 second to 1 week against model release dates from 2019 to 2026. Filled blue points with vertical error bars rise from a few seconds in 2019 to above 8 hours in 2026, with model names labeled beside selected points. Gray open points sit near the filled ones. A gray dashed straight line runs through the points from 2023 onward."}
+::: {#fig-vol3-measured-task-horizon fig-env="figure" fig-pos="htb" fig-cap="**Measured Task Horizon**: Each point is one model's 50 percent time horizon, the expert-time length of task its agent completes in half its attempts, against the model's release date. The vertical axis is logarithmic, so the straight dashed fit to frontier models released since 2023 is exponential growth, doubling about every `{python} MeasuredHorizon.recent_months_str` months. Filled points were the frontier at release, open points were not, and bars are 95 percent confidence intervals. Data from @kwa2025measuring (Time Horizon v1.1)." fig-alt="Scatter plot on a logarithmic vertical axis labeled from 1 second to 1 week against model release dates from 2019 to 2026. Filled blue points with vertical error bars rise from a few seconds in 2019 to above 8 hours in 2026, with model names labeled beside selected points. Gray open points sit near the filled ones. A gray dashed straight line runs through the points from 2023 onward."}
 
 ```{python}
 #| echo: false
@@ -539,10 +700,10 @@ import matplotlib.dates as mdates
 from mlsysim import Literature
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
-rows = Literature.AgentTimeHorizon.entries
+rows = book_style.load_series("vol3/01_introduction/data/metr_time_horizon_v1_1.csv").entries
 date = lambda r: dt.datetime.fromisoformat(r["release_date"])
 for is_frontier in (False, True):
     pts = [r for r in rows if bool(r["is_sota"]) == is_frontier]
@@ -573,9 +734,9 @@ ax.plot(
     [MeasuredHorizon.scenario.fitted_minutes(d) for d in xs],
     "--",
     color=COLORS["secondary"],
-    lw=1.5,
+    lw=1.6,
     zorder=3,
-    label=f"Fit since 2023: doubles every {MeasuredHorizon.recent_months_str} months",
+    label=f"Fit since 2023 (~{MeasuredHorizon.recent_months_str}-mo doubling)",
 )
 
 # ┌── 3. LABELS ───────────────────────────────────────────────────────────────
@@ -589,9 +750,10 @@ names = {
     "o3_inspect": "o3",
     "gpt_5_2025_08_07_inspect": "GPT-5",
     "claude_opus_4_6_inspect": "Claude Opus 4.6",
-    "claude_mythos_preview_early_inspect": "Claude Mythos (preview)",
+    "claude_mythos_preview_early_inspect": "Claude Mythos",
 }
-leader = {"claude_mythos_preview_early_inspect": ("2025-04-01", 1900), "claude_opus_4_6_inspect": ("2025-03-01", 800)}
+leader = {"claude_mythos_preview_early_inspect": ("2024-11-01", 1900), "claude_opus_4_6_inspect": ("2024-11-01", 750)}
+bbox = dict(facecolor="white", alpha=0.78, edgecolor="none", pad=0.4)
 for r in rows:
     if r["model_key"] not in names:
         continue
@@ -603,27 +765,58 @@ for r in rows:
             xytext=(dt.datetime.fromisoformat(d), yv),
             ha="right",
             va="center",
-            fontsize=8.5,
+            fontsize=9,
+            color=COLORS["primary"],
+            bbox=bbox,
             arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.7, shrinkB=4),
         )
+    elif r["model_key"] == "gpt2":
+        ax.annotate(
+            names[r["model_key"]],
+            (date(r), r["p50_min"]),
+            xytext=(8, 4),
+            textcoords="offset points",
+            ha="left",
+            fontsize=9,
+            color=COLORS["primary"],
+            bbox=bbox,
+        )
     else:
-        ax.annotate(names[r["model_key"]], (date(r), r["p50_min"]), xytext=(-6, 6), textcoords="offset points", ha="right", fontsize=8.5)
+        ax.annotate(
+            names[r["model_key"]],
+            (date(r), r["p50_min"]),
+            xytext=(-6, 5),
+            textcoords="offset points",
+            ha="right",
+            fontsize=9,
+            color=COLORS["primary"],
+            bbox=bbox,
+        )
 
 # ┌── 4. DECORATE ─────────────────────────────────────────────────────────────
 ax.set_yscale("log")
-ticks = {"1 s": 1 / 60, "10 s": 1 / 6, "1 min": 1, "10 min": 10, "1 hr": 60, "8 hr": 480, "1 week\n(40 hr)": 2400}
+ticks = {"1 s": 1 / 60, "10 s": 1 / 6, "1 min": 1, "10 min": 10, "1 hr": 60, "8 hr": 480, "1 wk": 2400}
 ax.set_yticks(list(ticks.values()))
 ax.set_yticklabels(list(ticks))
 ax.minorticks_off()
 ax.set_ylim(1 / 90, 4000)
 ax.set_xlabel("Model release date")
-ax.set_ylabel("Task length completed with\n50% success (expert time)")
-ax.legend(loc="upper left", frameon=False, fontsize=9)
+ax.set_ylabel("50% task horizon (expert time)")
+ax.legend(
+    loc="upper left",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.6,
+)
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 Among the frontier models in @fig-vol3-measured-task-horizon, the 50 percent horizon grew from about `{python} MeasuredHorizon.first_s_str` seconds to about `{python} MeasuredHorizon.last_h_str` hours, a factor of roughly `{python} MeasuredHorizon.growth_str`. That is a doubling every `{python} MeasuredHorizon.all_months_str` months across the whole period and every `{python} MeasuredHorizon.recent_months_str` months since 2023. @Eq-vol3-horizon-compounding turns that trend into an engineering obligation. A task that occupies an expert for hours instead of minutes spans many more dependent steps, and at a fixed per-step error, doubling the unchecked horizon squares the probability of success. Each doubling of the delegated task therefore requires either halving the per-step error or inserting checks that halve the unchecked segment between them. Model improvement supplies the first; only the runtime can supply the second, and the measured horizon is itself a reminder that half the attempts at that length still fail.
 
@@ -772,9 +965,167 @@ What the tools return shapes the next turn: a thread deadlock calls for a differ
 
 [^fn-feedback-control-cybernetics]: **Cybernetics**: Wiener's 1948 book named the study of control through feedback, in which a system measures the result of its own action and uses the difference from its goal to choose the next one [@wiener1948cybernetics]. The loop corrects errors only if the measurement comes from the environment; a runtime that feeds back the model's own account of what it did has closed a loop around a claim rather than around the result. \index{Cybernetics!feedback loop}
 
-Because dependencies cross turn boundaries, the runtime must manage the whole trajectory rather than isolated calls. The corrected patch depends on compiler errors produced several turns earlier, each edit draws down the task's cumulative token and dollar budget, and every action must be checked against the task's permissions. A single model request ends as soon as its response stream finishes, whereas the delegated task, along with any background tool runs, finishes only when the runtime settles it. The runtime therefore manages state, budgets, and lifetimes across the whole task rather than call by call.
+Because dependencies cross turn boundaries, the runtime must manage the whole trajectory rather than isolated calls. The corrected patch depends on compiler errors produced several turns earlier, each edit draws down the task's cumulative token and dollar budget, and every action must be checked against the task's permissions. A single model request ends as soon as its response stream finishes, whereas the delegated task, along with any background tool runs, finishes only when the runtime settles it. Even the prompt itself compounds from turn to turn: in a recorded repository repair from the benchmark in @sec-vol3-intro-existence-moment [@jimenez2024swebench; @yang2024sweagent], each turn appends the model's command and the shell's output to the conversation history before invoking the model again (@fig-vol3-repair-trajectory-context-growth).
 
-This boundary explains why a service built for isolated requests needs additional task-level mechanisms to host a multi-turn trajectory (@tbl-vol3-request-vs-trajectory). Stateful services may already provide some of these mechanisms; the comparison names engineering responsibilities that later chapters develop rather than limits built into web services.
+```{python}
+#| label: calc-vol3-intro-repair-trajectory-context
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RECORDED REPAIR TRAJECTORY CONTEXT ACCUMULATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-repair-trajectory-context-growth and the paragraph
+# │          following it in @sec-vol3-intro-trajectory-systems-boundary.
+# │ Goal: Quantify per-call and cumulative input growth across one recorded
+# │       SWE-bench Verified repair trajectory.
+# │ Show: Call count, first-call vs. final-call context characters, cumulative
+# │       characters sent vs. distinct characters added, and the re-read ratio.
+# │ How:  Scenarios.MiniSweAgentDjango12050Calls over
+# │       Literature.SweBenchMiniSonnet4Django12050Calls.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt_int, fmt_multiple
+
+class RepairTrajectoryContext:
+    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
+    scenario = Scenarios.MiniSweAgentDjango12050Calls
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    calls = scenario.calls
+    first_chars = scenario.first_call_chars
+    last_chars = scenario.last_call_chars
+    ctx_growth = scenario.context_growth
+    cum_sent = scenario.cumulative_sent_chars
+    cum_new = scenario.cumulative_new_chars
+    reread_mult = scenario.reread_ratio
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(calls == 22, "Recorded trajectory has 22 model calls")
+    check(ctx_growth > 5.0 and reread_mult > 13.0, "Context grows >5x and cumulative input is >13x distinct text")
+    check(last_chars == cum_new, "Append-only trajectory final context equals cumulative distinct characters")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    calls_str = fmt_int(calls)
+    first_chars_str = fmt_int(first_chars, commas=True)
+    last_chars_str = fmt_int(last_chars, commas=True)
+    ctx_growth_mult_str = fmt_multiple(ctx_growth, precision=1)
+    cum_sent_str = fmt_int(cum_sent, commas=True)
+    cum_new_str = fmt_int(cum_new, commas=True)
+    reread_mult_str = fmt_multiple(reread_mult, precision=1)
+```
+
+::: {#fig-vol3-repair-trajectory-context-growth fig-env="figure" fig-pos="htb" fig-cap="**Per-Call Context Growth in a Repair Trajectory**: Context characters read on each of the `{python} RepairTrajectoryContext.calls_str` model calls in one recorded repository-repair trajectory (`django__django-12050`), decomposed into re-sent history from earlier turns and new prompt or tool observation text added on that turn. Each bar's light lower segment equals the previous bar's full height because the stateless model interface resends the entire prior transcript on every turn. Data from @jimenez2024swebench and @yang2024sweagent." fig-alt="Stacked vertical bar chart of context characters read per model call across 22 calls of a repository repair trajectory. Each bar stacks a light blue lower segment for re-sent history from earlier turns beneath a dark blue upper segment for new input added on that turn. Total bar height rises from 5.5 thousand characters on call 1 to 29.6 thousand characters on call 22, while a callout box notes that 397.0 thousand cumulative characters are sent across all 22 calls against 29.6 thousand characters of distinct transcript."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RECORDED REPAIR TRAJECTORY CONTEXT ACCUMULATION (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-repair-trajectory-context-growth
+# │
+# │ Goal: Show why multi-turn tool trajectories multiply input token volume.
+# │ Show: Stacked bars of re-sent history vs. new input across 22 model calls.
+# │ How: Literature.SweBenchMiniSonnet4Django12050Calls (MLSysIM);
+# │      book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
+
+# ┌── 1. DATA ─────────────────────────────────────────────────────────────────
+rows = book_style.load_series("vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv").entries
+calls = np.array([int(r["call"]) for r in rows])
+ctx_k = np.array([r["context_chars"] / 1000.0 for r in rows])
+prev_k = np.concatenate(([0.0], ctx_k[:-1]))
+added_k = ctx_k - prev_k
+
+# ┌── 2. PLOT ─────────────────────────────────────────────────────────────────
+ax.bar(
+    calls,
+    prev_k,
+    width=0.72,
+    color=COLORS["BlueL"],
+    edgecolor=COLORS["BlueLine"],
+    lw=0.7,
+    zorder=3,
+    label="Re-sent history (earlier turns)",
+)
+ax.bar(
+    calls,
+    added_k,
+    bottom=prev_k,
+    width=0.72,
+    color=COLORS["BlueLine"],
+    edgecolor=COLORS["BlueLine"],
+    lw=0.7,
+    zorder=4,
+    label="New input (prompt or observation)",
+)
+
+# ┌── 3. ANNOTATE ─────────────────────────────────────────────────────────────
+bbox = dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.4)
+ax.annotate(
+    f"Call 1: {ctx_k[0]:.1f}K chars",
+    (calls[0], ctx_k[0]),
+    xytext=(1.0, 12.8),
+    textcoords="data",
+    ha="left",
+    va="bottom",
+    fontsize=9,
+    color=COLORS["primary"],
+    bbox=bbox,
+    arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.8),
+)
+ax.annotate(
+    f"Call {calls[-1]}: {ctx_k[-1]:.1f}K chars ({ctx_k[-1] / ctx_k[0]:.1f}× call 1)",
+    (calls[-1], ctx_k[-1]),
+    xytext=(22.4, 32.2),
+    textcoords="data",
+    ha="right",
+    va="bottom",
+    fontsize=9,
+    fontweight="bold",
+    color=COLORS["BlueLine"],
+    bbox=bbox,
+)
+cum_k = rows[-1]["cum_sent_chars"] / 1000.0
+new_k = rows[-1]["cum_new_chars"] / 1000.0
+ax.text(
+    1.1,
+    22.0,
+    f"22-call total: {cum_k:.1f}K chars sent\nvs. {new_k:.1f}K added ({cum_k / new_k:.1f}× re-read)",
+    fontsize=9,
+    color=COLORS["primary"],
+    bbox=dict(facecolor=COLORS["YellowFill"], alpha=0.95, edgecolor=COLORS["grid"], boxstyle="round,pad=0.4"),
+    zorder=5,
+)
+
+# ┌── 4. DECORATE ─────────────────────────────────────────────────────────────
+ax.set_xticks([1, 5, 10, 15, 20, int(calls[-1])])
+ax.set_xlim(0.2, calls[-1] + 0.8)
+ax.set_ylim(0, 36.5)
+ax.set_xlabel("Model call in the repair trajectory")
+ax.set_ylabel("Context read per call (thousand characters)")
+ax.legend(
+    loc="upper left",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.6,
+)
+plt.show()
+plt.close()
+```
+
+:::
+
+Across the `{python} RepairTrajectoryContext.calls_str` model calls of that trajectory, the first call reads `{python} RepairTrajectoryContext.first_chars_str` characters of task prompt and system instructions, whereas by call `{python} RepairTrajectoryContext.calls_str` the context read on a single turn has grown to `{python} RepairTrajectoryContext.last_chars_str` characters (`{python} RepairTrajectoryContext.ctx_growth_mult_str` the initial call). Because every call resends the accumulated transcript of earlier turns, the trajectory transmits `{python} RepairTrajectoryContext.cum_sent_str` characters of input across its `{python} RepairTrajectoryContext.calls_str` calls even though only `{python} RepairTrajectoryContext.cum_new_str` distinct characters enter the transcript (`{python} RepairTrajectoryContext.reread_mult_str` retransmission). That quadratic growth in cumulative input explains why multi-turn tool use dominates gateway token volume (@fig-vol3-agentic-token-growth) and why context compaction (@sec-vol3-context-engineering) and key-value cache reuse across turns (@sec-vol3-kv-cache) are foundational runtime responsibilities.
+
+Context accumulation is only one of the assumptions that break when a service built for isolated requests hosts a multi-turn trajectory (@tbl-vol3-request-vs-trajectory). Stateful services may already provide some of these mechanisms; the comparison names engineering responsibilities that later chapters develop rather than limits built into web services.
 
 | Concern       | Isolated-request baseline                    | Trajectory requirement                                                                | Developed in                                            |
 |:--------------|:---------------------------------------------|:--------------------------------------------------------------------------------------|:--------------------------------------------------------|

@@ -36,7 +36,7 @@ table is its human-readable companion.
 | `track` | enum | `cloud / edge / mobile / tinyml / global` | `cloud` |
 | `level` | enum | `L1 / L2 / L3 / L4 / L5 / L6+` | `L3` |
 | `zone` | enum | one of 11 zones (see § Zones) | `implement` |
-| `topic` | string | one of 87 topics in `taxonomy.yaml` | `quantization-fundamentals` |
+| `topic` | string | one of 87 topics in `schema/taxonomy_data.yaml` | `quantization-fundamentals` |
 | `competency_area` | enum | one of 13 areas (see § Competency areas) | `precision` |
 | `title` | string | ≤ 120 chars, plaintext, no trailing period, no LaTeX | `W8A16 KV Cache Expansion` |
 | `scenario` | string | ≥ 30 chars, plaintext (no HTML), 1-3 sentences | see worked example |
@@ -54,6 +54,8 @@ Optional but **strongly recommended**:
 | `details.common_mistake` | string | always — see § Markup conventions |
 | `details.napkin_math` | string | for L3+ when there's quantitative reasoning to show |
 | `expected_time_minutes` | integer ≥ 0 | typical 5-15 |
+| `taxonomy_subject` | ML Systems Taxonomy subject identity | always — see § ML Systems Taxonomy tags |
+| `taxonomy_concepts` | list of 1–3 concept identities | when a concept captures what the question tests |
 
 ## Markup conventions
 
@@ -230,8 +232,39 @@ because the constraint is HBM size).
 87 closed-enum topics in
 `staffml/vault/schema/enums.py:VALID_TOPICS`. The CLI tab-completes
 when you `vault new --topic <Tab>`. Adding a new topic is a schema
-change — open a PR against `enums.py` *and* `taxonomy.yaml`, then run
+change — open a PR against `enums.py` *and* `schema/taxonomy_data.yaml`, then run
 `vault codegen`.
+
+## ML Systems Taxonomy tags
+
+Every question also carries tags from the ML Systems Taxonomy, the shared
+vocabulary the textbooks, quizzes, and courses use
+(`shared/concepts/ml-systems-framework.yml` and `ml-systems-field.yml`;
+browsable at <https://mlsysbook.ai/explore/>). Tags are identities, never
+display codes:
+
+```yaml
+taxonomy_subject: llm-inference
+taxonomy_concepts:
+  - mlsys.kv-cache
+  - mlsys.paged-kv
+```
+
+- `taxonomy_subject` is the one subject the question belongs to.
+- `taxonomy_concepts` lists the concepts the question centrally tests, most
+  central first. Prefer one; add a second or third only when the question
+  cannot be answered without it. Omit the list when no concept fits and say
+  so in the PR, so the missing concept can be added to the taxonomy.
+- Tag the mechanism, not the platform: an edge question about memory
+  bandwidth is tagged with memory bandwidth, not with edge hardware.
+- Tag a calculation by what it calculates (a KV-cache sizing question is
+  about the KV cache), and a technique's effect by the technique.
+
+The full rules are the taxonomy's `tagging_rules`, shown on the explorer
+page. `vault check --strict` fails when a tag names a subject or concept that
+is not in the taxonomy, and names the replacement when a concept was retired.
+`topic` and `competency_area` remain required; the taxonomy tags are the
+cross-curriculum classification.
 
 ## Phase
 

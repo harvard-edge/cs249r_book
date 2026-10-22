@@ -8,6 +8,7 @@ CREATE TABLE questions (
   competency_area TEXT,
   bloom_level TEXT,
   phase TEXT,
+  taxonomy_subject TEXT,
   status TEXT NOT NULL,
   scenario TEXT NOT NULL,
   common_mistake TEXT,
@@ -29,6 +30,7 @@ CREATE INDEX idx_questions_track_level ON questions(track, level);
 CREATE INDEX idx_questions_zone ON questions(zone);
 CREATE INDEX idx_questions_status ON questions(status);
 CREATE INDEX idx_questions_human_review ON questions(human_review_status);
+CREATE INDEX idx_questions_taxonomy_subject ON questions(taxonomy_subject);
 
 CREATE TABLE chains (
   id TEXT PRIMARY KEY,
@@ -53,6 +55,16 @@ CREATE TABLE tags (
   tag TEXT NOT NULL,
   FOREIGN KEY (question_id) REFERENCES questions(id)
 );
+
+-- ML Systems Taxonomy concept tags (2026-10): position 0 is the most central.
+CREATE TABLE question_concepts (
+  question_id TEXT NOT NULL,
+  concept_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (question_id, concept_id),
+  FOREIGN KEY (question_id) REFERENCES questions(id)
+);
+CREATE INDEX idx_question_concepts_concept ON question_concepts(concept_id);
 
 CREATE TABLE release_metadata (
   key TEXT PRIMARY KEY,

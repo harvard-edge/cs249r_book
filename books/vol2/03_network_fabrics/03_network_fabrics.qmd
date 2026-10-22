@@ -162,7 +162,7 @@ def _bandwidth_trend(rows):
     order = {"Ethernet": 0, "InfiniBand": 1, "NVLink": 2, "PCIe (x16)": 3}
     return pd.DataFrame(out).sort_values(["Technology", "Year"], key=lambda c: c.map(order) if c.name == "Technology" else c)
 
-data = _bandwidth_trend(Literature.Series.InterconnectGenerations.entries)
+data = _bandwidth_trend(viz.load_series("vol2/03_network_fabrics/data/interconnect_generations.csv").entries)
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 4.2))
 _groups = list(dict.fromkeys(data["Technology"]))
@@ -1122,7 +1122,9 @@ _C = MeasuredAllReduce
 _x = np.array([r["size_bytes"] for r in _C.rows])
 _t = np.array([r["oop_time_us"] for r in _C.rows])
 _xx = np.logspace(np.log10(_x.min()), np.log10(_x.max()), 200)
-ax.plot(_xx, [_C.fit.model_time(s * byte).to(microsecond).magnitude for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2)
+ax.plot(
+    _xx, [_C.fit.model_time(s * byte).to(microsecond).magnitude for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2
+)
 ax.plot(_xx, np.full_like(_xx, _C.floor_us), ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.plot(_xx, _xx / (_C.bw_gbps * 1e9) * 1e6, ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.scatter(_x, _t, s=22, color=COLORS["RedLine"], label="Measured (8× H100, NVLink)", zorder=3)
@@ -1638,7 +1640,9 @@ class NetworkRailRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     n_gpus_str = fmt_count(_cluster.total_accelerators, commas=True, label="GPU")
     n_nodes_str = fmt_count(_cluster.count, commas=False, label="node")
-    gpus_per_rail_str = fmt_count(_cluster.total_accelerators // _cluster.node.accelerators_per_node, commas=False, label="GPU")  # one rail per GPU slot
+    gpus_per_rail_str = fmt_count(
+        _cluster.total_accelerators // _cluster.node.accelerators_per_node, commas=False, label="GPU"
+    )  # one rail per GPU slot
 ```
 
 For the cluster of `{python} NetworkRailRecap.n_gpus_str` spanning `{python} NetworkRailRecap.n_nodes_str`, this creates 8 parallel networks\index{Rail-optimized topology!parallel rail fabrics} of `{python} NetworkRailRecap.gpus_per_rail_str` each, requiring at least one switch port per endpoint in each rail. A single-switch realization therefore needs a radix at least as large as the rail endpoint count; the earlier radix-`{python} NetworkTopologyRadixRecap.radix_str` switch cannot realize this rail alone, which is why notebook \ref{nbk-network-fabrics-rail-optimized-dividend} assumed higher-radix rail switches. Built from radix-`{python} NetworkTopologyRadixRecap.radix_str` switches instead, each rail becomes a small two-tier fabric that preserves rank alignment but adds hops. For the bandwidth-hungry gradient exchanges of data parallelism, the larger benefit is isolation: each rail carries only its own rank's traffic, so the eight rail networks operate concurrently without competing for shared spine capacity. When a rail fits on one switch, the shorter path also trims the startup cost a ring pays on every round. That same isolation creates a sharp trade-off, because traffic that must reach GPUs of different ranks (such as expert routing in mixture of experts (MoE), or pipeline-stage handoffs that do not align with the rail wiring) requires bridging across rails. Large clusters therefore often employ a hybrid approach, using rail-optimized leaves for same-rank data-parallel traffic while bridging the rails with a full fat-tree spine to support cross-rank communication patterns.

@@ -26,7 +26,7 @@ test.describe("Command palette — global mount", () => {
 
     // Input is focused on open.
     await expect(
-      palette.getByPlaceholder(/search pages, topics, or questions/i),
+      palette.getByPlaceholder(/search pages, subjects, or questions/i),
     ).toBeFocused();
 
     // Pages section is available with an empty query.

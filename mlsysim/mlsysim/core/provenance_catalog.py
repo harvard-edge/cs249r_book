@@ -4161,6 +4161,22 @@ BROHAN_RT2_2023 = _lit(
     notes=("Sec. 3.3: RT-2-PaLI-X-55B 'can run at a frequency of 1-3 Hz', the 5B version 'at a "
            "frequency of around 5 Hz', in a multi-TPU cloud service."),
 )
+DRIESS_PALME_2023 = _lit(
+    "prov:driess-palme-2023",
+    "Driess, D. et al. (2023), PaLM-E: An Embodied Multimodal Language Model, ICML 2023, "
+    "arXiv:2303.03378",
+    url="https://arxiv.org/abs/2303.03378",
+    verified="2026-10-22",
+    notes="Sec. 3: PaLM-E-562B combines a 540B PaLM language model with a 22B ViT vision encoder (562B total).",
+)
+PINTO_SUPERSIZING_2016 = _lit(
+    "prov:pinto-supersizing-2016",
+    "Pinto, L. & Gupta, A. (2016), Supersizing Self-supervision: Learning to Grasp from 50K Tries "
+    "and 700 Robot Hours, ICRA 2016, arXiv:1509.06825",
+    url="https://arxiv.org/abs/1509.06825",
+    verified="2026-10-22",
+    notes="Abstract: 50,000 grasp attempts collected over 700 hours of robot trial time.",
+)
 OPENVLA_ACTION_BINS_2024 = _lit(
     "prov:kim-openvla-action-bins-2024",
     "Kim, M. J. et al. (2024), OpenVLA: An Open-Source Vision-Language-Action Model, arXiv:2406.09246",

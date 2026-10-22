@@ -45,10 +45,11 @@ async function test2_vault_areas_visible(page) {
   console.log("\n[2] vault page shows area cards");
   await page.getByRole("link", { name: /^Vault$/i }).first().click();
   await page.waitForTimeout(1000);
-  const archHeader = await page.getByText("Architecture", { exact: true }).first().isVisible().catch(() => false);
-  record("Architecture area card visible", archHeader);
-  const cnnVisible = await page.getByText("CNN Efficient Design", { exact: true }).first().isVisible().catch(() => false);
-  record("CNN Efficient Design topic visible", cnnVisible);
+  // The Vault browses the ML Systems Taxonomy: area S1 and its subject S1.1.
+  const hwHeader = await page.getByText("Hardware & accelerators", { exact: true }).first().isVisible().catch(() => false);
+  record("Hardware & accelerators area card visible", hwHeader);
+  const subjectVisible = await page.getByText("Accelerator architecture", { exact: true }).first().isVisible().catch(() => false);
+  record("Accelerator architecture subject visible", subjectVisible);
 }
 
 async function test3_topic_drill_shows_real_previews(page) {

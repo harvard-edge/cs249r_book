@@ -38,7 +38,7 @@ staffml/vault/
 │   │   └── d1-rollback.sql  ← inverse with prior-row bodies embedded
 │   └── latest.txt           ← names the latest release; replaced atomically
 ├── id-registry.yaml         ← APPEND-ONLY log; CI rejects line deletions
-├── taxonomy.yaml            ← topic graph; DAG-enforced
+├── schema/taxonomy_data.yaml ← topic graph; DAG-enforced
 ├── chains.yaml              ← chain definitions (optional)
 ├── zones.yaml               ← 8 ikigai zones
 └── exemplar-gaps.yaml       ← local/CI-generated coverage audit output (gitignored)

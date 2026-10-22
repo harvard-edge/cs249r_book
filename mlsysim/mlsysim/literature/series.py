@@ -20,9 +20,22 @@ from ..core.provenance import Provenance, ProvenanceKind
 from ..core import provenance_catalog as _catalog  # added 2026-10-20
 
 _SERIES = Path(__file__).parent / "data" / "series"
+_BOOKS = Path(__file__).resolve().parents[3] / "books"
 
 _EPOCH_HUB = "https://epoch.ai/benchmarks"
 _EPOCH_LICENSE = "Epoch AI data, CC-BY 4.0 (credit Epoch AI)."
+
+
+def _open_series_lines(stem: str) -> list[str]:
+    cand = _SERIES / f"{stem}.csv"
+    if not cand.exists():
+        matches = sorted(_BOOKS.glob(f"vol*/*/data/{stem}.csv"))
+        if matches:
+            cand = matches[0]
+        else:
+            raise FileNotFoundError(f"Series CSV not found for {stem!r}")
+    lines = cand.read_text(encoding="utf-8").splitlines(keepends=True)
+    return [line for line in lines if not line.lstrip().startswith("#")]
 
 
 def _coerce(value: str):
@@ -42,10 +55,9 @@ class _Series:
     def __init__(self, stem: str, provenance: Provenance, doc: str):
         self.__doc__ = doc
         self.provenance = provenance
-        with open(_SERIES / f"{stem}.csv", newline="") as fh:
-            reader = csv.DictReader(fh)
-            self.columns = tuple(reader.fieldnames or ())
-            self.entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
+        reader = csv.DictReader(_open_series_lines(stem))
+        self.columns = tuple(reader.fieldnames or ())
+        self.entries = tuple({k: _coerce(v) for k, v in row.items()} for row in reader)
         self.list = self.entries
 
     def where(self, **match):
@@ -593,15 +605,14 @@ class TrendSeries:
         self.provenance = provenance
         self.__doc__ = doc
         rows = []
-        with open(_DIR / f"{stem}.csv", newline="") as f:
-            for raw in csv.DictReader(f):
-                row = {}
-                for k, v in raw.items():
-                    if k in numeric:
-                        row[k] = float(v) if v not in ("", None) else None
-                    else:
-                        row[k] = v
-                rows.append(row)
+        for raw in csv.DictReader(_open_series_lines(stem)):
+            row = {}
+            for k, v in raw.items():
+                if k in numeric:
+                    row[k] = float(v) if v not in ("", None) else None
+                else:
+                    row[k] = v
+            rows.append(row)
         self.entries = tuple(rows)
 
     def column(self, key: str) -> list:
@@ -682,6 +693,15 @@ class Series:
              "training_cost_2023usd follows Cottier et al. (2024); frontier = Epoch's frontier-model flag"),
         "Parameters, training cost, domain, and publication date of notable models.",
         numeric=("parameters", "training_cost_2023usd", "frontier"),
+    )
+    NotableModelDatasets = TrendSeries(
+        "notable_model_datasets",
+        _lit("Epoch AI, Notable AI Models database (CC BY 4.0), snapshot 2026-10-12",
+             "https://epoch.ai/data/notable-ai-models",
+             "training_dataset_size is Epoch's Training dataset size (total) column in datapoints; "
+             "frontier = Epoch's frontier-model flag"),
+        "Training dataset size (datapoints), domain, and publication date of notable models.",
+        numeric=("training_dataset_size", "frontier"),
     )
     PretrainingTokens = TrendSeries(
         "pretraining_tokens",
@@ -1967,3 +1987,77 @@ SweBenchMiniSonnet4Django12050Calls = _Series(
     ),
     "Context read by each of the 22 model calls of one public repair-agent run, in characters.",
 )
+
+
+# --- Vercel AI Gateway Production Index (added 2026-10-21) -------------------
+VercelGatewayUsageSpendPrice = _Series(
+    "vercel_gateway_usage_spend_price_index",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: October 2026, "
+            "'Usage, spend, and price per token' (indexed to April 2026 = 100)"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index-october-2026",
+        verified="2026-10-21",
+        notes=(
+            "Monthly index (April 2026 = 100) of production token usage, total inference spend, "
+            "and average price per token across 200,000+ unique teams on the Vercel AI Gateway, "
+            "extracted directly from the published chart payload."
+        ),
+    ),
+    "Monthly production token usage, total spend, and average price per token indexed to April 2026 = 100.",
+)
+VercelGatewayUseCaseShares = _Series(
+    "vercel_gateway_use_case_shares",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: May 2026, "
+            "'Token volume vs. cost share by use case, through April 2026'"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index",
+        verified="2026-10-21",
+        notes=(
+            "Share of total production token volume and market cost across eight workload classes "
+            "over seven months of production traffic (Oct 2025 - Apr 2026) across 200,000+ unique "
+            "teams on the Vercel AI Gateway."
+        ),
+    ),
+    "Share of production token volume and total spend by workload category on a multi-provider inference gateway.",
+)
+VercelGatewayOpenWeightShare = _Series(
+    "vercel_gateway_open_weight_share",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: October 2026, "
+            "'Open-weight share of tokens and spend' (Dec 2025 - Sep 2026)"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index-october-2026",
+        verified="2026-10-21",
+        notes=(
+            "Monthly percentage of total gateway token volume and total spend served by open-weight "
+            "models from December 2025 through September 2026."
+        ),
+    ),
+    "Monthly open-weight share of production token volume and inference spend on a multi-provider gateway.",
+)
+VercelGatewayToolCallShare = _Series(
+    "vercel_gateway_tool_call_share",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "Vercel (2026), AI Gateway Production Index: May 2026, "
+            "'The rise of agents: Share of requests and tokens ending in tool calls'"
+        ),
+        url="https://vercel.com/blog/ai-gateway-production-index",
+        verified="2026-10-21",
+        notes=(
+            "Percentage of production inference requests and total tokens consumed by requests that "
+            "end in a tool call in October 2025 and April 2026 across 200,000+ unique teams."
+        ),
+    ),
+    "Share of gateway requests and total tokens accounted for by tool-calling invocations.",
+)
+

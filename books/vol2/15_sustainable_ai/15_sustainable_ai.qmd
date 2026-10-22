@@ -583,13 +583,14 @@ for e in _entries:
         _above = e["flops"] >= _fit and e["model"] != "PaLM"  # PaLM's label clears GPT-4-class's
         # GPT-4-class shares 2023 with a larger run, so its label sits level with it.
         _level = e["model"] == "GPT-4-class"
+        _alex = e["model"] == "AlexNet"
         ax.annotate(
             e["model"],
             (e["year"], e["flops"]),
             textcoords='offset points',
-            xytext=(-7, 0) if _level else (-6, 5) if _above else (6, -6),
-            ha='right' if (_above or _level) else 'left',
-            va='center' if _level else 'bottom' if _above else 'top',
+            xytext=(-4, 7) if _alex else (-7, 0) if _level else (-6, 5) if _above else (6, -6),
+            ha='left' if _alex else 'right' if (_above or _level) else 'left',
+            va='bottom' if _alex else 'center' if _level else 'bottom' if _above else 'top',
             fontsize=10,
             color=COLORS['primary'],
         )
@@ -1127,7 +1128,7 @@ The units are liters per kilowatt-hour\index{Water usage effectiveness!units and
 # │      Literature.Series.GeminiPromptEnergy (Elsworth et al. 2025).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, viz
 from mlsysim.fmt import check, fmt, fmt_multiple
 
 def _factor(rows, name):
@@ -1144,8 +1145,8 @@ class ServingFootprintFactors:
     """Per-prompt water and electricity emissions from measured serving factors."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    factors = Literature.Series.GoogleServingFactors.entries
-    energy = Literature.Series.GeminiPromptEnergy.entries
+    factors = viz.load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv").entries
+    energy = viz.load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
     wue = _factor(factors, "wue_category2")
     lb_ef = _factor(factors, "lb_emission_factor_2024")
     mb_ef = _factor(factors, "mb_emission_factor_2024")
@@ -3352,14 +3353,17 @@ from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.6))
 
-# Values digitized from Wu et al. (2022), million kg CO2e; not registry-backed.
-meta_names = ['LM', 'RM-1', 'RM-2', 'RM-3', 'RM-4', 'RM-5']
-meta_offline = np.array([0.02, 0.35, 0.25, 0.13, 0.14, 0.16])
-meta_online = np.array([0.00, 0.04, 0.03, 0.02, 0.02, 0.02])
-meta_infer = np.array([0.10, 0.46, 0.28, 0.24, 0.20, 0.26])
+# Values digitized from Wu et al. (2022), million kg CO2e (data/meta_operational_carbon.csv).
+_wu_rows = book_style.load_series("vol2/15_sustainable_ai/data/meta_operational_carbon.csv").entries
+_meta_rows = [r for r in _wu_rows if r["group"] == "meta"]
+_pub_rows = [r for r in _wu_rows if r["group"] == "public"]
+meta_names = [r["model"] for r in _meta_rows]
+meta_offline = np.array([r["offline_training_mkg"] for r in _meta_rows])
+meta_online = np.array([r["online_training_mkg"] for r in _meta_rows])
+meta_infer = np.array([r["inference_mkg"] for r in _meta_rows])
 
-pub_names = ['BERT-NAS', 'Evolved Transformer', 'T5', 'Meena', 'GShard-600B', 'Switch Transformer', 'GPT-3']
-pub_vals = np.array([0.28, 0.008, 0.05, 0.09, 0.008, 0.07, 0.55])
+pub_names = [r["model"] for r in _pub_rows]
+pub_vals = np.array([r["total_mkg"] for r in _pub_rows])
 
 # Horizontal bars so every model name reads unrotated. RM-1 gets headroom above
 # it for the one comparison the caption makes: its inference segment against
@@ -3582,7 +3586,7 @@ Inference workloads, like other software services, scale with demand. An always-
 # │      InferenceLifecycleExample.kwh_per_query for the comparison.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, viz
 from mlsysim.core.units import Wh
 from mlsysim.fmt import check, fmt_energy, fmt_multiple, fmt_percent
 
@@ -3597,9 +3601,13 @@ class PromptEnergyBoundary:
     """Per-prompt serving energy under accelerator-only and full-stack boundaries."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.GeminiPromptEnergy.entries
+    rows = viz.load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
     worked_example_wh = InferenceLifecycleExample.kwh_per_query.to(Wh).magnitude
-    year_reduction = next(r["value"] for r in Literature.Series.GoogleServingFactors.entries if r["parameter"] == "energy_reduction_12_months")
+    year_reduction = next(
+        r["value"]
+        for r in viz.load_series("vol2/15_sustainable_ai/data/google_serving_factors.csv").entries
+        if r["parameter"] == "energy_reduction_12_months"
+    )
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     full_wh = _counted_total(rows, "comprehensive_wh", "comprehensive_counted")
@@ -4359,12 +4367,13 @@ Public training-energy figures almost always report the single final run that pr
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import MWh, metric_ton
-from mlsysim import Literature, Models
+from mlsysim import Literature, Models, viz
 
 def _table4_row(model):
     """Parameters, energy, net emissions, and net grid factor of one Table 4 run."""
-    r = next(e for e in Literature.Series.PattersonTrainingFootprints.entries if e["model"] == model)
+    r = next(e for e in viz.load_series("vol2/15_sustainable_ai/data/patterson_training_footprints.csv").entries if e["model"] == model)
     return r["params_b"] * 1e9, r["energy_mwh"] * MWh, r["net_tco2e"] * metric_ton, r["net_kg_per_kwh"]
+
 from mlsysim.fmt import check, fmt, fmt_int, fmt_magnitude, fmt_params
 
 class PublicTrainingFootprints:
@@ -4507,12 +4516,13 @@ c_dark = COLORS['primary']
 c_gray = COLORS['secondary']
 c_border = COLORS['grid']
 
-# Values from the cited Statista series (billions of connected devices); not registry-backed.
-hist_yrs = ['2019', '2020', '2021', '2022', '2023']
-hist_vals = [8.6, 9.8, 11.3, 13.1, 15.1]
+# Values from the cited Statista series (billions of connected devices, data/iot_device_growth.csv).
+_iot_rows = book_style.load_series("vol2/15_sustainable_ai/data/iot_device_growth.csv").entries
+hist_yrs = [str(int(r["year"])) for r in _iot_rows if r["status"] == "historical"]
+hist_vals = [r["devices_billions"] for r in _iot_rows if r["status"] == "historical"]
 
-proj_yrs = ['2024', '2025', '2026', '2027', '2028', '2029', '2030']
-proj_vals = [17.8, 19.1, 21.1, 23.1, 25.2, 27.3, 29.4]
+proj_yrs = [str(int(r["year"])) for r in _iot_rows if r["status"] == "projected"]
+proj_vals = [r["devices_billions"] for r in _iot_rows if r["status"] == "projected"]
 
 x_hist = np.arange(len(hist_yrs))
 x_proj = np.arange(len(proj_yrs)) + len(hist_yrs)
@@ -5034,7 +5044,7 @@ The **duck curve**\index{Duck curve!definition} describes the steep evening ramp
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
-from mlsysim import Literature
+from mlsysim import Literature, viz
 from mlsysim.core.units import GW, MW
 from mlsysim.fmt import check, fmt_power
 
@@ -5042,7 +5052,7 @@ class EuropeGridWeek:
     """Wind, nuclear, and load statistics for one late-November week."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _grid = pd.DataFrame(Literature.Series.EuropeGenerationWeek47.entries)
+    _grid = pd.DataFrame(viz.load_series("vol2/15_sustainable_ai/data/europe_generation_2023w47.csv").entries)
     _grid["time_cet"] = pd.to_datetime(_grid["time_cet"])
     _days = _grid["time_cet"].dt.date
     _full = _grid[_days.map(_days.value_counts()) == 24]  # complete days only
@@ -5098,7 +5108,7 @@ import matplotlib.dates as mdates
 from mlsysim import Literature
 from binder.tools.figures import style as book_style
 
-_grid = pd.DataFrame(Literature.Series.EuropeGenerationWeek47.entries)
+_grid = pd.DataFrame(book_style.load_series("vol2/15_sustainable_ai/data/europe_generation_2023w47.csv").entries)
 _grid["time_cet"] = pd.to_datetime(_grid["time_cet"])
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.1, 3.5))
 _layers = [
@@ -5123,7 +5133,7 @@ for _p, (_k, _, _) in zip(_polys, _layers):
     _p.set_alpha(0.95 if _k == "wind" else 0.32)
 ax.plot(_t, _grid["load"] / 1000, color=COLORS["primary"], linewidth=1.3, zorder=3)
 ax.set_xlim(_t.iloc[0], _t.iloc[-1])
-ax.set_ylim(0, 400)
+ax.set_ylim(0, 415)
 ax.xaxis.set_major_locator(mdates.HourLocator(byhour=12))
 ax.xaxis.set_major_formatter(mdates.DateFormatter("%a %d"))
 ax.xaxis.set_minor_locator(mdates.DayLocator())

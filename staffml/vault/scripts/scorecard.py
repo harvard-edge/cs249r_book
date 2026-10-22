@@ -64,7 +64,6 @@ def compute_scorecard(corpus_path: str, chains_path: str, taxonomy_path: str) ->
             if field not in q and field in source:
                 q[field] = source[field]
 
-    tax_ids = {c["id"] for c in tax["concepts"]}
     schema_topic_ids = set(VALID_TOPICS)
     id_to_q = {q["id"]: q for q in data}
 
@@ -108,14 +107,22 @@ def compute_scorecard(corpus_path: str, chains_path: str, taxonomy_path: str) ->
     corpus_topics = {q.get("topic", "") for q in data if q.get("topic", "").strip()}
     missing_topic = sorted(corpus_topics - schema_topic_ids)
     zero_schema_topics = sorted(t for t in schema_topic_ids if t not in corpus_topics)
+    # ML Systems Taxonomy (2026-10): the cross-curriculum classification the
+    # site browses by. `tax` is staffml/app/src/data/mlsys-taxonomy.json.
+    subjects_used = Counter(q.get("taxonomy_subject") for q in data if q.get("taxonomy_subject") in tax["subjects"])
+    concepts_used = {c for q in data for c in q.get("taxonomy_concepts", []) if c in tax["concepts"]}
     sc["taxonomy"] = {
-        "taxonomy_json_concepts": len(tax["concepts"]),
         "schema_topics": len(schema_topic_ids),
-        "edges": len(tax.get("edges", [])),
         "empty_topic_refs": empty_topic,
         "corpus_topics_not_in_schema": missing_topic,
         "schema_topics_with_zero_questions": zero_schema_topics,
-        "taxonomy_json_overlap": len(corpus_topics & tax_ids),
+        "mlsys_version": tax.get("version", ""),
+        "mlsys_untagged": sum(1 for q in data if q.get("taxonomy_subject") not in tax["subjects"]),
+        "mlsys_subject_only": sum(1 for q in data if q.get("taxonomy_subject") and not q.get("taxonomy_concepts")),
+        "mlsys_subjects_used": len(subjects_used),
+        "mlsys_subjects_total": len(tax["subjects"]),
+        "mlsys_concepts_used": len(concepts_used),
+        "mlsys_concepts_total": len(tax["concepts"]),
     }
 
     # Quality
@@ -189,13 +196,14 @@ def print_scorecard(sc: dict, prev: dict = None):
     for t, d in sc["bloom_deviation"].items():
         print(f"  {t}: {d}%")
 
-    print(
-        f"\nTaxonomy: {sc['taxonomy']['schema_topics']} schema topics, "
-        f"{sc['taxonomy']['taxonomy_json_concepts']} taxonomy.json concepts"
-    )
+    t = sc["taxonomy"]
+    print(f"\nTopics: {t['schema_topics']} schema topics")
     print(f"  Empty topic refs: {sc['taxonomy']['empty_topic_refs']}")
     print(f"  Corpus topics not in schema: {len(sc['taxonomy']['corpus_topics_not_in_schema'])}")
     print(f"  Schema topics with zero questions: {len(sc['taxonomy']['schema_topics_with_zero_questions'])}")
+    print(f"ML Systems Taxonomy {t['mlsys_version']}: {t['mlsys_subjects_used']}/{t['mlsys_subjects_total']} subjects, "
+          f"{t['mlsys_concepts_used']}/{t['mlsys_concepts_total']} concepts used")
+    print(f"  Untagged questions: {t['mlsys_untagged']} · subject-only: {t['mlsys_subject_only']}")
 
     print(f"\nQuality:")
     print(f"  v1 axes complete: {sc['quality']['full_v1_axes_pct']}%")
@@ -208,7 +216,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--corpus", default="corpus.json")
     parser.add_argument("--chains", default="chains.json")
-    parser.add_argument("--taxonomy", default="taxonomy.json")
+    parser.add_argument("--taxonomy", default=str(VAULT_DIR.parent / "app/src/data/mlsys-taxonomy.json"),
+                        help="ML Systems Taxonomy labels written by `vault build`")
     parser.add_argument("--compare", help="Path to previous scorecard JSON for delta")
     parser.add_argument("--output", help="Save scorecard JSON to this path")
     args = parser.parse_args()

@@ -69,6 +69,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     fonts-dejavu \
     fonts-freefont-ttf \
     gdk-pixbuf2.0-bin \
+    graphviz \
     libcairo2 \
     libfontconfig1 \
     libfontconfig1-dev \

@@ -21,6 +21,10 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _VISUAL_PATH_RE = re.compile(r"^[a-z0-9-]+\.svg$")
+# ML Systems Taxonomy identities (shared/concepts/ml-systems-*.yml). Format is
+# checked here; membership in the current taxonomy is a structural-tier check.
+_TAXONOMY_SUBJECT_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_TAXONOMY_CONCEPT_RE = re.compile(r"^mlsys\.[a-z0-9]+(-[a-z0-9]+)*$")
 
 # Locate the vault's shared enums module regardless of install layout.
 _HERE = Path(__file__).resolve()
@@ -243,6 +247,11 @@ class Question(BaseModel):
     bloom_level: str | None = None
     phase: str | None = None
 
+    # ML Systems Taxonomy tags (2026-10): the subject the question belongs to
+    # and the one to three concepts it centrally tests, stored as identities.
+    taxonomy_subject: str | None = None
+    taxonomy_concepts: list[str] | None = None
+
     # Content
     title: str = Field(max_length=120)
     scenario: str
@@ -331,6 +340,27 @@ class Question(BaseModel):
                 f"invalid competency_area {v!r}; "
                 f"must be one of {sorted(VALID_COMPETENCY_AREAS)}"
             )
+        return v
+
+    @field_validator("taxonomy_subject")
+    @classmethod
+    def _taxonomy_subject(cls, v: str | None) -> str | None:
+        if v is not None and not _TAXONOMY_SUBJECT_RE.match(v):
+            raise ValueError(f"invalid taxonomy_subject {v!r}; must be a subject identity such as 'llm-inference'")
+        return v
+
+    @field_validator("taxonomy_concepts")
+    @classmethod
+    def _taxonomy_concepts(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if len(v) > 3:
+            raise ValueError(f"taxonomy_concepts lists {len(v)} concepts; tag at most 3")
+        if len(set(v)) != len(v):
+            raise ValueError("taxonomy_concepts repeats a concept")
+        bad = [c for c in v if not _TAXONOMY_CONCEPT_RE.match(c)]
+        if bad:
+            raise ValueError(f"invalid taxonomy_concepts {bad}; must be concept identities such as 'mlsys.kv-cache'")
         return v
 
     @field_validator("bloom_level")
