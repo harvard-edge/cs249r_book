@@ -140,11 +140,11 @@ class TimingAttitudeErrorModel(ForwardModel):
     def solve(self, speed: Quantity, yaw_rate: Quantity, distance: Quantity, timing_error: Quantity,
               angle_error: Quantity, reference: Optional[Quantity] = None) -> TimingAttitudeErrorResult:
         omega = yaw_rate.to(ureg.radian / ureg.second)
-        mis = (omega * timing_error).to(ureg.milliradian)
+        misorientation = (omega * timing_error).to(ureg.milliradian)
         lateral = calc_lever_arm_error(distance, angle_error)
         return TimingAttitudeErrorResult(
-            timing_travel=(speed * timing_error).to(_MM), misorientation=mis,
-            timing_lateral=(distance * mis.to(ureg.radian).magnitude).to(_MM),
+            timing_travel=(speed * timing_error).to(_MM), misorientation=misorientation,
+            timing_lateral=(distance * misorientation.to(ureg.radian).magnitude).to(_MM),
             angle_lateral=lateral,
             angle_lateral_share=None if reference is None else _ratio(lateral, reference),
         )
