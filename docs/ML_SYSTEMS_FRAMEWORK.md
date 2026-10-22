@@ -1,6 +1,6 @@
 # Machine learning systems: a candidate subject framework
 
-Status: editorial draft, version `0.1-draft`. This document specifies a proposal for review, rather than a claim of field completeness or community consensus.
+Status: editorial draft, version `0.2-draft`. This document specifies a proposal for review, rather than a claim of field completeness or community consensus.
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
@@ -15,30 +15,70 @@ The framework organizes the engineering knowledge needed to construct, evaluate,
 
 The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy pilot. It does not silently acquire broader/narrower assertions from the new subject collections. A predictable browsing location is useful without asserting that every collection is a semantic superclass.
 
-## Organizing rule
+## Organizing frame
 
-A subject area groups engineering knowledge with related mechanisms, design decisions, and failure modes. A subarea names a body of knowledge and defines its boundary. Activities such as deployment, system layers such as runtime, and concerns such as security are independent facets. They are not competing branches of one tree.
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 98 subjects (rows) under those five groups:
 
-Each current concept has one candidate home to make editorial maintenance predictable. Explicit secondary associations preserve legitimate connections across subjects. For example, retrieval belongs in inference and services while also connecting to data management. Neither placement dictates a course sequence or a prerequisite. Facet assignments are editorial hypotheses about relevance. Unassigned context facets mean unassessed relevance, not inapplicability.
+| Group | Areas |
+|---|---|
+| Foundations | Workloads & requirements · Models & architectures · Quantitative system models |
+| Stack | Hardware & accelerators · Frameworks, compilers & runtimes · Parallelism & distributed execution · Datacenter infrastructure & fleet |
+| Lifecycle | Data engineering · Training & adaptation · Model evaluation & testing · Deployment & serving · MLOps & operations |
+| Qualities | Performance, efficiency & benchmarking · Reliability & fault tolerance · Security & privacy · Safety & assurance · Responsible AI · Sustainability & cost |
+| System types | Agentic systems · Embodied & physical systems |
 
-The source contains definitions, includes/excludes boundaries, reading warrants, stable IDs, and candidate inventory gaps. A reading warrant identifies the scope of material used in designing a row. It does not establish exact semantic equivalence, endorsement, or assertion-level evidence. Empty concept inventories identify work to investigate; they do not establish that the books omit a subject.
+The groups correspond to the layer, activity, concern, and context facets. A single tree necessarily flattens that faceted space, so each concept's one home exists for maintenance and browsing, while facets and secondary links carry the other legitimate placements. The placement rules are recorded in the framework `rationale`:
 
-## Visual design study
+- **Mechanism first.** A concept lives in the Stack or Lifecycle row that engineers its mechanism whenever one exists (KV caching in serving, kernel fusion in compilers), even when it exists for performance.
+- **Qualities hold measurement and cross-layer techniques.** A Quality area holds measurement, trade-off reasoning, and techniques that act across several layers at once, such as compression.
+- **System-type admission test.** A system type earns an area only when, after placement, it keeps core concepts with no general home. Recommendation, multimodal, generative, edge, and distributed settings are contexts, shown as lenses.
+- **Background tier.** Concepts imported from general ML, robotics, distributed systems, site reliability, and safety engineering carry `scope: background`. They remain because ML systems concepts depend on them.
+- **Identity references.** Includes and excludes cite owning rows as `[[row-id]]`; the compiler rejects unknown identities.
+- **Declared gaps.** Topics a reviewer should expect but this version does not yet cover are recorded as `gaps` with a `topic` and a subject row, and published on the page.
 
-The Quarto page `site/explore/index.qmd` reads one generated data payload. Its taxonomy and concept-map modes share the same selection and site navigation. `taxonomy-study.qmd` preserves the former preview URL using the same interface body. The taxonomy has two display layouts:
+Using ML to optimize systems is an adjacent field and out of scope. Chapter pointers (`book_chapters`) name where MLSysBook teaches a subject at chapter grain; they are reading pointers, not alignment or depth claims.
 
-- **Branching tree:** the field expands into subject areas, subareas, and concepts. Selection reveals detail in place; the overview remains recoverable without opening another page.
-- **Nested map:** stable rectangular regions reveal progressively finer detail, with a persistent route back to the whole field. Geometry does not encode importance.
+## Website
 
-The **Concept map** mode includes every current concept and authored relationship. Selecting a concept preserves the map and opens its definition. An optional neighborhood view shows direct connections. The full drawing is a reference overview; fitting it on screen does not make every label readable.
+`site/explore/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
 
-The systems-perspective and activity-matrix views remain static reference alternatives. Subjects may be relevant to several system perspectives; these placements do not assert exclusive membership, a universal architecture, or causal flow.
+- **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
+- **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
+- **Concept map.** Each concept page carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
+- **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
+- **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
-A selected concept shows its definition and labeled connections in the same workspace. Following a connection changes the selection in place. Related book passages are optional behind one disclosure. The reference matrix, CSV, and written definitions remain available as scholarly and editorial artifacts without competing for the learner's attention in the main canvas.
+State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#view=glossary`); earlier hash formats still resolve.
 
-A focused concept map answers a different question. It shows labeled, conditional relationships around a selected concept, with navigation to related concepts and book passages. It should accompany the atlas rather than replace the classification with an unreadable network of every edge.
+## Relationships
 
-The implementation uses HTML and SVG for inspectable subject views. [D3 partition layouts](https://d3js.org/d3-hierarchy/partition) are an option for a later semantic-zoom hierarchy; [Cytoscape.js](https://js.cytoscape.org/) remains appropriate for relationship graphs. A more elaborate renderer cannot repair unclear categories. These prototypes prioritize readable labels, stable locations, explicit semantics, and equivalents that do not require pointing at a graphic.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,392 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+
+## Codes, downloads, and citation
+
+Every group, area, and subject carries a readable code: a group letter (F, S, L, Q, T), an area number, and a subject number, so `L4.3` is Lifecycle › Deployment & serving › its third subject. The compiler requires codes to be unique and nested. Codes are for people and may be renumbered between versions; concept identities such as `mlsys.kv-cache` are permanent and are what tools should store.
+
+`binder concepts build` writes the public release to `site/explore/downloads/` from the same compiled records as the page:
+
+| File | Format | Contents |
+|---|---|---|
+| `mlsys-taxonomy-subjects.csv` | CSV | One row per subject: code, group, area, definition, concepts, chapters |
+| `mlsys-taxonomy-concepts.csv` | CSV | One row per concept: identity, term, aliases, definition, home code, background flag |
+| `mlsys-taxonomy.json` | JSON | The full outline, concepts, relation vocabulary, and typed relationships |
+| `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes; concepts as `skos:Concept`; relationships as properties under `skos:related` |
+| `mlsys-concept-graph.graphml` | GraphML | The concept graph for Gephi, yEd, Cytoscape, or a graph database |
+| `mlsys-taxonomy.bib` | BibTeX | Citation for the current version |
+
+The page's *Print / PDF* action prints the expanded outline. The release currently carries the book's CC BY-NC-SA 4.0 license; a more permissive license would ease adoption by other courses and organizations and is an open decision.
+
+## Maintaining the taxonomy
+
+The taxonomy is meant to be complete enough to rely on and cheap to keep current. Each update follows the same loop:
+
+1. **Add or edit.** A new concept is one record in `ml-systems-field.yml` (identity, label, definition, family, optional aliases) plus at least two relationships using the controlled relations, and its identity added to one subject's `concepts` in `ml-systems-framework.yml`. Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
+2. **Build.** `./binder/binder concepts build` validates homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
+3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `shared/concepts/coverage/`, marked `held_out: true` when it did not inform the design.
+4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `docs/ML_SYSTEMS_TAXONOMY_CHANGELOG.md`, and retire rather than delete any withdrawn identity.
 
 ## Authoring and illustration tools
 
