@@ -21863,3 +21863,185 @@ class ChatServiceDayScenario(BaseScenario):
     @property
     def accelerators_average(self) -> float:
         return (self.token_rate / self.accelerator_token_rate).to("").magnitude
+
+
+# --- Production gateway telemetry and recorded repair trajectory (added 2026-10-21) ---
+
+
+class GatewayTokenGrowthScenario(BaseScenario):
+    """Production inference gateway usage, spend, and price per token alongside tool-call share."""
+    index_series_name: str
+    tool_series_name: str
+    teams_covered: int = 200_000
+
+    @property
+    def index_rows(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return list(getattr(Literature, self.index_series_name).entries)
+
+    @property
+    def tool_rows(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return list(getattr(Literature, self.tool_series_name).entries)
+
+    @property
+    def base_row(self) -> dict:
+        return self.index_rows[0]
+
+    @property
+    def end_row(self) -> dict:
+        return self.index_rows[-1]
+
+    @property
+    def usage_growth(self) -> float:
+        return self.end_row["usage_index"] / self.base_row["usage_index"]
+
+    @property
+    def spend_growth(self) -> float:
+        return self.end_row["spend_index"] / self.base_row["spend_index"]
+
+    @property
+    def price_index_end(self) -> float:
+        return float(self.end_row["price_per_token_index"])
+
+    @property
+    def price_drop_fraction(self) -> float:
+        return 1.0 - self.end_row["price_per_token_index"] / self.base_row["price_per_token_index"]
+
+    @property
+    def tool_request_share_start(self) -> float:
+        return self.tool_rows[0]["request_share_pct"] / 100.0
+
+    @property
+    def tool_request_share_end(self) -> float:
+        return self.tool_rows[-1]["request_share_pct"] / 100.0
+
+    @property
+    def tool_token_share_start(self) -> float:
+        return self.tool_rows[0]["token_share_pct"] / 100.0
+
+    @property
+    def tool_token_share_end(self) -> float:
+        return self.tool_rows[-1]["token_share_pct"] / 100.0
+
+    @property
+    def tool_tokens_per_request_ratio(self) -> float:
+        """Tokens per tool-calling request divided by tokens per non-tool request at the end month."""
+        r = self.tool_request_share_end
+        t = self.tool_token_share_end
+        return (t / r) / ((1.0 - t) / (1.0 - r))
+
+
+class RecordedRepairTrajectoryCallsScenario(BaseScenario):
+    """Per-call and cumulative context characters in one recorded repository-repair trajectory."""
+    series_name: str
+    run_series_name: str
+    instance_id: str
+
+    @property
+    def rows(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return list(getattr(Literature, self.series_name).entries)
+
+    @property
+    def run_row(self) -> dict:
+        from ..literature.registry import Literature
+        return getattr(Literature, self.run_series_name).where(instance_id=self.instance_id)[0]
+
+    @property
+    def calls(self) -> int:
+        return len(self.rows)
+
+    @property
+    def first_call_chars(self) -> int:
+        return int(self.rows[0]["context_chars"])
+
+    @property
+    def last_call_chars(self) -> int:
+        return int(self.rows[-1]["context_chars"])
+
+    @property
+    def context_growth(self) -> float:
+        return self.last_call_chars / self.first_call_chars
+
+    @property
+    def cumulative_sent_chars(self) -> int:
+        return int(self.rows[-1]["cum_sent_chars"])
+
+    @property
+    def cumulative_new_chars(self) -> int:
+        return int(self.rows[-1]["cum_new_chars"])
+
+    @property
+    def reread_ratio(self) -> float:
+        return self.cumulative_sent_chars / self.cumulative_new_chars
+
+    @property
+    def cost_usd(self) -> float:
+        return float(self.run_row["cost_usd"])
+
+
+class GatewayWorkloadSpendScenario(BaseScenario):
+    """Token volume share vs. spend share across production workloads and open-weight vs. closed-weight tiers."""
+    use_case_series_name: str
+    open_weight_series_name: str
+
+    @property
+    def use_cases(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return sorted(getattr(Literature, self.use_case_series_name).entries, key=lambda r: -r["token_share_pct"])
+
+    @property
+    def open_weight_rows(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return list(getattr(Literature, self.open_weight_series_name).entries)
+
+    def use_case(self, name: str) -> dict:
+        return next(r for r in self.use_cases if r["use_case"] == name)
+
+    def token_share(self, name: str) -> float:
+        return self.use_case(name)["token_share_pct"] / 100.0
+
+    def cost_share(self, name: str) -> float:
+        return self.use_case(name)["cost_share_pct"] / 100.0
+
+    def cost_per_token_index(self, name: str) -> float:
+        """Relative spend per token (1.0 = gateway average)."""
+        u = self.use_case(name)
+        return u["cost_share_pct"] / u["token_share_pct"]
+
+    @property
+    def back_office_vs_assistant_price_ratio(self) -> float:
+        return self.cost_per_token_index("Back Office") / self.cost_per_token_index("AI Personal Assistants")
+
+    @property
+    def open_weight_token_share_start(self) -> float:
+        return self.open_weight_rows[0]["token_share_pct"] / 100.0
+
+    @property
+    def open_weight_token_share_end(self) -> float:
+        return self.open_weight_rows[-1]["token_share_pct"] / 100.0
+
+    @property
+    def open_weight_spend_share_start(self) -> float:
+        return self.open_weight_rows[0]["spend_share_pct"] / 100.0
+
+    @property
+    def open_weight_spend_share_end(self) -> float:
+        return self.open_weight_rows[-1]["spend_share_pct"] / 100.0
+
+    @property
+    def closed_weight_token_share_end(self) -> float:
+        return 1.0 - self.open_weight_token_share_end
+
+    @property
+    def closed_weight_spend_share_end(self) -> float:
+        return 1.0 - self.open_weight_spend_share_end
+
+    @property
+    def closed_vs_open_price_ratio_end(self) -> float:
+        """Average spend per token on closed-weight models over open-weight models in the latest month."""
+        return (self.closed_weight_spend_share_end / self.closed_weight_token_share_end) / (
+            self.open_weight_spend_share_end / self.open_weight_token_share_end
+        )
+

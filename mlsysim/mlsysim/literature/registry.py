@@ -480,6 +480,10 @@ class Literature(Registry):
     SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
     SweBenchVerifiedLeaderboard = _series.SweBenchVerifiedLeaderboard  # added 2026-10-20
     SweBenchMiniSonnet4Django12050Calls = _series.SweBenchMiniSonnet4Django12050Calls  # added 2026-10-20
+    VercelGatewayUsageSpendPrice = _series.VercelGatewayUsageSpendPrice  # added 2026-10-21
+    VercelGatewayUseCaseShares = _series.VercelGatewayUseCaseShares  # added 2026-10-21
+    VercelGatewayOpenWeightShare = _series.VercelGatewayOpenWeightShare  # added 2026-10-21
+    VercelGatewayToolCallShare = _series.VercelGatewayToolCallShare  # added 2026-10-21
     ImitationSuperTuxKart = _series.ImitationSuperTuxKart  # added 2026-10-20
     GrpoPassAtKSteps = _series.GrpoPassAtKSteps  # added 2026-10-20
     RlTrainingDynamics = RlTrainingDynamics  # added 2026-10-20
