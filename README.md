@@ -479,7 +479,7 @@ Rather than viewing textbooks and LLMs in opposition, we bring them together. Th
 
 Yes, completely! Every volume is free to read online at [mlsysbook.ai](https://mlsysbook.ai).
 
-The entire textbook is open source under a Creative Commons license ([CC BY-NC-SA 4.0](LICENSE.md)), which means you are welcome to read, share, and adapt it for non-commercial educational use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press.
+The textbook is published by MIT Press under a Creative Commons license ([CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)), which means you are welcome to read and share it for non-commercial educational use with attribution. Translations and other modified versions need permission. If you prefer print, the MIT Press hardcover edition is on its way.
 
 The companion frameworks, simulators, and labs are also open source under permissive licenses (like MIT and Apache 2.0). Everything is right here in this repository—dive in and enjoy!
 
@@ -653,7 +653,8 @@ This is a multi-component repository, and **each component is released under its
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution; modified versions, including translations, need permission. |
+| Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
 | [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
 | [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
 | [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
