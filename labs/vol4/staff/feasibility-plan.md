@@ -3,7 +3,7 @@
 **Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Lab Staff
 **Status:** Canonical Engineering Implementation Checklist & Qualification Plan
 **Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
-**Reference Curriculum:** [Master Landing Page](../README.md) · [Course Syllabus](../curriculum/syllabus.md) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Capstone Studio](../labs/lab-capstone-studio.md)
+**Reference Curriculum:** [Course Homepage](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/) · [Course Syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Capstone Studio](../labs/lab-capstone-studio.md)
 
 ---
 
