@@ -5,7 +5,7 @@
  *
  * Single global instance mounted in app/layout.tsx. Three sections:
  *  1. Pages — fixed list of routes (Vault, Practice, Mock Interview, etc.)
- *  2. Topics — fuzzy search across the taxonomy
+ *  2. Subjects — search across the ML Systems Taxonomy (labels, codes, concepts)
  *  3. Questions — fuzzy search across all 9,200 question titles
  *
  * Keyboard:
@@ -32,7 +32,7 @@ import {
   FileText, Cpu, ArrowRight, Network,
 } from "lucide-react";
 import clsx from "clsx";
-import { searchTopics } from "@/lib/taxonomy";
+import { searchSubjects } from "@/lib/mlsys-taxonomy";
 import { searchQuestions } from "@/lib/corpus";
 import { useVault, vaultSearch } from "@/lib/corpus-provider";
 
@@ -42,7 +42,7 @@ type Result =
   | { kind: "question"; title: string; subtitle: string; questionId: string };
 
 const PAGES: Result[] = [
-  { kind: "page", title: "Vault",          subtitle: "Browse all topics",        href: "/",          icon: BookOpen },
+  { kind: "page", title: "Vault",          subtitle: "Browse all subjects",      href: "/",          icon: BookOpen },
   { kind: "page", title: "Explore",        subtitle: "Visual question atlas",    href: "/explore",   icon: Network },
   { kind: "page", title: "Practice",       subtitle: "Untimed, with helpers",    href: "/practice",  icon: Target },
   { kind: "page", title: "Mock Interview", subtitle: "Timed, the gauntlet",      href: "/gauntlet",  icon: Crosshair },
@@ -133,17 +133,17 @@ export default function CommandPalette() {
 
     if (searchQuery.trim().length >= 2) {
       try {
-        const topics = searchTopics(searchQuery).slice(0, 8);
+        const topics = searchSubjects(searchQuery).slice(0, 8);
         for (const t of topics) {
           out.push({
             kind: "topic",
-            title: t.name,
+            title: `${t.code} ${t.name}`,
             subtitle: `${t.questionCount} question${t.questionCount === 1 ? "" : "s"}`,
             topicId: t.id,
           });
         }
       } catch {
-        /* searchTopics may throw on cold start; swallow */
+        /* searchSubjects may throw on cold start; swallow */
       }
 
       try {
@@ -217,7 +217,7 @@ export default function CommandPalette() {
   const commit = (r: Result) => {
     setOpen(false);
     if (r.kind === "page") router.push(r.href);
-    else if (r.kind === "topic") router.push(`/?topic=${r.topicId}`);
+    else if (r.kind === "topic") router.push(`/?subject=${encodeURIComponent(r.topicId)}`);
     else if (r.kind === "question") router.push(`/practice?q=${r.questionId}`);
   };
 
@@ -281,7 +281,7 @@ export default function CommandPalette() {
   const topics = results.filter(r => r.kind === "topic");
   if (topics.length) {
     sections.push({
-      label: "Topics",
+      label: "Subjects",
       items: topics.map((r, i) => ({ result: r, idx: cursor + i })),
     });
     cursor += topics.length;
@@ -323,7 +323,7 @@ export default function CommandPalette() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search pages, topics, or questions…"
+            placeholder="Search pages, subjects, or questions…"
             className="flex-1 bg-transparent text-[14px] text-textPrimary placeholder:text-textTertiary focus:outline-none"
             aria-label="Command palette query"
             aria-controls="command-palette-results"
