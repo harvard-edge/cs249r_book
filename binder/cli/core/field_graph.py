@@ -19,6 +19,19 @@ import yaml
 from .concept_graph import ConceptGraphError, digest, svg_map
 
 
+def load_taxonomy_yaml(path: Path) -> object:
+    """Load a taxonomy file, refusing YAML anchors and aliases.
+
+    Other tools (StaffML's hardened loader) reject aliases, and a merge script
+    that reuses a list object silently emits them (2026-10-22), so an alias
+    here fails the build instead of breaking a downstream reader.
+    """
+    text = path.read_text()
+    if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text, Loader=yaml.SafeLoader)):
+        raise ConceptGraphError(f"{path.name}: YAML anchors/aliases are not allowed; write each value out in full")
+    return yaml.safe_load(text)
+
+
 def _index(records, name):
     if not isinstance(records, list):
         raise ConceptGraphError(f"field model: {name} must be a list")
@@ -51,7 +64,7 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     path = root / "shared/concepts/ml-systems-field.yml"
     if not path.exists():
         return None
-    model = yaml.safe_load(path.read_text())
+    model = load_taxonomy_yaml(path)
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")
