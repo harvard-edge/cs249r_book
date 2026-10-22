@@ -51,8 +51,10 @@ const LEFT_MENUS: MenuGroup[] = [
   },
   {
     id: "read", label: "Read", items: [
-      { icon: "bi-journal", label: "Volume I: Foundations", href: `${BASE}/vol1/` },
-      { icon: "bi-journal", label: "Volume II: Scaling", href: `${BASE}/vol2/` },
+      { icon: "bi-journal", label: "Volume I: Introduction to Machine Learning Systems", href: `${BASE}/vol1/` },
+      { icon: "bi-journal", label: "Volume II: Scaling Machine Learning Systems", href: `${BASE}/vol2/` },
+      { icon: "bi-journal", label: "Volume III: Agentic Machine Learning Systems (in preparation)", href: `${BASE}/vol3/` },
+      { icon: "bi-journal", label: "Volume IV: Physical AI (in preparation)", href: `${BASE}/vol4/` },
       { divider: true },
       { icon: "bi-file-pdf", label: "Volume I PDF", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf`, external: true },
       { icon: "bi-journal-text", label: "Volume I EPUB", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub`, external: true },
@@ -66,14 +68,14 @@ const LEFT_MENUS: MenuGroup[] = [
       { icon: "bi-sliders", label: "Labs", href: `${BASE}/labs/` },
       { icon: "bi-fire", label: "TinyTorch", href: `${BASE}/tinytorch/` },
       { icon: "bi-cpu", label: "Hardware Kits", href: `${BASE}/kits/` },
-      { icon: "bi-calculator", label: "MLSys·IM", href: `${BASE}/mlsysim/` },
+      { icon: "bi-calculator", label: "MLSys·im", href: `${BASE}/mlsysim/` },
     ]
   },
   {
     id: "teach", label: "Teach", items: [
-      { icon: "bi-signpost-split", label: "Course Map", href: `${BASE}/instructors/course-map.html` },
-      { icon: "bi-easel", label: "Lecture Slides", href: `${BASE}/slides/` },
       { icon: "bi-person-video3", label: "Instructor Hub", href: `${BASE}/instructors/` },
+      { icon: "bi-mortarboard", label: "Courses", href: `${BASE}/courses/` },
+      { icon: "bi-easel", label: "Lecture Slides", href: `${BASE}/slides/` },
     ]
   },
   {

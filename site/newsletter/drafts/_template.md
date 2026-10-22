@@ -38,6 +38,6 @@ Body text goes here. You can use all standard Markdown:
 
 ---
 
-*[Machine Learning Systems](https://mlsysbook.ai) is a two-volume open textbook on the physics of AI engineering.*
+*[Machine Learning Systems](https://mlsysbook.ai) is a four-volume open textbook series on the physics of AI engineering.*
 
 [Subscribe](https://buttondown.com/mlsysbook) | [GitHub](https://github.com/harvard-edge/cs249r_book) | [TinyTorch](https://mlsysbook.ai/tinytorch/)
