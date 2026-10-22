@@ -1349,10 +1349,12 @@ QUANTITIES = [
          min=16, max=200, basis=[]),
     dict(id="h100-hbm-bandwidth", label="H100 HBM bandwidth", unit="TB/s", device="H100",
          need=r"TB/s|GB/s|TB per second|GB per second", skip=r"NVLink|PCIe|L2|SRAM|InfiniBand|two H100|together|node",
-         value=r"(\d[\d,]*(?:\.\d+)?)\s*(TB/s|GB/s|TB per second|GB per second)", min=1.5, max=5, basis=[]),
+         value=r"(\d[\d,]*(?:\.\d+)?)\s*(TB/s|GB/s|TB per second|GB per second)", min=1.5, max=5,
+         basis=[("achieved", r"achieved|measured|sustained")], sentence_basis=True),  # 2026-10-21: a measured rate is not the peak
     dict(id="h100-fp16-peak", label="H100 dense FP16 peak", unit="TFLOP/s", device="H100",
          need=r"TFLOP|trillion", skip=r"sparse|FP8|INT8|FP32|TF32|FP4|two H100|together|node|\d H100s",
-         value=r"(\d[\d,]*(?:\.\d+)?)\s*(TFLOP/s|TFLOPS|trillion FP16 FLOPs)", min=500, max=2500, basis=[]),
+         value=r"(\d[\d,]*(?:\.\d+)?)\s*(TFLOP/s|TFLOPS|trillion FP16 FLOPs)", min=500, max=2500,
+         basis=[("attainable", r"attainable|achieved|sustained|measured")], sentence_basis=True),  # 2026-10-21: a roofline ceiling is not the peak
     dict(id="h100-ridge", label="H100 FP16 ridge point", unit="FLOP/byte", device="H100",
          need=r"\bridge\b", skip=r"FP32|INT8|FP8|ridges",
          value=r"(\d[\d,]*(?:\.\d+)?)\s*(?:FLOPs?/byte |FLOPs? per byte )?ridge\b|"
@@ -1366,7 +1368,8 @@ QUANTITIES = [
     dict(id="dram-energy", label="DRAM access energy", unit="pJ",
          need=r"DRAM|HBM|off-chip", skip=r"SRAM|register|naive|per MAC",
          value=r"(\d[\d,]*(?:\.\d+)?)\s*pJ", min=50, max=1000,
-         basis=[("per byte", r"per byte|a byte|one byte"), ("per 32-bit access", r"32-bit")], require_basis=True),
+         basis=[("per byte", r"per byte|a byte|one byte"), ("per 32-bit access", r"32-bit"),
+                ("7 nm", r"7 ?nm")], require_basis=True),  # 2026-10-21: a 7 nm figure is not the 45 nm one
     dict(id="dram-ratio", label="DRAM-to-arithmetic energy ratio", unit="x",
          need=r"DRAM|off-chip", skip=r"\$|storage|solid|per terabyte|egress|price|reuse|systolic|SRAM|cache",
          value=r"(\d[\d,]*)\s*(?:times|×|x\b|FP32 multiplies|FP16 multiplies|multiplies|multiply-adds)",
@@ -1427,7 +1430,9 @@ def extract_quantities(deck):
                         if not (q.get("min", -1e18) <= v <= q.get("max", 1e18)):
                             continue
                         tags = [t for t, rx in q["basis"] if re.search(rx, sent)]
-                        if not tags and q["basis"]:
+                        if not tags and q["basis"] and not q.get("sentence_basis"):
+                            # sentence_basis: a qualifier such as "achieved" describes only its own
+                            # sentence; a peak stated next to it in the frame stays a peak (2026-10-21)
                             ftags = [t for t, rx in q["basis"] if re.search(rx, frame_all)]
                             tags = ftags if len(ftags) == 1 else []
                         if not tags and q.get("require_basis"):
