@@ -55,12 +55,6 @@ const LEFT_MENUS: MenuGroup[] = [
       { icon: "bi-journal", label: "Volume II: Scaling Machine Learning Systems", href: `${BASE}/vol2/` },
       { icon: "bi-journal", label: "Volume III: Agentic Machine Learning Systems (in preparation)", href: `${BASE}/vol3/` },
       { icon: "bi-journal", label: "Volume IV: Physical AI (in preparation)", href: `${BASE}/vol4/` },
-      { divider: true },
-      { icon: "bi-file-pdf", label: "Volume I PDF", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf`, external: true },
-      { icon: "bi-journal-text", label: "Volume I EPUB", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub`, external: true },
-      { divider: true },
-      { icon: "bi-file-pdf", label: "Volume II PDF", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf`, external: true },
-      { icon: "bi-journal-text", label: "Volume II EPUB", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub`, external: true },
     ]
   },
   {
