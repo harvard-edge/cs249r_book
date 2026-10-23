@@ -34,7 +34,13 @@ VARIATIONS = [
     ("v18_cantilever_origami_arm_grasp", "18. Origami-Wrapped Cantilever Arm (15+11B)", "50% #15 + 50% #11: Rotary linkage arm in pleated wings"),
     ("v19_swave_dexterous_wing_grasp", "19. Three-Finger Wing Trajectory (15+11C)", "55% #15 + 45% #11: Sweeping wing + 3-finger hand"),
     ("v20_braided_origami_manipulator", "20. Braided Origami & Titanium Arm (15+11D)", "45% #15 + 55% #11: Intertwined ribbon & actuator arm"),
+    ("v21_vol4_arm_with_signature_flower_base", "21. Origami Arm + Signature Flower Base", "Vol 1-3 pointed-petal bloom anchoring #18 cantilever arm"),
+    ("v22_vol4_arm_full_palette_continuity", "22. Full Series Palette Continuity", "Teal-blue & mauve core shading + 3D cobalt node graph"),
+    ("v23_vol4_bloom_to_arm_metamorphosis", "23. Bloom-to-Arm Metamorphosis (Active)", "Signature Vol 1-3 origami flower blossoming into #18 arm"),
+    ("v24_vol4_origami_dahlia_joint_arm", "24. Origami Dahlia Rotary Joints", "Pointed-petal blooms integrated into rotary actuator joints"),
 ]
+
+ACTIVE_VARIATION = "v23_vol4_bloom_to_arm_metamorphosis"
 
 
 def clean_art_to_pure_white(art_img: Image.Image) -> Image.Image:
