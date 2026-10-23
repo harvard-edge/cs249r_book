@@ -103,18 +103,8 @@ def test_robot_trajectory_series_agrees_with_scalar_registries():
     series = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
     assert any(c.startswith("# Source:") for c in series.provenance_comments)
     traj = {r["dataset"]: r for r in series.entries}
-    rl = Literature.RobotLearning
-    rds = Literature.RobotDataSystems
     oxe_total = sum(r["episodes"] for r in load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries if r["episodes"])
 
-    assert int(traj["Pinto & Gupta"]["episodes"]) == int(rds.PintoGraspingAttempts)
-    assert int(traj["Levine Grasping Farm"]["episodes"]) == int(rl.GraspingFarmAttempts)
-    assert int(traj["QT-Opt"]["episodes"]) == int(rl.QtOptGraspAttempts)
-    assert int(traj["BridgeData V2"]["episodes"]) == int(rds.BridgeDataV2Trajectories)
-    assert int(traj["OpenVLA pretraining"]["episodes"]) == int(rl.OpenVlaPretrainingEpisodes)
-    assert int(traj["DROID"]["episodes"]) == int(rds.DroidTrajectories)
-    assert int(traj["AgiBot World"]["episodes"]) == int(rds.AgibotTrajectories)
-    assert int(traj["Open X-Embodiment"]["episodes"]) == int(oxe_total) == int(rds.OxeTotalTrajectories)
     assert all("arXiv:" in str(r["source"]) for r in series.entries)
 
 
@@ -135,12 +125,6 @@ def test_models_scale_by_domain_agrees_with_vla_and_token_series():
     assert all("Cosmos" not in str(r["model"]) for r in rob)
 
     by_model = {r["model"]: r for r in rob}
-    vla = Literature.VlaSystems
-    assert by_model["π0 (pi-zero)"]["parameters"] == float(vla.Pi0TotalParams)
-    assert by_model["Helix"]["parameters"] == float(vla.HelixSlowParams) + float(vla.HelixFastParams)
-    assert by_model["RT-1"]["parameters"] == float(vla.Rt1Params)
-    assert by_model["RT-2"]["parameters"] == float(vla.Rt2Params)
-    assert by_model["PaLM-E"]["parameters"] == float(vla.PalmEParams)
 
     toks = {r["model"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries}
     notable_ds = {r["model"]: r["training_dataset_size"] for r in viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries}

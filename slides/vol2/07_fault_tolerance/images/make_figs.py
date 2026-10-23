@@ -9,7 +9,7 @@ chapter uses three:
     7.2.2): GPU, PCIe link, and one eighth of a node's NIC and cables in
     series; redundant power supplies add no term.
   - Measured: Meta RSC (Kokolis et al. 2025) and Llama 3 405B (Dubey et al.
-    2024), from Literature.FleetOperations and Literature.TrainingRuns.
+    2024), from cited literature and Literature.TrainingRuns.
   - Llama 3 root causes: vol2/07_fault_tolerance/data/llama3_interruptions.csv (Dubey et al.
     2024, Table 5 counts), grouped here as the chart shows them.
   - Young-Daly (Napkin Math 7.2): Scenarios.Gpt3CheckpointInterval10K.

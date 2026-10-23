@@ -19,7 +19,6 @@ from ..results import (
     InputDemandResult,
     ObjectStorageBillResult,
     PrefetchDepthResult,
-    StorageBenchmarkResult,
     StorageFootprintResult,
     StreamVsStageResult,
     SyntheticFootprintResult,
@@ -323,24 +322,3 @@ class SyntheticFootprintModel(ForwardModel):
         )
 
 
-class StorageBenchmarkDemandModel(ForwardModel):
-    """
-    Measured storage demand per accelerator, from benchmark submissions.
-
-    Keeps the submissions that pass a division and check, then takes, per
-    workload and emulated accelerator, the median of sustained read throughput
-    divided by accelerator count. The generation ratio divides the newer
-    accelerator's median by the older one's.
-    """
-    requires = ("series",)
-    produces = StorageBenchmarkResult
-
-    def solve(self, rows: Iterable[dict], division: str, workloads: Sequence[str],
-              accelerators: Sequence[str]) -> StorageBenchmarkResult:
-        kept = [r for r in rows if r["division"] == division and r["au_check"] == "pass"]
-        med = {w: {a: statistics.median(r["io_GBps"] / r["num_accelerators"] for r in kept
-                                        if r["workload"] == w and r["accelerator"] == a)
-                   for a in accelerators} for w in workloads}
-        old, new = accelerators[0], accelerators[-1]
-        return StorageBenchmarkResult(result_count=len(kept), medians=med,
-                                      generation_ratios={w: med[w][new] / med[w][old] for w in workloads})

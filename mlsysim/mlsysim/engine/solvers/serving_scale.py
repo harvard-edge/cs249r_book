@@ -19,7 +19,6 @@ import numpy as np
 from ..results import (
     KvAdmissionResult,
     PrecisionDividendResult,
-    ServingFrontierResult,
 )
 from ...core.types import Quantity
 from ...core.units import Q_, ureg
@@ -32,47 +31,12 @@ _BIN_TIME = "%Y-%m-%d %H:%M"
 _WEEKDAYS = 5                       # Monday to Friday: datetime.weekday() below 5
 
 
-def _parse(stamp: str, fmt: str) -> datetime:
-    # The trace carries seven fractional digits; strptime reads six.
-    return datetime.strptime(stamp[:26] if fmt == _TRACE_TIME else stamp, fmt)
 
 
 
 
 
 
-class ServingFrontierModel(ForwardModel):
-    """
-    The measured throughput-interactivity frontier of serving configurations.
-
-    Each row is one measured configuration with an interactivity (output
-    tokens per second each user receives, 1 / TPOT) and a per-accelerator
-    throughput. The frontier keeps the configurations no other configuration
-    on the same accelerator beats on both rates; the best throughput at a
-    target is the highest throughput among rows that meet it.
-    """
-    requires = ()
-    produces = ServingFrontierResult
-
-    @staticmethod
-    def frontier(rows: Sequence[dict], x: str, y: str):
-        pts = sorted(((r[x], r[y]) for r in rows), key=lambda p: -p[0])
-        out, best = [], -1.0
-        for a, b in pts:
-            if b > best:
-                out.append((a, b))
-                best = b
-        return sorted(out)
-
-    @staticmethod
-    def best_at(rows: Sequence[dict], x: str, y: str, minimum: float) -> float:
-        return max(r[y] for r in rows if r[x] >= minimum)
-
-    def solve(self, rows: Sequence[dict], x: str, y: str, minimum: float) -> ServingFrontierResult:
-        f = self.frontier(rows, x, y)
-        peak = max(f, key=lambda p: p[1])
-        return ServingFrontierResult(frontier=f, peak_interactivity=peak[0], peak_throughput=peak[1],
-                                     best_at=self.best_at(rows, x, y, minimum))
 
 
 class KvAdmissionModel(ForwardModel):

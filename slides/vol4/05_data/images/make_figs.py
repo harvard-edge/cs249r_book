@@ -6,14 +6,13 @@ SVG in the Volume IV causal-boundary palette (proposal blue, nervous-system
 green, plant slate, hazard red, sensing petrol). Every derived value comes
 from calcs.py. Sources:
   - LeRobot Hub counts and episode histogram, Open X-Embodiment composition:
-    MLSysIM Scenarios.LeRobotHubDatasetCounts and OpenXEmbodimentPoolComposition
-    over the Literature registry (Hugging Face Hub API, 2026-10-12; Open
-    X-Embodiment overview sheet), as in the chapter's figures.
+    Hugging Face Hub API (2026-10-12) and Open X-Embodiment overview sheet,
+    as in the chapter's figures.
   - Pairing lag, teleoperation loop, yield, wear, bytes, contact grid,
     scenario table, takeover timeline, normalization: the MLSysIM scenarios
     the chapter reads (Napkin Math 5.1 to 5.3, Sec. 5.6 to 5.9), illustrative
     values labeled so.
-  - Autonomous success with intervention data: Literature.RobotDataSystems
+  - Autonomous success with intervention data: cited literature
     (Hoque et al. 2022, ThriftyDAgger, Table 3, physical cable routing).
 Run from this folder: python3 make_figs.py
 """

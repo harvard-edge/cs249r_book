@@ -3574,10 +3574,14 @@ Scale drives the systems lesson. At batch size 32, training requires `{python} M
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
+import math
 import numpy as np
 from mlsysim import Literature, viz
-from mlsysim.engine.solvers import ParameterGrowthModel
 from mlsysim.fmt import check, fmt_count, fmt_int
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ParameterGrowth:
@@ -3592,15 +3596,15 @@ class ParameterGrowth:
     rows = [r for r in series.entries if r["parameters"]]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fit = ParameterGrowthModel().solve(series.entries, split_year)
-    years = np.array(fit.years)
-    log_params = np.array(fit.log_parameters)
-    early_slope, early_intercept = fit.early_slope, fit.early_intercept
-    late_slope, late_intercept = fit.late_slope, fit.late_intercept
-    early_doubling_months = fit.early_doubling_months
-    late_doubling_months = fit.late_doubling_months
-    largest_params = fit.largest_parameters
-    model_count = fit.model_count
+    years = np.array([_decimal_year(r["date"]) for r in rows])
+    log_params = np.array([float(np.log10(r["parameters"])) for r in rows])
+    _early = years < split_year
+    early_slope, early_intercept = (float(x) for x in np.polyfit(years[_early], log_params[_early], 1))
+    late_slope, late_intercept = (float(x) for x in np.polyfit(years[~_early], log_params[~_early], 1))
+    early_doubling_months = 12 * math.log10(2) / early_slope
+    late_doubling_months = 12 * math.log10(2) / late_slope
+    largest_params = max(r["parameters"] for r in rows)
+    model_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(25 <= early_doubling_months <= 60, f"Expected ~43-month doubling before 2010, got {early_doubling_months:.0f}.")

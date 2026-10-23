@@ -2,7 +2,7 @@
 """Data plots and diagrams for Volume IV Lecture 6 (Policy Training).
 
 Every plotted value and every number in a label comes from calcs.py, which
-reads it from MLSysIM (the Scenarios.* entries and Literature.RobotLearning);
+reads it from MLSysIM (the Scenarios.* entries and cited literature);
 coordinates and schematic shapes are layout. Illustrative figures say so on
 the figure.
 

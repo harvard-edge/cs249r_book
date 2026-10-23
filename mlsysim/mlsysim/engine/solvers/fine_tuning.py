@@ -17,7 +17,6 @@ from ..results import (
     PreferencePairResult,
     SequencePackingResult,
     TargetMaskResult,
-    TrajectoryRoleShareResult,
 )
 from .base import ForwardModel
 from ...core.types import Quantity
@@ -92,35 +91,6 @@ class PerInvocationSerializationModel(ForwardModel):
             per_invocation_tokens=total, transcript_tokens=last, expansion=total / last)
 
 
-class TrajectoryRoleShareModel(ForwardModel):
-    """
-    Recorded transcript characters by role, pooled per (scaffold, model) configuration.
-
-    Each row is one trajectory with prompt, observation, model-output, and
-    total characters; each message is counted once. Characters stand in for
-    tokens because configurations use different tokenizers.
-    """
-    requires = ("series",)
-    produces = TrajectoryRoleShareResult
-
-    def solve(self, rows) -> TrajectoryRoleShareResult:
-        totals: dict = {}
-        for r in rows:
-            t = totals.setdefault((r["scaffold"], r["model"]), [0.0, 0.0, 0.0, 0.0, 0])
-            t[0] += r["prompt_chars"]
-            t[1] += r["obs_chars"]
-            t[2] += r["model_chars"]
-            t[3] += r["total_chars"]
-            t[4] += 1
-        configs = [dict(scaffold=s, model=m, runs=v[4], prompt_share=v[0] / v[3],
-                        observation_share=v[1] / v[3], model_share=v[2] / v[3])
-                   for (s, m), v in totals.items()]
-        obs = [c["observation_share"] for c in configs]
-        mod = [c["model_share"] for c in configs]
-        return TrajectoryRoleShareResult(
-            runs=len(rows), configurations=configs,
-            observation_low=min(obs), observation_high=max(obs),
-            model_low=min(mod), model_high=max(mod))
 
 
 class LossNormalizationModel(ForwardModel):

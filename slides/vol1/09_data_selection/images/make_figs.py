@@ -8,21 +8,20 @@ quantities directly. The notes below say where each figure's inputs live.
     (Villalobos et al. 2024), read from MLSysIM's literature series
     (vol1/04_data_engineering/data/pretraining_tokens.csv and PublicTextStock), the same data
     as the Data Engineering chapter's figure; the fit is recomputed here
-    exactly as the book does (least squares on log10 tokens), and its label
-    is Scenarios.PretrainingCorpusGrowth's growth.
+    exactly as the book does (least squares on log10 tokens).
   - GPT-2 on WebText and tokens per parameter: Scenarios.Gpt2XlWebTextCorpus
     (GPT-2 XL, WebText, Chinchilla constants), Models GPT-3 and Llama 2 70B.
   - Selection-inequality scoreboard: Scenarios.ResNet50TenPercentCoresetH100
     (Example 9.2 and Sec. 9.7.1), at the chapter's unrounded minutes.
   - Deduplication: Lee et al. 2022 near-duplicate shares
-    (Literature.DataSelectionResults) on GPT-2's run,
+    (cited literature) on GPT-2's run,
     Scenarios.Gpt2WebTextNearDuplicates.
   - MinHash page text: the C4 sentence Lee et al. 2022 found repeated
     (arXiv:2107.06499v2, footnote 1); signature values are illustrative.
   - Coverage floor: Scenarios.RareClassTenPercentCoreset (Sec. 9.3.4, 9.10).
   - Curriculum warmup: Scenarios.Cifar10LinearCurriculum (W illustrative).
   - Selection via proxy and FixMatch: Coleman et al. 2020 and Sohn et al.
-    2020 (table 2, best error per label budget), Literature.DataSelectionResults.
+    2020 (table 2, best error per label budget), cited literature.
   - ResNet-50 data path and echoing: Scenarios.ResNet50HalfCoresetEpochH100
     and ResNet50EchoingH100 (Napkin Math 9.4 and 9.5).
   - Cost breakdown and amortized ROI: Scenarios.ImageNetDataCostBreakdown

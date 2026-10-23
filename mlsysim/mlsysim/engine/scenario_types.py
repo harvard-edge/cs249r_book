@@ -23,7 +23,6 @@ from pydantic import BaseModel, ConfigDict
 
 from ..core.types import Quantity
 from ..core.units import Q_
-from ..core.series_loader import load_series
 from ..hardware.types import HardwareNode
 from ..models.types import Workload
 from ..systems.types import Fleet
@@ -601,17 +600,6 @@ class PowerLawScenario(BaseScenario):
         return calc_loss_reduction_compute_multiple(self.exponent, self.loss_reduction)
 
 
-class TrainingGrowthScenario(BaseScenario):
-    """Growth of training compute over a window of published runs, split into its factors."""
-    series_name: str
-    first_year: str
-    last_year: str
-
-    @property
-    def result(self):
-        from .solvers import TrainingGrowthModel
-        rows = load_series(self.series_name).entries
-        return TrainingGrowthModel().solve(rows, self.first_year, self.last_year)
 
 
 class PublishedRunScenario(BaseScenario):
@@ -875,21 +863,6 @@ class SilentSlowdownScenario(BaseScenario):
         return (1 - f) + f / (1 - self.bandwidth_loss) - 1
 
 
-class CollectiveFitScenario(BaseScenario):
-    """A floor-plus-bandwidth fit to the measured collective sweep ``series_name`` (local CSV series)."""
-    series_name: str
-    floor_cutoff: Quantity
-    mid_low: Quantity
-    mid_high: Quantity
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import CollectiveFitModel
-        return CollectiveFitModel().solve(self.rows, self.floor_cutoff, self.mid_low, self.mid_high)
 
 
 class NicSharingScenario(BaseScenario):
@@ -1137,23 +1110,6 @@ class SyntheticFootprintScenario(BaseScenario):
                                                self.verification_passes)
 
 
-class StorageBenchmarkScenario(BaseScenario):
-    """Per-accelerator storage demand measured in a benchmark series, older accelerator first."""
-    series_name: str
-    division: str
-    workloads: tuple
-    accelerators: tuple
-
-    @property
-    def rows(self) -> list:
-        return [r for r in load_series(self.series_name).entries
-                if r["division"] == self.division and r["au_check"] == "pass"]
-
-    @property
-    def result(self):
-        from .solvers import StorageBenchmarkDemandModel
-        return StorageBenchmarkDemandModel().solve(load_series(self.series_name).entries,
-                                                   self.division, self.workloads, self.accelerators)
 
 
 class ShardPackagingScenario(BaseScenario):
@@ -1251,17 +1207,6 @@ class TractionLossScenario(BaseScenario):
                                          self.drive_load_share)
 
 
-class DomainComputeGapScenario(BaseScenario):
-    """``model`` from a Literature series against the largest ``reference_group`` model of its year."""
-    series_name: str
-    model: str
-    reference_group: str = "Language"
-
-    @property
-    def result(self):
-        from .solvers import DomainComputeGapModel
-        rows = load_series(self.series_name).entries
-        return DomainComputeGapModel().solve(rows, self.model, self.reference_group)
 
 
 # --- Agent trajectories (added 2026-10-20) -----------------------------------
@@ -1323,27 +1268,6 @@ class AppendOnlyContextScenario(BaseScenario):
                                               self.context_window)
 
 
-class TaskHorizonTrendScenario(BaseScenario):
-    """Doubling time of the frontier 50% task horizon in a published series."""
-    series_name: str
-    fit_cap: Quantity                          # longest horizon the fits include
-    recent_from: str                           # ISO date the recent fit starts
-    published_recent_doubling: Optional[Quantity] = None   # the source's own figure, to check the refit
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import TaskHorizonTrendModel
-        return TaskHorizonTrendModel().solve(self.rows, self.fit_cap, self.recent_from)
-
-    def fitted_minutes(self, when) -> float:
-        """Horizon in minutes on the recent fit line at datetime ``when`` (fractional days count)."""
-        r = self.result
-        day = when.toordinal() + (when.hour * 3600 + when.minute * 60 + when.second) / 86400
-        return 2 ** (r.recent_intercept + r.recent_slope_per_day * day)
 
 
 
@@ -1804,16 +1728,6 @@ class AlignmentMemoryScenario(BaseScenario):
                                             self.rollout_sequences, self.rollout_tokens, self.device_memory)
 
 
-class ScalingSeriesScenario(BaseScenario):
-    """Named same-round series of a benchmark table and their scaling efficiencies."""
-    series_name: str
-    specs: List  # (label, (round, submitter prefix, benchmark, accelerator substring))
-
-    @property
-    def result(self):
-        from .solvers import ScalingSeriesModel
-        rows = load_series(self.series_name).entries
-        return ScalingSeriesModel().solve(rows, self.specs)
 
 
 # --- Collective communication (added 2026-10-20) ----------------------------
@@ -2042,16 +1956,6 @@ class ResidualShareScenario(BaseScenario):
         return calc_strong_scaling_speedup(self.devices, self.residual)
 
 
-class MemoryWallScenario(BaseScenario):
-    """Training-state demand of notable models against one accelerator's memory, by year."""
-    models: List                     # (label, name in vol1/05_nn_computation/data/notable_models.csv)
-    accelerators: List[str]          # Hardware.Cloud keys
-    bytes_per_param: Quantity
-
-    @property
-    def result(self):
-        from .solvers import MemoryWallModel
-        return MemoryWallModel().solve(self.models, self.accelerators, self.bytes_per_param)
 # --- Single-machine iron law, Amdahl, and silent degradation (added 2026-10-20) ---
 
 from ..datasets.types import DatasetProfile  # noqa: E402
@@ -2347,30 +2251,6 @@ class AmdahlScenario(BaseScenario):
 
 
 
-class ShiftedTestSetScenario(BaseScenario):
-    """Published models scored on an original and a re-collected test set (``local CSV series``)."""
-    series_name: str
-    original_key: str
-    new_key: str
-    gap_key: Optional[str] = None     # None: the gap is original minus new (added 2026-10-20)
-    baseline_prefix: Optional[str] = None  # None: no non-neural baselines in the series
-    # Optional (added 2026-10-20): keep only models scored on the new set whose
-    # original accuracy reaches this floor (a testbed that includes partially
-    # trained and low-data checkpoints).
-    original_floor: Optional[float] = None
-
-    @property
-    def rows(self):
-        rows = load_series(self.series_name).entries
-        if self.original_floor is None:
-            return rows
-        return [r for r in rows if r[self.new_key] is not None and r[self.original_key] >= self.original_floor]
-
-    @property
-    def result(self):
-        from .solvers import ShiftedTestSetModel
-        return ShiftedTestSetModel().solve(self.rows, self.original_key, self.new_key,
-                                           self.gap_key, self.baseline_prefix)
 
 
 
@@ -2459,69 +2339,8 @@ class GrowthGapScenario(BaseScenario):
         return (self.compute_annual_factor / self.bandwidth_annual_factor) ** years
 
 
-class TrendFitScenario(BaseScenario):
-    """Log-linear fit of one group of a Literature series; growth per ``period`` of the x column.
-
-    ``group_key=None`` fits every row. ``x_is_date`` reads the x column as an ISO
-    date and converts it to a fractional year (added 2026-10-20).
-    ``stated_points`` fits (x, y) pairs given directly, each y read from a
-    registry, in place of a series (added 2026-10-20).
-    """
-    series_name: Optional[str] = None
-    group_key: Optional[str] = None
-    group: Optional[str] = None
-    x_key: Optional[str] = None
-    y_key: Optional[str] = None
-    stated_points: Optional[List[tuple]] = None
-    period: float = 1.0
-    x_is_date: bool = False
-
-    def _x(self, value) -> float:
-        if not self.x_is_date:
-            return value
-        import datetime as dt
-        d = dt.date.fromisoformat(value)
-        return d.year + (d.timetuple().tm_yday - 1) / 365.25
-
-    @property
-    def points(self) -> List[tuple]:
-        if self.stated_points is not None:
-            return [(float(x), float(y)) for x, y in self.stated_points]
-        rows = load_series(self.series_name).entries
-        return [(self._x(r[self.x_key]), r[self.y_key]) for r in rows
-                if self.group_key is None or r[self.group_key] == self.group]
-
-    def crossing(self, y: float) -> float:
-        """The x at which the fitted trend reaches ``y`` (added 2026-10-20)."""
-        import math
-        _, slope, intercept = self.fit
-        return (math.log10(y) - intercept) / slope
-
-    @property
-    def fit(self) -> tuple:
-        """(growth per period, slope, intercept) of log10(y) on x."""
-        from ..physics.statistics import fit_exponential_growth
-        pts = self.points
-        return fit_exponential_growth([p[0] for p in pts], [p[1] for p in pts], self.period)
-
-    @property
-    def growth(self) -> float:
-        return self.fit[0]
 
 
-class TrendWindowScenario(BaseScenario):
-    """Maxima of series in a Literature table over year windows, and their ratios."""
-    series_name: str
-    windows: Dict[str, tuple]         # window name -> (first year, year after last)
-
-    def peak(self, series: str, window: str) -> float:
-        """Largest value of ``series`` in the named window."""
-        lo, hi = self.windows[window]
-        rows = load_series(self.series_name).entries
-        return max(r["value"] for r in rows if r["series"] == series and lo <= r["year"] < hi)
-
-    def growth(self, series: str, start: str, end: str) -> float:
-        return self.peak(series, end) / self.peak(series, start)
 
 
 class BatteryBudgetScenario(BaseScenario):
@@ -2955,15 +2774,6 @@ class QueueWaitScenario(BaseScenario):
         return calc_mg1_wait_ratio(self.utilization, self.service_cv)
 
 
-class JobSizeMixScenario(BaseScenario):
-    """A cluster trace's jobs and GPU time split at ``large_threshold`` GPUs per job."""
-    series: Any                             # TrendSeries with gpu_num, jobs, gpu_seconds rows
-    large_threshold: int
-
-    @property
-    def result(self):
-        from .solvers import JobSizeMixModel
-        return JobSizeMixModel().solve(self.series.entries, self.large_threshold)
 
 
 class DominantShareScenario(BaseScenario):
@@ -3773,27 +3583,6 @@ class BestOfNPoolScenario(BaseScenario):
 
 
 
-class CoverageVsVoteScenario(BaseScenario):
-    """Coverage against majority vote in a repeated-sampling study (two ``Literature`` series)."""
-    majority_series: str
-    coverage_series: str
-    small_model: str
-    large_model: str
-    dataset: str
-    k_max: int                       # the largest pool
-    k_knee: int                      # where voting stops gaining
-    repair_system: str
-    repair_dataset: str
-    repair_k: int
-
-    @property
-    def result(self):
-        from .solvers import CoverageVsVoteModel
-        return CoverageVsVoteModel().solve(
-            load_series(self.majority_series).entries,
-            load_series(self.coverage_series).entries,
-            self.small_model, self.large_model, self.dataset, self.k_max, self.k_knee,
-            self.repair_system, self.repair_dataset, self.repair_k)
 
 
 class VerifiedPoolScenario(BaseScenario):
@@ -3951,20 +3740,6 @@ class AttentionDilutionScenario(BaseScenario):
                                               self.lookalike_logit)
 
 
-class ComprehensionByLengthScenario(BaseScenario):
-    """Models of a Literature length sweep scored at every listed length."""
-    series_name: str
-    lengths: List[str]               # column suffixes, shortest first
-    hold_bar: float                  # score a model must hold at the longest length
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import ComprehensionByLengthModel
-        return ComprehensionByLengthModel().solve(self.rows, self.lengths, self.hold_bar)
 
 
 class PrefixLayoutBillScenario(BaseScenario):
@@ -4312,41 +4087,6 @@ class ConfidenceRegimesScenario(BaseScenario):
         raise KeyError(regime)
 
 
-class SingleStreamLatencyScenario(BaseScenario):
-    """Published single-stream latencies of one ``system`` from a benchmark ``series``, latest round each."""
-    series: Any                      # a Literature series with .entries rows
-    system: str
-    benchmarks: List[Any]            # (benchmark id, task, model)
-    scenario: str = "SingleStream"
-    metric_prefix: str = "p90"
-
-    def rounds(self, bench: str) -> List[Any]:
-        """Every matching row for ``bench``, oldest round first."""
-        hits = [r for r in self.series.entries
-                if r["system"] == self.system and r["benchmark"] == bench
-                and r["scenario"] == self.scenario and r["metric"].startswith(self.metric_prefix)]
-        return sorted(hits, key=lambda r: r["round"])
-
-    def latest(self, bench: str) -> Quantity:
-        return Q_(self.rounds(bench)[-1]["value"], "ms")
-
-    def earliest(self, bench: str) -> Quantity:
-        return Q_(self.rounds(bench)[0]["value"], "ms")
-
-    def latest_round(self, bench: str) -> str:
-        return self.rounds(bench)[-1]["round"]
-
-    @property
-    def latencies(self) -> List[Quantity]:
-        return [self.latest(b[0]) for b in self.benchmarks]
-
-    def count_within(self, period: Quantity) -> int:
-        return sum(1 for t in self.latencies if t <= period)
-
-    @property
-    def span(self) -> float:
-        lat = self.latencies
-        return (max(lat) / min(lat)).to("").magnitude
 # --- Data engineering: false-wake budgets, label budgets, agreement, ingest cost (added 2026-10-20) ---
 
 class AlwaysOnDetectorTargetsScenario(BaseScenario):
@@ -5208,26 +4948,6 @@ class TraceVolumeScenario(BaseScenario):
         return (self.per_device * self.devices).to("GB")
 
 
-class SoftwareGainsScenario(BaseScenario):
-    """Throughput of one fixed system across benchmark rounds, relative to each benchmark's first round."""
-    series: Any                              # a Literature series with .entries rows
-    benchmarks: List[Any]                    # (benchmark id, label)
-    scenario: str = "Offline"
-
-    def rows(self, bench: str) -> List[Any]:
-        """Every matching row for ``bench``, oldest publication first."""
-        hits = [r for r in self.series.entries if r["benchmark"] == bench and r["scenario"] == self.scenario]
-        return sorted(hits, key=lambda r: r["pub_month"])
-
-    def gain(self, bench: str) -> float:
-        pts = self.rows(bench)
-        return pts[-1]["value"] / pts[0]["value"]
-
-    def months(self) -> int:
-        """Months from the earliest to the latest publication in the scenario."""
-        stamps = sorted(r["pub_month"] for r in self.series.entries if r["scenario"] == self.scenario)
-        (y0, m0), (y1, m1) = (tuple(int(x) for x in stamps[i].split("-")) for i in (0, -1))
-        return (y1 - y0) * 12 + (m1 - m0)
 
 
 # --- Serving at scale (added 2026-10-20) ---------------------------------------
@@ -5380,43 +5100,6 @@ class LittlesLawScenario(BaseScenario):
 
 
 
-class ServingFrontierScenario(BaseScenario):
-    """Measured serving configurations: per-accelerator frontier and best rate at a per-user target."""
-    series: Any                          # rows with hardware, interactivity, and throughput columns
-    x_column: str = "interactivity_tok_s_user"
-    y_column: str = "output_tok_s_gpu"
-    targets: Optional[List[float]] = None    # per-user rates at which configurations are compared
-
-    def rows(self, hardware: Optional[str] = None, **match) -> List[dict]:
-        out = [r for r in self.series.entries if hardware is None or r["hardware"] == hardware]
-        return [r for r in out if all(r.get(k) == v for k, v in match.items())]
-
-    def solve(self, hardware: str, minimum: float, **match):
-        from .solvers import ServingFrontierModel
-        return ServingFrontierModel().solve(self.rows(hardware, **match), self.x_column, self.y_column, minimum)
-
-    def frontier(self, hardware: str):
-        from .solvers import ServingFrontierModel
-        return ServingFrontierModel.frontier(self.rows(hardware), self.x_column, self.y_column)
-
-    def best_at(self, hardware: str, minimum: float, **match) -> float:
-        from .solvers import ServingFrontierModel
-        return ServingFrontierModel.best_at(self.rows(hardware, **match), self.x_column, self.y_column, minimum)
-
-    def split_gain(self, hardware: str, minimum: float) -> float:
-        """Best split-pool (disaggregated) rate over best colocated rate at ``minimum``."""
-        return self.best_at(hardware, minimum, disagg=1.0) / self.best_at(hardware, minimum, disagg=0.0)
-
-    def sweep(self, hardware: str, **match) -> List[dict]:
-        """Matching rows in order of concurrency."""
-        return sorted(self.rows(hardware, **match), key=lambda r: r["conc"])
-
-    def max_concurrency_at(self, hardware: str, minimum: float, **match) -> float:
-        return max(r["conc"] for r in self.rows(hardware, **match) if r[self.x_column] >= minimum)
-
-    @property
-    def config_count(self) -> int:
-        return len(self.series.entries)
 
 
 
@@ -6501,127 +6184,8 @@ class DemonstrationCampaignScenario(BaseScenario):
         return self.repeat_campaigns * self.cable_life_used
 
 
-class HubDatasetCountsScenario(BaseScenario):
-    """Public datasets on a hub over time and episodes per dataset, from a monthly series and a
-    power-of-two episode histogram (all creation years pooled)."""
-    monthly: Any                   # Literature series: month, cumulative_datasets
-    histogram: Any                 # Literature series: bin_lo, bin_hi, datasets
-    small_episodes: int            # "small" datasets hold fewer than this many episodes
-    large_episodes: int            # "large" datasets hold at least this many
-
-    def count_at(self, month: str) -> float:
-        return {m["month"]: m["cumulative_datasets"] for m in self.monthly.entries}[month]
-
-    @property
-    def latest_month(self) -> str:
-        return self.monthly.entries[-1]["month"]
-
-    @property
-    def latest_count(self) -> float:
-        return self.monthly.entries[-1]["cumulative_datasets"]
-
-    def growth_since(self, month: str) -> float:
-        return self.latest_count / self.count_at(month)
-
-    @property
-    def pooled(self) -> Dict[float, float]:
-        """Datasets per bin lower edge, creation years pooled."""
-        out: Dict[float, float] = {}
-        for b in self.histogram.entries:
-            out[b["bin_lo"]] = out.get(b["bin_lo"], 0) + b["datasets"]
-        return out
-
-    @property
-    def counted(self) -> float:
-        return sum(b["datasets"] for b in self.histogram.entries)
-
-    @property
-    def small_share(self) -> float:
-        return sum(b["datasets"] for b in self.histogram.entries
-                   if b["bin_hi"] <= self.small_episodes) / self.counted
-
-    @property
-    def large_share(self) -> float:
-        return sum(b["datasets"] for b in self.histogram.entries
-                   if b["bin_lo"] >= self.large_episodes) / self.counted
-
-    @property
-    def median_bin_low(self) -> float:
-        run = 0.0
-        pooled = self.pooled
-        for lo in sorted(pooled):
-            run += pooled[lo]
-            if run >= self.counted / 2:
-                return lo
-        raise ValueError("empty histogram")
-
-    @property
-    def median_bin_high(self) -> float:
-        """Exclusive upper edge of the median bin (power-of-two bins)."""
-        return 2 * self.median_bin_low if self.median_bin_low else 1
 
 
-class PooledCorpusCompositionScenario(BaseScenario):
-    """Episode-weighted composition of a pooled cross-embodiment corpus against a machine's
-    command rate ``rate_threshold``."""
-    series: Any                    # Literature series: one row per constituent dataset
-    rate_threshold: Quantity
-    top_datasets: int = 2          # how many of a morphology's largest datasets top_share_within counts
-
-    @property
-    def rows(self) -> List[dict]:
-        return [r for r in self.series.entries if r["episodes"]]
-
-    def row(self, dataset: str) -> dict:
-        return next(r for r in self.rows if r["dataset"] == dataset)
-
-    @property
-    def datasets(self) -> int:
-        return len(self.rows)
-
-    @property
-    def total(self) -> float:
-        return sum(r["episodes"] for r in self.rows)
-
-    @property
-    def by_morphology(self) -> Dict[str, float]:
-        out: Dict[str, float] = {}
-        for r in self.rows:
-            out[r["robot_morphology"]] = out.get(r["robot_morphology"], 0) + r["episodes"]
-        return out
-
-    @property
-    def by_rate(self) -> Dict[Optional[float], float]:
-        """Episodes per declared command rate in Hz; None collects rows with no stated rate."""
-        out: Dict[Optional[float], float] = {}
-        for r in self.rows:
-            k = r["control_frequency_hz"] if isinstance(r["control_frequency_hz"], float) else None
-            out[k] = out.get(k, 0) + r["episodes"]
-        return out
-
-    def morphology_share(self, morphology: str) -> float:
-        return self.by_morphology.get(morphology, 0) / self.total
-
-    def rate_share(self, rate_hz: Optional[float]) -> float:
-        return self.by_rate.get(rate_hz, 0) / self.total
-
-    @property
-    def table_top_share(self) -> float:
-        return sum(r["episodes"] for r in self.rows if "table" in str(r["scene_type"]).lower()) / self.total
-
-    @property
-    def threshold_hz(self) -> float:
-        return self.rate_threshold.to("Hz").magnitude
-
-    @property
-    def at_or_above_threshold_share(self) -> float:
-        return sum(v for k, v in self.by_rate.items() if k is not None and k >= self.threshold_hz) / self.total
-
-    def top_share_within(self, morphology: str, n: Optional[int] = None) -> float:
-        """Share of a morphology's episodes supplied by its ``n`` largest datasets (default ``top_datasets``)."""
-        n = self.top_datasets if n is None else n
-        eps = sorted(r["episodes"] for r in self.rows if r["robot_morphology"] == morphology)
-        return sum(eps[-n:]) / sum(eps)
 
 
 class StateGridScenario(BaseScenario):
@@ -7349,28 +6913,6 @@ class FederatedUplinkScenario(BaseScenario):
 
 
 
-class SeriesSpreadScenario(BaseScenario):
-    """Highest over lowest ``value_key`` among rows of a Literature series in named year windows."""
-    series_name: str
-    value_key: str
-    windows: Dict[str, tuple]                 # window name -> (first year, last year), inclusive
-
-    @property
-    def rows(self) -> tuple:
-        return load_series(self.series_name).entries
-
-    def window(self, name: str) -> List[dict]:
-        lo, hi = self.windows[name]
-        return [r for r in self.rows if r[self.value_key] and lo <= r["year"] <= hi]
-
-    def highest(self, name: str) -> dict:
-        return max(self.window(name), key=lambda r: r[self.value_key])
-
-    def lowest(self, name: str) -> dict:
-        return min(self.window(name), key=lambda r: r[self.value_key])
-
-    def spread(self, name: str) -> float:
-        return self.highest(name)[self.value_key] / self.lowest(name)[self.value_key]
 
 
 # --- Policy training: discounting, decoders, trial campaigns, contact exploits (added 2026-10-20) ---
@@ -10264,18 +9806,6 @@ class AdversarialTrainingPassesScenario(BaseScenario):
         return self.passes / self.standard_passes
 
 
-class CrossConditionGapScenario(BaseScenario):
-    """A standard model's clean accuracy against a robust model's attacked accuracy: two of four cells.
-
-    The difference mixes a model change with a test change, so it is neither
-    the clean-accuracy penalty nor the robustness benefit.
-    """
-    standard_clean_accuracy: float    # percent
-    robust_attacked_accuracy: float   # percent
-
-    @property
-    def gap(self) -> float:
-        return self.standard_clean_accuracy - self.robust_attacked_accuracy
 
 
 class CertifiedRadiusScenario(BaseScenario):
@@ -10347,44 +9877,6 @@ class FloatBitFlipScenario(BaseScenario):
         return 1 + self.exponent_bits + self.fraction_bits
 
 
-class StandardizedAttackScenario(BaseScenario):
-    """Published defenses under one standardized attack (``local CSV series``): best by year and broken defenses.
-
-    Rows without a year and rows the benchmark flags unreliable are dropped. A
-    defense below ``broken_floor`` percent attacked accuracy provides no robustness.
-    """
-    series_name: str
-    first_year: int
-    last_year: int
-    broken_floor: float               # percent
-
-    @property
-    def rows(self):
-        return [r for r in load_series(self.series_name).entries
-                if r["year"] and r["unreliable"] not in (True, "True")]
-
-    @property
-    def years(self) -> List[int]:
-        return list(range(self.first_year, self.last_year + 1))
-
-    def best(self, year: int):
-        """The row with the highest attacked accuracy published in ``year``."""
-        return max((r for r in self.rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
-
-    @property
-    def best_first(self):
-        return self.best(self.first_year)
-
-    @property
-    def best_last(self):
-        return self.best(self.last_year)
-
-    @property
-    def broken(self):
-        return [r for r in self.rows if r["autoattack_acc"] < self.broken_floor]
-
-    def best_so_far(self, year: int) -> float:
-        return max(self.best(y)["autoattack_acc"] for y in self.years if y <= year)
 # --- The agent harness (added 2026-10-20) -------------------------------------
 # What the runtime around one trajectory holds, shares, and admits: approval
 # escrow, fair scheduling of model calls between request classes, admission of
@@ -10467,19 +9959,6 @@ class TrajectoryBudgetMeterScenario(BaseScenario):
             allowances, float(self.elapsed.to("second").magnitude))
 
 
-class CallCeilingScenario(BaseScenario):
-    """A model-call ceiling at the accepted runs' quantile, over every submission in a series."""
-    series_name: str
-    quantile: float
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import CallCeilingModel
-        return CallCeilingModel().solve(self.rows, self.quantile)
 # --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
 class InjectionExposureScenario(BaseScenario):
     """Workloads reading ``reads`` untrusted items each, a fraction ``payload_fraction`` carrying
@@ -10519,17 +9998,6 @@ class PolicyComparisonScenario(BaseScenario):
 
 
 
-class StepCeilingReturnScenario(BaseScenario):
-    """Success of the same models at several enforced step ceilings, from a published series."""
-    series_name: str
-    steps: Optional[List[int]] = None    # None: every ceiling the series reports
-
-    @property
-    def result(self):
-        from .solvers import StepCeilingReturnModel
-        rows = load_series(self.series_name).entries
-        steps = self.steps or sorted({int(r["steps"]) for r in rows})
-        return StepCeilingReturnModel().solve(rows, steps)
 # --- Closed-loop evaluation: trial campaigns, sequential tests, and exposure (added 2026-10-20) ---
 
 class ClosedLoopCampaignScenario(BaseScenario):
@@ -11830,35 +11298,8 @@ class PairedComparisonScenario(BaseScenario):
                                              self.tolerance, self.confidence)
 
 
-class ScaffoldSpreadScenario(BaseScenario):
-    """One leaderboard's models, each under several agent scaffolds (a ``Literature`` series)."""
-    series_name: str
-    min_scaffolds: int
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import ScaffoldSpreadModel
-        return ScaffoldSpreadModel().solve(self.rows, self.min_scaffolds)
 
 
-class LeaderboardTiesScenario(BaseScenario):
-    """The top of one evaluator's leaderboard with reported standard errors (a ``Literature`` series)."""
-    series_name: str
-    top: int
-    confidence: float = 0.95
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import LeaderboardTiesModel
-        return LeaderboardTiesModel().solve(self.rows, self.top, self.confidence)
 
 
 class TaskMixConsistencyScenario(BaseScenario):
@@ -12197,15 +11638,6 @@ class OdometryDriftScenario(BaseScenario):
                                           self.path_length, s.delta_loc, s.v_aisle, s.aisle_length, self.test_speed)
 
 
-class OdometryLeaderboardScenario(BaseScenario):
-    """Ranked odometry methods (``entries``: translation_err_pct, sensor_group) against ``site``'s bound and aisle."""
-    site: Any                                   # EmbodiedSiteScenario
-    entries: List[Any]
-
-    @property
-    def result(self):
-        from .solvers import OdometryLeaderboardModel
-        return OdometryLeaderboardModel().solve(self.entries, self.site.delta_loc, self.site.aisle_length)
 
 
 class BeliefExpiryScenario(BaseScenario):
@@ -14107,47 +13539,6 @@ class FrameCompressionScenario(BaseScenario):
         return (self.accelerator_frame * self.flop_fraction).to("millisecond")
 
 
-class SmallestModelAtScoreScenario(BaseScenario):
-    """The smallest model at or above ``threshold`` on ``score`` released up to each date.
-
-    ``series`` names a ``local CSV series`` table with ``date``, ``parameters``,
-    ``model``, and the ``score`` column; the frontier is the running minimum of
-    parameters among rows that clear the bar, in date order.
-    """
-    series: str
-    score: str
-    threshold: float
-
-    @property
-    def rows(self) -> list:
-        return sorted(load_series(self.series).entries, key=lambda r: r["date"])
-
-    @property
-    def frontier(self) -> list:
-        front = []
-        for r in self.rows:
-            if r[self.score] >= self.threshold and (not front or r["parameters"] < front[-1]["parameters"]):
-                front.append(r)
-        return front
-
-    @property
-    def first(self) -> dict:
-        return self.frontier[0]
-
-    @property
-    def last(self) -> dict:
-        return self.frontier[-1]
-
-    @property
-    def shrink(self) -> float:
-        return self.first["parameters"] / self.last["parameters"]
-
-    @property
-    def span_years(self) -> float:
-        import datetime as _dt
-        days = (_dt.date.fromisoformat(self.last["date"]) - _dt.date.fromisoformat(self.first["date"])).days
-        from ..core.units import SEC_PER_DAY, SEC_PER_YEAR_LEAP
-        return days / (SEC_PER_YEAR_LEAP / SEC_PER_DAY)
 
 
 class ConvBnReluFusionScenario(BaseScenario):
@@ -14472,57 +13863,6 @@ class ParameterBandwidthGrowthScenario(BaseScenario):
         return max(self.dense_index)
 
 
-class DeviceEnvelopeScenario(BaseScenario):
-    """Best-device-to-date envelopes of two columns of a ``local CSV series`` device table.
-
-    Rows are ordered by ``date_key``; each envelope is the running maximum,
-    and growth is the final envelope over the earliest device's value.
-    """
-    series_name: str
-    date_key: str
-    compute_key: str
-    bandwidth_key: str
-
-    @property
-    def rows(self) -> List[dict]:
-        return sorted(load_series(self.series_name).entries, key=lambda r: r[self.date_key])
-
-    def _envelope(self, key) -> List[tuple]:
-        best, out = 0.0, []
-        for r in self.rows:
-            best = max(best, r[key])
-            out.append((r[self.date_key], best))
-        return out
-
-    @property
-    def compute_envelope(self) -> List[tuple]:
-        return self._envelope(self.compute_key)
-
-    @property
-    def bandwidth_envelope(self) -> List[tuple]:
-        return self._envelope(self.bandwidth_key)
-
-    @property
-    def device_count(self) -> int:
-        return len(self.rows)
-
-    @property
-    def baseline(self) -> dict:
-        return self.rows[0]
-
-    @property
-    def compute_growth(self) -> float:
-        return self.compute_envelope[-1][1] / self.baseline[self.compute_key]
-
-    @property
-    def bandwidth_growth(self) -> float:
-        return self.bandwidth_envelope[-1][1] / self.baseline[self.bandwidth_key]
-
-    @property
-    def best_bandwidth_since(self) -> str:
-        """Date of the first device that reached today's best bandwidth."""
-        env = self.bandwidth_envelope
-        return next(d for d, v in env if v == env[-1][1])
 
 
 class AcceleratorGenerationsScenario(BaseScenario):
@@ -14930,18 +14270,6 @@ class PerInvocationSerializationScenario(BaseScenario):
         return PerInvocationSerializationModel().solve(self.turns, self.tokens_per_turn)
 
 
-class TrajectoryRoleShareScenario(BaseScenario):
-    """Transcript characters by role, per configuration, over a per-trajectory ``Literature`` series."""
-    series_name: str
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import TrajectoryRoleShareModel
-        return TrajectoryRoleShareModel().solve(self.rows)
 # --- Benchmarking (added 2026-10-20) -----------------------------------------
 class EfficiencyClaimGapScenario(BaseScenario):
     """A datasheet operating point against a sustained one: operations per watt at each, and their ratio.
@@ -15100,39 +14428,6 @@ class PeriodicInferencePowerScenario(BaseScenario):
         return (self.cut_saving / self.average_power).to("").magnitude
 
 
-class MeasurementBoundaryEnergyScenario(BaseScenario):
-    """One request's energy under a narrow and a full measurement boundary (``local CSV series`` rows).
-
-    Each row is a component with its energy and a counted flag under each
-    boundary; the two totals sum the counted rows.
-    """
-    series_name: str
-    narrow_key: str = "existing"
-    full_key: str = "comprehensive"
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    def _total(self, key: str) -> float:
-        return sum(r[f"{key}_wh"] for r in self.rows if r[f"{key}_counted"] == 1)
-
-    @property
-    def narrow(self) -> Quantity:
-        return Q_(self._total(self.narrow_key), "Wh")
-
-    @property
-    def full(self) -> Quantity:
-        return Q_(self._total(self.full_key), "Wh")
-
-    @property
-    def ratio(self) -> float:
-        return (self.full / self.narrow).to("").magnitude
-
-    def share(self, *prefixes: str) -> float:
-        """Share of the full-boundary total in the components whose names start with ``prefixes``."""
-        part = sum(r[f"{self.full_key}_wh"] for r in self.rows if r["component"].startswith(prefixes))
-        return part / self._total(self.full_key)
 
 
 class LossNormalizationScenario(BaseScenario):
@@ -15658,48 +14953,6 @@ class CommandAuthenticationScenario(BaseScenario):
             b.machine.spare, b.deadline, b.deadline_after_admission, self.freshness_window)
 
 
-class DisengagementRecordScenario(BaseScenario):
-    """One company's filed disengagement record: first and latest years and a year-over-year swing."""
-    entries: Tuple[Dict[str, Any], ...]         # rows of vol4/14_intervention/data/ca_dmv_disengagements.csv
-    company: str
-    first_year: int
-    latest_year: int
-    swing_from: int
-    swing_to: int
-    drivered_permit: str = "drivered_AVT"
-    driverless_permit: str = "driverless_AVDT"
-    filer_types: Tuple[str, ...] = ("annual", "first_report")
-
-    @property
-    def rows(self) -> Tuple[Dict[str, Any], ...]:
-        return tuple(r for r in self.entries
-                     if r["company"] == self.company and r["filer_type"] in self.filer_types)
-
-    def row(self, year: int, permit: Optional[str] = None) -> Dict[str, Any]:
-        p = self.drivered_permit if permit is None else permit
-        return next(r for r in self.rows if r["report_year"] == year and r["permit_type"] == p)
-
-    @property
-    def first(self):
-        return self.row(self.first_year)
-
-    @property
-    def latest(self):
-        return self.row(self.latest_year)
-
-    @property
-    def latest_driverless(self):
-        return self.row(self.latest_year, self.driverless_permit)
-
-    @property
-    def rate_drop(self) -> float:
-        """Miles per disengagement in the swing's first year over its second."""
-        return self.row(self.swing_from)["miles_per_disengagement"] / self.row(self.swing_to)["miles_per_disengagement"]
-
-    @property
-    def miles_growth(self) -> float:
-        """Autonomous miles in the swing's second year over its first."""
-        return self.row(self.swing_to)["autonomous_miles"] / self.row(self.swing_from)["autonomous_miles"]
 # --- Fault-injection oracles and campaign statistics (added 2026-10-20) ------
 
 class OnsetTrialScenario(BaseScenario):
@@ -17860,18 +17113,6 @@ class AccuracyFrontierScenario(BaseScenario):
 # engine/solvers/cost_accounting.py. Prices are Quantities in USD per Mtoken
 # unless a field says otherwise.
 
-class PriceDeclineScenario(BaseScenario):
-    """Lowest price at each fixed capability in a ``Literature`` series, fitted per year."""
-    series_name: str
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import PriceDeclineModel
-        return PriceDeclineModel().solve(self.rows)
 # --- Closing an agent course: residual risk, evidence, blame, and reliability (added 2026-10-20) ---
 # A residual violation rate over a day's trajectories, a shortened observation
 # window, the counterfactual search for the step that caused a failure, and the
@@ -17932,20 +17173,6 @@ class CounterfactualSearchScenario(BaseScenario):
 
 
 
-class CostVsScoreScenario(BaseScenario):
-    """Per-trial cost against mean score across a benchmark's configurations."""
-    series_name: str
-    trials: int                      # trials per configuration, by the benchmark's protocol
-    budget_hours: float              # time budget per trial, by the benchmark's protocol
-
-    @property
-    def rows(self):
-        return load_series(self.series_name).entries
-
-    @property
-    def result(self):
-        from .solvers import CostVsScoreModel
-        return CostVsScoreModel().solve(self.rows)
 
 
 class CohortAttemptCostScenario(BaseScenario):
@@ -18871,43 +18098,6 @@ class PerExampleGradientScenario(BaseScenario):
         return (self.per_example(name) * self.batch_size).to("byte")
 
 
-class FrontierCostTrendScenario(BaseScenario):
-    """Least-squares growth of frontier training cost: log10(cost) against publication date
-    (decimal year) over the frontier-flagged rows of vol1/05_nn_computation/data/notable_models.csv dated
-    ``from_year`` or later."""
-    from_year: int
-
-    @staticmethod
-    def decimal_year(s: str) -> float:
-        import datetime as _dt
-        d = _dt.date.fromisoformat(s)
-        return d.year + (d.timetuple().tm_yday - 1) / 365.25
-
-    @property
-    def rows(self) -> List[Dict[str, Any]]:
-        return [r for r in load_series("vol1/05_nn_computation/data/notable_models.csv").entries
-                if r["training_cost_2023usd"] and r["date"][:4] >= str(self.from_year)]
-
-    @property
-    def frontier(self) -> List[Dict[str, Any]]:
-        return [r for r in self.rows if r["frontier"] == 1]
-
-    @property
-    def fit(self) -> Tuple[float, float]:
-        """(slope, intercept) of log10(cost in 2023 USD) per decimal year."""
-        import numpy as _np
-        f = self.frontier
-        slope, intercept = _np.polyfit([self.decimal_year(r["date"]) for r in f],
-                                       _np.log10([r["training_cost_2023usd"] for r in f]), 1)
-        return float(slope), float(intercept)
-
-    @property
-    def growth_per_year(self) -> float:
-        return 10 ** self.fit[0]
-
-    @property
-    def priciest(self) -> Dict[str, Any]:
-        return max(self.frontier, key=lambda r: r["training_cost_2023usd"])
 
 
 
@@ -18917,174 +18107,8 @@ class FrontierCostTrendScenario(BaseScenario):
 # --- Production gateway telemetry and recorded repair trajectory (added 2026-10-21) ---
 
 
-class GatewayTokenGrowthScenario(BaseScenario):
-    """Production inference gateway usage, spend, and price per token alongside tool-call share."""
-    index_series_name: str
-    tool_series_name: str
-    teams_covered: int = 200_000
-
-    @property
-    def index_rows(self) -> List[dict]:
-        return list(load_series(self.index_series_name).entries)
-
-    @property
-    def tool_rows(self) -> List[dict]:
-        return list(load_series(self.tool_series_name).entries)
-
-    @property
-    def base_row(self) -> dict:
-        return self.index_rows[0]
-
-    @property
-    def end_row(self) -> dict:
-        return self.index_rows[-1]
-
-    @property
-    def usage_growth(self) -> float:
-        return self.end_row["usage_index"] / self.base_row["usage_index"]
-
-    @property
-    def spend_growth(self) -> float:
-        return self.end_row["spend_index"] / self.base_row["spend_index"]
-
-    @property
-    def price_index_end(self) -> float:
-        return float(self.end_row["price_per_token_index"])
-
-    @property
-    def price_drop_fraction(self) -> float:
-        return 1.0 - self.end_row["price_per_token_index"] / self.base_row["price_per_token_index"]
-
-    @property
-    def tool_request_share_start(self) -> float:
-        return self.tool_rows[0]["request_share_pct"] / 100.0
-
-    @property
-    def tool_request_share_end(self) -> float:
-        return self.tool_rows[-1]["request_share_pct"] / 100.0
-
-    @property
-    def tool_token_share_start(self) -> float:
-        return self.tool_rows[0]["token_share_pct"] / 100.0
-
-    @property
-    def tool_token_share_end(self) -> float:
-        return self.tool_rows[-1]["token_share_pct"] / 100.0
-
-    @property
-    def tool_tokens_per_request_ratio(self) -> float:
-        """Tokens per tool-calling request divided by tokens per non-tool request at the end month."""
-        r = self.tool_request_share_end
-        t = self.tool_token_share_end
-        return (t / r) / ((1.0 - t) / (1.0 - r))
 
 
-class RecordedRepairTrajectoryCallsScenario(BaseScenario):
-    """Per-call and cumulative context characters in one recorded repository-repair trajectory."""
-    series_name: str
-    run_series_name: str
-    instance_id: str
-
-    @property
-    def rows(self) -> List[dict]:
-        return list(load_series(self.series_name).entries)
-
-    @property
-    def run_row(self) -> dict:
-        return load_series(self.run_series_name).where(instance_id=self.instance_id)[0]
-
-    @property
-    def calls(self) -> int:
-        return len(self.rows)
-
-    @property
-    def first_call_chars(self) -> int:
-        return int(self.rows[0]["context_chars"])
-
-    @property
-    def last_call_chars(self) -> int:
-        return int(self.rows[-1]["context_chars"])
-
-    @property
-    def context_growth(self) -> float:
-        return self.last_call_chars / self.first_call_chars
-
-    @property
-    def cumulative_sent_chars(self) -> int:
-        return int(self.rows[-1]["cum_sent_chars"])
-
-    @property
-    def cumulative_new_chars(self) -> int:
-        return int(self.rows[-1]["cum_new_chars"])
-
-    @property
-    def reread_ratio(self) -> float:
-        return self.cumulative_sent_chars / self.cumulative_new_chars
-
-    @property
-    def cost_usd(self) -> float:
-        return float(self.run_row["cost_usd"])
 
 
-class GatewayWorkloadSpendScenario(BaseScenario):
-    """Token volume share vs. spend share across production workloads and open-weight vs. closed-weight tiers."""
-    use_case_series_name: str
-    open_weight_series_name: str
-
-    @property
-    def use_cases(self) -> List[dict]:
-        return sorted(load_series(self.use_case_series_name).entries, key=lambda r: -r["token_share_pct"])
-
-    @property
-    def open_weight_rows(self) -> List[dict]:
-        return list(load_series(self.open_weight_series_name).entries)
-
-    def use_case(self, name: str) -> dict:
-        return next(r for r in self.use_cases if r["use_case"] == name)
-
-    def token_share(self, name: str) -> float:
-        return self.use_case(name)["token_share_pct"] / 100.0
-
-    def cost_share(self, name: str) -> float:
-        return self.use_case(name)["cost_share_pct"] / 100.0
-
-    def cost_per_token_index(self, name: str) -> float:
-        """Relative spend per token (1.0 = gateway average)."""
-        u = self.use_case(name)
-        return u["cost_share_pct"] / u["token_share_pct"]
-
-    @property
-    def back_office_vs_assistant_price_ratio(self) -> float:
-        return self.cost_per_token_index("Back Office") / self.cost_per_token_index("AI Personal Assistants")
-
-    @property
-    def open_weight_token_share_start(self) -> float:
-        return self.open_weight_rows[0]["token_share_pct"] / 100.0
-
-    @property
-    def open_weight_token_share_end(self) -> float:
-        return self.open_weight_rows[-1]["token_share_pct"] / 100.0
-
-    @property
-    def open_weight_spend_share_start(self) -> float:
-        return self.open_weight_rows[0]["spend_share_pct"] / 100.0
-
-    @property
-    def open_weight_spend_share_end(self) -> float:
-        return self.open_weight_rows[-1]["spend_share_pct"] / 100.0
-
-    @property
-    def closed_weight_token_share_end(self) -> float:
-        return 1.0 - self.open_weight_token_share_end
-
-    @property
-    def closed_weight_spend_share_end(self) -> float:
-        return 1.0 - self.open_weight_spend_share_end
-
-    @property
-    def closed_vs_open_price_ratio_end(self) -> float:
-        """Average spend per token on closed-weight models over open-weight models in the latest month."""
-        return (self.closed_weight_spend_share_end / self.closed_weight_token_share_end) / (
-            self.open_weight_spend_share_end / self.open_weight_token_share_end
-        )
 

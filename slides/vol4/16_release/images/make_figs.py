@@ -6,7 +6,7 @@ Every value is sourced. "DR" is the rendered chapter, Deployment Release
 labels through deckvals.val), which reads MLSysIM: the running machine, the
 Challenger O-ring record (slides/vol4/16_release/images/data/challenger_oring_distress_record.csv, Dalal,
 Fowlkes, and Hoadley 1989 via UCI) with the Rogers Commission's temperatures
-(Literature.SpaceflightAnomalies), and Waymo's rider-only crash rates by
+(cited literature), and Waymo's rider-only crash rates by
 outcome (vol4/16_release/data/waymo_safety_impact_headline.csv).
 Diagrams follow the Volume IV causal-boundary palette (rules/volumes/vol4/
 palette.md): green for verified or certified, blue for learned proposals,

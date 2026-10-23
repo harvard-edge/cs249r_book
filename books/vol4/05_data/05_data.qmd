@@ -1026,26 +1026,38 @@ Public collection shows what that yield arithmetic produces at community scale. 
 # │       not by episodes per dataset.
 # │ Show: Dataset count at three dates; median-scale facts about episodes
 # │       per dataset (share under 16, share at or above 512).
-# │ How:  Scenarios.LeRobotHubDatasetCounts over data/lerobot_hub_monthly.csv
-# │       and LeRobotEpisodeHistogram (power-of-two bins, creation years pooled).
+# │ How:  data/lerobot_hub_monthly.csv and data/lerobot_hub_episode_histogram.csv
+# │       (power-of-two bins, creation years pooled).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import viz
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class LeRobotHub:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _hub = Scenarios.LeRobotHubDatasetCounts
-    small, large = _hub.small_episodes, _hub.large_episodes  # episodes per dataset
+    _monthly = viz.load_series("vol4/05_data/data/lerobot_hub_monthly.csv").entries
+    _hist = viz.load_series("vol4/05_data/data/lerobot_hub_episode_histogram.csv").entries
+    small, large = 16, 512  # episodes per dataset
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    n_2024_12, n_2025_12, n_now = _hub.count_at("2024-12"), _hub.count_at("2025-12"), _hub.latest_count
-    now_month = _hub.latest_month
+    n_2024_12 = int(next(r["cumulative_datasets"] for r in _monthly if r["month"] == "2024-12"))
+    n_2025_12 = int(next(r["cumulative_datasets"] for r in _monthly if r["month"] == "2025-12"))
+    n_now = int(_monthly[-1]["cumulative_datasets"])
+    now_month = str(_monthly[-1]["month"])
     session_yield = DemonstrationYieldFatigue.n_usable  # illustrative hour of @tbl-05-collection-budget
-    n_counted = _hub.counted
-    under_small = _hub.small_share * n_counted
-    at_large = _hub.large_share * n_counted
-    median_lo = _hub.median_bin_low
-    median_hi = _hub.median_bin_high
+    _pooled = {}
+    for _b in _hist:
+        _lo, _hi = int(_b["bin_lo"]), int(_b["bin_hi"])
+        _pooled[(_lo, _hi)] = _pooled.get((_lo, _hi), 0) + int(_b["datasets"])
+    _bins = sorted(_pooled.items())
+    n_counted = sum(_n for _, _n in _bins)
+    under_small = (lambda bins=_bins, sm=small: sum(_n for (_, _hi), _n in bins if _hi <= sm))()
+    at_large = (lambda bins=_bins, lg=large: sum(_n for (_lo, _), _n in bins if _lo >= lg))()
+    _running = 0
+    for (_lo, _hi), _n in _bins:
+        _running += _n
+        if _running >= n_counted / 2:
+            median_lo, median_hi = _lo, _hi
+            break
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_hi <= session_yield, "Prose says the median dataset is smaller than one illustrative session")
@@ -1580,28 +1592,34 @@ How much work the compatibility contract has to do is visible in the largest poo
 # │       embodiment contract.
 # │ Show: Single-arm and mobile-manipulator shares; table-top share; share
 # │       recorded at 10 Hz; share with no stated command rate.
-# │ How:  Scenarios.OpenXEmbodimentPoolComposition over
-# │       data/open_x_embodiment_composition.csv, episode-weighted, against the
+# │ How:  data/open_x_embodiment_composition.csv, episode-weighted, against the
 # │       chunk rate of Embodied.MobileManipulator.WarehouseMobileManipulator.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import Embodied, viz
+from mlsysim.core.units import hertz
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class OxeComposition:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _pool = Scenarios.OpenXEmbodimentPoolComposition
-    rows = tuple(_pool.rows)
-    chunk_hz = _pool.threshold_hz
+    rows = tuple(r for r in viz.load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries if r["episodes"])
+    chunk_hz = Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate.to(hertz).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total = _pool.total
-    single_arm = _pool.morphology_share("Single Arm") * total
-    mobile = _pool.morphology_share("Mobile Manipulator") * total
-    table = _pool.table_top_share * total
-    at_10hz = _pool.rate_share(10.0) * total
-    no_rate = _pool.rate_share(None) * total
-    top_two_mobile = _pool.top_share_within("Mobile Manipulator") * mobile  # the two largest datasets
-    at_or_above_chunk = _pool.at_or_above_threshold_share * total
+    total = sum(int(r["episodes"]) for r in rows)
+    single_arm = sum(int(r["episodes"]) for r in rows if r["robot_morphology"] == "Single Arm")
+    mobile = sum(int(r["episodes"]) for r in rows if r["robot_morphology"] == "Mobile Manipulator")
+    table = sum(int(r["episodes"]) for r in rows if "Table" in str(r["scene_type"] or ""))
+    at_10hz = sum(
+        int(r["episodes"]) for r in rows if isinstance(r["control_frequency_hz"], (int, float)) and float(r["control_frequency_hz"]) == 10.0
+    )
+    no_rate = sum(int(r["episodes"]) for r in rows if not isinstance(r["control_frequency_hz"], (int, float)))
+    _mobile_eps = sorted((int(r["episodes"]) for r in rows if r["robot_morphology"] == "Mobile Manipulator"), reverse=True)
+    top_two_mobile = sum(_mobile_eps[:2])  # the two largest datasets
+    at_or_above_chunk = (
+        lambda rows=rows, chz=chunk_hz: sum(
+            int(r["episodes"]) for r in rows if isinstance(r["control_frequency_hz"], (int, float)) and float(r["control_frequency_hz"]) >= chz
+        )
+    )()
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(total - 2_419_193) < 1, "Episode total must match the source sheet")
@@ -1861,7 +1879,7 @@ Pretraining on a million pooled trajectories from foreign robots does not help t
 # │ Goal:    Hold the reported scale and headline result of each dated system
 # │          in one place so a later edition can refresh them.
 # │ Show:    Corpus sizes and the reported scaling and transfer results.
-# │ How:     Literature.RobotDataSystems, Literature.RobotLearning, Models.Language,
+# │ How:     cited literature, cited literature, Models.Language,
 # │          and chapter-local plot series in vol4/05_data/data/.
 # └─────────────────────────────────────────────────────────────────────────────
 from datetime import date
@@ -1877,38 +1895,36 @@ class StateOfPractice:
     """Reported scale of dated robot-data systems (literature values)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    _lit = Literature.RobotDataSystems
-    _rlearn = Literature.RobotLearning
     _deepseek = Models.Language.DeepSeek_V3
     _traj = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
     _epoch = viz.load_series("vol4/05_data/data/epoch_models_scale_by_domain.csv")
-    oxe_datasets = int(_lit.OxeDatasets)  # Open X-Embodiment, Fig. 2; category: literature
-    oxe_embodiments = int(_lit.OxeEmbodiments)  # Open X-Embodiment, Fig. 2; category: literature
-    oxe_rt1x_gain = float(_lit.OxeRt1xMeanSuccessGain)  # RT-1-X mean success vs. original methods, Fig. 4; category: literature
-    droid_traj = int(_lit.DroidTrajectories)  # DROID, Fig. 1 ("76k trajectories"); category: literature
-    droid_hours = int(_lit.DroidHours)  # DROID, Fig. 1; category: literature
-    droid_scenes = int(_lit.DroidScenes)  # DROID, Fig. 1; category: literature
-    agibot_traj = int(_lit.AgibotTrajectories)  # AgiBot World, Sec. 3; category: literature
-    agibot_robots = int(_lit.AgibotRobots)  # AgiBot World, "more than 100 homogeneous robots"; category: literature
-    agibot_tasks = int(_lit.AgibotTasks)  # AgiBot World, Sec. 3; category: literature
-    agibot_gain = float(_lit.AgibotGainOverOxe)  # average gain over OXE pretraining, abstract; category: literature
-    lin_demos = int(_lit.LinDemonstrations)  # Lin et al., Sec. 1 ("over 40,000 demonstrations"); category: literature
-    lin_envs = int(_lit.LinEnvironments)  # Lin et al., Sec. 1 recipe; category: literature
-    lin_demos_per_env = int(_lit.LinDemosPerEnvironment)  # Lin et al., Sec. 1 recipe; category: literature
-    lin_success = float(_lit.LinNewEnvironmentSuccess)  # Lin et al., Sec. 1, new environment and object; category: literature
-    pi05_homes_min = int(_lit.Pi05TrainingHomesMin)  # pi0.5, Sec. V-B; category: literature
-    pi05_homes_max = int(_lit.Pi05TrainingHomesMax)  # pi0.5, Sec. V-B; category: literature
-    pi05_hours = int(_lit.Pi05MobileHours)  # pi0.5, Sec. I, mobile manipulation in homes; category: literature
-    mimicgen_seed = int(_lit.MimicgenSeedDemos)  # MimicGen, abstract (~200 human demonstrations); category: literature
-    mimicgen_generated = int(_lit.MimicgenGeneratedDemos)  # MimicGen, abstract (over 50K); category: literature
-    mimicgen_tasks = int(_lit.MimicgenTasks)  # MimicGen, abstract; category: literature
-    cotrain_gain = float(_lit.CotrainingSuccessGain)  # sim-and-real co-training, abstract (average); category: literature
-    droid_recal = int(_lit.DroidRecalibratedEpisodes)  # DROID website, April 2025 release of improved calibrations; category: literature
-    pinto_episodes = int(_lit.PintoGraspingAttempts)  # Pinto & Gupta 2016, abstract; category: literature
-    levine_episodes = int(_rlearn.GraspingFarmAttempts)  # Levine et al. 2018, grasping farm; category: literature
-    bridgedata_v2_episodes = int(_lit.BridgeDataV2Trajectories)  # Walke et al. 2023, Sec. 3; category: literature
-    oxe_episodes = int(_lit.OxeTotalTrajectories)  # Open X-Embodiment 2023, Table I; category: literature
-    pi0_datapoints = int(_lit.Pi0PretrainingDatapoints)  # Black et al. 2024, pi0 pretraining scale; category: literature
+    oxe_datasets = 60  # Open X-Embodiment, Fig. 2; category: literature
+    oxe_embodiments = 22  # Open X-Embodiment, Fig. 2; category: literature
+    oxe_rt1x_gain = 0.5  # RT-1-X mean success vs. original methods, Fig. 4; category: literature
+    droid_traj = 76000  # DROID, Fig. 1 ("76k trajectories"); category: literature
+    droid_hours = 350  # DROID, Fig. 1; category: literature
+    droid_scenes = 564  # DROID, Fig. 1; category: literature
+    agibot_traj = 1001552  # AgiBot World, Sec. 3; category: literature
+    agibot_robots = 100  # AgiBot World, "more than 100 homogeneous robots"; category: literature
+    agibot_tasks = 217  # AgiBot World, Sec. 3; category: literature
+    agibot_gain = 0.3  # average gain over OXE pretraining, abstract; category: literature
+    lin_demos = 40000  # Lin et al., Sec. 1 ("over 40,000 demonstrations"); category: literature
+    lin_envs = 32  # Lin et al., Sec. 1 recipe; category: literature
+    lin_demos_per_env = 50  # Lin et al., Sec. 1 recipe; category: literature
+    lin_success = 0.9  # Lin et al., Sec. 1, new environment and object; category: literature
+    pi05_homes_min = 3  # pi0.5, Sec. V-B; category: literature
+    pi05_homes_max = 104  # pi0.5, Sec. V-B; category: literature
+    pi05_hours = 400  # pi0.5, Sec. I, mobile manipulation in homes; category: literature
+    mimicgen_seed = 200  # MimicGen, abstract (~200 human demonstrations); category: literature
+    mimicgen_generated = 50000  # MimicGen, abstract (over 50K); category: literature
+    mimicgen_tasks = 18  # MimicGen, abstract; category: literature
+    cotrain_gain = 0.38  # sim-and-real co-training, abstract (average); category: literature
+    droid_recal = 36000  # DROID website, April 2025 release of improved calibrations; category: literature
+    pinto_episodes = 50000  # Pinto & Gupta 2016, abstract; category: literature
+    levine_episodes = 800000  # Levine et al. 2018, grasping farm; category: literature
+    bridgedata_v2_episodes = 60096  # Walke et al. 2023, Sec. 3; category: literature
+    oxe_episodes = 2419193  # Open X-Embodiment 2023, Table I; category: literature
+    pi0_datapoints = 1000000000  # Black et al. 2024, pi0 pretraining scale; category: literature
     deepseek_v3_tokens = _deepseek.training_tokens.to(count).magnitude  # DeepSeek-V3 pretraining tokens; category: literature
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
@@ -2263,7 +2279,7 @@ Even when every packet arrives intact, a fleet interface can still corrupt an ar
 # │ Show:    The pound-force-second to newton-second factor; the planned and
 # │          estimated insertion altitudes.
 # │ How:     Pint unit conversion; altitudes from
-# │          Literature.SpaceflightAnomalies (Phase I report, 1999).
+# │          cited literature (Phase I report, 1999).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -2273,9 +2289,8 @@ class MarsClimateOrbiter:
     """Impulse reported in lbf*s and read as N*s."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    _lit = Literature.SpaceflightAnomalies
-    h_planned = float(_lit.MarsClimateOrbiterPlannedAltitudeKm) * kilometer  # category: literature
-    h_actual = float(_lit.MarsClimateOrbiterActualAltitudeKm) * kilometer  # category: literature
+    h_planned = 226.0 * kilometer  # category: literature
+    h_actual = 57.0 * kilometer  # category: literature
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     lbf_s_in_n_s = (1 * ureg.lbf * second).to(newton * second).magnitude

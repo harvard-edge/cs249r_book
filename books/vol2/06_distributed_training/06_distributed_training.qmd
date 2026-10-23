@@ -239,28 +239,62 @@ Input demand at dataset scale\index{Dataset scale!storage limit} adds a third pr
 # │       the 10-04 precision pass removed, now computed instead of hand-typed).
 # │ Show: single-GPU memory ~15x (K80 to B200); plotted training-memory demand
 # │       ~4 orders of magnitude; first model above that year's GPU in 2020.
-# │ How: Scenarios.NotableModelMemoryWall (MemoryWallModel): parameters from
-# │      data/notable_models.csv x 16 B/param; capacities from Hardware.Cloud.
+# │ How: Parameters from vol1/05_nn_computation/data/notable_models.csv x 16 B/param;
+# │      capacities from Hardware.Cloud.
 # └─────────────────────────────────────────────────────────────────────────────
+import math
 import pandas as pd
+from mlsysim import Hardware, load_series
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_multiple
 
 class MemoryWallTrend:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    scenario = Scenarios.NotableModelMemoryWall  # eight plotted models, K80 to B200
-    _data = pd.DataFrame(scenario.result.rows).drop(columns="Date")
+    _notable = load_series("vol1/05_nn_computation/data/notable_models.csv").entries
+    _models = [
+        ("AlexNet", "AlexNet"),
+        ("VGG-16", "VGG16"),
+        ("ResNet-152", "ResNet-152 (ImageNet)"),
+        ("BERT-Large", "BERT-Large"),
+        ("GPT-2", "GPT-2 (1.5B)"),
+        ("GPT-3", "GPT-3 175B (davinci)"),
+        ("PaLM", "PaLM (540B)"),
+        ("Llama 3 (405B)", "Llama 3.1-405B"),
+    ]
+    _accelerators = ["K80", "V100", "A100", "H100", "B200"]
+    _bytes_per_param = 16 * byte
+    _rows = []
+    for _label, _name in _models:
+        _m = (lambda notable=_notable, nm=_name: next(m for m in notable if m["model"] == nm))()
+        _rows.append(
+            {
+                "Year": int(_m["date"][:4]),
+                "Name": _label,
+                "Type": "Model",
+                "Memory_GB": (_m["parameters"] * _bytes_per_param).to("GB").magnitude,
+            }
+        )
+    for _key in _accelerators:
+        _h = getattr(Hardware.Cloud, _key)
+        _rows.append({"Year": int(_h.release_year), "Name": _key, "Type": "GPU", "Memory_GB": _h.memory.capacity.to("GiB").magnitude})
+    _data = pd.DataFrame(_rows)
     table = _data
     _gpus = _data[_data['Type'] == 'GPU'].sort_values('Year')
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    _r = scenario.result
-    gpu_growth = _r.capacity_growth
-    demand_orders = _r.demand_orders
+    _gpu_rows = sorted((r for r in _rows if r["Type"] == "GPU"), key=lambda r: r["Year"])
+    _demand_rows = sorted((r for r in _rows if r["Type"] == "Model"), key=lambda r: r["Year"])
+    gpu_growth = max(g["Memory_GB"] for g in _gpu_rows) / min(g["Memory_GB"] for g in _gpu_rows)
+    demand_orders = math.log10(max(r["Memory_GB"] for r in _demand_rows) / min(r["Memory_GB"] for r in _demand_rows))
     # First plotted model whose training memory exceeds the largest GPU available that year.
-    crossover_year = _r.crossover_year
-    _crossover_name = _r.crossover_name
+    _cross = (
+        lambda drows=_demand_rows, grows=_gpu_rows: next(
+            r for r in drows if r["Memory_GB"] > max((g["Memory_GB"] for g in grows if g["Year"] <= r["Year"]), default=float("inf"))
+        )
+    )()
+    crossover_year = _cross["Year"]
+    _crossover_name = _cross["Name"]
     # How far the crossover model's training state overshot that year's largest GPU.
-    crossover_gap = _r.crossover_gap
+    crossover_gap = (lambda cross=_cross, grows=_gpu_rows: cross["Memory_GB"] / max(g["Memory_GB"] for g in grows if g["Year"] <= cross["Year"]))()
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(10 < gpu_growth < 20, f"Single-GPU memory growth K80 to B200 should be ~15x, got {gpu_growth:.1f}")
@@ -2593,6 +2627,7 @@ plt.close()
 # │      data/mlperf_training_llm_scaling.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_percent_range
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2600,12 +2635,28 @@ class MLPerfScaling:
     """Relative scaling efficiency of same-round MLPerf Training LLM series."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    scenario = Scenarios.MLPerfLlmScalingSeries  # five same-round series of MLPerfTrainingLLMScaling
+    _rows = load_series("vol2/06_distributed_training/data/mlperf_training_llm_scaling.csv").entries
+    _specs = [
+        ("GPT-3, NVIDIA H100 (v3.1)", ("v3.1", "NVIDIA", "gpt3", "H100-SXM5")),
+        ("GPT-3, Google TPU v5p (v4.1)", ("v4.1", "Google", "gpt3", "TPU-v5p")),
+        ("GPT-3, Google Trillium (v4.1)", ("v4.1", "Google", "gpt3", "TPU-trillium")),
+        ("Llama 3.1 405B, NVIDIA H100 (v5.0)", ("v5.0", "NVIDIA", "llama31_405b", "H100-SXM5")),
+        ("Llama 3.1 405B, GB200 (v5.0)", ("v5.0", "IBM+CoreWeave", "llama31_405b", "Blackwell")),
+    ]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _r = scenario.result
-    series = list(zip(_r.labels, _r.series))
-    effs = _r.efficiencies
+    series = []
+    effs = []
+    for _label, (_rnd, _sub, _bench, _accel) in _specs:
+        _pts = (
+            lambda rows=_rows, rnd=_rnd, sub=_sub, bench=_bench, accel=_accel: sorted(
+                (r for r in rows if r["round"] == rnd and r["submitter"].startswith(sub) and r["benchmark"] == bench and accel in r["accelerator"]),
+                key=lambda r: r["accelerators"],
+            )
+        )()
+        _a, _z = _pts[0], _pts[-1]
+        series.append((_label, list(_pts)))
+        effs.append((_a["score_minutes"] * _a["accelerators"]) / (_z["score_minutes"] * _z["accelerators"]))
     eos = series[0][1]
     eos_n_mult = eos[-1]["accelerators"] / eos[0]["accelerators"]
     eos_t_mult = eos[0]["score_minutes"] / eos[-1]["score_minutes"]

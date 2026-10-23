@@ -1138,36 +1138,9 @@ HBM_SOFT_ERROR_FIT_PER_MBIT = _est(
     url="https://tezzaron.com/media/soft_errors_1_1_secure.pdf",
 )
 
-FHE_OVERHEAD = _lit(
-    "prov:fhe-overhead-slowdown",
-    "Fully homomorphic encryption compute overhead, 2-6 orders of magnitude vs plaintext",
-    url="https://www.math-lock.com/benchmarks.html",
-    notes=(
-        "General-purpose FHE libraries (HElib, PALISADE) run 1e4-1e6x slower than "
-        "plaintext; the book uses 1e4x (10,000x) as a conservative low-end teaching figure."
-    ),
-)
 
 
-HSM_GPU_CRYPTO = _est(
-    "prov:hsm-gpu-crypto-throughput",
-    "HSM vs GPU RSA-2048 throughput and unit cost from security-engineering practice",
-    notes=(
-        "Enterprise HSMs ~10,000 RSA-2048 ops/s at $20k-$100k/unit; general-purpose GPUs "
-        "~100,000 ops/s at ~$1k; the ~10x throughput gap is the tamper-resistance tax."
-    ),
-)
 
-RESPONSIBLE_AI_OVERHEAD = _est(
-    "prov:responsible-ai-overhead-benchmarks",
-    "Responsible-AI technique overheads (accuracy, training, inference, memory) across published benchmarks",
-    notes=(
-        "Synthesis of reported overheads for DP-SGD, fairness-aware training, SHAP/LIME "
-        "explainability, adversarial training, and federated learning. Ranges are "
-        "order-of-magnitude empirical findings across the responsible-AI efficiency "
-        "literature, not vendor specifications."
-    ),
-)
 
 ORCHESTRATION_ASSUMPTIONS = _est(
     "prov:mlsysim-orchestration-assumptions",
@@ -1218,17 +1191,7 @@ POPE_INFERENCE = _lit(
 )
 
 
-GENDER_SHADES = _lit(
-    "prov:buolamwini-gendershades-2018",
-    "Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy Disparities in Commercial Gender Classification",
-    url="https://proceedings.mlr.press/v81/buolamwini18a.html",
-)
 
-CROWDFLOWER_2016 = _lit(
-    "prov:crowdflower-data-science-report-2016",
-    "CrowdFlower (2016), Data Science Report — 'What data scientists spend the most time doing'",
-    url="https://visit.figure-eight.com/data-science-report.html",
-)
 
 GPT2_TRAINING_COST_EST = _est(
     "prov:gpt2-training-cost-estimate",
@@ -1942,56 +1905,7 @@ DEEPSEEK_V3_TRAINING_CLUSTER = _lit(
     notes="DeepSeek-V3 was trained on a cluster of 2,048 NVIDIA H800 GPUs.",
 )
 
-# --- Measured fleet operations (Literature.FleetOperations) ---
-KOKOLIS_RSC_RELIABILITY_2025 = _lit(
-    "prov:kokolis-rsc-reliability-2025",
-    "Kokolis et al. (2025), Revisiting Reliability in Large-Scale Machine Learning Research Clusters",
-    url="https://arxiv.org/abs/2410.21680",
-    verified=_V,
-    notes=(
-        "Measured MTTF: 1,024-GPU jobs 7.9 hours; 8-GPU jobs 47.7 days (1,144.8 hours). "
-        "Projected MTTF: 16,384-GPU jobs 1.8 hours; 131,072-GPU jobs 0.23 hours."
-    ),
-)
-JEON_PHILLY_2019 = _lit(
-    "prov:jeon-philly-2019",
-    "Jeon et al. (2019), Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads (USENIX ATC)",
-    url="https://arxiv.org/abs/1901.05758",
-    verified=_V,
-    notes="Hardware utilization of GPUs in use is only around 52% on average (Microsoft Philly trace).",
-)
-LI_PERLMUTTER_2023 = _lit(
-    "prov:li-perlmutter-2023",
-    "Li et al. (2023), Analyzing Resource Utilization in an HPC System: A Case Study of NERSC's Perlmutter",
-    url="https://arxiv.org/abs/2301.05145",
-    verified=_V,
-    notes="About 50% of GPU-enabled jobs used up to 25% of the GPU memory (one-month usage analysis).",
-)
-SIGLER_OPENAI_K8S_2021 = _report(
-    "prov:sigler-openai-k8s-2021",
-    "OpenAI (2021), Scaling Kubernetes to 7,500 nodes",
-    "https://openai.com/index/scaling-kubernetes-to-7500-nodes/",
-)
 
-# --- Datacenter electricity projections (Literature.DatacenterElectricity) ---
-LBNL_US_DATACENTER_ENERGY_2024 = _report(
-    "prov:lbnl-us-datacenter-energy-2024",
-    "Shehabi et al. (2024), 2024 United States Data Center Energy Usage Report (LBNL)",
-    "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
-    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023, 4.4% of US electricity), 325-580 TWh projected for 2028 (6.7-12%). LBNL-2001637, doi:10.71468/P1WC7Q.",
-)
-LBNL_US_DATACENTER_ENERGY_2025 = _report(
-    "prov:lbnl-us-datacenter-energy-2025",
-    "Smith et al. (2026), United States Data Center Energy Usage Report: 2025 Update (LBNL)",
-    "https://doi.org/10.71468/P1RP4F",
-    notes="US data centers: 192 TWh in 2024 (4.7% of US electricity); 2030 Reference Case 649 TWh (11.8%), Compounded Uncertainty range 521-843 TWh (9.5-15.3%). Revises 2023-2024 slightly below the 2024 Report; prints no pre-2024 values. LBNL-2001758, OSTI 3374245.",
-)
-IEA_ENERGY_AND_AI_2025 = _report(
-    "prov:iea-energy-and-ai-2025",
-    "IEA (2025), Energy and AI",
-    "https://www.iea.org/reports/energy-and-ai",
-    notes="Global data-center electricity ~415 TWh in 2024 (~1.5%), projected ~945 TWh by 2030 (just under 3%); emissions from data-center electricity 180 Mt today, 300 Mt by 2035 (Base Case), below 1.5% of energy-sector emissions.",
-)
 
 # --- Hardware additions ---
 HOPPER_MICROBENCHMARK_LATENCY = _lit(
@@ -2236,16 +2150,6 @@ SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
 )
 
 # --- Accelerator life cycle (2026-10-13) ---
-SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
-    "prov:schneider-tpu-lifecycle-2025",
-    "Schneider et al. (2025), Life-Cycle Emissions of AI Hardware: A Cradle-to-Grave Approach and Generational Trends",
-    url="https://arxiv.org/abs/2502.01671",
-    verified="2026-10-13",
-    notes=(
-        "First published AI-accelerator LCA (five TPU generations, extraction through disposal). "
-        "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
-    ),
-)
 GOOGLE_SEARCH_VOLUME_2025 = _lit(
     "prov:google-search-volume-2025",
     "Srinivasan (2025), AI, personalization and the future of shopping (Google, The Keyword, 3 March 2025)",
@@ -2315,35 +2219,6 @@ FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
 )
 
 # --- Incident investigation reports (added 2026-10-20) ----------------------
-NTSB_HAR_19_03 = _lit(
-    "prov:ntsb-har-19-03",
-    "NTSB, Collision Between Vehicle Controlled by Developmental Automated Driving System and "
-    "Pedestrian, Tempe, Arizona, March 18, 2018, Highway Accident Report NTSB/HAR-19/03 (2019)",
-    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
-    verified="2026-10-20",
-    notes=(
-        "Read from the report PDF: emergency threshold and braking cap 7 m/s2 (0.71 g) and the "
-        "1-second action suppression (p. 13); TPD average deceleration capability 0.92 g "
-        "(footnote 33, p. 13; footnote 91, p. 43); table of selected ADS parameters "
-        "(pp. 15-16): first radar detection at -5.6 s, emergency and suppression at -1.2 s and "
-        "43.2 mph, suppression end at -0.2 s and 40.5 mph, operator takes the wheel at -0.02 s; "
-        "impact at 39 mph (p. v and p. 2); about 350 ft from the pedestrian at first detection (2.1.2); "
-        "footnote 91 states 2.1 s to stop from an initial 44 mph at 0.92 g."
-    ),
-)
-QUINN_EMANUEL_CRUISE_2024 = _lit(
-    "prov:quinn-emanuel-cruise-2024",
-    "Quinn Emanuel Urquhart & Sullivan, Report to the Boards of Directors of Cruise LLC, GM "
-    "Cruise Holdings LLC, and General Motors Holdings LLC regarding the October 2, 2023 "
-    "accident in San Francisco (2024)",
-    url="https://assets.ctfassets.net/95kuvdv8zn1v/1mb55pLYkkXVn0nXxEXz7w/9fb0e4938a89dc5cc09bf39e86ce5b9c/2024.01.24_Quinn_Emanuel_Report_re_Cruise.pdf",
-    verified="2026-10-20",
-    notes=(
-        "Pullover after the collision: the vehicle moved about 20 ft at up to 7.7 mph with the "
-        "pedestrian beneath it (p. 10). Transcribed from the Volume IV chapter's citation; "
-        "not re-read against the report in this pass."
-    ),
-)
 
 # --- Agent task horizon (added 2026-10-20) -----------------------------------
 METR_TIME_HORIZON_V1_1 = _lit(
@@ -2359,17 +2234,6 @@ METR_TIME_HORIZON_V1_1 = _lit(
 )
 
 # --- Model calls and agent trajectories (added 2026-10-20) -------------------
-ANTHROPIC_2025_SERVING_POSTMORTEM = _report(
-    "prov:anthropic-2025-serving-postmortem",
-    "Anthropic, A postmortem of three recent issues, September 2025",
-    "https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues",
-    notes=(
-        "Routing bug: 0.8 percent of one model's requests misrouted at first, 16 percent at the worst "
-        "hour (August 31); approximately 30 percent of the coding tool's active users had at "
-        "least one message misrouted. Approximate top-k reproduction: an array of 12,000 zeros "
-        "with a single one; the approximate result missed the maximum for every index from 10,240 on."
-    ),
-)
 
 # --- Collective communication (added 2026-10-20) ------------------------------
 
@@ -2378,15 +2242,6 @@ ANTHROPIC_2025_SERVING_POSTMORTEM = _report(
 # --- Deployment-tier field figures (added 2026-10-20) ------------------------
 # --- Spaceflight anomaly inquiries (added 2026-10-20) -----------------------
 # --- Workload-aware cluster schedulers (added 2026-10-20) --------------------
-QIAO_POLLUX_2021 = _lit(
-    "prov:qiao-pollux-2021",
-    "Qiao et al. (2021), Pollux: Co-adaptive Cluster Scheduling for Goodput-Optimized Deep "
-    "Learning (OSDI 21)",
-    url="https://arxiv.org/abs/2008.12260",
-    verified="2026-10-20",
-    notes=("Abstract: Pollux reduces average job completion times by 37-50% relative to "
-           "state-of-the-art DL schedulers, on its testbed and trace."),
-)
 
 # --- Diabetic retinopathy screening and distribution shift (added 2026-10-20) ---
 TORCHVISION_0_28_PARAMETER_COUNTS = Provenance(
@@ -2406,109 +2261,8 @@ TORCHVISION_0_28_PARAMETER_COUNTS = Provenance(
 # --- Context engineering: long-context use, summaries, prefix caching (added 2026-10-20) ---
 
 # --- Published vision-language-action systems (added 2026-10-20) ------------
-KIM_OPENVLA_2024 = _lit(
-    "prov:kim-openvla-real-robot-2024",
-    "Kim, M. J. et al. (2024), OpenVLA: An Open-Source Vision-Language-Action Model, arXiv:2406.09246",
-    url="https://arxiv.org/abs/2406.09246",
-    verified="2026-09-29",
-    notes=("Table 2: real-robot task success with bfloat16 71.3%, int8 58.1%, int4 71.9% weights; "
-           "Sec. 5.3: the int8 build ran at 1.2 Hz on the A5000 evaluation GPU against the 5 Hz control "
-           "rate of the training data; about 6 Hz on one RTX 4090 in bfloat16."),
-)
-ZHAO_ACT_2023 = _lit(
-    "prov:zhao-act-2023",
-    "Zhao, T. Z. et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware (ACT), "
-    "RSS 2023, arXiv:2304.13705; code github.com/tonyzhaozh/act",
-    url="https://arxiv.org/abs/2304.13705",
-    verified="2026-10-20",
-    notes=("Chunk size k = 100 at a 50 Hz control rate; temporal ensembling weights exp(-k i) with "
-           "k = 0.01 (imitate_episodes.py, commit 742c753, lines 255-259)."),
-)
-CHI_DIFFUSION_POLICY_2024 = _lit(
-    "prov:chi-diffusion-policy-2024",
-    "Chi, C. et al. (2024), Diffusion Policy: Visuomotor Policy Learning via Action Diffusion, IJRR",
-    url="https://arxiv.org/abs/2303.04137",
-    verified="2026-09-29",
-    notes=("Prediction horizon T_p = 16, action execution horizon T_a = 8 (simulation tasks); "
-           "real-world Push-T executes T_a = 6 of T_p = 16 (App. A.4, Tables 7 and 8, checked 2026-10-20)."),
-)
-BLACK_PI0_2024 = _lit(
-    "prov:black-pi0-2024",
-    "Black, K. et al. (2024), pi0: A Vision-Language-Action Flow Model for General Robot Control, "
-    "arXiv:2410.24164",
-    url="https://arxiv.org/abs/2410.24164",
-    verified="2026-09-29",
-    notes=("Sec. IV and App. A-D: 3.3B parameters in total, a 300M action expert, H = 50, 10 flow "
-           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090). App. A-D: "
-           "robots at 50 Hz run inference every 0.5 s, after executing 25 actions (checked 2026-10-20)."),
-)
-BERSCHEID_RUCKIG_2021 = _lit(
-    "prov:berscheid-ruckig-2021",
-    "Berscheid, L. and Kroger, T. (2021), Jerk-limited Real-time Trajectory Generation with Arbitrary "
-    "Target States, Robotics: Science and Systems XVII",
-    url="https://arxiv.org/abs/2105.04830",
-    verified="2026-10-20",
-    notes=("Sec. V-B, Table III (7 degrees of freedom, Intel i7-8700K, single thread, PREEMPT Linux): "
-           "Ruckig mean 19.8 +/- 0.2 us, worst case 123 +/- 13 us."),
-)
-KIM_OPENVLA_OFT_2025 = _lit(
-    "prov:kim-openvla-oft-2025",
-    "Kim, M. J., Finn, C., Liang, P. (2025), Fine-Tuning Vision-Language-Action Models: Optimizing "
-    "Speed and Success, RSS 2025",
-    url="https://arxiv.org/abs/2502.19645",
-    verified="2026-09-29",
-    notes="LIBERO on an A100: OpenVLA-OFT 109.7 Hz with 8-step chunks against OpenVLA's 4.2 Hz.",
-)
-PERTSCH_FAST_2025 = _lit(
-    "prov:pertsch-fast-2025",
-    "Pertsch, K. et al. (2025), FAST: Efficient Action Tokenization for Vision-Language-Action Models, "
-    "arXiv:2501.09747",
-    url="https://arxiv.org/abs/2501.09747",
-    verified="2026-09-29",
-    notes=("30 to 60 tokens per chunk; Table I shirt fold at 50 Hz, 700 naive tokens against 53 FAST "
-           "tokens; pi0-FAST about 750 ms against pi0's about 100 ms on an RTX 4090."),
-)
-FIGURE_AI_HELIX_2025 = _report(
-    "prov:figure-ai-helix-2025",
-    "Figure AI (2025), Helix: A Vision-Language-Action Model for Generalist Humanoid Control",
-    "https://www.figure.ai/news/helix",
-    notes=("System 2: a 7B vision-language model at 7-9 Hz; System 1: an 80M visuomotor policy at "
-           "200 Hz; 35 degrees of freedom."),
-)
-BJORCK_GR00T_N1_2025 = _lit(
-    "prov:bjorck-gr00t-n1-2025",
-    "Bjorck, J. et al. (2025), GR00T N1: An Open Foundation Model for Generalist Humanoid Robots, "
-    "arXiv:2503.14734",
-    url="https://arxiv.org/abs/2503.14734",
-    verified="2026-09-29",
-    notes=("2.2B parameters with a 1.34B vision-language model at 10 Hz; a flow-matching action "
-           "transformer at 120 Hz; 16-action chunks, 4 integration steps, 63.9 ms per chunk (L40, bf16)."),
-)
-GEMINI_ROBOTICS_2025 = _lit(
-    "prov:gemini-robotics-2025",
-    "Gemini Robotics Team (2025), Gemini Robotics: Bringing AI into the Physical World, arXiv:2503.20020",
-    url="https://arxiv.org/abs/2503.20020",
-    verified="2026-09-29",
-    notes=("Cloud backbone under 160 ms, about 250 ms end to end, an effective 50 Hz control rate "
-           "with chunks."),
-)
-LIN_AWQ_2024 = _lit(
-    "prov:lin-awq-2024",
-    "Lin, J. et al. (2024), AWQ: Activation-aware Weight Quantization for LLM Compression and "
-    "Acceleration, MLSys 2024",
-    url="https://arxiv.org/abs/2306.00978",
-    verified="2026-10-20",
-    notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
-)
 
 # --- Data engineering: wake-word benchmarks, annotation times, Speech Commands (added 2026-10-20) ---
-CITYSCAPES_2016 = _lit(
-    "prov:cordts-cityscapes-2016",
-    "Cordts et al. (2016), The Cityscapes Dataset for Semantic Urban Scene Understanding, CVPR",
-    url="https://www.cityscapes-dataset.com/",
-    verified="2026-10-20",
-    notes="Fine pixel-level annotation and quality control took more than 1.5 h on average for one image.",
-)
 SPEECH_COMMANDS_V2_CARD = _report(
     "prov:speech-commands-v002-hf-card",
     "Hugging Face dataset card google/speech_commands, config v0.02 (rev. 57ba463); Warden (2018), "
@@ -2542,124 +2296,13 @@ NSIGHT_TRACE_VOLUME_SCENARIO = _est(
 # --- Retrieval from long-term memory: agents, poisoning, a tribunal record (added 2026-10-20) ---
 
 # --- Robot demonstration data: dated systems, interventions, recorders (added 2026-10-20) ---
-DROID_RECALIBRATION_2025 = _lit(
-    "prov:droid-recalibration-2025",
-    "DROID project website, April 2025 release of improved camera calibrations (droid-dataset.github.io)",
-    url="https://droid-dataset.github.io/",
-    verified="2026-10-19",
-    notes="New camera calibrations published for about 36,000 episodes after an overlap check.",
-)
-BU_AGIBOT_WORLD_2025 = _lit(
-    "prov:bu-agibot-world-2025",
-    "Bu, Q. et al. (2025), AgiBot World Colosseo: A Large-Scale Manipulation Platform for Scalable and "
-    "Intelligent Embodied Systems, IROS 2025",
-    url="https://doi.org/10.1109/IROS60139.2025.11247088",
-    verified="2026-10-18",
-    notes=("Sec. 3: 1,001,552 trajectories, 217 tasks, more than 100 homogeneous robots; abstract: "
-           "30 percent average gain over pretraining on Open X-Embodiment."),
-)
-LIN_DATA_SCALING_2025 = _lit(
-    "prov:lin-data-scaling-2025",
-    "Lin, F. et al. (2025), Data Scaling Laws in Imitation Learning for Robotic Manipulation, ICLR 2025",
-    url="https://arxiv.org/abs/2410.18647",
-    verified="2026-10-18",
-    notes=("Sec. 1: over 40,000 demonstrations; recipe of 32 environments with 50 demonstrations each; "
-           "about 90 percent success in a new environment with a new object."),
-)
-BLACK_PI05_2025 = _lit(
-    "prov:black-pi05-2025",
-    "Black, K. et al. (2025), pi0.5: A Vision-Language-Action Model with Open-World Generalization, CoRL 2025",
-    url="https://proceedings.mlr.press/v305/black25a.html",
-    verified="2026-10-18",
-    notes="Sec. I: about 400 hours of mobile manipulation in homes; Sec. V-B: 3 to 104 training locations.",
-)
-MANDLEKAR_MIMICGEN_2023 = _lit(
-    "prov:mandlekar-mimicgen-2023",
-    "Mandlekar, A. et al. (2023), MimicGen: A Data Generation System for Scalable Robot Learning using "
-    "Human Demonstrations, CoRL 2023",
-    url="https://proceedings.mlr.press/v229/mandlekar23a.html",
-    verified="2026-10-18",
-    notes="Abstract: over 50K demonstrations generated from about 200 human demonstrations across 18 tasks.",
-)
-MADDUKURI_COTRAINING_2025 = _lit(
-    "prov:maddukuri-cotraining-2025",
-    "Maddukuri, A. et al. (2025), Sim-and-Real Co-Training: A Simple Recipe for Vision-Based Robotic "
-    "Manipulation, RSS 2025",
-    url="https://doi.org/10.15607/RSS.2025.XXI.109",
-    verified="2026-10-18",
-    notes="Abstract: 38 percent average gain in real-robot success.",
-)
-ECFR_49_CFR_563_EDR = _report(
-    "prov:ecfr-49-cfr-563-7",
-    "eCFR, 49 CFR Part 563 (Event Data Recorders), Sec. 563.7 Table I and footnote 4",
-    "https://www.ecfr.gov/current/title-49/subtitle-B/chapter-V/part-563",
-    notes=("Speed, accelerator pedal, and service brake from -20 to 0 s at 10 samples/s (phase-in from "
-           "2028); before the phase-in, -5.0 to 0 s at 2 samples/s. Retrieved 2026-10-19."),
-)
-NASA_MCO_PHASE1_1999 = _report(
-    "prov:nasa-mco-phase1-1999",
-    "Stephenson, A. G. et al. (1999), Mars Climate Orbiter Mishap Investigation Board Phase I Report, NASA",
-    "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
-    notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
-)
 
 # Agent sandboxes (added 2026-10-20)
-ZHANG_2024_CYBENCH = _lit(
-    "prov:zhang-2024-cybench",
-    "Zhang et al. (2024), Cybench: A Framework for Evaluating Cybersecurity Capabilities and "
-    "Risks of Language Models",
-    url="https://cybench.github.io/",
-    verified="2026-10-12",
-    notes="40 professional-level capture-the-flag tasks from four competitions (cybench.github.io).",
-)
 
 
 # --- On-device and federated learning results (added 2026-10-20) ---
-CAI_2020_TINYTL = _lit(
-    "prov:cai-2020-tinytl",
-    "Cai et al. (2020), TinyTL: Reduce Memory, Not Parameters for Efficient On-Device Learning, NeurIPS 2020, abstract",
-    url="https://arxiv.org/abs/2007.11622",
-    verified="2026-09-29",
-    notes="Up to 6.5x training-memory saving against full fine-tuning; lite residual modules add 3.8% memory.",
-)
 
 # --- Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20) ---
-RUDIN_LEGGED_GYM_2022 = _lit(
-    "prov:rudin-legged-gym-2022",
-    "Rudin, N., Hoeller, D., Reist, P., and Hutter, M. (2022), Learning to Walk in Minutes Using "
-    "Massively Parallel Deep Reinforcement Learning, CoRL 2021 (PMLR 164), arXiv:2109.11978",
-    url="https://arxiv.org/abs/2109.11978",
-    verified="2026-10-18",
-    notes=("4,096 simulated ANYmal robots, 24 steps per robot per PPO update, 1,500 updates, under "
-           "20 minutes on one RTX A6000; policy at 50 Hz."),
-)
-LUO_HILSERL_2025 = _lit(
-    "prov:luo-hil-serl-2025",
-    "Luo, J., Xu, C., Wu, J., and Levine, S. (2025), Precise and Dexterous Robotic Manipulation via "
-    "Human-in-the-Loop Reinforcement Learning, Science Robotics, arXiv:2410.21845",
-    url="https://arxiv.org/abs/2410.21845",
-    verified="2026-10-18",
-    notes=("1 to 2.5 h of real-world training per task; 20 to 30 teleoperated demonstrations seed the "
-           "replay buffer. Figure 5 (top row) plots success as a running average over 20 episodes; "
-           "RAM insertion reaches 100% within about 90 minutes and USB grasp-insert within about 150 "
-           "(read from the figure)."),
-)
-LEVINE_GRASPING_FARM_2018 = _lit(
-    "prov:levine-grasping-farm-2018",
-    "Levine, S., Pastor, P., Krizhevsky, A., Ibarz, J., and Quillen, D. (2018), Learning Hand-Eye "
-    "Coordination for Robotic Grasping with Deep Learning and Large-Scale Data Collection, IJRR 37(4-5)",
-    url="https://arxiv.org/abs/1603.02199",
-    verified="2026-10-18",
-    notes="Between 6 and 14 manipulators at a time collected over 800,000 grasp attempts over two months.",
-)
-KALASHNIKOV_QTOPT_2018 = _lit(
-    "prov:kalashnikov-qt-opt-2018",
-    "Kalashnikov, D. et al. (2018), QT-Opt: Scalable Deep Reinforcement Learning for Vision-Based "
-    "Robotic Manipulation, CoRL 2018, arXiv:1806.10293",
-    url="https://arxiv.org/abs/1806.10293",
-    verified="2026-10-18",
-    notes="Over 580,000 real-world grasp attempts.",
-)
 
 # --- Network architectures lecture and chapter (added 2026-10-20) ---
 
@@ -2687,85 +2330,12 @@ CRITEO_KAGGLE_DATASET = _lit(
 # ML compilers and fused kernels (added 2026-10-20)
 
 # Attacks on and defenses of learned systems (added 2026-10-20).
-ABADI_DPSGD_2016 = Provenance(
-    id="prov:abadi-deep-learning-dp-2016",
-    kind=ProvenanceKind.LITERATURE,
-    ref="Abadi, M. et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016",
-    url="https://arxiv.org/abs/1607.00133",
-    verified="2026-10-20",
-    notes=("q = 0.01, sigma = 4, delta = 1e-5: moments accountant epsilon 1.26 after 100 epochs and 2.55 after "
-           "400; strong composition 9.34 and 24.22. Section 5.2: 90, 95, and 97 percent MNIST test accuracy for "
-           "(0.5, 1e-5), (2, 1e-5), and (8, 1e-5)-DP (large, medium, small noise); MNIST nonprivate baseline "
-           "98.30 percent; CIFAR-10 73 percent at epsilon 8."),
-)
-DE_DP_IMAGE_CLASSIFICATION_2022 = Provenance(
-    id="prov:de-dp-image-classification-2022",
-    kind=ProvenanceKind.LITERATURE,
-    ref="De, S. et al. (2022), Unlocking High-Accuracy Differentially Private Image Classification through Scale",
-    url="https://arxiv.org/abs/2204.13650",
-    verified="2026-10-20",
-    notes=("CIFAR-10 from scratch, WRN-16-4: 81.4 percent at epsilon 8. The paper states that the nonprivate "
-           "WRN-16-4 achieves >94 percent test accuracy, citing Zagoruyko and Komodakis (2016); the nonprivate "
-           "reference value is taken from that source (ZAGORUYKO_WRN_2016)."),
-)
-ZAGORUYKO_WRN_2016 = Provenance(
-    id="prov:zagoruyko-wide-residual-networks-2016",
-    kind=ProvenanceKind.LITERATURE,
-    ref="Zagoruyko, S. and Komodakis, N. (2016), Wide Residual Networks, BMVC 2016, Table 6",
-    url="https://arxiv.org/abs/1605.07146",
-    verified="2026-10-20",
-    notes=("Table 6 (effect of dropout in residual block; mean/std preprocessing, CIFAR numbers are the median of "
-           "5 runs): depth 16, k 4, no dropout, CIFAR-10 test error 5.02 percent (5.24 with dropout). Stored as "
-           "accuracy 100 - 5.02 = 94.98 percent. WRN-16-4 is the architecture De et al. (2022) train privately."),
-)
 
 # --- Robustness studies: physical attacks, FGSM, calibration, jailbreaks, backdoors (added 2026-10-20) ---
 # Values transcribed from the cited tables as the Robust AI lecture quotes them.
 
 
 # --- Closed-loop evaluation sources (added 2026-10-20) ---
-NHTSA_PE16007_2017 = Provenance(
-    id="prov:nhtsa-pe16-007-2017",
-    kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="NHTSA Office of Defects Investigation, ODI Resume, Preliminary Evaluation PE 16-007, closing report (January 2017)",
-    url="https://static.nhtsa.gov/odi/inv/2016/INCLA-PE16007-7876.PDF",
-    verified="2026-10-19",
-    notes=("Figure 11 and p. 10: airbag-deployment crashes per million miles, Tesla Model S and Model X, "
-           "1.3 before and 0.8 after Autosteer installation, 'almost 40 percent'; footnote 22: all miles "
-           "before and after installation, not only miles with Autopilot in use."),
-)
-QCS_AUTOSTEER_2019 = Provenance(
-    id="prov:qcs-autosteer-2019",
-    kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="Quality Control Systems Corp. (Whitfield, R. A.), NHTSA's Implausible Safety Claim for Tesla's "
-        "Autosteer Driver Assistance System (February 2019)",
-    url="http://www.safetyresearch.net/Library/NHTSA_Autosteer_Safety_Claim.pdf",
-    verified="2026-10-19",
-    notes=("Replication from per-vehicle mileage released after a FOIA lawsuit: exact exposure before and "
-           "after installation computable for 13 percent of vehicles; in that cohort the airbag-deployment "
-           "rate rose from 0.76 to 1.21 per million miles. Values as cited in the chapter's War Story; "
-           "URL not re-fetched 2026-10-20."),
-)
-KALRA_PADDOCK_RAND_2016 = _lit(
-    "prov:kalra-paddock-rand-rr1478-2016",
-    "Kalra, N. and Paddock, S. M. (2016), Driving to Safety: How Many Miles of Driving Would It Take to "
-    "Demonstrate Autonomous Vehicle Reliability?, RAND Corporation RR-1478",
-    url="https://www.rand.org/pubs/research_reports/RR1478.html",
-    verified="2026-10-19",
-    notes=("Table 1: benchmark rates per 100 million miles (fatalities 1.09, reported injuries 77, reported "
-           "crashes 190); miles required, millions: (1) zero failures, 95 percent upper limit at the "
-           "benchmark 275 / 3.9 / 1.6; (2) rate within 20 percent at 95 percent 8,800 / 125 / 51; (3) 20 "
-           "percent better than human at 95 percent and 80 percent power 11,000 / 161 / 65."),
-)
-KUSANO_WAYMO_2025 = _lit(
-    "prov:kusano-waymo-56m-2025",
-    "Kusano, K. D. et al. (2025), Comparison of Waymo Rider-Only Crash Rates by Crash Type to Human "
-    "Benchmarks at 56.7 Million Miles, Traffic Injury Prevention 26(sup1)",
-    url="https://www.tandfonline.com/toc/gcpi20/26/sup1",
-    verified="2026-10-19",
-    notes=("56.7 million rider-only miles through January 2025; any-injury-reported crashed-vehicle rate 79 "
-           "percent and airbag-deployment rate 81 percent below an aligned human benchmark."),
-)
 
 # --- Sensor perception sources (added 2026-10-20) ---------------------------
 KITTI_GEIGER_2013 = _lit(
@@ -2790,150 +2360,26 @@ KITTI_GEIGER_2013 = _lit(
 
 
 
-EEOC_UNIFORM_GUIDELINES_1978 = _report(
-    "prov:eeoc-uniform-guidelines-1978",
-    "Uniform Guidelines on Employee Selection Procedures (1978), 29 CFR 1607.4(D)",
-    "https://www.ecfr.gov/current/title-29/subtitle-B/chapter-XIV/part-1607/section-1607.4",
-    notes=("A selection rate for any group below four-fifths (80 percent) of the rate for the group "
-           "with the highest rate is generally regarded as evidence of adverse impact (a U.S. "
-           "employment screen, not a lending standard)."),
-)
 
 
 # --- Failure-recovery sources (added 2026-10-20) ----------------------------
-SEC_2013_KNIGHT_CAPITAL = _lit(
-    "prov:sec-2013-knight-capital",
-    "U.S. Securities and Exchange Commission, In the Matter of Knight Capital Americas LLC, "
-    "Release No. 34-70694, Administrative Proceeding File No. 3-15570 (16 October 2013)",
-    url="https://www.sec.gov/files/litigation/admin/2013/34-70694.pdf",
-    verified="2026-10-20",
-    notes=("Read from the order's text: eight SMARS servers, the deployment missed one, the seven "
-           "that received the new code (paras. 15, 16, 27); 212 incoming parent orders, 4 million "
-           "executions in 154 stocks for more than 397 million shares in approximately 45 minutes, "
-           "net long approximately $3.5 billion and net short approximately $3.15 billion, a $460 "
-           "million realized loss (para. 17); 97 'Power Peg disabled' e-mails (para. 19)."),
-)
 
-SIGELMAN_2010_DAPPER = _lit(
-    "prov:sigelman-2010-dapper",
-    "Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
-    "Google Technical Report dapper-2010-1, Table 2 and Section 4.4",
-    url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
-    verified="2026-10-20",
-    notes=("Table 2: effect of non-adaptive sampling frequencies on the average latency and throughput "
-           "of a Web search cluster (1/1: +16.3 percent latency, -1.48 percent throughput; 1/16: "
-           "+2.12, -0.08; 1/1024: -0.20, -0.06); experimental errors 2.5 and 0.15 percent. Section "
-           "4.4: the first production version averaged one sampled trace for every 1024 candidates. "
-           "Read from the report PDF with pdftotext."),
-)
 
 
 
 
 
 # --- Coordinating several agents (added 2026-10-20) ---
-HADFIELD_2025_RESEARCH_SYSTEM = _lit(
-    "prov:hadfield-2025-research-system",
-    "Hadfield et al. (2025), How we built our multi-agent research system, Anthropic Engineering, 13 June 2025",
-    url="https://www.anthropic.com/engineering/built-multi-agent-research-system",
-    verified="2026-10-20",
-    notes=("Benefits section: 'a multi-agent system with Claude Opus 4 as the lead agent and Claude "
-           "Sonnet 4 subagents outperformed single-agent Claude Opus 4 by 90.2% on our internal "
-           "research eval'; 'token usage by itself explains 80% of the variance' (BrowseComp). Prompt "
-           "engineering section: 'Early agents made errors like spawning 50 subagents for simple queries'."),
-)
 
 
 
 # --- Robot odometry, mapping, and tracking results (added 2026-10-20) ---
-BORENSTEIN_UMBMARK_1996 = _lit(
-    "prov:borenstein-umbmark-1996",
-    "Borenstein, J. and Feng, L. (1996), Measurement and Correction of Systematic Odometry Errors in "
-    "Mobile Robots, IEEE Transactions on Robotics and Automation 12(6), 869-880",
-    url="https://doi.org/10.1109/70.544770",
-    verified="2026-10-20",
-    notes=("UMBmark: bidirectional 4 m x 4 m square path (16 m per run) at 0.2 m/s with on-the-spot "
-           "turns, TRC LabMate differential-drive base. Table I, experiment 1 (Fig. 11): E_max,syst "
-           "317 mm before and 21 mm after calibrating wheelbase and wheel-diameter ratio; run-to-run "
-           "standard deviation of the return error about 25 mm (Secs. 3.3 and 5)."),
-)
 
 
 
 # --- Grounded intent sources (added 2026-10-20) ------------------------------
-BROHAN_RT1_2023 = _lit(
-    "prov:brohan-rt1-2023",
-    "Brohan, A. et al. (2023), RT-1: Robotics Transformer for Real-World Control at Scale, RSS 2023, "
-    "arXiv:2212.06817",
-    url="https://arxiv.org/abs/2212.06817",
-    verified="2026-10-20",
-    notes=("Fig. 1(a) caption: the model outputs tokenized actions 'at 3 Hz'; Sec. 5.1: 'each action "
-           "dimension in RT-1 is discretized into 256 bins'."),
-)
-BROHAN_RT2_2023 = _lit(
-    "prov:brohan-rt2-2023",
-    "Brohan, A. et al. (2023), RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic "
-    "Control, arXiv:2307.15818",
-    url="https://arxiv.org/abs/2307.15818",
-    verified="2026-10-20",
-    notes=("Sec. 3.3: RT-2-PaLI-X-55B 'can run at a frequency of 1-3 Hz', the 5B version 'at a "
-           "frequency of around 5 Hz', in a multi-TPU cloud service."),
-)
-DRIESS_PALME_2023 = _lit(
-    "prov:driess-palme-2023",
-    "Driess, D. et al. (2023), PaLM-E: An Embodied Multimodal Language Model, ICML 2023, "
-    "arXiv:2303.03378",
-    url="https://arxiv.org/abs/2303.03378",
-    verified="2026-10-22",
-    notes="Sec. 3: PaLM-E-562B combines a 540B PaLM language model with a 22B ViT vision encoder (562B total).",
-)
-PINTO_SUPERSIZING_2016 = _lit(
-    "prov:pinto-supersizing-2016",
-    "Pinto, L. & Gupta, A. (2016), Supersizing Self-supervision: Learning to Grasp from 50K Tries "
-    "and 700 Robot Hours, ICRA 2016, arXiv:1509.06825",
-    url="https://arxiv.org/abs/1509.06825",
-    verified="2026-10-22",
-    notes="Abstract: 50,000 grasp attempts collected over 700 hours of robot trial time.",
-)
-OPENVLA_ACTION_BINS_2024 = _lit(
-    "prov:kim-openvla-action-bins-2024",
-    "Kim, M. J. et al. (2024), OpenVLA: An Open-Source Vision-Language-Action Model, arXiv:2406.09246",
-    url="https://arxiv.org/abs/2406.09246",
-    verified="2026-10-20",
-    notes="Sec. 3.2: each action dimension is discretized separately 'into one of 256 bins'.",
-)
-AHN_AUTORT_2024 = _lit(
-    "prov:ahn-autort-2024",
-    "Ahn, M. et al. (2024), AutoRT: Embodied Foundation Models for Large Scale Orchestration of "
-    "Robotic Agents, arXiv:2401.12963",
-    url="https://arxiv.org/abs/2401.12963",
-    verified="2026-10-20",
-    notes=("Sec. 5.3: 259 tasks from 64 scenes, a base rate of 228/259 acceptable, 200/214 after the "
-           "LLM filter, which rejected 17 of the 31 unsuitable tasks; all 14 errors arose in teleop "
-           "task sampling. The 228, 214, 200, and 17 were read from a fetched summary of the HTML, "
-           "not verbatim."),
-)
 
 # --- Data selection: pruning, deduplication, echoing, and labels (added 2026-10-20) ---
-LEE_DEDUP_2022 = _lit(
-    "prov:lee-deduplicating-training-data-2022",
-    "Lee, Ippolito, Nystrom, Zhang, Eck, Callison-Burch, and Carlini (2022), Deduplicating Training Data Makes "
-    "Language Models Better, ACL 2022",
-    url="https://arxiv.org/abs/2107.06499",
-    verified="2026-10-18",
-    notes="Near-duplicate removal affected 3.04 percent of C4 and 13.63 percent of RealNews; footnote 1: a "
-          "61-word sentence repeated 61,036 times in C4; over 4 percent of validation examples overlap training "
-          "data; deduplicated models emit memorized text ten times less often.",
-)
-SOHN_FIXMATCH_2020 = _lit(
-    "prov:sohn-fixmatch-2020",
-    "Sohn, Berthelot, Li, Zhang, Carlini, Cubuk, Kurakin, Zhang, and Raffel (2020), FixMatch: Simplifying "
-    "Semi-Supervised Learning with Consistency and Confidence, NeurIPS 2020",
-    url="https://arxiv.org/abs/2001.07685",
-    verified="2026-10-20",
-    notes="Table 2, CIFAR-10 error rates over 5 folds: FixMatch (RA) 13.81, 5.07, 4.26 and FixMatch (CTA) 11.39, "
-          "5.07, 4.31 percent at 40, 250, and 4000 labels.",
-)
 
 # --- Training footprints and lifecycle carbon (added 2026-10-20) -------------
 LLAMA31_MODEL_CARD_EMISSIONS = _ds(
@@ -2962,26 +2408,7 @@ SICK_NANOSCAN3_CORE = _ds(
 )
 
 # --- Agent evaluation results (added 2026-10-20) --------------------------------
-YAO_2024_TAUBENCH = _lit(
-    "prov:yao-2024-taubench",
-    "Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark for Tool-Agent-User "
-    "Interaction in Real-World Domains, arXiv:2406.12045, abstract",
-    url="https://arxiv.org/abs/2406.12045",
-    verified="2026-10-20",
-    notes=("Abstract: state-of-the-art function-calling agents (like gpt-4o) succeed on <50% of the "
-           "tasks and are inconsistent (pass^8 <25% in retail). Upper bounds, not point values."),
-)
 
-METR_2025_REWARD_HACKING = _lit(
-    "prov:metr-2025-reward-hacking",
-    "von Arx, Chan, and Barnes (METR, 5 June 2025), Recent Frontier Models Are Reward Hacking, "
-    "o3 task table",
-    url="https://metr.org/blog/2025-06-05-recent-reward-hacking/",
-    verified="2026-10-20",
-    notes=("o3 runs judged reward hacking over runs: RE-Bench total 39/128 (30.4%), HCAST total "
-           "8/1087 (0.7%), Optimize LLM Foundry 21/21; the post states hacking was more than 43x "
-           "more common on RE-Bench than on HCAST."),
-)
 
 
 
@@ -3011,81 +2438,12 @@ JOUPPI_TPUV4I_ISCA_2021 = _lit(
 # Values as read from each source at the location named in the notes; the
 # section and figure locations follow the citations already carried by the
 # course material that quotes them.
-VALSAN_TAMING_NONBLOCKING_CACHES_2016 = _lit(
-    "prov:valsan-taming-nonblocking-caches-2016",
-    "Valsan, P. K., Yun, H., and Farshchi, F. (2016), Taming Non-blocking Caches to Improve "
-    "Isolation in Multicore Real-Time Systems, IEEE RTAS 2016",
-    url="https://doi.org/10.1109/RTAS.2016.7461361",
-    verified="2026-10-20",
-    notes=("Abstract: up to 21X execution-time increase with cache partitioning. Exp. 2, three "
-           "BwRead(DRAM) co-runners against a BwRead(LLC) victim: 2.1x Cortex-A9, 7.9x Nehalem "
-           "(text), 10.6x Cortex-A15 (Fig. 2(b) label); write co-runners 21.4x on Cortex-A15 "
-           "(Fig. 2(e) label)."),
-)
-ICHNOWSKI_FOGROS2_2023 = _lit(
-    "prov:ichnowski-fogros2-2023",
-    "Ichnowski, J. et al. (2023), FogROS2: An Adaptive Platform for Cloud and Fog Robotics Using "
-    "ROS 2, IEEE ICRA 2023",
-    url="https://arxiv.org/abs/2205.09778",
-    verified="2026-10-20",
-    notes="Abstract: grasp planning takes 14 s on the robot and 1.2 s offloaded with FogROS2.",
-)
 
 # --- Mapping a computation onto an accelerator (added 2026-10-20) ---
 
 # --- Quantization (added 2026-10-20) ---
 
 # --- Supervisory intervention: takeover studies, regulations, embedded crypto (added 2026-10-20) ---
-OWENS_2024_ED25519_M4 = _lit(
-    "prov:owens-2024-ed25519-cortex-m4",
-    "Owens, D., et al. (2024), Efficient and Side-Channel Resistant Ed25519 on ARM Cortex-M4",
-    url="https://par.nsf.gov/servlets/purl/10507285",
-    verified="2026-10-20",
-    notes=("Abstract: 'Verify in 720,000 cycles on the ARM Cortex-M4' (optimized assembly). Table II "
-           "(kilo-cycles) prints 722 at 24 MHz and 760 at 168 MHz; the abstract's 720,000 is stored."),
-)
-SCHWABE_STOFFELEN_2016_AES_M4 = _lit(
-    "prov:schwabe-stoffelen-2016-aes-cortex-m",
-    "Schwabe, P., and Stoffelen, K. (2016), All the AES You Need on Cortex-M3 and M4, SAC 2016",
-    url="https://cryptojedi.org/papers/aesarm-20161019.pdf",
-    verified="2026-10-20",
-    notes=("Table 1 (Performance of unprotected AES), p. 6: AES-128 single block encryption, 661.7 "
-           "cycles on Cortex-M4 (659.4 on M3); unprotected table-based implementation."),
-)
-LIU_2023_SIRIUS = _lit(
-    "prov:liu-2023-sirius",
-    "Liu, H., Nasiriany, S., Zhang, L., Bao, Z., and Zhu, Y. (2023), Robot Learning on the Job: "
-    "Human-in-the-Loop Autonomy and Learning During Deployment (Sirius), RSS 2023, arXiv:2211.08416",
-    url="https://arxiv.org/abs/2211.08416",
-    verified="2026-10-20",
-    notes=("Sec. IV-D: 'average reaction time of 2 seconds, roughly corresponding to the time of 15 "
-           "robot actions. We thus set l = 15.'"),
-)
-MERAT_2014_TRANSITION = _lit(
-    "prov:merat-2014-transition-to-manual",
-    "Merat, N., Jamson, A. H., Lai, F. C. H., Daly, M., and Carsten, O. M. J. (2014), Transition to "
-    "manual: Driver behaviour when resuming control from a highly automated vehicle, "
-    "Transportation Research Part F 27:274-282",
-    url="https://eprints.whiterose.ac.uk/84460",
-    verified="2026-10-20",
-    notes="Abstract: 'it took drivers around 35-40 s to stabilise their lateral control of the vehicle.'",
-)
-UNECE_R157_ALKS = _report(
-    "prov:unece-r157-alks-2021",
-    "UN Regulation No. 157, Automated Lane Keeping Systems (ALKS), OJ L 82, 9.3.2021",
-    "https://op.europa.eu/o/opportal-service/download-handler?identifier=36fd3041-807a-11eb-9ac9-01aa75ed71a1&format=pdf&language=en&productionSystem=cellar",
-    notes=("Para 5.4.4.1: a minimum risk manoeuvre 'shall be started, earliest 10 s after the start of "
-           "the transition demand'. Para 8.3.1(d)(ii): DSSAD timestamp accuracy +/- 1,0 s. Read 2026-10-20."),
-)
-WARSAW_DLH2904_REPORT = _report(
-    "prov:warsaw-dlh2904-report-1994",
-    "Main Commission for Aircraft Accident Investigation (Poland), Report on the Accident to Airbus A320-211 "
-    "D-AIPN at Warsaw Okecie Airport on 14 September 1993 (English translation)",
-    "http://www.rvs.uni-bielefeld.de/publications/Incidents/DOCS/ComAndRep/Warsaw/warsaw-report.html",
-    notes=("Sec. 1.1: the left gear touched the runway 9 seconds after the right; the wheel brakes 'began to "
-           "operate after about 4 seconds'; the aircraft rolled over the end of the runway at GS = 72 kts. "
-           "Sec. 1.2: fatal injuries 1 crew, 1 passenger. Read 2026-10-20."),
-)
 
 # --- Fault injection and attacks on robot proposers (added 2026-10-20) ---
 
@@ -3095,54 +2453,12 @@ WARSAW_DLH2904_REPORT = _report(
 
 
 # --- Responsible physical AI: penalties, per-group detection (added 2026-10-20) ---
-CPUC_D24_07_004_CRUISE = _lit(
-    "prov:cpuc-d24-07-004-cruise",
-    "California Public Utilities Commission, Decision 24-07-004, Presiding Officer's Decision "
-    "Approving Offered Settlement Terms and Granting Deferral of the Order to Show Cause "
-    "Proceedings (Cruise LLC, 2024)",
-    url="https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M536/K690/536690391.PDF",
-    verified="2026-10-20",
-    notes=(
-        "'the daily maximum fine of $7,500 per Pub. Util. Code 5378(b) will be applied for each of "
-        "the 15 days for a total penalty of $112,500'; the 15 days run October 3 to October 18, "
-        "2023. Read from the decision PDF on 2026-10-20."
-    ),
-)
-NHTSA_CRUISE_CONSENT_ORDER_2024 = _lit(
-    "prov:nhtsa-cruise-consent-order-2024",
-    "NHTSA, 'NHTSA Announces Consent Order with Cruise After Company Failed to Fully Report Crash "
-    "Involving Pedestrian', press release, 30 September 2024",
-    url="https://www.nhtsa.gov/press-releases/consent-order-cruise-crash-reporting",
-    verified="2026-10-20",
-    notes=("A $1.5 million civil penalty for crash reports that omitted the dragging. Transcribed from "
-           "the Volume IV chapter's citation; the page refused automated fetches (HTTP 403)."),
-)
-DOJ_CRUISE_DPA_2024 = _lit(
-    "prov:doj-cruise-dpa-2024",
-    "U.S. Attorney's Office, Northern District of California, 'Cruise Admits to Submitting a False "
-    "Report to Influence a Federal Investigation and Agrees to Pay $500,000', press release, "
-    "November 2024",
-    url="https://www.justice.gov/usao-ndca/pr/cruise-admits-submitting-false-report-influence-federal-investigation-and-agrees-pay",
-    verified="2026-10-20",
-    notes=("A $500,000 criminal fine under a deferred prosecution agreement. Transcribed from the "
-           "release title as the Volume IV bibliography records it; the page body was not readable."),
-)
 
 # --- ML operations, part 1: Zillow Offers, ML outages, change-driven outages (added 2026-10-20) ---
 
 # --- Benchmarking, deciding from measurements (added 2026-10-20) ---
 
 # --- Serving a stream of tokens (added 2026-10-20) ----------------------------
-ELSWORTH_GOOGLE_AI_FOOTPRINT_2025 = _lit(
-    "prov:elsworth-google-ai-footprint-2025",
-    "Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, arXiv "
-    "2508.15734, Section 4.3",
-    url="https://arxiv.org/abs/2508.15734",
-    verified="2026-10-20",
-    notes="May 2024 to May 2025: a 33x reduction in per-prompt energy for the median Gemini Apps text "
-          "prompt, including a 23x reduction from model improvements and a 1.4x reduction from improved "
-          "machine utilization.",
-)
 
 # --- Engineering Physical AI: premises no sensor reports (added 2026-10-20) ---
 SICK_DETEC4_SET_30_450 = _ds(
@@ -3157,25 +2473,11 @@ SICK_DETEC4_SET_30_450 = _ds(
 )
 
 
-AGILITY_TOTES_2025 = _report(
-    "prov:agility-digit-100k-totes-2025",
-    "Agility Robotics (2025), Digit moves over 100,000 totes in commercial deployment, 20 November 2025",
-    "https://www.agilityrobotics.com/content/digit-moves-over-100k-totes",
-    notes="Vendor-reported count of totes moved by Digit at a first customer site (GXO, Flowery Branch).",
-)
 
 
 # --- ML operations, part 2: monitoring, alerting, retraining (added 2026-10-20) ---
 
 # --- Responsible engineering: carbon accounting and duties (added 2026-10-20) ---
-PROPUBLICA_CIGNA_2023 = _report(
-    "prov:propublica-cigna-2023",
-    "Rucker, Miller, and Armstrong, How Cigna Saves Millions by Having Its Doctors Reject Claims "
-    "Without Reading Them, ProPublica and The Capitol Forum, 25 March 2023",
-    "https://www.propublica.org/article/cigna-pxdx-medical-health-insurance-rejection-claims",
-    notes="Over two months, Cigna medical directors denied more than 300,000 requests for payment, "
-          "spending on average 1.2 seconds on each.",
-)
 
 # --- Course-overview anchors: BLOOM's published run files, Alps, ChatGPT traffic (added 2026-10-20) ---
 

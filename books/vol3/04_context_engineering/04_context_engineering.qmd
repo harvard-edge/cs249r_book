@@ -306,24 +306,31 @@ Length degrades comprehension even when every required fact remains in the input
 # │ How:  data/fiction_livebench_by_length.csv, models scored at every
 # │       length through 60K tokens.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import numpy as np
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ContextLengthComprehension:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.FictionLiveBenchThrough60K  # data/fiction_livebench_by_length.csv
+    _rows = load_series("vol3/04_context_engineering/data/fiction_livebench_by_length.csv").entries
+    band_lengths = ["0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k"]
+    _cols = ["score_" + n for n in band_lengths]
+    _scored = (lambda rows=_rows, cols=_cols: [r for r in rows if all(r[c] is not None for c in cols)])()
+    _arr = (lambda scored=_scored, cols=_cols: np.array([[r[c] for c in cols] for r in scored]))()
     questions = 36  # questions per length, from the benchmark methodology
-    hold_bar = scenario.hold_bar
+    hold_bar = 0.90  # scenario assumption: the score a model must hold at 60K
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    r = scenario.result
-    n_scored = r.scored_models
-    median_short = r.median["0"]
-    median_8k = round(r.median["8k"], 2)  # whole percent: 36 questions per cell
-    median_60k = round(r.median["60k"], 2)
-    n_hold = r.held_count
-    lo_60k = r.lowest_last
-    hi_60k = r.highest_last
+    n_scored = len(_scored)
+    median = (lambda arr=_arr, bl=band_lengths: {n: float(np.median(arr[:, i])) for i, n in enumerate(bl)})()
+    q25 = (lambda arr=_arr, bl=band_lengths: {n: float(np.percentile(arr[:, i], 25)) for i, n in enumerate(bl)})()
+    q75 = (lambda arr=_arr, bl=band_lengths: {n: float(np.percentile(arr[:, i], 75)) for i, n in enumerate(bl)})()
+    median_short = median["0"]
+    median_8k = round(median["8k"], 2)  # whole percent: 36 questions per cell
+    median_60k = round(median["60k"], 2)
+    n_hold = (lambda scored=_scored, hb=hold_bar: sum(1 for r in scored if r["score_60k"] >= hb))()
+    lo_60k = min(r["score_60k"] for r in _scored)
+    hi_60k = max(r["score_60k"] for r in _scored)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_short > median_8k >= median_60k, "Prose says the median falls with length")
@@ -357,7 +364,6 @@ class ContextLengthComprehension:
 # │ How: data/fiction_livebench_by_length.csv (MLSysIM); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Literature, Scenarios
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
@@ -366,8 +372,8 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 entries = book_style.load_series("vol3/04_context_engineering/data/fiction_livebench_by_length.csv").entries
 lengths = ["0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k", "120k", "192k"]
 x = np.arange(len(lengths))
-sweep = Scenarios.FictionLiveBenchThrough60K.result  # models scored at every length through 60k
-band_lengths = sweep.lengths
+_C = ContextLengthComprehension  # models scored at every length through 60k
+band_lengths = _C.band_lengths
 traces = [
     ("gpt-5-2025-08-07_medium", "GPT-5 (medium)", "BlueLine", "o"),
     ("grok-4-0709", "Grok 4", "VioletLine", "s"),
@@ -380,12 +386,12 @@ traces = [
 # ┌── 2. RENDER ───────────────────────────────────────────────────────────────
 ax.fill_between(
     x[: len(band_lengths)],
-    [100 * sweep.q25[n] for n in band_lengths],
-    [100 * sweep.q75[n] for n in band_lengths],
+    [100 * _C.q25[n] for n in band_lengths],
+    [100 * _C.q75[n] for n in band_lengths],
     color=COLORS["grid"],
     alpha=0.35,
     lw=0,
-    label=f"Middle half ({sweep.scored_models} models)",
+    label=f"Middle half ({_C.n_scored} models)",
 )
 for key, label, color, marker in traces:
     row = next(e for e in entries if e["model"] == key)

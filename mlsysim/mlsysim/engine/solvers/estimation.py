@@ -21,7 +21,6 @@ from ..results import (
     FrozenTransformResult,
     InertialCoastResult,
     OdometryDriftResult,
-    OdometryLeaderboardResult,
     RangeFusionResult,
     ReplayBufferResult,
     SensorBiasDriftResult,
@@ -172,33 +171,6 @@ class OdometryDriftModel(ForwardModel):
         )
 
 
-class OdometryLeaderboardModel(ForwardModel):
-    """
-    Ranked odometry methods' translation error (percent of distance) against a bound.
-
-    A rate ``eps`` spends ``bound`` after ``bound / eps``; the rate that spends
-    it in exactly one ``segment`` is ``bound / segment``.
-    """
-    requires = ("entries", "bound", "segment")
-    produces = OdometryLeaderboardResult
-
-    def solve(self, entries: Sequence[dict], bound: Quantity, segment: Quantity) -> OdometryLeaderboardResult:
-        err = [r["translation_err_pct"] for r in entries]
-        st = [r["translation_err_pct"] for r in entries if r["sensor_group"] == "stereo"]
-        la = [r["translation_err_pct"] for r in entries if r["sensor_group"] == "laser"]
-        best = min(min(st), min(la))
-        st_med, la_med = statistics.median(st), statistics.median(la)
-
-        def dist(pct):
-            return (bound / (pct / 100)).to(ureg.meter)
-
-        thr = 100 * _ratio(bound, segment)
-        return OdometryLeaderboardResult(
-            count=len(entries), stereo_count=len(st), laser_count=len(la), best_pct=best,
-            stereo_median_pct=st_med, laser_median_pct=la_med, distance_best=dist(best),
-            distance_stereo_median=dist(st_med), distance_laser_median=dist(la_med),
-            segment_threshold_pct=thr, count_below_threshold=sum(1 for e in err if e < thr),
-        )
 
 
 class BeliefExpiryModel(ForwardModel):

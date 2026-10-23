@@ -7,7 +7,7 @@ Every value comes from calcs.py, which reads MLSysIM:
   - One day of ChatGPT prompts against training GPT-3 once
     (Scenarios.ChatGptDayAtGeminiMedianPrompt).
   - Datacenter electricity, 2024 and the 2030 projection
-    (Literature.DatacenterElectricity, IEA).
+    (cited literature, IEA).
   - Deployment power by tier (the Lecture 2 power ladder).
   - The stack with each lecture on its layer (kit stack_build8 canvas).
 

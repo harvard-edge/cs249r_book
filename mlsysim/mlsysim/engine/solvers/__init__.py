@@ -7,9 +7,9 @@ from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
-from .orchestration import JobSizeMixModel, OrchestrationModel, PreemptionTaxModel
+from .orchestration import OrchestrationModel, PreemptionTaxModel
 from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
-from .interconnect import (AlphaBetaModel, BisectionModel, CollectiveFitModel, CommunicationIntensityModel,
+from .interconnect import (AlphaBetaModel, BisectionModel, CommunicationIntensityModel,
                            GradientSyncModel, IncastModel, TensorParallelCommModel, TransferLadderModel)
 from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
 from .reliability import FailureIntervalModel, ReliabilityModel
@@ -40,7 +40,6 @@ from .storage import (
     StreamVsStageModel,
     UtilizationLossModel,
     SyntheticFootprintModel,
-    StorageBenchmarkDemandModel,
 )
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
 from .embodied import TakeoverBudgetModel  # supervisory intervention (added 2026-10-20)
@@ -50,17 +49,14 @@ from .realtime import CommandAuthenticationModel  # added 2026-10-20
 from .embodied import OnsetTrialModel, RailHoldUpModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AppendOnlyContextModel,
-                     HorizonCompoundingModel, TaskHorizonTrendModel)
+                     HorizonCompoundingModel)
 # Model calls and agent trajectories (added 2026-10-20)
 from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCallModel, SamplingModel,
                          TrajectoryResendModel)
-from .trends import DomainComputeGapModel, MemoryWallModel, ScalingSeriesModel, TrainingGrowthModel
 from .parallelism import (AlignmentMemoryModel, DataParallelScaleOutModel, ParallelLayoutModel,
                           TensorParallelLayerModel, ZeroShardingModel)
-from .trends import TrainingGrowthModel
 # Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
 from .performance import AmdahlModel, IronLawModel
-from .quality import ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 from .goodput import GoodputModel, RuntimeGoodputModel  # fleet goodput (added 2026-10-20)
 
@@ -89,7 +85,6 @@ __all__ = [
     "AlphaBetaModel",
     "BisectionModel",
     "IncastModel",
-    "CollectiveFitModel",
     "AllReduceAlgorithmModel",
     "HierarchicalAllReduceModel",
     "AllToAllDispatchModel",
@@ -97,16 +92,12 @@ __all__ = [
     "ErrorFeedbackModel",
     "CompressionRunModel",
     "OverlapBudgetModel",
-    "TrainingGrowthModel",
-    "DomainComputeGapModel",
     "StoppingBudgetModel",
     "TakeoverBudgetModel",
     "ShieldCoverageBillModel",
     "BrakingBlendModel",
     "CommandAuthenticationModel",
     "TractionLossModel",
-    "ScalingSeriesModel",
-    "MemoryWallModel",
     "ParallelLayoutModel",
     "ZeroShardingModel",
     "DataParallelScaleOutModel",
@@ -114,7 +105,6 @@ __all__ = [
     "AlignmentMemoryModel",
     "IronLawModel",
     "AmdahlModel",
-    "ShiftedTestSetModel",
     "StorageFootprintModel",
     "TieredCheckpointModel",
     "CheckpointStormModel",
@@ -127,11 +117,9 @@ __all__ = [
     "StreamVsStageModel",
     "UtilizationLossModel",
     "SyntheticFootprintModel",
-    "StorageBenchmarkDemandModel",
     "HorizonCompoundingModel",
     "AcceptedTaskCostModel",
     "AppendOnlyContextModel",
-    "TaskHorizonTrendModel",
     "ContextAdmissionModel",
     "SamplingModel",
     "CheckerPosteriorModel",
@@ -163,7 +151,6 @@ __all__ = [
     "DataModel",
     "TransformationModel",
     "OrchestrationModel",
-    "JobSizeMixModel",
     "PreemptionTaxModel",
     "CompressionModel",
 ]
@@ -208,7 +195,6 @@ from .deliberation import (
     ProbeVsAnswerModel,
     AllocationAxesModel,
     BestOfNPoolModel,
-    CoverageVsVoteModel,
     VerifiedPoolModel,
     ArgmaxNoiseModel,
     ScopedRevisionModel,
@@ -221,7 +207,6 @@ __all__ += [
     "ProbeVsAnswerModel",
     "AllocationAxesModel",
     "BestOfNPoolModel",
-    "CoverageVsVoteModel",
     "VerifiedPoolModel",
     "ArgmaxNoiseModel",
     "ScopedRevisionModel",
@@ -234,7 +219,6 @@ __all__ += [
 from .context import (
     ContextBudgetModel,
     AttentionDilutionModel,
-    ComprehensionByLengthModel,
     PrefixLayoutBillModel,
     CompactionCadenceModel,
     ContextInvalidationModel,
@@ -244,7 +228,6 @@ from .context import (
 __all__ += [
     "ContextBudgetModel",
     "AttentionDilutionModel",
-    "ComprehensionByLengthModel",
     "PrefixLayoutBillModel",
     "CompactionCadenceModel",
     "ContextInvalidationModel",
@@ -270,13 +253,11 @@ __all__ += [
 from .serving_scale import (
     KvAdmissionModel,
     PrecisionDividendModel,
-    ServingFrontierModel,
 )
 
 __all__ += [
     "KvAdmissionModel",
     "PrecisionDividendModel",
-    "ServingFrontierModel",
 ]
 
 # --- Retrieval from long-term memory (added 2026-10-20) ---
@@ -378,10 +359,7 @@ __all__ += [
     "DenseNetworkModel",
     "EpochOverheadModel",
 ]
-from .trends import ParameterGrowthModel, DatasetGrowthModel  # added 2026-10-20
 __all__ += [
-    "ParameterGrowthModel",
-    "DatasetGrowthModel",
 ]
 
 # --- Agent security (added 2026-10-20) ---
@@ -397,8 +375,6 @@ from .harness import (
     DeficitRoundRobinModel,
     BoundedLiabilityAdmissionModel,
     TrajectoryBudgetMeterModel,
-    CallCeilingModel,
-    StepCeilingReturnModel,
 )
 
 __all__ += [
@@ -406,8 +382,6 @@ __all__ += [
     "DeficitRoundRobinModel",
     "BoundedLiabilityAdmissionModel",
     "TrajectoryBudgetMeterModel",
-    "CallCeilingModel",
-    "StepCeilingReturnModel",
 ]
 
 # --- Sensor perception (added 2026-10-20) ---
@@ -472,7 +446,6 @@ from .estimation import (
     ReplayBufferModel,
     InertialCoastModel,
     OdometryDriftModel,
-    OdometryLeaderboardModel,
     BeliefExpiryModel,
     StaleTransformModel,
     FreeSpaceExpiryModel,
@@ -493,7 +466,6 @@ __all__ += [
     "ReplayBufferModel",
     "InertialCoastModel",
     "OdometryDriftModel",
-    "OdometryLeaderboardModel",
     "BeliefExpiryModel",
     "StaleTransformModel",
     "FreeSpaceExpiryModel",
@@ -567,8 +539,6 @@ from .acceptance import (
     BinomialIntervalsModel,
     ProportionPlanningModel,
     PairedComparisonModel,
-    ScaffoldSpreadModel,
-    LeaderboardTiesModel,
     TaskMixConsistencyModel,
     CappedSelectionCostModel,
 )
@@ -577,8 +547,6 @@ __all__ += [
     "BinomialIntervalsModel",
     "ProportionPlanningModel",
     "PairedComparisonModel",
-    "ScaffoldSpreadModel",
-    "LeaderboardTiesModel",
     "TaskMixConsistencyModel",
     "CappedSelectionCostModel",
 ]
@@ -653,7 +621,6 @@ __all__ += [
 from .fine_tuning import (
     TargetMaskModel,
     PerInvocationSerializationModel,
-    TrajectoryRoleShareModel,
     LossNormalizationModel,
     SequencePackingModel,
     PreferencePairModel,
@@ -662,7 +629,6 @@ from .fine_tuning import (
 __all__ += [
     "TargetMaskModel",
     "PerInvocationSerializationModel",
-    "TrajectoryRoleShareModel",
     "LossNormalizationModel",
     "SequencePackingModel",
     "PreferencePairModel",
@@ -713,8 +679,6 @@ __all__ += [
 
 # --- Agent cost accounting (added 2026-10-20) ---
 from .cost_accounting import (
-    PriceDeclineModel,
-    CostVsScoreModel,
     CohortAttemptCostModel,
     PrefixCacheBillModel,
     CompactionPaybackModel,
@@ -732,8 +696,6 @@ from .cost_accounting import (
 )
 
 __all__ += [
-    "PriceDeclineModel",
-    "CostVsScoreModel",
     "CohortAttemptCostModel",
     "PrefixCacheBillModel",
     "CompactionPaybackModel",

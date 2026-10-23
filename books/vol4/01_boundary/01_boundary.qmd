@@ -140,21 +140,31 @@ The latest step changed where learned proposals come from. In digital software s
 # │       language frontier of the same year.
 # │ Show: Gap between two open robot policies and the language maximum of
 # │       their publication year.
-# │ How:  Scenarios.OpenVlaComputeGap and Scenarios.Gr00tN1ComputeGap
-# │       (DomainComputeGapModel over data/epoch_models_by_domain.csv, Epoch estimates).
+# │ How:  data/epoch_models_by_domain.csv (Epoch estimates).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int
+from binder.tools.figures import style as book_style
 
 class ComputeByDomain:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    vla = Scenarios.OpenVlaComputeGap  # OpenVLA against the 2024 language maximum
-    gr00t = Scenarios.Gr00tN1ComputeGap  # GR00T N1 2B against the 2025 language maximum
+    _rows = book_style.load_series("vol4/01_boundary/data/epoch_models_by_domain.csv").entries
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gap_vla = vla.result.gap
-    gap_gr00t = gr00t.result.gap
-    n_robotics = gr00t.result.domain_models_with_compute
+    _vla_c = float(next(r["training_flop"] for r in _rows if r["model"] == "OpenVLA"))
+    _gr00t_c = float(next(r["training_flop"] for r in _rows if r["model"] == "GR00T N1 2B"))
+    _lang_2024 = max(
+        float(r["training_flop"])
+        for r in _rows
+        if r["domain_group"] == "Language" and str(r["publication_date"]).startswith("2024-") and r["training_flop"] is not None
+    )
+    _lang_2025 = max(
+        float(r["training_flop"])
+        for r in _rows
+        if r["domain_group"] == "Language" and str(r["publication_date"]).startswith("2025-") and r["training_flop"] is not None
+    )
+    gap_vla = _lang_2024 / _vla_c
+    gap_gr00t = _lang_2025 / _gr00t_c
+    n_robotics = sum(1 for r in _rows if r["domain_group"] == "Robotics" and r["training_flop"] is not None)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gap_vla > 100 and gap_gr00t > 1000, "Prose: hundreds of times in 2024, thousands of times in 2025")
@@ -846,7 +856,7 @@ A warehouse model that recognizes an obstacle too late cannot recover the cleara
 # │          18.7 m during suppression; 7 m/s^2 (0.71 g) chosen cap against
 # │          0.92 g (9.0 m/s^2) capability; Cruise about 20 ft (6.1 m) at up
 # │          to 7.7 mph.
-# │ How:     Literature.IncidentReports (NTSB/HAR-19/03 and the Quinn Emanuel
+# │ How:     cited literature (NTSB/HAR-19/03 and the Quinn Emanuel
 # │          report). Suppression travel is Scenarios.TempeActionSuppression,
 # │          the mean of the two recorded speeds over the suppression (trapezoid
 # │          rule); no counterfactual stop is computed.
@@ -859,22 +869,21 @@ class IncidentRecord:
     """Investigator-reported values for the Tempe (2018) and Cruise (2023) cases."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    IR = Literature.IncidentReports
     SUPP = Scenarios.TempeActionSuppression
     # category: literature. NTSB/HAR-19/03 (2019), table pp. 15-16 and p. 13
-    t_detect = float(IR.TempeFirstDetectionS) * second  # first detection, before impact
-    t_recognize = float(IR.TempeEmergencyRecognitionS) * second  # emergency recognized and suppression begins, before impact
+    t_detect = 5.6 * second  # first detection, before impact
+    t_recognize = 1.2 * second  # emergency recognized and suppression begins, before impact
     v_recognize = SUPP.speed  # recorded speed at that instant
     t_suppress = SUPP.delay  # action-suppression period (p. 13)
-    t_supp_end = float(IR.TempeSuppressionEndS) * second  # suppression ends, before impact
+    t_supp_end = 0.2 * second  # suppression ends, before impact
     v_supp_end = SUPP.speed_at_delay_end  # recorded speed at that instant
-    t_takeover = float(IR.TempeOperatorTakeoverS) * second  # operator takes the wheel, before impact
+    t_takeover = 0.02 * second  # operator takes the wheel, before impact
     # category: literature. NTSB/HAR-19/03, p. 13 and footnote 33
-    a_cap = float(IR.TempeAdsBrakingCapMps2) * meter / second**2  # ADS emergency threshold and braking cap (chosen by the developer)
-    g_capable = float(IR.TempeRoadDecelerationG)  # police-determined average deceleration capability in the crash area, in g
+    a_cap = 7.0 * meter / second**2  # ADS emergency threshold and braking cap (chosen by the developer)
+    g_capable = 0.92  # police-determined average deceleration capability in the crash area, in g
     # category: literature. Quinn Emanuel report to the Cruise boards (2024), p. 10
-    d_drag = float(IR.CruisePulloverDistanceFt) * foot  # approximate distance moved during the pullover
-    v_drag = float(IR.CruisePulloverMaxSpeedMph) * mph  # maximum speed during the pullover
+    d_drag = 20.0 * foot  # approximate distance moved during the pullover
+    v_drag = 7.7 * mph  # maximum speed during the pullover
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     g0 = (1 * standard_gravity).to(meter / second**2)

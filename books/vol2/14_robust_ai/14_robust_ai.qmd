@@ -393,12 +393,12 @@ A vehicle perception model trained mostly on daytime images encounters unfamilia
 # │ Goal: Show that even a shift meant to be none at all costs every model.
 # │ Show: 212 ImageNet models (>= 55% val) all lose 7-14 points on
 # │       ImageNet-V2, median 12; the loss tracks accuracy linearly.
-# │ How: Scenarios.ImageNetTestbedV2Shift: gaps and a least-squares fit over
+# │ How: Gaps and a least-squares fit over
 # │      data/imagenet_testbed_shift.csv, models above the val floor.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt, fmt_int
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -406,25 +406,29 @@ class ImageNetV2Shift:
     """Accuracy on ImageNet against ImageNet-V2 across the Taori et al. testbed."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    _s = Scenarios.ImageNetTestbedV2Shift
-    val_floor = _s.original_floor  # percent; excludes the testbed's partially trained and low-data checkpoints
-    rows = _s.rows
+    val_floor = 55  # percent; excludes the testbed's partially trained and low-data checkpoints
+    _all_rows = load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries
+    rows = (lambda rows=_all_rows, vf=val_floor: [r for r in rows if r["imagenet_v2"] is not None and r["val"] >= vf])()
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _r = _s.result
-    fit_slope, fit_intercept = _r.slope, _r.intercept
+    _gaps = [r["val"] - r["imagenet_v2"] for r in rows]
+    _gap_min = min(_gaps)
+    _gap_max = max(_gaps)
+    _gap_median = float(np.median(_gaps))
+    _model_count = len(rows)
+    fit_slope, fit_intercept = (float(x) for x in np.polyfit([r["val"] for r in rows], [r["imagenet_v2"] for r in rows], 1))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(_r.gap_min > 0, "Prose says every model scores lower on ImageNet-V2.")
-    check(6 <= _r.gap_min and _r.gap_max <= 15 and 11 <= _r.gap_median <= 13, "Prose quotes 7 to 14 points, median 12.")
-    check(_r.model_count >= 200, "Prose quotes about 200 models.")
+    check(_gap_min > 0, "Prose says every model scores lower on ImageNet-V2.")
+    check(6 <= _gap_min and _gap_max <= 15 and 11 <= _gap_median <= 13, "Prose quotes 7 to 14 points, median 12.")
+    check(_model_count >= 200, "Prose quotes about 200 models.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_count_str = fmt_int(_r.model_count)
+    model_count_str = fmt_int(_model_count)
     val_floor_str = fmt_int(val_floor)
-    gap_min_str = fmt_int(round(_r.gap_min))
-    gap_max_str = fmt_int(round(_r.gap_max))
-    gap_median_str = fmt_int(round(_r.gap_median))
+    gap_min_str = fmt_int(round(_gap_min))
+    gap_max_str = fmt_int(round(_gap_max))
+    gap_median_str = fmt_int(round(_gap_median))
 ```
 
 Even a shift that was designed to be no shift at all costs accuracy. @recht2019imagenet rebuilt the ImageNet validation set a decade after the original by following the original collection and labeling protocol, then evaluated existing models on the new images. In the larger testbed of @taori2020measuring, every one of the `{python} ImageNetV2Shift.model_count_str` models that reach at least `{python} ImageNetV2Shift.val_floor_str` percent on the original set scores lower on the new one, by `{python} ImageNetV2Shift.gap_min_str` to `{python} ImageNetV2Shift.gap_max_str` points with a median of `{python} ImageNetV2Shift.gap_median_str` (@fig-imagenet-v2-shift). The loss follows a nearly straight line, so a model that is better on the original set is better on the new one, yet no architecture, training recipe, or amount of extra data closes the gap. Whatever separates the two sets is not an obvious visual change, yet it is costly to every model. For a fleet, accuracy measured on held-out data from the training distribution is therefore an optimistic estimate of accuracy on the next population of inputs, not a prediction of it.
@@ -1330,7 +1334,7 @@ Adversarial example generation increases training time because each training ste
 # │
 # │ Goal: Expose an invalid clean-versus-attacked accuracy subtraction.
 # │ Show: A 26-point cross-condition gap that is not a clean-accuracy penalty.
-# │ How: Scenarios.ResNet50CleanVersusRobustAttacked: standard ResNet-50 clean
+# │ How: Standard ResNet-50 clean
 # │      accuracy from data/imagenet_testbed_shift.csv (76.1%) against
 # │      an assumed robust-model attacked accuracy (~50%).
 # │
@@ -1342,15 +1346,14 @@ class RobustnessTaxAnalysis:
     """Quantify the utility-robustness trade-off."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models, Scenarios
+    from mlsysim import Models, load_series
 
     m = Models.Vision.ResNet50
-    _s = Scenarios.ResNet50CleanVersusRobustAttacked
-    standard_clean_acc = _s.standard_clean_accuracy
-    robust_model_attacked_acc = _s.robust_attacked_accuracy  # scenario assumption: an adversarially trained ImageNet model at 4/255
+    standard_clean_acc = next(r["val"] for r in load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries if r["model"] == "resnet50")
+    robust_model_attacked_acc = 50.0  # scenario assumption: an adversarially trained ImageNet model at 4/255
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cross_condition_gap = _s.gap
+    cross_condition_gap = standard_clean_acc - robust_model_attacked_acc
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1519,11 +1522,11 @@ Empirical attack evaluation must be adaptive to the defense\index{Adaptive evalu
 # │       under one standardized attack.
 # │ Show: Best AutoAttack accuracy 44% (2018) -> 75% (2024) at clean ~94%;
 # │       four published defenses fall to ~0% under the standardized attack.
-# │ How: Scenarios.RobustBenchCifar10LinfProgress: year maxima and filters over
+# │ How: Year maxima and filters over
 # │      data/robustbench_cifar10_linf.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1531,15 +1534,15 @@ class RobustBenchProgress:
     """Best robust accuracy by year and defenses broken by AutoAttack."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    _s = Scenarios.RobustBenchCifar10LinfProgress
-    rows = _s.rows
-    first_year, last_year = _s.first_year, _s.last_year
-    broken_floor = _s.broken_floor  # percent AutoAttack accuracy; below this a defense provides no robustness
+    _all_rows = load_series("vol2/14_robust_ai/data/robustbench_cifar10_linf.csv").entries
+    rows = [r for r in _all_rows if r["year"] and r["unreliable"] not in (True, "True")]
+    first_year, last_year = 2018, 2024
+    broken_floor = 5.0  # percent AutoAttack accuracy; below this a defense provides no robustness
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    best_first = _s.best_first
-    best_last = _s.best_last
-    broken = _s.broken
+    best_first = (lambda rows=rows, y0=first_year: max((r for r in rows if int(r["year"]) == y0), key=lambda r: r["autoattack_acc"]))()
+    best_last = (lambda rows=rows, y1=last_year: max((r for r in rows if int(r["year"]) == y1), key=lambda r: r["autoattack_acc"]))()
+    broken = (lambda rows=rows, bf=broken_floor: [r for r in rows if r["autoattack_acc"] < bf])()
     entry_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

@@ -5,7 +5,7 @@ Every value comes from calcs.py (imported as K), which reads MLSysIM: the
 running machine and its aisle record, the finished stopping budgets, the
 loaded arm joint and its kinetic barrier, the two-joint projection, the
 permission check's stage budget, Literature.ContactForceMeasurements
-(Kirschner et al. 2022, Table II, hand, B1), and Literature.IncidentReports
+(Kirschner et al. 2022, Table II, hand, B1), and cited literature
 (Cruise, Therac-25). Labels print the strings calcs.py recorded, through
 deckvals.val; geometry uses the full-precision values. "SE" is the rendered
 chapter, Safety Enforcement (Volume IV, Chapter 12).

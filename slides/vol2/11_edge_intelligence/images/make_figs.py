@@ -306,9 +306,9 @@ def battery():
     out(fig, 'battery')
 
 def tiny_energy():
-    from mlsysim import Literature
+    from mlsysim import load_series
     keep = {'Syntiant Core 2\n(KWS, low-energy)': 'Syntiant Core 2, keyword spotting', 'STM32N6 NPU\n(KWS, low-power)': 'STM32N6 NPU, keyword spotting', 'STM32N6 NPU\n(IC, high-perf)': 'STM32N6 NPU, image classification', 'Google Coral\nEdge TPU': 'Google Coral Edge TPU', 'Jetson AGX Orin\n(ResNet-50)': 'Jetson AGX Orin, ResNet-50'}
-    rows = [(keep[d['name']], d['energy_uj']) for d in Literature.EdgeInferenceBenchmarks.list if d['name'] in keep]
+    rows = [(keep[d['name'].replace('\\n', '\n')], d['energy_uj']) for d in load_series(HERE / 'data' / 'edge_inference_benchmarks.csv').entries if d['name'].replace('\\n', '\n') in keep]
     rows.sort(key=lambda r: r[1])
     fig, ax = plt.subplots(figsize=(5.9, 2.5))
     t_lo, t_hi = ((lambda q, u: q.to(u).magnitude)(q, 'microjoule') for q in (Q_(2.0, 'J'), Q_(3.0, 'J')))

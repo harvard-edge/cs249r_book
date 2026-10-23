@@ -30,17 +30,11 @@ def test_communication_intensity():
     r = Scenarios.Gpt3DataParallelIntensity.result
     assert r.local_tokens == 8192
 
-def test_growth_and_runs():
-    g = Scenarios.NotableRunGrowth2012to2024.result
-    assert g.run_count == 146
 
 def test_spine_optics_buildout():
     s = Scenarios.SpineOpticsTraining10K
     assert s.n_links == 20000
 
-def test_nccl_allreduce_fit():
-    r = Scenarios.NcclAllReduceH100NodeFit.result
-    assert r.row_count == 32
 
 def test_ring_allreduce_across_oversubscribed_spine():
     r = Scenarios.RingAllReduceAcross4to1Spine.result
@@ -67,9 +61,6 @@ def test_input_demand_stall_and_prefetch():
     p = Scenarios.PrefetchDepthByTier.result
     assert p.depths == {'nvme': 1, 'pfs': 1, 'object': 3}
 
-def test_measured_storage_demand():
-    r = Scenarios.MLPerfStorageV1Demand.result
-    assert r.result_count == 124
 
 def test_warehouse_elementary_stop():
     r = Scenarios.WarehouseAisleStopAtDriveLimit.result
@@ -80,23 +71,12 @@ def test_floor_traction_loss():
     r = Scenarios.HydraulicFluidSlickTraction.result
     assert not r.premise_holds
 
-def test_robot_policy_compute_gap():
-    v = Scenarios.OpenVlaComputeGap.result
-    assert v.reference_model == 'Llama 3.1-405B'
-    g = Scenarios.Gr00tN1ComputeGap.result
-    assert g.reference_model == 'Grok 4'
-    assert g.domain_models_with_compute == 25
 
 def test_append_only_context():
     r = Scenarios.AppendOnlyRepairContext.result
     assert r.last_call_tokens.to('token').magnitude == 51500
     assert r.cumulative_input_tokens.to('token').magnitude == 892500
 
-def test_task_horizon_trend_reproduces_source():
-    s = Scenarios.FrontierTaskHorizonTrend
-    r = s.result
-    assert r.doubling_recent.to('day').magnitude == pytest.approx(s.published_recent_doubling.to('day').magnitude, abs=1)
-    assert r.first_date == '2019-02-14'
 
 def test_trajectory_resend():
     r = Scenarios.CodingAgentResend30Turns.result
@@ -185,11 +165,8 @@ def test_pipeline_tensor_parallel_and_ring_attention():
 def test_alignment_memory_and_fleet_facts():
     a = Scenarios.Llama2_70B_PpoAlignment.result
     assert a.min_devices_for_ppo == 19
-    m = Scenarios.MLPerfLlmScalingSeries.result
 
 def test_memory_wall_residual_share_and_recompute():
-    w = Scenarios.NotableModelMemoryWall.result
-    assert (w.crossover_name, w.crossover_year) == ('GPT-3', 2020)
     r = Scenarios.ResidualOnePercent512
     a = Scenarios.Gpt3ActivationsMicrobatch4
 
@@ -199,10 +176,6 @@ def test_input_space_and_gpt3_cluster_time():
     assert i.digits == 362508
     assert i.test_examples == 50000
 
-def test_measured_silent_degradation():
-    r = Scenarios.ImageNetV2Shift.result
-    assert r.model_count == 67
-    assert r.baseline_count == 3
 
 def test_battery_heat_and_energy():
     b = Scenarios.AlwaysOnObjectDetectorPhone
@@ -234,9 +207,6 @@ def test_straggler_replicas_probe_sdc():
     a = Scenarios.SdcExposure10K
     b = Scenarios.SdcExposure100K
 
-def test_kalos_job_size_mix():
-    r = Scenarios.KalosJobSizeMix.result
-    assert r.job_count == 19907
 
 def test_drf_and_packing():
     d = Scenarios.DrfTwoTenantExample.result
@@ -281,8 +251,6 @@ def test_probe_and_allocation_axes():
 
 def test_pools_estimator_and_coverage():
     p = Scenarios.IndependentCandidatePools.result
-    c = Scenarios.RepeatedSamplingCoverageVsVote.result
-    assert c.vote_gain_after_knee < 0.01 < 0.05 < c.coverage_gain_small
 
 def test_verified_pool_and_argmax_noise():
     v = Scenarios.SparseValidPoolFirstPass.result
@@ -317,9 +285,6 @@ def test_toy_head_attention_dilution():
     assert r.weight_with_lookalikes is None
     x = Scenarios.ToyHeadLookalikeExcerpt.result
 
-def test_fiction_livebench_through_60k():
-    r = Scenarios.FictionLiveBenchThrough60K.result
-    assert r.scored_models == 53 and r.held_count == 3
 
 def test_repair_prefix_layout_bill():
     r = Scenarios.RepairPrefixLayoutBill.result
@@ -417,8 +382,6 @@ def test_decode_floor_layernorm_and_tp_exchanges():
 
 def test_compilation_payback_trace_volume_and_software_gains():
     c = Scenarios.Decode13BCompilationPayback
-    sg = Scenarios.MlperfInferenceSoftwareGainsDgxH100
-    assert sg.months() == 19
 
 def test_serving_cost_goodput_tax_and_knees():
     c = Scenarios.LlmServingFirstYear
@@ -460,11 +423,6 @@ def test_fleet_routing_tail_cold_start_and_tenants():
     assert (b.slot_iterations, b.useful_iterations, b.requests_advanced) == (800, 500, 7)
     assert b.total_tokens == [150, 280, 220, 240]
 
-def test_inferencex_frontier_and_token_cost():
-    x = Scenarios.InferenceXServingFrontier
-    assert x.config_count == 325
-    b = x.solve('b200', 100)
-    assert x.max_concurrency_at('b200', 50, framework='sglang') == 64
 
 def test_retrieval_records_in_allowance():
     r = Scenarios.RetrievalRecordsInAllowance.result
@@ -503,18 +461,6 @@ def test_demonstration_campaign():
     assert c.gear_cycles == 102942
     assert c.cable_cycles == 58824
 
-def test_hub_counts_and_pooled_corpus():
-    h = Scenarios.LeRobotHubDatasetCounts
-    assert h.count_at('2024-12') == 1085
-    assert h.count_at('2025-12') == 26548
-    assert h.latest_count == 80132
-    assert h.counted == 59031
-    assert h.median_bin_low == 8
-    assert h.median_bin_high == 16
-    o = Scenarios.OpenXEmbodimentPoolComposition
-    assert o.datasets == 72
-    assert o.total == 2419193
-    assert o.top_datasets == 2
 
 def test_coverage_grids_and_gripper_transfer():
     g = Scenarios.WarehouseManipulatorStateGrid
@@ -604,13 +550,9 @@ def test_parameter_efficient_updates():
     ad = Scenarios.CompactEncoderResidualAdapters
     assert (ad.params_per_adapter, ad.params_total) == (25360, 304320)
 
-def test_federated_round_mechanics():
-    s = Scenarios.PhoneSocAiScoreSpread
-    assert s.lowest('fleet')['processor'] == 'Snapdragon 460'
 
 def test_on_device_learning_literature():
     from mlsysim import Literature
-    L = Literature.OnDeviceLearning
     rows = load_series('slides/vol2/11_edge_intelligence/images/data/fedavg_mnist_cnn_rounds.csv').entries
     assert (rows[0]['iid_rounds'], rows[0]['non_iid_rounds'], rows[-1]['iid_rounds']) == (626, 483, 18)
 
@@ -775,9 +717,6 @@ def test_robust_ai_answering_attacks_and_faults():
     r = Scenarios.SmoothingRadiusCifar10
     f = Scenarios.Fp32WeightExponentFlip
     assert f.flipped_bit == 30 and f.word_bits == 32 and (f.scale_log2 == 128)
-    t = Scenarios.ImageNetTestbedV2Shift.result
-    assert t.model_count == 212 and t.baseline_count == 0
-    b = Scenarios.RobustBenchCifar10LinfProgress
 
 def test_fixture_release_policy_comparison():
     r = Scenarios.FixtureReleasePolicyComparison.result
@@ -797,11 +736,6 @@ def test_trajectory_budget_meter():
     assert r.input_tokens == 892500 and r.cached_tokens == 841000 and (r.total_tokens == 898500)
     assert r.leading_with_reuse == 'turns' and r.leading_without_reuse == 'dollars'
 
-def test_call_and_step_ceilings_from_public_runs():
-    r = Scenarios.SweBenchCallCeilingP90.result
-    assert r.runs == 2100 and len(r.configurations) == 5 and r.longer_when_failed
-    s = Scenarios.OSWorldStepCeilingReturn.result
-    assert s.steps == [15, 50, 100] and s.flat_after_middle == 3
 
 def test_latch_evaluation_campaign():
     c = Scenarios.LatchEvaluationCampaign
@@ -873,7 +807,6 @@ def test_responsible_ai_literature_series():
     from mlsysim import Literature
     dp = load_series('vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv').entries
     cifar8 = next((r for r in dp if r['dataset'] == 'CIFAR-10' and r['epsilon'] == 8))
-    assert cifar8['accuracy_pct'] == Literature.DifferentialPrivacy.Cifar10AbadiAccuracyAtEps8Pct
     assert len(load_series('slides/vol2/16_responsible_ai/images/data/ofqual_2020_grade_matrix.csv').entries) == 7
 
 def test_durable_execution_checkpoint_cadence():
@@ -909,8 +842,6 @@ def test_spatial_memory_estimation():
     assert Scenarios.WarehouseObservationReplayBuffer.result.slots == 52
     i = Scenarios.WarehouseImuOneSecondCoast.result
     o = Scenarios.WarehouseUmbmarkOdometryDrift.result
-    k = Scenarios.WarehouseKittiOdometryDrift.result
-    assert (k.count, k.best_pct, k.laser_median_pct, k.count_below_threshold) == (127, 0.53, 0.68, 0)
 
 def test_spatial_memory_maps():
     q = Scenarios.WarehousePermissionClearanceQuery.result
@@ -959,9 +890,6 @@ def test_paired_comparison_and_published_newcombe_examples():
     assert calc_mcnemar_exact_two_sided(0, 0) == 1.0
 
 def test_leaderboards_and_selection_cost():
-    s = Scenarios.TerminalBenchScaffoldSpread.result
-    assert s.models == 16 and s.widest == 'claude-opus-4-6' and (s.widest_count == 11)
-    t = Scenarios.SweBenchVerifiedRankTies.result
     m = Scenarios.TwoTaskTypeConsistency.result
     c = Scenarios.CappedCandidateSelection.result
 
@@ -988,10 +916,8 @@ def test_repair_candidate_paired_comparison_as_read_by_operations():
 
 def test_openai_sycophancy_timeline_and_dapper():
     from mlsysim import Literature
-    inc = Literature.IncidentReports
     rows = {r['sampling_frequency']: r for r in load_series('slides/vol3/14_agent_operations/images/data/dapper_sampling_overhead.csv').entries}
     assert rows['1/1']['latency_change_pct'] == 16.3 and rows['1/1024']['latency_change_pct'] == -0.2
-    assert Literature.DistributedTracing.DapperFirstProductionSamplingDenominator == 1024
 
 def test_gpt2_xl_step_fits_one_h100():
     flash = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
@@ -1010,8 +936,6 @@ def test_model_compression_scenarios():
     from mlsysim.core.units import BYTES_FP32, BYTES_INT32
     t = Scenarios.Llama2_7BTokenOnFlagshipPhone
     b = Scenarios.MobileNetV2BlurPipelinePhone
-    m = Scenarios.SmallestModelAtSixtyPercentMmlu
-    assert m.first['model'] == 'Gopher 280B' and m.last['model'] == 'Qwen2.5-Coder-3B'
     r = Scenarios.Rank128Factorization4096
     f = Scenarios.ResNet50Conv256FusionH100
     w = Scenarios.WearableMobileNetV2SparseFlash
@@ -1024,8 +948,6 @@ def test_model_compression_scenarios():
 
 def test_accelerator_trends_and_latency_in_cycles():
     w = Scenarios.DenseParametersVsBandwidthSince2014
-    e = Scenarios.AcceleratorEnvelopeSinceTpuV2
-    assert e.best_bandwidth_since == '2025-02-15'
     g = Scenarios.NvidiaGenerationsV100ToB200
 
 def test_trajectory_planning_joint_rates_handoffs_and_replacement():
@@ -1066,8 +988,6 @@ def test_fine_tuning_serialization_and_target_mask():
     m = Scenarios.RecoveryRecordTargetMask.result
     assert m.stored == 16384 and m.predicted == 16383
     assert m.targets_without_rationale == 800 and m.targets_with_rationale == 2200
-    r = Scenarios.SweBenchVerifiedRoleShares.result
-    assert r.runs == 2100 and len(r.configurations) == 5
 
 def test_fine_tuning_weighting_packing_and_bounds():
     w = Scenarios.RepairTraceWithLookupWeighting.result
@@ -1204,9 +1124,6 @@ def test_supervisory_intervention_takeover_budgets():
     assert auth.verify_time.m_as('ms') == pytest.approx(1.8) and auth.mac_time.m_as('us') == pytest.approx(4.96275)
     assert auth.forged_to_miss == 55 and auth.forged_to_miss_after_admission == 20 and (auth.forged_rate == 546)
     assert auth.spare_after_freshness.m_as('mm') == pytest.approx(1.0075)
-    rec = s.WaymoCaliforniaDisengagementRecord
-    assert rec.rate_drop > 3 and rec.miles_growth > 3
-    assert rec.latest['disengagements'] == 174
     import math
     vals = sorted((r['mean_takeover_time_s'] for r in load_series('slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv').entries))
     assert len(vals) == 520 and sum(vals) / len(vals) == pytest.approx(2.72, abs=0.005)
@@ -1452,7 +1369,6 @@ def test_responsibility_groups_and_records():
     t = Scenarios.WarehouseEventTriggeredRetention
     assert t.window.m_as('s') == pytest.approx(30.0) and t.reduction == pytest.approx(96.0)
     p = Scenarios.CruiseDisclosurePenalties
-    assert p.per_day_penalty == Literature.IncidentReports.CruiseCpucPenaltyUsd == 112500
     assert p.total == 2112500
     assert len(load_series('slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv')) == 8 and len(load_series('slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv')) == 8
     li = load_series('slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv').entries
@@ -1499,8 +1415,6 @@ def test_benchmark_decision_scenarios():
     assert g.top1_loss == approx(0.9) and g.ece_ratio == approx(0.089 / 0.031)
     assert calc_t_critical(4, 0.95) == approx(2.776445, rel=1e-06)
     assert calc_spearman_rank_correlation([1, 2, 2, 3], [1, 3, 2, 4]) == approx(0.948683, rel=1e-05)
-    r = Scenarios.ImageNetV2Shift.result
-    assert r.network_rank_correlation == approx(0.996634, rel=1e-05)
 
 def test_token_serving_scenarios():
     """Serving a stream of tokens on one machine: decode batches, speculation, KV budgets, stall,
@@ -1569,19 +1483,12 @@ def test_fairness_gates_price_and_feedback():
     x = Scenarios.RecommenderExplorationExposure
     assert x.impressions == 200000000 and x.catalog_coverage == pytest.approx(2e-05)
     assert x.explore_impressions == pytest.approx(2000000.0)
-    F = Literature.Fairness
 
 def test_agent_cost_accounting():
     """Cohort cost per accepted task and the levers on it (added 2026-10-20)."""
     from mlsysim.physics import calc_kingman_wait_ratio, calc_speculative_round_speedup
     assert calc_kingman_wait_ratio(0.5, 1.0, 1.0) == pytest.approx(1.0)
     assert calc_speculative_round_speedup(0.4, 5, 0.08) == pytest.approx(1.0)
-    p = Scenarios.PriceAtFixedCapabilityDecline.result
-    assert p.series_count == 21 and round(p.rate_low) == 9 and (round(p.rate_median) == 46)
-    assert round(p.rate_high, -1) == 860 and round(p.series_rates['MMLU / GPT-3']) == 12
-    f = Scenarios.FrontierSweCostVsScore.result
-    assert f.configurations == 19 and round(f.cost_ratio) == 10 and (round(f.score_gap) == 3)
-    assert round(100 * f.median_spread) == 21
     c = Scenarios.RepairCohortTokenPriceComparison.result
     b = Scenarios.RepairResendCacheBill.result
     assert (b.sent_tokens, b.fresh_tokens) == (892500, 51500)
@@ -1646,7 +1553,6 @@ def test_premises_no_sensor_reports():
     assert s.spring_stiffness_max.m_as('N/m') == pytest.approx(50536.746, rel=1e-06)
     assert s.spring_stroke.m_as('mm') == pytest.approx(1.9787582, rel=1e-06)
     assert [p.m_as('N') for p in (s.coasting_rigid_guarded, s.coasting_rigid_fast, s.coasting_spring_fast)] == pytest.approx([67.416615, 219.601913, 74.894354], rel=1e-06)
-    assert Literature.RobotDeployments.AgilityDigitTotesMoved == 100000
 
 def test_closing_an_agent_course():
     """Remediation attempt, lost reply, residual violations, passing set, blame search,
@@ -1752,11 +1658,6 @@ def test_responsible_engineering_cost_carbon_and_duties():
     assert g.per_batch('KWS').m_as('byte') == pytest.approx(200000 * 4 * 256)
     assert g.per_batch('GPT-2').m_as('byte') == pytest.approx(1500000000.0 * 4 * 256)
 
-def test_frontier_training_cost_trend():
-    """Frontier training-cost growth fit over Epoch's notable models (added 2026-10-20)."""
-    t = Scenarios.FrontierTrainingCostTrend
-    assert 2.5 < t.growth_per_year < 3.5
-    assert t.priciest['model'] == 'Grok 4' and t.priciest['training_cost_2023usd'] > 100000000.0
 
 def test_swe_bench_verified_leaderboard_one_attempt():
     """SWE-bench Verified leaderboard: the one-attempt frontier and the same-model loop
@@ -1769,38 +1670,4 @@ def test_chat_service_day_scenario():
     """One day of ChatGPT prompts at the Gemini median prompt (added 2026-10-20)."""
     from mlsysim import Literature, ReferenceStats
     assert float(ReferenceStats.TextTokenization.WordsPerToken) == 0.75
-    d = Literature.DatacenterElectricity
 
-def test_vercel_gateway_and_repair_trajectory_scenarios():
-    """Production gateway token-usage telemetry and recorded repair trajectory (added 2026-10-21)."""
-    g = Scenarios.VercelGatewayTokenGrowth
-    assert len(g.index_rows) == 6 and len(g.tool_rows) == 2
-    assert g.usage_growth == pytest.approx(7.908)
-    assert g.spend_growth == pytest.approx(3.427)
-    assert g.price_index_end == pytest.approx(43.3)
-    assert g.price_drop_fraction == pytest.approx(0.567)
-    assert g.tool_request_share_start == pytest.approx(0.114)
-    assert g.tool_request_share_end == pytest.approx(0.222)
-    assert g.tool_token_share_start == pytest.approx(0.316)
-    assert g.tool_token_share_end == pytest.approx(0.589)
-    assert g.tool_tokens_per_request_ratio == pytest.approx(0.589 / 0.222 / (0.411 / 0.778))
-    c = Scenarios.MiniSweAgentDjango12050Calls
-    assert c.calls == 22
-    assert c.first_call_chars == 5499 and c.last_call_chars == 29594
-    assert c.context_growth == pytest.approx(29594 / 5499)
-    assert c.cumulative_sent_chars == 396997 and c.cumulative_new_chars == 29594
-    assert c.reread_ratio == pytest.approx(396997 / 29594)
-    assert c.cost_usd == pytest.approx(0.147413)
-    w = Scenarios.VercelGatewayWorkloadSpend
-    assert len(w.use_cases) == 8 and len(w.open_weight_rows) == 10
-    assert w.token_share('AI Personal Assistants') == pytest.approx(0.4)
-    assert w.cost_share('AI Personal Assistants') == pytest.approx(0.196)
-    assert w.token_share('AI Coding Agents') == pytest.approx(0.218)
-    assert w.cost_share('AI Coding Agents') == pytest.approx(0.204)
-    assert w.token_share('Back Office') == pytest.approx(0.058)
-    assert w.cost_share('Back Office') == pytest.approx(0.15)
-    assert w.back_office_vs_assistant_price_ratio == pytest.approx(15.0 / 5.8 / (19.6 / 40.0))
-    assert w.open_weight_token_share_start == pytest.approx(0.07)
-    assert w.open_weight_token_share_end == pytest.approx(0.715)
-    assert w.open_weight_spend_share_end == pytest.approx(0.226)
-    assert w.closed_vs_open_price_ratio_end == pytest.approx(0.774 / 0.285 / (0.226 / 0.715))

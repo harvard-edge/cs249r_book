@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ..results import (AlphaBetaResult, BisectionResult, CollectiveFitResult,
+from ..results import (AlphaBetaResult, BisectionResult, 
                        CommunicationIntensityResult, GradientSyncResult, IncastResult,
                        TensorParallelCommResult, TransferLadderResult)
 from ...core.types import Quantity
@@ -220,30 +220,3 @@ class IncastModel(ForwardModel):
         )
 
 
-class CollectiveFitModel(ForwardModel):
-    """
-    Two-parameter fit to a measured collective sweep (nccl-tests rows).
-
-    The floor is the median time of the small messages; the bandwidth is the
-    algorithm bandwidth at the largest message. The model ``floor + n / bw``
-    is close at both ends; the worst ratio of measured to modeled time in a
-    middle size range shows where delivered bandwidth is still ramping.
-    """
-    requires = ("rows",)
-    produces = CollectiveFitResult
-
-    def solve(self, rows, floor_cutoff: Quantity, mid_low: Quantity, mid_high: Quantity) -> CollectiveFitResult:
-        import statistics
-        cut = floor_cutoff.to("byte").magnitude
-        lo, hi = mid_low.to("byte").magnitude, mid_high.to("byte").magnitude
-        floor_us = statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= cut)
-        bw_gbps = rows[-1]["oop_algbw_GBps"]
-        mid = [r for r in rows if lo <= r["size_bytes"] <= hi]
-        worst = max(r["oop_time_us"] / (floor_us + r["size_bytes"] / (bw_gbps * 1e9) * 1e6) for r in mid)
-        bus = [r["oop_busbw_GBps"] for r in mid]
-        return CollectiveFitResult(
-            row_count=len(rows), floor_time=Q_(floor_us, "microsecond"), bandwidth=Q_(bw_gbps, "GB/s"),
-            knee=Q_(floor_us * 1e-6 * bw_gbps * 1e9, "byte"), worst_mid_ratio=worst,
-            peak_bus_bandwidth=Q_(max(r["oop_busbw_GBps"] for r in rows), "GB/s"),
-            mid_bus_bandwidth_low=Q_(min(bus), "GB/s"), mid_bus_bandwidth_high=Q_(max(bus), "GB/s"),
-        )

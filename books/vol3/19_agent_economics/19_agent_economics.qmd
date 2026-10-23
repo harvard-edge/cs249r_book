@@ -83,23 +83,33 @@ Offers like this one recur, because the price of a fixed capability falls quickl
 # │ Context: @fig-vol3-price-at-fixed-capability and the paragraph after it.
 # │ Goal: Quantify how fast the token price of a fixed capability falls.
 # │ Show: Range and median of per-year decline across every threshold.
-# │ How:  Scenarios.PriceAtFixedCapabilityDecline: log-linear fit of lowest
+# │ How:  Log-linear fit of lowest
 # │       price on release date per threshold series in
 # │       data/epoch_lowest_price_at_capability.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import datetime as dt
+import numpy as np
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 class PriceAtCapability:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.PriceAtFixedCapabilityDecline
-    rows = scenario.rows
+    rows = load_series("vol3/19_agent_economics/data/epoch_lowest_price_at_capability.csv").entries
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _r = scenario.result
-    series = _r.series_rates
-    rate_lo, rate_med, rate_hi = _r.rate_low, _r.rate_median, _r.rate_high
-    last_date = _r.last_date
+    _grouped = {}
+    for _r in rows:
+        _grouped.setdefault((_r["benchmark"], _r["threshold_model"]), []).append(_r)
+
+    @staticmethod
+    def _decline_per_year(points) -> float:
+        _t = np.array([dt.date.fromisoformat(p["release_date"]).toordinal() / 365.25 for p in points])
+        return float(10 ** -np.polyfit(_t, np.log10([p["usd_per_mtok"] for p in points]), 1)[0])
+
+    series = (lambda grp=_grouped, fn=_decline_per_year: {f"{b} / {m}": fn(v) for (b, m), v in grp.items()})()
+    _rates = sorted(series.values())
+    rate_lo, rate_med, rate_hi = _rates[0], float(np.median(_rates)), _rates[-1]
+    last_date = max(r["release_date"] for r in rows)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(rate_lo > 5 and rate_hi > 500, "Prose says every series fell at least ~10x per year, the fastest by hundreds")
@@ -852,23 +862,27 @@ The price spread a router can exploit is wide, and it does not track capability 
 # │ Goal: Show how loosely per-trial cost tracks score.
 # │ Show: Cost and duration ranges; cost ratio and score gap between the top
 # │       configuration and the runner-up; median best-to-worst spread.
-# │ How:  Scenarios.FrontierSweCostVsScore (data/frontier_swe_v2_trials.csv).
+# │ How:  Local data/frontier_swe_v2_trials.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import numpy as np
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_usd
 
 class CostVsScore:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.FrontierSweCostVsScore
-    rows = scenario.rows
-    trials, budget_h = scenario.trials, scenario.budget_hours  # protocol published by the benchmark
+    rows = load_series("vol3/19_agent_economics/data/frontier_swe_v2_trials.csv").entries
+    trials, budget_h = 5, 20  # protocol published by the benchmark
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _r = scenario.result
-    cost_ratio, score_gap = _r.cost_ratio, _r.score_gap
-    usd_lo, usd_hi = _r.cost_low, _r.cost_high
-    h_lo, h_hi = _r.hours_low, _r.hours_high
-    spread = _r.median_spread
+    _sorted = sorted(rows, key=lambda r: -r["mean5"])
+    _top, _runner_up = _sorted[0], _sorted[1]
+    cost_ratio = _top["usd_per_trial"] / _runner_up["usd_per_trial"]
+    score_gap = 100 * (_top["mean5"] - _runner_up["mean5"])
+    usd_lo = min(r["usd_per_trial"] for r in rows)
+    usd_hi = max(r["usd_per_trial"] for r in rows)
+    h_lo = min(r["hours_per_trial"] for r in rows)
+    h_hi = max(r["hours_per_trial"] for r in rows)
+    spread = float(np.median([r["best5"] - r["worst5"] for r in rows]))
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cost_ratio > 5 and score_gap < 5, "Prose says the top score costs many times the runner-up for a few points")
@@ -1921,32 +1935,33 @@ An adaptation is therefore priced like any other architecture change on the task
 # │ Show: Token and spend shares for personal assistants, coding agents, and
 # │       back-office automation; open-weight vs. closed-weight shares and
 # │       relative spend per token.
-# │ How:  Scenarios.VercelGatewayWorkloadSpend over
-# │       data/vercel_gateway_use_case_shares.csv and
+# │ How:  Local data/vercel_gateway_use_case_shares.csv and
 # │       data/vercel_gateway_open_weight_share.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class GatewayWorkloadSpend:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    scenario = Scenarios.VercelGatewayWorkloadSpend
+    use_cases = sorted(load_series("vol3/19_agent_economics/data/vercel_gateway_use_case_shares.csv").entries, key=lambda r: -r["token_share_pct"])
+    _ow_rows = list(load_series("vol3/19_agent_economics/data/vercel_gateway_open_weight_share.csv").entries)
+    _by_name = {r["use_case"]: r for r in use_cases}
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    assistant_tok = scenario.token_share("AI Personal Assistants")
-    assistant_cost = scenario.cost_share("AI Personal Assistants")
-    assistant_idx = scenario.cost_per_token_index("AI Personal Assistants")
-    coding_tok = scenario.token_share("AI Coding Agents")
-    coding_cost = scenario.cost_share("AI Coding Agents")
-    back_office_tok = scenario.token_share("Back Office")
-    back_office_cost = scenario.cost_share("Back Office")
-    back_office_idx = scenario.cost_per_token_index("Back Office")
-    bo_vs_asst = scenario.back_office_vs_assistant_price_ratio
-    open_tok = scenario.open_weight_token_share_end
-    open_spend = scenario.open_weight_spend_share_end
-    closed_tok = scenario.closed_weight_token_share_end
-    closed_spend = scenario.closed_weight_spend_share_end
-    closed_vs_open = scenario.closed_vs_open_price_ratio_end
+    assistant_tok = _by_name["AI Personal Assistants"]["token_share_pct"] / 100.0
+    assistant_cost = _by_name["AI Personal Assistants"]["cost_share_pct"] / 100.0
+    assistant_idx = _by_name["AI Personal Assistants"]["cost_share_pct"] / _by_name["AI Personal Assistants"]["token_share_pct"]
+    coding_tok = _by_name["AI Coding Agents"]["token_share_pct"] / 100.0
+    coding_cost = _by_name["AI Coding Agents"]["cost_share_pct"] / 100.0
+    back_office_tok = _by_name["Back Office"]["token_share_pct"] / 100.0
+    back_office_cost = _by_name["Back Office"]["cost_share_pct"] / 100.0
+    back_office_idx = _by_name["Back Office"]["cost_share_pct"] / _by_name["Back Office"]["token_share_pct"]
+    bo_vs_asst = back_office_idx / assistant_idx
+    open_tok = _ow_rows[-1]["token_share_pct"] / 100.0
+    open_spend = _ow_rows[-1]["spend_share_pct"] / 100.0
+    closed_tok = 1.0 - open_tok
+    closed_spend = 1.0 - open_spend
+    closed_vs_open = (closed_spend / closed_tok) / (open_spend / open_tok)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(assistant_tok > coding_tok > back_office_tok, "Personal assistants lead token share")
@@ -1984,16 +1999,15 @@ Even within the model-inference bill alone, token volume and dollar spend diverg
 # │ Goal: Show that token volume and dollar spend diverge across agent workloads.
 # │ Show: Paired horizontal bars of token share vs. spend share and relative
 # │       spend per token across 8 production workload classes.
-# │ How: Scenarios.VercelGatewayWorkloadSpend (MLSysIM); book_style.setup_plot().
+# │ How: GatewayWorkloadSpend (above); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
-rows = Scenarios.VercelGatewayWorkloadSpend.use_cases
+rows = GatewayWorkloadSpend.use_cases
 labels = [r["use_case"].replace("AI ", "") for r in rows]
 tok = np.array([r["token_share_pct"] for r in rows])
 cost = np.array([r["cost_share_pct"] for r in rows])

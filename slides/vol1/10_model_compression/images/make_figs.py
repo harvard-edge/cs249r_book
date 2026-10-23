@@ -25,8 +25,8 @@ Scenarios.* quantities. Where each figure's inputs live:
   - Break-even axis: CSR and COO from physics.memory; the 80 to 90 percent
     band for unstructured kernels is the chapter's (Sec. 10.4.2), unsourced.
   - MLP share: physics.transformer.calc_transformer_block_weights.
-  - Smallest capable model: Scenarios.SmallestModelAtSixtyPercentMmlu
-    (Epoch AI data, vol1/10_model_compression/data/mmlu_dense_models.csv).
+  - Smallest capable model: Epoch AI data
+    (vol1/10_model_compression/data/mmlu_dense_models.csv).
   - Frontier: slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv (Howard et al. 2019).
   - Iterative pruning: slides/vol1/10_model_compression/images/data/han2015_alexnet_pruning.csv (Han et al. 2015).
   - Deep Compression cliffs: slides/vol1/10_model_compression/images/data/han2016_compression_methods.csv.

@@ -4,7 +4,7 @@
 Every value comes from calcs.py, which reads MLSysIM: the retinopathy-screener
 scenarios (Scenarios.RetinopathyScreenerRequirements, ...LateMemoryLimit,
 AlwaysNormalScreener, FundusPhotoAt224, RetinopathyScreeningCloudVersusEdge,
-RetinopathyMonitoringCadences), Literature.Surveys (CrowdFlower 2016), and
+RetinopathyMonitoringCadences), cited literature (CrowdFlower 2016), and
 ReferenceStats.TorchvisionParameterCounts. Figure code holds only layout
 (coordinates, sizes, colors) and labels; the chapter sections each figure
 redraws are noted at the figure.

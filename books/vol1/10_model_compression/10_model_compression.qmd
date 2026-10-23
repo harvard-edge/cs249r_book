@@ -174,25 +174,31 @@ Across deployment targets, the disparity in weight memory spans about six orders
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
-from mlsysim import Scenarios
+from mlsysim import viz
+from mlsysim.core.units import SEC_PER_DAY, SEC_PER_YEAR_LEAP
 from mlsysim.fmt import check, fmt_count, fmt_multiple, fmt_percent
+
+def _running_smallest(rows, threshold):
+    front = []
+    for r in rows:
+        if r["mmlu"] >= threshold and (not front or r["parameters"] < front[-1]["parameters"]):
+            front.append(r)
+    return front
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SmallestCapableModel:
     """Smallest dense model clearing a fixed MMLU score over time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Scenarios.SmallestModelAtSixtyPercentMmlu: Epoch AI's dense-model MMLU
-    # results against a fixed 60 percent bar.
-    smallest = Scenarios.SmallestModelAtSixtyPercentMmlu
-    threshold = smallest.threshold
-    rows = smallest.rows
+    # Epoch AI's dense-model MMLU results against a fixed 60 percent bar.
+    threshold = 0.60  # scenario assumption: a fixed capability bar
+    rows = sorted(viz.load_series("vol1/10_model_compression/data/mmlu_dense_models.csv").entries, key=lambda r: r["date"])
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    frontier = smallest.frontier
-    first, last = smallest.first, smallest.last
-    shrink = smallest.shrink
-    span_years = smallest.span_years
+    frontier = _running_smallest(rows, threshold)
+    first, last = frontier[0], frontier[-1]
+    shrink = first["parameters"] / last["parameters"]
+    span_years = (dt.date.fromisoformat(last["date"]) - dt.date.fromisoformat(first["date"])).days / (SEC_PER_YEAR_LEAP / SEC_PER_DAY)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(first["model"].startswith("Gopher") and "Qwen2.5" in last["model"], "Prose names Gopher and Qwen2.5-Coder-3B.")

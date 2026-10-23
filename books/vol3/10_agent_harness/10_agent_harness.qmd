@@ -1094,32 +1094,61 @@ Baseline profiling under unconstrained budgets reveals the empirical completion 
 # │ Show: Share of failed and of accepted runs that a call ceiling at the
 # │       accepted runs' 90th percentile would halt; success vs. step
 # │       ceiling for the same model.
-# │ How:  Scenarios.SweBenchCallCeilingP90 over data/swe_bench_verified_trajectories.csv
-# │       (per-run call counts and outcome); Scenarios.OSWorldStepCeilingReturn
-# │       over data/osworld_step_budget.csv (same model at 15, 50, 100 steps).
+# │ How:  Local data/swe_bench_verified_trajectories.csv (per-run call counts
+# │       and outcome) and data/osworld_step_budget.csv (same model at 15, 50,
+# │       100 steps).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import statistics
+import numpy as np
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class CeilingEvidence:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ceiling = Scenarios.SweBenchCallCeilingP90
-    step_return = Scenarios.OSWorldStepCeilingReturn
-    q = ceiling.quantile  # ceiling at the accepted runs' 90th percentile of calls
+    _traj_rows = load_series("vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv").entries
+    _osw_rows = load_series("vol3/10_agent_harness/data/osworld_step_budget.csv").entries
+    q = 0.90  # ceiling at the accepted runs' 90th percentile of calls
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _r = ceiling.result
-    n_tasks = max(c["runs"] for c in _r.configurations)  # a full submission runs every task once
-    fail_halt_lo, fail_halt_hi = _r.failed_halted_low, _r.failed_halted_high
-    ok_halt_hi = _r.accepted_halted_high
-    longer_when_failed = _r.longer_when_failed
-    cap_lo, cap_hi = _r.cap_low, _r.cap_high
+    configurations = []
+    for _sub in sorted({r["submission"] for r in _traj_rows}):
+        _g = (lambda rows=_traj_rows, sb=_sub: [r for r in rows if r["submission"] == sb])()
+        _ok = sorted(r["n_model_calls"] for r in _g if r["resolved"])
+        _bad = sorted(r["n_model_calls"] for r in _g if not r["resolved"])
+        _cap = float(np.quantile(_ok, q))
+        configurations.append(
+            dict(
+                submission=_sub,
+                scaffold=_g[0]["scaffold"],
+                model=_g[0]["model"],
+                runs=len(_g),
+                accepted=len(_ok),
+                cap=_cap,
+                failed_halted=(lambda bad=_bad, cp=_cap: sum(1 for c in bad if c > cp) / len(bad))(),
+                accepted_halted=(lambda ok=_ok, cp=_cap: sum(1 for c in ok if c > cp) / len(ok))(),
+                median_accepted=float(statistics.median(_ok)),
+                median_failed=float(statistics.median(_bad)),
+                accepted_calls=_ok,
+                failed_calls=_bad,
+            )
+        )
+    n_tasks = max(c["runs"] for c in configurations)  # a full submission runs every task once
+    fail_halt_lo = min(c["failed_halted"] for c in configurations)
+    fail_halt_hi = max(c["failed_halted"] for c in configurations)
+    ok_halt_hi = max(c["accepted_halted"] for c in configurations)
+    longer_when_failed = all(c["median_failed"] > c["median_accepted"] for c in configurations)
+    cap_lo = min(c["cap"] for c in configurations)
+    cap_hi = max(c["cap"] for c in configurations)
     # Two configurations share one model; their ceilings still differ.
-    _same = [c["cap"] for c in _r.configurations if "claude-4-sonnet" in c["submission"] or "claude_4_sonnet" in c["submission"]]
-    _s = step_return.result
-    by_model = _s.scores
-    n_flat_after_50 = _s.flat_after_middle
-    best_gain = _s.best_gain
+    _same = [c["cap"] for c in configurations if "claude-4-sonnet" in c["submission"] or "claude_4_sonnet" in c["submission"]]
+    _steps = sorted({int(r["steps"]) for r in _osw_rows})
+    _raw_scores = {}
+    for _r in _osw_rows:
+        _raw_scores.setdefault(_r["model"], {})[int(_r["steps"])] = _r["score_pct"]
+    by_model = (lambda rs=_raw_scores, st=_steps: {m: {s: v[s] for s in st} for m, v in rs.items() if all(s in v for s in st)})()
+    _low, _mid, _high = _steps[0], _steps[len(_steps) // 2], _steps[-1]
+    n_flat_after_50 = (lambda bm=by_model, hi=_high, md=_mid: sum(1 for v in bm.values() if v[hi] <= v[md]))()
+    best_gain = (lambda bm=by_model, hi=_high, lo=_low: max(v[hi] - v[lo] for v in bm.values()))()
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(longer_when_failed, "Prose says failed runs take more calls in every configuration")
@@ -1156,16 +1185,15 @@ Baseline profiling of public repair-agent runs shows what such distributions loo
 # │ Goal: Show that failed runs consume more calls than accepted ones.
 # │ Show: Per-configuration CDFs of calls, accepted vs. failed, with the
 # │       ceiling at the accepted runs' 90th percentile.
-# │ How: Scenarios.SweBenchCallCeilingP90 (MLSysIM); book_style.set_book_style().
+# │ How: CeilingEvidence (above); book_style.set_book_style().
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 plt = book_style.plt
 COLORS = book_style.COLORS
-configs = Scenarios.SweBenchCallCeilingP90.result.configurations
+configs = CeilingEvidence.configurations
 fig, axes = plt.subplots(2, 3, figsize=(6.2, 4.6), sharey=True)
 flat = axes.ravel()
 
@@ -1227,14 +1255,12 @@ Re-running the same model under several enforced ceilings supplies the confirmat
 # │
 # │ Goal: Show that the return on a higher ceiling depends on the model.
 # │ Show: Success at 15, 50, 100 steps for each model run at all three.
-# │ How: Scenarios.OSWorldStepCeilingReturn over data/osworld_step_budget.csv
-# │      (MLSysIM); book_style.setup_plot().
+# │ How: CeilingEvidence (above); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
-by_model = Scenarios.OSWorldStepCeilingReturn.result.scores  # models run at every ceiling
+by_model = CeilingEvidence.by_model  # models run at every ceiling
 names = {
     "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
     "claude-sonnet-4-20250514": "Claude Sonnet 4",

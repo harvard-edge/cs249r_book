@@ -1061,11 +1061,13 @@ plt.close()
 # │ Show: 8x H100 all-reduce: ~17 µs floor to 512 KB, 274 GB/s asymptotic
 # │       algorithm bandwidth; model knee ~5 MB; measured time up to ~1.7×
 # │       the model between 8 and 128 MB.
-# │ How: Scenarios.NcclAllReduceH100NodeFit (CollectiveFitModel): floor =
+# │ How: Local data/nccl_allreduce_h100_node.csv: floor =
 # │      median time for sizes <= 64 KiB; bandwidth = algbw at the largest
 # │      size; model T = floor + size / bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+import statistics
+from mlsysim import load_series
 from mlsysim.core.units import GB, MB, second
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_multiple
 
@@ -1074,16 +1076,17 @@ class MeasuredAllReduce:
     """Two-parameter fit to a measured eight-GPU NCCL all-reduce sweep."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    scenario = Scenarios.NcclAllReduceH100NodeFit  # floor up to 64 KiB; bandwidth at the largest size
-    rows = scenario.rows
+    rows = load_series("vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv").entries
+    _cut = 64 * 1024  # floor up to 64 KiB
+    _mid_lo, _mid_hi = 8 * 2**20, 128 * 2**20
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fit = scenario.result
-    floor_us = fit.floor_time.to(microsecond).magnitude
-    bw_gbps = fit.bandwidth.to(GB / second).magnitude
-    peak_busbw_gbps = fit.peak_bus_bandwidth.to(GB / second).magnitude
-    knee_b = fit.knee.to(byte).magnitude
-    mid_ratio = fit.worst_mid_ratio
+    floor_us = (lambda rows=rows, cut=_cut: float(statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= cut)))()
+    bw_gbps = float(rows[-1]["oop_algbw_GBps"])
+    peak_busbw_gbps = float(max(r["oop_busbw_GBps"] for r in rows))
+    knee_b = floor_us * 1e-6 * bw_gbps * 1e9
+    _mid = (lambda rows=rows, lo=_mid_lo, hi=_mid_hi: [r for r in rows if lo <= r["size_bytes"] <= hi])()
+    mid_ratio = (lambda mid=_mid, fl=floor_us, bw=bw_gbps: max(r["oop_time_us"] / (fl + r["size_bytes"] / (bw * 1e9) * 1e6) for r in mid))()
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(12 <= floor_us <= 20, f"Prose quotes the measured floor (about 17 microseconds), got {floor_us:.1f}.")
@@ -1122,9 +1125,7 @@ _C = MeasuredAllReduce
 _x = np.array([r["size_bytes"] for r in _C.rows])
 _t = np.array([r["oop_time_us"] for r in _C.rows])
 _xx = np.logspace(np.log10(_x.min()), np.log10(_x.max()), 200)
-ax.plot(
-    _xx, [_C.fit.model_time(s * byte).to(microsecond).magnitude for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2
-)
+ax.plot(_xx, [_C.floor_us + s / (_C.bw_gbps * 1e9) * 1e6 for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2)
 ax.plot(_xx, np.full_like(_xx, _C.floor_us), ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.plot(_xx, _xx / (_C.bw_gbps * 1e9) * 1e6, ":", color=COLORS["primary"], lw=1, zorder=1)
 ax.scatter(_x, _t, s=22, color=COLORS["RedLine"], label="Measured (8× H100, NVLink)", zorder=3)

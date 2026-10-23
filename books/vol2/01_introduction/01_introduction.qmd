@@ -112,17 +112,17 @@ This book assumes familiarity with single-machine training, inference, and accel
 # │ Goal: Pin the order-of-magnitude training-compute anchors to MLSysIM.
 # │ Show: ~10^18 FLOPs (AlexNet), ~10^20 (BERT-Large), ~10^24 (PaLM), ~10^25 (GPT-4-class
 # │       estimate), and the seven-order span between the first and last.
-# │ How: round(log10(flops)) of Literature.ComputeTrend entries.
+# │ How: round(log10(flops)) of vol1/01_introduction/data/compute_trend.csv entries.
 # └─────────────────────────────────────────────────────────────────────────────
 from math import floor, log10
-from mlsysim import Literature
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_math
 
 class TrainingComputeLandmarks:
-    """Order-of-magnitude training-compute anchors from Literature.ComputeTrend."""
+    """Order-of-magnitude training-compute anchors from compute_trend.csv."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _trend = {e["model"]: e["flops"] for e in Literature.ComputeTrend.entries}
+    _trend = {e["model"]: e["flops"] for e in load_series("vol1/01_introduction/data/compute_trend.csv").entries}
     alexnet_flops = _trend["AlexNet"]
     bert_flops = _trend["BERT-Large"]
     palm_flops = _trend["PaLM"]
@@ -219,7 +219,7 @@ class Gpt4TrainingScenario:
 # │      (2022), Appendix B.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
+from mlsysim import Literature, load_series, Models
 from mlsysim.fmt import check, fmt_count, fmt_time, fmt_time_range
 
 class LandmarkTrainingRuns:
@@ -432,7 +432,7 @@ GPT-3\index{GPT-3!training compute} consumed an estimated `{python} Gpt3Training
 import datetime as dt
 import math
 import numpy as np
-from mlsysim import Literature, viz
+from mlsysim import Literature, load_series, viz
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
 
 def _decimal_year(s):
@@ -447,19 +447,23 @@ class TrainingComputeGrowth:
     """Decomposition of training-compute growth into count, duration, and rate."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    scenario = Scenarios.NotableRunGrowth2012to2024  # Epoch AI notable models, 2012-2024
-    first_year, last_year = scenario.first_year, scenario.last_year
+    first_year, last_year = "2012", "2024"  # Epoch AI notable models, 2012-2024
     all_rows = _in_window(viz.load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries, first_year, last_year)  # figure rows
+    _runs = [r for r in all_rows if r["hardware_quantity"] and r["training_time_hours"]]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _growth = scenario.result
-    run_count = _growth.run_count
-    compute_g = _growth.compute_factor
-    count_g = _growth.count_factor
-    duration_g = _growth.duration_factor
-    rate_g = _growth.rate_factor
-    fleet_share = _growth.fleet_share
-    span_orders = _growth.span_orders
+    @staticmethod
+    def _annual_factor(rows, value):
+        return float(10 ** np.polyfit([_decimal_year(r["date"]) for r in rows], np.log10([value(r) for r in rows]), 1)[0])
+
+    run_count = len(_runs)
+    compute_g = _annual_factor(_runs, lambda r: r["training_compute_flop"])
+    count_g = _annual_factor(_runs, lambda r: r["hardware_quantity"])
+    duration_g = _annual_factor(_runs, lambda r: r["training_time_hours"])
+    rate_g = _annual_factor(_runs, lambda r: r["training_compute_flop"] / (r["hardware_quantity"] * r["training_time_hours"] * 3600))
+    fleet_share = (math.log(count_g) + math.log(duration_g)) / math.log(compute_g)
+    _origin = next(r for r in all_rows if r["model"] == "AlexNet")["training_compute_flop"]
+    span_orders = math.log10(max(r["training_compute_flop"] for r in all_rows) / _origin)
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(count_g * duration_g * rate_g / compute_g - 1) < 1e-6, "The three factors must multiply to the compute trend.")
     check(0.4 <= fleet_share <= 0.6, f"Prose says about half of the growth is count and duration, got {fleet_share:.2f}.")
@@ -574,7 +578,7 @@ The language-model points pull away from the vision points because compute deman
 # │       dropped; the GPT-3 point is the Microsoft/OpenAI 2020 machine size.
 # └─────────────────────────────────────────────────────────────────────────────
 from math import log10
-from mlsysim import Literature, Models
+from mlsysim import Literature, load_series, Models
 from mlsysim.fmt import check, fmt_count
 
 class ClusterSizeLandmarks:
@@ -808,7 +812,7 @@ The interruption cadence follows from simple arithmetic. Consider a hypothetical
 # │ How: Models.Language.Llama3_405B + Literature.TrainingRuns (Dubey 2024).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
+from mlsysim import Literature, load_series, Models
 from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_time
 
 class Llama3PretrainingRecord:
@@ -892,7 +896,7 @@ class InfiniBandScenario:
 # │ How: Systems.Clusters.Meta_RSC_A100_16K; Literature.TrainingRuns.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Systems
+from mlsysim import Literature, load_series, Systems
 from mlsysim.fmt import check, fmt_count
 
 class FleetInvestmentAnchors:
@@ -1341,7 +1345,7 @@ class Gpt3StatsScenario:
 import datetime as dt
 import math
 import numpy as np
-from mlsysim import Literature, viz
+from mlsysim import Literature, load_series, viz
 from mlsysim.fmt import check, fmt_multiple
 
 def _trend_year(s):
@@ -1524,7 +1528,7 @@ plt.close()
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Literature
+from mlsysim import Literature, load_series
 from mlsysim.core.units import day, flop, second
 from mlsysim.fmt import check
 
@@ -1683,7 +1687,7 @@ A team that spends a fixed training-compute budget making a model twice as large
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsysim import Literature
+from mlsysim import Literature, load_series
 from mlsysim.fmt import check, fmt_count, fmt_int, fmt_math, sci_latex
 
 def _chinchilla_loss(e, a, b, alpha, beta, n, d):
@@ -1836,7 +1840,7 @@ plt.close()
 # │ How: Literature.Chinchilla.TokensPerParam; Literature.TrainingRuns.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, load_series
 from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_ratio
 
 class ComputeAllocationAnchors:
@@ -1877,7 +1881,7 @@ Within the studied regime, the Chinchilla result indicates that model size and t
 # │ How: pulling Models.Language.GPT3.parameters from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
+from mlsysim import Literature, load_series, Models
 from mlsysim.fmt import check, fmt, fmt_count, fmt_params, fmt_ratio
 
 class Gpt3OptimalScenario:
@@ -2722,7 +2726,7 @@ The Fleet Law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling exper
 # │       Megatron-LM's 52 percent of peak, which counts recomputed activations.
 # │ How: Literature.TrainingRuns, cross-checked against ComputeAllocationAnchors.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, load_series
 from mlsysim.fmt import check, fmt_percent
 
 class EfficiencyMeasureAnchors:

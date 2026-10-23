@@ -18,7 +18,6 @@ import numpy as np
 from ..results import (
     AttentionDilutionResult,
     CompactionCadenceResult,
-    ComprehensionByLengthResult,
     ContextBudgetResult,
     ContextInvalidationResult,
     PrefixLayoutBillResult,
@@ -141,37 +140,6 @@ class AttentionDilutionModel(ForwardModel):
         return AttentionDilutionResult(**out)
 
 
-class ComprehensionByLengthModel(ForwardModel):
-    """
-    Scores of models measured at every length of a context-length sweep.
-
-    Keeps the models scored at every listed length, then reports the median
-    and quartiles per length and how many models hold ``hold_bar`` at the
-    longest one. Scores are fractions, as the source series stores them.
-    """
-    requires = ()
-    produces = ComprehensionByLengthResult
-
-    def solve(self, rows: Sequence[dict], lengths: Sequence[str], hold_bar: float,
-              column_prefix: str = "score_", model_column: str = "model") -> ComprehensionByLengthResult:
-        cols = [column_prefix + n for n in lengths]
-        scored = [r for r in rows if all(r[c] is not None for c in cols)]
-        arr = np.array([[r[c] for c in cols] for r in scored])
-        last = cols[-1]
-        low = min(scored, key=lambda r: r[last])
-        high = max(scored, key=lambda r: r[last])
-        return ComprehensionByLengthResult(
-            lengths=list(lengths),
-            scored_models=len(scored),
-            median={n: float(np.median(arr[:, i])) for i, n in enumerate(lengths)},
-            q25={n: float(np.percentile(arr[:, i], 25)) for i, n in enumerate(lengths)},
-            q75={n: float(np.percentile(arr[:, i], 75)) for i, n in enumerate(lengths)},
-            held_count=sum(1 for r in scored if r[last] >= hold_bar),
-            lowest_last=low[last],
-            highest_last=high[last],
-            lowest_model=str(low[model_column]),
-            highest_model=str(high[model_column]),
-        )
 
 
 class PrefixLayoutBillModel(ForwardModel):

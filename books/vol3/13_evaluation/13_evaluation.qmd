@@ -91,29 +91,34 @@ Engineering decisions are also comparative. A new configuration, `candidate_v2`,
 # │       more than sampling noise.
 # │ Show: Widest and median within-model spread; the median reported
 # │       standard error; the widest model's range and scaffold count.
-# │ How:  Scenarios.TerminalBenchScaffoldSpread (data/terminal_bench_2_harness.csv,
-# │       models with >= 5 scaffolds; ScaffoldSpreadModel).
+# │ How:  Local data/terminal_bench_2_harness.csv (models with >= 5 scaffolds).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import statistics
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class ScaffoldSpread:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.TerminalBenchScaffoldSpread
+    _rows = load_series("vol3/13_evaluation/data/terminal_bench_2_harness.csv").entries
+    _min_scaffolds = 5  # scenario assumption: enough scaffolds to show a spread
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    result = scenario.result
-    widest = result.widest
-    widest_lo, widest_hi, widest_n = result.widest_low, result.widest_high, result.widest_count
-    median_spread = result.median_spread
-    median_se = result.median_se
+    _by_model = {}
+    for _r in _rows:
+        _by_model.setdefault(_r["model"], []).append(_r["accuracy"])
+    _by_model = (lambda bm=_by_model, ms=_min_scaffolds: {m: v for m, v in bm.items() if len(v) >= ms})()
+    _spreads = {m: max(v) - min(v) for m, v in _by_model.items()}
+    widest = max(_spreads, key=_spreads.get)
+    widest_lo, widest_hi, widest_n = min(_by_model[widest]), max(_by_model[widest]), len(_by_model[widest])
+    median_spread = statistics.median(_spreads.values())
+    median_se = statistics.median([r["accuracy_se"] for r in _rows if r["accuracy_se"]])
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_spread > 4 * median_se, "Prose says the typical spread is several standard errors")
     check(widest_hi - widest_lo > 0.2, "Prose says the widest spread exceeds 20 points")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_models_str = fmt_int(result.models)
+    n_models_str = fmt_int(len(_by_model))
     widest_lo_str = fmt_percent(round(widest_lo, 2), precision=0, style="prose")
     widest_hi_str = fmt_percent(round(widest_hi, 2), precision=0, style="prose")
     widest_n_str = fmt_int(widest_n)
@@ -524,31 +529,41 @@ These binary examples assume complete verdicts. If an evaluation sweep leaves tr
 # │ Context: @fig-vol3-leaderboard-rank-ties and the paragraph after it.
 # │ Goal: Show that adjacent leaderboard ranks are rarely distinguishable.
 # │ Show: Tied neighbors among the top 25; the gap a pair needs.
-# │ How:  Scenarios.SweBenchVerifiedRankTies (data/epoch_swe_bench_verified_runs.csv;
-# │       LeaderboardTiesModel): independent-samples z test at 95 percent on
+# │ How:  Local data/epoch_swe_bench_verified_runs.csv:
+# │       independent-samples z test at 95 percent on
 # │       the reported standard errors (conservative relative to pairing).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import math
+import statistics
+from statistics import NormalDist
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int
 
 class RankTies:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.SweBenchVerifiedRankTies
+    _rows = load_series("vol3/13_evaluation/data/epoch_swe_bench_verified_runs.csv").entries
+    _top = 25
+    _z = NormalDist().inv_cdf(0.5 + 0.95 / 2)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    result = scenario.result
-    tied = result.tied
-    needed_gap = result.needed_gap
+    _ranked = sorted(_rows, key=lambda r: -r["mean_score"])
+    _shown = _ranked[:_top]
+    _pairs = list(zip(_shown[:-1], _shown[1:]))
+    tied = (
+        lambda pairs=_pairs, z=_z: int(sum(abs(a["mean_score"] - b["mean_score"]) < z * math.hypot(a["stderr"], b["stderr"]) for a, b in pairs))
+    )()
+    _typical_se = statistics.median([r["stderr"] for r in _shown])
+    needed_gap = _z * math.sqrt(2) * _typical_se
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(tied >= result.pairs - 2, "Prose says nearly every neighboring pair is tied")
+    check(tied >= len(_pairs) - 2, "Prose says nearly every neighboring pair is tied")
     check(0.04 < needed_gap < 0.07, "Prose says a pair needs about five points to separate")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_models_str = fmt_int(result.models)
-    top_n_str = fmt_int(result.top)
+    n_models_str = fmt_int(len(_ranked))
+    top_n_str = fmt_int(len(_shown))
     tied_str = fmt_int(tied)
-    n_pairs_str = fmt_int(result.pairs)
+    n_pairs_str = fmt_int(len(_pairs))
     needed_gap_str = fmt_int(round(100 * needed_gap))
 ```
 
@@ -793,7 +808,7 @@ Permitting multiple attempts means one thing when a repair agent can generate ei
 # Scope: One fixed task, independent runs under the declared reset.
 # How: Scenarios.RecurringTaskConsistency and its variants (recurrences compound
 #      as turns do: HorizonCompoundingModel); tau-bench bounds from
-#      Literature.AgentEvaluation (Yao et al. 2024 abstract).
+#      cited literature (Yao et al. 2024 abstract).
 from mlsysim import Literature, Scenarios
 from mlsysim.physics import calc_independent_success
 from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
@@ -809,10 +824,9 @@ class PassPowK:
     target = recurring.target_success  # consistency the recurring work must hold
     chk_p, chk_k = checkpoint.step_success, checkpoint.long_horizon
     # Point-in-time upper bounds reported in the tau-bench abstract.
-    tau = Literature.AgentEvaluation
-    taubench_success_bound = tau.TauBenchSuccessUpperBoundPct / 100
-    taubench_pow_bound = tau.TauBenchRetailPassPowUpperBoundPct / 100
-    taubench_k = int(tau.TauBenchPassPowK)
+    taubench_success_bound = 50 / 100  # Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark f...
+    taubench_pow_bound = 25 / 100  # Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark f...
+    taubench_k = 8  # Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark f...
 
     # 2. EXECUTE
     result = recurring.result

@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 
 from ..results import (
-    JobSizeMixResult,
     OrchestrationResult,
     PreemptionTaxResult,
 )
@@ -81,50 +80,6 @@ class OrchestrationModel(ForwardModel):
             is_stable=utilization < 1.0,
         )
 
-class JobSizeMixModel(ForwardModel):
-    """
-    Jobs and GPU time of a cluster trace, by job-size class.
-
-    The trace rows aggregate jobs by requested GPU count (``gpu_num``), with
-    the job count, total GPU-seconds, and GPU-seconds split by the job's
-    final state. Three classes: one GPU, more than one but fewer than
-    ``large_threshold``, and ``large_threshold`` or more.
-
-    ``service_cv_lower_bound`` is the coefficient of variation of GPU time
-    per job computed from the row means only. Spread within a row is
-    ignored, so the true coefficient is at least this large; it feeds the
-    variability factor of a one-server queue model.
-
-    Literature Source:
-    1. Hu et al. (2024), "Characterization of Large Language Model
-       Development in the Datacenter" (NSDI 24), AcmeTrace.
-    """
-    requires = ("rows",)
-    produces = JobSizeMixResult
-
-    STATES = ("completed", "failed", "canceled")
-
-    def solve(self, rows, large_threshold: int) -> JobSizeMixResult:
-        jobs = sum(r["jobs"] for r in rows)
-        gpu_s = sum(r["gpu_seconds"] for r in rows)
-        preds = {
-            "single": lambda n: n == 1,
-            "medium": lambda n: 1 < n < large_threshold,
-            "large": lambda n: n >= large_threshold,
-        }
-        classes = {}
-        for key, pred in preds.items():
-            j = sum(r["jobs"] for r in rows if pred(r["gpu_num"]))
-            t = sum(r["gpu_seconds"] for r in rows if pred(r["gpu_num"]))
-            classes[key] = {"jobs": j, "gpu_seconds": t, "job_share": j / jobs, "time_share": t / gpu_s,
-                            "mean_gpu_hours": t / j / 3600}
-        m1 = gpu_s / jobs
-        m2 = sum(r["jobs"] * (r["gpu_seconds"] / r["jobs"]) ** 2 for r in rows) / jobs
-        states = {s: sum(r["gpu_seconds_" + s] for r in rows) / gpu_s for s in self.STATES}
-        states["other"] = 1 - sum(states.values())
-        return JobSizeMixResult(job_count=jobs, gpu_seconds=gpu_s, classes=classes,
-                                service_cv_lower_bound=math.sqrt(m2 - m1 * m1) / m1,
-                                state_time_shares=states)
 
 
 class PreemptionTaxModel(ForwardModel):
@@ -159,6 +114,5 @@ class PreemptionTaxModel(ForwardModel):
 
 __all__ = [
     "OrchestrationModel",
-    "JobSizeMixModel",
     "PreemptionTaxModel",
 ]

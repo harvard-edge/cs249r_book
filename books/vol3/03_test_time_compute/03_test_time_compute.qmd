@@ -465,24 +465,38 @@ The predicate in pass@$\IndependentAttemptCount$ is passing these tests, which i
 # │ How:  data/repeated_sampling_majority.csv / RepeatedSamplingCoverage,
 # │       recomputed from per-sample labels with the unbiased estimator.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class CoverageVsSelection:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.RepeatedSamplingCoverageVsVote  # Literature.RepeatedSampling* series
-    k_max, k_knee = scenario.k_max, scenario.k_knee
-    repair_k = scenario.repair_k
+    _maj_rows = load_series("vol3/03_test_time_compute/data/repeated_sampling_majority.csv").entries
+    _cov_rows = load_series("vol3/03_test_time_compute/data/repeated_sampling_coverage.csv").entries
+    _small_model = "Llama-3-8B-Instruct"
+    _large_model = "Llama-3-70B-Instruct"
+    _dataset = "MATH"
+    k_max, k_knee = 10_000, 256
+    _repair_system = "DeepSeek-Coder-V2-Instruct + Moatless Tools"
+    _repair_dataset = "SWE-bench Lite (all 300)"
+    repair_k = 250
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    result = scenario.result
-    cov_small = result.coverage_small
-    vote_small = result.vote_small
-    vote_large = result.vote_large
-    vote_gain_after_knee = result.vote_gain_after_knee
-    cov_gain_after_knee = result.coverage_gain_small
-    repair_1 = result.repair_first
-    repair_k_cov = result.repair_max
+    @staticmethod
+    def _at(rows, model, dataset, k, field):
+        return next(r[field] for r in rows if r["model"] == model and r["dataset"] == dataset and r["k"] == k)
+
+    cov_small = _at(_maj_rows, _small_model, _dataset, k_max, "coverage")
+    vote_small = _at(_maj_rows, _small_model, _dataset, k_max, "majority_vote_accuracy")
+    vote_large = _at(_maj_rows, _large_model, _dataset, k_max, "majority_vote_accuracy")
+    _gains = (
+        lambda fn=_at, mr=_maj_rows, ds=_dataset, km=k_max, kk=k_knee, sm=_small_model, lm=_large_model: [
+            fn(mr, m, ds, km, "majority_vote_accuracy") - fn(mr, m, ds, kk, "majority_vote_accuracy") for m in (sm, lm)
+        ]
+    )()
+    vote_gain_after_knee = max(0.0, *_gains)
+    cov_gain_after_knee = cov_small - _at(_maj_rows, _small_model, _dataset, k_knee, "coverage")
+    repair_1 = _at(_cov_rows, _repair_system, _repair_dataset, 1, "coverage")
+    repair_k_cov = _at(_cov_rows, _repair_system, _repair_dataset, repair_k, "coverage")
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cov_small > 0.95 and vote_small < 0.5 and vote_large < 0.65, "Prose contrasts near-complete coverage with sub-60% voting")

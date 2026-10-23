@@ -24,10 +24,8 @@ from typing import Mapping, Optional, Sequence
 from ..results import (
     BinomialIntervalsResult,
     CappedSelectionCostResult,
-    LeaderboardTiesResult,
     PairedComparisonResult,
     ProportionPlanningResult,
-    ScaffoldSpreadResult,
     TaskMixConsistencyResult,
 )
 from ...core.types import Quantity
@@ -158,68 +156,8 @@ class PairedComparisonModel(ForwardModel):
         )
 
 
-class ScaffoldSpreadModel(ForwardModel):
-    """
-    One model's benchmark score across agent scaffolds, from leaderboard rows.
-
-    Rows carry ``model``, ``accuracy``, and ``accuracy_se``. Models with at
-    least ``min_scaffolds`` rows are kept; each spread is the highest minus
-    the lowest score, set against the median reported standard error.
-    """
-    requires = ("series",)
-    produces = ScaffoldSpreadResult
-
-    def solve(self, rows: Sequence[Mapping], min_scaffolds: int) -> ScaffoldSpreadResult:
-        by_model = {}
-        for r in rows:
-            by_model.setdefault(r["model"], []).append(r["accuracy"])
-        by_model = {m: v for m, v in by_model.items() if len(v) >= min_scaffolds}
-        spreads = {m: max(v) - min(v) for m, v in by_model.items()}
-        widest = max(spreads, key=spreads.get)
-        return ScaffoldSpreadResult(
-            models=len(by_model),
-            spreads=spreads,
-            widest=widest,
-            widest_low=min(by_model[widest]),
-            widest_high=max(by_model[widest]),
-            widest_count=len(by_model[widest]),
-            median_spread=statistics.median(spreads.values()),
-            median_se=statistics.median([r["accuracy_se"] for r in rows if r["accuracy_se"]]),
-        )
 
 
-class LeaderboardTiesModel(ForwardModel):
-    """
-    Neighboring leaderboard ranks that an independent-samples test cannot separate.
-
-    Rows carry ``model``, ``mean_score``, and ``stderr``. Among the ``top``
-    highest scores, a neighboring pair is tied when its gap is below
-    ``z sqrt(se_a^2 + se_b^2)``; with a typical standard error ``s``, two
-    systems need a gap of about ``z sqrt(2) s``. Pairing on shared tasks
-    would separate more, so this is conservative.
-    """
-    requires = ("series",)
-    produces = LeaderboardTiesResult
-
-    def solve(self, rows: Sequence[Mapping], top: int, confidence: float = 0.95) -> LeaderboardTiesResult:
-        z = z_for_confidence(confidence)
-        ranked = sorted(rows, key=lambda r: -r["mean_score"])
-        shown = ranked[:top]
-        pairs = list(zip(shown[:-1], shown[1:]))
-        tied = sum(abs(a["mean_score"] - b["mean_score"]) < z * math.hypot(a["stderr"], b["stderr"])
-                   for a, b in pairs)
-        typical = statistics.median([r["stderr"] for r in shown])
-        return LeaderboardTiesResult(
-            models=len(ranked),
-            top=len(shown),
-            pairs=len(pairs),
-            tied=int(tied),
-            typical_se=typical,
-            needed_gap=z * math.sqrt(2) * typical,
-            top_model=shown[0]["model"],
-            top_score=shown[0]["mean_score"],
-            last_score=shown[-1]["mean_score"],
-        )
 
 
 class TaskMixConsistencyModel(ForwardModel):

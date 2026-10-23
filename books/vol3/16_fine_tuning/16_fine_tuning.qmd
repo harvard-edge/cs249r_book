@@ -425,20 +425,29 @@ Recorded repair trajectories show that the hypothetical inventory's proportions 
 # │ Context: @fig-vol3-trajectory-composition and the paragraph after it.
 # │ Goal: Ground the hypothetical mask inventory in recorded trajectories.
 # │ Show: Range of observation and model-output shares across configurations.
-# │ How:  Scenarios.SweBenchVerifiedRoleShares (TrajectoryRoleShareModel over
-# │       data/swe_bench_verified_trajectories.csv); characters pooled per
-# │       configuration, each message counted once.
+# │ How:  Local vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv;
+# │       characters pooled per configuration, each message counted once.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class TrajectoryComposition:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    shares = Scenarios.SweBenchVerifiedRoleShares
-    runs = shares.rows
+    runs = load_series("vol3/10_agent_harness/data/swe_bench_verified_trajectories.csv").entries
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    configs = shares.result.configurations
+    _totals = {}
+    for _r in runs:
+        _t = _totals.setdefault((_r["scaffold"], _r["model"]), [0.0, 0.0, 0.0, 0.0, 0])
+        _t[0] += _r["prompt_chars"]
+        _t[1] += _r["obs_chars"]
+        _t[2] += _r["model_chars"]
+        _t[3] += _r["total_chars"]
+        _t[4] += 1
+    configs = [
+        dict(scaffold=s, model=m, runs=v[4], prompt_share=v[0] / v[3], observation_share=v[1] / v[3], model_share=v[2] / v[3])
+        for (s, m), v in _totals.items()
+    ]
     obs_shares = sorted(c["observation_share"] for c in configs)
     model_shares = sorted(c["model_share"] for c in configs)
 
@@ -466,13 +475,12 @@ class TrajectoryComposition:
 # │
 # │ Goal: Show how much of a recorded trajectory is observation.
 # │ Show: Stacked prompt / observation / model-output shares per configuration.
-# │ How: Scenarios.SweBenchVerifiedRoleShares (MLSysIM); book_style.setup_plot().
+# │ How: TrajectoryComposition (above); book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.3, 3.5))
-configs = Scenarios.SweBenchVerifiedRoleShares.result.configurations
+configs = TrajectoryComposition.configs
 labels = [f"{c['scaffold']}\n{c['model']}" for c in configs]
 segments = [
     ("Prompt", COLORS["grid"], COLORS["primary"], "prompt_share"),

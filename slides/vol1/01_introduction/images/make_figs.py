@@ -14,7 +14,7 @@ print), or from the measured series MLSysIM holds:
     the "better model" intercept, the flatter slope, and the winter position
     are illustrative layout, labeled "Illustrative" on the plot.
   - Amdahl pipeline: Scenarios.ModelSpeedupRequestPath.
-  - ImageNetV2 scatter and fit: Scenarios.ImageNetV2Shift (Recht et al. 2019).
+  - ImageNetV2 scatter and fit: slides/vol1/01_introduction/images/data/recht_imagenetv2_shift.csv (Recht et al. 2019).
   - MLPerf: slides/vol1/01_introduction/images/data/mlperf_inference_v4_llama2_70b_offline.csv and the H100 and
     H200 registry entries.
 

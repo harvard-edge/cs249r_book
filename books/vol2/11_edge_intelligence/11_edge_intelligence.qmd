@@ -946,9 +946,12 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.4, 4.6))
 # Tier 2: Edge GPU (Jetson)
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# Sourced from Literature.EdgeInferenceBenchmarks (MLPerf Tiny + vendor data);
+# Sourced from vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv (MLPerf Tiny + vendor data);
 # tiers: 0 = MCU/ASIC, 1 = edge accelerator, 2 = edge GPU.
-devices = [(d["name"], d["latency_ms"], d["energy_uj"], d["tier"]) for d in Literature.EdgeInferenceBenchmarks.list]
+devices = [
+    (d["name"].replace("\\n", "\n"), d["latency_ms"], d["energy_uj"], int(d["tier"]))
+    for d in book_style.load_series("vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv").entries
+]
 
 # Tiers are categories, not resources: one neutral hue for every point, and
 # gray bands whose tint deepens with energy per inference. Position and the
@@ -1342,14 +1345,14 @@ The memory reduction is useful only when the frozen backbone remains expressive 
 # │ Show: Published training-memory saving vs. full fine-tuning and the
 # │       memory overhead of the lite residual modules.
 # │ How: Literature values quoted in the Cai et al. (NeurIPS 2020) abstract
-# │      (arXiv:2007.11622), read from Literature.OnDeviceLearning.
+# │      (arXiv:2007.11622), read from cited literature.
 from mlsysim import Literature
 from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class EdgeTinyTlResults:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    memory_saving_vs_full = Literature.OnDeviceLearning.TinyTlMemorySavingVsFull  # "up to" vs. full fine-tuning
-    lite_residual_overhead = Literature.OnDeviceLearning.TinyTlLiteResidualOverhead
+    memory_saving_vs_full = 6.5  # "up to" vs. full fine-tuning
+    lite_residual_overhead = 0.038  # Cai et al. (2020), TinyTL: Reduce Memory, Not Parameters for Effici...
     # ┌── 2. EXECUTE ───────────────────────────────────────
     full_to_tinytl_fraction = 1 / memory_saving_vs_full
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -2383,7 +2386,7 @@ Across these four dimensions, illustrative peak compute ratings differ by about 
 # │ How: Max/min ai_score over windows of data/ai_benchmark_socs.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_text
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2391,15 +2394,19 @@ class MobileAISpread:
     """Spread of measured on-device AI scores across phone SoCs."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    spread = Scenarios.PhoneSocAiScoreSpread  # windows 2020-2026 (fleet) and 2024-2025 (one generation)
-    rows = spread.rows
-    fleet_first, last = spread.windows["fleet"]
+    rows = load_series("vol2/11_edge_intelligence/data/ai_benchmark_socs.csv").entries
+    fleet_first, last = 2020, 2026  # scenario assumption: phones from 2020 on remain in a fleet
+    _gen_first, _gen_last = 2024, 2025
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fleet_hi, fleet_lo = spread.highest("fleet"), spread.lowest("fleet")
-    fleet_spread = spread.spread("fleet")
-    gen_hi, gen_lo = spread.highest("generation"), spread.lowest("generation")
-    gen_spread = spread.spread("generation")
+    _fleet_rows = (lambda rows=rows, f0=fleet_first, f1=last: [r for r in rows if r["ai_score"] and f0 <= r["year"] <= f1])()
+    _gen_rows = (lambda rows=rows, g0=_gen_first, g1=_gen_last: [r for r in rows if r["ai_score"] and g0 <= r["year"] <= g1])()
+    fleet_hi = max(_fleet_rows, key=lambda r: r["ai_score"])
+    fleet_lo = min(_fleet_rows, key=lambda r: r["ai_score"])
+    fleet_spread = fleet_hi["ai_score"] / fleet_lo["ai_score"]
+    gen_hi = max(_gen_rows, key=lambda r: r["ai_score"])
+    gen_lo = min(_gen_rows, key=lambda r: r["ai_score"])
+    gen_spread = gen_hi["ai_score"] / gen_lo["ai_score"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(300 <= fleet_spread <= 500, f"Prose says roughly 400x across the fleet window, got {fleet_spread:.0f}.")

@@ -705,25 +705,36 @@ Industry benchmark suites illustrate how a strict measurement contract operates 
 # │ Show: Same 8x H100 system, four MLPerf Inference rounds: GPT-J 2.7×,
 # │       Llama 2 70B 1.4×, SDXL 1.2×; ResNet-50 and BERT unchanged.
 # │ How: Offline throughput relative to each benchmark's first round, from
-# │      Scenarios.MlperfInferenceSoftwareGainsDgxH100 (the MLPerf series).
+# │      data/mlperf_inference_dgx_h100.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_multiple
 
 class SoftwareGains:
     """Offline throughput gains of one fixed DGX H100 across MLPerf Inference rounds."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gains = Scenarios.MlperfInferenceSoftwareGainsDgxH100
-    benchmarks = tuple(gains.benchmarks)
+    _entries = load_series("vol2/09_performance_engineering/data/mlperf_inference_dgx_h100.csv").entries
+    benchmarks = (
+        ("gptj-99", "GPT-J 6B"),
+        ("llama2-70b-99.9", "Llama 2 70B"),
+        ("stable-diffusion-xl", "Stable Diffusion XL"),
+        ("bert-99", "BERT-Large"),
+        ("resnet50", "ResNet-50"),
+    )
+    rows_for = (
+        lambda entries=_entries, bms=benchmarks: {
+            b: sorted((r for r in entries if r["benchmark"] == b and r["scenario"] == "Offline"), key=lambda r: r["pub_month"]) for b, _ in bms
+        }
+    )()
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gptj_gain = gains.gain("gptj-99")
-    llama_gain = gains.gain("llama2-70b-99.9")
-    sdxl_gain = gains.gain("stable-diffusion-xl")
-    resnet_gain = gains.gain("resnet50")
-    bert_gain = gains.gain("bert-99")
+    gptj_gain = rows_for["gptj-99"][-1]["value"] / rows_for["gptj-99"][0]["value"]
+    llama_gain = rows_for["llama2-70b-99.9"][-1]["value"] / rows_for["llama2-70b-99.9"][0]["value"]
+    sdxl_gain = rows_for["stable-diffusion-xl"][-1]["value"] / rows_for["stable-diffusion-xl"][0]["value"]
+    resnet_gain = rows_for["resnet50"][-1]["value"] / rows_for["resnet50"][0]["value"]
+    bert_gain = rows_for["bert-99"][-1]["value"] / rows_for["bert-99"][0]["value"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.4 <= gptj_gain <= 3.0, f"Prose says GPT-J rose ~2.7x, got {gptj_gain:.2f}.")
@@ -764,7 +775,7 @@ _months = {"v3.1": "Sep 2023", "v4.0": "Mar 2024", "v4.1": "Aug 2024", "v5.0": "
 _cols = [COLORS["RedLine"], COLORS["BlueLine"], COLORS["VioletLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]
 _dy = {"bert-99": -10, "resnet50": -24}
 for (_b, _lab), _c in zip(_C.benchmarks, _cols):
-    _p = _C.gains.rows(_b)
+    _p = _C.rows_for[_b]
     _x = [_rounds.index(r["round"]) for r in _p]
     _y = [r["value"] / _p[0]["value"] for r in _p]
     ax.plot(_x, _y, "-o", ms=5, lw=1.8, color=_c, zorder=3)

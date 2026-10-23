@@ -3446,27 +3446,33 @@ plt.close()
 # │      (Epoch AI), ordered by release date.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Literature, viz
 from mlsysim.core.units import TB, second
 from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_multiple
+
+def _running_max_envelope(rows, key):
+    best, out = 0.0, []
+    for r in rows:
+        best = max(best, r[key])
+        out.append((r["date"], best))
+    return out
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthEnvelope:
     """Best-device bandwidth and FP16 tensor throughput over time, all vendors."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    env = Scenarios.AcceleratorEnvelopeSinceTpuV2  # data/accelerator_bandwidth_compute.csv
-    rows = env.rows
+    rows = sorted(viz.load_series("vol1/11_hw_acceleration/data/accelerator_bandwidth_compute.csv").entries, key=lambda r: r["date"])
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    bw_env = env.bandwidth_envelope
-    fl_env = env.compute_envelope
-    baseline = env.baseline
-    compute_growth = env.compute_growth
-    bandwidth_growth = env.bandwidth_growth
+    bw_env = _running_max_envelope(rows, "memory_bandwidth_bytes_per_s")
+    fl_env = _running_max_envelope(rows, "fp16_tensor_flops")
+    baseline = rows[0]
+    compute_growth = fl_env[-1][1] / baseline["fp16_tensor_flops"]
+    bandwidth_growth = bw_env[-1][1] / baseline["memory_bandwidth_bytes_per_s"]
     best_bandwidth_tbs = bw_env[-1][1] / 1e12
-    bandwidth_plateau_since = env.best_bandwidth_since
-    device_count = env.device_count
+    bandwidth_plateau_since = (lambda env=bw_env: next(d for d, v in env if v == env[-1][1]))()
+    device_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(baseline["device"].startswith("Google TPU v2"), "Baseline is TPU v2, the earliest device with an FP16 tensor rate.")

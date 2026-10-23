@@ -27,12 +27,10 @@ from ..results import (
     CohortAttemptCostResult,
     CompactionPaybackResult,
     ConservedBudgetResult,
-    CostVsScoreResult,
     DedicatedBreakEvenResult,
     KingmanQueueResult,
     ModelCascadeResult,
     PrefixCacheBillResult,
-    PriceDeclineResult,
     RetryPolicyResult,
     SerialEpisodeResult,
     SpeculativeEpisodeResult,
@@ -60,61 +58,10 @@ def _per_mtok(price: Quantity) -> float:
     return float(price.to("USD / Mtoken").magnitude)
 
 
-def _milli(q) -> int:
-    return int(round(_usd(q) * 1000))
 
 
-class PriceDeclineModel(ForwardModel):
-    """
-    Yearly decline of the lowest price that reaches each fixed capability.
-
-    Rows are grouped by (benchmark, threshold model); each group's log10 price
-    is fitted linearly on release date in years, and the decline factor is
-    ``10^-slope``.
-    """
-    requires = ("series",)
-    produces = PriceDeclineResult
-
-    @staticmethod
-    def decline_per_year(points) -> float:
-        t = np.array([_dt.date.fromisoformat(p["release_date"]).toordinal() / 365.25 for p in points])
-        return 10 ** -np.polyfit(t, np.log10([p["usd_per_mtok"] for p in points]), 1)[0]
-
-    def solve(self, rows) -> PriceDeclineResult:
-        series: Dict[tuple, list] = {}
-        for r in rows:
-            series.setdefault((r["benchmark"], r["threshold_model"]), []).append(r)
-        named = {f"{b} / {m}": float(self.decline_per_year(v)) for (b, m), v in series.items()}
-        rates = sorted(self.decline_per_year(v) for v in series.values())
-        return PriceDeclineResult(series_count=len(series), series_rates=named,
-                                  rate_low=float(rates[0]), rate_median=float(np.median(rates)),
-                                  rate_high=float(rates[-1]),
-                                  last_date=max(r["release_date"] for r in rows))
 
 
-class CostVsScoreModel(ForwardModel):
-    """
-    Cost per trial against mean score, configuration by configuration.
-
-    Compares the top-scoring configuration with the runner-up and reports the
-    median best-to-worst spread across a configuration's trials.
-    """
-    requires = ("series",)
-    produces = CostVsScoreResult
-
-    def solve(self, rows) -> CostVsScoreResult:
-        rows = sorted(rows, key=lambda r: -r["mean5"])
-        top, runner_up = rows[0], rows[1]
-        return CostVsScoreResult(
-            configurations=len(rows),
-            cost_ratio=top["usd_per_trial"] / runner_up["usd_per_trial"],
-            score_gap=100 * (top["mean5"] - runner_up["mean5"]),
-            cost_low=min(r["usd_per_trial"] for r in rows),
-            cost_high=max(r["usd_per_trial"] for r in rows),
-            hours_low=min(r["hours_per_trial"] for r in rows),
-            hours_high=max(r["hours_per_trial"] for r in rows),
-            median_spread=float(np.median([r["best5"] - r["worst5"] for r in rows])),
-        )
 
 
 class CohortAttemptCostModel(ForwardModel):

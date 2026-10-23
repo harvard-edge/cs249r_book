@@ -103,30 +103,30 @@ Replacing the human operator in the interaction loop with a software runtime def
 # │ Show: Tool-calling request share and token share; tokens-per-request ratio
 # │       over non-tool calls; five-month price drop, token-volume growth, and
 # │       total-spend growth on a production inference gateway.
-# │ How:  Scenarios.VercelGatewayTokenGrowth over
-# │       data/vercel_gateway_usage_spend_price_index.csv and
+# │ How:  Local data/vercel_gateway_usage_spend_price_index.csv and
 # │       data/vercel_gateway_tool_call_share.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent
 
 class GatewayTokenGrowth:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.VercelGatewayTokenGrowth
-    teams = scenario.teams_covered
+    _idx_rows = list(load_series("vol3/01_introduction/data/vercel_gateway_usage_spend_price_index.csv").entries)
+    _tool_rows = list(load_series("vol3/01_introduction/data/vercel_gateway_tool_call_share.csv").entries)
+    teams = 200_000
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    req_start = scenario.tool_request_share_start
-    req_end = scenario.tool_request_share_end
-    tok_start = scenario.tool_token_share_start
-    tok_end = scenario.tool_token_share_end
-    density_ratio = scenario.tool_tokens_per_request_ratio
-    price_drop = scenario.price_drop_fraction
-    price_end = scenario.price_index_end
-    usage_growth = scenario.usage_growth
-    spend_growth = scenario.spend_growth
-    usage_end = scenario.end_row["usage_index"]
-    spend_end = scenario.end_row["spend_index"]
+    req_start = _tool_rows[0]["request_share_pct"] / 100.0
+    req_end = _tool_rows[-1]["request_share_pct"] / 100.0
+    tok_start = _tool_rows[0]["token_share_pct"] / 100.0
+    tok_end = _tool_rows[-1]["token_share_pct"] / 100.0
+    density_ratio = (tok_end / req_end) / ((1.0 - tok_end) / (1.0 - req_end))
+    price_drop = 1.0 - _idx_rows[-1]["price_per_token_index"] / _idx_rows[0]["price_per_token_index"]
+    price_end = float(_idx_rows[-1]["price_per_token_index"])
+    usage_growth = _idx_rows[-1]["usage_index"] / _idx_rows[0]["usage_index"]
+    spend_growth = _idx_rows[-1]["spend_index"] / _idx_rows[0]["spend_index"]
+    usage_end = _idx_rows[-1]["usage_index"]
+    spend_end = _idx_rows[-1]["spend_index"]
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(req_start - 0.114) < 1e-4 and abs(req_end - 0.222) < 1e-4, "Tool request share rose from 11.4% to 22.2%")
@@ -645,25 +645,45 @@ The horizon in @eq-vol3-horizon-compounding belongs to the delegated task, and t
 # │ Show: Frontier 50% horizon at the first and latest release; doubling
 # │       time since 2019 and since 2023.
 # │ How:  Log-linear fit of log2(horizon) on release date over frontier
-# │       models, excluding estimates above 16 h (the source's own rule):
-# │       Scenarios.FrontierTaskHorizonTrend (TaskHorizonTrendModel).
+# │       models, excluding estimates above 16 h (the source's own rule) in
+# │       data/metr_time_horizon_v1_1.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import datetime as dt
+import numpy as np
+from mlsysim import Literature, load_series
 from mlsysim.core.units import Q_
 from mlsysim.fmt import check, fmt, fmt_int
 
+def _horizon_log2_fit(points):
+    _t = np.array([dt.date.fromisoformat(r["release_date"]).toordinal() for r in points])
+    _slope, _intercept = np.polyfit(_t, np.log2([r["p50_min"] for r in points]), 1)
+    return float(_slope), float(_intercept)
+
 class MeasuredHorizon:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.FrontierTaskHorizonTrend  # data/metr_time_horizon_v1_1.csv, fit at or below 16 h
-    published_recent_days = scenario.published_recent_doubling.to("day").magnitude  # the source's own 2023-on doubling time
+    _rows = load_series("vol3/01_introduction/data/metr_time_horizon_v1_1.csv").entries
+    _cap_min = Q_(16, "hour").to("minute").magnitude  # the source's own fit rule
+    _recent_from = "2023-01-01"
+    published_recent_days = float(Literature.Benchmarks.AgentHorizonDoublingDays2023On)  # the source's own 2023-on doubling time
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    result = scenario.result
-    all_days = result.doubling_all.to("day").magnitude
-    recent_days = result.doubling_recent.to("day").magnitude
-    first_s = Q_(result.first_frontier_minutes, "minute").to("second").magnitude
-    last_h = Q_(result.last_frontier_minutes, "minute").to("hour").magnitude
-    growth = result.growth
+    _frontier = [r for r in _rows if r["is_sota"]]
+    _fit = (lambda fr=_frontier, cm=_cap_min: [r for r in fr if r["p50_min"] <= cm])()
+    _recent = (lambda fit=_fit, rf=_recent_from: [r for r in fit if r["release_date"] >= rf])()
+    _slope_all, _ = _horizon_log2_fit(_fit)
+    recent_slope_per_day, recent_intercept = _horizon_log2_fit(_recent)
+    _doubling_all = Q_(1 / _slope_all, "day")
+    _doubling_recent = Q_(1 / recent_slope_per_day, "day")
+    all_days = _doubling_all.to("day").magnitude
+    recent_days = _doubling_recent.to("day").magnitude
+    first_s = Q_(_frontier[0]["p50_min"], "minute").to("second").magnitude
+    last_h = Q_(_frontier[-1]["p50_min"], "minute").to("hour").magnitude
+    growth = _frontier[-1]["p50_min"] / _frontier[0]["p50_min"]
+
+    @classmethod
+    def fitted_minutes(cls, when) -> float:
+        _day = when.toordinal() + (when.hour * 3600 + when.minute * 60 + when.second) / 86400
+        return 2 ** (cls.recent_intercept + cls.recent_slope_per_day * _day)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(recent_days - published_recent_days) < 1, f"Refit must reproduce the source's doubling time, got {recent_days:.1f} d")
@@ -671,8 +691,8 @@ class MeasuredHorizon:
     check(first_s < 10 and last_h > 8, "Prose spans seconds to more than a working day")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    all_months_str = fmt(result.doubling_all.to("month").magnitude, precision=1)
-    recent_months_str = fmt(result.doubling_recent.to("month").magnitude, precision=1)
+    all_months_str = fmt(_doubling_all.to("month").magnitude, precision=1)
+    recent_months_str = fmt(_doubling_recent.to("month").magnitude, precision=1)
     first_s_str = fmt_int(round(first_s))
     last_h_str = fmt_int(round(last_h))
     growth_str = fmt_int(round(growth, -3))
@@ -691,8 +711,7 @@ class MeasuredHorizon:
 # │ Show: Log-scale horizon vs. release date; frontier vs. other models;
 # │       95% CIs; the 2023-on log-linear fit.
 # │ How: data/metr_time_horizon_v1_1.csv (MLSysIM); the fit line from
-# │      Scenarios.FrontierTaskHorizonTrend via MeasuredHorizon;
-# │      book_style.setup_plot().
+# │      MeasuredHorizon; book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
 import numpy as np
@@ -727,11 +746,11 @@ for is_frontier in (False, True):
             label="Other evaluated models",
         )
 
-# ┌── 2. FIT (MeasuredHorizon's scenario: same subset, same fit) ──────────────
+# ┌── 2. FIT (MeasuredHorizon: same subset, same fit) ─────────────────────────
 xs = mdates.num2date(np.linspace(mdates.datestr2num("2023-01-01"), mdates.datestr2num("2026-07-01"), 50))
 ax.plot(
     xs,
-    [MeasuredHorizon.scenario.fitted_minutes(d) for d in xs],
+    [MeasuredHorizon.fitted_minutes(d) for d in xs],
     "--",
     color=COLORS["secondary"],
     lw=1.6,
@@ -979,24 +998,23 @@ Because dependencies cross turn boundaries, the runtime must manage the whole tr
 # │       SWE-bench Verified repair trajectory.
 # │ Show: Call count, first-call vs. final-call context characters, cumulative
 # │       characters sent vs. distinct characters added, and the re-read ratio.
-# │ How:  Scenarios.MiniSweAgentDjango12050Calls over
-# │       data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv.
+# │ How:  Local data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 class RepairTrajectoryContext:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    scenario = Scenarios.MiniSweAgentDjango12050Calls
+    _rows = list(load_series("vol3/01_introduction/data/swe_bench_verified_mini_v1_sonnet4_django_12050_calls.csv").entries)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    calls = scenario.calls
-    first_chars = scenario.first_call_chars
-    last_chars = scenario.last_call_chars
-    ctx_growth = scenario.context_growth
-    cum_sent = scenario.cumulative_sent_chars
-    cum_new = scenario.cumulative_new_chars
-    reread_mult = scenario.reread_ratio
+    calls = len(_rows)
+    first_chars = int(_rows[0]["context_chars"])
+    last_chars = int(_rows[-1]["context_chars"])
+    ctx_growth = last_chars / first_chars
+    cum_sent = int(_rows[-1]["cum_sent_chars"])
+    cum_new = int(_rows[-1]["cum_new_chars"])
+    reread_mult = cum_sent / cum_new
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(calls == 22, "Recorded trajectory has 22 model calls")

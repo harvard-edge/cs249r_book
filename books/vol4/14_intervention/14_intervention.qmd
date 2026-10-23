@@ -80,20 +80,27 @@ How often that exchange happens on a mature fleet is a matter of public record i
 # │       and that its reported rate is not a monotone capability curve.
 # │ Show: Miles per disengagement in the first and latest report years; the
 # │       2020-to-2021 swing; the latest driverless-testing rate.
-# │ How:  Scenarios.WaymoCaliforniaDisengagementRecord (MLSysIM), Waymo's annual
-# │       rows of data/ca_dmv_disengagements.csv.
+# │ How:  Waymo's annual rows of data/ca_dmv_disengagements.csv.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
+from binder.tools.figures import style as book_style
 
 class DisengagementRecord:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    record = Scenarios.WaymoCaliforniaDisengagementRecord
+    _rows = [
+        r
+        for r in book_style.load_series("vol4/14_intervention/data/ca_dmv_disengagements.csv").entries
+        if r["company"] == "Waymo" and r["filer_type"] in ("annual", "first_report")
+    ]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    first, latest, dl = record.first, record.latest, record.latest_driverless
-    drop = record.rate_drop
-    miles_growth = record.miles_growth
+    _drv = sorted((r for r in _rows if r["permit_type"] == "drivered_AVT"), key=lambda r: int(r["report_year"]))
+    _dls = sorted((r for r in _rows if r["permit_type"] == "driverless_AVDT"), key=lambda r: int(r["report_year"]))
+    first, latest, dl = _drv[0], _drv[-1], _dls[-1]
+    _r2020 = next(r for r in _drv if int(r["report_year"]) == 2020)
+    _r2021 = next(r for r in _drv if int(r["report_year"]) == 2021)
+    drop = float(_r2020["miles_per_disengagement"]) / float(_r2021["miles_per_disengagement"])
+    miles_growth = float(_r2021["autonomous_miles"]) / float(_r2020["autonomous_miles"])
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(drop > 3 and miles_growth > 3, "Prose: the rate fell over threefold while miles grew over threefold")
@@ -545,7 +552,7 @@ class InterventionTakeoverBudget:
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission)
     # UN Regulation No. 157 (ALKS), para. 5.4.4.1: a minimum risk manoeuvre
     # starts at the earliest 10 s after the transition demand.
-    t_r157 = Literature.HumanTakeover.R157MinimumRiskManoeuvreDelayS * second  # category: sourced
+    t_r157 = 10 * second  # category: sourced
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     ib, ob = in_loop.result, out_of_loop.result
@@ -1903,7 +1910,7 @@ On a shared wireless link, a legitimate `veto_path` intervention packet and an u
 # │          of the freshness window carries.
 # │ How:     Scenarios.WarehouseRemoteCommandAuthentication
 # │          (CommandAuthenticationModel): published Cortex-M4 cycle counts
-# │          (Literature.Crypto) divided by the permission MCU's clock
+# │          (cited literature) divided by the permission MCU's clock
 # │          (RM.permission_mcu); verification adds to tau_delay, so each
 # │          millisecond is travel at the aisle speed against the spare of
 # │          InterventionTimeoutBudget.
@@ -1921,7 +1928,7 @@ class InterventionAuthBudget:
     spare = InterventionTimeoutBudget.spare  # category: derived
     t_auth_max = InterventionTimeoutBudget.t_latest  # category: derived
     mcu_clock = auth.clock  # category: illustrative (reference class, RM.permission_mcu)
-    # Published cycle counts on an ARM Cortex-M4 (Literature.Crypto); the
+    # Published cycle counts on an ARM Cortex-M4 (cited literature); the
     # reference core is assumed to retire them in the same number of cycles.
     ed25519_verify_cycles = auth.verify_cycles  # category: sourced (Owens et al. 2024, optimized assembly)
     aes_block_cycles = auth.mac_block_cycles  # category: sourced (Schwabe and Stoffelen, AES-128 single block)
@@ -2043,8 +2050,8 @@ class InterventionFlight2904Strip:
     """Timing values drawn in ws_flight2904_authority_lockout.svg."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_left_gear_s = int(Literature.IncidentReports.Dlh2904LeftGearContactAfterRightS)  # category: sourced (bfu1994warsaw)
-    t_brake_after_left_s = int(Literature.IncidentReports.Dlh2904WheelBrakesAfterLeftGearS)  # category: sourced (bfu1994warsaw, "about 4 seconds")
+    t_left_gear_s = 9  # category: sourced (bfu1994warsaw)
+    t_brake_after_left_s = 4  # category: sourced (bfu1994warsaw, "about 4 seconds")
     x0_px, px_per_s = 190, 30  # category: chosen (drawing scale)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
@@ -2096,7 +2103,7 @@ Consider a robotic arm striking a warehouse racking upright during a supervisory
 # │          the machine's permission tick.
 # │ Show:    Part 563 pre-crash window and rate before and after the 2024 rule;
 # │          the new sample period in permission ticks.
-# │ How:     Window and rate from 49 CFR Part 563 (Literature.EventDataRecorders);
+# │ How:     Window and rate from 49 CFR Part 563 (cited literature);
 # │          period = 1 / rate; ticks = period / AISLE.t_tick.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -2109,14 +2116,13 @@ class InterventionRecordBaselines:
     """Regulated vehicle pre-crash recording against the permission tick."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    # NHTSA, 49 CFR Part 563 (Sec. 563.7 Table I and footnote 4), via Literature.EventDataRecorders.
-    edr = Literature.EventDataRecorders
-    edr_old_window = edr.LegacyPreCrashWindowS * second  # category: sourced
-    edr_old_rate = edr.LegacyPreCrashRateHz * hertz  # category: sourced
-    edr_new_window = edr.PreCrashWindowS * second  # category: sourced
-    edr_new_rate = edr.PreCrashRateHz * hertz  # category: sourced
+    # NHTSA, 49 CFR Part 563 (Sec. 563.7 Table I and footnote 4), via cited literature.
+    edr_old_window = 5 * second  # category: sourced
+    edr_old_rate = 2 * hertz  # category: sourced
+    edr_new_window = 20 * second  # category: sourced
+    edr_new_rate = 10 * hertz  # category: sourced
     # UN Regulation No. 157 (ALKS), para. 8.3.1(d)(ii): DSSAD timestamp accuracy +/- 1.0 s.
-    dssad_accuracy = Literature.HumanTakeover.R157DssadTimestampAccuracyS * second  # category: sourced
+    dssad_accuracy = 1 * second  # category: sourced
     tick = AISLE.t_tick  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
@@ -2294,13 +2300,12 @@ class InterventionLearningEvidence:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     # Liu et al., RSS 2023 (Sirius), Sec. IV-D: pre-intervention class of
     # l = 15 robot actions, matching an observed operator reaction time of 2 s.
-    takeover = Literature.HumanTakeover
-    sirius_actions = int(takeover.SiriusPreInterventionActions)  # category: sourced
-    sirius_window = takeover.SiriusPreInterventionWindowS * second  # category: sourced
+    sirius_actions = 15  # category: sourced
+    sirius_window = 2 * second  # category: sourced
     # Merat et al., TR Part F 27 (2014), abstract: 35-40 s to stabilize
     # lateral control after resuming manual driving.
-    merat_lo = takeover.MeratLateralStabilizationLowS * second  # category: sourced
-    merat_hi = takeover.MeratLateralStabilizationHighS * second  # category: sourced
+    merat_lo = 35 * second  # category: sourced
+    merat_hi = 40 * second  # category: sourced
     t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced)
     t_pre = AISLE.pre_trigger_window  # category: derived
 

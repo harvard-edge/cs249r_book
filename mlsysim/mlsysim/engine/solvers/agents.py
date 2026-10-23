@@ -20,7 +20,6 @@ from ..results import (
     AcceptedTaskCostResult,
     AppendOnlyContextResult,
     HorizonCompoundingResult,
-    TaskHorizonTrendResult,
 )
 from .base import ForwardModel
 from ...core.types import Quantity
@@ -148,39 +147,7 @@ def _ordinal(s: str) -> int:
     return dt.date.fromisoformat(s).toordinal()
 
 
-def _log2_fit(points):
-    """(slope per day, intercept) of a least-squares fit of log2(horizon) on release date."""
-    t = np.array([_ordinal(r["release_date"]) for r in points])
-    slope, intercept = np.polyfit(t, np.log2([r["p50_min"] for r in points]), 1)
-    return slope, intercept
 
 
-class TaskHorizonTrendModel(ForwardModel):
-    """
-    Growth of the 50 percent task horizon of frontier models at release.
-
-    Frontier rows are those marked state of the art at release. Doubling
-    times come from least-squares fits of log2(horizon) on release date, over
-    frontier rows at or below ``fit_cap`` (the source excludes longer, less
-    certain estimates), for the whole period and from ``recent_from`` on.
-    """
-    requires = ("series",)
-    produces = TaskHorizonTrendResult
-
-    def solve(self, rows, fit_cap: Quantity, recent_from: str) -> TaskHorizonTrendResult:
-        cap = fit_cap.to("minute").magnitude
-        frontier = [r for r in rows if r["is_sota"]]
-        fit = [r for r in frontier if r["p50_min"] <= cap]
-        recent = [r for r in fit if r["release_date"] >= recent_from]
-        slope_all, _ = _log2_fit(fit)
-        slope, intercept = _log2_fit(recent)
-        first, last = frontier[0], frontier[-1]
-        return TaskHorizonTrendResult(
-            first_frontier_minutes=first["p50_min"], last_frontier_minutes=last["p50_min"],
-            first_date=first["release_date"], last_date=last["release_date"],
-            growth=last["p50_min"] / first["p50_min"],
-            doubling_all=Q_(1 / slope_all, "day"), doubling_recent=Q_(1 / slope, "day"),
-            recent_slope_per_day=slope, recent_intercept=intercept,
-        )
 
 

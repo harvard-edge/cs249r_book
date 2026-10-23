@@ -1516,12 +1516,12 @@ The knee occurs where the variable compute cost $(\BatchSize\times \MarginalRequ
 # │ Show: B200 frontier spans ~30× from peak throughput to 100 tok/s/user;
 # │       at 50 tok/s/user GB200 NVL72 delivers ~44× an H100 per GPU, against
 # │       a ~2.3× gap in peak dense FP8 rate.
-# │ How: Scenarios.InferenceXServingFrontier (frontier and best rate at a
-# │      target over data/inferencex_dsr1_fp8_1k1k.csv); peak rates from
+# │ How: Frontier and best rate at a target over
+# │      data/inferencex_dsr1_fp8_1k1k.csv; peak rates from
 # │      Hardware.Cloud.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Scenarios
+from mlsysim import Hardware, load_series
 from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1529,8 +1529,7 @@ class ServingFrontier:
     """Measured throughput-interactivity frontier of LLM serving by accelerator."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    measured = Scenarios.InferenceXServingFrontier
-    rows = measured.series.entries
+    rows = load_series("vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv").entries
     hardware = (("h100", "H100"), ("h200", "H200"), ("b200", "B200"), ("gb200", "GB200 NVL72"), ("mi355x", "MI355X"))
     target_tps_user = 50  # scenario assumption: a comfortable streaming rate for chat
     high_tps_user = 100
@@ -1540,15 +1539,35 @@ class ServingFrontier:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     frontiers = {}
     for _hw, _ in hardware:
-        frontiers[_hw] = measured.frontier(_hw)
-    h100_at_target = measured.best_at("h100", target_tps_user)
-    gb200_at_target = measured.best_at("gb200", target_tps_user)
+        _pts = (
+            lambda rows=rows, hw=_hw: sorted(
+                ((r["interactivity_tok_s_user"], r["output_tok_s_gpu"]) for r in rows if r["hardware"] == hw), key=lambda p: -p[0]
+            )
+        )()
+        _out, _best = [], -1.0
+        for _a, _b in _pts:
+            if _b > _best:
+                _out.append((_a, _b))
+                _best = _b
+        frontiers[_hw] = sorted(_out)
+    h100_at_target = (
+        lambda rows=rows, t=target_tps_user: max(
+            r["output_tok_s_gpu"] for r in rows if r["hardware"] == "h100" and r["interactivity_tok_s_user"] >= t
+        )
+    )()
+    gb200_at_target = (
+        lambda rows=rows, t=target_tps_user: max(
+            r["output_tok_s_gpu"] for r in rows if r["hardware"] == "gb200" and r["interactivity_tok_s_user"] >= t
+        )
+    )()
     gen_ratio = gb200_at_target / h100_at_target
     gb200_fp8_per_gpu = gb200_rack.compute.precision_flops["fp8"] / gb200_rack.accelerator_count
     peak_ratio = (gb200_fp8_per_gpu / h100_fp8).to("").magnitude
     b200_peak = max(y for _, y in frontiers["b200"])
     b200_peak_tps_user = max(frontiers["b200"], key=lambda p: p[1])[0]
-    b200_at_high = measured.best_at("b200", high_tps_user)
+    b200_at_high = (
+        lambda rows=rows, h=high_tps_user: max(r["output_tok_s_gpu"] for r in rows if r["hardware"] == "b200" and r["interactivity_tok_s_user"] >= h)
+    )()
     b200_span = b200_peak / b200_at_high
     config_count = len(rows)
 

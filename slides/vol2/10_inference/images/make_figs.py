@@ -10,8 +10,7 @@ Sources (all via MLSysIM)
   - Hook: Scenarios.LlmServingFirstYear (Napkin Math 10.1).
   - Serving tax: Scenarios.InteractiveRequestServingTax (Sec. 10.3.2).
   - InferenceX (SemiAnalysis, Apache-2.0), DeepSeek-R1-0528, FP8, snapshot
-    2026-10-12: Scenarios.InferenceXServingFrontier over
-    vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv. Frontier = configurations no
+    2026-10-12: vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv. Frontier = configurations no
     other configuration on the same accelerator beats on both axes.
   - Knee: Scenarios.VisionBatchingKnee, Scenarios.LlmDecodeBatchingKnee.
   - Four-request batch: Scenarios.FourRequestDecodeBatch (Napkin Math 10.3).

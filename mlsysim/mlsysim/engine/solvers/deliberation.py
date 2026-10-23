@@ -21,7 +21,6 @@ from ..results import (
     AllocationAxesResult,
     ArgmaxNoiseResult,
     BestOfNPoolResult,
-    CoverageVsVoteResult,
     DeadlinePolicyResult,
     ProbeVsAnswerResult,
     PrunedSearchTreeResult,
@@ -166,43 +165,6 @@ class BestOfNPoolModel(ForwardModel):
 
 
 
-class CoverageVsVoteModel(ForwardModel):
-    """
-    Pool coverage against what majority voting returns, from per-sample labels.
-
-    Coverage (pass@k averaged over problems) at one sample and at the largest
-    pool, for a small and a large model; majority-vote accuracy at the largest
-    pool; the gains of each from a knee to the largest pool; and repository
-    repair coverage at one sample and at its pool size.
-    """
-    requires = ("series",)
-    produces = CoverageVsVoteResult
-
-    @staticmethod
-    def _at(rows, model, dataset, k, field):
-        return next(r[field] for r in rows if r["model"] == model and r["dataset"] == dataset and r["k"] == k)
-
-    def solve(self, majority_rows, coverage_rows, small_model: str, large_model: str, dataset: str,
-              k_max: int, k_knee: int, repair_system: str, repair_dataset: str,
-              repair_k: int) -> CoverageVsVoteResult:
-        at = self._at
-        cov, vote = "coverage", "majority_vote_accuracy"
-        gains = [at(majority_rows, m, dataset, k_max, vote) - at(majority_rows, m, dataset, k_knee, vote)
-                 for m in (small_model, large_model)]
-        cov_small = at(majority_rows, small_model, dataset, k_max, cov)
-        return CoverageVsVoteResult(
-            coverage_small=cov_small,
-            coverage_large=at(majority_rows, large_model, dataset, k_max, cov),
-            coverage_small_first=at(majority_rows, small_model, dataset, 1, cov),
-            coverage_large_first=at(majority_rows, large_model, dataset, 1, cov),
-            vote_small=at(majority_rows, small_model, dataset, k_max, vote),
-            vote_large=at(majority_rows, large_model, dataset, k_max, vote),
-            vote_gain_small=gains[0],
-            vote_gain_after_knee=max(0.0, *gains),
-            coverage_gain_small=cov_small - at(majority_rows, small_model, dataset, k_knee, cov),
-            repair_first=at(coverage_rows, repair_system, repair_dataset, 1, cov),
-            repair_max=at(coverage_rows, repair_system, repair_dataset, repair_k, cov),
-        )
 
 
 class VerifiedPoolModel(ForwardModel):

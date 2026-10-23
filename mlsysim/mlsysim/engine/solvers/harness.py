@@ -16,9 +16,7 @@ from typing import Dict, Mapping, Sequence
 from ..results import (
     ApprovalEscrowResult,
     BoundedLiabilityAdmissionResult,
-    CallCeilingResult,
     DeficitRoundRobinResult,
-    StepCeilingReturnResult,
     TrajectoryBudgetMeterResult,
 )
 from .base import ForwardModel
@@ -35,13 +33,6 @@ def _count(q: Quantity) -> float:
     return float(q.to("").magnitude)
 
 
-def _quantile(values: Sequence[float], q: float) -> float:
-    """Linear-interpolation quantile (NumPy's default method)."""
-    xs = sorted(values)
-    pos = (len(xs) - 1) * q
-    lo = int(pos)
-    hi = min(lo + 1, len(xs) - 1)
-    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
 
 
 class ApprovalEscrowModel(ForwardModel):
@@ -189,71 +180,5 @@ class TrajectoryBudgetMeterModel(ForwardModel):
         )
 
 
-class CallCeilingModel(ForwardModel):
-    """
-    A model-call ceiling at the accepted runs' ``q``-quantile, applied post hoc to public runs.
-
-    For each configuration: the ceiling, the share of failed and of accepted
-    runs it would halt (calls strictly above it), and the median calls of
-    accepted, failed, and all runs. Post hoc truncation of unconstrained runs:
-    a ceiling the agent can see changes how it spends its calls.
-    """
-    requires = ("series",)
-    produces = CallCeilingResult
-
-    def solve(self, rows: Sequence[Mapping], quantile: float) -> CallCeilingResult:
-        configs = []
-        for sub in sorted({r["submission"] for r in rows}):
-            g = [r for r in rows if r["submission"] == sub]
-            ok = sorted(r["n_model_calls"] for r in g if r["resolved"])
-            bad = sorted(r["n_model_calls"] for r in g if not r["resolved"])
-            every = [r["n_model_calls"] for r in g]
-            cap = _quantile(ok, quantile)
-            configs.append(dict(
-                submission=sub, scaffold=g[0]["scaffold"], model=g[0]["model"],
-                runs=len(g), accepted=len(ok), cap=cap,
-                failed_halted=sum(1 for c in bad if c > cap) / len(bad),
-                accepted_halted=sum(1 for c in ok if c > cap) / len(ok),
-                median_accepted=float(statistics.median(ok)),
-                median_failed=float(statistics.median(bad)),
-                median_calls=float(statistics.median(every)),
-                upper_calls=_quantile(every, quantile),
-                accepted_calls=ok, failed_calls=bad,
-            ))
-        return CallCeilingResult(
-            quantile=quantile, runs=len(rows), configurations=configs,
-            failed_halted_low=min(c["failed_halted"] for c in configs),
-            failed_halted_high=max(c["failed_halted"] for c in configs),
-            accepted_halted_high=max(c["accepted_halted"] for c in configs),
-            cap_low=min(c["cap"] for c in configs),
-            cap_high=max(c["cap"] for c in configs),
-            median_calls_low=min(c["median_calls"] for c in configs),
-            median_calls_high=max(c["median_calls"] for c in configs),
-            longer_when_failed=all(c["median_failed"] > c["median_accepted"] for c in configs),
-        )
 
 
-class StepCeilingReturnModel(ForwardModel):
-    """
-    Return on raising an enforced step ceiling, for models run at every ceiling.
-
-    The gain is the change in percent completed from the lowest to the highest
-    ceiling; a model is flat after the middle ceiling when the highest scores
-    no better than the middle one.
-    """
-    requires = ("series",)
-    produces = StepCeilingReturnResult
-
-    def solve(self, rows: Sequence[Mapping], steps: Sequence[int]) -> StepCeilingReturnResult:
-        scores: Dict[str, Dict[int, float]] = {}
-        for r in rows:
-            scores.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
-        scores = {m: {s: v[s] for s in steps} for m, v in scores.items() if all(s in v for s in steps)}
-        low, mid, high = steps[0], steps[len(steps) // 2], steps[-1]
-        gain = {m: v[high] - v[low] for m, v in scores.items()}
-        best = max(gain, key=gain.get)
-        return StepCeilingReturnResult(
-            steps=list(steps), scores=scores, gain=gain,
-            flat_after_middle=sum(1 for v in scores.values() if v[high] <= v[mid]),
-            best_gain=gain[best], best_model=best,
-        )

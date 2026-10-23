@@ -10,11 +10,11 @@ chapter reads) or from a cited Literature series:
     Gpt3TensorDataParallel1K, Gpt3ThreeDParallel1K.
   - GPT-2 inside and across nodes: Scenarios.Gpt2DataParallelOneNode and
     Gpt2DataParallelFourNodes10GbE.
-  - MLPerf Training: Scenarios.MLPerfLlmScalingSeries.
+  - MLPerf Training: slides/vol2/06_distributed_training/images/data/mlperf_training_llm_scaling.csv.
   - Straggler: Scenarios.StragglerFreeStep1K (a^N, calc_all_up_availability).
   - Critical batch: gradient-noise model of McCandlish et al. 2018 as the
     chapter plots it, steps 1 + Bcrit/B and samples 1 + B/Bcrit (dimensionless).
-  - Memory wall: Scenarios.NotableModelMemoryWall.
+  - Memory wall: slides/vol2/06_distributed_training/images/data/epoch_notable_models.csv.
   - ZeRO: Scenarios.Llama2_7B_ZeroStages64.
   - Pipeline: Scenarios.NaiveFourStagePipeline, GPipeFourStageWalkthrough,
     Pipeline8Stage32Micro, Pipeline16Stage32Micro (calc_pipeline_bubble).

@@ -107,11 +107,11 @@ Consider two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GP
 # │       production mix.
 # │ Show: Kalos (2023): 86% of 19,907 GPU jobs use one GPU and 0.1% of GPU
 # │       time; jobs of 256+ GPUs are ~4% of jobs and ~96% of GPU time.
-# │ How: Scenarios.KalosJobSizeMix (JobSizeMixModel) over
+# │ How: Job-count and GPU-time shares over
 # │      data/acme_kalos_job_sizes.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -119,17 +119,16 @@ class JobSizeMix:
     """Job-count and GPU-time shares by job size in the Kalos LLM cluster."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    _mix = Scenarios.KalosJobSizeMix
-    rows = _mix.series.entries
-    large_threshold = _mix.large_threshold  # GPUs; the smallest job size in the trace's large-run cluster
+    rows = load_series("vol2/08_fleet_orchestration/data/acme_kalos_job_sizes.csv").entries
+    large_threshold = 256  # GPUs; the smallest job size in the trace's large-run cluster
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _r = _mix.result
-    job_count = _r.job_count
-    single_job_share = _r.classes["single"]["job_share"]
-    single_time_share = _r.classes["single"]["time_share"]
-    large_job_share = _r.classes["large"]["job_share"]
-    large_time_share = _r.classes["large"]["time_share"]
+    job_count = sum(r["jobs"] for r in rows)
+    _gpu_s = sum(r["gpu_seconds"] for r in rows)
+    single_job_share = sum(r["jobs"] for r in rows if r["gpu_num"] == 1) / job_count
+    single_time_share = sum(r["gpu_seconds"] for r in rows if r["gpu_num"] == 1) / _gpu_s
+    large_job_share = (lambda rows=rows, lt=large_threshold: sum(r["jobs"] for r in rows if r["gpu_num"] >= lt))() / job_count
+    large_time_share = (lambda rows=rows, lt=large_threshold: sum(r["gpu_seconds"] for r in rows if r["gpu_num"] >= lt))() / _gpu_s
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.8 <= single_job_share <= 0.9 and single_time_share < 0.005, "Prose: most jobs are single-GPU and use almost no GPU time.")
@@ -876,16 +875,16 @@ The mechanism that closes this gap is group admission. A **PodGroup**\index{PodG
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: War story "OpenAI's gang-scheduling deadlock (2021)" below.
 # │
-# │ Goal: Pin the reported Kubernetes node count to Literature.FleetOperations.
+# │ Goal: Pin the reported Kubernetes node count to cited literature.
 # │ Show: 7,500 nodes.
-# │ How:  Literature.FleetOperations.OpenAiKubernetesNodes.
+# │ How:  7500.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Literature
 from mlsysim.fmt import check, fmt
 
 class OpenAiK8sScale:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    nodes = float(Literature.FleetOperations.OpenAiKubernetesNodes)
+    nodes = 7500.0  # OpenAI (2021), Scaling Kubernetes to 7,500 nodes
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(nodes > 1000, "war story describes a multi-thousand-node cluster")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1883,7 +1882,7 @@ An idle accelerator in an enterprise fleet incurs operational costs every hour w
 # │ Context: @fig-cost-idle-gpus prose and caption immediately below.
 # │
 # │ Goal: Price idle capacity at 10,000 GPUs and pin the published utilization
-# │       measurements (Philly, Perlmutter) to Literature.FleetOperations.
+# │       measurements (Philly, Perlmutter) to cited literature.
 # │ Show: ~$87.6M/yr waste at 50% utilization; >$52M/yr recovered moving to
 # │       the 80% target (the chapter-wide 50 -> 80 baseline); Philly 52% mean utilization; Perlmutter 50% of jobs <25% memory.
 # │ How:  N x (1 - util) x GpuHourRef x hours/year.
@@ -1897,9 +1896,9 @@ class IdleCostAnchors:
     gpu_hour_usd = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
     util_low = 0.50  # scenario assumption: poorly scheduled utilization
     util_mid = Systems.Orchestration.target_cluster_utilization  # same 50 -> 80 improvement as the chapter opening
-    philly_util = float(Literature.FleetOperations.PhillyMeanGpuUtilization)
-    perlmutter_jobs = float(Literature.FleetOperations.PerlmutterJobsUnder25PctMemoryFraction)
-    perlmutter_mem_threshold = float(Literature.FleetOperations.PerlmutterJobMemoryThresholdFraction)  # threshold as reported by the study
+    philly_util = 0.52  # Jeon et al. (2019), Analysis of Large-Scale Multi-Tenant GPU Cluste...
+    perlmutter_jobs = 0.5  # Li et al. (2023), Analyzing Resource Utilization in an HPC System: ...
+    perlmutter_mem_threshold = 0.25  # threshold as reported by the study
     # ┌── 2. EXECUTE ───────────────────────────────────────
     waste_low = n_gpus * (1 - util_low) * gpu_hour_usd * HOURS_PER_YEAR
     recovered = n_gpus * (util_mid - util_low) * gpu_hour_usd * HOURS_PER_YEAR
@@ -2389,7 +2388,7 @@ Pollux uses statistical goodput\index{Goodput!statistical} to connect system thr
 # │
 # │ Goal: Anchor the Pollux discussion with its published headline result.
 # │ Show: 37 to 50 percent lower average JCT than the compared DL schedulers.
-# │ How:  Literature.FleetOperations.PolluxJctReduction{Low,High}.
+# │ How:  cited literature,High}.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Literature
 from mlsysim.fmt import check, fmt, fmt_percent
@@ -2399,8 +2398,8 @@ class PolluxReportedJct:
     # Qiao et al. (OSDI 2021), abstract (arXiv:2008.12260): "Pollux reduces
     # average job completion times by 37-50% relative to state-of-the-art DL
     # schedulers."
-    jct_reduction_lo = float(Literature.FleetOperations.PolluxJctReductionLow)
-    jct_reduction_hi = float(Literature.FleetOperations.PolluxJctReductionHigh)
+    jct_reduction_lo = 0.37  # Qiao et al. (2021), Pollux: Co-adaptive Cluster Scheduling for Good...
+    jct_reduction_hi = 0.5  # Qiao et al. (2021), Pollux: Co-adaptive Cluster Scheduling for Good...
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(0 < jct_reduction_lo < jct_reduction_hi < 1, "reported reduction must be a fractional range")
     # ┌── 4. OUTPUT ────────────────────────────────────────

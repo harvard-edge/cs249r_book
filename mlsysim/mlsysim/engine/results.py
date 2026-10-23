@@ -60,11 +60,9 @@ __all__ = [
     "RecoveryBudgetResult",
     "GradientSyncResult",
     "CommunicationIntensityResult",
-    "TrainingGrowthResult",
     "AlphaBetaResult",
     "BisectionResult",
     "IncastResult",
-    "CollectiveFitResult",
     "StorageFootprintResult",
     "TieredCheckpointResult",
     "CheckpointStormResult",
@@ -77,11 +75,9 @@ __all__ = [
     "StreamVsStageResult",
     "UtilizationLossResult",
     "SyntheticFootprintResult",
-    "StorageBenchmarkResult",
     "HorizonCompoundingResult",
     "AcceptedTaskCostResult",
     "AppendOnlyContextResult",
-    "TaskHorizonTrendResult",
     "ContextAdmissionResult",
     "SamplingResult",
     "CheckerPosteriorResult",
@@ -92,11 +88,8 @@ __all__ = [
     "DataParallelScaleOutResult",
     "TensorParallelLayerResult",
     "AlignmentMemoryResult",
-    "ScalingSeriesResult",
-    "MemoryWallResult",
     "IronLawResult",
     "AmdahlResult",
-    "ShiftedTestSetResult",
     "StoppingBudgetResult",
     "SpeedStepResult",
     "FreshnessProfileResult",
@@ -111,11 +104,9 @@ __all__ = [
     "ZeroFailureResult",
     "ShieldCoverageBillResult",
     "ThrottledStageResult",
-    "JobSizeMixResult",
     "PreemptionTaxResult",
     "ContextBudgetResult",
     "AttentionDilutionResult",
-    "ComprehensionByLengthResult",
     "PrefixLayoutBillResult",
     "CompactionCadenceResult",
     "ContextInvalidationResult",
@@ -781,15 +772,6 @@ class CommunicationIntensityResult(SolverResult):
     compute_time_at_peak: Quantity
 
 
-class TrainingGrowthResult(SolverResult):
-    """Result from TrainingGrowthModel: annual growth of training compute and its factors."""
-    run_count: int
-    compute_factor: float
-    count_factor: float
-    duration_factor: float
-    rate_factor: float
-    fleet_share: float             # share of the compute exponent from count and duration
-    span_orders: float             # orders of magnitude from AlexNet to the largest run
 
 
 class AlphaBetaResult(SolverResult):
@@ -827,20 +809,6 @@ class IncastResult(SolverResult):
     bandwidth_delay_product: Quantity
 
 
-class CollectiveFitResult(SolverResult):
-    """Result from CollectiveFitModel: a floor-plus-bandwidth fit to a measured collective sweep."""
-    row_count: int
-    floor_time: Quantity
-    bandwidth: Quantity
-    knee: Quantity
-    worst_mid_ratio: float
-    peak_bus_bandwidth: Quantity
-    mid_bus_bandwidth_low: Quantity
-    mid_bus_bandwidth_high: Quantity
-
-    def model_time(self, size: Quantity) -> Quantity:
-        """Modeled time for a message of ``size``: floor + size / bandwidth."""
-        return (self.floor_time + size / self.bandwidth).to("microsecond")
 # ── Storage calculation results (added 2026-10-20) ────────────────
 
 class StorageFootprintResult(SolverResult):
@@ -950,11 +918,6 @@ class SyntheticFootprintResult(SolverResult):
     traffic_amplification: float
 
 
-class StorageBenchmarkResult(SolverResult):
-    """Result from StorageBenchmarkDemandModel: measured storage demand per accelerator."""
-    result_count: int
-    medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
-    generation_ratios: Dict[str, float]    # workload -> newer / older accelerator
 
 
 # --- Embodied stopping, traction, and domain compute (added 2026-10-20) -----
@@ -1035,15 +998,6 @@ class TractionLossResult(SolverResult):
     premise_holds: bool                      # the lower friction still supports it
 
 
-class DomainComputeGapResult(SolverResult):
-    """Result from DomainComputeGapModel: one model against the largest of another domain that year."""
-    model: str
-    year: str
-    model_flop: float
-    reference_model: str
-    reference_flop: float
-    gap: float                               # reference_flop / model_flop
-    domain_models_with_compute: int          # rows of the model's domain that carry a compute estimate
 
 
 # --- Agent trajectories: reliability, cost, context, measured runs (added 2026-10-20) ---
@@ -1086,17 +1040,6 @@ class AppendOnlyContextResult(SolverResult):
     reread_ratio: float                  # cumulative input / last call
 
 
-class TaskHorizonTrendResult(SolverResult):
-    """Result from TaskHorizonTrendModel: growth of the measured 50% task horizon."""
-    first_frontier_minutes: float
-    last_frontier_minutes: float
-    first_date: str
-    last_date: str
-    growth: float                        # last / first frontier horizon
-    doubling_all: Quantity               # whole-period fit
-    doubling_recent: Quantity            # fit from the recent start date
-    recent_slope_per_day: float          # log2(minutes) per day, recent fit
-    recent_intercept: float              # log2(minutes) at date ordinal 0, recent fit
 
 
 # ── Model calls and agent trajectories (added 2026-10-20) ─────────
@@ -1357,21 +1300,8 @@ class AlignmentMemoryResult(SolverResult):
     min_devices_for_ppo: Optional[int] = None
 
 
-class ScalingSeriesResult(SolverResult):
-    """Result from ScalingSeriesModel: same-round benchmark series and their efficiencies."""
-    labels: List[str]
-    series: List[List[Dict[str, Any]]]   # each series' rows, smallest configuration first
-    efficiencies: List[float]            # largest configuration relative to the smallest
 
 
-class MemoryWallResult(SolverResult):
-    """Result from MemoryWallModel: demand and capacity rows and the crossover."""
-    rows: List[Dict[str, Any]]           # Year, Date, Name, Type ("Model" or "GPU"), Memory_GB
-    capacity_growth: float               # largest over smallest accelerator memory
-    demand_orders: float                 # log10 of largest over smallest demand
-    crossover_name: str
-    crossover_year: int
-    crossover_gap: float                 # crossover demand over that year's largest accelerator
 # ── Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20) ──
 
 class IronLawResult(SolverResult):
@@ -1403,19 +1333,6 @@ class AmdahlResult(SolverResult):
     speedup_bound: float               # overall speedup with an infinitely fast stage
 
 
-class ShiftedTestSetResult(SolverResult):
-    """Result from ShiftedTestSetModel: accuracy on an original and a re-collected test set."""
-    model_count: int
-    baseline_count: int                # models named with the baseline prefix (non-neural)
-    gap_min: float                     # percentage points, all models
-    gap_max: float
-    network_gap_min: float             # percentage points, models without the baseline prefix
-    network_gap_max: float
-    mean_gap: float
-    gap_median: Optional[float] = None  # percentage points, all models (added 2026-10-20)
-    slope: float                       # least-squares fit: new = slope * original + intercept
-    intercept: float
-    network_rank_correlation: Optional[float] = None  # Spearman, original against new, non-baseline models (added 2026-10-20)
 
 
 # ── Physical-plant budget results: stopping, actuation, heat, power (added 2026-10-20) ──
@@ -1584,17 +1501,6 @@ class ThrottledStageResult(SolverResult):
 
 # --- Fleet orchestration (added 2026-10-20) ---
 
-class JobSizeMixResult(SolverResult):
-    """Result from JobSizeMixModel: a cluster trace's jobs and GPU time by job-size class.
-
-    Each class dict holds ``jobs``, ``gpu_seconds``, ``job_share``,
-    ``time_share``, and ``mean_gpu_hours`` (GPU-hours per job).
-    """
-    job_count: float
-    gpu_seconds: float
-    classes: Dict[str, Dict[str, float]]
-    service_cv_lower_bound: float    # spread of GPU time per job, between size rows only
-    state_time_shares: Dict[str, float]
 
 
 class PreemptionTaxResult(SolverResult):
@@ -1658,19 +1564,6 @@ class BestOfNPoolResult(SolverResult):
 
 
 
-class CoverageVsVoteResult(SolverResult):
-    """Result from CoverageVsVoteModel: pool coverage against majority-vote accuracy."""
-    coverage_small: float            # at the largest pool
-    coverage_large: float
-    coverage_small_first: float      # at one sample
-    coverage_large_first: float
-    vote_small: float
-    vote_large: float
-    vote_gain_small: float           # vote gain from the knee to the largest pool, small model
-    vote_gain_after_knee: float      # the larger of the two models' vote gains
-    coverage_gain_small: float       # coverage gain over the same range
-    repair_first: float              # repository-repair coverage at one sample
-    repair_max: float                # at the repair pool size
 
 
 class VerifiedPoolResult(SolverResult):
@@ -1819,18 +1712,6 @@ class AttentionDilutionResult(SolverResult):
     weight_no_unrelated: Optional[float] = None          # every unrelated key dropped, look-alikes kept
 
 
-class ComprehensionByLengthResult(SolverResult):
-    """Result from ComprehensionByLengthModel: models scored at every length of a sweep."""
-    lengths: List[str]                   # length labels, shortest first
-    scored_models: int                   # models with a score at every length
-    median: Dict[str, float]             # length -> median score (fraction)
-    q25: Dict[str, float]                # length -> 25th percentile
-    q75: Dict[str, float]                # length -> 75th percentile
-    held_count: int                      # models at or above the bar at the longest length
-    lowest_last: float                   # lowest score at the longest length
-    highest_last: float                  # highest score at the longest length
-    lowest_model: str
-    highest_model: str
 
 
 class PrefixLayoutBillResult(SolverResult):
@@ -2040,12 +1921,6 @@ class RuntimeGoodputResult(SolverResult):
 
 
 
-class ServingFrontierResult(SolverResult):
-    """Result from ServingFrontierModel: one accelerator's measured frontier and its best rate at a target."""
-    frontier: List[Tuple[float, float]]      # (interactivity, throughput), no point beaten on both
-    peak_interactivity: float                # interactivity of the highest-throughput point
-    peak_throughput: float
-    best_at: float                           # highest throughput among rows meeting the target
 
 
 # --- KV cache management: footprint, paging, prefix reuse, pauses, residency (added 2026-10-20) ---
@@ -2080,7 +1955,6 @@ class PrecisionDividendResult(SolverResult):
 
 
 __all__ += [
-    "ServingFrontierResult",
     "KvAdmissionResult",
     "PrecisionDividendResult",
 ]
@@ -2615,45 +2489,11 @@ __all__ += [
 ]
 
 
-class ParameterGrowthResult(SolverResult):
-    """Result from ParameterGrowthModel: parameter-count fits before and after a split year (added 2026-10-20)."""
-    models: List[str]
-    domains: List[str]
-    parameters: List[float]
-    years: List[float]                 # decimal publication years
-    log_parameters: List[float]
-    split_year: int
-    early_slope: float                 # decades of parameters per year, before the split
-    early_intercept: float
-    late_slope: float
-    late_intercept: float
-    early_doubling_months: float
-    late_doubling_months: float
-    largest_parameters: float
-    model_count: int
 
 
-class DatasetGrowthResult(SolverResult):
-    """Result from DatasetGrowthModel: dataset-size fits before and after a split year."""
-    models: List[str]
-    domains: List[str]
-    dataset_sizes: List[float]
-    years: List[float]                 # decimal publication years
-    log_dataset_sizes: List[float]
-    split_year: int
-    early_slope: float                 # decades of datapoints per year, before the split
-    early_intercept: float
-    late_slope: float
-    late_intercept: float
-    early_doubling_months: float
-    late_doubling_months: float
-    largest_dataset_size: float
-    model_count: int
 
 
 __all__ += [
-    "ParameterGrowthResult",
-    "DatasetGrowthResult",
 ]
 
 
@@ -2752,29 +2592,8 @@ class TrajectoryBudgetMeterResult(SolverResult):
     leading_without_reuse: str
 
 
-class CallCeilingResult(SolverResult):
-    """Result from CallCeilingModel: a call ceiling at the accepted runs' quantile, per configuration."""
-    quantile: float
-    runs: int
-    configurations: List[Dict[str, Any]]     # one row per submission, sorted by submission id
-    failed_halted_low: float
-    failed_halted_high: float
-    accepted_halted_high: float
-    cap_low: float
-    cap_high: float
-    median_calls_low: float
-    median_calls_high: float
-    longer_when_failed: bool                 # failed median above accepted median everywhere
 
 
-class StepCeilingReturnResult(SolverResult):
-    """Result from StepCeilingReturnModel: success of the same model at several enforced step ceilings."""
-    steps: List[int]
-    scores: Dict[str, Dict[int, float]]      # model -> step ceiling -> percent completed
-    gain: Dict[str, float]                   # points from the lowest to the highest ceiling
-    flat_after_middle: int                   # models no better at the highest than the middle ceiling
-    best_gain: float
-    best_model: str
 
 
 __all__ += [
@@ -2782,8 +2601,6 @@ __all__ += [
     "DeficitRoundRobinResult",
     "BoundedLiabilityAdmissionResult",
     "TrajectoryBudgetMeterResult",
-    "CallCeilingResult",
-    "StepCeilingReturnResult",
 ]
 # --- Sensor perception: capture timing, age, and error scales (added 2026-10-20) ---
 
@@ -3103,19 +2920,6 @@ class OdometryDriftResult(SolverResult):
     speed_ratio: float               # operating speed / benchmark speed
 
 
-class OdometryLeaderboardResult(SolverResult):
-    """Result from OdometryLeaderboardModel: ranked odometry drift rates against a bound."""
-    count: int
-    stereo_count: int
-    laser_count: int
-    best_pct: float
-    stereo_median_pct: float
-    laser_median_pct: float
-    distance_best: Quantity
-    distance_stereo_median: Quantity
-    distance_laser_median: Quantity
-    segment_threshold_pct: float     # rate that spends the bound in exactly one segment
-    count_below_threshold: int
 
 
 class BeliefExpiryResult(SolverResult):
@@ -3554,29 +3358,8 @@ class PairedComparisonResult(SolverResult):
     independent_multiple: float          # independent / paired
 
 
-class ScaffoldSpreadResult(SolverResult):
-    """Result from ScaffoldSpreadModel: one model's score across agent scaffolds."""
-    models: int                          # models with at least the minimum scaffold count
-    spreads: Dict[str, float]            # model -> highest minus lowest score
-    widest: str
-    widest_low: float
-    widest_high: float
-    widest_count: int
-    median_spread: float
-    median_se: float                     # median reported standard error over all rows
 
 
-class LeaderboardTiesResult(SolverResult):
-    """Result from LeaderboardTiesModel: neighbors a leaderboard cannot separate."""
-    models: int
-    top: int
-    pairs: int                           # neighboring pairs among the top
-    tied: int                            # pairs closer than an independent-samples test resolves
-    typical_se: float                    # median standard error of the top
-    needed_gap: float                    # z sqrt(2) x typical standard error
-    top_model: str
-    top_score: float
-    last_score: float                    # score at the last shown rank
 
 
 class TaskMixConsistencyResult(SolverResult):
@@ -3604,8 +3387,6 @@ __all__ += [
     "BinomialIntervalsResult",
     "ProportionPlanningResult",
     "PairedComparisonResult",
-    "ScaffoldSpreadResult",
-    "LeaderboardTiesResult",
     "TaskMixConsistencyResult",
     "CappedSelectionCostResult",
 ]
@@ -3900,14 +3681,6 @@ class PerInvocationSerializationResult(SolverResult):
     expansion: float                     # per-invocation / transcript = (H + 1) / 2
 
 
-class TrajectoryRoleShareResult(SolverResult):
-    """Result from TrajectoryRoleShareModel: transcript characters by role, per configuration."""
-    runs: int
-    configurations: List[Dict[str, Any]]  # scaffold, model, runs, prompt/observation/model shares
-    observation_low: float
-    observation_high: float
-    model_low: float
-    model_high: float
 
 
 class LossNormalizationResult(SolverResult):
@@ -3957,7 +3730,6 @@ class PreferencePairResult(SolverResult):
 __all__ += [
     "TargetMaskResult",
     "PerInvocationSerializationResult",
-    "TrajectoryRoleShareResult",
     "LossNormalizationResult",
     "SequencePackingResult",
     "PreferencePairResult",
@@ -4295,26 +4067,8 @@ __all__ += [
 # fallback, adaptation payback, and per-workload levers. Dollars are floats
 # unless a field is a Quantity.
 
-class PriceDeclineResult(SolverResult):
-    """Result from PriceDeclineModel: fitted yearly decline of the lowest price at each fixed capability."""
-    series_count: int
-    series_rates: Dict[str, float]   # "benchmark / threshold model" -> factor per year
-    rate_low: float
-    rate_median: float
-    rate_high: float
-    last_date: str
 
 
-class CostVsScoreResult(SolverResult):
-    """Result from CostVsScoreModel: how loosely per-trial cost tracks score."""
-    configurations: int
-    cost_ratio: float                # top configuration over the runner-up, per trial
-    score_gap: float                 # points between their mean scores
-    cost_low: float                  # dollars per trial
-    cost_high: float
-    hours_low: float
-    hours_high: float
-    median_spread: float             # median best-minus-worst trial score, as a fraction
 
 
 class CohortAttemptCostResult(SolverResult):
@@ -4563,8 +4317,6 @@ class WorkloadLeverResult(SolverResult):
 
 
 __all__ += [
-    "PriceDeclineResult",
-    "CostVsScoreResult",
     "CohortAttemptCostResult",
     "TokenPriceComparisonResult",
     "PrefixCacheBillResult",

@@ -10,7 +10,7 @@ Sources: every number a figure prints or plots is read from MLSysIM through
 calcs.py (deckvals val/num), which this file imports:
   - Running machine: Embodied.MobileManipulator and Embodied.Scenario, through
     Scenarios.WarehouseAisleStopAtDriveLimit (The Causal Boundary, Napkin Math 1.1).
-  - Tempe: Literature.IncidentReports (NTSB HAR-19/03), through
+  - Tempe: cited literature (NTSB HAR-19/03), through
     Scenarios.TempeActionSuppression and its ADS-cap variant.
   - Training compute: Epoch AI via vol4/01_boundary/data/epoch_models_by_domain.csv, as the
     chapter's figure 2.

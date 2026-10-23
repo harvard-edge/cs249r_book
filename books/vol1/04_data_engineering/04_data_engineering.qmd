@@ -181,10 +181,15 @@ class LabelingComputeRatio:
 # │      over vol1/04_data_engineering/data/notable_model_datasets.csv, split at 2010.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import math
 import numpy as np
 from mlsysim import viz
-from mlsysim.engine.solvers import DatasetGrowthModel
 from mlsysim.fmt import check, fmt_int
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DatasetGrowth:
@@ -196,15 +201,15 @@ class DatasetGrowth:
     rows = [r for r in series.entries if r["training_dataset_size"]]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fit = DatasetGrowthModel().solve(series.entries, split_year)
-    years = np.array(fit.years)
-    log_sizes = np.array(fit.log_dataset_sizes)
-    early_slope, early_intercept = fit.early_slope, fit.early_intercept
-    late_slope, late_intercept = fit.late_slope, fit.late_intercept
-    early_doubling_months = fit.early_doubling_months
-    late_doubling_months = fit.late_doubling_months
-    largest_size = fit.largest_dataset_size
-    model_count = fit.model_count
+    years = np.array([_decimal_year(r["date"]) for r in rows])
+    log_sizes = np.array([float(np.log10(r["training_dataset_size"])) for r in rows])
+    _early = years < split_year
+    early_slope, early_intercept = (float(x) for x in np.polyfit(years[_early], log_sizes[_early], 1))
+    late_slope, late_intercept = (float(x) for x in np.polyfit(years[~_early], log_sizes[~_early], 1))
+    early_doubling_months = 12 * math.log10(2) / early_slope
+    late_doubling_months = 12 * math.log10(2) / late_slope
+    largest_size = max(r["training_dataset_size"] for r in rows)
+    model_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(24 <= early_doubling_months <= 48, f"Expected ~34-month doubling before 2010, got {early_doubling_months:.0f}.")
@@ -1513,23 +1518,28 @@ Raw volume cannot substitute for checking what the examples mean, because an unc
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
+import math
 import numpy as np
 from mlsysim import Literature, viz
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_tokens
+from mlsysim.physics.statistics import fit_exponential_growth
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingDataSupply:
     """Pre-training corpus growth versus the estimated stock of public text."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    growth_fit = Scenarios.PretrainingCorpusGrowth
     corpora = viz.load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries
     stock = {r["bound"]: r["tokens"] for r in viz.load_series("vol1/04_data_engineering/data/public_text_stock.csv").entries}
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    years = np.array([x for x, _ in growth_fit.points])
-    growth_per_year, fit_slope, fit_intercept = growth_fit.fit
-    median_crossing_year = growth_fit.crossing(stock["median"])
+    years = np.array([_decimal_year(r["date"]) for r in corpora])
+    growth_per_year, fit_slope, fit_intercept = fit_exponential_growth(list(years), [r["tokens"] for r in corpora], 1.0)
+    median_crossing_year = (math.log10(stock["median"]) - fit_intercept) / fit_slope
     first, last = corpora[0], max(corpora, key=lambda r: r["tokens"])
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2742,7 +2752,7 @@ class SegmentationLabelScale:
     image_height_px = labels.image_height
     box_count = labels.boxes
     box_coords = labels.coords_per_box
-    mask_hours = float(Literature.AnnotationTimes.CityscapesFineMaskHours)  # Cordts et al. 2016
+    mask_hours = 1.5  # Cordts et al. 2016
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pixel_labels = labels.mask_entries

@@ -13,7 +13,7 @@ label offsets are layout. "CE" is the rendered chapter. Sources:
   - Diagrams redrawn at slide size from the chapter's figures:
     fig-vol3-working-set-selection, fig-vol3-context-zones,
     fig-vol3-invalidation-graph (CE Secs. 4.2, 4.4.3, 4.7.1).
-  - Fiction.LiveBench via Epoch AI: Scenarios.FictionLiveBenchThrough60K over
+  - Fiction.LiveBench via Epoch AI:
     vol3/04_context_engineering/data/fiction_livebench_by_length.csv.
   - slides/vol3/04_context_engineering/images/data/lost_in_the_middle_gpt35_turbo_20docs.csv and ContextUse (Liu et al. 2024; Shi et
     al. 2023; the RULER bar), RulerEffectiveLength (Hsieh et al. 2024, Table 3),

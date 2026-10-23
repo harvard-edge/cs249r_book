@@ -516,10 +516,10 @@ class GenderShadesDisparity:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    err_light_male = Literature.Fairness.GenderShadesErrLightMale
-    err_light_female = Literature.Fairness.GenderShadesErrLightFemale
-    err_dark_male = Literature.Fairness.GenderShadesErrDarkMale
-    err_dark_female = Literature.Fairness.GenderShadesErrDarkFemale
+    err_light_male = 0.8  # Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy D...
+    err_light_female = 9.8  # Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy D...
+    err_dark_male = 0.7  # Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy D...
+    err_dark_female = 34.5  # Buolamwini & Gebru (2018), Gender Shades: Intersectional Accuracy D...
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     disparity_fold = err_dark_female / err_light_male
@@ -1806,23 +1806,34 @@ Training a single large language model\index{LLM} consumes thousands of GPU\inde
 # │      rows of data/notable_models.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
+import datetime as dt
+import numpy as np
+from mlsysim import viz
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_text, fmt_usd
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FrontierTrainingCost:
     """Training compute cost of notable and frontier models over time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    trend = Scenarios.FrontierTrainingCostTrend
-    start_year = trend.from_year
-    rows = trend.rows
+    start_year = 2016  # scenario assumption: start of the fitted window
+    rows = (
+        lambda sy=str(start_year): [
+            r for r in viz.load_series("vol1/05_nn_computation/data/notable_models.csv").entries if r["training_cost_2023usd"] and r["date"][:4] >= sy
+        ]
+    )()
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    frontier = trend.frontier
-    fit_slope, fit_intercept = trend.fit
-    growth_per_year = trend.growth_per_year
-    priciest = trend.priciest
+    frontier = [r for r in rows if r["frontier"] == 1]
+    fit_slope, fit_intercept = (
+        float(x) for x in np.polyfit([_decimal_year(r["date"]) for r in frontier], np.log10([r["training_cost_2023usd"] for r in frontier]), 1)
+    )
+    growth_per_year = 10**fit_slope
+    priciest = max(frontier, key=lambda r: r["training_cost_2023usd"])
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2 <= growth_per_year <= 4, f"Expected ~2.9x per year, got {growth_per_year:.2f}.")
@@ -1856,7 +1867,7 @@ from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.4))
 _C = FrontierTrainingCost
-_yr = _C.trend.decimal_year
+_yr = _decimal_year
 _oth = [r for r in _C.rows if r["frontier"] != 1]
 ax.scatter([_yr(r["date"]) for r in _oth], [r["training_cost_2023usd"] for r in _oth], s=14, color=COLORS["grid"], label="Notable model", zorder=2)
 ax.scatter(

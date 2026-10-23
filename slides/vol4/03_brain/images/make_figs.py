@@ -10,12 +10,12 @@ page and saved at that size (save_slot), so the slide places them at scale 1
 and every label keeps its drawn size (8 to 9.5 pt).
 
   - MLPerf Inference edge, single stream, p90, Jetson AGX Orin 64G (TensorRT),
-    latest round per model: Scenarios.OrinDevKitSingleStream, as the chapter's
+    latest round per model: vol4/03_brain/data/mlperf_inference_edge_orin.csv, as the chapter's
     figure 9 reads it.
   - Memory wall, roofline, evaluation bars, decoder ladder:
     Scenarios.IntentModelEvaluation*, IntentModelDecodeRoofline,
     IntentBackboneDecoderFamilies, WarehouseProposerTraffic.
-  - Published two-speed rates: Literature.VlaSystems (Figure AI 2025; Bjorck et al. 2025).
+  - Published two-speed rates: cited literature (Figure AI 2025; Bjorck et al. 2025).
   - Evidence horizon and timing strip: Scenarios.ConveyorMugEvidenceHorizon.
   - KV ladder: Scenarios.ThreeViewKvHistory. Confidence and success:
     Scenarios.ProposerConfidenceRegimes (stipulated, illustrative).
