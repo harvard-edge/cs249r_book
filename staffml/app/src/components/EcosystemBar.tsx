@@ -23,6 +23,15 @@ interface DropdownItem {
   external?: boolean;
   active?: boolean;
   divider?: boolean;
+  /** Staging-only: hidden on the live site (mlsysbook.ai) until released. */
+  unreleased?: boolean;
+}
+
+// Mirrors the release gate in shared/config/site-head.html: the live host shows
+// only released volumes; the dev preview and local builds show the whole series.
+function isReleased(item: DropdownItem): boolean {
+  if (!item.unreleased || typeof window === "undefined") return !item.unreleased;
+  return !/(^|\.)mlsysbook\.ai$/.test(window.location.hostname);
 }
 
 interface MenuGroup {
@@ -53,14 +62,8 @@ const LEFT_MENUS: MenuGroup[] = [
     id: "read", label: "Read", items: [
       { icon: "bi-journal", label: "Volume I: Introduction to Machine Learning Systems", href: `${BASE}/vol1/` },
       { icon: "bi-journal", label: "Volume II: Scaling Machine Learning Systems", href: `${BASE}/vol2/` },
-      { icon: "bi-journal", label: "Volume III: Agentic Machine Learning Systems (in preparation)", href: `${BASE}/vol3/` },
-      { icon: "bi-journal", label: "Volume IV: Physical AI (in preparation)", href: `${BASE}/vol4/` },
-      { divider: true },
-      { icon: "bi-file-pdf", label: "Volume I PDF", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf`, external: true },
-      { icon: "bi-journal-text", label: "Volume I EPUB", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub`, external: true },
-      { divider: true },
-      { icon: "bi-file-pdf", label: "Volume II PDF", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf`, external: true },
-      { icon: "bi-journal-text", label: "Volume II EPUB", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub`, external: true },
+      { icon: "bi-journal", label: "Volume III: Agentic Machine Learning Systems (in preparation)", href: `${BASE}/vol3/`, unreleased: true },
+      { icon: "bi-journal", label: "Volume IV: Physical AI (in preparation)", href: `${BASE}/vol4/`, unreleased: true },
     ]
   },
   {
@@ -391,7 +394,7 @@ export default function EcosystemBar() {
             boxShadow: '0 6px 12px rgba(0,0,0,0.08)',
           }}
         >
-          {openMenuDef.items.map((item, i) =>
+          {openMenuDef.items.filter(isReleased).map((item, i) =>
             item.divider ? (
               <div key={i} style={{ ...S.divider, borderTopColor: dividerColor }} />
             ) : (
@@ -611,7 +614,7 @@ export default function EcosystemBar() {
               <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>
                 {menu.label}
               </div>
-              {menu.items.filter(i => !i.divider).map((item, i) => (
+              {menu.items.filter(i => !i.divider && isReleased(i)).map((item, i) => (
                 <a
                   key={i}
                   href={item.href}

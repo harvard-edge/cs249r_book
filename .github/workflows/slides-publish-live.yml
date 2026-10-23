@@ -85,6 +85,13 @@ permissions:
 # the 30-min pdflatex build and the Release packaging run in parallel with
 # other publish workflows and aren't blocked by the gh-pages-deploy lock.
 
+# Volumes published live. The dev preview (slides-preview-dev.yml) builds every
+# volume; the live site carries only released ones. Volumes III and IV stay
+# staging-only until their public preview (decided 2026-10-23). To release a
+# volume, add it here and in the shared release gate (shared/config/site-head.html).
+env:
+  LIVE_VOLUMES: "vol1 vol2"
+
 jobs:
   # Block publish unless the latest dev validate run for slides is green.
   # See .github/workflows/infra-publish-guard.yml for guard semantics.
@@ -147,7 +154,7 @@ jobs:
         working-directory: slides
         run: |
           make svgs
-          for vol in vol1 vol2 vol3 vol4; do
+          for vol in $LIVE_VOLUMES; do
             mkdir -p _build/$vol
             for ch_dir in $vol/*_*/; do
               tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
@@ -171,7 +178,7 @@ jobs:
         working-directory: slides
         run: |
           missing=()
-          for vol in vol1 vol2 vol3 vol4; do
+          for vol in $LIVE_VOLUMES; do
             for ch_dir in $vol/*_*/; do
               tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
               [ -z "$tex_file" ] && continue
@@ -192,7 +199,7 @@ jobs:
           # Speaker notes: pdf2pptx copies each slide's note into the PPTX
           # notes pane when <deck>-notes.pdf sits beside <deck>.pdf. Decks on
           # the current theme build notes; older decks skip without them.
-          for vol in vol1 vol2 vol3 vol4; do
+          for vol in $LIVE_VOLUMES; do
             v=${vol#vol}
             for ch_dir in $vol/*_*/; do
               d=$(basename "$ch_dir")
@@ -201,7 +208,7 @@ jobs:
             done
           done
           echo "Converting PDFs to PowerPoint..."
-          for vol in vol1 vol2 vol3 vol4; do
+          for vol in $LIVE_VOLUMES; do
             if ls _build/$vol/*.pdf 1>/dev/null 2>&1; then
               python3 scripts/pdf2pptx.py _build/$vol/*.pdf --output-dir _build/$vol --dpi 300
             fi
@@ -216,7 +223,7 @@ jobs:
         working-directory: slides
         run: |
           missing=()
-          for vol in vol1 vol2 vol3 vol4; do
+          for vol in $LIVE_VOLUMES; do
             for ch_dir in $vol/*_*/; do
               tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
               [ -z "$tex_file" ] && continue
@@ -257,38 +264,25 @@ jobs:
         run: |
           cd builds
 
-          # PDF archives (preserve vol1/ ... vol4/ folder structure inside zip)
-          zip -r ../MLSysBook-Slides-Vol1-PDF.zip vol1/*.pdf
-          zip -r ../MLSysBook-Slides-Vol2-PDF.zip vol2/*.pdf
-          zip -r ../MLSysBook-Slides-Vol3-PDF.zip vol3/*.pdf
-          zip -r ../MLSysBook-Slides-Vol4-PDF.zip vol4/*.pdf
-          zip -r ../MLSysBook-Slides-All-PDF.zip vol1/*.pdf vol2/*.pdf vol3/*.pdf vol4/*.pdf
-
-          # PPTX archives
-          zip -r ../MLSysBook-Slides-Vol1-PPTX.zip vol1/*.pptx
-          zip -r ../MLSysBook-Slides-Vol2-PPTX.zip vol2/*.pptx
-          zip -r ../MLSysBook-Slides-Vol3-PPTX.zip vol3/*.pptx
-          zip -r ../MLSysBook-Slides-Vol4-PPTX.zip vol4/*.pptx
-          zip -r ../MLSysBook-Slides-All-PPTX.zip vol1/*.pptx vol2/*.pptx vol3/*.pptx vol4/*.pptx
+          # Per-volume and combined archives for the live volumes only.
+          ALL_PDF=(); ALL_PPTX=()
+          for vol in $LIVE_VOLUMES; do
+            V="Vol${vol#vol}"
+            zip -r "../MLSysBook-Slides-${V}-PDF.zip" $vol/*.pdf
+            zip -r "../MLSysBook-Slides-${V}-PPTX.zip" $vol/*.pptx
+            ALL_PDF+=($vol/*.pdf); ALL_PPTX+=($vol/*.pptx)
+          done
+          zip -r ../MLSysBook-Slides-All-PDF.zip "${ALL_PDF[@]}"
+          zip -r ../MLSysBook-Slides-All-PPTX.zip "${ALL_PPTX[@]}"
 
           # Per-deck files: GitHub Releases is a flat namespace, so vol1/00_course_overview.pdf
           # and vol2/00_course_overview.pdf collide. Stage prefixed copies for upload.
           mkdir -p ../release-flat
-          for f in vol1/*.pdf vol1/*.pptx; do
-            [ -e "$f" ] || continue
-            cp "$f" "../release-flat/vol1_$(basename "$f")"
-          done
-          for f in vol2/*.pdf vol2/*.pptx; do
-            [ -e "$f" ] || continue
-            cp "$f" "../release-flat/vol2_$(basename "$f")"
-          done
-          for f in vol3/*.pdf vol3/*.pptx; do
-            [ -e "$f" ] || continue
-            cp "$f" "../release-flat/vol3_$(basename "$f")"
-          done
-          for f in vol4/*.pdf vol4/*.pptx; do
-            [ -e "$f" ] || continue
-            cp "$f" "../release-flat/vol4_$(basename "$f")"
+          for vol in $LIVE_VOLUMES; do
+            for f in $vol/*.pdf $vol/*.pptx; do
+              [ -e "$f" ] || continue
+              cp "$f" "../release-flat/${vol}_$(basename "$f")"
+            done
           done
 
           cd ..
@@ -325,26 +319,20 @@ jobs:
 
             - **Volume I**, *Introduction to Machine Learning Systems*: one lecture per chapter, from the course overview to the conclusion, with the larger chapters in two parts.
             - **Volume II**, *Scaling Machine Learning Systems*: one lecture per chapter.
-            - **Volume III**, *Agentic Machine Learning Systems*: one lecture per chapter, from the course overview to the conclusion. The book is in preparation.
-            - **Volume IV**, *Physical AI: Machine Learning Systems That Sense and Act*: one lecture per chapter, from the course overview to the conclusion. The book is in preparation.
             - **TinyML**: the courseware from the HarvardX Professional Certificate in Tiny Machine Learning.
 
             Every deck has speaker notes, class activities, and figures drawn from source.
 
             ### PDF downloads
-            - **MLSysBook-Slides-All-PDF.zip**: Volumes I to IV
+            - **MLSysBook-Slides-All-PDF.zip**: Volumes I and II
             - **MLSysBook-Slides-Vol1-PDF.zip**: Volume I
             - **MLSysBook-Slides-Vol2-PDF.zip**: Volume II
-            - **MLSysBook-Slides-Vol3-PDF.zip**: Volume III
-            - **MLSysBook-Slides-Vol4-PDF.zip**: Volume IV
 
             ### PowerPoint downloads
             Each PowerPoint slide is an image of the PDF page, so the text is not editable. The notes pane holds the speaker notes, which appear in presenter view.
-            - **MLSysBook-Slides-All-PPTX.zip**: Volumes I to IV
+            - **MLSysBook-Slides-All-PPTX.zip**: Volumes I and II
             - **MLSysBook-Slides-Vol1-PPTX.zip**: Volume I
             - **MLSysBook-Slides-Vol2-PPTX.zip**: Volume II
-            - **MLSysBook-Slides-Vol3-PPTX.zip**: Volume III
-            - **MLSysBook-Slides-Vol4-PPTX.zip**: Volume IV
 
             ### TinyML downloads (HarvardX on edX)
             - **MLSysBook-TinyML-All.zip**: slides, readings, and supplementary material
@@ -362,24 +350,16 @@ jobs:
             MLSysBook-Slides-All-PDF.zip
             MLSysBook-Slides-Vol1-PDF.zip
             MLSysBook-Slides-Vol2-PDF.zip
-            MLSysBook-Slides-Vol3-PDF.zip
-            MLSysBook-Slides-Vol4-PDF.zip
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
-            MLSysBook-Slides-Vol3-PPTX.zip
-            MLSysBook-Slides-Vol4-PPTX.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
             release-flat/vol1_*.pdf
             release-flat/vol2_*.pdf
-            release-flat/vol3_*.pdf
-            release-flat/vol4_*.pdf
             release-flat/vol1_*.pptx
             release-flat/vol2_*.pptx
-            release-flat/vol3_*.pptx
-            release-flat/vol4_*.pptx
           make_latest: true
 
       - name: ✅ Verify Release has required archives
@@ -388,7 +368,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The thirteen top-level archives are the authoritative set. If each of
+          # The top-level archives for the live volumes are the authoritative set. If each of
           # these is present, the release is correct regardless of how many
           # individual per-deck files attached or whether the action exited
           # non-zero on a transient metadata-update 404.
@@ -396,13 +376,9 @@ jobs:
             MLSysBook-Slides-All-PDF.zip
             MLSysBook-Slides-Vol1-PDF.zip
             MLSysBook-Slides-Vol2-PDF.zip
-            MLSysBook-Slides-Vol3-PDF.zip
-            MLSysBook-Slides-Vol4-PDF.zip
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
-            MLSysBook-Slides-Vol3-PPTX.zip
-            MLSysBook-Slides-Vol4-PPTX.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
@@ -431,7 +407,7 @@ jobs:
             echo "   archives verified present — treating as transient and passing."
           fi
 
-          echo "✅ Release verified: all 13 required archives present."
+          echo "✅ Release verified: all ${#REQUIRED[@]} required archives present."
 
   # ===========================================================================
   # Stage 3: Deploy Quarto portal
@@ -464,6 +440,16 @@ jobs:
       - name: 🔨 Build Slides Portal
         working-directory: slides
         run: quarto render
+
+      - name: ✂️ Drop unreleased volume pages
+        run: |
+          # The portal renders every volume page; the live site keeps only the
+          # live volumes. Links to the dropped pages are hidden by the release gate.
+          for vol in vol1 vol2 vol3 vol4; do
+            case " $LIVE_VOLUMES " in *" $vol "*) continue ;; esac
+            rm -rf "slides/_build/$vol.html" "slides/_build/$vol"
+            echo "   dropped $vol"
+          done
 
       - name: 🔍 Validate build
         run: |
