@@ -25,7 +25,6 @@ from ..results import (
     RatioClipResult,
     RepeatedVerificationResult,
     RewardCompositionResult,
-    RewardShapingResult,
     RolloutSlotCycleResult,
     RolloutStepBudgetResult,
     VerifierPoolResult,
@@ -90,30 +89,6 @@ class CenteredRewardModel(ForwardModel):
                                     failing_score=failing_reward - baseline)
 
 
-class RewardShapingModel(ForwardModel):
-    """
-    A shaped terminal score ``R = c + alpha f - lambda len`` with ``c`` in {0, 1}.
-
-    With ``f`` and ``len = tokens / cap`` in [0, 1], a pass scores at least
-    ``1 - lambda`` and a failure at most ``alpha``, so every pass outranks
-    every failure when ``alpha + lambda < 1``. The runtime must enforce the
-    cap, or ``len`` can exceed 1 and the bound fails.
-    """
-    requires = ()
-    produces = RewardShapingResult
-
-    def solve(self, format_weight: float, length_weight: float, length_cap: int,
-              pass_format: float, pass_tokens: int, failure_format: float,
-              failure_tokens: int) -> RewardShapingResult:
-        def score(correct, fmt, tokens):
-            return correct + format_weight * fmt - length_weight * tokens / length_cap
-
-        total = format_weight + length_weight
-        return RewardShapingResult(
-            weight_sum=total, lowest_pass=1 - length_weight, highest_failure=format_weight,
-            order_holds=total < 1,
-            example_pass=score(1, pass_format, pass_tokens),
-            example_failure=score(0, failure_format, failure_tokens))
 
 
 class ForkValueModel(ForwardModel):

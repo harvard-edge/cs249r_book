@@ -13,8 +13,7 @@ bash-only track).
     .../logs/<id>/report.json (swebench_report_*.json here).
 
 This script downloads the 500 trajectories (about 83 MB) into a cache folder
-outside the repository and writes two small CSV files that calcs.py and
-make_figs.py read:
+outside the repository and writes two small CSV files that make_figs.py reads:
   swebench_runs.csv           one row per task: calls, cost, resolved, exit
                               status, characters sent to the model over the
                               whole run, and characters newly added

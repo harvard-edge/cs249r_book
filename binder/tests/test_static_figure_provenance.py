@@ -32,8 +32,9 @@ def provenance(tmp_path, monkeypatch, request):
         target = tmp_path / source.relative_to(repo)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-        if not integrated and source.suffix == ".qmd":
-            target.write_bytes(subprocess.check_output(["git", "show", "efd1999a73:" + str(source.relative_to(repo))], cwd=repo))
+        if source.suffix == ".qmd":
+            rev = "3dac1031c7" if integrated else "efd1999a73"
+            target.write_bytes(subprocess.check_output(["git", "show", rev + ":" + str(source.relative_to(repo))], cwd=repo))
     original_git = guard.subprocess.check_output
 
     def reviewed_git_bytes(args, cwd):

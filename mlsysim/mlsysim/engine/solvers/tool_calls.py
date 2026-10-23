@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from ..results import (
     BlindRetryResult,
-    IntegrationAdaptersResult,
     ModelPollingResult,
     ObservationCarryResult,
     ToolCatalogSelectionResult,
@@ -179,11 +178,3 @@ class ToolkitGranularityModel(ForwardModel):
         )
 
 
-class IntegrationAdaptersModel(ForwardModel):
-    """Adapters connecting every host to every service, pairwise and through one shared protocol."""
-    requires = ()
-    produces = IntegrationAdaptersResult
-
-    def solve(self, hosts: int, services: int) -> IntegrationAdaptersResult:
-        pairwise, shared = calc_integration_adapters(hosts, services)
-        return IntegrationAdaptersResult(pairwise=pairwise, shared=shared)

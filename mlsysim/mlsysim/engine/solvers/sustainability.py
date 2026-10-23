@@ -24,13 +24,10 @@ from ..results import (
     DevelopmentSweepResult,
     DutyCycledPowerResult,
     EmbodiedPaybackResult,
-    FacilityCarbonRateResult,
     FacilityPowerResult,
     GridPlacementResult,
-    PowerCapResult,
     PueRetrofitResult,
     RepeatedWorkEnergyResult,
-    RollingWindowResult,
     RunFootprintResult,
     ServiceLifeExtensionResult,
     ServingCrossoverResult,
@@ -130,14 +127,6 @@ class PueRetrofitModel(ForwardModel):
                                  saved_cost=(energy * electricity_price).to("USD"))
 
 
-class FacilityCarbonRateModel(ForwardModel):
-    """Operational carbon per hour of named sites: ``IT power x PUE x grid intensity``."""
-    requires = ()
-    produces = FacilityCarbonRateResult
-
-    def solve(self, it_power: Quantity, pues: Dict[str, float], intensities: Dict[str, Quantity]) -> FacilityCarbonRateResult:
-        rates = {k: (it_power * pues[k] * intensities[k]).to("metric_ton/hour") for k in pues}
-        return FacilityCarbonRateResult(rates=rates)
 
 
 class GridPlacementModel(ForwardModel):
@@ -191,18 +180,6 @@ class ServiceLifeExtensionModel(ForwardModel):
         return ServiceLifeExtensionResult(annual_charge_reduction=1 - _ratio(short_life, long_life))
 
 
-class PowerCapModel(ForwardModel):
-    """
-    A run that needs more power than its feed: the concurrency the feed allows
-    and the duration that concurrency stretches the run to (same total work).
-    """
-    requires = ()
-    produces = PowerCapResult
-
-    def solve(self, required_power: Quantity, feed_power: Quantity, planned_duration: Quantity) -> PowerCapResult:
-        concurrency = min(1.0, _ratio(feed_power, required_power))
-        return PowerCapResult(concurrency=concurrency,
-                              stretched_duration=(planned_duration / concurrency).to(planned_duration.units))
 
 
 class RepeatedWorkEnergyModel(ForwardModel):
@@ -302,18 +279,6 @@ class DevelopmentSweepModel(ForwardModel):
         return DevelopmentSweepResult(final_run_equivalents=candidates * relative_cost)
 
 
-class RollingWindowModel(ForwardModel):
-    """Means of an hourly series over every window of ``window`` consecutive samples, and the extremes."""
-    requires = ()
-    produces = RollingWindowResult
-
-    def solve(self, values: Sequence[float], window: int) -> RollingWindowResult:
-        vals = list(values)
-        means = [sum(vals[i:i + window]) / window for i in range(len(vals) - window + 1)]
-        lo = min(range(len(means)), key=means.__getitem__)
-        hi = max(range(len(means)), key=means.__getitem__)
-        return RollingWindowResult(means=means, low_index=lo, high_index=hi,
-                                   low=means[lo], high=means[hi], ratio=means[hi] / means[lo])
 
 
 class CarbonPricedPlacementModel(ForwardModel):

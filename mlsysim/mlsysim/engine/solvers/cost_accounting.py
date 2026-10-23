@@ -26,10 +26,8 @@ from ..results import (
     ArchitectureChoiceResult,
     CohortAttemptCostResult,
     CompactionPaybackResult,
-    ConcurrencySweepResult,
     ConservedBudgetResult,
     CostVsScoreResult,
-    CoverageIndependenceResult,
     DedicatedBreakEvenResult,
     KingmanQueueResult,
     ModelCascadeResult,
@@ -629,37 +627,5 @@ class WorkloadLeverModel(ForwardModel):
         return WorkloadLeverResult(rows=rows)
 
 
-class CoverageIndependenceModel(ForwardModel):
-    """
-    Measured coverage at k samples against independent trials, ``1 - (1 - p1)^k``.
-
-    Coverage that grows more slowly than the independent prediction means
-    failures are correlated: hard tasks keep failing on every sample.
-    """
-    requires = ("series",)
-    produces = CoverageIndependenceResult
-
-    def solve(self, rows) -> CoverageIndependenceResult:
-        pts = sorted((int(r["k"]), float(r["coverage"])) for r in rows)
-        first = pts[0][1]
-        return CoverageIndependenceResult(
-            first=first, measured={k: c for k, c in pts},
-            independent={k: calc_independent_success(first, k) for k, _ in pts},
-        )
 
 
-class ConcurrencySweepModel(ForwardModel):
-    """
-    One serving configuration swept across concurrency: throughput against per-user speed.
-    """
-    requires = ("series",)
-    produces = ConcurrencySweepResult
-
-    def solve(self, rows, x_column: str, y_column: str) -> ConcurrencySweepResult:
-        pts = sorted((float(r["conc"]), float(r[x_column]), float(r[y_column])) for r in rows)
-        lo, hi = pts[0], pts[-1]
-        return ConcurrencySweepResult(
-            points=pts, concurrency_multiple=hi[0] / lo[0], throughput_multiple=hi[2] / lo[2],
-            per_user_slowdown=lo[1] / hi[1], token_time_low=Q_(1000 / lo[1], "ms"),
-            token_time_high=Q_(1000 / hi[1], "ms"),
-        )

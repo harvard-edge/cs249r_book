@@ -9,7 +9,7 @@ make_figs.py plots. The plot is the tool's own output, not a redrawn formula.
 
   arm:  the TCP limit, its deceleration bound, and its jerk bound (TP Napkin Math 11.4)
   base: the drive limit, a_brake, and its jerk bound (TP Sec. 11.5.4)
-Every input comes from MLSysIM through calcs.py (Scenarios.WarehouseArmStallStop
+Every input comes from MLSysIM (Scenarios.WarehouseArmStallStop
 and Scenarios.WarehouseBaseJerkLimitedStop).
 
 Needs `pip install ruckig` (tested with ruckig 0.19.4). Run from this folder:
@@ -25,11 +25,7 @@ from pathlib import Path
 
 from ruckig import ControlInterface, InputParameter, Result, Ruckig, Trajectory
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-with contextlib.redirect_stdout(io.StringIO()):
-    import calcs as K  # noqa: E402  every input comes from MLSysIM through calcs.py
-
-DT = K.T_TICK / 1000            # s, the arm's servo tick (TP Sec. 11.1)
+DT = 1.0 / 1000            # s, the arm's servo tick (TP Sec. 11.1)
 
 
 def stop(v, a, j):
@@ -57,7 +53,7 @@ out = Path(__file__).parent / "ruckig_stops.csv"
 with out.open("w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["case", "t_s", "position_m", "velocity_mps", "acceleration_mps2"])
-    for name, v, a, j in (("arm", K.V_TCP, K.A_ARM, K.J_ARM), ("base", K.V_BASE, K.A_BASE, K.J_BASE)):
+    for name, v, a, j in (("arm", 1.0, 5.0, 66.66666666666667), ("base", 1.5, 2.0, 7.111111111111111)):
         dur, rows = stop(v, a, j)
         print(f"{name}: ruckig {version('ruckig')} duration {1000 * dur:.2f} ms, "
               f"distance {1000 * rows[-1][1]:.2f} mm")

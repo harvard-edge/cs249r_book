@@ -10,35 +10,18 @@ spread around the honest value, layout coordinates) are drawn here.
 
 Run from this folder: python3 make_figs.py
 """
-
+_NUMS = {'canary_pct': 5.0, 'cutover_pct': 100.0, 'exposure_ratio': 20.0, 'ref_gpus': 1024.0, 'ref_nodes': 128.0, 'ref_gpn': 8.0, 'grad_gb': 350.0, 'ckpt_tb': 2.45, 'weights_gb': 350.0, 'stuxnet_zd': 4.0, 'mirai_peak': 600000.0, 'steal_small_usd': 20.0, 'steal_gpt35_usd': 2000.0, 'steal_ada_rms': 0.0005, 'steal_babbage_rms': 0.0007, 'steal_b002_width': 1536.0, 'steal_ada_q_m': 2.0, 'steal_babbage_q_m': 4.0, 'steal_gpt35_q_m': 40.0, 'shape_classes': 1000.0, 'shape_topk': 5.0, 'shape_fewer': 200.0, 'shape_removed_pct': 99.5, 'shape_from': 6.0, 'shape_to': 2.0, 'shape_bits': 13.3, 'shape_digits': 4.0, 'shape_bits_per_digit': 3.3, 'ext_train_k': 5.0, 'ext_train': 5000.0, 'ext_queries_m': 5.0, 'ext_fid_pct': 90.0, 'ext_tier_usd': 50.0, 'ext_quota_k': 10.0, 'ext_quota': 10000.0, 'ext_price': 0.001, 'ext_days': 500.0, 'ext_period': 30.0, 'ext_tier_cost': 833.0, 'ext_payg': 5000.0, 'ext_allow_k': 100.0, 'ext_allow': 100000.0, 'ext_allow_days': 10.0, 'ext_allow_fees': 17.0, 'ext_overage': 4900.0, 'ext_overage_q_m': 4.9, 'ext_life': 4917.0, 'ext_tier_share': 0.17, 'ns_low': 50.0, 'ns_mid': 100.0, 'ns_high': 300.0, 'laion_pct': 0.01, 'laion_images': 40000.0, 'laion_usd': 60.0, 'bd_workers': 64.0, 'bd_honest_n': 63.0, 'bd_honest': 1.0, 'bd_attack': 10000.0, 'bd_mean': 157.0, 'dp': 64.0, 'dp_gpus': 16.0, 'ring': 1.97, 'gather': 63.0, 'gather_ratio': 32.0, 'mt_base': 1000.0, 'mt_ctrl': 850.0, 'mt_pct': 15.0, 'sc_symbols': 256.0, 'sc_bytes': 5.0, 'sc_exp': 12.0, 'epc_mib': 128.0, 'epc_mb': 134.2, 'r50_fp32_mb': 102.2, 'r50_fp32_pct': 76.0, 'r50_int8_mb': 25.6, 'r18_int8_mb': 11.7, 'fhe_mult': 10000.0, 'fhe_base_ms': 20.0, 'fhe_aes_ms': 0.5, 'fhe_aes_total_ms': 20.5, 'fhe_s': 200.0, 'gpt2_gen': 600000.0, 'gpt2_insp': 1800.0, 'gpt2_mem': 604.0, 'audit_eps': 1.0, 'nf_ratings': 8.0, 'nf_pct': 99.0, 'sal_n': 1000.0, 'sal_range': 200000.0, 'sal_eps': 1.0, 'sal_sens': 200000.0, 'sal_scale': 200000.0, 'sal_err': 200.0, 'sal_small_n': 100.0, 'sal_small_err': 2000.0, 'sal_wrong': 0.2, 'comp_eps': 1.0, 'comp_total': 10.0, 'ab_q': 0.01, 'ab_sigma': 4.0, 'ab_delta_exp': 5.0, 'ab_short': 100.0, 'ab_long': 400.0, 'ab_acc_short': 1.26, 'ab_acc_long': 2.55, 'ab_strong_short': 9.34, 'ab_strong_long': 24.22, 'ab_tight_short': 7.4, 'ab_tight_long': 9.5, 'run_epochs': 60.0, 'run_eps': 3.0, 'run_eps_code': 3.0, 'run_delta_exp': 5.0, 'run_clip': 1.0, 'run_clip_code': 1.0, 'mnist_base_pct': 98.3, 'mnist_gap_pts': 3.3, 'cifar_base_pct': 95.0, 'cifar_gap_lo': 14.0, 'cifar_gap_hi': 22.0, 'cifar_eps': 8.0}
 import math
 import sys
 from pathlib import Path
-
 import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import slideplot as sp  # noqa: E402
-import calcs  # noqa: E402  (records every value; figures read them through val/num)
-from deckvals import val, num  # noqa: E402
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'assets' / 'kit'))
+import slideplot as sp
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 C = sp.C
 plt = sp.plt
 out = Path(__file__).parent
-
-# Volume II C3 roles (volumes/vol2/palette.md)
-V2 = {
-    "c1": "#1F407A", "c1_l": "#EAF1F8",
-    "c2": "#d97706", "c2_l": "#fef3c7",
-    "c3": "#7c3aed", "c3_l": "#f3e8ff",
-    "ok": "#16a34a", "ok_l": "#dcfce7",
-    "risk": "#dc2626", "risk_l": "#fee2e2",
-    "frame": "#94a3b8", "frame_l": "#f8fafc",
-    "text": "#0f172a", "gray": "#64748b",
-}
-
+V2 = {'c1': '#1F407A', 'c1_l': '#EAF1F8', 'c2': '#d97706', 'c2_l': '#fef3c7', 'c3': '#7c3aed', 'c3_l': '#f3e8ff', 'ok': '#16a34a', 'ok_l': '#dcfce7', 'risk': '#dc2626', 'risk_l': '#fee2e2', 'frame': '#94a3b8', 'frame_l': '#f8fafc', 'text': '#0f172a', 'gray': '#64748b'}
 
 def canvas(w, h):
     """A diagram canvas in inches, so font sizes read as printed sizes."""
@@ -46,466 +29,325 @@ def canvas(w, h):
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(0, w)
     ax.set_ylim(0, h)
-    ax.axis("off")
-    return fig, ax
+    ax.axis('off')
+    return (fig, ax)
 
+def box(ax, x, y, w, h, text, fill, stroke, fs=11, color=None, bold=True, alpha=1.0, ls='-'):
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle='round,pad=0,rounding_size=0.06', fc=fill, ec=stroke, lw=1.6, alpha=alpha, ls=ls))
+    ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=fs * 1.08, color=color or V2['text'], fontweight='bold' if bold else 'normal', alpha=alpha, linespacing=1.15)
 
-def box(ax, x, y, w, h, text, fill, stroke, fs=11, color=None, bold=True, alpha=1.0, ls="-"):
-    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.06",
-                                fc=fill, ec=stroke, lw=1.6, alpha=alpha, ls=ls))
-    ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs * 1.08,
-            color=color or V2["text"], fontweight="bold" if bold else "normal",
-            alpha=alpha, linespacing=1.15)
-
-
-def arrow(ax, p, q, color, lw=1.8, alpha=1.0, ls="-", both=False):
-    ax.add_patch(FancyArrowPatch(p, q, arrowstyle="<|-|>" if both else "-|>",
-                                 mutation_scale=13, color=color, lw=lw, alpha=alpha,
-                                 linestyle=ls, shrinkA=2, shrinkB=2))
-
+def arrow(ax, p, q, color, lw=1.8, alpha=1.0, ls='-', both=False):
+    ax.add_patch(FancyArrowPatch(p, q, arrowstyle='<|-|>' if both else '-|>', mutation_scale=13, color=color, lw=lw, alpha=alpha, linestyle=ls, shrinkA=2, shrinkB=2))
 
 def marker(ax, x, y, n, alpha=1.0):
-    ax.add_patch(plt.Circle((x, y), 0.13, fc=V2["risk"], ec="white", lw=1.2, alpha=alpha, zorder=6))
-    ax.text(x, y, str(n), ha="center", va="center", fontsize=10, color="white",
-            fontweight="bold", alpha=alpha, zorder=7)
-
+    ax.add_patch(plt.Circle((x, y), 0.13, fc=V2['risk'], ec='white', lw=1.2, alpha=alpha, zorder=6))
+    ax.text(x, y, str(n), ha='center', va='center', fontsize=10, color='white', fontweight='bold', alpha=alpha, zorder=7)
 
 def save(fig, name):
     sp.save(fig, out / name)
+sp.hbars(out / 'recall_canary.svg', [('Cutover', 100.0, 'danger', '100%'), ('Canary', 5.0, 'compute', '5%')], '', log=False, size=(3.6, 1.0), xlabel='Traffic exposed until rollback')
 
-
-# ------------------------------------------------------------ recall canary
-sp.hbars(out / "recall_canary.svg", [
-    ("Cutover", num("cutover_pct"), "danger", f"{val('cutover_pct')}%"),
-    ("Canary", num("canary_pct"), "compute", f"{val('canary_pct')}%"),
-], "", log=False, size=(3.6, 1.0), xlabel="Traffic exposed until rollback")
-
-
-# ------------------------------------------------------------ fleet interface map
 def fleetmap(path, step):
-    W, H = 5.8, 2.6
+    W, H = (5.8, 2.6)
     fig, ax = canvas(W, H)
-    # components
-    box(ax, 0.05, 1.45, 0.95, 0.75, "Data feed\nweb, users,\nlabelers", V2["ok_l"], V2["ok"], fs=9.8)
-    ax.add_patch(FancyBboxPatch((1.35, 0.95), 1.75, 1.45, boxstyle="round,pad=0,rounding_size=0.06",
-                                fc=V2["c1_l"], ec=V2["c1"], lw=1.6))
-    ax.text(2.225, 2.22, "Training cluster", ha="center", va="center", fontsize=11, fontweight="bold",
-            color=V2["text"])
-    ax.text(2.225, 1.98, f"{val('ref_gpus')} GPUs, {val('ref_nodes')} nodes", ha="center", va="center", fontsize=10,
-            color=V2["text"])
-    # ring of nodes
+    box(ax, 0.05, 1.45, 0.95, 0.75, 'Data feed\nweb, users,\nlabelers', V2['ok_l'], V2['ok'], fs=9.8)
+    ax.add_patch(FancyBboxPatch((1.35, 0.95), 1.75, 1.45, boxstyle='round,pad=0,rounding_size=0.06', fc=V2['c1_l'], ec=V2['c1'], lw=1.6))
+    ax.text(2.225, 2.22, 'Training cluster', ha='center', va='center', fontsize=11, fontweight='bold', color=V2['text'])
+    ax.text(2.225, 1.98, '1,024 GPUs, 128 nodes', ha='center', va='center', fontsize=10, color=V2['text'])
     for k in range(8):
         a = 2 * math.pi * k / 8
-        cx, cy = 2.225 + 0.42 * math.cos(a), 1.5 + 0.26 * math.sin(a)
-        ax.add_patch(Rectangle((cx - 0.08, cy - 0.06), 0.16, 0.12, fc="white", ec=V2["c1"], lw=1.2, zorder=3))
-    ax.add_patch(plt.matplotlib.patches.Ellipse((2.225, 1.5), 0.84, 0.52, fill=False, ec=V2["c2"], lw=2.0, zorder=2))
-    box(ax, 1.35, 0.1, 1.75, 0.55, "Node admission\nattestation, keys", V2["c3_l"], V2["c3"], fs=10.5)
-    box(ax, 3.4, 1.45, 0.95, 0.75, "Registry\nrelease\nrecord", V2["c3_l"], V2["c3"], fs=10.5)
-    box(ax, 4.6, 1.45, 1.15, 0.75, "Serving API\nshared GPUs", V2["c1_l"], V2["c1"], fs=10.5)
-    box(ax, 4.6, 0.1, 1.15, 0.55, "Users,\ntenants", V2["frame_l"], V2["frame"], fs=10.5)
-    arrow(ax, (1.0, 1.82), (1.35, 1.82), V2["ok"])
-    arrow(ax, (3.1, 1.82), (3.4, 1.82), V2["gray"])
-    arrow(ax, (4.35, 1.82), (4.6, 1.82), V2["gray"])
-    arrow(ax, (5.175, 0.65), (5.175, 1.45), V2["gray"], both=True)
-    arrow(ax, (2.225, 0.65), (2.225, 0.95), V2["c3"], both=True)
+        cx, cy = (2.225 + 0.42 * math.cos(a), 1.5 + 0.26 * math.sin(a))
+        ax.add_patch(Rectangle((cx - 0.08, cy - 0.06), 0.16, 0.12, fc='white', ec=V2['c1'], lw=1.2, zorder=3))
+    ax.add_patch(plt.matplotlib.patches.Ellipse((2.225, 1.5), 0.84, 0.52, fill=False, ec=V2['c2'], lw=2.0, zorder=2))
+    box(ax, 1.35, 0.1, 1.75, 0.55, 'Node admission\nattestation, keys', V2['c3_l'], V2['c3'], fs=10.5)
+    box(ax, 3.4, 1.45, 0.95, 0.75, 'Registry\nrelease\nrecord', V2['c3_l'], V2['c3'], fs=10.5)
+    box(ax, 4.6, 1.45, 1.15, 0.75, 'Serving API\nshared GPUs', V2['c1_l'], V2['c1'], fs=10.5)
+    box(ax, 4.6, 0.1, 1.15, 0.55, 'Users,\ntenants', V2['frame_l'], V2['frame'], fs=10.5)
+    arrow(ax, (1.0, 1.82), (1.35, 1.82), V2['ok'])
+    arrow(ax, (3.1, 1.82), (3.4, 1.82), V2['gray'])
+    arrow(ax, (4.35, 1.82), (4.6, 1.82), V2['gray'])
+    arrow(ax, (5.175, 0.65), (5.175, 1.45), V2['gray'], both=True)
+    arrow(ax, (2.225, 0.65), (2.225, 0.95), V2['c3'], both=True)
     if step >= 2:
         a = 1.0
         marker(ax, 1.17, 2.0, 1, a)
-        ax.text(1.17, 2.43, "records", ha="center", fontsize=10, color=V2["risk"], fontweight="bold")
+        ax.text(1.17, 2.43, 'records', ha='center', fontsize=10, color=V2['risk'], fontweight='bold')
         marker(ax, 2.225, 1.5, 2, a)
-        ax.text(2.225, 1.06, "gradients", ha="center", va="center", fontsize=10, color=V2["risk"],
-                fontweight="bold")
+        ax.text(2.225, 1.06, 'gradients', ha='center', va='center', fontsize=10, color=V2['risk'], fontweight='bold')
         marker(ax, 2.5, 0.8, 3, a)
-        ax.text(2.68, 0.8, "evidence, keys", ha="left", va="center", fontsize=10, color=V2["risk"],
-                fontweight="bold")
+        ax.text(2.68, 0.8, 'evidence, keys', ha='left', va='center', fontsize=10, color=V2['risk'], fontweight='bold')
         marker(ax, 3.25, 2.0, 4, a)
-        ax.text(3.25, 2.43, "weights", ha="center", fontsize=10, color=V2["risk"], fontweight="bold")
+        ax.text(3.25, 2.43, 'weights', ha='center', fontsize=10, color=V2['risk'], fontweight='bold')
         marker(ax, 5.35, 1.05, 5, a)
-        ax.text(5.5, 1.05, "queries,\nanswers", ha="left", va="center", fontsize=10, color=V2["risk"],
-                fontweight="bold")
+        ax.text(5.5, 1.05, 'queries,\nanswers', ha='left', va='center', fontsize=10, color=V2['risk'], fontweight='bold')
         marker(ax, 4.6, 1.45, 6, a)
-        ax.text(4.42, 1.2, "co-tenant\ntiming", ha="right", va="center", fontsize=10, color=V2["risk"],
-                fontweight="bold")
+        ax.text(4.42, 1.2, 'co-tenant\ntiming', ha='right', va='center', fontsize=10, color=V2['risk'], fontweight='bold')
     ax.set_xlim(0, W + 0.25)
     save(fig, path)
+fleetmap('fleetmap_step1.svg', 1)
+fleetmap('fleetmap_step2.svg', 2)
 
-
-fleetmap("fleetmap_step1.svg", 1)
-fleetmap("fleetmap_step2.svg", 2)
-
-
-# ------------------------------------------------------------ threat model, federated round
 def threatmodel(path):
-    W, H = 5.5, 1.3
+    W, H = (5.5, 1.3)
     fig, ax = canvas(W, H)
-    box(ax, 0.05, 0.3, 1.55, 0.72, "Enrolled client\n(compromised)", V2["risk_l"], V2["risk"], fs=11)
-    box(ax, 1.98, 0.3, 1.55, 0.72, "Coordinator\n(reads messages)", V2["c3_l"], V2["c3"], fs=11)
-    box(ax, 3.9, 0.3, 1.55, 0.72, "Global model\n(every replica)", V2["c1_l"], V2["c1"], fs=11)
-    arrow(ax, (1.6, 0.66), (1.98, 0.66), V2["risk"], lw=2.2)
-    arrow(ax, (3.53, 0.66), (3.9, 0.66), V2["risk"], lw=2.2)
-    ax.text(1.79, 1.1, "update", ha="center", fontsize=10.5, color=V2["risk"], fontweight="bold")
-    for x, lab in ((1.79, "A"), (3.715, "B")):
-        ax.plot([x, x], [0.02, 0.25], color=V2["text"], lw=1.4, ls="--")
-        ax.text(x + 0.06, 0.1, f"boundary {lab}", ha="left", va="center", fontsize=10.5, fontweight="bold",
-                color=V2["text"])
+    box(ax, 0.05, 0.3, 1.55, 0.72, 'Enrolled client\n(compromised)', V2['risk_l'], V2['risk'], fs=11)
+    box(ax, 1.98, 0.3, 1.55, 0.72, 'Coordinator\n(reads messages)', V2['c3_l'], V2['c3'], fs=11)
+    box(ax, 3.9, 0.3, 1.55, 0.72, 'Global model\n(every replica)', V2['c1_l'], V2['c1'], fs=11)
+    arrow(ax, (1.6, 0.66), (1.98, 0.66), V2['risk'], lw=2.2)
+    arrow(ax, (3.53, 0.66), (3.9, 0.66), V2['risk'], lw=2.2)
+    ax.text(1.79, 1.1, 'update', ha='center', fontsize=10.5, color=V2['risk'], fontweight='bold')
+    for x, lab in ((1.79, 'A'), (3.715, 'B')):
+        ax.plot([x, x], [0.02, 0.25], color=V2['text'], lw=1.4, ls='--')
+        ax.text(x + 0.06, 0.1, f'boundary {lab}', ha='left', va='center', fontsize=10.5, fontweight='bold', color=V2['text'])
     save(fig, path)
+threatmodel('threatmodel.svg')
 
-
-threatmodel("threatmodel.svg")
-
-
-# ------------------------------------------------------------ LLM control and data in one stream
 def llm_stream(path):
-    W, H = 5.8, 1.9
+    W, H = (5.8, 1.9)
     fig, ax = canvas(W, H)
-    segs = [("System\ninstructions", V2["c3_l"], V2["c3"], 1.05),
-            ("User\ntext", V2["frame_l"], V2["frame"], 0.75),
-            ("Retrieved page:\n\u201cignore previous\u2026\u201d", V2["risk_l"], V2["risk"], 1.55)]
+    segs = [('System\ninstructions', V2['c3_l'], V2['c3'], 1.05), ('User\ntext', V2['frame_l'], V2['frame'], 0.75), ('Retrieved page:\n“ignore previous…”', V2['risk_l'], V2['risk'], 1.55)]
     x = 0.05
     for t, f, s, w in segs:
         box(ax, x, 1.0, w, 0.75, t, f, s, fs=10.5)
         x += w + 0.05
-    ax.text(0.05, 0.82, "one token stream: control and data share it", ha="left", va="top",
-            fontsize=10.5, color=V2["gray"])
-    box(ax, 3.62, 1.0, 0.68, 0.75, "Model", V2["c1_l"], V2["c1"], fs=11)
-    arrow(ax, (3.52, 1.375), (3.62, 1.375), V2["gray"])
-    box(ax, 4.55, 1.0, 1.2, 0.75, "Policy check\nprincipal,\npermissions", V2["ok_l"], V2["ok"], fs=10)
-    arrow(ax, (4.3, 1.375), (4.55, 1.375), V2["gray"])
-    box(ax, 4.55, 0.05, 1.2, 0.55, "Tools, data", V2["frame_l"], V2["frame"], fs=10.5)
-    arrow(ax, (5.15, 1.0), (5.15, 0.6), V2["ok"])
-    ax.text(4.45, 0.33, "output is untrusted input", ha="right", va="center", fontsize=10.5,
-            color=V2["ok"], fontweight="bold")
+    ax.text(0.05, 0.82, 'one token stream: control and data share it', ha='left', va='top', fontsize=10.5, color=V2['gray'])
+    box(ax, 3.62, 1.0, 0.68, 0.75, 'Model', V2['c1_l'], V2['c1'], fs=11)
+    arrow(ax, (3.52, 1.375), (3.62, 1.375), V2['gray'])
+    box(ax, 4.55, 1.0, 1.2, 0.75, 'Policy check\nprincipal,\npermissions', V2['ok_l'], V2['ok'], fs=10)
+    arrow(ax, (4.3, 1.375), (4.55, 1.375), V2['gray'])
+    box(ax, 4.55, 0.05, 1.2, 0.55, 'Tools, data', V2['frame_l'], V2['frame'], fs=10.5)
+    arrow(ax, (5.15, 1.0), (5.15, 0.6), V2['ok'])
+    ax.text(4.45, 0.33, 'output is untrusted input', ha='right', va='center', fontsize=10.5, color=V2['ok'], fontweight='bold')
     save(fig, path)
+llm_stream('llm_stream.svg')
 
-
-llm_stream("llm_stream.svg")
-
-
-# ------------------------------------------------------------ two kinds of theft
 def theft(path):
-    W, H = 5.8, 2.0
+    W, H = (5.8, 2.0)
     fig, ax = canvas(W, H)
-    ax.text(1.4, 1.88, "Exact artifact theft", ha="center", va="top", fontsize=12, fontweight="bold",
-            color=V2["risk"])
-    ax.text(4.4, 1.88, "Approximate behavioral theft", ha="center", va="top", fontsize=12,
-            fontweight="bold", color=V2["risk"])
-    box(ax, 0.1, 0.65, 1.1, 0.8, "Bucket,\nregistry,\ndevice", V2["c3_l"], V2["c3"], fs=10.5)
-    box(ax, 1.65, 0.65, 1.05, 0.8, "Same\nweights", V2["risk_l"], V2["risk"], fs=10.5)
-    arrow(ax, (1.2, 1.05), (1.65, 1.05), V2["risk"])
-    ax.text(1.4, 0.38, "needs file access", ha="center", va="center", fontsize=10.5, color=V2["text"])
-    ax.plot([2.95, 2.95], [0.15, 1.8], color=V2["frame"], lw=1)
-    box(ax, 3.1, 0.65, 0.95, 0.8, "Deployed\nAPI", V2["c1_l"], V2["c1"], fs=10.5)
-    box(ax, 4.65, 0.6, 1.12, 0.9, "Surrogate:\nnew weights,\nsimilar\nanswers", V2["risk_l"], V2["risk"], fs=10)
-    arrow(ax, (4.05, 1.2), (4.65, 1.2), V2["risk"])
-    arrow(ax, (4.65, 0.9), (4.05, 0.9), V2["gray"])
-    ax.text(4.35, 1.3, "queries", ha="center", va="bottom", fontsize=9.5, color=V2["risk"])
-    ax.text(4.35, 0.8, "scores", ha="center", va="top", fontsize=9.5, color=V2["gray"])
-    ax.text(4.4, 0.38, "needs only an account", ha="center", va="center", fontsize=10.5, color=V2["text"])
+    ax.text(1.4, 1.88, 'Exact artifact theft', ha='center', va='top', fontsize=12, fontweight='bold', color=V2['risk'])
+    ax.text(4.4, 1.88, 'Approximate behavioral theft', ha='center', va='top', fontsize=12, fontweight='bold', color=V2['risk'])
+    box(ax, 0.1, 0.65, 1.1, 0.8, 'Bucket,\nregistry,\ndevice', V2['c3_l'], V2['c3'], fs=10.5)
+    box(ax, 1.65, 0.65, 1.05, 0.8, 'Same\nweights', V2['risk_l'], V2['risk'], fs=10.5)
+    arrow(ax, (1.2, 1.05), (1.65, 1.05), V2['risk'])
+    ax.text(1.4, 0.38, 'needs file access', ha='center', va='center', fontsize=10.5, color=V2['text'])
+    ax.plot([2.95, 2.95], [0.15, 1.8], color=V2['frame'], lw=1)
+    box(ax, 3.1, 0.65, 0.95, 0.8, 'Deployed\nAPI', V2['c1_l'], V2['c1'], fs=10.5)
+    box(ax, 4.65, 0.6, 1.12, 0.9, 'Surrogate:\nnew weights,\nsimilar\nanswers', V2['risk_l'], V2['risk'], fs=10)
+    arrow(ax, (4.05, 1.2), (4.65, 1.2), V2['risk'])
+    arrow(ax, (4.65, 0.9), (4.05, 0.9), V2['gray'])
+    ax.text(4.35, 1.3, 'queries', ha='center', va='bottom', fontsize=9.5, color=V2['risk'])
+    ax.text(4.35, 0.8, 'scores', ha='center', va='top', fontsize=9.5, color=V2['gray'])
+    ax.text(4.4, 0.38, 'needs only an account', ha='center', va='center', fontsize=10.5, color=V2['text'])
     save(fig, path)
-
-
-theft("theft_types.svg")
-
-# ------------------------------------------------------------ Carlini et al. 2024 query counts
+theft('theft_types.svg')
 fig, ax = plt.subplots(figsize=(5.8, 1.45))
-rows = [("ada", num("steal_ada_q_m") * 1e6, "compute", f"< {val('steal_ada_q_m')}M queries: weight matrix"),
-        ("babbage", num("steal_babbage_q_m") * 1e6, "compute", f"< {val('steal_babbage_q_m')}M queries: weight matrix"),
-        ("gpt-3.5-turbo", num("steal_gpt35_q_m") * 1e6, "neutral", f"< {val('steal_gpt35_q_m')}M queries: hidden width")]
+rows = [('ada', 2.0 * 1000000.0, 'compute', '< 2M queries: weight matrix'), ('babbage', 4.0 * 1000000.0, 'compute', '< 4M queries: weight matrix'), ('gpt-3.5-turbo', 40.0 * 1000000.0, 'neutral', '< 40M queries: hidden width')]
 for i, (lab, v, ck, txt) in enumerate(rows):
     y = len(rows) - 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
-    ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right", va="center",
-            fontsize=13, fontweight="bold", color=C["text"])
-    ax.text(v * 1.15, y, txt, va="center", fontsize=12.5, color=C[ck], fontweight="bold")
-ax.set_xscale("log")
-ax.set_xlim(1e5, 3e9)
+    ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+    ax.text(v * 1.15, y, txt, va='center', fontsize=12.5, color=C[ck], fontweight='bold')
+ax.set_xscale('log')
+ax.set_xlim(100000.0, 3000000000.0)
 ax.set_yticks([])
-ax.spines["left"].set_visible(False)
-ax.set_xlabel("Queries to the public API (log scale)")
-ax.grid(axis="x", color=C["grid"], lw=0.6)
+ax.spines['left'].set_visible(False)
+ax.set_xlabel('Queries to the public API (log scale)')
+ax.grid(axis='x', color=C['grid'], lw=0.6)
 ax.set_axisbelow(True)
-sp.save(fig, out / "carlini_queries.svg")
-
-
-# ------------------------------------------------------------ cumulative bill (Napkin Math 13.1)
-BUDGET = calcs.BUDGET
-QUERIES, TRAIN = BUDGET.extraction_queries, BUDGET.training_cost.to("USD").magnitude
-
-
-def pay_cost(q):
-    return BUDGET.pay_per_query_cost(q).to("USD").magnitude
-
-
-def tier_cost(q):
-    return BUDGET.tier_cost(q).to("USD").magnitude
-
-
-def life_cost(q):
-    return BUDGET.lifetime_cost(q).to("USD").magnitude
-
+sp.save(fig, out / 'carlini_queries.svg')
+QUERIES, TRAIN = (5000000.0, 5000)
 
 def bill(path, step):
     fig, ax = plt.subplots(figsize=(3.7, 2.7))
     q = np.linspace(0, QUERIES, 400)
-    ax.axhline(TRAIN / 1e3, color=C["neutral"], ls="--", lw=1.4)
-    ax.text(0.05, TRAIN / 1e3 + 0.12, f"training cost, \\${val('ext_train_k')}K", fontsize=11, color=C["neutral"], va="bottom")
-    ax.plot(q / 1e6, [pay_cost(v) / 1e3 for v in q], color=C["neutral"], lw=1.6, ls=":")
-    ax.text(3.3, 4.3, "pay per query", fontsize=11, color=C["neutral"], ha="right")
+    ax.axhline(TRAIN / 1000.0, color=C['neutral'], ls='--', lw=1.4)
+    ax.text(0.05, TRAIN / 1000.0 + 0.12, 'training cost, \\$5K', fontsize=11, color=C['neutral'], va='bottom')
+    ax.plot(q / 1000000.0, [0.0, 0.01253132832, 0.02506265664, 0.03759398496, 0.05012531328, 0.0626566416, 0.07518796992, 0.08771929825, 0.1002506266, 0.1127819549, 0.1253132832, 0.1378446115, 0.1503759398, 0.1629072682, 0.1754385965, 0.1879699248, 0.2005012531, 0.2130325815, 0.2255639098, 0.2380952381, 0.2506265664, 0.2631578947, 0.2756892231, 0.2882205514, 0.3007518797, 0.313283208, 0.3258145363, 0.3383458647, 0.350877193, 0.3634085213, 0.3759398496, 0.3884711779, 0.4010025063, 0.4135338346, 0.4260651629, 0.4385964912, 0.4511278195, 0.4636591479, 0.4761904762, 0.4887218045, 0.5012531328, 0.5137844612, 0.5263157895, 0.5388471178, 0.5513784461, 0.5639097744, 0.5764411028, 0.5889724311, 0.6015037594, 0.6140350877, 0.626566416, 0.6390977444, 0.6516290727, 0.664160401, 0.6766917293, 0.6892230576, 0.701754386, 0.7142857143, 0.7268170426, 0.7393483709, 0.7518796992, 0.7644110276, 0.7769423559, 0.7894736842, 0.8020050125, 0.8145363409, 0.8270676692, 0.8395989975, 0.8521303258, 0.8646616541, 0.8771929825, 0.8897243108, 0.9022556391, 0.9147869674, 0.9273182957, 0.9398496241, 0.9523809524, 0.9649122807, 0.977443609, 0.9899749373, 1.002506266, 1.015037594, 1.027568922, 1.040100251, 1.052631579, 1.065162907, 1.077694236, 1.090225564, 1.102756892, 1.115288221, 1.127819549, 1.140350877, 1.152882206, 1.165413534, 1.177944862, 1.19047619, 1.203007519, 1.215538847, 1.228070175, 1.240601504, 1.253132832, 1.26566416, 1.278195489, 1.290726817, 1.303258145, 1.315789474, 1.328320802, 1.34085213, 1.353383459, 1.365914787, 1.378446115, 1.390977444, 1.403508772, 1.4160401, 1.428571429, 1.441102757, 1.453634085, 1.466165414, 1.478696742, 1.49122807, 1.503759398, 1.516290727, 1.528822055, 1.541353383, 1.553884712, 1.56641604, 1.578947368, 1.591478697, 1.604010025, 1.616541353, 1.629072682, 1.64160401, 1.654135338, 1.666666667, 1.679197995, 1.691729323, 1.704260652, 1.71679198, 1.729323308, 1.741854637, 1.754385965, 1.766917293, 1.779448622, 1.79197995, 1.804511278, 1.817042607, 1.829573935, 1.842105263, 1.854636591, 1.86716792, 1.879699248, 1.892230576, 1.904761905, 1.917293233, 1.929824561, 1.94235589, 1.954887218, 1.967418546, 1.979949875, 1.992481203, 2.005012531, 2.01754386, 2.030075188, 2.042606516, 2.055137845, 2.067669173, 2.080200501, 2.09273183, 2.105263158, 2.117794486, 2.130325815, 2.142857143, 2.155388471, 2.167919799, 2.180451128, 2.192982456, 2.205513784, 2.218045113, 2.230576441, 2.243107769, 2.255639098, 2.268170426, 2.280701754, 2.293233083, 2.305764411, 2.318295739, 2.330827068, 2.343358396, 2.355889724, 2.368421053, 2.380952381, 2.393483709, 2.406015038, 2.418546366, 2.431077694, 2.443609023, 2.456140351, 2.468671679, 2.481203008, 2.493734336, 2.506265664, 2.518796992, 2.531328321, 2.543859649, 2.556390977, 2.568922306, 2.581453634, 2.593984962, 2.606516291, 2.619047619, 2.631578947, 2.644110276, 2.656641604, 2.669172932, 2.681704261, 2.694235589, 2.706766917, 2.719298246, 2.731829574, 2.744360902, 2.756892231, 2.769423559, 2.781954887, 2.794486216, 2.807017544, 2.819548872, 2.832080201, 2.844611529, 2.857142857, 2.869674185, 2.882205514, 2.894736842, 2.90726817, 2.919799499, 2.932330827, 2.944862155, 2.957393484, 2.969924812, 2.98245614, 2.994987469, 3.007518797, 3.020050125, 3.032581454, 3.045112782, 3.05764411, 3.070175439, 3.082706767, 3.095238095, 3.107769424, 3.120300752, 3.13283208, 3.145363409, 3.157894737, 3.170426065, 3.182957393, 3.195488722, 3.20802005, 3.220551378, 3.233082707, 3.245614035, 3.258145363, 3.270676692, 3.28320802, 3.295739348, 3.308270677, 3.320802005, 3.333333333, 3.345864662, 3.35839599, 3.370927318, 3.383458647, 3.395989975, 3.408521303, 3.421052632, 3.43358396, 3.446115288, 3.458646617, 3.471177945, 3.483709273, 3.496240602, 3.50877193, 3.521303258, 3.533834586, 3.546365915, 3.558897243, 3.571428571, 3.5839599, 3.596491228, 3.609022556, 3.621553885, 3.634085213, 3.646616541, 3.65914787, 3.671679198, 3.684210526, 3.696741855, 3.709273183, 3.721804511, 3.73433584, 3.746867168, 3.759398496, 3.771929825, 3.784461153, 3.796992481, 3.80952381, 3.822055138, 3.834586466, 3.847117794, 3.859649123, 3.872180451, 3.884711779, 3.897243108, 3.909774436, 3.922305764, 3.934837093, 3.947368421, 3.959899749, 3.972431078, 3.984962406, 3.997493734, 4.010025063, 4.022556391, 4.035087719, 4.047619048, 4.060150376, 4.072681704, 4.085213033, 4.097744361, 4.110275689, 4.122807018, 4.135338346, 4.147869674, 4.160401003, 4.172932331, 4.185463659, 4.197994987, 4.210526316, 4.223057644, 4.235588972, 4.248120301, 4.260651629, 4.273182957, 4.285714286, 4.298245614, 4.310776942, 4.323308271, 4.335839599, 4.348370927, 4.360902256, 4.373433584, 4.385964912, 4.398496241, 4.411027569, 4.423558897, 4.436090226, 4.448621554, 4.461152882, 4.473684211, 4.486215539, 4.498746867, 4.511278195, 4.523809524, 4.536340852, 4.54887218, 4.561403509, 4.573934837, 4.586466165, 4.598997494, 4.611528822, 4.62406015, 4.636591479, 4.649122807, 4.661654135, 4.674185464, 4.686716792, 4.69924812, 4.711779449, 4.724310777, 4.736842105, 4.749373434, 4.761904762, 4.77443609, 4.786967419, 4.799498747, 4.812030075, 4.824561404, 4.837092732, 4.84962406, 4.862155388, 4.874686717, 4.887218045, 4.899749373, 4.912280702, 4.92481203, 4.937343358, 4.949874687, 4.962406015, 4.974937343, 4.987468672, 5.0], color=C['neutral'], lw=1.6, ls=':')
+    ax.text(3.3, 4.3, 'pay per query', fontsize=11, color=C['neutral'], ha='right')
     a2 = 1.0 if step >= 2 else 0.0
-    ax.plot(q / 1e6, [tier_cost(v) / 1e3 for v in q], color=C["danger"], lw=2.6, alpha=a2)
-    ax.text(4.95, tier_cost(QUERIES) / 1e3 + 0.2, f"daily quota: \\${val('ext_tier_cost')}\n{val('ext_days')} days", ha="right",
-            va="bottom", fontsize=11, color=C["danger"], fontweight="bold", alpha=a2)
+    ax.plot(q / 1000000.0, [0.0, 0.00208855472, 0.00417710944, 0.00626566416, 0.008354218881, 0.0104427736, 0.01253132832, 0.01461988304, 0.01670843776, 0.01879699248, 0.0208855472, 0.02297410192, 0.02506265664, 0.02715121136, 0.02923976608, 0.0313283208, 0.03341687552, 0.03550543024, 0.03759398496, 0.03968253968, 0.0417710944, 0.04385964912, 0.04594820384, 0.04803675856, 0.05012531328, 0.052213868, 0.05430242272, 0.05639097744, 0.05847953216, 0.06056808688, 0.0626566416, 0.06474519632, 0.06683375104, 0.06892230576, 0.07101086048, 0.0730994152, 0.07518796992, 0.07727652464, 0.07936507937, 0.08145363409, 0.08354218881, 0.08563074353, 0.08771929825, 0.08980785297, 0.09189640769, 0.09398496241, 0.09607351713, 0.09816207185, 0.1002506266, 0.1023391813, 0.104427736, 0.1065162907, 0.1086048454, 0.1106934002, 0.1127819549, 0.1148705096, 0.1169590643, 0.119047619, 0.1211361738, 0.1232247285, 0.1253132832, 0.1274018379, 0.1294903926, 0.1315789474, 0.1336675021, 0.1357560568, 0.1378446115, 0.1399331662, 0.142021721, 0.1441102757, 0.1461988304, 0.1482873851, 0.1503759398, 0.1524644946, 0.1545530493, 0.156641604, 0.1587301587, 0.1608187135, 0.1629072682, 0.1649958229, 0.1670843776, 0.1691729323, 0.1712614871, 0.1733500418, 0.1754385965, 0.1775271512, 0.1796157059, 0.1817042607, 0.1837928154, 0.1858813701, 0.1879699248, 0.1900584795, 0.1921470343, 0.194235589, 0.1963241437, 0.1984126984, 0.2005012531, 0.2025898079, 0.2046783626, 0.2067669173, 0.208855472, 0.2109440267, 0.2130325815, 0.2151211362, 0.2172096909, 0.2192982456, 0.2213868003, 0.2234753551, 0.2255639098, 0.2276524645, 0.2297410192, 0.2318295739, 0.2339181287, 0.2360066834, 0.2380952381, 0.2401837928, 0.2422723475, 0.2443609023, 0.246449457, 0.2485380117, 0.2506265664, 0.2527151211, 0.2548036759, 0.2568922306, 0.2589807853, 0.26106934, 0.2631578947, 0.2652464495, 0.2673350042, 0.2694235589, 0.2715121136, 0.2736006683, 0.2756892231, 0.2777777778, 0.2798663325, 0.2819548872, 0.2840434419, 0.2861319967, 0.2882205514, 0.2903091061, 0.2923976608, 0.2944862155, 0.2965747703, 0.298663325, 0.3007518797, 0.3028404344, 0.3049289891, 0.3070175439, 0.3091060986, 0.3111946533, 0.313283208, 0.3153717627, 0.3174603175, 0.3195488722, 0.3216374269, 0.3237259816, 0.3258145363, 0.3279030911, 0.3299916458, 0.3320802005, 0.3341687552, 0.3362573099, 0.3383458647, 0.3404344194, 0.3425229741, 0.3446115288, 0.3467000835, 0.3487886383, 0.350877193, 0.3529657477, 0.3550543024, 0.3571428571, 0.3592314119, 0.3613199666, 0.3634085213, 0.365497076, 0.3675856307, 0.3696741855, 0.3717627402, 0.3738512949, 0.3759398496, 0.3780284043, 0.3801169591, 0.3822055138, 0.3842940685, 0.3863826232, 0.3884711779, 0.3905597327, 0.3926482874, 0.3947368421, 0.3968253968, 0.3989139515, 0.4010025063, 0.403091061, 0.4051796157, 0.4072681704, 0.4093567251, 0.4114452799, 0.4135338346, 0.4156223893, 0.417710944, 0.4197994987, 0.4218880535, 0.4239766082, 0.4260651629, 0.4281537176, 0.4302422723, 0.4323308271, 0.4344193818, 0.4365079365, 0.4385964912, 0.4406850459, 0.4427736007, 0.4448621554, 0.4469507101, 0.4490392648, 0.4511278195, 0.4532163743, 0.455304929, 0.4573934837, 0.4594820384, 0.4615705931, 0.4636591479, 0.4657477026, 0.4678362573, 0.469924812, 0.4720133668, 0.4741019215, 0.4761904762, 0.4782790309, 0.4803675856, 0.4824561404, 0.4845446951, 0.4866332498, 0.4887218045, 0.4908103592, 0.492898914, 0.4949874687, 0.4970760234, 0.4991645781, 0.5012531328, 0.5033416876, 0.5054302423, 0.507518797, 0.5096073517, 0.5116959064, 0.5137844612, 0.5158730159, 0.5179615706, 0.5200501253, 0.52213868, 0.5242272348, 0.5263157895, 0.5284043442, 0.5304928989, 0.5325814536, 0.5346700084, 0.5367585631, 0.5388471178, 0.5409356725, 0.5430242272, 0.545112782, 0.5472013367, 0.5492898914, 0.5513784461, 0.5534670008, 0.5555555556, 0.5576441103, 0.559732665, 0.5618212197, 0.5639097744, 0.5659983292, 0.5680868839, 0.5701754386, 0.5722639933, 0.574352548, 0.5764411028, 0.5785296575, 0.5806182122, 0.5827067669, 0.5847953216, 0.5868838764, 0.5889724311, 0.5910609858, 0.5931495405, 0.5952380952, 0.59732665, 0.5994152047, 0.6015037594, 0.6035923141, 0.6056808688, 0.6077694236, 0.6098579783, 0.611946533, 0.6140350877, 0.6161236424, 0.6182121972, 0.6203007519, 0.6223893066, 0.6244778613, 0.626566416, 0.6286549708, 0.6307435255, 0.6328320802, 0.6349206349, 0.6370091896, 0.6390977444, 0.6411862991, 0.6432748538, 0.6453634085, 0.6474519632, 0.649540518, 0.6516290727, 0.6537176274, 0.6558061821, 0.6578947368, 0.6599832916, 0.6620718463, 0.664160401, 0.6662489557, 0.6683375104, 0.6704260652, 0.6725146199, 0.6746031746, 0.6766917293, 0.678780284, 0.6808688388, 0.6829573935, 0.6850459482, 0.6871345029, 0.6892230576, 0.6913116124, 0.6934001671, 0.6954887218, 0.6975772765, 0.6996658312, 0.701754386, 0.7038429407, 0.7059314954, 0.7080200501, 0.7101086048, 0.7121971596, 0.7142857143, 0.716374269, 0.7184628237, 0.7205513784, 0.7226399332, 0.7247284879, 0.7268170426, 0.7289055973, 0.730994152, 0.7330827068, 0.7351712615, 0.7372598162, 0.7393483709, 0.7414369256, 0.7435254804, 0.7456140351, 0.7477025898, 0.7497911445, 0.7518796992, 0.753968254, 0.7560568087, 0.7581453634, 0.7602339181, 0.7623224728, 0.7644110276, 0.7664995823, 0.768588137, 0.7706766917, 0.7727652464, 0.7748538012, 0.7769423559, 0.7790309106, 0.7811194653, 0.7832080201, 0.7852965748, 0.7873851295, 0.7894736842, 0.7915622389, 0.7936507937, 0.7957393484, 0.7978279031, 0.7999164578, 0.8020050125, 0.8040935673, 0.806182122, 0.8082706767, 0.8103592314, 0.8124477861, 0.8145363409, 0.8166248956, 0.8187134503, 0.820802005, 0.8228905597, 0.8249791145, 0.8270676692, 0.8291562239, 0.8312447786, 0.8333333333], color=C['danger'], lw=2.6, alpha=a2)
+    ax.text(4.95, 833.3333333 / 1000.0 + 0.2, 'daily quota: \\$833\n500 days', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold', alpha=a2)
     a3 = 1.0 if step >= 3 else 0.0
-    ax.plot(q / 1e6, [life_cost(v) / 1e3 for v in q], color=C["memory"], lw=2.6, alpha=a3)
-    ax.text(2.3, 3.7, f"lifetime budget:\n\\${val('ext_life')}", ha="right", va="center", fontsize=11,
-            color=C["memory"], fontweight="bold", alpha=a3)
+    ax.plot(q / 1000000.0, [0.0, 0.00208855472, 0.00417710944, 0.00626566416, 0.008354218881, 0.0104427736, 0.01253132832, 0.01461988304, 0.01691729323, 0.02944862155, 0.04197994987, 0.0545112782, 0.06704260652, 0.07957393484, 0.09210526316, 0.1046365915, 0.1171679198, 0.1296992481, 0.1422305764, 0.1547619048, 0.1672932331, 0.1798245614, 0.1923558897, 0.204887218, 0.2174185464, 0.2299498747, 0.242481203, 0.2550125313, 0.2675438596, 0.280075188, 0.2926065163, 0.3051378446, 0.3176691729, 0.3302005013, 0.3427318296, 0.3552631579, 0.3677944862, 0.3803258145, 0.3928571429, 0.4053884712, 0.4179197995, 0.4304511278, 0.4429824561, 0.4555137845, 0.4680451128, 0.4805764411, 0.4931077694, 0.5056390977, 0.5181704261, 0.5307017544, 0.5432330827, 0.555764411, 0.5682957393, 0.5808270677, 0.593358396, 0.6058897243, 0.6184210526, 0.630952381, 0.6434837093, 0.6560150376, 0.6685463659, 0.6810776942, 0.6936090226, 0.7061403509, 0.7186716792, 0.7312030075, 0.7437343358, 0.7562656642, 0.7687969925, 0.7813283208, 0.7938596491, 0.8063909774, 0.8189223058, 0.8314536341, 0.8439849624, 0.8565162907, 0.869047619, 0.8815789474, 0.8941102757, 0.906641604, 0.9191729323, 0.9317042607, 0.944235589, 0.9567669173, 0.9692982456, 0.9818295739, 0.9943609023, 1.006892231, 1.019423559, 1.031954887, 1.044486216, 1.057017544, 1.069548872, 1.082080201, 1.094611529, 1.107142857, 1.119674185, 1.132205514, 1.144736842, 1.15726817, 1.169799499, 1.182330827, 1.194862155, 1.207393484, 1.219924812, 1.23245614, 1.244987469, 1.257518797, 1.270050125, 1.282581454, 1.295112782, 1.30764411, 1.320175439, 1.332706767, 1.345238095, 1.357769424, 1.370300752, 1.38283208, 1.395363409, 1.407894737, 1.420426065, 1.432957393, 1.445488722, 1.45802005, 1.470551378, 1.483082707, 1.495614035, 1.508145363, 1.520676692, 1.53320802, 1.545739348, 1.558270677, 1.570802005, 1.583333333, 1.595864662, 1.60839599, 1.620927318, 1.633458647, 1.645989975, 1.658521303, 1.671052632, 1.68358396, 1.696115288, 1.708646617, 1.721177945, 1.733709273, 1.746240602, 1.75877193, 1.771303258, 1.783834586, 1.796365915, 1.808897243, 1.821428571, 1.8339599, 1.846491228, 1.859022556, 1.871553885, 1.884085213, 1.896616541, 1.90914787, 1.921679198, 1.934210526, 1.946741855, 1.959273183, 1.971804511, 1.98433584, 1.996867168, 2.009398496, 2.021929825, 2.034461153, 2.046992481, 2.05952381, 2.072055138, 2.084586466, 2.097117794, 2.109649123, 2.122180451, 2.134711779, 2.147243108, 2.159774436, 2.172305764, 2.184837093, 2.197368421, 2.209899749, 2.222431078, 2.234962406, 2.247493734, 2.260025063, 2.272556391, 2.285087719, 2.297619048, 2.310150376, 2.322681704, 2.335213033, 2.347744361, 2.360275689, 2.372807018, 2.385338346, 2.397869674, 2.410401003, 2.422932331, 2.435463659, 2.447994987, 2.460526316, 2.473057644, 2.485588972, 2.498120301, 2.510651629, 2.523182957, 2.535714286, 2.548245614, 2.560776942, 2.573308271, 2.585839599, 2.598370927, 2.610902256, 2.623433584, 2.635964912, 2.648496241, 2.661027569, 2.673558897, 2.686090226, 2.698621554, 2.711152882, 2.723684211, 2.736215539, 2.748746867, 2.761278195, 2.773809524, 2.786340852, 2.79887218, 2.811403509, 2.823934837, 2.836466165, 2.848997494, 2.861528822, 2.87406015, 2.886591479, 2.899122807, 2.911654135, 2.924185464, 2.936716792, 2.94924812, 2.961779449, 2.974310777, 2.986842105, 2.999373434, 3.011904762, 3.02443609, 3.036967419, 3.049498747, 3.062030075, 3.074561404, 3.087092732, 3.09962406, 3.112155388, 3.124686717, 3.137218045, 3.149749373, 3.162280702, 3.17481203, 3.187343358, 3.199874687, 3.212406015, 3.224937343, 3.237468672, 3.25, 3.262531328, 3.275062657, 3.287593985, 3.300125313, 3.312656642, 3.32518797, 3.337719298, 3.350250627, 3.362781955, 3.375313283, 3.387844612, 3.40037594, 3.412907268, 3.425438596, 3.437969925, 3.450501253, 3.463032581, 3.47556391, 3.488095238, 3.500626566, 3.513157895, 3.525689223, 3.538220551, 3.55075188, 3.563283208, 3.575814536, 3.588345865, 3.600877193, 3.613408521, 3.62593985, 3.638471178, 3.651002506, 3.663533835, 3.676065163, 3.688596491, 3.70112782, 3.713659148, 3.726190476, 3.738721805, 3.751253133, 3.763784461, 3.776315789, 3.788847118, 3.801378446, 3.813909774, 3.826441103, 3.838972431, 3.851503759, 3.864035088, 3.876566416, 3.889097744, 3.901629073, 3.914160401, 3.926691729, 3.939223058, 3.951754386, 3.964285714, 3.976817043, 3.989348371, 4.001879699, 4.014411028, 4.026942356, 4.039473684, 4.052005013, 4.064536341, 4.077067669, 4.089598997, 4.102130326, 4.114661654, 4.127192982, 4.139724311, 4.152255639, 4.164786967, 4.177318296, 4.189849624, 4.202380952, 4.214912281, 4.227443609, 4.239974937, 4.252506266, 4.265037594, 4.277568922, 4.290100251, 4.302631579, 4.315162907, 4.327694236, 4.340225564, 4.352756892, 4.365288221, 4.377819549, 4.390350877, 4.402882206, 4.415413534, 4.427944862, 4.44047619, 4.453007519, 4.465538847, 4.478070175, 4.490601504, 4.503132832, 4.51566416, 4.528195489, 4.540726817, 4.553258145, 4.565789474, 4.578320802, 4.59085213, 4.603383459, 4.615914787, 4.628446115, 4.640977444, 4.653508772, 4.6660401, 4.678571429, 4.691102757, 4.703634085, 4.716165414, 4.728696742, 4.74122807, 4.753759398, 4.766290727, 4.778822055, 4.791353383, 4.803884712, 4.81641604, 4.828947368, 4.841478697, 4.854010025, 4.866541353, 4.879072682, 4.89160401, 4.904135338, 4.916666667], color=C['memory'], lw=2.6, alpha=a3)
+    ax.text(2.3, 3.7, 'lifetime budget:\n\\$4,917', ha='right', va='center', fontsize=11, color=C['memory'], fontweight='bold', alpha=a3)
     ax.set_xlim(0, 5)
     ax.set_ylim(0, 6.2)
-    ax.set_xlabel("Queries collected (millions)")
+    ax.set_xlabel('Queries collected (millions)')
     ax.set_ylabel("Attacker's bill (\\$K)")
     sp.save(fig, out / path)
-
-
 for k in (1, 2, 3):
-    bill(f"bill_step{k}.svg", k)
+    bill(f'bill_step{k}.svg', k)
 
-
-# ------------------------------------------------------------ bilevel poisoning loop
 def bilevel(path):
-    W, H = 5.8, 2.45
+    W, H = (5.8, 2.45)
     fig, ax = canvas(W, H)
-    box(ax, 0.05, 1.45, 2.3, 0.9, "Attacker (outer loop)\nchoose poison P to raise\ntarget loss",
-        V2["risk_l"], V2["risk"], fs=10.5)
-    # data grid
-    gx, gy = 0.35, 0.15
+    box(ax, 0.05, 1.45, 2.3, 0.9, 'Attacker (outer loop)\nchoose poison P to raise\ntarget loss', V2['risk_l'], V2['risk'], fs=10.5)
+    gx, gy = (0.35, 0.15)
     for r in range(3):
         for c in range(6):
             red = (r, c) in ((0, 1), (1, 4), (2, 2))
-            ax.add_patch(Rectangle((gx + c * 0.24, gy + r * 0.24), 0.2, 0.2,
-                                   fc=V2["risk"] if red else V2["ok_l"],
-                                   ec=V2["risk"] if red else V2["ok"], lw=1))
-    ax.text(gx + 0.72, gy + 0.85, "training data: clean S plus poison P", ha="center", fontsize=10.5,
-            color=V2["text"], fontweight="bold")
-    arrow(ax, (1.2, 1.45), (1.05, 1.1), V2["risk"], lw=2)
-    ax.text(1.28, 1.27, "inject", fontsize=10.5, color=V2["risk"], fontweight="bold")
-    box(ax, 2.68, 0.15, 1.8, 0.9, "Defender (inner loop)\ntrains: minimize\ntraining loss",
-        V2["c1_l"], V2["c1"], fs=10.5)
-    arrow(ax, (1.85, 0.5), (2.68, 0.5), V2["c1"], lw=2)
-    box(ax, 4.6, 0.15, 1.15, 0.9, "Trained model\nscored on\ntarget loss", V2["frame_l"], V2["frame"], fs=10.5)
-    arrow(ax, (4.48, 0.6), (4.6, 0.6), V2["c1"], lw=2)
-    ax.add_patch(FancyArrowPatch((5.2, 1.05), (2.35, 1.95), connectionstyle="arc3,rad=0.35",
-                                 arrowstyle="-|>", mutation_scale=13, color=V2["risk"], lw=2))
-    ax.text(3.75, 1.4, "feedback: did the\nmodel learn it?", ha="center", fontsize=10.5,
-            color=V2["risk"], fontweight="bold")
+            ax.add_patch(Rectangle((gx + c * 0.24, gy + r * 0.24), 0.2, 0.2, fc=V2['risk'] if red else V2['ok_l'], ec=V2['risk'] if red else V2['ok'], lw=1))
+    ax.text(gx + 0.72, gy + 0.85, 'training data: clean S plus poison P', ha='center', fontsize=10.5, color=V2['text'], fontweight='bold')
+    arrow(ax, (1.2, 1.45), (1.05, 1.1), V2['risk'], lw=2)
+    ax.text(1.28, 1.27, 'inject', fontsize=10.5, color=V2['risk'], fontweight='bold')
+    box(ax, 2.68, 0.15, 1.8, 0.9, 'Defender (inner loop)\ntrains: minimize\ntraining loss', V2['c1_l'], V2['c1'], fs=10.5)
+    arrow(ax, (1.85, 0.5), (2.68, 0.5), V2['c1'], lw=2)
+    box(ax, 4.6, 0.15, 1.15, 0.9, 'Trained model\nscored on\ntarget loss', V2['frame_l'], V2['frame'], fs=10.5)
+    arrow(ax, (4.48, 0.6), (4.6, 0.6), V2['c1'], lw=2)
+    ax.add_patch(FancyArrowPatch((5.2, 1.05), (2.35, 1.95), connectionstyle='arc3,rad=0.35', arrowstyle='-|>', mutation_scale=13, color=V2['risk'], lw=2))
+    ax.text(3.75, 1.4, 'feedback: did the\nmodel learn it?', ha='center', fontsize=10.5, color=V2['risk'], fontweight='bold')
     save(fig, path)
+bilevel('bilevel.svg')
 
-
-bilevel("bilevel.svg")
-
-
-# ------------------------------------------------------------ Nightshade grid, relabeled
 def nightshade(path):
     """The paper's grid: the first four prompts, four doses, relabeled at slide size."""
     from PIL import Image
-    im = Image.open(out / "poisoning_example.png").convert("RGB")
+    im = Image.open(out / 'poisoning_example.png').convert('RGB')
     crop = np.asarray(im.crop((96, 22, 96 + 4 * 72, 313)))
     fig = plt.figure(figsize=(3.7, 3.0))
     ax = fig.add_axes([0.2, 0.11, 0.79, 0.79])
-    ax.imshow(crop, aspect="auto")
-    ax.axis("off")
-    for i, r in enumerate(["clean", val("ns_low"), val("ns_mid"), val("ns_high")]):
-        fig.text(0.19, 0.11 + 0.79 * (1 - (i + 0.5) / 4), r, ha="right", va="center", fontsize=13,
-                 fontweight="bold", color=C["danger"] if i else C["text"])
-    fig.text(0.0, 0.5, "poison images", ha="left", va="center", fontsize=11, color=C["neutral"],
-             rotation=90)
-    for j, (a_, b_) in enumerate(zip(["Dog", "Car", "Handbag", "Hat"], ["Cat", "Cow", "Toaster", "Cake"])):
+    ax.imshow(crop, aspect='auto')
+    ax.axis('off')
+    for i, r in enumerate(['clean', '50', '100', '300']):
+        fig.text(0.19, 0.11 + 0.79 * (1 - (i + 0.5) / 4), r, ha='right', va='center', fontsize=13, fontweight='bold', color=C['danger'] if i else C['text'])
+    fig.text(0.0, 0.5, 'poison images', ha='left', va='center', fontsize=11, color=C['neutral'], rotation=90)
+    for j, (a_, b_) in enumerate(zip(['Dog', 'Car', 'Handbag', 'Hat'], ['Cat', 'Cow', 'Toaster', 'Cake'])):
         x = 0.2 + 0.79 * (j + 0.5) / 4
-        fig.text(x, 0.91, a_, ha="center", va="bottom", fontsize=12, fontweight="bold")
-        fig.text(x, 0.10, b_, ha="center", va="top", fontsize=12, color=C["danger"], fontweight="bold")
+        fig.text(x, 0.91, a_, ha='center', va='bottom', fontsize=12, fontweight='bold')
+        fig.text(x, 0.1, b_, ha='center', va='top', fontsize=12, color=C['danger'], fontweight='bold')
     sp.save(fig, out / path)
+nightshade('nightshade.svg')
 
-
-nightshade("nightshade.svg")
-
-
-# ------------------------------------------------------------ Stuxnet chain and its ML analog
 def supply(path, step):
-    W, H = 5.8, 2.2
+    W, H = (5.8, 2.2)
     fig, ax = canvas(W, H)
-    rows = [("Stuxnet, 2010", ["USB media", "Windows\nhosts", "Siemens\nStep7", "PLC logic"],
-             "operators\nsee normal", 1.25, 1.0),
-            ("ML supply chain", ["public\nartifact", "build\nhost", "training\njob", "model\nartifact"],
-             "health checks\npass", 0.15, 1.0 if step >= 2 else 0.0)]
+    rows = [('Stuxnet, 2010', ['USB media', 'Windows\nhosts', 'Siemens\nStep7', 'PLC logic'], 'operators\nsee normal', 1.25, 1.0), ('ML supply chain', ['public\nartifact', 'build\nhost', 'training\njob', 'model\nartifact'], 'health checks\npass', 0.15, 1.0 if step >= 2 else 0.0)]
     for title, stages, mon, y, a in rows:
-        ax.text(0.02, y + 0.78, title, fontsize=11, fontweight="bold", color=V2["text"], alpha=a)
+        ax.text(0.02, y + 0.78, title, fontsize=11, fontweight='bold', color=V2['text'], alpha=a)
         for i, s in enumerate(stages):
             x = 0.05 + i * 1.12
-            box(ax, x, y, 0.92, 0.65, s, V2["frame_l"], V2["frame"], fs=10.5, alpha=a)
-            ax.add_patch(plt.Circle((x + 0.8, y + 0.53), 0.06, fc=V2["risk"], alpha=a, zorder=5))
+            box(ax, x, y, 0.92, 0.65, s, V2['frame_l'], V2['frame'], fs=10.5, alpha=a)
+            ax.add_patch(plt.Circle((x + 0.8, y + 0.53), 0.06, fc=V2['risk'], alpha=a, zorder=5))
             if i < 3:
-                arrow(ax, (x + 0.92, y + 0.33), (x + 1.12, y + 0.33), V2["risk"], alpha=a)
-        box(ax, 4.62, y, 1.15, 0.65, mon, "white", V2["gray"], fs=9.5, ls="--", alpha=a)
-        arrow(ax, (4.53, y + 0.33), (4.65, y + 0.33), V2["gray"], alpha=a)
+                arrow(ax, (x + 0.92, y + 0.33), (x + 1.12, y + 0.33), V2['risk'], alpha=a)
+        box(ax, 4.62, y, 1.15, 0.65, mon, 'white', V2['gray'], fs=9.5, ls='--', alpha=a)
+        arrow(ax, (4.53, y + 0.33), (4.65, y + 0.33), V2['gray'], alpha=a)
     save(fig, path)
-
-
-supply("supply_step1.svg", 1)
-supply("supply_step2.svg", 2)
-
-
-# ------------------------------------------------------------ breakdown point of the mean
+supply('supply_step1.svg', 1)
+supply('supply_step2.svg', 2)
 rng = np.random.default_rng(13)
-n_workers = int(num("bd_workers"))
-honest = rng.normal(num("bd_honest"), 0.1, int(num("bd_honest_n")))  # spread around the honest value: drawing only
-vs = np.logspace(0, math.log10(num("bd_attack")), 200)
+n_workers = int(64.0)
+honest = rng.normal(1.0, 0.1, int(63.0))
+vs = np.logspace(0, math.log10(10000.0), 200)
 means = [(honest.sum() + v) / n_workers for v in vs]
 meds = [np.median(np.append(honest, v)) for v in vs]
 fig, ax = plt.subplots(figsize=(3.6, 2.2))
-ax.plot(vs, means, color=C["danger"], lw=2.6)
-ax.plot(vs, meds, color=C["data"], lw=2.6)
-ax.text(1.3, 120, f"mean of {val('bd_workers')}\n(what AllReduce\naverages)", color=C["danger"], fontsize=11,
-        fontweight="bold", ha="left", va="top")
-ax.text(1.2e3, 0.55, f"median of {val('bd_workers')}", color=C["data"], fontsize=11, fontweight="bold", ha="center")
-ax.set_xscale("log")
-ax.set_yscale("log")
+ax.plot(vs, means, color=C['danger'], lw=2.6)
+ax.plot(vs, meds, color=C['data'], lw=2.6)
+ax.text(1.3, 120, 'mean of 64\n(what AllReduce\naverages)', color=C['danger'], fontsize=11, fontweight='bold', ha='left', va='top')
+ax.text(1200.0, 0.55, 'median of 64', color=C['data'], fontsize=11, fontweight='bold', ha='center')
+ax.set_xscale('log')
+ax.set_yscale('log')
 ax.set_ylim(0.4, 300)
-ax.set_xlabel("Value one worker sends")
-ax.set_ylabel("Aggregate")
+ax.set_xlabel('Value one worker sends')
+ax.set_ylabel('Aggregate')
 ax.set_xticks([1, 10, 100, 1000, 10000])
-ax.set_xticklabels(["1", "10", "100", "1K", "10K"])
+ax.set_xticklabels(['1', '10', '100', '1K', '10K'])
 ax.set_yticks([1, 10, 100])
-ax.set_yticklabels(["1", "10", "100"])
+ax.set_yticklabels(['1', '10', '100'])
 ax.minorticks_off()
-sp.save(fig, out / "breakdown.svg")
-
-# ------------------------------------------------------------ gather traffic, N_DP = 64
-sp.hbars(out / "gather_traffic.svg", [
-    ("Ring AllReduce (sum)", calcs.FLEET.allreduce_factor, "memory", f"{val('ring')} S"),
-    ("Gather every gradient", num("gather"), "danger", f"{val('gather')} S  ({val('gather_ratio')} times)"),
-], "", log=False, size=(5.8, 1.0), xlabel="Bytes each worker receives per step, S = gradient size (derived)")
-
-# ------------------------------------------------------------ enclave page cache
+sp.save(fig, out / 'breakdown.svg')
+sp.hbars(out / 'gather_traffic.svg', [('Ring AllReduce (sum)', 1.96875, 'memory', '1.97 S'), ('Gather every gradient', 63.0, 'danger', '63 S  (32 times)')], '', log=False, size=(5.8, 1.0), xlabel='Bytes each worker receives per step, S = gradient size (derived)')
 fig, ax = plt.subplots(figsize=(3.0, 2.0))
-labels = ["ResNet-18\nINT8", "ResNet-50\nINT8", "ResNet-50\nFP32"]
-keys = ["r18_int8_mb", "r50_int8_mb", "r50_fp32_mb"]
-vals = [num(k) for k in keys]
-ax.bar(range(3), vals, color=[C["memory"], C["memory"], C["compute"]], width=0.62)
+labels = ['ResNet-18\nINT8', 'ResNet-50\nINT8', 'ResNet-50\nFP32']
+keys = ['r18_int8_mb', 'r50_int8_mb', 'r50_fp32_mb']
+vals = [_NUMS[k] for k in keys]
+ax.bar(range(3), vals, color=[C['memory'], C['memory'], C['compute']], width=0.62)
 for i, k in enumerate(keys):
-    ax.text(i, vals[i] + 3, f"{val(k)} MB", ha="center", fontsize=11, fontweight="bold")
-ax.axhline(num("epc_mb"), color=C["danger"], ls="--", lw=1.8)
-ax.text(2.4, num("epc_mb") + 3.8, f"EPC {val('epc_mib')} MiB = {val('epc_mb')} MB", ha="right", va="bottom", fontsize=11, color=C["danger"],
-        fontweight="bold")
+    ax.text(i, vals[i] + 3, f"{ {'r18_int8_mb': '11.7', 'r50_int8_mb': '25.6', 'r50_fp32_mb': '102.2'}[k]} MB", ha='center', fontsize=11, fontweight='bold')
+ax.axhline(134.2, color=C['danger'], ls='--', lw=1.8)
+ax.text(2.4, 134.2 + 3.8, 'EPC 128 MiB = 134.2 MB', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold')
 ax.set_xticks(range(3))
 ax.set_xticklabels(labels, fontsize=11)
 ax.set_ylim(0, 165)
-ax.set_ylabel("Weights only (MB)")
-sp.save(fig, out / "epc.svg")
-
-# ------------------------------------------------------------ trusted compute latency
+ax.set_ylabel('Weights only (MB)')
+sp.save(fig, out / 'epc.svg')
 fig, ax = plt.subplots(figsize=(3.0, 2.0))
-labels = ["Plaintext", "AES", "FHE"]
-vals = [num("fhe_base_ms"), num("fhe_aes_total_ms"), num("fhe_s") * 1e3]
-ax.bar(range(3), vals, color=[C["neutral"], C["neutral"], C["danger"]], width=0.62)
-for i, (v, t) in enumerate(zip(vals, [f"{val('fhe_base_ms')} ms", f"{val('fhe_aes_total_ms')} ms",
-                                      f"{val('fhe_s')} s"])):
-    ax.text(i, v * 1.4, t, ha="center", fontsize=11, fontweight="bold")
-ax.set_yscale("log")
-ax.set_ylim(5, 2e6)
-ax.set_yticks([10, 1e3, 1e5])
-ax.set_yticklabels(["10 ms", "1 s", "100 s"])
+labels = ['Plaintext', 'AES', 'FHE']
+vals = [20.0, 20.5, 200.0 * 1000.0]
+ax.bar(range(3), vals, color=[C['neutral'], C['neutral'], C['danger']], width=0.62)
+for i, (v, t) in enumerate(zip(vals, ['20 ms', '20.5 ms', '200 s'])):
+    ax.text(i, v * 1.4, t, ha='center', fontsize=11, fontweight='bold')
+ax.set_yscale('log')
+ax.set_ylim(5, 2000000.0)
+ax.set_yticks([10, 1000.0, 100000.0])
+ax.set_yticklabels(['10 ms', '1 s', '100 s'])
 ax.minorticks_off()
 ax.set_xticks(range(3))
 ax.set_xticklabels(labels, fontsize=11)
-ax.set_ylabel("Inference latency")
-sp.save(fig, out / "fhe.svg")
-
-# ------------------------------------------------------------ GPT-2 extraction funnel
-sp.hbars_steps(str(out / "gpt2_funnel"), [
-    ("Generated", num("gpt2_gen"), "neutral", val("gpt2_gen")),
-    ("Inspected", num("gpt2_insp"), "compute", val("gpt2_insp")),
-    ("Memorized", num("gpt2_mem"), "danger", val("gpt2_mem")),
-], "", log=True, size=(3.3, 1.2), xlabel="GPT-2 samples (log scale)")
-
-
-# ------------------------------------------------------------ audit lower bound, DP ceiling
-AUDIT = calcs.AUDIT
+ax.set_ylabel('Inference latency')
+sp.save(fig, out / 'fhe.svg')
+sp.hbars_steps(str(out / 'gpt2_funnel'), [('Generated', 600000.0, 'neutral', '600,000'), ('Inspected', 1800.0, 'compute', '1,800'), ('Memorized', 604.0, 'danger', '604')], '', log=True, size=(3.3, 1.2), xlabel='GPT-2 samples (log scale)')
 fpr = np.linspace(0, 1, 301)
-ceil = np.array([AUDIT.ceiling(f) for f in fpr])
-aud = np.array([AUDIT.audit(f) for f in fpr])
+ceil = np.array([0.0, 0.009060939428, 0.01812187886, 0.02718281828, 0.03624375771, 0.04530469714, 0.05436563657, 0.063426576, 0.07248751543, 0.08154845485, 0.09060939428, 0.09967033371, 0.1087312731, 0.1177922126, 0.126853152, 0.1359140914, 0.1449750309, 0.1540359703, 0.1630969097, 0.1721578491, 0.1812187886, 0.190279728, 0.1993406674, 0.2084016068, 0.2174625463, 0.2265234857, 0.2355844251, 0.2446453646, 0.253706304, 0.2627672434, 0.2718281828, 0.2808891223, 0.2899500617, 0.2990110011, 0.3080719406, 0.31713288, 0.3261938194, 0.3352547588, 0.3443156983, 0.3533766377, 0.3624375771, 0.3714985166, 0.380559456, 0.3896203954, 0.3986813348, 0.4077422743, 0.4168032137, 0.4258641531, 0.4349250926, 0.443986032, 0.4530469714, 0.4621079108, 0.4711688503, 0.4802297897, 0.4892907291, 0.4983516686, 0.507412608, 0.5164735474, 0.5255344868, 0.5345954263, 0.5436563657, 0.5527173051, 0.5617782445, 0.570839184, 0.5799001234, 0.5889610628, 0.5980220023, 0.6070829417, 0.6161438811, 0.6252048205, 0.63426576, 0.6433266994, 0.6523876388, 0.6614485783, 0.6705095177, 0.6795704571, 0.6886313965, 0.697692336, 0.7067532754, 0.7158142148, 0.7248751543, 0.7314480079, 0.7326742727, 0.7339005376, 0.7351268024, 0.7363530672, 0.737579332, 0.7388055968, 0.7400318616, 0.7412581264, 0.7424843912, 0.743710656, 0.7449369208, 0.7461631856, 0.7473894504, 0.7486157152, 0.74984198, 0.7510682448, 0.7522945096, 0.7535207744, 0.7547470392, 0.755973304, 0.7571995688, 0.7584258336, 0.7596520984, 0.7608783632, 0.762104628, 0.7633308928, 0.7645571577, 0.7657834225, 0.7670096873, 0.7682359521, 0.7694622169, 0.7706884817, 0.7719147465, 0.7731410113, 0.7743672761, 0.7755935409, 0.7768198057, 0.7780460705, 0.7792723353, 0.7804986001, 0.7817248649, 0.7829511297, 0.7841773945, 0.7854036593, 0.7866299241, 0.7878561889, 0.7890824537, 0.7903087185, 0.7915349833, 0.7927612481, 0.7939875129, 0.7952137777, 0.7964400426, 0.7976663074, 0.7988925722, 0.800118837, 0.8013451018, 0.8025713666, 0.8037976314, 0.8050238962, 0.806250161, 0.8074764258, 0.8087026906, 0.8099289554, 0.8111552202, 0.812381485, 0.8136077498, 0.8148340146, 0.8160602794, 0.8172865442, 0.818512809, 0.8197390738, 0.8209653386, 0.8221916034, 0.8234178682, 0.824644133, 0.8258703978, 0.8270966626, 0.8283229275, 0.8295491923, 0.8307754571, 0.8320017219, 0.8332279867, 0.8344542515, 0.8356805163, 0.8369067811, 0.8381330459, 0.8393593107, 0.8405855755, 0.8418118403, 0.8430381051, 0.8442643699, 0.8454906347, 0.8467168995, 0.8479431643, 0.8491694291, 0.8503956939, 0.8516219587, 0.8528482235, 0.8540744883, 0.8553007531, 0.8565270179, 0.8577532827, 0.8589795476, 0.8602058124, 0.8614320772, 0.862658342, 0.8638846068, 0.8651108716, 0.8663371364, 0.8675634012, 0.868789666, 0.8700159308, 0.8712421956, 0.8724684604, 0.8736947252, 0.87492099, 0.8761472548, 0.8773735196, 0.8785997844, 0.8798260492, 0.881052314, 0.8822785788, 0.8835048436, 0.8847311084, 0.8859573732, 0.887183638, 0.8884099028, 0.8896361676, 0.8908624325, 0.8920886973, 0.8933149621, 0.8945412269, 0.8957674917, 0.8969937565, 0.8982200213, 0.8994462861, 0.9006725509, 0.9018988157, 0.9031250805, 0.9043513453, 0.9055776101, 0.9068038749, 0.9080301397, 0.9092564045, 0.9104826693, 0.9117089341, 0.9129351989, 0.9141614637, 0.9153877285, 0.9166139933, 0.9178402581, 0.9190665229, 0.9202927877, 0.9215190526, 0.9227453174, 0.9239715822, 0.925197847, 0.9264241118, 0.9276503766, 0.9288766414, 0.9301029062, 0.931329171, 0.9325554358, 0.9337817006, 0.9350079654, 0.9362342302, 0.937460495, 0.9386867598, 0.9399130246, 0.9411392894, 0.9423655542, 0.943591819, 0.9448180838, 0.9460443486, 0.9472706134, 0.9484968782, 0.949723143, 0.9509494078, 0.9521756726, 0.9534019375, 0.9546282023, 0.9558544671, 0.9570807319, 0.9583069967, 0.9595332615, 0.9607595263, 0.9619857911, 0.9632120559, 0.9644383207, 0.9656645855, 0.9668908503, 0.9681171151, 0.9693433799, 0.9705696447, 0.9717959095, 0.9730221743, 0.9742484391, 0.9754747039, 0.9767009687, 0.9779272335, 0.9791534983, 0.9803797631, 0.9816060279, 0.9828322927, 0.9840585575, 0.9852848224, 0.9865110872, 0.987737352, 0.9889636168, 0.9901898816, 0.9914161464, 0.9926424112, 0.993868676, 0.9950949408, 0.9963212056, 0.9975474704, 0.9987737352, 1.0])
+aud = np.array([0.0, 0.005326666667, 0.01064, 0.01594, 0.02122666667, 0.0265, 0.03176, 0.03700666667, 0.04224, 0.04746, 0.05266666667, 0.05786, 0.06304, 0.06820666667, 0.07336, 0.0785, 0.08362666667, 0.08874, 0.09384, 0.09892666667, 0.104, 0.10906, 0.1141066667, 0.11914, 0.12416, 0.1291666667, 0.13416, 0.13914, 0.1441066667, 0.14906, 0.154, 0.1589266667, 0.16384, 0.16874, 0.1736266667, 0.1785, 0.18336, 0.1882066667, 0.19304, 0.19786, 0.2026666667, 0.20746, 0.21224, 0.2170066667, 0.22176, 0.2265, 0.2312266667, 0.23594, 0.24064, 0.2453266667, 0.25, 0.25466, 0.2593066667, 0.26394, 0.26856, 0.2731666667, 0.27776, 0.28234, 0.2869066667, 0.29146, 0.296, 0.3005266667, 0.30504, 0.30954, 0.3140266667, 0.3185, 0.32296, 0.3274066667, 0.33184, 0.33626, 0.3406666667, 0.34506, 0.34944, 0.3538066667, 0.35816, 0.3625, 0.3668266667, 0.37114, 0.37544, 0.3797266667, 0.384, 0.38826, 0.3925066667, 0.39674, 0.40096, 0.4051666667, 0.40936, 0.41354, 0.4177066667, 0.42186, 0.426, 0.4301266667, 0.43424, 0.43834, 0.4424266667, 0.4465, 0.45056, 0.4546066667, 0.45864, 0.46266, 0.4666666667, 0.47066, 0.47464, 0.4786066667, 0.48256, 0.4865, 0.4904266667, 0.49434, 0.49824, 0.5021266667, 0.506, 0.50986, 0.5137066667, 0.51754, 0.52136, 0.5251666667, 0.52896, 0.53274, 0.5365066667, 0.54026, 0.544, 0.5477266667, 0.55144, 0.55514, 0.5588266667, 0.5625, 0.56616, 0.5698066667, 0.57344, 0.57706, 0.5806666667, 0.58426, 0.58784, 0.5914066667, 0.59496, 0.5985, 0.6020266667, 0.60554, 0.60904, 0.6125266667, 0.616, 0.61946, 0.6229066667, 0.62634, 0.62976, 0.6331666667, 0.63656, 0.63994, 0.6433066667, 0.64666, 0.65, 0.6533266667, 0.65664, 0.65994, 0.6632266667, 0.6665, 0.66976, 0.6730066667, 0.67624, 0.67946, 0.6826666667, 0.68586, 0.68904, 0.6922066667, 0.69536, 0.6985, 0.7016266667, 0.70474, 0.70784, 0.7109266667, 0.714, 0.71706, 0.7201066667, 0.72314, 0.72616, 0.7291666667, 0.73216, 0.73514, 0.7381066667, 0.74106, 0.744, 0.7469266667, 0.74984, 0.75274, 0.7556266667, 0.7585, 0.76136, 0.7642066667, 0.76704, 0.76986, 0.7726666667, 0.77546, 0.77824, 0.7810066667, 0.78376, 0.7865, 0.7892266667, 0.79194, 0.79464, 0.7973266667, 0.8, 0.80266, 0.8053066667, 0.80794, 0.81056, 0.8131666667, 0.81576, 0.81834, 0.8209066667, 0.82346, 0.826, 0.8285266667, 0.83104, 0.83354, 0.8360266667, 0.8385, 0.84096, 0.8434066667, 0.84584, 0.84826, 0.8506666667, 0.85306, 0.85544, 0.8578066667, 0.86016, 0.8625, 0.8648266667, 0.86714, 0.86944, 0.8717266667, 0.874, 0.87626, 0.8785066667, 0.88074, 0.88296, 0.8851666667, 0.88736, 0.88954, 0.8917066667, 0.89386, 0.896, 0.8981266667, 0.90024, 0.90234, 0.9044266667, 0.9065, 0.90856, 0.9106066667, 0.91264, 0.91466, 0.9166666667, 0.91866, 0.92064, 0.9226066667, 0.92456, 0.9265, 0.9284266667, 0.93034, 0.93224, 0.9341266667, 0.936, 0.93786, 0.9397066667, 0.94154, 0.94336, 0.9451666667, 0.94696, 0.94874, 0.9505066667, 0.95226, 0.954, 0.9557266667, 0.95744, 0.95914, 0.9608266667, 0.9625, 0.96416, 0.9658066667, 0.96744, 0.96906, 0.9706666667, 0.97226, 0.97384, 0.9754066667, 0.97696, 0.9785, 0.9800266667, 0.98154, 0.98304, 0.9845266667, 0.986, 0.98746, 0.9889066667, 0.99034, 0.99176, 0.9931666667, 0.99456, 0.99594, 0.9973066667, 0.99866, 1.0])
 assert np.all(aud <= ceil + 1e-12)
 fig, ax = plt.subplots(figsize=(3.2, 2.4))
-ax.fill_between(fpr, aud, ceil, color=C["compute_l"], alpha=0.9)
-ax.plot(fpr, fpr, color=C["neutral"], ls="--", lw=1.4)
-ax.plot(fpr, ceil, color=C["text"], lw=2.6)
-ax.plot(fpr, aud, color=C["memory"], lw=2.6)
-ax.text(0.04, 1.0, f"DP ceiling, $\\epsilon$ = {val('audit_eps')}\n(upper bound)", fontsize=12, color=C["text"],
-        fontweight="bold", va="top", ha="left")
-ax.text(0.62, 0.55, "audit\n(lower bound)", fontsize=12, color=C["memory"], fontweight="bold", va="top")
-ax.text(0.8, 0.70, "chance", fontsize=10.5, color=C["neutral"], ha="left", va="top")
+ax.fill_between(fpr, aud, ceil, color=C['compute_l'], alpha=0.9)
+ax.plot(fpr, fpr, color=C['neutral'], ls='--', lw=1.4)
+ax.plot(fpr, ceil, color=C['text'], lw=2.6)
+ax.plot(fpr, aud, color=C['memory'], lw=2.6)
+ax.text(0.04, 1.0, 'DP ceiling, $\\epsilon$ = 1\n(upper bound)', fontsize=12, color=C['text'], fontweight='bold', va='top', ha='left')
+ax.text(0.62, 0.55, 'audit\n(lower bound)', fontsize=12, color=C['memory'], fontweight='bold', va='top')
+ax.text(0.8, 0.7, 'chance', fontsize=10.5, color=C['neutral'], ha='left', va='top')
 ax.set_xlim(0, 1)
 ax.set_ylim(0, 1.02)
 ax.set_xticks([0, 0.5, 1])
 ax.set_yticks([0, 0.5, 1])
-ax.set_xlabel("Nonmembers flagged (FPR)")
-ax.set_ylabel("Members flagged (TPR)")
-sp.save(fig, out / "audit_roc.svg")
+ax.set_xlabel('Nonmembers flagged (FPR)')
+ax.set_ylabel('Members flagged (TPR)')
+sp.save(fig, out / 'audit_roc.svg')
 
-
-# ------------------------------------------------------------ DP output densities
 def dens(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 1.8))
     x = np.linspace(-6, 7, 800)
     b = 1.0
     p = np.exp(-np.abs(x) / b) / (2 * b)
     q = np.exp(-np.abs(x - 1.0) / b) / (2 * b)
-    ax.plot(x, p, color=C["memory"], lw=2.6)
-    ax.plot(x, q, color=C["compute"], lw=2.6)
-    ax.text(-1.25, 0.42, "release on D", color=C["memory"], fontsize=12, fontweight="bold", ha="right")
-    ax.text(2.2, 0.42, "release on D\u2032\n(one person changed)", color=C["compute"], fontsize=12,
-            fontweight="bold", ha="left", va="center")
+    ax.plot(x, p, color=C['memory'], lw=2.6)
+    ax.plot(x, q, color=C['compute'], lw=2.6)
+    ax.text(-1.25, 0.42, 'release on D', color=C['memory'], fontsize=12, fontweight='bold', ha='right')
+    ax.text(2.2, 0.42, 'release on D′\n(one person changed)', color=C['compute'], fontsize=12, fontweight='bold', ha='left', va='center')
     if step >= 2:
         m = (x >= 2.0) & (x <= 4.0)
-        ax.fill_between(x[m], 0, p[m], color=C["memory_l"], alpha=0.9)
-        ax.fill_between(x[m], 0, q[m], color=C["compute_l"], alpha=0.5)
+        ax.fill_between(x[m], 0, p[m], color=C['memory_l'], alpha=0.9)
+        ax.fill_between(x[m], 0, q[m], color=C['compute_l'], alpha=0.5)
     ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
+    ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["f(D)", "f(D\u2032)"], fontsize=12)
+    ax.set_xticklabels(['f(D)', 'f(D′)'], fontsize=12)
     ax.set_xlim(-6, 7)
     ax.set_ylim(0, 0.6)
-    ax.set_xlabel("Released value (illustrative Laplace noise)")
+    ax.set_xlabel('Released value (illustrative Laplace noise)')
     sp.save(fig, out / path)
-
-
-dens("dp_step1.svg", 1)
-dens("dp_step2.svg", 2)
-
-# ------------------------------------------------------------ salary mean error
-sp.hbars(out / "salary_err.svg", [
-    (f"{val('sal_n')} people", num("sal_err"), "memory", f"\\${val('sal_err')}"),
-    (f"{val('sal_small_n')} people", num("sal_small_err"), "danger", f"\\${val('sal_small_err')}"),
-], "", log=False, size=(3.4, 1.0), xlabel="Expected error of the mean")
-
-# ------------------------------------------------------------ accountant against composition
+dens('dp_step1.svg', 1)
+dens('dp_step2.svg', 2)
+sp.hbars(out / 'salary_err.svg', [('1,000 people', 200.0, 'memory', '\\$200'), ('100 people', 2000.0, 'danger', '\\$2,000')], '', log=False, size=(3.4, 1.0), xlabel='Expected error of the mean')
 fig, ax = plt.subplots(figsize=(3.3, 1.8))
-groups = [(f"{val('ab_short')} epochs", "ab_acc_short", "ab_strong_short"),
-          (f"{val('ab_long')} epochs", "ab_acc_long", "ab_strong_long")]
+groups = [('100 epochs', 'ab_acc_short', 'ab_strong_short'), ('400 epochs', 'ab_acc_long', 'ab_strong_long')]
 for i, (g, mom_key, strong_key) in enumerate(groups):
-    mom, strong = num(mom_key), num(strong_key)
+    mom, strong = ({'100 epochs': 1.26, '400 epochs': 2.55}[g], {'100 epochs': 9.34, '400 epochs': 24.22}[g])
     y = 1 - i
-    ax.barh(y + 0.18, strong, height=0.34, color=C["neutral"])
-    ax.barh(y - 0.18, mom, height=0.34, color=C["memory"])
-    ax.text(strong + 0.4, y + 0.18, val(strong_key), va="center", fontsize=11, color=C["neutral"],
-            fontweight="bold")
-    ax.text(mom + 0.4, y - 0.18, val(mom_key), va="center", fontsize=11, color=C["memory"],
-            fontweight="bold")
-    ax.text(-0.5, y, g, ha="right", va="center", fontsize=11, fontweight="bold")
-ax.text(13.6, 1.18, "strong composition", fontsize=10.5, color=C["neutral"], va="center")
-ax.text(5.4, 0.82, "moments accountant", fontsize=10.5, color=C["memory"], va="center")
+    ax.barh(y + 0.18, strong, height=0.34, color=C['neutral'])
+    ax.barh(y - 0.18, mom, height=0.34, color=C['memory'])
+    ax.text(strong + 0.4, y + 0.18, {'100 epochs': '9.34', '400 epochs': '24.22'}[g], va='center', fontsize=11, color=C['neutral'], fontweight='bold')
+    ax.text(mom + 0.4, y - 0.18, {'100 epochs': '1.26', '400 epochs': '2.55'}[g], va='center', fontsize=11, color=C['memory'], fontweight='bold')
+    ax.text(-0.5, y, g, ha='right', va='center', fontsize=11, fontweight='bold')
+ax.text(13.6, 1.18, 'strong composition', fontsize=10.5, color=C['neutral'], va='center')
+ax.text(5.4, 0.82, 'moments accountant', fontsize=10.5, color=C['memory'], va='center')
 ax.set_yticks([])
-ax.spines["left"].set_visible(False)
+ax.spines['left'].set_visible(False)
 ax.set_xlim(0, 28)
-ax.set_xlabel("$\\epsilon$ reported for the same run")
-sp.save(fig, out / "accountant.svg")
-
-print("figures written to", out)
+ax.set_xlabel('$\\epsilon$ reported for the same run')
+sp.save(fig, out / 'accountant.svg')
+print('figures written to', out)

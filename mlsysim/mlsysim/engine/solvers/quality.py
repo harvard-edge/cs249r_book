@@ -12,7 +12,9 @@ from typing import Optional
 
 import numpy as np
 
-from ..results import ProxyDriftResult, ShiftedTestSetResult
+from ..results import (
+    ShiftedTestSetResult,
+)
 from ...physics.statistics import calc_spearman_rank_correlation
 from .base import ForwardModel
 
@@ -67,33 +69,3 @@ def season_label(start_year: int) -> str:
     return f"{start_year % 100:02d}-{(start_year + 1) % 100:02d}"
 
 
-class ProxyDriftModel(ForwardModel):
-    """
-    A proxy estimate against the reference it stands in for, season by season.
-
-    The season ratio is the summed weekly proxy over the summed weekly
-    reference. Before drift it stays near 1; the largest deviation over the
-    seasons before ``first_drift_year`` is the stable band. In the peak season
-    the model reports both peaks, their ratio, and the largest single week.
-    """
-    requires = ("rows",)
-    produces = ProxyDriftResult
-
-    def solve(self, rows, proxy_key: str, reference_key: str, first_year: int, last_year: int,
-              start_week: int, end_week: int, first_drift_year: int, peak_year: int) -> ProxyDriftResult:
-        both = [r for r in rows if r[proxy_key] is not None and r[reference_key] is not None]
-        ratios = {}
-        for y in range(first_year, last_year + 1):
-            ws = season_weeks(both, y, start_week, end_week)
-            ratios[season_label(y)] = sum(r[proxy_key] for r in ws) / sum(r[reference_key] for r in ws)
-        stable = [ratios[season_label(y)] for y in range(first_year, first_drift_year)]
-        peak = season_weeks(both, peak_year, start_week, end_week)
-        p_proxy = max(r[proxy_key] for r in peak)
-        p_ref = max(r[reference_key] for r in peak)
-        return ProxyDriftResult(
-            season_ratios=ratios,
-            stable_max_deviation=max(abs(x - 1) for x in stable),
-            peak_season=season_label(peak_year),
-            peak_proxy=p_proxy, peak_reference=p_ref, peak_ratio=p_proxy / p_ref,
-            max_week_ratio=max(r[proxy_key] / r[reference_key] for r in peak),
-        )

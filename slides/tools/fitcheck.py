@@ -75,27 +75,9 @@ def log_overflow(tex, log):
 NOTE_WORD_LIMIT = 220   # the notes page silently cuts off longer notes (plain layout, footnotesize)
 
 
-def _cap(value, m):
-    """A \\val or \\Val match as printed (\\Val capitalizes the first letter)."""
-    if value is None:
-        return m.group(0)
-    return value[:1].upper() + value[1:] if m.group(1) == "V" else value
-
-
-def with_values(src, deck_dir):
-    """Substitute each \\val{key} with its value from the deck's numbers.tex, so
-    counts see what prints (2026-10-20: \\val{x}. counted as two words)."""
-    f = Path(deck_dir) / "images" / "numbers.tex"
-    if not f.exists():
-        return src
-    vals = {k: v.replace("{,}", ",") for k, v in
-            re.findall(r"\\defval\{([a-z0-9_]+)\}\{(.*)\}\s*$", f.read_text(), re.M)}
-    return re.sub(r"\\([vV])al\{([a-z0-9_]+)\}", lambda m: _cap(vals.get(m.group(2)), m), src)
-
-
 def long_notes(tex):
     """Speaker notes the notes PDF would truncate without warning."""
-    src = with_values(tex.read_text(errors="replace"), Path(tex).parent)
+    src = tex.read_text(errors="replace")
     out = []
     for m in re.finditer(r"\\(?:mlsys)?note\{(.*?)\}\s*\n", src):
         body = re.sub(r"\\[A-Za-z]+|[{}$]", " ", m.group(1))

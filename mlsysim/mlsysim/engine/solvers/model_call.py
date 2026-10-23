@@ -17,7 +17,6 @@ from ..results import (
     ContextAdmissionResult,
     ModelCallResult,
     SamplingResult,
-    TokenMixResult,
     TrajectoryResendResult,
 )
 from ...core.types import Quantity
@@ -183,27 +182,3 @@ class TrajectoryResendModel(ForwardModel):
         )
 
 
-class TokenMixModel(ForwardModel):
-    """
-    Prompt and output tokens of a request trace, and where the time would go.
-
-    Medians and token shares come from the trace; the time share prices every
-    request at the stated per-token floors (an illustration, not the trace's
-    measured latency).
-    """
-    requires = ()
-    produces = TokenMixResult
-
-    def solve(self, prompt_tokens: Sequence[float], output_tokens: Sequence[float],
-              prefill_per_token: Quantity, decode_per_token: Quantity) -> TokenMixResult:
-        s_in, s_out = sum(prompt_tokens), sum(output_tokens)
-        t_in, t_out = s_in * prefill_per_token, s_out * decode_per_token
-        med_in, med_out = statistics.median(prompt_tokens), statistics.median(output_tokens)
-        return TokenMixResult(
-            requests=len(prompt_tokens),
-            median_prompt=med_in,
-            median_output=med_out,
-            median_ratio=med_in / med_out,
-            input_share=s_in / (s_in + s_out),
-            output_time_share=_ratio(t_out, t_in + t_out),
-        )

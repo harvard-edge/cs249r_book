@@ -17,12 +17,9 @@ from typing import Dict, Optional, Sequence
 import numpy as np
 
 from ..results import (
-    BallsIntoBinsResult,
     KvAdmissionResult,
     PrecisionDividendResult,
-    RequestTraceResult,
     ServingFrontierResult,
-    TrafficProfileResult,
 )
 from ...core.types import Quantity
 from ...core.units import Q_, ureg
@@ -40,72 +37,8 @@ def _parse(stamp: str, fmt: str) -> datetime:
     return datetime.strptime(stamp[:26] if fmt == _TRACE_TIME else stamp, fmt)
 
 
-class RequestTraceModel(ForwardModel):
-    """
-    Arrival rate, token lengths, and fixed-batch slot waste of a request trace.
-
-    The idle share groups consecutive requests into batches of ``batch_size``
-    that keep every slot until the longest answer ends (``1 - mean/max`` per
-    batch, averaged); a trailing partial batch is dropped. Per-second counts
-    bin arrivals by whole seconds since the first arrival, empty seconds
-    included.
-    """
-    requires = ()
-    produces = RequestTraceResult
-
-    def solve(self, timestamps: Sequence[str], prompt_tokens: Sequence[float],
-              output_tokens: Sequence[float], batch_size: int = 8) -> RequestTraceResult:
-        t = [_parse(s, _TRACE_TIME) for s in timestamps]
-        out = np.array(output_tokens, dtype=float)
-        n = len(out) // batch_size
-        idle = [calc_padding_waste_fraction(b) for b in out[: n * batch_size].reshape(n, batch_size)]
-        secs = np.array([(x - t[0]).total_seconds() for x in t]).astype(int)
-        per = np.bincount(secs)
-        duration = Q_((t[-1] - t[0]).total_seconds(), "second")
-        return RequestTraceResult(
-            requests=len(t),
-            duration=duration,
-            arrival_rate=(len(t) / duration).to("1/second"),
-            median_prompt=statistics.median(prompt_tokens),
-            median_output=statistics.median(output_tokens),
-            mean_prompt=float(np.mean(prompt_tokens)),
-            mean_output=float(out.mean()),
-            max_output=float(out.max()),
-            batch_size=batch_size,
-            fixed_batch_idle_share=float(np.mean(idle)),
-            per_second_mean=float(per.mean()),
-            per_second_peak=int(per.max()),
-        )
 
 
-class TrafficProfileModel(ForwardModel):
-    """
-    Peak, trough, and the weekday day-night swing of a binned request series.
-
-    Each bin's rate is its count over ``bin_seconds``. For every weekday the
-    model takes the day's lowest and highest bin; the swing is the mean of
-    their ratio.
-    """
-    requires = ()
-    produces = TrafficProfileResult
-
-    def solve(self, bin_starts: Sequence[str], counts: Sequence[float],
-              bin_seconds: Quantity) -> TrafficProfileResult:
-        width = bin_seconds.to("second").magnitude
-        rates = np.array(counts, dtype=float) / width
-        days: Dict[str, list] = {}
-        for stamp, r in zip(bin_starts, rates):
-            if _parse(stamp, _BIN_TIME).weekday() < _WEEKDAYS:
-                days.setdefault(stamp[:10], []).append(r)
-        troughs = [min(d) for d in days.values()]
-        peaks = [max(d) for d in days.values()]
-        per_s = ureg("1/second")
-        return TrafficProfileResult(
-            peak_rate=float(rates.max()) * per_s, min_rate=float(rates.min()) * per_s,
-            weekday_trough_low=min(troughs) * per_s, weekday_trough_high=max(troughs) * per_s,
-            weekday_peak_low=min(peaks) * per_s, weekday_peak_high=max(peaks) * per_s,
-            weekday_peak_to_trough=float(np.mean([p / t for p, t in zip(peaks, troughs)])),
-        )
 
 
 class ServingFrontierModel(ForwardModel):
@@ -204,33 +137,3 @@ class PrecisionDividendModel(ForwardModel):
         )
 
 
-class BallsIntoBinsModel(ForwardModel):
-    """
-    Busiest-bin load when ``n`` equal jobs go into ``n`` empty bins, no departures.
-
-    With one choice each job picks a bin at random; with two it probes two
-    random bins and joins the less loaded (Mitzenmacher 2001). Each bin count
-    is averaged over ``trials`` runs. One seeded generator draws every run in
-    order (all one-choice runs, then all two-choice runs), so a seed fixes the
-    whole table.
-    """
-    requires = ()
-    produces = BallsIntoBinsResult
-
-    def solve(self, bins: Sequence[int], choices: Sequence[int], trials: Dict[int, int],
-              seed: int) -> BallsIntoBinsResult:
-        rng = np.random.default_rng(seed)
-
-        def busiest(n: int, d: int) -> int:
-            if d == 1:
-                return int(np.bincount(rng.integers(0, n, n), minlength=n).max())
-            load = np.zeros(n, dtype=int)
-            a, b = rng.integers(0, n, n), rng.integers(0, n, n)
-            for i in range(n):
-                j = a[i] if load[a[i]] <= load[b[i]] else b[i]
-                load[j] += 1
-            return int(load.max())
-
-        table = {d: [float(np.mean([busiest(n, d) for _ in range(trials[n])])) for n in bins]
-                 for d in choices}
-        return BallsIntoBinsResult(bins=list(bins), max_load=table)

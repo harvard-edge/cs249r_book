@@ -91,6 +91,10 @@ class LocalSeries:
     def list(self) -> tuple[dict, ...]:
         return self.entries
 
+    @property
+    def rows(self) -> tuple[dict, ...]:
+        return self.entries
+
     def where(self, **match):
         return tuple(e for e in self.entries if all(e.get(k) == v for k, v in match.items()))
 

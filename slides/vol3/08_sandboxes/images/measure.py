@@ -37,11 +37,8 @@ DATA = HERE / "data"
 N = 30          # runs per envelope for the startup timing
 N_DOCKER = 15   # docker runs are slower; fewer samples
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
-from deckvals import mlsysim  # noqa: E402
-
 # Agent Sandboxes, Napkin Math 8.2: the pinned base the clone run copies
-BASE_GB = mlsysim.Scenarios.CopyOnWriteRepairWorkspaces.base_image.to("GB").magnitude
+BASE_GB = 2.4
 
 
 def run(cmd, **kw):

@@ -17,18 +17,19 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-import contextlib
-import io
-
-with contextlib.redirect_stdout(io.StringIO()):
-    import calcs as c  # the oracle and envelope values, read from MLSysIM
+ONSET = 0.082
+RESTRICTED_BOUND = 0.6296253647824702
+V_RESTRICTED = 1.0
+PAYLOAD = 50.0
+MU_INSPECTED = 0.12
+BUS_NOMINAL = 47.7
 
 HERE = Path(__file__).resolve().parent
 
 oracle = {
     "reference_event": "last_valid_renewal",
-    "onset_ms_max": round(c.ONSET * 1e3),
-    "travel_mm_max": round(c.RESTRICTED_BOUND * 1e3, 1),
+    "onset_ms_max": round(ONSET * 1e3),
+    "travel_mm_max": round(RESTRICTED_BOUND * 1e3, 1),
     "pass_requires": ["preconditions_verified", "witnesses_complete",
                       "onset_margin>=0", "travel_margin>=0"],
 }
@@ -37,8 +38,8 @@ oracle_bytes = json.dumps(oracle, sort_keys=True, separators=(",", ":")).encode(
 header = {
     "trial_id": "F1-restricted-001",
     "claim": "rack-end stop within clear distance after proposer stall",
-    "envelope": {"speed_mps": c.V_RESTRICTED, "payload_kg": round(c.PAYLOAD),
-                 "floor_mu": c.MU_INSPECTED, "drive_bus_V": c.BUS_NOMINAL},
+    "envelope": {"speed_mps": V_RESTRICTED, "payload_kg": round(PAYLOAD),
+                 "floor_mu": MU_INSPECTED, "drive_bus_V": BUS_NOMINAL},
     "injection": {"mode": "kill chunk-policy task", "phase": "1 tick after renewal",
                   "timer_isr": "left running"},
     "oracle_sha256": hashlib.sha256(oracle_bytes).hexdigest(),
@@ -55,7 +56,7 @@ record = {"header": header, "oracle": oracle, "signature_ed25519": sig.hex()}
 
 short = [
     '"trial_id": "F1-restricted-001",',
-    f'"envelope": {{"speed_mps": {c.V_RESTRICTED}, "payload_kg": {round(c.PAYLOAD)}, "floor_mu": {c.MU_INSPECTED}}},',
+    f'"envelope": {{"speed_mps": {V_RESTRICTED}, "payload_kg": {round(PAYLOAD)}, "floor_mu": {MU_INSPECTED}}},',
     '"injection": {"mode": "kill chunk-policy task", "timer_isr": "left running"},',
     f'"oracle_sha256": "{header["oracle_sha256"][:24]}...",',
     '"outcome": {"trials": "unavailable", "max_onset_ms": "unavailable",',

@@ -9,7 +9,7 @@ the path argument, batch-dependent logits, and prefill and decode timings.
 
 This script is NOT run by the slide build. It needs torch, transformers, and
 tiktoken, and the model in the local Hugging Face cache. It writes
-data/model_runs.json, which calcs.py and make_figs.py read.
+data/model_runs.json, which make_figs.py reads.
 
     python3 run_model.py          (from this folder, in an environment with torch)
 """

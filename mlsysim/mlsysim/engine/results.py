@@ -17,7 +17,6 @@ from ..core.types import Quantity
 # helper names (Any, Dict, BaseModel, Quantity, ...) into mlsysim.engine.
 __all__ = [
     "SolverResult",
-    # Supply layer
     "DistributedResult",
     "ReliabilityResult",
     "CheckpointResult",
@@ -31,28 +30,22 @@ __all__ = [
     "TailLatencyResult",
     "EconomicsResult",
     "DataResult",
-    "OffloadResult",
     "TopologyResult",
     "EfficiencyResult",
     "TransformationResult",
-    # Demand layer
     "ScalingResult",
     "CompressionResult",
     "CompressionCandidate",
     "CompressionSweepResult",
     "SynthesisResult",
-    # Consequence layer
     "OrchestrationResult",
     "InferenceScalingResult",
     "SensitivityResult",
     "ResponsibleEngineeringResult",
-    # Search & optimization
     "OptimizerResult",
     "ParallelismOptimizerResult",
     "BatchingOptimizerResult",
     "PlacementOptimizerResult",
-    # Situation models (2026-10-20): one solver per recurring calculation that
-    # chapters and lecture slides both quote, so the arithmetic has one home.
     "DecodeBoundResult",
     "TransferLadderResult",
     "TensorParallelCommResult",
@@ -85,20 +78,15 @@ __all__ = [
     "UtilizationLossResult",
     "SyntheticFootprintResult",
     "StorageBenchmarkResult",
-    # Agent trajectories (added 2026-10-20)
     "HorizonCompoundingResult",
     "AcceptedTaskCostResult",
     "AppendOnlyContextResult",
     "TaskHorizonTrendResult",
-    "AgentRunSummaryResult",
-    # Model calls and agent trajectories (added 2026-10-20)
     "ContextAdmissionResult",
     "SamplingResult",
     "CheckerPosteriorResult",
     "ModelCallResult",
     "TrajectoryResendResult",
-    "TokenMixResult",
-    # Distributed training (added 2026-10-20)
     "ParallelLayoutResult",
     "ZeroShardingResult",
     "DataParallelScaleOutResult",
@@ -106,12 +94,9 @@ __all__ = [
     "AlignmentMemoryResult",
     "ScalingSeriesResult",
     "MemoryWallResult",
-    # Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20)
     "IronLawResult",
     "AmdahlResult",
     "ShiftedTestSetResult",
-    "ProxyDriftResult",
-    # physical-plant budgets (added 2026-10-20)
     "StoppingBudgetResult",
     "SpeedStepResult",
     "FreshnessProfileResult",
@@ -124,12 +109,10 @@ __all__ = [
     "ContinuousDeratingResult",
     "DriveBusResult",
     "ZeroFailureResult",
-    "ShieldCoverageBillResult",  # added 2026-10-20
+    "ShieldCoverageBillResult",
     "ThrottledStageResult",
-    # Fleet orchestration (added 2026-10-20)
     "JobSizeMixResult",
     "PreemptionTaxResult",
-    # Context engineering (added 2026-10-20)
     "ContextBudgetResult",
     "AttentionDilutionResult",
     "ComprehensionByLengthResult",
@@ -137,15 +120,12 @@ __all__ = [
     "CompactionCadenceResult",
     "ContextInvalidationResult",
     "ProtectedFieldCheckResult",
-    # learned proposers (added 2026-10-20)
     "VlaEvaluationResult",
     "DecoderFamiliesResult",
     "ProposerTrafficResult",
     "EvidenceHorizonResult",
-    # Fleet goodput (added 2026-10-20)
     "GoodputResult",
     "RuntimeGoodputResult",
-    # Retrieval from long-term memory (added 2026-10-20)
     "RetrievalPayloadResult",
     "Bm25PairResult",
     "ExactScanFloorResult",
@@ -153,15 +133,11 @@ __all__ = [
     "GraphNeighborhoodResult",
     "IndexMaintenanceResult",
     "StorageAmplificationResult",
-    "MaintainedPolicyCostResult",
-    "WordOverlapResult",
-    # Tool calling (added 2026-10-20)
     "BlindRetryResult",
     "ObservationCarryResult",
     "ModelPollingResult",
     "ToolCatalogSelectionResult",
     "ToolkitGranularityResult",
-    "IntegrationAdaptersResult",
 ]
 
 
@@ -439,14 +415,6 @@ class DataResult(SolverResult):
     margin: Quantity
 
 
-class OffloadResult(SolverResult):
-    """Legacy result type. Offload analysis is now folded into SingleNodeModel/PerformanceProfile."""
-    feasible: bool
-    transfer_time: Quantity
-    compute_time: Quantity
-    bottleneck: str
-    effective_bandwidth: Quantity
-    memory_spill_bytes: Quantity
 
 
 class TopologyResult(SolverResult):
@@ -1131,30 +1099,6 @@ class TaskHorizonTrendResult(SolverResult):
     recent_intercept: float              # log2(minutes) at date ordinal 0, recent fit
 
 
-class AgentRunSummaryResult(SolverResult):
-    """Result from AgentRunSummaryModel: one recorded agent run over a benchmark, one attempt per task."""
-    tasks: int
-    accepted: int
-    rejected: int
-    acceptance: float
-    submitted: int                       # tasks whose loop ended by the agent's own submission
-    total_cost: float                    # dollars
-    mean_attempt_cost: float
-    cost_per_accepted: float
-    accepted_mean_cost: float            # mean over accepted attempts only
-    accepted_only_understatement: float  # cost_per_accepted / accepted_mean_cost
-    calls_median: float
-    calls_min: int
-    calls_max: int
-    commands: Dict[str, int]             # command class -> count
-    command_total: int
-    observations: int
-    nonzero_exits: int
-    truncated_outputs: int
-    truncated_tasks: int = 0             # tasks with at least one truncated output (added 2026-10-20)
-    syntax_error_tasks: int
-    syntax_error_accepted: int
-    call_bins: List[Dict[str, Any]]      # {"low", "high", "tasks", "accepted"} per bin
 # ── Model calls and agent trajectories (added 2026-10-20) ─────────
 
 class ContextAdmissionResult(SolverResult):
@@ -1218,14 +1162,6 @@ class TrajectoryResendResult(SolverResult):
     decode_time: Quantity
 
 
-class TokenMixResult(SolverResult):
-    """Result from TokenMixModel: prompt and output tokens of a request trace."""
-    requests: int
-    median_prompt: float
-    median_output: float
-    median_ratio: float
-    input_share: float               # prompt tokens / all tokens
-    output_time_share: float         # decode time / all time at the stated floors
 # --- Collective communication (added 2026-10-20) ---------------------------
 
 class AllReduceAlgorithmResult(SolverResult):
@@ -1482,15 +1418,6 @@ class ShiftedTestSetResult(SolverResult):
     network_rank_correlation: Optional[float] = None  # Spearman, original against new, non-baseline models (added 2026-10-20)
 
 
-class ProxyDriftResult(SolverResult):
-    """Result from ProxyDriftModel: a proxy estimate against its reference, season by season."""
-    season_ratios: Dict[str, float]    # season label -> summed proxy / summed reference
-    stable_max_deviation: float        # largest |ratio - 1| before the first drift season
-    peak_season: str
-    peak_proxy: float                  # the season's highest weekly proxy value (reference units)
-    peak_reference: float
-    peak_ratio: float
-    max_week_ratio: float              # largest single-week proxy / reference in the peak season
 # ── Physical-plant budget results: stopping, actuation, heat, power (added 2026-10-20) ──
 
 
@@ -1729,10 +1656,6 @@ class BestOfNPoolResult(SolverResult):
     easy_pass_at_max: float          # the easy half's pass@N
 
 
-class PassAtKEstimateResult(SolverResult):
-    """Result from PassAtKEstimateModel: unbiased subset estimate against the plug-in."""
-    subset_estimate: float
-    plug_in: float
 
 
 class CoverageVsVoteResult(SolverResult):
@@ -1857,35 +1780,6 @@ class DeadlinePolicyResult(SolverResult):
     b_over_a: float
 
 
-class RecordedRunCostResult(SolverResult):
-    """Result from RecordedRunCostModel: one public agent run's recorded spend per resolved task."""
-    tasks: int
-    resolved: int
-    resolve_rate: float
-    cost_per_attempt: float          # dollars
-    cost_per_resolved: float
-    unresolved_share: float          # share of spend on attempts that failed
-    input_output_ratio: float
-    median_calls: float
-    # Optional (added 2026-10-20): runs that ended above a recorded cost limit.
-    cost_limit: Optional[float] = None       # dollars
-    over_limit_runs: Optional[int] = None
-    mean_overshoot: Optional[float] = None   # dollars above the limit, over those runs
-    max_overshoot: Optional[float] = None
-    # Optional (added 2026-10-20): per-run token medians as the agent recorded them,
-    # and output tokens as a share of all recorded tokens, pooled over the runs.
-    median_input_tokens: Optional[float] = None    # input tokens summed over a run's calls
-    median_output_tokens: Optional[float] = None
-    median_input_output_ratio: Optional[float] = None   # median of per-run input / output
-    output_token_share: Optional[float] = None     # pooled output / (input + output)
-    # Optional (added 2026-10-20): mean recorded cost of resolved and of
-    # unresolved runs, and how far the resolved-run mean understates the
-    # cohort cost per resolved task (cost_per_resolved / mean_resolved_cost).
-    mean_resolved_cost: Optional[float] = None     # dollars
-    mean_unresolved_cost: Optional[float] = None
-    survivor_understatement: Optional[float] = None
-    mean_calls: Optional[float] = None
-    max_cost: Optional[float] = None               # dollars, the costliest run
 # --- Context engineering (added 2026-10-20) ----------------------------------
 # What one agent request carries: a budget by role, the softmax cost of
 # admitted keys, measured comprehension by length, a zoned layout's input bill,
@@ -2142,31 +2036,8 @@ class RuntimeGoodputResult(SolverResult):
     interruption_checkpoint_interval: Quantity
 # --- Serving at scale: traces, frontiers, admission (added 2026-10-20) --------
 
-class RequestTraceResult(SolverResult):
-    """Result from RequestTraceModel: arrivals and token lengths of a request trace."""
-    requests: int
-    duration: Quantity                       # first to last arrival
-    arrival_rate: Quantity                   # requests / duration
-    median_prompt: float
-    median_output: float
-    mean_prompt: float
-    mean_output: float
-    max_output: float
-    batch_size: int
-    fixed_batch_idle_share: float            # mean of 1 - mean/max over consecutive batches
-    per_second_mean: float                   # arrivals per one-second bin, empty seconds included
-    per_second_peak: int                     # busiest one-second bin
 
 
-class TrafficProfileResult(SolverResult):
-    """Result from TrafficProfileModel: request rate over a binned week."""
-    peak_rate: Quantity
-    min_rate: Quantity
-    weekday_trough_low: Quantity             # lowest and highest nightly minimum, weekdays
-    weekday_trough_high: Quantity
-    weekday_peak_low: Quantity               # lowest and highest daily maximum, weekdays
-    weekday_peak_high: Quantity
-    weekday_peak_to_trough: float            # mean over weekdays of max / min
 
 
 class ServingFrontierResult(SolverResult):
@@ -2206,19 +2077,12 @@ class PrecisionDividendResult(SolverResult):
     budget_gain: float                       # KV budget low / KV budget base
 
 
-class BallsIntoBinsResult(SolverResult):
-    """Result from BallsIntoBinsModel: simulated busiest-bin load, n balls into n bins."""
-    bins: List[int]
-    max_load: Dict[int, List[float]]         # choices -> mean busiest-bin load per bin count
 
 
 __all__ += [
-    "RequestTraceResult",
-    "TrafficProfileResult",
     "ServingFrontierResult",
     "KvAdmissionResult",
     "PrecisionDividendResult",
-    "BallsIntoBinsResult",
 ]
 # --- Retrieval from long-term memory (added 2026-10-20) ------------------------
 # Staging whole records in a token allowance, BM25 ranking, the exact-scan
@@ -2320,21 +2184,8 @@ class StorageAmplificationResult(SolverResult):
     time_ratio: float                    # dense store / graph store, re-index time
 
 
-class MaintainedPolicyCostResult(SolverResult):
-    """Result from MaintainedPolicyCostModel: cost per accepted task with and without upkeep."""
-    baseline_cost: float                 # cost per accepted task, units of the baseline attempt
-    maintained_cost: float
-    change: float                        # maintained / baseline - 1
-    break_even_acceptance: float         # acceptance at which the two match
 
 
-class WordOverlapResult(SolverResult):
-    """Result from WordOverlapModel: distinct words two texts share."""
-    shared: int
-    union: int
-    first_words: int
-    second_words: int
-    jaccard: float                       # shared / union
 
 class KvAttentionDesignResult(SolverResult):
     """Result from KvAttentionDesignModel: bytes per token by attention design."""
@@ -2570,14 +2421,6 @@ class ThermalThrottleResult(SolverResult):
     theta_never_trips: Quantity              # largest theta whose loaded steady state stays below the trip
 
 
-class LatencyTailResult(SolverResult):
-    """Result from LatencyTailModel: the tail of a measured latency sample."""
-    count: int
-    p50: Quantity
-    p99: Quantity
-    p999: Quantity
-    maximum: Quantity
-    over_threshold: Optional[int] = None     # samples longer than the stated threshold
 
 
 # --- Tool calling (added 2026-10-20) ------------------------------------------
@@ -2637,10 +2480,6 @@ class ToolkitGranularityResult(SolverResult):
     break_even_change_probability: float  # shell change probability matching structured
 
 
-class IntegrationAdaptersResult(SolverResult):
-    """Result from IntegrationAdaptersModel: pairwise adapters against one shared protocol."""
-    pairwise: int                        # hosts x services
-    shared: int                          # hosts + services
 
 
 # --- Agent sandboxes (added 2026-10-20) ---
@@ -2695,11 +2534,6 @@ class SandboxPoolReserveResult(SolverResult):
     slow_reserve: int
 
 
-class BootTimeCdfResult(SolverResult):
-    """Result from BootTimeCdfModel: the median and a tail percentile of a released boot-time CDF."""
-    booting: int                             # instances booting at once
-    median: Quantity
-    tail: Quantity
 
 
 # --- Neural computation: a dense network's counts, and one training epoch (added 2026-10-20) ---
@@ -2817,7 +2651,10 @@ class DatasetGrowthResult(SolverResult):
     model_count: int
 
 
-__all__ += ["ParameterGrowthResult", "DatasetGrowthResult"]
+__all__ += [
+    "ParameterGrowthResult",
+    "DatasetGrowthResult",
+]
 
 
 # --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
@@ -2830,12 +2667,6 @@ class InjectionExposureResult(SolverResult):
     screened_per_cohort: Dict[str, float]  # screened exposure x cohort tasks
 
 
-class TurnExposureResult(SolverResult):
-    """Result from TurnExposureModel: exposure counted in turns, and the same reads counted as items."""
-    per_turn: float                   # 1 - (1 - q)^r
-    trajectory: float                 # 1 - (1 - p_turn)^H
-    reads: int                        # r H
-    same_reads: float                 # 1 - (1 - q)^(r H); equals trajectory
 
 
 class PolicyComparisonResult(SolverResult):
@@ -2858,7 +2689,6 @@ class PolicyComparisonResult(SolverResult):
 
 __all__ += [
     "InjectionExposureResult",
-    "TurnExposureResult",
     "PolicyComparisonResult",
 ]
 
@@ -3109,7 +2939,12 @@ class RetentionCostResult(SolverResult):
     workspace_share: float                   # workspace snapshot share of the bytes
 
 
-__all__ += ["GroupCommitResult", "SnapshotVolumeResult", "CheckpointTraceResult", "RetentionCostResult"]
+__all__ += [
+    "GroupCommitResult",
+    "SnapshotVolumeResult",
+    "CheckpointTraceResult",
+    "RetentionCostResult",
+]
 # --- Failure recovery: repair, irreversible loss, loops, containment (added 2026-10-20) ---
 # What the runtime decides once an effect has failed: repair against unwind,
 # checks ahead of a pivot, how late a loop is stopped, and the bounds retries,
@@ -3191,34 +3026,10 @@ class RetryJitterResult(SolverResult):
     expected_in_window: float                # expected count in one burst-sized window
 
 
-class CleanupGraphResult(SolverResult):
-    """Result from CleanupGraphModel: cleanup as a reverse stack against a dependency graph."""
-    stack_time: Quantity                     # one at a time
-    graph_time: Quantity                     # unlimited parallelism, the longest path
-    saved_time: Quantity
-    blocked: List[str]                       # transitive dependents of the unresolved operation
-    settleable: List[str]                    # everything else, apart from the unresolved one
 
 
-class BreakerWindowResult(SolverResult):
-    """Result from BreakerWindowModel: one breaker window classified two ways."""
-    outcomes: int
-    classified_failures: int
-    classified_fraction: float
-    classified_trips: bool
-    naive_failures: int
-    naive_fraction: float
-    naive_trips: bool
 
 
-class RetrySustainedOutagesResult(SolverResult):
-    """Result from RetrySustainedOutagesModel: incidents a table lists as sustained by retries."""
-    incidents: int
-    retry_sustained: int
-    share: float
-    with_duration: List[Tuple[str, float]]   # (incident, hours), longest first
-    without_duration: List[str]
-    over_hours: int                          # retry-sustained incidents longer than the threshold
 
 
 __all__ += [
@@ -3228,9 +3039,6 @@ __all__ += [
     "RetryAmplificationResult",
     "BulkheadAdmissionResult",
     "RetryJitterResult",
-    "CleanupGraphResult",
-    "BreakerWindowResult",
-    "RetrySustainedOutagesResult",
 ]
 # --- Spatial memory: estimation, belief expiry, and map queries (added 2026-10-20) ---
 
@@ -3386,12 +3194,6 @@ class FrozenTransformResult(SolverResult):
     exceeds_tolerance: bool
 
 
-class TrackConfirmationResult(SolverResult):
-    """Result from TrackConfirmationModel: the wait before a tracker outputs a new track."""
-    frame_period: Quantity
-    held_frames: int
-    wait: Quantity
-    travel: Quantity
 
 
 class ClearanceQueryRow(SolverResult):
@@ -3554,9 +3356,6 @@ class PueRetrofitResult(SolverResult):
     saved_cost: Quantity
 
 
-class FacilityCarbonRateResult(SolverResult):
-    """Result from FacilityCarbonRateModel: operational carbon per hour of each site."""
-    rates: Dict[str, Quantity]
 
 
 class GridPlacementResult(SolverResult):
@@ -3581,10 +3380,6 @@ class ServiceLifeExtensionResult(SolverResult):
     annual_charge_reduction: float
 
 
-class PowerCapResult(SolverResult):
-    """Result from PowerCapModel: the concurrency a feed allows and the stretched duration."""
-    concurrency: float
-    stretched_duration: Quantity
 
 
 class RepeatedWorkEnergyResult(SolverResult):
@@ -3636,14 +3431,6 @@ class DevelopmentSweepResult(SolverResult):
     final_run_equivalents: float
 
 
-class RollingWindowResult(SolverResult):
-    """Result from RollingWindowModel: window means and their extremes."""
-    means: List[float]
-    low_index: int
-    high_index: int
-    low: float
-    high: float
-    ratio: float
 
 
 class CarbonPricedPlacementResult(SolverResult):
@@ -3661,11 +3448,9 @@ __all__ += [
     "WaterUseResult",
     "RunFootprintResult",
     "PueRetrofitResult",
-    "FacilityCarbonRateResult",
     "GridPlacementResult",
     "EmbodiedPaybackResult",
     "ServiceLifeExtensionResult",
-    "PowerCapResult",
     "RepeatedWorkEnergyResult",
     "ServingCrossoverResult",
     "CascadeEnergyResult",
@@ -3673,41 +3458,15 @@ __all__ += [
     "DataMovementEnergyResult",
     "DemandReboundResult",
     "DevelopmentSweepResult",
-    "RollingWindowResult",
     "CarbonPricedPlacementResult",
 ]
 
 
 # --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
-class VerdictBoundsResult(SolverResult):
-    """Result from VerdictBoundsModel: an acceptance rate with unresolved trials kept or dropped."""
-    trials: int
-    default_rate: float                  # unresolved counted as not accepted
-    upper_bound: float                   # every unresolved trial resolved as accepted
-    dropped_rate: float                  # unresolved trials removed from the denominator
 
 
-class GraderCalibrationResult(SolverResult):
-    """Result from GraderCalibrationModel: a grader's error rates against a reference assessment."""
-    false_accept_rate: float             # Pr(accept | reference failure)
-    false_accept_low: float              # Wilson interval of that rate
-    false_accept_high: float
-    accepted: int                        # all reports the grader accepted
-    failure_among_accepted: float        # Pr(reference failure | accept)
-    false_reject_rate: float             # Pr(reject | reference pass)
 
 
-class TaskRepeatAllocationResult(SolverResult):
-    """Result from TaskRepeatAllocationModel: standard error of task-by-run designs under one budget."""
-    within_variance: float               # sigma_run^2
-    variance_ratio: float                # sigma_run^2 / sigma_task^2, runs at which the run term stops dominating
-    free_tasks: Dict[int, int]           # runs per task -> tasks, new tasks free
-    free_se: Dict[int, float]            # runs per task -> standard error, new tasks free
-    paid_tasks: Dict[int, int]           # runs per task -> whole tasks the budget affords with fixture cost
-    paid_se: Dict[int, float]
-    best_runs: int                       # runs per task minimizing the variance with fixture cost
-    best_tasks: int
-    best_se: float
 
 
 class BinomialIntervalsResult(SolverResult):
@@ -3839,41 +3598,9 @@ class CappedSelectionCostResult(SolverResult):
     doubled_rate_per_accepted: Quantity  # sequential with the pass probability doubled
 
 
-class PairedRunEvaluationResult(SolverResult):
-    """Result from PairedRunEvaluationModel: two configurations, repeated runs of the same tasks."""
-    runs: int
-    tasks: int
-    trials: Dict[str, int]
-    accepted: Dict[str, int]
-    rate: Dict[str, float]
-    wilson: Dict[str, Tuple[float, float]]
-    unknown: Dict[str, int]
-    visible_pass: Dict[str, int]
-    visible_pass_sealed_reject: Dict[str, int]
-    calls: Dict[str, int]
-    tokens: Dict[str, int]
-    output_tokens: Dict[str, int]
-    seconds: Dict[str, float]
-    tokens_per_accepted: Dict[str, float]
-    seconds_per_accepted: Dict[str, float]
-    per_task_passes: Dict[str, Dict[str, int]]
-    pass_at: Dict[str, Dict[int, float]]     # k -> unbiased pass@k averaged over tasks
-    pass_pow: Dict[str, Dict[int, float]]    # k -> unbiased pass^k averaged over tasks
-    both: int                                # paired run by run: both accepted
-    candidate_only: int
-    baseline_only: int
-    neither: int
-    difference: float
-    lower: float
-    upper: float
-    exact_p: float
-    tokens_per_accepted_ratio: float         # candidate over baseline
 
 
 __all__ += [
-    "VerdictBoundsResult",
-    "GraderCalibrationResult",
-    "TaskRepeatAllocationResult",
     "BinomialIntervalsResult",
     "ProportionPlanningResult",
     "PairedComparisonResult",
@@ -3881,7 +3608,6 @@ __all__ += [
     "LeaderboardTiesResult",
     "TaskMixConsistencyResult",
     "CappedSelectionCostResult",
-    "PairedRunEvaluationResult",
 ]
 
 __all__ += [
@@ -4052,9 +3778,16 @@ class StaleAnchorResult(SolverResult):
 
 
 __all__ += [
-    "TwoLinkJointRateResult", "HandoffExposureResult", "ChunkReplacementResult", "JerkLimitedStopResult",
-    "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
-    "DynamicWindowResult", "StaleAnchorResult",
+    "TwoLinkJointRateResult",
+    "HandoffExposureResult",
+    "ChunkReplacementResult",
+    "JerkLimitedStopResult",
+    "SpillLimitedStopResult",
+    "TrajectoryDeadlinesResult",
+    "SeamBridgeResult",
+    "ShoulderSwingResult",
+    "DynamicWindowResult",
+    "StaleAnchorResult",
 ]
 
 
@@ -4129,7 +3862,10 @@ class StagingBurstResult(SolverResult):
 
 
 __all__ += [
-    "FailureTriageResult", "RunSplitLeakageResult", "AdmissionOrderResult", "CorpusDenominatorsResult",
+    "FailureTriageResult",
+    "RunSplitLeakageResult",
+    "AdmissionOrderResult",
+    "CorpusDenominatorsResult",
     "StagingBurstResult",
 ]
 
@@ -4214,32 +3950,17 @@ class PreferencePairResult(SolverResult):
     initial_gradient_coefficient: float  # beta / 2
 
 
-class ContextDistillationResult(SolverResult):
-    """Result from ContextDistillationModel: a per-turn prefix read every turn against distilling it."""
-    monthly_prefix_tokens: float
-    uncached_spend: Quantity             # USD per month the prefix costs at the full input price
-    cached_spend: Quantity               # USD per month with the prefix billed as cached reads
-    net_uncached: Quantity               # uncached spend minus redistillation per month
-    net_cached: Quantity
-    break_even_revisions: float          # redistillations per month that cancel the uncached saving
 
 
-class CandidateReleaseResult(SolverResult):
-    """Result from CandidateReleaseModel: a candidate policy against the baseline on separate trials."""
-    baseline_cost_per_accepted: Quantity
-    candidate_cost_per_accepted: Quantity
-    break_even_attempt_cost: Quantity    # candidate attempt cost that matches the baseline's C_eff
-    cost_rise: float                     # candidate / baseline C_eff - 1
-    gap: float                           # candidate - baseline acceptance
-    gap_se: float                        # unpooled, trials treated as independent
-    gap_z: float                         # gap / gap_se
-    recall_error_ratio: float            # candidate / baseline PRE on renamed schemas
 
 
 __all__ += [
-    "TargetMaskResult", "PerInvocationSerializationResult", "TrajectoryRoleShareResult",
-    "LossNormalizationResult", "SequencePackingResult", "PreferencePairResult",
-    "ContextDistillationResult", "CandidateReleaseResult",
+    "TargetMaskResult",
+    "PerInvocationSerializationResult",
+    "TrajectoryRoleShareResult",
+    "LossNormalizationResult",
+    "SequencePackingResult",
+    "PreferencePairResult",
 ]
 
 
@@ -4328,7 +4049,10 @@ class CommandAuthenticationResult(SolverResult):
 
 
 __all__ += [
-    "TakeoverBudgetResult", "TakeoverLadderResult", "BrakingBlendResult", "CommandAuthenticationResult",
+    "TakeoverBudgetResult",
+    "TakeoverLadderResult",
+    "BrakingBlendResult",
+    "CommandAuthenticationResult",
 ]
 # --- Fault-injection oracles and campaign statistics (added 2026-10-20) -----
 
@@ -4391,7 +4115,12 @@ class DiagnosticCoverageResult(SolverResult):
     allocation: dict                     # stratum -> injections in proportion to its rate
 
 
-__all__ += ["OnsetTrialResult", "RailHoldUpResult", "ExponentialRareEventResult", "DiagnosticCoverageResult"]
+__all__ += [
+    "OnsetTrialResult",
+    "RailHoldUpResult",
+    "ExponentialRareEventResult",
+    "DiagnosticCoverageResult",
+]
 # ── Reinforcement learning from verifiable rewards (added 2026-10-20) ──
 
 class RewardCompositionResult(SolverResult):
@@ -4409,14 +4138,6 @@ class CenteredRewardResult(SolverResult):
     failing_score: float                 # failing reward - baseline
 
 
-class RewardShapingResult(SolverResult):
-    """Result from RewardShapingModel: R = c + alpha f - lambda len, and whether passes stay above failures."""
-    weight_sum: float                    # alpha + lambda
-    lowest_pass: float                   # 1 - lambda, a pass at zero format and the length cap
-    highest_failure: float               # alpha, a failure with perfect format and zero length
-    order_holds: bool                    # alpha + lambda < 1
-    example_pass: float                  # the stated pass's score
-    example_failure: float               # the stated failure's score
 
 
 class ForkValueResult(SolverResult):
@@ -4510,10 +4231,18 @@ class VerifierPoolResult(SolverResult):
 
 
 __all__ += [
-    "RewardCompositionResult", "CenteredRewardResult", "RewardShapingResult", "ForkValueResult",
-    "ContinuationForkCostResult", "GroupCoefficientsResult", "LengthNormalizationResult",
-    "RolloutStepBudgetResult", "RepeatedVerificationResult", "RatioClipResult",
-    "RolloutSlotCycleResult", "GroupBarrierResult", "VerifierPoolResult",
+    "RewardCompositionResult",
+    "CenteredRewardResult",
+    "ForkValueResult",
+    "ContinuationForkCostResult",
+    "GroupCoefficientsResult",
+    "LengthNormalizationResult",
+    "RolloutStepBudgetResult",
+    "RepeatedVerificationResult",
+    "RatioClipResult",
+    "RolloutSlotCycleResult",
+    "GroupBarrierResult",
+    "VerifierPoolResult",
 ]
 
 
@@ -4551,7 +4280,11 @@ class SupervisorQueueResult(SolverResult):
     busy_per_hour: Quantity              # assistant minutes per operating hour
 
 
-__all__ += ["DetectionShortfallRow", "DetectionShortfallResult", "SupervisorQueueResult"]
+__all__ += [
+    "DetectionShortfallRow",
+    "DetectionShortfallResult",
+    "SupervisorQueueResult",
+]
 
 
 # --- Agent cost accounting (added 2026-10-20) ---------------------------------
@@ -4825,28 +4558,27 @@ class WorkloadLeverResult(SolverResult):
     rows: Dict[str, WorkloadLeverRow]
 
 
-class CoverageIndependenceResult(SolverResult):
-    """Result from CoverageIndependenceModel: measured coverage against independent trials."""
-    first: float                     # coverage at one sample
-    measured: Dict[int, float]
-    independent: Dict[int, float]    # 1 - (1 - first)^k
 
 
-class ConcurrencySweepResult(SolverResult):
-    """Result from ConcurrencySweepModel: one server swept across concurrency."""
-    points: List[Tuple[float, float, float]]   # (concurrency, tokens/s per user, tokens/s per GPU)
-    concurrency_multiple: float
-    throughput_multiple: float
-    per_user_slowdown: float
-    token_time_low: Quantity         # per-user time per output token at the lowest concurrency
-    token_time_high: Quantity
 
 
 __all__ += [
-    "PriceDeclineResult", "CostVsScoreResult", "CohortAttemptCostResult", "TokenPriceComparisonResult",
-    "PrefixCacheBillResult", "CompactionPaybackResult", "RetryPolicyResult", "SerialEpisodeResult",
-    "SpeculativeEpisodeResult", "ModelCascadeResult", "TrajectoryAdmissionResult", "KingmanQueueResult",
-    "DedicatedBreakEvenResult", "ConservedBudgetResult", "ArchitectureChoiceResult",
-    "AdaptationPaybackResult", "WorkloadLeverRow", "WorkloadLeverResult", "CoverageIndependenceResult",
-    "ConcurrencySweepResult",
+    "PriceDeclineResult",
+    "CostVsScoreResult",
+    "CohortAttemptCostResult",
+    "TokenPriceComparisonResult",
+    "PrefixCacheBillResult",
+    "CompactionPaybackResult",
+    "RetryPolicyResult",
+    "SerialEpisodeResult",
+    "SpeculativeEpisodeResult",
+    "ModelCascadeResult",
+    "TrajectoryAdmissionResult",
+    "KingmanQueueResult",
+    "DedicatedBreakEvenResult",
+    "ConservedBudgetResult",
+    "ArchitectureChoiceResult",
+    "AdaptationPaybackResult",
+    "WorkloadLeverRow",
+    "WorkloadLeverResult",
 ]

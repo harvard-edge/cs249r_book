@@ -24,39 +24,27 @@ that draw them say "illustrative".
 
 Run from this folder: python3 make_figs.py
 """
-
+from types import SimpleNamespace
+import sys as _sys; from pathlib import Path as _Path; _sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / "mlsysim"))
+from mlsysim.core.units import Q_
+import mlsysim
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import slideplot as sp  # noqa: E402
-import calcs as K  # noqa: E402  (records every value; figures read them)
-from deckvals import val  # noqa: E402
-from mlsysim.physics.agents import calc_pass_posterior  # noqa: E402
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon  # noqa: E402
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'assets' / 'kit'))
+import slideplot as sp
+from mlsysim.physics.agents import calc_pass_posterior
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon
 C = sp.C
 plt = sp.plt
 out = Path(__file__).parent
-
-# Volume III agentic-stack roles (rules volumes/vol3/palette.md)
-V3 = {
-    "think": ("#e0f2fe", "#0284c7", "#0369a1"),   # compute / deliberation
-    "mem": ("#dcfce7", "#16a34a", "#15803d"),     # memory / context
-    "tool": ("#fef3c7", "#d97706", "#b45309"),    # actuation / tools (checks run here)
-    "sys": ("#f3e8ff", "#7c3aed", "#6d28d9"),     # storage / system
-    "bad": ("#fee2e2", "#dc2626", "#b91c1c"),     # faults
-    "neutral": ("#f8fafc", "#94a3b8", "#0f172a"),
-}
-
+V3 = {'think': ('#e0f2fe', '#0284c7', '#0369a1'), 'mem': ('#dcfce7', '#16a34a', '#15803d'), 'tool': ('#fef3c7', '#d97706', '#b45309'), 'sys': ('#f3e8ff', '#7c3aed', '#6d28d9'), 'bad': ('#fee2e2', '#dc2626', '#b91c1c'), 'neutral': ('#f8fafc', '#94a3b8', '#0f172a')}
 
 class plain_log_ticks:
     """Write log-axis ticks as plain numbers (1, 10, 100), not 10 with a
     superscript, whose exponent is too small to read in a column."""
 
     def __init__(self, every=1):
-        self.every = every  # label every n-th decade, so wide ranges do not collide
+        self.every = every
 
     def __enter__(self):
         from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
@@ -65,10 +53,10 @@ class plain_log_ticks:
 
         def save(fig, path):
             for ax in fig.axes:
-                if ax.get_xscale() == "log":
+                if ax.get_xscale() == 'log':
                     if every > 1:
                         ax.xaxis.set_major_locator(LogLocator(base=10.0 ** every))
-                    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+                    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:,.0f}'))
                     ax.xaxis.set_minor_formatter(NullFormatter())
             self.save(fig, path)
         sp.save = save
@@ -76,374 +64,266 @@ class plain_log_ticks:
     def __exit__(self, *exc):
         sp.save = self.save
 
-
 def tag(ax, text, x=0.0, y=-0.22):
-    ax.text(x, y, text, transform=ax.transAxes, fontsize=9, color=C["neutral"],
-            ha="left", va="top")
-
+    ax.text(x, y, text, transform=ax.transAxes, fontsize=9, color=C['neutral'], ha='left', va='top')
 
 def canvas(w, h, xmax=100.0):
     fig, ax = plt.subplots(figsize=(w, h))
     ax.set_xlim(0, xmax)
     ax.set_ylim(0, xmax * h / w)
-    ax.set_aspect("equal")
-    ax.axis("off")
-    return fig, ax
+    ax.set_aspect('equal')
+    ax.axis('off')
+    return (fig, ax)
 
-
-def box(ax, x, y, w, h, text, role="neutral", fs=12, dashed=False, alpha=1.0, bold=False,
-        lw=1.6):
+def box(ax, x, y, w, h, text, role='neutral', fs=12, dashed=False, alpha=1.0, bold=False, lw=1.6):
     fill, stroke, txt = V3[role]
-    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=1.2",
-                                fc=fill, ec=stroke, lw=lw, ls="--" if dashed else "-",
-                                alpha=alpha, zorder=2))
-    ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs,
-            color=txt, alpha=alpha, zorder=3, fontweight="bold" if bold else "normal")
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle='round,pad=0,rounding_size=1.2', fc=fill, ec=stroke, lw=lw, ls='--' if dashed else '-', alpha=alpha, zorder=2))
+    ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=fs, color=txt, alpha=alpha, zorder=3, fontweight='bold' if bold else 'normal')
 
+def arrow(ax, x0, y0, x1, y1, color='#64748b', ls='-', lw=1.6, alpha=1.0):
+    ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle='-|>', mutation_scale=12, color=color, lw=lw, ls=ls, alpha=alpha, zorder=1, shrinkA=0, shrinkB=0))
 
-def arrow(ax, x0, y0, x1, y1, color="#64748b", ls="-", lw=1.6, alpha=1.0):
-    ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=12,
-                                 color=color, lw=lw, ls=ls, alpha=alpha, zorder=1,
-                                 shrinkA=0, shrinkB=0))
-
-
-# --------------------------------------------------------------------------
-# Hook: an explanation against a test (NM 3.1)
-# --------------------------------------------------------------------------
 def hook():
-    h = K.HOOK.result
-    rows = [(f"Explain in {val('hook_tokens')} tokens", K.m(h.answer_time, "ms"), "compute",
-             f"{val('hook_gen_s')} s"),
-            ("Run the targeted test", K.m(K.HOOK.probe_time, "ms"), "data", f"{val('hook_probe_ms')} ms")]
-    sp.hbars_steps(str(out / "hook"), rows, "ms", log=True, size=(5.8, 1.7),
-                   xlabel="Time (ms, log scale)")
-    # The same two bars drawn for a half-width column (the closing retrieval slide)
+    rows = [('Explain in 1,024 tokens', 21580.41791, 'compute', '21.58 s'), ('Run the targeted test', 40, 'data', '40 ms')]
+    sp.hbars_steps(str(out / 'hook'), rows, 'ms', log=True, size=(5.8, 1.7), xlabel='Time (ms, log scale)')
     with plain_log_ticks(every=2):
-        sp.hbars(str(out / "hook_col.svg"), rows, "ms", log=True, size=(2.6, 0.9),
-                 xlabel="Time (ms, log scale)")
+        sp.hbars(str(out / 'hook_col.svg'), rows, 'ms', log=True, size=(2.6, 0.9), xlabel='Time (ms, log scale)')
 
-
-# --------------------------------------------------------------------------
-# Three allocation axes (TTC figure 2), one panel per step
-# --------------------------------------------------------------------------
 def axes():
     """Drawn 9 in wide and shown about 5.6 in wide: 15 pt text lands near 9.5 pt."""
-    heads = [("Depth", "one longer chain"), ("Breadth", "sample, then select"),
-             ("Feedback", "check, then revise")]
+    heads = [('Depth', 'one longer chain'), ('Breadth', 'sample, then select'), ('Feedback', 'check, then revise')]
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.6)
         for i, (t, sub) in enumerate(heads):
             a = 1.0 if i < k else 0.0
-            ax.text(16.5 + i * 33.5, 36.5, t, ha="center", fontsize=21, fontweight="bold",
-                    color="#0f172a", alpha=a)
-            ax.text(16.5 + i * 33.5, 32.3, sub, ha="center", fontsize=16, color="#475569", alpha=a)
+            ax.text(16.5 + i * 33.5, 36.5, t, ha='center', fontsize=21, fontweight='bold', color='#0f172a', alpha=a)
+            ax.text(16.5 + i * 33.5, 32.3, sub, ha='center', fontsize=16, color='#475569', alpha=a)
         if k >= 1:
-            box(ax, 1, 22, 13, 6.5, "Input", "neutral", fs=15)
+            box(ax, 1, 22, 13, 6.5, 'Input', 'neutral', fs=15)
             for j in range(4):
-                box(ax, 2 + j * 7.5, 12, 5.5, 5.5, "", "think")
+                box(ax, 2 + j * 7.5, 12, 5.5, 5.5, '', 'think')
             arrow(ax, 5, 22, 4.6, 17.7)
             for j in range(3):
                 arrow(ax, 7.5 + j * 7.5, 14.75, 9.5 + j * 7.5, 14.75)
-            box(ax, 13, 1, 18, 7, "Candidate", "think", fs=15)
+            box(ax, 13, 1, 18, 7, 'Candidate', 'think', fs=15)
             arrow(ax, 27, 12, 24, 8.2)
         if k >= 2:
             x0 = 34.5
-            box(ax, x0, 22, 13, 6.5, "Input", "neutral", fs=15)
+            box(ax, x0, 22, 13, 6.5, 'Input', 'neutral', fs=15)
             for j, y in enumerate((24, 17, 10)):
-                box(ax, x0 + 16, y, 5, 5, "", "think")
-                box(ax, x0 + 23, y, 5, 5, "", "think")
+                box(ax, x0 + 16, y, 5, 5, '', 'think')
+                box(ax, x0 + 23, y, 5, 5, '', 'think')
                 arrow(ax, x0 + 13, 25, x0 + 16, y + 2.5)
                 arrow(ax, x0 + 21, y + 2.5, x0 + 23, y + 2.5)
                 arrow(ax, x0 + 28, y + 2.5, x0 + 29.5, 8.4)
-            box(ax, x0 + 18, 1, 14, 7, "Select", "sys", fs=15)
+            box(ax, x0 + 18, 1, 14, 7, 'Select', 'sys', fs=15)
         if k >= 3:
             x0 = 68
-            box(ax, x0, 22, 16, 6.5, "Candidate", "think", fs=15)
-            ax.add_patch(FancyBboxPatch((x0 + 18, 13), 13.5, 17.5, boxstyle="round,pad=0,rounding_size=1.2",
-                                        fc="none", ec=V3["tool"][1], lw=1.4, ls="--", zorder=1))
-            ax.text(x0 + 24.75, 27.3, "sandbox", ha="center", fontsize=14, color=V3["tool"][2])
-            box(ax, x0 + 19, 16.5, 11.5, 6.5, "Check", "tool", fs=15)
+            box(ax, x0, 22, 16, 6.5, 'Candidate', 'think', fs=15)
+            ax.add_patch(FancyBboxPatch((x0 + 18, 13), 13.5, 17.5, boxstyle='round,pad=0,rounding_size=1.2', fc='none', ec=V3['tool'][1], lw=1.4, ls='--', zorder=1))
+            ax.text(x0 + 24.75, 27.3, 'sandbox', ha='center', fontsize=14, color=V3['tool'][2])
+            box(ax, x0 + 19, 16.5, 11.5, 6.5, 'Check', 'tool', fs=15)
             arrow(ax, x0 + 16, 24, x0 + 19, 21)
-            box(ax, x0 + 14, 1, 17.5, 7, "Observation", "tool", fs=14, bold=True)
+            box(ax, x0 + 14, 1, 17.5, 7, 'Observation', 'tool', fs=14, bold=True)
             arrow(ax, x0 + 22.75, 16.5, x0 + 22.75, 8.2)
-            box(ax, x0, 1, 11, 7, "Revised", "think", fs=15)
+            box(ax, x0, 1, 11, 7, 'Revised', 'think', fs=15)
             arrow(ax, x0 + 14, 4.5, x0 + 11, 4.5)
-            arrow(ax, x0 + 5.5, 22, x0 + 5.5, 8.2, ls="--")
-        sp.save(fig, out / f"axes_step{k}.svg")
+            arrow(ax, x0 + 5.5, 22, x0 + 5.5, 8.2, ls='--')
+        sp.save(fig, out / f'axes_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# NM 3.2: one ceiling, three latencies and bills
-# --------------------------------------------------------------------------
 def alloc():
-    a = K.AXES.result
-    names = ["Depth", "Breadth", "Feedback"]
-    keys = ["depth", "breadth", "feedback"]
-    data = {"time": [K.m(getattr(a, f"{k}_time"), "s") for k in keys],
-            "bill": [K.m(getattr(a, f"{k}_cost"), "USD") for k in keys]}
-    cols = [V3["think"][1], V3["think"][1], V3["tool"][1]]
+    names = ['Depth', 'Breadth', 'Feedback']
+    keys = ['depth', 'breadth', 'feedback']
+    data = {'time': [86.32167164, 21.58041791, 69.24125373], 'bill': [0.073728, 0.110592, 0.09522]}
+    cols = [V3['think'][1], V3['think'][1], V3['tool'][1]]
     for k in (1, 2):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(5.8, 1.8))
-        for ax, field, label, fmt, show in (
-                (ax1, "time", "Generation and checks (s)", "{:.1f} s", True),
-                (ax2, "bill", "Model-token bill ($)", "${:.3f}", k >= 2)):
+        for ax, field, label, fmt, show in ((ax1, 'time', 'Generation and checks (s)', '{:.1f} s', True), (ax2, 'bill', 'Model-token bill ($)', '${:.3f}', k >= 2)):
             vals = data[field]
             ys = [2, 1, 0]
             ax.barh(ys, vals if show else [0, 0, 0], color=cols, height=0.6)
             for y, v in zip(ys, vals):
-                ax.text(v + max(vals) * 0.03, y, fmt.format(v), va="center", fontsize=12,
-                        fontweight="bold", color=C["text"], alpha=1 if show else 0)
+                ax.text(v + max(vals) * 0.03, y, fmt.format(v), va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=1 if show else 0)
             ax.set_xlim(0, max(vals) * 1.55)
             ax.set_yticks(ys)
-            ax.set_yticklabels(names if ax is ax1 else ["", "", ""], fontsize=12)
+            ax.set_yticklabels(names if ax is ax1 else ['', '', ''], fontsize=12)
             ax.set_xlabel(label, fontsize=11)
             ax.set_xticks([])
             ax.tick_params(left=False)
-            ax.spines["left"].set_visible(False)
+            ax.spines['left'].set_visible(False)
         fig.subplots_adjust(wspace=0.12)
-        sp.save(fig, out / f"alloc_step{k}.svg")
+        sp.save(fig, out / f'alloc_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# NM 3.3: pass@k bars and the cost of a parallel pool
-# --------------------------------------------------------------------------
 def passk():
-    p = K.POOL.result
-    rows = [(f"{k} candidate{'s' if k > 1 else ''}", v * 100, "data", f"{v * 100:.1f}%")
-            for k, v in sorted(p.pass_at.items())]
-    sp.hbars_steps(str(out / "passk"), rows, "%", log=False, size=(3.6, 1.9),
-                   xlabel="Pool holds a pass (%)")
-    rows2 = [(f"Pool of {val('pool_n')}", p.parallel_per_success, "compute", val("pool_par")),
-             ("Retry to a pass", p.sequential_per_success, "data", val("pool_seq"))]
-    sp.hbars(str(out / "poolcost.svg"), rows2, "", log=False, size=(3.6, 0.75),
-             xlabel="Candidates per accepted repair")
+    rows = [('1 candidate', 30.0, 'data', '30.0%'), ('2 candidates', 51.0, 'data', '51.0%'), ('4 candidates', 75.99, 'data', '76.0%'), ('8 candidates', 94.235199, 'data', '94.2%')]
+    sp.hbars_steps(str(out / 'passk'), rows, '%', log=False, size=(3.6, 1.9), xlabel='Pool holds a pass (%)')
+    rows2 = [('Pool of 8', 8.489396834, 'compute', '8.5'), ('Retry to a pass', 3.333333333, 'data', '3.3')]
+    sp.hbars(str(out / 'poolcost.svg'), rows2, '', log=False, size=(3.6, 0.75), xlabel='Candidates per accepted repair')
 
-
-# --------------------------------------------------------------------------
-# Brown et al. 2024: coverage against majority vote (MLSysIM)
-# --------------------------------------------------------------------------
 def coverage():
-    S = K.COV
-    maj = K.mlsysim.load_series(S.majority_series).entries
-    cov = K.mlsysim.load_series(S.coverage_series).entries
-    series = ((S.small_model, "8B", C["memory"]), (S.large_model, "70B", C["network"]))
-    rep = sorted([e for e in cov if e["model"] == S.repair_system and e["dataset"] == S.repair_dataset],
-                 key=lambda e: e["k"])
+    maj = ({'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 1.0, 'majority_vote_accuracy': 0.932677, 'coverage': 0.930434, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 2.0, 'majority_vote_accuracy': 0.930472, 'coverage': 0.968757, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 4.0, 'majority_vote_accuracy': 0.954039, 'coverage': 0.984721, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 8.0, 'majority_vote_accuracy': 0.964332, 'coverage': 0.990293, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 16.0, 'majority_vote_accuracy': 0.967362, 'coverage': 0.992056, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 32.0, 'majority_vote_accuracy': 0.968425, 'coverage': 0.992442, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 64.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.992757, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 128.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.993341, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 256.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.994381, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 512.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.996025, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 1024.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.998069, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 2048.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.999601, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 4096.0, 'majority_vote_accuracy': 0.968504, 'coverage': 0.999992, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 8192.0, 'majority_vote_accuracy': 0.968504, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 10000.0, 'majority_vote_accuracy': 0.968504, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 1.0, 'majority_vote_accuracy': 0.768465, 'coverage': 0.768491, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 2.0, 'majority_vote_accuracy': 0.769173, 'coverage': 0.862121, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 4.0, 'majority_vote_accuracy': 0.827946, 'coverage': 0.920758, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 8.0, 'majority_vote_accuracy': 0.849588, 'coverage': 0.957962, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 16.0, 'majority_vote_accuracy': 0.859609, 'coverage': 0.979037, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 32.0, 'majority_vote_accuracy': 0.866033, 'coverage': 0.988855, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 64.0, 'majority_vote_accuracy': 0.869646, 'coverage': 0.993706, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 128.0, 'majority_vote_accuracy': 0.873858, 'coverage': 0.996525, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 256.0, 'majority_vote_accuracy': 0.87685, 'coverage': 0.998548, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 512.0, 'majority_vote_accuracy': 0.879508, 'coverage': 0.999744, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 1024.0, 'majority_vote_accuracy': 0.880217, 'coverage': 0.999993, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 2048.0, 'majority_vote_accuracy': 0.882205, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 4096.0, 'majority_vote_accuracy': 0.884016, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 8192.0, 'majority_vote_accuracy': 0.8825, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 10000.0, 'majority_vote_accuracy': 0.88189, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.095312, 'coverage': 0.093079, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.098027, 'coverage': 0.150621, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.125697, 'coverage': 0.224315, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.156895, 'coverage': 0.310481, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.186592, 'coverage': 0.407206, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.207267, 'coverage': 0.510022, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.216929, 'coverage': 0.60816, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.225863, 'coverage': 0.694469, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.226393, 'coverage': 0.768563, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.225091, 'coverage': 0.832003, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.222988, 'coverage': 0.882371, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.218529, 'coverage': 0.916856, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.214492, 'coverage': 0.936899, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.211816, 'coverage': 0.949951, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.210938, 'coverage': 0.953125, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.204687, 'coverage': 0.202351, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.211055, 'coverage': 0.296059, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.257327, 'coverage': 0.397774, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.311458, 'coverage': 0.505768, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.34928, 'coverage': 0.616159, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.37414, 'coverage': 0.715706, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.394566, 'coverage': 0.793937, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.405353, 'coverage': 0.850356, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.412523, 'coverage': 0.890817, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.415371, 'coverage': 0.917783, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.415462, 'coverage': 0.935407, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.417865, 'coverage': 0.950888, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.417982, 'coverage': 0.967595, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.416563, 'coverage': 0.981363, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.414062, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.478984, 'coverage': 0.478577, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.48541, 'coverage': 0.576687, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.534329, 'coverage': 0.661729, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.56488, 'coverage': 0.738223, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.585319, 'coverage': 0.806704, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.596581, 'coverage': 0.862806, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.603086, 'coverage': 0.904947, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.605216, 'coverage': 0.932514, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.608363, 'coverage': 0.949062, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.605365, 'coverage': 0.960767, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.604349, 'coverage': 0.969405, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.601172, 'coverage': 0.975498, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.599297, 'coverage': 0.980663, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.596348, 'coverage': 0.984111, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.59375, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.268867, 'coverage': 0.268351, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.274238, 'coverage': 0.369797, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.31738, 'coverage': 0.475128, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.355994, 'coverage': 0.578188, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.386058, 'coverage': 0.668946, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.404351, 'coverage': 0.741078, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.414675, 'coverage': 0.797906, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.423714, 'coverage': 0.84482, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.427904, 'coverage': 0.883244, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.428014, 'coverage': 0.912135, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.428887, 'coverage': 0.934902, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.430332, 'coverage': 0.953848, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.430273, 'coverage': 0.970186, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.429863, 'coverage': 0.982388, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.429688, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.1475, 'coverage': 0.146535, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.164355, 'coverage': 0.22946, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.20194, 'coverage': 0.325329, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.248649, 'coverage': 0.424592, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.285589, 'coverage': 0.525982, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.312542, 'coverage': 0.627158, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.321061, 'coverage': 0.71873, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.327769, 'coverage': 0.791691, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.325858, 'coverage': 0.845222, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.327233, 'coverage': 0.885217, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.325065, 'coverage': 0.916576, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.327168, 'coverage': 0.938767, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.326016, 'coverage': 0.951465, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.326055, 'coverage': 0.959253, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.328125, 'coverage': 0.960938, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.013633, 'coverage': 0.012602, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.016973, 'coverage': 0.024338, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.020641, 'coverage': 0.04564, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.024449, 'coverage': 0.081662, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.030213, 'coverage': 0.136918, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.036869, 'coverage': 0.212135, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.040919, 'coverage': 0.302381, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.044303, 'coverage': 0.399053, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.044936, 'coverage': 0.491357, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.042923, 'coverage': 0.571839, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.043704, 'coverage': 0.637022, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.04429, 'coverage': 0.688578, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.04543, 'coverage': 0.733217, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.045117, 'coverage': 0.781419, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.046875, 'coverage': 0.796875, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.023398, 'coverage': 0.023191, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.028887, 'coverage': 0.043912, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.03265, 'coverage': 0.079502, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.038534, 'coverage': 0.134612, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.049941, 'coverage': 0.210582, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.056796, 'coverage': 0.305938, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.060865, 'coverage': 0.414022, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.060099, 'coverage': 0.519398, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.057347, 'coverage': 0.604672, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.058428, 'coverage': 0.669303, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.056855, 'coverage': 0.725107, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.056634, 'coverage': 0.777372, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.05543, 'coverage': 0.822601, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.055371, 'coverage': 0.863727, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.054688, 'coverage': 0.875, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.002617, 'coverage': 0.002673, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.004531, 'coverage': 0.005308, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.007227, 'coverage': 0.010463, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.009042, 'coverage': 0.020347, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.010099, 'coverage': 0.038589, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.009591, 'coverage': 0.070145, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.008103, 'coverage': 0.11969, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.006052, 'coverage': 0.188328, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.006406, 'coverage': 0.268826, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.007161, 'coverage': 0.345927, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.007689, 'coverage': 0.412269, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.008066, 'coverage': 0.469368, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.007969, 'coverage': 0.517588, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.007812, 'coverage': 0.559085, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.007812, 'coverage': 0.570312, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.006797, 'coverage': 0.008334, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.013359, 'coverage': 0.016192, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.018558, 'coverage': 0.030659, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.023111, 'coverage': 0.055578, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.02824, 'coverage': 0.094593, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.033488, 'coverage': 0.149714, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.037667, 'coverage': 0.221145, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.039608, 'coverage': 0.305707, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.038836, 'coverage': 0.394513, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.037554, 'coverage': 0.47691, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.036738, 'coverage': 0.548461, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.035234, 'coverage': 0.609936, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.034297, 'coverage': 0.665697, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.032031, 'coverage': 0.724007, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.03125, 'coverage': 0.742188, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.020078, 'coverage': 0.020312, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.025957, 'coverage': 0.038232, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.029854, 'coverage': 0.068704, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.034779, 'coverage': 0.115722, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.043661, 'coverage': 0.181066, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.048732, 'coverage': 0.263514, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.050961, 'coverage': 0.358432, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.052832, 'coverage': 0.456454, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.04985, 'coverage': 0.544402, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.049368, 'coverage': 0.617705, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.045195, 'coverage': 0.679751, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.043437, 'coverage': 0.732325, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.042344, 'coverage': 0.775176, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.042012, 'coverage': 0.805885, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.039062, 'coverage': 0.8125, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.006133, 'coverage': 0.006219, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.009551, 'coverage': 0.012159, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.012194, 'coverage': 0.02328, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.015819, 'coverage': 0.042949, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.01828, 'coverage': 0.074736, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.019867, 'coverage': 0.120705, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.020278, 'coverage': 0.181252, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.019172, 'coverage': 0.254254, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.018415, 'coverage': 0.33308, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.017354, 'coverage': 0.410964, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.016979, 'coverage': 0.484192, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.015898, 'coverage': 0.547909, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.015703, 'coverage': 0.59758, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.015625, 'coverage': 0.641575, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.015625, 'coverage': 0.65625, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.018516, 'coverage': 0.01856, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.023828, 'coverage': 0.03537, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.028102, 'coverage': 0.064811, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.03397, 'coverage': 0.111924, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.043098, 'coverage': 0.179372, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.047055, 'coverage': 0.265473, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.04688, 'coverage': 0.36478, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.045157, 'coverage': 0.467941, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.044129, 'coverage': 0.560388, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.04305, 'coverage': 0.632942, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.042344, 'coverage': 0.689531, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.04252, 'coverage': 0.739753, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.044766, 'coverage': 0.783786, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.047813, 'coverage': 0.824087, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.046875, 'coverage': 0.835938, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 1.0, 'majority_vote_accuracy': 0.000781, 'coverage': 0.000647, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 2.0, 'majority_vote_accuracy': 0.001348, 'coverage': 0.001282, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 4.0, 'majority_vote_accuracy': 0.002734, 'coverage': 0.002518, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 8.0, 'majority_vote_accuracy': 0.004336, 'coverage': 0.004861, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 16.0, 'majority_vote_accuracy': 0.006746, 'coverage': 0.009102, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 32.0, 'majority_vote_accuracy': 0.011559, 'coverage': 0.016201, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 64.0, 'majority_vote_accuracy': 0.014914, 'coverage': 0.026949, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 128.0, 'majority_vote_accuracy': 0.014991, 'coverage': 0.042043, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 256.0, 'majority_vote_accuracy': 0.015441, 'coverage': 0.06279, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 512.0, 'majority_vote_accuracy': 0.014896, 'coverage': 0.090541, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 1024.0, 'majority_vote_accuracy': 0.014316, 'coverage': 0.125428, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 2048.0, 'majority_vote_accuracy': 0.014766, 'coverage': 0.164872, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 4096.0, 'majority_vote_accuracy': 0.015391, 'coverage': 0.205826, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 8192.0, 'majority_vote_accuracy': 0.015625, 'coverage': 0.251542, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 200.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 10000.0, 'majority_vote_accuracy': 0.015625, 'coverage': 0.265625, 'n_problems': 128.0, 'n_samples': 10000.0, 'mc_reps': 1.0})
+    cov = ({'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 1.0, 'coverage': 0.15872, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 2.0, 'coverage': 0.217129, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 4.0, 'coverage': 0.276889, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 8.0, 'coverage': 0.336235, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 16.0, 'coverage': 0.3911, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 32.0, 'coverage': 0.43915, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 64.0, 'coverage': 0.481375, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 128.0, 'coverage': 0.520489, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (all 300)', 'k': 250.0, 'coverage': 0.56, 'n_problems': 300.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 1.0, 'coverage': 0.143759, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 2.0, 'coverage': 0.196322, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 4.0, 'coverage': 0.250635, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 8.0, 'coverage': 0.305397, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 16.0, 'coverage': 0.358193, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 32.0, 'coverage': 0.407914, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 64.0, 'coverage': 0.45384, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 128.0, 'coverage': 0.497, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'DeepSeek-Coder-V2-Instruct + Moatless Tools', 'dataset': 'SWE-bench Lite (excl. flaky-test instances)', 'k': 250.0, 'coverage': 0.541353, 'n_problems': 266.0, 'n_samples': 250.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 1.0, 'coverage': 0.000199, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 2.0, 'coverage': 0.000395, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 4.0, 'coverage': 0.000781, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 8.0, 'coverage': 0.001529, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 16.0, 'coverage': 0.002932, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 32.0, 'coverage': 0.005411, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 64.0, 'coverage': 0.009361, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 128.0, 'coverage': 0.014763, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 256.0, 'coverage': 0.021157, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 512.0, 'coverage': 0.028338, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 1024.0, 'coverage': 0.036518, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 2048.0, 'coverage': 0.04666, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 4096.0, 'coverage': 0.058195, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 8192.0, 'coverage': 0.068596, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'CodeContests', 'k': 10000.0, 'coverage': 0.071429, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 1.0, 'coverage': 0.007921, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 2.0, 'coverage': 0.014237, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 4.0, 'coverage': 0.023674, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 8.0, 'coverage': 0.03558, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 16.0, 'coverage': 0.048348, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 32.0, 'coverage': 0.060859, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 64.0, 'coverage': 0.073935, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 128.0, 'coverage': 0.090275, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 256.0, 'coverage': 0.111323, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 512.0, 'coverage': 0.136389, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 1024.0, 'coverage': 0.163677, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 2048.0, 'coverage': 0.191933, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 4096.0, 'coverage': 0.221657, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 8192.0, 'coverage': 0.25359, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'CodeContests', 'k': 10000.0, 'coverage': 0.264286, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 1.0, 'coverage': 0.074426, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 2.0, 'coverage': 0.093717, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 4.0, 'coverage': 0.113306, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 8.0, 'coverage': 0.134775, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 16.0, 'coverage': 0.158463, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 32.0, 'coverage': 0.182522, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 64.0, 'coverage': 0.205433, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 128.0, 'coverage': 0.225921, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 256.0, 'coverage': 0.245332, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 512.0, 'coverage': 0.266004, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 1024.0, 'coverage': 0.289872, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 2048.0, 'coverage': 0.316568, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 4096.0, 'coverage': 0.343339, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 8192.0, 'coverage': 0.370263, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'CodeContests', 'k': 10000.0, 'coverage': 0.378571, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 1.0, 'coverage': 0.021199, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 2.0, 'coverage': 0.028399, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 4.0, 'coverage': 0.035485, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 8.0, 'coverage': 0.043392, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 16.0, 'coverage': 0.054173, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 32.0, 'coverage': 0.068449, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 64.0, 'coverage': 0.084747, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 128.0, 'coverage': 0.102258, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 256.0, 'coverage': 0.12147, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 512.0, 'coverage': 0.142933, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 1024.0, 'coverage': 0.16553, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 2048.0, 'coverage': 0.1869, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 4096.0, 'coverage': 0.206142, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 8192.0, 'coverage': 0.227723, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'CodeContests', 'k': 10000.0, 'coverage': 0.235714, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 1.0, 'coverage': 0.009148, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 2.0, 'coverage': 0.015308, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 4.0, 'coverage': 0.023469, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 8.0, 'coverage': 0.033243, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 16.0, 'coverage': 0.043819, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 32.0, 'coverage': 0.05486, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 64.0, 'coverage': 0.067709, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 128.0, 'coverage': 0.083771, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 256.0, 'coverage': 0.103233, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 512.0, 'coverage': 0.125568, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 1024.0, 'coverage': 0.150357, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 2048.0, 'coverage': 0.175066, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 4096.0, 'coverage': 0.196355, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 8192.0, 'coverage': 0.211326, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'CodeContests', 'k': 10000.0, 'coverage': 0.214286, 'n_problems': 140.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 1.0, 'coverage': 0.930434, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 2.0, 'coverage': 0.968757, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 4.0, 'coverage': 0.984721, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 8.0, 'coverage': 0.990293, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 16.0, 'coverage': 0.992056, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 32.0, 'coverage': 0.992442, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 64.0, 'coverage': 0.992757, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 128.0, 'coverage': 0.993341, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 256.0, 'coverage': 0.994381, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 512.0, 'coverage': 0.996025, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 1024.0, 'coverage': 0.998069, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 2048.0, 'coverage': 0.999601, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 4096.0, 'coverage': 0.999992, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 8192.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'GSM8K', 'k': 10000.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 1.0, 'coverage': 0.768491, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 2.0, 'coverage': 0.862121, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 4.0, 'coverage': 0.920758, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 8.0, 'coverage': 0.957962, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 16.0, 'coverage': 0.979037, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 32.0, 'coverage': 0.988855, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 64.0, 'coverage': 0.993706, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 128.0, 'coverage': 0.996525, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 256.0, 'coverage': 0.998548, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 512.0, 'coverage': 0.999744, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 1024.0, 'coverage': 0.999993, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 2048.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 4096.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 8192.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'GSM8K', 'k': 10000.0, 'coverage': 1.0, 'n_problems': 127.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.093079, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.150621, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.224315, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.310481, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.407206, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.510022, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.60816, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.694469, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.768563, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.832003, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.882371, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.916856, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.936899, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.949951, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-2B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.953125, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.202351, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.296059, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.397774, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.505768, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.616159, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.715706, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.793937, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.850356, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.890817, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.917783, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.935407, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.950888, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.967595, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.981363, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Gemma-7B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.478577, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.576687, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.661729, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.738223, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.806704, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.862806, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.904947, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.932514, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.949062, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.960767, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.969405, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.975498, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.980663, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.984111, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.268351, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.369797, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.475128, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.578188, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.668946, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.741078, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.797906, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.84482, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.883244, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.912135, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.934902, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.953848, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.970186, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.982388, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.984375, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.146535, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.22946, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.325329, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.424592, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.525982, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.627158, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.71873, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.791691, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.845222, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.885217, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.916576, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.938767, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.951465, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.959253, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.960938, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.012602, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.024338, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.04564, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.081662, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.136918, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.212135, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.302381, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.399053, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.491357, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.571839, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.637022, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.688578, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.733217, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.781419, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1.4B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.796875, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.023191, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.043912, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.079502, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.134612, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.210582, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.305938, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.414022, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.519398, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.604672, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.669303, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.725107, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.777372, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.822601, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.863727, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-12B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.875, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.002673, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.005308, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.010463, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.020347, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.038589, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.070145, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.11969, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.188328, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.268826, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.345927, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.412269, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.469368, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.517588, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.559085, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-160M', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.570312, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.008334, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.016192, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.030659, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.055578, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.094593, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.149714, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.221145, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.305707, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.394513, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.47691, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.548461, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.609936, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.665697, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.724007, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-1B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.742188, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.020312, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.038232, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.068704, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.115722, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.181066, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.263514, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.358432, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.456454, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.544402, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.617705, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.679751, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.732325, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.775176, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.805885, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-2.8B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.8125, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.006219, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.012159, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.02328, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.042949, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.074736, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.120705, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.181252, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.254254, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.33308, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.410964, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.484192, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.547909, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.59758, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.641575, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-410M', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.65625, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.01856, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.03537, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.064811, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.111924, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.179372, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.265473, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.36478, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.467941, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.560388, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.632942, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.689531, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.739753, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.783786, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.824087, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-6.9B', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.835938, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 1.0, 'coverage': 0.000647, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 2.0, 'coverage': 0.001282, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 4.0, 'coverage': 0.002518, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 8.0, 'coverage': 0.004861, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 16.0, 'coverage': 0.009102, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 32.0, 'coverage': 0.016201, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 64.0, 'coverage': 0.026949, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 128.0, 'coverage': 0.042043, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 256.0, 'coverage': 0.06279, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 512.0, 'coverage': 0.090541, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 1024.0, 'coverage': 0.125428, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 2048.0, 'coverage': 0.164872, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 4096.0, 'coverage': 0.205826, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 8192.0, 'coverage': 0.251542, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Pythia-70M', 'dataset': 'MATH', 'k': 10000.0, 'coverage': 0.265625, 'n_problems': 128.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 1.0, 'coverage': 0.21245, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 2.0, 'coverage': 0.255074, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 4.0, 'coverage': 0.295156, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 8.0, 'coverage': 0.33414, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 16.0, 'coverage': 0.370287, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 32.0, 'coverage': 0.399297, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 64.0, 'coverage': 0.420404, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 128.0, 'coverage': 0.436782, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 256.0, 'coverage': 0.450559, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 512.0, 'coverage': 0.462779, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 1024.0, 'coverage': 0.47496, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 2048.0, 'coverage': 0.487615, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 4096.0, 'coverage': 0.500605, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 8192.0, 'coverage': 0.512459, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-70B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 10000.0, 'coverage': 0.515385, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 1.0, 'coverage': 0.205981, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 2.0, 'coverage': 0.260685, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 4.0, 'coverage': 0.308182, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 8.0, 'coverage': 0.348426, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 16.0, 'coverage': 0.38276, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 32.0, 'coverage': 0.409531, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 64.0, 'coverage': 0.424943, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 128.0, 'coverage': 0.432091, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 256.0, 'coverage': 0.436413, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 512.0, 'coverage': 0.440707, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 1024.0, 'coverage': 0.446203, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 2048.0, 'coverage': 0.453308, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 4096.0, 'coverage': 0.463443, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 8192.0, 'coverage': 0.478801, 'n_problems': 130.0, 'n_samples': 10000.0}, {'model': 'Llama-3-8B-Instruct', 'dataset': 'MiniF2F-MATH', 'k': 10000.0, 'coverage': 0.484615, 'n_problems': 130.0, 'n_samples': 10000.0})
+    series = (('Llama-3-8B-Instruct', '8B', C['memory']), ('Llama-3-70B-Instruct', '70B', C['network']))
+    rep = sorted([e for e in cov if e['model'] == 'DeepSeek-Coder-V2-Instruct + Moatless Tools' and e['dataset'] == 'SWE-bench Lite (all 300)'], key=lambda e: e['k'])
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.2))
         for model, lab, col in series:
-            r = sorted([e for e in maj if e["model"] == model and e["dataset"] == S.dataset], key=lambda e: e["k"])
-            ks = [e["k"] for e in r]
-            ax.plot(ks, [100 * e["coverage"] for e in r], "-", color=col, lw=2.4)
-            ax.text(ks[-1] * 1.25, 100 * r[-1]["coverage"] + (4 if lab == "70B" else -7),
-                    f"{lab} coverage", color=col, fontsize=11, fontweight="bold", va="center")  # noqa
+            r = sorted([e for e in maj if e['model'] == model and e['dataset'] == 'MATH'], key=lambda e: e['k'])
+            ks = [e['k'] for e in r]
+            ax.plot(ks, [100 * e['coverage'] for e in r], '-', color=col, lw=2.4)
+            ax.text(ks[-1] * 1.25, 100 * r[-1]['coverage'] + (4 if lab == '70B' else -7), f'{lab} coverage', color=col, fontsize=11, fontweight='bold', va='center')
             if k >= 2:
-                ax.plot(ks, [100 * e["majority_vote_accuracy"] for e in r], "--", color=col, lw=2.4)
-                ax.text(ks[-1] * 1.25, 100 * r[-1]["majority_vote_accuracy"],
-                        f"{lab} majority vote", color=col, fontsize=11, fontweight="bold", va="center")
+                ax.plot(ks, [100 * e['majority_vote_accuracy'] for e in r], '--', color=col, lw=2.4)
+                ax.text(ks[-1] * 1.25, 100 * r[-1]['majority_vote_accuracy'], f'{lab} majority vote', color=col, fontsize=11, fontweight='bold', va='center')
         if k >= 3:
-            ax.plot([e["k"] for e in rep], [100 * e["coverage"] for e in rep], ":", color=C["data"], lw=2.8)
-            ax.text(14, 3, f"Repair agent coverage, 1 to {val('cov_repair_k')} samples (dotted)",
-                    color=C["data"], fontsize=11, fontweight="bold", va="bottom", ha="left")
-        ax.set_xscale("log")
-        ax.set_xlim(1, 10_000)
+            ax.plot([e['k'] for e in rep], [100 * e['coverage'] for e in rep], ':', color=C['data'], lw=2.8)
+            ax.text(14, 3, 'Repair agent coverage, 1 to 250 samples (dotted)', color=C['data'], fontsize=11, fontweight='bold', va='bottom', ha='left')
+        ax.set_xscale('log')
+        ax.set_xlim(1, 10000)
         ax.set_ylim(0, 104)
         ax.set_xticks([1, 10, 100, 1000, 10000])
-        ax.set_xticklabels(["1", "10", "100", "1,000", "10,000"])
-        ax.set_xlabel("Samples per problem (log scale)")
-        ax.set_ylabel("Problems (%)")
-        ax.grid(axis="y", color=C["grid"], lw=0.6)
+        ax.set_xticklabels(['1', '10', '100', '1,000', '10,000'])
+        ax.set_xlabel('Samples per problem (log scale)')
+        ax.set_ylabel('Problems (%)')
+        ax.grid(axis='y', color=C['grid'], lw=0.6)
         ax.set_axisbelow(True)
-        fig.subplots_adjust(right=0.70)
-        sp.save(fig, out / f"coverage_step{k}.svg")
+        fig.subplots_adjust(right=0.7)
+        sp.save(fig, out / f'coverage_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# NM 3.4: precision against the valid-candidate rate
-# --------------------------------------------------------------------------
 def precision():
     import numpy as np
-    S = K.VER
     xs = np.logspace(-3, 0, 300)
-    # Passing-set precision is one minus the posterior of a defect given a pass.
-    ys = [100 * (1 - calc_pass_posterior(1 - x, S.false_accept_rate, 1 - S.false_reject_rate)) for x in xs]
-    v_pct, v2_pct = 100 * S.valid_rate, 100 * K.VER_V.valid_rate
-    prec, prec_fa, prec_v = (100 * x.result.precision for x in (S, K.VER_FA, K.VER_V))
+    ys = [100 * (1 - calc_pass_posterior(1 - x, 0.02, 1 - 0.1)) for x in xs]
+    v_pct, v2_pct = (100 * 0.05, 100 * 0.1)
+    prec, prec_fa, prec_v = (100 * x.result.precision for x in (SimpleNamespace(false_accept_rate=0.02, false_reject_rate=0.1, incident_loss=Q_(500, 'USD'), name='64 candidates at 5 percent valid, first passing one returned', output_price=Q_(15.0, 'USD / Mtoken'), pool_size=64, result=SimpleNamespace(any_false_pass=0.7070345054, any_selection=0.9854904374, conditional_loss=Q_(148.4375, 'dollar'), defect_given_selection=0.296875, expected_invalid_passes=1.216, expected_passes=4.096, expected_valid_passes=2.88, invalid_pass=0.019, loss_to_bill=148.8075122, no_selection=0.01450956256, output_bill=Q_(0.98304, 'dollar'), pass_probability=0.064, precision=0.703125, task_loss=Q_(146.2837368, 'dollar'), valid_pass=0.045, wrong_selection=0.2925674736), tokens_per_candidate=Q_(1024, 'token'), valid_rate=0.05), SimpleNamespace(false_accept_rate=0.01, false_reject_rate=0.1, incident_loss=Q_(500, 'USD'), name='The same pool with the false-acceptance rate halved', output_price=Q_(15.0, 'USD / Mtoken'), pool_size=64, result=SimpleNamespace(any_false_pass=0.457141413, any_selection=0.9723090329, conditional_loss=Q_(87.1559633, 'dollar'), defect_given_selection=0.1743119266, expected_invalid_passes=0.608, expected_passes=3.488, expected_valid_passes=2.88, invalid_pass=0.0095, loss_to_bill=86.20455972, no_selection=0.0276909671, output_bill=Q_(0.98304, 'dollar'), pass_probability=0.0545, precision=0.8256880734, task_loss=Q_(84.74253039, 'dollar'), valid_pass=0.045, wrong_selection=0.1694850608), tokens_per_candidate=Q_(1024, 'token'), valid_rate=0.05), SimpleNamespace(false_accept_rate=0.02, false_reject_rate=0.1, incident_loss=Q_(500, 'USD'), name='The same pool with the valid-candidate rate doubled', output_price=Q_(15.0, 'USD / Mtoken'), pool_size=64, result=SimpleNamespace(any_false_pass=0.6872947171, any_selection=0.9993341894, conditional_loss=Q_(83.33333333, 'dollar'), defect_given_selection=0.1666666667, expected_invalid_passes=1.152, expected_passes=6.912, expected_valid_passes=5.76, invalid_pass=0.018, loss_to_bill=84.71460889, no_selection=0.0006658105617, output_bill=Q_(0.98304, 'dollar'), pass_probability=0.108, precision=0.8333333333, task_loss=Q_(83.27784912, 'dollar'), valid_pass=0.09, wrong_selection=0.1665556982), tokens_per_candidate=Q_(1024, 'token'), valid_rate=0.1)))
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.0))
-        ax.plot(xs * 100, ys, color=C["text"], lw=2.4)
-        ax.axvspan(0.1, v_pct, color=C["danger_l"], alpha=0.6, lw=0)
+        ax.plot(xs * 100, ys, color=C['text'], lw=2.4)
+        ax.axvspan(0.1, v_pct, color=C['danger_l'], alpha=0.6, lw=0)
         if k >= 2:
-            ax.plot([v_pct], [prec], "o", ms=11, color=C["danger"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"{val('vp_v_pct')}% valid: {val('vp_prec1')}% of passes valid",
-                        (v_pct, prec), xytext=(12, -24), textcoords="offset points",
-                        ha="left", va="top", fontsize=12, fontweight="bold", color=C["danger"])
+            ax.plot([v_pct], [prec], 'o', ms=11, color=C['danger'], mec='white', mew=1.5, zorder=5)
+            ax.annotate('5% valid: 70.3% of passes valid', (v_pct, prec), xytext=(12, -24), textcoords='offset points', ha='left', va='top', fontsize=12, fontweight='bold', color=C['danger'])
         if k >= 3:
-            ax.plot([v_pct], [prec_fa], "o", ms=10, color=C["data"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"false acceptance halved: {val('vp_half_fa')}%", (v_pct, prec_fa),
-                        xytext=(-12, 6), textcoords="offset points", ha="right", va="bottom",
-                        fontsize=11, fontweight="bold", color=C["data"])
-            ax.plot([v2_pct], [prec_v], "s", ms=9, color=C["memory"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"valid rate doubled: {val('vp_double_v')}%", (v2_pct, prec_v),
-                        xytext=(10, -6), textcoords="offset points", ha="left", va="top",
-                        fontsize=11, fontweight="bold", color=C["memory"])
-        ax.set_xscale("log")
+            ax.plot([v_pct], [prec_fa], 'o', ms=10, color=C['data'], mec='white', mew=1.5, zorder=5)
+            ax.annotate('false acceptance halved: 82.6%', (v_pct, prec_fa), xytext=(-12, 6), textcoords='offset points', ha='right', va='bottom', fontsize=11, fontweight='bold', color=C['data'])
+            ax.plot([v2_pct], [prec_v], 's', ms=9, color=C['memory'], mec='white', mew=1.5, zorder=5)
+            ax.annotate('valid rate doubled: 83.3%', (v2_pct, prec_v), xytext=(10, -6), textcoords='offset points', ha='left', va='top', fontsize=11, fontweight='bold', color=C['memory'])
+        ax.set_xscale('log')
         ax.set_xlim(0.1, 100)
         ax.set_ylim(0, 105)
         ax.set_xticks([0.1, 1, 10, 100])
-        ax.set_xticklabels(["0.1", "1", "10", "100"])
-        ax.set_xlabel("Valid candidates in the pool (%, log scale)")
-        ax.set_ylabel("Passes that are valid (%)")
-        ax.grid(axis="y", color=C["grid"], lw=0.6)
+        ax.set_xticklabels(['0.1', '1', '10', '100'])
+        ax.set_xlabel('Valid candidates in the pool (%, log scale)')
+        ax.set_ylabel('Passes that are valid (%)')
+        ax.grid(axis='y', color=C['grid'], lw=0.6)
         ax.set_axisbelow(True)
-        sp.save(fig, out / f"precision_step{k}.svg")
-    r = K.VER.result
-    rows = [("Incident loss", K.m(r.task_loss, "USD"), "danger", f"${val('vp_task_loss')}"),
-            ("Output bill", K.m(r.output_bill, "USD"), "neutral", f"${val('vp_bill')}")]
+        sp.save(fig, out / f'precision_step{k}.svg')
+    rows = [('Incident loss', 146.2837368, 'danger', '$146.28'), ('Output bill', 0.98304, 'neutral', '$0.98')]
     with plain_log_ticks():
-        sp.hbars(str(out / "loss.svg"), rows, "", log=True, size=(3.4, 0.95),
-                 xlabel="Dollars per attempt (log)")
+        sp.hbars(str(out / 'loss.svg'), rows, '', log=True, size=(3.4, 0.95), xlabel='Dollars per attempt (log)')
 
-
-# --------------------------------------------------------------------------
-# Equation 4: the winner's scoring error
-# --------------------------------------------------------------------------
 def selection():
     import numpy as np
-    s = K.SEL.result
-    ns = sorted(s.expected_max)
+    ns = sorted({1: -4.50899085e-17, 2: 0.5641895835, 4: 1.029375373, 8: 1.423600306, 16: 1.765991393, 32: 2.069668828, 64: 2.343733465})
     fig, ax = plt.subplots(figsize=(3.6, 2.1))
-    ax.plot(ns, [s.expected_max[n] for n in ns], "o-", color=C["danger"], lw=2.4, ms=7)
-    na = np.array(sorted(s.asymptote))
-    ax.plot(na, [s.asymptote[n] for n in na], "--", color=C["neutral"], lw=1.8)
-    ax.text(24, 2.75, "asymptote √(2 ln N)", color=C["neutral"], fontsize=12, ha="right", va="bottom")
-    small, large = K.SEL.small_pool, K.SEL.large_pool
-    for n, key in ((small, "sel_shift_small"), (large, "sel_shift_large")):
-        ax.annotate(f"{val(key)}σ at N = {n}", (n, s.expected_max[n]),
-                    xytext=(6, -18) if n == small else (-4, -40), textcoords="offset points", fontsize=12,
-                    fontweight="bold", color=C["danger"], ha="left" if n == small else "right")
-    ax.set_xscale("log", base=2)
+    ax.plot(ns, [-4.50899085e-17, 0.5641895835, 1.029375373, 1.423600306, 1.765991393, 2.069668828, 2.343733465], 'o-', color=C['danger'], lw=2.4, ms=7)
+    na = np.array(sorted({2: 1.177410023, 4: 1.665109222, 8: 2.03933398, 16: 2.354820045, 32: 2.632768848, 64: 2.884053773}))
+    ax.plot(na, [1.177410023, 1.665109222, 2.03933398, 2.354820045, 2.632768848, 2.884053773], '--', color=C['neutral'], lw=1.8)
+    ax.text(24, 2.75, 'asymptote √(2 ln N)', color=C['neutral'], fontsize=12, ha='right', va='bottom')
+    small, large = (4, 64)
+    for n, key in ((small, 'sel_shift_small'), (large, 'sel_shift_large')):
+        ax.annotate(f"{ {4: '1.0', 64: '2.3'}[n]}σ at N = {n}", (n, {4: 1.029375373, 64: 2.343733465}[n]), xytext=(6, -18) if n == small else (-4, -40), textcoords='offset points', fontsize=12, fontweight='bold', color=C['danger'], ha='left' if n == small else 'right')
+    ax.set_xscale('log', base=2)
     ax.set_xticks(ns)
     ax.set_xticklabels([str(n) for n in ns])
     ax.set_xlim(0.8, 80)
     ax.set_ylim(-0.2, 3.2)
-    ax.set_xlabel("Candidates scored, N")
+    ax.set_xlabel('Candidates scored, N')
     ax.set_ylabel("Winner's scoring error (σ)")
-    ax.grid(axis="y", color=C["grid"], lw=0.6)
+    ax.grid(axis='y', color=C['grid'], lw=0.6)
     ax.set_axisbelow(True)
-    sp.save(fig, out / "selection.svg")
+    sp.save(fig, out / 'selection.svg')
 
-
-# --------------------------------------------------------------------------
-# Where each search structure prunes (TTC figure 7), one panel per step
-# --------------------------------------------------------------------------
 def node(ax, x, y, kind, r=1.8):
-    styles = {"prompt": ("#e5e7eb", "#64748b", "-"), "gen": (V3["think"][0], V3["think"][1], "-"),
-              "keep": (V3["mem"][0], V3["mem"][1], "-"), "pruned": ("#f1f5f9", "#94a3b8", "-"),
-              "open": ("white", "#94a3b8", "--")}
+    styles = {'prompt': ('#e5e7eb', '#64748b', '-'), 'gen': (V3['think'][0], V3['think'][1], '-'), 'keep': (V3['mem'][0], V3['mem'][1], '-'), 'pruned': ('#f1f5f9', '#94a3b8', '-'), 'open': ('white', '#94a3b8', '--')}
     fc, ec, ls = styles[kind]
     ax.add_patch(plt.Circle((x, y), r, fc=fc, ec=ec, lw=1.8, ls=ls, zorder=3))
-    if kind == "pruned":
+    if kind == 'pruned':
         for s in (1, -1):
-            ax.plot([x - r * 0.6, x + r * 0.6], [y - s * r * 0.6, y + s * r * 0.6], color="#64748b",
-                    lw=1.5, zorder=4)
+            ax.plot([x - r * 0.6, x + r * 0.6], [y - s * r * 0.6, y + s * r * 0.6], color='#64748b', lw=1.5, zorder=4)
 
-
-def edge(ax, x0, y0, x1, y1, color="#94a3b8", lw=1.6):
+def edge(ax, x0, y0, x1, y1, color='#94a3b8', lw=1.6):
     ax.plot([x0, x1], [y0, y1], color=color, lw=lw, zorder=1)
 
-
 def topo():
-    heads = [("Best-of-N", "prunes only at the end"), ("Beam", "prunes at each step"),
-             ("Tree search", "grows one favored leaf")]
+    heads = [('Best-of-N', 'prunes only at the end'), ('Beam', 'prunes at each step'), ('Tree search', 'grows one favored leaf')]
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.6)
         for i, (t, sub) in enumerate(heads):
             a = 1 if i < k else 0
-            ax.text(16.5 + i * 33.5, 36.5, t, ha="center", fontsize=21, fontweight="bold", color="#0f172a", alpha=a)
-            ax.text(16.5 + i * 33.5, 32.3, sub, ha="center", fontsize=16, color="#475569", alpha=a)
+            ax.text(16.5 + i * 33.5, 36.5, t, ha='center', fontsize=21, fontweight='bold', color='#0f172a', alpha=a)
+            ax.text(16.5 + i * 33.5, 32.3, sub, ha='center', fontsize=16, color='#475569', alpha=a)
         if k >= 1:
-            node(ax, 2.5, 16, "prompt")
+            node(ax, 2.5, 16, 'prompt')
             for j, y in enumerate([27, 20, 13, 6]):
                 edge(ax, 2.5, 16, 8, y)
                 for c in range(3):
-                    node(ax, 8 + c * 5.5, y, "gen")
+                    node(ax, 8 + c * 5.5, y, 'gen')
                     if c:
                         edge(ax, 8 + (c - 1) * 5.5, y, 8 + c * 5.5, y)
                 edge(ax, 19, y, 27.5, y)
-                node(ax, 27.5, y, "keep" if j == 2 else "pruned")
-            ax.plot([24, 24], [3.5, 29.5], ls="--", color="#475569", lw=1.4)
-            ax.text(24, 0.2, "select", ha="center", fontsize=15, color="#475569")
+                node(ax, 27.5, y, 'keep' if j == 2 else 'pruned')
+            ax.plot([24, 24], [3.5, 29.5], ls='--', color='#475569', lw=1.4)
+            ax.text(24, 0.2, 'select', ha='center', fontsize=15, color='#475569')
         if k >= 2:
             x0 = 35
-            node(ax, x0 + 1.5, 16, "prompt")
+            node(ax, x0 + 1.5, 16, 'prompt')
             for y in (22, 10):
                 edge(ax, x0 + 1.5, 16, x0 + 8, y)
-                node(ax, x0 + 8, y, "gen")
-            kids = [(27, "keep"), (19.5, "pruned"), (12.5, "keep"), (5, "pruned")]
+                node(ax, x0 + 8, y, 'gen')
+            kids = [(27, 'keep'), (19.5, 'pruned'), (12.5, 'keep'), (5, 'pruned')]
             for (y, kind), par in zip(kids, [22, 22, 10, 10]):
                 edge(ax, x0 + 8, par, x0 + 15, y)
                 node(ax, x0 + 15, y, kind)
-            ax.plot([x0 + 19] * 2, [3.5, 29.5], ls="--", color="#475569", lw=1.4)
-            ax.text(x0 + 19, 0.2, "score, keep 2", ha="center", fontsize=15, color="#475569")
+            ax.plot([x0 + 19] * 2, [3.5, 29.5], ls='--', color='#475569', lw=1.4)
+            ax.text(x0 + 19, 0.2, 'score, keep 2', ha='center', fontsize=15, color='#475569')
             for y, par in ((29, 27), (23.5, 27), (15, 12.5), (9.5, 12.5)):
                 edge(ax, x0 + 15, par, x0 + 26, y)
-                node(ax, x0 + 26, y, "gen")
+                node(ax, x0 + 26, y, 'gen')
         if k >= 3:
             x0 = 68.5
-            node(ax, x0 + 1.5, 17, "prompt")
-            pts = {"a": (x0 + 8.5, 26), "b": (x0 + 8.5, 17), "c": (x0 + 8.5, 8),
-                   "d": (x0 + 15.5, 21), "e": (x0 + 15.5, 12), "f": (x0 + 22.5, 26), "g": (x0 + 22.5, 18)}
-            parent = {"a": (x0 + 1.5, 17), "b": (x0 + 1.5, 17), "c": (x0 + 1.5, 17), "d": pts["b"],
-                      "e": pts["b"], "f": pts["d"], "g": pts["d"]}
+            node(ax, x0 + 1.5, 17, 'prompt')
+            pts = {'a': (x0 + 8.5, 26), 'b': (x0 + 8.5, 17), 'c': (x0 + 8.5, 8), 'd': (x0 + 15.5, 21), 'e': (x0 + 15.5, 12), 'f': (x0 + 22.5, 26), 'g': (x0 + 22.5, 18)}
+            parent = {'a': (x0 + 1.5, 17), 'b': (x0 + 1.5, 17), 'c': (x0 + 1.5, 17), 'd': pts['b'], 'e': pts['b'], 'f': pts['d'], 'g': pts['d']}
             for n_, (x, y) in pts.items():
-                hot = n_ in ("b", "d", "g")
-                edge(ax, parent[n_][0], parent[n_][1], x, y, color=V3["think"][1] if hot else "#94a3b8",
-                     lw=3.5 if hot else 1.6)
-            kinds = {"a": "gen", "b": "gen", "c": "open", "d": "gen", "e": "open", "f": "open", "g": "keep"}
+                hot = n_ in ('b', 'd', 'g')
+                edge(ax, parent[n_][0], parent[n_][1], x, y, color=V3['think'][1] if hot else '#94a3b8', lw=3.5 if hot else 1.6)
+            kinds = {'a': 'gen', 'b': 'gen', 'c': 'open', 'd': 'gen', 'e': 'open', 'f': 'open', 'g': 'keep'}
             for n_, (x, y) in pts.items():
                 node(ax, x, y, kinds[n_])
-            ax.text(x0 + 22.5, 13.8, "new leaf\nscored", ha="center", va="top", fontsize=14,
-                    color=V3["mem"][2], fontweight="bold")
-            ax.text(x0 + 16, 0.2, "bold path: visits updated", ha="center", fontsize=15,
-                    color=V3["think"][2])
-        sp.save(fig, out / f"topo_step{k}.svg")
+            ax.text(x0 + 22.5, 13.8, 'new leaf\nscored', ha='center', va='top', fontsize=14, color=V3['mem'][2], fontweight='bold')
+            ax.text(x0 + 16, 0.2, 'bold path: visits updated', ha='center', fontsize=15, color=V3['think'][2])
+        sp.save(fig, out / f'topo_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# Step pruning bounds tree growth (TTC 3.6.2)
-# --------------------------------------------------------------------------
 def prune():
-    p = K.TREE.result
-    rows = [("No pruning", p.unpruned_nodes, "neutral", f"{val('tree_unpruned')} nodes"),
-            (f"A flat {val('tree_r_pct')}% cut", p.flat_cut_nodes, "memory", f"{val('tree_flat')} nodes (reference)"),
-            (f"Step check rejects {val('tree_r_pct')}%", p.pruned_nodes, "compute", f"{val('tree_pruned')} nodes")]
-    sp.hbars_steps(str(out / "prune"), rows, "", log=False, size=(5.8, 1.6),
-                   xlabel=f"Nodes generated through depth {val('tree_depth')} ({val('tree_b')} children per node)")
+    rows = [('No pruning', 155, 'neutral', '155 nodes'), ('A flat 68% cut', 49.6, 'memory', '49.6 nodes (reference)'), ('Step check rejects 68%', 25.8, 'compute', '25.8 nodes')]
+    sp.hbars_steps(str(out / 'prune'), rows, '', log=False, size=(5.8, 1.6), xlabel='Nodes generated through depth 3 (5 children per node)')
 
-
-# --------------------------------------------------------------------------
-# Revisable candidate plan (TTC table 5, figure 5)
-# --------------------------------------------------------------------------
 def plan():
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.5)
-        inputs = [("Source excerpt", 31), ("Failure log", 23), ("Waiter-return test", 13),
-                  ("API declaration", 2.5)]
+        inputs = [('Source excerpt', 31), ('Failure log', 23), ('Waiter-return test', 13), ('API declaration', 2.5)]
         for name, y in inputs:
-            role = "tool" if "test" in name else "neutral"
-            a = 0.0 if ("test" in name and k == 1) else 1.0
+            role = 'tool' if 'test' in name else 'neutral'
+            a = 0.0 if 'test' in name and k == 1 else 1.0
             box(ax, 0.5, y, 23, 6.5, name, role, fs=14, alpha=a)
-        dx = {1: "Diagnosis:\ntimeout too short", 2: "Diagnosis:\ntimeout too short",
-              3: "Diagnosis':\nmissed notify"}[k]
-        drole = {1: "think", 2: "bad", 3: "think"}[k]
-        prole = "think" if k != 2 else "bad"
+        dx = {1: 'Diagnosis:\ntimeout too short', 2: 'Diagnosis:\ntimeout too short', 3: "Diagnosis':\nmissed notify"}[k]
+        drole = {1: 'think', 2: 'bad', 3: 'think'}[k]
+        prole = 'think' if k != 2 else 'bad'
         box(ax, 27.5, 23.5, 23.5, 10, dx, drole, fs=15)
-        box(ax, 54, 23.5, 21, 10, "Patch':\nnotify on return" if k == 3 else "Patch:\nraise timeout",
-            prole, fs=14, dashed=(k == 2))
-        box(ax, 78, 23.5, 21.5, 10, "Check':\nordering test" if k == 3 else "Check\nselection",
-            prole, fs=15, dashed=(k == 2))
-        box(ax, 27.5, 2.5, 23.5, 6.5, "API notes", "mem", fs=15)
+        box(ax, 54, 23.5, 21, 10, "Patch':\nnotify on return" if k == 3 else 'Patch:\nraise timeout', prole, fs=14, dashed=k == 2)
+        box(ax, 78, 23.5, 21.5, 10, "Check':\nordering test" if k == 3 else 'Check\nselection', prole, fs=15, dashed=k == 2)
+        box(ax, 27.5, 2.5, 23.5, 6.5, 'API notes', 'mem', fs=15)
         arrow(ax, 23.5, 33, 27.5, 30.5)
         arrow(ax, 23.5, 26.5, 27.5, 27.5)
         arrow(ax, 51, 28.5, 54, 28.5)
@@ -451,201 +331,117 @@ def plan():
         arrow(ax, 23.5, 5.75, 27.5, 5.75)
         arrow(ax, 23.5, 36.5, 60, 33.6, alpha=0.5)
         if k >= 2:
-            arrow(ax, 23.5, 16, 29, 23.5, color=V3["bad"][1] if k == 2 else "#64748b",
-                  ls="--" if k == 2 else "-")
+            arrow(ax, 23.5, 16, 29, 23.5, color=V3['bad'][1] if k == 2 else '#64748b', ls='--' if k == 2 else '-')
         if k == 2:
-            ax.text(27.5, 14.5, "contradicts", fontsize=15, color=V3["bad"][2], fontweight="bold")
-            ax.text(77, 17, "Desc(diagnosis): needs review", fontsize=15, color=V3["bad"][2],
-                    fontweight="bold", ha="center")
-            ax.text(54, 5.75, "support kept", fontsize=15, color=V3["mem"][2], fontweight="bold", va="center")
+            ax.text(27.5, 14.5, 'contradicts', fontsize=15, color=V3['bad'][2], fontweight='bold')
+            ax.text(77, 17, 'Desc(diagnosis): needs review', fontsize=15, color=V3['bad'][2], fontweight='bold', ha='center')
+            ax.text(54, 5.75, 'support kept', fontsize=15, color=V3['mem'][2], fontweight='bold', va='center')
         if k == 3:
-            ax.add_patch(FancyBboxPatch((26.5, 22), 74, 13, boxstyle="round,pad=0,rounding_size=1.5",
-                                        fc="none", ec=V3["think"][1], lw=1.5, ls="--"))
-            ax.text(77, 17, "regenerated: 3 artifacts", fontsize=15, color=V3["think"][2],
-                    fontweight="bold", ha="center")
-            ax.text(54, 5.75, "retained", fontsize=15, color=V3["mem"][2], fontweight="bold", va="center")
-        sp.save(fig, out / f"plan_step{k}.svg")
+            ax.add_patch(FancyBboxPatch((26.5, 22), 74, 13, boxstyle='round,pad=0,rounding_size=1.5', fc='none', ec=V3['think'][1], lw=1.5, ls='--'))
+            ax.text(77, 17, 'regenerated: 3 artifacts', fontsize=15, color=V3['think'][2], fontweight='bold', ha='center')
+            ax.text(54, 5.75, 'retained', fontsize=15, color=V3['mem'][2], fontweight='bold', va='center')
+        sp.save(fig, out / f'plan_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# NM 3.6: four accounts for flat sampling and beam search
-# --------------------------------------------------------------------------
 def accounts():
-    b = K.BEAM.result
-    fields = [("out", "Output tokens", "{:,.0f}"), ("inp", "Input tokens", "{:,.0f}"),
-              ("time", "Time (s)", "{:.1f}"), ("bill", "Token bill ($)", "{:.3f}")]
-    data = {"out": [b.flat_output_tokens, b.beam_output_tokens],
-            "inp": [b.flat_prompt_tokens, b.beam_prompt_tokens],
-            "time": [K.m(b.flat_elapsed, "s"), K.m(b.beam_elapsed, "s")],
-            "bill": [K.m(b.flat_token_cost, "USD"), K.m(b.beam_token_cost, "USD")]}
+    fields = [('out', 'Output tokens', '{:,.0f}'), ('inp', 'Input tokens', '{:,.0f}'), ('time', 'Time (s)', '{:.1f}'), ('bill', 'Token bill ($)', '{:.3f}')]
+    data = {'out': [8192, 4608], 'inp': [65536, 156288], 'time': [22.58041791, 19.92286567], 'bill': [0.319488, 0.544704]}
     fig, axs = plt.subplots(1, 4, figsize=(5.8, 1.7))
     for ax, (f, lab, fmt) in zip(axs, fields):
         vals = data[f]
-        ax.bar([0, 1], vals, color=[C["neutral"], C["compute"]], width=0.62)
+        ax.bar([0, 1], vals, color=[C['neutral'], C['compute']], width=0.62)
         for x, v in zip([0, 1], vals):
-            ax.text(x, v * 1.03, fmt.format(v), ha="center", va="bottom", fontsize=10.5, fontweight="bold",
-                    color=C["text"])
+            ax.text(x, v * 1.03, fmt.format(v), ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['text'])
         ax.set_ylim(0, max(vals) * 1.32)
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Flat", "Beam"], fontsize=11)
+        ax.set_xticklabels(['Flat', 'Beam'], fontsize=11)
         ax.set_yticks([])
-        ax.spines["left"].set_visible(False)
+        ax.spines['left'].set_visible(False)
         ax.set_title(lab, fontsize=12)
     fig.subplots_adjust(wspace=0.35)
-    sp.save(fig, out / "accounts.svg")
+    sp.save(fig, out / 'accounts.svg')
 
-
-# --------------------------------------------------------------------------
-# Stopping precedence (TTC figure 8)
-# --------------------------------------------------------------------------
-def diamond(ax, x, y, w, h, text, role="neutral", alpha=1.0):
+def diamond(ax, x, y, w, h, text, role='neutral', alpha=1.0):
     fill, stroke, txt = V3[role]
-    ax.add_patch(Polygon([(x, y + h / 2), (x + w / 2, y + h), (x + w, y + h / 2), (x + w / 2, y)],
-                         closed=True, fc=fill, ec=stroke, lw=1.8, alpha=alpha, zorder=2))
-    ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=15, color=txt,
-            alpha=alpha, zorder=3)
-
+    ax.add_patch(Polygon([(x, y + h / 2), (x + w / 2, y + h), (x + w, y + h / 2), (x + w / 2, y)], closed=True, fc=fill, ec=stroke, lw=1.8, alpha=alpha, zorder=2))
+    ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=15, color=txt, alpha=alpha, zorder=3)
 
 def stop():
-    steps = [("1. Ceiling\nreached?", "Stop admitting;\nkeep a pass,\nelse escalate", "bad"),
-             ("2. Candidate\naccepted?", "Stop search;\nsend it to the\nacceptance gate", "mem"),
-             ("3. Gain per\ndollar too low?", "Stop early;\nreport incomplete\nor escalate", "tool")]
+    steps = [('1. Ceiling\nreached?', 'Stop admitting;\nkeep a pass,\nelse escalate', 'bad'), ('2. Candidate\naccepted?', 'Stop search;\nsend it to the\nacceptance gate', 'mem'), ('3. Gain per\ndollar too low?', 'Stop early;\nreport incomplete\nor escalate', 'tool')]
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.4)
-        box(ax, 0.3, 19, 14.5, 12, "Before\nadmitting\nwork", "neutral", fs=15)
+        box(ax, 0.3, 19, 14.5, 12, 'Before\nadmitting\nwork', 'neutral', fs=15)
         for i, (q, outcome, role) in enumerate(steps):
             a = 1.0 if i < k else 0.0
             x = 18.5 + i * 27.5
-            diamond(ax, x, 17, 25, 16, q, "neutral", alpha=a)
+            diamond(ax, x, 17, 25, 16, q, 'neutral', alpha=a)
             box(ax, x, 0.3, 25, 12.5, outcome, role, fs=14, alpha=a)
-            ax.add_patch(FancyArrowPatch((x + 12.5, 17), (x + 12.5, 12.9), arrowstyle="-|>",
-                                         mutation_scale=13, color="#64748b", lw=1.8, alpha=a))
-            ax.text(x + 13.5, 14.2, "yes", fontsize=14, color="#475569", alpha=a)
+            ax.add_patch(FancyArrowPatch((x + 12.5, 17), (x + 12.5, 12.9), arrowstyle='-|>', mutation_scale=13, color='#64748b', lw=1.8, alpha=a))
+            ax.text(x + 13.5, 14.2, 'yes', fontsize=14, color='#475569', alpha=a)
             prev_x = 14.8 if i == 0 else x - 2.5
-            ax.add_patch(FancyArrowPatch((prev_x, 25), (x, 25), arrowstyle="-|>", mutation_scale=13,
-                                         color="#64748b", lw=1.8, alpha=a))
+            ax.add_patch(FancyArrowPatch((prev_x, 25), (x, 25), arrowstyle='-|>', mutation_scale=13, color='#64748b', lw=1.8, alpha=a))
             if i:
-                ax.text(x - 1.3, 26.3, "no", fontsize=14, color="#475569", ha="center", alpha=a)
-        ax.text(99.5, 35.5, "no to all three: admit the next round", fontsize=14, color="#475569",
-                ha="right", va="center", alpha=1.0 if k == 3 else 0.0)
-        sp.save(fig, out / f"stop_step{k}.svg")
+                ax.text(x - 1.3, 26.3, 'no', fontsize=14, color='#475569', ha='center', alpha=a)
+        ax.text(99.5, 35.5, 'no to all three: admit the next round', fontsize=14, color='#475569', ha='right', va='center', alpha=1.0 if k == 3 else 0.0)
+        sp.save(fig, out / f'stop_step{k}.svg')
 
-
-# --------------------------------------------------------------------------
-# NM 3.7: three policies under one deadline
-# --------------------------------------------------------------------------
 def policy():
-    po = K.POL.result
-    p = {key: dict(per_acc=K.m(getattr(po, f"{key.lower()}_cost_per_pass"), "USD"),
-                   pass_=getattr(po, f"{key.lower()}_pass"),
-                   time=K.m(po.c_time if key == "C" else po.round_time, "s")) for key in "ABC"}
-    pts = [("A", "A: one candidate", C["neutral"]), ("C", f"C: feedback, {po.rounds} rounds", C["data"]),
-           ("B", f"B: {val('pol_n')} in parallel", C["compute"])]
+    p = {'A': {'per_acc': 0.05286, 'pass_': 0.4, 'time': 31.07462687}, 'B': {'per_acc': 0.1720416389, 'pass_': 0.98320384, 'time': 31.07462687}, 'C': {'per_acc': 0.05941377049, 'pass_': 0.61, 'time': 49.71940299}}
+    pts = [('A', 'A: one candidate', C['neutral']), ('C', f'C: feedback, {2} rounds', C['data']), ('B', 'B: 8 in parallel', C['compute'])]
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.0))
         for i, (key, lab, col) in enumerate(pts):
             if i >= k:
                 continue
             d = p[key]
-            ax.plot([d["per_acc"]], [d["pass_"] * 100], "o", ms=13, color=col, mec="white", mew=1.5, zorder=5)
-            t = d["time"]
-            ax.annotate(f"{lab}\n{d['pass_'] * 100:.0f}% pass, {t:.1f} s",
-                        (d["per_acc"], d["pass_"] * 100),
-                        xytext=(12, -4) if key != "B" else (-12, -4), textcoords="offset points",
-                        ha="left" if key != "B" else "right", va="center", fontsize=11,
-                        fontweight="bold", color=col)
+            ax.plot([d['per_acc']], [d['pass_'] * 100], 'o', ms=13, color=col, mec='white', mew=1.5, zorder=5)
+            t = d['time']
+            ax.annotate(f"{lab}\n{d['pass_'] * 100:.0f}% pass, {t:.1f} s", (d['per_acc'], d['pass_'] * 100), xytext=(12, -4) if key != 'B' else (-12, -4), textcoords='offset points', ha='left' if key != 'B' else 'right', va='center', fontsize=11, fontweight='bold', color=col)
         ax.set_xlim(0.03, 0.2)
         ax.set_ylim(20, 110)
-        ax.set_xlabel("Model bill per accepted repair ($)")
-        ax.set_ylabel("Repairs accepted (%)")
-        ax.grid(color=C["grid"], lw=0.6)
+        ax.set_xlabel('Model bill per accepted repair ($)')
+        ax.set_ylabel('Repairs accepted (%)')
+        ax.grid(color=C['grid'], lw=0.6)
         ax.set_axisbelow(True)
-        sp.save(fig, out / f"policy_step{k}.svg")
-
-
-# --------------------------------------------------------------------------
-# Real artifacts typeset as code panels: exact excerpts, elisions marked
-# --------------------------------------------------------------------------
-MONO = ["Menlo", "DejaVu Sans Mono", "Courier New", "monospace"]
-
+        sp.save(fig, out / f'policy_step{k}.svg')
+MONO = ['Menlo', 'DejaVu Sans Mono', 'Courier New', 'monospace']
 
 def code_panel(path, lines, width, fs=10.5, title=None, colors=None):
     """lines: list of strings; colors: {index: color} for highlighted lines."""
     colors = colors or {}
-    # SVG collapses leading spaces; keep indentation with no-break spaces, and
-    # size the panel from the longest line (Menlo advance is 0.602 em).
-    lines = [ln.replace(" ", "\u00a0") for ln in lines]
-    longest = max(len(ln) for ln in lines + ([title] if title else []))
+    lines = [ln.replace(' ', '\xa0') for ln in lines]
+    longest = max((len(ln) for ln in lines + ([title] if title else [])))
     width = max(width, longest * fs * 0.602 / 72.0 + 0.35)
     n = len(lines) + (1 if title else 0)
     lh = fs * 1.3 / 72.0
     fig = plt.figure(figsize=(width, n * lh + 0.25))
     ax = fig.add_axes([0, 0, 1, 1])
-    ax.axis("off")
-    ax.add_patch(FancyBboxPatch((0.005, 0.01), 0.99, 0.98, boxstyle="round,pad=0,rounding_size=0.02",
-                                fc="#f8fafc", ec="#cbd5e1", lw=1.0, transform=ax.transAxes))
+    ax.axis('off')
+    ax.add_patch(FancyBboxPatch((0.005, 0.01), 0.99, 0.98, boxstyle='round,pad=0,rounding_size=0.02', fc='#f8fafc', ec='#cbd5e1', lw=1.0, transform=ax.transAxes))
     y = 1 - 0.12 / (n * lh + 0.25)
     step = lh / (n * lh + 0.25)
     if title:
-        ax.text(0.02, y, title, fontsize=fs, family="sans-serif", color="#475569", va="top",
-                fontweight="bold", transform=ax.transAxes)
+        ax.text(0.02, y, title, fontsize=fs, family='sans-serif', color='#475569', va='top', fontweight='bold', transform=ax.transAxes)
         y -= step
     for i, line in enumerate(lines):
-        col = colors.get(i, "#0f172a")
-        ax.text(0.02, y, line, fontsize=fs, family=MONO, color=col, va="top", transform=ax.transAxes,
-                fontweight="bold" if i in colors else "normal", usetex=False, parse_math=False)
+        col = colors.get(i, '#0f172a')
+        ax.text(0.02, y, line, fontsize=fs, family=MONO, color=col, va='top', transform=ax.transAxes, fontweight='bold' if i in colors else 'normal', usetex=False, parse_math=False)
         y -= step
     sp.save(fig, path)
 
-
 def panels():
-    red, green, gray = "#b91c1c", "#15803d", "#64748b"
-    # The real reproducer run (pool_trace.txt), split into its three cases
-    runs = [blk.strip().splitlines() for blk in (out / "pool_trace.txt").read_text().strip().split("\n\n")]
-    # Only the first case is drawn; the patch runs appear as text on the predict slide.
-    for name, lines in zip(("trace_bug",), runs):
-        cols = {i: (green if "PASS" in ln else red) for i, ln in enumerate(lines)
-                if ln.startswith("probe") or ln.startswith("B blocked")}
+    red, green, gray = ('#b91c1c', '#15803d', '#64748b')
+    runs = [blk.strip().splitlines() for blk in (out / 'pool_trace.txt').read_text().strip().split('\n\n')]
+    for name, lines in zip(('trace_bug',), runs):
+        cols = {i: green if 'PASS' in ln else red for i, ln in enumerate(lines) if ln.startswith('probe') or ln.startswith('B blocked')}
         cols[0] = gray
-        code_panel(out / f"{name}.svg", lines, 4.0, fs=11, colors=cols)
-    # CPython 3.12 Lib/queue.py (branch 3.12 @ 58ed60b), exact lines, dedented 8 spaces
-    q = ["def get(self, block=True, timeout=None):",
-         "    with self.not_empty:",
-         "        ...",
-         "            while not self._qsize():",
-         "                self.not_empty.wait()",
-         "",
-         "def put(self, item, block=True, timeout=None):",
-         "    with self.not_full:",
-         "        ...",
-         "        self._put(item)",
-         "        self.unfinished_tasks += 1",
-         "        self.not_empty.notify()       # line 152"]
-    code_panel(out / "queue_code.svg", q, 4.6, fs=10.5, colors={4: "#0369a1", 11: red})
-    # openai/human-eval human_eval/evaluation.py @ b9453e8, lines 22 to 28, dedented 4 spaces
-    he = ["def estimator(n: int, c: int, k: int) -> float:",
-          '    """',
-          "    Calculates 1 - comb(n - c, k) / comb(n, k).",
-          '    """',
-          "    if n - c < k:",
-          "        return 1.0",
-          "    return 1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1))"]
-    code_panel(out / "humaneval_code.svg", he, 5.8, fs=11, colors={2: "#0369a1"})
-    # openai/prm800k README annotated line @ 7ecc794 (exact fields; long strings cut at "...")
-    prm = ['"problem": "...greatest common factor of $20 !$ and $200,\\\\!000$? ..."',
-           '"pre_generated_steps": [',
-           '  "I want to find the largest positive integer ...",',
-           '  "One way to do this is to factor both numbers ...",',
-           '  "I know that $200,\\\\!000 = 2^5\\\\cdot 10^4 = 2^9\\\\cdot 5^4$.",',
-           '  ... 13 more steps ...',
-           '"pre_generated_answer": "320,000",',
-           '"ground_truth_answer": "40,\\\\!000",',
-           '"pre_generated_verifier_score": 0.010779580529581414',
-           '# label for step 3: "rating": -1   (scale -1, 0, +1)']
-    code_panel(out / "prm800k.svg", prm, 5.8, fs=10, colors={4: red, 6: red, 8: "#0369a1", 9: red})
-
-
-if __name__ == "__main__":
+        code_panel(out / f'{name}.svg', lines, 4.0, fs=11, colors=cols)
+    q = ['def get(self, block=True, timeout=None):', '    with self.not_empty:', '        ...', '            while not self._qsize():', '                self.not_empty.wait()', '', 'def put(self, item, block=True, timeout=None):', '    with self.not_full:', '        ...', '        self._put(item)', '        self.unfinished_tasks += 1', '        self.not_empty.notify()       # line 152']
+    code_panel(out / 'queue_code.svg', q, 4.6, fs=10.5, colors={4: '#0369a1', 11: red})
+    he = ['def estimator(n: int, c: int, k: int) -> float:', '    """', '    Calculates 1 - comb(n - c, k) / comb(n, k).', '    """', '    if n - c < k:', '        return 1.0', '    return 1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1))']
+    code_panel(out / 'humaneval_code.svg', he, 5.8, fs=11, colors={2: '#0369a1'})
+    prm = ['"problem": "...greatest common factor of $20 !$ and $200,\\\\!000$? ..."', '"pre_generated_steps": [', '  "I want to find the largest positive integer ...",', '  "One way to do this is to factor both numbers ...",', '  "I know that $200,\\\\!000 = 2^5\\\\cdot 10^4 = 2^9\\\\cdot 5^4$.",', '  ... 13 more steps ...', '"pre_generated_answer": "320,000",', '"ground_truth_answer": "40,\\\\!000",', '"pre_generated_verifier_score": 0.010779580529581414', '# label for step 3: "rating": -1   (scale -1, 0, +1)']
+    code_panel(out / 'prm800k.svg', prm, 5.8, fs=10, colors={4: red, 6: red, 8: '#0369a1', 9: red})
+if __name__ == '__main__':
     panels()
     hook()
     axes()
@@ -660,4 +456,4 @@ if __name__ == "__main__":
     accounts()
     stop()
     policy()
-    print("figures written to", out)
+    print('figures written to', out)

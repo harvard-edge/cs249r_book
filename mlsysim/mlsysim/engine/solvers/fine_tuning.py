@@ -12,8 +12,6 @@ comparison. None models a trained network's learning dynamics.
 from __future__ import annotations
 
 from ..results import (
-    CandidateReleaseResult,
-    ContextDistillationResult,
     LossNormalizationResult,
     PerInvocationSerializationResult,
     PreferencePairResult,
@@ -204,53 +202,5 @@ class PreferencePairModel(ForwardModel):
             gradient_coefficient=coef, initial_gradient_coefficient=coef0)
 
 
-class ContextDistillationModel(ForwardModel):
-    """
-    A procedural prefix read on every turn, priced against distilling it into the weights.
-
-    The prefix costs ``prefix x turns x sessions`` input tokens a month at the
-    input price, or ``cached_fraction`` of that if served from a prefix cache.
-    Distillation removes it and costs ``redistill_cost`` per revision; it pays
-    while the removed spend exceeds the redistillations a month.
-    """
-    requires = ()
-    produces = ContextDistillationResult
-
-    def solve(self, prefix_tokens: int, turns_per_session: int, sessions_per_month: float,
-              input_price: Quantity, cached_fraction: float, redistill_cost: Quantity,
-              revisions_per_month: float) -> ContextDistillationResult:
-        tokens = prefix_tokens * turns_per_session * sessions_per_month
-        uncached = (tokens * _ureg.token * input_price).to("USD")
-        cached = (uncached * cached_fraction).to("USD")
-        redistill = (redistill_cost * revisions_per_month).to("USD")
-        return ContextDistillationResult(
-            monthly_prefix_tokens=tokens, uncached_spend=uncached, cached_spend=cached,
-            net_uncached=(uncached - redistill).to("USD"), net_cached=(cached - redistill).to("USD"),
-            break_even_revisions=(uncached / redistill_cost).to("").magnitude)
 
 
-class CandidateReleaseModel(ForwardModel):
-    """
-    A fine-tuned candidate against the baseline on separate trials of one task set.
-
-    Cost per accepted task is the attempt cost over the acceptance rate; the
-    candidate matches the baseline only at an attempt cost of baseline C_eff
-    times its own acceptance. The acceptance gap's standard error treats the
-    arms as independent (unpooled), which a paired design would replace.
-    """
-    requires = ()
-    produces = CandidateReleaseResult
-
-    def solve(self, trials: int, baseline_acceptance: float, baseline_attempt_cost: Quantity,
-              candidate_acceptance: float, candidate_attempt_cost: Quantity,
-              baseline_recall_error: float, candidate_recall_error: float) -> CandidateReleaseResult:
-        ce_b = calc_cost_per_accepted(baseline_attempt_cost, baseline_acceptance).to("USD")
-        ce_c = calc_cost_per_accepted(candidate_attempt_cost, candidate_acceptance).to("USD")
-        gap = candidate_acceptance - baseline_acceptance
-        se = calc_proportion_gap_se(candidate_acceptance, baseline_acceptance, trials, trials)
-        return CandidateReleaseResult(
-            baseline_cost_per_accepted=ce_b, candidate_cost_per_accepted=ce_c,
-            break_even_attempt_cost=(ce_b * candidate_acceptance).to("USD"),
-            cost_rise=(ce_c / ce_b).to("").magnitude - 1,
-            gap=gap, gap_se=se, gap_z=gap / se,
-            recall_error_ratio=candidate_recall_error / baseline_recall_error)

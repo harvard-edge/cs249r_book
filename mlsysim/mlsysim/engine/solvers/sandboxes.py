@@ -11,7 +11,6 @@ contention, or a particular hypervisor.
 from __future__ import annotations
 
 from ..results import (
-    BootTimeCdfResult,
     EnvelopeAmortizationResult,
     SandboxPoolReserveResult,
     SyscallTaxResult,
@@ -144,20 +143,3 @@ class SandboxPoolReserveModel(ForwardModel):
         )
 
 
-class BootTimeCdfModel(ForwardModel):
-    """
-    The median and a tail percentile of a measured boot-time CDF.
-
-    Reads the first boot time whose cumulative fraction reaches each
-    percentile, as a released CDF is read; no interpolation.
-    """
-    requires = ()
-    produces = BootTimeCdfResult
-
-    def solve(self, booting: int, boot_times, cumulative, median_fraction: float,
-              tail_fraction: float) -> BootTimeCdfResult:
-        return BootTimeCdfResult(
-            booting=booting,
-            median=calc_cdf_quantile(boot_times, cumulative, median_fraction),
-            tail=calc_cdf_quantile(boot_times, cumulative, tail_fraction),
-        )

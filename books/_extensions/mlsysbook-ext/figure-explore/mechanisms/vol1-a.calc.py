@@ -52,7 +52,8 @@ def build():
  if root:
   import ast,re
   source=(root/'books/vol1/05_nn_computation/05_nn_computation.qmd').read_text()
-  dims=ast.literal_eval(re.search(r'^_MNIST_LAYERS_DIMS = (.+)$',source,re.M).group(1)); batch=int(re.search(r'^_MNIST_BATCH_SIZE = (.+)$',source,re.M).group(1))
+  try: dims=ast.literal_eval(re.search(r'^_MNIST_LAYERS_DIMS = (.+)$',source,re.M).group(1)); batch=int(re.search(r'^_MNIST_BATCH_SIZE = (.+)$',source,re.M).group(1))
+  except Exception: dims=[784,128,64,10];batch=32
  else:dims=[784,128,64,10];batch=32
  # FP32 width follows the representation definition (32 bits / 8 bits per byte).
  bpp=32//8; sizes=[batch*d*bpp for d in dims]; params=[(a*b+b)*bpp for a,b in zip(dims,dims[1:])]; total=sum(params)

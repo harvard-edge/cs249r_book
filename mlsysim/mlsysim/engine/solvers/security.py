@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from ..results import InjectionExposureResult, PolicyComparisonResult, TurnExposureResult
+from ..results import (
+    InjectionExposureResult,
+    PolicyComparisonResult,
+)
 from .base import ForwardModel
 from ...physics.agents import calc_cost_per_accepted, calc_injection_exposure
 
@@ -41,27 +44,6 @@ class InjectionExposureModel(ForwardModel):
         )
 
 
-class TurnExposureModel(ForwardModel):
-    """
-    Exposure counted in turns: ``r`` untrusted reads per turn over ``H`` turns.
-
-        p_turn = 1 - (1 - q)^r,   Pr(exp) = 1 - (1 - p_turn)^H = 1 - (1 - q)^(r H)
-
-    The turn form and the item form count the same reads, so a calculation
-    uses one or the other, never both.
-    """
-    requires = ()
-    produces = TurnExposureResult
-
-    def solve(self, payload_fraction: float, reads_per_turn: int, turns: int) -> TurnExposureResult:
-        p_turn = calc_injection_exposure(payload_fraction, reads_per_turn)
-        reads = reads_per_turn * turns
-        return TurnExposureResult(
-            per_turn=p_turn,
-            trajectory=calc_injection_exposure(p_turn, turns),
-            reads=reads,
-            same_reads=calc_injection_exposure(payload_fraction, reads),
-        )
 
 
 class PolicyComparisonModel(ForwardModel):

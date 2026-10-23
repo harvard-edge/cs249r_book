@@ -17,14 +17,11 @@ import math
 from typing import Iterable, Mapping, Sequence
 
 from ..results import (
-    BreakerWindowResult,
     BulkheadAdmissionResult,
-    CleanupGraphResult,
     IrreversibleLossResult,
     RepairBreakEvenResult,
     RetryAmplificationResult,
     RetryJitterResult,
-    RetrySustainedOutagesResult,
     UndetectedLoopResult,
 )
 from .base import ForwardModel
@@ -224,76 +221,7 @@ class RetryJitterModel(ForwardModel):
                                  expected_in_window=calc_jitter_expected_arrivals(retries, burst_window, jitter_span))
 
 
-class CleanupGraphModel(ForwardModel):
-    """
-    Registered cleanup run as a reverse stack, one at a time, against a dependency graph.
-
-    The stack takes the sum of the durations; the graph, with unlimited
-    parallelism, the longest path (``calc_cleanup_critical_path``). When one
-    operation's outcome stays unresolved, only its transitive dependents are
-    blocked; every other operation can still settle.
-    """
-    requires = ()
-    produces = CleanupGraphResult
-
-    def solve(self, durations: Mapping[str, Quantity], depends_on: Mapping[str, Sequence[str]],
-              unresolved: str) -> CleanupGraphResult:
-        stack = sum(durations.values(), 0 * next(iter(durations.values())))
-        graph = calc_cleanup_critical_path(durations, depends_on)
-        blocked, frontier = [], {unresolved}
-        while frontier:
-            nxt = {op for op, deps in depends_on.items() if set(deps) & frontier and op not in blocked}
-            blocked += sorted(nxt)
-            frontier = nxt
-        settleable = [op for op in durations if op != unresolved and op not in blocked]
-        return CleanupGraphResult(stack_time=stack.to("second"), graph_time=graph.to("second"),
-                                  saved_time=(stack - graph).to("second"),
-                                  blocked=[op for op in durations if op in blocked], settleable=settleable)
 
 
-class BreakerWindowModel(ForwardModel):
-    """
-    One circuit-breaker window: failure fraction under a classification rule, and a naive one.
-
-    The classified rule counts only outcomes that show the dependency cannot
-    do work (``failure_classes``); answers from a working service count as
-    observations, not failures. The naive rule counts every outcome other than
-    success. The breaker trips at ``f >= threshold`` with at least ``min_outcomes``.
-    """
-    requires = ()
-    produces = BreakerWindowResult
-
-    def solve(self, outcomes: Mapping[str, int], failure_classes: Iterable[str], success_class: str,
-              threshold: float, min_outcomes: int) -> BreakerWindowResult:
-        n = sum(outcomes.values())
-        classified = sum(outcomes[c] for c in failure_classes)
-        naive = n - outcomes[success_class]
-        f_c, f_n = classified / n, naive / n
-        enough = n >= min_outcomes
-        return BreakerWindowResult(outcomes=n, classified_failures=classified, classified_fraction=f_c,
-                                   classified_trips=enough and f_c >= threshold, naive_failures=naive,
-                                   naive_fraction=f_n, naive_trips=enough and f_n >= threshold)
 
 
-class RetrySustainedOutagesModel(ForwardModel):
-    """
-    Incidents a published table lists with retry as a sustaining effect.
-
-    Counts the table's rows and those whose sustaining effects include retries,
-    and lists the retry-sustained durations, longest first; rows with no
-    reported duration are listed separately.
-    """
-    requires = ()
-    produces = RetrySustainedOutagesResult
-
-    def solve(self, rows: Sequence[Mapping], id_column: str, flag_column: str, duration_column: str,
-              threshold_hours: float) -> RetrySustainedOutagesResult:
-        hit = [r for r in rows if r[flag_column]]
-        timed = sorted(((r[id_column], r[duration_column]) for r in hit if r[duration_column] is not None),
-                       key=lambda x: -x[1])
-        return RetrySustainedOutagesResult(
-            incidents=len(rows), retry_sustained=len(hit), share=len(hit) / len(rows),
-            with_duration=timed,
-            without_duration=[r[id_column] for r in hit if r[duration_column] is None],
-            over_hours=sum(1 for _, h in timed if h > threshold_hours),
-        )

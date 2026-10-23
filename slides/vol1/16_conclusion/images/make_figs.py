@@ -67,97 +67,64 @@ gft_step2.svg and ironlaw_bars_step1.svg (Lecture 1), data_wall_step2.svg
 
 Run from this folder: python3 make_figs.py
 """
-
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
-import slideplot as sp  # noqa: E402
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'assets' / 'kit'))
+import slideplot as sp
 plt = sp.plt
 C = sp.C
 out = Path(__file__).parent
-
-CRIMSON = "#A51C30"
+CRIMSON = '#A51C30'
 FONT = 'font-family="Helvetica, Arial, sans-serif"'
-
 
 class Svg:
     """A tiny SVG builder. Every element carries the first step it appears in;
     write(stem, n) emits stem_step1..n, hidden elements kept but transparent."""
 
     def __init__(self, w, h):
-        self.w, self.h, self.items = w, h, []
+        self.w, self.h, self.items = (w, h, [])
 
     def add(self, first, s, last=99):
         self.items.append((first, last, s))
 
-    def rect(self, x, y, w, h, fill, stroke, first=1, sw=2, rx=8, dash=None,
-             last=99, opacity=1.0):
-        d = f' stroke-dasharray="{dash}"' if dash else ""
-        self.add(first, f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" '
-                        f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}" '
-                        f'opacity="{opacity}"{d}/>', last)
+    def rect(self, x, y, w, h, fill, stroke, first=1, sw=2, rx=8, dash=None, last=99, opacity=1.0):
+        d = f' stroke-dasharray="{dash}"' if dash else ''
+        self.add(first, f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}" opacity="{opacity}"{d}/>', last)
 
-    def text(self, x, y, s, size=22, color=C["text"], weight="normal",
-             anchor="middle", first=1, last=99, italic=False, opacity=1.0):
-        lines = s.split("\n")
+    def text(self, x, y, s, size=22, color=C['text'], weight='normal', anchor='middle', first=1, last=99, italic=False, opacity=1.0):
+        lines = s.split('\n')
         y0 = y - (len(lines) - 1) * size * 0.6
-        spans = "".join(
-            f'<tspan x="{x}" y="{y0 + i * size * 1.2:.1f}">{ln}</tspan>'
-            for i, ln in enumerate(lines))
-        st = ' font-style="italic"' if italic else ""
-        self.add(first, f'<text {FONT} font-size="{size}" fill="{color}" '
-                        f'font-weight="{weight}"{st} opacity="{opacity}" '
-                        f'text-anchor="{anchor}" dominant-baseline="middle">'
-                        f'{spans}</text>', last)
+        spans = ''.join((f'<tspan x="{x}" y="{y0 + i * size * 1.2:.1f}">{ln}</tspan>' for i, ln in enumerate(lines)))
+        st = ' font-style="italic"' if italic else ''
+        self.add(first, f'<text {FONT} font-size="{size}" fill="{color}" font-weight="{weight}"{st} opacity="{opacity}" text-anchor="{anchor}" dominant-baseline="middle">{spans}</text>', last)
 
-    def line(self, x1, y1, x2, y2, color, first=1, sw=2.5, arrow=True,
-             dash=None, last=99, opacity=1.0):
-        d = f' stroke-dasharray="{dash}"' if dash else ""
-        m = f' marker-end="url(#a{color[1:]})"' if arrow else ""
-        self.add(first, f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-                        f'stroke="{color}" stroke-width="{sw}" '
-                        f'opacity="{opacity}"{d}{m}/>', last)
+    def line(self, x1, y1, x2, y2, color, first=1, sw=2.5, arrow=True, dash=None, last=99, opacity=1.0):
+        d = f' stroke-dasharray="{dash}"' if dash else ''
+        m = f' marker-end="url(#a{color[1:]})"' if arrow else ''
+        self.add(first, f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{color}" stroke-width="{sw}" opacity="{opacity}"{d}{m}/>', last)
 
     def circle(self, x, y, r, fill, stroke, first=1, sw=2, last=99, dash=None):
-        d = f' stroke-dasharray="{dash}"' if dash else ""
-        self.add(first, f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" '
-                        f'stroke="{stroke}" stroke-width="{sw}"{d}/>', last)
+        d = f' stroke-dasharray="{dash}"' if dash else ''
+        self.add(first, f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>', last)
 
     def write(self, stem, steps):
-        colors = sorted(set(C.values()) | {CRIMSON, "#7FC8E8"})
-        defs = "".join(
-            f'<marker id="a{c[1:]}" viewBox="0 0 10 10" refX="9" refY="5" '
-            f'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
-            f'<path d="M0,0 L10,5 L0,10 z" fill="{c}"/></marker>' for c in colors)
+        colors = sorted(set(C.values()) | {CRIMSON, '#7FC8E8'})
+        defs = ''.join((f'<marker id="a{c[1:]}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{c}"/></marker>' for c in colors))
         for k in range(1, steps + 1):
             body = []
             for first, last, s in self.items:
                 vis = first <= k <= last
-                body.append(s if vis else '<g opacity="0">' + s + "</g>")
-            svg = (f'<svg xmlns="http://www.w3.org/2000/svg" '
-                   f'viewBox="0 0 {self.w} {self.h}" width="{self.w}" '
-                   f'height="{self.h}"><defs>{defs}</defs>'
-                   f'<rect width="100%" height="100%" fill="white"/>'
-                   + "".join(body) + "</svg>")
-            name = f"{stem}_step{k}.svg" if steps > 1 else f"{stem}.svg"
+                body.append(s if vis else '<g opacity="0">' + s + '</g>')
+            svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.w} {self.h}" width="{self.w}" height="{self.h}"><defs>{defs}</defs><rect width="100%" height="100%" fill="white"/>' + ''.join(body) + '</svg>'
+            name = f'{stem}_step{k}.svg' if steps > 1 else f'{stem}.svg'
             (out / name).write_text(svg)
-
-
-import calcs as K  # noqa: E402  (every value drawn below; calcs reads MLSysIM)
-from deckvals import val, num  # noqa: E402
-from matplotlib.ticker import FixedLocator, NullLocator  # noqa: E402
-
+from matplotlib.ticker import FixedLocator, NullLocator
 
 def ellipse(g, cx, cy, rx, ry, fill, stroke, first=1, sw=1.5, dash=None, last=99):
-    d = f' stroke-dasharray="{dash}"' if dash else ""
-    g.add(first, f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{fill}" '
-                 f'stroke="{stroke}" stroke-width="{sw}"{d}/>', last)
+    d = f' stroke-dasharray="{dash}"' if dash else ''
+    g.add(first, f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>', last)
 
-
-def bars(path, rows, size, log=False, ticks=None, xlabel=None, xlim=None, fs=11,
-         lfs=None):
+def bars(path, rows, size, log=False, ticks=None, xlabel=None, xlim=None, fs=11, lfs=None):
     """Horizontal bars drawn at the size of their slot. rows: (label, value,
     color key, printed value). ticks: list of (x, label) for plain tick labels
     (no 10^n superscripts, which render too small)."""
@@ -167,209 +134,112 @@ def bars(path, rows, size, log=False, ticks=None, xlabel=None, xlim=None, fs=11,
     for i, (label, v, ck, txt) in enumerate(rows):
         y = n - 1 - i
         ax.barh(y, v, color=C[ck], height=0.62)
-        ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=lfs or fs, color=C["text"], fontweight="bold")
-        ax.text(v * 1.15 if log else v + max(vals) * 0.02, y, txt, va="center",
-                fontsize=fs, color=C[ck], fontweight="bold")
+        ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=lfs or fs, color=C['text'], fontweight='bold')
+        ax.text(v * 1.15 if log else v + max(vals) * 0.02, y, txt, va='center', fontsize=fs, color=C[ck], fontweight='bold')
     ax.set_yticks([])
     if log:
-        ax.set_xscale("log")
+        ax.set_xscale('log')
     ax.set_xlim(*(xlim or ((min(vals) / 3, max(vals) * 40) if log else (0, max(vals) * 1.35))))
     if ticks:
         ax.xaxis.set_major_locator(FixedLocator([t for t, _ in ticks]))
         ax.set_xticklabels([s for _, s in ticks])
         ax.xaxis.set_minor_locator(NullLocator())
-    ax.tick_params(axis="x", labelsize=fs - 1)
+    ax.tick_params(axis='x', labelsize=fs - 1)
     ax.set_ylim(-0.6, n - 0.4)
-    ax.spines["left"].set_visible(False)
-    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.spines['left'].set_visible(False)
+    ax.grid(axis='x', color=C['grid'], linewidth=0.6)
     ax.set_axisbelow(True)
     if xlabel:
         ax.set_xlabel(xlabel, fontsize=fs - 1)
     sp.save(fig, path)
-
-
-# =============================================================================
-# The stack with one number per layer (retrieval reveal, frame 2).
-# Slot 0.92 textwidth x 5.6 cm: canvas 900 x 366, so 20 px renders near 8.7 pt.
-# =============================================================================
 g = Svg(900, 366)
-layers = [
-    ("Applications", f"Black share enrolled: {val('ober_before')}% by cost, {val('ober_after')}% by need",
-     "L15", 0.12),
-    ("Operations", f"${val('z_writedown_m')}M write-down, every server up", "L14", 0.17),
-    ("Serving", f"Batch 1 costs {val('hook_ratio')}× batch {val('batch_eight')}", "L13", 0.22),
-    ("Training", f"{val('mp_total_b')} bytes per parameter: PaLM ≈ {val('palm_h100s')} H100s", "L8", 0.12),
-    ("Models", f"{val('p7b_b')}B model in FP16 = {val('mem7b_gb')} GB; phone has {val('phone_ram_gb')} GB",
-     "L10", 0.17),
-    ("Frameworks", f"Host {val('gpt2_host_ms')} ms against {val('gpt2_read_ms')} ms of weight reads", "L7", 0.22),
-    ("Hardware", f"TPU {val('tpu_ppw_lo')} to {val('tpu_ppw_hi')}× perf/W; {val('hook_eff')} TOPS/W rated, "
-     f"{val('hook_sus_eff')} sustained", "L11, L12", 0.12),
-]
+layers = [('Applications', 'Black share enrolled: 17.7% by cost, 46.5% by need', 'L15', 0.12), ('Operations', '$304M write-down, every server up', 'L14', 0.17), ('Serving', 'Batch 1 costs 7.5× batch 8', 'L13', 0.22), ('Training', '16 bytes per parameter: PaLM ≈ 100 H100s', 'L8', 0.12), ('Models', '7B model in FP16 = 14 GB; phone has 8 GB', 'L10', 0.17), ('Frameworks', 'Host 8.6 ms against 0.9 ms of weight reads', 'L7', 0.22), ('Hardware', 'TPU 30 to 80× perf/W; 20 TOPS/W rated, 1.5 sustained', 'L11, L12', 0.12)]
 for i, (name, fact, lec, op) in enumerate(layers):
     y = 6 + i * 46
-    g.add(1, f'<rect x="10" y="{y}" width="786" height="40" rx="7" fill="{CRIMSON}" '
-             f'fill-opacity="{op}"/>')
-    g.text(24, y + 21, name, 22, CRIMSON, "bold", "start")
-    g.text(190, y + 21, fact, 20, C["text"], "normal", "start")
-    g.text(786, y + 21, lec, 18, CRIMSON, "bold", "end")
-g.add(1, f'<rect x="806" y="6" width="56" height="316" rx="7" fill="{CRIMSON}" '
-         f'fill-opacity="0.18"/>')
-g.add(1, f'<text {FONT} x="834" y="164" font-size="22" font-weight="700" fill="{CRIMSON}" '
-         f'text-anchor="middle" dominant-baseline="middle" letter-spacing="3" '
-         f'transform="rotate(-90 834 164)">DATA</text>')
+    g.add(1, f'<rect x="10" y="{y}" width="786" height="40" rx="7" fill="{CRIMSON}" fill-opacity="{op}"/>')
+    g.text(24, y + 21, name, 22, CRIMSON, 'bold', 'start')
+    g.text(190, y + 21, fact, 20, C['text'], 'normal', 'start')
+    g.text(786, y + 21, lec, 18, CRIMSON, 'bold', 'end')
+g.add(1, f'<rect x="806" y="6" width="56" height="316" rx="7" fill="{CRIMSON}" fill-opacity="0.18"/>')
+g.add(1, f'<text {FONT} x="834" y="164" font-size="22" font-weight="700" fill="{CRIMSON}" text-anchor="middle" dominant-baseline="middle" letter-spacing="3" transform="rotate(-90 834 164)">DATA</text>')
 g.line(834, 322, 834, 334, CRIMSON, arrow=False, sw=2)
-g.text(862, 348, f"Data: Tay suspended after {val('tay_hours')} hours (L4); each WebText token "
-       f"seen about {val('gpt2_passes')} times (L9)", 19, C["text"], "normal", "end")
-g.write("stack_numbers", 1)
-
-# =============================================================================
-# The fleet failure chain, tagged by lecture (frame 6; thumbnails on 4, 31, 33).
-# Slot 0.95 textwidth x 4.9 cm: canvas 900 x 312, 19 px renders near 8.5 pt.
-# =============================================================================
+g.text(862, 348, 'Data: Tay suspended after 16 hours (L4); each WebText token seen about 17 times (L9)', 19, C['text'], 'normal', 'end')
+g.write('stack_numbers', 1)
 g = Svg(900, 312)
-stages = [("INT8\ncalibration", C["compute"], C["compute_l"], "Lecture 10b\ncalibration set"),
-          ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 14\ntraining-serving skew"),
-          ("Input shift on\none cohort", C["neutral"], C["neutral_l"], "Lectures 4b, 14b\ndrift"),
-          ("Accuracy\n−4 points", C["danger"], C["danger_l"], "Lecture 12b\naggregate metric only")]
+stages = [('INT8\ncalibration', C['compute'], C['compute_l'], 'Lecture 10b\ncalibration set'), ('Firmware\npreprocessing', C['neutral'], C['neutral_l'], 'Lectures 4, 14\ntraining-serving skew'), ('Input shift on\none cohort', C['neutral'], C['neutral_l'], 'Lectures 4b, 14b\ndrift'), ('Accuracy\n−4 points', C['danger'], C['danger_l'], 'Lecture 12b\naggregate metric only')]
 for i, (lab, stroke, fill, tag) in enumerate(stages):
     x = 10 + i * 225
     g.rect(x, 6, 200, 86, fill, stroke, sw=2.5)
-    g.text(x + 100, 49, lab, 22, stroke if i in (0, 3) else C["text"], "bold")
+    g.text(x + 100, 49, lab, 22, stroke if i in (0, 3) else C['text'], 'bold')
     if i < 3:
-        g.line(x + 202, 49, x + 223, 49, C["neutral"], sw=3)
-    g.text(x + 100, 124, tag, 19, CRIMSON, "bold", first=2)
-g.text(450, 172, "Every team met its own target; no test crossed the interfaces.",
-       20, C["neutral"], "normal", italic=True, first=2)
-# step 3: the two measurements that would have caught it
-g.rect(10, 196, 425, 108, C["data_l"], C["data"], first=3)
-g.text(222, 224, "Skew check (principle 11)", 21, C["data"], "bold", first=3)
-g.text(222, 268, "same captured images through\nboth preprocessing paths", 19,
-       C["text"], first=3)
-g.rect(465, 196, 425, 108, C["data_l"], C["data"], first=3)
-g.text(677, 224, "Cohort-level monitoring", 21, C["data"], "bold", first=3)
-g.text(677, 268, "accuracy by device and firmware,\nfrom day one", 19, C["text"], first=3)
-g.write("chain", 3)
-
-# =============================================================================
-# One phone model through nine lectures (frame 7; chapter table 2).
-# Slot 0.92 textwidth x 5.5 cm: canvas 900 x 362, 18 px renders near 7.8 pt.
-# =============================================================================
+        g.line(x + 202, 49, x + 223, 49, C['neutral'], sw=3)
+    g.text(x + 100, 124, tag, 19, CRIMSON, 'bold', first=2)
+g.text(450, 172, 'Every team met its own target; no test crossed the interfaces.', 20, C['neutral'], 'normal', italic=True, first=2)
+g.rect(10, 196, 425, 108, C['data_l'], C['data'], first=3)
+g.text(222, 224, 'Skew check (principle 11)', 21, C['data'], 'bold', first=3)
+g.text(222, 268, 'same captured images through\nboth preprocessing paths', 19, C['text'], first=3)
+g.rect(465, 196, 425, 108, C['data_l'], C['data'], first=3)
+g.text(677, 224, 'Cohort-level monitoring', 21, C['data'], 'bold', first=3)
+g.text(677, 268, 'accuracy by device and firmware,\nfrom day one', 19, C['text'], first=3)
+g.write('chain', 3)
 g = Svg(900, 362)
-phases = [
-    ("Envelope", "Watt-scale power,\nheat, battery", "L2"),
-    ("Architecture", f"Depthwise separable, {val('dw_channels')} ch.:\n{val('dw_ratio')}× fewer FLOPs", "L6"),
-    ("Training", "Large batches to train;\nserves one image", "L8"),
-    ("Data selection", "Milder augmentation\nfor a small model", "L9"),
-    ("Compression", f"INT8: {val('int8_of_fp32_pct')}% of\nFP32's bytes", "L10b"),
-    ("Acceleration", "Do the phone's NPU\nkernels run INT8?", "L11"),
-    ("Benchmarking", "Gain must survive\npreprocessing", "L12"),
-    ("Serving", "p99 under 50 ms", "L13"),
-    ("Operations", "Accuracy tracked\nper device cohort", "L14b"),
-]
+phases = [('Envelope', 'Watt-scale power,\nheat, battery', 'L2'), ('Architecture', 'Depthwise separable, 256 ch.:\n8.7× fewer FLOPs', 'L6'), ('Training', 'Large batches to train;\nserves one image', 'L8'), ('Data selection', 'Milder augmentation\nfor a small model', 'L9'), ('Compression', "INT8: 25% of\nFP32's bytes", 'L10b'), ('Acceleration', "Do the phone's NPU\nkernels run INT8?", 'L11'), ('Benchmarking', 'Gain must survive\npreprocessing', 'L12'), ('Serving', 'p99 under 50 ms', 'L13'), ('Operations', 'Accuracy tracked\nper device cohort', 'L14b')]
 for i, (name, fact, lec) in enumerate(phases):
     row, col = divmod(i, 3)
-    x, y = 10 + col * 300, 4 + row * 112
+    x, y = (10 + col * 300, 4 + row * 112)
     first = row + 1
-    g.rect(x, y, 264, 94, "white", C["neutral"], first=first, sw=2)
-    g.text(x + 12, y + 20, name, 21, CRIMSON, "bold", "start", first=first)
-    g.text(x + 254, y + 20, lec, 18, C["neutral"], "bold", "end", first=first)
-    g.text(x + 132, y + 63, fact, 18, C["text"], first=first)
+    g.rect(x, y, 264, 94, 'white', C['neutral'], first=first, sw=2)
+    g.text(x + 12, y + 20, name, 21, CRIMSON, 'bold', 'start', first=first)
+    g.text(x + 254, y + 20, lec, 18, C['neutral'], 'bold', 'end', first=first)
+    g.text(x + 132, y + 63, fact, 18, C['text'], first=first)
     if col < 2:
-        g.line(x + 266, y + 47, x + 298, y + 47, C["neutral"], first=first, sw=2.5)
+        g.line(x + 266, y + 47, x + 298, y + 47, C['neutral'], first=first, sw=2.5)
 for row in (0, 1):
     y0 = 4 + row * 112
-    g.line(880, y0 + 96, 880, y0 + 103, C["neutral"], arrow=False, first=row + 2, sw=2)
-    g.line(880, y0 + 103, 142, y0 + 103, C["neutral"], arrow=False, first=row + 2, sw=2,
-           dash="5 4")
-    g.line(142, y0 + 103, 142, y0 + 111, C["neutral"], first=row + 2, sw=2)
-# step 3: the propagation the chapter traces
-g.text(450, 346, "Depthwise layers go bandwidth-bound, so the next lever is bytes:"
-       " INT8, if the NPU runs it.", 18, C["danger"], "bold", first=3)
-g.write("journey", 3)
-
-# =============================================================================
-# Roofline: one model, two regimes; INT8 raises the ridge (frame 9)
-# =============================================================================
-import numpy as np  # noqa: E402
-
-BW, P16, P8 = num("h100_bw"), num("h100_fp16"), num("h100_int8")
-PREFILL_I, RESNET_INT8_I = K.QKV.traffic_intensity, K.S3_MIXED.traffic_intensity
+    g.line(880, y0 + 96, 880, y0 + 103, C['neutral'], arrow=False, first=row + 2, sw=2)
+    g.line(880, y0 + 103, 142, y0 + 103, C['neutral'], arrow=False, first=row + 2, sw=2, dash='5 4')
+    g.line(142, y0 + 103, 142, y0 + 111, C['neutral'], first=row + 2, sw=2)
+g.text(450, 346, 'Depthwise layers go bandwidth-bound, so the next lever is bytes: INT8, if the NPU runs it.', 18, C['danger'], 'bold', first=3)
+g.write('journey', 3)
+import numpy as np
+BW, P16, P8 = (3.35, 989.0, 1979.0)
+PREFILL_I, RESNET_INT8_I = (1046.678024, 569.4627995)
 xs = np.logspace(np.log10(0.4), np.log10(30000), 400)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    ax.plot(xs, np.minimum(P16, BW * xs), color=C["memory"], lw=3, zorder=2)
-    ax.plot(xs[xs >= P16 / BW], np.full((xs >= P16 / BW).sum(), P16),
-            color=C["compute"], lw=3, zorder=3)
-    ax.axvline(P16 / BW, color=C["neutral"], lw=1, ls="--")
-    ax.text(P16 / BW / 1.08, 1.4, f"ridge {val('ridge16')}", color=C["neutral"], fontsize=10,
-            ha="right")
+    ax.plot(xs, np.minimum(P16, BW * xs), color=C['memory'], lw=3, zorder=2)
+    ax.plot(xs[xs >= P16 / BW], np.full((xs >= P16 / BW).sum(), P16), color=C['compute'], lw=3, zorder=3)
+    ax.axvline(P16 / BW, color=C['neutral'], lw=1, ls='--')
+    ax.text(P16 / BW / 1.08, 1.4, 'ridge 295', color=C['neutral'], fontsize=10, ha='right')
     on3 = 1.0 if k >= 3 else 0.0
     m = xs >= P8 / BW
-    ax.plot(xs[m], np.full(m.sum(), P8), color=C["danger"], lw=2.5, ls="--", alpha=on3)
-    ax.plot(xs[(xs >= P16 / BW) & (xs <= P8 / BW)],
-            BW * xs[(xs >= P16 / BW) & (xs <= P8 / BW)], color=C["danger"], lw=2.5,
-            ls="--", alpha=on3)
-    ax.axvline(P8 / BW, color=C["danger"], lw=1, ls=":", alpha=on3)
-    ax.text(P8 / BW * 1.08, 1.4, f"INT8 ridge {val('ridge8')}", color=C["danger"], fontsize=10,
-            alpha=on3)
-    ax.text(28000, P8 * 1.1, f"INT8 peak {val('h100_int8')}", color=C["danger"], fontsize=10, ha="right",
-            va="bottom", fontweight="bold", alpha=on3)
-    ax.text(28000, P16 / 1.1, f"FP16 peak {val('h100_fp16')}", color=C["compute"], fontsize=10, ha="right",
-            va="top", fontweight="bold")
-    # step 1: decode
-    ax.plot([num("dec_ai")], [BW], "o", ms=11, color=C["memory"], mec="white", mew=1.5, zorder=5)
-    ax.annotate(f"GPT-2 XL decode,\nbatch 1: {val('dec_ai')}", (num("dec_ai"), BW), xytext=(-16, 52),
-                textcoords="offset points", ha="left", va="bottom", fontsize=11,
-                arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1.2), fontweight="bold",
-                color=C["memory"])
+    ax.plot(xs[m], np.full(m.sum(), P8), color=C['danger'], lw=2.5, ls='--', alpha=on3)
+    ax.plot(xs[(xs >= P16 / BW) & (xs <= P8 / BW)], BW * xs[(xs >= P16 / BW) & (xs <= P8 / BW)], color=C['danger'], lw=2.5, ls='--', alpha=on3)
+    ax.axvline(P8 / BW, color=C['danger'], lw=1, ls=':', alpha=on3)
+    ax.text(P8 / BW * 1.08, 1.4, 'INT8 ridge 591', color=C['danger'], fontsize=10, alpha=on3)
+    ax.text(28000, P8 * 1.1, 'INT8 peak 1,979', color=C['danger'], fontsize=10, ha='right', va='bottom', fontweight='bold', alpha=on3)
+    ax.text(28000, P16 / 1.1, 'FP16 peak 989', color=C['compute'], fontsize=10, ha='right', va='top', fontweight='bold')
+    ax.plot([1.0], [BW], 'o', ms=11, color=C['memory'], mec='white', mew=1.5, zorder=5)
+    ax.annotate('GPT-2 XL decode,\nbatch 1: 1', (1.0, BW), xytext=(-16, 52), textcoords='offset points', ha='left', va='bottom', fontsize=11, arrowprops=dict(arrowstyle='-', color=C['memory'], lw=1.2), fontweight='bold', color=C['memory'])
     a2 = 1.0 if k >= 2 else 0.0
-    ax.plot([PREFILL_I], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
-            zorder=5, alpha=a2)
-    ax.annotate(f"Same model,\nbatched prefill: {val('qkv_ai')}", (PREFILL_I, P16),
-                xytext=(6, -36), textcoords="offset points", ha="left", va="top", fontsize=11,
-                fontweight="bold", color=C["compute"], alpha=a2)
-    ax.plot([RESNET_INT8_I], [BW * RESNET_INT8_I], "o", ms=11, color=C["danger"],
-            mec="white", mew=1.5, zorder=6, alpha=on3)
-    ax.annotate(f"ResNet-50 conv, INT8\nweights: {val('s3_mixed')}, below {val('ridge8')}",
-                (RESNET_INT8_I, BW * RESNET_INT8_I), xytext=(-30, 14),
-                textcoords="offset points", ha="right", va="bottom", fontsize=11,
-                fontweight="bold", color=C["danger"], alpha=on3)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.plot([PREFILL_I], [P16], 'o', ms=11, color=C['compute'], mec='white', mew=1.5, zorder=5, alpha=a2)
+    ax.annotate('Same model,\nbatched prefill: 1,047', (PREFILL_I, P16), xytext=(6, -36), textcoords='offset points', ha='left', va='top', fontsize=11, fontweight='bold', color=C['compute'], alpha=a2)
+    ax.plot([RESNET_INT8_I], [BW * RESNET_INT8_I], 'o', ms=11, color=C['danger'], mec='white', mew=1.5, zorder=6, alpha=on3)
+    ax.annotate('ResNet-50 conv, INT8\nweights: 569, below 591', (RESNET_INT8_I, BW * RESNET_INT8_I), xytext=(-30, 14), textcoords='offset points', ha='right', va='bottom', fontsize=11, fontweight='bold', color=C['danger'], alpha=on3)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
     ax.set_xlim(0.4, 30000)
     ax.set_ylim(1, 30000)
     ax.set_xticks([1, 10, 100, 1000, 10000])
-    ax.set_xticklabels(["1", "10", "100", "1,000", "10,000"])
+    ax.set_xticklabels(['1', '10', '100', '1,000', '10,000'])
     ax.set_yticks([1, 10, 100, 1000])
-    ax.set_yticklabels(["1", "10", "100", "1,000"])
+    ax.set_yticklabels(['1', '10', '100', '1,000'])
     ax.minorticks_off()
-    ax.set_xlabel("Arithmetic intensity (FLOP/byte)")
-    ax.set_ylabel("TFLOP/s on one H100")
-    sp.save(fig, out / f"roofline_step{k}.svg")
-
-# =============================================================================
-# The thirteen principles as a cycle: slide variant of book figure 1.
-# Canvas 900 x 410: at 0.92 textwidth x 5.3 cm (frame 12) 22 px renders near
-# 8 pt; at 0.88 textwidth x 5.0 cm (frame 18) near 7.6 pt.
-# =============================================================================
-PARTS = [
-    ("Foundations (Data)", 6, 6, 136, [(1, "Data as code", "heuristic"),
-                                       (2, "Data gravity", "heuristic")]),
-    ("Development (Model)", 474, 6, 136, [(3, "Iron law", "decomposition"),
-                                          (4, "Silicon contract", "heuristic")]),
-    ("Optimization", 474, 190, 214, [(5, "Pareto frontier", "bound"),
-                                     (6, "Arithmetic intensity", "bound"),
-                                     (7, "Energy movement", "decomposition"),
-                                     (8, "Amdahl's law", "bound")]),
-    ("Deployment", 6, 190, 214, [(9, "Verification gap", "policy"),
-                                 (10, "Statistical drift", "fitted model"),
-                                 (11, "Skew diagnostic", "heuristic"),
-                                 (12, "Latency budget", "policy"),
-                                 (13, "Bias feedback", "fitted model")]),
-]
-ARROW = "#7FC8E8"
-
+    ax.set_xlabel('Arithmetic intensity (FLOP/byte)')
+    ax.set_ylabel('TFLOP/s on one H100')
+    sp.save(fig, out / f'roofline_step{k}.svg')
+PARTS = [('Foundations (Data)', 6, 6, 136, [(1, 'Data as code', 'heuristic'), (2, 'Data gravity', 'heuristic')]), ('Development (Model)', 474, 6, 136, [(3, 'Iron law', 'decomposition'), (4, 'Silicon contract', 'heuristic')]), ('Optimization', 474, 190, 214, [(5, 'Pareto frontier', 'bound'), (6, 'Arithmetic intensity', 'bound'), (7, 'Energy movement', 'decomposition'), (8, "Amdahl's law", 'bound')]), ('Deployment', 6, 190, 214, [(9, 'Verification gap', 'policy'), (10, 'Statistical drift', 'fitted model'), (11, 'Skew diagnostic', 'heuristic'), (12, 'Latency budget', 'policy'), (13, 'Bias feedback', 'fitted model')])]
+ARROW = '#7FC8E8'
 
 def cycle(stem, steps=1, kinds_from=None, lit=None, trace=None):
     """kinds_from: step at which kind tags appear (None: never).
@@ -380,231 +250,118 @@ def cycle(stem, steps=1, kinds_from=None, lit=None, trace=None):
         dim = lit is not None and p != lit
         op = 0.28 if dim else 1.0
         on = lit is not None and p == lit
-        g.rect(x, y, 420, h, "#FBEFF1" if on else "white",
-               CRIMSON if on else "#BBBBBB", sw=3 if on else 2, opacity=op)
-        g.text(x + 16, y + 24, title, 23, CRIMSON, "bold", "start", opacity=op)
+        g.rect(x, y, 420, h, '#FBEFF1' if on else 'white', CRIMSON if on else '#BBBBBB', sw=3 if on else 2, opacity=op)
+        g.text(x + 16, y + 24, title, 23, CRIMSON, 'bold', 'start', opacity=op)
         for j, (pnum, name, kind) in enumerate(items):
             ly = y + 62 + j * 34
-            for pr, f in (trace or []):
+            for pr, f in trace or []:
                 if pr == pnum:
-                    g.rect(x + 6, ly - 16, 408, 32, C["compute_l"], C["compute"],
-                           sw=1.5, rx=5, first=f)
-            g.text(x + 42, ly, str(pnum), 22, C["neutral"], "bold", "end", opacity=op)
-            g.text(x + 52, ly, name, 22, C["text"], "normal", "start", opacity=op)
+                    g.rect(x + 6, ly - 16, 408, 32, C['compute_l'], C['compute'], sw=1.5, rx=5, first=f)
+            g.text(x + 42, ly, str(pnum), 22, C['neutral'], 'bold', 'end', opacity=op)
+            g.text(x + 52, ly, name, 22, C['text'], 'normal', 'start', opacity=op)
             if kinds_from:
-                g.text(x + 410, ly, kind, 20, C["neutral"], "normal", "end",
-                       first=kinds_from, italic=True, opacity=op)
-    for x1, y1, x2, y2 in ((428, 40, 470, 40), (684, 144, 684, 186),
-                           (472, 380, 430, 380), (216, 186, 216, 144)):
+                g.text(x + 410, ly, kind, 20, C['neutral'], 'normal', 'end', first=kinds_from, italic=True, opacity=op)
+    for x1, y1, x2, y2 in ((428, 40, 470, 40), (684, 144, 684, 186), (472, 380, 430, 380), (216, 186, 216, 144)):
         g.line(x1, y1, x2, y2, ARROW, sw=8)
-    ellipse(g, 450, 165, 88, 40, "white", C["neutral"], dash="4 3")
-    g.text(450, 165, "Conservation\nof complexity", 19, C["text"], "bold")
+    ellipse(g, 450, 165, 88, 40, 'white', C['neutral'], dash='4 3')
+    g.text(450, 165, 'Conservation\nof complexity', 19, C['text'], 'bold')
     g.write(stem, steps)
-
-
-cycle("cycle", steps=2, kinds_from=2)
+cycle('cycle', steps=2, kinds_from=2)
 for p in range(4):
-    cycle(f"cycle_part{p + 1}", lit=p)
-cycle("cycle_trace", steps=2, trace=[(5, 1), (4, 1), (6, 1), (7, 1),
-                                     (12, 2), (9, 2), (11, 2)])
-
-# =============================================================================
-# Amdahl: a 10x faster kernel inside a request that is 90 percent host.
-# Slot 0.85 textwidth x 3.0 cm; drawn near that size.
-# =============================================================================
-host_pct = num("amdahl_host_pct")
-inf_pct = num("amdahl_inf_pct")
-SPEEDUP = num("amdahl_speedup")
+    cycle(f'cycle_part{p + 1}', lit=p)
+cycle('cycle_trace', steps=2, trace=[(5, 1), (4, 1), (6, 1), (7, 1), (12, 2), (9, 2), (11, 2)])
+host_pct = 90.0
+inf_pct = 10.0
+SPEEDUP = 10.0
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.7, 1.05))
-    rows = [("Before", host_pct, inf_pct, f"+ inference {inf_pct:.0f}% = 100%"),
-            (f"After {val('amdahl_speedup')}× kernel", host_pct, inf_pct / SPEEDUP,
-             f"+ {inf_pct / SPEEDUP:.0f}% = {val('amdahl_new_pct')}%: {val('amdahl_gain')}× faster")]
+    rows = [('Before', host_pct, inf_pct, f'+ inference {inf_pct:.0f}% = 100%'), ('After 10× kernel', host_pct, inf_pct / SPEEDUP, f'+ {inf_pct / SPEEDUP:.0f}% = 91%: 1.1× faster')]
     for i, (lab, host, inf, tot) in enumerate(rows):
         y = 1 - i
-        on = 1.0 if (i == 0 or k == 2) else 0.0
-        ax.barh(y, host, color=C["neutral"], height=0.62, alpha=on)
-        ax.barh(y, inf, left=host, color=C["compute"], height=0.62, alpha=on)
-        ax.text(host_pct / 2, y, f"Host preprocessing {val('amdahl_host_pct')}%", ha="center", va="center",
-                color="white", fontsize=11, fontweight="bold", alpha=on)
-        ax.text(-1, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
-                color=C["text"], alpha=on)
-        ax.text(host + inf + 1.5, y, tot, va="center", fontsize=11, fontweight="bold",
-                color=C["compute"] if i == 0 else C["danger"], alpha=on)
+        on = 1.0 if i == 0 or k == 2 else 0.0
+        ax.barh(y, host, color=C['neutral'], height=0.62, alpha=on)
+        ax.barh(y, inf, left=host, color=C['compute'], height=0.62, alpha=on)
+        ax.text(host_pct / 2, y, 'Host preprocessing 90%', ha='center', va='center', color='white', fontsize=11, fontweight='bold', alpha=on)
+        ax.text(-1, y, lab, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'], alpha=on)
+        ax.text(host + inf + 1.5, y, tot, va='center', fontsize=11, fontweight='bold', color=C['compute'] if i == 0 else C['danger'], alpha=on)
     ax.set_yticks([])
     ax.set_xlim(0, 100)
     ax.set_xticks([0, 25, 50, 75, 100])
-    ax.tick_params(axis="x", labelsize=10)
+    ax.tick_params(axis='x', labelsize=10)
     ax.set_ylim(-0.5, 1.5)
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Share of the original request time (%)", fontsize=10)
-    sp.save(fig, out / f"amdahl_step{k}.svg")
-
-# =============================================================================
-# Tails: illustrative scenario, then a measured Google service
-# =============================================================================
-sp.hbars(str(out / "tail_illus.svg"), [
-    ("Mean TTFT", num("ttft_mean"), "neutral", f"{val('ttft_mean')} ms"),
-    ("p99 TTFT", num("ttft_p99"), "danger", f"{val('ttft_p99')} ms ({val('ttft_gap')}×)"),
-], "ms", log=False, xlabel="Time to first token (ms)", size=(3.4, 1.6))
-sp.hbars(str(out / "tail_measured.svg"), [
-    ("One leaf, median", num("leaf_p50"), "memory", f"{val('leaf_p50')} ms"),
-    ("One leaf, p99", num("leaf_p99"), "memory", f"{val('leaf_p99')} ms"),
-    ("All leaves, median", num("all_p50"), "danger", f"{val('all_p50')} ms"),
-    ("All leaves, p99", num("all_p99"), "danger", f"{val('all_p99')} ms ({val('tail_ratio')}×)"),
-], "ms", log=False, xlabel="Latency (ms)", size=(3.4, 2.1))
-
-# =============================================================================
-# From one GPU to a pool (frame 23). Slot 0.62 textwidth x 3.2 cm.
-# =============================================================================
-bars(out / "mtbf.svg", [
-    ("One GPU (MTTF)", num("mttf_h"), "neutral", f"{val('mttf_h')} h ({val('mttf_years')} years)"),
-    ("A three-week run", num("run_h"), "memory", f"{val('run_h')} h"),
-    (f"{val('n_gpu')} GPUs (MTBF)", num("mtbf_h"), "danger",
-     f"{val('mtbf_h')} h ({K.FAIL.result.interval.to('day').magnitude:.0f} days)"),
-], size=(2.4, 1.05), log=True, xlim=(10, 3e6),
-    ticks=[(10, "10"), (1000, "1,000"), (100000, "100,000")],
-    xlabel="Hours (log scale)", fs=10)
-
-# Llama 3 against the model (frame 28). Slot about 0.45 textwidth x 1.9 cm.
-bars(out / "llama_mtbf.svg", [
-    (f"Model, {val('l3_gpus')} GPUs", num("model_16k_h"), "neutral", f"{val('model_16k_h')} h"),
-    ("Llama 3, measured", num("l3_gap_h"), "danger", f"{val('l3_gap_h')} h"),
-], size=(1.5, 0.62), xlim=(0, 4.5), ticks=[(0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4")],
-    xlabel="Hours between interruptions", fs=10)
-
-# Power ladder by deployment tier (frame 25; System Paradigms Sec. 2.1, as in
-# Lecture 0). Slot 0.52 textwidth x 4.0 cm.
-bars(out / "power_tiers.svg", [
-    ("Cloud", num("cloud_mw") * 1e6, "neutral", f"{val('cloud_mw')} MW"),
-    ("Edge", num("edge_w"), "neutral", f"{val('edge_w')} W"),
-    ("Mobile", num("mobile_w"), "neutral", f"{val('mobile_w')} W"),
-    ("TinyML", num("tiny_mw") * 1e-3, "neutral", f"{val('tiny_mw')} mW"),
-], size=(1.85, 1.45), log=True, xlim=(1e-4, 1e9),
-    ticks=[(1e-3, "1 mW"), (1, "1 W"), (1e6, "1 MW")],
-    xlabel="Power (log scale)", fs=10)
-
-# =============================================================================
-# A composed assistant's critical path (frame 26).
-# Slot 0.88 textwidth x 4.2 cm: canvas 900 x 290, 19 px renders near 7.8 pt.
-# =============================================================================
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Share of the original request time (%)', fontsize=10)
+    sp.save(fig, out / f'amdahl_step{k}.svg')
+sp.hbars(str(out / 'tail_illus.svg'), [('Mean TTFT', 50.0, 'neutral', '50 ms'), ('p99 TTFT', 2000.0, 'danger', '2,000 ms (40×)')], 'ms', log=False, xlabel='Time to first token (ms)', size=(3.4, 1.6))
+sp.hbars(str(out / 'tail_measured.svg'), [('One leaf, median', 1.0, 'memory', '1 ms'), ('One leaf, p99', 10.0, 'memory', '10 ms'), ('All leaves, median', 40.0, 'danger', '40 ms'), ('All leaves, p99', 140.0, 'danger', '140 ms (14×)')], 'ms', log=False, xlabel='Latency (ms)', size=(3.4, 2.1))
+bars(out / 'mtbf.svg', [('One GPU (MTTF)', 50000.0, 'neutral', '50,000 h (5.7 years)'), ('A three-week run', 504.0, 'memory', '504 h'), ('1,024 GPUs (MTBF)', 48.8, 'danger', f'48.8 h ({2.034505208:.0f} days)')], size=(2.4, 1.05), log=True, xlim=(10, 3000000.0), ticks=[(10, '10'), (1000, '1,000'), (100000, '100,000')], xlabel='Hours (log scale)', fs=10)
+bars(out / 'llama_mtbf.svg', [('Model, 16,384 GPUs', 3.05, 'neutral', '3.05 h'), ('Llama 3, measured', 3.1, 'danger', '3.1 h')], size=(1.5, 0.62), xlim=(0, 4.5), ticks=[(0, '0'), (1, '1'), (2, '2'), (3, '3'), (4, '4')], xlabel='Hours between interruptions', fs=10)
+bars(out / 'power_tiers.svg', [('Cloud', 3.0 * 1000000.0, 'neutral', '3 MW'), ('Edge', 200.0, 'neutral', '200 W'), ('Mobile', 5.0, 'neutral', '5 W'), ('TinyML', 1.0 * 0.001, 'neutral', '1 mW')], size=(1.85, 1.45), log=True, xlim=(0.0001, 1000000000.0), ticks=[(0.001, '1 mW'), (1, '1 W'), (1000000.0, '1 MW')], xlabel='Power (log scale)', fs=10)
 g = Svg(900, 290)
-nodes = {"ret": (10, 96, "Retrieval", f"{val('dag_ret')} ms"),
-         "ta": (245, 6, "Tool A", f"{val('dag_tool_a')} ms"),
-         "tb": (245, 186, "Tool B", f"{val('dag_tool_b')} ms"),
-         "gen": (480, 96, "Generation", f"{val('dag_gen')} ms"),
-         "ver": (715, 96, "Verifier", f"{val('dag_ver')} ms")}
-crit = {"ret", "ta", "gen", "ver"}
+nodes = {'ret': (10, 96, 'Retrieval', '50 ms'), 'ta': (245, 6, 'Tool A', '110 ms'), 'tb': (245, 186, 'Tool B', '70 ms'), 'gen': (480, 96, 'Generation', '180 ms'), 'ver': (715, 96, 'Verifier', '30 ms')}
+crit = {'ret', 'ta', 'gen', 'ver'}
 for key, (x, y, name, ms) in nodes.items():
-    g.rect(x, y, 175, 92, "white", C["neutral"], sw=2)
-    g.text(x + 87, y + 30, name, 23, C["text"], "bold")
-    g.text(x + 87, y + 64, ms, 23, C["memory"], "bold")
+    g.rect(x, y, 175, 92, 'white', C['neutral'], sw=2)
+    g.text(x + 87, y + 30, name, 23, C['text'], 'bold')
+    g.text(x + 87, y + 64, ms, 23, C['memory'], 'bold')
     if key in crit:
-        g.rect(x, y, 175, 92, "none", C["danger"], sw=4, first=2)
-edges = [(185, 142, 243, 60, True), (185, 142, 243, 232, False),
-         (420, 52, 478, 125, True), (420, 232, 478, 160, False),
-         (655, 142, 713, 142, True)]
+        g.rect(x, y, 175, 92, 'none', C['danger'], sw=4, first=2)
+edges = [(185, 142, 243, 60, True), (185, 142, 243, 232, False), (420, 52, 478, 125, True), (420, 232, 478, 160, False), (655, 142, 713, 142, True)]
 for x1, y1, x2, y2, c in edges:
-    g.line(x1, y1, x2, y2, C["neutral"], sw=2.5)
+    g.line(x1, y1, x2, y2, C['neutral'], sw=2.5)
     if c:
-        g.line(x1, y1, x2, y2, C["danger"], sw=3.5, first=2)
-g.text(890, 222, "Critical path", 20, C["danger"], "bold", "end", first=2)
-g.text(890, 252, f"{val('dag_ret')} + {val('dag_tool_a')} + {val('dag_gen')} + {val('dag_ver')} = "
-       f"{val('dag_crit')} ms", 20, C["danger"],
-       "bold", "end", first=2)
-# step 3: what can go wrong at each interface
+        g.line(x1, y1, x2, y2, C['danger'], sw=3.5, first=2)
+g.text(890, 222, 'Critical path', 20, C['danger'], 'bold', 'end', first=2)
+g.text(890, 252, '50 + 110 + 180 + 30 = 370 ms', 20, C['danger'], 'bold', 'end', first=2)
 for x, y in ((214, 101), (449, 88), (449, 196)):
-    g.circle(x, y, 13, C["danger"], C["danger"], first=3)
-    g.text(x, y, "×", 20, "white", "bold", first=3)
-g.text(10, 70, "invented tool name", 19, C["danger"], "bold", "start", first=3)
-g.text(560, 66, "malformed JSON", 19, C["danger"], "bold", "start", first=3)
-g.text(468, 236, "timeout", 19, C["danger"], "bold", "start", first=3)
-g.write("dag", 3)
-
-# =============================================================================
-# From one node to a fleet (frame 27).
-# Slot 0.58 textwidth x 4.8 cm: canvas 900 x 480, 27 px renders near 7.4 pt.
-# =============================================================================
+    g.circle(x, y, 13, C['danger'], C['danger'], first=3)
+    g.text(x, y, '×', 20, 'white', 'bold', first=3)
+g.text(10, 70, 'invented tool name', 19, C['danger'], 'bold', 'start', first=3)
+g.text(560, 66, 'malformed JSON', 19, C['danger'], 'bold', 'start', first=3)
+g.text(468, 236, 'timeout', 19, C['danger'], 'bold', 'start', first=3)
+g.write('dag', 3)
 g = Svg(900, 480)
 
-
 def node(x, y, s, first=1, last=99, hl=False):
-    g.rect(x, y, 70 * s, 50 * s, "#F6EEE9", CRIMSON if hl else "#B08A75",
-           sw=3 if hl else 1.5, rx=5, first=first, last=last)
+    g.rect(x, y, 70 * s, 50 * s, '#F6EEE9', CRIMSON if hl else '#B08A75', sw=3 if hl else 1.5, rx=5, first=first, last=last)
     for j in range(4):
-        g.rect(x + (6 + j * 16) * s, y + 8 * s, 12 * s, 14 * s, C["compute_l"],
-               C["compute"], sw=1, rx=2, first=first, last=last)
-    g.rect(x + 6 * s, y + 30 * s, 58 * s, 13 * s, C["memory_l"], C["memory"], sw=1,
-           rx=2, first=first, last=last)
-
-
+        g.rect(x + (6 + j * 16) * s, y + 8 * s, 12 * s, 14 * s, C['compute_l'], C['compute'], sw=1, rx=2, first=first, last=last)
+    g.rect(x + 6 * s, y + 30 * s, 58 * s, 13 * s, C['memory_l'], C['memory'], sw=1, rx=2, first=first, last=last)
 node(60, 90, 4.4, last=1)
-g.text(214, 440, "One node", 27, C["text"], "bold", last=1)
+g.text(214, 440, 'One node', 27, C['text'], 'bold', last=1)
 for r in range(4):
     for c in range(4):
-        node(10 + c * 108, 10 + r * 100, 1.15, first=2, hl=(r == 1 and c == 1))
+        node(10 + c * 108, 10 + r * 100, 1.15, first=2, hl=r == 1 and c == 1)
         if c < 3:
-            g.line(10 + c * 108 + 80, 39 + r * 100, 10 + (c + 1) * 108, 39 + r * 100,
-                   C["network"], sw=2.5, arrow=False, first=2)
+            g.line(10 + c * 108 + 80, 39 + r * 100, 10 + (c + 1) * 108, 39 + r * 100, C['network'], sw=2.5, arrow=False, first=2)
     if r < 3:
         for c in range(4):
-            g.line(50 + c * 108, 68 + r * 100, 50 + c * 108, 110 + r * 100, C["network"],
-                   sw=2.5, arrow=False, first=2)
-g.text(214, 440, "A fleet: nodes on a network", 27, C["network"], "bold", first=2)
-rows = [("Bandwidth", "HBM in the node", "+ network bisection"),
-        ("A failure", "an exception", "routine: fault tolerance"),
-        ("Progress", "a step", "coordination")]
+            g.line(50 + c * 108, 68 + r * 100, 50 + c * 108, 110 + r * 100, C['network'], sw=2.5, arrow=False, first=2)
+g.text(214, 440, 'A fleet: nodes on a network', 27, C['network'], 'bold', first=2)
+rows = [('Bandwidth', 'HBM in the node', '+ network bisection'), ('A failure', 'an exception', 'routine: fault tolerance'), ('Progress', 'a step', 'coordination')]
 for i, (head_, one, many) in enumerate(rows):
     y = 40 + i * 150
-    g.text(475, y, head_, 29, CRIMSON, "bold", "start")
-    g.text(475, y + 44, one, 27, C["text"], "normal", "start", last=1)
-    g.text(475, y + 44, many, 27, C["network"], "bold", "start", first=2)
-g.write("fleet", 2)
-
-# =============================================================================
-# The voice-assistant request through four lighthouses (frame 30).
-# Slot 0.95 textwidth x 3.9 cm: canvas 900 x 248, 17 px renders near 7.6 pt.
-# The slide places one photo above each column (x = 2 + 228 i, width 215).
-# =============================================================================
+    g.text(475, y, head_, 29, CRIMSON, 'bold', 'start')
+    g.text(475, y + 44, one, 27, C['text'], 'normal', 'start', last=1)
+    g.text(475, y + 44, many, 27, C['network'], 'bold', 'start', first=2)
+g.write('fleet', 2)
 g = Svg(900, 248)
-stages = [("Wake word", "KWS, microcontroller", [f"{val('kws_kb')} KB INT8 in {val('mcu_flash_mb')} MB",
-                                                 f"{val('kws_mflop')} MFLOP", "milliwatts"],
-           "Power", C["danger"]),
-          ("Front end", "MobileNetV2-size, phone", [f"{val('mnv2_mflop')} MFLOP",
-                                                    f"{val('mnv2_int8_mb')} MB INT8", f"{val('phone_w')} W"],
-           "Compute", C["compute"]),
-          ("Ranking", "DLRM, cloud", [f"{val('dlrm_gb')} GB of tables", f"one H100: {val('h100_gib')} GB"],
-           "Capacity", C["network"]),
-          ("Reply", "GPT-2, cloud H100", [f"{val('gpt2_gb')} GB per token",
-                                             f"{val('gpt2_mem_ms')} ms floor",
-                                             f"{val('gpt2_ratio')}× compute floor"],
-           "Bandwidth", C["memory"])]
+stages = [('Wake word', 'KWS, microcontroller', ['200 KB INT8 in 1 MB', '20 MFLOP', 'milliwatts'], 'Power', C['danger']), ('Front end', 'MobileNetV2-size, phone', ['600 MFLOP', '3.5 MB INT8', '5 W'], 'Compute', C['compute']), ('Ranking', 'DLRM, cloud', ['100 GB of tables', 'one H100: 80 GB'], 'Capacity', C['network']), ('Reply', 'GPT-2, cloud H100', ['3 GB per token', '0.9 ms floor', '295× compute floor'], 'Bandwidth', C['memory'])]
 for i, (name, sub, nums, bind, col) in enumerate(stages):
     x = 2 + i * 228
-    g.rect(x, 2, 215, 180, "white", C["neutral"], sw=2)
-    g.text(x + 107, 26, name, 22, CRIMSON, "bold")
-    g.text(x + 107, 54, sub, 17, C["neutral"])
+    g.rect(x, 2, 215, 180, 'white', C['neutral'], sw=2)
+    g.text(x + 107, 26, name, 22, CRIMSON, 'bold')
+    g.text(x + 107, 54, sub, 17, C['neutral'])
     for j, s in enumerate(nums):
-        g.text(x + 107, 90 + j * 28, s, 19, C["text"])
+        g.text(x + 107, 90 + j * 28, s, 19, C['text'])
     if i < 3:
-        g.line(x + 216, 92, x + 227, 92, C["neutral"], sw=2.5)
-    g.rect(x + 12, 194, 191, 50, "white", C["neutral"], sw=1.5, dash="5 4", last=i + 1)
-    g.text(x + 107, 219, "binding term?", 20, C["danger"], "bold", last=i + 1)
+        g.line(x + 216, 92, x + 227, 92, C['neutral'], sw=2.5)
+    g.rect(x + 12, 194, 191, 50, 'white', C['neutral'], sw=1.5, dash='5 4', last=i + 1)
+    g.text(x + 107, 219, 'binding term?', 20, C['danger'], 'bold', last=i + 1)
     g.rect(x + 12, 194, 191, 50, col, col, first=i + 2)
-    g.text(x + 107, 219, bind, 24, "white", "bold", first=i + 2)
-g.write("voice", 5)
-
-# =============================================================================
-# Text-free thumbnails for goals, takeaways, recall, and part locators: each
-# keeps its figure's shapes with every word replaced by a faint bar.
-# =============================================================================
-import subprocess  # noqa: E402
-
-THUMBS = ["chain_step2.svg", "chain_step3.svg", "roofline_step3.svg", "cycle_step2.svg",
-          "mtbf.svg"] + \
-         [f"cycle_part{p}.svg" for p in range(1, 5)]
-subprocess.run([sys.executable, str(Path(__file__).resolve().parents[3] / "tools" /
-                                    "greek_thumbs.py")] + [str(out / t) for t in THUMBS],
-               check=True)
-
-print("figures written to", out)
+    g.text(x + 107, 219, bind, 24, 'white', 'bold', first=i + 2)
+g.write('voice', 5)
+import subprocess
+THUMBS = ['chain_step2.svg', 'chain_step3.svg', 'roofline_step3.svg', 'cycle_step2.svg', 'mtbf.svg'] + [f'cycle_part{p}.svg' for p in range(1, 5)]
+subprocess.run([sys.executable, str(Path(__file__).resolve().parents[3] / 'tools' / 'greek_thumbs.py')] + [str(out / t) for t in THUMBS], check=True)
+print('figures written to', out)

@@ -21,10 +21,8 @@ from ..results import (
     ExactScanFloorResult,
     GraphNeighborhoodResult,
     IndexMaintenanceResult,
-    MaintainedPolicyCostResult,
     RetrievalPayloadResult,
     StorageAmplificationResult,
-    WordOverlapResult,
 )
 from .base import ForwardModel
 from ...core.units import KB, byte, flop, millisecond, microsecond, second
@@ -255,37 +253,5 @@ class StorageAmplificationModel(ForwardModel):
         )
 
 
-class MaintainedPolicyCostModel(ForwardModel):
-    """
-    Cost per accepted task of a memory policy that pays upkeep to raise acceptance.
-
-    In units of the baseline's attempt cost, the baseline pays ``1 / p_a`` per
-    accepted task and the maintained policy ``(1 + m) / p_b``. The maintained
-    policy breaks even when its acceptance falls to ``(1 + m) p_a``.
-    """
-    requires = ()
-    produces = MaintainedPolicyCostResult
-
-    def solve(self, baseline_acceptance: float, maintained_acceptance: float,
-              maintenance_share: float) -> MaintainedPolicyCostResult:
-        attempt = 1 + maintenance_share
-        base = calc_cost_per_accepted(1, baseline_acceptance)
-        kept = calc_cost_per_accepted(attempt, maintained_acceptance)
-        return MaintainedPolicyCostResult(
-            baseline_cost=base, maintained_cost=kept, change=kept / base - 1,
-            break_even_acceptance=attempt / base,
-        )
 
 
-class WordOverlapModel(ForwardModel):
-    """
-    Distinct words two texts share, the signal a similarity-first deduplicator
-    or a bag-of-words match sees. Lowercased, punctuation stripped.
-    """
-    requires = ()
-    produces = WordOverlapResult
-
-    def solve(self, first: str, second: str) -> WordOverlapResult:
-        shared, union, a, b = calc_word_overlap(first, second)
-        return WordOverlapResult(shared=shared, union=union, first_words=a, second_words=b,
-                                 jaccard=shared / union)

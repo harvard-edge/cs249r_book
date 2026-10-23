@@ -24,15 +24,11 @@ from typing import Mapping, Optional, Sequence
 from ..results import (
     BinomialIntervalsResult,
     CappedSelectionCostResult,
-    GraderCalibrationResult,
     LeaderboardTiesResult,
     PairedComparisonResult,
-    PairedRunEvaluationResult,
     ProportionPlanningResult,
     ScaffoldSpreadResult,
     TaskMixConsistencyResult,
-    TaskRepeatAllocationResult,
-    VerdictBoundsResult,
 )
 from ...core.types import Quantity
 from ...core.units import USD
@@ -57,88 +53,10 @@ def z_for_confidence(confidence: float) -> float:
     return NormalDist().inv_cdf(0.5 + confidence / 2)
 
 
-class VerdictBoundsModel(ForwardModel):
-    """
-    An acceptance rate when some trials end pending or unknown.
-
-    The default counts unresolved trials as not accepted and reports the
-    bounds from resolving all of them either way. Dropping them from the
-    denominator inflates the rate, and since hard tasks are the ones that
-    time out, it biases the sample toward easy tasks.
-    """
-    requires = ()
-    produces = VerdictBoundsResult
-
-    def solve(self, passed: int, failed: int, unresolved: int) -> VerdictBoundsResult:
-        n = passed + failed + unresolved
-        return VerdictBoundsResult(
-            trials=n,
-            default_rate=passed / n,
-            upper_bound=(passed + unresolved) / n,
-            dropped_rate=passed / (passed + failed),
-        )
 
 
-class GraderCalibrationModel(ForwardModel):
-    """
-    A grader's error rates against an independent reference assessment.
-
-    The false-acceptance rate conditions on reference failures and predicts
-    how often the grader approves a broken result; the failure fraction among
-    accepted results conditions on the grader's acceptances and moves with
-    the base rate of failures. A random audit of accepted results estimates
-    only the second.
-    """
-    requires = ()
-    produces = GraderCalibrationResult
-
-    def solve(self, reference_failures: int, accepted_failures: int, reference_passes: int,
-              accepted_passes: int, confidence: float = 0.95) -> GraderCalibrationResult:
-        lo, hi = calc_wilson_interval(accepted_failures, reference_failures, z_for_confidence(confidence))
-        accepted = accepted_failures + accepted_passes
-        return GraderCalibrationResult(
-            false_accept_rate=accepted_failures / reference_failures,
-            false_accept_low=lo,
-            false_accept_high=hi,
-            accepted=accepted,
-            failure_among_accepted=accepted_failures / accepted,
-            false_reject_rate=(reference_passes - accepted_passes) / reference_passes,
-        )
 
 
-class TaskRepeatAllocationModel(ForwardModel):
-    """
-    Standard error of a task-averaged acceptance estimate under one run budget.
-
-    ``Var = sigma_task^2 / N + sigma_run^2 / (N r)``, with the within-task
-    variance from the mean rate, ``m (1 - m) - sigma_task^2``. With new tasks
-    free, the budget buys ``budget / r`` tasks; when a new task's fixture
-    costs ``fixture_cost`` runs, it buys ``floor(budget / (fixture_cost + r))``
-    whole tasks, and repeats earn a place.
-    """
-    requires = ()
-    produces = TaskRepeatAllocationResult
-
-    def solve(self, mean_rate: float, between_task_variance: float, budget_runs: int,
-              free_runs: Sequence[int], fixture_cost_runs: int, max_runs: int) -> TaskRepeatAllocationResult:
-        vb = between_task_variance
-        vw = calc_within_task_variance(mean_rate, vb)
-        free_tasks = {r: budget_runs // r for r in free_runs}
-        free_se = {r: math.sqrt(calc_task_averaged_variance(vb, vw, n, r)) for r, n in free_tasks.items()}
-        paid_tasks = {r: budget_runs // (fixture_cost_runs + r) for r in range(1, max_runs + 1)}
-        paid_var = {r: calc_task_averaged_variance(vb, vw, n, r) for r, n in paid_tasks.items()}
-        best = min(paid_var, key=paid_var.get)
-        return TaskRepeatAllocationResult(
-            within_variance=vw,
-            variance_ratio=vw / vb,
-            free_tasks=free_tasks,
-            free_se=free_se,
-            paid_tasks=paid_tasks,
-            paid_se={r: math.sqrt(v) for r, v in paid_var.items()},
-            best_runs=best,
-            best_tasks=paid_tasks[best],
-            best_se=math.sqrt(paid_var[best]),
-        )
 
 
 class BinomialIntervalsModel(ForwardModel):
@@ -360,70 +278,3 @@ class CappedSelectionCostModel(ForwardModel):
         )
 
 
-class PairedRunEvaluationModel(ForwardModel):
-    """
-    Two configurations run ``runs`` times on each of the same tasks, run against run.
-
-    Rows carry ``task``, ``run``, ``config``, the sealed ``verdict`` and the
-    ``visible`` check (``pass``, ``fail``, or ``unknown``), and the trial's
-    ``calls``, ``input_tokens``, ``output_tokens``, and ``seconds``. Per
-    configuration: acceptance with its Wilson interval, how many visible
-    passes the sealed tests reject, token and time totals charged to accepted
-    trials, and the unbiased pass@k and pass^k from each task's passes,
-    averaged over tasks with equal weight. Paired run by run, the comparison
-    uses Newcombe's method 10 and McNemar's exact test; runs of one task are
-    correlated, so that interval treats them as more independent than they are.
-    """
-    requires = ("series",)
-    produces = PairedRunEvaluationResult
-
-    def solve(self, rows: Sequence[Mapping], task_ids: Sequence[str], runs: int, baseline: str,
-              candidate: str, confidence: float = 0.95) -> PairedRunEvaluationResult:
-        z = z_for_confidence(confidence)
-        out = {f: {} for f in ("trials", "accepted", "rate", "wilson", "unknown", "visible_pass",
-                               "visible_pass_sealed_reject", "calls", "tokens", "output_tokens", "seconds",
-                               "tokens_per_accepted", "seconds_per_accepted", "per_task_passes", "pass_at",
-                               "pass_pow")}
-        for cfg in (baseline, candidate):
-            rr = [r for r in rows if r["config"] == cfg]
-            acc = sum(r["verdict"] == "pass" for r in rr)
-            tok = sum(r["input_tokens"] + r["output_tokens"] for r in rr)
-            sec = sum(r["seconds"] for r in rr)
-            passes = {t: sum(r["verdict"] == "pass" for r in rr if r["task"] == t) for t in task_ids}
-            out["trials"][cfg] = len(rr)
-            out["accepted"][cfg] = acc
-            out["rate"][cfg] = acc / len(rr)
-            out["wilson"][cfg] = calc_wilson_interval(acc, len(rr), z)
-            out["unknown"][cfg] = sum(r["verdict"] == "unknown" for r in rr)
-            out["visible_pass"][cfg] = sum(r["visible"] == "pass" for r in rr)
-            out["visible_pass_sealed_reject"][cfg] = sum(r["visible"] == "pass" and r["verdict"] != "pass" for r in rr)
-            out["calls"][cfg] = sum(r["calls"] for r in rr)
-            out["tokens"][cfg] = tok
-            out["output_tokens"][cfg] = sum(r["output_tokens"] for r in rr)
-            out["seconds"][cfg] = sec
-            out["tokens_per_accepted"][cfg] = tok / acc
-            out["seconds_per_accepted"][cfg] = sec / acc
-            out["per_task_passes"][cfg] = passes
-            ks = range(1, runs + 1)
-            out["pass_at"][cfg] = {k: sum(calc_pass_at_k_unbiased(runs, c, k) for c in passes.values()) / len(passes)
-                                   for k in ks}
-            out["pass_pow"][cfg] = {k: sum(calc_pass_pow_k_unbiased(runs, c, k) for c in passes.values()) / len(passes)
-                                    for k in ks}
-        ok = {(r["task"], r["run"], r["config"]): r["verdict"] == "pass" for r in rows}
-        both = cand = base = neither = 0
-        for t in task_ids:
-            for n in range(runs):
-                x, y = ok[(t, n, candidate)], ok[(t, n, baseline)]
-                both += x and y
-                cand += x and not y
-                base += y and not x
-                neither += (not x) and (not y)
-        delta, lower, upper = calc_newcombe_paired_difference(both, cand, base, neither, z)
-        tpa = out["tokens_per_accepted"]
-        return PairedRunEvaluationResult(
-            runs=runs, tasks=len(task_ids), **out,
-            both=both, candidate_only=cand, baseline_only=base, neither=neither,
-            difference=delta, lower=lower, upper=upper,
-            exact_p=calc_mcnemar_exact_two_sided(base, cand),
-            tokens_per_accepted_ratio=tpa[candidate] / tpa[baseline],
-        )

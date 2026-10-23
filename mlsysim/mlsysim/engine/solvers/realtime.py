@@ -19,7 +19,6 @@ from ..results import (
     CanFdBusResult,
     CommandAuthenticationResult,
     EtherCatCycleResult,
-    LatencyTailResult,
     LeaseBudgetResult,
     PhaseLagBudgetResult,
     ResponseTimeResult,
@@ -210,29 +209,6 @@ class LeaseBudgetModel(ForwardModel):
         )
 
 
-class LatencyTailModel(ForwardModel):
-    """
-    The tail of a measured latency sample: median, p99, p99.9, and maximum.
-
-    Percentiles use linear interpolation between order statistics (numpy's
-    default). A measured maximum is the largest value seen so far, never a
-    bound: it can only grow as the sample grows.
-    """
-    requires = ("samples",)
-    produces = LatencyTailResult
-
-    def solve(self, samples: Sequence[float], unit: str = "microsecond",
-              threshold: Optional[Quantity] = None) -> LatencyTailResult:
-        a = np.asarray(samples, dtype=float)
-        u = ureg(unit)
-        pct = np.percentile(a, [50.0, 99.0, 99.9])
-        over = None
-        if threshold is not None:
-            over = int((a > threshold.to(u).magnitude).sum())
-        return LatencyTailResult(
-            count=int(a.size), p50=float(pct[0]) * u, p99=float(pct[1]) * u,
-            p999=float(pct[2]) * u, maximum=float(a.max()) * u, over_threshold=over,
-        )
 
 
 class SharedDramReadModel(ForwardModel):

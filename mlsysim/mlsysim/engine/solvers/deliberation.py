@@ -23,10 +23,8 @@ from ..results import (
     BestOfNPoolResult,
     CoverageVsVoteResult,
     DeadlinePolicyResult,
-    PassAtKEstimateResult,
     ProbeVsAnswerResult,
     PrunedSearchTreeResult,
-    RecordedRunCostResult,
     ScopedRevisionResult,
     SearchAccountsResult,
     VerifiedPoolResult,
@@ -166,21 +164,6 @@ class BestOfNPoolModel(ForwardModel):
         )
 
 
-class PassAtKEstimateModel(ForwardModel):
-    """
-    pass@k estimated from ``n`` samples with ``c`` passes.
-
-    The subset estimate ``1 - C(n - c, k) / C(n, k)`` is unbiased; plugging the
-    observed rate into ``1 - (1 - c/n)^k`` is biased low.
-    """
-    requires = ()
-    produces = PassAtKEstimateResult
-
-    def solve(self, samples: int, passing: int, k: int) -> PassAtKEstimateResult:
-        return PassAtKEstimateResult(
-            subset_estimate=calc_pass_at_k_unbiased(samples, passing, k),
-            plug_in=calc_independent_success(passing / samples, k),
-        )
 
 
 class CoverageVsVoteModel(ForwardModel):
@@ -460,55 +443,3 @@ class DeadlinePolicyModel(ForwardModel):
         )
 
 
-class RecordedRunCostModel(ForwardModel):
-    """
-    One public agent run's spend as the agent recorded it, per attempt and per resolved task.
-
-    Cohort cost per resolved task is the run's total over its resolved tasks;
-    the unresolved share is the fraction of that spend on attempts that
-    failed. Runs that record no cost are rejected. With a ``cost_limit``
-    (dollars), it also counts the runs that ended above it and by how much.
-    """
-    requires = ("series",)
-    produces = RecordedRunCostResult
-
-    def solve(self, rows, cost_limit: Optional[float] = None) -> RecordedRunCostResult:
-        costs = [r["rep_cost_usd"] for r in rows]
-        if any(c is None or c != c for c in costs):
-            raise ValueError("this run records no cost")
-        total = sum(costs)
-        resolved = sum(1 for r in rows if r["resolved"])
-        inp = sum(r["rep_input_tokens_sum"] for r in rows)
-        out = sum(r["rep_output_tokens_sum"] for r in rows)
-        return RecordedRunCostResult(
-            tasks=len(rows),
-            resolved=resolved,
-            resolve_rate=resolved / len(rows),
-            cost_per_attempt=total / len(rows),
-            cost_per_resolved=total / resolved,
-            unresolved_share=sum(r["rep_cost_usd"] for r in rows if not r["resolved"]) / total,
-            input_output_ratio=inp / out,
-            median_calls=statistics.median(r["n_model_calls"] for r in rows),
-            median_input_tokens=statistics.median(r["rep_input_tokens_sum"] for r in rows),
-            median_output_tokens=statistics.median(r["rep_output_tokens_sum"] for r in rows),
-            median_input_output_ratio=statistics.median(
-                r["rep_input_tokens_sum"] / r["rep_output_tokens_sum"]
-                for r in rows if r["rep_output_tokens_sum"]),
-            output_token_share=out / (inp + out),
-            mean_resolved_cost=statistics.mean(r["rep_cost_usd"] for r in rows if r["resolved"]),
-            mean_unresolved_cost=statistics.mean(r["rep_cost_usd"] for r in rows if not r["resolved"]),
-            survivor_understatement=(total / resolved)
-            / statistics.mean(r["rep_cost_usd"] for r in rows if r["resolved"]),
-            mean_calls=statistics.mean(r["n_model_calls"] for r in rows),
-            max_cost=max(costs),
-            **self._over_limit(costs, cost_limit),
-        )
-
-    @staticmethod
-    def _over_limit(costs, cost_limit):
-        if cost_limit is None:
-            return {}
-        over = [c - cost_limit for c in costs if c > cost_limit]
-        return dict(cost_limit=cost_limit, over_limit_runs=len(over),
-                    mean_overshoot=sum(over) / len(over) if over else 0.0,
-                    max_overshoot=max(over, default=0.0))

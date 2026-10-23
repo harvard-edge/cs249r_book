@@ -26,7 +26,6 @@ from ..results import (
     ReplayBufferResult,
     SensorBiasDriftResult,
     StaleTransformResult,
-    TrackConfirmationResult,
 )
 from ...core.types import Quantity
 from ...core.units import ureg
@@ -351,13 +350,3 @@ class FrozenTransformModel(ForwardModel):
         )
 
 
-class TrackConfirmationModel(ForwardModel):
-    """A tracker that outputs a track only after ``min_hits`` associated frames holds it ``(min_hits - 1)`` frame periods."""
-    requires = ("min_hits", "frame_rate", "speed")
-    produces = TrackConfirmationResult
-
-    def solve(self, min_hits: int, frame_rate: Quantity, speed: Quantity) -> TrackConfirmationResult:
-        period = (1 / frame_rate).to(_MS)
-        wait = ((min_hits - 1) * period).to(_MS)
-        return TrackConfirmationResult(frame_period=period, held_frames=min_hits - 1, wait=wait,
-                                       travel=(speed * wait).to(_MM))

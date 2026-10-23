@@ -18,7 +18,6 @@ import numpy as np
 
 from ..results import (
     AcceptedTaskCostResult,
-    AgentRunSummaryResult,
     AppendOnlyContextResult,
     HorizonCompoundingResult,
     TaskHorizonTrendResult,
@@ -185,48 +184,3 @@ class TaskHorizonTrendModel(ForwardModel):
         )
 
 
-class AgentRunSummaryModel(ForwardModel):
-    """
-    Totals of one recorded agent run over a benchmark, one attempt per task.
-
-    Acceptance is the benchmark's hidden tests; cost per accepted task is the
-    run's total spend over its accepted tasks (with one attempt each, the same
-    as the mean attempt over acceptance). Charging only the accepted runs
-    reports their mean cost and hides the rejected spend. Tasks are also
-    binned by model calls, each bin running from the previous edge (exclusive)
-    to its own (inclusive), with a last bin above the final edge.
-    """
-    requires = ("series",)
-    produces = AgentRunSummaryResult
-
-    def solve(self, rows, call_bin_edges: Sequence[int],
-              command_classes: Sequence[str] = ("read", "write", "run", "net")) -> AgentRunSummaryResult:
-        n = len(rows)
-        ok = [r for r in rows if r["resolved"]]
-        costs = [r["cost_usd"] for r in rows]
-        calls = [int(r["model_calls"]) for r in rows]
-        total = sum(costs)
-        mean_attempt = total / n
-        per_accepted = calc_cost_per_accepted(mean_attempt, len(ok) / n)
-        accepted_mean = statistics.mean(r["cost_usd"] for r in ok)
-        commands = {k: int(sum(r[f"cmd_{k}"] for r in rows)) for k in command_classes}
-        syntax = [r for r in rows if r["syntax_error_seen"]]
-        bins, low = [], 0
-        for high in list(call_bin_edges) + [None]:
-            b = [r for r in rows if r["model_calls"] > low and (high is None or r["model_calls"] <= high)]
-            bins.append({"low": low + 1, "high": high, "tasks": len(b), "accepted": sum(1 for r in b if r["resolved"])})
-            low = high
-        return AgentRunSummaryResult(
-            tasks=n, accepted=len(ok), rejected=n - len(ok), acceptance=len(ok) / n,
-            submitted=sum(1 for r in rows if r["exit_status"] == "Submitted"),
-            total_cost=total, mean_attempt_cost=mean_attempt, cost_per_accepted=per_accepted,
-            accepted_mean_cost=accepted_mean, accepted_only_understatement=per_accepted / accepted_mean,
-            calls_median=statistics.median(calls), calls_min=min(calls), calls_max=max(calls),
-            commands=commands, command_total=sum(commands.values()),
-            observations=int(sum(r["observations"] for r in rows)),
-            nonzero_exits=int(sum(r["nonzero_exit"] for r in rows)),
-            truncated_outputs=int(sum(r["truncated"] for r in rows)),
-            truncated_tasks=sum(1 for r in rows if r["truncated"]),
-            syntax_error_tasks=len(syntax), syntax_error_accepted=sum(1 for r in syntax if r["resolved"]),
-            call_bins=bins,
-        )
