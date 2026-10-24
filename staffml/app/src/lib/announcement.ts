@@ -9,11 +9,11 @@
  * emits for the same config, and the CSS (in globals.css) recreates
  * Bootstrap 5's .alert.alert-primary so the bar reads visually the same.
  *
- * Template:
+ * Template (the same three lines as the other companion sites, e.g.
+ * kits/config/announcement.yml):
  *   Line 1 — identity + primary CTA (what is THIS site)
- *   Line 2 — the book
- *   Line 3 — "Alongside the book:" sibling row (3 most-relevant verbs)
- *   Line 4 — newsletter
+ *   Line 2 — the books (Volumes III and IV wrapped in .mls-unreleased)
+ *   Line 3 — "Companion resources:" the full sibling row, newsletter last
  */
 
 const BASE = "https://mlsysbook.ai";
@@ -43,9 +43,8 @@ export const ANNOUNCEMENT: AnnouncementConfig = {
   dismissable: true,
   type: "primary",
   lines: [
-    `🎯 <strong>StaffML</strong> — physics-grounded ML systems interview prep; practice with worked-problem rigor. <a href="${staffmlPath("/practice/")}">Start practicing →</a>`,
-    `📘 <strong>The books:</strong> <a href="${BASE}/vol1/">Introduction to Machine Learning Systems</a> · <a href="${BASE}/vol2/">Scaling Machine Learning Systems</a><span class="mls-unreleased"> · <a href="${BASE}/vol3/">Agentic Machine Learning Systems</a> (in preparation) · <a href="${BASE}/vol4/">Physical AI</a> (in preparation)</span> — open access.`,
-    `🛠️ <strong>Alongside the book:</strong> <a href="${BASE}/tinytorch/">TinyTorch</a> (build) · <a href="${BASE}/kits/">Hardware Kits</a> (deploy) · <a href="${BASE}/mlsysim/">MLSys·im</a> (simulate)`,
-    `📬 <strong>Newsletter:</strong> ML Systems insights & updates — <a href="${BASE}/newsletter/">Subscribe →</a>`,
+    `<strong>StaffML</strong>: ML systems interview practice, with worked problems grounded in the physics of the hardware. <a href="${staffmlPath("/practice/")}">Start practicing →</a>`,
+    `<strong>The books:</strong> <a href="${BASE}/vol1/">Introduction to Machine Learning Systems</a> · <a href="${BASE}/vol2/">Scaling Machine Learning Systems</a> (preview)<span class="mls-unreleased"> · <a href="${BASE}/vol3/">Agentic Machine Learning Systems</a> (in preparation) · <a href="${BASE}/vol4/">Physical AI</a> (in preparation)</span>. All are open access.`,
+    `<strong>Companion resources:</strong> <a href="${BASE}/tinytorch/">TinyTorch</a> (build) · <a href="${BASE}/kits/">Hardware Kits</a> (deploy) · <a href="${BASE}/mlsysim/">MLSys·im</a> (model) · <a href="${BASE}/labs/">Labs</a> (explore) · <a href="${BASE}/slides/">Lecture Slides</a> (teach) · <a href="${BASE}/instructors/">Instructor Hub</a> (teach) · <a href="${BASE}/staffml/">StaffML</a> (practice) · <a href="${BASE}/newsletter/">Newsletter</a>`,
   ],
 };
