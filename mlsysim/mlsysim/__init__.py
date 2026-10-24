@@ -3,7 +3,7 @@
 mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 """
 
-__version__ = "0.1.2"
+__version__ = "0.3.0"
 
 from . import core
 from . import engine
