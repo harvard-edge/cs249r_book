@@ -1,0 +1,1 @@
+import{t as e}from"./properties-DaUFoXFR.js";export{e as properties};

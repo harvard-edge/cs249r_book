@@ -1,0 +1,1 @@
+import{l as e}from"./session-DqoWmb7X.js";function t(t){window.open(e(`?file=${encodeURIComponent(t)}`).toString(),`_blank`)}export{t};

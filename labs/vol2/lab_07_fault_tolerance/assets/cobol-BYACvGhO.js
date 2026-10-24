@@ -1,0 +1,1 @@
+import{t as e}from"./cobol-ttQu-eUm.js";export{e as cobol};

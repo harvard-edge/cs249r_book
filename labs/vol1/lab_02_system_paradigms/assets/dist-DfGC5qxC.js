@@ -1,0 +1,1 @@
+import{t as e}from"./dist-DOsgOC8X.js";export{e as go};

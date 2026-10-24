@@ -1,0 +1,1 @@
+import{t as e}from"./troff-r7W702V9.js";export{e as troff};

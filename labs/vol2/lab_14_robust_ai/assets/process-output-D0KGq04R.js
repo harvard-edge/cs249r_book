@@ -1,0 +1,1 @@
+import{X as e,Z as t}from"./cells-BRkCaSsh.js";import{t as n}from"./strings-B2vv-ENv.js";function r(r){return r.mimetype.startsWith(`application/vnd.marimo`)||r.mimetype===`text/html`?t(n.asString(r.data)):e(n.asString(r.data))}export{r as t};

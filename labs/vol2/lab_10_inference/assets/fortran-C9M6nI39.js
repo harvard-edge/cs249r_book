@@ -1,0 +1,1 @@
+import{t as e}from"./fortran-BarbOvgW.js";export{e as fortran};

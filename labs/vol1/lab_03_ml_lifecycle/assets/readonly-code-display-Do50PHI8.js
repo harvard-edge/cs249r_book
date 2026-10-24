@@ -1,0 +1,1 @@
+import{hi as e,mi as t}from"./cells-BRkCaSsh.js";var n=new e,r=new t;function i(e){let t=e.trim();return t?n.isSupported(t)?{code:n.transformIn(t).code,language:`markdown`}:r.isSupported(t)?{code:r.transformIn(t).code,language:`sql`}:{code:e,language:`python`}:{code:e,language:`python`}}export{i as t};

@@ -1,0 +1,1 @@
+var e=class{promise;resolve;reject;status=`pending`;value=void 0;constructor(){this.promise=new Promise((e,n)=>{this.reject=e=>{this.status=`rejected`,n(e)},this.resolve=n=>{this.status=`resolved`,t(n)||(this.value=n),e(n)}})}};function t(e){return typeof e==`object`&&!!e&&`then`in e&&typeof e.then==`function`}export{e as t};

@@ -1,0 +1,1 @@
+import{t as e}from"./gherkin-BlnXaZZf.js";export{e as gherkin};

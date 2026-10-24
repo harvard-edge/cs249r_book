@@ -1,0 +1,1 @@
+import{r as e}from"./dist-DmUAWIff.js";export{e as xml};

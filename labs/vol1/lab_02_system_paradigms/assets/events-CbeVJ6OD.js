@@ -1,0 +1,1 @@
+function e(e){return()=>({TYPE:e,is(t){return t.type===e},create(t){return new CustomEvent(e,t)}})}var t=e(`marimo-value-input`)(),n=e(`marimo-value-update`)(),r=e(`marimo-value-ready`)(),i=e(`marimo-incoming-message`)();function a(e,n){return t.create({bubbles:!0,composed:!0,detail:{value:e,element:n}})}export{a,n as i,t as n,r,i as t};

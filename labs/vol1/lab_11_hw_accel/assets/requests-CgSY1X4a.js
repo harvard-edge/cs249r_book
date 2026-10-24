@@ -1,0 +1,1 @@
+import{f as e}from"./useEvent-Dfcbgjhg.js";var t=e(null);export{t};

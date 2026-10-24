@@ -1,0 +1,1 @@
+import{t as e}from"./sparql-CjwbV0fX.js";export{e as sparql};

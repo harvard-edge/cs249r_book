@@ -1,0 +1,1 @@
+import{n as e}from"./dist-1tmpVXyz.js";export{e as html};
