@@ -112,6 +112,11 @@ export function showAhaCard(container, label, text, link) {
    ----------------------------------------------------------- */
 export async function mountPixiOnCanvas(canvas, opts = {}) {
   const W = canvas.width, H = canvas.height;
+  const pixelRatio = window.devicePixelRatio || 1;
+  // Match the displayed canvas on small high-density screens. Rendering more
+  // pixels than the display can show wastes GPU work without sharpening it.
+  const displayWidth = canvas.getBoundingClientRect().width || W;
+  const resolution = Math.min(2, pixelRatio, Math.max(1, displayWidth * pixelRatio / W));
   const app = new PIXI.Application();
   await app.init({
     canvas: canvas,
@@ -119,8 +124,12 @@ export async function mountPixiOnCanvas(canvas, opts = {}) {
     backgroundColor: opts.bg ?? 0xffffff,
     antialias: true,
     autoDensity: true,
-    resolution: Math.min(2, window.devicePixelRatio || 1)
+    resolution
   });
+  // Pixi autoDensity writes fixed inline CSS dimensions. Let the site stylesheet
+  // scale the canvas as a pair so narrow screens keep the 680:460 aspect ratio.
+  canvas.style.removeProperty("width");
+  canvas.style.removeProperty("height");
   // Pixi v8 sets stage.eventMode globally on stage; we want canvas to receive pointer events.
   app.stage.eventMode = "static";
   app.stage.hitArea = app.screen;
@@ -134,6 +143,14 @@ export async function mountPixiOnCanvas(canvas, opts = {}) {
     for (let i = 0; i < tickHandlers.length; i++) tickHandlers[i](dt);
   });
 
+  // A hidden tab should neither burn frames nor advance a timed run.
+  const onVisibilityChange = () => {
+    if (document.hidden) app.ticker.stop();
+    else app.ticker.start();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  onVisibilityChange();
+
   return {
     app,
     stage: app.stage,
@@ -141,7 +158,10 @@ export async function mountPixiOnCanvas(canvas, opts = {}) {
     height: H,
     PIXI,
     onTick: (fn) => tickHandlers.push(fn),
-    destroy: () => app.destroy(true, { children: true, texture: true }),
+    destroy: () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      app.destroy(true, { children: true, texture: true });
+    },
   };
 }
 
@@ -371,57 +391,61 @@ export function getFilters() {
 export function mountReadyOverlay(stage, opts = {}) {
   const W = opts.width  ?? stage.hitArea?.width  ?? 680;
   const H = opts.height ?? stage.hitArea?.height ?? 460;
+  const compact = typeof window !== "undefined" && window.matchMedia &&
+                  window.matchMedia("(pointer: coarse), (max-width: 640px)").matches;
 
   const root = new PIXI.Container();
   root.eventMode = "static";
   root.cursor = "default";
 
   const dim = new PIXI.Graphics();
-  dim.rect(0, 0, W, H).fill({ color: 0x101827, alpha: 0.78 });
+  dim.rect(0, 0, W, H).fill(0x101827);
   root.addChild(dim);
 
   const title = new PIXI.Text({
     text: opts.title ?? "READY",
-    style: { fill: 0xffffff, fontSize: 30, fontWeight: "800", letterSpacing: 2, align: "center" }
+    style: { fill: 0xffffff, fontSize: compact ? 36 : 30, fontWeight: "800", letterSpacing: 2, align: "center" }
   });
   title.anchor.set(0.5);
-  title.position.set(W / 2, H / 2 - 70);
+  title.position.set(W / 2, H / 2 - (compact ? 120 : 70));
   root.addChild(title);
 
   if (opts.goal) {
     const goal = new PIXI.Text({
       text: opts.goal,
-      style: { fill: 0xd4edda, fontSize: 15, align: "center", wordWrap: true, wordWrapWidth: W * 0.78 }
+      style: { fill: 0xd4edda, fontSize: compact ? 25 : 15, align: "center", wordWrap: true, wordWrapWidth: W * 0.78 }
     });
     goal.anchor.set(0.5);
-    goal.position.set(W / 2, H / 2 - 30);
+    goal.position.set(W / 2, H / 2 - (compact ? 45 : 30));
     root.addChild(goal);
   }
 
   if (opts.controls) {
     const controls = new PIXI.Text({
       text: opts.controls,
-      style: { fill: 0xffffff, fontSize: 14, align: "center", lineHeight: 22, wordWrap: true, wordWrapWidth: W * 0.85 }
+      style: { fill: 0xffffff, fontSize: compact ? 22 : 14, align: "center", lineHeight: compact ? 29 : 22, wordWrap: true, wordWrapWidth: W * 0.85 }
     });
     controls.anchor.set(0.5);
-    controls.position.set(W / 2, H / 2 + 14);
+    controls.position.set(W / 2, H / 2 + (compact ? 40 : 14));
     root.addChild(controls);
   }
 
-  const hint = new PIXI.Text({
-    text: "Take your time — read the controls.",
-    style: { fill: 0xb8c2cc, fontSize: 12, fontStyle: "italic" }
-  });
-  hint.anchor.set(0.5);
-  hint.position.set(W / 2, H / 2 + 56);
-  root.addChild(hint);
+  if (!compact) {
+    const hint = new PIXI.Text({
+      text: "Take your time — read the controls.",
+      style: { fill: 0xb8c2cc, fontSize: 12, fontStyle: "italic" }
+    });
+    hint.anchor.set(0.5);
+    hint.position.set(W / 2, H / 2 + 56);
+    root.addChild(hint);
+  }
 
   const cta = new PIXI.Text({
-    text: "press  ENTER  to launch",
-    style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700", letterSpacing: 1.5 }
+    text: compact ? "tap to launch" : "press ENTER or tap to launch",
+    style: { fill: 0xffd6a8, fontSize: compact ? 29 : 18, fontWeight: "700", letterSpacing: 1.5 }
   });
   cta.anchor.set(0.5);
-  cta.position.set(W / 2, H / 2 + 86);
+  cta.position.set(W / 2, H / 2 + (compact ? 135 : 86));
   root.addChild(cta);
 
   // Always add overlay last so it's on top.

@@ -90,13 +90,13 @@ export async function mountMoe(canvas, opts = {}) {
         burst(tokenLayer, exp.x, expertY, exp.color, 6);
         score++;
         scoreText.text = "Score: " + score;
-        if (opts.onScoreChange) opts.onScoreChange({ score, timeLeft: 30000 });
+        if (opts.onScoreChange) opts.onScoreChange({ score });
       } else {
         // Wrong route!
         over = true;
         flash(stage, 0xc44444, 400);
         shake(stage, 15, 400);
-        drawGameOver();
+        drawGameOver("wrong-route");
       }
     }, 150);
   }
@@ -144,16 +144,17 @@ export async function mountMoe(canvas, opts = {}) {
         over = true;
         flash(stage, 0xc44444, 400);
         shake(stage, 15, 400);
-        drawGameOver();
+        drawGameOver("missed");
+        return;
       }
     }
   });
 
-  function drawGameOver() {
-    if (opts.onGameOver) opts.onGameOver({ score, timeLeft: 30000 });
+  function drawGameOver(reason) {
+    if (opts.onGameOver) opts.onGameOver({ score, reason });
     const bg = new PIXI.Graphics();
     bg.rect(0, 0, W, H).fill({ color: 0xffffff, alpha: 0.9 });
-    const t1 = new PIXI.Text({ text: "Routing Error!", style: { fontSize: 28, fontWeight: "bold", fill: 0xc44444 } });
+    const t1 = new PIXI.Text({ text: reason === "missed" ? "Token expired!" : "Routing error!", style: { fontSize: 28, fontWeight: "bold", fill: 0xc44444 } });
     t1.anchor.set(0.5); t1.position.set(W / 2, H / 2 - 20);
     const t2 = new PIXI.Text({ text: `Routed: ${score} tokens`, style: { fontSize: 16, fill: 0x333333 } });
     t2.anchor.set(0.5); t2.position.set(W / 2, H / 2 + 15);
