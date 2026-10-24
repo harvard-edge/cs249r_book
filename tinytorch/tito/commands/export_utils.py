@@ -222,14 +222,14 @@ def convert_py_to_notebook(
     console.print("[dim]🔄 Overwriting existing notebook (Python file is source of truth)[/dim]" if notebook_file.exists() else "[dim]✨ Creating new notebook from Python file[/dim]")
 
     try:
-        from ..core.virtual_env_manager import get_venv_bin_dir
+        from ..core.virtual_env_manager import resolve_venv_tool
         jupytext_path = "jupytext"
-        venv_jupytext = get_venv_bin_dir(venv_path) / "jupytext"
+        venv_jupytext = resolve_venv_tool("jupytext", venv_path)
 
-        if venv_jupytext.exists():
-            test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if venv_jupytext != "jupytext":
+            test_result = subprocess.run([venv_jupytext, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if test_result.returncode == 0:
-                jupytext_path = str(venv_jupytext)
+                jupytext_path = venv_jupytext
                 console.print(f"[dim]🔧 Using venv jupytext: {venv_jupytext}[/dim]")
             else:
                 console.print("[dim]⚠️  Venv jupytext has issues, falling back to system[/dim]")
@@ -281,7 +281,11 @@ def convert_py_to_notebook(
         return True
 
     except FileNotFoundError:
-        console.print("[red]❌ Jupytext not found. Install with: pip install jupytext[/red]")
+        console.print(
+            f"[red]❌ Jupytext not found at '{jupytext_path}' and not on PATH.[/red]\n"
+            f"[dim]It may still be installed inside your venv ({venv_bin_dir}) — "
+            f"activate your virtual environment, or run: tito setup[/dim]"
+        )
         return False
     except Exception as e:
         console.print(f"[red]❌ Conversion error: {e}[/red]")

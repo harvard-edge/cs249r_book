@@ -9,7 +9,7 @@ it, see [`vault/REVIEWS.md`](vault/REVIEWS.md).
 
 ---
 
-## Quick start — from clone to first-question-visible
+## Quick start: from clone to first question visible
 
 ```bash
 # 1. Clone and pick the staffml worktree
@@ -55,7 +55,7 @@ it's longer, file an issue titled "CONTRIBUTING.md getting-started friction".
 | New question | `vault/questions/<track>/<level>/<zone>/` | `vault new` |
 | Fix a question | same | `vault edit <id>` |
 | Reclassify a question | same | `vault move <id> --to <track>/<level>/<zone>` |
-| New topic | `vault/taxonomy.yaml` | PR with a §7 entry in EVOLUTION.md |
+| New topic | `vault/schema/taxonomy_data.yaml` (and `schema/enums.py`) | PR with a §7 entry in EVOLUTION.md |
 | Website UX | `staffml/app/src/` | Next.js |
 | Worker API | `staffml/vault-worker/` (Phase 3+) | Wrangler project |
 | Schema evolution | `vault/schema/` | RFC-style PR per EVOLUTION.md |
@@ -92,11 +92,11 @@ CI re-runs these. PRs are merge-blocked on red CI.
 
 Every question's `provenance` field must honestly reflect how it was made:
 
-- `human` — written from scratch by a human.
-- `llm-draft` — machine-drafted; not yet human-reviewed.
-- `llm-then-human-edited` — an LLM draft substantially revised by a human (the
+- `human`: written from scratch by a human.
+- `llm-draft`: machine-drafted; not yet human-reviewed.
+- `llm-then-human-edited`: an LLM draft substantially revised by a human (the
   common case). `generation_meta.human_reviewed_at` records when.
-- `imported` — from an external source (e.g., book, published paper). Include
+- `imported`: from an external source (e.g., book, published paper). Include
   source in `tags`.
 
 Misattributing LLM content as `human` is a correctness bug, not a style nit.
@@ -108,7 +108,7 @@ Misattributing LLM content as `human` is a correctness bug, not a style nit.
 that file to add yourself.
 
 For external PRs: commit signatures (GPG/SSH) or GitHub-verified-email match is
-required — CI rejects `authors:` claims that don't match the committer
+required, and CI rejects `authors:` claims that don't match the committer
 identity.
 
 ---
@@ -117,7 +117,7 @@ identity.
 
 - Keep questions focused on a **single concept**. "Good napkin math" is usually
   a signal; "grab-bag of facts" is usually a code smell.
-- Use realistic hardware specs — check `mlsysbook/constants.py` and the
+- Use realistic hardware specs. Check `mlsysbook/constants.py` and the
   `vault/schema/models.yaml` registry for the canonical values.
 - Paper-cite URL format only: `https://mlsysbook.ai/book/chapters/<slug>`.
 - Scenarios are plaintext; solutions and napkin math can use restricted
@@ -127,12 +127,12 @@ identity.
 
 ## Things that block external PRs from merging
 
-1. **Provenance lie** — `vault mark-exemplar` or `vault promote --reviewed-by`
+1. **Provenance lie**: `vault mark-exemplar` or `vault promote --reviewed-by`
    fields that don't match git committer.
-2. **Registry mutation** — any commit that deletes lines from
+2. **Registry mutation**: any commit that deletes lines from
    `id-registry.yaml`. The registry is append-only.
-3. **Schema mixing** — questions at different `schema_version` in the same PR.
-4. **Unsigned schema-evolution PR** — schema bumps require two maintainer
+3. **Schema mixing**: questions at different `schema_version` in the same PR.
+4. **Unsigned schema-evolution PR**: schema bumps require two maintainer
    approvals.
 
 ---
@@ -161,7 +161,7 @@ External contributions to `vault/questions/` become feasible at Phase 1 exit.
 
 ## License
 
-The corpus under `staffml/vault/` is licensed **CC-BY-NC-4.0** — see
+The corpus under `staffml/vault/` is licensed **CC-BY-NC-4.0**; see
 [`vault/questions/LICENSE`](vault/questions/LICENSE). Summary:
 
 - **Share and adapt for non-commercial purposes** with attribution.

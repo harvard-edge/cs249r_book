@@ -14,11 +14,10 @@ checks. See the `ValidateCommand` class docstring below for the contract:
 Pre-commit picks the new scope up automatically once `default=True` —
 no YAML edit needed. Ad-hoc audits use `--all-scopes` or `--scope <name>`.
 
-Some checks still delegate to scripts under binder/tools/scripts/ (tables,
-spelling, epub, sources, grid-tables, images) and to standalone audit
-scripts under binder/tools/audit/index/. Prefer new logic in cli/checks/
-with normal imports; see binder/cli/README.md "Check implementation layout".
-Legacy `_delegate_script` / importlib paths are being phased out.
+Check logic lives in cli/checks/ (and the _*_checks.py modules beside this
+file); a few scopes still import from the audit package under binder/tools/
+via _import_audit_module. Put new logic in cli/checks/ with normal imports;
+see binder/cli/README.md "Check implementation layout".
 """
 
 from __future__ import annotations
@@ -42,14 +41,14 @@ from rich.table import Table
 
 from . import reference_check
 
+from core.discovery import VOLUME_DIRS
+
 console = Console()
 
 
 SELF_XREF_SPAN_RE = re.compile(
     r"@[Ss]ec(-[a-zA-Z0-9_-]+)\s+(?:through|to)\s+@[Ss]ec(-[a-zA-Z0-9_-]+)"
 )
-
-from core.discovery import VOLUME_DIRS
 
 # Files that live at the Quarto project root but are not chapter content: the
 # per-volume landing pages, the swapped index, and the 404 page. Before the
@@ -65,6 +64,8 @@ def _is_chapter_qmd(path) -> bool:
     name = path.name
     if name.startswith("index-vol") or path.stem in _NON_CHAPTER_STEMS:
         return False
+    if path.parent.name in VOLUME_DIRS:
+        return False
     if any(part.startswith("_") for part in path.parts[:-1]):
         return False
     if any(part.startswith("vol") and part not in VOLUME_DIRS for part in path.parts[:-1]):
@@ -73,9 +74,20 @@ def _is_chapter_qmd(path) -> bool:
 
 
 
+# Strict notation (2026-10-08). Volumes whose conversion to registry macros is
+# finished. For them, notation rows must be used by a chapter (not only by the
+# notation chapter's own notes), and no chapter may use two different symbols
+# that render alike. Add a volume here when its conversion lands.
+STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
+# Volumes whose chapters are held to one letter, one meaning (check notation
+# --scope collisions). Separate from conversion: resolving a collision changes
+# what readers see, so each volume joins after an editorial pass.
+COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
+# Iron-law rows every volume's notation chapter must carry, used or not.
+CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
+
+
 @dataclass
-
-
 class ValidationIssue:
     """One finding reported by a check scope.
 
@@ -110,6 +122,61 @@ class ValidationIssue:
             payload["auto_fix_cmd"] = self.auto_fix_cmd
         return payload
 
+    @classmethod
+    def from_template(
+        cls,
+        code: str,
+        file: str,
+        line: int,
+        message: Optional[str] = None,
+        context: str = "",
+        suggestion: Optional[str] = None,
+        severity: str = "error",
+        rule_doc: Optional[str] = None,
+        auto_fix_cmd: Optional[str] = None,
+        **kwargs: Any,
+    ) -> "ValidationIssue":
+        """Construct a ValidationIssue using the central CheckCatalog template.
+
+        If message or suggestion are not supplied, they are populated from the central
+        `check_catalog.yaml` template. Any extra keyword arguments format message or
+        suggestion templates.
+        """
+        err_def = _check_catalog().get_error(code)
+
+        final_msg = message
+        if not final_msg:
+            final_msg = err_def.message_template if (err_def and err_def.message_template) else (err_def.trigger if err_def else code)
+        if kwargs and final_msg:
+            try:
+                final_msg = final_msg.format(**kwargs)
+            except (KeyError, IndexError, ValueError):
+                pass  # template needs fields the caller did not pass; keep it raw
+
+        final_sug = suggestion
+        if final_sug is None and err_def:
+            final_sug = err_def.suggestion_template or err_def.fix
+            if kwargs and final_sug:
+                try:
+                    final_sug = final_sug.format(**kwargs)
+                except (KeyError, IndexError, ValueError):
+                    pass  # template needs fields the caller did not pass; keep it raw
+
+        final_rule_doc = rule_doc if rule_doc is not None else (err_def.rule_doc if err_def else "")
+        final_auto_fix = auto_fix_cmd if auto_fix_cmd is not None else (err_def.auto_fix_cmd if err_def else "")
+
+        return cls(
+            file=file,
+            line=line,
+            code=code,
+            message=final_msg or code,
+            severity=severity,
+            context=context,
+            suggestion=final_sug or "",
+            rule_doc=final_rule_doc,
+            auto_fix_cmd=final_auto_fix,
+        )
+
 
 @dataclass
 class ValidationRunResult:
@@ -119,6 +186,9 @@ class ValidationRunResult:
     files_checked: int
     issues: List[ValidationIssue]
     elapsed_ms: int
+    # Where the run came from, for "rerun just this" hints. Not serialized.
+    group: str = field(default="", compare=False)
+    scope: str = field(default="", compare=False)
 
     @property
     def passed(self) -> bool:
@@ -161,6 +231,32 @@ def _is_escaped(text: str, idx: int) -> bool:
         backslashes += 1
         j -= 1
     return backslashes % 2 == 1
+
+
+def _check_catalog():
+    """Return the central check catalog (binder/cli/data/check_catalog.yaml)."""
+    try:
+        from cli.core.catalog import get_check_catalog
+    except ImportError:
+        try:
+            from core.catalog import get_check_catalog
+        except ImportError:
+            from binder.cli.core.catalog import get_check_catalog
+    return get_check_catalog()
+
+
+def _import_audit_module(module_path: str):
+    """Import a module from the ``audit`` package under ``binder/tools``.
+
+    That package imports itself as top-level ``audit``, so ``binder/tools``
+    must be on sys.path first.
+    """
+    import importlib
+
+    tools_root = str(Path(__file__).resolve().parents[2] / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    return importlib.import_module(module_path)
 
 
 def _inline_math_spans(text: str) -> List[str]:
@@ -427,6 +523,10 @@ class ValidateCommand:
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
             Scope("xref-case", "_run_xref_sentence_start_case",
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
+            Scope("callout-ref-noun", "_run_callout_ref_noun",
+                  note="\\ref{} to a custom callout prints a bare number; a noun (notebook, principle, lighthouse, ...) must precede it"),
+            Scope("margin-pointers", "_run_margin_pointers",
+                  note="margin pointers cite exactly one same-volume @sec- label; arrow matches direction (↩ earlier chapter, ↪ later chapter or appendix) and wording; one pointer per target per chapter"),
             Scope("callout-ref-form", "_run_callout_ref_form",
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
             Scope("redundant-xref-prefix", "_run_redundant_xref_prefix",
@@ -437,14 +537,11 @@ class ValidateCommand:
                   note="cross-volume targets defined in Vol 1 but missing from Vol 2 TOC break EPUB builds"),
         ],
         "labels": [
-            # duplicates and orphans are both curated, but each carries its
-            # own implicit filter when invoked from pre-commit:
-            #   - duplicates: figures + tables + listings only (sections /
-            #     equations have legitimate dup-key collisions in vol2 WIP)
-            #   - orphans:    vol1 only (vol2 has many forward labels for
-            #     not-yet-authored chapters)
-            # The YAML hook embeds the appropriate flags. fig-labels currently
-            # fails (corpus debt) so it stays default=False until cleaned up.
+            # duplicates and orphans are both curated. Without type flags,
+            # duplicates checks figures, tables, listings, and equations
+            # (sections have legitimate dup-key collisions in WIP chapters);
+            # orphans checks every label type in every volume. fig-labels
+            # currently fails (corpus debt) so it stays default=False.
             Scope("duplicates", "_run_duplicate_labels"),
             Scope("orphans", "_run_unreferenced_labels"),
             Scope("fig-labels", "_run_fig_label_underscores", default=False),
@@ -454,6 +551,10 @@ class ValidateCommand:
             Scope("ids", "_run_headers", default=False),
             Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
+            Scope("blank-before", "_run_heading_blank_before",
+                  note="a heading or fenced div needs a blank line before it, or Pandoc folds it into the paragraph and its {#sec-}/{#fig-} anchor is lost"),
+            Scope("unnumbered-target", "_run_unnumbered_sec_targets",
+                  note="@sec- refs to a section of an .unnumbered page render as ?@sec in the PDF; name the page in words instead"),
         ],
         "bib": [
             Scope("hygiene", "_run_bib_hygiene"),
@@ -478,6 +579,10 @@ class ValidateCommand:
             # URLs"). Network-bound -> opt-in, not a pre-commit gate.
             Scope("links", "_run_bib_links", default=False,
                   note="DOI/URL liveness: every locator resolves (network; opt-in)"),
+            # verify: cryptographic ledger & primary database verification.
+            # Network-bound and opt-in.
+            Scope("verify", "_run_bib_verify", default=False,
+                  note="cryptographic ledger & primary database verification (opt-in)"),
         ],
         "footnotes": [
             Scope(
@@ -518,6 +623,15 @@ class ValidateCommand:
             Scope("files", "_run_images"),
             Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
+            # Added 2026-10-13: matplotlib figures are scaled to the text block,
+            # so printed text = font size x (text width / cropped image width).
+            # vol2 canvases drifted from 0.62x to 1.04x with no check failing.
+            # Default=False because it executes every chapter's python cells.
+            # Enforced instead by two pre-commit hooks (2026-10-13, all four
+            # volumes at 0): book-check-figure-print-scale on changed chapters,
+            # and book-check-figure-print-scale-all when the style changes.
+            Scope("print-scale", "_run_figure_print_scale", default=False,
+                  note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -529,6 +643,8 @@ class ValidateCommand:
         "markup": [
             Scope("patterns", "_run_rendering",
                   note="low-level markup (backticks, dollar signs, asterisks)"),
+            Scope("prose-leaks", "_run_prose_tex_leaks",
+                  note="LaTeX ties (0.85~million) and a math closer glued to a digit (128$\\times$32) in Markdown prose"),
             Scope("list-spacing", "_run_markdown_list_spacing",
                   note="blank line required between bold lead-in paragraphs and lists"),
             Scope("div-fences", "_run_div_fences",
@@ -541,6 +657,15 @@ class ValidateCommand:
                   note="callout title attribute sentence-case compliance"),
             Scope("unclosed-html-comments", "_run_unclosed_html_comments",
                   note="unclosed <!-- HTML comment tags that silently swallow prose"),
+            # Added 2026-10-11 (vol1 streamline): `\mbox{`{python} x`}` in
+            # prose is raw LaTeX, so the HTML build drops the computed value
+            # entirely (ch2, ch4, ch16 each lost a number this way).
+            # Added 2026-10-11: \\ref{nbk-...} to a callout defined in another
+            # chapter renders as raw LaTeX in the per-chapter HTML build.
+            Scope("cross-chapter-callout-ref", "_run_cross_chapter_callout_ref",
+                  note="\\ref{} to a notebook/war-story/checkpoint defined in another file renders raw in HTML; point to its section instead"),
+            Scope("raw-tex-inline-value", "_run_raw_tex_inline_value",
+                  note="raw LaTeX box (\\mbox/\\hbox/\\makebox) around an inline {python} value hides it from HTML"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -565,6 +690,9 @@ class ValidateCommand:
             Scope("spelling-dict", "_run_mitpress_spelling_dict",
                   note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
+            # Added 2026-10-13 after "ledger" was removed from all four books.
+            Scope("coined-nouns", "_run_coined_nouns",
+                  note='no "ledger": name the record plainly (list, log, table, record)'),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
             Scope("above-below", "_run_mitpress_above_below",
@@ -595,11 +723,13 @@ class ValidateCommand:
             Scope("slash", "_run_mitpress_spaced_slash",
                   note="training/inference, no spaces", default=False),
             Scope("vs-period", "_run_mitpress_vs_period",
-                  note="vs. not vs", default=False),
+                  note="vs. not vs (§10.5)", default=True),
             Scope("eg-ie-comma", "_run_mitpress_eg_ie_comma",
-                  note="comma after e.g./i.e.", default=False),
+                  note="comma after e.g./i.e. (§10.10)", default=True),
             Scope("hyphen-range", "_run_mitpress_hyphen_range",
-                  note="en-dash for number ranges", default=False),
+                  note="en-dash for number ranges (§6.78)", default=True),
+            Scope("quotes", "_run_mitpress_quote_punctuation",
+                  note='periods and commas inside quotation marks per CMOS §6.9 (," and .")', default=True),
         ],
         "numbers": [
             Scope("unit-spacing", "_run_unit_spacing",
@@ -660,14 +790,31 @@ class ValidateCommand:
         "structure": [
             Scope("concept-maps", "_run_concept_maps",
                   note="validate concept-map YAML files and frontmatter wiring"),
+            # 2026-10-12: forward touches (a concept used before its owning
+            # chapter) are a sculpting worklist, so they stay out of the gate.
+            Scope("concept-order", "_run_concept_order", default=False,
+                  note="concepts used before their owning chapter (schema v2 maps)"),
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
                   note="## sections need prose before ### subsections"),
+            # 2026-10-13: two chapter renumberings (vol2 swap, vol3 split) left
+            # number-offset stale, so chapters printed the wrong number and no
+            # check noticed. The offset must equal the NN_ folder prefix minus one.
+            Scope("number-offset", "_run_number_offset",
+                  note="chapter number-offset matches its NN_ folder"),
+            # 2026-10-13: a top-level `number-sections: false` added to the
+            # volume entry files for the HTML landing page became book-wide
+            # metadata in the PDF, so every chapter went unnumbered and every
+            # figure printed as 0.x. Entry files may only switch it off for HTML.
+            Scope("pdf-entry-numbering", "_run_pdf_entry_numbering",
+                  note="volume PDF entry files must not turn number-sections off book-wide"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
                   note="Purpose sections unnumbered"),
+            Scope("purpose-stack", "_run_purpose_stack",
+                  note="every chapter opens with Purpose section, architecture stack SVG, and hook question"),
             # Added 2026-08-17. purpose.md anti-pattern 8a: an appendix opens
             # with one unheaded orientation paragraph, never a chapter-style
             # Purpose heading or italic hook question. A sweep that reshaped the
@@ -709,6 +856,10 @@ class ValidateCommand:
             Scope("lego-guard-strength", "_run_lego_guard_strength",
                   note="stage-3 check() guards must bound the prose claim, "
                        "not merely assert existence or positivity", default=False),
+            Scope("lego-cell-architecture", "_run_lego_cell_architecture",
+                  note="single-class and class-first placement invariants", default=False),
+            Scope("lego-stage4-purity", "_run_lego_stage4_purity",
+                  note="Stage 4 (OUTPUT) contains strictly display string assignments", default=False),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
@@ -794,6 +945,18 @@ class ValidateCommand:
         "notation": [
             Scope("consistency", "_run_notation_consistency",
                   note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
+            Scope("registry", "_run_notation_registry",
+                  note="the notation files themselves: no extension redefines a core symbol, no file defines a symbol two ways"),
+            Scope("coverage", "_run_notation_coverage",
+                  note="bidirectional volume coverage: every macro used in a volume is defined in its notation.qmd, and every notation.qmd row is used in that volume"),
+            Scope("forms", "_run_notation_forms",
+                  note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
+            Scope("strict", "_run_notation_strict",
+                  note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
+            Scope("collisions", "_run_notation_collisions",
+                  note="no top-level section of a chapter in COLLISION_CHECKED_VOLUMES uses two different symbols that render alike"),
+            Scope("conventions", "_run_notation_conventions",
+                  note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
         "spelling": [
             # Both scopes require aspell. Heavy and not part of pre-commit
@@ -814,8 +977,8 @@ class ValidateCommand:
             Scope("epubcheck", "_run_epubcheck", default=False),
         ],
         "pdf": [
-            # Scans _build/pdf-vol*/ artifact via pdftotext. Requires
-            # --vol1 or --vol2 (or run both explicitly).
+            # Scans the built _build/pdf-volN/ artifact. Volumes come from
+            # --volN (or the --path volume); with neither, vol1 and vol2.
             Scope("verify", "_run_pdf_verify"),
             # Narrow rendered-PDF counter regression gate. Useful after
             # chapter-only builds, where full cross-reference verification can
@@ -830,6 +993,12 @@ class ValidateCommand:
             # may indicate a Python warning leaked into the rendered output.
             # Default=False — post-build audit, not a pre-commit gate.
             Scope("pdf-warnings", "_run_pdf_warnings", default=False),
+            # Added 2026-10-01: figure text measured in the PRINTED PDF. The palette
+            # rules' "8 px" SVG floor prints at 3-5 pt once a 680-1060 px canvas is
+            # scaled to the text block; most vol2-4 SVGs and many matplotlib figures
+            # print below 6 pt. Default=False until the figures are resized.
+            Scope("figure-font-floor", "_run_pdf_figure_font_floor", default=False,
+                  note="text on figure pages printing below 6 pt (excludes math fonts)"),
         ],
         "registry": [
             Scope("sources", "_run_registry_sources",
@@ -934,7 +1103,7 @@ class ValidateCommand:
         # corpus has known noise that needs cleanup before flipping default).
         parser.add_argument("--check-patterns", action="store_true", default=False, help="refs --scope inline: include pattern hazard checks (opt-in; noisy on dev)")
         parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks (default)")
-        parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
+        parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: retired (its analysis was removed); reports an error if passed")
         parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
         parser.add_argument("--include-lightbox", action="store_true", default=False, help="math --scope attr-leaks: also surface fig-cap/tbl-cap math that leaks into HTML lightbox tooltips (warning, opt-in; ~70 pre-existing instances on dev)")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
@@ -987,12 +1156,18 @@ class ValidateCommand:
             "--log", dest="pdf_log", type=str, default=None,
             help="pdf --scope verify: optional Quarto render log to scan for crossref warnings",
         )
+        parser.add_argument(
+            "--offline", action="store_true", default=False,
+            help="bib --scope verify: skip live network calls (ledger-only check)",
+        )
 
         try:
-            ns = parser.parse_args(args)
+            ns = parser.parse_intermixed_args(args)
         except SystemExit:
             # argparse uses SystemExit(0) for --help and non-zero for parse errors.
             return ("-h" in args) or ("--help" in args)
+
+        self._offline = getattr(ns, "offline", False)
 
         if not ns.subcommand:
             self._print_check_help()
@@ -1017,7 +1192,13 @@ class ValidateCommand:
                 console.print(f"[yellow]Valid scopes: {', '.join(valid)}[/yellow]")
                 return False
             runs.extend(self._run_group(group_name, scope, root_path, ns))
+            if not runs and not ns.json:
+                opt_in = ", ".join(sc.name for sc in self.GROUPS[group_name])
+                console.print(
+                    f"[yellow]Nothing ran: group '{group_name}' has no default scopes. "
+                    f"Use --all-scopes or --scope <name> (scopes: {opt_in}).[/yellow]")
 
+        self._fill_catalog_suggestions(runs)
         any_failed = any(not run.passed for run in runs)
         summary = {
             "status": "failed" if any_failed else "passed",
@@ -1033,8 +1214,42 @@ class ValidateCommand:
             verbose = not getattr(ns, "quiet", False)
             plain = getattr(ns, "plain", False)
             self._print_human_summary(summary, verbose=verbose, plain=plain)
+            if any_failed and not plain:
+                self._print_rerun_hints(runs, ns)
 
         return not any_failed
+
+    @staticmethod
+    def _fill_catalog_suggestions(runs: List[ValidationRunResult]) -> None:
+        """Give issues that carry no suggestion the catalog's fix for their code."""
+        if not any(not i.suggestion for run in runs for i in run.issues):
+            return
+        fixes = {
+            err.code: err.fix
+            for group in _check_catalog().groups.values()
+            for err in group.error_codes
+            if err.fix
+        }
+        for run in runs:
+            for issue in run.issues:
+                if not issue.suggestion and issue.code in fixes:
+                    issue.suggestion = fixes[issue.code]
+
+    @staticmethod
+    def _print_rerun_hints(runs: List[ValidationRunResult], ns: argparse.Namespace) -> None:
+        """Print the command that reruns each failing scope on its own."""
+        target = ""
+        if ns.path:
+            target = f" --path {ns.path}"
+        else:
+            target = "".join(f" --{flag}" for flag in ("vol1", "vol2", "vol3", "vol4", "tinytorch")
+                             if getattr(ns, flag, False))
+        failing = [run for run in runs if not run.passed and run.group and run.scope]
+        if not failing:
+            return
+        console.print("[dim]Rerun one check (add --json for every issue with its suggested fix):[/dim]")
+        for run in failing:
+            console.print(f"  [cyan]./binder/binder check {run.group} --scope {run.scope}{target}[/cyan]")
 
     # ------------------------------------------------------------------
     # Group dispatch
@@ -1071,6 +1286,7 @@ class ValidateCommand:
                 # Run them via `--scope <name>` or `--all-scopes`.
                 continue
             method = getattr(self, method_name)
+            first_new = len(results)
             # Some runners need extra kwargs
             if method_name == "_run_refs":
                 checks_code = ns.citations_in_code or (not ns.citations_in_code and not ns.citations_in_raw)
@@ -1082,11 +1298,10 @@ class ValidateCommand:
             elif method_name == "_run_attr_latex_leaks":
                 results.append(method(root, include_lightbox=getattr(ns, 'include_lightbox', False)))
             elif method_name == "_run_duplicate_labels":
-                # Curated default for duplicates: figures + tables + listings only.
-                # Section / equation dup-keys are legitimately ambiguous in vol2
-                # WIP (forward-referenced labels not yet authored) and would
-                # block every commit. Explicit type flags from the user override
-                # this default and switch to the user-selected subset.
+                # Curated default for duplicates: figures, tables, listings, and
+                # equations. Section dup-keys are legitimately ambiguous in WIP
+                # chapters and would block every commit. Explicit type flags
+                # override this default.
                 explicit = (ns.figures or ns.tables or ns.sections or
                             ns.equations or ns.listings or ns.all_types)
                 if explicit:
@@ -1098,14 +1313,14 @@ class ValidateCommand:
                     }
                 results.append(method(root, label_types))
             elif method_name == "_run_unreferenced_labels":
-                # Curated default for orphans: all label types. The vol filter
-                # comes from --vol1 / --vol2 at the path level (vol2 has many
-                # forward references not yet authored — pre-commit pins to
-                # --vol1 to avoid blocking commits on legitimate forwards).
+                # Curated default for orphans: all label types, in whatever
+                # path --volN / --path selects.
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
             elif method_name == "_run_sources":
+                results.append(method(root, ns))
+            elif method_name == "_run_figure_print_scale":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -1120,14 +1335,15 @@ class ValidateCommand:
                 ))
             elif method_name == "_run_epub_hygiene":
                 results.append(method(root, fix=getattr(ns, 'fix', False)))
-            elif method_name == "_run_pdf_verify":
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False), log_path=getattr(ns, 'pdf_log', None)))
-            elif method_name == "_run_pdf_numbering":
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
-            elif method_name in ("_run_pdf_table_spacing", "_run_pdf_purpose_overflow"):
-                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
+            elif group == "pdf":
+                flags = {flag: getattr(ns, flag, False) for flag in self._PDF_VOLUME_FLAGS}
+                if method_name == "_run_pdf_verify":
+                    flags["log_path"] = getattr(ns, "pdf_log", None)
+                results.append(method(root, **flags))
             else:
                 results.append(method(root))
+            for result in results[first_new:]:
+                result.group, result.scope = group, scope_name
         return results
 
     def _print_check_help(self) -> None:
@@ -1182,6 +1398,8 @@ class ValidateCommand:
         console.print("  [cyan]./binder/binder check refs --all-scopes[/cyan]   [dim]# every scope including opt-in (* in table)[/dim]")
         console.print("  [cyan]./binder/binder check figures --vol1[/cyan]      [dim]# default figure scopes, Vol I only[/dim]")
         console.print("  [cyan]./binder/binder check all[/cyan]                 [dim]# every group, default scopes[/dim]")
+        console.print("  [cyan]./binder/binder check all --path <file> --json[/cyan] [dim]# machine-readable one-shot audit for LLMs[/dim]")
+        console.print("  [cyan]./binder/binder check all --path <file> --plain[/cyan] [dim]# single-line compiler diagnostics (file:line:code)[/dim]")
         console.print("  [cyan]./binder/binder check <group> help[/cyan]        [dim]# per-group error codes + guidance[/dim]")
         console.print("[dim]An asterisk (*) marks a scope that is default=False — runnable via --scope or --all-scopes.[/dim]")
         console.print()
@@ -1189,10 +1407,13 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _print_group_help(self, group: str) -> None:
-        """Dispatch to per-group help. Falls back to a generic listing."""
-        if group == "epub":
-            self._print_epub_help()
+        """Dispatch to per-group help using the central CheckCatalog."""
+        catalog = _check_catalog()
+        group_doc = catalog.get_group(group)
+        if group_doc:
+            self._print_catalog_group_help(group_doc)
             return
+
         # Generic fallback: list scopes, default flag, runner method, and the
         # short note (if any). The Default column is the contract pre-commit /
         # CI rely on.
@@ -1215,93 +1436,47 @@ class ValidateCommand:
                       f"or [cyan]--all-scopes[/cyan] to include opt-in scopes.[/dim]")
         console.print()
 
-    def _print_epub_help(self) -> None:
-        """Dedicated help for the `epub` group: the three scopes, the
-        error codes each can surface, and how to fix them at source.
+    def _print_catalog_group_help(self, group_doc: Any) -> None:
+        """Render a standardized, rich-formatted help panel from a CheckGroupDoc catalog entry."""
+        if group_doc.scopes:
+            scope_table = Table(show_header=True, header_style="bold cyan", box=None)
+            scope_table.add_column("Scope", style="yellow", width=20)
+            scope_table.add_column("When to run", style="white", width=28)
+            scope_table.add_column("Cost", style="dim", width=14)
+            scope_table.add_column("Key Invariant", style="dim", width=30)
+            for sc in group_doc.scopes:
+                scope_table.add_row(
+                    _rich_escape(sc.name),
+                    _rich_escape(sc.when),
+                    _rich_escape(sc.cost),
+                    _rich_escape(sc.invariant),
+                )
+            console.print(Panel(scope_table, title=f"./binder/binder check {group_doc.group} — scopes", border_style="cyan"))
 
-        This panel exists because the `epub` group is the most common
-        source of unexpected failures for new contributors — the error
-        codes (RSC-005, RSC-016, RSC-020, OPF-014, smoke-css-*) are
-        cryptic in isolation, but map cleanly to a few source-level
-        patterns. Printing the mapping here saves cross-referencing
-        the README when a CI failure is in hand.
-        """
-        # --- Scopes panel -----------------------------------------------
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=12)
-        scope_table.add_column("When to run", style="white", width=30)
-        scope_table.add_column("Cost", style="dim", width=18)
-        scope_table.add_column("Needs", style="dim", width=12)
-        scope_table.add_row("hygiene", "Every commit (pre-commit)", "<1s, scans source", "—")
-        scope_table.add_row("smoke", "After build, for reader compat", "~200ms, scans built EPUB", "—")
-        scope_table.add_row("epubcheck", "CI, before release", "~7s per volume", "Java + epubcheck")
-        console.print(Panel(scope_table, title="./binder/binder check epub — scopes", border_style="cyan"))
+        if group_doc.error_codes:
+            code_table = Table(show_header=True, header_style="bold cyan", box=None)
+            code_table.add_column("Code", style="red", width=30)
+            code_table.add_column("Trigger", style="white", width=30)
+            code_table.add_column("Fix at source", style="green", width=34)
+            for err in group_doc.error_codes:
+                code_table.add_row(
+                    _rich_escape(err.code),
+                    _rich_escape(err.trigger),
+                    _rich_escape(err.fix),
+                )
+            console.print(Panel(code_table, title="Error codes", border_style="red"))
 
-        # --- Error code table ------------------------------------------
-        # Scope is derivable from the code prefix: svg-/bib-* = hygiene,
-        # smoke-* = smoke, RSC-*/OPF-* = epubcheck. Dropping the column
-        # leaves room for readable Trigger / Fix copy.
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=32)
-        code_table.add_column("Trigger", style="white", width=30)
-        code_table.add_column("Fix at source", style="green", width=32)
+        if group_doc.common_invocations:
+            console.print("[bold]Common invocations:[/bold]")
+            for cmd_str, desc in group_doc.common_invocations:
+                if desc:
+                    console.print(f"  [cyan]{cmd_str:<50}[/cyan] [dim]{desc}[/dim]")
+                else:
+                    console.print(f"  [cyan]{cmd_str}[/cyan]")
 
-        rows = [
-            ("svg-c0",
-             "C0 control char in SVG aria-label",
-             "Strip in Python plot title; or --fix"),
-            ("svg-dupe-marker",
-             "Duplicate <marker id=…/> in one SVG",
-             "Delete duplicate; or --fix"),
-            ("bib-url-escape-underscore",
-             r"\_ in bib url= or http doi=",
-             r"\_ → _ in the .bib; or --fix"),
-            ("bib-url-escape-percent",
-             r"\% in bib URL field",
-             r"\% → % in the .bib; or --fix"),
-            ("bib-url-raw-angle",
-             "raw < or > in bib URL field",
-             "%3C / %3E encode; or --fix"),
-            ("smoke-css-custom-property-decl",
-             "--var-name: value; in packaged CSS",
-             "Inline the literal value"),
-            ("smoke-css-custom-property-use",
-             "var(--x) in packaged CSS",
-             "Inline the literal value"),
-            ("smoke-external-resource",
-             "src=/<link href= to http(s)://",
-             "Package the asset or drop"),
-            ("RSC-016 (FATAL)",
-             "XML malformed (--, <br>, C0)",
-             "epub_postprocess sanitizes; fix at source if it recurs"),
-            ("RSC-005",
-             "Malformed markup (alt on wrong elem)",
-             "Fix the emitter in the Quarto filter"),
-            ("RSC-020",
-             "Invalid URL syntax in href",
-             "Same as bib-url-* above"),
-            ("RSC-012",
-             "Broken fragment ID",
-             "resolve_cross_references.py handles this"),
-            ("OPF-014",
-             "Missing mathml / other OPF property",
-             "epub_postprocess aligns nav mathml property"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(code, trigger, fix)
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        # --- Command quick reference -----------------------------------
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check epub[/cyan]                        [dim]# hygiene + smoke + epubcheck[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope hygiene[/cyan]        [dim]# source-only, fast[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope hygiene --fix[/cyan]  [dim]# auto-repair source issues[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope epubcheck --max-fatal 0 --max-errors 0[/cyan]")
-        console.print("  [dim]                                                    # CI-style strict gating[/dim]")
-        console.print("  [cyan]./binder/binder check epub --json[/cyan]                 [dim]# structured output[/dim]")
-        console.print("  [cyan]./binder/binder build epub --vol1 --skip-hygiene[/cyan]  [dim]# emergency build bypass[/dim]")
-        console.print()
-        console.print("[dim]Deep dive: binder/cli/README.md → \"EPUB Checks — Two Layers, One CLI Surface\"[/dim]")
+        if group_doc.deep_dive:
+            console.print()
+            console.print(f"[dim]Deep dive: {group_doc.deep_dive}[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -1392,7 +1567,20 @@ class ValidateCommand:
             return [root] if root.suffix == ".bib" else []
         bibs = sorted(root.rglob("*.bib"))
         if bibs:
-            return bibs
+            unique_bibs = []
+            seen_targets = set()
+            for b in bibs:
+                if b.name.endswith("inbox.bib") or "inbox" in b.stem:
+                    continue
+                try:
+                    resolved = b.resolve()
+                except OSError:
+                    resolved = b
+                if resolved in seen_targets:
+                    continue
+                seen_targets.add(resolved)
+                unique_bibs.append(b)
+            return unique_bibs
         return self._book_bib_files_for_root(root)
 
     def _read_text(self, path: Path) -> str:
@@ -1407,7 +1595,80 @@ class ValidateCommand:
         try:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
-            return str(path)
+            try:
+                return str(path.relative_to(self.config_manager.root_dir))
+            except ValueError:
+                return str(path)
+
+    def _display_path(self, raw: str, root: Path) -> str:
+        """Map a path a check module reported relative to ``root`` onto the book-relative form.
+
+        Pseudo-files such as ``(corpus)`` pass through unchanged. Without this, a
+        ``--vol1`` or ``--path <file>`` run reports paths that drop the volume
+        prefix (or everything but the file name) and cannot be opened.
+        """
+        if not raw or raw.startswith("("):
+            return raw
+        path = Path(raw)
+        if not path.is_absolute():
+            path = (root.parent if root.is_file() else root) / path
+        return self._relative_file(path)
+
+    @staticmethod
+    def _issues_from_records(records: Any, *, file_map=None) -> List[ValidationIssue]:
+        """Convert check-module findings into ValidationIssues.
+
+        A record needs ``file``, ``line``, ``code`` and ``message``; ``severity``
+        (default ``error``), ``context`` and ``suggestion`` are copied when present.
+        ``file_map`` rewrites each record's file for display.
+        """
+        return [
+            ValidationIssue(
+                file=file_map(r.file) if file_map else r.file,
+                line=r.line,
+                code=r.code,
+                message=r.message,
+                severity=getattr(r, "severity", "error") or "error",
+                context=getattr(r, "context", "") or "",
+                suggestion=getattr(r, "suggestion", "") or "",
+            )
+            for r in records
+        ]
+
+    @staticmethod
+    def _result(name: str, description: str, files_checked: int,
+                issues: List[ValidationIssue], started: float) -> ValidationRunResult:
+        """Build a ValidationRunResult, timing it from ``started`` (a ``time.time()`` value)."""
+        return ValidationRunResult(
+            name=name,
+            description=description,
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - started) * 1000),
+        )
+
+    def _issues_from_violations(self, violations: Any) -> List[ValidationIssue]:
+        """Convert ``cli.checks`` violations (file/line/code/message[/context/suggestion]) to errors."""
+        return self._issues_from_records(
+            violations, file_map=lambda f: self._relative_file(Path(f).resolve()))
+
+    @staticmethod
+    def _checker_error(file: str, line: int, scope: str, exc: BaseException) -> ValidationIssue:
+        """Report a check that crashed on one input instead of silently skipping it."""
+        return ValidationIssue(
+            file=file,
+            line=line,
+            code="checker_error",
+            message=(
+                f"The {scope} check could not process this file "
+                f"({type(exc).__name__}: {exc}); nothing in it was checked."
+            ),
+            severity="error",
+            suggestion=(
+                f"Fix the file if it is malformed, otherwise fix the checker; "
+                f"reproduce with ./binder/binder check <group> --scope {scope} --path <file>."
+            ),
+        )
 
     def _run_cli_contract(self, root: Path) -> ValidationRunResult:
         """Run read-only command-surface contract checks for Binder itself."""
@@ -1415,26 +1676,9 @@ class ValidateCommand:
         from cli.checks import cli_contract
 
         repo_root = Path(__file__).resolve().parents[3]
-        violations = cli_contract.run_contract(repo_root)
-        issues = [
-            ValidationIssue(
-                file=violation.file,
-                line=violation.line,
-                code=violation.code,
-                message=violation.message,
-                severity="error",
-                context=violation.context,
-                suggestion=violation.suggestion,
-            )
-            for violation in violations
-        ]
-        return ValidationRunResult(
-            name="cli-contract",
-            description="Public Binder CLI command contract",
-            files_checked=len(cli_contract.CASES),
-            issues=issues,
-            elapsed_ms=int((time.time() - start) * 1000),
-        )
+        issues = self._issues_from_records(cli_contract.run_contract(repo_root))
+        return self._result("cli-contract", "Public Binder CLI command contract",
+                            len(cli_contract.CASES), issues, start)
 
     def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
         """Assert book-content pre-commit hooks dispatch through ./binder/binder."""
@@ -1442,26 +1686,9 @@ class ValidateCommand:
         from cli.checks import binder_canonical
 
         repo_root = Path(__file__).resolve().parents[3]
-        violations = binder_canonical.run_canonical(repo_root)
-        issues = [
-            ValidationIssue(
-                file=violation.file,
-                line=violation.line,
-                code=violation.code,
-                message=violation.message,
-                severity="error",
-                context=violation.context,
-                suggestion=violation.suggestion,
-            )
-            for violation in violations
-        ]
-        return ValidationRunResult(
-            name="binder-canonical",
-            description="Book-content hooks must route through Binder",
-            files_checked=1,
-            issues=issues,
-            elapsed_ms=int((time.time() - start) * 1000),
-        )
+        issues = self._issues_from_records(binder_canonical.run_canonical(repo_root))
+        return self._result("binder-canonical", "Book-content hooks must route through Binder",
+                            1, issues, start)
 
     def _run_python_syntax(self, root: Path) -> ValidationRunResult:
         """Compile every ```{python} code block to catch syntax errors."""
@@ -1475,7 +1702,7 @@ class ValidateCommand:
         for file in files:
             content = self._read_text(file)
             lines = content.split("\n")
-            rel = str(file.relative_to(root)) if file.is_relative_to(root) else str(file)
+            rel = self._relative_file(file)
 
             in_block = False
             block_lines: List[str] = []
@@ -1506,6 +1733,8 @@ class ValidateCommand:
                             message=f"Python syntax error: {exc.msg}",
                             severity="error",
                             context=(exc.text or "").strip()[:120],
+                            suggestion="Fix the cell so it compiles; ./binder/binder check code --scope exec "
+                                       "--path <file> also runs it.",
                         ))
                     continue
                 if in_block:
@@ -1798,14 +2027,12 @@ class ValidateCommand:
         )
 
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
-        """Resolve the bibliography a .qmd actually renders against.
+        """Resolve the bibliography a .qmd renders against, or None for non-book files.
 
-        Volumes I and II share contents/references.bib; Volumes III and IV each
-        have their own. Resolve by volume rather than assuming the shared file,
-        because "backmatter" appears in every volume's path: matching on that
-        segment alone checked vol4's appendices against vol1/vol2's bibliography
-        and reported seven of its real entries as missing, while vol3 and vol4
-        chapters matched no segment at all and were never citation-checked.
+        Every volume renders against the shared ``books/references.bib``
+        (unified 2026-09-30). A volume-specific ``references-volN.bib`` still
+        wins when one exists. The returned path may not exist; the caller
+        reports that rather than skipping the file.
         """
         try:
             rel = file.relative_to(self.config_manager.book_dir)
@@ -1813,14 +2040,15 @@ class ValidateCommand:
             return None
         parts = set(rel.parts)
         contents = self.config_manager.book_dir
-        for vol in ("vol3", "vol4"):
+        for vol in ("vol1", "vol2", "vol3", "vol4"):
             if vol in parts:
-                bib_file = contents / f"references-{vol}.bib"
-                return bib_file if bib_file.exists() else None
-        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & parts):
+                dedicated = contents / f"references-{vol}.bib"
+                if dedicated.exists():
+                    return dedicated
+                break
+        if not ({"vol1", "vol2", "vol3", "vol4", "frontmatter", "backmatter"} & parts):
             return None
-        bib_file = contents / "references.bib"
-        return bib_file if bib_file.exists() else None
+        return contents / "references.bib"
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
         """refs --scope citations: flag citation keys missing from the file's bibliography.
@@ -1834,15 +2062,31 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         bib_key_pattern = re.compile(r"@\w+\{([^,\s]+)")
+        bib_keys_by_file: Dict[Path, Optional[Set[str]]] = {}
 
         for file in files:
             bib_file = self._bibliography_for_qmd(file)
             if bib_file is None:
                 continue
+            if bib_file not in bib_keys_by_file:
+                if bib_file.is_file():
+                    bib_keys_by_file[bib_file] = set(bib_key_pattern.findall(self._read_text(bib_file)))
+                else:
+                    bib_keys_by_file[bib_file] = None
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(bib_file),
+                        line=0,
+                        code="bibliography_missing",
+                        message=f"Bibliography {bib_file.name} does not exist (or is a broken link); "
+                                f"citations in files that render against it were not checked.",
+                        severity="error",
+                        suggestion="Restore the file or its symlink target (books/references.bib -> ../bibs/references.bib).",
+                    ))
+            bib_keys = bib_keys_by_file[bib_file]
+            if bib_keys is None:
+                continue
 
             content = self._read_text(file)
-            bib_content = self._read_text(bib_file)
-            bib_keys = set(bib_key_pattern.findall(bib_content))
             # Strip YAML frontmatter (--- ... --- at file top) to avoid email false positives
             qmd_content_no_code = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
             # Strip HTML style/script blocks to avoid CSS @media false positives
@@ -1859,14 +2103,19 @@ class ValidateCommand:
             refs = {r for r in refs if not re.match(r"^\d+\.\d+", r)}
             missing = sorted(refs - bib_keys)
             for key in missing:
-                line_no = self._line_for_token(content, f"@{key}")
+                # Exact-key match, so @smith2020 does not land on @smith2020a.
+                hit = re.search(r"@" + re.escape(key) + r"(?![\w:+-])", content)
+                line_no = content.count("\n", 0, hit.start()) + 1 if hit else 1
                 issues.append(ValidationIssue(
                     file=self._relative_file(file),
                     line=line_no,
                     code="missing_citation",
-                    message=f"Citation key @{key} missing in bibliography",
+                    message=f"Citation key @{key} is not in {bib_file.name}",
                     severity="error",
                     context=f"@{key}",
+                    suggestion=f"Fix the key's spelling, or add the entry to "
+                               f"{self._relative_file(bib_file.resolve())} with "
+                               f"./binder/binder bib add --doi <doi> (or --arxiv/--url/--isbn).",
                 ))
 
         return ValidationRunResult(
@@ -2902,8 +3151,8 @@ class ValidateCommand:
 
         A reference resolves when its name, or the name before a dot, is assigned or defined as a
         class in a Python cell of the same file. ``check_patterns`` adds grid-table, inline
-        f-string, inline call, and YAML caption hazards. ``check_scope`` adds class-scope warnings
-        from the maintenance validator, ignoring files whose analysis raises.
+        f-string, inline call, and YAML caption hazards. ``check_scope`` is retired and only
+        reports that it is.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -3002,21 +3251,20 @@ class ValidateCommand:
                             severity="error",
                             context=stripped[:160],
                         ))
-            if check_scope:
-                from binder.tools.scripts.maintenance.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
-                try:
-                    scope_warnings = _check_scope(file, verbose=False)
-                    for filepath, lineno, check_type, msg in scope_warnings:
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file),
-                            line=lineno,
-                            code=check_type.lower(),
-                            message=msg,
-                            severity="warning",
-                            context="",
-                        ))
-                except Exception:
-                    pass
+        if check_scope:
+            # The class-body scope analysis lived in
+            # binder/tools/scripts/maintenance/validate_inline_refs.py, retired
+            # in b643113bce. Say so instead of crashing on the import.
+            issues.append(ValidationIssue(
+                file="(binder)",
+                line=0,
+                code="check_scope_retired",
+                message="--check-scope is retired: its class-body scope analysis was removed "
+                        "with validate_inline_refs.py, so nothing was scope-checked.",
+                severity="error",
+                suggestion="Drop --check-scope; undefined inline refs are still caught "
+                           "by ./binder/binder check refs --scope inline.",
+            ))
 
         return ValidationRunResult(
             name="inline-refs",
@@ -3145,7 +3393,9 @@ class ValidateCommand:
         # regardless of how they are spaced.
         # See book-prose.md §5 ("Footnote Marker Placement").
         cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])\s*(\[\^fn-[\w-]+\])")
-        fn_before_punct_pat = re.compile(r"(\[\^fn-[\w-]+\])([\.,;:!?])")
+        fn_before_punct_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*([\.,;:!?])")
+        fn_before_quote_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*([\"”])")
+        punct_space_fn_pat = re.compile(r"([\.,;:!?])\s+(\[\^fn-[\w-]+\])")
         stacked_fn_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*(\[\^fn-[\w-]+\])")
         def_colon_prefix_pat = re.compile(r"^:\s*\[\^fn-[\w-]+\]")
 
@@ -3264,7 +3514,7 @@ class ValidateCommand:
                             file=self._relative_file(file),
                             line=idx,
                             code="inline_footnote",
-                            message=f"Inline footnote syntax; use [^fn-name] reference format",
+                            message="Inline footnote syntax; use [^fn-name] reference format",
                             severity="error",
                             context=m.group(0)[:80],
                         )
@@ -3320,6 +3570,33 @@ class ValidateCommand:
                                 context=_rich_escape(stripped[:80]),
                             )
                         )
+
+                    for m in fn_before_quote_pat.finditer(line):
+                        fn_marker, quote = m.group(1), m.group(2)
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_inside_quote",
+                                message=f"Footnote {_rich_escape(fn_marker)} placed before closing quotation mark '{quote}'; move marker after quote per CMOS §14.19/§14.26",
+                                severity="error",
+                                context=_rich_escape(stripped[:80]),
+                            )
+                        )
+
+                    if not stripped.startswith("#"):
+                        for m in punct_space_fn_pat.finditer(line):
+                            punct, fn_marker = m.group(1), m.group(2)
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="footnote_spaced_from_punctuation",
+                                    message=f"Footnote {_rich_escape(fn_marker)} separated from preceding punctuation '{punct}' by whitespace; remove space per CMOS §14.19/§14.26",
+                                    severity="error",
+                                    context=_rich_escape(stripped[:80]),
+                                )
+                            )
 
                     for m in stacked_fn_pat.finditer(line):
                         fn1, fn2 = m.group(1), m.group(2)
@@ -3799,8 +4076,8 @@ class ValidateCommand:
     _CAPTIONS_DIV_CLOSE_RE = re.compile(r"^:::\s*$")
     _PIPE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$")
     _PIPE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
-    _TBL_CAP_ANY_RE = re.compile(r"^\s*:\s+\S")
-    _TBL_CAP_LABELED_RE = re.compile(r"^\s*:\s+.+\{#tbl-[\w-]+")
+    _TBL_CAP_ANY_RE = re.compile(r"^\s*:\s+\S", re.M)
+    _TBL_CAP_LABELED_RE = re.compile(r"^\s*:\s+.+\{#tbl-[\w-]+", re.M)
     _MD_IMAGE_ANY_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]+\)")
     _MD_IMAGE_WITH_LABEL_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]+\)\s*\{[^}]*#fig-")
     _LST_DIV_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*#(lst-[\w-]+)")
@@ -3951,7 +4228,7 @@ class ValidateCommand:
                                 break
                         k -= 1
                     cap_text = "\n".join(after + before)
-                    if not re.search(r"^\s*:\s+\S", cap_text, re.M):
+                    if not self._TBL_CAP_ANY_RE.search(cap_text):
                         raw_issues.append(ValidationIssue(
                             file=self._relative_file(file),
                             line=table_start,
@@ -3965,8 +4242,7 @@ class ValidateCommand:
                             severity="error",
                             context=line.strip()[:120],
                         ))
-                    elif not re.search(
-                            r"^\s*:\s+.+\{#tbl-[\w-]+", cap_text, re.M):
+                    elif not self._TBL_CAP_LABELED_RE.search(cap_text):
                         raw_issues.append(ValidationIssue(
                             file=self._relative_file(file),
                             line=table_start,
@@ -4132,22 +4408,18 @@ class ValidateCommand:
         start = time.time()
         files = self._qmd_files(root)
         raw_issues: List[ValidationIssue] = []
-        in_code = False
-        in_raw = False
         for file in files:
             lines = self._read_text(file).splitlines()
+            # One toggle for every fence: a raw TikZ/LaTeX block closes with a
+            # plain ``` like any other, so tracking it separately left the
+            # rest of the file unscanned after the first such block.
             in_code = False
-            in_raw = False
             n = len(lines)
             for i, line in enumerate(lines):
-                # Toggle code-fence state.
                 if re.match(r"^\s*(```+|~~~+)", line):
-                    if re.match(r"^\s*```\s*\{\.?tikz|^\s*```\s*\{=latex\}", line):
-                        in_raw = not in_raw
-                    else:
-                        in_code = not in_code
+                    in_code = not in_code
                     continue
-                if in_code or in_raw:
+                if in_code:
                     continue
                 if not self._CAPTION_ORPHAN_RE.match(line):
                     continue
@@ -4243,8 +4515,10 @@ class ValidateCommand:
                         i = k + 1
                         continue
                     cap_k = k
+                    found = False
                     while cap_k < n and cap_k < j + 8:
                         if self._TABLE_CAPTION_RE.match(lines[cap_k]):
+                            found = True
                             raw_issues.append(ValidationIssue(
                                 file=self._relative_file(file),
                                 line=cap_k + 1,
@@ -4261,7 +4535,9 @@ class ValidateCommand:
                             ))
                             break
                         cap_k += 1
-                    i = max(j, cap_k + 1)
+                    # Resume after the caption, or right after the table so
+                    # fences in the lookahead window are still tracked.
+                    i = cap_k + 1 if found else j
                 else:
                     i += 1
         return ValidationRunResult(
@@ -4331,6 +4607,10 @@ class ValidateCommand:
                     i for i, ln in enumerate(body)
                     if self._MARGIN_IMAGE.search(ln) or "\\includegraphics" in ln
                 ]
+                # Architecture stack figures in Purpose sections do not carry a caption by default.
+                if any("margin_stack.svg" in ln for ln in body):
+                    idx = cursor + 1
+                    continue
                 if image_at:
                     caption_at = [
                         i for i, ln in enumerate(body)
@@ -4640,7 +4920,8 @@ class ValidateCommand:
                 # Track float block end
                 if in_float:
                     ls = line.strip()
-                    if ls.startswith(":::") and not ls.startswith("::: {"):
+                    # A bare closer of any width; `:::: {#fig-x}` is an opener.
+                    if re.match(r"^:{3,}\s*$", ls):
                         in_float = False
                         float_label = None
 
@@ -5016,11 +5297,7 @@ class ValidateCommand:
             from binder.cli.checks.inline_ref_order import check_inline_order
 
         for f in files:
-            try:
-                text = f.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            order_issues = check_inline_order(f, text)
+            order_issues = check_inline_order(f, self._read_text(f))
             for oi in order_issues:
                 issues.append(
                     ValidationIssue(
@@ -5086,7 +5363,8 @@ class ValidateCommand:
                             code="python_missing_echo_false",
                             message="Python block must include #| echo: false — code must not appear in rendered output",
                             severity="error",
-                            context="Add #| echo: false as first line after ```{python}",
+                            context=lines[i].strip()[:120],
+                            suggestion="Add `#| echo: false` as the first line after ```{python}",
                         )
                     )
                 # Advance past this block to the line after closing ```
@@ -5265,13 +5543,17 @@ class ValidateCommand:
         for yml_path in possible_paths:
             if yml_path.exists():
                 try:
-                    data = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+                    data = yaml.safe_load(yml_path.read_text(encoding="utf-8")) or {}
                     for part in data.get("parts", []):
                         if "key" in part:
                             summaries_keys.add(part["key"].lower().replace("_", "").replace("-", ""))
-                except Exception:
-                    pass
+                except (OSError, yaml.YAMLError, AttributeError, TypeError) as exc:
+                    issues.append(self._checker_error(self._relative_file(yml_path), 0, "parts", exc))
 
+        if issues:
+            # A summaries.yml failed to parse; part keys cannot be judged.
+            return self._result("parts", "Validate \\part{key:...} against summaries.yml",
+                                0, issues, start)
         if not summaries_keys:
             # No summaries found — skip gracefully
             return ValidationRunResult(
@@ -5297,12 +5579,14 @@ class ValidateCommand:
                             message=f"Part key '{key}' not found in summaries.yml",
                             severity="error",
                             context=m.group(0),
+                            suggestion="Use a key defined in the volume's parts/summaries.yml, "
+                                       "or add the part there.",
                         )
                     )
 
         return ValidationRunResult(
             name="parts",
-            description="Validate \\part{{key:...}} against summaries.yml",
+            description="Validate \\part{key:...} against summaries.yml",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -5312,7 +5596,15 @@ class ValidateCommand:
     # Concept Maps Validation
     # ------------------------------------------------------------------
 
-    def _run_concept_maps(self, root: Path) -> ValidationRunResult:
+    def _run_concept_order(self, root: Path) -> ValidationRunResult:
+        """Report schema-v2 concepts touched before their owning chapter teaches them."""
+        result = self._run_concept_maps(root, include_order=True)
+        result.issues = [i for i in result.issues if "used before it is taught" in i.message]
+        result.name = "concept-order"
+        result.description = "Concepts used before their owning chapter"
+        return result
+
+    def _run_concept_maps(self, root: Path, include_order: bool = False) -> ValidationRunResult:
         """Validate concept-map YAML files and QMD frontmatter wiring."""
         start = time.time()
         issues: List[ValidationIssue] = []
@@ -5323,7 +5615,7 @@ class ValidateCommand:
 
         repo_root = self.config_manager.root_dir
         contents_dir = root if "contents" in str(root) else repo_root  / "books"
-        findings = check_concept_maps(contents_dir, repo_root)
+        findings = check_concept_maps(contents_dir, repo_root, include_order=include_order)
         for finding in findings:
             issues.append(
                 ValidationIssue(
@@ -5423,13 +5715,15 @@ class ValidateCommand:
                     if "{" in heading_text:
                         heading_text = heading_text[: heading_text.index("{")].strip()
                     issues.append(
-                        ValidationIssue(
+                        ValidationIssue.from_template(
+                            code="heading_level_skip",
                             file=self._relative_file(file),
                             line=idx,
-                            code="heading_level_skip",
-                            message=f"Heading jumps from H{prev_level} to H{level} (skips {skipped})",
                             severity="warning",
                             context=heading_text[:80],
+                            prev_level=prev_level,
+                            level=level,
+                            skipped=skipped,
                         )
                     )
 
@@ -5446,6 +5740,107 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # H2 landing prose  (detect ## followed immediately by ###)
     # ------------------------------------------------------------------
+
+    def _run_pdf_entry_numbering(self, root: Path) -> ValidationRunResult:
+        """Flag a top-level ``number-sections: false`` in a volume's PDF entry file.
+
+        The entry file (``index-volN.qmd``, ``volN/index.qmd``, or
+        ``volN/frontmatter/about.qmd``) supplies the whole book's metadata in a
+        PDF build, so a top-level ``number-sections: false`` there unnumbers
+        every chapter. Scope it under ``format: html:`` instead.
+        """
+        start = time.time()
+        # _qmd_files drops index-volN.qmd and volN/index.qmd as scaffolding,
+        # which are exactly the entry files this check exists for.
+        if root.is_dir():
+            files = sorted(
+                p for p in root.rglob("*.qmd")
+                if not any(part.startswith("_") for part in p.relative_to(root).parts)
+            )
+        else:
+            files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for file in files:
+            parts = file.parts
+            is_entry = (
+                re.fullmatch(r"index-vol\d\.qmd", file.name) is not None
+                or (file.name == "index.qmd" and len(parts) >= 2 and re.fullmatch(r"vol\d", parts[-2]))
+                or (file.name == "about.qmd" and len(parts) >= 3 and parts[-2] == "frontmatter"
+                    and re.fullmatch(r"vol\d", parts[-3]))
+            )
+            if not is_entry:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                if re.match(r"^number-sections:\s*false\s*$", line):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="pdf_entry_number_sections_off",
+                        message=("top-level number-sections: false in a volume entry file "
+                                 "turns off chapter numbering for the whole PDF (figures print as 0.x)"),
+                        context=line.strip(),
+                        suggestion="move it under format: html:",
+                    ))
+        return ValidationRunResult(
+            name="pdf-entry-numbering",
+            description="Volume PDF entry files keep book-wide numbering on",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_number_offset(self, root: Path) -> ValidationRunResult:
+        """Require each chapter's ``number-offset`` to equal its folder number minus one.
+
+        A chapter lives in ``books/volN/NN_name/NN_name.qmd``; its front matter
+        ``number-offset: [k]`` sets the printed chapter number to k + 1, so k
+        must be NN - 1. Files outside numbered chapter folders are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        offset_pat = re.compile(r"^number-offset:\s*\[\s*(\d+)\s*\]\s*$")
+        checked = 0
+        for file in files:
+            folder = file.parent.name
+            m_folder = re.match(r"^(\d\d)_", folder)
+            if not m_folder or file.stem != folder:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                m = offset_pat.match(line.strip())
+                if m:
+                    expected = int(m_folder.group(1)) - 1
+                    if int(m.group(1)) != expected:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="number_offset_mismatch",
+                            message=(f"number-offset [{m.group(1)}] prints chapter {int(m.group(1)) + 1}, "
+                                     f"but the folder is chapter {int(m_folder.group(1))}"),
+                            context=line.strip(),
+                            suggestion=f"number-offset: [{expected}]",
+                        ))
+                    break
+        return ValidationRunResult(
+            name="number-offset",
+            description="Chapter number-offset matches its NN_ folder",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_h2_landings(self, root: Path) -> ValidationRunResult:
         """Require H2 sections to orient readers before H3 subsections.
@@ -5535,18 +5930,15 @@ class ValidateCommand:
                 if "{" in subsection_text:
                     subsection_text = subsection_text[: subsection_text.index("{")].strip()
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="h2_missing_landing",
                         file=self._relative_file(file),
                         line=idx,
-                        code="h2_missing_landing",
-                        message=(
-                            "H2 section drops directly into an H3 subsection "
-                            "without intervening prose"
-                        ),
-                        severity="error",
                         context=(
                             f"{heading_text[:60]} → {subsection_text[:60]}"
                         ),
+                        heading_text=heading_text,
+                        subsection_text=subsection_text,
                     )
                 )
 
@@ -6093,6 +6485,21 @@ class ValidateCommand:
                        f"'{h.detail} et al. (year)' and keeps the claim "
                        f"traceable to the bibliography."))
 
+    def _run_coined_nouns(self, root: Path) -> ValidationRunResult:
+        """Flag the coined noun "ledger" anywhere it renders.
+
+        Added 2026-10-13. A concept-map pass spread "ledger" across all four
+        books; the author ruled it jargon and every use was replaced with the
+        plain word for the record. The right word depends on context, so this
+        flags and never fixes.
+        """
+        from cli.checks.prose_integrity import find_coined_nouns
+        return self._run_prose_integrity(
+            root, find_coined_nouns, "coined-nouns", "coined_noun",
+            lambda h: (f"'{h.match}' is a banned coined noun. Name the record "
+                       f"plainly for what it holds: list, log, table, record, "
+                       f"or account."))
+
     def _run_underscore_italics(self, root: Path) -> ValidationRunResult:
         """Flag `_italic_` outside the Purpose hook question.
 
@@ -6338,6 +6745,7 @@ class ValidateCommand:
                             message="Use GB/TB not GiB/TiB in prose (book-prose.md)",
                             severity="warning",
                             context=context,
+                            suggestion=f"{m.group(1)} → {m.group(1).replace('i', '')}",
                         )
                     )
 
@@ -6399,16 +6807,8 @@ class ValidateCommand:
 
         issues: List[ValidationIssue] = []
         if not html_root.exists():
-            return ValidationRunResult(
-                name="rendered-currency",
-                description=(
-                    "Skip rendered currency audit; no cached HTML audit "
-                    f"directory at {html_root.relative_to(repo_root)}"
-                ),
-                files_checked=0,
-                issues=issues,
-                elapsed_ms=int((time.time() - start) * 1000),
-            )
+            return self._result("rendered-currency", "Rendered currency audit", 0,
+                                [self._missing_html_audit(html_root, repo_root)], start)
 
         html_files = iter_html_files([html_root])
         for violation in audit_rendered_html([html_root]):
@@ -6793,7 +7193,6 @@ class ValidateCommand:
     )
     # YAML caption-like keys at top of a chunk options block or block YAML.
     # Match e.g. `fig-cap: "..."`, `fig-cap: '...'`, `fig-cap: bare text`.
-    _YAML_CAP_KEYS = ("fig-cap", "tbl-cap", "lst-cap", "fig-alt", "tbl-alt")
     _YAML_CAP_RE = re.compile(
         r"""^(?P<indent>\s*)(?:\#\|\s*)?(?P<key>fig-cap|tbl-cap|lst-cap|fig-alt|tbl-alt)\s*:\s*(?P<value>.*?)\s*$"""
     )
@@ -7137,24 +7536,10 @@ class ValidateCommand:
         from cli.checks.math_canonical import audit
 
         start = time.time()
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f)) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
+        qmd_files = self._qmd_files(root)
         violations = audit([root] if root.is_dir() else qmd_files or [root])
 
-        issues: List[ValidationIssue] = []
-        for v in violations:
-            file_path = Path(v.file)
-            try:
-                rel = str(file_path.resolve().relative_to(root.resolve()))
-            except ValueError:
-                rel = v.file
-            issues.append(ValidationIssue(
-                file=rel,
-                line=v.line,
-                code=v.code,
-                message=v.message,
-                severity="error",
-                context=v.context,
-            ))
+        issues = self._issues_from_violations(violations)
 
         return ValidationRunResult(
             name="math-canonical",
@@ -7174,16 +7559,8 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             for violation in check_file(qmd):
-                file_path = Path(violation.file)
-                try:
-                    rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
-                except ValueError:
-                    try:
-                        rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
-                    except ValueError:
-                        rel = violation.file
                 issues.append(ValidationIssue(
-                    file=rel,
+                    file=self._relative_file(Path(violation.file).resolve()),
                     line=violation.line,
                     code=violation.code,
                     message=violation.msg,
@@ -7207,25 +7584,7 @@ class ValidateCommand:
         qmd_files = self._qmd_files(root)
         violations = audit([root])
 
-        issues: List[ValidationIssue] = []
-        for violation in violations:
-            file_path = Path(violation.file)
-            try:
-                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
-            except ValueError:
-                try:
-                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
-                except ValueError:
-                    rel = violation.file
-            issues.append(ValidationIssue(
-                file=rel,
-                line=violation.line,
-                code=violation.code,
-                message=violation.message,
-                severity="error",
-                context=violation.context,
-                suggestion=violation.suggestion,
-            ))
+        issues = self._issues_from_violations(violations)
 
         return ValidationRunResult(
             name="math-multiplier-style",
@@ -7243,25 +7602,7 @@ class ValidateCommand:
         qmd_files = self._qmd_files(root)
         violations = audit([root])
 
-        issues: List[ValidationIssue] = []
-        for violation in violations:
-            file_path = Path(violation.file)
-            try:
-                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
-            except ValueError:
-                try:
-                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
-                except ValueError:
-                    rel = violation.file
-            issues.append(ValidationIssue(
-                file=rel,
-                line=violation.line,
-                code=violation.code,
-                message=violation.message,
-                severity="error",
-                context=violation.context,
-                suggestion=violation.suggestion,
-            ))
+        issues = self._issues_from_violations(violations)
 
         return ValidationRunResult(
             name="fmt-semantic-suffix",
@@ -7288,12 +7629,10 @@ class ValidateCommand:
             for idx, line in enumerate(lines, 1):
                 if self._PURPOSE_HEADING.match(line) and ".unnumbered" not in line:
                     issues.append(
-                        ValidationIssue(
+                        ValidationIssue.from_template(
+                            code="purpose_not_unnumbered",
                             file=self._relative_file(file),
                             line=idx,
-                            code="purpose_not_unnumbered",
-                            message="Purpose section must include {.unnumbered}",
-                            severity="error",
                             context=line.strip()[:80],
                         )
                     )
@@ -7301,6 +7640,101 @@ class ValidateCommand:
         return ValidationRunResult(
             name="purpose-unnumbered",
             description="Ensure Purpose sections are unnumbered",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _PURPOSE_STACK_HOOK = re.compile(r"^\s*_[A-Z][^_]+\?_\s*$")
+
+    def _run_purpose_stack(self, root: Path) -> ValidationRunResult:
+        """Ensure every chapter has Purpose section, architecture stack SVG, caption, and hook question."""
+        start = time.time()
+        files = [f for f in self._qmd_files(root) if re.match(r"^\d{2}_", f.name)]
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            purpose_idx: Optional[int] = None
+            purpose_text = ""
+
+            for idx, line in enumerate(lines, 1):
+                if self._PURPOSE_HEADING.match(line):
+                    purpose_idx = idx
+                    purpose_text = line.strip()
+                    break
+
+            if purpose_idx is None:
+                issues.append(
+                    ValidationIssue.from_template(
+                        code="purpose_heading_missing",
+                        file=self._relative_file(file),
+                        line=1,
+                        context=lines[0][:80] if lines else "",
+                    )
+                )
+                continue
+
+            if ".unnumbered" not in purpose_text or ".unlisted" not in purpose_text:
+                issues.append(
+                    ValidationIssue.from_template(
+                        code="purpose_heading_classes",
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        context=purpose_text[:80],
+                    )
+                )
+
+            # Scan the Purpose section: from purpose_idx until the next ## heading (or end of section/file)
+            has_stack = False
+            stack_idx: Optional[int] = None
+            has_hook = False
+
+            for j in range(purpose_idx, min(len(lines), purpose_idx + 60)):
+                line_str = lines[j].strip()
+                if line_str.startswith("## ") and not line_str.startswith("## Purpose"):
+                    break
+                if "margin_stack.svg" in line_str:
+                    has_stack = True
+                    stack_idx = j + 1
+
+                if self._PURPOSE_STACK_HOOK.match(line_str):
+                    has_hook = True
+
+            if not has_stack:
+                issues.append(
+                    ValidationIssue.from_template(
+                        code="purpose_stack_missing",
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        context=purpose_text[:80],
+                    )
+                )
+            else:
+                svg_path = file.parent / "images" / "svg" / "margin_stack.svg"
+                if not svg_path.is_file():
+                    issues.append(
+                        ValidationIssue.from_template(
+                            code="purpose_stack_file_missing",
+                            file=self._relative_file(file),
+                            line=stack_idx or purpose_idx,
+                            context=lines[(stack_idx or purpose_idx) - 1].strip()[:80],
+                        )
+                    )
+
+            if not has_hook:
+                issues.append(
+                    ValidationIssue.from_template(
+                        code="purpose_hook_missing",
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        context=purpose_text[:80],
+                    )
+                )
+
+        return ValidationRunResult(
+            name="purpose-stack",
+            description="Ensure every chapter has Purpose section with architecture stack SVG and hook question",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -7381,6 +7815,7 @@ class ValidateCommand:
         "callout-case-study",
         "callout-war-story",
         "callout-warning",
+        "callout-caution",
     }
     _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
 
@@ -7805,6 +8240,70 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_mitpress_quote_punctuation(self, root: Path) -> ValidationRunResult:
+        """Flag periods and commas placed outside quotation marks per CMOS §6.9 / MIT Press §10."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # Match closing double quote or right double quotation mark followed immediately by period or comma
+        quote_punct_pat = re.compile(r"(\w+)([\"”])([,\.])")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_comment = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("<!--"):
+                    if "-->" not in stripped:
+                        in_comment = True
+                    continue
+                if in_comment:
+                    if "-->" in stripped:
+                        in_comment = False
+                    continue
+                if stripped.startswith("#"):
+                    continue
+
+                # Mask inline code, math, and Quarto attribute blocks
+                masked = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
+                masked = re.sub(r"\$\$?[^$]+\$\$?", lambda m: " " * len(m.group(0)), masked)
+                masked = re.sub(r"\{[^{}]*\}", lambda m: " " * len(m.group(0)), masked)
+                masked = re.sub(r"\]\([^)]+\)", lambda m: " " * len(m.group(0)), masked)
+
+                for m in quote_punct_pat.finditer(masked):
+                    word = m.group(1)
+                    quote = m.group(2)
+                    punct = m.group(3)
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="quote_punctuation_placement",
+                            message=(
+                                f"Period or comma placed outside quotation marks ('{quote}{punct}'); "
+                                f"move punctuation inside quotes (e.g. '{punct}{quote}') per CMOS §6.9 / MIT Press §10"
+                            ),
+                            severity="warning",
+                            context=context,
+                            suggestion=f"{word}{punct}{quote}",
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-quote-punctuation",
+            description='Periods and commas inside quotation marks (CMOS §6.9 / MIT Press §10)',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_mitpress_acknowledgements(self, root: Path) -> ValidationRunResult:
         """Flag British spelling 'Acknowledgements' — should be 'Acknowledgments' (American)."""
         start = time.time()
@@ -8081,12 +8580,9 @@ class ValidateCommand:
                     is_sentence_start, _ = classify_position(
                         line, lines, idx, m.start(), m.end()
                     )
-                    ref_suffix = re.sub(r"^@[Aa]lg-", "", direct_ref)
-                    replacement = (
-                        f"@Alg-{ref_suffix}"
-                        if is_sentence_start
-                        else f"@alg-{ref_suffix}"
-                    )
+                    # Keep the author's prefix (alg- or algo-); only its case changes.
+                    stem = direct_ref[2:]
+                    replacement = f"@{'A' if is_sentence_start else 'a'}{stem}"
                     context = line.strip()[:100]
                     issues.append(
                         ValidationIssue(
@@ -8099,6 +8595,7 @@ class ValidateCommand:
                             ),
                             severity="warning",
                             context=context,
+                            suggestion=f"{m.group(0)} → {replacement}",
                         )
                     )
 
@@ -8504,6 +9001,80 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        defs = {}
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        texts = {f: self._read_text(f) for f in files}
+        for f, t in texts.items():
+            for m in def_pat.finditer(t):
+                defs[m.group(1)] = f
+        # 2026-10-12: enforced for vol1 only. 2026-10-13: vol2-vol4 refs fixed
+        # (117 at the time), so every volume is enforced.
+        enforced_volumes = {"vol1", "vol2", "vol3", "vol4"}
+        for f, t in texts.items():
+            if not enforced_volumes & set(Path(f).parts):
+                continue
+            for idx, line in enumerate(t.splitlines(), 1):
+                for m in ref_pat.finditer(line):
+                    d = defs.get(m.group(1))
+                    if d is not None and d != f:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(f),
+                                line=idx,
+                                code="cross_chapter_callout_ref",
+                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                severity="error",
+                                context=line.strip()[:100],
+                            )
+                        )
+        return ValidationRunResult(
+            name="cross-chapter-callout-ref",
+            description="Flag cross-chapter \\ref to callout ids",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_raw_tex_inline_value(self, root: Path) -> ValidationRunResult:
+        """Flag raw LaTeX boxes wrapping inline {python} values in prose (dropped by HTML)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\(?:mbox|hbox|makebox)\{[^{}]*`\{python\}")
+        for file in files:
+            in_code = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                m = pat.search(line)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="raw_tex_inline_value",
+                            message="Raw LaTeX box around an inline {python} value; HTML drops it. Remove the box.",
+                            severity="error",
+                            context=line.strip()[:100],
+                        )
+                    )
+        return ValidationRunResult(
+            name="raw-tex-inline-value",
+            description="Flag raw LaTeX boxes around inline {python} values",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_missing_image_files(self, root: Path) -> ValidationRunResult:
         """Flag local image file references in QMD files that do not exist on disk."""
         start = time.time()
@@ -8702,7 +9273,7 @@ class ValidateCommand:
                         ),
                         severity="error",
                         context=line.strip()[:100],
-                        suggestion=f"Remove duplicate callout noun inside parens: change to '(\\ref{{...}})'",
+                        suggestion="Remove duplicate callout noun inside parens: change to '(\\ref{...})'",
                     ))
 
         return ValidationRunResult(
@@ -9462,22 +10033,16 @@ class ValidateCommand:
             from binder.cli.checks.table_content import validate_file
 
         t0 = time.time()
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
+        qmd_files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
             try:
                 table_issues = validate_file(qmd)
-            except Exception:
+            except Exception as exc:  # report a crash instead of passing the file
+                issues.append(self._checker_error(self._relative_file(qmd), 0, "content", exc))
                 continue
             for ti in table_issues:
-                p = Path(ti.file)
-                if p.is_absolute():
-                    try:
-                        rel = str(p.relative_to(root))
-                    except ValueError:
-                        rel = str(p)
-                else:
-                    rel = ti.file
+                rel = self._display_path(ti.file, root)
                 issues.append(ValidationIssue(
                     file=rel, line=ti.line, code=ti.code,
                     message=ti.message, severity=ti.severity,
@@ -9494,67 +10059,58 @@ class ValidateCommand:
     # Spelling checks
     # ------------------------------------------------------------------
 
-    def _run_spelling_prose(self, root: Path) -> ValidationRunResult:
-        """Spell check prose text (requires aspell)."""
-        t0 = time.time()
-        try:
-            from cli.checks.spelling_prose import check_file
-        except ImportError:
-            from binder.cli.checks.spelling_prose import check_file
+    def _run_spelling(self, root: Path, kind: str) -> ValidationRunResult:
+        """Run the prose or TikZ spell check; aspell must be on PATH.
 
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
+        Without aspell the prose check cannot run at all and the TikZ check
+        falls back to its typo table, so either way the run reports it.
+        """
+        import shutil
+
+        from cli.checks import spelling_prose, spelling_tikz
+
+        t0 = time.time()
+        has_aspell = shutil.which("aspell") is not None
         issues: List[ValidationIssue] = []
+        if not has_aspell:
+            issues.append(self._missing_tool(
+                "aspell_missing", "aspell",
+                "Install it (brew install aspell, or apt-get install aspell aspell-en), then rerun."))
+        qmd_files = self._qmd_files(root) if has_aspell or kind == "tikz" else []
         for qmd in qmd_files:
-            for err in check_file(qmd):
-                misspelled_str = ", ".join(err.get("misspelled", []))
-                issues.append(
-                    ValidationIssue(
+            if kind == "prose":
+                for err in spelling_prose.check_file(qmd):
+                    issues.append(ValidationIssue(
                         file=self._relative_file(qmd),
                         line=err.get("line", 0),
                         code="spelling-prose",
-                        message=f"Misspelled: {misspelled_str}",
+                        message=f"Misspelled: {', '.join(err.get('misspelled', []))}",
                         severity="warning",
                         context=err.get("text", "")[:120],
-                    )
-                )
-        return ValidationRunResult(
-            name="spelling-prose",
-            description="Spell check prose text (aspell)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_spelling_tikz(self, root: Path) -> ValidationRunResult:
-        """Spell check TikZ diagram text (requires aspell)."""
-        t0 = time.time()
-        try:
-            from cli.checks.spelling_tikz import check_file
-        except ImportError:
-            from binder.cli.checks.spelling_tikz import check_file
-
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
-        issues: List[ValidationIssue] = []
-        for qmd in qmd_files:
-            for err in check_file(qmd):
-                suggestions_str = ", ".join(err.get("suggestions", []))
-                issues.append(
-                    ValidationIssue(
+                        suggestion="Correct the spelling, or add a legitimate term to ignore_terms "
+                                   "in binder/cli/checks/spelling_prose.py.",
+                    ))
+            else:
+                for err in spelling_tikz.check_file(qmd, use_aspell=has_aspell):
+                    issues.append(ValidationIssue(
                         file=self._relative_file(qmd),
                         line=err.get("line", 0),
                         code="spelling-tikz",
-                        message=f"TikZ text typo: {suggestions_str}",
+                        message=f"TikZ text typo: {', '.join(err.get('suggestions', []))}",
                         severity="warning",
                         context=err.get("context", "")[:120],
-                    )
-                )
-        return ValidationRunResult(
-            name="spelling-tikz",
-            description="Spell check TikZ diagram text (aspell)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+                    ))
+        description = ("Spell check prose text (aspell)" if kind == "prose"
+                       else "Spell check TikZ diagram text (aspell)")
+        return self._result(f"spelling-{kind}", description, len(qmd_files), issues, t0)
+
+    def _run_spelling_prose(self, root: Path) -> ValidationRunResult:
+        """Spell check prose text (requires aspell)."""
+        return self._run_spelling(root, "prose")
+
+    def _run_spelling_tikz(self, root: Path) -> ValidationRunResult:
+        """Spell check TikZ diagram text (requires aspell)."""
+        return self._run_spelling(root, "tikz")
 
     # ------------------------------------------------------------------
     # EPUB validation
@@ -9583,9 +10139,8 @@ class ValidateCommand:
         Runs in <1s and is safe to invoke from pre-commit on every push.
 
         When `fix=True` (from `--fix`), the detected issues are rewritten
-        in place before reporting. The returned issue list then reflects
-        what the check found BEFORE the fix — so a first `--fix` run
-        reports "N issues found, N auto-fixed" and a second run reports 0.
+        in place first, so the returned issue list holds only what the fix
+        could not repair; the description reports how many were fixed.
         """
         from cli.commands._epub_checks import (
             find_hygiene_issues,
@@ -9609,6 +10164,7 @@ class ValidateCommand:
                 code=e.code,
                 message=e.message,
                 severity="error",  # hygiene issues are always blocking
+                context=e.context,
             )
             for e in epub_issues
         ]
@@ -9749,6 +10305,18 @@ class ValidateCommand:
 
         return issues
 
+    @staticmethod
+    def _missing_epub() -> ValidationIssue:
+        """Issue for an EPUB scope that found no built EPUB to read."""
+        return ValidationIssue(
+            file="books/_build/epub-vol*/",
+            line=0,
+            code="epub_missing",
+            message="No built EPUB found under books/_build/epub-vol*/; nothing was checked.",
+            severity="error",
+            suggestion="Build one first: ./binder/binder build epub --vol1 (or --vol2 ...)",
+        )
+
     def _run_epub_smoke(self, root: Path) -> ValidationRunResult:
         """Reader-compatibility smoke checks against the built EPUB(s).
 
@@ -9773,13 +10341,8 @@ class ValidateCommand:
         epubs = _discover_built_epubs(repo_root)
 
         if not epubs:
-            return ValidationRunResult(
-                name="epub-smoke",
-                description="EPUB reader-compatibility smoke (no built EPUBs found)",
-                files_checked=0,
-                issues=[],
-                elapsed_ms=int((time.time() - t0) * 1000),
-            )
+            return self._result("epub-smoke", "EPUB reader-compatibility smoke", 0,
+                                [self._missing_epub()], t0)
 
         all_issues: List[ValidationIssue] = []
         for epub in epubs:
@@ -9843,15 +10406,9 @@ class ValidateCommand:
         epubs = _discover_built_epubs(repo_root)
 
         if not epubs:
-            # Not a failure by itself; mirror the existing _run_epub
-            # behaviour when no EPUB has been built yet.
-            return ValidationRunResult(
-                name="epubcheck",
-                description="epubcheck (no built EPUBs found under _build/epub-vol*/)",
-                files_checked=0,
-                issues=[],
-                elapsed_ms=int((time.time() - t0) * 1000),
-            )
+            # Asking to validate EPUBs that do not exist is a failure: in CI
+            # it means the artifact download landed somewhere else.
+            return self._result("epubcheck", "epubcheck", 0, [self._missing_epub()], t0)
 
         all_issues: List[ValidationIssue] = []
         per_volume_counts: Dict[str, Dict[str, int]] = {}
@@ -9998,316 +10555,288 @@ class ValidateCommand:
             return [root.name]
         return ["vol1", "vol2"]
 
+    _PDF_VOLUME_FLAGS = ("vol1", "vol2", "vol3", "vol4", "tinytorch")
+
+    def _pdf_targets(self, root: Path, flags: Dict[str, bool]) -> Tuple[Path, Path, List[str]]:
+        """Return ``(repo_root, quarto_dir, volumes)`` for a built-PDF scope."""
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "books"
+        return repo_root, quarto_dir, self._resolve_pdf_volumes(root, quarto_dir, **flags)
+
+    @staticmethod
+    def _pdf_rel(pdf_path: Path, repo_root: Path) -> str:
+        """Display path of a built PDF, relative to the repo when possible."""
+        try:
+            return str(pdf_path.relative_to(repo_root))
+        except ValueError:
+            return str(pdf_path)
+
+    def _pdf_issue(self, issue: Any, pdf_path: Path, vol: str, repo_root: Path) -> ValidationIssue:
+        """Convert a ``_pdf_checks.PdfIssue`` into a ValidationIssue with a next step."""
+        suggestion = {
+            "missing-pdf": f"This scope reads the rendered PDF; build it first: ./binder/binder build pdf --{vol}",
+            "pdftotext-missing": "Install poppler (brew install poppler), then rerun.",
+        }.get(issue.code, "")
+        return ValidationIssue(
+            file=self._pdf_rel(pdf_path, repo_root),
+            line=0,
+            code=issue.code,
+            message=issue.message,
+            severity=issue.severity,
+            context=f"count={issue.count}" if issue.count > 1 else "",
+            suggestion=suggestion,
+        )
+
+    def _missing_pdf(self, pdf_path: Path, vol: str, repo_root: Path) -> ValidationIssue:
+        """Issue for a PDF scope whose input artifact has not been built."""
+        from cli.commands._pdf_checks import PdfIssue
+
+        return self._pdf_issue(
+            PdfIssue(code="missing-pdf",
+                     message=f"PDF not found: {self._pdf_rel(pdf_path, repo_root)}; nothing was checked."),
+            pdf_path, vol, repo_root)
+
+    @staticmethod
+    def _missing_tool(code: str, tool: str, install: str) -> ValidationIssue:
+        """Issue for a scope that cannot run because a tool or package is missing."""
+        return ValidationIssue(
+            file="(environment)",
+            line=0,
+            code=code,
+            message=f"{tool} is not available, so this scope could not run.",
+            severity="error",
+            suggestion=install,
+        )
+
     def _run_pdf_verify(
         self,
         root: Path,
         *,
-        vol1: bool = False,
-        vol2: bool = False,
-        vol3: bool = False,
-        vol4: bool = False,
-        tinytorch: bool = False,
         log_path: Optional[str] = None,
+        **flags: bool,
     ) -> ValidationRunResult:
         """pdf --scope verify: verify built volume PDFs and report failures as issues.
 
         Volumes come from the volume flags or the scanned root. Each PDF is checked with
-        ``log_path`` or the log left by the build. Failures are reported against the PDF path at
-        line 0, and the last issue of a failing volume carries the formatted checklist as context.
+        ``log_path`` or the log left by the build. A failing volume reports every issue
+        plus any failed checklist row that has no issue of its own; its last issue carries
+        the formatted checklist as context.
         """
-        from cli.commands._pdf_checks import (
-            default_log_path,
-            format_checklist,
-            verify_volume_pdf,
-        )
+        from cli.commands._pdf_checks import format_checklist, default_log_path, verify_volume_pdf
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root  / "books"
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
         # An explicit --log wins; otherwise fall back to the log the build left
         # beside the .tex, so log-based gates run without extra ceremony.
         log = Path(log_path) if log_path else None
 
-        volumes = self._resolve_pdf_volumes(
-            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
-        )
-
         issues: List[ValidationIssue] = []
-        checked = 0
         for vol in volumes:
-            vol_log = log or default_log_path(quarto_dir, vol)
-            result = verify_volume_pdf(quarto_dir, vol, log_path=vol_log)
-            checked += 1
-            if not result.ok:
-                for issue in result.issues:
-                    issues.append(ValidationIssue(
-                        file=str(result.pdf_path.relative_to(repo_root)),
-                        line=0,
-                        code=issue.code,
-                        message=issue.message,
-                        severity="error",
-                        context=f"count={issue.count}" if issue.count > 1 else "",
-                    ))
-                # Surface checklist summary as context for the first failure
-                if issues:
-                    issues[-1].context = format_checklist(result)[:300]
+            result = verify_volume_pdf(quarto_dir, vol, log_path=log or default_log_path(quarto_dir, vol))
+            if result.ok:
+                continue
+            vol_issues = [self._pdf_issue(i, result.pdf_path, vol, repo_root) for i in result.issues]
+            reported = {i.code for i in result.issues}
+            for row in result.checks:
+                # The artifact row is covered by the missing-pdf issue.
+                if row.passed or row.skipped or row.is_warning or row.check_id in reported \
+                        or row.check_id == "artifact":
+                    continue
+                vol_issues.append(ValidationIssue(
+                    file=self._pdf_rel(result.pdf_path, repo_root),
+                    line=0,
+                    code=row.check_id,
+                    message=f"Failed: {row.label}",
+                    severity="error",
+                    suggestion="Run ./binder/binder layout overlaps to locate the pages.",
+                ))
+            if vol_issues:
+                vol_issues[-1].context = format_checklist(result)[:300]
+            issues.extend(vol_issues)
 
-        return ValidationRunResult(
-            name="pdf-verify",
-            description=f"Built PDF verification ({', '.join(volumes)})",
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._result("pdf-verify", f"Built PDF verification ({', '.join(volumes)})",
+                            len(volumes), issues, t0)
 
-    def _run_pdf_numbering(
-        self,
-        root: Path,
-        *,
-        vol1: bool = False,
-        vol2: bool = False,
-        vol3: bool = False,
-        vol4: bool = False,
-        tinytorch: bool = False,
-    ) -> ValidationRunResult:
+    def _run_pdf_numbering(self, root: Path, **flags: bool) -> ValidationRunResult:
         """pdf --scope numbering: scan built volume PDFs for object-numbering regressions."""
         from cli.commands._pdf_checks import default_pdf_path, scan_pdf_numbering
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root  / "books"
-
-        volumes = self._resolve_pdf_volumes(
-            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
-        )
-
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
         issues: List[ValidationIssue] = []
-        checked = 0
         for vol in volumes:
             pdf_path = default_pdf_path(quarto_dir, vol)
+            issues.extend(self._pdf_issue(i, pdf_path, vol, repo_root) for i in scan_pdf_numbering(pdf_path))
+
+        return self._result(
+            "pdf-numbering", f"Built PDF object-numbering regression scan ({', '.join(volumes)})",
+            len(volumes), issues, t0)
+
+    def _run_pdf_figure_font_floor(self, root: Path, *, floor_pt: float = 6.0,
+                                   **flags: bool) -> ValidationRunResult:
+        """pdf --scope figure-font-floor: printed point size of figure text.
+
+        For every page carrying a numbered figure caption, collects text spans
+        below ``floor_pt`` whose font is not a math font (math sub/superscripts
+        are legitimately small) and that sit above the caption line. One issue
+        per figure page, with the smallest size seen.
+        """
+        from cli.commands._pdf_checks import default_pdf_path
+
+        t0 = time.time()
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            return self._result(
+                "pdf-figure-font-floor", "Printed figure text size", 0,
+                [self._missing_tool("pymupdf_missing", "PyMuPDF (import fitz)",
+                                    "pip install pymupdf into the venv that runs binder")], t0)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        math_font = re.compile(r"math|cmsy|cmmi|cmex|msam|msbm|stix", re.I)
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            if not pdf_path.exists():
+                issues.append(self._missing_pdf(pdf_path, vol, repo_root))
+                continue
             checked += 1
-            for issue in scan_pdf_numbering(pdf_path):
-                issues.append(ValidationIssue(
-                    file=str(pdf_path.relative_to(repo_root))
-                    if pdf_path.is_absolute()
-                    else str(pdf_path),
-                    line=0,
-                    code=issue.code,
-                    message=issue.message,
-                    severity="error",
-                    context=f"count={issue.count}" if issue.count > 1 else "",
-                ))
+            doc = fitz.open(str(pdf_path))
+            for pno in range(len(doc)):
+                page = doc[pno]
+                text = page.get_text("text")
+                caps = re.findall(r"Figure (\d+\.\d+|[A-Z]\.\d+):", text)
+                if not caps:
+                    continue
+                small = []
+                for block in page.get_text("dict")["blocks"]:
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            if span["text"].strip() and span["size"] < floor_pt and not math_font.search(span["font"]):
+                                small.append(span["size"])
+                if len(small) >= 3:
+                    issues.append(ValidationIssue(
+                        file=self._pdf_rel(pdf_path, repo_root), line=pno + 1,
+                        code="figure-font-floor", severity="warning",
+                        message=f"Figure {', '.join(sorted(set(caps)))}: {len(small)} text spans print below {floor_pt:g} pt (smallest {min(small):.1f} pt)",
+                        suggestion="Enlarge the figure's text or shrink its canvas so text prints at "
+                                   f"{floor_pt:g} pt or more (line = PDF page).",
+                    ))
+        return self._result("pdf-figure-font-floor",
+                            f"Printed figure text size ({', '.join(volumes)})", checked, issues, t0)
 
-        return ValidationRunResult(
-            name="pdf-numbering",
-            description=f"Built PDF object-numbering regression scan ({', '.join(volumes)})",
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_pdf_table_spacing(
-        self,
-        root: Path,
-        *,
-        vol1: bool = False,
-        vol2: bool = False,
-        vol3: bool = False,
-        vol4: bool = False,
-        tinytorch: bool = False,
-    ) -> ValidationRunResult:
+    def _run_pdf_table_spacing(self, root: Path, **flags: bool) -> ValidationRunResult:
         """pdf --scope table-spacing: find table rules jammed against following text.
 
         Scans each selected volume's built PDF and keeps the severity set by the scanner.
         """
+        import importlib.util
+
         from cli.commands._pdf_checks import default_pdf_path, scan_table_prose_spacing
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root  / "books"
-
-        volumes = self._resolve_pdf_volumes(
-            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
-        )
-
-        issues: List[ValidationIssue] = []
-        checked = 0
-        for vol in volumes:
-            pdf_path = default_pdf_path(quarto_dir, vol)
-            checked += 1
-            for issue in scan_table_prose_spacing(pdf_path):
-                issues.append(ValidationIssue(
-                    file=str(pdf_path.relative_to(repo_root))
-                    if pdf_path.is_absolute()
-                    else str(pdf_path),
-                    line=0,
-                    code=issue.code,
-                    message=issue.message,
-                    severity=issue.severity,
-                    context=f"count={issue.count}" if issue.count > 1 else "",
-                ))
-
-        return ValidationRunResult(
-            name="pdf-table-spacing",
-            description=f"Rendered PDF table/prose spacing scan ({', '.join(volumes)})",
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_pdf_purpose_overflow(
-        self,
-        root: Path,
-        *,
-        vol1: bool = False,
-        vol2: bool = False,
-        vol3: bool = False,
-        vol4: bool = False,
-        tinytorch: bool = False,
-    ) -> ValidationRunResult:
-        """Check that chapter Purpose sections fit on their opener page in the built PDF."""
-        from cli.commands._pdf_checks import default_pdf_path, scan_purpose_overflow
-
-        t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root  / "books"
-
-        volumes = self._resolve_pdf_volumes(
-            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
-        )
-
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
+        if importlib.util.find_spec("pdfplumber") is None:
+            return self._result(
+                "pdf-table-spacing", "Rendered PDF table/prose spacing scan", 0,
+                [self._missing_tool("pdfplumber_missing", "pdfplumber",
+                                    "pip install pdfplumber into the venv that runs binder")], t0)
         issues: List[ValidationIssue] = []
         checked = 0
         for vol in volumes:
             pdf_path = default_pdf_path(quarto_dir, vol)
             if not pdf_path.is_file():
+                issues.append(self._missing_pdf(pdf_path, vol, repo_root))
                 continue
             checked += 1
-            for issue in scan_purpose_overflow(pdf_path, vol, repo_root):
-                issues.append(
-                    ValidationIssue(
-                        file=str(pdf_path.relative_to(repo_root))
-                        if pdf_path.is_absolute()
-                        else str(pdf_path),
-                        line=0,
-                        code=issue.code,
-                        message=issue.message,
-                        severity=issue.severity,
-                    )
-                )
+            issues.extend(self._pdf_issue(i, pdf_path, vol, repo_root)
+                          for i in scan_table_prose_spacing(pdf_path))
 
-        return ValidationRunResult(
-            name="purpose-overflow",
-            description=f"Chapter Purpose opener page fit in PDF ({', '.join(volumes)})",
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._result(
+            "pdf-table-spacing", f"Rendered PDF table/prose spacing scan ({', '.join(volumes)})",
+            checked, issues, t0)
+
+    def _run_pdf_purpose_overflow(self, root: Path, **flags: bool) -> ValidationRunResult:
+        """Check that chapter Purpose sections fit on their opener page in the built PDF."""
+        from cli.commands._pdf_checks import default_pdf_path, scan_purpose_overflow
+
+        t0 = time.time()
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            if not pdf_path.is_file():
+                issues.append(self._missing_pdf(pdf_path, vol, repo_root))
+                continue
+            checked += 1
+            issues.extend(self._pdf_issue(i, pdf_path, vol, repo_root)
+                          for i in scan_purpose_overflow(pdf_path, vol, repo_root))
+
+        return self._result(
+            "purpose-overflow", f"Chapter Purpose opener page fit in PDF ({', '.join(volumes)})",
+            checked, issues, t0)
 
     # ------------------------------------------------------------------
     # Registry: constants → registry migration gates
     # ------------------------------------------------------------------
 
+    def _run_registry_file_check(self, root: Path, check: str, name: str,
+                                 description: str) -> ValidationRunResult:
+        """Run one ``_registry_checks.<check>(repo, paths=...)`` over the QMD files under ``root``."""
+        from cli.commands import _registry_checks
+
+        t0 = time.time()
+        qmd_files = self._qmd_files(root)
+        repo = _registry_checks.repo_root_from_here()
+        raw = getattr(_registry_checks, check)(repo, paths=qmd_files)
+        # The module reports repo-relative paths; show them book-relative like every other scope.
+        issues = self._issues_from_records(raw, file_map=lambda f: self._relative_file(repo / f))
+        return self._result(name, f"{description} ({len(qmd_files)} files)",
+                            len(qmd_files), issues, t0)
+
     def _run_registry_sources(self, root: Path) -> ValidationRunResult:
         """registry --scope sources: flag banned legacy constant and registry patterns."""
-        from cli.commands._registry_checks import check_registry_sources, repo_root_from_here
+        return self._run_registry_file_check(
+            root, "check_registry_sources", "registry-sources", "QMD registry source scan")
+
+    def _run_registry_repo_check(self, check: str, name: str, description: str,
+                                 files_checked: int = 1) -> ValidationRunResult:
+        """Run one repo-wide ``_registry_checks.<check>(repo)`` gate."""
+        from cli.commands import _registry_checks
 
         t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_registry_sources(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="registry-sources",
-            description=f"QMD registry source scan ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        raw = getattr(_registry_checks, check)(_registry_checks.repo_root_from_here())
+        return self._result(name, description, files_checked,
+                            self._issues_from_records(raw), t0)
 
     def _run_registry_tests(self, root: Path) -> ValidationRunResult:
-        """registry --scope tests: run MLSysIM registry gates and book usage checks.
+        """registry --scope tests: run MLSysIM registry gates and book usage checks."""
+        from cli.commands._registry_checks import registry_test_files, repo_root_from_here
 
-        Reports a fixed ``files_checked`` count of 5.
-        """
-        from cli.commands._registry_checks import run_registry_pytest, repo_root_from_here
-
-        t0 = time.time()
-        raw = run_registry_pytest(repo_root_from_here())
-        issues = [
-            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="registry-tests",
-            description="mlsysim registry pytest gates",
-            files_checked=5,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_repo_check(
+            "run_registry_pytest", "registry-tests", "mlsysim registry pytest gates",
+            files_checked=len(registry_test_files(repo_root_from_here())))
 
     def _run_registry_appendix(self, root: Path) -> ValidationRunResult:
         """registry --scope appendix: verify appendix LEGO cells against the registry."""
-        from cli.commands._registry_checks import verify_appendix_lego, repo_root_from_here
-
-        t0 = time.time()
-        raw = verify_appendix_lego(repo_root_from_here())
-        issues = [
-            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="registry-appendix",
-            description="Appendix LEGO verify against live registry",
-            files_checked=0,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_repo_check(
+            "verify_appendix_lego", "registry-appendix",
+            "Appendix LEGO verify against live registry")
 
     def _run_registry_anchors(self, root: Path) -> ValidationRunResult:
         """registry --scope anchors: validate paper anchor consistency."""
-        from cli.commands._registry_checks import verify_paper_anchors, repo_root_from_here
-
-        t0 = time.time()
-        raw = verify_paper_anchors(repo_root_from_here())
-        issues = [
-            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="registry-anchors",
-            description="Paper anchor validation",
-            files_checked=0,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_repo_check(
+            "verify_paper_anchors", "registry-anchors", "Paper anchor validation")
 
     def _run_registry_yaml_pending(self, root: Path) -> ValidationRunResult:
         """registry --scope yaml-pending: fail while audit YAML has pending changes.
 
         Pending changes are entries still marked ``should_change=true``.
         """
-        from cli.commands._registry_checks import check_yaml_pending, repo_root_from_here
-
-        t0 = time.time()
-        raw = check_yaml_pending(repo_root_from_here())
-        issues = [
-            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="registry-yaml-pending",
-            description="Audit YAML should_change=true count",
-            files_checked=0,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_repo_check(
+            "check_yaml_pending", "registry-yaml-pending",
+            "Audit YAML should_change=true count")
 
     # ------------------------------------------------------------------
     # Content tree: require the canonical two-volume frontmatter shape.
@@ -10417,11 +10946,12 @@ class ValidateCommand:
                 if p.is_file():
                     file_paths.append(p)
             if file_paths:
-                return self._run_audit_check_files(
-                    file_paths,
+                return self._run_audit_check(
+                    root,
                     "audit.checks.source_citations",
                     "sources",
                     "Source citation validation",
+                    files=file_paths,
                 )
         return self._run_audit_check(
             root,
@@ -10561,7 +11091,6 @@ class ValidateCommand:
         """
         runs = summary["runs"]
         total = summary["total_issues"]
-        status = summary["status"]
 
         if plain:
             for run in runs:
@@ -10580,11 +11109,17 @@ class ValidateCommand:
                             print(f"    fix: {issue['suggestion']}")
             return
 
-        # On success with no empty scans, stay silent — pre-commit shows "Passed"
-        # and direct callers see exit code 0. But if any check scanned 0 files,
-        # surface the table so NO-OPs are never silently hidden.
+        # On success with no empty scans, print one line so a caller can tell
+        # "passed" from "ran nothing" (pre-commit hides it for passing hooks).
+        # If any check scanned 0 files, show the table so NO-OPs are never hidden.
         has_noop = any(run["passed"] and run["files_checked"] == 0 for run in runs)
         if total == 0 and not has_noop:
+            if verbose:
+                files = sum(run["files_checked"] for run in runs)
+                seconds = sum(run["elapsed_ms"] for run in runs) / 1000
+                names = ", ".join(run["name"] for run in runs)
+                console.print(f"[green]✓ {len(runs)} check(s) passed, {files} file-scan(s), "
+                              f"0 issues ({seconds:.1f}s): {_rich_escape(names)}[/green]")
             return
 
         # Show the summary table when there are issues
@@ -10653,7 +11188,8 @@ class ValidateCommand:
                 if issue.get("suggestion"):
                     console.print(f"     [dim cyan]fix: {_rich_escape(str(issue['suggestion']))}[/dim cyan]")
             if run["issue_count"] > 30:
-                console.print(f"  [dim]... {run['issue_count'] - 30} more[/dim]")
+                console.print(f"  [dim]... {run['issue_count'] - 30} more "
+                              f"(--plain or --json lists them all)[/dim]")
             console.print()
 
         parts = []
@@ -10675,66 +11211,6 @@ class ValidateCommand:
         else:
             console.print(f"[green]{payload.get('message', 'Operation succeeded')}[/green]")
 
-    # ------------------------------------------------------------------
-    # Subprocess helper: only for scripts that wrap external binaries.
-    #
-    # All pure-Python validators have been migrated to native imports
-    # (see _run_table_content, _run_grid_tables, _run_sources,
-    # _run_bib_hygiene, _run_image_formats, _run_external_images,
-    # _run_unit_tests, _run_notation_consistency). The remaining
-    # _delegate_script callers all wrap a non-Python tool:
-    #   - _run_spelling_prose / _run_spelling_tikz → aspell CLI
-    #   - _run_math_render_audit → Quarto's `quarto render` pipeline
-    # New checks should follow the native pattern unless they
-    # genuinely need to invoke an external binary.
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _delegate_script(script_path: Path, args: List[str], run_name: str) -> ValidationRunResult:
-        """Run an external-binary-wrapping script and convert its exit code to a ValidationRunResult."""
-        import subprocess
-        t0 = time.time()
-        cmd = ["python3", str(script_path)] + args
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            elapsed = int((time.time() - t0) * 1000)
-            if result.returncode == 0:
-                return ValidationRunResult(
-                    name=run_name, description=run_name,
-                    files_checked=0, issues=[], elapsed_ms=elapsed,
-                )
-            # Script failed — report its output as a single error
-            output = (result.stdout + result.stderr).strip()
-            return ValidationRunResult(
-                name=run_name, description=run_name,
-                files_checked=0, elapsed_ms=elapsed,
-                issues=[ValidationIssue(
-                    file="(script output)", line=0, code=run_name,
-                    message=output[:500] if output else f"Script exited with code {result.returncode}",
-                    severity="error",
-                )],
-            )
-        except FileNotFoundError:
-            elapsed = int((time.time() - t0) * 1000)
-            return ValidationRunResult(
-                name=run_name, description=run_name,
-                files_checked=0, elapsed_ms=elapsed,
-                issues=[ValidationIssue(
-                    file=str(script_path), line=0, code=run_name,
-                    message=f"Script not found: {script_path}", severity="error",
-                )],
-            )
-        except subprocess.TimeoutExpired:
-            elapsed = int((time.time() - t0) * 1000)
-            return ValidationRunResult(
-                name=run_name, description=run_name,
-                files_checked=0, elapsed_ms=elapsed,
-                issues=[ValidationIssue(
-                    file=str(script_path), line=0, code=run_name,
-                    message="Script timed out after 120s", severity="error",
-                )],
-            )
-
     def _run_grid_tables(self, root: Path) -> ValidationRunResult:
         """Check for grid tables (prefer pipe tables)."""
         try:
@@ -10743,25 +11219,20 @@ class ValidateCommand:
             from binder.cli.checks.grid_tables import check_grid_tables
 
         t0 = time.time()
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
+        qmd_files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
         for qmd in qmd_files:
+            rel = self._relative_file(qmd)
             try:
-                content = qmd.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            try:
-                grid_hits = check_grid_tables(content)
-            except Exception:
+                grid_hits = check_grid_tables(self._read_text(qmd))
+            except Exception as exc:  # report a crash instead of passing the file
+                issues.append(self._checker_error(rel, 0, "grid-tables", exc))
                 continue
             for line_num, desc in grid_hits:
-                try:
-                    rel = str(qmd.relative_to(root))
-                except ValueError:
-                    rel = str(qmd)
                 issues.append(ValidationIssue(
                     file=rel, line=line_num, code="grid-table",
                     message=desc, severity="error", context="",
+                    suggestion="Rewrite it as a pipe table (| a | b | rows with a |---| separator).",
                 ))
         return ValidationRunResult(
             name="grid-tables",
@@ -10779,7 +11250,7 @@ class ValidateCommand:
         """
         from cli.commands.headings import find_violations
         t0 = time.time()
-        qmd_files = [str(f) for f in sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))]
+        qmd_files = [str(f) for f in self._qmd_files(root)]
         violations = find_violations(qmd_files)
         issues: List[ValidationIssue] = []
         for v in violations:
@@ -10844,7 +11315,9 @@ class ValidateCommand:
         else to the shared ``references.bib``; front matter and back matter use the shared file.
         """
         contents = self.config_manager.book_dir
-        shared_bib = contents / "references.bib"
+        shared_bib = self.config_manager.root_dir / "bibs" / "references.bib"
+        if not shared_bib.exists():
+            shared_bib = contents / "references.bib"
         from cli.core.discovery import discover_volumes
         scopes: List[ValidateCommand._BibScope] = []
         for vol in discover_volumes(contents):
@@ -10868,14 +11341,6 @@ class ValidateCommand:
             return None
         for scope in self._book_bib_scopes():
             if any(rel.startswith(prefix) for prefix in scope.qmd_prefixes):
-                return scope
-        return None
-
-    def _book_bib_scope_for_bib(self, bib_path: Path) -> Optional[_BibScope]:
-        """Return the bibliography scope that uses a given ``.bib`` file, or None."""
-        resolved = bib_path.resolve()
-        for scope in self._book_bib_scopes():
-            if any(path.resolve() == resolved for path in scope.bib_paths):
                 return scope
         return None
 
@@ -11227,11 +11692,11 @@ class ValidateCommand:
             "pages-has-prefix": f"Remove p./pp. from @{key}'s pages field; keep only the bare range.",
             "doi-with-prefix": f"Store @{key}'s DOI as a bare DOI without https://doi.org/.",
             "journal-abbreviated": f"Spell out @{key}'s journal title using the official full name.",
-            "forbidden-field": f"Remove or convert the forbidden field on .",
+            "forbidden-field": f"Remove or convert the forbidden field on @{key}.",
         }
         return suggestions.get(
             rule,
-            f"Fix , then rerun ./binder/binder check bib --json.",
+            f"Fix @{key} ({rule}), then rerun ./binder/binder check bib --json.",
         )
 
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
@@ -11817,6 +12282,283 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_bib_verify(self, root: Path) -> ValidationRunResult:
+        """Verify BibTeX entries against the cryptographic ledger and primary databases.
+
+        Reads the verification manifest (review/bib-verification/manifest.json or
+        binder/tools/bib_verification_manifest.json). Checks sha256 hash of normalized
+        entry text to detect tampering or unverified modifications. If entries
+        lack verification or hash has drifted, flags them. For unverified entries
+        with DOIs, performs live verification against Crossref / DataCite APIs.
+        """
+        import hashlib
+        import json
+        import ssl
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        try:
+            from cli.checks import bib_lint
+        except ImportError:
+            from binder.cli.checks import bib_lint
+
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        # Locate manifest: check canonical tracked bibs/manifest.json first
+        issues: List[ValidationIssue] = []
+        ledger_path = self.config_manager.root_dir / "bibs" / "manifest.json"
+        if not ledger_path.exists():
+            legacy = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
+            if legacy.exists():
+                ledger_path = legacy
+            else:
+                fallback = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
+                if fallback.exists():
+                    ledger_path = fallback
+
+        if not ledger_path.exists():
+            issues.append(ValidationIssue(
+                file=self._relative_file(ledger_path),
+                line=0,
+                code="bib_verify_missing_manifest",
+                message="Verification ledger not found. Run `python3 binder/tools/scripts/audit/verify_bibliography.py` to generate.",
+                severity="warning",
+                suggestion="Run verification audit to establish the cryptographic manifest.",
+            ))
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=len(bib_files),
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        manifest: dict = {}
+        try:
+            manifest = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            issues.append(ValidationIssue(
+                file=self._relative_file(ledger_path),
+                line=0,
+                code="bib_verify_corrupted_manifest",
+                message=f"Verification ledger could not be read: {exc}",
+                severity="error",
+                suggestion="Regenerate the manifest using the audit tool.",
+            ))
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=len(bib_files),
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            ctx = ssl.create_default_context()
+
+        ua = "MLSysBook-binder-bibcheck/1.0 (mailto:jvijay@gmail.com)"
+
+        def compute_entry_hash(raw_text: str) -> str:
+            normalized = re.sub(r"\s+", " ", raw_text.strip())
+            return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+        def check_crossref(clean_doi: str) -> tuple[bool, str]:
+            url = f"https://api.crossref.org/works/{urllib.parse.quote(clean_doi)}"
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            try:
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8")).get("message", {})
+                        title = (data.get("title") or [""])[0]
+                        return True, title
+            except urllib.error.HTTPError as e:
+                return False, f"HTTP {e.code}"
+            except Exception as e:
+                return False, str(e)
+            return False, "Not found"
+
+        def check_datacite(clean_doi: str) -> tuple[bool, str]:
+            url = f"https://api.datacite.org/dois/{urllib.parse.quote(clean_doi)}"
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            try:
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("attributes", {})
+                        titles = data.get("titles", [])
+                        title = titles[0].get("title", "") if titles else ""
+                        return True, title
+            except urllib.error.HTTPError as e:
+                return False, f"HTTP {e.code}"
+            except Exception as e:
+                return False, str(e)
+            return False, "Not found"
+
+        unverified_doi_entries: list[tuple[str, bib_lint.Entry, str]] = []
+
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                entries, _ = bib_lint.parse_bib(text)
+            except ValueError as exc:
+                rel = self._relative_file(bib_path)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=0,
+                    code="bib_verify_parse_error",
+                    message=f"PARSE ERROR: {exc}",
+                    severity="error",
+                ))
+                continue
+
+            rel = self._relative_file(bib_path)
+            for entry in entries:
+                current_hash = compute_entry_hash(entry.raw)
+                record = manifest.get(entry.key)
+
+                if record is None:
+                    doi_field = entry.get("doi")
+                    doi_val = doi_field.value.strip() if doi_field else ""
+                    if doi_val:
+                        unverified_doi_entries.append((rel, entry, doi_val))
+                    else:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_unverified_entry",
+                            message=f"@{entry.entry_type}{{{entry.key}}} has not been verified against canonical sources.",
+                            severity="warning",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Verify entry against primary academic sources and record in manifest.",
+                        ))
+                    continue
+
+                status = record.get("status")
+                recorded_hash = record.get("entry_hash")
+                if status == "invalid":
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_invalid_entry",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is flagged as fabricated or invalid citation.",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Remove this invalid citation or replace with an authentic reference.",
+                    ))
+                elif not recorded_hash:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_missing_sha",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is missing SHA-256 hash in verification manifest.",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Run verification audit to record cryptographic SHA-256 hash.",
+                    ))
+                elif recorded_hash != current_hash:
+                    # Only flag drift if the entry is in the primary file recorded in manifest
+                    rec_file = record.get("file")
+                    if not rec_file or rec_file == rel or Path(rec_file).name == bib_path.name:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_verification_drift",
+                            message=(
+                                f"@{entry.entry_type}{{{entry.key}}} has drifted from verified state "
+                                f"(hash mismatch: recorded {recorded_hash[:8]}... vs current {current_hash[:8]}...)."
+                            ),
+                            severity="warning",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Re-verify modified entry and update manifest with audit tool.",
+                        ))
+                elif status != "verified":
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_unverified_status",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is marked as '{status}' (must be 'verified').",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Authenticate entry against canonical databases and record external evidence.",
+                    ))
+                else:
+                    details = record.get("details", {})
+                    source = details.get("source") if isinstance(details, dict) else None
+                    if not source or source in ("unverified", "no_details"):
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_unauthenticated_source",
+                            message=f"@{entry.entry_type}{{{entry.key}}} lacks authentic external source evidence in manifest.",
+                            severity="error",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Verify entry against external academic database or official registry.",
+                        ))
+
+        # Check unverified entries that have DOIs
+        if unverified_doi_entries:
+            offline = getattr(self, "_offline", False)
+            if offline:
+                for rel, entry, raw_doi in unverified_doi_entries:
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_unverified_doi_offline",
+                        message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` has not been verified in manifest (offline mode active).",
+                        severity="warning",
+                        context=f"doi = {{{clean_doi}}}",
+                        suggestion="Run `./binder/binder check bib --scope verify` without --offline to verify against primary APIs.",
+                    ))
+            else:
+                def verify_doi_target(t):
+                    rel, entry, raw_doi = t
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    if clean_doi.startswith("10.48550/arXiv."):
+                        ok, title_or_err = check_datacite(clean_doi)
+                    else:
+                        ok, title_or_err = check_crossref(clean_doi)
+                    return rel, entry, clean_doi, ok, title_or_err
+
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    for fut in as_completed([ex.submit(verify_doi_target, t) for t in unverified_doi_entries]):
+                        rel, entry, clean_doi, ok, title_or_err = fut.result()
+                        if not ok:
+                            issues.append(ValidationIssue(
+                                file=rel,
+                                line=entry.start_line,
+                                code="bib_unverified_doi",
+                                message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` could not be verified via Crossref/DataCite: {title_or_err}",
+                                severity="warning",
+                                context=f"doi = {{{clean_doi}}}",
+                                suggestion="Check DOI correctness or confirm source in browser.",
+                            ))
+
+        issues.sort(key=lambda i: (i.file, i.line))
+        return ValidationRunResult(
+            name="bib-verify",
+            description="Cryptographic ledger & primary database verification",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+
     # ──────────────────────────────────────────────────────────────────────
     # Native audit-check adapters (binder/tools/audit/checks/*).
     #
@@ -11848,116 +12590,45 @@ class ValidateCommand:
         module_path: str,
         name: str,
         description: str,
+        files: Optional[List[Path]] = None,
     ) -> ValidationRunResult:
-        """Import an audit.checks.* module and run its `check()` per QMD file.
+        """Import an ``audit.checks.*`` module and run its ``check()`` per QMD file.
 
-        The audit package lives at `binder/tools/audit/`. It uses relative
-        imports against its own `audit.*` top-level package, so the parent
-        directory (`binder/tools`) must be on sys.path for the import to
-        resolve. This method does the path-prepend once per call.
+        Scans ``files`` when given (pre-commit passes the changed files), else the
+        chapter QMDs under ``root``. The audit package lives at
+        ``binder/tools/audit/`` and imports itself as top-level ``audit``, so
+        ``binder/tools`` must be on sys.path.
         """
-        import importlib
-        import sys as _sys
-        # Prefer native binder/cli/audit, fallback to binder/tools
-        cli_root = Path(__file__).resolve().parent.parent
-        tools_root = cli_root.parent / "tools"
-        for p in (cli_root, tools_root):
-            p_str = str(p)
-            if p_str not in _sys.path:
-                _sys.path.insert(0, p_str)
-        mod = importlib.import_module(module_path)
+        mod = _import_audit_module(module_path)
 
         t0 = time.time()
-        qmd_files = sorted(f for f in root.rglob("*.qmd") if _is_chapter_qmd(f))
+        if files is None:
+            qmd_files = self._qmd_files(root)
+        else:
+            qmd_files = [f for f in files if f.suffix == ".qmd" and f.exists()]
         issues: List[ValidationIssue] = []
         counter = 0
         for qmd in qmd_files:
+            rel = self._relative_file(qmd)
             try:
                 text = qmd.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError) as exc:
+                issues.append(self._checker_error(rel, 0, name, exc))
                 continue
             audit_issues, counter = mod.check(qmd, text, "both", counter)
             for issue in audit_issues:
-                try:
-                    rel = str(qmd.relative_to(root))
-                except ValueError:
-                    rel = str(qmd)
-                message = issue.reason or issue.rule_text or issue.category
-                # needs_review flag → warning (human must review).
-                # Auto-fixable and protected issues → error (scripted fix).
-                severity = "warning" if getattr(issue, "needs_review", False) else "error"
+                # needs_review → warning (a human decides); auto-fixable and
+                # protected issues → error (scripted fix).
                 issues.append(ValidationIssue(
                     file=rel,
                     line=issue.line,
                     code=issue.category,
-                    message=message,
-                    severity=severity,
+                    message=issue.reason or issue.rule_text or issue.category,
+                    severity="warning" if getattr(issue, "needs_review", False) else "error",
                     context=(issue.before or "")[:160],
                     suggestion=getattr(issue, "suggested_after", "") or "",
                 ))
-        return ValidationRunResult(
-            name=name,
-            description=description,
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_audit_check_files(
-        self,
-        files: list[Path],
-        module_path: str,
-        name: str,
-        description: str,
-    ) -> ValidationRunResult:
-        """Run an audit check against an explicit file list."""
-        import importlib
-        import sys as _sys
-
-        cli_root = Path(__file__).resolve().parent.parent
-        tools_root = cli_root.parent / "tools"
-        for p in (cli_root, tools_root):
-            p_str = str(p)
-            if p_str not in _sys.path:
-                _sys.path.insert(0, p_str)
-        mod = importlib.import_module(module_path)
-
-        t0 = time.time()
-        issues: List[ValidationIssue] = []
-        counter = 0
-        checked = 0
-        for qmd in files:
-            if qmd.suffix != ".qmd" or not qmd.exists():
-                continue
-            try:
-                text = qmd.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            checked += 1
-            audit_issues, counter = mod.check(qmd, text, "both", counter)
-            for issue in audit_issues:
-                message = issue.reason or issue.rule_text or issue.category
-                severity = "warning" if getattr(issue, "needs_review", False) else "error"
-                try:
-                    rel = str(qmd.relative_to(self.config_manager.root_dir))
-                except ValueError:
-                    rel = str(qmd)
-                issues.append(ValidationIssue(
-                    file=rel,
-                    line=issue.line,
-                    code=issue.category,
-                    message=message,
-                    severity=severity,
-                    context=(issue.before or "")[:160],
-                    suggestion=getattr(issue, "suggested_after", "") or "",
-                ))
-        return ValidationRunResult(
-            name=name,
-            description=description,
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._result(name, description, len(qmd_files), issues, t0)
 
     def _run_mitpress_compound_prefix(self, root: Path) -> ValidationRunResult:
         """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
@@ -11997,16 +12668,7 @@ class ValidateCommand:
         persistent exact-line accept-list can grandfather reviewed layout
         exceptions without hiding new violations.
         """
-        import importlib
-        import sys as _sys
-
-        cli_root = Path(__file__).resolve().parent.parent
-        tools_root = cli_root.parent / "tools"
-        for path in (cli_root, tools_root):
-            path_str = str(path)
-            if path_str not in _sys.path:
-                _sys.path.insert(0, path_str)
-        scan_mod = importlib.import_module("audit.scan")
+        scan_mod = _import_audit_module("audit.scan")
 
         contents_root = self.config_manager.book_dir
         resolved_root = root.resolve()
@@ -12068,14 +12730,7 @@ class ValidateCommand:
         this method is the binder front door — pure Python imports, no
         subprocess. Replaces the standalone binder/tools/audit/run_notation_consistency.py.
         """
-        import importlib
-        import sys as _sys
-
-        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
-        audit_root_str = str(audit_root)
-        if audit_root_str not in _sys.path:
-            _sys.path.insert(0, audit_root_str)
-        scan_mod = importlib.import_module("audit.scan")
+        scan_mod = _import_audit_module("audit.scan")
 
         t0 = time.time()
         # scope="both" is mandatory: the notation accept-list spans both
@@ -12117,6 +12772,773 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_notation_registry(self, root: Path) -> ValidationRunResult:
+        """Check the series notation files against each other (added 2026-10-01).
+
+        Parses every symbol row of the series core (head + tail) and the four
+        volume extensions. Errors: a volume extension defines a core symbol with
+        a different meaning (unless its row says it is "the core's" quantity), or
+        one file defines a symbol two different ways. Tables in a section whose
+        heading says "(local)" declare chapter-scoped meanings and are skipped.
+        Letters outside the core may mean different things in different volumes
+        (rule D2 in notations.md), so cross-volume reuse is not an error.
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+        files = {
+            "vol1": [books / "vol1" / "frontmatter" / "notation.qmd"],
+            "vol2": [books / "vol2" / "frontmatter" / "notation.qmd"],
+            "vol3": [books / "vol3" / "frontmatter" / "notation.qmd"],
+            "vol4": [books / "vol4" / "frontmatter" / "notation.qmd"],
+        }
+        core_owner = "vol1"
+
+        def norm(s: str) -> str:
+            return re.sub(r"\s+", " ", re.sub(r"[*$]", "", s.lower())).strip()
+
+        defs: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
+        for owner, paths in files.items():
+            for path in paths:
+                section, header = "", None
+                for lineno, ln in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if ln.startswith("#"):
+                        section, header = ln, None
+                        continue
+                    if not ln.startswith("|"):
+                        if ln.strip():
+                            header = None
+                        continue
+                    cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+                    if re.match(r"^:?-+", cells[0]):
+                        continue
+                    if header is None:
+                        header = [norm(c) for c in cells]
+                        continue
+                    if "definition" not in header or "(local)" in section.lower():
+                        continue
+                    rec = dict(zip(header, cells))
+                    meaning = norm(rec.get("definition", ""))
+                    if not meaning or meaning.startswith(("expiry ", "t_")):
+                        continue
+                    for sym in re.findall(r"\$([^$]+)\$", rec.get("symbol", cells[0])):
+                        defs[re.sub(r"\s+", "", sym)][owner].append((meaning, str(path.relative_to(books.parent)), lineno, ln))
+
+        issues: List[ValidationIssue] = []
+        for sym, owners in sorted(defs.items()):
+            for owner, entries in owners.items():
+                if len(entries) > 1:
+                    meanings = {m for m, *_ in entries}
+                    if len(meanings) > 1:
+                        _, f, line, _ = entries[-1]
+                        issues.append(ValidationIssue(
+                            file=f, line=line, code="notation-registry-duplicate",
+                            message=f"${sym}$ is defined {len(meanings)} different ways in {owner}: " + " | ".join(sorted(meanings)),
+                            severity="error"))
+                    else:
+                        lines_str = ", ".join(str(e[2]) for e in entries)
+                        _, f, line, _ = entries[-1]
+                        issues.append(ValidationIssue(
+                            file=f, line=line, code="notation-registry-repeated-row",
+                            message=f"${sym}$ table row is duplicated {len(entries)} times in {owner} (lines {lines_str})",
+                            severity="error",
+                            suggestion="Remove duplicate rows to keep the notation chapter clean and prevent table bloat."))
+            if core_owner in owners:
+                core_meanings = {m for m, *_ in owners[core_owner]}
+                for owner, entries in owners.items():
+                    if owner == core_owner:
+                        continue
+                    for meaning, f, line, row in entries:
+                        if meaning not in core_meanings and "core" not in row.lower():
+                            issues.append(ValidationIssue(
+                                file=f, line=line, code="notation-registry-core-redefined",
+                                message=f"${sym}$ is a core symbol ({' | '.join(sorted(core_meanings))}); {owner} redefines it as '{meaning}'",
+                                severity="error",
+                                suggestion="Use the core meaning, choose a non-core symbol, or state in the row that it is the core's quantity."))
+
+        iron_law_symbols = [
+            (r"\Bandwidth", r"\text{BW}"),
+            (r"\DataVolume", r"D_{\text{vol}}"),
+            (r"\EfficiencyHw", r"\eta_{\text{hw}}"),
+            (r"\Latency", r"L_{\text{lat}}"),
+            (r"\Operations", "O"),
+            (r"\PeakRate", r"R_{\text{peak}}"),
+        ]
+        for macro, latex in iron_law_symbols:
+            norm_macro = re.sub(r"\s+", "", macro)
+            norm_latex = re.sub(r"\s+", "", latex)
+            for vol in ["vol1", "vol2", "vol3", "vol4"]:
+                has_sym = (norm_macro in defs and vol in defs[norm_macro]) or (norm_latex in defs and vol in defs[norm_latex])
+                if not has_sym:
+                    issues.append(ValidationIssue(
+                        file=f"books/{vol}/frontmatter/notation.qmd", line=1,
+                        code="notation-registry-core-missing",
+                        message=f"Iron Law core symbol ${macro}$ is missing from {vol}'s notation table",
+                        severity="error",
+                        suggestion=f"Include ${macro}$ in {vol}'s Iron Law table so all volumes share the core foundation."))
+        return ValidationRunResult(
+            name="notation-registry",
+            description="Series notation files are mutually consistent",
+            files_checked=sum(len(p) for p in files.values()),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:  # noqa: C901
+        """Enforce bidirectional notation coverage between chapters and notation.qmd.
+
+        For each volume:
+        1. (Under-coverage) Every notation macro from mlsysim.Notation used in the
+           volume's chapters must appear in that volume's frontmatter/notation.qmd tables.
+        2. (Over-coverage / Dead notation) Every notation macro listed in that volume's
+           frontmatter/notation.qmd tables must actually be used in that volume.
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+
+        vol_dirs: Dict[str, Path] = {}
+        for v in ["vol1", "vol2", "vol3", "vol4"]:
+            v_dir = books / v
+            if v_dir.is_dir() and (root == books or root == books.parent or root == v_dir or v_dir in root.parents or root in v_dir.parents or str(root).startswith(str(v_dir))):
+                vol_dirs[v] = v_dir
+
+        project_root = books.parent
+        if str(project_root / "mlsysim") not in sys.path:
+            sys.path.insert(0, str(project_root / "mlsysim"))
+        # Fail loudly: an empty registry would report every table row as unused
+        # (this happened silently whenever numpy was missing; fixed 2026-10-08).
+        try:
+            from mlsysim.notation import Notation
+        except Exception as exc:
+            raise RuntimeError(
+                "notation coverage cannot import mlsysim (" + type(exc).__name__ + ": " + str(exc)
+                + "). Run binder with the project virtual environment on PATH."
+            ) from exc
+        all_macros = {s.macro for s in Notation.list()}
+        # Retired names compile to their canonical macro (registry `aliases:`).
+        macro_aliases = Notation.aliases()
+        all_macros |= set(macro_aliases)
+
+        issues: List[ValidationIssue] = []
+        files_checked = 0
+
+        for vol, v_dir in sorted(vol_dirs.items()):
+            not_file = v_dir / "frontmatter" / "notation.qmd"
+            if not not_file.exists():
+                continue
+            files_checked += 1
+
+            not_text = not_file.read_text(encoding="utf-8")
+            table_macros: Dict[str, int] = {}
+            sym_col = 0     # the column a table's header names "Symbol" (first by default)
+            for lineno, line in enumerate(not_text.splitlines(), 1):
+                if not line.startswith("|"):
+                    sym_col = 0
+                    continue
+                parts = [c.strip() for c in line.strip("|").split("|")]
+                heads = [re.sub(r"[*\s]", "", c).lower() for c in parts]
+                if "symbol" in heads and not any("$" in c for c in parts):
+                    sym_col = heads.index("symbol")
+                    continue
+                if not line.startswith("|---") and not line.startswith("|:-") and not line.startswith("| Symbol"):
+                    if len(parts) > sym_col:
+                        for m in re.finditer(r"\\([A-Za-z]+)", parts[sym_col]):
+                            macro_name = "\\" + m.group(1)
+                            canon = macro_aliases.get(macro_name, macro_name)
+                            if canon in all_macros or not all_macros:
+                                table_macros[canon] = lineno
+
+            vol_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+            chapter_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+            for qmd in sorted(v_dir.rglob("*.qmd")):
+                if not _is_chapter_qmd(qmd) and "frontmatter/notation" not in str(qmd):
+                    continue
+                files_checked += 1
+                qmd_text = qmd.read_text(encoding="utf-8")
+                qmd_rel = str(qmd.relative_to(project_root))
+                if "frontmatter/notation" in str(qmd):
+                    # For notation.qmd, remove symbol column so definitions do not self-match as usage
+                    clean_lines = []
+                    for ln in qmd_text.splitlines():
+                        if ln.startswith("|") and not ln.startswith("|---") and not ln.startswith("| Symbol"):
+                            parts = ln.strip("|").split("|")
+                            clean_lines.append("|".join(parts[1:]) if len(parts) > 1 else ln)
+                        else:
+                            clean_lines.append(ln)
+                    qmd_text = "\n".join(clean_lines)
+
+                in_notation = "frontmatter/notation" in str(qmd)
+                # A chapter's own symbols (front matter `notation-local: [...]`)
+                # are declared there, not in the notation table; the declaration
+                # line itself is not a use (2026-10-08).
+                local_decl = set()
+                local_line = 1
+                fm_end = 0
+                if qmd_text.startswith("---"):
+                    head = qmd_text.split("\n---", 1)[0]
+                    fm_end = head.count("\n") + 2
+                    lm = re.search(r"^notation-local:\s*\[(.*?)\]\s*$", head, re.M)
+                    if lm:
+                        local_line = head.count("\n", 0, lm.start()) + 1
+                        local_decl = {macro_aliases.get("\\" + n, "\\" + n)
+                                      for n in re.findall(r"\\?([A-Z][A-Za-z]*)", lm.group(1))}
+                local_used = set()
+                for lineno, line in enumerate(qmd_text.splitlines(), 1):
+                    if lineno <= fm_end:
+                        continue
+                    for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", line):
+                        macro_name = "\\" + m.group(1)
+                        canon = macro_aliases.get(macro_name, macro_name)
+                        if canon in local_decl:
+                            local_used.add(canon)
+                            continue
+                        if canon in all_macros:
+                            vol_usage[canon].append((qmd_rel, lineno))
+                            # A row is alive only if a chapter uses it; the notation
+                            # chapter's own notes cannot keep a row alive (2026-10-08).
+                            if not in_notation:
+                                chapter_usage[canon].append((qmd_rel, lineno))
+
+                for m in sorted(local_decl - all_macros):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-unknown",
+                        message=f"Macro {m} in notation-local is not registered in mlsysim.Notation",
+                        severity="error",
+                        suggestion=f"Register {m} in mlsysim/mlsysim/notation/data/*.yaml or remove it from notation-local",
+                    ))
+                for m in sorted(local_decl & set(table_macros.keys())):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-redundant",
+                        message=f"Macro {m} in notation-local is already in {vol}'s notation table (line {table_macros[m]})",
+                        severity="error",
+                        suggestion=f"Remove {m} from {qmd_rel} notation-local so the volume's notation table governs it",
+                    ))
+                for m in sorted((local_decl & all_macros) - local_used):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-unused",
+                        message=f"Macro {m} is declared in {qmd_rel} notation-local (line {local_line}) but is never used in the chapter",
+                        severity="error",
+                        suggestion=f"Remove unused macro {m} from {qmd_rel} notation-local",
+                    ))
+
+            # 1. Under-coverage: Used in volume, but missing from notation table
+            missing = set(vol_usage.keys()) - set(table_macros.keys())
+            for m in sorted(missing):
+                first_file, first_line = vol_usage[m][0]
+                total_uses = len(vol_usage[m])
+                issues.append(ValidationIssue(
+                    file=str(not_file.relative_to(project_root)),
+                    line=1,
+                    code="notation-coverage-missing",
+                    message=f"Macro {m} is used {total_uses} times in {vol} (first at {first_file}:{first_line}) but is missing from its notation table",
+                    severity="error",
+                    suggestion=f"Add a row for {m} to books/{vol}/frontmatter/notation.qmd",
+                ))
+
+            # 2. Over-coverage: Defined in notation table, but unused in volume
+            # 2026-10-08: a row is alive only if a chapter (not the notation chapter's own
+            # notes) uses it. Switched on per volume once its strict-notation
+            # conversion is done; until then chapters still write raw letters for
+            # rows like \Time, so the stricter test would only report noise.
+            usage_for_dead_rows = chapter_usage if vol in STRICT_CONVERTED_VOLUMES else vol_usage
+            unused = set(table_macros.keys()) - set(usage_for_dead_rows.keys()) - CORE_REQUIRED_ROWS
+            for m in sorted(unused):
+                line = table_macros[m]
+                issues.append(ValidationIssue(
+                    file=str(not_file.relative_to(project_root)),
+                    line=line,
+                    code="notation-coverage-unused",
+                    message=f"Macro {m} is defined in {vol}'s notation table (line {line}) but is never used in {vol}",
+                    severity="error",
+                    suggestion=f"Remove unused macro {m} from books/{vol}/frontmatter/notation.qmd to prevent table bloat",
+                ))
+
+        return ValidationRunResult(
+            name="notation-coverage",
+            description="Bidirectional coverage between chapters and notation tables",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+
+    def _run_heading_blank_before(self, root: Path) -> ValidationRunResult:
+        """Flag ATX headings that directly follow a non-blank line (added 2026-10-01).
+
+        Pandoc requires a blank line before a heading. Without one the heading
+        is folded into the preceding paragraph and its {#sec-...} id prints as
+        literal text, so every @sec- reference to it renders "?@sec-...".
+        342 vol3/vol4 headings lost their blank line in late-September edits
+        and the Volume III PDF printed 664 unresolved section references.
+        """
+        t0 = time.time()
+        issues: List[ValidationIssue] = []
+        files = self._qmd_files(root)
+        for f in files:
+            lines = f.read_text(encoding="utf-8").split("\n")
+            fence = False
+            for i, ln in enumerate(lines):
+                if ln.startswith("```"):
+                    fence = not fence
+                    continue
+                if fence or i == 0:
+                    continue
+                prev = lines[i - 1]
+                is_heading = re.match(r"#{1,6} \S", ln) and not prev.startswith(("---", ":::", "<!--"))
+                # A fenced div opener after a prose line is folded the same way, losing its
+                # {#fig-}/{#tbl-} id (vol4 fig-14-authority-handshake-fsm, 2026-10-01).
+                is_div = re.match(r":{3,} ?\{", ln) and not re.match(r":{3,}", prev) and not prev.startswith(("---", "```"))
+                if (is_heading or is_div) and prev.strip():
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=i + 1, code="heading-blank-before",
+                        message="heading has no blank line before it; Pandoc will fold it into the paragraph",
+                        severity="error", context=ln[:120]))
+        return ValidationRunResult(
+            name="heading-blank-before",
+            description="Headings are preceded by a blank line",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_unnumbered_sec_targets(self, root: Path) -> ValidationRunResult:
+        """Flag @sec- references whose target sits on an .unnumbered page (added 2026-10-01).
+
+        Quarto cannot number a section of an unnumbered page, so the PDF prints
+        "?@sec-...". Found as four vol4 refs into the reader guide.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        texts = {f: f.read_text(encoding="utf-8") for f in files}
+        unnumbered = set()
+        for f, txt in texts.items():
+            first = next((l for l in txt.split("\n") if l.startswith("# ")), "")
+            page_unnumbered = ".unnumbered" in first
+            for m in re.finditer(r"^#{1,6} .*\{#(sec-[A-Za-z0-9_-]+)([^}]*)\}", txt, re.M):
+                if page_unnumbered or ".unnumbered" in m.group(2):
+                    unnumbered.add(m.group(1))
+        issues: List[ValidationIssue] = []
+        for f, txt in texts.items():
+            for m in re.finditer(r"@(?:S|s)(ec-[A-Za-z0-9_-]+)", txt):
+                label = "s" + m.group(1)
+                label = label.rstrip(".-_")
+                if label in unnumbered:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=txt.count("\n", 0, m.start()) + 1,
+                        code="unnumbered-sec-target", severity="error",
+                        message=f"@{label} points into an unnumbered page; the PDF prints ?@{label}",
+                        suggestion="Name the page in words (for example 'the reader guide') instead of a numbered reference."))
+        return ValidationRunResult(
+            name="unnumbered-sec-target",
+            description="No @sec- references into unnumbered pages",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_prose_tex_leaks(self, root: Path) -> ValidationRunResult:
+        """Flag TeX habits that Pandoc Markdown prints literally (added 2026-10-01).
+
+        - A tie between word characters (``0.85~million``, ``Scope~1``) prints a
+          literal tilde; 21 such ties shipped in a vol2 chapter. Markdown
+          subscripts (``CO~2~``) are not flagged.
+        - A ``$`` closer followed by a digit is not a closer to Pandoc, so
+          ``128$\\times$32`` prints as raw text (vol2 fig-tensor-core-tiling).
+        Code blocks, inline code, ``{=latex}`` blocks and math are masked first.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            prose = re.sub(r"(?ms)^```.*?^```", blank, text)
+            prose = re.sub(r"`[^`\n]*`", blank, prose)
+            glued = [m.start() for m in re.finditer(r"[0-9A-Za-z]\$\\times\$[0-9A-Za-z]", prose)]
+            masked = re.sub(r"\$\$.*?\$\$|\$[^$\n]+\$", blank, prose, flags=re.S)
+            masked = re.sub(r"~[^~\s]{1,12}~", blank, masked)
+            ties = [m.start() + 1 for m in re.finditer(r"[A-Za-z0-9.]~[A-Za-z0-9]", masked)]
+            # A closer `$` directly followed by an inline {python} ref renders as `$` + digit
+            # (`$\\pm$`{python} x`` printed "$±$5" in vol4); a caption attribute eats `\\,`.
+            for ln_no, line in enumerate(prose.split("\n"), 1):
+                L = re.sub(r"`\{python\}[^`]*`", "\x01", line).replace("\\$", "  ").replace("$$", "  ")
+                depth = 0
+                for i, ch in enumerate(L):
+                    if ch == "$":
+                        depth ^= 1
+                        if depth == 0 and i + 1 < len(L) and L[i + 1] == "\x01":
+                            issues.append(ValidationIssue(file=self._relative_file(f), line=ln_no,
+                                code="math-closer-before-inline-ref", severity="error",
+                                message="a $ closer right before an inline {python} value renders as $ + digit; move the value outside the math or use a Unicode symbol",
+                                context=line[:120]))
+            for m in re.finditer(r'fig-(?:cap|alt)="([^"]*)"', text):
+                if re.search(r"(?<!\\)\\[,;:! _]", m.group(1)):
+                    issues.append(ValidationIssue(file=self._relative_file(f), line=text.count("\n", 0, m.start()) + 1,
+                        code="caption-attr-escape", severity="error",
+                        message="inside a fig-cap/fig-alt attribute, \\, and similar escapes lose their backslash; double it (\\\\,)",
+                        context=m.group(1)[:120]))
+            for pos, code, msg in [(g, "math-closer-digit", "a $ closer followed by a digit is not math to Pandoc; write $128 \\times 32$")
+                                   for g in glued] + [(k, "latex-tie", "LaTeX tie ~ prints a literal tilde in Markdown; use a plain space") for k in ties]:
+                line = text.count("\n", 0, pos) + 1
+                issues.append(ValidationIssue(file=self._relative_file(f), line=line, code=code,
+                                              message=msg, severity="error",
+                                              context=text.split("\n")[line - 1][:120]))
+        return ValidationRunResult(
+            name="prose-tex-leaks",
+            description="No literal TeX ties or glued math closers in prose",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_callout_ref_noun(self, root: Path) -> ValidationRunResult:
+        """A \\ref{} to a custom numbered callout must follow its noun (added 2026-10-01).
+
+        The filter prints a bare number, so "in \\ref{nbk-x} models both" reads
+        "in 7.1 models both" and "(\\ref{lhs-x})" reads "(1.4)". Accepted forms:
+        "notebook \\ref{...}", "(principle \\ref{...})", a list continuation
+        ("notebooks \\ref{a} and \\ref{b}"), and "the X principle (\\ref{...})",
+        where the noun ends the phrase just before the parenthesis. About 300
+        bare references were fixed across vol1-vol4 when this check was added.
+        """
+        t0 = time.time()
+        nouns = {"nbk": r"notebooks?|napkin[ -]math", "pri": r"principles?", "dfn": r"definitions?|invariants?",
+                 "exmp": r"examples?", "lhs": r"lighthouses?", "psp": r"perspectives?", "thrm": r"theorems?",
+                 "chk": r"checkpoints?", "cs": r"case stud(?:y|ies)", "ws": r"war stor(?:y|ies)"}
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\ref\{(" + "|".join(nouns) + r")-[^}]+\}")
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            # Blank fenced code (LEGO cell header comments name callouts but never render).
+            text = re.sub(r"(?ms)^```.*?^```", lambda c: re.sub(r"[^\n]", " ", c.group(0)), text)
+            for m in pat.finditer(text):
+                noun = nouns[m.group(1)]
+                pre = re.sub(r"\\index\{[^{}]*\}", "", text[max(0, m.start() - 160):m.start()])[-60:]
+                line_start = text.rfind("\n", 0, m.start()) + 1
+                if re.fullmatch(r"\|[^|\n]*\|?\s*", text[line_start:m.start()]) or re.search(r"\|\s*\**$", text[line_start:m.start()]):
+                    continue  # the reference is the value of a table cell (a numbered "#" column)
+                if re.search(r"(?i)(?:" + noun + r")[\s~]*$", pre):
+                    continue
+                if re.search(r"\\ref\{[^}]+\}\s*(?:,|and|or|, and)\s*$", pre):
+                    continue
+                stripped = pre.rstrip()
+                if stripped.endswith("(") and re.search(r"(?i)\b(?:" + noun + r")$", stripped[:-1].rstrip()):
+                    continue
+                issues.append(ValidationIssue(
+                    file=self._relative_file(f), line=text.count("\n", 0, m.start()) + 1,
+                    code="callout-ref-noun", severity="error",
+                    message=f"{m.group(0)} prints a bare number; put its noun directly before it",
+                    context=text[max(0, m.start() - 60):m.end()].replace("\n", " ")))
+        return ValidationRunResult(
+            name="callout-ref-noun",
+            description="Custom callout references carry their noun",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_margin_pointers(self, root: Path) -> ValidationRunResult:
+        """Margin navigation pointers follow the house form (added 2026-10-03).
+
+        Enforces the mechanical half of the Prose Or Margin decision method in
+        .claude/rules/cross-references.md: each `.margin-pointer` block cites
+        exactly one @sec- label defined in the same volume; `↩` points to an
+        earlier chapter ("is/are established in"), `↪` to a later chapter or an
+        appendix ("is/are developed / measured / operationalized / enforced in",
+        or a **Byte layout:** / **Protocol:** label), `⇄` carries **Contrast:**;
+        and a chapter has at most one pointer per target section. Whether the
+        target actually supports the pointer's claim is an editorial check this
+        scope cannot see. Added after the 2026-10-03 cross-reference audit, which
+        found ~170 malformed or duplicate pointers across the four volumes.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        block = re.compile(r"(?m)^::: \{\.column-margin \.margin-pointer\}\n\s*([^\n]+?)\s*\n:::\s*$")
+        label_re = re.compile(r"@[Ss](ec-[A-Za-z0-9_-]*[A-Za-z0-9])")
+        # The verb marks the role; "is established in @sec-x" and "the bound established in @sec-x" both qualify.
+        fwd = re.compile(r"\b(?:developed|measured|operationalized|enforced)\b[^.@]*\bin @")
+        bwd = re.compile(r"\bestablished\b[^.@]*\bin @")
+        # 2026-10-12 author ruling (Vol I): an appendix collects material for reference and
+        # is never a concept's home, so a pointer into one may say "collected for reference
+        # in". Accepted, not required, so the other volumes' pointers are unaffected.
+        appx = re.compile(r"\bcollected for reference in @")
+        homes: Dict[Path, Dict[str, object]] = {}
+
+        def home_map(vol_dir: Path) -> Dict[str, object]:
+            if vol_dir not in homes:
+                h: Dict[str, object] = {}
+                for q in vol_dir.rglob("*.qmd"):
+                    m = re.match(r"(\d\d)_", q.parent.name)
+                    # Appendix files live in backmatter/appendix_*.qmd or (vol3) appendices/.
+                    is_app = "appendix" in q.name or q.parent.name == "appendices"
+                    key: object = int(m.group(1)) if m else ("appendix" if is_app else "front")
+                    for lab in re.findall(r"\{#(sec-[A-Za-z0-9_-]+)", q.read_text(encoding="utf-8")):
+                        h[lab] = key
+                homes[vol_dir] = h
+            return homes[vol_dir]
+
+        for f in files:
+            parts = f.resolve().parts
+            vol = next((p for p in parts if re.fullmatch(r"vol[1-4]", p)), None)
+            m = re.match(r"(\d\d)_", f.parent.name)
+            if not vol or not m:
+                continue
+            ch = int(m.group(1))
+            home = home_map(Path(*parts[: parts.index(vol) + 1]))
+            text = f.read_text(encoding="utf-8")
+            seen: Dict[str, int] = {}
+            # Pointer blocks that open while another fenced div (callout, figure,
+            # layout) is still open sit inside it; the rule puts them after it.
+            nested: set = set()
+            stack: List[str] = []
+            in_code = False
+            for n_line, raw in enumerate(text.split("\n"), 1):
+                if raw.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                fence = re.match(r"^(:{3,})\s*(\S.*)?$", raw)
+                if not fence:
+                    continue
+                if fence.group(2):
+                    if "margin-pointer" in fence.group(2) and stack:
+                        nested.add(n_line + 1)
+                    stack.append(fence.group(2))
+                elif stack:
+                    stack.pop()
+            for b in block.finditer(text):
+                line = text.count("\n", 0, b.start()) + 2
+                body = b.group(1)
+                labs = label_re.findall(body)
+                problem = None
+                if line in nested:
+                    problem = "pointer sits inside a callout or other fenced div; place it after the block"
+                elif body[0] not in "↩↪⇄":
+                    problem = "pointer line must start with ↩, ↪, or ⇄"
+                elif len(labs) != 1:
+                    problem = f"pointer cites {len(labs)} @sec- labels; exactly one is required"
+                else:
+                    lab = "s" + labs[0]
+                    tgt = home.get(lab)
+                    if tgt is None:
+                        problem = f"@{lab} is not defined in {vol}"
+                    elif tgt == ch:
+                        problem = "pointer targets its own chapter; same-chapter references stay in prose"
+                    elif body[0] == "↩" and not (isinstance(tgt, int) and tgt < ch):
+                        problem = "↩ must point to an earlier chapter"
+                    elif body[0] == "↪" and not (tgt == "appendix" or (isinstance(tgt, int) and tgt > ch)):
+                        problem = "↪ must point to a later chapter or an appendix"
+                    elif body[0] == "↩" and not bwd.search(body):
+                        problem = '↩ pointer wording uses "established in"'
+                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not (fwd.search(body) or (tgt == "appendix" and appx.search(body))):
+                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in" (an appendix target may use "collected for reference in")'
+                    elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
+                        problem = "⇄ pointer must open with **Contrast:**"
+                    elif re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body) and tgt != "appendix":
+                        # 2026-10-04: labeled pointers name an appendix wire format or protocol.
+                        problem = "**Byte layout:** / **Protocol:** pointers must target an appendix section"
+                    elif re.search(r"\*\*(Byte layout|Protocol):\*\*", body) and not re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body):
+                        problem = "**Byte layout:** / **Protocol:** labels go only on ↪ pointers, right after the arrow"
+                    elif lab in seen:
+                        problem = f"second pointer to @{lab} in this chapter (first at line {seen[lab]})"
+                    seen.setdefault(lab, line)
+                if problem:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=line, code="margin-pointer",
+                        severity="error", message=problem, context=body[:120]))
+        return ValidationRunResult(
+            name="margin-pointers",
+            description="Margin navigation pointers follow the house form",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _notation_strict_inputs(self, root: Path):
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()), root / "books")
+        repo = books.parent
+        from cli.checks import notation_strict as ns
+        qmds = [f for f in sorted(books.glob("vol*/**/*.qmd")) if f.parent.name not in VOLUME_DIRS]
+        files = qmds + sorted(books.glob("vol*/**/*_quizzes.json"))
+        files = [f for f in files if "_build" not in f.parts]
+        return repo, ns, files
+
+    def _run_notation_strict(self, root: Path) -> ValidationRunResult:
+        """Strict notation ratchet (added 2026-10-08).
+
+        Every raw symbol in math is fingerprinted (symbol + its math span). A
+        commit may remove fingerprints but never add one beyond the stored
+        baseline, so the book can only move toward full registry notation.
+        `./binder/binder notation report <file>` explains what to do.
+        """
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        violations = []
+        for f in files:
+            violations += ns.scan_path(f, repo, reg)
+        current = ns.baseline_of(violations)
+        base_path = repo / "binder" / "tools" / "audit" / "data" / "notation_strict_baseline.json"
+        baseline = json.loads(base_path.read_text(encoding="utf-8")) if base_path.exists() else {}
+        worse = ns.ratchet(current, baseline)
+        issues: List[ValidationIssue] = []
+        by_fp = {}
+        for v in violations:
+            by_fp.setdefault((v.file, v.fingerprint()), v)
+        for f, fps in sorted(worse.items()):
+            for fp in fps:
+                v = by_fp[(f, fp)]
+                issues.append(ValidationIssue(
+                    file=f, line=v.line, code="notation-strict-new-raw-symbol",
+                    message=(f"{v.raw} is used here but not declared for this chapter (add a row to the volume's notation chapter, or list it in the chapter's notation-local)"
+                             if v.kind == "out-of-scope" else
+                             f"{v.raw} is a retired macro name: write the canonical one"
+                             if v.kind == "alias" else
+                             f"new raw symbol {v.raw} ({v.kind}) in math: every symbol must be a registered macro"),
+                    context=v.math[:160],
+                    suggestion=("candidates: " + ", ".join("\\" + c["macro"] + " (" + c["meaning"] + ")" for c in v.suggestions[:4]))
+                               if v.suggestions else "register a symbol; see ./binder/binder notation report " + f,
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-strict",
+            description="No new raw symbols in math (ratchet against the baseline)",
+            files_checked=len(files), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_collisions(self, root: Path) -> ValidationRunResult:
+        """One letter, one meaning per chapter (added 2026-10-08)."""
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for f in files:
+            rel = f.relative_to(repo)
+            if len(rel.parts) < 2 or rel.parts[1] not in COLLISION_CHECKED_VOLUMES:
+                continue
+            if rel.as_posix().endswith(("frontmatter/notation.qmd", "glossary/glossary.qmd")):
+                continue        # notation chapter and glossary: independent entries, every meaning by design
+            checked += 1
+            # an appendix of derivations: each ### derivation keeps its home chapter's notation
+            level = 3 if "/backmatter/appendix_" in rel.as_posix() else 2
+            for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg, level):
+                issues.append(ValidationIssue(
+                    file=str(rel), line=min(c["lines"]), code="notation-glyph-collision",
+                    message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in the section "
+                            f"'{c['section'][:60]}': a reader sees one letter mean two things",
+                    suggestion="give one of them a distinguishing subscript (a new entry), or use one meaning here",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-collisions", description="No chapter uses two symbols that render alike",
+            files_checked=checked, issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
+        """Every registry entry follows the naming and field conventions and is used in the book."""
+        t0 = time.time()
+        repo, _, files = self._notation_strict_inputs(root)
+        if str(repo / "mlsysim") not in sys.path:
+            sys.path.insert(0, str(repo / "mlsysim"))
+        from mlsysim.notation import Notation
+        from mlsysim.notation.types import convention_problems
+        issues: List[ValidationIssue] = []
+        aliases = Notation.aliases()
+        used_macros = set(CORE_REQUIRED_ROWS)
+        macro_pat = re.compile(r"\\([A-Z][A-Za-z0-9]*)")
+        for f in files:
+            if f.name == "notation.qmd":
+                continue
+            text = f.read_text(encoding="utf-8")
+            text = re.sub(r"(?m)^notation-local:\s*\[.*?\]\s*$", "", text)
+            for m in macro_pat.findall(text):
+                raw = "\\" + m
+                used_macros.add(aliases.get(raw, raw))
+        for s_ in Notation.list():
+            probs = list(convention_problems(s_))
+            if probs:
+                issues.append(ValidationIssue(file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
+                                              code="notation-convention",
+                                              message=f"{s_.macro}: " + "; ".join(probs),
+                                              rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+            if s_.macro not in used_macros:
+                issues.append(ValidationIssue(
+                    file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
+                    code="notation-registry-unused",
+                    message=f"{s_.macro} is defined in {s_.domain}.yaml but is never used in any chapter or quiz",
+                    suggestion=f"Remove unused macro {s_.macro} from mlsysim/mlsysim/notation/data/{s_.domain}.yaml and run `python3 tools/build_notation.py`",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        macros_tex = repo / "books" / "shared" / "_includes" / "_macros.tex"
+        if macros_tex.exists():
+            tex_macros = set(re.findall(r"\\newcommand\{\\([A-Za-z0-9]+)\}", macros_tex.read_text(encoding="utf-8")))
+            expected_tex = {s_.macro.lstrip("\\") for s_ in Notation.list()} | {k.lstrip("\\") for k in aliases.keys()} | {"Glyph"}
+            if tex_macros != expected_tex:
+                diff = sorted((tex_macros ^ expected_tex))[:5]
+                issues.append(ValidationIssue(
+                    file="books/shared/_includes/_macros.tex", line=1,
+                    code="notation-macros-unsynced",
+                    message=f"_macros.tex is out of sync with mlsysim/notation/data/*.yaml (e.g., {', '.join(diff)})",
+                    suggestion="Run `python3 tools/build_notation.py` and `python3 tools/generate_notation_stub.py`",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-conventions", description="Registry entries follow conventions and are used in the book",
+            files_checked=len(Notation), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_forms(self, root: Path) -> ValidationRunResult:
+        """Flag notation forms the Notation chapter rules out, inside math spans.
+
+        Settled in the 2026-10-01 notation pass (see .claude/rules/notations.md):
+        subscripts use \\text{} (not \\mathrm/\\rm), event probabilities use \\Pr
+        and distributions lowercase p, big-O is \\mathcal{O}, transpose is ^T (vol4: ^\\top, D9), and
+        grouped digits inside math use {,}. Skips Python cells, inline
+        `{python}` references, TikZ blocks, and the notation files themselves
+        (matplotlib labels inside Python cells legitimately use \\mathrm).
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+        rules = [
+            ("mathrm-subscript", re.compile(r"_\{?\s*(?:\\mathrm\{|\\rm\s)"),
+             "subscript uses \\mathrm/\\rm; write \\text{...}"),
+            ("capital-P-probability", re.compile(r"(?<![A-Za-z0-9\\_{])P\((?!t\)|N-1\)|N_\{\\text\{workers\}\}\)|\\WorkerCountWorkers\)|s\)|s_0\)|\\operatorname)"),
+             "probability written P(...); use \\Pr(...) for events or p(...) for distributions"),
+            ("bare-big-O", re.compile(r"(?<![A-Za-z\\_{}])(?<!\\mathcal )O\((?=\s*(?:1|n|N|S|d|\\log|log|k|m|B|P|D)\b)"),
+             "asymptotic order written O(...); use \\mathcal{O}(...)"),
+            ("transpose-top", re.compile(r"\^\{?\s*\\(?:top|mathsf\{T\})"),
+             "transpose written ^\\top or ^{\\mathsf T}; use ^T"),
+            ("transpose-T", re.compile(r"(?:\\(?:mathbf|boldsymbol)\{[^{}]*\}|[\])])\^\{?T\}?(?![A-Za-z{])"),
+             "vol4 writes transpose ^\\top (D9); convert ^T"),
+            ("math-thousands-comma", re.compile(r"(?<![\d{])\d{1,3},\d{3}(?!\d)"),
+             "raw comma inside math renders as '4, 096'; write 4{,}096"),
+        ]
+        issues: List[ValidationIssue] = []
+        files = 0
+        for qmd in sorted(books.glob("vol*/**/*.qmd")):
+            if not _is_chapter_qmd(qmd):
+                continue
+            files += 1
+            text = qmd.read_text(encoding="utf-8")
+            masked = re.sub(r"^```.*?^```", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S | re.M)
+            masked = re.sub(r"`\{python\}[^`]*`", "", masked)
+            masked = masked.replace("\\$", "  ")  # escaped dollar signs are currency, not math delimiters
+            for m in re.finditer(r"\$\$(.+?)\$\$|\$([^$\n]+?)\$", masked, flags=re.S):
+                span = m.group(1) or m.group(2)
+                line = masked.count("\n", 0, m.start()) + 1
+                for code, pat, msg in rules:
+                    # D9 (2026-10-01): transpose form is per volume; vol4 keeps ^\\top.
+                    if code == "transpose-top" and "/vol4/" in str(qmd):
+                        continue
+                    if code == "transpose-T" and "/vol4/" not in str(qmd):
+                        continue
+                    if pat.search(span):
+                        issues.append(ValidationIssue(
+                            file=str(qmd.relative_to(books.parent)), line=line,
+                            code=f"notation-{code}", message=msg, severity="error",
+                            context=span.strip()[:160],
+                        ))
+        return ValidationRunResult(
+            name="notation-forms",
+            description="Banned notation forms inside math (Notation chapter rules)",
+            files_checked=files, issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_mitpress_latin_running_text(self, root: Path) -> ValidationRunResult:
         """Prefer English over Latin abbreviations in running prose (§10.6).
 
@@ -12138,6 +13560,36 @@ class ValidateCommand:
         return self._run_audit_check(
             root, "audit.checks.alt_text_style",
             "alt-text-style", "alt-text style compliance (§10.12)",
+        )
+
+    def _run_figure_print_scale(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
+        """figures --scope print-scale: printed size of matplotlib body figures.
+
+        Executes each chapter's python cells in a subprocess and measures every
+        figure inside a ``#fig-`` div; see ``cli/checks/figure_print_scale.py``.
+        Positional files (pre-commit) narrow the run to those chapters.
+        """
+        try:
+            from cli.checks import figure_print_scale as fps
+        except ImportError:
+            from binder.cli.checks import figure_print_scale as fps
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "files", None):
+            candidates = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            candidates = [q.resolve() for q in candidates if q.suffix == ".qmd" and q.is_file()]
+        else:
+            candidates = self._qmd_files(root)
+        qmds = [q for q in candidates if "```{python}" in q.read_text(encoding="utf-8")]
+        issues = [ValidationIssue(**f) for f in fps.check_chapters(qmds, repo_root)]
+        return ValidationRunResult(
+            name="figure-print-scale",
+            description="Matplotlib print scale and font floor (limits from mlsysim.viz.style)",
+            files_checked=len(qmds), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
@@ -12163,7 +13615,8 @@ class ValidateCommand:
         for img in image_files:
             try:
                 bad = check_file(img, strict=False, verbose=False, fix=False, show_progress=False)
-            except Exception:
+            except Exception as exc:  # an image Pillow cannot open is itself a finding
+                issues.append(self._checker_error(self._relative_file(img), 0, "formats", exc))
                 continue
             for tup in bad:
                 fp, msg = tup[0], tup[1]
@@ -12401,93 +13854,41 @@ class ValidateCommand:
     # check summary table.
     # ------------------------------------------------------------------
 
-    def _run_index_anti_patterns(self, root: Path) -> ValidationRunResult:
-        """index --scope anti-patterns: \\index{} anti-patterns from §9."""
-        from cli.commands._index_checks import check_anti_patterns
+    def _run_index_module_check(self, root: Path, check: str, name: str,
+                                description: str) -> ValidationRunResult:
+        """Run one ``_index_checks.<check>`` function and wrap its findings."""
+        from cli.commands import _index_checks
 
         t0 = time.time()
-        raw = check_anti_patterns(root)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        target = root / "books" if (root / "books").is_dir() else root
-        return ValidationRunResult(
-            name="index-anti-patterns",
-            description="\\index{} anti-patterns (corpus-level)",
-            files_checked=len(list(target.rglob("*.qmd"))),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        raw = getattr(_index_checks, check)(root)
+        issues = self._issues_from_records(
+            raw, file_map=lambda f: self._display_path(f, root))
+        return self._result(name, description,
+                            len(_index_checks._iter_qmd_files(root)), issues, t0)
+
+    def _run_index_anti_patterns(self, root: Path) -> ValidationRunResult:
+        """index --scope anti-patterns: \\index{} anti-patterns from §9."""
+        return self._run_index_module_check(
+            root, "check_anti_patterns", "index-anti-patterns",
+            "\\index{} anti-patterns (corpus-level)")
 
     def _run_index_tag_placement(self, root: Path) -> ValidationRunResult:
         """index --scope tag-placement: \\index{} not inside bold/italic/code/heading."""
-        from cli.commands._index_checks import check_tag_placement
-
-        t0 = time.time()
-        raw = check_tag_placement(root)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        target = root / "books" if (root / "books").is_dir() else root
-        return ValidationRunResult(
-            name="index-tag-placement",
-            description="\\index{} forbidden placement (bold/code/headings)",
-            files_checked=len(list(target.rglob("*.qmd"))),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_index_module_check(
+            root, "check_tag_placement", "index-tag-placement",
+            "\\index{} forbidden placement (bold/code/headings)")
 
     def _run_index_xref_resolves(self, root: Path) -> ValidationRunResult:
         """index --scope xref-resolves: every |see / |seealso resolves."""
-        from cli.commands._index_checks import check_xref_resolves
-
-        t0 = time.time()
-        raw = check_xref_resolves(root)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        target = root / "books" if (root / "books").is_dir() else root
-        return ValidationRunResult(
-            name="index-xref-resolves",
-            description="\\index{} see/seealso target resolution",
-            files_checked=len(list(target.rglob("*.qmd"))),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_index_module_check(
+            root, "check_xref_resolves", "index-xref-resolves",
+            "\\index{} see/seealso target resolution")
 
     def _run_index_encap_conflicts(self, root: Path) -> ValidationRunResult:
         """index --scope encap-conflicts: no direct \\index{X} and \\index{X|see{Y}} on same term."""
-        from cli.commands._index_checks import check_makeindex_encap_conflicts
-
-        t0 = time.time()
-        raw = check_makeindex_encap_conflicts(root)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        target = root / "books" if (root / "books").is_dir() else root
-        return ValidationRunResult(
-            name="index-encap-conflicts",
-            description="\\index{} makeindex encap conflict check",
-            files_checked=len(list(target.rglob("*.qmd"))),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_index_module_check(
+            root, "check_makeindex_encap_conflicts", "index-encap-conflicts",
+            "\\index{} makeindex encap conflict check")
 
     def _run_index_placement_contexts(self, root: Path) -> ValidationRunResult:
         """index --scope forbidden-contexts: \\index{} in code / math / attribute strings.
@@ -12513,32 +13914,9 @@ class ValidateCommand:
 
     def _run_index_bold_definitions(self, root: Path) -> ValidationRunResult:
         """index/prose --scope bold-definitions: body-prose bold ⟺ \\index{!definition} co-location."""
-        from cli.commands._index_checks import check_bold_definitions
-
-        t0 = time.time()
-        raw = check_bold_definitions(root)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        target = root / "books" if (root / "books").is_dir() else root
-        if target.is_file():
-            files_checked = 1
-        elif (target / "books").is_dir():
-            files_checked = len(list((target / "books").rglob("*.qmd")))
-        else:
-            files_checked = len(list(target.rglob("*.qmd")))
-
-        return ValidationRunResult(
-            name="bold-definitions",
-            description="\\index{!definition} bold co-location and uniqueness per emphasis-bold.md",
-            files_checked=files_checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_index_module_check(
+            root, "check_bold_definitions", "bold-definitions",
+            "\\index{!definition} bold co-location and uniqueness per emphasis-bold.md")
 
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
         """code --scope lego-dead-code: LEGO variables defined but never used.
@@ -12550,27 +13928,7 @@ class ValidateCommand:
         t0 = time.time()
         paths = [root]
         files = qmd_files(paths)
-        violations = audit_paths(paths)
-        issues = []
-        for violation in violations:
-            file_path = Path(violation.file)
-            try:
-                rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
-            except ValueError:
-                try:
-                    rel = str(file_path.resolve().relative_to(root.resolve()))
-                except ValueError:
-                    rel = violation.file
-            issues.append(
-                ValidationIssue(
-                    file=rel,
-                    line=violation.line,
-                    code=violation.code,
-                    message=violation.message,
-                    severity="error",
-                    context=violation.context,
-                )
-            )
+        issues = self._issues_from_violations(audit_paths(paths))
         return ValidationRunResult(
             name="lego-dead-code",
             description="LEGO variables defined but never referenced",
@@ -12581,49 +13939,13 @@ class ValidateCommand:
 
     def _run_lego_prose_literals(self, root: Path) -> ValidationRunResult:
         """code --scope lego-prose-literals: walkthrough prose must not hardcode computed operands."""
-        from cli.commands._registry_checks import check_lego_prose_literals, repo_root_from_here
-
-        t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_lego_prose_literals(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="lego-prose-literals",
-            description=f"LEGO walkthrough prose literal scan ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_file_check(
+            root, "check_lego_prose_literals", "lego-prose-literals", "LEGO walkthrough prose literal scan")
 
     def _run_lego_prose_units(self, root: Path) -> ValidationRunResult:
         """code --scope lego-prose-units: units after {python} *_str in prose."""
-        from cli.commands._registry_checks import check_lego_prose_units, repo_root_from_here
-
-        t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_lego_prose_units(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="lego-prose-units",
-            description=f"LEGO prose unit-after-_str scan ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_file_check(
+            root, "check_lego_prose_units", "lego-prose-units", "LEGO prose unit-after-_str scan")
 
     def _run_rendered_doubled_words(self, root: Path) -> ValidationRunResult:
         """code --scope rendered-doubled-words: doubled words after substitution.
@@ -12631,75 +13953,29 @@ class ValidateCommand:
         Source-level scans cannot see these: in ```{python} X.fps_str` FPS`` the
         source holds one "FPS" and the render shows two. Executes LEGO cells.
         """
-        from cli.commands._registry_checks import (
-            check_rendered_doubled_words,
-            repo_root_from_here,
-        )
-
-        t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_rendered_doubled_words(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="rendered-doubled-words",
-            description=f"doubled words in substituted prose ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_file_check(
+            root, "check_rendered_doubled_words", "rendered-doubled-words", "doubled words in substituted prose")
 
     def _run_lego_load_pint(self, root: Path) -> ValidationRunResult:
         """code --scope lego-load-pint: physical *_value must use ureg/registry."""
-        from cli.commands._registry_checks import check_lego_load_pint, repo_root_from_here
-
-        t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_lego_load_pint(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="lego-load-pint",
-            description=f"LEGO pint LOAD lint ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._run_registry_file_check(
+            root, "check_lego_load_pint", "lego-load-pint", "LEGO pint LOAD lint")
 
     def _run_lego_equations(self, root: Path) -> ValidationRunResult:
         """code --scope lego-equations: numeric A/B=C coherence in prose."""
-        from cli.commands._registry_checks import check_lego_equations, repo_root_from_here
+        return self._run_registry_file_check(
+            root, "check_lego_equations", "lego-equations", "LEGO equation coherence")
 
-        t0 = time.time()
-        repo = repo_root_from_here()
-        qmd_files = self._qmd_files(root)
-        raw = check_lego_equations(repo, paths=qmd_files)
-        issues = [
-            ValidationIssue(
-                file=i.file, line=i.line, code=i.code,
-                message=i.message, severity=i.severity,
-            )
-            for i in raw
-        ]
-        return ValidationRunResult(
-            name="lego-equations",
-            description=f"LEGO equation coherence ({len(qmd_files)} files)",
-            files_checked=len(qmd_files),
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+    def _run_lego_cell_architecture(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-cell-architecture: single-class and class-first placement."""
+        return self._run_registry_file_check(
+            root, "check_lego_cell_architecture", "lego-cell-architecture", "LEGO cell architecture scan")
+
+    def _run_lego_stage4_purity(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-stage4-purity: Stage 4 display string purity."""
+        return self._run_registry_file_check(
+            root, "check_lego_stage4_purity", "lego-stage4-purity", "LEGO Stage 4 purity scan")
+
 
     # Binary units are banned in rendered prose (prose-craft.md: "Never binary
     # units in prose. Write GB and TB, not GiB or TiB"). Exactly one helper is
@@ -12709,35 +13985,6 @@ class ValidateCommand:
     # unit prints the binary unit itself.
     BINARY_UNITS = ("GiB", "MiB", "KiB", "TiB")
     BRANDED_HELPER = "fmt_memory_capacity"
-
-    # Known leaks parked pending the book-wide memory-unit convention change
-    # (2026-08-13 ruling: store and print capacity in true decimal bytes, so an
-    # A100 is 80e9 B, not 80 GiB). Fixing these piecemeal now would convert
-    # against a registry that still stores binary magnitudes, so the values
-    # would be wrong twice. The convention change resolves all four at the root
-    # and DELETES this allowlist; it must not outlive that commit.
-    #
-    # Keyed by (chapter-relative path, exact call text) so it survives line
-    # drift but not a change to the call itself: edit the call and the check
-    # fires again, which is the intent.
-    BINARY_UNIT_ALLOWLIST = {
-        (
-            "vol1/backmatter/appendix_machine.qmd",
-            "fmt_qty(tpuv5_cap, GiB, precision=0, commas=False)",
-        ),
-        (
-            "vol1/backmatter/appendix_machine.qmd",
-            "fmt_qty(tpuv5_sram, MiB, precision=0, commas=False)",
-        ),
-        (
-            "vol1/frameworks/frameworks.qmd",
-            "fmt_memory(fp16, unit=GiB, commas=False)",
-        ),
-        (
-            "vol1/frameworks/frameworks.qmd",
-            "fmt_memory(remaining, unit=GiB, commas=False)",
-        ),
-    }
 
     def _run_binary_units_in_output(self, root: Path) -> ValidationRunResult:
         """Flag formatter calls that leak binary units into rendered output.
@@ -12770,8 +14017,6 @@ class ValidateCommand:
                     if not um:
                         continue
                     rel = self._relative_file(file)
-                    if (rel, m.group(0)) in self.BINARY_UNIT_ALLOWLIST:
-                        continue
                     unit = um.group(1)
                     decimal = {"GiB": "GB", "MiB": "MB", "KiB": "KB", "TiB": "TB"}[unit]
                     issues.append(ValidationIssue(
@@ -13097,7 +14342,7 @@ class ValidateCommand:
         approved_layout_vectors = {
             ("vol1/frontmatter/_conventions.qmd", (17, 85)),
             ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/ml_lifecycle/ml_lifecycle.qmd", (16, 44, 50)),
         }
 
         for file in files:
@@ -13322,7 +14567,6 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        block_start = re.compile(r"^```")
         raw_latex_start = re.compile(r"^\\\[|^\$\$|^\\begin\{")
         raw_latex_end = re.compile(r"^\\\]|^\$\$|^\\end\{")
 
@@ -13338,12 +14582,19 @@ class ValidateCommand:
                     continue
                 if in_code:
                     continue
-                # Skip raw LaTeX blocks (display math, \begin{} environments)
+                # Skip raw LaTeX blocks (display math, \begin{} environments).
+                # A block that opens and closes on one line (`$$ x $$`) must not
+                # switch the state on, or the prose after it goes unscanned.
                 if raw_latex_start.match(stripped):
-                    in_raw_latex = True
+                    one_line = (
+                        (stripped.startswith("$$") and stripped.count("$$") >= 2)
+                        or (stripped.startswith("\\[") and "\\]" in stripped)
+                        or (stripped.startswith("\\begin{") and "\\end{" in stripped)
+                    )
+                    in_raw_latex = not one_line
                     continue
                 if in_raw_latex:
-                    if raw_latex_end.match(stripped):
+                    if raw_latex_end.match(stripped) or stripped.endswith(("$$", "\\]")):
                         in_raw_latex = False
                     continue
 
@@ -13360,6 +14611,7 @@ class ValidateCommand:
                             ),
                             severity="error",
                             context=context,
+                            suggestion=r"\${python} x_str` → \$`{python} x_str`",
                         )
                     )
 
@@ -13445,94 +14697,49 @@ class ValidateCommand:
     # Post-build: scan extracted PDF text for "UserWarning" strings that
     # may indicate a Python warning leaked into the rendered output.
 
-    def _run_pdf_warnings(
-        self,
-        root: Path,
-        *,
-        vol1: bool = False,
-        vol2: bool = False,
-        vol3: bool = False,
-        vol4: bool = False,
-        tinytorch: bool = False,
-        log_path: Optional[str] = None,
-    ) -> ValidationRunResult:
-        """Scan PDF text for UserWarning strings (post-build audit).
-
-        Args:
-            root: Scoping path.
-            vol1: True if Volume I explicitly requested.
-            vol2: True if Volume II explicitly requested.
-            vol3: True if Volume III explicitly requested.
-            vol4: True if Volume IV explicitly requested.
-            tinytorch: True if TinyTorch volume explicitly requested.
-            log_path: Optional path to LaTeX build log.
-
-        Returns:
-            ValidationRunResult containing any detected UserWarning issues.
-        """
-        t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
-        quarto_dir = repo_root  / "books"
-        issues: List[ValidationIssue] = []
-
-        volumes = self._resolve_pdf_volumes(
-            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
-        )
-
+    def _run_pdf_warnings(self, root: Path, **flags: bool) -> ValidationRunResult:
+        """pdf --scope pdf-warnings: scan built PDF text for leaked Python ``UserWarning`` lines."""
         import shutil
+
+        from cli.commands._pdf_checks import _pdftotext, default_pdf_path
+
+        t0 = time.time()
+        repo_root, quarto_dir, volumes = self._pdf_targets(root, flags)
         if shutil.which("pdftotext") is None:
-            issues.append(ValidationIssue(
-                file="", line=0, code="pdftotext_missing",
-                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
-                severity="warning",
-            ))
-            return ValidationRunResult(
-                name="pdf-warnings",
-                description="PDF UserWarning scan",
-                files_checked=0,
-                issues=issues,
-                elapsed_ms=int((time.time() - t0) * 1000),
-            )
+            return self._result(
+                "pdf-warnings", "PDF UserWarning scan", 0,
+                [self._missing_tool("pdftotext_missing", "pdftotext",
+                                    "Install poppler (brew install poppler), then rerun.")], t0)
 
-        from cli.commands._pdf_checks import PDF_BY_VOLUME
-
+        issues: List[ValidationIssue] = []
         checked = 0
         for vol in volumes:
-            pdf_name = PDF_BY_VOLUME.get(vol)
-            if not pdf_name:
-                continue
-            pdf_path = quarto_dir / "_build" / f"pdf-{vol}" / pdf_name
+            pdf_path = default_pdf_path(quarto_dir, vol)
             if not pdf_path.is_file():
+                issues.append(self._missing_pdf(pdf_path, vol, repo_root))
+                continue
+            try:
+                body = _pdftotext(pdf_path)
+            except RuntimeError as exc:
+                issues.append(self._checker_error(self._pdf_rel(pdf_path, repo_root), 0,
+                                                  "pdf-warnings", exc))
                 continue
             checked += 1
-            try:
-                proc = subprocess.run(
-                    ["pdftotext", "-layout", str(pdf_path), "-"],
-                    capture_output=True, text=True,
-                )
-                body = proc.stdout or ""
-            except Exception:
-                continue
-
             for line_num, line in enumerate(body.splitlines(), 1):
                 if "UserWarning" in line:
-                    context = line.strip()[:200]
                     issues.append(ValidationIssue(
-                        file=str(pdf_path.relative_to(repo_root)),
+                        file=self._pdf_rel(pdf_path, repo_root),
                         line=line_num,
                         code="pdf_userwarning",
-                        message=f"UserWarning text found in {vol} PDF output",
+                        message=f"UserWarning text found in {vol} PDF output (line = pdftotext line)",
                         severity="warning",
-                        context=context,
+                        context=line.strip()[:200],
+                        suggestion="Find the LEGO cell that emits the warning and fix or silence it at "
+                                   "the source; ./binder/binder check code --scope exec runs the cells.",
                     ))
 
-        return ValidationRunResult(
-            name="pdf-warnings",
-            description=f"PDF UserWarning scan ({', '.join(volumes)})",
-            files_checked=checked,
-            issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
+        return self._result("pdf-warnings", f"PDF UserWarning scan ({', '.join(volumes)})",
+                            checked, issues, t0)
 
     # ------------------------------------------------------------------
     # Check 6: rendered {python} leak check  (code group, default=False)
@@ -13546,6 +14753,18 @@ class ValidateCommand:
     # Match {python} inside <code>...</code> — these are legitimate.
     _CODE_TAG_PYTHON = re.compile(r"<code[^>]*>.*?\{python\}.*?</code>", re.DOTALL)
 
+    def _missing_html_audit(self, html_root: Path, repo_root: Path) -> ValidationIssue:
+        """Issue for a rendered-HTML scope whose cached html-audit build is absent."""
+        rel = self._pdf_rel(html_root, repo_root)
+        return ValidationIssue(
+            file=rel,
+            line=0,
+            code="html_audit_missing",
+            message=f"No cached HTML build at {rel}; this scope reads rendered HTML, so nothing was checked.",
+            severity="error",
+            suggestion="Populate the cache first: binder/tools/audit/fmt/render_html.sh",
+        )
+
     def _run_rendered_python_leak(self, root: Path) -> ValidationRunResult:
         """Scan built HTML for literal {python} that leaked through Quarto."""
         t0 = time.time()
@@ -13554,22 +14773,8 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         if not html_audit_dir.is_dir():
-            issues.append(ValidationIssue(
-                file="", line=0, code="html_audit_missing",
-                message=(
-                    "html-audit build directory not found at "
-                    f"{html_audit_dir.relative_to(repo_root)}. "
-                    "Run a build first."
-                ),
-                severity="warning",
-            ))
-            return ValidationRunResult(
-                name="rendered-python-leak",
-                description="Literal {python} leak scan (no build found)",
-                files_checked=0,
-                issues=issues,
-                elapsed_ms=int((time.time() - t0) * 1000),
-            )
+            return self._result("rendered-python-leak", "Literal {python} leak scan", 0,
+                                [self._missing_html_audit(html_audit_dir, repo_root)], t0)
 
         html_files = sorted(html_audit_dir.rglob("*.html"))
         for html_file in html_files:
@@ -13578,12 +14783,13 @@ class ValidateCommand:
             except OSError:
                 continue
 
-            # Remove {python} occurrences inside <code> tags (legitimate)
-            cleaned = self._CODE_TAG_PYTHON.sub("", content)
+            # Blank {python} inside <code> tags (legitimate) without shifting
+            # offsets, so line numbers still index into the file.
+            cleaned = self._CODE_TAG_PYTHON.sub(
+                lambda c: re.sub(r"[^\n]", " ", c.group(0)), content)
 
             for m in self._RENDERED_PYTHON_LEAK.finditer(cleaned):
-                # Find approximate line number
-                line_num = content[:m.start()].count("\n") + 1
+                line_num = cleaned.count("\n", 0, m.start()) + 1
                 start_ctx = max(0, m.start() - 40)
                 end_ctx = min(len(cleaned), m.end() + 40)
                 context = cleaned[start_ctx:end_ctx].replace("\n", " ").strip()[:120]

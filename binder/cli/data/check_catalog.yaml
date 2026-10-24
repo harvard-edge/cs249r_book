@@ -1,0 +1,575 @@
+groups:
+  epub:
+    group: epub
+    title: EPUB Validation
+    description: EPUB source hygiene, smoke reader validation, and epubcheck
+    deep_dive: binder/cli/README.md → "EPUB Checks — Two Layers, One CLI Surface"
+    scopes:
+    - name: hygiene
+      when: Every commit (pre-commit)
+      cost: <1s, scans source
+      invariant: Source XML & BibTeX hygiene
+      needs: —
+    - name: smoke
+      when: After build, for reader compat
+      cost: ~200ms, scans built EPUB
+      invariant: Reader compatibility
+      needs: —
+    - name: epubcheck
+      when: CI, before release
+      cost: ~7s per volume
+      invariant: Strict IDPF/W3C EPUB conformance
+      needs: Java + epubcheck
+    error_codes:
+    - code: svg-c0
+      trigger: C0 control char in SVG aria-label
+      fix: Strip in Python plot title; or --fix
+      message_template: C0 control character detected in SVG aria-label attribute
+    - code: svg-dupe-marker
+      trigger: Duplicate <marker id=…/> in one SVG
+      fix: Delete duplicate; or --fix
+      message_template: Duplicate marker id detected in SVG definition
+    - code: bib-url-escape-underscore
+      trigger: \_ in bib url= or http doi=
+      fix: \_ → _ in the .bib; or --fix
+      message_template: Escaped underscore in bib url or doi field
+    - code: bib-url-escape-percent
+      trigger: \% in bib URL field
+      fix: \% → % in the .bib; or --fix
+      message_template: Escaped percent in bib url field
+    - code: bib-url-raw-angle
+      trigger: raw < or > in bib URL field
+      fix: '%3C / %3E encode; or --fix'
+      message_template: Raw angle bracket (< or >) in bib url field
+    - code: smoke-css-custom-property-decl
+      trigger: '--var-name: value; in packaged CSS'
+      fix: Inline the literal value
+      message_template: CSS custom property declaration found in packaged EPUB CSS
+    - code: smoke-css-custom-property-use
+      trigger: var(--x) in packaged CSS
+      fix: Inline the literal value
+      message_template: CSS custom property usage found in packaged EPUB CSS
+    - code: smoke-external-resource
+      trigger: src=/<link href= to http(s)://
+      fix: Package the asset or drop
+      message_template: External network resource reference found in EPUB markup
+    - code: RSC-016 (FATAL)
+      trigger: XML malformed (--, <br>, C0)
+      fix: epub_postprocess sanitizes; fix at source if it recurs
+      message_template: Malformed XML syntax in packaged XHTML document
+    - code: RSC-005
+      trigger: Malformed markup (alt on wrong elem)
+      fix: Fix the emitter in the Quarto filter
+      message_template: Disallowed attribute or invalid element nesting in XHTML
+    - code: RSC-020
+      trigger: Invalid URL syntax in href
+      fix: Same as bib-url-* above
+      message_template: Invalid URI or percent-encoding in href attribute
+    - code: RSC-012
+      trigger: Broken fragment ID
+      fix: resolve_cross_references.py handles this
+      message_template: Target anchor ID referenced by fragment does not exist
+    - code: OPF-014
+      trigger: Missing mathml / other OPF property
+      fix: epub_postprocess aligns nav mathml property
+      message_template: Required OPF manifest item property missing
+    common_invocations:
+    - - ./binder/binder check epub
+      - '# hygiene + smoke + epubcheck'
+    - - ./binder/binder check epub --scope hygiene
+      - '# source-only, fast'
+    - - ./binder/binder check epub --scope hygiene --fix
+      - '# auto-repair source issues'
+    - - ./binder/binder check epub --scope epubcheck --max-fatal 0 --max-errors 0
+      - '# CI-style strict gating'
+    - - ./binder/binder check epub --json
+      - '# structured output'
+    - - ./binder/binder build epub --vol1 --skip-hygiene
+      - '# emergency build bypass'
+  structure:
+    group: structure
+    title: Book Structure & Chapter Architecture
+    description: Heading levels, H2 landings, parts, Purpose sections, architecture stack SVGs
+    scopes:
+    - name: concept-maps
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: YAML structure & frontmatter wiring
+    - name: heading-levels
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: H1 → H2 → H3 hierarchy (no skipped levels)
+    - name: h2-landings
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Orientation prose under H2 before H3
+    - name: parts
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Valid part keys in book structure
+    - name: purpose-unnumbered
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Purpose sections unnumbered
+    - name: purpose-stack
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Purpose stack SVG & hook question
+    - name: appendix-opening
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Unheaded orientation paragraph in appendices
+    error_codes:
+    - code: purpose_heading_missing
+      trigger: Chapter lacks opening Purpose section
+      fix: Add `## Purpose {.unnumbered .unlisted}`
+      message_template: Chapter must begin with a '## Purpose {.unnumbered .unlisted}' section
+      suggestion_template: '## Purpose {.unnumbered .unlisted}'
+    - code: purpose_heading_classes
+      trigger: Purpose heading lacks required classes
+      fix: Use `## Purpose {.unnumbered .unlisted}`
+      message_template: 'Purpose heading must include classes: {.unnumbered .unlisted}'
+      suggestion_template: '## Purpose {.unnumbered .unlisted}'
+    - code: purpose_stack_missing
+      trigger: Purpose lacks architecture stack diagram
+      fix: Include margin stack SVG (images/svg/margin_stack.svg); no caption
+      message_template: Purpose section must include the architecture stack diagram (images/svg/margin_stack.svg)
+      suggestion_template: '::: {.column-margin}
+
+        ![](images/svg/margin_stack.svg){width="100%" fig-alt="Systems Architecture Stack"}
+
+        :::'
+    - code: purpose_stack_file_missing
+      trigger: margin_stack.svg not found on disk
+      fix: Create or copy margin_stack.svg to images/svg/
+      message_template: 'Referenced architecture stack SVG does not exist on disk: images/svg/margin_stack.svg'
+      suggestion_template: Ensure images/svg/margin_stack.svg exists in the chapter directory
+    - code: purpose_hook_missing
+      trigger: Purpose lacks opening hook question
+      fix: Add italic question `_Why/How does ...?_`
+      message_template: Purpose section must include an opening italic hook question (_Why/How ...?_)
+      suggestion_template: _Why does [core challenge] require [systems approach]?_
+    - code: purpose_not_unnumbered
+      trigger: Purpose heading lacks {.unnumbered}
+      fix: Add `{.unnumbered}` attribute to `## Purpose`
+      message_template: Purpose section must include {.unnumbered}
+      suggestion_template: '## Purpose {.unnumbered .unlisted}'
+    - code: heading_level_skip
+      trigger: Heading jumps levels (e.g. H2 to H4)
+      fix: Do not skip levels; insert intermediate heading
+      message_template: Heading jumps from H{prev_level} to H{level} (skips {skipped})
+    - code: h2_missing_landing
+      trigger: H2 followed immediately by H3
+      fix: Add orientation prose under H2 before H3
+      message_template: Section '{heading_text}' needs orientation prose before subsection '{subsection_text}'
+    - code: number_offset_mismatch
+      trigger: Chapter front-matter number-offset disagrees with its NN_ folder
+      fix: Set number-offset to the folder number minus one
+      message_template: number-offset prints the wrong chapter number for its folder
+    - code: appendix_opening_shape
+      trigger: Appendix has Purpose heading or hook
+      fix: Open with one unheaded orientation paragraph
+      message_template: Appendix opens with a Purpose heading or hook question instead of an unheaded orientation paragraph
+    common_invocations:
+    - - ./binder/binder check structure
+      - '# all curated structure scopes'
+    - - ./binder/binder check structure --scope purpose-stack
+      - '# verify stack SVG and hook'
+    - - ./binder/binder check structure --scope h2-landings
+      - '# verify section landings'
+    - - ./binder/binder check structure --json
+      - '# structured output for LLMs'
+    - - ./binder/binder check structure --plain
+      - '# single-line compiler diagnostics'
+  numbers:
+    group: numbers
+    title: Number & Unit Conventions
+    description: Physical unit spacing, binary unit standards, percent conventions, currency
+    scopes:
+    - name: unit-spacing
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Space between number and physical unit
+    - name: binary-units
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: 'SI prefix discipline: GB/TB not GiB/TiB'
+    - name: percent-spacing
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No space before % symbol (50%)
+    - name: percent-word-before
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Digits before 'percent' (5 percent)
+    - name: percent-in-captions
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Spell out 'percent' in captions
+    - name: percent-in-tables
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Use % symbol in tables
+    - name: percent-in-prose
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Spell out 'percent' in body prose
+    - name: currency
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Use $; USD defined once in notation
+    - name: rendered-currency
+      when: Post-render (opt-in)
+      cost: ~5s
+      invariant: HTML cache audit for USD / $$ artifacts
+    error_codes:
+    - code: binary_units
+      trigger: GiB/TiB used in text or table
+      fix: Use GB/TB/MB/kB or fmt() helper
+      message_template: Binary unit prefix '{unit}' used; MLSysBook uses SI decimal units (GB/TB)
+    - code: unit_spacing
+      trigger: Missing space before unit (100ms)
+      fix: 'Insert space: `100 ms`, `32 GB`, `1.5 GHz`'
+      message_template: 'Missing space between number and unit: ''{context}'''
+    - code: percent_spacing
+      trigger: Space before % symbol (50 %)
+      fix: 'Remove space: `50%`'
+      message_template: Space found before % symbol
+    - code: percent_word_before
+      trigger: Spelled-out number before percent
+      fix: 'Use digits: `5 percent` not `five percent`'
+      message_template: Use numerals before 'percent' ('5 percent' not '{context}')
+    - code: percent_in_prose
+      trigger: '% symbol used in body prose'
+      fix: 'Spell out: `50 percent` in running text'
+      message_template: Use the word 'percent' in body prose, not the '%' symbol
+    - code: percent_in_table
+      trigger: Word 'percent' used in table
+      fix: Use `%` symbol in table cells/headers
+      message_template: Use '%' symbol inside tables, not the word 'percent'
+    - code: mitpress_percent_in_caption
+      trigger: '% symbol used in caption'
+      fix: Spell out `percent` in captions
+      message_template: Spell out 'percent' in captions instead of using '%'
+    - code: currency_usd_literal
+      trigger: Literal 'USD' in body prose
+      fix: Use `$` symbol (`$100` not `USD 100`)
+      message_template: Literal 'USD' used in content; use '$' (USD defined once in notation)
+    - code: currency_fmt_prefix_suffix
+      trigger: Manual $ before fmt(..., currency=...)
+      fix: Remove manual `$`; fmt() prepends it
+      message_template: Manual '$' before fmt() call that already supplies currency formatting
+    common_invocations:
+    - - ./binder/binder check numbers
+      - '# all curated numbers scopes'
+    - - ./binder/binder check numbers --scope binary-units
+      - '# audit binary units'
+    - - ./binder/binder check numbers --scope unit-spacing
+      - '# audit unit spacing'
+    - - ./binder/binder check numbers --json
+      - '# structured output for LLMs'
+    - - ./binder/binder check numbers --plain
+      - '# single-line compiler diagnostics'
+  figures:
+    group: figures
+    title: Figure Markup, Captions & Image Hygiene
+    description: Caption presence, formatting, margin captions, label required, and image file existence
+    scopes:
+    - name: captions
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Caption presence & syntax
+    - name: caption-heads
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: '**Bold Title**: Text format'
+    - name: div-syntax
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Valid figure div markup
+    - name: label-required
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Body images require {#fig-X}
+    - name: margin-caption-required
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Margin figures require caption (stack exempted)
+    - name: files
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Images exist and casing matches
+    - name: alt-text-style
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Alt-text follows body prose rules (§10.12)
+    error_codes:
+    - code: figure_missing_label
+      trigger: Body markdown image lacks {#fig-X}
+      fix: Add `{#fig-NAME}` or wrap in margin div
+      message_template: Markdown image in body prose lacks required {#fig-...} cross-reference label
+    - code: margin_figure_missing_caption
+      trigger: .column-margin image lacks *caption*
+      fix: Add `*Caption*` (margin_stack.svg exempted)
+      message_template: Margin figure requires a one-line italic *caption* beneath the image
+    - code: margin_figure_caption_above_image
+      trigger: Margin caption placed before image
+      fix: Move `*Caption*` directly below image
+      message_template: Margin caption must appear below the image, not above it
+    - code: caption_head_missing_bold
+      trigger: Caption does not start with bold title
+      fix: 'Format as `**Bold Title**: Explanation`'
+      message_template: 'Caption must start with a bold title (**Title**: ...)'
+    - code: caption_head_separator
+      trigger: Missing colon or space after title
+      fix: 'Use `**Title**: Text` (colon + space)'
+      message_template: Caption bold title must be followed immediately by a colon and space
+    - code: caption_body_lowercase_after_colon
+      trigger: Lowercase word follows caption colon
+      fix: Capitalize first word after colon
+      message_template: First word after caption colon must begin with a capital letter
+    - code: missing_image
+      trigger: Referenced image file does not exist
+      fix: Verify path or generate/commit image asset
+      message_template: Referenced image file not found on disk
+    - code: image_case_mismatch
+      trigger: Image path case differs from disk
+      fix: Match exact filesystem casing
+      message_template: Image path casing differs from file on disk
+    - code: incomplete_figure
+      trigger: Empty caption or malformed block
+      fix: Provide complete, valid figure markup
+      message_template: Incomplete or malformed figure block
+    common_invocations:
+    - - ./binder/binder check figures
+      - '# all curated figure scopes'
+    - - ./binder/binder check figures --scope margin-caption-required
+      - '# verify margin captions'
+    - - ./binder/binder check figures --scope caption-heads
+      - '# verify caption title formats'
+    - - ./binder/binder check figures --json
+      - '# structured output for LLMs'
+    - - ./binder/binder check figures --plain
+      - '# single-line compiler diagnostics'
+  prose:
+    group: prose
+    title: Prose Integrity & MIT Press Style
+    description: Tone, capitalization, contractions, duplicate words, spatial references, and canonical terms
+    scopes:
+    - name: sentence-start
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Capitalize sentence starts
+    - name: manual-et-al
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Use narrative @key, not hand-typed et al.
+    - name: underscore-italics
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: '*italic* in body prose; _ for Purpose hook'
+    - name: standalone-prose
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No series-dependent volume naming
+    - name: contractions
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No informal contractions in body prose
+    - name: spelling-dict
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Canonical MIT Press spellings (§10.7)
+    - name: duplicate-words
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No repeated consecutive words
+    - name: above-below
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No spatial above/below references
+    - name: acknowledgements
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: 'American spelling: Acknowledgments'
+    - name: compound-prefix
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: pre-/non- closed up (§10.8)
+    - name: concept-caps
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Lowercase concept terms (§10.3)
+    - name: latin-abbrevs
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: English in running text (§10.6)
+    error_codes:
+    - code: contractions
+      trigger: Informal contraction in body prose
+      fix: 'Expand: `can''t` → `cannot`, `it''s` → `it is`'
+      message_template: Informal contraction in body prose; expand to full form
+    - code: duplicate_word
+      trigger: Repeated consecutive word
+      fix: Remove duplicate ('the the' → 'the')
+      message_template: Repeated word '{word}' in prose
+    - code: mitpress_above_below
+      trigger: Spatial ref 'above' or 'below'
+      fix: Use `@sec-X`, 'preceding', 'following'
+      message_template: Spatial reference '{word}' in prose; use '@sec-...' or relative narrative
+    - code: sentence_starts_lowercase
+      trigger: Sentence begins with lowercase word
+      fix: Capitalize first word or join clause
+      message_template: Sentence starts with the lowercase word '{word}'
+    - code: manual_et_al
+      trigger: Hand-typed 'Author et al.'
+      fix: Use narrative `@citekey` form for citeproc
+      message_template: Hand-typed 'et al.' in prose; use narrative '@citekey' instead
+    - code: underscore_italics
+      trigger: _word_ used in body prose
+      fix: Use `*word*`; `_` reserved for Purpose hook
+      message_template: Underscore italics in body prose; use asterisks (*italic*)
+    - code: standalone_prose
+      trigger: '''this volume'' or ''Volume I'''
+      fix: Use 'this book' or describe topic directly
+      message_template: Series-dependent volume reference '{match}'; book must be standalone
+    - code: mitpress_spelling
+      trigger: Non-canonical spelling
+      fix: 'Use canonical: `trade-off`, `dataset`, etc.'
+      message_template: Non-canonical spelling '{before}'; use '{after}' per §10.7
+    - code: mitpress_acknowledgements
+      trigger: '''Acknowledgements'' with extra ''e'''
+      fix: Use American spelling `Acknowledgments`
+      message_template: British spelling 'Acknowledgements'; use American 'Acknowledgments'
+    - code: mitpress_compound_prefix
+      trigger: Hyphenated pre-/non- prefix
+      fix: 'Close up: `pretraining`, `nonzero` (§10.8)'
+      message_template: Hyphenated compound prefix; close up per §10.8
+    - code: mitpress_concept_term_capitalization
+      trigger: Capitalized concept term
+      fix: 'Lowercase: `memory wall`, `iron law` (§10.3)'
+      message_template: Capitalized concept term in prose; use lowercase per §10.3
+    - code: mitpress_latin_running_text
+      trigger: e.g./i.e./etc. in running text
+      fix: Use 'for example', 'that is' (§10.6)
+      message_template: Latin abbreviation in running text; use English equivalent per §10.6
+    common_invocations:
+    - - ./binder/binder check prose
+      - '# all curated prose scopes'
+    - - ./binder/binder check prose --scope contractions
+      - '# audit contractions'
+    - - ./binder/binder check prose --scope above-below
+      - '# audit spatial refs'
+    - - ./binder/binder check prose --json
+      - '# structured output for LLMs'
+    - - ./binder/binder check prose --plain
+      - '# single-line compiler diagnostics'
+  refs:
+    group: refs
+    title: Cross-References, Citations & Link Integrity
+    description: Chapter, figure, equation cross-references, bibliography keys, callout links
+    scopes:
+    - name: cross-refs
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Resolve @sec-, @fig-, @tbl-, @eq-, @lst-
+    - name: citations
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Resolve [@key] in volume .bib
+    - name: scaffold-citations
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No citations in Purpose or takeaways
+    - name: duplicate-year
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: 'No redundant year: [@k] (YYYY)'
+    - name: duplicate-key
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No duplicate citekey [@k; @k]
+    - name: manual-bracket
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No manual attribution near [@k]
+    - name: capitalized
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: chapter 12 lowercase in prose (§10.3.2)
+    - name: xref-case
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: '@Fig- at start, @fig- mid-sentence'
+    - name: callout-ref-noun
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: \ref{} needs preceding noun
+    - name: callout-ref-form
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Custom callouts use \ref{id}, never @id
+    - name: redundant-xref-prefix
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: No 'section @sec-X' or 'figure @fig-Y'
+    - name: margin-pointers
+      when: Every commit (pre-commit)
+      cost: <1s
+      invariant: Pointer direction arrows & targets
+    error_codes:
+    - code: broken_reference
+      trigger: Cross-reference target not found
+      fix: Verify target label exists in volume
+      message_template: Unresolved cross-reference '{label}'
+    - code: broken_citation
+      trigger: Citekey [@key] not in volume .bib
+      fix: Add entry to volume .bib or fix citekey
+      message_template: Citation key '{key}' not found in volume bibliography
+    - code: scaffold_citation
+      trigger: Citation in Purpose or takeaways
+      fix: Move citation to narrative section
+      message_template: Bibliography citations are not permitted in Purpose or Takeaways sections
+    - code: duplicate_citation_year
+      trigger: 'Redundant year: `[@k] (2024)`'
+      fix: Remove redundant `(2024)` or use `@k`
+      message_template: Redundant year following citation '[@{key}] ({year})'
+    - code: duplicate_citation_key
+      trigger: 'Repeated citekey: `[@k; @k]`'
+      fix: Remove duplicate citekey from bracket
+      message_template: Duplicate citation key '{key}' in single citation block
+    - code: capitalized_ref
+      trigger: Capitalized 'Chapter X' in prose
+      fix: 'Lowercase: `chapter X`, `section Y` (§10.3.2)'
+      message_template: Noun preceding cross-reference number must be lowercase in running text
+    - code: xref_sentence_start_case
+      trigger: Mismatched @fig- / @Fig- casing
+      fix: Use `@Fig-` at start, `@fig-` mid-sentence
+      message_template: Cross-reference prefix case must match sentence position
+    - code: callout_ref_missing_noun
+      trigger: Bare \ref{nbk-...} without noun
+      fix: 'Prepend noun: `Notebook \ref{nbk-...}`'
+      message_template: Bare \ref{} to custom callout must be preceded by an identifying noun
+    - code: callout_ref_form
+      trigger: '@dfn- or @nbk- used as crossref'
+      fix: Use `\ref{dfn-...}` for custom callouts
+      message_template: Custom numbered callouts must be referenced with \ref{}, not @id
+    - code: redundant_xref_prefix
+      trigger: '''section @sec-X'' or ''figure @fig-Y'''
+      fix: Use `@sec-X` or `@fig-Y` alone
+      message_template: Redundant noun preceding @-reference; cross-reference resolves noun automatically
+    - code: margin_pointer_direction
+      trigger: Arrow does not match target position
+      fix: Use `↩` for earlier, `↪` for later chapters
+      message_template: Margin pointer arrow direction does not match chapter target position
+    common_invocations:
+    - - ./binder/binder check refs
+      - '# all curated refs scopes'
+    - - ./binder/binder check refs --scope cross-refs
+      - '# check broken links'
+    - - ./binder/binder check refs --scope citations
+      - '# check bib citations'
+    - - ./binder/binder check refs --json
+      - '# structured output for LLMs'
+    - - ./binder/binder check refs --plain
+      - '# single-line compiler diagnostics'

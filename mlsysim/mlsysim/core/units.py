@@ -18,9 +18,16 @@ __all__ = [
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
-    "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4", "BYTES_ADAM_STATE",
+    "BYTES_FP32", "BYTES_INT32", "BYTES_INT64", "BYTES_INT16", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
+    "BYTES_ADAM_STATE", "BYTES_ADAM_MOMENTS", "BYTES_ADAM_TOTAL", "BYTES_TRAINING_STATE_MIXED_PRECISION",
+    # Interconnect standards
+    "NVLINK3_BANDWIDTH_UNIDIRECTIONAL", "NVLINK3_BANDWIDTH_BIDIRECTIONAL",
+    "NVLINK4_BANDWIDTH_UNIDIRECTIONAL", "NVLINK4_BANDWIDTH_BIDIRECTIONAL",
+    "NVLINK5_BANDWIDTH_UNIDIRECTIONAL", "NVLINK5_BANDWIDTH_BIDIRECTIONAL",
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
+    "FLOAT_FORMAT_BITS", "INT16_BITS",  # number-format layouts (added 2026-10-20)
+    "FP8_FORMAT_BITS", "INT4_BITS",  # quantization formats (added 2026-10-20)
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
     "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
@@ -55,6 +62,12 @@ __all__ = [
     # Electrical and kinematic (Physical AI / Embodied)
     "volt", "V", "millivolt", "mV", "ampere", "A", "milliampere", "mA",
     "ohm", "milliohm", "newton", "N", "radian", "rad", "hertz", "Hz",
+    # Further aliases (2026-10-13 unit sweep)
+    "dimensionless", "terawatt_hour", "TWh", "megatonne", "Mt", "month", "picosecond",
+    "centimeter", "cm", "nanometer", "pound", "mph", "rpm", "degree", "milliradian",
+    "degC", "delta_degC", "kilohertz", "kHz", "megahertz", "MHz", "gigahertz", "GHz",
+    "kilobyte", "megabyte", "gigabyte", "kilonewton", "farad", "microfarad",
+    "millihenry", "picohenry", "mAh", "decibel", "lux", "ppm", "standard_gravity",
 ]
 
 ureg = pint.UnitRegistry()
@@ -100,6 +113,8 @@ PB = ureg.PB
 # Common precision sizes
 BYTES_FP32 = 4 * byte
 BYTES_INT32 = 4 * byte
+BYTES_INT64 = 8 * byte  # integer class labels, indices (added 2026-10-20)
+BYTES_INT16 = 2 * byte  # 16-bit sparse-format indices (added 2026-10-20)
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
@@ -108,11 +123,42 @@ BYTES_INT4 = 0.5 * byte
 # +4 B/param (engine/calibration.py: TRAINING_OPTIMIZER_BYTES_ADAM = 12,
 # CHECKPOINT_BYTES_PER_PARAM_ADAM = 14 include it). Pick deliberately.
 BYTES_ADAM_STATE = 8 * byte
+BYTES_ADAM_MOMENTS = 8 * byte  # Explicit alias for moments only (4B momentum + 4B variance)
+BYTES_ADAM_TOTAL = 12 * byte   # FP32 master weight (4B) + two FP32 moments (8B)
+BYTES_TRAINING_STATE_MIXED_PRECISION = 16 * byte  # FP16 weights (2B) + FP16 grads (2B) + FP32 master (4B) + FP32 moments (8B)
+
+# Interconnect standards (explicit unidirectional link vs bidirectional total)
+NVLINK3_BANDWIDTH_UNIDIRECTIONAL = 300 * GB / second
+NVLINK3_BANDWIDTH_BIDIRECTIONAL = 600 * GB / second
+NVLINK4_BANDWIDTH_UNIDIRECTIONAL = 450 * GB / second
+NVLINK4_BANDWIDTH_BIDIRECTIONAL = 900 * GB / second
+NVLINK5_BANDWIDTH_UNIDIRECTIONAL = 900 * GB / second
+NVLINK5_BANDWIDTH_BIDIRECTIONAL = 1800 * GB / second
 
 # Bit widths (companion to the byte widths above)
 FP32_BITS = 32
 INT8_BITS = 8
 SIMD_REGISTER_BITS = 512
+INT16_BITS = 16
+
+# Binary floating-point layouts, (exponent bits, fraction bits): IEEE 754-2019
+# binary32 and binary16, and bfloat16 (FP32's exponent with a 7-bit fraction).
+# physics.numerics.calc_float_range derives each format's range from these.
+# (added 2026-10-20)
+FLOAT_FORMAT_BITS = {
+    "fp32": (8, 23),
+    "bf16": (8, 7),
+    "fp16": (5, 10),
+}
+# FP8 layouts (Micikevicius et al. 2022, Table 1). E5M2 follows IEEE 754
+# conventions; E4M3 keeps its top exponent for normal values (one NaN pattern,
+# no infinities), so its values come from
+# physics.numerics.calc_float_values(4, 3, ieee=False) (added 2026-10-20).
+FP8_FORMAT_BITS = {
+    "e4m3": (4, 3),
+    "e5m2": (5, 2),
+}
+INT4_BITS = 4  # (added 2026-10-20)
 
 # Precision string -> byte width. Shared by Engine, ServingModel, SynthesisSolver.
 PRECISION_MAP = {
@@ -302,4 +348,46 @@ radian = ureg.radian
 rad = ureg.radian
 hertz = ureg.hertz
 Hz = ureg.hertz
+
+# --- Further aliases (2026-10-13 unit sweep) ---
+# Every unit the books use gets an exported alias here, so LEGO cells import
+# it instead of writing ureg.<unit> or defining a local `_X = ureg.<unit>`.
+# Single-letter symbols are deliberately not added (W, N, K, ... collide with
+# cell variables); use the full name.
+dimensionless = ureg.dimensionless
+terawatt_hour = ureg.terawatt_hour
+TWh = ureg.terawatt_hour
+megatonne = ureg.megametric_ton
+Mt = ureg.megametric_ton
+month = ureg.month
+picosecond = ureg.picosecond
+centimeter = ureg.centimeter
+cm = ureg.centimeter
+nanometer = ureg.nanometer
+pound = ureg.pound
+mph = ureg.mph
+rpm = ureg.rpm
+degree = ureg.degree
+milliradian = ureg.milliradian
+degC = ureg.degC
+delta_degC = ureg.delta_degC
+kilohertz = ureg.kilohertz
+kHz = ureg.kilohertz
+megahertz = ureg.megahertz
+MHz = ureg.megahertz
+gigahertz = ureg.gigahertz
+GHz = ureg.gigahertz
+kilobyte = ureg.kilobyte
+megabyte = ureg.megabyte
+gigabyte = ureg.gigabyte
+kilonewton = ureg.kilonewton
+farad = ureg.farad
+microfarad = ureg.microfarad
+millihenry = ureg.millihenry
+picohenry = ureg.picohenry
+mAh = ureg.milliampere_hour
+decibel = ureg.decibel
+lux = ureg.lux
+ppm = ureg.ppm
+standard_gravity = ureg.standard_gravity
 

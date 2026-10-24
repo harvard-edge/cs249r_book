@@ -152,7 +152,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
     <tr>
       <td><b>Foundations</b></td>
       <td>Core concepts</td>
-      <td>Introduction, ML Systems, DL Primer, Architectures</td>
+      <td>Introduction, System Paradigms, DL Primer, Architectures</td>
     </tr>
     <tr>
       <td><b>Development</b></td>
@@ -574,6 +574,9 @@ Thanks to these wonderful people who helped improve the book!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=80" width="80px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/arulk"><img src="https://avatars.githubusercontent.com/u/616070?v=4?v=4?s=80" width="80px;" alt="Arul Kumaravel"/><br /><sub><b>Arul Kumaravel</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/bl00dny"><img src="https://avatars.githubusercontent.com/u/106136390?v=4?v=4?s=80" width="80px;" alt="STG"/><br /><sub><b>STG</b></sub></a><br />🪲</td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/xizhuomengcontin"><img src="https://avatars.githubusercontent.com/u/319346922?v=4?v=4?s=80" width="80px;" alt="Xizhuo"/><br /><sub><b>Xizhuo</b></sub></a><br />🧠</td>
     </tr>
   </tbody>
 </table>

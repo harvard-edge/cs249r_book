@@ -1,0 +1,483 @@
+% =============================================================================
+% Lecture 3: Test-Time Compute
+% Agentic Machine Learning Systems (Volume III), Chapter 3
+% =============================================================================
+% Thesis: extra deliberation raises the chance of success only through the
+% information it adds, and only an executed check adds a fact the model did
+% not have, so deliberation is a budget with a stopping rule.
+% Running case: the repair agent's connection-pool stall (Lighthouse 1.1),
+% shown as a real reproducer run (images/pool_reproducer.py, pool_trace.txt).
+%
+% Build: make deck V=3 D=03_test_time_compute   (figures: images/make_figs.py)
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 3},
+  chaptertitle={Test-Time Compute},
+  layer=model,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath,colortbl}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
+
+\title{Test-Time Compute}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{3.5cm}\centering\includegraphics[width=3.4cm,height=1.3cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{\dimexpr\linewidth-3.95cm\relax}\small\raggedright #2\end{minipage}}
+% One line of a worked example, shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 2 ended at one model call: one prompt in, one candidate out. Today the runtime may spend more before it acts: a longer derivation, more candidates, a check, another call. The notes total 70 minutes; the core alone runs about 56. FLEX: notes tagged [OPTIONAL] can be cut, first the search-history photos, the pass@k code, the public repair-agent runs, and the pruning estimate. Every number on the slides comes from images/calcs.py; most chapter inputs are hypothetical and the slides say "illustrative".}
+\mlsystitle{Test-Time Compute}{Extra deliberation pays only through the information it adds, and only an executed check adds a new fact, so deliberation is a budget with a stopping rule.}{cover_deliberation_blueprint.png}
+
+\begin{frame}{Predict: how much slower is the explanation?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=3.5cm,keepaspectratio]{hook_step}{2}\\[0.15cm]
+  {\small Requests stall although a connection is idle. Timeout too short, or a lost wake-up?}\\[0.25cm]
+  {\normalsize\choice{A}{5$\times$}\qquad\choice{B}{50$\times$}\qquad\answerat{2}{C}{about 500$\times$}\qquad\choice{D}{5,000$\times$}}\\[0.15cm]
+  \uncover<2->{\small 21.58 s against 40 ms is \textbf{\textcolor{mlsysaccent}{539.5$\times$}}, and only the test observes the program.}
+  \mlsyscredit{Test-Time Compute, Napkin Math 3.1 (illustrative: 21.075 ms per generated token; a prepared 40 ms test). Repair agent: Lighthouse 1.1.}
+  \note{[3.5 min] [CORE] The repair agent from Lecture 1 is fixing a connection pool. Clients stall even after a connection becomes idle. Two explanations fit: a timeout that aborts too early, or a lost wake-up when a worker returns a connection. The model proposes raising the timeout. The runtime can spend the next unit of work two ways: ask the model for a 1,024-token explanation, or run a prepared targeted test. Step 1: the explanation bar. ENGAGE: vote; how many times longer than the test? Step 2: C. At the chapter's illustrative 21.075 ms per generated token, 1,024 tokens take 21.58 s and cost \$0.015 at \$15 per million output tokens; 21.58 s over 40 ms is 539.5 times. Students who pick A or B think of generation as fast; it is fast per token, but every token is sequential (Lecture 2: output length sets call latency). WARN: what the tokens hold matters more than their speed. The explanation re-reads what the prompt already holds; the test observes the running program. Only the test adds a fact. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real run shows the waiter blocked beside an idle connection}
+  \begin{columns}[c]
+    \begin{column}{0.65\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{trace_bug.pdf}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \small Worker A holds the only connection; worker B waits; A returns it.\\[0.3cm]
+      The pool holds an idle connection for \textbf{25.1 ms} while B stays blocked.\\[0.3cm]
+      \textcolor{mlsysaccent}{A timeout cannot explain that. A lost wake-up can.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{One real run of images/pool\_reproducer.py (a minimal pool written for this lecture, separate from the book's code), 2026-10-18, laptop. Output unchanged.}
+  \note{[2 min] [CORE] This is a real run. We wrote a 40-line pool with the repair agent's bug and a probe that forces the interleaving the chapter describes: A holds the only connection, B waits with a 30 ms timeout, A returns the connection. NARRATE: read the trace top to bottom. At 7.6 ms the pool holds one idle connection. B does not get it until 32.7 ms, when its own timeout expires and it rechecks. The probe's verdict asks one question, does a waiter wake within 5 ms of a return, and the answer is no: blocked 25.1 ms, FAIL. The whole probe took 32.8 ms of wall clock, the same scale as the chapter's 40 ms. ENGAGE: why does the stall look like a timeout problem from outside? (Expected: it ends exactly when the timeout fires, so lengthening the timeout seems related.) WARN: this probe exercises one thread schedule; passing or failing it does not establish the whole task (Lecture 2: a check certifies only the property it checks). FLEX: [CORE]; this is the running case shown as a real program.}
+\end{frame}
+
+\begin{frame}{Recall: what do attempts and turns cost?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      {\Large\bfseries Question of the day}\\[0.3cm]
+      {\normalsize Write the cost per accepted task. Then: what is the chance that 10 unchecked turns all succeed at 99\% each?}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small
+        $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$\\[0.05cm]
+        {\footnotesize expected attempt cost over acceptance probability (Lecture 1)}\\[0.15cm]
+        $(1-\epsilon)^{H}$: 90.4\% at $H = 10$\\[0.05cm]
+        {\footnotesize $\epsilon$: per-turn error; $H$: turns (Lecture 1)}
+      \end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Introduction, equations 1.1 and 1.2, Napkin Math 1.1.}
+  \note{[1.5 min] [CORE] Retrieval, 60 seconds of writing. Step 2: Lecture 1's two relations. Cost per accepted task divides the expected cost of an attempt by the probability that an attempt is accepted, so extra deliberation pays only if it raises acceptance faster than it raises attempt cost. Horizon compounding: 99 percent per turn holds across 10 turns 90.4 percent of the time. ENGAGE: a feedback round adds a turn; does it make compounding worse? (Expected: only if the turn is unchecked; a check that rejects a bad step and retries it resets the compounding, which is why feedback can lengthen deliberation safely.) LINK: Lecture 2's invocation contract ends at one prompt and one candidate; today is everything the runtime does around that call with the weights fixed. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{When is another token, candidate, check, or call worth it?}
+  \begin{columns}[c]
+    \begin{column}{0.70\textwidth}
+      \thumbline{thumb_axes_step3.pdf}{Compare depth, breadth, and feedback by what each adds and costs.}\\[0.12cm]
+      \thumbline{thumb_coverage_step3.pdf}{Separate a pool that holds a fix from a selector that returns one.}\\[0.12cm]
+      \thumbline{thumb_precision_step3.pdf}{Compute how far a passing check can be trusted.}\\[0.12cm]
+      \thumbline{thumb_stop_step3.pdf}{Bound a search, revise it, and stop it in order.}
+    \end{column}
+    \begin{column}{0.27\textwidth}
+      \centering
+      \mlsyskitfig[width=\textwidth,height=2.6cm,keepaspectratio]{stack_model}\\[0.1cm]
+      \safeimg[width=0.5\textwidth,height=1.3cm,keepaspectratio]{hsa_locator_h.pdf}\\
+      \hsathread{closes the horizon exposure}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] The driving question is the chapter's: when is another token, candidate, check, or model call worth its cost? Four goals, one per segment; each thumbnail is the figure that teaches it. Right: we are on the Model layer of the stack, Part I. The locator lights horizon: every extra turn spent inside one decision lengthens the horizon, so that spending has to be bounded before the agent acts. Test-time compute is the work the runtime orchestrates around the model call, with the weights held fixed, to generate, test, and select candidates before committing to an action.}
+\end{frame}
+
+% =============================================================================
+% SECTION: ALLOCATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Segment 1: three ways to spend the next unit of work, and what each one buys.}
+\mlsysdivider{Where can the next unit of work go?}{Test-Time Compute, \S3.1 and \S3.2}
+\section{Allocation}
+
+\begin{frame}{Depth, breadth, and feedback spend one budget three ways}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=5.0cm,keepaspectratio]{axes_step}{3}\\[0.1cm]
+  {\footnotesize Three allocation axes for one budget: the tokens, calls, checks, and seconds allowed per decision.}
+  \mlsyscredit{Test-Time Compute, \S3.2, figure 2 and Definition 3.1 (redrawn).}
+  \note{[2.5 min] [CORE] The test-time compute budget is the per-decision allowance of prompt tokens, generated tokens, model calls, checks, and wall-clock time, spent with the weights fixed, before the runtime must select, abstain, or escalate. Step 1: depth extends one candidate; every token waits on the one before it. Step 2: breadth samples several candidates that do not depend on one another, then a selector picks. Step 3: feedback runs a check inside a sandbox and feeds the observation into the next call. ENGAGE: which panel adds information that is in neither the prompt nor the weights? (Expected: feedback; the observation.) WARN: breadth does not buy diversity. Independent samples from one model share its blind spots; if the model puts little probability on the notify fix, eight samples can all raise the timeout. LINK: Lecture 2 showed that sampling shapes candidates and leaves correctness to a check. The term rollout comes from game search: one bounded candidate path played forward. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: which patch makes the probe pass?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.67\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{queue_code.pdf}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \small\choice{1}{Raise the timeout to 60 ms}\\[0.2cm]
+      \answerat{2}{2}{Notify a waiter on return}\\[0.2cm]
+      \choice{3}{Either one}\\[0.35cm]
+      \uncover<2->{\scriptsize Real runs of the same probe:\\[0.05cm]
+      \textbf{1:} B blocked 54.3 ms; \textcolor{errorstroke}{\textbf{FAIL}}, 62.0 ms\\[0.05cm]
+      \textbf{2:} B blocked 0.0 ms; \textcolor{GreenLine}{\textbf{PASS}}, 6.7 ms}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Left: CPython 3.12, Lib/queue.py (PSF License), lines 122 to 171, elided, line numbers in the source. Right: real runs of images/pool\_reproducer.py, 2026-10-18 (images/pool\_trace.txt).}
+  \note{[2 min] [CORE] Left is real code: CPython's queue.Queue, the bounded queue many pools are built on. get() waits on a condition while the queue is empty; put() ends with self.not\_empty.notify(), line 152, which wakes one waiter. Our buggy pool omits that call. ENGAGE: vote, then reveal. Step 2: answer 2. The same probe, run for real on both patches. Raising the timeout to 60 ms makes B wait 54.3 ms after the connection returned: the stall gets longer, and the probe still fails. Notify on return wakes B 0.0 ms after the return, and the probe passes in 6.7 ms. Students who chose 1 trusted the symptom's shape: the stall ended at the timeout. WARN: the timeout patch is exactly what the model proposed in the hook. Generation alone never had a reason to reject it; the executed check did. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{One 4,096-token ceiling yields three latencies and three bills}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.3cm,keepaspectratio]{alloc_step}{2}\\[0.1cm]
+  {\small Breadth: 4 streams of 1,024 tokens. Feedback: 3 rounds, each with a 1.5 s check.}\\[0.05cm]
+  \uncover<2->{\small Breadth pays \textbf{\textcolor{mlsysaccent}{1.5$\times$}} depth's bill: 12,288 extra prompt tokens, read once per stream.}
+  \mlsyscredit{Test-Time Compute, Napkin Math 3.2 and table 2 (illustrative: \$3 and \$15 per million input and output tokens, no cache discount).}
+  \note{[3 min] [CORE] Worked example 1, Napkin Math 3.2. Given: a 4,096-token prompt, an output ceiling of 4,096 tokens, 21.075 ms per token. Step 1, time. Depth generates all 4,096 tokens in one chain: 86.3 s. Breadth runs 4 streams of 1,024 at once: 21.6 s, if the server can hold all four (Lecture 2: decode is paced by reading the weights, so a batch of streams shares each step). Feedback runs 3 rounds of 1,024 tokens plus three 1.5 s checks: 69.2 s. Step 2, money. Depth \$0.074. Breadth \$0.111: each stream is billed its own copy of the prompt, 3 times 4,096 = 12,288 extra input tokens, 1.5 times depth. Feedback \$0.095: each round re-reads every earlier candidate and report, 16,380 input tokens by round 3 (Lecture 2: append-only resend grows quadratically). ENGAGE: which allocation adds a fact? (Feedback.) WARN: equal output ceilings do not mean equal latency, memory, or bill. The table prices the work; it says nothing about the quality of the result. LINK: a shared prefix cache removes most of breadth's premium; Lecture 5 owns the mechanism (copy-on-write block sharing). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Extra compute pays where the model can sometimes succeed}
+  \centering\small
+  \begin{tabular}{@{}P{3.0cm}P{4.4cm}P{5.6cm}@{}}\toprule
+    \textbf{Difficulty} & \textbf{Best use of budget} & \textbf{Measured} \\\midrule
+    Easy (bins 1--2) & Revise one answer & Beam over-optimizes at high budget \\[0.15cm]
+    Medium (bins 3--4) & Step-scorer search & Beam beats best-of-N with 4$\times$ less compute (16 vs.\ 64 samples) \\[0.15cm]
+    \rowcolor{mlsysaccent!10} Hardest (bin 5) & Nothing helps much & A larger model wins \\\bottomrule
+  \end{tabular}\\[0.4cm]
+  {\normalsize Equal FLOPs: small model + test-time compute beat one \textbf{\textcolor{mlsysaccent}{14$\times$}} larger,\\ except on the hardest questions.}
+  \mlsyscredit{Snell et al., arXiv 2408.03314, 2024: \S3.2 (5 bins of pass@1 from 2,048 samples), \S5.3 and Fig.~3, \S6.2 and Fig.~7, \S1 and \S7, Fig.~9. One base model; MATH benchmark.}
+  \note{[2.5 min] [CORE] Real published results, read from the paper. Snell et al. binned MATH competition problems into five difficulty levels by the base model's own pass rate (estimated from 2,048 samples per question). On the easy bins, revising one answer sequentially used the budget most effectively, and beam search guided by a learned step scorer actually got worse at high budgets: it over-optimized the scorer. On the middle bins, beam search beat best-of-N, matching it with about 4 times less compute (16 against 64 generations). On the hardest bin, no method made much progress. In a comparison at equal total floating-point operations (FLOPs), test-time compute let the small model beat a model about 14 times larger on easy and medium questions; on the hardest, spending the FLOPs on a larger model won. ENGAGE: what should a runtime do with a task whose pilot samples never pass? (Expected: escalate to a stronger model or a human instead of sampling wider.) WARN: the runtime does not know difficulty in advance; it estimates it from cheap signals such as agreement among two or three pilot samples and fast linters, and those signals are classifiers whose precision must be measured. LINK: this is cost per accepted task: spend raises the attempt cost, and it pays only where it raises acceptance. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: what extra input does breadth read?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        4-way breadth, unshared prompts\\
+        Prompt: 4,096 tokens\\
+        Input: \$3 per million tokens
+      \end{mlsyscard}
+      {\normalsize Extra input tokens over depth? And at an 8$\times$ larger prompt?}
+    \end{column}
+    \begin{column}{0.52\textwidth}\small
+      \wstep{2}{Extra reads $= (N-1)\,S = 3 \times 4{,}096 = \mathbf{12{,}288}$ tokens}
+      \wstep{2}{8$\times$ prompt: $3 \times 32{,}768 = \mathbf{98{,}304}$ tokens, \$0.29}
+      \wstep{3}{Serial streams: breadth takes 86.32 s, as long as depth}
+      \uncover<3->{\textcolor{mlsysaccent}{\textbf{Only feedback can tell a short timeout from a lost wake-up.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, Checkpoint 3.1 and Napkin Math 3.2 (derived in images/calcs.py).}
+  \note{[2 min] [CORE] Checkpoint 3.1, in pairs. $N$ is the number of candidates, $S$ the prompt length in tokens. Step 2: breadth reads the prompt once per stream, so $N - 1 = 3$ extra copies: 12,288 tokens. If the repository context grows 8 times to 32,768 tokens, the premium is 98,304 tokens, \$0.29 per decision at list price: the premium grows with both $N$ and $S$. Step 3: if the service admits only one stream at a time, breadth's 4 candidates run one after another, 86.32 s, no faster than depth, and feedback at 69.24 s becomes the shortest path. Last line: the information question; neither more tokens nor more samples observe the running pool. ENGAGE: what does a shared prefix cache change? (Expected: the repeated prompt reads become cheap or free, so breadth's premium mostly disappears.) Land the segment aloud: the same ceiling buys different latency, memory, and money on each axis, and only feedback buys a new fact. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: SELECTION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Breadth produced a pool. Segment 2: does the pool hold a fix, and does the selector return it?}
+\mlsysdivider{Does the pool hold a fix, and will the selector return it?}{Test-Time Compute, \S3.3}
+\section{Selection}
+
+\begin{frame}{Predict: how often does a pool of 8 hold a fix?}
+  \mlsysactivity{Predict}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.4cm,keepaspectratio]{passk_step}{4}\\[0.05cm]
+      \uncover<5->{\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{poolcost.pdf}}
+    \end{column}
+    \begin{column}{0.37\textwidth}\small
+      Each candidate passes with $p = 30\%$, independently.\\[0.2cm]
+      $\text{pass@}k = 1-(1-p)^k$\\[0.05cm]
+      {\footnotesize chance that at least one of $k$ candidates passes}\\[0.25cm]
+      \uncover<5->{\textcolor{mlsysaccent}{\textbf{A parallel pool buys one round, at 2.5$\times$ the candidates.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, Napkin Math 3.3 (illustrative $p$; the verifier is the acceptance check). pass@$k$: Chen et al.\ 2021.}
+  \note{[2.5 min] [CORE] ENGAGE: before step 4, ask for a guess for 8 candidates. Steps 1 to 4: 30, 51, 76, 94.2 percent. Each doubling squares the chance that every candidate fails; the eighth candidate adds only 2.5 points. Step 5, worked example: the parallel pool always generates 8 candidates, 8.5 per accepted repair. Retrying one at a time and stopping at the first pass reaches the same 94.2 percent with 3.14 candidates on average, 3.3 per accepted repair. The pool costs 2.5 times as much; what it buys is one round instead of an expected 3.14 rounds. WARN: this assumes the most favorable case, a selector that always finds a passing member. Breadth buys latency and costs more per accepted repair. LINK: in cost per accepted task, breadth raises acceptance per round but raises the attempt cost faster. Size the pool as the smallest one that meets the target within the rounds the deadline allows. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Pools cover 98\% of problems; majority vote returns 43\%}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=5.5cm,keepaspectratio]{coverage_step}{3}
+  \mlsyscredit{Brown et al., ``Large Language Monkeys,'' 2024: released per-sample labels, recomputed in MLSysIM (unbiased pass@$k$; MATH, two open models; SWE-bench Lite, 300 issues, 250 samples each).}
+  \note{[3 min] [CORE] Real data: Brown et al. released the correctness label of every sample, 10,000 per problem on competition math, and MLSysIM recomputes these curves from those labels. Step 1, coverage: the share of problems whose pool holds at least one correct answer, pass@$k$ averaged over problems. The 8B model rises from 27 percent at one sample to 98 percent at 10,000; the 70B model from 48 to 98. Step 2, what majority voting returns from the same pools: 43 percent for 8B and 59 for 70B. After 256 samples the 8B vote gains 0.2 points while coverage gains another 10. Step 3, the repair agent's case: a code-repair agent on 300 real GitHub issues, where tests check each patch; coverage rises from 16 percent at one sample to 56 at 250. ENGAGE: why can the repair setting use its extra coverage while math voting cannot? (Expected: tests identify the passing patch; a vote only returns what the model says most often.) WARN: coverage is a ceiling for any selector that returns an unchanged pool member; what the runtime returns depends on the selector. Spending on breadth pays only when the selector can find the passing member. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Benchmarks estimate pass@k from n samples without bias}
+  \centering
+  \safeimg[width=0.98\textwidth,height=4.8cm,keepaspectratio]{humaneval_code.pdf}\\[0.2cm]
+  {\small $n$ samples, $c$ pass. Example: $n = 20$, $c = 4$, $k = 5$.}\\[0.1cm]
+  \uncover<2->{\small Subset estimate \textbf{0.718}; the plug-in $1-(1-c/n)^k$ gives 0.672, biased low.}
+  \mlsyscredit{openai/human-eval, human\_eval/evaluation.py @ b9453e8, lines 22 to 28 (MIT License); Chen et al., 2021. Example: Test-Time Compute, Exercise 2(d) (derived).}
+  \note{[1.5 min] [OPTIONAL] Real code from the repository that introduced pass@$k$ for code (Chen et al. 2021). Generate $n$ samples per task, count the $c$ that pass. Of all subsets of size $k$, the fraction that contain only failures is comb($n-c$, $k$) over comb($n$, $k$); one minus that is the chance a fresh pool of $k$ holds a pass. The numpy line computes the same ratio as a product, avoiding huge factorials. Step 2: 4 of 20 samples pass; for $k = 5$ the subset estimate is 0.718, while plugging the observed rate 0.2 into $1-(1-p)^k$ gives 0.672. ENGAGE: why average per task and not per workload? (Expected: next slide.) WARN: the predicate is passing these tests, narrower than completing the task. LINK: Lecture 13 owns repeated-run consistency, pass$^k$, which asks the opposite question: do all $k$ runs succeed? FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A ranker orders candidates; only a verifier may accept one}
+  \centering\small
+  \begin{tabular}{@{}cP{4.2cm}P{4.0cm}P{4.4cm}@{}}\toprule
+    & \textbf{Proposed repair} & \textbf{Check result} & \textbf{What it supports} \\\midrule
+    \textbf{A} & Increase the timeout & \textcolor{errorstroke}{\textbf{Compiles; fails}} & Valid syntax, same bug \\[0.12cm]
+    \textbf{B} & Retry after the timeout & \textcolor{errorstroke}{\textbf{Compiles; fails}} & New code, same defect \\[0.12cm]
+    \textbf{C} & Notify, malformed syntax & \textcolor{errorstroke}{\textbf{Does not parse}} & Never reaches a test \\[0.12cm]
+    \rowcolor{GreenL} \textbf{D} & Notify, valid syntax & \textcolor{GreenLine}{\textbf{Reproducer passes}} & Promising; not yet accepted \\\bottomrule
+  \end{tabular}\\[0.3cm]
+  \uncover<2->{\small Verifier: a check the candidate cannot modify. No pass: \textbf{\textcolor{mlsysaccent}{abstain}}, never return the most plausible failure.}
+  \mlsyscredit{Test-Time Compute, \S3.3.2, table 3 (hypothetical pool) and Definition 3.2.}
+  \note{[2 min] [CORE] Three kinds of selection signal, ordered by cost and by the strength of claim. Execution checks (parser, type checker, tests) establish only the property they check. Answer agreement, majority vote, returns what the generator produces most often: if the model favors the timeout patch, A and B outvote D. Learned rankers and LLM judges (a model prompted to grade another model's output) give an ordering. Ranking orders candidates by a score; acceptance decides whether a candidate meets the task contract. If every candidate is broken, the top-ranked one is the most plausible failure. Step 2: D passes the reproducer, the only verdict that can justify returning a candidate. Verifier-guided selection returns a candidate only when a check whose criteria and observations the candidate cannot modify passes it, and abstains otherwise. ENGAGE: in what order should these checks run? (Expected: cheapest first; parsing drops C before any sandboxed test; a warm container test may take 5 ms, an LLM judge 800 ms.) WARN: D still has untested behavior; full acceptance is a separate gate. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{True or false: average $p$, then apply pass@k?}
+  \mlsysactivity{Vote}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        Half the tasks pass at 60\% per candidate.\\
+        Half never pass ($p = 0$).\\
+        Average single-sample rate: 30\%.
+      \end{mlsyscard}
+      {\normalsize ``A pool of 8 solves 94.2\% of the workload.''}
+    \end{column}
+    \begin{column}{0.44\textwidth}\small
+      \uncover<2->{\textbf{\textcolor{errorstroke}{False.}}\\[0.15cm]
+      Easy half: $1 - 0.4^{8} = 99.9\%$\\
+      Hard half: $0\%$ at any pool size\\[0.1cm]
+      Workload: \textbf{\textcolor{mlsysaccent}{50.0\%}}\\[0.2cm]
+      Compute pass@$k$ per task, then average.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, \S3.8 (pitfall: independent samples as independent capabilities); derived in images/calcs.py.}
+  \note{[2 min] [CORE] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: false. Samples drawn independently for one prompt still share one model's weights and blind spots. The half where the model never succeeds stays at zero no matter how many samples it draws; the other half reaches 99.9 percent. Workload success is 50.0 percent; the averaged rate predicts 94.2 percent. Students who answer true treat attempts across a mixed workload as draws with one shared pass probability, which hides the clustering of failures on hard tasks. ENGAGE: what should the runtime do with the second half? (Expected: escalate to a stronger model or a human; more samples cannot help.) Land the segment aloud: a pool is only as good as its selector, and a selector may return a candidate only on a verifier's pass. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: VERIFICATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Every selection rests on a check. Segment 3: where checks attach, how far a pass can be trusted, and what search does to a check.}
+\mlsysdivider{How far can a passing check be trusted?}{Test-Time Compute, \S3.4}
+\section{Verification}
+
+\begin{frame}{A step label catches the error at step 3 of 16}
+  \centering
+  \safeimg[width=\textwidth,height=5.25cm,keepaspectratio]{prm800k.pdf}\\[0.05cm]
+  {\small Step-level evidence stops this branch 13 steps before its wrong answer.}
+  \mlsyscredit{openai/prm800k README @ 7ecc794, annotated example line (MIT License); step comments added. Lightman et al., ``Let's Verify Step by Step,'' ICLR 2024.}
+  \note{[2.5 min] [CORE] Real data: one line of PRM800K, the dataset of about 800,000 human step-level correctness labels behind Lightman et al.'s process reward model. A model solved a math problem in 16 steps. Step 3 claims 200,000 = $2^9 \cdot 5^4$; it is $2^6 \cdot 5^5$. The labeler rated it $-1$, and the 13 steps after it build on the error, ending at 320,000 against the true 40,000. The trained process scorer gave the whole solution 0.011. Two kinds of check: an outcome check tests a finished candidate (run the tests, compare the answer); a step check judges each intermediate step, so search can drop a broken branch before it spends tokens on the rest. A process reward model (PRM) is a learned scorer that assigns a value to each step given the steps before it. ENGAGE: what does the step label cost? (Expected: a human judgment per step; this one line took 4.6 minutes to label, which is why learned step scorers are scarce.) WARN: a PRM score ranks and prunes; it reaches no closure evidence level (Lecture 1). Rescoring each growing prefix from scratch costs scorer input that grows quadratically with the number of steps; prefix reuse removes that growth. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{At 5\% valid candidates, 30\% of passes are broken}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.6cm,keepaspectratio]{precision_step}{3}\\[0.05cm]
+  {\footnotesize Verifier precision $= \dfrac{v(1-\epsilon_{\text{FR}})}{v(1-\epsilon_{\text{FR}}) + (1-v)\,\epsilon_{\text{FA}}}$\quad $v$: valid rate;\ $\epsilon_{\text{FA}}$, $\epsilon_{\text{FR}}$: false accept, reject}
+  \mlsyscredit{Test-Time Compute, \S3.4.2, equation 3 and Napkin Math 3.4 (illustrative rates; derived in images/calcs.py).}
+  \note{[3 min] [CORE] Worked example 2, Napkin Math 3.4. Precision is the share of passing candidates that are actually valid. Inputs: $v$, the valid-candidate rate; false acceptance $\epsilon_{\text{FA}}$, the share of invalid candidates that pass; false rejection $\epsilon_{\text{FR}}$, the share of valid ones that fail. Step 1: the curve for $\epsilon_{\text{FA}} = 2\%$ and $\epsilon_{\text{FR}} = 10\%$; the red band is where valid candidates are rare. Step 2: at 5 percent valid, a pool of 64 has on average 2.88 valid passes and 1.216 invalid passes, so 70.3 percent of passes are valid and 29.7 percent are broken. Step 3: two levers of similar strength. Halving false acceptance gives 82.6 percent; doubling the valid rate gives 83.3 percent. ENGAGE: what does a larger pool do to precision? (Expected: nothing at fixed rates; it raises the chance of any selection and the chance of a false pass together.) WARN: this is the verification asymmetry principle in numbers: generating a passing candidate and knowing a pass is valid are different events. A report of $\epsilon_{\text{FA}}$ without the base rate cannot be turned into precision. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: what does one attempt risk?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        64 candidates of 1,024 tokens\\
+        Return the first pass; else abstain\\
+        Precision 70.31\%; a pool selects 98.55\%\\
+        A defective deploy: \$500 loss
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.55\textwidth}\small
+      \wstep{2}{Defective per attempt: $0.9855 \times 0.2969 = \mathbf{29.26\%}$}
+      \wstep{2}{Expected loss: \textbf{\$146.28} per attempt}
+      \uncover<3->{\centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{loss.pdf}\\[0.05cm]
+      \textcolor{mlsysaccent}{\textbf{The acceptance policy sets the cost of this task.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, Napkin Math 3.4 (\$15 per million output tokens; derived in images/calcs.py).}
+  \note{[3.5 min] [CORE] ENGAGE: two minutes in pairs. Each candidate passes with probability 0.064 (valid passes plus false passes), so the pool of 64 selects something 98.55 percent of the time and abstains 1.45 percent. Under the first-passing rule, a returned candidate is valid with the passing-set precision, 70.31 percent. Step 2: defective selections per attempt, 98.55 times 29.69 percent, 29.26 percent; at \$500 per incident, \$146.28 per attempt. Step 3: the whole output bill is \$0.98, so the expected loss is about 149 times the tokens. Step 4, one more minute in the same pairs: halve the false-acceptance rate to 1 percent and recompute the passing-set precision. (Expected: 82.6 percent; the cheaper lever is whichever of a stricter check or a better generator costs less, since doubling the valid rate gives 83.3 percent.) WARN: the batch holds at least one false pass 70.70 percent of the time, but only 29.26 percent of attempts return one, because a false pass later in the batch does no harm once an earlier valid candidate passed. Pool availability, passing-set precision, and deployed defect risk are three different numbers. LINK: spend on whichever of a better generator or a stricter check is cheaper. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Picking the top score selects the scorer's error}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{selection.pdf}
+    \end{column}
+    \begin{column}{0.37\textwidth}\small
+      Selection pressure: score $=$ true quality $+$ noise of spread $\sigma$.\\[0.25cm]
+      A 0.5\% loophole appears in \textbf{\textcolor{mlsysaccent}{27.4\%}} of 64-candidate pools.\\[0.25cm]
+      A patch that deletes the failing assertion also passes.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, \S3.4.3 and equation 4 (equal true quality, independent Gaussian noise; exact expectation computed in images/calcs.py). Manheim and Garrabrant, 2018.}
+  \note{[2.5 min] [CORE] Selection pressure. A learned scorer reports true quality plus an error with spread $\sigma$. Taking the maximum of $N$ scores also takes the maximum of $N$ errors. The red curve is the exact expected maximum when all candidates are equally good: 1.0 $\sigma$ at 4 candidates, 2.3 $\sigma$ at 64; the dashed curve is the large-$N$ formula $\sigma\sqrt{2\ln N}$, which overstates it at these sizes. So a threshold calibrated on single, unselected outputs cannot be reused on argmax winners. Second, loopholes: an exploit that appears in 0.5 percent of single samples, too rare to see in one-call testing, appears in 27.4 percent of 64-candidate pools, and selection promotes it. In the repair case, deleting the assertion that checks for blocked waiters raises the test score as much as fixing the notify. Goodhart's law in three forms: regressional (selecting noise), extremal (correlations break in the tail search reaches), adversarial (tampering with the check). ENGAGE: what measurement must change? (Expected: check accuracy measured on selected candidates, at the deployed budget.) LINK: Lecture 13 owns grader isolation, which keeps generated code from editing tests; Lecture 17 shows what happens when such a check becomes a training reward (reward hacking). Land the segment aloud: a pass inherits the base rate, and search pushes candidates into the check's blind spots. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: SEARCH
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Segment 4: candidates and revisions together form a search. How is it shaped, revised, paid for, and stopped?}
+\mlsysdivider{How is a search shaped, revised, paid for, and stopped?}{Test-Time Compute, \S3.5 to \S3.7}
+\section{Search}
+
+\begin{frame}{Search programs have scored and pruned candidates since 1950}
+  \begin{columns}[T]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{shannon-endgame-machine.jpg}\\[0.05cm]
+      {\footnotesize Shannon's chess endgame machine, about 1950}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{newell-simon-chess.jpg}\\[0.05cm]
+      {\footnotesize Allen Newell and Herbert Simon: search as generating and pruning}
+    \end{column}
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{sedol-alphago-game4.jpg}\\[0.05cm]
+      {\footnotesize Game 4, Lee Sedol against AlphaGo, 2016}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Left: Daderot, CC0 (MIT Museum). Center: Paolo Massa, public domain. Right: game record by Wesalius, CC BY-SA 4.0. All Wikimedia Commons. Shannon 1950; Newell and Simon 1976; Silver et al.\ 2016.}
+  \note{[1.5 min] [OPTIONAL] Spending compute at decision time is old. Left: a relay machine Shannon built around 1950 to play chess endgames, now at the MIT Museum. His 1950 paper separated generating candidate moves from scoring positions with an evaluation function; game trees grow exponentially, so programs pruned. Center: Allen Newell and Herbert Simon at a chess board; their 1976 Turing lecture framed problem solving as heuristic search, generating and pruning hypotheses under limited resources, and Simon's satisficing (1956) is the stopping rule we meet at the end of this segment. Right: the record of Game 4 of AlphaGo against Lee Sedol in March 2016, the only game AlphaGo lost. AlphaGo used Monte Carlo tree search with the PUCT rule, which favors extensions with a high mean score and a high prior probability from a policy network, plus an exploration bonus for little-visited ones. WARN: a miscalibrated prior steers visits away from correct but unlikely moves just as it does for an unlikely but correct code step. LINK: today's language-model search reuses these ideas over text and code; the next slide compares the three structures. FLEX: [OPTIONAL]; cut first if short.}
+\end{frame}
+
+\begin{frame}{Each search structure prunes at a different point}
+  \centering
+  \mlsyssteps[width=0.98\textwidth,height=5.6cm,keepaspectratio]{topo_step}{3}
+  \mlsyscredit{Test-Time Compute, \S3.6.1, figure 7 and table 6 (redrawn; sizes illustrative). Beam search: Lowerre 1976. Tree search: Yao et al.\ 2023; Silver et al.\ 2016.}
+  \note{[2 min] [CORE] Step 1, best-of-N: every candidate decodes to full length, then the selector keeps one. Free serving capacity becomes lower latency, but a candidate with a broken first line still decodes to the end. Step 2, beam search: keep at most a beam width of partial candidates; at each step generate extensions, score them, keep the highest-scoring few. Peak memory must hold width times extensions with their KV caches (the stored attention keys and values of each token) while scoring. Step 3, tree search: extend whichever leaf looks most promising or least explored, score the new leaf, and update visit counts and mean scores along its path to the root. ENGAGE: which structure needs a step scorer? (Expected: beam and tree; best-of-N needs only a final check.) WARN: if the step scorer is noisy, the tree's mean scores inherit the selection optimism of the last segment and pull visits toward branches inflated by noise. LINK: Lecture 5 owns the radix prefix cache that lets branches share their ancestors' KV state; Lecture 8 owns copy-on-write workspaces so each branch tests against its own files. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: what does a 68\% step check save?}
+  \mlsysactivity{Predict}{1.5 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.0cm,keepaspectratio]{prune_step}{3}\\[0.15cm]
+  {\small 5 children per node, depth 3. Effective branching factor $b(1-r) = 5 \times 0.32 = 1.6$.}\\[0.05cm]
+  \uncover<3->{\small Cut \textbf{\textcolor{mlsysaccent}{83.4\%}}, because rejecting a parent removes its subtree.}
+  \mlsyscredit{Test-Time Compute, \S3.6.2 and equation 6 (illustrative; derived in images/calcs.py).}
+  \note{[2 min] [OPTIONAL] Each retained node proposes $b = 5$ children; a step check rejects each child with probability $r = 0.68$. Step 1: without pruning, three levels generate 5 + 25 + 125 = 155 nodes. ENGAGE: predict the pruned count. Most students guess the flat reference in step 2: 68 percent fewer, 49.6 nodes. Step 3: the expected count is 25.8 nodes, ending with 4.1 leaves: 83.4 percent fewer, because rejecting a parent removes every node beneath it. The effective branching factor $b(1-r) = 1.6$ is above 1, so the expected frontier still grows exponentially; the tree dies out on its own only when $r$ exceeds $1 - 1/b$, 80 percent here. Above that threshold hard ceilings are optional; below it they are required. WARN: a check that falsely rejects valid steps kills good branches permanently. FLEX: [OPTIONAL]; the takeaway is the threshold $r > 1 - 1/b$.}
+\end{frame}
+
+\begin{frame}{A refuted premise invalidates only its descendants}
+  \centering
+  \mlsyssteps[width=0.98\textwidth,height=5.6cm,keepaspectratio]{plan_step}{3}
+  \mlsyscredit{Test-Time Compute, \S3.5, table 5, figure 5, Napkin Math 3.5. Truth maintenance: Doyle 1979; make: Feldman 1979.}
+  \note{[3 min] [CORE] A revisable candidate plan records each generated artifact with the evidence or artifacts it rests on: a directed graph with an edge from each prerequisite to its dependent. Step 1: the diagnosis rests on the source excerpt and the failure log; the patch on the diagnosis; the check selection on the patch. The API notes rest only on the API declaration. Step 2: the waiter-return test (the probe we ran) contradicts the diagnosis. Walking the edges marks its descendants, Desc(diagnosis): the patch and the check selection. The API notes keep their support. Step 3: the next call receives the still-valid inputs plus the new observation and regenerates only that branch. Napkin Math 3.5: a 12-node plan at 150 tokens per node; replacing 3 nodes generates 450 tokens instead of 1,800, 75 percent avoided. ENGAGE: what if the patch silently depended on the API declaration and that edge was never recorded? (Expected: a stale compatibility claim survives; a missing edge fails exactly like make's undeclared dependency.) WARN: dropping a node from the plan does not undo a file it wrote or a container it started; Lecture 12 owns compensation of such effects. Revision also needs a stop: ceilings on calls and tokens, and an immediate stop on a repeated candidate under unchanged evidence. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Beam search saves output tokens and pays more for input}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.2cm,keepaspectratio]{accounts.pdf}\\[0.1cm]
+  {\small Four accounts, never one ``search cost'': money, work by kind, wall time, peak live state.}\\[0.05cm]
+  {\small The beam's bill drops below flat sampling's only if input costs under \textbf{17.3\%} of list price.}
+  \mlsyscredit{Test-Time Compute, \S3.6.4 and Napkin Math 3.6 (illustrative prices; scorer \$0.50 per million tokens; derived in images/calcs.py).}
+  \note{[2 min] [OPTIONAL] Napkin Math 3.6. Flat: 16 complete candidates of 4 segments of 128 tokens. Beam: width 4, 3 extensions per retained prefix, so stages of 3, 9, 12, and 12 extensions. The beam generates 4,608 output tokens against 8,192, 43.75 percent fewer, worth \$0.054. But every extension request resends the 4,096-token prompt and its prefix: 156,288 input tokens against 65,536, \$0.272 more. Its bill is \$0.545 against \$0.319, while its time is 19.9 s against 22.6 s. The knob is the price of repeated input: below 17.3 percent of list price, the regime a prefix cache creates, the beam is also cheaper. ENGAGE: why keep tokens, test runs, and seconds in separate accounts? (Expected: they load different resources; adding model FLOPs to test seconds gives a meaningless number.) LINK: Lecture 19 measures this accounting on real runs: one 2024 repair run spent \$5.10 per resolved task, 77 percent of it on attempts that failed. Before dispatch, reserve each call's maximum output and release unused budget only when the call settles, because a canceled remote call may keep billing; Lecture 10 owns budget reservation. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Vote: which stopping rule decides first?}
+  \mlsysactivity{Vote}{3 min}
+  \centering
+  \mlsyssteps[width=0.98\textwidth,height=5.0cm,keepaspectratio]{stop_step}{3}\\[0.05cm]
+  {\small Near the ceiling, a candidate passes the sealed suite, and the gain estimate is still high.}
+  \mlsyscredit{Test-Time Compute, \S3.6.6, figure 8 (redrawn), Checkpoint 3.2. Satisficing: Simon 1956.}
+  \note{[4 min] [CORE] Stopping precedence. Before admitting more work, the runtime asks three questions in a fixed order. Step 1: a hard ceiling on tokens, calls, depth, or time stops new admissions unconditionally; a candidate already passing goes to the acceptance gate, otherwise abstain or escalate. Step 2: within the ceilings, a candidate that meets the acceptance criteria stops the search. This is satisficing, Herbert Simon's word (1956; pictured with Newell in the search-history photos) for stopping at the first alternative that meets an aspiration level. Step 3: only then does the marginal rule stop early when the next round's expected gain in acceptance per dollar falls below a threshold. ENGAGE: Checkpoint 3.2, vote, then one minute with a neighbor who chose differently, then vote again. (Expected: the ceiling or the acceptance check stops the search; either way the passing candidate goes to the acceptance gate, and the marginal estimate is never consulted.) WARN: an exhausted budget carries no acceptance evidence. Returning the top-scoring unverified candidate violates the order; this is invariant closure (Lecture 1): mechanical limits below the model stop spending, evidence above it authorizes the answer. Reversing the order lets an optimistic gain estimate breach a ceiling. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The deadline decides which policy can run}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.8cm,keepaspectratio]{policy_step}{3}\\[0.05cm]
+  \uncover<3->{\small One round takes 31.07 s; a third feedback round would end at \textbf{93.22 s}, past the 75 s deadline.}
+  \mlsyscredit{Test-Time Compute, \S3.7, Napkin Math 3.7 (illustrative: 2,048-token prompt, 1,000-token candidates, 10 s tests; derived in images/calcs.py).}
+  \note{[3 min] [CORE] Worked example 3, Napkin Math 3.7. One workload, a sealed regression suite, a first candidate that passes 40 percent of the time, a hard 75 s deadline, 8 workers. Step 1, A, one candidate: 31.07 s (1,000 tokens at 21.075 ms plus a 10 s test), 40 percent, \$0.053 per accepted repair. Step 2, B, 8 candidates in parallel: still 31.07 s, 98.32 percent (pass@8), \$0.172 per accepted repair, 3.3 times A. Step 3, C, feedback: a failed patch plus a 340-token trace feeds a revision that passes 35 percent of the time. Two rounds fit in 75 s; three would end at 93.22 s. C passes 61 percent at \$0.059 per accepted repair, 49.72 s on average. ENGAGE: if the deadline were 35 s, which policies remain? (Expected: A and B; only breadth beats 40 percent.) WARN: none dominates the others on every axis; all three sit on the frontier, and the deadline, budget, and error tolerance pick the operating point. Report false acceptance, abstention, and deadline misses separately, and charge every started task. LINK: Lecture 13 owns matched-budget evaluation of whole agent policies. Land the segment aloud. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Back to the stall: what was each step worth?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.53\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{trace_bug.pdf}\\[0.1cm]
+      \safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{hook_col.pdf}
+    \end{column}
+    \begin{column}{0.44\textwidth}\small
+      \only<1|handout:0>{\normalsize A deliberation policy costs too much per accepted repair. In what order do you diagnose it?}%
+      \only<2-|handout:1>{%
+      \textbf{\textcolor{mlsysaccent}{1. Availability.}} Does pass@$k$ ever see a fix? If not, escalate.\\[0.15cm]
+      \textbf{\textcolor{mlsysaccent}{2. Precision.}} At the measured base rate, can a pass be trusted?\\[0.15cm]
+      \textbf{\textcolor{mlsysaccent}{3. Rounds.}} Only then ask whether the next round is worth its cost.\\[0.2cm]
+      In the hook, the 32.8 ms probe settled what 21.58 s of tokens could not.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Test-Time Compute, \S3.9; Napkin Math 3.1; the real reproducer run.}
+  \note{[3.5 min] [CORE] Back to the hook. ENGAGE: 90 seconds of writing, then take two answers. Step 2: the chapter's diagnostic order. First availability: compute pass@$k$ per task; if passing candidates rarely enter the pool, a wider pool will not help, so switch model or escalate. Second, precision at the measured base rate: if passes are untrustworthy, a better generator or a stricter check buys more than a larger pool. Only third, how many rounds to buy, which the marginal stopping rule answers in acceptance gain per dollar. In the hook, the explanation would have taken 21.58 s and could not observe the pool; the real probe took 32.8 ms, refuted the timeout hypothesis, and rejected the model's own timeout patch. At every step the runtime decides whether to continue, abstain, or escalate; the model only proposes. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_trace_bug.pdf}{Generating tokens re-reads the prompt; only an executed check adds a fact.}\\[0.22cm]
+  \thumbline{thumb_coverage_step3.pdf}{pass@$k$ caps what a selector can return; the selector's own errors set what it returns.}\\[0.22cm]
+  \thumbline{thumb_precision_step3.pdf}{A pass inherits the base rate, and search pushes candidates into a check's blind spots.}\\[0.22cm]
+  \thumbline{thumb_stop_step3.pdf}{Revise along recorded dependencies, charge every branch, and stop in order: ceiling, acceptance, margin.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the third.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item Reasoning models choose how many hidden tokens to spend. Who should set that budget: the model, the runtime, or the user paying for it?
+    \item Difficulty is unknown before the attempt. How cheap can a difficulty estimate be and still route the budget well?
+    \item When a check becomes the target of search, how often must it be re-measured on selected candidates?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for discussion or a short written response. The first follows from \S3.2.6: reasoning tokens are ordinary output tokens, billed and decoded like any other, and a hidden trace leaves the runtime only call telemetry. The second follows from Example 3.1 and the routing signals after it. The third follows from \S3.4.3; Lecture 13 owns the evaluation method.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Test-Time Compute, \S3.1 to \S3.9; Checkpoints 3.1 and 3.2; Exercises 2, 3, and 9.
+    \item Brown et al., ``Large Language Monkeys,'' 2024: coverage against selection.
+    \item Snell et al., ``Scaling LLM Test-Time Compute Optimally,'' 2024: difficulty routes the budget.
+    \item Lightman et al., ``Let's Verify Step by Step,'' ICLR 2024: step-level supervision.
+    \item Gao et al., ``Scaling Laws for Reward Model Overoptimization,'' ICML 2023.
+    \item Run images/pool\_reproducer.py: change the timeout and watch the probe.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its two checkpoints and the exercises on pool sizing, check strictness, and stopping before an irreversible change. Brown et al. release the per-sample labels behind the coverage plot. Snell et al. measure how difficulty changes the most effective allocation. Lightman et al. compare outcome and step supervision and release PRM800K. Gao et al. measure how a proxy score diverges from a held-out score as best-of-N grows. The reproducer runs in a second with no dependencies.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_memory}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} CONTEXT ENGINEERING}}\\[0.5cm]
+      {\LARGE\bfseries\raggedright Deliberation left failed patches, traces, and stale passes. Which belong in the next call?\par}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] Deliberation leaves candidate versions, refuted hypotheses, observations, and dependency records. The next model call cannot treat all of them as equally current, even when all of them still fit in its window. Lecture 4 develops how to select a working context that keeps the evidence for the chosen candidate, marks superseded material, and carries open questions forward. Lecture 4 also owns context compaction, which the feedback axis needed today.}
+\end{frame}
+
+\end{document}

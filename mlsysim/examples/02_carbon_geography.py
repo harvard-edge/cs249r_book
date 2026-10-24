@@ -34,7 +34,7 @@ def main():
         mfu=0.45
     )
 
-    print(f"Total Energy Consumed: {res_poland.total_energy_kwh.to('MWh'):.1f}")
+    print(f"Total Energy Consumed: {res_poland.total_energy_kwh.to('MWh'):.1f~P}")
     print("-" * 40)
     print(f"Carbon Footprint (Poland): {res_poland.carbon_footprint_kg / 1000:,.1f} Tonnes")
     print(f"Carbon Footprint (Quebec): {res_quebec.carbon_footprint_kg / 1000:,.1f} Tonnes")

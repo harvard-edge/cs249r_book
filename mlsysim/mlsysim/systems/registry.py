@@ -46,10 +46,22 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
+        # Power (added 2026-09-29): pc.DGX_H100_USER_GUIDE_POWER -- six 3.3 kW PSUs in
+        # 4+2 redundancy, 10.2 kW max. nics_per_node counts the eight compute
+        # ConnectX-7 IB cards; the two dual-port storage/in-band Ethernet cards are excluded.
+        psus_per_node=6,
+        psu_redundancy=2,
+        psu_rating=3.3 * kilowatt,
+        max_power=10.2 * kilowatt,
         host_memory=2 * TiB,
         host_cpu="Dual Intel Xeon Platinum 8480C",
         host_cpu_cores=112,
         host_memory_bw=614 * (GB / ureg.second),
+        # Physical composition (added 2026-09-28): pc.DGX_H100_USER_GUIDE_PHYSICAL
+        # -- four NVSwitch chips, 18 NVLink links per GPU, 287.6 lb (130.45 kg).
+        nvswitch_count=4,
+        nvlink_links_per_accelerator=18,
+        mass=130.45 * ureg.kilogram,
         metadata=Metadata(
             provenance=pc.DGX_H100_SYSTEM_SPEC,
             description="Official NVIDIA DGX H100 server: 8x H100 80GB SXM5, Dual Intel Xeon 8480C (112 cores).",
@@ -91,7 +103,16 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
+        # Power (added 2026-09-29): pc.DGX_A100_USER_GUIDE_POWER -- six 3 kW PSUs in
+        # 3+3 redundancy, 6.5 kW max.
+        psus_per_node=6,
+        psu_redundancy=3,
+        psu_rating=3.0 * kilowatt,
+        max_power=6.5 * kilowatt,
+        metadata=Metadata(
+            provenance=pc.DGX_A100_USER_GUIDE_POWER,
+            description="Official NVIDIA DGX A100 server: 8x A100 80GB SXM4, six 3 kW PSUs in 3+3 redundancy (6.5 kW max).",
+        ),
     )
     DGX_B200 = Node(
         name="DGX B200",
@@ -99,7 +120,16 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth_per_direction,
         nics_per_node=8,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
+        # Power (added 2026-09-29): pc.DGX_B200_USER_GUIDE_POWER -- six 3.3 kW PSUs in
+        # 5+1 redundancy, 14.3 kW max.
+        psus_per_node=6,
+        psu_redundancy=1,
+        psu_rating=3.3 * kilowatt,
+        max_power=14.3 * kilowatt,
+        metadata=Metadata(
+            provenance=pc.DGX_B200_USER_GUIDE_POWER,
+            description="Official NVIDIA DGX B200 server: 8x B200 180GB SXM6, six 3.3 kW PSUs in 5+1 redundancy (14.3 kW max).",
+        ),
     )
     Kempner_H100_4GPU = Node(
         name="Kempner H100 4-GPU Server",
@@ -112,49 +142,92 @@ class Nodes(Registry):
             description="Kempner H100 partition server envelope: four H100 80GB GPUs per server.",
         ),
     )
+    GrandTeton_H100 = Node(
+        name="Meta Grand Teton (8x H100)",
+        accelerator=Hardware.Cloud.H100,
+        accelerators_per_node=8,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        nics_per_node=8,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta Grand Teton GPU server: eight H100 GPUs per node.",
+        ),
+    )
+    Server_8x_MI300X = Node(
+        name="8x MI300X Server",
+        accelerator=Hardware.Cloud.MI300X,
+        accelerators_per_node=8,
+        intra_node_bw=896 * (GB / ureg.second),
+        nics_per_node=8,
+        host_memory=1.5 * TiB,
+        max_power=10.0 * kilowatt,
+        metadata=Metadata(
+            provenance=Hardware.Cloud.MI300X.metadata.provenance,
+            description="8x AMD Instinct MI300X OAM server node (1.5 TB HBM3, Infinity Fabric).",
+        ),
+    )
 
 
 class Fabrics(Registry):
     """Vetted network fabrics (canonical bandwidth + latency)."""
     Ethernet_10G = NetworkFabric(
         name="10GbE", bandwidth=10 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS, description="Standard 10 Gb/s Ethernet fabric with TCP latency."),
     )
     Ethernet_100G = NetworkFabric(
         name="100GbE", bandwidth=100 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS, description="Standard 100 Gb/s Ethernet fabric with TCP latency."),
     )
     Ethernet_400G = NetworkFabric(
         name="400GbE", bandwidth=400 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth400"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth400"], description="High-speed 400 Gb/s Ethernet fabric."),
     )
     Ethernet_800G = NetworkFabric(
         name="800GbE", bandwidth=800 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth800"], description="High-speed 800 Gb/s Ethernet fabric."),
     )
     Ethernet_1P6T = NetworkFabric(
         name="1.6TbE", bandwidth=1600 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth800"], description="Next-generation 1.6 Tb/s Ethernet fabric."),
     )
     RoCE_100G = NetworkFabric(
         name="100GbE RoCE", bandwidth=100 * Gbps, latency=Q_(ROCE_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["roce"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["roce"], description="100 Gb/s RDMA over Converged Ethernet (RoCE v2) fabric."),
     )
     InfiniBand_HDR = NetworkFabric(
         name="IB HDR", bandwidth=_INFINIBAND_HDR_BW, latency=Q_(IB_HDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["hdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["hdr"], description="200 Gb/s InfiniBand HDR fabric."),
     )
     InfiniBand_NDR = NetworkFabric(
         name="IB NDR", bandwidth=_INFINIBAND_NDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["ndr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["ndr"], description="400 Gb/s NVIDIA Quantum-2 InfiniBand NDR fabric."),
     )
     InfiniBand_XDR = NetworkFabric(
         name="IB XDR", bandwidth=_INFINIBAND_XDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["xdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["xdr"], description="800 Gb/s InfiniBand XDR fabric."),
     )
     InfiniBand_GXDR = NetworkFabric(
         name="IB GXDR", bandwidth=_INFINIBAND_GXDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["xdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["xdr"], description="1.6 Tb/s InfiniBand GXDR fabric."),
+    )
+    # --- Added 2026-09-28 ---
+    InfiniBand_EDR = NetworkFabric(
+        name="IB EDR", bandwidth=100 * Gbps,
+        metadata=Metadata(provenance=pc.INFINIBAND_SPEC, description="EDR InfiniBand, 100 Gb/s per port (latency not modeled)."),
+    )
+    RoCE_400G = NetworkFabric(
+        name="400GbE RoCE", bandwidth=400 * Gbps, latency=Q_(ROCE_LATENCY_US, "us"),
+        metadata=Metadata(provenance=pc.META_GENAI_INFRA_2024, description="400 Gb/s RoCE v2 fabric (Meta GenAI cluster class)."),
+    )
+    InfiniBand_NDR_Oversub2to1 = NetworkFabric(
+        name="IB NDR (2:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
+        latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=2.0,
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES, description="400 Gb/s InfiniBand NDR fabric with 2:1 oversubscription."),
+    )
+    InfiniBand_NDR_Oversub4to1 = NetworkFabric(
+        name="IB NDR (4:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
+        latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=4.0,
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES, description="400 Gb/s InfiniBand NDR fabric with 4:1 oversubscription."),
     )
 
 
@@ -249,6 +322,74 @@ class Clusters(Registry):
         fabric=Fabrics.InfiniBand_NDR,
         metadata=Metadata(provenance=_TIER_PROV, description="Mega cluster tier (100k GPUs)."),
     )
+    # --- Added 2026-09-28 ---
+    Lab_64_A100 = Fleet(
+        name="Lab Cluster (64 A100 GPUs)",
+        node=Nodes.DGX_A100,
+        count=8,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Small lab tier (64 A100 GPUs)."),
+    )
+    DgxH100SuperPodSU = Fleet(
+        name="DGX SuperPOD scalable unit (32 DGX H100)",
+        node=Nodes.DGX_H100,
+        count=32,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.NVIDIA_DGX_SUPERPOD_H100_RA,
+            description="One DGX SuperPOD scalable unit: 32 DGX H100 nodes (256 GPUs) on NDR InfiniBand.",
+        ),
+    )
+    Meta_RSC_A100_16K = Fleet(
+        name="Meta AI Research SuperCluster (16,000 A100)",
+        node=Nodes.DGX_A100,
+        count=2000,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(
+            provenance=pc.META_RSC_2022,
+            description="Meta RSC full build-out: 2,000 DGX A100 nodes (16,000 GPUs) on 200 Gb/s InfiniBand.",
+        ),
+    )
+    Meta_GenAI_H100_24K_RoCE = Fleet(
+        name="Meta GenAI cluster (24,576 H100, RoCE)",
+        node=Nodes.GrandTeton_H100,
+        count=3072,
+        fabric=Fabrics.RoCE_400G,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta 24K-GPU GenAI cluster on a 400 Gb/s RoCE fabric.",
+        ),
+    )
+    Meta_GenAI_H100_24K_IB = Fleet(
+        name="Meta GenAI cluster (24,576 H100, InfiniBand)",
+        node=Nodes.GrandTeton_H100,
+        count=3072,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta 24K-GPU GenAI cluster on NVIDIA Quantum-2 400 Gb/s InfiniBand.",
+        ),
+    )
+    Training_1K_B200 = Fleet(
+        name="Training Cluster (1024 B200 GPUs)",
+        node=Nodes.DGX_B200,
+        count=128,
+        fabric=Fabrics.InfiniBand_XDR,
+        metadata=Metadata(
+            provenance=_TIER_PROV,
+            description="B200/XDR mid-cluster training tier (1024 GPUs).",
+        ),
+    )
+    Meta_Llama3_16K_H100 = Fleet(
+        name="Meta Llama 3 cluster (16,384 H100)",
+        node=Nodes.DGX_H100,
+        count=2048,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.DUBEY_LLAMA3_2024,
+            description="Meta 16K-GPU Llama 3 405B training cluster on 400 Gb/s InfiniBand NDR.",
+        ),
+    )
 
 
 class Pods(Registry):
@@ -263,6 +404,18 @@ class Pods(Registry):
             description="Reference TPU pod envelope for cloud-scale system models.",
         ),
     )
+    # Added 2026-09-28. Chips-only envelope: memory and power are the per-chip
+    # registry values times 8,960 (no host, network, or cooling overhead).
+    TPUv5p_8960 = PodEnvelope(
+        name="Cloud TPU v5p Pod (8960 chips)",
+        chips=8960,
+        memory=8960 * Hardware.Cloud.TPUv5p.memory.capacity,
+        power=8960 * Hardware.Cloud.TPUv5p.tdp,
+        metadata=Metadata(
+            provenance=pc.GOOGLE_TPU_V5P,
+            description="Full TPU v5p pod: 8,960 chips; memory and power are chips-only sums of per-chip registry values.",
+        ),
+    )
 
 
 class Racks(Registry):
@@ -273,6 +426,14 @@ class Racks(Registry):
         node=Nodes.DGX_H100,
         nodes_per_rack=4,
         non_accelerator_power=11.1 * kilowatt,
+        # Breakdown of the 11.1 kW (added 2026-09-28; the components already
+        # enumerated in pc.DGX_H100_RACK_REFERENCE). The schema validator
+        # guards that the five parts sum to non_accelerator_power.
+        host_power=3.2 * kilowatt,
+        switch_power=1.6 * kilowatt,
+        network_power=0.8 * kilowatt,
+        conversion_loss_power=2.8 * kilowatt,
+        cooling_allocation_power=2.7 * kilowatt,
         metadata=Metadata(
             provenance=pc.DGX_H100_RACK_REFERENCE,
             description="Reference 32-H100 rack profile for rack-level power and cooling models.",
@@ -283,7 +444,7 @@ class Racks(Registry):
 
 class SwitchFabric(Registry):
     """Switch-ASIC capacity, 400G optics power, and α-β / FEC / hop latency reference
-    figures for datacenter network-fabric models."""
+    figures for datacenter network-fabric and interconnect models."""
 
     NdrSwitchPorts = sourced(64, pc.NVIDIA_QUANTUM2_QM97XX_SWITCH,
         name="NDR switch ports", description="Reference 64-port NDR switch used for two-tier fabric sizing.")
@@ -307,6 +468,29 @@ class SwitchFabric(Registry):
         name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model.")
     AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model.")
+    # Effective collective-launch α ranges (software stack included), one Low/High pair per
+    # interconnect. The single source for every α range table; AlphaNdr and AlphaRoce above
+    # are the point anchors and must sit inside the NDR and RoCE ranges (tested).
+    EffectiveAlphaNvlinkLow = sourced_qty(1 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (NVLink, low)", description="Low end of the effective per-message collective-launch latency over NVLink.")
+    EffectiveAlphaNvlinkHigh = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (NVLink, high)", description="High end of the effective per-message collective-launch latency over NVLink.")
+    EffectiveAlphaPcieGen5Low = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (PCIe Gen5, low)", description="Low end of the effective per-message collective-launch latency over PCIe Gen5.")
+    EffectiveAlphaPcieGen5High = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (PCIe Gen5, high)", description="High end of the effective per-message collective-launch latency over PCIe Gen5.")
+    EffectiveAlphaNdrLow = sourced_qty(1 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand NDR, low)", description="Low end of the effective per-message collective-launch latency over InfiniBand NDR.")
+    EffectiveAlphaNdrHigh = sourced_qty(3 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand NDR, high)", description="High end of the effective per-message collective-launch latency over InfiniBand NDR.")
+    EffectiveAlphaHdrLow = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand HDR, low)", description="Low end of the effective per-message collective-launch latency over InfiniBand HDR.")
+    EffectiveAlphaHdrHigh = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand HDR, high)", description="High end of the effective per-message collective-launch latency over InfiniBand HDR.")
+    EffectiveAlphaRoceLow = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (100G RoCE, low)", description="Low end of the effective per-message collective-launch latency over 100G RoCE.")
+    EffectiveAlphaRoceHigh = sourced_qty(10 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (100G RoCE, high)", description="High end of the effective per-message collective-launch latency over 100G RoCE.")
     HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="Per-hop switch latency", description="Approximate per-hop store-and-forward switch latency.")
     FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
@@ -328,6 +512,11 @@ class NetworkEnergy(Registry):
         name="NVLink energy per bit", description="Representative midpoint of a 5--10 pJ/bit NVLink transfer envelope.")
     InfiniBandEnergyPerBit = sourced_qty(35 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
         name="InfiniBand energy per bit", description="Representative midpoint of a 20--50 pJ/bit switched-network transfer envelope.")
+    # Added 2026-10-20: short-range radio transmit envelope for the edge-versus-radio comparison.
+    RadioBitLow = sourced_qty(100_000 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="Short-range radio energy per bit (low)", description="Low end of an order-of-magnitude Bluetooth/Wi-Fi transmit envelope per bit.")
+    RadioBitHigh = sourced_qty(500_000 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="Short-range radio energy per bit (high)", description="High end of an order-of-magnitude Bluetooth/Wi-Fi transmit envelope per bit.")
 
 
 class Storage(Registry):
@@ -355,7 +544,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen5",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen5 local NVMe SSD storage subsystem.",
+        ),
     )
     LocalNvmeGen4 = StorageSubsystem(
         name="Local NVMe SSD (Gen4)",
@@ -365,7 +557,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen4",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen4 local NVMe SSD storage subsystem.",
+        ),
     )
     LocalNvmeGen3 = StorageSubsystem(
         name="Local NVMe SSD (Gen3)",
@@ -375,7 +570,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen3",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen3 local NVMe SSD storage subsystem.",
+        ),
     )
     SataSsd = StorageSubsystem(
         name="SATA SSD",
@@ -384,7 +582,10 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Standard SATA III 6 Gb/s solid-state drive storage subsystem.",
+        ),
     )
     SataSsdEffective = StorageSubsystem(
         name="SATA SSD (effective sequential)",
@@ -392,7 +593,10 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Effective sequential bandwidth profile for SATA SSD storage.",
+        ),
     )
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
@@ -401,14 +605,20 @@ class Storage(Registry):
         media="HDD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise 7,200 RPM mechanical hard disk drive storage subsystem.",
+        ),
     )
     CloudBlockStorageBaseline = StorageSubsystem(
         name="Cloud block storage baseline",
         bandwidth=250 * (MB / ureg.second),
         media="cloud block volume",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Baseline high-performance cloud network block storage volume.",
+        ),
     )
     ObjectStoreSingleStream = StorageSubsystem(
         name="Object storage single-stream read",
@@ -416,7 +626,10 @@ class Storage(Registry):
         media="object storage",
         interface="HTTP range request",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Single-stream cloud object store read performance profile.",
+        ),
     )
     LocalNvmeTrainingLow = StorageSubsystem(
         name="Local NVMe training tier (low)",
@@ -424,7 +637,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Lower-tier local NVMe training scratch storage subsystem.",
+        ),
     )
     LocalNvmeTrainingTypical = StorageSubsystem(
         name="Local NVMe training tier (typical)",
@@ -432,19 +648,62 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Typical-tier local NVMe training scratch storage subsystem.",
+        ),
     )
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen4 NVMe SSDs in RAID 0 per node.",
+        ),
     )
     LocalNvmeGen5x4 = NodeStorageConfig(
         name="4x local Gen5 NVMe drives per node",
         device=LocalNvmeGen5,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen5 NVMe SSDs in RAID 0 per node.",
+        ),
+    )
+    # --- Added 2026-09-28 ---
+    LocalNvmeGen4_7T68 = StorageSubsystem(
+        name="Local NVMe SSD (Gen4, 7.68 TB)",
+        storage_tech=Hardware.Tech.Storage.NvmeGen4,
+        capacity=7.68 * TB,
+        bandwidth=Hardware.Tech.Storage.NvmeGen4.bandwidth,
+        latency=Hardware.Tech.Storage.NvmeGen4.latency,
+        media="NVMe SSD",
+        interface="PCIe Gen4",
+        durability="local",
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise U.2 Gen4 NVMe drive at the common 7.68 TB capacity point.",
+        ),
+    )
+    LocalNvmeGen4_7T68x4 = NodeStorageConfig(
+        name="4x local Gen4 7.68 TB NVMe drives per node",
+        device=LocalNvmeGen4_7T68,
+        devices_per_node=4,
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen4 7.68 TB NVMe SSDs per node.",
+        ),
+    )
+    PfsPerNodeShare = StorageSubsystem(
+        name="Parallel file system per-client share (uncontended)",
+        bandwidth=4 * (GB / ureg.second),
+        media="parallel file system",
+        durability="durable",
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Teaching assumption: uncontended per-client PFS read bandwidth.",
+        ),
     )
     PfsOneTbPerSecond = StorageSubsystem(
         name="Reference parallel file system (1 TB/s)",
@@ -480,5 +739,8 @@ class Systems(Registry):
     Racks = Racks
     Reliability = Reliability
     Orchestration = OrchestrationProfile(
-        metadata=Metadata(provenance=pc.ORCHESTRATION_ASSUMPTIONS)
+        metadata=Metadata(
+            provenance=pc.ORCHESTRATION_ASSUMPTIONS,
+            description="Reference Kubernetes and SLURM orchestration overhead and scheduling latency assumptions.",
+        )
     )

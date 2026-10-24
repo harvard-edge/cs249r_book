@@ -122,7 +122,7 @@ async function handleEvents(request, env, corsHeaders) {
     // Strip any unexpected fields — only keep known ones + metadata
     const clean = { type: event.type };
     const allowedFields = [
-      'topic', 'zone', 'level', 'track', 'score', 'questionId',
+      'topic', 'subject', 'zone', 'level', 'track', 'score', 'questionId',
       'questionCount', 'pct', 'questionsAnswered', 'planId',
       'page', 'category', '_ts', '_sid',
       'value', 'perceived', 'seconds', 'napkinGrade',

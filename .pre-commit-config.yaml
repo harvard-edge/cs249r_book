@@ -16,6 +16,15 @@
 # (Scope(default=True) in binder/cli/commands/validate.py). Heavier / opt-in
 # scopes are reachable via `--scope <name>` or `--all-scopes` on the CLI.
 #
+# Inspecting errors and getting fixes:
+# ------------------------------------
+# To see error codes, triggers, and source-level fixes for any check group:
+#     ./binder/binder check <group> help
+#
+# To run all checks against a single file with machine-parseable diagnostics (LLM-friendly):
+#     ./binder/binder check all --path <file> --json   # structured JSON with line numbers & suggestions
+#     ./binder/binder check all --path <file> --plain  # single-line compiler diagnostics (file:line:code)
+#
 # Adding a new check
 # ------------------
 # 1. Implement the runner inside `ValidateCommand` (binder/cli/commands/validate.py).
@@ -89,7 +98,7 @@ repos:
       - id: codespell
         name: "Generic: Check for common misspellings"
         args: ["--toml", "pyproject.toml"]
-        exclude: "^(_site/|_book/|htmlcov/|site/assets/games/vendor/|.*\\.js$|.*\\.pdf$)"
+        exclude: "^(_site/|_book/|htmlcov/|site/assets/games/vendor/|binder/tools/bib_verification_manifest\\.json|bibs/manifest\\.json|bibs/canonical_provenance\\.json|.*\\.js$|.*\\.pdf$)"
 
   # ===========================================================================
   # SECTION 2: BIBLIOGRAPHY — .bib mechanical fix → tidy → semantic lint
@@ -107,7 +116,7 @@ repos:
         entry: ./binder/binder bib mechanical --pre-commit
         language: system
         pass_filenames: true
-        files: ^(books/|books/|shared/).*\.bib$
+        files: ^(books/|bibs/references\.bib|shared/).*\.bib$
 
   - repo: https://github.com/FlamingTempura/bibtex-tidy
     rev: v1.14.0
@@ -134,7 +143,18 @@ repos:
         entry: ./binder/binder check bib
         language: system
         pass_filenames: false
-        files: ^books/.*\.(bib|qmd)$
+        files: ^(books|bibs)/.*\.(bib|qmd)$
+
+      - id: book-check-bib-verify
+        name: "Bib: Cryptographic ledger verification (SHA-256)"
+        # Validates all entries in edited .bib files against the SHA-256 ledger
+        # in bibs/manifest.json. Rejects unverified,
+        # drifted, or fabricated citations. Purely local/in-memory for existing
+        # entries (~350ms, offline-safe).
+        entry: ./binder/binder check bib --scope verify --offline
+        language: system
+        pass_filenames: false
+        files: ^(books|bibs)/.*\.bib$
 
   # ===========================================================================
   # SECTION 3: REPO GUARDS — cross-cutting checks not tied to one binder group
@@ -272,10 +292,13 @@ repos:
   # ===========================================================================
   # SECTION 5: BOOK VALIDATORS — one hook per binder check group.
   # Names map 1:1 to `./binder/binder check <group>`. Inside each group, the
-  # curated default scopes run. To see a group's scopes:
+  # curated default scopes run. To see a group's scopes and error code catalog:
   #   ./binder/binder check <group> help
   # To see what's runnable but opt-in for that group:
   #   ./binder/binder check <group> --all-scopes
+  # To run all checks against a single file with machine-parseable diagnostics (LLM-friendly):
+  #   ./binder/binder check all --path <file> --json   # structured JSON with line numbers & suggestions
+  #   ./binder/binder check all --path <file> --plain  # single-line compiler diagnostics (file:line:code)
   #
   # Order is execution order: structural / graph checks first, prose / style
   # last. Failures earlier signal "your structure is broken, fix that before
@@ -305,11 +328,13 @@ repos:
         files: ^books/.*\.qmd$
 
       - id: book-check-structure
-        name: "Book: check structure (heading levels, H2 landings, parts, Purpose)"
+        name: "Book: check structure (heading levels, H2 landings, parts, Purpose, stack)"
         entry: ./binder/binder check structure
         language: system
         pass_filenames: false
-        files: ^books/.*\.qmd$
+        # 2026-10-13: concept maps (schema v2 ownership contracts) are part of
+        # this group, so an edited *_concepts.yml triggers it too.
+        files: ^books/.*(\.qmd|_concepts\.yml)$
 
       # `labels` is split by scope:
       #   orphans     — both vols (10 vol2 orphans were resolved 2026-05;
@@ -356,6 +381,25 @@ repos:
         language: system
         pass_filenames: false
         files: ^books/.*\.qmd$|^binder/tools/audit/baselines/captions_baseline\.json$
+
+      - id: book-check-figure-print-scale
+        name: "Book: matplotlib figures print at 0.80-1.05x, text >= 9 pt (changed chapters)"
+        # Added 2026-10-13. Executes each changed chapter's python cells and
+        # measures every #fig- figure against the limits in
+        # mlsysim/mlsysim/viz/style.py (binder/cli/checks/figure_print_scale.py).
+        entry: ./binder/binder check figures --scope print-scale
+        language: system
+        pass_filenames: true
+        files: ^books/vol[1-4]/.*\.qmd$
+
+      - id: book-check-figure-print-scale-all
+        name: "Book: matplotlib figure print scale, all volumes (style or plotter changed)"
+        # A change to the shared style, the plotters, or the check itself can move
+        # every figure, so it re-measures all four volumes.
+        entry: bash -c 'for v in 1 2 3 4; do ./binder/binder check figures --scope print-scale --vol$v --quiet || exit 1; done'
+        language: system
+        pass_filenames: false
+        files: ^mlsysim/mlsysim/viz/.*\.py$|^binder/cli/checks/figure_print_scale\.py$|^binder/tools/figures/style\.py$
 
       - id: book-check-images
         name: "Book: check images (formats, externals, SVG XML)"
@@ -418,6 +462,17 @@ repos:
         pass_filenames: false
         files: ^books/.*\.qmd$
 
+      # Split out 2026-10-01: book-check-code is often SKIPped for pre-existing
+      # failures in other scopes, and that hid five inline refs placed before
+      # their LEGO cell (vol2 ch03/ch08, vol4 ch07/ch11/ch17), each a hard PDF
+      # build failure. Its own id keeps this cheap static check running.
+      - id: book-check-inline-order
+        name: "Book: inline {python} refs come after their defining cell"
+        entry: ./binder/binder check code --scope inline-order
+        language: system
+        pass_filenames: false
+        files: ^books/.*\.qmd$
+
       # ---- Prose style -------------------------------------------------
 
       - id: book-check-prose
@@ -428,7 +483,7 @@ repos:
         files: ^books/.*\.qmd$
 
       - id: book-check-punctuation
-        name: "Book: check punctuation (em-dash, slash, vs., e.g., en-dash)"
+        name: "Book: check punctuation (quotes, vs., e.g., en-dash)"
         entry: ./binder/binder check punctuation
         language: system
         pass_filenames: false

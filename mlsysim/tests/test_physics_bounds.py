@@ -106,12 +106,59 @@ def get_all_transformer_models():
 # the model's `name`. Add an entry (params in M, flops in M, integer geometry)
 # when you register a new model, citing the source you verified against.
 EXPECTED_TRANSFORMER_SPECS = {
-    # GPT-2 Small — Radford et al. (2019), "Language Models are Unsupervised
-    # Multitask Learners". 124M params, 12 layers, 768 hidden, 12 heads; the
+    # BERT-Base — Devlin et al. (2018). 110M params, 12 layers, 768 hidden, 12 heads.
+    "BERT-Base": dict(
+        parameters_m=110.0, layers=12, hidden_dim=768, heads=12,
+    ),
+    # BERT-Large — Devlin et al. (2018). 340M params, 24 layers, 1024 hidden, 16 heads.
+    "BERT-Large": dict(
+        parameters_m=340.0, layers=24, hidden_dim=1024, heads=16,
+    ),
+    # DeepSeek-V3 — DeepSeek-AI (2024). 671B params, 61 layers, 7168 hidden, 56 heads.
+    "DeepSeek-V3": dict(
+        parameters_m=671000.0, layers=61, hidden_dim=7168, heads=56,
+    ),
+    # GPT-2 (1.5B) — Radford et al. (2019). 1.5B params, 48 layers, 1600 hidden, 25 heads.
+    "GPT-2 (1.5B)": dict(
+        parameters_m=1500.0, layers=48, hidden_dim=1600, heads=25,
+    ),
+    # GPT-2 Small — Radford et al. (2019). 124M params, 12 layers, 768 hidden, 12 heads;
     # per-token forward pass is ~2N = 248 MFLOP.
     "GPT-2 Small (124M)": dict(
         parameters_m=124.0, inference_flops_m=248.0,
         layers=12, hidden_dim=768, heads=12,
+    ),
+    # GPT-3 (175B) — Brown et al. (2020). 175B params, 96 layers, 12288 hidden, 96 heads.
+    "GPT-3 (175B)": dict(
+        parameters_m=175000.0, layers=96, hidden_dim=12288, heads=96,
+    ),
+    # GPT-4 — OpenAI (2023) / public architecture consensus (16x110B MoE). 120 layers, 16384 hidden, 128 heads.
+    "GPT-4": dict(
+        parameters_m=1760000.0, layers=120, hidden_dim=16384, heads=128,
+    ),
+    # Llama-2-7B — Touvron et al. (2023). 7B params, 32 layers, 4096 hidden, 32 heads.
+    "Llama-2-7B": dict(
+        parameters_m=7000.0, layers=32, hidden_dim=4096, heads=32,
+    ),
+    # Llama-2-70B — Touvron et al. (2023). 70B params, 80 layers, 8192 hidden, 64 heads.
+    "Llama-2-70B": dict(
+        parameters_m=70000.0, layers=80, hidden_dim=8192, heads=64,
+    ),
+    # Llama-3.1-8B — Dubey et al. (2024). 8.03B params, 32 layers, 4096 hidden, 32 heads.
+    "Llama-3.1-8B": dict(
+        parameters_m=8030.0, layers=32, hidden_dim=4096, heads=32,
+    ),
+    # Llama-3.1-70B — Dubey et al. (2024). 70.6B params, 80 layers, 8192 hidden, 64 heads.
+    "Llama-3.1-70B": dict(
+        parameters_m=70600.0, layers=80, hidden_dim=8192, heads=64,
+    ),
+    # Llama-3.1-405B — Dubey et al. (2024). 405B params, 126 layers, 16384 hidden, 128 heads.
+    "Llama-3.1-405B": dict(
+        parameters_m=405000.0, layers=126, hidden_dim=16384, heads=128,
+    ),
+    # Mixtral-8x7B — Jiang et al. (2024). 46.7B total params, 32 layers, 4096 hidden, 32 heads.
+    "Mixtral-8x7B": dict(
+        parameters_m=46700.0, layers=32, hidden_dim=4096, heads=32,
     ),
 }
 
@@ -130,7 +177,9 @@ def test_transformer_attention_geometry(model):
     h, nh = model.hidden_dim, model.heads
     assert h > 0 and nh > 0, f"{model.name}: non-positive hidden_dim/heads ({h}/{nh})"
     assert h % nh == 0, f"{model.name}: hidden_dim {h} not divisible by heads {nh}"
-    head_dim = h // nh
+    # An explicit head_dim (PaLM: 48 heads of 256 at d_model 18,432) overrides
+    # the hidden_dim // heads convention (added 2026-10-20).
+    head_dim = model.head_dim or h // nh
     assert 32 <= head_dim <= 256, (
         f"{model.name}: head_dim {head_dim} outside the sane 32-256 range "
         f"(hidden_dim {h} / heads {nh})"

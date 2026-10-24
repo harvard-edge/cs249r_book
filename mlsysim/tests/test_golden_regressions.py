@@ -27,8 +27,8 @@ def test_golden_roofline_resnet50_a100_batch1():
     assert result.bottleneck == "Compute"
     assert result.latency.m_as("ms") == pytest.approx(0.5675641025641026)
     assert result.throughput.m_as("1/s") == pytest.approx(1761.915518409758)
-    assert result.memory_footprint.m_as("GB") == pytest.approx(0.0512)
-    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(145.5965909090909)
+    assert result.memory_footprint.m_as("GB") == pytest.approx(0.051114064)
+    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(145.84137654453485)
 
 
 def test_golden_bottleneck_intensity_scaled_units():
@@ -177,7 +177,7 @@ def test_golden_engine_utilization_and_energy_resnet50_a100():
     # Batch-traffic heuristic (weights x (1 + 0.1 x B)) pinned at batch 32:
     # intensity was previously pinned only implicitly at batch=1.
     p32 = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=32)
-    assert p32.arithmetic_intensity.magnitude == pytest.approx(1220.2380952380952, rel=1e-9)
+    assert p32.arithmetic_intensity.magnitude == pytest.approx(1222.2896319922922, rel=1e-9)
 
 
 def test_golden_engine_non_transformer_training_memory():
@@ -190,7 +190,7 @@ def test_golden_engine_non_transformer_training_memory():
 
     p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100,
                      batch_size=8, is_training=True)
-    assert p.memory_footprint.m_as("GB") == pytest.approx(0.4096, rel=1e-6)
+    assert p.memory_footprint.m_as("GB") == pytest.approx(0.408912512, rel=1e-6)
 
 
 def test_reference_hardware_tflops_matches_registry():

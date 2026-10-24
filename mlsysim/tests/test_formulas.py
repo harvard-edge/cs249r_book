@@ -29,9 +29,8 @@ from mlsysim.physics import (
     calc_strong_scaling_speedup,
     calc_universal_scalability_law,
     calc_usl_optimal_concurrency,
-    calc_multiagent_speedup,
-    calc_multiagent_optimal_concurrency,
     calc_transformer_prefill_flops,
+    calc_vla_inference_latency,
     calc_bottleneck,
     model_memory,
     calc_ring_allreduce_time,
@@ -46,10 +45,6 @@ from mlsysim.physics import (
     calc_pipeline_bubble,
     calc_kv_cache_size,
     calc_mla_cache_size,
-    calc_pareto_scale,
-    calc_pareto_survival,
-    calc_pareto_conditional_survival,
-    calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
     calc_capped_exponential_scale,
     calc_expected_paged_kv_tokens,
@@ -61,7 +56,6 @@ from mlsysim.physics import (
     calc_fleet_tco,
     calc_population_stability_index,
     calc_two_proportion_sample_size,
-    calc_constraint_propagation_factor,
 )
 from mlsysim.core.units import ureg, Q_, MB, GB
 
@@ -125,6 +119,13 @@ class TestDTime:
         assert result.units == ureg.second
         assert result.magnitude == pytest.approx(1e18 / (8 * 312e12 * 0.5), rel=1e-4)
 
+
+# ======================================================================
+# calc_training_time_days
+# ======================================================================
+
+
+
 # ======================================================================
 # calc_amdahls_speedup
 # ======================================================================
@@ -181,6 +182,71 @@ class TestBottleneck:
             Q_("1 GB/s"),
         )
         assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_infinite_device_flops_preserves_workload_intensity(self):
+        # Even with infinite compute (t_comp_ms = 0), intrinsic arithmetic intensity
+        # is a workload property (10 TFLOP / 10 GB = 1000 FLOP/byte) and must not be zeroed out.
+        result = calc_bottleneck(
+            Q_("10 TFLOP"),
+            Q_("10 GB"),
+            Q_("inf flop/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Memory"
+        assert result["compute_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_infinite_device_bw_preserves_workload_intensity(self):
+        # Even with infinite bandwidth (t_mem_ms = 0), intrinsic arithmetic intensity
+        # is a workload property (10 TFLOP / 10 GB = 1000 FLOP/byte) and must not be inf.
+        result = calc_bottleneck(
+            Q_("10 TFLOP"),
+            Q_("10 GB"),
+            Q_("1 TFLOP/s"),
+            Q_("inf byte/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["memory_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_zero_ops_memory_bound(self):
+        result = calc_bottleneck(
+            Q_("0 flop"),
+            Q_("1 GB"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Memory"
+        assert result["compute_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == 0.0
+
+    def test_zero_bytes_compute_bound(self):
+        result = calc_bottleneck(
+            Q_("1 TFLOP"),
+            Q_("0 byte"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["memory_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert math.isinf(result["intensity"])
+
+    def test_degenerate_zero_ops_and_bytes(self):
+        result = calc_bottleneck(
+            Q_("0 flop"),
+            Q_("0 byte"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["compute_ms"] == 0.0
+        assert result["memory_ms"] == 0.0
+        assert result["ratio"] == 1.0
+        assert result["intensity"] == 0.0
 
 # ======================================================================
 # model_memory
@@ -582,49 +648,6 @@ class TestPipelineBubble:
 # Pareto trajectory-length helpers
 # ======================================================================
 
-class TestParetoTrajectory:
-    """Heavy-tailed agent trajectory lengths and the decreasing hazard rate."""
-
-    ALPHA = 1.1
-    MEAN = 24.8
-
-    def test_scale_from_measured_mean(self):
-        # x_min = mean * (alpha - 1) / alpha
-        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
-        assert scale == pytest.approx(2.2545, abs=1e-3)
-
-    def test_fit_reproduces_the_measured_tail(self):
-        # The same two parameters must place ~1 percent beyond a P99 of 142.
-        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
-        assert calc_pareto_survival(142, scale, self.ALPHA) == pytest.approx(0.010, abs=2e-3)
-
-    def test_scale_cancels_in_conditional_survival(self):
-        # P(N > 100 | N > 50) depends only on the ratio and the tail index.
-        for scale in (1.0, 2.2545, 5.0):
-            assert calc_pareto_conditional_survival(50, 100, self.ALPHA) == pytest.approx(
-                calc_pareto_survival(100, scale, self.ALPHA)
-                / calc_pareto_survival(50, scale, self.ALPHA)
-            )
-
-    def test_hazard_rate_decreases(self):
-        """A longer-running trajectory is likelier to keep running, not less."""
-        young = calc_pareto_conditional_survival(10, 20, self.ALPHA)
-        old = calc_pareto_conditional_survival(500, 1000, self.ALPHA)
-        assert young == pytest.approx(old)  # scale-free: doubling is doubling
-        assert calc_pareto_conditional_survival(50, 100, self.ALPHA) > math.exp(-50 / self.MEAN)
-
-    def test_mean_residual_life_grows_with_attained_service(self):
-        assert calc_pareto_mean_residual_life(50, self.ALPHA) == pytest.approx(500.0)
-        assert calc_pareto_mean_residual_life(100, self.ALPHA) > calc_pareto_mean_residual_life(50, self.ALPHA)
-
-    def test_no_finite_mean_below_alpha_one(self):
-        with pytest.raises(ValueError):
-            calc_pareto_scale(self.MEAN, 0.9)
-        with pytest.raises(ValueError):
-            calc_pareto_mean_residual_life(50, 1.0)
-
-    def test_survival_is_one_below_the_scale(self):
-        assert calc_pareto_survival(1.0, 2.2545, self.ALPHA) == 1.0
 
 
 # ======================================================================
@@ -705,6 +728,13 @@ class TestPagedKVCacheSize:
             seq_len=2050, batch_size=1, page_size_tokens=16,
         )
         assert frag == pytest.approx(14 / 2064, rel=1e-4)
+
+
+# ======================================================================
+# calc_speculative_branch_capacity
+# ======================================================================
+
+
 
 # ======================================================================
 # calc_capped_exponential_scale / calc_expected_paged_kv_tokens
@@ -958,11 +988,6 @@ class TestMTBFNode:
         expected = 1 / (4/10_000 + 2/50_000 + 2/20_000)
         assert result.m_as(ureg.hour) == pytest.approx(expected, rel=1e-4)
 
-def test_calc_binomial_failure_probability():
-    from mlsysim.physics.reliability import calc_binomial_failure_probability
-    assert calc_binomial_failure_probability(1.0, 100) == 1.0
-    assert calc_binomial_failure_probability(0.0, 100) == 0.0
-    assert abs(calc_binomial_failure_probability(0.5, 2) - 0.75) < 1e-9
 
 # ======================================================================
 # statistics.py — calc_population_stability_index,
@@ -1037,18 +1062,6 @@ class TestTwoProportionSampleSize:
             calc_two_proportion_sample_size(1.0, 0.001)
 
 
-class TestConstraintPropagationFactor:
-    """factor = base^(stage_to - stage_from) (Boehm cost-of-delay)."""
-
-    def test_three_stage_gap(self):
-        assert calc_constraint_propagation_factor(0, 3) == 8
-
-    def test_equal_stages_is_one(self):
-        assert calc_constraint_propagation_factor(2, 2) == 1
-
-    def test_backwards_raises(self):
-        with pytest.raises(ValueError):
-            calc_constraint_propagation_factor(3, 1)
 
 
 # ======================================================================
@@ -1204,44 +1217,6 @@ class TestUniversalScalabilityLaw:
 # calc_multiagent_speedup
 # ======================================================================
 
-class TestMultiAgentSpeedup:
-    """Multi-Agent Amdahl's Law with linear and quadratic coordination tax."""
-
-    def test_chapter15_known_values(self):
-        s = 0.15
-        alpha = 0.004
-        beta = 0.030
-
-        # Hand-computed known answers from Chapter 15
-        assert calc_multiagent_speedup(1, s, alpha, beta) == pytest.approx(1.0 / 1.034, rel=1e-3)
-        assert calc_multiagent_speedup(4, s, alpha, beta) == pytest.approx(1.830, rel=1e-2)
-        assert calc_multiagent_speedup(8, s, alpha, beta) == pytest.approx(1.329, rel=1e-2)
-        assert calc_multiagent_speedup(12, s, alpha, beta) == pytest.approx(0.864, rel=1e-2)
-
-    def test_optimal_concurrency_root(self):
-        s = 0.15
-        alpha = 0.004
-        beta = 0.030
-        m_star = calc_multiagent_optimal_concurrency(s, alpha, beta)
-        # Stationary root: 2 * alpha * M^3 + beta * M^2 - (1 - s) = 0
-        assert 3.7 < m_star < 3.8
-        f_root = 2 * alpha * (m_star ** 3) + beta * (m_star ** 2) - (1.0 - s)
-        assert abs(f_root) < 1e-6
-
-    def test_reduces_to_standard_amdahl_when_taxes_zero(self):
-        s = 0.2
-        for m in [2, 5, 10]:
-            speedup = calc_multiagent_speedup(m, s_serial=s, alpha=0.0, beta=0.0)
-            expected = 1.0 / (s + (1.0 - s) / m)
-            assert speedup == pytest.approx(expected, rel=1e-6)
-
-    def test_validation_bounds(self):
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(0, s_serial=0.1)
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(4, s_serial=1.2)
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(4, s_serial=0.1, alpha=-0.01)
 
 
 # ======================================================================
@@ -1268,3 +1243,56 @@ class TestTransformerPrefillFlops:
         attn_bidir = 4.0 * layers * hidden * (s ** 2)
         assert causal.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_causal, rel=1e-6)
         assert bidir.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_bidir, rel=1e-6)
+
+
+# ======================================================================
+# calc_vla_inference_latency (added 2026-09-28)
+# ======================================================================
+
+class TestVlaInferenceLatency:
+    """Prefill (compute-bound) plus decode (bandwidth-bound) for one VLA evaluation."""
+
+    # 7B parameters, 43 TFLOP/s dense FP16, 200 GB/s: round numbers checked by hand.
+    N = 7e9
+    PI = 43e12 * ureg.flop / ureg.second
+    BW = 200e9 * ureg.byte / ureg.second
+
+    def test_autoregressive_hand_check(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        # prefill 2 N S / Pi = 4.2e12 / 43e12 = 97.67 ms > 70 ms sweep -> compute-bound
+        assert r["prefill_bound"] == "compute"
+        assert r["t_prefill"].m_as(ureg.millisecond) == pytest.approx(4.2e12 / 43e12 * 1e3, rel=1e-9)
+        # six decode steps, each one 70 ms weight sweep
+        assert r["decode_steps"] == 6
+        assert r["t_decode"].m_as(ureg.millisecond) == pytest.approx(6 * 70.0, rel=1e-9)
+        assert r["t_total"].m_as(ureg.millisecond) == pytest.approx(4.2e12 / 43e12 * 1e3 + 420.0, rel=1e-9)
+
+    def test_weight_only_quantization_cuts_decode_not_prefill(self):
+        fp16 = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        int4 = calc_vla_inference_latency(self.N, 3.5e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        assert int4["t_prefill"] == fp16["t_prefill"]
+        assert int4["t_decode"].m_as(ureg.millisecond) == pytest.approx(fp16["t_decode"].m_as(ureg.millisecond) / 4)
+
+    def test_parallel_decode_moves_actions_into_prefill(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW, parallel_decode=True)
+        assert r["decode_steps"] == 0 and r["prefill_tokens"] == 307
+        assert r["t_total"] == r["t_prefill"]
+
+    def test_short_prompt_is_memory_bound(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 10, 1, self.PI, self.BW)
+        assert r["prefill_bound"] == "memory"
+        assert r["t_total"].m_as(ureg.millisecond) == pytest.approx(70.0)
+
+    def test_efficiency_factors_scale_terms(self):
+        r = calc_vla_inference_latency(
+            self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW,
+            compute_utilization=0.5, bus_efficiency=0.7,
+        )
+        assert r["t_prefill"].m_as(ureg.millisecond) == pytest.approx(2 * 4.2e12 / 43e12 * 1e3)
+        assert r["t_decode_step"].m_as(ureg.millisecond) == pytest.approx(100.0)
+
+    def test_rejects_bad_inputs(self):
+        with pytest.raises(ValueError):
+            calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 0, 7, self.PI, self.BW)
+        with pytest.raises(ValueError):
+            calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW, compute_utilization=0)

@@ -318,4 +318,63 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Run after a short delay to ensure everything is initialized
   setTimeout(setupMobileSidebarToggle, 500);
+
+  // Resolve vertical collisions among margin elements (.column-margin, footnotes, margin figures)
+  function resolveMarginCollisions() {
+    const marginEls = Array.from(document.querySelectorAll('.column-margin'));
+    if (!marginEls.length) return;
+
+    // Reset any previously applied transforms first to read natural document flow
+    marginEls.forEach(el => {
+      el.style.transform = '';
+    });
+
+    // Notes return to normal flow on narrow screens. A desktop translation
+    // must be cleared before this guard or it can cover the next figure.
+    if (window.innerWidth < 992) return;
+
+    let prevBottom = -Infinity;
+    const SPACING = 16; // 16px minimum vertical space between margin items
+
+    marginEls.forEach(el => {
+      // Ignore hidden elements
+      if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return;
+
+      let top = Infinity;
+      let bottom = -Infinity;
+      const children = el.children.length > 0 ? Array.from(el.children) : [el];
+
+      children.forEach(child => {
+        const r = child.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return;
+        const childTop = window.scrollY + r.top;
+        const childBottom = window.scrollY + r.bottom;
+        if (childTop < top) top = childTop;
+        if (childBottom > bottom) bottom = childBottom;
+      });
+
+      if (!isFinite(top) || !isFinite(bottom) || bottom - top <= 0) return;
+
+      if (top < prevBottom + SPACING) {
+        const shift = (prevBottom + SPACING) - top;
+        el.style.transform = `translateY(${shift}px)`;
+        prevBottom = bottom + shift;
+      } else {
+        prevBottom = bottom;
+      }
+    });
+  }
+
+  // Schedule margin collision resolution across multiple lifecycle checkpoints
+  [100, 400, 1000, 2500].forEach(delay => {
+    setTimeout(resolveMarginCollisions, delay);
+  });
+  window.addEventListener('load', resolveMarginCollisions);
+
+  // Recalculate on window resize
+  let marginResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(marginResizeTimer);
+    marginResizeTimer = setTimeout(resolveMarginCollisions, 150);
+  });
 });

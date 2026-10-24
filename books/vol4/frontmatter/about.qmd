@@ -1,156 +1,120 @@
+---
+format:
+  html:
+    number-sections: false
+---
+
 # Preface {#sec-about .unnumbered}
 
-## Who this book is for {#sec-book-audience .unlisted}
+## Who This Book Is For {#sec-about-audience}
 
-This textbook is for computer science and engineering students, machine learning researchers, robotics engineers, and embedded systems architects who want to build embodied intelligent systems that safely sense, reason, and act in the physical world.
+This book is for senior undergraduates and beginning graduate students in computer science, robotics, electrical engineering, and machine learning, and for practicing engineers who build, deploy, or certify physical AI systems. It is written for the engineer who has watched an embodied policy succeed in simulation or a scripted demonstration and now has to ship a machine that moves mass among people, day after day. That machine must not collide with a coworker, damage a payload, burn out a motor winding, or run away on a network timeout.
 
-An advisory model ends at a display or a human decision, so its computation can be retried or canceled before anything outside the computer acts on the result. Its errors can still cause harm, but only through whoever or whatever responds to them.
+The reader should understand basic programming in Python and machine learning intuition, and be comfortable with introductory Newtonian physics, linear algebra, and basic probability. The book assumes no prior book in this series. It develops physical AI concepts where they are first used and derives the timing, control, and hardware-placement relationships needed to reason about embodied workloads without requiring specialist background in nonlinear control theory or application-specific integrated circuit (ASIC) microarchitecture.
 
-In physical AI, software directs matter, momentum, and energy. When a vision-language model proposes motion for a mobile base or an articulated robotic arm, execution crosses the causal boundary into continuous Newtonian physics. If an actuation command exceeds the yield strength of a gearbox or the thermal dissipation limit of an inverter, physical hardware breaks. Once kinetic energy is released or material yields, software cannot undo the state transition.
+## Why a Physical AI Textbook {#sec-about-why}
 
-Building systems that survive this reality requires a shared systems engineering discipline, and readers arrive at it from three directions:
+A reasonable engineer might look at the current wave of robot foundation models and ask a skeptical question. *Is physical artificial intelligence a genuine systems discipline with durable principles, or is it simply classical robotics with a transformer bolted on, or an end-to-end neural network running on an onboard computer?*
 
-* **Machine Learning Practitioners**: Moving beyond static test-set accuracy evaluated on stored datasets. In physical AI, actions alter future sensory observations through closed-loop feedback ($s_{t+1} \sim P(s \mid s_t, a_t)$), so a policy drifts off the states it was trained on, and the worst-case cost of that drift grows with the square of the horizon (@sec-boundary-bedrock-laws). Practitioners learn how to formulate continuous action policies, evaluate closed-loop survival, and submit unprivileged proposals to an independent permission path.
-* **Robotics and Control Engineers**: Augmenting classical feedback loops with high-capacity neural foundation models. Modern vision-language-action models provide open-vocabulary semantic scene understanding and multimodal generalization, but they are learned proposers that run at tens of hertz with variable latency, so an independent permission path whose rate follows the plant's stopping budget must check what they propose. Control engineers learn how to build that path, including safety filters such as Control Barrier Functions, on real-time silicon.
-* **Embedded Systems and Silicon Architects**: Managing multi-rate execution across heterogeneous system-on-chip (SoC) platforms. Architects learn how to isolate high-throughput neural accelerators from the safety microcontroller that runs the permission path, preventing memory bus crossbar contention, direct memory access (DMA) starvation, and supply voltage droop from breaching hard physical deadlines.
+The skepticism is fair. Much of what is written about embodied AI highlights impressive single-task demonstrations, such as a dexterous hand folding laundry or a humanoid walking through a lab. Demonstration, however, is not deployment. In the field, failure rarely comes from the raw expressiveness of the model. What fails is the system around it, as when an observation arrives 50 milliseconds too late, an action proposal demands more torque than the joint drives can deliver, or an unmodeled delay turns a braking command into an impact.
 
----
+Traditional machine learning systems center on disembodied prediction. A model evaluates static inputs in an open loop and returns advisory labels, rankings, or tokens without acting directly on the world. Because a person or downstream service must still decide what to do with that output, an erroneous prediction can be discarded or recalculated before it causes harm, and systems engineering centers on balancing training cost against serving latency, memory, and throughput. Agentic machine learning systems move from single predictions to sequential action: a model formulates multi-step plans, inspects feedback, and invokes software tools in a closed loop. As long as that loop stays inside a digital environment, however, virtual time can be paused, execution can be sandboxed, and failed transactions can be rolled back.
 
-## Why a physical AI systems textbook {#sec-book-why-physical .unlisted}
+Physical AI systems bring agency into continuous physics. When an autonomous model commands actuators, computation crosses the causal boundary into mass, momentum, friction, and heat. In continuous physics, virtual sandboxes do not exist: time cannot pause while a foundation model deliberates, and Newtonian work cannot be rolled back after an impact. A larger model cannot shorten a stopping distance, cool an electric winding, or recover clearance spent while it computed. Physical AI therefore requires an architectural discipline. Learned models propose, while an independent permission path, with its own timing and its own fallback, decides what may cross into the physical world.
 
-This book approaches physical AI from a first-principles systems perspective. Its scope is clearest beside the two neighboring kinds of book that it is not.
+This book teaches how to design, measure, and govern that machine. Its central question is what an embodied task needs around a learned model to produce useful physical service supported by the required evidence. Readers should leave able to translate physical limits into computational budgets, design sensorimotor policies that close the loop under real-time deadlines, enforce runtime assurance independently of the learned proposer, and justify release through an assurance case that links claims to empirical evidence.
 
-* **Not a classical control theory book**: We do not develop continuous-time Laplace transforms, contour integrals, or Lyapunov stability proofs at length. Formal continuous-control proofs and reachability derivations are collected in the volume appendices for optional depth.
-* **Not a traditional robotics kinematics book**: We do not work through Denavit-Hartenberg parameter matrices, forward-kinematics linkage catalogs, or specialized mechanical design heuristics.
+## The Causal Boundary and the Four Laws {#sec-about-mental-model}
 
-Instead, we reason from physical principles (conservation of energy and momentum, stopping kinematics, thermal dissipation, and Coulomb friction) and from computational systems architecture (multi-rate execution loops, memory bus contention, asynchronous message queues, and permission paths that check learned proposals).
+The unit of engineering in this book is the **causal boundary**, the interface where an admitted digital command becomes current in a motor winding, torque on a shaft, and physical force delivered to the world. Accuracy on a held-out dataset is not the measure of a physical AI system. The measure is whether closed-loop actions achieve task goals within verified physical limits, supported by evidence independent of the learned model's self-report, and at what cost in latency, energy, thermal margin, and compute.
 
-### Mechanisms taught to the depth that changes a budget
+Four governing laws anchor the book's architecture. Each law pairs a physical or statistical constraint with the systems mechanism required to bound it:
 
-This book does not treat learned models or control blocks as black boxes, and it does not survey their internals either. A mechanism enters the main text at the depth at which it changes a number the machine must budget: a latency, a memory footprint, a clearance, or the evidence a claim can rest on. An action-chunk decoder appears through the horizon it supplies and the time a new chunk takes. A scene representation appears through the memory it occupies and the age of the evidence it holds. A barrier filter appears through the premises its guarantee needs and the deadline it must meet. Internals that move no such number, including the arithmetic of patch tokenization and attention, decoder loss functions, and surface-reconstruction methods, are in the machine learning and control appendices for readers who want them.
+- **The First Law: Irreversibility.** Software cannot roll back physical consequences. Every check that admits a command must finish before the machine spends its remaining clearance, so physical limits become strict budgets in time, distance, torque, heat, and voltage.
+- **The Second Law: Endogenous Data.** A physical machine's actions choose its next observations. The states a deployed policy visits are conditioned on its own previous actions, so competence is a claim bounded by the operating envelope that closed-loop evaluation actually verified.
+- **The Third Law: Proposal Is Not Permission.** A learned model may propose motion; only an independent permission path may admit it. The permission path evaluates state whose age is bounded, executes within a deterministic deadline set by the plant physics, and maintains a feasible fallback that does not depend on the learned proposer.
+- **The Fourth Law: Permission Must Be Earned.** Permission to operate is granted per operating condition on recorded evidence, and it expires when that evidence does.
 
-### Delay is distance
+The first of these is a physical law. The other three are design principles, the embodied counterparts to covariate shift, runtime assurance, and the assurance case. This book elevates them to bedrock laws because a production machine that violates them incurs predictable physical risks.
 
-A machine keeps moving while it senses, decides, and waits for its brakes. Every millisecond between an observation and the moment braking force builds is spent as travel toward whatever the machine must not reach, so operating speed, delay, clearance, and braking capacity form one budget rather than four separate specifications. The book builds that budget for one machine, adding each term in the chapter that owns it, beginning with the body's stopping distance in @sec-body-kinetic-momentum. A learned model's inference time enters the budget only through the age of the evidence it hands forward, because the permission path, not the model, decides each tick whether motion may continue.
+Two relations quantify these obligations throughout the book. **Delay is distance** governs the stopping budget: if a machine moving at velocity $\SpeedAtDetection$ takes reaction time $\PrebrakeDelay$ to sense, compute, and actuate before decelerating at rate $\CredibleBrakingDeceleration$, the total stopping distance is $\StoppingDistance = \SpeedAtDetection \cdot \PrebrakeDelay + \frac{\SpeedAtDetection^2}{2\CredibleBrakingDeceleration}$. Every millisecond of latency is distance spent before braking can begin. **Evidence expiration** governs the validity of state: an observation or state estimate carries an expiration timestamp derived from the plant's maximum rate of change, after which it cannot justify a safety assertion.
 
----
+The machine's architecture separates five roles: the **Brain** (learned models that propose goals and motion), the **Nervous System** (deterministic communication and the independent permission path), the **Body** (drives, transmissions, windings, and power systems), the **Boundary** (register writes and sensor captures), and the **World** (continuous physical dynamics, obstacles, and people). A warehouse mobile manipulator that navigates an aisle shared with workers, opens a spring-latched door, and handles a fragile payload serves as the running reference machine in every chapter. A humanoid example at the end of each part tests whether the reasoning survives a body that couples balance, joint torque, and thermal dissipation.
 
-## What this book promises {#sec-book-promise .unlisted}
+## What This Book Covers {#sec-about-covers}
 
-This book does not promise a machine that is provably safe. No finite test campaign, runtime filter, or certification scheme delivers that for a learned system in an open world, and the chapters say so wherever it matters. The book teaches something narrower. It shows how to build a machine whose learned proposals cannot authorize their own motion, whose permission path decides on evidence of known age within the margin that delay has not yet consumed, and whose every guarantee is written down with the premises it rests on. A barrier filter protects the plant only while its model, its state estimate, its actuator authority, and its deadline hold. A release is justified only for the conditions its evidence covers. A premise that evidence cannot settle restricts what the machine may do instead of being assumed away. The final chapter returns to the opening question with that answer. The guarantee is conditional, and the engineering lies in knowing its conditions and recording them.
+The book builds understanding in physical dependency order: **anatomy, teaching, running, governing**. Each part adds responsibilities that the preceding material prepares the reader to evaluate, and reference appendices supply the supporting mathematical, control, and hardware derivations:
 
----
+- **Introduction: The Causal Boundary** (@sec-boundary) prices delay at the causal boundary, defines the five-level machine architecture, and establishes the four governing laws.
+- **Part I: The Machine Anatomy** turns the first law into physical budgets. @Sec-body measures what the body can do before damage, @sec-brain characterizes the learned proposer and how quickly its evidence ages, and @sec-nervous derives how frequently the permission path must tick and how long a proposal may drive the actuators.
+- **Part II: Teaching the Machine** applies the second law to sensorimotor learning. @Sec-data records demonstrations with their operating conditions, @sec-training analyzes training regimes and the dependencies they hide, and @sec-evaluation bounds the policy's competence through finite-trial closed-loop evaluation.
+- **Part III: Running the Machine** applies the third law at runtime. It follows dated sensor measurements through perception (@sec-perception), spatial memory and state estimation (@sec-memory), intent grounding (@sec-intent), and trajectory planning (@sec-planning) to runtime enforcement (@sec-enforcement), and tests whether real-time hardware keeps that path on time (@sec-placement).
+- **Part IV: Governing the Machine** applies the fourth law to operational authority. @Sec-intervention governs how authority passes between the machine and an operator. @Sec-verification injects physical and computational faults to prove containment. @Sec-release constructs the assurance case that justifies release under named conditions. @Sec-responsibility names who answers for each decision behind an admitted action, which human roles a person can actually perform, and which people bear the machine's risk and appear in its records.
+- **Conclusion: Engineering Physical AI** (@sec-frontier) synthesizes the complete methodology, transfers the reasoning to an unfamiliar machine, and establishes the open research frontier.
 
-## The machine in five levels {#sec-book-mental-model .unlisted}
+Reference appendices provide background on machine learning foundations (@sec-appendix-ml), control and dynamics (@sec-appendix-control), systems and hardware (@sec-appendix-systems), sensorimotor troubleshooting (@sec-appendix-spa-troubleshooting), and a unified glossary. Each appendix is organized as a lookup reference so that readers can consult a specific derivation without losing the thread of the main text.
 
-The machine in this book has five levels. The Brain holds the learned proposers, which revise goals at a few hertz and emit short action sequences at tens of hertz. Below the proposal boundary, the Nervous System holds the permission path, which admits, modifies, or refuses every proposal on fresh state and owns the fallback. The Body is the plant under its drives, the Boundary is where commands become current and the world becomes measurement, and the World is everything the machine does not own. Governance surrounds all five as a lifecycle envelope, deciding who may command the machine and what evidence licenses it to operate. The Brain proposes; only the permission path permits. @Sec-boundary-machine-model gives the full model and its rates.
+## How to Read This Book {#sec-about-reading}
 
----
+The book is written to be read in order. Each chapter uses only ideas introduced earlier or defined where they appear, and each owns its concepts. Every chapter opens with the physical problem it solves, develops the mechanism as the answer, and closes with a summary and a handoff to the next chapter. Classical systems mechanisms (watchdog leases, safety filters, interlocks, fail-safe fallbacks, and real-time scheduling) appear as concrete solutions to physical hazards rather than as abstract theory.
 
-## The three machine classes {#sec-book-archetypes .unlisted}
+Readers with a particular focus can tailor their depth after the introduction. Four tracks correspond to the primary engineering roles that collaborate on a physical AI deployment:
 
-To keep systems concepts concrete, this textbook grounds its principles in the three machine classes of @sec-boundary-four-archetypes:
+- **Core systems curriculum**: Follow the complete sequence from @sec-boundary through @sec-frontier to integrate physical limits, learning, runtime design, and operational evidence.
+- **ML systems and learned runtimes**: Focus on the common foundation, sensorimotor training and evaluation (@sec-data through @sec-evaluation), perception and planning (@sec-perception through @sec-placement), and release (@sec-release).
+- **Embedded systems and silicon**: Focus on the common foundation, runtime placement (@sec-placement), communication timing (@sec-nervous), and fault verification (@sec-verification).
+- **Robotics, control, and assurance**: Focus on the common foundation, state estimation and planning (@sec-memory through @sec-planning), runtime enforcement (@sec-enforcement), human intervention (@sec-intervention), and responsibility for the people around the machine (@sec-responsibility).
 
-1. **Class 1 · Mass-Dominated Mobility (AMRs and Quadrupeds)**: Planar transport bases and legged platforms (such as Boston Dynamics' Spot) navigating open facilities and rugged terrain. Governed by vehicle momentum, tire-road and foot-ground Coulomb friction, kinematic stopping distance envelopes, and multi-camera / lidar perception pipelines under rolling-shutter skew.
-2. **Class 2 · Contact-Dominated Manipulation**: Multi-link robotic arms performing dexterous contact tasks. Governed by non-linear arm dynamics, reflected rotor inertia ($J_{\text{ref}} = N^2 J_{\text{rotor}}$), cycloidal gearbox compliance, and contact force containment.
-3. **Class 3 · Flow-Dominated Process and Energy Systems**: High-pressure fluid loops, chemical batch reactors, and thermal plants. Governed by enthalpy exchange, pipe fluid dynamics, pressure transients, and irreversible thermodynamic phase changes.
+Evidence flows from physical anatomy through training and runtime execution to operational release, and the chapter dependencies across the six divisions of the book follow that progression (@fig-vol4-chapter-dependencies). Every arrow in the map represents a concrete record or physical bound handed forward from one engineering stage to the next.
 
-One machine runs through the book, the warehouse mobile manipulator of @sec-boundary-four-archetypes, and each chapter adds what it owns to that machine's budgets. Each part closes by testing its law on a humanoid, which couples all three classes on one chassis.
-
----
-
-## How to read this book: Progressive arc vs. modular drop-in {#sec-book-structure .unlisted}
-
-This textbook supports two reading patterns:
-
-### For sequential readers (the cumulative curriculum arc)
-
-Readers moving cover-to-cover follow an introduction, four parts, and a conclusion, and each part is led by one of the book's four laws. @Sec-boundary-book-architecture traces the chain of records the chapters hand forward.
-
-* **Introduction** (@sec-boundary) asks what a machine must guarantee before a learned model's proposal becomes physical work.
-* **Part I: The Machine Anatomy** turns the first law, irreversibility, into budgets of time, distance, torque, heat, and voltage.
-* **Part II: Teaching the Machine** asks what a learned proposer's competence rests on under the second law, endogenous data, when its own actions choose what it observes next.
-* **Part III: Running the Machine** builds the runtime around the third law, proposal is not permission.
-* **Part IV: Governing the Machine** applies the fourth law, evidence bounds authority, to decide who may command the machine and under which conditions it may operate.
-* **Conclusion** (@sec-frontier) answers the opening question with what the evidence supports.
-
-### For drop-in readers and modular course instructors
-
-Instructors and practitioners often need to study one topic in isolation, such as sensor DMA pipelines, trajectory chunking, or Control Barrier Functions. To support modular use without prerequisite confusion:
-
-* **Orientation at each chapter opening**: Every chapter begins with an orientation section that frames the core problem and states its physical stakes, and the margin stack at each chapter's opening marks the level the chapter works on.
-* **Explicit Foundational Context**: Whenever a chapter draws upon a core concept established earlier (such as the proposal boundary, the stopping budget, or the three machine classes), the text provides an immediate inline orientation gloss and a precise section cross-reference.
-* **Self-Contained Worked Examples**: Each chapter contains standalone analytical derivations, executable Python calculations, and industrial case studies that can be studied independently.
-
-The margin stack is ordered by control rate and authority rather than by software dependency alone.
-
-```{=latex}
-\begin{center}
-\scalebox{0.8}{%
-\mlphysicalstackfull{100}{100}{100}{100}{100}%
-}
-\end{center}
-```
-
-A stack with no level highlighted marks the governance chapters, because governance is an envelope around all five levels rather than one of them.
-
-```{=latex}
-\begin{center}
-\begin{minipage}[t]{0.30\textwidth}
-\centering
-{\usefont{T1}{phv}{b}{n}\fontsize{8}{9}\selectfont The Body}\\[4pt]
-\mlphysicalstack{20}{20}{100}{20}{20}
-\end{minipage}%
-\hfill
-\begin{minipage}[t]{0.30\textwidth}
-\centering
-{\usefont{T1}{phv}{b}{n}\fontsize{8}{9}\selectfont Nervous System}\\[4pt]
-\mlphysicalstack{20}{100}{20}{20}{20}
-\end{minipage}%
-\hfill
-\begin{minipage}[t]{0.30\textwidth}
-\centering
-{\usefont{T1}{phv}{b}{n}\fontsize{8}{9}\selectfont The Brain}\\[4pt]
-\mlphysicalstack{100}{20}{20}{20}{20}
-\end{minipage}
-\end{center}
-```
-
-These three stacks are those of @sec-body, @sec-nervous, and @sec-brain.
-
-### Margin reading aids
-
-The margins carry small, unnumbered visual notes beside the passage where a relationship, a gap in scale, or a threshold is easiest to see. They are reading aids rather than figures to cite, and they come in five forms.
-
-* **Ladders** span orders of magnitude (such as execution rates from inverter switching down to intent-model revision, or sensor ingestion bandwidths).
-* **Threshold knees** mark the point beyond which a trend stops holding (such as reflected rotor inertia limiting joint acceleration, force rising with contact stiffness, or tail latency rising with memory bus contention).
-* **Budget envelopes** set competing demands against a deadline (such as diffusion denoising times against control periods, or fieldbus cycle budgets).
-* **Sequence strips** show multi-phase timing (such as authority handshakes, receding-horizon chunk windows, or the steps that seal a record).
-* **Causal chains** trace how a fault propagates and how far it reaches (such as from an unmodeled simulator artifact to a damaged part).
-
-::: {layout-ncol=4}
-![](/vol4/13_placement/images/svg/margin_execution_determinism_ladder.svg){width="100%" fig-alt="Margin visual example: ladder of illustrative timing bounds for four candidate execution domains on a log scale, from a lockstep microcontroller up to a cloud host."}
-
-![](/vol4/02_body/images/svg/margin_reflected_rotor_inertia_knee.svg){width="100%" fig-alt="Margin visual example: threshold knee showing optimal inertia matching ratio N* beyond which rotor inertia dominates."}
-
-![](/vol4/06_training/images/svg/margin_generative_inference_deadlines_envelope.svg){width="100%" fig-alt="Margin visual example: budget envelope contrasting Flow Matching vs DDIM denoising times against control deadlines."}
-
-![](/vol4/14_intervention/images/svg/margin_four_phase_handshake_strip.svg){width="100%" fig-alt="Margin visual example: sequence strip illustrating the four-phase human-machine supervisory authority handover."}
+::: {#fig-vol4-chapter-dependencies fig-env="figure" fig-pos="htb" fig-cap="**Chapter Dependency Map**: Arrows show chapter dependencies across the book's divisions. Solid-arrow weight follows the citation-count bands in the legend: 5–9, 10–19, and 20 or more citations; dashed arrows mark light links. Transitive links are omitted for clarity." fig-alt="Six horizontal bands, one per division of the book from the introduction to the conclusion, each holding its chapter boxes. Arrows connect chapters across the divisions. Solid arrows use three weights for citation counts; dashed arrows denote light links."}
+![](/vol4/frontmatter/images/svg/fm_chapter_dependency_map.svg)
 :::
 
-### The golden thread: An end-to-end forensic trace
+### Marginal reading aids and navigation pointers {#sec-about-margin-pointers}
 
-To anchor abstract concepts across all seventeen chapters into a cohesive engineering reality, this book weaves a recurring real-world scenario—the **Golden Thread**—through the four parts and the five levels of the machine:
+The margins carry small visual aids beside the prose where a quantitative relationship, scale gap, or threshold is easiest to see. Each visual follows one of five recurring forms:
 
-* **Part I · The Physical Challenge (The Plant Hazard)**: An autonomous mobile robot (AMR) navigates an industrial aisle at $v = 1.3\text{ m/s}$. Without warning, an obstacle enters its path with limited clearance. The plant's physical braking capacity, tire-floor Coulomb friction, and actuator response delay dictate a hard stopping budget ($d_{\text{stop}} \le D_{\text{clear}}$) that no software optimization can bypass.
-* **Part II · The Learning Gap (The Policy Failure)**: The onboard vision-language-action (VLA) policy, trained on nominal demonstrations without sudden intrusions, encounters acute out-of-distribution covariate shift ($\mathcal{O}(T^2 \epsilon)$). Instead of braking, the generative action chunk decoder proposes an aggressive swerve that violates kinematic turning limits and would destabilize the chassis.
-* **Part III · The Runtime Execution (The Silicon Bottleneck)**: Camera exposure + SerDes transport + neural inference consumes critical milliseconds of unguided motion before an action proposal is emitted. When the proposal reaches the shared-memory mailbox, heterogeneous memory bus contention on the system-on-chip threatens the real-time deadline.
-* **Part IV · The Safety Shield (The Deterministic Intervention)**: Operating on an isolated real-time safety microcontroller, the high-rate reflex path evaluates the Control Barrier Function ($h(x) \ge 0$). Calculating that the proposed swerve will breach the admissible stopping envelope, the quadratic program minimally projects the proposal into an admissible braking clamp, arresting the chassis safely before contact without relying on software optimism.
+- **Ladders** span orders of magnitude (such as sensor ingestion bandwidths or execution loop rates).
+- **Threshold knees** mark the point where a physical relationship changes regime (such as reflected rotor inertia dominating gear trains or contact stiffness spiking forces).
+- **Budget envelopes** set competing demands against a deadline (such as diffusion denoising steps against control periods, or operator takeover latencies).
+- **Sequence strips** illustrate multi-phase timing (such as receding-horizon chunk execution or fault handshakes).
+- **Causal chains** trace fault propagation from sensor error to physical consequence.
 
-{{< pagebreak >}}
+::: {layout-ncol=4}
+![](/vol4/05_data/images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Margin visual example: ladder of write bandwidths."}
 
-## Related books in the machine learning systems curriculum {#sec-book-series-map .unlisted}
+![](/vol4/02_body/images/svg/margin_reflected_rotor_inertia_knee.svg){width="100%" fig-alt="Margin visual example: threshold knee showing optimal inertia matching ratio."}
 
-This textbook is part of the *Machine Learning Systems* curriculum. *Introduction to Machine Learning Systems* examines how models use computation and memory on a single machine. *Scaling Machine Learning Systems* extends that engineering scope to coordinating distributed training and inference across cluster fleets.
+![](/vol4/06_training/images/svg/margin_generative_inference_deadlines_envelope.svg){width="100%" fig-alt="Margin visual example: budget envelope contrasting denoising times against control deadlines."}
 
-The curriculum also addresses systems that take autonomous actions. *Agentic Machine Learning Systems* focuses on stateful goal-directed trajectories in digital software environments, while *Physical AI Systems* examines actions that produce force, motion, and thermodynamic change in the physical world. Each text offers a complementary perspective, and this book is self-contained, developing the physical, computational, and architectural principles required to engineer dependable embodied machines.
+![](/vol4/14_intervention/images/svg/margin_takeover_allowance_envelope.svg){width="100%" fig-alt="Margin visual example: budget envelope setting takeover allowance against stopping time."}
+:::
+
+Alongside these visual notes, unnumbered **marginal navigation pointers** trace architectural connections across chapters. Three symbols distinguish whether a pointer looks back to a foundation, ahead to a downstream consumer, or across to a contrasting design:
+
+- **`↩` Backward pointer:** Directs the reader back to the earlier chapter where a physical bound, hardware contract, or clock cadence was established.
+- **`↪` Forward pointer:** Directs the reader ahead to the later chapter, or to an appendix, where the idea is developed, measured, or enforced.
+- **`⇄` Contrast:** Marks a place where two chapters or machine classes treat the same problem differently.
+
+A pointer only orients. When an argument depends on another chapter, the reference stays in the text.
+
+## What This Book Is Not {#sec-about-not}
+
+This is not a ROS 2 or middleware manual. Middleware and messaging frameworks change, whereas the physical requirements they must satisfy (bounded latency, deterministic serialization, and fault isolation) do not. The book therefore introduces real-time protocols and message queues only as mechanisms to meet stated physical deadlines. Nor is it a mechanical CAD manual or a motor design treatise, because it characterizes actuators, transmissions, and thermal limits through the software budgets they impose rather than through their mechanical fabrication. For the same reason, simulation appears here not as a benchmark leaderboard, where open-loop scores stand in for deployment, but as a tool for generating hypotheses and training data. Its claims must still be verified on the physical machine. Software agents that act solely behind digital APIs without physical actuators remain outside our scope.
+
+## A Note on Durability {#sec-about-durability}
+
+Robot form factors, neural network architectures, and motor drive silicon will evolve, some before this book reaches print. The text therefore emphasizes the principles that survive those transitions: the causal boundary as the unit of engineering, the four governing laws, the separation between learned proposers and deterministic permission paths, and the discipline of grounding operational authority in empirical evidence. Current platforms and models appear throughout to make the concepts concrete, but the principles stand independently of any specific vendor, model, or hardware platform. Where a question is actively unsettled in the field, such as how best to verify generalist policies against rare corner cases, the book presents the problem as an open engineering challenge rather than settled doctrine.
+
+## Prerequisites {#sec-about-prerequisites}
+
+The worked examples and derivations draw on five foundational areas. Readers should be comfortable with:
+
+- programming in Python and working with numeric arrays;
+- core machine learning concepts, including supervised training, loss functions, and inference;
+- introductory Newtonian mechanics (position, velocity, acceleration, force, torque, inertia);
+- linear algebra (vectors, matrices, coordinate transformations); and
+- undergraduate probability and basic statistics.
+
+Deeper background in classical control theory, real-time operating systems, or robotics kinematics is beneficial but not required; the book develops the necessary control, estimation, and real-time concepts where they are first needed. Every specialized tool is introduced from first principles at the point where a concrete systems decision depends on it.

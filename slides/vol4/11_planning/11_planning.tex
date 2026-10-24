@@ -1,0 +1,576 @@
+% =============================================================================
+% Lecture 11: Trajectory Planning
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 11
+% =============================================================================
+% Thesis: every motion a robot follows carries its timing, a smooth join to the
+% present state, and a stop that runs without the proposer, and admission
+% closes before the latest moment that stop can still begin.
+% Hook and synthesis: Napkin Math 11.1, a p99 replanner over a ten-minute
+% mission. Running case: the warehouse mobile manipulator's arm reaching for a
+% mug past a conveyor guard (1 m/s TCP limit, 60 ms chunk lease, 300 mm of
+% clearance), and its base approaching the rack end at 1.5 m/s.
+%
+% Build: make deck V=4 D=11_planning   (figures: images/make_figs.py)
+% Real tool output: images/ruckig_run.py (Ruckig 0.19.4) writes ruckig_stops.csv.
+% Plan:  lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 11},
+  chaptertitle={Trajectory Planning},
+  layer=brain,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+% Volume IV figure roles (volumes/vol4/palette.md), for text beside figures
+\definecolor{figprop}{HTML}{1D4ED8}
+\definecolor{figperm}{HTML}{047857}
+\definecolor{figveto}{HTML}{991B1B}
+\definecolor{figlag}{HTML}{B45309}
+\setcounter{mlsystotalsections}{5}
+
+\title{Trajectory Planning}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% Chapter notation, as the book prints it
+\newcommand{\dstop}{d_{\text{stop}}}
+\newcommand{\Dclear}{D_{\text{clear}}}
+\newcommand{\Tlease}{T_{\text{lease}}}
+\newcommand{\tcommit}{t_{\text{commit}}}
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.18cm]}
+% An exact excerpt of real source or configuration, at a legible size
+\newenvironment{logblock}[1][8.5]{\par\ttfamily\bfseries\fontsize{#1}{#1}\selectfont\setlength{\baselineskip}{1.25\baselineskip}\raggedright\setlength{\parskip}{0pt}}{\par}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 10 gave the arm a goal inside an intent lease; today turns that goal into motion the drives can follow and the machine can stop. The notes total about 71.5 minutes; the core lecture, with every [OPTIONAL] frame cut, runs about 59 minutes. Cut first, in this order: the open questions, the base's sideways maneuver, the phase plane, the stale anchor, the chunk configurations, the overshoot frame, and the damped least-squares curve.}
+\mlsystitle{Trajectory Planning}{Every motion carries its timing, a smooth join to the present, and a stop that runs without the proposer; admission closes before that stop's latest start.}{cover_planning_blueprint.png}
+
+\begin{frame}{Predict: are all 3,000 handoffs on time?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.0cm,keepaspectratio]{hook_step}{3}\\[0.05cm]
+  {\small A replanner meets its p99 deadline: 99 of 100 replacement plans arrive on time. A ten-minute mission at 5 Hz makes 3,000 handoffs. How likely is it that all 3,000 arrive on time?}\\[0.12cm]
+  {\normalsize\choice{A}{about 99\%}\quad\choice{B}{about 37\%}\quad\choice{C}{about 5\%}\quad\answerat{3}{D}{almost never}}
+  \mlsyscredit{Trajectory Planning, Napkin Math 11.1 (5 Hz and 600 s illustrative; independent misses assumed). Derived in calcs.py.}
+  \note{[2.5 min] A generic replanner, slower than our machine's, meets a p99 replacement budget: each new plan is late with probability 0.01. Step 1: that bar is the p99 budget, one late plan in 100. ENGAGE: vote with fingers. Step 2: a mission target allows one failed mission in 1,000. Step 3: D. With independent misses, the probability that all 3,000 handoffs are on time is 0.99 to the 3,000th power, about 8 times 10 to the minus 14; we expect 30 late handoffs per run. Spreading the 1-in-1,000 mission target over 3,000 handoffs leaves each handoff a budget of one late plan in 3 million, the p99.99997 quantile, 4.5 orders of magnitude deeper than p99 (derived). WARN: students who pick A treat the mission as one event; students who pick B remember $e^{-1}$ from a different count (it would need 100 handoffs). No test campaign of practical size observes a one-in-3-million tail. The lecture answers that the machine cannot bet clearance on the tail, so every plan carries a stop that runs when the next plan is late. The synthesis returns to these bars. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: what does an intent lease grant the arm?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Question of the day}\\[0.2cm]
+      {\normalsize An intent lease bounds a target. What three things does it bound, and what does it not give the arm?}\\[0.3cm]
+      \uncover<2->{\small It bounds the target in \textbf{\textcolor{mlsysaccent}{space}}, \textbf{\textcolor{mlsysaccent}{effort}}, and \textbf{\textcolor{mlsysaccent}{time}}, on a clock the permission side owns.\\[0.12cm]
+      It grants a goal. It names no velocity, no acceleration, and no stop.}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.5cm,keepaspectratio]{erflex-mobile-manipulator.jpg}\\[0.05cm]
+      {\footnotesize A real mobile manipulator: arm on a wheeled base, the running machine's layout}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: ER-FLEX (MiR250 base, UR16e arm), Auledas, CC BY 4.0, Wikimedia Commons.}
+  \note{[1 min] [CORE] Retrieval from Lecture 10. Give 45 seconds. Step 2: the intent lease bounds the target in space, effort, and time, and the permission side's clock can expire it; it grants a goal, never a path. The photo is a commercial mobile manipulator with the same layout as our running machine, an arm on a wheeled base; our machine is a reference design whose numbers come from the book. ENGAGE: the lease says ``the mug, within 15 mm, for the next few hundred milliseconds.'' What must the arm do while the next inference pass is late? Take two answers; the lecture answers it. LINK: Lecture 10 owns the intent lease; Lecture 9 the belief record that supplies obstacle geometry. FLEX: [CORE] A student who missed Lecture 10 needs only this slide.}
+\end{frame}
+
+\begin{frame}{Why must every motion carry the stop it rarely uses?}
+  \thumbline{thumb_jac_ellipse.pdf}{Map a tool speed to joint rates through the Jacobian, and say why it fails near a straight elbow.}\\[0.2cm]
+  \thumbline{thumb_repl_step3.pdf}{Budget replacement latency from capture to admission, and size the tail a mission demands.}\\[0.2cm]
+  \thumbline{thumb_seam_step2.pdf}{Check a timed plan and its seam against the drive's limits, and price a fifth-degree bridge.}\\[0.2cm]
+  \thumbline{thumb_runway_step2.pdf}{Size a jerk-limited stop, and place the commitment deadline before the stop must begin.}\\[0.15cm]
+  {\footnotesize\textcolor{midgray}{Thread: the third law, proposal is not permission. Record: the trajectory record.}}
+  \note{[1.5 min] [CORE] The driving question: a moving robot cannot pause its momentum while a learned policy computes the next piece of motion. Why must every motion it follows already contain a stop it will probably never use? Four goals, one per teaching segment; each thumbnail is the shape of the figure that teaches it. The third law, proposal is not permission, which Lecture 8 stated, reduces today to one test. The microcontroller admits a plan only with a stop that fits the clearance left. Today's record, the trajectory record, joins the record chain after the intent lease. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: THE HANDOFF
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: what the planner hands over, and why tool space and joint space disagree.}
+\mlsysdivider{What does a planner hand the controller besides a target?}{Trajectory Planning, \S11.1 and \S11.2}
+\section{Handoff}
+
+\begin{frame}{A plan carries timing, a smooth join, and its own stop}
+  \begin{columns}[c]
+    \begin{column}{0.63\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.6cm,keepaspectratio]{obligations_step}{3}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{franka-side.jpg}\\[0.05cm]
+      {\footnotesize Franka Emika arm, the class whose limits the chapter uses}\\[0.15cm]
+      {\footnotesize Chunk policy: \textbf{40 ms} per pass at p99; tail can exceed \textbf{150 ms}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.1 and Napkin Math 11.4 (1 m/s TCP limit; stop computed by Ruckig, see \S11.5). Photo: Ims, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] The arm reaches for a mug drifting on a conveyor; the chunk policy runs on the host processor, 40 ms per pass at p99 (illustrative), but memory contention or preemption can stretch a pass past 150 ms. The arm keeps moving the whole time. Step 1: a chunk predicts 16 setpoints, 25 ms apart, out to 400 ms (dashed blue); only the prefix up to the next admitted chunk is authorized (green). Step 2: the next chunk arrives 0.2 rad/s faster (schematic); a smooth bridge joins it to the motion under way without a jump. Step 3: if no chunk arrives, the lease lapses at 60 ms, response delays push onset to 82 ms, and a stop computed in advance brings the tool to rest at 357 ms without the proposer. ENGAGE: which of the three can a learned policy guarantee on its own? (Expected: none; the policy proposes, and the microcontroller checks all three.) WARN: students assume that a fast policy makes the stop unnecessary; the tail decides, and the median says little about it. LINK: Lecture 3 owns chunking; Lecture 4 owns the chunk lease. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: does 1 m/s at the tool fit the joints?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{jac_ellipse.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small Tool limit \textbf{1 m/s}; joint limit \textbf{2.175 rad/s}.\\[0.1cm]
+      {\footnotesize Manipulator Jacobian $J$: tool velocity $= J \times$ joint rates. Ellipse: tool speeds from unit joint rate.}\\[0.12cm]
+      Elbow at 90°: does the weakest direction fit?\\[0.1cm]
+      \uncover<2->{\textbf{\textcolor{figveto}{No.}} One joint needs at least \textbf{3.5 rad/s}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.2.1 and figure 1; link lengths and limits: Franka Robotics 2023. Computed in calcs.py.}
+  \note{[3.5 min] [CORE] Clearance and the tool speed limit live in tool space; the drives enforce joint limits. The manipulator Jacobian $J$ maps joint rates to tool velocity, and it changes with the pose. The ellipse is the set of tool velocities reachable with one unit of joint rate: wide where the arm moves the tool easily, thin where it cannot. ENGAGE: one minute; at a right-angle elbow, can the tool move at 1 m/s in its weakest direction without any joint passing 2.175 rad/s? Step 2: no. The joint-rate vector needs a norm of 4.9 rad/s, and with two joints at least one component is the norm divided by the square root of 2, 3.5 rad/s, above the limit. Straighten the elbow to 10° and the same 1 m/s along the arm needs 37.8 rad/s. The determinant of $J$ is $L_1L_2\sin q_2$, zero when the elbow is straight: the singular pose. WARN: the 1 m/s TCP (tool center point) limit bounds no joint speed near a singularity; every tool-space check must be mapped back to joint limits. ML students: autograd builds the same matrix; the control appendix covers seven joints. LINK: Lecture 5 used the same map to show why a Cartesian label can force a different arm through a singularity. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Damping caps the joint step and gives up tool accuracy}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{dls.pdf}\\[0.05cm]
+  {\small 50 mm damping (illustrative): 8.3 rad/s at 10°; the tool moves \textbf{21.9\%} of the request.}
+  \mlsyscredit{Trajectory Planning, \S11.2.1, equation 2 (Wampler 1986; Nakamura and Hanafusa 1986). Computed in calcs.py.}
+  \note{[2 min] Inverse kinematics runs the map backward: find the joint step that moves the tool by a requested amount. The exact inverse divides each tool direction by its singular value, so the weakest direction gets the largest step (red), climbing from 4.9 to 37.8 rad/s per 1 m/s as the elbow straightens. Damped least squares (green) minimizes tool error plus $\lambda^2$ times joint motion; ML students will recognize ridge regression, with $\lambda^2$ as weight decay. Its gain never exceeds $1/(2\lambda)$, 10 rad/s per m/s at $\lambda = 50$ mm. At 90° it asks 4.6 rad/s and still delivers 94.3 percent of the tool motion; at 10° it asks 8.3 rad/s and delivers 21.9 percent. ENGAGE: is 8.3 rad/s feasible? (Expected: no; still above 2.175, so time parameterization must slow the tool.) WARN: damping bounds the step; it does not make it feasible, and the lag it creates is tracking error the planner must carry into its clearance checks. FLEX: [OPTIONAL] Cut if short; say the bold line.}
+\end{frame}
+
+\begin{frame}{The ROS trajectory message carries timing but no stop}
+  \begin{columns}[T]
+    \begin{column}{0.50\textwidth}
+      {\small\texttt{JointTrajectoryPoint.msg}}\par\vspace{0.08cm}
+      \begin{logblock}[10]
+float64[] positions\\
+float64[] velocities\\
+float64[] accelerations\\
+float64[] effort\\
+builtin\_interfaces/Duration\\
+\ \ \ \ time\_from\_start
+      \end{logblock}
+      \vspace{0.12cm}
+      {\small\texttt{JointTrajectory.msg}: header, joint\_names, points}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \small Present: positions, rates, and arrival times.\\[0.15cm]
+      \uncover<2->{Missing: an expiry on the controller's clock, the parent lease, the payload assumption, and a stop that runs if the next message never comes.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ROS 2 common\_interfaces, trajectory\_msgs/msg (rolling, commit ba32be2): field lines, comments omitted, one line wrapped.}
+  \note{[1.5 min] [CORE] This is the real message a ROS 2 planner such as MoveIt sends a joint trajectory controller: a header, joint names, and points, each point with positions, velocities, accelerations, efforts, and a time from start. Comments are omitted; the field lines are exact. Step 2: what it lacks. It has no deadline on the controller's own clock, no link to the intent that justified it, no statement of the payload or map it was checked against, and no stop. A controller that receives only this keeps tracking the last points if the host hangs. ENGAGE: if the planner process crashes halfway through, what does the arm do with this message? (Expected: it finishes the points it has, or holds, and neither is a checked stop.) WARN: the message is fine for its job in a lab; the gap appears only when a learned proposer can stall at any tick. LINK: Lecture 4's handoff record carried timing for one chunk; the next slide extends it to the whole plan. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The trajectory record binds the motion to its deadlines and stop}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=5.6cm,keepaspectratio]{record_step}{3}
+  \mlsyscredit{Trajectory Planning, \S11.2.2 and \S11.8 (deadlines of the longer-lease schedule; stop of Napkin Math 11.4).}
+  \note{[3 min] [CORE] The trajectory record is the immutable proposal the tracking controller follows and the permission path admits, the record that follows the intent lease in the record chain. Step 1: the header names the frame, the evidence time, and a digest of the parent intent lease; the motion is 16 setpoints, 25 ms apart, with the seam state (position, velocity, acceleration) where it joins the motion under way. Step 2: the stop, latched in the microcontroller's protected memory at admission: an S-curve stop of 137.5 mm in 275 ms from 1 m/s. The deadlines, all on the microcontroller's monotonic clock: the 60 ms chunk lease, the commitment instant at 300 ms when the matched stop must physically begin, the nominal end at 400 ms, and rest at 575 ms. Step 3: the sidecar declares the conditions of the check (payload at most 3 kg, the obstacle-map epoch, the operating domain, the ODD). The tracking controller reads setpoints; the permission path reads every field, every tick. ENGAGE: which deadline ends tracking first here? (Expected: the 60 ms lease.) WARN: admission rests on its physics; the record carries no origin tag. LINK: Lecture 4 owns the chunk lease and the handoff record; Lecture 9 the belief record; Lecture 10 the intent lease; Lecture 5 the ODD. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REPLACEMENT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the first segment aloud: the planner hands over a timed record with a stop and deadlines, and tool limits must be mapped through the Jacobian to joint limits. Now: can a successor arrive in time?}
+\mlsysdivider{How long does a replacement plan take, and how deep is its tail?}{Trajectory Planning, \S11.3}
+\section{Replacement}
+
+\begin{frame}{Estimate: how many requests must overlap?}
+  \mlsysactivity{Estimate}{1 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.3cm,keepaspectratio]{repl_step}{3}\\[0.02cm]
+  {\small One replacement takes \textbf{114.9 ms}; one is due every 50 ms. \uncover<3->{$114.9/50 = 2.3$, so at least \textbf{3} overlap.}}
+  \mlsyscredit{Trajectory Planning, equation 3 and \S11.3.1 (design allocations, illustrative). Derived in calcs.py.}
+  \note{[3 min] [CORE] Replacement latency runs from the capture of the observation a plan rests on to its admission on the microcontroller. Step 1: the frame is already 51.6 ms old when the planner dispatches (Lecture 8's waterfall). Step 2: the dispatch-to-admission allocation, 63.3 ms: the chunk policy's 40 ms pass, 18 ms of whole-plan validation, and 5.3 ms of link, decoding, staging, and the wait for the next permission tick. Total 114.9 ms, longer than the 50 ms renewal and the 60 ms lease. ENGAGE: one minute; how many requests must overlap to admit one every 50 ms? Step 3: 114.9 divided by 50 is 2.3, so at least three in flight. WARN: a 114.9 ms latency still allows a 50 ms period. The pipeline sustains the cadence only if every stage has queue room and bounded bus waits, and the sum of stage percentiles differs from the percentile of the sum. Charging the whole pass after dispatch double-counts the visual encoder; the budget is deliberately conservative. LINK: Lecture 8 owns observation age and the waterfall; Lecture 13 tests the 63.3 ms allocation on real silicon. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Policies predict far and execute a short prefix}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{chunks.pdf}\\[0.1cm]
+  {\small $\pi_0$ re-infers every 0.5 s. A longer horizon supplies candidates; it grants no authority.}
+  \mlsyscredit{Chi et al.\ 2025 (Diffusion Policy, Push-T), Black et al.\ 2024 ($\pi_0$), both via Trajectory Planning \S11.3.2 and table 4; running machine: \S11.3.2.}
+  \note{[2 min] Three published configurations. Diffusion Policy on the Push-T benchmark predicts 16 steps and executes 6 before replanning, which lets it recover from a pushed block. $\pi_0$, a flow-matching policy, predicts 50 actions and on 50 Hz robots re-infers after 25, every 0.5 s. Our running machine predicts 16 setpoints, 400 ms, and admits a successor every 50 ms, two setpoints. ENGAGE: which number sets the accelerator's inference load: the horizon or the executed prefix? (Expected: the prefix, through how often inference runs.) WARN: predicting farther at the same renewal rate costs more compute and buys no authority; executing a longer prefix saves compute but slows reaction. LINK: Lecture 3 owns chunking as a supply lever. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Plan from the seam, or the arm steps backward}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{stale.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small Joint at 0.50 rad/s; 80 ms of compute and transport (illustrative).\\[0.15cm]
+      Anchor at the request: \textbf{0.040 rad} behind, up to \textbf{28 mm} at the tool.\\[0.15cm]
+      Anchor at the projected seam state, then check the measured state at activation.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.3.3 and definition 11.2; Smith 1957. Derived in calcs.py.}
+  \note{[2 min] Future-state conditioning. During the 80 ms a replacement takes, the joint keeps turning at 0.50 rad/s, so a plan anchored at the pose sampled at the request is 0.040 rad (2.29°) behind; at 0.70 m of reach that is up to 28 mm at the tool, more than the arm's whole sideways clearance past the conveyor guard. The new plan would command the arm backward. The fix is to plan from the reference state projected to the seam, Smith's 1957 dead-time idea. WARN: the projected state is a reference that no sensor measured; contact and tracking error move the real arm, so the microcontroller checks measured encoder state against the admitted envelope at activation. Real-time chunking (Black et al. 2025) freezes the actions that run during inference and generates the rest to agree; it makes a smooth join likely without guaranteeing one. LINK: Lecture 3 owns temporal ensembling and real-time chunking. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Does a late handoff put the arm at risk?}
+  \mlsysactivity{Concept question}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{thumb_hook_step3.pdf}\\[0.05cm]
+      {\footnotesize p99 per handoff: 30 late handoffs expected per mission}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \small The resident stop is latched and qualified. A replacement misses its deadline. The arm:\\[0.12cm]
+      \choice{A}{collides unless the plan arrives}\\[0.06cm]
+      \answerat{2}{B}{stops; the mission loses time}\\[0.06cm]
+      \choice{C}{keeps tracking the old plan}\\[0.15cm]
+      \uncover<2->{\footnotesize A late plan costs availability. Clearance rests on the stop.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.3.2 and Napkin Math 11.1, systems insight.}
+  \note{[2 min] [CORE] ENGAGE: vote, discuss with a neighbor for 30 seconds, vote again. Step 2: B. If the resident stop is feasible, intact in memory, and starts within its budgeted delay, a late replacement ends tracking and the arm stops; the mission loses time. A missed deadline becomes a collision hazard only if the stop is infeasible, corrupted, or late. C is wrong on the running machine: the old plan's lease lapses 60 ms after its admission, and tracking ends. WARN: this is why the hook's one-in-3-million tail is a design target for availability and says nothing about the collision rate, and why misses cluster in practice when the bus or accelerator is contended, breaking the independence assumption. Land the segment aloud: replacement takes longer than the renewal period, so requests overlap, and the tail decides whether the mission finishes; the stop decides whether the arm hits something. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: FOLLOWABLE MOTION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] A plan can arrive on time and still ask for more than the body can give. Third segment: what the drives can follow.}
+\mlsysdivider{Can the drives follow the plan, including its seams?}{Trajectory Planning, \S11.4}
+\section{Followable}
+
+\begin{frame}{The same arm ships with two sets of joint limits}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      {\small Franka ROS description, \texttt{joint2}}\par\vspace{0.05cm}
+      \begin{logblock}
+joint2:\\
+\ \ limit:\\
+\ \ \ \ lower: \ \ \ \ -1.7628\\
+\ \ \ \ upper: \ \ \ \ \ 1.7628\\
+\ \ \ \ velocity: \ \ \ 2.1750\\
+\ \ \ \ effort: \ \ \ \ 87.0
+      \end{logblock}
+      \vspace{0.1cm}
+      {\small MoveIt Panda config, \texttt{panda\_joint2}}\par\vspace{0.05cm}
+      \begin{logblock}
+max\_velocity: 2.1750\\
+\textcolor{BlueLine}{max\_acceleration: 1.875}\\
+max\_jerk: 300.0
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small\textbf{Kinodynamic feasibility:} every joint stays inside its position, velocity, acceleration, jerk, torque, and current limits along the whole plan, its seams, and its stop.\\[0.15cm]
+      \uncover<2->{Datasheet acceleration: \textbf{7.5 rad/s²}. MoveIt plans at \textbf{a quarter} of it.\\[0.1cm]
+      Holding 3 kg at 0.70 m takes \textbf{20.6 N·m}, \textbf{23.7\%} of 87 N·m.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Excerpts: franka\_ros (develop) panda joint\_limits.yaml; moveit\_resources (ros2, c4d86cf) panda\_moveit\_config joint\_limits.yaml. 7.5 rad/s²: Franka 2023, via NM 11.3.}
+  \note{[3 min] [CORE] Two real configuration files for the same Panda arm, excerpted exactly. Left: the vendor's ROS description, joint 2 (the shoulder): position range, velocity 2.175 rad/s, torque (effort) 87 N·m. Right: the MoveIt configuration that motion planners load: the same velocity, an acceleration of 1.875 rad/s², and a jerk of 300 rad/s³. Kinodynamic feasibility asks whether a timed plan stays inside every one of these limits, continuously, including the seams and the stop. Step 2: the chapter's datasheet acceleration for this joint is 7.5 rad/s²; the planning config uses a quarter of it, a margin someone chose. And gravity spends torque before motion begins: holding the rated 3 kg at full reach takes 20.6 N·m, 23.7 percent of the limit (derived). ENGAGE: which file should the permission path check against? (Expected: the limits qualified for this arm and payload, which neither file proves on its own.) WARN: limits never transfer between platforms or payloads without identification. LINK: Lecture 2 owns the delivered torque ceiling. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Two legal samples can bracket an overspeed}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{overshoot.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small Check samples against a contracted limit:\\[0.1cm]
+      $|\dot q_k| \le v_{\max} - \tfrac{1}{2}\,a_{\max}\,\Delta t$\\[0.15cm]
+      {\footnotesize $a_{\max}$: largest acceleration the interpolator can command; $\Delta t$: sample period.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.4.2, equations 9 and 10 (schematic).}
+  \note{[1 min] Drives follow a continuous interpolant between samples. If the interpolator may accelerate at $a_{\max}$, it can rise for half a period and fall for the other half, so speed between two samples peaks $\tfrac{1}{2}a_{\max}\Delta t$ above them. Checking samples against a contracted limit absorbs that worst case without checking every instant. WARN: the common pitfall is checking only waypoints; for polynomial splines the checker can compute exact interior extrema instead. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A one-tick seam passes the torque check and fails the rate}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=4.4cm,keepaspectratio]{seam_step}{2}\\[0.02cm]
+  {\small A C$^2$ seam matches position, velocity, and acceleration.}\\[0.02cm]
+  {\small 0.2 rad/s gap. One tick: \textbf{36,700 N·m/s}, 36.7$\times$ the 1,000 N·m/s limit. \uncover<2->{Bridge: 88.1 N·m/s, 8.8\%.}}
+  \mlsyscredit{Trajectory Planning, Napkin Math 11.2; reflected inertia 0.1835 kg·m² (MLSysIM, CSG-25-50 with ILM 70x18, a Panda-class stand-in). Derived in calcs.py.}
+  \note{[3 min] [CORE] A seam is where the retiring chunk hands off to the next. Matching position only (C$^0$) leaves a velocity step; matching velocity too (C$^1$) leaves an acceleration step; C$^2$ matches position, velocity, and acceleration. Step 1: the incoming chunk runs 0.2 rad/s faster, and the joint closes the gap in one 1 ms tick. The reflected rotor inertia alone, the gear ratio squared times the rotor inertia, 0.1835 kg·m², asks 36.7 N·m, under the 51 N·m rating. But reaching it in one tick is 36,700 N·m/s, 36.7 times the arm's torque-rate limit. Step 2: a 50 ms quintic bridge, a fifth-degree polynomial whose six coefficients match position, velocity, and acceleration at both ends, peaks at 1.1 N·m and 88.1 N·m/s, 8.8 percent of the limit, a 33.3 times smaller torque peak. ENGAGE: why does the reflected inertia matter more than the link here? (Expected: the rotor turns 50 times faster than the joint, so its inertia counts 2,500 times.) WARN: with the 3 kg payload included, 1.65 kg·m², the one-tick step is 331 N·m and fails the torque check too. Embedded students: the drive cannot slew current that fast anyway; the step becomes lag and vibration. LINK: Lecture 2 owns reflected rotor inertia. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The arm's own controller aborts a discontinuous command}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      {\small libfranka, \texttt{include/franka/errors.h}}\par\vspace{0.08cm}
+      \begin{logblock}[8.5]
+\textcolor{black!60}{/** True if commanded velocity in joint\\
+\ *\ \ motion generators is discontinuous\\
+\ *\ \ (target values are too far apart). */}\\
+const bool\&\\
+\textcolor{RedLine}{joint\_motion\_generator\_velocity\_discontinuity};\\[0.2cm]
+\textcolor{black!60}{/** True if commanded acceleration in joint\\
+\ *\ \ motion generators is discontinuous\\
+\ *\ \ (target values are too far apart). */}\\
+const bool\&\\
+\textcolor{RedLine}{joint\_motion\_generator\_acceleration\_discontinuity};
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{franka-hand-guiding.jpg}\\[0.05cm]
+      {\footnotesize The controller compares each 1 kHz setpoint with the last one}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{frankaemika/libfranka, errors.h (master, commit f1d7751), exact excerpt, line breaks moved. Photo: Ims, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[1.5 min] [CORE] This is real source from Franka's control library. The robot samples setpoints at 1 kHz and compares each with the previous cycle; if the difference implies a velocity or acceleration jump beyond its thresholds, it raises one of these flags and aborts motion. (Comment line breaks are moved to fit; the words are exact.) So an unblended seam does not wait to wear the gearbox; the vendor's own controller stops the arm. The photo shows a person guiding a Franka arm by hand, the way demonstrations are often collected. ENGAGE: is the abort a safe stop? (Expected: it ends motion, but it skips the planned, checked stop along the corridor; a physical stop still needs the drive's qualified response.) LINK: the next slide prices how short a bridge can get. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: squeeze the bridge to 10 ms}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given}\\[0.05cm]
+        Gap $\Delta\dot q = 0.2$ rad/s\\
+        Inertia $J = 0.1835$ kg·m²\\
+        Peak accel $= 1.5\,\Delta\dot q/T$\\
+        Peak jerk $= 6\,\Delta\dot q/T^2$\\
+        Limit: 1,000 N·m/s
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \small A late admission leaves 10 ms for the bridge, down from 50. Does it still fit?\\[0.2cm]
+      \wstep{2}{Accel 30 rad/s², torque $J \times 30 =$ \textbf{5.5 N·m}}
+      \wstep{2}{Jerk 12,000 rad/s³, rate $J \times 12{,}000 =$ \textbf{2,202 N·m/s}}
+      \wstep{3}{\textbf{\textcolor{figveto}{2.2$\times$ the limit.}} Shortest legal bridge: \textbf{14.8 ms}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, Checkpoint 11.2 and Napkin Math 11.2. Derived in calcs.py.}
+  \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs. A replacement that arrives after its blend deadline must close the same 0.2 rad/s gap in 10 ms. Step 2: peak acceleration scales as one over the duration: 1.5 times 0.2 over 0.01 is 30 rad/s², 5.5 N·m of torque, still small. Peak jerk scales as one over the duration squared: 6 times 0.2 over 0.0001 is 12,000 rad/s³, a torque rate of 2,202 N·m/s. Step 3: 2.2 times the limit; it fails. The shortest bridge inside the limit is 14.8 ms (derived). WARN: students check torque, see 5.5 N·m, and pass it; halving the duration multiplies the torque rate by four, so a compressed bridge must be checked again, never inherited from the nominal one. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The fastest swing hides a torque step the drive refuses}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{phase.pdf}\\[0.05cm]
+  {\small Shoulder, 3 kg at 0.70 m, 0.5 rad. A jerk bound adds \textbf{12.6 ms} (2.4\%).}
+  \mlsyscredit{Trajectory Planning, Napkin Math 11.3 and figure 4; limits: Franka 2023. Curves computed in make\_figs.py from calcs.py.}
+  \note{[2.5 min] Time parameterization: a path says where the arm goes; the timing law along it says how fast. This phase plane plots speed against position along the swing. The dashed gray arcs are what torque alone allows: 40.2 rad/s² lifting and 65.1 braking, unequal because gravity helps the brake. The published 7.5 rad/s² acceleration limit is tighter, so it binds both ways. The fastest timing rides the acceleration arc to the middle and the braking arc down (red), 516.4 ms, peaking at 1.94 rad/s. At the switch point acceleration flips sign: a 24.8 N·m torque step. A jerk bound from the 1,000 N·m/s torque-rate limit (604.8 rad/s³) rounds the corners (green, almost on top of red): 528.9 ms. ENGAGE: is 2.4 percent worth paying? (Expected: yes; the bang-bang timing is unexecutable.) LINK: TOPP-RA finds this timing with one small linear program per grid point; MoveIt 2's default parameterizer (Kunz and Stilman) handles velocity and acceleration only. FLEX: [OPTIONAL] Cut if short; say the bold line.}
+\end{frame}
+
+% =============================================================================
+% SECTION: THE STOP
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the third segment aloud: a plan is followable only if every joint, seam, and timing stays inside the body's limits, and the rate of change of torque binds first at a seam. Now the piece every plan must carry: the stop.}
+\mlsysdivider{How long is a stop the drive can execute, and when must it begin?}{Trajectory Planning, \S11.5}
+\section{Stop}
+
+\begin{frame}{Ruckig's jerk-limited stop runs 275 ms and 137.5 mm}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.8cm,keepaspectratio]{ruckig_arm.pdf}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \small Stop from 1 m/s; deceleration bound 5 m/s², jerk bound 66.7 m/s³ (jerk: rate of change of acceleration).\\[0.15cm]
+      $\dstop = \dfrac{v^2}{2a} + \dfrac{v\,a}{2j}$\\[0.1cm]
+      100 mm + 37.5 mm\\[0.15cm]
+      {\footnotesize Equation 17 gives the same.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Output of Ruckig 0.19.4 (Berscheid and Kröger 2021), run by ruckig\_run.py with the bounds of Trajectory Planning, Napkin Math 11.4 (illustrative).}
+  \note{[3 min] [CORE] We ran Ruckig, the open-source online trajectory generator the chapter names, and asked it to bring a 1 m/s tool to rest with a 5 m/s² deceleration bound and a 66.7 m/s³ jerk bound. The red curves are its output, sampled at 1 kHz. Bottom: deceleration ramps up at the jerk limit, holds 5 m/s², ramps back to zero exactly as speed reaches zero, the S-curve. Top: speed. It takes 275 ms and 137.5 mm. The dashed gray stop is constant deceleration: 200 ms and 100 mm, but its acceleration steps from zero to 5 m/s² and back, infinite jerk, which no drive executes. The extra 37.5 mm is the cruise over half of one jerk ramp, so a jerk limit acts like extra reaction time. ENGAGE: where did the 66.7 m/s³ come from? (Expected: the chapter has no measured jerk tolerance for the load, so it uses the peak jerk of a smooth polynomial stop; a loaded stopping trial would replace it.) WARN: constant-deceleration arithmetic understates the stop. Among stops within both bounds, the S-curve is the shortest; any slower profile must be charged at its own distance. LINK: Lecture 1's elementary budget assumed constant deceleration; today adds the jerk term. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: does the open-mug stop fit in 300 mm?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.9cm,keepaspectratio]{runway_step}{2}\\[0.05cm]
+  {\small Lease lapses at 60 ms; tick, bus, and onset add 22 ms. An open mug spills above \textbf{2.45 m/s²}; the smooth stop at that peak has jerk \textbf{16 m/s³}.}\\[0.08cm]
+  \uncover<2->{\small\textbf{\textcolor{figveto}{362.4 mm: no.}} The loaded carry must slow to \textbf{0.89 m/s}.}
+  \mlsyscredit{Trajectory Planning, Napkin Math 11.4 and \S11.5.2 (all inputs illustrative; mug 40 mm radius, 10 mm freeboard). Mayer and Krechetnikov 2012. Derived in calcs.py.}
+  \note{[3.5 min] [CORE] The stall runway. Step 1: the proposer stalls during a reach at the 1 m/s limit. The lease lapses at 60 ms; one tick, one bus cycle, and 20 ms of onset make 82 ms, 82 mm of travel; then the 137.5 mm stop. 219.5 of 300 mm, 80.5 mm to spare before sensing and model reserves. At this speed each millisecond of lease costs a millimeter. ENGAGE: now the arm carries an open mug, 40 mm inner radius, filled 10 mm below the rim. At 5 m/s² the liquid rises 20.4 mm at the wall, over the rim. Keeping it in caps deceleration at 2.45 m/s², and the same smooth stop shape at that lower peak has a jerk of 16.0 m/s³ instead of 66.7 (derived). Does the stop still fit? Step 2: no. The gentler stop is 280.4 mm, 362.4 mm in all. The loaded carry must run at 0.89 m/s or less (derived). WARN: students who reuse the 66.7 m/s³ jerk get 222.3 mm and answer yes; the jerk scales with the peak deceleration. The same lease, the same clearance, a different load: the stop belongs to the payload, so the record's sidecar must declare it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The stop must begin before the arm is already doomed}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.0cm,keepaspectratio]{timeline_step}{2}\\[0.05cm]
+  {\small\textbf{Inevitable collision state:} every admissible control from here collides. Admit only if $\dstop(\tcommit) \le \Dclear(\tcommit)$.}\\[0.05cm]
+  \uncover<2->{\small 200 ms late at commitment: 200 mm more cruise, a \textbf{97.5 mm} breach.}
+  \mlsyscredit{Trajectory Planning, \S11.5.1 to \S11.5.3, figure 2 and equation 18; Fraichard and Asama 2004. Derived in calcs.py.}
+  \note{[3 min] [CORE] Step 1: the running lease from the last slide: track, lapse at 60 ms, response to 82 ms, stop to 357 ms. Step 2: a longer-lease schedule for the same arm, used to show the record's own deadline tier. The planner requests at 60 ms, budgets 160 ms of tail latency and 20 ms of slack: preferred admission 240 ms. The matched stop must physically begin at the commitment instant, 300 ms, so admission closes at 278 ms, one 22 ms decision-to-onset delay earlier. Rest at 575 ms; the setpoints running to 400 ms are never executed. Cruise from the 240 ms check to 300 ms is charged: 197.5 of 300 mm. An inevitable collision state (ICS) is a state from which every control inside the drive and traction limits ends in collision, long before contact. ENGAGE: the host reports the next plan is almost done at 278 ms. Wait? (Expected: no. Waiting 200 ms adds 200 mm of cruise and breaches by 97.5 mm; progress reports cannot extend a stopping budget.) WARN: this is the deadline form of the boundary, fixed at planning time; Lecture 12 owns its set form, the stopping envelope, checked every tick, and the state-matched fallback ladder. LINK: Lecture 4 owns authority-expiry timers. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A base stop from 1.5 m/s that ramps in takes 1,031 ms}
+  \begin{columns}[c]
+    \begin{column}{0.70\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{base_speed.pdf}
+    \end{column}
+    \begin{column}{0.28\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{erflex-mobile-manipulator.jpg}\\[0.05cm]
+      {\footnotesize 2 m/s², 7.11 m/s³ jerk}\\[0.1cm]
+      {\footnotesize The S-curve adds \textbf{210.94 mm}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.5.4 and figure 5 (card values illustrative); S-curve: Ruckig 0.19.4 output. Photo: Auledas, CC BY 4.0, Wikimedia Commons. Derived in calcs.py.}
+  \note{[1.5 min] [CORE] The aisle run. The base drives at its 1.5 m/s limit toward a rack end with 1.10 m of clear distance; the loaded tote rack tolerates the 2 m/s² credible deceleration only when it ramps in. Three stops. Constant deceleration: 750 ms, which no drive executes. The S-curve from Ruckig with a 7.11 m/s³ jerk bound: 1,031.25 ms and 773.44 mm. The smooth polynomial with the same peaks: 1,125 ms and 843.75 mm. The S-curve adds 210.94 mm, the travel of 140.6 ms of cruise. ENGAGE: why does a jerk limit act like extra delay? (Expected: during each ramp the base still moves near full speed while deceleration builds.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The jerk-limited stop overruns the rack end at 1.5 m/s}
+  \centering
+  \mlsyskitfig[width=0.95\textwidth,height=4.8cm,keepaspectratio]{budget_bar_step6}\\[0.05cm]
+  {\small The constant stopping total is \textbf{912.9 mm} and fits; the polynomial reaches \textbf{1,194.15 mm}.}
+  \mlsyscredit{Trajectory Planning, \S11.5.4; stopping-budget bar from the course kit (MLSysIM values). Derived in calcs.py.}
+  \note{[1.5 min] [CORE] The stopping-budget bar, now with today's row: the jerk ramps. The earlier rows are unchanged: 200.4 mm of delay travel (Lecture 1's 133.6 ms at 1.5 m/s), with Lecture 4's lease path and Lecture 8's observation age inside it, 562.5 mm of braking, and 150 mm of localization and protective allowances (Lecture 2). Only the unexecutable constant-deceleration stop fits; the S-curve's 210.94 mm of jerk ramps bring the running total to 1,123.84 mm, 23.84 mm past the clearance; the polynomial stop would reach 1,194.15 mm. ENGAGE: what are the two levers? (Expected: slow down, or detect the boundary farther ahead; a longer prediction creates no stopping room.) WARN: the deficit rests on a stipulated jerk bound and still omits the dispatch-to-admission travel; it is a conditional design deficit. LINK: this adds the jerk row to the stopping budget from Lecture 1; Lecture 12 adds tracking error and sets the aisle speed. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{True or false: on-time plans need no stop?}
+  \mlsysactivity{Concept question}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{thumb_runway_step2.pdf}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small Replacement p99 is 45 ms, under the 50 ms renewal. The team drops the stop from the record.\\[0.15cm]
+      \choice{T}{true}\qquad\answerat{2}{F}{false}\\[0.15cm]
+      \uncover<2->{\footnotesize One plan in 100 is late. The base needs \textbf{1,031.25 ms} to stop.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.9, fallacy 2; base stop \S11.5.4.}
+  \note{[2 min] [CORE] The chapter's fallacy. ENGAGE: vote. Step 2: false. A p99 of 45 ms means one plan in 100 is later than that; across a mission that is dozens of late plans. Without a stop latched at admission, the machine must improvise one, and the shortest stop its bounds allow already takes 1,031.25 ms on the base; a stop forced into the 750 ms constant-deceleration time violates the acceleration bound, the jerk bound, or both. WARN: students who say true reason from the median. The thumbnail is the stall runway: the stop is half the runway. FLEX: [CORE]. Land the segment aloud: every admitted plan carries a jerk-limited stop, the stop sets the operating speed, and admission closes before the stop must begin.}
+\end{frame}
+
+% =============================================================================
+% SECTION: GENERATORS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Only now do we choose how candidates are generated, because every generator faces the same checks.}
+\mlsysdivider{Which generator should propose the motion?}{Trajectory Planning, \S11.6 to \S11.8}
+\section{Generators}
+
+\begin{frame}{Every generator still owes the same checks at admission}
+  \centering
+  \safeimg[width=0.90\textwidth,height=3.5cm,keepaspectratio]{gen_timing.pdf}\\[0.0cm]
+  \footnotesize
+  \begin{tabular}{@{}P{3.3cm}P{4.2cm}P{4.6cm}@{}}\toprule
+    \textbf{Family} & \textbf{Work} & \textbf{Still unproven} \\\midrule
+    Sampling (RRT*, PRM) & collision queries & timing; timeout proves nothing \\
+    Optimization, MPC & constrained solve & finishing before the deadline \\
+    Learned chunks & model inference & limits, seams, and the stop \\\bottomrule
+  \end{tabular}
+  \mlsyscredit{Ruckig: Berscheid and Kröger 2021 (7 axes, desktop CPU), via Trajectory Planning table 4; other bars: \S11.1 and \S11.3.1 (allocations, illustrative).}
+  \note{[3 min] [CORE] Three families propose motion. Sampling planners (PRM, RRT*) search configuration space, the space of joint angles minus the poses that hit something; collision queries dominate their run time, and a timeout proves nothing about whether a route exists. Trajectory optimization and model predictive control (MPC) solve a constrained problem each cycle; MPC is recursively feasible only with a terminal set, which on a robot is a verified stop to rest, and its guarantee holds only if the solver finishes before the deadline. Learned chunk policies spend model inference and enforce none of the limits. The bars: Ruckig's published 19.8 µs mean and 123 µs worst case for seven axes on a desktop CPU fit inside a 1 ms tick; the chunk pass is 40 ms; the whole capture-to-admission path is 114.9 ms. ENGAGE: which generator's output needs the fewest checks at admission? (Expected: none is exempt; even Ruckig guarantees only the bounds it was given, and desktop timings do not transfer to a safety microcontroller.) WARN: kinematic feasibility by construction is not admission. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A wheeled base reaches any pose but not with any velocity}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{base_view.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{amazon-drive-unit.jpg}\\[0.05cm]
+      {\footnotesize A differential-drive warehouse unit: two drive wheels}\\[0.1cm]
+      {\footnotesize Textbook window test admits \textbf{2.10 m/s}; the full budget fails at 1.5.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.6.1, figure 6 (schematic); Fox et al.\ 1997. Photo: Amazon drive unit, Swindon, Auledas, CC BY 4.0, Wikimedia Commons. Derived in calcs.py.}
+  \note{[1.5 min] The base's two drive wheels roll without slipping, so it cannot slide sideways: a nonholonomic constraint. It reaches every pose in the aisle, but a sideways offset becomes a maneuver of turn, drive, and turn back. Base planners therefore search over controls. The dynamic window approach scores arcs of forward speed and turn rate reachable in the next 50 ms, plus or minus 0.1 m/s at 2 m/s², and keeps arcs that can stop before the nearest obstacle using the textbook constant-deceleration test. On 1.10 m of rack-end clearance that test admits 2.10 m/s, above the 1.5 m/s drive limit, while the full jerk-limited budget fails even at 1.5. WARN: a classical base planner is a proposer too. ROS 2 Nav2 ships both DWB and MPPI controllers. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Discuss: which generator for the guarded reach?}
+  \mlsysactivity{Discuss}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \small The arm must reach around a fixed conveyor guard to a moving mug. A replacement is due every 50 ms; validation already takes 18 ms of it.\\[0.2cm]
+      Which family proposes the route, which the motion near the mug, and what checks the result?
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{franka-side.jpg}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, \S11.6. Photo: Ims, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] Two minutes with a neighbor. Expected answer: the guard is static, so a slow solver can plan the route around it outside the renewal loop (sampling, or graphs of convex sets, which suit static structure) and hand the loop a corridor; near the moving mug a learned chunk policy or an online generator proposes within the 50 ms cadence, optionally projected onto limits by a constrained optimizer on the proposal side. Whatever proposes, the microcontroller checks limits, seams, clearance, and the latched stop before admission. WARN: students pick one method for everything; the solver's deadline decides what reaches admission, whatever the quality of its optimum, and a solver without a bounded finish time needs a timeout that leaves the resident stop executable. Land the segment aloud: every generator is a proposer, and changing it changes the compute budget, never the obligations. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Why can a late plan leave clearance intact?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.3cm,keepaspectratio]{thumb_hook_step3.pdf}\\[0.02cm]
+      {\footnotesize 3,000 handoffs all on time: $8\times10^{-14}$}\\[0.1cm]
+      \safeimg[width=\textwidth,height=1.1cm,keepaspectratio]{thumb_runway_step2.pdf}\\[0.02cm]
+      {\footnotesize Late plan: 82 + 137.5 = 219.5 of 300 mm}
+    \end{column}
+    \begin{column}{0.54\textwidth}\small
+      \only<1|handout:0>{\normalsize Name the three things every admitted plan carries, and the deadline admission must beat.}%
+      \only<2->{\textbf{Timing:} a prefix renewed before its lease lapses.\\[0.04cm]
+      \textbf{Smooth join:} a C$^2$ seam within the torque rate.\\[0.04cm]
+      \textbf{A stop:} jerk-limited, latched, run without the proposer.\\[0.08cm]
+      Admission closes before $\tcommit$, the stop's latest start.\\[0.08cm]
+      \textbf{\textcolor{mlsysaccent}{The tail sets availability; the stop sets clearance.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trajectory Planning, Napkin Math 11.1 and 11.4. Derived in calcs.py.}
+  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 90 seconds. Step 2: every admitted plan carries timing, a smooth join, and a stop, and admission closes before the commitment instant. The hook showed that no practical design meets every handoff deadline across a mission: 30 late plans expected per run, and a one-in-3-million per-handoff target no test can observe. A faster policy would not remove the tail. Each late plan ends tracking within the lease, and the latched stop brings the arm to rest inside its clearance: 82 mm of lease path and 137.5 mm of stop, 219.5 of 300 mm with an empty gripper. The tail decides how often the mission pauses; the stop decides whether anything is hit. ENGAGE: which term would you shorten first if the stall runway grew too long? (Expected: if travel before onset rivals the stop, the lease; if the stop dominates, the deceleration or jerk bound the load tolerates must be measured.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_obligations_step3.pdf}{A plan carries timing, a smooth join, and a stop without the proposer.}\\[0.1cm]
+  \thumbline{thumb_jac_ellipse.pdf}{1 m/s at the tool needs 3.5 rad/s at a 90° elbow, 37.8 near straight.}\\[0.1cm]
+  \thumbline{thumb_repl_step3.pdf}{Replacement takes 114.9 ms; a late plan stops the arm and costs time.}\\[0.1cm]
+  \thumbline{thumb_seam_step2.pdf}{At a seam the torque rate fails first, growing as $1/T^2$ in bridge time $T$.}\\[0.1cm]
+  \thumbline{thumb_timeline_step2.pdf}{The jerk-limited stop sets the speed; admission closes before it begins.}
+  \note{[1.5 min] [CORE] One line per segment, plus the opening idea. Ask students which slide taught each line. The record added today is the trajectory record; Part III's law, proposal is not permission, reduces to a clearance test. The microcontroller admits a candidate only with an independently executable stop that fits the clearance left, however the candidate was generated. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item The chapter stipulates the load's jerk tolerance. Who should measure it, and on which loads?
+        \item Should a learned policy be trained to emit C$^2$ chunks, or should a checker always repair them?
+        \item People walk into stopped robots too. When should the fallback be something other than a stop?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{franka-hand-guiding.jpg}\\[0.05cm]
+      {\footnotesize Teaching a Franka Emika arm by hand}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Ims, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[1 min] No single answer. The first comes from \S11.5.2: a loaded stopping trial would replace the stipulated jerk bound and could move the base's 23.84 mm deficit either way. The second contrasts real-time chunking with a quintic bridge. The third comes from \S11.6: a stationary robot stays safe only if external interlocks keep others out; Lecture 12 takes up fallbacks matched to the state. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Trajectory Planning, \S11.1 to \S11.10; Checkpoints 11.1 to 11.3; Napkin Math 11.2 and 11.4 by hand.
+    \item Fraichard and Asama, ``Inevitable Collision States,'' Advanced Robotics, 2004.
+    \item Biagiotti and Melchiorri, \emph{Trajectory Planning for Automatic Machines and Robots}, 2008: the double-S profile.
+    \item Berscheid and Kröger, ``Jerk-Limited Real-Time Trajectory Generation,'' RSS 2021 (Ruckig; run \texttt{ruckig\_run.py}).
+    \item Lynch and Park, \emph{Modern Robotics}, 2017: Jacobians, dynamics, time scaling.
+    \item Chi et al., ``Diffusion Policy,'' IJRR 2025: receding-horizon chunks.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its checkpoints; work Napkin Math 11.2 and 11.4 by hand. Fraichard and Asama formalize inevitable collision states. Biagiotti and Melchiorri derive the double-S stop. Ruckig is open source; the script in this deck's folder reproduces both stops in a few lines. Lynch and Park cover Jacobians, dynamics, and time scaling for students without control background (also the book's control appendix). Chi et al. present the learned proposers whose seams this lecture checks. FLEX: [CORE] Add your course's lab.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_nervous}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} SAFETY ENFORCEMENT}}\\[0.5cm]
+      {\LARGE\bfseries An admitted plan still needs permission on every control tick. Why?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Admission judged the plan against the state the planner predicted; the machine executes it against the state it actually reaches, while a person may step into the aisle. Lecture 12 moves down to the Nervous System: the per-tick check, the stopping envelope, and the fallbacks that include the stop latched today. FLEX: [CORE].}
+\end{frame}
+
+\end{document}

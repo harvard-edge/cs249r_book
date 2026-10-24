@@ -62,7 +62,7 @@ LSP-diagnostic-shaped errors so editors render inline squiggles.
       "severity": 1,
       "code": "topic-not-in-taxonomy",
       "source": "vault-check",
-      "message": "topic 'kv-cachee' not found in taxonomy.yaml; did you mean 'kv-cache-management'?"
+      "message": "topic 'kv-cachee' not found in schema/taxonomy_data.yaml; did you mean 'kv-cache-management'?"
     }
   ]
 }

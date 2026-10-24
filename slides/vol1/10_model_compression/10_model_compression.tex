@@ -1,1966 +1,580 @@
 % =============================================================================
-% Chapter 10: Model Compression — ML Systems Lecture Slides
+% Lecture 10: Model Compression (Part 1: which work can the model stop doing?)
+% Introduction to Machine Learning Systems (Volume I)
 % =============================================================================
-% This deck covers the three dimensions of model compression:
-%   1. Structural optimization (pruning, distillation, NAS)
-%   2. Precision optimization (quantization FP32→INT8→INT4)
-%   3. Architectural efficiency (operator fusion, sparsity)
+% A model that wins a benchmark meets a device that cannot hold or run it.
+% Part 1 removes work: pruning, sparse formats and kernels, distillation, low
+% rank, batch-norm folding, the order of the levers, and Amdahl's limit.
+% Part 2 (10b_model_compression) removes bits: formats, the affine mapping,
+% calibration, the accuracy cliff, and when fewer bits run faster.
 %
-% IMAGES:
-%   - optimization-stack.pdf       - quantization-number-line.pdf
-%   - pruning-structured-vs-unstructured.pdf
-%   - knowledge-distillation-pipeline.pdf
-%   - compression-deployment-spectrum.pdf
-%   - qat-training-loop.pdf        - nas-overview.pdf
-%   - operator-fusion.pdf          - compression-tradeoff-regions.pdf
-%   - cover_model_compression.png
+% Build: make -C slides build-10_model_compression   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder; the split is in
+%        ../10b_model_compression/part1_changes.md.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume       = {Volume I},
-  chapter      = {Chapter 10},
-  logo         = {../../assets/img/logo-mlsysbook.png},
-  instlogo     = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Model Compression},
+  volume={Volume I},
+  chapter={Chapter 10},
+  chaptertitle={Model Compression, Part 1},
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+  layer=models,
+  dividerstack,
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usepackage{upquote}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
 
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-% \Dvol and \Rpeak are defined in the theme
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
-        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation ---
-\setcounter{mlsystotalsections}{9}
-
-\title{Model Compression}
+\title{Model Compression, Part 1}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A true-or-false statement card
+\newcommand{\tfcard}[2]{%
+  \begin{mlsyscard}{mlsysaccent}
+    {\small\textbf{#1}}\\[0.05cm]
+    \uncover<2->{\footnotesize\textcolor{RedLine}{\textbf{False.}} #2}%
+  \end{mlsyscard}}
+
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE AND HOOK
 % =============================================================================
-\mlsystitle{Model Compression}{From Benchmark Winner to Production Model}{cover_model_compression.png}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. The chapter takes two lectures. Today removes work. It asks which parts of the model can stop computing, and when removing them makes the device faster. Next lecture removes bits. The notes total about 71 minutes, which leaves a few minutes for questions; notes tagged [OPTIONAL] can be cut, leaving about 49.5 minutes.}
+\mlsystitle{Model Compression, Part~1}{The models that win benchmarks rarely ship as they are. Compression fits a trained model inside a device's budget, and a saving counts only when the hardware and the rest of the system let it show.}{cover_model_compression_blueprint.png}
 
-% =============================================================================
-% LEARNING OBJECTIVES
-% =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-[1 min]
-% -- LINK: Prior chapters trained and optimized models; this chapter makes them deployable
-Students learned to train models (Ch8--9) and will soon see hardware (Ch11).
-This slide frames the gap: trained models are too big for production silicon.
-
-% -- NARRATE: Walk through objectives emphasizing the three-layer stack
-Read each objective aloud. Stress the progression: structural (what to compute),
-precision (how precisely), architectural (how efficiently). These three layers
-are the chapter's organizing framework. Note LO 6: hardware-aware design ---
-aligning model structure and quantization format to accelerator capabilities
-is what converts theoretical compression ratios into real speedups.
-
-% -- ENGAGE: Surface personal experience with deployment constraints
-Ask: ``Has anyone tried to run a large model on a phone or Raspberry Pi?
-What happened?'' Cold-call 2 students.
-
-% -- WARN: Students may think compression is optional polish
-Common error: students treat compression as nice-to-have optimization.
-Correct framing: without compression, most models cannot physically deploy ---
-14 GB does not fit in 8 GB RAM. It is a hard constraint, not a preference.
-
-% -- FLEX: [CORE] Never skip learning objectives
-[CORE] This slide sets the chapter roadmap.
-IF AHEAD: Ask which objective seems most surprising.
-IF SHORT: Read objectives quickly, skip the audience question.
-}
-
-\footnotesize
-\begin{enumerate}\setlength\itemsep{0pt}
-  \item Explain the \textbf{three-layer optimization stack}: model representation, numerical precision, hardware implementation
-  \item Compare \textbf{quantization} strategies (FP32 $\to$ INT8 $\to$ INT4) for memory, energy, and accuracy
-  \item Apply \textbf{pruning} (structured vs.\ unstructured) and quantify the accuracy-sparsity trade-off
-  \item Implement \textbf{knowledge distillation} to transfer capabilities from teachers to students
-  \item Distinguish \textbf{PTQ vs.\ QAT} and identify when each is appropriate
-  \item Analyze \textbf{hardware-aware design principles} to align model operations with target platform capabilities
-  \item Design integrated compression pipelines under deployment constraints
-\end{enumerate}
-
+\begin{frame}{A 7B model needs 14 GB; the phone has 8 GB}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{ladder_step}{2}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \only<1|handout:0>{\normalsize Weight bytes span about six orders of magnitude, from a frontier model to a microcontroller.}%
+      \uncover<2->{\small Suppose the weights fit. Each token reads every weight over a 51.2 GB/s bus. Time per token?\\[0.2cm]
+        \normalsize
+        \choice{A}{3 ms}\qquad\choice{B}{27 ms}\\[0.1cm]
+        \alt<3->{\colorbox{mlsysaccent!15}{\choice{C}{about 270 ms}}}{\choice{C}{about 270 ms}}\quad\choice{D}{2.7 s}\\[0.2cm]}
+      \uncover<3->{\footnotesize 14 GB / 51.2 GB/s: about 2 J per token, about 8 W of memory traffic against a sustained 3 to 5 W.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.1. Log scale.}
+  \note{[3 min] [CORE] Step 1: one log scale of bytes. A 175-billion-parameter model in FP16 (two bytes per weight) is 350 GB; a phone has 8 GB of RAM (DRAM, its main memory); a microcontroller (MCU) has about 512 KB of SRAM, the small fast memory on its chip. About six orders of magnitude. Step 2: a model that only just misses: 7 billion parameters is 14 GB in FP16. Ask the class to assume the operating system gave it everything and the weights fit. ENGAGE: vote with fingers. Step 3: C. Generating one token at batch one reads every weight once over the bus, the link between DRAM and the processor: 14 GB over 51.2 GB/s is about 270 ms, about 2 J of DRAM energy, so about 8 W of memory traffic alone, above the phone's sustained 3 to 5 W. Students who chose A or B forgot that every weight crosses the bus for every token. Capacity, time, and energy each bind. Today removes work; next lecture removes bits, and its synthesis returns to this model. WARN: the 175B model is not today's target.}
 \end{frame}
 
-\begin{frame}{Visual Language}
-\note{
-[0.5 min]
-% -- NARRATE: Brief orientation to the color code
-Point to each card: blue = compute ops, green = data/memory, orange = routing,
-red = error/bottleneck. In this chapter, red highlights accuracy loss regions
-and blue highlights compute savings from compression. The color system
-connects to the chapter's semantic use of accuracy loss (red) vs.\ compute
-savings (blue) throughout the compression-accuracy trade-off diagrams.
-
-% -- FLEX: [OPTIONAL] Skip if students saw this in a previous lecture
-[OPTIONAL] If students already know the color system, say ``same legend as before'' and advance.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
+\begin{frame}{The smallest model to pass 60 percent on MMLU shrank 93 times}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{smallest_capable.pdf}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering
+      {\normalsize Gopher, 280B (2021)}\\[0.1cm]
+      {\Large$\downarrow$}\\[0.1cm]
+      {\normalsize Qwen2.5-Coder, 3B (2024)}\\[0.4cm]
+      \uncover<2->{{\huge\bfseries\textcolor{mlsysaccent}{93$\times$}}\\[0.1cm]
+      {\small smaller in under three years}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Redrawn from Model Compression, \S10.1 (fig-smallest-capable-model); data: Epoch AI Benchmarking Hub, MMLU, CC BY 4.0. MMLU: Hendrycks et al. 2020.}
+  \note{[2 min] [OPTIONAL] Real data that the gap can close. MMLU is a multiple-choice exam over 57 subjects; 60 percent is a fixed bar. Each blue dot is a dense model reported at or above 60 percent, each gray dot one below; the red step line is the smallest model at or above the bar up to each date. The plot is redrawn at slide size from the same Epoch AI data as the book figure, with only the record holders named. Step 1: Gopher, 280 billion parameters, end of 2021. Step 2: Qwen2.5-Coder-3B in 2024, about 93 times smaller, in under three years. WARN: this is not compression alone. Better data, longer training, and distillation from larger models all contributed, and the 3B model is code-specialized. The point is that a capability first reached at frontier scale can later fit a much smaller budget. LINK: distillation returns in segment 2; Lecture 9 showed data selection's share.}
 \end{frame}
 
-
-% =============================================================================
-\section{The Deployment Gap}
-% =============================================================================
-
-\begin{frame}{Why Compress? The Math Does Not Work}
-\note{
-[2 min]
-% -- LINK: Learning objectives just promised deployability --- this slide shows why it is hard
-The objectives listed ``compression makes models deployable.'' Now show the
-arithmetic: 14 GB model, 8 GB phone. The numbers do not fit.
-
-% -- NARRATE: Walk through the table, then the red card
-Point to the table: ``GPT-3 at 350 GB cannot fit on any single GPU. LLaMA-7B
-at 14 GB cannot fit on a phone with 8 GB shared RAM. This is not an
-optimization opportunity --- it is a hard physical constraint.''
-Point to the deployment spectrum diagram on the right.
-
-% -- ENGAGE: Force students to confront the constraint
-Ask: ``What options do you have when 14 GB must fit in 8 GB?''
-Give 30 seconds. Expected answers: reduce precision, prune, use a smaller model.
-
-% -- WARN: Students confuse ``optimization'' with ``requirement''
-Common error: treating compression as performance tuning.
-Correct framing: without compression, deployment is physically impossible ---
-the bits literally do not fit in the RAM.
-
-% -- FLEX: [CORE] This is the motivating problem for the entire chapter
-[CORE] This slide is essential --- it frames every technique that follows.
-IF AHEAD: ``What is the smallest model in the table and why?''
-IF SHORT: Skip the question, just walk through the table.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    Capability $\neq$ deployability:
-
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Model (FP16)} & \textbf{Memory} \\
-      \midrule
-      GPT-3 (175B)    & 350 GB \\
-      LLaMA-7B        & 14 GB \\
-      ResNet-50        & 100 MB \\
-      MobileNetV2      & 14 MB \\
-      DS-CNN (KWS)     & 500 KB \\
-      \bottomrule
-    \end{tabular}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize Smartphone RAM: \textbf{8 GB} (shared with OS).\\
-    Microcontroller: \textbf{384 KB} SRAM.\\
-    14 GB cannot fit in 8 GB.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{compression-deployment-spectrum.pdf}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Lecture 9 shrank the data and left the model as it was}
+  \mlsysactivity{Retrieval}{1 min}
+  \begin{columns}[c]
+    \begin{column}{0.28\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.6cm,keepaspectratio]{stack_models}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering
+      {\Large\bfseries Question of the day}\\[0.3cm]
+      {\normalsize Which iron-law factor did data selection cut?\\Is the trained model any smaller afterwards?}\\[0.5cm]
+      \uncover<2->{\Large
+        $T = \textcolor{midgray}{\dfrac{\text{Samples}}{\text{Task}}} \times
+        \boxed{\dfrac{\text{FLOPs}}{\text{Sample}}} \times
+        \boxed{\dfrac{\text{Seconds}}{\text{FLOP}}}$\\[0.25cm]
+        {\small Today and next lecture work on the two boxed factors.}}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] ENGAGE: 30 seconds, written, from memory. Step 2: data selection cut Samples per Task, the data factor. No. The trained model keeps the same parameter count, precision, and footprint, so it can still overflow a phone or leave decoding waiting on memory. Compression works on FLOPs per Sample (what the model computes) and on the bytes and operation costs behind Seconds per FLOP (how values are stored and how the work executes). The stack on the left highlights the models layer, where this lecture lives. LINK: the iron law from Lectures 0 and 1.}
 \end{frame}
 
-% --- War Story: AlexNet ---
-\begin{frame}{War Story: AlexNet's Two-GPU Split (2012)}
-\note{
-[2 min]
-% -- LINK: The deployment gap was arithmetic (14 GB, 8 GB); this grounds it in history
-The previous slide showed the memory math. This war story reveals that
-memory constraints shaped deep learning since its founding moment in 2012.
-Students often treat compression as a modern engineering afterthought;
-this corrects that framing.
-
-% -- NARRATE: Walk through Context, Failure, Consequence, Systems lesson
-\textbf{Context}: In 2012, Krizhevsky, Sutskever, and Hinton at the University of Toronto
-set out to train a 60-million-parameter convolutional network on ImageNet.
-\textbf{Failure}: A single NVIDIA GTX 580 carried only 3 GB of memory---not enough to hold
-the model, its activations, and gradients during training. The hardware wall
-blocked the architecture they wanted.
-\textbf{Consequence}: They split the network across two GTX 580s, placing half the
-feature maps on each GPU, communicating only in selected layers. AlexNet's
-two-tower structure was a memory budget forced into the architecture---not
-a modeling choice. That split network won ImageNet 2012 by more than
-10 percentage points and launched the deep-learning era.
-\textbf{Systems lesson}: Every model carries the fingerprints of the memory hierarchy
-it had to fit on. Compression is not a finishing step; it is the same battle
-the field has fought since AlexNet.
-
-% -- ENGAGE: Ask what they would have done
-Ask: ``If you were Krizhevsky in 2012 with 3 GB of GPU memory and a 60M-param
-model, what would your options be?'' Give 20 seconds. Expected: reduce model
-size, use less precision, distribute across GPUs, use CPU memory (too slow).
-
-% -- WARN: Students see AlexNet as a historical curiosity, not a systems lesson
-Common error: treating this as trivia. Correct framing: the same constraint---
-not enough memory for the model on the target hardware---is the exact problem
-every section of this chapter solves. The techniques changed; the tension did not.
-
-% -- FLEX: [CORE] This war story is the chapter's historical anchor
-[CORE] Do not skip---this establishes why compression is not optional polish.
-IF AHEAD: ``How does this compare to today's LLM training splits across 1000+ GPUs?''
-IF SHORT: Read Context and Systems lesson; skip the engagement question.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{Context}: 2012. University of Toronto. Goal: train a 60M-parameter
-    convolutional network on ImageNet.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{crimson}
-    {\scriptsize \textbf{Failure}: GTX 580 = \textbf{3 GB} RAM. Model + activations + gradients
-    $\gg$ 3 GB. One GPU cannot hold the planned architecture.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{Consequence}: Split across two GPUs. Half the feature maps per GPU.
-    The two-tower structure was a \emph{memory budget}, not a modeling choice.
-    Won ImageNet 2012 by $>$10 percentage points.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \vspace{0.5cm}
-    \mlsysinsight{Systems Lesson:}{Every model carries the fingerprints of the memory hierarchy it had to fit on.}
-
-    \vspace{0.2cm}
-    \begin{mlsyscard}{datastroke}
-    {\scriptsize Compression is not a finishing step added to a finished model.\\[0.1cm]
-    It is the \textbf{same battle the field has fought since AlexNet.}\\[0.1cm]
-    Training split $\to$ gradient checkpointing $\to$ pruning $\to$ quantization: all renegotiate the same silicon contract.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\mlsyscite{Krizhevsky, Sutskever \& Hinton, NeurIPS 2012}
-
+\begin{frame}{Which work can the model stop doing, and did it help?}
+  \vspace{-0.1cm}
+  {\normalsize By the end of today you will be able to:}\\[0.35cm]
+  \begin{enumerate}\setlength{\itemsep}{0.3cm}\normalsize
+    \item Find the term of the budget a model breaks.
+    \item Explain why structured removal saves time and scattered zeros often do not.
+    \item Choose among pruning, distillation, and low rank by what each produces and costs.
+    \item Order the levers and bound the end-to-end gain with Amdahl's law.
+  \end{enumerate}
+  \vspace{0.3cm}
+  \threadstrip{0}{1}{0}{1}{0}
+  \note{[1 min] [CORE] The driving question: given a model that does not fit its device, which work can it stop doing, and when does removing that work make the device faster? Read the four outcomes. Say that the second half of the question, did it help, is where most compression projects go wrong. The strip at the bottom fills today's factor of the iron law, FLOPs per sample (the algorithm axis), and the fast-enough half of the dual mandate; Lecture 10b adds the machine factor.}
 \end{frame}
 
-\begin{frame}{The Physics of Quantization}
-\note{
-[2 min]
-% -- LINK: The deployment gap showed a size problem; now reveal the energy problem
-The previous slide showed models do not fit in RAM. This slide shows why
-even fitting is not enough --- moving data costs orders of magnitude more
-than computing on it.
-
-% -- NARRATE: Walk through the energy table for the ``aha'' moment
-Point to the table: ``An 8-bit integer add costs 1x energy. A 32-bit float
-add costs 30x. But a DRAM read costs 40,000x. The bottleneck is not
-arithmetic --- it is data movement.'' Then point to the blue card: quantizing
-from FP16 to INT4 gives 4x speedup because the model is bandwidth-bound.
-
-% -- ENGAGE: Force students to identify the optimization target
-Ask: ``If memory access costs 40,000x more than an integer add, where
-should we focus optimization?'' Give 20 seconds. Expected: reduce data
-movement, not reduce compute.
-
-% -- WARN: Students fixate on compute cost, not data movement cost
-Common error: students assume faster ALUs are the answer because GPUs
-are marketed on TFLOPS. Correct framing: quantization wins because it
-reduces bytes moved, not operations performed.
-
-% -- FLEX: [CORE] The energy hierarchy is the physical basis for all compression
-[CORE] This slide is essential --- it grounds every technique in physics.
-IF AHEAD: ``What does this imply for the relative value of pruning vs quantization?''
-IF SHORT: Skip the question, keep the table walkthrough.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Energy-Movement Invariant:}
-    $E_{\text{move}} \gg E_{\text{compute}}$
-
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}llr@{}}
-      \toprule
-      \textbf{Operation} & \textbf{Width} & \textbf{Energy} \\
-      \midrule
-      Integer Add & 8-bit  & 1$\times$ \\
-      Float Add   & 32-bit & 30$\times$ \\
-      DRAM Read   & 64-bit & \textcolor{errorstroke}{\textbf{40,000$\times$}} \\
-      \bottomrule
-    \end{tabular}
-
-    \vspace{0.1cm}
-    \mlsysconcept{Iron Law:}{Reduces \emph{both} $\Dvol$ and $O$.}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{The Quantization Speedup}\\[0.05cm]
-    7B LLM on 50 GB/s device:\\
-    FP16: 14 GB $\to$ 280 ms/token (3.6 tok/s)\\
-    INT4: 3.5 GB $\to$ 70 ms/token (14 tok/s)\\[0.05cm]
-    \textcolor{computestroke}{\textbf{4$\times$ speedup}} (bandwidth-bound).}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    FP32 $\to$ INT8: 4$\times$ memory savings.\\
-    INT8 energy: \textbf{20$\times$} less per inference.\\
-    Battery: 1 hour $\to$ 20 hours.
-  \end{column}
-\end{columns}
-
+\begin{frame}{The blur model runs at 8 FPS; the camera needs 30}
+  \centering
+  \begin{tikzpicture}
+    \node[anchor=south west,inner sep=0] (img) at (0,0)
+      {\includegraphics[width=0.9\textwidth,height=3.6cm,keepaspectratio]{iphone-xr-logic-board.jpg}};
+    \begin{scope}[x={(img.south east)},y={(img.north west)}]
+      \draw[mlsysaccent,line width=2pt,rounded corners=2pt] (0.535,0.50) rectangle (0.705,0.97);
+    \end{scope}
+  \end{tikzpicture}\\[0.05cm]
+  {\footnotesize\textcolor{mlsysaccent}{\textbf{Outlined:}} Apple A12 (CPU, GPU, Neural Engine) with 3 GB of DRAM stacked on top.}\\[0.15cm]
+  {\normalsize MobileNetV2, FP32 on the CPU:} {\Large\bfseries\textcolor{RedLine}{125 ms}}\,{\normalsize per frame}%
+  \uncover<2->{\quad{\normalsize 30 FPS needs} {\Large\bfseries\textcolor{GreenLine}{33 ms}}}
+  \mlsyscredit{Photo: iPhone XR logic board, Sonic8400 (CC BY-SA 4.0), Wikimedia Commons; parts: iFixit iPhone XR teardown. Example 10.1, a labeled composite; frame rates illustrative.}
+  \note{[1.5 min] [CORE] The running case for the lecture, and the hardware it runs on. The photo is an iPhone XR logic board beside a centimeter ruler; the outlined package is the A12 system on chip (its CPU, GPU, and Neural Engine), with 3 GB of LPDDR4X DRAM stacked on top of it, per iFixit's teardown. Every weight the model uses lives in that DRAM and crosses into the processor for every frame or token, which is why the next segment measures time in bytes over the bus. A camera app blurs the background behind a person in real time. Its segmentation model is MobileNetV2 (Lecture 6): 3.5 million parameters, 14 MB in FP32, about 600 million floating-point operations (MFLOP) per frame. Step 1: in FP32 (32-bit floating point) on the phone's CPU it runs at about 8 frames per second, 125 ms per frame. Step 2: 30 frames per second leaves 33 ms. The integer accelerator (the Neural Engine here) does not run FP32, so the model cannot use it; that door opens next lecture. WARN: the chapter labels these frame times a composite scenario for a mid-tier phone; say that it describes no particular phone.}
 \end{frame}
 
 % =============================================================================
-\section{Optimization Stack}
+% SECTION: BUDGET
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] First, what the device grants each result, and which part of that grant a model breaks.}
+\mlsysdivider{What does a device grant each result, and which term does a model break?}{Model Compression, \S10.1}
+\section{Budget}
 
-\begin{frame}{The Three-Layer Optimization Stack}
-\note{
-[2 min]
-% -- LINK: Energy hierarchy showed why compression matters; now show the full toolkit
-The energy slide proved data movement dominates. This slide introduces the
-three-layer stack that attacks the problem from three angles simultaneously.
-
-% -- NARRATE: Walk through each layer on the diagram
-Point to top layer: ``Structural --- what to compute (pruning, distillation, NAS).''
-Middle: ``Precision --- how precisely (FP32 to INT8 to INT4).''
-Bottom: ``Architectural --- how efficiently (fusion, sparsity).''
-Then the punchline: ``They compound multiplicatively: 2x times 4x times 2x = 16x.''
-
-% -- ENGAGE: Test multiplicative vs additive intuition
-Ask: ``If pruning gives 2x and quantization gives 4x, what is the combined
-speedup?'' Students often say 6x (additive). Correct: 8x minimum, up to 16x
-with fusion.
-
-% -- WARN: Students assume techniques are additive, not multiplicative
-Common error: adding compression ratios (2+4+2=8x).
-Correct framing: each layer reduces a different bottleneck independently,
-so gains multiply when layers target orthogonal constraints.
-
-% -- FLEX: [CORE] This is the chapter's organizing framework
-[CORE] Every subsequent slide maps to one of these three layers.
-IF AHEAD: ``Which layer has the highest risk of accuracy loss?''
-IF SHORT: Show the diagram, state the 16x result, move on.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{optimization-stack.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Key:}{Techniques \textbf{compound multiplicatively}. Pruning (2$\times$) + Quantization (4$\times$) + Fusion (2$\times$) = \textbf{16$\times$} total compression.}
-
+\begin{frame}{Reading weights takes MobileNetV2 0.27 ms and GPT-2 XL 59 ms}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{stream_step}{4}\\[0.1cm]
+  \uncover<4->{\small Reading every weight once at batch one; the budget is a frame for the camera, a token for text.}
+  \mlsyscredit{Model Compression, table 1. Phone LPDDR bus 51.2 GB/s.}
+  \note{[3 min] [CORE] A deployment budget is the memory, time, and energy a device grants each result: a frame, a token, an inference. The plot asks one question per model: how long does it take just to read the weights once on the phone's 51.2 GB/s bus? Step 1: MobileNetV2 in FP32, 0.27 ms, about 1 percent of the 33 ms frame. Reading its weights is not what fills the frame. The plot shows only weight reads; the rest of MobileNetV2's frame goes to its 600 MFLOP of arithmetic and its activation traffic (writing and reading each layer's outputs), which this plot does not measure. The measured slide in the last segment times the model itself. Step 2: ResNet-50 (102.2 MB) takes 2 ms. Step 3: GPT-2 XL in FP16, 3 GB, takes 59 ms for every generated token, because decoding at batch one reads every weight per token. Step 4: with 4-bit weights, 15 ms, next lecture's subject. ENGAGE: which lever helps which model? Expected: structure and execution for MobileNetV2, precision for GPT-2 XL. WARN: these times are derived from bus bandwidth and sizes; nobody measured them. The third case, capacity, is the keyword spotter: 800 KB in FP32 against 512 KB of SRAM.}
 \end{frame}
 
-\begin{frame}{The Compression-Accuracy Trade-off}
-\note{
-[2 min]
-% -- LINK: The stack showed three layers; now show where each sits on the risk curve
-The optimization stack introduced three layers. This diagram maps them onto
-a compression-vs-accuracy curve to show which are safe and which are dangerous.
-
-% -- NARRATE: Walk through three regions left to right
-Point to Region 1 (green): ``Free lunch --- fusion, BF16. Zero accuracy cost.
-Always do these first.'' Region 2 (yellow): ``Sweet spot --- INT8, structured
-pruning. Most production systems live here.'' Region 3 (red): ``Danger zone ---
-INT4, aggressive pruning. Models can break catastrophically.'' Point to the
-knee: ``This is where you stop.''
-
-% -- ENGAGE: Ask where INT4 quantization falls
-Before explaining, ask: ``Which region does INT4 quantization belong to?''
-Expected wrong answer: Region 2. Correct: Region 2--3 boundary, depending
-on the model and calibration strategy.
-
-% -- WARN: Students assume all quantization is safe (Region 2)
-Common error: INT8 works great so INT4 must be fine too.
-Correct framing: the curve is nonlinear --- going from 8 bits to 4 bits
-crosses a threshold where activation outliers can no longer be represented.
-
-% -- FLEX: [CORE] The three-region mental model guides every design decision
-[CORE] Students will reference these regions throughout the chapter.
-IF AHEAD: ``Where does binary quantization (1-bit) sit?''
-IF SHORT: Just name the three regions and the knee, skip the INT4 discussion.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=5.5cm,keepaspectratio]{compression-tradeoff-regions.pdf}
-
+\begin{frame}{Compression works on three tiers of one stack}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.2cm,keepaspectratio]{tiers_step}{3}
+  \mlsyscredit{Model Compression, \S10.1 and table 2.}
+  \note{[1.5 min] [CORE] The map of both lectures. Each tier removes a different kind of surplus and moves a different term. Step 1: what the model computes. Pruning and distillation remove structure, so FLOPs per sample and the weight bytes fall. Step 2: how values are stored. Quantization stores each value in fewer bits (FP32 is 32-bit floating point; INT8 is an 8-bit integer), so bytes moved and energy per operation fall; FLOPs per sample do not change. Step 3: how it executes. A kernel is one compiled routine the processor runs; fusion merges several into one so intermediate results stay on chip. Fusion and sparse kernels decide whether the savings above reach the hardware. Today: the top tier and the structural side of the bottom tier. Next lecture: the middle tier, precision. WARN: the tiers interact; pruning changes the value ranges that quantization must later fit. LINK: Lecture 7 lowered graphs to kernels in the same direction.}
 \end{frame}
 
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: Which Technique First?}
-\note{
-[2 min]
-% -- LINK: The three-region diagram just showed Region 1 is free; test if students internalized it
-Students just saw the compression-accuracy curve. This exercise tests whether
-they absorbed the ``free lunch first'' principle.
-
-% -- NARRATE: Frame the scenario, then pause
-Read the scenario aloud: ``ResNet-50, 100 MB, 8 FPS, need 30 FPS.'' Then say:
-``Write your answer and reasoning. Which technique do you apply first?''
-Wait 60 seconds in silence.
-
-% -- ENGAGE: Prediction with a common wrong answer
-The answer is operator fusion (Region 1: zero accuracy cost, 10--30\% latency
-reduction). Students often guess quantization first because it sounds more
-dramatic. After reveal, say: ``Free optimizations first, then trade accuracy.''
-
-% -- WARN: Students skip free optimizations and jump to dramatic ones
-Common error: jumping straight to INT8 quantization because it gives 4x.
-Correct framing: fusion costs nothing --- always exhaust Region 1 before
-entering Region 2.
-
-% -- FLEX: [CORE] This is active learning moment 1 of 3
-[CORE] Do not skip --- this cements the three-region framework.
-IF AHEAD: ``What if fusion only gets you to 10 FPS --- what is next?''
-IF SHORT: Reduce to 30 seconds, then reveal immediately.
-}
-
-\centering
-\vspace{0.6cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.4cm}
-{\large You must deploy ResNet-50 to a mobile phone.\\
-The model is 100 MB (FP32) and runs at 8 FPS.\\
-You need 30 FPS.\\[0.2cm]
-\alert{Which optimization technique do you apply first?}}
-
-\vspace{0.3cm}
-{\normalsize Write your answer and reasoning. \textcolor{midgray}{(60 seconds)}}
-
+\begin{frame}{MobileNetV2 sits off the accuracy-efficiency frontier}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.8cm,keepaspectratio]{frontier_step}{2}\\[0.05cm]
+  \only<1|handout:0>{\small Measured on a Pixel 1. Which model would you ship instead of the red one?}%
+  \uncover<2->{\small V3-Large 0.75 beats the blur model on both axes: 1.64$\times$ faster and 1.3 points more accurate.}
+  \mlsyscredit{Howard et al., ``Searching for MobileNetV3,'' ICCV 2019, Table 3 (float, TFLite benchmark tool, one large core, batch 1). Model Compression, \S10.5.1.}
+  \note{[2.5 min] [CORE] Measured data from real phones. Each dot is a published ImageNet model; the horizontal axis is its latency on a Pixel 1 phone in floating point, measured with the TFLite benchmark tool on one large core at batch one; the vertical axis is top-1 accuracy. The red dot is MobileNetV2 at width 1.0, the blur model's backbone: 72.0 percent at 64 ms. ENGAGE: one minute, which model would you ship instead, and what does it cost you? Step 2: the blue line joins the models that no other model beats on both axes, the accuracy-efficiency frontier. MobileNetV2 is dominated. MobileNetV3-Large at width 0.75 runs in 39 ms at 73.3 percent, 1.64 times faster and 1.3 points more accurate (derived from the table). The chapter draws a distinction. A change that keeps the task and removes waste moves a dominated model toward the frontier at little cost; once on the frontier, every further saving trades accuracy, as the slope from V3-Large 1.0 down to V3-Small shows. WARN: the 64 ms here is a real Pixel 1 measurement; the 125 ms of the running case is the chapter's composite for a different phone, so do not compare them directly. Architecture search produced the V3 models without compression; this lecture's levers act on the model you already have.}
 \end{frame}
 
 % =============================================================================
-\section{Pruning}
+% SECTION: STRUCTURE
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Structure first, on the blur model: what can the model stop computing?}
+\mlsysdivider{Which work can the model stop doing?}{Model Compression, \S10.2.1 to \S10.2.3, \S10.4.2}
+\section{Structure}
 
-\begin{frame}{Pruning: Remove What Doesn't Matter}
-\note{
-[2 min]
-% -- LINK: The optimization stack's top layer is structural --- pruning is its primary tool
-The three-layer stack's top layer addresses ``what to compute.'' Pruning
-removes weights that carry minimal information, directly reducing model size.
-
-% -- NARRATE: Walk through the formal objective, then the heuristic
-Point to the equation: ``We want the smallest set of weights that preserves
-accuracy. This is NP-hard, so we use magnitude pruning: if a weight is
-below threshold tau, zero it out.'' Then: ``ResNet-50 has 25.6M params but
-only 3M carry task information --- 90\% can be pruned with under 2\% loss.''
-
-% -- ENGAGE: Ask why networks are overparameterized in the first place
-Ask: ``Why are networks overparameterized?'' Give 20 seconds.
-Expected: overparameterization helps optimization (loss landscape smoothing),
-but the final solution is sparse.
-
-% -- WARN: Students assume pruning automatically speeds up inference
-Common error: ``I pruned 90\% of weights so inference is 10x faster.''
-Correct framing: sparse matrices need hardware support to skip zeros.
-Without sparse kernels, the pruned model runs at the same speed.
-
-% -- FLEX: [CORE] Pruning is a fundamental technique referenced throughout
-[CORE] Essential for the structured-vs-unstructured distinction next.
-IF AHEAD: ``What is the relationship between pruning and the Lottery Ticket Hypothesis?''
-IF SHORT: Skip the audience question, walk through the equation and numbers.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    Networks carry far more parameters than any task requires.
-
-    \vspace{0.05cm}
-    \begin{mlsyscard}{crimson}
-    {\scriptsize \textbf{Pruning} removes weights that contribute minimal information.}
-    \end{mlsyscard}
-
-    \vspace{0.05cm}
-    \textbf{Formal objective:}
-    $\min_{\hat{W}} \mathcal{L}(\hat{W}) \;\; \text{s.t.} \;\; \|\hat{W}\|_0 \leq k$
-
-    \vspace{0.05cm}
-    {\scriptsize
-    NP-hard $\to$ magnitude heuristic:
-    $M_{i,j} = \begin{cases} 1 & |W_{i,j}| > \tau \\ 0 & \text{otherwise} \end{cases}$
-    }
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    {\scriptsize
-    \textbf{MobileNet:} 14 MB $\to$ 2 MB, $<$1\% loss\\
-    \textbf{ResNet-50:} 90\% prunable (3M of 25.6M params carry task information)
-    }
-
-    \vspace{0.1cm}
-    \mlsysalert{Pitfall:}{Pruning does \emph{not} auto-speed inference --- sparse matrices need HW support.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Most of ResNet-50's weights can go for about one point}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.6cm,keepaspectratio]{prune_step}{3}\\[0.15cm]
+  \uncover<3->{\normalsize ResNet-50: about 80\% of weights removed for about one point of top-1 accuracy.}
+  \mlsyscredit{Gale, Elsen, Hooker 2019 (magnitude pruning with retraining), via Model Compression, \S10.2. Matrix illustrative.}
+  \note{[2.5 min] [CORE] Pruning removes the weights whose removal raises the loss least. Formally: minimize the loss subject to at most $k$ nonzero weights. That search is combinatorial, so the cheap proxy is magnitude. Darker cells are larger weights. Step 1: a dense 6 by 6 weight matrix. Step 2: unstructured pruning zeroes the 18 smallest. The matrix has the same shape; a dense kernel still reads and multiplies every zero. Step 3: structured pruning removes whole columns (output channels), leaving a smaller matrix that is still dense and runs on ordinary kernels. ENGAGE: which one should run faster on a phone CPU? Expected: the structured one, because the work it removed is gone from the matrix shape. The data line: Gale et al. removed about 80 percent of ResNet-50's weights with magnitude pruning and retraining for roughly one point of top-1 accuracy. WARN: removable is not the same as faster; the next four slides put numbers on that.}
 \end{frame}
 
-\begin{frame}{Structured vs.\ Unstructured Pruning}
-\note{
-[2 min]
-% -- LINK: Pruning was introduced abstractly; now show it has two fundamentally different forms
-The previous slide warned that pruning does not auto-speed inference.
-This slide explains why: it depends on the pruning structure.
-
-% -- NARRATE: Walk through the three columns in the diagram
-Point left: ``Unstructured --- scattered zeros everywhere. Hardware cannot skip
-individual zeros efficiently. You need sparse matrix kernels.''
-Point center: ``N:M structured --- NVIDIA's 2:4 pattern. Exactly 2 of every 4
-weights are zero. A100 Sparse Tensor Cores give 2x speedup.''
-Point right: ``Channel/layer pruning --- remove entire columns. The result is
-a smaller dense network that runs on any hardware.''
-
-% -- ENGAGE: Which type would you choose for a mobile phone?
-Ask: ``Which pruning type would you choose for a phone with no sparse kernel
-support?'' Expected: channel pruning (dense sub-network, any hardware).
-
-% -- WARN: Students think all pruning gives speedup
-Common error: ``90\% pruned = 10x faster'' regardless of structure.
-Correct framing: unstructured pruning saves memory but not latency unless
-the hardware has sparse execution support.
-
-% -- FLEX: [CORE] This distinction determines real-world deployment decisions
-[CORE] The structured-vs-unstructured choice is a recurring design decision.
-IF AHEAD: ``Why did NVIDIA choose 2:4 specifically?'' (hardware-friendly pattern)
-IF SHORT: Just cover the three columns, skip the engagement question.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{pruning-structured-vs-unstructured.pdf}
-
-\vspace{0.05cm}
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{computestroke}{\textbf{Unstructured}}\\
-    {\scriptsize Highest compression; needs sparse kernels}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{routingstroke}{\textbf{N:M Structured}}\\
-    {\scriptsize 2:4 on A100: 2$\times$ speedup}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{datastroke}{\textbf{Channel/Layer}}\\
-    {\scriptsize Dense sub-network; any hardware}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Magnitude pruning keeps four of nine weights}
+  \mlsysactivity{Estimate}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.8cm,keepaspectratio]{mask_step}{2}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \only<1|handout:0>{\normalsize Keep $|w| \geq 0.5$. Mark the mask. What fraction is zero?}%
+      \uncover<2->{\small Mask $\odot$ weights: 0.8, $-0.7$, $-0.9$, $-0.6$ survive.\\[0.2cm]
+        5 of 9 zero: 56\% sparse.\\[0.2cm]
+        0.4 is pruned; the rule is a magnitude threshold, and it does not select ``the top half''.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.2.1 and listing 1. Sparsity derived.}
+  \note{[2.5 min] [OPTIONAL] The chapter's listing 1, by hand. ENGAGE: one minute; students write the mask (1 keeps, 0 removes) for threshold 0.5 and the share of zeros. Step 2: four weights survive: 0.8, $-0.7$, $-0.9$, $-0.6$. The pruned matrix is the mask multiplied element by element with the weights. Five of nine are zero, about 56 percent sparse (derived). WARN: students keep 0.4 because it is ``fairly large'', or drop $-0.7$ because it is negative. The rule uses magnitude, the absolute value, and a fixed threshold. ENGAGE: is this matrix any smaller in memory now? Hold the answer; the next slide asks PyTorch. FLEX: in practice the threshold is set per layer from a target sparsity, and the model is fine-tuned after pruning to recover accuracy. FLEX: cutting it loses the hand exercise on magnitude pruning; the sparse-format predict still gives the segment an activity.}
 \end{frame}
 
-\begin{frame}{Iterative vs.\ One-Shot Pruning}
-\note{
-[2 min]
-% -- LINK: Structured vs unstructured was about where to prune; this is about how much at once
-The previous slide showed pruning types. This slide shows pruning schedules:
-gradual removal with recovery vs aggressive one-shot removal.
-
-% -- NARRATE: Walk through the table, then contrast with one-shot
-Point to the table: ``Each cycle prunes 2 channels, accuracy drops, fine-tuning
-recovers it. After 3 cycles: 27\% channels removed, only 0.4\% accuracy lost.''
-Then: ``One-shot at 27\%: accuracy drops to 0.943 --- a 5\% degradation.''
-Point to the Lottery Ticket card: ``Dense networks contain sparse subnetworks
-that match full accuracy from the original initialization.''
-
-% -- ENGAGE: Ask why iterative works so much better
-Ask: ``Why does removing 2 channels at a time work better than removing all
-at once?'' Expected: the network can redistribute information during fine-tuning.
-
-% -- WARN: Students underestimate the cost of iterative pruning
-Common error: thinking iterative pruning is always worth the extra training.
-Correct framing: iterative requires N fine-tuning rounds. For large models
-(LLMs), this can be prohibitively expensive. One-shot + calibration is
-sometimes the only practical option.
-
-% -- FLEX: [OPTIONAL] The Lottery Ticket card is bonus depth
-[OPTIONAL] The core message is iterative vs one-shot numbers.
-IF AHEAD: ``Does the Lottery Ticket Hypothesis mean we could skip training the full network?''
-IF SHORT: Cover just the table numbers and the 0.4\% vs 5\% contrast.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{Iterative:} prune $\to$ fine-tune $\to$ repeat
-
-    \vspace{0.05cm}
-    {\scriptsize
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lrr@{}}
-      \toprule
-      \textbf{Cycle} & \textbf{After Prune} & \textbf{After Tune} \\
-      \midrule
-      1st (2 ch.) & 0.971 & 0.992 \\
-      2nd (2 ch.) & 0.956 & 0.993 \\
-      3rd (2 ch.) & 0.967 & \textbf{0.991} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.05cm}
-    27\% channels removed, only \textbf{0.4\%} accuracy loss.
-
-    \vspace{0.1cm}
-    \textbf{One-Shot:} prune all at once\\
-    {\scriptsize Same 27\%: 0.995 $\to$ 0.914 $\to$ \textbf{0.943} --- \textcolor{errorstroke}{\textbf{5\% degradation}}.}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{Lottery Ticket Hypothesis}\\[0.05cm]
-    Dense networks contain sparse subnetworks that match full accuracy from original initialization.\\[0.05cm]
-    ResNet-18: 10--20\% of size achieves 93.2\% vs.\ 94.1\%.\\[0.05cm]
-    \textcolor{computestroke}{\textbf{Implication:}} 80--90\% of training compute may be wasted.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\mlsyscite{Frankle \& Carlin, ICLR 2019}
-
+\begin{frame}[fragile]{PyTorch prunes by mask and keeps the shape and the bytes}
+  \begin{columns}[T]
+    \begin{column}{0.75\textwidth}
+\fontsize{9}{10}\selectfont\color{black}
+\begin{verbatim}
+>>> layer = nn.Linear(3, 3, bias=False)
+>>> layer.weight.data = LISTING_1.clone()
+>>> _ = prune.l1_unstructured(layer, 'weight', amount=5)
+>>> layer.weight
+tensor([[ 0.80,  0.00, -0.70],
+        [ 0.00, -0.90,  0.00],
+        [-0.60,  0.00,  0.00]], grad_fn=<MulBackward0>)
+>>> layer.weight.shape, list(dict(layer.named_buffers()))
+(torch.Size([3, 3]), ['weight_mask'])
+>>> c = layer.weight.detach().to_sparse_csr()
+>>> nbytes(layer.weight)
+36
+>>> nbytes(c.values(), c.col_indices(), c.crow_indices())
+80
+\end{verbatim}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \small
+      The same four survivors as the slide before.\\[0.25cm]
+      \uncover<2->{Shape unchanged; a mask is \emph{added}.\\[0.25cm]}
+      \uncover<3->{\textbf{CSR: 80 B against 36 B dense}, because its indices are 64-bit.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Run here: PyTorch 2.13.0, torch.nn.utils.prune (docs: pytorch.org/tutorials/intermediate/pruning\_tutorial.html). Script: images/torch\_demos.py.}
+  \note{[2 min] [OPTIONAL] Real output, produced by running images/torch\_demos.py with PyTorch 2.13.0 on a laptop; LISTING\_1 holds the chapter's listing-1 weights, and nbytes adds up each tensor's element count times its element size. Step 1: PyTorch's pruning call zeroes the five smallest magnitudes, the same four survivors students found by hand. Step 2: the pruned weight keeps its 3 by 3 shape, and the module now carries an extra buffer, weight\_mask; the weight itself is recomputed as the original times the mask, which is what grad\_fn=MulBackward0 reports. So the pruned model is larger in memory than before until the mask is removed, and even then it stores nine floats. Step 3: converting to CSR stores 4 values (16 bytes) plus 4 column indices and 4 row pointers in 64-bit integers (64 bytes): 80 bytes against 36 dense (derived in calcs.py, matching the printout). ENGAGE: what would have to change for CSR to win? Expected: far more zeros, and narrower indices. WARN: the zeros save nothing until a format and a kernel use them; PyTorch's 2:4 path (to\_sparse\_semi\_structured) needs a GPU with sparse tensor cores and was not run here. FLEX: cutting it loses the real pruning API; the previous slide already shows that a mask keeps the shape.}
 \end{frame}
 
-% =============================================================================
-\section{Distillation}
-% =============================================================================
-
-\begin{frame}{Knowledge Distillation: Learning from a Teacher}
-\note{
-[2 min]
-% -- LINK: Pruning removes weights from an existing model; distillation trains a new smaller one
-Pruning carved away parts of an existing network. Distillation takes a
-different approach: train a compact student from scratch using the teacher's
-soft probability outputs.
-
-% -- NARRATE: Walk through the pipeline diagram, then the loss equation
-Point to the diagram: ``Teacher produces soft labels at temperature T.
-Student learns from both the soft labels (KL divergence) and the hard labels
-(cross-entropy). Alpha balances the two losses.'' Then point to DistilBERT
-card: ``97\% of teacher accuracy, 40\% fewer parameters, 60\% faster.''
-ANALOGY: ``The teacher writes a detailed answer key with partial credit ---
-the student learns not just what is right, but what is almost right.''
-
-% -- ENGAGE: Why do soft labels help more than hard labels?
-Ask: ``Why do soft labels help?'' Give 20 seconds. Expected: soft labels
-reveal inter-class similarity (e.g., a ``7'' looks somewhat like a ``1'').
-Hard labels hide this structure.
-
-% -- WARN: Students confuse temperature with learning rate
-Common error: thinking higher T always means better distillation.
-Correct framing: T controls the entropy of the output distribution.
-Too high: everything looks uniform. Too low: no dark knowledge transfer.
-Typical values: T = 3--20.
-
-% -- FLEX: [CORE] Distillation is a distinct paradigm from pruning
-[CORE] Students need this to understand the comparison table next.
-IF AHEAD: ``Can you distill a pruned model into an even smaller student?''
-IF SHORT: Skip the analogy, keep the diagram walkthrough and DistilBERT numbers.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=3.8cm,keepaspectratio]{knowledge-distillation-pipeline.pdf}
-
-\vspace{0.02cm}
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    $\mathcal{L} = \alpha \cdot \text{KL}(p^T_{\text{teacher}}, p^T_{\text{student}}) + (1\!-\!\alpha) \cdot \text{CE}$
-
-    \vspace{0.02cm}
-    {\scriptsize Temperature $T > 1$ softens distributions, revealing inter-class similarity.}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{datastroke}
-    {\scriptsize \textbf{DistilBERT}: 97\% teacher accuracy, 40\% fewer params, 60\% faster. Produces \emph{dense} models --- any hardware.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\mlsyscite{Hinton et al., 2015}
-
+\begin{frame}{A sparse product skips 10 of 16 multiplies but pays an index each}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.8cm,keepaspectratio]{spmv_step}{2}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small
+      \uncover<2->{Each surviving product needs its column, to fetch the right $x_j$.\\[0.25cm]}
+      \uncover<3->{\textbf{Bytes, FP32 with 32-bit indices:}\\
+        dense: 16 $\times$ 4 = 64 B\\
+        CSR: 6 values + 6 columns = 48 B, plus 5 row pointers = 68 B}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.4.2 (4$\times$4 example) and \S10.7 (CSR). Byte counts derived.}
+  \note{[2.5 min] [CORE] The chapter's 4 by 4 matrix-vector product. Step 1: a dense kernel performs all 16 multiply-accumulates, zeros included. Step 2: a sparse kernel performs only the 6 nonzero products. But it must know where each one sits, so for every value it loads a column index (blue tags) and then fetches the matching entry of $x$ from a scattered address. The zeros are skipped; the bookkeeping is not. Step 3: count bytes in CSR (compressed sparse row), the common format: each nonzero stores its value and its column, 8 bytes with 32-bit indices, 48 bytes for six; plus one pointer per row boundary, 5 pointers, 20 bytes; 68 bytes against 64 for the dense matrix (derived). At 62.5 percent zeros, this small matrix got bigger. For a 4,096 by 4,096 layer the 4,097 row pointers are negligible, so the 8 bytes per nonzero dominate. WARN: students count the multiplies and stop; on real hardware the scattered loads often cost more than the arithmetic saved.}
 \end{frame}
 
-\begin{frame}{Distillation vs.\ Pruning}
-\note{
-[2 min]
-% -- LINK: Students now know both pruning and distillation; compare them head-to-head
-The previous slides introduced pruning (carve existing model) and distillation
-(train a new smaller model). This table makes the trade-off explicit.
-
-% -- NARRATE: Walk through the comparison table row by row
-Point to Mechanism: ``Pruning subtracts from an existing model. Distillation
-builds from scratch.'' Output: ``Pruning can produce sparse matrices needing
-special kernels. Distillation always produces dense models.'' Then the
-Conservation of Complexity card: ``Neither technique destroys complexity ---
-pruning pushes it to hardware, distillation pushes it to training budget.''
-
-% -- ENGAGE: Which would you choose for a resource-constrained team?
-Ask: ``If your team has limited GPU budget for retraining, which do you pick?''
-Expected: pruning (PTQ-style, no retraining). If unlimited training budget:
-distillation (better final result).
-
-% -- WARN: Students think one technique is strictly better than the other
-Common error: assuming distillation always wins because it produces dense models.
-Correct framing: distillation requires a trained teacher and significant
-training compute. Pruning can be applied post-training with zero retraining.
-
-% -- FLEX: [CORE] The comparison sets up the composing-techniques section
-[CORE] Students need this distinction to design pipelines later.
-IF AHEAD: ``Can you prune a distilled model? What about distilling a pruned model?''
-IF SHORT: Highlight just the Hardware row and the Conservation card.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  \textbf{Criterion} & \textbf{Distillation} & \textbf{Pruning} \\
-  \midrule
-  \textbf{Mechanism}  & Train student from teacher   & Remove weights from model \\
-  \textbf{Output}     & Dense, compact architecture  & Sparse or smaller dense \\
-  \textbf{Hardware}   & Runs on any hardware         & May need sparse kernels \\
-  \textbf{Compression}& 2--10$\times$                & Up to 10$\times$ \\
-  \textbf{Best for}   & Architecture change          & Keep existing architecture \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\mlsysconcept{Conservation of Complexity:}{Pruning $\to$ hardware (sparse support). Distillation $\to$ training (teacher budget). Neither destroys complexity.}
-
+\begin{frame}{Sparse formats can cost more bytes than they save}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{A wearable, 2 MB of flash}\\[0.05cm]
+        Pruned MobileNetV2: the surviving FP32 weights total 2 MB. Each needs a 16-bit index. Does it fit?
+      \end{mlsyscard}
+      \uncover<3->{\small\textbf{\textcolor{RedLine}{No: 3 MB.}} Remove whole channels, or use fewer bits.}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \uncover<2->{\only<2|handout:0>{\includegraphics[width=\textwidth,height=3.8cm,keepaspectratio]{sparsefmt_step1}}%
+        \only<3-|handout:1>{\includegraphics[width=\textwidth,height=3.8cm,keepaspectratio]{sparsefmt_step2}}}\par\vspace{0.1cm}
+      \uncover<4->{\small At what sparsity do CSR and COO break even?}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.4.2 (wearable: a labeled scenario) and \S10.7 (CSR, COO).}
+  \note{[3 min] [CORE] ENGAGE: one minute; ask for a yes or no and a byte count. Step 2: to skip zeros you store only survivors plus where each one sits. An FP32 value is 4 bytes; a 16-bit index adds 2, so each survivor costs 6 bytes, half again. Step 3: 2 MB of values becomes 3 MB. It does not fit. Step 4, estimate in pairs: a dense FP32 tensor costs 4 bytes per entry, zero or not. CSR with 32-bit indices costs 8 bytes per nonzero, so it is smaller only when fewer than half the entries survive, which means above 50 percent zeros. COO (coordinate list: row, column, value) costs 12 bytes, so it needs fewer than a third surviving, which means above 66.7 percent zeros. WARN: a 50 percent sparse model is not half the size until it is stored in a format that skips the zeros, and in CSR at exactly 50 percent it is the same size.}
 \end{frame}
 
-\begin{frame}{Case Study: DistilBERT in Production}
-\note{
-[2 min]
-% -- LINK: Distillation was abstract; this shows a real deployment story
-Students learned the distillation mechanism and the pruning-vs-distillation
-comparison. This slide grounds it with a real production deployment.
-
-% -- NARRATE: Walk through the DistilBERT numbers as a war story
-``Hugging Face needed BERT for real-time NLP serving. BERT-Base: 110M params,
-440 MB. Too slow for mobile and too expensive for high-QPS servers.''
-Point to the table: ``DistilBERT: 66M params, 260 MB. 40\% fewer params,
-60\% faster, retains 97\% of teacher accuracy on GLUE.'' Then: ``The key:
-distillation produced a \emph{dense} model that runs on any hardware.''
-
-% -- ENGAGE: Would you deploy DistilBERT or pruned BERT?
-Ask: ``For a mobile keyboard prediction app, would you use DistilBERT or
-pruned BERT?'' Give 20 seconds. Expected: DistilBERT --- dense model runs
-on any mobile hardware; pruned BERT needs sparse kernels.
-
-% -- WARN: Latency figures are context-specific; the chapter footnote gives different numbers
-The latency values in this table (6.5 ms / 2.5 ms) are illustrative
-single-sample figures for one hardware context. The chapter footnote
-(fn-distilbert-deployment) cites the full deployment impact as 85 ms to
-34 ms, reflecting a different inference context (batch size, sequence length,
-hardware). Both are valid; the key lesson is the 2.6$\times$ ratio and the
-``dense output on any hardware'' property. Emphasize: latency figures are
-hardware- and batch-size-dependent---always profile on the target device.
-
-% -- WARN: Students may think 97\% accuracy is always acceptable
-Separate warn: ``3\% loss is fine'' is dangerous for safety-critical tasks
-(medical, legal). Always validate on the specific downstream task.
-
-% -- FLEX: [OPTIONAL] Concrete case study deepens understanding
-[OPTIONAL] The numbers are memorable; skip if short on time.
-IF AHEAD: ``What about TinyBERT (4x smaller than DistilBERT)?''
-IF SHORT: State the three headline numbers and move on.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{The problem:} BERT-Base too slow for real-time NLP.
-
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.1}
-    {\scriptsize
-    \begin{tabular}{@{}lrr@{}}
-      \toprule
-      & \textbf{BERT-Base} & \textbf{DistilBERT} \\
-      \midrule
-      Parameters  & 110M      & 66M (\textbf{40\% fewer}) \\
-      Size (FP32) & 440 MB    & 260 MB \\
-      Latency     & 6.5 ms    & \textbf{2.5 ms} \\
-      GLUE score  & 79.6      & 77.0 (\textbf{97\%}) \\
-      Hardware    & Any       & Any (dense) \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    \mlsysconcept{Key:}{Dense output runs on \emph{any} hardware --- no sparse kernel dependency.}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \vspace{0.1cm}
-    \begin{mlsyscard}{datastroke}
-    {\scriptsize \textbf{Production impact:}\\[0.05cm]
-    $\bullet$ 2.6$\times$ faster inference\\
-    $\bullet$ Enables on-device NLP\\
-    $\bullet$ Serving cost: 60\% reduction\\
-    $\bullet$ No accuracy-critical regression\\[0.05cm]
-    Used by 10,000+ applications on Hugging Face Hub.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \mlsysalert{Caveat:}{97\% GLUE retention $\neq$ 97\% on \emph{your} task. Always validate downstream.}
-  \end{column}
-\end{columns}
-\mlsyscite{Sanh et al., 2019}
-
+\begin{frame}{Sparse kernels win only past a break-even the hardware sets}
+  \centering
+  \includegraphics[width=0.95\textwidth,height=5.0cm,keepaspectratio]{breakeven}\\[0.15cm]
+  \uncover<2->{\small Measured, well-engineered GPU kernels: 1.2 to 2.1$\times$ faster on sparse Transformer and MobileNet models, at 27\% of FP32 peak.}
+  \mlsyscredit{Model Compression, \S10.4.2 and \S10.7. Gale, Zaharia, Young, Elsen 2020 (V100).}
+  \note{[2 min] [OPTIONAL] One axis, the share of weights that are zero, with every break-even from this lecture on it. Bytes: CSR pays above 50 percent, COO above 66.7 percent. Time is harsher. A dense kernel multiplies zeros at full speed, while an unstructured sparse kernel decodes indices and gathers scattered activations, and on some hardware it loses to dense until 80 to 90 percent sparsity. The green point is the exception the next slide explains, a fixed 2:4 pattern at exactly 50 percent that hardware executes directly. Step 2, measured: Gale et al. wrote sparse GPU kernels that run sparse Transformer and MobileNet models 1.2 to 2.1 times faster than dense on a V100, while reaching only 27 percent of the chip's FP32 peak. A kernel at 27 percent of peak still wins because it does far fewer operations. WARN: the 80 to 90 percent band depends on tensor shape, format, kernel, and chip; treat it as a warning that moves with each of them. FLEX: step 2 can be cut for time. FLEX: cutting it loses the break-even axis and the measured sparse kernels; the sparse-format predict already shows that zeros can cost bytes.}
 \end{frame}
 
-\begin{frame}{Quick Check}
-\note{
-[1 min]
-% -- NARRATE: Pause and let students retrieve before moving to quantization
-Say: ``Close your notes. In what order should you apply compression techniques,
-and why?'' Wait 30 seconds in silence. Then cold-call one student.
-Expected: fusion first (free), then quantization (cheap), then pruning (tuning),
-then distillation (training budget).
-
-% -- ENGAGE: The retrieval task itself is the engagement. Expected answers:
-fusion (Region 1, free), INT8 quantization (cheap, 4x), structured pruning
-(requires fine-tuning), distillation last (full training run needed). A common
-wrong answer is distillation first because it ``sounds'' most thorough.
-Correct framing: always exhaust cheap options before expensive ones.
-
-% -- FLEX: [CORE] Distributed retrieval practice between major sections
-[CORE] This 30-second pause cements the pruning/distillation material
-before the quantization deep-dive.
-IF SHORT: Reduce to 15 seconds, still require an answer.
-}
-
-\centering
-\Large\bfseries Quick check --- no peeking.\\[0.5cm]
-\normalsize In what order should you apply compression techniques, and why?\\[0.3cm]
-{\small 30 seconds --- then we continue.}
+\begin{frame}{A 2:4 sparse GEMM nears 2$\times$ only when the matrix is large}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{sparse24.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \centering
+      \uncover<2->{\includegraphics[width=\textwidth,height=4.3cm,keepaspectratio]{gemm24}\\[0.1cm]
+        {\footnotesize ResNet-50 top-1 in Mishra et al.: 76.1\% dense, 76.2\% with 2:4 sparsity.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.2.1. Mishra et al. 2021, Fig.\ 3 (values read from the published plot, approximate) and Table 2; peak: NVIDIA 2020.}
+  \note{[2.5 min] [OPTIONAL] Hardware can skip zeros when they follow a fixed pattern. Step 1: under 2:4 sparsity every group of four weights keeps exactly two. The block [0, 1.4, 0, $-2.1$] is stored as the two values plus two 2-bit positions, 01 and 11. Half the value bytes, a small fixed index, no irregularity. The A100's sparse tensor cores read the positions and skip the zeroed multiplies; the vendor's design peak is 2 times the math throughput. Step 2: measured INT8 matrix multiplies (GEMM, general matrix multiply, the operation behind most layers) on the A100: about 1.2 times when the inner dimension K is 1,280, about 1.9 times at 12,800, read from Mishra et al.'s plot. Small matrices do not hide the overhead. Accuracy held. ResNet-50 at 76.2 percent sparse against 76.1 dense, after retraining. WARN: quote 2 times only as the peak. LINK: Lecture 11 opens the sparse datapath. FLEX: cutting it loses the measured 2:4 GEMM; channel pruning still shows structure that hardware can use.}
 \end{frame}
 
-
-
-% =============================================================================
-\section{Quantization}
-% =============================================================================
-
-\mlsysfocus{The Quantization Rule}{%
-FP32 $\to$ INT8: \textbf{4$\times$} memory, \textbf{2--4$\times$} throughput\\[0.2cm]
-{\normalsize For bandwidth-bound LLMs: linear speedup}%
-}
-
-\begin{frame}{How Quantization Works}
-\note{
-[2 min]
-% -- LINK: The focus frame just stated the 4x rule; now show the mechanism
-The dark-background slide stated FP32-to-INT8 gives 4x memory. This slide
-reveals how: snapping continuous values to a discrete grid.
-
-% -- NARRATE: Walk through the number line diagram left to right
-Point to FP32 (continuous line): ``Every real number is representable.''
-Point to INT8 (256 grid points): ``Only 256 discrete levels. The quantization
-error is the gap between the true value and the nearest grid point.''
-Then: ``The formula: x\_q = round(x / scale) + zero\_point. This is lossy ---
-you cannot recover the original value.''
-Point to the Free Lunch Zone text: ``FP32 to INT8 loses less than 1\%.
-Below 4 bits: the Quantization Cliff --- accuracy collapses.''
-
-% -- ENGAGE: What happens when distinct values collide?
-Ask: ``What happens when two very different FP32 values map to the same
-INT8 level?'' Give 20 seconds. Expected: information is permanently lost;
-the model cannot distinguish those two activations.
-
-% -- WARN: Students think quantization is rounding and therefore harmless
-Common error: ``it is just rounding, so the error is small.''
-Correct framing: outlier activations in transformers can be 100x larger
-than typical values. Uniform quantization wastes most of its 256 levels
-on the narrow central range, crushing outliers.
-
-% -- FLEX: [CORE] This is the conceptual foundation for PTQ vs QAT next
-[CORE] Students must understand the lossy mapping before comparing strategies.
-IF AHEAD: ``How would you handle outlier activations that are 100x the mean?''
-IF SHORT: Skip the question, keep the diagram walkthrough.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{quantization-number-line.pdf}
-
-\vspace{0.05cm}
-\small
-{\footnotesize Most models exhibit a ``Free Lunch Zone'' where FP32 $\to$ INT8 loses $<$1\% accuracy.\\
-Below 4 bits: the \textbf{Quantization Cliff} --- accuracy collapses catastrophically.}
-
+\begin{frame}{Channel pruning keeps tensors dense if counts fill the tiles}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{tiles.pdf}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering
+      \uncover<2->{\includegraphics[width=\textwidth,height=4.4cm,keepaspectratio]{width075}\\[0.05cm]
+        {\footnotesize Width 0.75 keeps about 70\% of the arithmetic.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.2.1 and \S10.2.4; Sandler et al. 2018.}
+  \note{[2 min] [CORE] Structured pruning has its own rule. The shapes must suit the hardware. Step 1: a matrix unit processes channels in fixed groups of 8, a tile; each slot in the tile is a lane. Pruning 256 channels to 250 removes about 2 percent of the work but leaves the last tile running 2 of its 8 lanes, so the layer may run no faster. Pruning to 248 keeps every tile full. MobileNetV2's reference code rounds every channel count to a multiple of 8 for this reason. Step 2: the blur model's own knob. At width 0.75 MobileNetV2 drops from 3.5 to 2.6 million parameters and from 600 to 418 MFLOP per frame, about 70 percent of the arithmetic kept, not the 56 percent the square of 0.75 predicts, because depthwise layers scale with width, not its square. WARN: the preferred multiple depends on the kernel and number format.}
 \end{frame}
 
-\begin{frame}{PTQ vs.\ QAT: When Precision Matters}
-\note{
-[2 min]
-% -- LINK: The number line showed quantization is lossy; now show two strategies to manage the loss
-Students understand quantization introduces error. This slide presents
-two strategies: accept the error (PTQ) or train through it (QAT).
-
-% -- NARRATE: Walk through PTQ first, then QAT diagram
-Left column: ``PTQ: quantize the trained model and deploy. No retraining.
-This is the strong baseline --- always try PTQ first.''
-Right column, point to the QAT loop diagram: ``QAT inserts fake quantization
-nodes in the forward pass. The model sees quantized values during training
-and learns to compensate. Backward pass uses the Straight-Through Estimator
-(STE) because rounding has zero gradient.'' Then: ``QAT recovers 0.5--1.0
-percentage points when PTQ is not enough.''
-
-% -- ENGAGE: When would you choose QAT over PTQ?
-Ask: ``If PTQ gives 95.5\% and your production threshold is 96\%, what do
-you do?'' Expected: try QAT to recover the missing 0.5 pp.
-
-% -- WARN: Students assume QAT is always superior to PTQ
-Common error: ``QAT is strictly better, so always use it.''
-Correct framing: QAT requires access to training data, a training pipeline,
-and GPU hours. PTQ is a one-line function call. For INT8, PTQ is usually
-sufficient. QAT matters at INT4 or when you are near a production threshold.
-
-% -- FLEX: [CORE] PTQ-vs-QAT is a fundamental deployment decision
-[CORE] This distinction recurs in the composing-techniques section.
-IF AHEAD: ``What does the STE do, and why is it necessary?''
-IF SHORT: Skip the STE detail, emphasize ``PTQ first, QAT if needed.''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{qat-training-loop.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    {\scriptsize
-    \textbf{Post-Training Quantization (PTQ):}
-    \begin{itemize}\setlength\itemsep{-1pt}
-      \item Quantize once after training
-      \item No retraining needed --- strong baseline
-    \end{itemize}
-
-    \vspace{0.05cm}
-    \textbf{Quantization-Aware Training (QAT):}
-    \begin{itemize}\setlength\itemsep{-1pt}
-      \item Fake quantize in forward pass
-      \item STE enables gradient flow
-      \item Recovers 0.5--1.0 pp accuracy
-    \end{itemize}
-    }
-
-    \vspace{0.05cm}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{LLMs:} INT4 weights + FP16 activations dominates (bandwidth-bound).}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Retraining, then iterating, moves AlexNet's pruning cliff}
+  \mlsysactivity{Predict}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.3cm,keepaspectratio]{han_step}{2}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \only<1|handout:0>{\small Pruning once and retraining holds AlexNet's accuracy to 80\% of weights removed. If we prune and retrain in rounds instead, where does the cliff move?}%
+      \uncover<2->{\small Iterative: no loss at 9$\times$ fewer weights, against 5$\times$ for one cut.\\[0.25cm]
+        It also got more retraining; a fair test fixes the recovery budget.\\[0.25cm]
+        \normalsize Rule: one cut plus recovery first.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Han, Pool, Tran, Dally, NeurIPS 2015, Fig.\ 5 (AlexNet, ImageNet top-5; L2 curves); points taken from the published figure's vector data.}
+  \note{[3 min] [OPTIONAL] Measured curves from Han et al., the paper behind magnitude pruning with retraining. The horizontal axis is the share of AlexNet's weights pruned by magnitude; the vertical axis is the change in ImageNet top-5 accuracy. The points are the paper's own, taken from the vector data of its Figure 5 (the L2-regularized runs). Step 1, red: pruning without retraining already loses about 0.9 points at two thirds pruned and 4 points at 80 percent. Blue: one prune followed by retraining holds accuracy to 80 percent pruned, 5 times fewer weights, then falls. ENGAGE: one minute to predict where repeated prune-and-retrain rounds put the cliff. Step 2, green: iterating reaches 88.9 percent, 9 times fewer weights, with no loss, and the paper reports the sharp drop only past 10 times. WARN: the iterative run received several rounds of retraining to the single run's one, so part of its advantage is more training; a fair comparison fixes the recovery budget. Working rule, as in the chapter: prune once with a recovery run first, and pay for iterative schedules only when that misses the target. FLEX: the lottery ticket hypothesis (a sparse subnetwork found by pruning and rewinding can train to full accuracy) is reading, \S10.2.1.}
 \end{frame}
 
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: The Quantization Speedup}
-\note{
-[3 min]
-% -- LINK: PTQ vs QAT showed precision choices; now calculate the concrete impact
-Students chose between PTQ and QAT. This exercise makes them calculate
-exactly how much speedup quantization delivers on a bandwidth-bound LLM.
+\begin{frame}{Low rank: 16 times fewer values, but two kernels}
+  \mlsysactivity{Estimate}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{book_matrix_factorization.pdf}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \small A $4096 \times 4096$ FP32 layer, factored at rank $k = 128$. Megabytes before and after?\\[0.25cm]
+      \uncover<2->{$4096^2 \times 4$ B = \textbf{67.1 MB}\\[0.1cm]
+        $2 \times 4096 \times 128 \times 4$ B = \textbf{4.2 MB}, 16$\times$ fewer\\[0.25cm]}
+      \uncover<3->{\footnotesize Cost: an intermediate vector, a second kernel launch, and ranks off the tile size waste the array.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.2.2 and Systems Perspective 10.1.}
+  \note{[2.5 min] [CORE] Low-rank factorization replaces one weight matrix $W$ ($m$ by $n$) with two thin ones, $U$ ($m$ by $k$) and $V$ ($k$ by $n$), whose product approximates it. It works when a few directions carry most of the transformation, which trained weights often show. ENGAGE: one minute, compute both sizes. Step 2: dense, 4,096 squared times 4 bytes is 67.1 MB; factored, two 4,096 by 128 matrices are 4.2 MB, 16 times fewer values. Matrix-vector arithmetic falls the same way, from $mn$ to $k(m + n)$ multiply-accumulates. Step 3: the cost. The layer now runs as two kernels, with an intermediate vector of length 128 written and read between them unless they are fused, plus a second launch. If the rank does not match the hardware tile (a multiple of 16, for example), part of the matrix unit sits idle. WARN: the error depends on how fast the singular values decay; the chapter's 16 times assumes rank 128 captures almost all of the layer. Choosing rank is a validation question, like a pruning threshold. LINK: as with channel tiles, shapes must suit the hardware.}
+\end{frame}
 
-% -- NARRATE: Present the problem, then reveal after pause
-Read the scenario: ``7B LLM, 16 GB RAM, 50 GB/s bandwidth. FP16 = 2 bytes
-per param. INT4 = 0.5 bytes per param. Calculate model size, latency per
-token, and tokens per second for each.'' Wait 90 seconds.
-After pause, walk through the blue solution card: ``FP16: 14 GB / 50 GB/s
-= 280 ms = 3.6 tok/s. INT4: 3.5 GB / 50 GB/s = 70 ms = 14 tok/s.
-4x speedup because generation is bandwidth-bound --- linear in model size.''
-
-% -- ENGAGE: Peer instruction protocol
-Present problem (30s). Individual work (60s). If 30--70\% get the right
-speedup factor: pair discussion (90s), then re-vote. Reveal and explain.
-The key insight: bandwidth-bound means latency scales linearly with bytes.
-
-% -- WARN: Students forget that LLM generation is bandwidth-bound, not compute-bound
-Common error: calculating FLOP reduction instead of byte reduction.
-Correct framing: autoregressive generation reads the entire weight matrix
-once per token. Latency = model\_bytes / bandwidth. Period.
-
-% -- FLEX: [CORE] Active learning moment 2 of 3 --- quantitative exercise
-[CORE] This is the chapter's central calculation.
-IF AHEAD: ``What happens if the model no longer fits in RAM at FP16?''
-IF SHORT: Show the solution immediately, walk through the arithmetic.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\small\bfseries Calculate the Quantization Speedup}
-
-    \vspace{0.1cm}
-    7B LLM on device with 16 GB RAM, 50 GB/s BW.\\
-    FP16: 2 bytes/param. INT4: 0.5 bytes/param.
-
-    \vspace{0.1cm}
-    \textbf{Calculate:}
-    \begin{enumerate}\setlength\itemsep{-1pt}
-      \item FP16 model size and latency/token
-      \item INT4 model size and latency/token
-      \item Tokens/sec and speedup
-    \end{enumerate}
-
-    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{Solution:}\\[0.05cm]
-    FP16: $7\!\times\!10^9\!\times\!2$ = 14 GB\\
-    Latency: $14/50$ = \textbf{280 ms} (3.6 tok/s)\\[0.05cm]
-    INT4: $7\!\times\!10^9\!\times\!0.5$ = 3.5 GB\\
-    Latency: $3.5/50$ = \textbf{70 ms} (14 tok/s)\\[0.05cm]
-    \textcolor{computestroke}{\textbf{4$\times$ linear speedup}}\\
-    (bandwidth-bound $\Rightarrow$ linear)}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A distilled student keeps 97 percent of BERT, 60 percent faster}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.4cm,keepaspectratio]{kd_step}{3}\\
+      {\footnotesize One cat image: label and teacher}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering
+      \uncover<3->{\small $L = (1 - \alpha)\,L_{\text{CE}} + \alpha\,T^2\,\text{KL}(\text{teacher}_T \,\|\, \text{student}_T)$\\[0.2cm]}
+      \uncover<4->{\includegraphics[width=\textwidth,height=3.4cm,keepaspectratio]{distilbert}}\\[0.1cm]
+      \uncover<5->{\footnotesize Half the layers removed; only 1.6$\times$ faster.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.2.3 (after its soft-target figure; $T = 4$ derived); DistilBERT: Sanh et al. 2019.}
+  \note{[4.5 min] [CORE] Distillation trains a small dense student to imitate a large teacher. Step 1: a hard label says cat, 100 percent. Step 2: the teacher says cat 85, dog 10, fox 5: it also says which wrong answers are close, and the student learns from that. Step 3: dividing the teacher's logits by a temperature $T$ before the softmax flattens them; at $T = 4$ the same teacher gives 48, 28, 24 (derived). The loss mixes ordinary cross-entropy on the label, weight $1 - \alpha$, with the KL divergence to the softened teacher, weight $\alpha$; the $T^2$ factor keeps the two gradients on the same scale. As $T$ grows very large every class approaches a third and the teacher's signal disappears. Step 4: DistilBERT against BERT: 40 percent fewer parameters, 60 percent faster, 97 percent of the language-understanding score. Step 5: half the layers removed, yet 1.6 times faster, because embeddings and fixed per-request costs do not shrink. WARN: the student is dense, which is the advantage over unstructured pruning, but distillation costs a training run. Land the segment: remove structure the hardware can drop, or train a smaller dense student; scattered zeros pay only past a break-even that the format and the kernel set.}
 \end{frame}
 
 % =============================================================================
-\section{NAS \& Fusion}
+% SECTION: EXECUTION
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Fewer weights are on paper. When does removed work make the device faster?}
+\mlsysdivider{When does removed work make the device faster?}{Model Compression, \S10.4.1, \S10.4.2, \S10.6.1}
+\section{Execution}
 
-\begin{frame}{Neural Architecture Search (NAS)}
-\note{
-[2 min]
-% -- LINK: Pruning and distillation modify existing architectures; NAS designs new ones from scratch
-Pruning removes weights, distillation transfers knowledge. NAS takes a
-fundamentally different approach: automatically search for an architecture
-that is efficient by design.
-
-% -- NARRATE: Walk through the four-component loop in the diagram
-Point to the diagram: ``Search space defines the building blocks. Strategy
-explores combinations (RL, evolutionary, gradient-based). Evaluation scores
-each candidate. The loop repeats until convergence.'' Then the cost story:
-``Original NAS: 22,400 GPU-hours. Weight-sharing: 1,000x cheaper. Now
-practical for real teams.'' Point to EfficientNet card: ``8.4x smaller and
-6.1x faster than ResNet-50 at the same accuracy --- NAS found what humans
-could not.''
-
-% -- ENGAGE: Why is hardware-aware NAS important?
-Ask: ``Why include target-device latency in the search objective?''
-Expected: a model with fewer FLOPs may be slower on specific hardware
-due to memory access patterns. Latency-aware search optimizes for the
-actual deployment target.
-
-% -- WARN: Students think NAS is too expensive to be practical
-Common error: ``22,400 GPU-hours means NAS is only for Google.''
-Correct framing: weight-sharing NAS costs 10--100 GPU-hours, comparable
-to a single training run. The 2017 cost is obsolete.
-
-% -- FLEX: [OPTIONAL] NAS is important but secondary to pruning/quantization
-[OPTIONAL] EfficientNet is the key takeaway.
-IF AHEAD: ``What search space constraints make NAS tractable?''
-IF SHORT: Show the diagram, state the EfficientNet numbers, move on.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.85\textwidth,height=4.2cm,keepaspectratio]{nas-overview.pdf}
-
-\vspace{0.05cm}
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    {\scriptsize \textbf{Original NAS} (2017): 22,400 GPU-hours\\
-    \textbf{Weight-sharing}: 1,000$\times$ cheaper\\
-    \textbf{Hardware-aware}: latency on target device}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{datastroke}
-    {\scriptsize \textbf{EfficientNet}: 8.4$\times$ smaller, 6.1$\times$ faster than ResNet-50 at same accuracy.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\mlsyscite{Zoph \& Le, 2017; Tan \& Le, 2019}
-
+\begin{frame}{Folding batch norm cuts a layer's traffic by 45 percent}
+  \centering
+  \mlsyssteps[width=0.88\textwidth,height=5.0cm,keepaspectratio]{fusion_step}{2}
+  \mlsyscredit{Model Compression, \S10.4.1.}
+  \note{[2.5 min] [CORE] Step 1: one ResNet-50 layer with 256 channels at 28 by 28, run as three kernels. Each reads its input from HBM (the accelerator's main memory) and writes its output back, six transfers in all. Count them with the class: convolution reads the 802.8 KB input and 2.4 MB of weights and writes 802.8 KB, 4 MB; batch norm reads and writes again, 1.6 MB; ReLU the same, 1.6 MB; 7.2 MB in all. Step 2: after compression the model is frozen, so batch norm's scale and shift can be folded into the convolution's weights and bias, and ReLU applied before the write. One kernel, two transfers, 4 MB, 44.8 percent less. At the H100's 3,350 GB/s that is 2.1 against 1.2 microseconds of traffic, 1.81 times (derived), a lower bound that ignores compute. ENGAGE: why is this fusion specific to compression? Expected: folding needs frozen statistics and final channel counts, so it happens after pruning. LINK: Lecture 7's fusion rule. The next slide does the fold in PyTorch.}
 \end{frame}
 
-\begin{frame}{Operator Fusion: The Free Lunch}
-\note{
-[2 min]
-% -- LINK: NAS redesigned the architecture; fusion optimizes how it executes on hardware
-NAS addressed the model structure. Operator fusion addresses the bottom
-layer of the optimization stack: hardware implementation. This is Region 1
---- zero accuracy cost.
-
-% -- NARRATE: Walk through the before/after in the diagram
-Point to the left (unfused): ``Conv writes result to global memory. BatchNorm
-reads it back, writes again. ReLU reads again. Three round-trips to slow
-DRAM.'' Point to the right (fused): ``One kernel does Conv, BN, and ReLU
-in on-chip registers. One read, one write. Result: 10--30\% latency reduction
-for free.'' Then: ``This is always the first optimization to apply.''
-
-% -- ENGAGE: Why does not everyone already do this?
-Ask: ``Why doesn't everyone do this already?'' Give 15 seconds.
-Answer: inference engines already do --- TensorRT, ONNX Runtime, TFLite all
-fuse Conv-BN-ReLU automatically. The insight is that it is the framework's
-job, not the researcher's.
-
-% -- WARN: Students undervalue fusion because it ``only'' gives 10--30\%
-Common error: dismissing 10--30\% as minor compared to 4x from quantization.
-Correct framing: fusion is free (zero accuracy cost) and compounds with
-every other technique. It is the baseline you always start from.
-
-% -- FLEX: [CORE] Fusion is the ``always do first'' technique
-[CORE] This reinforces the Region 1 principle from the trade-off slide.
-IF AHEAD: ``What operators cannot be fused? Why?''
-IF SHORT: Show the diagram, state ``10--30\% free,'' move on.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{operator-fusion.pdf}
-
-\vspace{0.05cm}
-\mlsysinsight{Rule:}{Operator fusion is \textbf{always} first. Zero accuracy cost, immediate latency gain.}
-
+\begin{frame}[fragile]{One call folds batch norm away}
+  \begin{columns}[T]
+    \begin{column}{0.76\textwidth}
+\fontsize{9.4}{12}\selectfont\color{black}
+\begin{verbatim}
+>>> conv, bn = nn.Conv2d(16, 16, 3), nn.BatchNorm2d(16)
+>>> _ = bn.running_var.uniform_(0.5, 2)
+>>> m = nn.Sequential(conv, bn, nn.ReLU()).eval()
+>>> [type(x).__name__ for x in m]
+['Conv2d', 'BatchNorm2d', 'ReLU']
+>>> f = fuse_modules(m, [['0', '1', '2']])
+>>> [type(x).__name__ for x in f]
+['ConvReLU2d', 'Identity', 'Identity']
+>>> x = torch.randn(1, 16, 28, 28)
+>>> (f(x) - m(x)).abs().max().item()
+1.6689300537109375e-06
+\end{verbatim}
+    \end{column}
+    \begin{column}{0.23\textwidth}
+      \small
+      Three modules go in, and \textbf{one} comes out; batch norm is gone.\\[0.25cm]
+      \uncover<2->{Its scale and shift now live in the convolution's weights and bias.\\[0.25cm]}
+      \uncover<3->{Same outputs, to float rounding.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Run here: PyTorch 2.13.0, torch.ao.quantization.fuse\_modules (PyTorch API docs). Script: images/torch\_demos.py.}
+  \note{[1.5 min] [OPTIONAL] Real output from images/torch\_demos.py with PyTorch 2.13.0. The model is a convolution, a batch norm with nontrivial running statistics, and a ReLU, in evaluation mode. Step 1: fuse\_modules returns a model whose first module is a ConvReLU2d (a convolution with its ReLU) and whose other two are Identity, so the batch-norm layer no longer runs. Step 2: its per-channel scale and shift were folded into the convolution's weights and bias, which is possible only because the statistics are frozen. Step 3: the fused and unfused outputs differ by about 1.7 millionths, float rounding. Students will make this call before nearly every deployment of a convolutional model. WARN: fuse\_modules needs evaluation mode and a supported pattern; anything else is left unfused, so inspect the result as here rather than assume it. FLEX: cutting it loses the one-line framework call; the previous slide teaches the fold and its 45 percent saving.}
 \end{frame}
 
-\begin{frame}{Hardware-Aware Design: Aligning to the Silicon (1/2)}
-\note{
-[1 min]
-% -- LINK: Operator fusion showed one way to match hardware; this slide generalizes the principle
-Operator fusion eliminates redundant memory round-trips by keeping data in
-on-chip registers. That is one manifestation of a broader principle: model
-structure, quantization format, and operator choices must all align with
-what the target accelerator can natively execute. This slide names that
-principle.
-
-% -- NARRATE: Walk through the core principle and the first two alignment dimensions
-State the headline: ``Theoretical compression ratios do NOT equal measured speedups.
-The gap closes only when model operations align with silicon capabilities.''
-Then walk the two cards:
-1.\ \textbf{Pruning alignment}: Channel pruning and N:M sparsity (e.g., 2:4) are
-efficient because GPU Sparse Tensor Cores have dedicated hardware for 2:4
-patterns. Unstructured sparsity does not align --- no hardware skip mechanism.
-2.\ \textbf{Quantization alignment}: INT8 maps directly to accelerator arithmetic
-units (Tensor Cores, NPUs). Unsupported formats mean software emulation and
-no speedup despite a theoretical compression ratio.
-
-% -- FLEX: [CORE] First part of the hardware-aware design principle.
-[CORE] This slide closes two of the three alignment dimensions.
-IF SHORT: Cover only the headline and pruning alignment card; move to slide 2.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    Theoretical compression ratios $\neq$ measured speedups.\\
-    The gap closes when operations align with silicon.
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{Pruning alignment}\\
-    Channel pruning + 2:4 N:M sparsity $\to$ Sparse Tensor Cores.\\
-    Unstructured sparsity $\to$ no HW skip $\to$ no speedup.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{datastroke}
-    {\scriptsize \textbf{Quantization alignment}\\
-    INT8 $\to$ native Tensor Core arithmetic.\\
-    Unsupported formats $\to$ software emulation $\to$ no gain.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \vspace{0.3cm}
-    \mlsysinsight{The Principle:}{Align pruning structure, quantization format, and operator choices with the capabilities of the target accelerator.}
-
-    \vspace{0.3cm}
-    \mlsysalert{Pitfall:}{A compression technique that looks efficient in FLOPs may deliver no speedup if it does not match what the silicon can execute natively.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{MLPs do two thirds of the work, LayerNorm nearly none}
+  \mlsysactivity{Predict}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\includegraphics[width=\textwidth,height=3.4cm,keepaspectratio]{mlpshare}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \small Which do you compress first to cut latency, and how?\\[0.25cm]
+      \uncover<2->{\textbf{MLP:} structured pruning, it holds the arithmetic.\\[0.15cm]
+        \textbf{LayerNorm:} fusion; little arithmetic per byte, so a larger share of time than of work.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.6.1 (ViT-Base-sized layer; FLOP shares only, no time shares stated).}
+  \note{[2 min] [OPTIONAL] Per token and per layer of a transformer with hidden width $d$: the MLP block costs about $8d^2$ multiply-accumulates, the query, key, value, and output projections $4d^2$. So the MLP carries nearly two thirds of the arithmetic and the projections just under a third; the attention products add a few percent. LayerNorm does almost no arithmetic. ENGAGE: one minute, which do you compress first and with what? Step 2: the chapter's answer is component by component. The MLP holds the work, so structured pruning there cuts the most arithmetic. LayerNorm streams the whole activation tensor for very little arithmetic, so it is memory bound and can claim a visible share of time; fusion fixes it, and pruning does not. WARN: the chapter gives FLOP shares and no measured time share for LayerNorm; do not invent one. The lesson is that FLOP share and time share differ, and only a profile tells you the time.}
 \end{frame}
 
-\begin{frame}{Hardware-Aware Design: Aligning to the Silicon (2/2)}
-\note{
-[1 min]
-% -- LINK: Previous slide covered pruning and quantization alignment; this completes operator alignment
-The previous slide covered the pruning and quantization dimensions of hardware
-alignment. This slide covers operator alignment and connects to Ch11.
-
-% -- NARRATE: Walk through operator alignment and the Ch11 forward pointer
-3.\ \textbf{Operator alignment}: Depthwise separable convolutions look efficient
-in FLOPs but are memory-bandwidth bound on many GPUs. Hardware-aware NAS
-(from the NAS section) measures actual latency rather than FLOP counts
-precisely because the two can diverge by 3--5$\times$.
-Then the forward pointer: ``Ch11 shows exactly how GPU Tensor Cores, systolic
-arrays, and Sparse Tensor Cores exploit these alignments.''
-
-% -- ENGAGE: Ask which compression technique is hardware-unaware
-Ask: ``From the techniques we covered, which one risks being hardware-unaware?''
-Give 20 seconds. Expected: unstructured pruning --- it gives memory savings
-but no latency gain without hardware-native sparse execution support.
-
-% -- WARN: Students think any compression ratio translates directly to a speedup
-Common error: ``INT8 gives 4$\times$ memory, so 4$\times$ speedup.'' Correct
-framing: the speedup materializes only if the operator runs on native INT8
-arithmetic units. Profile on the target device.
-
-% -- FLEX: [CORE] Completes the 6th learning objective (hardware-aware design)
-[CORE] This slide closes the LO contract and directly prepares Ch11.
-IF AHEAD: ``Which of the three alignment dimensions is easiest to overlook?''
-IF SHORT: State the operator alignment one-liner and the profile rule.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{Operator alignment}\\
-    FLOPs can diverge 3--5$\times$ from measured latency.\\
-    Hardware-aware NAS measures actual device latency.\\
-    Depthwise separable convolutions: low FLOPs, memory-bound in practice.}
-    \end{mlsyscard}
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{Profile on target hardware}\\
-    Theoretical ratios and measured latency diverge sharply.\\
-    Always measure end-to-end on the deployment device.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \vspace{0.3cm}
-    {\scriptsize \textbf{Next chapter} (Ch11) shows exactly how GPU Tensor Cores, systolic arrays, and Sparse Tensor Cores exploit these alignment principles.}
-
-    \vspace{0.3cm}
-    \mlsysconcept{Summary:}{Three alignment dimensions: pruning structure, quantization format, operator choices. All must match target silicon.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Pruning alone falls off a cliff below about 6 percent of size}
+  \centering
+  \safeimg[width=0.96\textwidth,height=5.8cm,keepaspectratio]{cliff_methods.pdf}
+  \mlsyscredit{Model Compression, \S10.5.3, figure redrawn from the chapter's data: Han, Mao, Dally 2016 (AlexNet, ImageNet), one reported setting.}
+  \note{[2 min] [CORE] Real data from Deep Compression (AlexNet on ImageNet): accuracy change, in points, against the share of the original model size kept. Read each curve from the right. SVD (a low-rank factorization) alone falls off a cliff below about 15 percent of the size; pruning alone below about 6 percent; pruning plus quantization holds to about 3 percent. Each method has a plateau and a model-dependent cliff, and combining methods moves the cliff. ENGAGE: why does adding quantization move the cliff left? Expected: it removes bytes without removing more weights, so pruning can stop before its own cliff. WARN: one setting of one paper; the cliff's location is measured per model. The quantization curve is next lecture's subject. Land the segment: removed work saves time only where it was on the critical path and the kernel can skip it.}
 \end{frame}
 
 % =============================================================================
-\section{Efficiency Measurement}
+% SECTION: THE SYSTEM
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Put the levers together on the blur pipeline and ask whether the saving survives everything around the model.}
+\mlsysdivider{Does the saving survive the rest of the system?}{Model Compression, \S10.5.3, \S10.6, \S10.7}
+\section{The System}
 
-\begin{frame}{Pareto Efficiency for Compression}
-\note{
-[2 min]
-% -- LINK: Students know individual techniques; now formalize how to compare them
-Students learned pruning, distillation, and quantization as separate tools.
-This slide introduces Pareto efficiency as the formal framework for
-evaluating which compression configurations are worth pursuing.
-
-% -- NARRATE: Walk through the Pareto frontier concept with concrete points
-``Plot accuracy on the y-axis, latency (or model size) on the x-axis.
-Each compression configuration is a point. The Pareto frontier is the
-set of points where you cannot improve one metric without worsening the
-other.'' Point to the table: ``Configuration C (INT8 + channel pruning)
-dominates B (INT8 only) --- same accuracy, lower latency. B is \emph{not}
-on the Pareto frontier.'' Then: ``Only configurations on the frontier are
-worth deploying. Everything else is dominated.''
-
-% -- ENGAGE: Identify the dominated configuration
-Ask: ``Which configuration in the table is dominated?'' Give 20 seconds.
-Expected: B (INT8 only) --- C achieves the same accuracy at lower latency.
-
-% -- WARN: Students compare techniques on a single metric
-Common error: ``INT4 is best because it has the smallest model.'' Correct
-framing: INT4 sacrifices accuracy. Whether that trade-off is acceptable
-depends on the deployment requirement. Pareto analysis makes this explicit.
-
-% -- FLEX: [CORE] Pareto efficiency frames the decision framework next
-[CORE] Students need this to evaluate compression pipelines rationally.
-IF AHEAD: ``How does the Pareto frontier change with different hardware?''
-IF SHORT: State the frontier concept and the dominated-point example.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{Pareto frontier:} No metric improves without another worsening.
-
-    \vspace{0.1cm}
-    {\scriptsize
-    \renewcommand{\arraystretch}{1.05}
-    \begin{tabular}{@{}llrr@{}}
-      \toprule
-      & \textbf{Config} & \textbf{Acc.} & \textbf{Latency} \\
-      \midrule
-      A & FP32 baseline        & 76.2\% & 15 ms \\
-      B & INT8 only            & 76.0\% & 8 ms \\
-      C & INT8 + channel prune & 76.0\% & 5 ms \\
-      D & INT4 + distillation  & 74.5\% & 3 ms \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.05cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{B is dominated by C:} Same accuracy, lower latency. B is \emph{not} on the Pareto frontier.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \vspace{0.1cm}
-    \begin{mlsyscard}{crimson}
-    {\scriptsize \textbf{Pareto frontier (A, C, D):}\\[0.05cm]
-    A: Highest accuracy (no compression)\\
-    C: Best accuracy-latency trade-off\\
-    D: Lowest latency (accuracy sacrifice)\\[0.05cm]
-    Only frontier points are worth deploying.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \mlsysinsight{Rule:}{If another config matches your accuracy at lower cost, your config is \textbf{dominated}.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Structure brings the blur frame to 87 ms, still over 33}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{waterfall_step}{2}\\[0.05cm]
+  \uncover<2->{\small Order: prune channels, distill from ResNet-50, then quantize and fuse.}
+  \mlsyscredit{Model Compression, \S10.5.3 and Example 10.1. Illustrative scenario; frame times need device measurement.}
+  \note{[2 min] [CORE] The levers in order on the blur model. Step 1: FP32 on the CPU, 14 MB, 125 ms per frame. Step 2: channel pruning to width 0.75 keeps about 70 percent of the arithmetic: 10.4 MB, and about 87 ms if time scales with arithmetic. Still far over 33 ms. Two slides on, a measurement tests that assumption. The remaining gap needs a different processor, which needs integers, the subject of the next lecture. Why this order? Quantizing first would calibrate value ranges that pruning then changes; in a modeled BERT pipeline the chapter reports 0.6 percent accuracy loss in this order against 2.1 percent quantizing first. Profile after each step. WARN: the chapter labels these frame times illustrative.}
 \end{frame}
 
-\begin{frame}{Your Turn: Pruning Arithmetic}
-\note{
-[3 min]
-% -- LINK: Pareto analysis showed how to compare; now calculate concrete pruning numbers
-Students just learned to evaluate compression configurations. This exercise
-forces them to calculate the concrete impact of pruning on parameters and FLOPs.
+\begin{frame}{Pruning and INT8 promised 8$\times$ and delivered 1.5$\times$}
+  \centering
+  \includegraphics[width=0.92\textwidth,height=3.9cm,keepaspectratio]{paper_real}\\[0.2cm]
+  {\normalsize Combined techniques do not multiply on the device.}
+  \mlsyscredit{Model Compression, \S10.4 and Systems Perspective 10.4. Illustrative pipeline; 18.8\% derived.}
+  \note{[1.5 min] [CORE] This frame teaches the chapter's concept that combined techniques do not multiply. Half the weights pruned (2 times fewer) and INT8 (4 times fewer bytes) is 8 times on paper. In the chapter's illustrative pipeline the device sees 1.5 times, 18.8 percent of the paper figure. Name the three losses: zeros streamed through dense kernels, unfused conversions between formats, and small layers dominated by launch overhead. ENGAGE: which of the three would a structured pruning pass remove? Expected: the first, because whole channels leave the matrix shape. WARN: the numbers are the chapter's illustrative scenario; the measured slide two frames on shows the same gap on a real CPU. LINK: the next frame finds a second limit outside the model.}
+\end{frame}
 
-% -- NARRATE: Present problem, then reveal after pause
-``ResNet-50: 25.6M params. At 90\% unstructured sparsity, how many non-zero
-params remain? At 50\% structured pruning (channels), what is the FLOP
-reduction?'' Wait 90 seconds. Solution: ``Unstructured: 2.56M non-zero params
-(memory savings if sparse format used). Structured: roughly 75\% FLOP
-reduction (halving channels in each layer reduces FLOPs quadratically
-for conv layers because both input and output channels shrink).''
+\begin{frame}{With the model at 20 percent, the cap is 1.25$\times$}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \only<1|handout:0>{\includegraphics[width=0.92\textwidth,height=2.3cm,keepaspectratio]{amdahl_step1}}%
+  \only<2-|handout:1>{\includegraphics[width=0.92\textwidth,height=2.3cm,keepaspectratio]{amdahl_step2}}\par\vspace{0.3cm}
+  \only<1|handout:0>{\normalsize The model becomes infinitely fast. Overall speedup?}%
+  \only<2|handout:0>{\normalsize Amdahl's law: $1 / (1 - 0.2) = 1.25\times$.}%
+  \only<3-|handout:1>{\normalsize $S = \dfrac{1}{(1 - p) + p/s}$: \ $p = 0.6$, $s = 4$ gives $1 / (0.4 + 0.15) = 1.82\times$.}
+  \mlsyscredit{Model Compression, \S10.4 and Systems Perspective 10.4. Illustrative scenarios; 1.82$\times$ derived.}
+  \note{[2.5 min] [CORE] Step 1: now suppose compression were perfect. ENGAGE: the model is 20 percent of the pipeline's latency; decoding the camera frame, resizing, and display take the rest. The model becomes infinitely fast. Overall speedup? Step 2: 1 over 0.8, 1.25 times. The other 80 percent sets the ceiling. Step 3, a second estimate with the general form: if a fraction $p$ of the time speeds up by $s$, the whole speeds up by 1 over ((1 $-$ $p$) + $p$ / $s$). With the model at 60 percent of latency made 4 times faster: 1 / (0.4 + 0.15) = 1.82 times (derived). Even a large model share and a large gain land below 2. WARN: students who answered 5 times for step 1 divided 100 by 20. LINK: Amdahl from Lectures 1 and 2. FLEX: if short, stop after step 2.}
+\end{frame}
 
-% -- ENGAGE: Peer instruction protocol
-Present (30s). Individual work (60s). If 30--70\% correct: pair discussion.
-The key insight: structured pruning gives \emph{real} speedup because the
-resulting model is a smaller dense network. Unstructured gives memory savings
-but needs sparse hardware for speedup.
+\begin{frame}{Measured: zeros save no time; width 0.75 saves 12\%}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \only<1|handout:0>{\normalsize MobileNetV2 on a laptop CPU, one thread, batch 1. Width 0.75 keeps 70\% of the FLOPs; 80\% of weights zeroed keeps all of them. Predict each time.\\[0.3cm]}%
+  \only<2->{\includegraphics[width=0.95\textwidth,height=4.4cm,keepaspectratio]{cpu_measure}\\[0.05cm]
+    {\small Deployment evidence: time fell only where the kernel skipped work, and by less than the FLOPs.}}
+  \mlsyscredit{Measured 2026-10-18: Apple M5 Max CPU, 1 thread, PyTorch 2.13.0, torchvision MobileNetV2 (random weights), 1$\times$3$\times$224$\times$224, median of 1,000 interleaved runs. Script: images/measure\_cpu.py.}
+  \note{[2.5 min] [CORE] This slide is a measurement. We ran torchvision's MobileNetV2 in PyTorch on one thread of a laptop CPU at batch one, three ways, interleaving the runs so background load hit all three alike (images/measure\_cpu.py, with the mlperf-edu virtual environment's PyTorch 2.13.0). FLOPs come from PyTorch's own FLOP counter. ENGAGE: one minute, predict each bar as a share of the dense model's time. Step 2: zeroing 80 percent of the convolution and linear weights with global magnitude pruning left the time at 101 percent, because dense kernels multiply zeros at full speed, as the sparse slides predicted. Width 0.75, the structured change, kept 70 percent of the FLOPs but 88 percent of the time, 12.5 against 14.1 ms. This run does not separate the likely causes: per-layer overhead in the framework, memory traffic, and depthwise layers that run far below the CPU's peak, none of which shrinks in proportion to the arithmetic. So the waterfall's 87 ms, which assumed time proportional to arithmetic, is an upper bound on the saving. WARN: absolute times vary from run to run on a shared laptop and are not phone times; the ratios are the lesson, and the phone must be measured the same way. LINK: Lecture 12 makes this kind of measurement rigorous.}
+\end{frame}
 
-% -- WARN: Students assume 50\% channel pruning gives 50\% FLOP reduction
-Common error: linear scaling assumption. Correct framing: conv FLOPs scale
-with both input and output channels. Halving both gives $\sim$75\% reduction
-($0.5 \times 0.5 = 0.25$ of original).
-
-% -- FLEX: [CORE] Quantitative exercise for pruning section
-[CORE] Central calculation connecting pruning to hardware impact.
-IF AHEAD: ``What accuracy loss would you expect at 50\% channel pruning?''
-IF SHORT: Show solution immediately, walk through the quadratic argument.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Calculate Pruning Impact}
-
-    \vspace{0.15cm}
-    ResNet-50: \textbf{25.6M} parameters, \textbf{4.1 GFLOPs}.
-
-    \vspace{0.1cm}
-    \textbf{1.} At 90\% \textit{unstructured} sparsity:\\
-    \hspace{0.3cm} How many non-zero params remain?
-
-    \vspace{0.05cm}
-    \textbf{2.} At 50\% \textit{structured} pruning (channels):\\
-    \hspace{0.3cm} What is the approximate FLOP reduction?
-
-    \vspace{0.05cm}
-    \textbf{3.} Which gives real speedup on a phone GPU?
-
-    \vspace{0.1cm}
-    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{Solution:}\\[0.05cm]
-    1.\ $25.6\text{M} \times 0.1 = \textbf{2.56M}$ non-zero\\
-    \hspace{0.3cm}(memory: 100 MB $\to$ 10 MB if sparse)\\[0.05cm]
-    2.\ Conv FLOPs $\propto C_{\text{in}} \times C_{\text{out}}$\\
-    \hspace{0.3cm}$0.5 \times 0.5 = 0.25$ remaining\\
-    \hspace{0.3cm}$\approx$ \textbf{75\% FLOP reduction}\\[0.05cm]
-    3.\ \textcolor{datastroke}{\textbf{Structured}} --- smaller\\
-    \hspace{0.3cm}dense network, any hardware.\\
-    \hspace{0.3cm}Unstructured needs sparse kernels.
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}[t]{True or false: four claims about compression}
+  \mlsysactivity{Vote}{2 min}
+  \vspace{-0.45cm}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \tfcard{4$\times$ fewer weights by magnitude pruning gives about 4$\times$ lower latency.}{One trace: 40\% fewer parameters, 12\% lower latency.}\par\vspace{-0.3cm}
+      \tfcard{A sparse format always saves memory.}{CSR costs 8 B per nonzero; below 50\% zeros it grows.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \tfcard{Pruning and quantization can be applied in any order.}{Modeled BERT: 2.1\% loss quantizing first, 0.6\% staged.}\par\vspace{-0.3cm}
+      \tfcard{Distillation is lossless compression.}{The student is bounded by its capacity; DistilBERT keeps 97\%.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.7 (fallacies and pitfalls), Example 10.2 (modeled), \S10.2.3.}
+  \note{[2.5 min] [OPTIONAL] Peer instruction: everyone votes true or false on all four, one minute with a neighbor, vote again. Step 2: all four are false. One: in one trace from the chapter, 40 percent fewer parameters gave only 12 percent lower latency, because irregular sparsity did not execute efficiently. Two: CSR with 32-bit indices costs 8 bytes per nonzero, so below 50 percent zeros it is larger than the dense tensor. Three: in the chapter's modeled BERT pipeline, quantizing before pruning lost 2.1 percent accuracy against 0.6 percent in the staged order. Four: a student learns only what its capacity and the teacher's outputs allow; it inherits the teacher's errors, and DistilBERT keeps 97 percent of BERT's score. FLEX: for a shorter lecture use statements one and two.}
 \end{frame}
 
 % =============================================================================
-\section{Composing Techniques}
+% CLOSE
 % =============================================================================
-
-\begin{frame}{The Decision Framework}
-\note{
-[2 min]
-% -- LINK: Students now know all individual techniques; this slide shows how to combine them
-Each technique was introduced in isolation. This decision framework maps
-deployment constraints to the right combination and order of techniques.
-
-% -- NARRATE: Walk through the table by constraint, then the recommended order
-Point to the table: ``Memory-constrained? Pruning, distillation, or INT8/INT4.
-Latency-constrained? Channel pruning plus fusion. Power-constrained? NAS plus
-INT4 plus sparsity.'' Then the crimson card: ``The order matters. Fusion first
-(free), INT8 second (cheap), structured pruning third (requires fine-tuning),
-distillation last (requires training budget).''
-Finish with the BERT example: ``440 MB to 28 MB = 16x total compression.''
-
-% -- ENGAGE: Ask students to recall the ordering principle
-Ask: ``Why must fusion come before quantization in the pipeline?''
-Expected: fusion is free (Region 1), so you always exhaust free gains
-before accepting any accuracy trade-off.
-
-% -- WARN: Students apply techniques in the wrong order
-Common error: starting with distillation (expensive) before trying INT8 (cheap).
-Correct framing: order by cost --- free, then cheap, then expensive.
-Each step may make the next unnecessary.
-
-% -- FLEX: [CORE] The decision framework is the chapter's practical deliverable
-[CORE] Students will use this framework in the discussion exercise next.
-IF AHEAD: ``What if your constraint is both memory and latency?''
-IF SHORT: Just cover the recommended order card and BERT example.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lp{2.6cm}p{2.2cm}p{2.8cm}@{}}
-  \toprule
-  \textbf{Constraint} & \textbf{Model Repr.} & \textbf{Numerics} & \textbf{HW Impl.} \\
-  \midrule
-  Memory    & Pruning, distill.\ & INT8/INT4  & --- \\
-  Latency   & Channel pruning    & FP16, INT8 & Fusion, graph opt. \\
-  Power     & NAS, pruning       & INT4       & Sparsity exploit. \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{crimson}
-{\scriptsize \textbf{Recommended Order:} 1.\ Fusion (free) $\to$ 2.\ INT8 quant (cheap) $\to$ 3.\ Structured pruning (tuning) $\to$ 4.\ Distillation (training)}
-\end{mlsyscard}
-
-\vspace{0.05cm}
-{\scriptsize \textbf{BERT}: 440 MB $\to$ 110 MB (INT8) $\to$ 28 MB (pruned + quantized + distilled) = \textbf{16$\times$} total.}
-
+\begin{frame}{Structure moved the models part of the way}
+  \begin{columns}[c]
+    \begin{column}{0.54\textwidth}
+      \centering\includegraphics[width=\textwidth,height=5.0cm,keepaspectratio]{ladder_step2}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \small
+      \textbf{Blur:} 125 $\rightarrow$ about 87 ms, against 33.\\[0.2cm]
+      \uncover<2->{\textbf{GPT-2 XL:} still 59 ms of weights per token.\\[0.2cm]}
+      \uncover<3->{\textbf{Keyword spotter:} 800 KB against 512 KB.\\[0.2cm]
+        \textbf{7B model:} still 14 GB against 8 GB.\\[0.3cm]}
+      \uncover<4->{\normalsize Every remaining gap is in bits per value.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Compression, \S10.1, table 1, Example 10.1 (illustrative), Lighthouse 10.2.}
+  \note{[2 min] [CORE] Back to the opening ladder. Step 1: the blur model went from 125 to about 87 ms with channel pruning, still well over 33 ms (illustrative). Step 2: GPT-2 XL decoding still streams 3 GB of FP16 weights per token, 59 ms, because structure did not change bytes per weight. Step 3: the keyword spotter's 800 KB of FP32 weights still overflow 512 KB of SRAM, and the 7B model is still 14 GB against the phone's 8 GB. ENGAGE: for each case, which term still binds? Expected: frame time and the unused integer accelerator for blur; token time on weight bytes for decoding; capacity for the spotter and the 7B model. Step 4: every remaining gap is in bits per value, which is next lecture.}
 \end{frame}
 
-\begin{frame}{The 4$\times$ MobileNet Win}
-\note{
-[2 min]
-% -- LINK: The decision framework was abstract; this is a concrete deployment story
-The previous slide mapped constraints to techniques. This slide shows
-the framework applied: MobileNetV3 for video-call background blur.
-
-% -- NARRATE: Walk through the before/after table, then the Conservation card
-Point to the table: ``Before: 8 FPS at 5 mJ per frame. Ships? No --- need
-30 FPS. After INT8: 35 FPS at 1.7 mJ per frame. Ships? Yes.'' Then:
-``Without compression, this feature does not exist on phones.''
-Point to the Conservation of Complexity card: ``Pruning pushes complexity
-to hardware. Distillation pushes it to training. NAS pushes it to search.
-Quantization pushes it to lost precision. Move complexity where cost is lowest.''
-
-% -- ENGAGE: Where did the complexity go in this example?
-Ask: ``In the MobileNet INT8 case, where did the complexity go?''
-Expected: precision was sacrificed (lossy quantization), but the loss was
-below the perceptual threshold for background blur.
-
-% -- WARN: Students think compression always degrades user experience
-Common error: assuming any accuracy loss is unacceptable.
-Correct framing: for background blur, sub-1\% accuracy loss is imperceptible.
-The alternative is no feature at all.
-
-% -- FLEX: [OPTIONAL] The Conservation of Complexity is a philosophical capstone
-[OPTIONAL] The numbers are the key takeaway; the Conservation card is bonus.
-IF AHEAD: ``Which tasks have the tightest accuracy tolerance?''
-IF SHORT: Cover just the before/after table and the ``Ships? Yes'' punchline.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Scenario:} Video call background blur, 30 FPS needed.
-
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lrr@{}}
-      \toprule
-      & \textbf{Before} & \textbf{After INT8} \\
-      \midrule
-      Speed     & 8 FPS           & \textbf{35 FPS} \\
-      Energy    & 5 mJ/frame      & \textbf{1.7 mJ/frame} \\
-      Ships?    & \textcolor{errorstroke}{No} & \textcolor{datastroke}{\textbf{Yes}} \\
-      \bottomrule
-    \end{tabular}
-
-    \vspace{0.1cm}
-    \mlsysconcept{Key:}{Compression \textbf{enabled} the feature.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{Conservation of Complexity}\\[0.05cm]
-    Complexity is relocated, not destroyed:\\
-    $\bullet$ Pruning $\to$ HW handles sparsity\\
-    $\bullet$ Distillation $\to$ training budget\\
-    $\bullet$ NAS $\to$ search compute\\
-    $\bullet$ Quantization $\to$ precision lost\\[0.05cm]
-    Move complexity where \textbf{cost is lowest}.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Takeaways}
+  \begin{itemize}\setlength{\itemsep}{0.28cm}\normalsize
+    \item Find the binding term first: arithmetic for the camera frame, weight bytes for a decode token, capacity for a microcontroller.
+    \item Move a dominated model to the accuracy-efficiency frontier before trading along it.
+    \item Remove structure the hardware can drop, or train a smaller dense student.
+    \item Sparsity saves bytes and time only past a break-even set by the format and the kernel.
+    \item Order the levers and measure after each; the rest of the pipeline caps the gain.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per idea. Ask students to say which slide taught each. If short on time, read only the first and last.}
 \end{frame}
 
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Design a Compression Pipeline}
-\note{
-[3 min]
-% -- LINK: The decision framework and MobileNet case were cloud/mobile; now push to TinyML
-Students designed pipelines for phones (8 GB). This exercise pushes to
-the extreme: 384 KB SRAM on an Arduino Nicla.
-
-% -- NARRATE: Frame the challenge, then facilitate discussion
-Read the scenario aloud. Then: ``Turn to a neighbor. Design a compression
-pipeline. You have 90 seconds.'' Walk around the room listening.
-After 90 seconds, cold-call 2--3 pairs.
-Good answers: (1) Start with a tiny architecture (DS-CNN, not MobileNet).
-(2) Fuse operators. (3) INT8 quantize. (4) Structured channel pruning.
-(5) Possibly distill from a larger keyword spotter.
-The key insight: even MobileNetV2 INT8 at 3.5 MB is 10x too large for
-384 KB. They need a fundamentally small architecture plus compression.
-
-% -- ENGAGE: The five option prompts at the bottom force a concrete choice
-Students must argue for a specific combination of the five options.
-The best answer is ``All, but starting from a tiny architecture.''
-
-% -- WARN: Students will try to compress MobileNet into 384 KB
-Common error: applying INT8 + pruning to MobileNetV2 and hoping it fits.
-Correct framing: 3.5 MB / 384 KB = 9x gap. No amount of pruning closes
-a 9x gap. You must start with a model designed for the constraint (DS-CNN).
-
-% -- FLEX: [CORE] Active learning moment 3 of 3 --- synthesis exercise
-[CORE] This is the capstone exercise integrating all techniques.
-IF AHEAD: ``What accuracy would you accept for a keyword spotter?''
-IF SHORT: Reduce to 60 seconds, cold-call one pair.
-}
-
-\centering
-\vspace{0.8cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.5cm}
-{\normalsize You must deploy a keyword spotter (``Hey Siri'')\\
-on an Arduino Nicla (\textbf{384 KB} SRAM, \textbf{100 mW}).\\[0.2cm]
-\alert{Design a compression pipeline.}}
-
-\vspace{0.4cm}
-\begin{columns}[c]
-  \begin{column}{0.20\textwidth}\centering\small Prune?\end{column}
-  \begin{column}{0.20\textwidth}\centering\small Quantize?\end{column}
-  \begin{column}{0.20\textwidth}\centering\small Distill?\end{column}
-  \begin{column}{0.20\textwidth}\centering\small NAS?\end{column}
-  \begin{column}{0.20\textwidth}\centering\small All?\end{column}
-\end{columns}
-
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering
+      \mlsysphoto[width=\textwidth,height=1.9cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.02cm]
+      {\footnotesize GPU with 2:4 sparse cores}\\[0.15cm]
+      \mlsysphoto[width=\textwidth,height=1.7cm,keepaspectratio]{arduino-nano.jpg}\\[0.02cm]
+      {\footnotesize Microcontroller board}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.3cm}
+        \item The smallest model reaching a fixed MMLU score fell 93 times in three years. Will compressing frontier models, or training small models from scratch, close the phone gap first?
+        \item A channel-pruned model runs faster on any processor; a 2:4 model runs faster only on some. Which would you ship to a fleet of mixed devices?
+        \item Hardware rewards 2:4 patterns, INT8, and multiples of 8. Should models target today's datapaths, or should hardware follow what compresses best?
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: NVIDIA H100 PCIe, Geekerwan (CC BY 3.0); Arduino Nano clone, MegaMegaAndOmega (CC BY-SA 4.0); both Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for two minutes of discussion if time allows, or assign one as a short written response. The photos are the two ends of the fleet in the second question: a datacenter GPU whose tensor cores execute the 2:4 pattern, and an 8-bit microcontroller board with no matrix unit at all, on which only removed channels and fewer bytes help. The second and third questions preview Lecture 11.}
 \end{frame}
 
-% =============================================================================
-\section{Wrap-Up}
-% =============================================================================
-
-\begin{frame}{Fallacies}
-\note{
-[2 min]
-% -- LINK: Students just designed pipelines composing techniques; now show how composition fails
-The discussion exercise assumed techniques compose cleanly. These fallacies
-show where that assumption breaks down.
-
-% -- NARRATE: Walk through each fallacy with its quantitative rebuttal
-First fallacy: ``Pruning to 70\% gives 97.8\%. Adding INT8 should still be
-97\%, right? No --- drops to 94.2\%. Techniques interact non-linearly.''
-Second: ``INT8 loses 0.1\%. INT4 should lose 0.2\%? No --- 5--15\% drop.
-Binary: 51\%. The curve has a cliff, not a slope.''
-Third: ``INT8 + 50\% pruning should give 8x speedup. Actual: 28\%.
-Sparse dequantization overhead erodes the theoretical gains.''
-
-% -- WARN: The interaction fallacy is the most dangerous for pipeline design
-Common error: multiplying individual compression ratios to predict combined
-speedup. Correct framing: always measure the combined pipeline end-to-end.
-Theoretical composition overestimates real gains by 2--5x.
-
-% -- FLEX: [CORE] Fallacies directly challenge what students learned earlier
-[CORE] These fallacies are essential correctives to the optimistic framing.
-IF AHEAD: ``How would you test for non-linear interactions in your pipeline?''
-IF SHORT: Cover just the first fallacy (interaction), skip the other two.
-}
-
-\footnotesize
-\textbf{Fallacy:} \textit{Optimization techniques compose independently.}\\
-{\scriptsize BERT pruned to 70\%: 97.8\% accuracy. Add INT8: drops to 94.2\%. Techniques interact non-linearly.}
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{Aggressive quantization scales uniformly.}\\
-{\scriptsize ResNet-50 INT8: 76.1\% (vs.\ 76.2\% FP32). INT4: 5--15\% drop. Binary: \textbf{51\%}. Threshold effects.}
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{Compression ratios predict deployment speedup.}\\
-{\scriptsize INT8 + 50\% pruning $\to$ expected 8$\times$. Actual: \textbf{28\%} end-to-end. Sparsity + dequantization overhead erode gains.}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.12cm}
+    \item \textbf{Read:} Model Compression, \S10.1, \S10.2, \S10.4, \S10.5.3, \S10.6.1, \S10.7 (mlsysbook.ai).
+    \item Han, Mao, Dally, ``Deep Compression,'' ICLR 2016.
+    \item Blalock et al., ``What Is the State of Neural Network Pruning?'' MLSys 2020.
+    \item Hinton, Vinyals, Dean, ``Distilling the Knowledge in a Neural Network,'' 2015.
+    \item Sanh et al., ``DistilBERT, a Distilled Version of BERT,'' 2019.
+    \item Hoefler et al., ``Sparsity in Deep Learning,'' JMLR 2021.
+  \end{itemize}
+  \note{[0.5 min] [OPTIONAL] The chapter first, with the self-check questions at the end of each section. Deep Compression is the source of the plateau-and-cliff curves; Blalock et al. is a sober survey of what pruning results actually show and how to compare them fairly; Hinton et al. is distillation in eight pages and Sanh et al. its best-known product; Hoefler et al. goes deeper on when sparsity pays. FLEX: add the TinyTorch compression module if your course assigns it.}
 \end{frame}
 
-\begin{frame}{Pitfalls}
-\note{
-[2 min]
-% -- LINK: Fallacies showed conceptual errors; pitfalls show operational mistakes
-The fallacies were about wrong mental models. These pitfalls are about
-wrong engineering practices --- optimizing the wrong metric and skipping
-training-aware methods.
-
-% -- NARRATE: Walk through each pitfall with its numbers
-First: ``A team reduces FLOPs by 60\% but achieves only 12\% latency reduction
-on ARM. Why? Sparse patterns prevent vectorization. Memory bandwidth and
-cache behavior determine actual performance --- not operation counts.
-The rule: profile on target hardware.''
-Second: ``PTQ achieves 96.8\% of BERT baseline. QAT retains 99.1\% --- a
-2.3-point gap. That gap often determines whether the model meets the
-production threshold.''
-
-% -- WARN: Students optimize for theoretical metrics instead of measured performance
-Common error: reporting FLOP reduction as the primary success metric.
-Correct framing: FLOPs predict performance only for compute-bound workloads.
-Most inference is memory-bound, so FLOP reduction alone is misleading.
-
-% -- FLEX: [CORE] These pitfalls connect directly to Ch12 (Benchmarking)
-[CORE] The ``profile on target hardware'' message bridges to the next chapters.
-IF AHEAD: ``What tools would you use to profile on-device?''
-IF SHORT: Cover just the first pitfall (FLOPs vs latency).
-}
-
-\small
-\textbf{Pitfall:} \textit{Optimizing for theoretical metrics rather than deployment performance.}\\
-{\footnotesize Teams reduce FLOPs by 60\% but achieve only 12\% latency reduction on ARM. Memory bandwidth, cache behavior, and instruction-level parallelism determine actual performance --- not operation counts. \textbf{Profile on target hardware.}}
-
-\vspace{0.2cm}
-\textbf{Pitfall:} \textit{Using post-training optimization without considering training-aware alternatives.}\\
-{\footnotesize PTQ achieves 96.8\% of BERT baseline. QAT retains 99.1\% --- a 2.3-point gap. Post-training pruning to 70\%: 73.8\% accuracy. Gradual pruning \emph{during} training: 75.6\%. The 2--4\% improvement from training-aware methods often determines whether models meet production thresholds.}
-
-\end{frame}
-
-
-\begin{frame}{Muddiest Point}
-\note{
-[1 min]
-% -- NARRATE: Collect muddiest points for next-lecture opening
-Say: ``Write down the single most confusing concept from today. One sentence.
-Hand it in on your way out or submit digitally.'' Use responses to open
-the next lecture (Ch11 Hardware Acceleration) with targeted clarification.
-
-% -- FLEX: [CORE] Diagnostic tool --- do not skip even if short on time
-[CORE] Muddiest point takes 60 seconds and provides irreplaceable feedback.
-IF SHORT: Reduce to 30 seconds, still collect responses.
-}
-
-\centering
-\Large\bfseries One-minute paper\\[0.5cm]
-\normalsize Write down the \textbf{muddiest point} from today's lecture.\\[0.2cm]
-{\small What concept was most confusing or unclear?}\\[0.5cm]
-{\footnotesize\textcolor{midgray}{(Hand in on your way out --- or submit digitally)}}
-\end{frame}
-
-% --- RETRIEVAL PRACTICE ---
-\begin{frame}{What Were the Key Ideas?}
-\note{
-[2 min]
-% -- NARRATE: Retrieval practice before revealing takeaways
-Say: ``Close your notes. Write down the 4 most important concepts from today.
-90 seconds. No peeking.'' Walk around the room silently. Do NOT reveal the
-next slide (Key Takeaways) until time is up.
-
-% -- FLEX: [CORE] Retrieval practice is the highest-impact learning activity
-[CORE] Even 60 seconds of retrieval doubles long-term retention.
-IF SHORT: Reduce to 60 seconds but still require writing.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
-\end{frame}
-
-\begin{frame}{Key Takeaways}
-\note{
-[2 min]
-% -- NARRATE: Reveal takeaways after retrieval, anchor with numbers
-Walk through each bullet. Emphasize the quantitative anchors students
-should remember: ``4x from INT8. 16x combined. For LLMs, weight-only INT4
-dominates. Order matters: fuse, quantize, prune, distill. And always ---
-profile on target hardware, not FLOPs.'' Point specifically to the 7th
-bullet: hardware-aware design is the bridge to Ch11 --- this is why the
-Sparse Tensor Cores and native INT8 units in the H100 were designed.
-
-% -- FLEX: [CORE] This is the definitive summary --- read every bullet
-[CORE] Students compare their retrieval practice answers against these bullets.
-IF SHORT: Read the bold terms only, skip the explanatory text.
-}
-
-\scriptsize
-\begin{itemize}\setlength\itemsep{1pt}
-  \item \textbf{Three-layer stack}: Structural (what to compute), Precision (how precisely), Architectural (how efficiently). Combine all three for multiplicative gains.
-  \item \textbf{PTQ is the strong baseline}: INT8 post-training quantization delivers 4$\times$ compression with no retraining. Use QAT only when PTQ falls short.
-  \item \textbf{LLMs: weight-only INT4 wins}: INT4 weights + FP16 activations dominate because autoregressive generation is memory-bandwidth bound.
-  \item \textbf{Structured pruning for real speedup}: Unstructured sparsity needs sparse kernels. Structured pruning (channels, heads) produces a smaller dense network on any hardware.
-  \item \textbf{Order matters}: Fuse first (free), INT8 second (cheap), structured pruning third (tuning), distillation last (training budget).
-  \item \textbf{Profile on target hardware}: FLOPs mispredict real performance. A 2$\times$ FLOP reduction may yield only 1.2$\times$ speedup on a memory-bound device.
-  \item \textbf{Hardware-aware design}: Align pruning structure, quantization format, and operators with target accelerator capabilities. Theoretical ratios only materialize when silicon can execute them natively.
-\end{itemize}
-
-\end{frame}
-
-\begin{frame}{References}
-\note{
-[1 min]
-% -- NARRATE: Point students to the foundational papers
-Say: ``These are the seven papers that define the field. Han et al.\ for
-pruning, Hinton for distillation, Jacob for quantization, Frankle for
-Lottery Tickets, Zoph for NAS, Tan for EfficientNet, Sanh for DistilBERT.
-Start with Han and Hinton if you read only two. The AlexNet war story
-is from Krizhevsky, Sutskever \& Hinton, NeurIPS 2012.''
-
-% -- FLEX: [OPTIONAL] Skip if running short --- students have the slide
-[OPTIONAL] This slide is a reference, not a teaching moment.
-IF SHORT: Say ``references are on this slide'' and advance.
-}
-
-\small
-\mlsysref{Han+15}{Han et al. ``Deep Compression.'' ICLR 2016.}
-\mlsysref{Hinton+15}{Hinton, Vinyals, Dean. ``Distilling the Knowledge in a Neural Network.'' 2015.}
-\mlsysref{Jacob+18}{Jacob et al. ``Quantization and Training of Neural Networks.'' CVPR 2018.}
-\mlsysref{Frankle+19}{Frankle \& Carlin. ``The Lottery Ticket Hypothesis.'' ICLR 2019.}
-\mlsysref{Zoph+17}{Zoph \& Le. ``Neural Architecture Search with RL.'' ICLR 2017.}
-\mlsysref{Tan+19}{Tan \& Le. ``EfficientNet: Rethinking Model Scaling.'' ICML 2019.}
-\mlsysref{Sanh+19}{Sanh et al. ``DistilBERT.'' 2019.}
-
-\end{frame}
-
-\begin{frame}{Next Lecture: Hardware Acceleration}
-\note{
-[1 min]
-% -- LINK: This chapter compressed the model; the next chapter shows where it runs
-Model compression reduced what needs to be computed and how precisely.
-But compressed models still run on physical hardware --- and the hardware
-determines whether compression translates to real speedup.
-
-% -- NARRATE: Build anticipation for Ch11 with specific questions
-Say: ``We shaved off every unnecessary bit. But logic must run on physics.
-Next lecture answers four questions: Why do Tensor Cores make INT8 fast?
-How do systolic arrays exploit data reuse? What does the Roofline Model
-reveal about when compression actually helps? And why does 2:4 sparsity
-from this chapter get a dedicated hardware unit?''
-
-% -- FLEX: [CORE] The forward hook motivates Ch11 attendance
-[CORE] End on the unanswered question: ``From math to physics.''
-IF SHORT: Just say ``next: hardware acceleration'' and dismiss.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \vspace{0.3cm}
-    We compressed the model's \textbf{logic} --- shaved off every unnecessary bit.
-
-    \vspace{0.2cm}
-    Logic must eventually run on \textbf{physics}.
-
-    \vspace{0.2cm}
-    \begin{mlsyscard}{crimson}
-    \textbf{Next:} How do accelerators exploit compression?\\[0.1cm]
-    {\footnotesize
-    $\bullet$ Tensor Cores for INT8/INT4 arithmetic\\
-    $\bullet$ Systolic arrays for dense matrix ops\\
-    $\bullet$ Roofline model: when does compression help?\\
-    $\bullet$ Sparse Tensor Cores for 2:4 sparsity}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.5cm}
-    \centering
-    {\normalsize\textbf{From Math to Physics}}
-
-    \vspace{0.3cm}
-    {\large Compressed model $+$\\
-    Smart hardware $=$\\
-    \textcolor{datastroke}{\textbf{Real speedup}}}
-
-    \vspace{0.3cm}
-    {\footnotesize Without hardware alignment,\\
-    compression ratios are just\\
-    numbers on paper.}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-
-% =============================================================================
-% BACKUP SLIDES
-% =============================================================================
-\appendix
-
-\begin{frame}{Backup: Quantization Cliff --- Why INT4 Is Dangerous}
-\note{
-[2 min]
-% -- NARRATE: Extended explanation of the quantization cliff for students who ask
-Use if students ask about going below INT8. Walk through the accuracy
-numbers: FP32 76.2\%, INT8 76.1\% (negligible), INT4 71--73\% (significant),
-Binary 51\% (catastrophic). The cliff occurs because 4 bits cannot represent
-the dynamic range of activation outliers. LLMs use mixed INT4 weights + FP16
-activations to avoid this.
-
-% -- FLEX: [OPTIONAL] Backup slide --- use only if students need more depth on quantization precision
-[OPTIONAL] Deploy when the main quantization slide raises questions about sub-INT8.
-}
-\small
-Use if students ask about going below INT8.\\small ResNet-50 accuracy by precision:\\ FP32: 76.2\%. INT8: 76.1\% ($-$0.1\%). INT4: 71--73\% ($-$3--5\%). Binary: 51\% (catastrophic).\\ The ``cliff'' occurs because 4 bits cannot represent the dynamic range of activation outliers.\\ LLMs use mixed INT4 weights + FP16 activations to avoid this.
-\end{frame}
-
-\begin{frame}{Backup: PTQ vs QAT Decision Tree}
-\note{
-[2 min]
-% -- NARRATE: Decision tree for choosing PTQ vs QAT
-Start with PTQ (always). If accuracy drop < 1\%: ship PTQ. If 1--3\% drop:
-try QAT with the same training data. If > 3\% drop: the model architecture
-may not tolerate quantization --- consider distillation or mixed precision.
-For LLMs: GPTQ (PTQ variant) dominates because full QAT is prohibitively expensive.
-
-% -- FLEX: [OPTIONAL] Deploy when students ask which to choose
-[OPTIONAL] Backup for PTQ/QAT questions.
-}
-\small
-Use if students need a decision framework for PTQ vs QAT.\\[0.1cm]
-{\footnotesize
-\textbf{Step 1:} Always try PTQ first (one function call, no training).\\
-\textbf{Step 2:} Measure accuracy drop on your validation set.\\
-$\bullet$ Drop $< 1\%$: Ship PTQ. Done.\\
-$\bullet$ Drop 1--3\%: Try QAT (requires training data + GPU budget).\\
-$\bullet$ Drop $> 3\%$: Architecture may not tolerate quantization. Consider distillation or mixed precision (INT8 weights + FP16 activations).\\[0.05cm]
-\textbf{LLMs:} GPTQ (PTQ variant) dominates --- full QAT at 70B+ params is prohibitively expensive (\$100K+).
-}
-\end{frame}
-
-\begin{frame}{Backup: Pareto Frontier Construction}
-\note{
-[2 min]
-% -- NARRATE: How to build a Pareto frontier in practice
-1. Generate N compression configurations (vary pruning ratio, quantization
-level, distillation temperature). 2. Measure accuracy and latency for each
-on target hardware. 3. Sort by accuracy descending. 4. Walk the list: keep
-a config only if its latency is lower than all previously kept configs.
-5. The kept configs form the Pareto frontier.
-
-% -- FLEX: [OPTIONAL] Deploy during the Pareto efficiency discussion
-[OPTIONAL] Practical algorithm for frontier construction.
-}
-\small
-Use if students ask how to construct a Pareto frontier.\\[0.1cm]
-{\footnotesize
-\textbf{1.} Generate $N$ compression configs (vary pruning \%, quant bits, distill temp).\\
-\textbf{2.} Measure accuracy and latency on \emph{target hardware} for each.\\
-\textbf{3.} Sort by accuracy descending.\\
-\textbf{4.} Walk the sorted list: keep a config only if its latency is strictly lower than all previously kept configs.\\
-\textbf{5.} Kept configs = Pareto frontier.\\[0.05cm]
-\textbf{Tip:} The frontier changes with hardware. Re-evaluate when switching deployment targets.
-}
-\end{frame}
-
-\begin{frame}{Backup: Compression Pipeline Order}
-\note{
-[1 min]
-% -- NARRATE: Quick-reference for the recommended compression pipeline order
-Use if students need a concise reference. Walk through: (1) Operator fusion ---
-free, 10--30\% latency reduction. (2) INT8 quantization --- 4x memory, under
-1\% accuracy loss. (3) Structured pruning --- requires fine-tuning, real HW
-speedup. (4) Knowledge distillation --- requires training budget, dense output.
-Combined: up to 16x total.
-
-% -- FLEX: [OPTIONAL] Backup slide --- use as reference during Q\&A or review sessions
-[OPTIONAL] Deploy when students ask ``what was the order again?''
-}
-\small
-Use if students need a reference for the recommended order.\\small 1.\ \textbf{Operator fusion} (free, 10--30\% latency reduction)\\ 2.\ \textbf{INT8 quantization} (4$\times$ memory, $<$1\% accuracy loss)\\ 3.\ \textbf{Structured pruning} (requires fine-tuning, real HW speedup)\\ 4.\ \textbf{Knowledge distillation} (requires training budget, dense output)
-
- Combined: up to 16$\times$ total compression.
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\includegraphics[width=\textwidth,height=4.0cm,keepaspectratio]{hook_step1}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} MODEL COMPRESSION, PART 2}}\\[0.5cm]
+      {\LARGE\bfseries How few bits can a value keep?}\\[0.3cm]
+      {\small Today we removed work. Next time we remove bits, and find when that makes the device faster.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Krishnamoorthi 2018, Table 3 (TensorFlow-Slim ResNet-v1-50, 75.2\% in float).}
+  \note{[0.5 min] [CORE] The bars: ResNet-50 keeps its accuracy when every value is stored in 8 bits, 75.2 to 75.0 percent. Part 2 quantizes MobileNetV2, GPT-2 XL, and ResNet-50: number formats, scales and zero-points, calibration, the accuracy cliff, and when fewer bits run faster. The bridge to Lecture 11 (why moving data costs more than computing it) moves to the end of Part 2.}
 \end{frame}
 
 \end{document}

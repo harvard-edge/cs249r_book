@@ -15,15 +15,12 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-try:
-    from cli.core.discovery import discover_volumes, format_volume_display_name
-except ImportError:
-    from core.discovery import discover_volumes, format_volume_display_name
+from ..core.discovery import discover_volumes, format_volume_display_name
 
 console = Console()
 
@@ -102,7 +99,7 @@ class MaintenanceCommand:
         # Tips
         tips = Panel(
             "[bold magenta]💡 Pro Tips:[/bold magenta]\n"
-            "• Use [cyan]./binder/binder build intro,ml_systems[/cyan] to build multiple chapters\n"
+            "• Use [cyan]./binder/binder build intro,system_paradigms[/cyan] to build multiple chapters\n"
             "• Use [cyan]./binder/binder preview[/cyan] for live development with hot reload\n"
             "• Use [cyan]./binder/binder doctor[/cyan] to check system health\n"
             "• Use [cyan]./binder/binder clean[/cyan] to clean up build artifacts",
@@ -772,7 +769,7 @@ class MaintenanceCommand:
                 console.print(f"[green]✅ Saved: {file}[/green]")
 
         # Summary
-        console.print(f"\n[bold]Summary:[/bold]")
+        console.print("\n[bold]Summary:[/bold]")
         if action == "list":
             console.print(f"  Total sections: {total_listed}")
         else:
@@ -1043,8 +1040,16 @@ class MaintenanceCommand:
             resize_out = Path(f"{src}.resized")
 
             def run_magick(cmd):
-                """Run an ImageMagick command and return True if it exits 0."""
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                """Run an ImageMagick command; on failure print its error and return False."""
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                except FileNotFoundError:
+                    console.print("[red]❌ ImageMagick `magick` is not on PATH (brew install imagemagick)[/red]")
+                    return False
+                if result.returncode != 0:
+                    reason = (result.stderr or result.stdout).strip().splitlines()
+                    console.print(f"[red]   {' '.join(cmd[:2])} exited {result.returncode}: "
+                                  f"{reason[-1] if reason else 'no output'}[/red]")
                 return result.returncode == 0
 
             if smart_compression:

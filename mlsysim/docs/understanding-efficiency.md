@@ -5,7 +5,7 @@
 
 ---
 
-## What Is Efficiency?
+## What Efficiency Is
 
 The efficiency parameter, written as **eta** in equations and `efficiency` in code,
 is the ratio of achieved FLOPS to peak FLOPS. MLSys·im exposes it on every
@@ -18,14 +18,14 @@ those models.
 eta = Achieved_FLOPS / Peak_FLOPS
 ```
 
-When you write:
+Consider this call:
 
 ```python
 Engine.solve(model=llama70b, hardware=h100, batch_size=32, precision="fp16", efficiency=0.45)
 ```
 
-you are telling the model: "assume this workload achieves 45% of the H100's
-peak FP16 throughput." The framework uses this to convert theoretical compute
+It tells the model to assume that this workload achieves 45% of the H100's
+peak FP16 throughput. The framework uses this to convert theoretical compute
 time into realistic wall-clock time:
 
 ```
@@ -33,14 +33,14 @@ Time = FLOPs / (Peak_FLOPS x eta)
 ```
 
 Efficiency is always between 0.0 and 1.0. A value of 1.0 would mean the
-hardware is computing at its absolute theoretical maximum every single cycle --
-something that never happens in practice.
+hardware is computing at its absolute theoretical maximum on every cycle,
+which never happens in practice.
 
 ---
 
-## Why Is It a Single Number?
+## Why It Is a Single Number
 
-Because it compresses 12+ sub-factors that are impossible to predict
+Efficiency is a single number because it compresses 12+ sub-factors that are impossible to predict
 analytically for an arbitrary workload on arbitrary hardware. Here is what
 eta actually absorbs:
 
@@ -61,7 +61,7 @@ eta actually absorbs:
 
 No analytical model can predict the combined effect of all twelve factors for
 a given workload. Even NVIDIA's own performance models use empirical
-calibration. The honest thing to do is to measure eta, not pretend to derive it.
+calibration. Eta should be measured, not derived.
 
 ---
 
@@ -77,7 +77,7 @@ hazards, memory latency, and a dozen other microarchitectural details. Patterson
 and Hennessy do not try to predict CPI from first principles. Instead, they:
 
 1. **Measure it** on real hardware with real workloads.
-2. **Teach students what affects it** -- so they can reason about why CPI
+2. **Teach students what affects it**, so they can reason about why CPI
    differs across programs and architectures.
 3. **Use it as a parameter** in the performance equation:
    `Time = Instructions x CPI x Clock_Period`
@@ -96,8 +96,8 @@ on one processor and CPI = 0.8 on another, mlsysim users learn to reason about
 *why* Megatron-LM training achieves eta = 0.50 while eager-mode PyTorch on a small
 model achieves eta = 0.10.
 
-The value of the framework is not in predicting eta. It is in answering: **"Given
-this eta, what happens when I change the hardware, the model, or the batch size?"**
+The value of the framework is not in predicting eta. It is in answering **what happens,
+for a given eta, when the hardware, the model, or the batch size changes**.
 
 ---
 
@@ -115,24 +115,24 @@ Use these empirically-grounded ranges as starting points:
 | TinyML (TFLite Micro on ESP32) | 0.05-0.15 | Interpreter overhead, no tensor cores |
 
 These ranges come from published benchmarks (MLPerf, PaLM training reports,
-Megatron-LM papers) and our own measurements. They are not universal truths --
+Megatron-LM papers) and our own measurements. They are not universal truths;
 they are informed defaults. If a solver exposes `efficiency=0.5`, read that as a
 documented starting point for a well-optimized datacenter workload, not a hidden
 claim that every workload reaches 50% of peak.
 
 ---
 
-## How to Calibrate Efficiency for Your Workload
+## How to Calibrate Efficiency for a Workload
 
-If you have access to real hardware, you can measure eta directly. This is the
-gold standard -- it turns the analytical model from an estimation tool into a
+With access to real hardware, eta can be measured directly. This is the
+gold standard, because it turns the analytical model from an estimation tool into a
 calibrated prediction tool.
 
-### Step 1: Run Your Workload
+### Step 1: Run the Workload
 
-Run your actual training or inference workload on the target hardware. Use
-your real code, your real data, and your real batch size. Do not use synthetic
-benchmarks -- they measure a different workload.
+Run the actual training or inference workload on the target hardware. Use
+the real code, the real data, and the real batch size. Do not use synthetic
+benchmarks, because they measure a different workload.
 
 ### Step 2: Measure Actual Throughput
 
@@ -159,7 +159,7 @@ print(f"eta = {eta:.3f}")  # e.g., eta = 0.423
 
 ### Step 4: Use Calibrated Efficiency for What-If Analysis
 
-Now you have a grounded eta. Use it to explore counterfactuals:
+With a grounded eta in hand, use it to explore counterfactuals:
 
 ```python
 # "What if I moved from H100 to B200?"
@@ -173,9 +173,9 @@ result = Engine.solve(
 ```
 
 **Important caveat:** eta does not transfer perfectly across GPU generations
-(see the fallacies section below). But it transfers much better than having no
-measurement at all. A calibrated eta from one GPU gives you a reasonable
-starting point for another, which you can then refine.
+(see the fallacies section below), but it transfers much better than having no
+measurement at all. A calibrated eta from one GPU gives a reasonable
+starting point for another, which further measurement can then refine.
 
 ---
 
@@ -191,7 +191,7 @@ the workload:
 - Small model in eager mode: eta ~ 0.08-0.15
 
 Using eta = 0.5 for decode-phase inference will overestimate throughput by
-10-50x. Always match your efficiency to the workload regime.
+10-50x. Always match the efficiency to the workload regime.
 
 ### Fallacy: "Higher eta is always better"
 
@@ -206,7 +206,7 @@ right eta depends on the objective.
 
 ### Fallacy: "eta transfers across GPU generations"
 
-It does not -- at least not exactly. Different architectures have different
+It does not, at least not exactly. Different architectures have different
 bottleneck profiles:
 
 - **A100 to H100:** The Transformer Engine and higher memory bandwidth on H100
@@ -216,13 +216,13 @@ bottleneck profiles:
   NVIDIA's 2:4 structured sparsity) achieve different eta for the same
   workload.
 - **GPU to TPU:** Completely different memory hierarchy, interconnect topology,
-  and programming model. An eta measured on GPU tells you almost nothing about
+  and programming model. An eta measured on GPU says almost nothing about
   TPU performance.
 
-When moving across architectures, use your calibrated eta as a *starting point*,
+When moving across architectures, use the calibrated eta as a *starting point*,
 then adjust based on known architectural differences.
 
-### Fallacy: "You can improve eta just by buying faster hardware"
+### Fallacy: "Buying faster hardware improves eta"
 
 Eta is a *ratio*. Buying a faster GPU increases both numerator and denominator.
 If the bottleneck is software overhead (Python dispatch, kernel launch latency),
@@ -237,14 +237,14 @@ the domain of ML systems engineering.
 
 ## Further Reading
 
-- **PaLM Training Report** (Chowdhery et al., 2022) -- Reports MFU of 46.2%
+- **PaLM Training Report** (Chowdhery et al., 2022): Reports MFU of 46.2%
   for PaLM 540B on TPUv4, one of the most carefully measured large-scale
   training efficiency numbers published.
-- **Megatron-LM** (Shoeybi et al., 2020) -- The reference implementation for
+- **Megatron-LM** (Shoeybi et al., 2020): The reference implementation for
   efficient large model training. Published efficiency numbers across model
   sizes and parallelism configurations.
-- **MLPerf Training** (mattson et al., 2020) -- Standardized benchmarks that
+- **MLPerf Training** (mattson et al., 2020): Standardized benchmarks that
   provide comparable efficiency measurements across hardware platforms.
-- **Computer Architecture: A Quantitative Approach** (Hennessy & Patterson) --
+- **Computer Architecture: A Quantitative Approach** (Hennessy & Patterson):
   Chapter 1's treatment of CPI and the CPU performance equation is the direct
   intellectual ancestor of how mlsysim treats efficiency.

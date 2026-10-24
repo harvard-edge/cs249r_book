@@ -1,43 +1,45 @@
+---
+format:
+  html:
+    number-sections: false
+---
+
 # Agent Memory Principles {.unnumbered}
 
-Part I priced a single model call and asked when buying more proposals raises the evidence behind a decision. A trajectory makes that call dozens or hundreds of times, and the model keeps nothing between calls, so everything the next call knows about the task is state that the runtime carries and hands back to it. Part II closes the State exposure of H·S·A. Carried state fails in three ways. It overflows what a call can use, it goes stale when the source it describes changes underneath it, and it contradicts itself when two copies disagree. The part treats state at two of its levels. Within a session ($S_1$), state is the context each call reads and the attention state the serving system computes from it. Beyond the session ($S_3$), it is the sources, logs, indexes, and notes that persist and must be retrieved to matter. The sandboxed workspace between them ($S_2$) arrives with Part III, which gives the agent the authority to write it. These places are not levels of one cache. Each holds a different kind of object under a different owner, and the principles below say what each may hold and when its contents stop being true.
+Part I priced a bounded model call and asked when additional reasoning, candidates, or checks improve the selected result. Continuing a trajectory across turns requires deciding which information reaches the next call. In the repair task, the earlier failure trace describes one source version, the candidate patch changes that version, and the latest test covers only the conditions it exercised. Carrying all three forward without their relationships can mislead the next decision even when they fit in the context window. Part II addresses the state exposure of H·S·A by separating the selected context from its derived attention state and from information retained outside the session. Within a session ($\StateExposureLevel_1$), the runtime supplies working context while the serving system retains reusable computation, whereas durable sources and records ($\StateExposureLevel_3$) outlive that session and must be retrieved to enter a later call. Between those two sits task-local workspace state ($\StateExposureLevel_2$), whose execution and persistence requirements the sandbox workspace (@sec-vol3-sandboxes-cow) and trajectory checkpoints (@sec-vol3-persistence-checkpointing) take up later. Because these three classes of state have different owners and validity conditions, they are not levels of one cache, and every turn begins by budgeting what fits in the call's working set.
 
 ::: {#pri-vol3-attention-working-set .callout-principle title="Context is a selected working set"}
 
-**Invariant**: A model reliably uses far less context than its nominal window admits, and task success peaks at an effective working-set size, then falls as further tokens dilute attention and lengthen prefill. The tokens staged for one call are therefore a selection from the trajectory's history, not the history itself. The full treatment appears in @sec-vol3-context-engineering-physics.
+**Invariant**: A model's nominal context limit bounds how much input a call can accept, not the quality of decisions made from it. The runtime selects the next call's instructions, tool declarations, task state, and observations under that limit, and every token assigned to one role is unavailable to the others. When inputs and outputs share a context limit $\ContextWindow$, reserving output allowance $\OutputLimit$ gives the planning bound
+$$ \SystemInstructionTokenCount + \ToolDeclarationTokenCount + \TaskStateTokenCount + \ObservationTokenCount \le \ContextWindow - \OutputLimit $$
+Fitting within the bound does not guarantee that the selected material supports the next decision.
 
-**Implication**: The runtime must choose, order, and bound what each call sees against an effective size measured on its own workload. When it compacts history, it must keep verbatim the identifiers, paths, and failing assertions that later actions depend on.
+**Implication**: Every schema or log token displaces evidence. Measure context policies on the intended workload and preserve output headroom when setting the input budget. Compaction must protect the exact fields the current task requires and distinguish information retained in the prompt from information available only through a later read. A shorter representation is useful only if the next decision remains adequate. @Sec-vol3-context-engineering-decision develops the partition (@eq-vol3-context-budget-partition), and @sec-vol3-context-engineering-physics gives the full treatment.
 
 :::
 
-What the runtime selects, the serving system must turn into attention state and hold in accelerator memory.
+What the runtime selects, the serving system must turn into attention state. Retaining that computation can reduce repeated work, but its validity differs from the relevance of the information it encodes.
 
 ::: {#pri-vol3-prefix-coherence .callout-principle title="Attention state is derived from the token prefix"}
 
-**Invariant**: The key-value cache for a sequence is a function of its exact token prefix. It can be reused only up to the first token that differs, shared only among sequences whose prefixes are identical, and rebuilt from the tokens at any time, so losing it costs computation and never task knowledge. The full treatment appears in @sec-vol3-kvcache-radix-tree.
+**Invariant**: For the causal full-attention decoder considered here, reusable key-value state depends on the exact preceding token sequence and compatible model inputs and configuration, including positions and attention masks. A changed token prevents ordinary prefix reuse from that position onward, and matching tokens permit reuse only when compatible cached state remains available. Holding that state costs, for $\LayerCount$ layers of $\KvHeadCount$ key-value heads of dimension $\AttentionHeadDimension$ stored at $\ElementStorageSize$ bytes per element,
+$$ \KvCacheBytesPerToken = 2 \cdot \LayerCount \cdot \KvHeadCount \cdot \AttentionHeadDimension \cdot \ElementStorageSize $$
+bytes per retained token.
 
-**Implication**: The harness should stage tokens in order of ascending volatility and keep history append-only between compactions, so that each turn reuses the previous turn's work. The serving system should hold attention state in fixed-size blocks, so that branching trajectories share prefix blocks and a paused trajectory's state can be kept, offloaded, or dropped by comparing its wait time with the cost of reload and recompute.
-
-:::
-
-What must outlive a session lives outside the model entirely and returns to it only through retrieval.
-
-::: {#pri-vol3-retrieval-contract .callout-principle title="Retrieval is a contract, not recall"}
-
-**Invariant**: Durable information re-enters the model only when it is retrieved and staged into context, and a retrieval score measures similarity to the query, not whether a record is current, authoritative, or permitted. The full treatment appears in @sec-vol3-persistent-governance.
-
-**Implication**: Every read from durable storage, whether the runtime pre-stages it or the model requests it through a search tool, must pass through a typed contract that bounds scope, freshness, candidate count, and latency. The runtime chooses exact search, lexical, dense, or graph retrieval by the information need, and checks each candidate's version and provenance against its source before staging it.
+**Implication**: One volatile field early in the prompt forfeits reuse of everything after it, so the measured token-weighted prefix hit rate $\PrefixHitRate$ (@eq-hprefix), not the count of potential matches, sets the saving. Keep stable material ahead of frequently changing material where the request format and task permit, without preserving obsolete information merely to retain a cache hit. The serving system can share, retain, offload, or recompute derived state according to resource costs. Losing cached tensors loses reusable computation rather than task knowledge when the inputs and configuration needed to reconstruct them remain available. @Sec-vol3-kv-cache develops both quantities (@eq-mem-token), with the reuse contract in @sec-vol3-kvcache-radix-tree.
 
 :::
 
-The three places where state lives share one rule about which copy is true.
+Information that must outlive a session belongs in an external store, and returning a record to the model requires selecting it and supplying its contents, not merely retaining its location. The same record can remain useful as history while losing support for a claim about the current environment. Managing both requires identifying which source and conditions a claim depends on.
 
 ::: {#pri-vol3-source-authority .callout-principle title="Authority stays with the source"}
 
-**Invariant**: Only source artifacts, such as the filesystem, the version-control tree, and the database, are authoritative. A staged observation, a compacted summary, an index entry, a note the agent wrote, and the attention state computed from any of them are derived views that become false when their source is written, and the model cannot tell when that has happened. The full treatment appears in @sec-vol3-context-engineering-context-rot for the prompt and in @sec-vol3-persistent-invalidation for durable stores.
+**Invariant**: A staged excerpt, summary, retrieval result, or index entry does not supersede the designated source for the claim it represents. Durable information re-enters the model only when it is retrieved and staged into context, and a retrieval score ranks candidates without establishing that a record is current, authoritative for the claim, or permitted for this task. If a derived entry $\DerivedMemoryEntry$ was supported by its source from generation $\MemoryEntryBirthGeneration(\DerivedMemoryEntry)$ until a relevant change at $\MemoryEntryDeathGeneration(\DerivedMemoryEntry)$, a query that requires generation $\QueryWorkspaceGeneration$ may use it only if
+$$ \text{IsValid}(\DerivedMemoryEntry, \QueryWorkspaceGeneration) = \big(\MemoryEntryBirthGeneration(\DerivedMemoryEntry) \le \QueryWorkspaceGeneration < \MemoryEntryDeathGeneration(\DerivedMemoryEntry)\big) $$
+A later change invalidates an observation as evidence about the present without making the historical observation false. Source provenance does not itself grant action permission or establish task acceptance.
 
-**Implication**: Every mutating action must invalidate each derived view that read the mutated source before the next call, and freshness is judged by version rather than by age. Each place resolves invalidation at its own cost, by marking, refreshing, or removing stale entries in the prompt, by filtering stale records at read time in an index, and by flagging agent-written notes for revalidation.
+**Implication**: Every read from durable storage, whether the runtime pre-stages it or the model requests it through a search tool, needs a contract that bounds access, returned content, resource use, and the required freshness. A source version check establishes whether a retrieved claim remains supported; a cache hit or an index entry does not establish freshness, and age limits can trigger a refresh but do not prove it. Removing unsupported claims or refusing to use them can also reduce the stale-support rate $\StaleSupportRate$ (@eq-vol3-stale-support). Track the dependencies of current claims, refresh, remove, or explicitly mark unsupported current-state claims, and retain historical evidence when needed. @Sec-vol3-context-engineering-context-rot treats the prompt, and @sec-vol3-persistent-governance and @sec-vol3-persistent-invalidation treat durable stores (@eq-vol3-index-validity).
 
 :::
 
-@Sec-vol3-context-engineering decides which tokens each call sees and keeps them bounded, ordered, and current as the horizon grows. @Sec-vol3-kv-cache follows those tokens into the serving system and prices holding their attention state across the turns, forks, and tool waits of a trajectory. @Sec-vol3-long-term-memory decides what outlives the session, how it returns to context, and what the agent may write back. A trajectory that remembers everything it needs still cannot change anything outside the model, and giving it that power safely is the work of Part III.
+Together, these three principles separate what the prompt carries, what the serving engine caches, and what durable storage backs. @Sec-vol3-context-engineering decides which information each call sees and how to keep that working context bounded and applicable. @Sec-vol3-kv-cache follows the selected tokens into the serving system and prices holding their attention state across turns, forks, and tool waits. @Sec-vol3-long-term-memory governs what outlives the session and how stored records return to a task under freshness checks. Selecting valid information still supplies no permission to act on it; Part III develops the tool and execution boundaries through which proposals affect the environment.

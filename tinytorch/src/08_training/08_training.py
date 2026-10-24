@@ -1712,12 +1712,12 @@ def analyze_training_memory():
 
         # Convert to human-readable
         def format_memory(nbytes):
-            if nbytes < 1024:
-                return f"{nbytes}B"
-            elif nbytes < 1024 * 1024:
-                return f"{nbytes/1024:.1f}KB"
+            if nbytes < 1000:
+                return f"{nbytes} B"
+            elif nbytes < 1_000_000:
+                return f"{nbytes/1000:.1f} KB"
             else:
-                return f"{nbytes/(1024*1024):.1f}MB"
+                return f"{nbytes/1_000_000:.1f} MB"
 
         print(f"{name:<10} {format_memory(param_memory):<10} "
               f"{format_memory(grad_memory):<12} {format_memory(sgd_memory):<12} "
@@ -1753,9 +1753,9 @@ def analyze_checkpoint_overhead():
     print("-" * 70)
 
     def format_size(nbytes):
-        if nbytes < 1024:
-            return f"{nbytes}B"
-        return f"{nbytes/1024:.1f}KB"
+        if nbytes < 1000:
+            return f"{nbytes} B"
+        return f"{nbytes/1000:.1f} KB"
 
     for size in sizes:
         # Create model and trainer

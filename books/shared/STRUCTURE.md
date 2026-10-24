@@ -39,8 +39,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `01_introduction/01_introduction.qmd` |
 |  | part | `parts/foundations_principles.qmd` |
-| 2 | chapter | `02_ml_systems/02_ml_systems.qmd` |
-| 3 | chapter | `03_ml_workflow/03_ml_workflow.qmd` |
+| 2 | chapter | `02_system_paradigms/02_system_paradigms.qmd` |
+| 3 | chapter | `03_ml_lifecycle/03_ml_lifecycle.qmd` |
 | 4 | chapter | `04_data_engineering/04_data_engineering.qmd` |
 |  | part | `parts/build_principles.qmd` |
 | 5 | chapter | `05_nn_computation/05_nn_computation.qmd` |
@@ -83,8 +83,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 3 | chapter | `03_network_fabrics/03_network_fabrics.qmd` |
 | 4 | chapter | `04_data_storage/04_data_storage.qmd` |
 |  | part | `parts/distributed_ml_principles.qmd` |
-| 5 | chapter | `05_distributed_training/05_distributed_training.qmd` |
-| 6 | chapter | `06_collective_communication/06_collective_communication.qmd` |
+| 5 | chapter | `05_collective_communication/05_collective_communication.qmd` |
+| 6 | chapter | `06_distributed_training/06_distributed_training.qmd` |
 | 7 | chapter | `07_fault_tolerance/07_fault_tolerance.qmd` |
 | 8 | chapter | `08_fleet_orchestration/08_fleet_orchestration.qmd` |
 |  | part | `parts/deployment_principles.qmd` |
@@ -110,7 +110,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 
 ## Volume III: Agentic Machine Learning Systems (`vol3`)
 
-21 chapters. Reading order:
+23 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -121,39 +121,43 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `01_introduction/01_introduction.qmd` |
-|  | part | `parts/engine_principles.qmd` |
+|  | part | `parts/model_principles.qmd` |
 | 2 | chapter | `02_foundation_model/02_foundation_model.qmd` |
 | 3 | chapter | `03_test_time_compute/03_test_time_compute.qmd` |
 |  | part | `parts/memory_principles.qmd` |
 | 4 | chapter | `04_context_engineering/04_context_engineering.qmd` |
 | 5 | chapter | `05_kv_cache/05_kv_cache.qmd` |
 | 6 | chapter | `06_long_term_memory/06_long_term_memory.qmd` |
-|  | part | `parts/sandboxing_principles.qmd` |
+|  | part | `parts/tool_use_principles.qmd` |
 | 7 | chapter | `07_tool_calling/07_tool_calling.qmd` |
 | 8 | chapter | `08_sandboxes/08_sandboxes.qmd` |
+| 9 | chapter | `09_security/09_security.qmd` |
 |  | part | `parts/runtime_principles.qmd` |
-| 9 | chapter | `09_agent_harness/09_agent_harness.qmd` |
-| 10 | chapter | `10_durable_execution/10_durable_execution.qmd` |
-| 11 | chapter | `11_failure_recovery/11_failure_recovery.qmd` |
-|  | part | `parts/compiler_principles.qmd` |
-| 12 | chapter | `13_trajectory_curation/13_trajectory_curation.qmd` |
-| 13 | chapter | `14_fine_tuning/14_fine_tuning.qmd` |
-| 14 | chapter | `15_rlvr/15_rlvr.qmd` |
-|  | part | `parts/fleet_principles.qmd` |
-| 15 | chapter | `16_multi_agent/16_multi_agent.qmd` |
-| 16 | chapter | `12_evaluation/12_evaluation.qmd` |
-| 17 | chapter | `17_agent_economics/17_agent_economics.qmd` |
+| 10 | chapter | `10_agent_harness/10_agent_harness.qmd` |
+| 11 | chapter | `11_durable_execution/11_durable_execution.qmd` |
+| 12 | chapter | `12_failure_recovery/12_failure_recovery.qmd` |
+| 13 | chapter | `13_evaluation/13_evaluation.qmd` |
+| 14 | chapter | `14_agent_operations/14_agent_operations.qmd` |
+|  | part | `parts/learning_principles.qmd` |
+| 15 | chapter | `15_trajectory_curation/15_trajectory_curation.qmd` |
+| 16 | chapter | `16_fine_tuning/16_fine_tuning.qmd` |
+| 17 | chapter | `17_rlvr/17_rlvr.qmd` |
+|  | part | `parts/scale_principles.qmd` |
+| 18 | chapter | `18_multi_agent/18_multi_agent.qmd` |
+| 19 | chapter | `19_agent_economics/19_agent_economics.qmd` |
 |  | part | `parts/synthesis_principles.qmd` |
-| 18 | chapter | `18_conclusion/18_conclusion.qmd` |
-| 19 | chapter | `appendices/app_a_reference_architecture.qmd` |
-| 20 | chapter | `appendices/app_b_tool_design.qmd` |
-| 21 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
+| 20 | chapter | `20_conclusion/20_conclusion.qmd` |
 |  | backmatter | `backmatter/appendix_math.qmd` |
+|  | backmatter | `backmatter/appendix_inference.qmd` |
+|  | backmatter | `backmatter/appendix_systems.qmd` |
+| 21 | chapter | `appendices/app_a_reference_architecture.qmd` |
+| 22 | chapter | `appendices/app_b_tool_design.qmd` |
+| 23 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 
 ## Volume IV: Physical AI Systems (`vol4`)
 
-17 chapters. Reading order:
+18 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -184,7 +188,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 14 | chapter | `14_intervention/14_intervention.qmd` |
 | 15 | chapter | `15_verification/15_verification.qmd` |
 | 16 | chapter | `16_release/16_release.qmd` |
-| 17 | chapter | `17_frontier/17_frontier.qmd` |
+| 17 | chapter | `17_responsibility/17_responsibility.qmd` |
+| 18 | chapter | `18_frontier/18_frontier.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
 |  | backmatter | `backmatter/appendix_ml.qmd` |
 |  | backmatter | `backmatter/appendix_control.qmd` |

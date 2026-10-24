@@ -33,8 +33,8 @@ LEDGER_MD = REPO_ROOT / "binder/tools/audit/artifacts/chapter_html_audit.md"
 CHAPTERS: dict[str, list[str]] = {
     "vol1": [
         "introduction/introduction",
-        "ml_systems/ml_systems",
-        "ml_workflow/ml_workflow",
+        "02_system_paradigms/02_system_paradigms",
+        "ml_lifecycle/ml_lifecycle",
         "data_engineering/data_engineering",
         "nn_computation/nn_computation",
         "nn_architectures/nn_architectures",
@@ -59,8 +59,8 @@ CHAPTERS: dict[str, list[str]] = {
         "compute_infrastructure/compute_infrastructure",
         "network_fabrics/network_fabrics",
         "data_storage/data_storage",
-        "distributed_training/distributed_training",
         "collective_communication/collective_communication",
+        "distributed_training/distributed_training",
         "fault_tolerance/fault_tolerance",
         "fleet_orchestration/fleet_orchestration",
         "performance_engineering/performance_engineering",

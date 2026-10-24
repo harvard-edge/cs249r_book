@@ -179,6 +179,8 @@ $it$
 $endfor$
 $additional-packages$
 \begin{document}
+% Reproducible default; an authored seed in the body still takes precedence.
+\pgfmathsetseed{1}%
 $body$
 \end{document}
 ]]
@@ -410,18 +412,25 @@ end
 
 --- Converts a PDF to SVG.
 local pdf2svg = function (imgdata)
-  -- Using `os.tmpname()` instead of a hash would be slightly cleaner, but the
-  -- function causes problems on Windows (and wasm). See, e.g.,
-  -- https://github.com/pandoc-ext/diagram/issues/49
-  local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
+  local hash = pandoc.utils.sha1(imgdata)
+  local pdf_file = 'diagram-' .. hash .. '.pdf'
+  local svg_file = 'diagram-' .. hash .. '.svg'
   write_file(pdf_file, imgdata)
-  local args = {
-    '--export-type=svg',
-    '--export-plain-svg',
-    '--export-filename=-',
-    pdf_file
-  }
-  return pandoc.pipe('inkscape', args, ''), os.remove(pdf_file)
+  local success = os.execute('pdftocairo -svg ' .. pdf_file .. ' ' .. svg_file .. ' > /dev/null 2>&1')
+  if not success then
+    local args = {
+      '--batch-process',
+      '--export-type=svg',
+      '--export-plain-svg',
+      '--export-filename=' .. svg_file,
+      pdf_file
+    }
+    pandoc.pipe('inkscape', args, '')
+  end
+  local svgdata = read_file(svg_file)
+  os.remove(pdf_file)
+  os.remove(svg_file)
+  return svgdata
 end
 
 local function properties_from_code (code, comment_start)
@@ -508,13 +517,24 @@ local function get_cached_image (hash, mime_type)
   return nil
 end
 
+-- TikZ's deterministic rendering default changes its output without changing
+-- authored source. Keep old unseeded cache entries out of this pipeline;
+-- preserve the cache identity of all other engines.
+local function image_cache_key (codeblock)
+  local source = codeblock.text
+  if codeblock.classes[1] == 'tikz' then
+    source = 'tikz-default-seed-1:v2\n' .. source
+  end
+  return pandoc.sha1(source)
+end
+
 local function cache_image (codeblock, imgdata, mimetype)
   -- do nothing if caching is disabled or not possible.
   if not image_cache then
     return
   end
   local ext = extension_for_mimetype[mimetype]
-  local filename = pandoc.sha1(codeblock.text) .. '.' .. ext
+  local filename = image_cache_key(codeblock) .. '.' .. ext
   local imgpath = pandoc.path.join{image_cache, filename}
   write_file(imgpath, imgdata)
 end
@@ -547,7 +567,7 @@ local function code_to_figure (conf)
     local imgdata, imgtype
     if conf.cache then
       imgdata, imgtype = get_cached_image(
-        pandoc.sha1(block.text),
+        image_cache_key(block),
         run_pdf2svg and 'image/svg+xml' or engine.mime_type
       )
     end

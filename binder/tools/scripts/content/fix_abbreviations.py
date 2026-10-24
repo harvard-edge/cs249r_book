@@ -86,7 +86,7 @@ NO_EXPAND = {"CUDA", "cuDNN", "GPU", "GPUs", "CPU", "CPUs", "RAM", "API",
 
 # Chapter QMD files (body chapters only, not frontmatter/backmatter)
 CHAPTER_DIRS = [
-    "introduction", "ml_systems", "ml_workflow", "data_engineering",
+    "introduction", "02_system_paradigms", "ml_lifecycle", "data_engineering",
     "nn_computation", "nn_architectures", "frameworks", "training",
     "data_selection", "model_compression", "hw_acceleration", "benchmarking",
     "model_serving", "ml_ops", "responsible_engr", "conclusion",

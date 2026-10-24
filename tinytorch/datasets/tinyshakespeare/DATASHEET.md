@@ -55,7 +55,7 @@ TinyShakespeare should not be used for modern factual question answering, gramma
 ## Distribution & Maintenance
 
 ### How will the dataset be distributed?
-The offline sample is bundled directly in the TinyTorch repository under `tinytorch/datasets/tinyshakespeare/`. The full corpus is hosted publicly on GitHub and Hugging Face.
+The offline sample is bundled directly in the TinyTorch repository under `tinytorch/datasets/tinyshakespeare/`. The full corpus is fetched on demand from Andrej Karpathy's `char-rnn` repository on GitHub.
 
 ### What is the dataset license?
 Public Domain (CC0 / Project Gutenberg License).

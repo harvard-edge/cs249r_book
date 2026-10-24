@@ -1,72 +1,74 @@
 ---
 engine: jupyter
+notation-local: [\CompletedRequestCount, \CumulativeArrivals, \CumulativeCompletions, \DeviceRequestCapacity, \InstantaneousRequestOccupancy, \IntervalMeanOccupancy, \LatencyBandwidthCrossoverSize, \ObservationIntervalLength, \RequestResidenceTime]
+format:
+  html:
+    number-sections: false
 ---
 
 # Machine Foundations {#sec-appdx-machine-foundations dropcap="chapter-opening"}
 
-A datasheet reports peak throughput; a workload almost never reaches it. Closing that gap requires knowing which physical limit binds execution first: latency, memory bandwidth, arithmetic intensity, or energy. This appendix collects the durable hardware models and order-of-magnitude values that anchor single-node reasoning throughout the book, providing the mathematical baselines where chapter estimates can be audited or extended. The models presume an undergraduate background in computer architecture, particularly the memory hierarchy.
+A datasheet reports peak throughput, and a workload almost never reaches it. Closing that gap requires knowing which physical limit binds execution first: memory bandwidth, arithmetic throughput, fixed overhead, or energy. This appendix collects the hardware models, ratios, and order-of-magnitude values used for single-node estimates in the book, so that chapter estimates can be checked against them. Architecture essentials support readers encountering memory hierarchies and hardware cost models for the first time. Familiarity with undergraduate computer architecture is helpful but not required.
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference. When diagnosing performance issues, use this appendix to translate a vague symptom ("it’s slow") into a specific constraint ("memory bound at batch size one") and then choose the lever that can actually move.
+This appendix is designed as a reference. When diagnosing performance issues, use it to translate a vague symptom ("it is slow") into a specific constraint ("bandwidth bound at batch size one") and then choose the lever that addresses it. Each need in @tbl-appdx-machine-lookup leads to the section that carries the model or worked template and to the chapter that applies it to the book's workloads.
 
-Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ for bandwidth).
+| **Need**                                                          | **Reference Section**                                                        | **Applied In**                                                |
+|:------------------------------------------------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------|
+| **Sanity-check feasibility with orders of magnitude**             | @sec-appdx-machine-foundations-numbers-know-b531                             | @sec-ml-systems-system-balance-hardware-96ab                  |
+| **Compare access times across memory, links, and storage**        | @sec-appdx-machine-foundations-latencies-every-programmer-know-e89f          | @sec-hardware-acceleration-memory-hierarchy-1839              |
+| **Decide whether a kernel is compute or bandwidth bound**         | @sec-appdx-machine-foundations-roofline-model-2529                           | @sec-hardware-acceleration-roofline-model-42ff                |
+| **Check that a performance equation is consistent**               | @sec-appdx-machine-foundations-dimensional-analysis-76b3                     | @sec-introduction-iron-law-ml-systems-c32a                    |
+| **Predict whether more accelerators shorten a run**               | @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741               | @sec-model-training-singlenode-multigpu-training-c87f         |
+| **Estimate the wall-clock time of a training run**                | @sec-appdx-machine-foundations-training-time-equation-7c3e                   | @sec-model-training-iron-law-training-performance-a53f        |
+| **Size request concurrency for a serving target**                 | @sec-appdx-machine-foundations-littles-law-21a3                              | @sec-model-serving-littles-law-9352                           |
+| **Explain why data movement dominates energy**                    | @sec-appdx-machine-foundations-memory-hierarchy-2278                         | @sec-hardware-acceleration-memory-hierarchy-1839              |
+| **Separate latency-dominated from bandwidth-dominated transfers** | @sec-appdx-machine-foundations-bandwidth-vs-latency-5320                     | @sec-hardware-acceleration-hostaccelerator-communication-bb7a |
+| **Place a device class by compute, memory, and power**            | @sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1 | @sec-hardware-acceleration-choosing-accelerator-6b2d          |
+| **Choose a numerical format**                                     | @sec-appdx-machine-foundations-floatingpoint-format-comparison-1836          | @sec-model-compression-numerical-format-comparison-8fa2       |
+| **Map floating-point values to integers**                         | @sec-appdx-machine-foundations-integer-quantization-5442                     | @sec-model-compression-quantization-precision-cd46            |
 
-- Sanity-check feasibility: Start with @sec-appdx-machine-foundations-numbers-know-b531 for order-of-magnitude numbers.
-- Diagnose the dominant ceiling: Use the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 to decide whether the workload is compute bound or memory bound.
-- Reason about scaling limits: Use Amdahl's and Gustafson's Laws in @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 to understand why adding accelerators may not reduce time-to-train.
-- Choose the right precision: Use @sec-appdx-machine-foundations-floatingpoint-format-comparison-1836 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
-- Follow the chapter treatment: For the full narrative, use @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
+: **Where to Look**: Each need maps to the section of this appendix that carries the model or worked template and to the chapter that applies it to the book's workloads. {#tbl-appdx-machine-lookup tbl-colwidths="[40,32,28]"}
 
-Although modern hardware encompasses diverse accelerator architectures, interconnect topologies, and packaging options, the physical laws and bottleneck models detailed here govern them all.
+Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ for bandwidth). The values in this appendix are ratios and orders of magnitude, which change slowly because they follow from physics and circuit design. The dated specifications of particular accelerators, links, and storage devices change with every product generation. @Sec-appdx-system-assumptions tabulates them so a reader can substitute current values without disturbing the relationships here.
 
 ## Numbers to Know {#sec-appdx-machine-foundations-numbers-know-b531}
 
 ```{python}
 #| echo: false
+#| label: numbers-to-know
 from mlsysim import *
 from mlsysim.core.units import *
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ NUMBERS TO KNOW SETUP
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-appdx-machine-foundations-numbers-know-b531—all reference tables
-# │          (@tbl-energy-ratios-ref, @tbl-memory-ratios-ref,
-# │          @tbl-scaling-rules-ref, @tbl-memory-current-ref,
-# │          @tbl-compute-current-ref, @tbl-ridge-current-ref)
+# │ Context: @sec-appdx-machine-foundations-numbers-know-b531 (three-numbers
+# │          callout, @tbl-energy-ratios-ref, @tbl-scaling-rules-ref) and the
+# │          bandwidth sentence after @tbl-memory-ratios-ref.
 # │
-# │ Goal: Compute reference ratios and current hardware specs for the
-# │       "Numbers Every ML Systems Engineer Should Know" reference section.
+# │ Goal: Compute the durable reference ratios and sizing rules that a
+# │       reader memorizes; dated per-chip values live in System Assumptions.
 # │ Scope: chapter-anchor
 # │ Show: A 45 nm reference energy ratio (~580$\times$ for a 32-bit DRAM read vs.
-# │       a 16-bit floating-point multiply), latency hierarchy,
-# │       bandwidth specs, ridge points for A100/H100.
+# │       a 16-bit floating-point multiply), 16 bytes/param training state,
+# │       sizing-rule examples for Llama 3 8B, speed of light in fiber.
 # │ How: Quantities stay attached until ratio reduction or output formatting.
 # │       Ratios are reference-specific and should be treated as order-of-magnitude anchors.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_ops_rate, MarkdownStr
-from mlsysim.core.units import (
-    TOPS,
-    SECONDS_PER_MINUTE,
-    SEC_PER_HOUR,
-    SEC_PER_DAY,
-)
-from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
-from mlsysim.engine import calibration
+from mlsysim.physics import memory_from_params, SPEED_OF_LIGHT_FIBER_KM_S
+from mlsysim.physics import calc_transformer_training_flops
+from mlsysim.fmt import fmt, fmt_count, fmt_flops, fmt_math, fmt_memory, fmt_multiple, fmt_params, fmt_qty, fmt_tokens, sci_latex, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NumbersToKnow:
-    """Namespace for machine-foundations reference numbers (ratios and hardware specs)."""
+    """Namespace for machine-foundations reference ratios and sizing rules."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Hardware
-
     h_h100 = Hardware.Cloud.H100
-    h_a100 = Hardware.Cloud.A100
-    f = Systems.Fabrics
     # Energy hierarchy: sourced from Hardware.Tech (taxonomy refactor; energy-as-property).
     ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
     ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
@@ -74,17 +76,18 @@ class NumbersToKnow:
     ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
     ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
     ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
-    # Latency hierarchy: sourced from Hardware.Tech/Systems.Fabrics (taxonomy refactor).
-    LATENCY_REGISTER_REF = Hardware.Tech.Memory.Register.latency
-    LATENCY_L1_REGISTER = Hardware.Tech.Memory.L1.latency
-    LATENCY_L2_CACHE = Hardware.Tech.Memory.L2.latency
-    LATENCY_HBM3 = Hardware.Tech.Memory.DRAM.latency
-    LATENCY_PCIE_GEN5 = Hardware.Tech.Interconnect.PCIeGen5.latency
-    LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
+    # Latency anchors for the network-vs-local ratio: Hardware.Tech/Systems.Fabrics.
+    LATENCY_HBM3 = Hardware.Tech.Memory.HopperGlobalMemory.latency
     LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
+    sizing_model_params = Models.Language.Llama3_8B.parameters
+    sizing_training_tokens = 1 * TRILLION  # scenario assumption: token budget for the training-FLOPs example
+    fp16_bytes_per_param = 2
+    int8_bytes_per_param = 1
+    fp32_bytes_per_param = 4
+    adam_state_bytes_per_param = 8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: Physics Constants (Eternal)
+    # Step 1: Physics constants (eternal)
     speed_of_light = SPEED_OF_LIGHT_FIBER_KM_S.to(km / ms)
 
     # Step 2: Reference energy ratios. DRAM and arithmetic use Horowitz's
@@ -94,99 +97,67 @@ class NumbersToKnow:
     fp32_vs_fp16 = round((ENERGY_FLOP_FP32_PJ / ENERGY_FLOP_FP16_PJ).to_base_units().magnitude, 1)
     l1_vs_reg = int((ENERGY_SRAM_L1_PJ / ENERGY_REG_PJ).to_base_units().magnitude)
 
-    # Step 3: Memory hierarchy ratios (reference-specific)
-    hbm_vs_register = int((LATENCY_HBM3 / LATENCY_REGISTER_REF).to_base_units().magnitude)
-    ssd_vs_register = int(round(((LATENCY_NVME_SSD / LATENCY_REGISTER_REF).to_base_units().magnitude) / 100_000) * 100_000)
+    # Step 3: Bandwidth and network ratios on the reference machine
     network_vs_local = int((LATENCY_INFINIBAND / LATENCY_HBM3).to_base_units().magnitude)
-    gpu_bw_vs_pcie = int((h_h100.memory.bandwidth / Hardware.Cloud.H100.interconnect.bandwidth).to_base_units().magnitude)
+    gpu_bw_vs_pcie = int((h_h100.memory.bandwidth / h_h100.interconnect.bandwidth).to_base_units().magnitude)
 
-    # Step 4: Current Hardware Reference (circa 2024)
-    lat_l1 = LATENCY_L1_REGISTER.to(nanosecond)
-    lat_l2 = LATENCY_L2_CACHE.to(nanosecond)
-    lat_hbm = LATENCY_HBM3.to(nanosecond)
-    lat_pcie = LATENCY_PCIE_GEN5.to(nanosecond)
-    lat_ib = LATENCY_INFINIBAND.to(nanosecond)
-    lat_ssd = LATENCY_NVME_SSD.to(nanosecond)
-
-    bw_pcie5 = Hardware.Cloud.H100.interconnect.bandwidth.to(GB / second)
-    bw_dram = Hardware.Tech.Storage.SystemMemory.bandwidth.to(GB / second)
-    bw_ib = f.InfiniBand_NDR.bandwidth.to(GB / second)
-
-    flops_h100_fp16 = h_h100.compute.peak_flops.to(TFLOPs / second)
-    flops_h100_fp8 = h_h100.compute.precision_flops["fp8"].to(TFLOPs / second)
-    flops_a100_fp16 = h_a100.compute.peak_flops.to(TFLOPs / second)
-    mobile_tops_int8 = Hardware.Mobile.iPhone15Pro.compute.peak_flops.to(TOPS)
-
-    ridge_a100 = int(h_a100.ridge_point().to(flop / byte).magnitude)
-    ridge_h100 = int(h_h100.ridge_point().to(flop / byte).magnitude)
-    training_model_params = Models.Language.Llama2_7B.parameters
-    fp16_bytes_per_param = 2
-    fp32_bytes_per_param = 4
-    adam_state_bytes_per_param = 8
+    # Step 4: Sizing rules (arithmetic, not hardware-specific)
     training_state_bytes_per_param = fp16_bytes_per_param + fp16_bytes_per_param + fp32_bytes_per_param + adam_state_bytes_per_param
-    training_state_footprint = memory_from_params(training_model_params, training_state_bytes_per_param * byte / param)
+    training_state_footprint = memory_from_params(sizing_model_params, training_state_bytes_per_param * byte / param)
+    inference_fp16_footprint = memory_from_params(sizing_model_params, fp16_bytes_per_param * byte / param)
+    inference_int8_footprint = memory_from_params(sizing_model_params, int8_bytes_per_param * byte / param)
+    inference_flops_per_token = (2 * flop / param) * sizing_model_params
+    training_flops = calc_transformer_training_flops(sizing_model_params, sizing_training_tokens).to(flop)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(dram_vs_compute == 581, f"Expected 581x DRAM vs compute ratio, got {dram_vs_compute}")
+    check(training_state_bytes_per_param == 16, f"Expected 16 bytes/param training state, got {training_state_bytes_per_param}")
+    check(round(training_state_footprint.to(GB).magnitude) == 128, f"Expected 128 GB training state footprint, got {training_state_footprint}")
+    check(round(inference_fp16_footprint.to(GB).magnitude) == 16, f"Expected 16 GB FP16 weights, got {inference_fp16_footprint}")
+    check(40 < gpu_bw_vs_pcie < 60, f"Expected HBM/PCIe bandwidth ratio near 50x, got {gpu_bw_vs_pcie}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Canonical _str forms for prose; raw ints/floats above kept for arithmetic.
-    from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_ops_rate, fmt_bandwidth, fmt_count, fmt_memory, fmt_params
+    speed_of_light_km_per_ms_str = fmt_qty(speed_of_light, unit=km / ms, precision=0, commas=False)
 
     dram_vs_compute_ratio_mult_str = fmt_multiple(dram_vs_compute, precision=0, commas=False)
     fp32_vs_int8_ratio_mult_str = fmt_multiple(fp32_vs_int8, precision=0, commas=False)
     fp32_vs_fp16_ratio_mult_str = fmt_multiple(fp32_vs_fp16, precision=1, commas=False)
     l1_vs_reg_ratio_mult_str = fmt_multiple(l1_vs_reg, precision=0, commas=False)
-
-    hbm_vs_register_ratio_mult_str = fmt_multiple(hbm_vs_register, precision=0, commas=False)
-    ssd_vs_register_ratio_mult_str = fmt_multiple(ssd_vs_register, precision=0, commas=True)
     network_vs_local_ratio_mult_str = fmt_multiple(network_vs_local, precision=0, commas=False)
     gpu_bw_vs_pcie_ratio_mult_str = fmt_multiple(gpu_bw_vs_pcie, precision=0, commas=False)
 
-    lat_l1_ns_str = fmt_time(lat_l1, unit=nanosecond, precision=0, commas=False)
-    lat_l2_ns_str = fmt_time(lat_l2, unit=nanosecond, precision=0, commas=False)
-    lat_hbm_ns_str = fmt_time(lat_hbm, unit=nanosecond, precision=0, commas=False)
-    lat_pcie_ns_str = fmt_time(lat_pcie, unit=nanosecond, precision=0, commas=False)
-    lat_ib_ns_str = fmt_time(lat_ib, unit=nanosecond, precision=0, commas=False)
-    lat_ssd_ns_str = fmt_time(lat_ssd, unit=nanosecond, precision=0, commas=False)
-
-    bw_hbm_h100_tb_per_s_str = fmt_bandwidth(h_h100.memory.bandwidth, unit=TB / second, precision=1, commas=False)
-    bw_pcie5_gb_per_s_str = fmt_bandwidth(bw_pcie5, unit=GB / second, precision=0, commas=False)
-    bw_dram_gb_per_s_str = fmt_bandwidth(bw_dram, unit=GB / second, precision=0, commas=False)
-    bw_ib_gb_per_s_str = fmt_bandwidth(bw_ib, unit=GB / second, precision=0, commas=False)
-    bw_nvme_gb_per_s_str = fmt_bandwidth(Hardware.Tech.Storage.NvmeGen4.bandwidth, unit=GB / second, precision=0, commas=False)
-
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(flops_h100_fp16, unit=TFLOPs / second, precision=0, commas=False)
-    h100_fp8_tflop_per_s_str = fmt_flop_rate(flops_h100_fp8, unit=TFLOPs / second, precision=0, commas=False)
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(flops_a100_fp16, unit=TFLOPs / second, precision=0, commas=False)
-    mobile_int8_tops_str = fmt_ops_rate(mobile_tops_int8, unit=TOPS, precision=0, commas=False)
-
-    ridge_a100_str = fmt(ridge_a100, precision=0, commas=False)
-    ridge_h100_str = fmt(ridge_h100, precision=0, commas=False)
     fp16_bytes_per_param_str = fmt_count(fp16_bytes_per_param, label="byte")
     fp32_bytes_per_param_str = fmt_count(fp32_bytes_per_param, label="byte")
     adam_state_bytes_per_param_str = fmt_count(adam_state_bytes_per_param, label="byte")
     training_state_bytes_per_param_str = fmt_count(training_state_bytes_per_param, label="byte")
-    training_model_params_b_str = fmt_params(training_model_params, scale="B", precision=0, commas=False)
-    training_state_footprint_gb_str = fmt_memory(training_state_footprint, unit=GB, precision=0, commas=False)
+    sizing_model_params_b_str = fmt_params(sizing_model_params, scale="B", precision=2, commas=False)
+    sizing_training_tokens_t_str = fmt_tokens(sizing_training_tokens, scale="T", precision=0)
+    training_state_footprint_gb_str = fmt_memory(training_state_footprint, unit=GB, precision=1, commas=False)
+    inference_fp16_footprint_gb_str = fmt_memory(inference_fp16_footprint, unit=GB, precision=1, commas=False)
+    inference_int8_footprint_gb_str = fmt_memory(inference_int8_footprint, unit=GB, precision=1, commas=False)
+    inference_flops_per_token_gflops_str = fmt_flops(inference_flops_per_token, unit=GFLOPs, precision=1, commas=False)
+    training_flops_math = fmt_math(sci_latex(training_flops, 1))
 ```
 
-Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] shaped a generation of systems engineers, these reference numbers provide the order-of-magnitude intuition essential for ML systems design. Although absolute values and ratios vary by technology and workload, the hierarchy is more durable. Memorize the relationships; use the specific numbers as sanity checks.
+In general systems engineering, Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] gave developers a shared set of order-of-magnitude anchors for reasoning about cache misses, disk seeks, and network round trips before writing code. Machine learning systems rest on a parallel hierarchy of physical ratios: fetching a 32-bit weight from off-chip DRAM costs hundreds of times more energy and roughly a thousand times more latency than reading it from a register, a gap that no compiler flag can erase. Although absolute timings and wattages shift with every process node and workload, the relative gaps across memory tiers, precision widths, and fiber links remain stable across hardware generations. Memorizing those relationships turns back-of-envelope sizing into a fast sanity check on any design.
 
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
-* Energy ratio: In the cited 45 nm reference, a 32-bit DRAM read uses ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply. This motivates arithmetic intensity.
-* Training-state footprint: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so a `{python} NumbersToKnow.training_model_params_b_str` model needs `{python} NumbersToKnow.training_state_footprint_gb_str` just to start training.
-* Fiber propagation limit: Light travels about 200 km/ms in fiber. The table's ~40 ms cross-country round trip includes reducible overhead, but propagation cannot be optimized away.
+* **Energy ratio**: In the cited 45 nm reference, a 32-bit DRAM read uses ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply.
+* **Training-state footprint**: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so Llama 3 8B (`{python} NumbersToKnow.sizing_model_params_b_str` parameters) needs `{python} NumbersToKnow.training_state_footprint_gb_str` to start full training, more than one accelerator's memory.
+* **Fiber propagation limit**: Light travels about `{python} NumbersToKnow.speed_of_light_km_per_ms_str` in fiber, so propagation sets a floor on every round trip.
 
 :::
 
-[^fn-jeff-dean-latency]: **Jeff Dean**\index{Dean, Jeff!latency numbers}: A Google Senior Fellow and one of the architects of Google's distributed systems infrastructure, including MapReduce, BigTable, and TensorFlow. His latency numbers, originally presented with Peter Norvig around 2010, became a canonical reference for systems engineers. The numbers have been updated over the years as hardware evolved, but the *hierarchy* of latencies remains remarkably stable; Colin Scott's interactive visualization shows the latency hierarchy across hardware generations [@scott2012latency].
+[^fn-jeff-dean-latency]: **Jeff Dean**\index{Dean, Jeff!latency numbers}: A Google Senior Fellow and one of the architects of MapReduce, BigTable, and TensorFlow. His latency numbers, originally presented with Peter Norvig around 2010, became a canonical reference for systems engineers; Colin Scott's interactive visualization shows that the *hierarchy* of latencies has stayed stable across hardware generations [@scott2012latency].
 
 ### Reference relationships {.unnumbered}
 
-These relationships mix physical or arithmetic bounds with technology-specific measurements; only the bounds are invariant.
+The numbers above mix two kinds of quantities: invariant physical or arithmetic bounds, such as propagation delay in fiber and bytes per parameter, and technology-specific energy ratios that shift with each process node while preserving their ordering. The three tables below separate those reference anchors into propagation latency, memory-to-compute energy cost, and model-sizing arithmetic.
 
-#### Speed of light tax {.unnumbered}
+#### Speed of light {.unnumbered}
 
-@Tbl-speed-of-light-ref shows approximate round-trip baselines. Their propagation component is irreducible.
+No network upgrade or routing optimization can deliver a cross-country round trip in 5 ms when light in fiber takes roughly 40 ms to make the journey. Each approximate round trip in @tbl-speed-of-light-ref carries that irreducible propagation component.
 
 | **Distance**           | **Round-Trip Latency** | **Implication**                      |
 |:-----------------------|:----------------------:|:-------------------------------------|
@@ -199,7 +170,7 @@ These relationships mix physical or arithmetic bounds with technology-specific m
 
 #### Energy hierarchy {.unnumbered}
 
-@Tbl-energy-ratios-ref quantifies the energy cost of data movement vs. computation—the fundamental reason why arithmetic intensity dominates ML performance optimization.[^fn-horowitz-energy-app]
+Moving data across wires costs far more energy than computing on it once it arrives in an arithmetic unit. Raising reuse per byte therefore pays off across every hardware generation (@tbl-energy-ratios-ref).[^fn-horowitz-energy-app]
 
 | **Relationship**                  |                   **Reference Ratio**                    | **Source and Interpretation**                                             |
 |:----------------------------------|:--------------------------------------------------------:|:--------------------------------------------------------------------------|
@@ -212,114 +183,217 @@ These relationships mix physical or arithmetic bounds with technology-specific m
 
 [^fn-horowitz-energy-app]: **Energy hierarchy sources**\index{Energy hierarchy!reference sources}: The DRAM and arithmetic values come from @horowitz2014 (45 nm). The L1 SRAM/register ratio is an illustrative hierarchy anchor, not a Horowitz measurement. The headline ratio compares a 32-bit DRAM access with a 16-bit floating-point multiply. Both the absolute values and the ratio vary with process, circuit, memory technology, and operand width; wire distance helps explain why movement remains expensive.
 
-#### Memory hierarchy {.unnumbered}
+#### Scaling rules {.unnumbered}
 
-@Tbl-memory-ratios-ref shows why the memory hierarchy is uneven: nearby on-package hops can differ by only a few times, while off-chip, storage, and network tiers introduce orders-of-magnitude jumps.
+Memory and compute requirements for training and inference follow from a few arithmetic relationships (@tbl-scaling-rules-ref).[^fn-training-memory-footprint] The examples use Llama 3 8B. @Sec-model-training-optimization-algorithm-system-implications-f9f2 derives the 16 bytes per parameter of training state and why switching to 16-bit arithmetic does not shrink it.
 
-| **Relationship**                                                   |                            **Ratio**                             | **Why It Persists**               |
-|:-------------------------------------------------------------------|:----------------------------------------------------------------:|:----------------------------------|
-| **Accelerator high-bandwidth memory vs. register**                 | ~`{python} NumbersToKnow.hbm_vs_register_ratio_mult_str` slower  | On-chip vs. off-chip              |
-| **SSD vs. register**                                               | ~`{python} NumbersToKnow.ssd_vs_register_ratio_mult_str` slower  | Electrical vs. mechanical/flash   |
-| **Network vs. local memory**                                       | ~`{python} NumbersToKnow.network_vs_local_ratio_mult_str` slower | Speed of light + switching        |
-| **Accelerator memory BW vs. CPU$\leftrightarrow$Accelerator link** |  ~`{python} NumbersToKnow.gpu_bw_vs_pcie_ratio_mult_str` faster  | Architectural investment priority |
-
-: **The Latency Hierarchy**: Selected latency relationships in the memory hierarchy. The largest gaps come from crossing physical boundaries: off-chip memory, peripheral links, storage, and network fabric. {#tbl-memory-ratios-ref tbl-colwidths="[47,23,30]"}
-
-#### Scaling laws {.unnumbered}
-
-@Tbl-scaling-rules-ref collects the arithmetic relationships that govern memory and compute requirements for training and inference.[^fn-training-memory-footprint]
-
-| **Rule**                          |             **Formula**              |                **Example**                 |
-|:----------------------------------|:------------------------------------:|:------------------------------------------:|
-| **Inference memory (FP16)**       |      2 bytes$\times$ parameters      |             7B params → 14 GB              |
-| **Inference memory (INT8)**       |      1 byte$\times$ parameters       |              7B params → 7 GB              |
-| **Training memory (Adam)**        |     16 bytes$\times$ parameters      |             7B params → 112 GB             |
-| **Inference FLOPs (transformer)** |   ~2$\times$ parameters per token    |        7B model → ~14 GFLOPs/token         |
-| **Training FLOPs**                | ~6$\times$ parameters$\times$ tokens | 7B on 1T tokens → $4 \times 10^{22}$ FLOPs |
+| **Rule**                          |             **Formula**              |                                              **Example (Llama 3 8B)**                                              |
+|:----------------------------------|:------------------------------------:|:------------------------------------------------------------------------------------------------------------------:|
+| **Inference memory (FP16)**       |      2 bytes$\times$ parameters      |                              `{python} NumbersToKnow.inference_fp16_footprint_gb_str`                              |
+| **Inference memory (INT8)**       |      1 byte$\times$ parameters       |                              `{python} NumbersToKnow.inference_int8_footprint_gb_str`                              |
+| **Training memory (Adam)**        |     16 bytes$\times$ parameters      |                              `{python} NumbersToKnow.training_state_footprint_gb_str`                              |
+| **Inference FLOPs (transformer)** |   ~2$\times$ parameters per token    |                      `{python} NumbersToKnow.inference_flops_per_token_gflops_str` per token                       |
+| **Training FLOPs**                | ~6$\times$ parameters$\times$ tokens | `{python} NumbersToKnow.training_flops_math` FLOPs on `{python} NumbersToKnow.sizing_training_tokens_t_str` tokens |
 
 : **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[34,33,33]"}
 
 [^fn-training-memory-footprint]: **Training memory (Adam)**\index{Training memory!Adam storage model}: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
 
+### The latency hierarchy {#sec-appdx-machine-foundations-latencies-every-programmer-know-e89f}
+
+```{python}
+#| echo: false
+#| label: latency-hierarchy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY HIERARCHY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-machine-foundations-latencies-every-programmer-know-e89f,
+# │          @tbl-memory-ratios-ref
+# │
+# │ Goal: Express each tier's access latency as a decade range, a multiple of
+# │       a register access, and a human-scale duration.
+# │ Show: Decade brackets (0.1–1 ns ... 100 µs–1 ms), ratios rounded to one
+# │       significant figure (HBM ~900x a register), and the 10-second analogy.
+# │ How: Tech-class latencies from Hardware.Tech and Systems.Fabrics; the
+# │      representative per-tier values themselves are tabulated in System
+# │      Assumptions.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Hardware, Systems
+from mlsysim.core.units import nanosecond, microsecond, ms, second, minute, hour, day, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY
+from mlsysim.fmt import fmt_time, fmt_time_range, fmt_multiple, check
+
+def _decade_bounds(latency):
+    """Return the power-of-ten bracket (lo, hi) that contains a latency."""
+    exponent = math.floor(math.log10(latency.to(nanosecond).magnitude))
+    return (10.0**exponent) * nanosecond, (10.0 ** (exponent + 1)) * nanosecond
+
+def _decade_unit(lo):
+    """Pick the display unit that keeps a decade's lower endpoint readable."""
+    if lo < 1 * microsecond:
+        return nanosecond
+    if lo < 1 * ms:
+        return microsecond
+    return ms
+
+def _ratio_sig1(ratio):
+    """Round a dimensionless ratio to one significant figure."""
+    return round(ratio, -math.floor(math.log10(ratio)))
+
+# ┌── LEGO ───────────────────────────────────────────────
+class LatencyHierarchy:
+    """Latency hierarchy as decades, register multiples, and a human-scale analogy."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    LATENCY_REGISTER_REF = Hardware.Tech.Memory.Register.latency
+    LATENCY_L1 = Hardware.Tech.Memory.L1.latency
+    LATENCY_L2 = Hardware.Tech.Memory.L2.latency
+    LATENCY_HBM3 = Hardware.Tech.Memory.HopperGlobalMemory.latency
+    LATENCY_NVLINK = Hardware.Tech.Interconnect.NVLink.latency
+    LATENCY_PCIE_GEN5 = Hardware.Tech.Interconnect.PCIeGen5.latency
+    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
+    LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
+    analogy_register_seconds = 10  # analogy anchor: one register access stretched to ten seconds
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    analogy_scale = analogy_register_seconds / LATENCY_REGISTER_REF.to(second).magnitude
+    register_lo, register_hi = _decade_bounds(LATENCY_REGISTER_REF)
+    l1_lo, l1_hi = _decade_bounds(LATENCY_L1)
+    l2_lo, l2_hi = _decade_bounds(LATENCY_L2)
+    hbm_lo, hbm_hi = _decade_bounds(LATENCY_HBM3)
+    nvlink_lo, nvlink_hi = _decade_bounds(LATENCY_NVLINK)
+    pcie_lo, pcie_hi = _decade_bounds(LATENCY_PCIE_GEN5)
+    ib_lo, ib_hi = _decade_bounds(LATENCY_INFINIBAND)
+    ssd_lo, ssd_hi = _decade_bounds(LATENCY_NVME_SSD)
+    l1_ratio = _ratio_sig1((LATENCY_L1 / LATENCY_REGISTER_REF).to("").magnitude)
+    l2_ratio = _ratio_sig1((LATENCY_L2 / LATENCY_REGISTER_REF).to("").magnitude)
+    hbm_ratio = _ratio_sig1((LATENCY_HBM3 / LATENCY_REGISTER_REF).to("").magnitude)
+    nvlink_ratio = _ratio_sig1((LATENCY_NVLINK / LATENCY_REGISTER_REF).to("").magnitude)
+    pcie_ratio = _ratio_sig1((LATENCY_PCIE_GEN5 / LATENCY_REGISTER_REF).to("").magnitude)
+    ib_ratio = _ratio_sig1((LATENCY_INFINIBAND / LATENCY_REGISTER_REF).to("").magnitude)
+    ssd_ratio = _ratio_sig1((LATENCY_NVME_SSD / LATENCY_REGISTER_REF).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        LATENCY_NVME_SSD > LATENCY_INFINIBAND > LATENCY_PCIE_GEN5 > LATENCY_NVLINK > LATENCY_HBM3 > LATENCY_L2 > LATENCY_L1 > LATENCY_REGISTER_REF,
+        "Latency hierarchy violation",
+    )
+    check(hbm_ratio == 900, f"Expected HBM ~900x a register access, got {hbm_ratio}")
+    check(ssd_ratio == 300000, f"Expected SSD ~300,000x a register access, got {ssd_ratio}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    register_decade_str = fmt_time_range(register_lo, register_hi, unit=_decade_unit(register_lo), commas=True)
+    l1_decade_str = fmt_time_range(l1_lo, l1_hi, unit=_decade_unit(l1_lo), commas=True)
+    l2_decade_str = fmt_time_range(l2_lo, l2_hi, unit=_decade_unit(l2_lo), commas=True)
+    hbm_decade_str = fmt_time_range(hbm_lo, hbm_hi, unit=_decade_unit(hbm_lo), commas=True)
+    nvlink_decade_str = fmt_time_range(nvlink_lo, nvlink_hi, unit=_decade_unit(nvlink_lo), commas=True)
+    pcie_decade_str = fmt_time_range(pcie_lo, pcie_hi, unit=_decade_unit(pcie_lo), commas=True)
+    ib_decade_str = fmt_time_range(ib_lo, ib_hi, unit=_decade_unit(ib_lo), commas=True)
+    ssd_decade_str = fmt_time_range(ssd_lo, ssd_hi, unit=_decade_unit(ssd_lo), commas=True)
+
+    l1_ratio_mult_str = fmt_multiple(l1_ratio, precision=0, commas=True)
+    l2_ratio_mult_str = fmt_multiple(l2_ratio, precision=0, commas=True)
+    hbm_ratio_mult_str = fmt_multiple(hbm_ratio, precision=0, commas=True)
+    nvlink_ratio_mult_str = fmt_multiple(nvlink_ratio, precision=0, commas=True)
+    pcie_ratio_mult_str = fmt_multiple(pcie_ratio, precision=0, commas=True)
+    ib_ratio_mult_str = fmt_multiple(ib_ratio, precision=0, commas=True)
+    ssd_ratio_mult_str = fmt_multiple(ssd_ratio, precision=0, commas=True)
+
+    register_distance_str = fmt_time(LATENCY_REGISTER_REF.to(second).magnitude * analogy_scale, second, precision=0, commas=False, style="word")
+    l1_distance_str = fmt_time(LATENCY_L1.to(second).magnitude * analogy_scale, second, precision=1, commas=False, style="word")
+    l2_distance_str = fmt_time(LATENCY_L2.to(second).magnitude * analogy_scale / SECONDS_PER_MINUTE, minute, precision=1, commas=False, style="word")
+    hbm_distance_str = fmt_time(LATENCY_HBM3.to(second).magnitude * analogy_scale / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    nvlink_distance_str = fmt_time(LATENCY_NVLINK.to(second).magnitude * analogy_scale / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    pcie_distance_str = fmt_time(LATENCY_PCIE_GEN5.to(second).magnitude * analogy_scale / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
+    ib_distance_str = fmt_time(LATENCY_INFINIBAND.to(second).magnitude * analogy_scale / SEC_PER_DAY, day, precision=1, commas=False, style="word")
+    ssd_distance_str = fmt_time(LATENCY_NVME_SSD.to(second).magnitude * analogy_scale / SEC_PER_DAY, day, precision=1, commas=False, style="word")
+```
+
+Distance costs time. Each step away from the arithmetic units, from registers through on-chip cache, off-chip memory, device and host links, the network, and storage, multiplies the wait for the first byte. The largest jumps come from crossing a physical boundary (@tbl-memory-ratios-ref). If a register access took ten seconds, a read from accelerator memory would take hours and a read from local flash storage would take weeks.
+
+| **Tier**                            |               **Latency (Decade)**              |             **Relative to a Register**            |         **If a Register Access Took 10 s**        |
+|:------------------------------------|:-----------------------------------------------:|:-------------------------------------------------:|:-------------------------------------------------:|
+| **Register**                        | `{python} LatencyHierarchy.register_decade_str` |                     1$\times$                     | `{python} LatencyHierarchy.register_distance_str` |
+| **L1 cache**                        |    `{python} LatencyHierarchy.l1_decade_str`    |   `{python} LatencyHierarchy.l1_ratio_mult_str`   |    `{python} LatencyHierarchy.l1_distance_str`    |
+| **L2 cache**                        |    `{python} LatencyHierarchy.l2_decade_str`    |   `{python} LatencyHierarchy.l2_ratio_mult_str`   |    `{python} LatencyHierarchy.l2_distance_str`    |
+| **Accelerator memory (HBM)**        |    `{python} LatencyHierarchy.hbm_decade_str`   |   `{python} LatencyHierarchy.hbm_ratio_mult_str`  |    `{python} LatencyHierarchy.hbm_distance_str`   |
+| **Accelerator-to-accelerator link** |  `{python} LatencyHierarchy.nvlink_decade_str`  | `{python} LatencyHierarchy.nvlink_ratio_mult_str` |  `{python} LatencyHierarchy.nvlink_distance_str`  |
+| **Host link (PCIe)**                |   `{python} LatencyHierarchy.pcie_decade_str`   |  `{python} LatencyHierarchy.pcie_ratio_mult_str`  |   `{python} LatencyHierarchy.pcie_distance_str`   |
+| **Network fabric**                  |    `{python} LatencyHierarchy.ib_decade_str`    |   `{python} LatencyHierarchy.ib_ratio_mult_str`   |    `{python} LatencyHierarchy.ib_distance_str`    |
+| **Local flash storage (NVMe)**      |    `{python} LatencyHierarchy.ssd_decade_str`   |   `{python} LatencyHierarchy.ssd_ratio_mult_str`  |    `{python} LatencyHierarchy.ssd_distance_str`   |
+
+: **The Latency Hierarchy**: Access latency by tier, as the decade that contains it, as a multiple of a register access (rounded to one significant figure), and on a human time scale where one register access takes ten seconds. The largest gaps come from crossing physical boundaries: off-chip memory, device and host links, network fabric, and storage. {#tbl-memory-ratios-ref tbl-colwidths="[30,22,22,26]"}
+
+Bandwidth falls along the same path. On the reference accelerator, high-bandwidth memory delivers about `{python} NumbersToKnow.gpu_bw_vs_pcie_ratio_mult_str` the bandwidth of the host link, and a network access costs about `{python} NumbersToKnow.network_vs_local_ratio_mult_str` the latency of an accelerator-memory access. Data that must cross the host link or the network should cross it once and be reused many times on the device.
+
 ### Illustrative latency budgets {.unnumbered}
 
-Latency budgets depend on application-specific safety requirements, user expectations, and service-level objectives. @Tbl-latency-targets-ref lists illustrative targets rather than universal limits.
+```{python}
+#| echo: false
+#| label: latency-budget-braking
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BRAKING LATENCY BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-latency-targets-ref (autonomous braking row)
+# │
+# │ Goal: Convert a braking latency budget into distance traveled.
+# │ Show: "100 km/h", "10 ms", "28 cm" in the table row.
+# │ How: distance = speed x budget, kept as Pint quantities.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import km, hour, ms, centimeter
+from mlsysim.fmt import fmt_qty, fmt_time, check
 
-| **Application**        | **Budget** | **Constraint**                       |
-|:-----------------------|:----------:|:-------------------------------------|
-| **Autonomous braking** |   <10 ms   | At 100 km/h, 10 ms = 28 cm of travel |
-| **Voice assistant**    |  <100 ms   | Human perception of "instant"        |
-| **Web search**         |  <200 ms   | User patience threshold              |
-| **Video streaming**    |    <1 s    | Buffer tolerance                     |
-| **Batch training**     | hours–days | Throughput dominates latency         |
+# ┌── LEGO ───────────────────────────────────────────────
+class BrakingBudget:
+    """Distance a vehicle travels during one braking latency budget."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    vehicle_speed = 100 * (km / hour)  # scenario assumption: highway speed
+    braking_budget = 10 * ms  # scenario assumption: illustrative braking budget
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    travel = (vehicle_speed * braking_budget).to(centimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(27 < travel.to(centimeter).magnitude < 29, f"Expected ~28 cm of travel, got {travel}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    vehicle_speed_km_per_h_str = fmt_qty(vehicle_speed, unit=km / hour, precision=0, commas=False)
+    braking_budget_ms_str = fmt_time(braking_budget, unit=ms, precision=0, commas=False)
+    travel_cm_str = fmt_qty(round(travel.to(centimeter).magnitude) * centimeter, unit=centimeter, precision=0, commas=False)
+```
+
+Hardware access latencies span nanoseconds to milliseconds, but the application decides how much total delay a response can tolerate: an autonomous braking controller must act within milliseconds while a batch training job can run for days (@tbl-latency-targets-ref). These targets reflect safety envelopes, human perception thresholds, and service-level objectives rather than universal hardware limits. @Sec-model-serving-latency-budget-ef40 shows how a serving system divides such an end-to-end budget among its stages.
+
+| **Application**        |                    **Budget**                   | **Constraint**                                                                                                                                            |
+|:-----------------------|:-----------------------------------------------:|:----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Autonomous braking** | <`{python} BrakingBudget.braking_budget_ms_str` | At `{python} BrakingBudget.vehicle_speed_km_per_h_str`, `{python} BrakingBudget.braking_budget_ms_str` = `{python} BrakingBudget.travel_cm_str` of travel |
+| **Voice assistant**    |                     <100 ms                     | Human perception of "instant"                                                                                                                             |
+| **Web search**         |                     <200 ms                     | User patience threshold                                                                                                                                   |
+| **Video streaming**    |                       <1 s                      | Buffer tolerance                                                                                                                                          |
+| **Batch training**     |                    hours–days                   | Throughput dominates latency                                                                                                                              |
 
 : **Illustrative Latency Targets**: Production requirements depend on the application and its service-level objectives. {#tbl-latency-targets-ref tbl-colwidths="[34,33,33]"}
 
-### Current hardware reference (c. 2024) {.unnumbered}
-
-These numbers reflect the current generation. Use them for back-of-envelope calculations and recheck them against current hardware.
-
-#### Memory latency and bandwidth {.unnumbered}
-
-@Tbl-memory-current-ref provides representative latency and bandwidth anchors across the memory hierarchy.
-
-| **Level**                               |                **Latency**                |                   **Bandwidth**                   |
-|:----------------------------------------|:-----------------------------------------:|:-------------------------------------------------:|
-| **Register**                            |                  ~0.3 ns                  |                         —                         |
-| **L1 Cache**                            |  ~`{python} NumbersToKnow.lat_l1_ns_str`  |                         —                         |
-| **L2 Cache**                            |  ~`{python} NumbersToKnow.lat_l2_ns_str`  |                         —                         |
-| **GPU HBM3**                            |  ~`{python} NumbersToKnow.lat_hbm_ns_str` | `{python} NumbersToKnow.bw_hbm_h100_tb_per_s_str` |
-| **PCIe Gen5 (CPU$\leftrightarrow$GPU)** | ~`{python} NumbersToKnow.lat_pcie_ns_str` |   `{python} NumbersToKnow.bw_pcie5_gb_per_s_str`  |
-| **CPU DRAM**                            |                  ~100 ns                  |   `{python} NumbersToKnow.bw_dram_gb_per_s_str`   |
-| **InfiniBand (network)**                |  ~`{python} NumbersToKnow.lat_ib_ns_str`  |    `{python} NumbersToKnow.bw_ib_gb_per_s_str`    |
-| **NVMe SSD**                            |  ~`{python} NumbersToKnow.lat_ssd_ns_str` |   `{python} NumbersToKnow.bw_nvme_gb_per_s_str`   |
-
-: **Memory Hierarchy (c. 2024)**: Representative latency and bandwidth anchors across registers, caches, memory, interconnects, networks, and storage. Together they show why locality and data movement shape performance. {#tbl-memory-current-ref tbl-colwidths="[34,33,33]"}
-
-```{=latex}
-\newpage
-```
-
-#### Compute throughput {.unnumbered}
-
-@Tbl-compute-current-ref compares representative peak throughput and power for data-center GPUs and a mobile NPU.
-
-| **Platform**               |                   **FP16/BF16**                    |                      **INT8/FP8-class**                      | **Power** |
-|:---------------------------|:--------------------------------------------------:|:------------------------------------------------------------:|:---------:|
-| **Data center GPU (H100)** | `{python} NumbersToKnow.h100_fp16_tflop_per_s_str` | `{python} NumbersToKnow.h100_fp8_tflop_per_s_str` (FP8 peak) |   700 W   |
-| **Data center GPU (A100)** | `{python} NumbersToKnow.a100_fp16_tflop_per_s_str` |                           624 TOPS                           |   400 W   |
-| **Mobile NPU**             |                         —                          |        `{python} NumbersToKnow.mobile_int8_tops_str`         |   3–5 W   |
-
-: **Compute Reference (c. 2024)**: Representative peak throughput and power for data-center GPUs and a mobile NPU. Because the rows use different precision modes and operation conventions, compare them only within a matched workload and precision context. {#tbl-compute-current-ref tbl-colwidths="[33,20,32,15]"}
-
-#### Roofline ridge points {.unnumbered}
-
-@Tbl-ridge-current-ref defines the arithmetic intensity thresholds that determine whether a workload is memory bound or compute bound.
-
-| **Accelerator** |                  **Ridge Point**                  | **Implication**              |
-|:----------------|:-------------------------------------------------:|:-----------------------------|
-| **A100 (FP16)** | `{python} NumbersToKnow.ridge_a100_str` FLOP/byte | Below → memory-bound         |
-| **H100 (FP16)** | `{python} NumbersToKnow.ridge_h100_str` FLOP/byte | Higher bar for compute-bound |
-
-: **Arithmetic Intensity Thresholds (c. 2024)**: Batch-1 weight-streaming inference is often memory bound; larger batches may cross the ridge. {#tbl-ridge-current-ref tbl-colwidths="[33,33,34]"}
-
 ::: {#psp-appendix-machine-gpus-and-accelerators-terminology .callout-perspective title="A note on terminology: GPUs and accelerators"}
 
-Throughout this book, "accelerator" is the general term for hardware acceleration. The principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply to GPUs, Tensor Processing Units (TPUs), NPUs, application-specific integrated circuits, and other specialized AI accelerators. Vendor-specific features such as CUDA and NVLink are identified explicitly.
+Throughout this book, "accelerator" is the general term for hardware acceleration. The principles of roofline analysis, memory hierarchies, numerical precision, and performance modeling apply to GPUs, Tensor Processing Units (TPUs), NPUs, application-specific integrated circuits, and other specialized AI accelerators. Vendor-specific features such as CUDA and NVLink are identified explicitly.
 
 :::
 
-Knowing the numbers is only the first step. The real power comes from compact models that reveal *which* number matters for the bottleneck at hand. The Roofline Model begins that diagnosis by translating raw hardware specs into actionable performance ceilings.
+@Sec-appdx-assumptions-accelerator-specifications-7a21 tabulates the dated specifications for these accelerators, including the NVIDIA H100 that serves as the book's reference machine. Those device peaks, together with the reference latencies, energy ratios, and application budgets in this section, supply the raw inputs for back-of-envelope checks, but raw specifications alone do not reveal which resource binds a workload. Turning hardware numbers into a bottleneck diagnosis requires compact analytical models that relate workload demand to machine ceilings.
 
 ## Physics of Computing {#sec-appdx-machine-foundations-physics-computing-c77f}
 
-Raw hardware specs—TFLOP/s, TB/s, watt budgets—are necessary but insufficient for performance reasoning. Without compact analytical models, an engineer cannot distinguish a compute-bound workload from a memory-bound one, or predict whether doubling GPUs will halve training time. The models in this section turn those distinctions into quantitative checks.
+An accelerator rated at hundreds of teraflops can still spend most of a training step waiting on memory reads, serial host dispatch, or in-flight request state. Raw hardware specifications (FLOP/s, bytes per second, watts) bound each resource in isolation, yet without analytical models an engineer cannot tell whether a slow kernel is compute-bound or bandwidth-bound, verify that a time equation is dimensionally consistent, predict whether doubling the accelerator count will halve training time, or size serving concurrency from arrival rate and latency. Four foundational models turn those hardware limits into quantitative checks.
 
 ### The Roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
 
-The Roofline Model\index{Roofline model!appendix refresher} [@williams2009] bounds how fast a workload can run on a given hardware target. The answer depends on whether the workload runs out of compute or memory bandwidth first.
+A kernel that achieves 1 percent of an accelerator's peak FLOP/s may be poorly written, or it may already be saturating the memory bus at the physical limit of the chip. The Roofline Model\index{Roofline model!appendix refresher} [@williams2009] separates those two cases by bounding how fast a workload can run on a given hardware target according to whether it runs out of compute or memory bandwidth first.
 
-Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appendix refresher}: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because each loaded element is reused many times. Element-wise operations like rectified linear unit (ReLU) have low intensity because each operation loads a number, performs one computation, and writes it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
+Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appendix refresher}: the ratio of computations performed to bytes moved from memory. Matrix multiplication achieves high arithmetic intensity because each loaded element is reused across multiple multiply-accumulate steps. In contrast, element-wise operations like rectified linear unit (ReLU) have low intensity because each element is fetched from memory, evaluated once, and written back. Plotting achievable performance against arithmetic intensity yields the roofline (@fig-roofline): a diagonal memory-bandwidth ceiling rises linearly from the origin until it meets the horizontal peak-compute ceiling at the ridge point. A workload's arithmetic intensity determines which ceiling governs execution, and therefore whether optimizations must target memory traffic or arithmetic throughput.
 
 ::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: The sloped memory-bandwidth ceiling and horizontal peak-compute ceiling meet at the ridge point. Plotting a workload by arithmetic intensity identifies which roofline ceiling applies." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
 ```{.tikz}
@@ -344,93 +418,118 @@ Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appen
 ```
 :::
 
-The **ridge point**\index{Ridge point!appendix refresher} determines the hardware's balance. If a workload's intensity falls below this point, it is memory-bound (sloped region). If above, it is compute-bound (flat region).
-\begin{gather*}
-\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{bytes accessed}}
-\qquad\qquad
-\text{Ridge Point} = \frac{\text{Peak FLOP/s}}{\text{Memory Bandwidth}}
-\end{gather*}
+The **ridge point**\index{Ridge point!appendix refresher} determines the hardware's balance. Formally, when computation and data movement overlap completely (the overlapped form of the iron law), idealized wall-clock time is bounded below by the critical path:
+$$ \Time\geq \max\left( \frac{\Operations}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right) $$
+Attainable throughput $\AttainableComputeRate = \Operations/ \Time$ is therefore bounded by:
+$$ \AttainableComputeRate \leq \frac{\Operations}{\max\left( \frac{\Operations}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right)} = \min\left( \PeakRate, \frac{\Operations}{\DataVolume} \times \Bandwidth \right) = \min(\PeakRate, \ArithmeticIntensity\times \Bandwidth) $$
+where $\ArithmeticIntensity= \Operations/ \DataVolume$ is the arithmetic intensity measured at the DRAM interface. The ridge point $\RooflineRidgePoint$ is the transition intensity where the compute and bandwidth ceilings meet:
+$$ \PeakRate = \RooflineRidgePoint \times \Bandwidth \implies \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
+If a workload's arithmetic intensity falls below $\RooflineRidgePoint$, it is bandwidth-bound (the roofline literature says memory-bound). Above that value, it is compute bound. The memory-bound regime is the bandwidth-bound archetype of @sec-ml-systems-workload-archetypes-fd10, whose lighthouse is GPT-2 decode. The compute-bound regime is the compute-bound archetype, whose lighthouse is ResNet-50. @Sec-hardware-acceleration-roofline-model-42ff develops both regimes and the levers that move a workload between them.
 
 ::: {#psp-appendix-machine-batch-size-arithmetic-intensity .callout-perspective title="Batch size controls arithmetic intensity"}
 
-For matrix multiplications, arithmetic intensity scales with the batch dimension. For $\mathbf{Y} = \mathbf{X}\mathbf{W}$, where $\mathbf{X}$ is $(B\times d_{\text{in}})$ and $\mathbf{W}$ is $(d_{\text{in}}\times d_{\text{out}})$:
+For matrix multiplications, arithmetic intensity scales with the batch dimension. For $\LayerOutputMatrix= \LayerInputMatrix\WeightMatrix$, where $\LayerInputMatrix$ is $(\BatchSize\times \LayerInputWidth)$ and $\WeightMatrix$ is $(\LayerInputWidth\times \LayerOutputWidth)$:
 
-- FLOPs: $2 \times B \times d_{\text{in}} \times d_{\text{out}}$ (multiply-adds)
-- Bytes: Moving $X$, $W$, and $Y$ costs approximately $s_{\text{elem}}(B d_{\text{in}} + d_{\text{in}}d_{\text{out}} + B d_{\text{out}})$ bytes.
+- **FLOPs**: $2 \times \BatchSize\times \LayerInputWidth \times \LayerOutputWidth$ (multiply-adds).
+- **Bytes**: Moving $\LayerInputMatrix$, $\WeightMatrix$, and $\LayerOutputMatrix$ costs approximately $\ElementStorageSize(\BatchSize\LayerInputWidth + \LayerInputWidth\LayerOutputWidth + \BatchSize\LayerOutputWidth)$ bytes.
 
-Doubling $B$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
+Doubling $\BatchSize$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving (@sec-model-serving-batching-helps-f1dc develops the serving side, including the latency it adds). Activation traffic, cache behavior, shape, precision, and the ridge point still determine whether it reaches the compute ceiling.
 
 :::
 
-#### A concrete example: The A100 analysis {#sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30}
+#### A concrete example: The H100 analysis {#sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30}
 
 ```{python}
 #| echo: false
-#| label: a100-roofline-example
-# ┌── LEGO ───────────────────────────────────────────────
+#| label: h100-roofline-example
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 ROOFLINE EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30
-# │ Goal: A100 ridge point; GEMM vs ReLU intensity comparison
-from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth
+# │
+# │ Goal: H100 ridge point; GEMM vs ReLU intensity; INT8 ridge shift.
+# │ Show: ~295 FLOP/byte FP16 ridge, GEMM ~1,365 FLOP/byte vs ReLU 0.25,
+# │       ReLU at a small fraction of a percent of peak, INT8 ridge ~591.
+# │ How: Registry peak rates and bandwidth; ridge = peak / bandwidth.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import flop, byte, second, TFLOPs, TB, TOPS
+from mlsysim.fmt import fmt, fmt_int, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth, fmt_ops_rate, fmt_percent, check
 
-class A100RooflineExample:
+# ┌── LEGO ───────────────────────────────────────────────
+class H100RooflineExample:
+    """H100 ridge point and the GEMM/ReLU contrast on either side of it."""
+
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gemm = 4096
+    h100 = Hardware.Cloud.H100
+    n_gemm = 4096  # scenario assumption: square GEMM dimension
     relu_intensity = 0.25 * (flop / byte)  # scenario assumption: elementwise ReLU arithmetic intensity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_fp16 = Hardware.Cloud.A100.compute.peak_flops
-    a100_bw = Hardware.Cloud.A100.memory.bandwidth
-    ridge_point = (a100_fp16 / a100_bw).to(flop / byte)
+    h100_fp16 = h100.compute.peak_flops
+    h100_int8 = h100.compute.precision_flops["int8"]
+    h100_bw = h100.memory.bandwidth
+    ridge_point = (h100_fp16 / h100_bw).to(flop / byte)
+    int8_ridge = (h100_int8 / h100_bw).to(flop / byte)
     gemm_intensity = int(n_gemm / 3) * (flop / byte)
-    relu_achieved = (relu_intensity * a100_bw).to(TFLOPs / second)
-    relu_utilization_value = (relu_achieved / a100_fp16).to_base_units().magnitude * 100
+    relu_achieved = (relu_intensity * h100_bw).to(TFLOPs / second)
+    relu_utilization = (relu_achieved / h100_fp16).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(gemm_intensity > ridge_point, "GEMM must be compute-bound on H100")
+    check(relu_intensity < ridge_point, "ReLU must be memory-bound on H100")
+    check(0.0005 < relu_utilization < 0.001, f"Expected ReLU near 0.08% of peak, got {relu_utilization:.5f}")
+    check(1.9 < (int8_ridge / ridge_point).to("").magnitude < 2.1, "INT8 should double the H100 ridge point")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16, unit=TFLOPs / second, precision=0)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16, unit=TFLOPs / second, precision=0)
+    h100_int8_tops_str = fmt_ops_rate(h100_int8, unit=TOPS, precision=0, commas=True)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
     n_gemm_str = fmt(n_gemm, precision=0, commas=False)
     ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point, commas=False)
-    gemm_intensity_str = fmt_arithmetic_intensity(gemm_intensity, commas=False)
+    int8_ridge_value_str = fmt_int(round(int8_ridge.to(flop / byte).magnitude), commas=False)
+    gemm_intensity_str = fmt_arithmetic_intensity(gemm_intensity, commas=True)
     relu_intensity_str = fmt_arithmetic_intensity(relu_intensity, precision=2, commas=False)
-    relu_util_str = fmt_percent(relu_utilization_value / 100, precision=2, commas=False, style='prose')
+    relu_util_str = fmt_percent(relu_utilization, precision=2, commas=False, style='prose')
 ```
 
-Consider an NVIDIA A100\index{A100!roofline analysis} GPU with FP16 Tensor Core performance of `{python} A100RooflineExample.a100_fp16_tflop_per_s_str` and HBM2e bandwidth of `{python} A100RooflineExample.a100_bw_tb_per_s_str`. The ridge point is `{python} A100RooflineExample.a100_fp16_tflop_per_s_str`/`{python} A100RooflineExample.a100_bw_tb_per_s_str` = `{python} A100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
+Consider an NVIDIA H100\index{H100!roofline analysis}, the book's reference machine, with dense FP16 Tensor Core performance of `{python} H100RooflineExample.h100_fp16_tflop_per_s_str` and HBM3 bandwidth of `{python} H100RooflineExample.h100_bw_tb_per_s_str`. The ridge point is `{python} H100RooflineExample.h100_fp16_tflop_per_s_str`/`{python} H100RooflineExample.h100_bw_tb_per_s_str` = `{python} H100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
-Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} A100RooflineExample.n_gemm_str` by `{python} A100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} A100RooflineExample.gemm_intensity_str`, so `{python} A100RooflineExample.gemm_intensity_str` > `{python} A100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading 2 bytes and writing 2 bytes (4 bytes total), yielding an arithmetic intensity of only $1/4 =$ `{python} A100RooflineExample.relu_intensity_str`. Because `{python} A100RooflineExample.relu_intensity_str` $\ll$ `{python} A100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely memory bound, achieving only about `{python} A100RooflineExample.relu_util_str` of peak TFLOP/s. This contrast explains why modern frameworks fuse operations. Combining ReLU directly with the preceding MatMul kernel avoids writing intermediate results to memory, effectively preserving memory bandwidth.
+Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} H100RooflineExample.n_gemm_str` by `{python} H100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} H100RooflineExample.gemm_intensity_str`, so `{python} H100RooflineExample.gemm_intensity_str` > `{python} H100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading 2 bytes and writing 2 bytes (4 bytes total), yielding an arithmetic intensity of only $1/4 =$ `{python} H100RooflineExample.relu_intensity_str`. Because `{python} H100RooflineExample.relu_intensity_str` $\ll$ `{python} H100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely bandwidth-bound, achieving only about `{python} H100RooflineExample.relu_util_str` of peak FLOP/s. This contrast is why frameworks fuse an element-wise operation into the preceding matrix multiply, so the intermediate result never makes a round trip through memory. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 develops fusion and the launch overhead it removes.
+
+Precision moves the ridge. At INT8 the H100's peak rate doubles to `{python} H100RooflineExample.h100_int8_tops_str` while its memory bandwidth stays fixed, so the ridge rises to about `{python} H100RooflineExample.int8_ridge_value_str` operations per byte. A convolution layer that sits above the FP16 ridge can fall below the INT8 ridge, which is why quantized ResNet-50 inference can turn bandwidth bound on the same chip (@sec-hardware-acceleration-hardware-balance).
 
 ### Dimensional analysis {#sec-appdx-machine-foundations-dimensional-analysis-76b3}
 
-The Roofline Model helps diagnose *where* a bottleneck lies. Before applying any performance equation, however, it must be verified as physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}—every term must resolve to the same units. If they do not, the equation contains an error.
+In the roofline calculation, dividing peak throughput ($\text{FLOP/s}$) by memory bandwidth ($\text{bytes/s}$) cancels seconds and leaves $\text{FLOP/byte}$. Dividing byte volume directly by $\text{FLOP/s}$ or adding milliseconds of network delay to seconds of compute, by contrast, produces a quantity whose units do not reduce to time, turning a back-of-envelope estimate into a silent category error. Before plugging numbers into any performance equation, **dimensional analysis** verifies that the equation is **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}, meaning every additive or equated term resolves to the same units.
 
-For serialized phases, consider the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a:
-$$ T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} $$
+Consider both levels of the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a. First, in the multiplicative D·A·M form (@eq-intro-dam-iron-law), intermediate units cancel across the three factors to leave seconds per task:
+$$ \Time[\text{s}] = \frac{\text{Samples}}{\text{Task}} \times \frac{\text{FLOPs}}{\text{Sample}} \times \frac{\text{s}}{\text{FLOP}} = \frac{\text{s}}{\text{Task}} $$
 
-Correctness is verified by confirming that every term resolves to time (seconds):
-$$ T [s] = \underbrace{ \frac{D_{\text{vol}} [\text{bytes}]}{\text{BW} [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{O [\text{FLOPs}]}{R_{\text{peak}} [\text{FLOP/s}] \cdot \eta_{\text{hw}} [1]} }_{\text{seconds}} + \underbrace{ L_{\text{lat}} [s] }_{\text{seconds}} $$
+Second, for serialized execution phases (@eq-intro-iron-law), every additive term must resolve to time (seconds):
+$$ \Time[\text{s}] = \underbrace{ \frac{\DataVolume [\text{bytes}]}{\Bandwidth [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{\Operations[\text{FLOPs}]}{\PeakRate [\text{FLOP/s}] \cdot \EfficiencyHw [1]} }_{\text{seconds}} + \underbrace{ \Latency [\text{s}] }_{\text{seconds}} $$
 
-*   Data term: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \mathbf{s}$
-*   Compute term: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \mathbf{s}$
-*   Latency term: Already in seconds.
+*   **Data term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \text{s}$
+*   **Compute term**: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \text{s}$
+*   **Latency term**: Already in seconds.
 
-The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through Time, which is precisely what the iron law quantifies.
+The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through time, as the iron law does.
 
-Once an equation is dimensionally sound, the next question is how its time terms scale across devices. @Sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 answers that question with two complementary bounds.
+Once a single-device time equation is dimensionally sound, the next question is how its terms behave when work is partitioned across multiple processors.
 
-### Amdahl's Law and Gustafson's Law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
+### Amdahl's law and Gustafson's law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
 
-Parallelization is the primary tool for scaling ML, but its limits depend on *how* the workload scales. These two laws frame the fundamental tension in parallel computing. **Amdahl's law**\index{Amdahl's law!appendix refresher} is the pessimist's view, governing how much faster a *fixed* task can run (optimizing latency). **Gustafson's law**\index{Gustafson's law!appendix refresher} is the optimist's view, governing how much *more* work can be done in the same time (optimizing throughput).
+Doubling the number of accelerators on a training job can either shorten the wall-clock time of a fixed batch or process twice as many tokens in the same time window, and serial overhead limits those two choices very differently. **Amdahl's law**\index{Amdahl's law!appendix refresher} and **Gustafson's law**\index{Gustafson's law!appendix refresher} formalize the two regimes according to what they hold fixed: Amdahl's law bounds how much faster a *fixed* task can run (optimizing latency), whereas Gustafson's law bounds how much *more* work can be completed in a fixed time budget (optimizing throughput).
 
 #### Strong scaling (Amdahl's Law) {#sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2}
 
-**Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
-
-Amdahl's Law [@amdahl1967] states that the speedup is limited by the serial portion of the task.[^fn-amdahl-scaling-appendix] If a fraction $s$ of the task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
-$$ \text{Speedup}(n) = \frac{1}{s + \frac{1-s}{n}} $$
+When an engineer splits a fixed training batch or a single inference query across more accelerators to reduce step latency, only the parallelizable matrix math shrinks; host dispatch, barrier synchronization, and sequential aggregation remain fixed. **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster such a fixed-size problem runs as processors are added, and Amdahl's law [@amdahl1967] states that the serial fraction of the task sets a hard ceiling on the resulting speedup.[^fn-amdahl-scaling-appendix] Let $\Time(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCount$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCount$ processors is:
+$$ \Time(\WorkerCount) = (1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount} $$
+The resulting theoretical speedup is:
+$$ \text{Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount}} $$
 
 [^fn-amdahl-scaling-appendix]: **Gene Amdahl (1922–2015)**\index{Amdahl, Gene|seealso{Amdahl's law}}: A legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.
-
-As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to $1/s$.
 
 ```{python}
 #| echo: false
@@ -445,7 +544,7 @@ As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to 
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlSetup:
@@ -460,8 +559,9 @@ class AmdahlSetup:
     serial_pct = int(serial_fraction * 100)
     parallel_pct = int(parallel_fraction * 100)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(serial_pct + parallel_pct == 100, "Serial and parallel percentages must sum to 100")
+    check(round(serial_fraction + parallel_fraction, 6) == 1.0, "Fractions must sum to 1.0")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     s_pct_str = fmt_percent(serial_pct / 100, precision=0, commas=False, style='prose')
@@ -471,7 +571,7 @@ class AmdahlSetup:
     p_str = fmt(parallel_fraction, precision=2, commas=False)
 ```
 
-To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a training step is serial overhead (for example, Python global interpreter lock (GIL), kernel launch latency) and `{python} AmdahlSetup.p_pct_str` is parallelizable matrix math:
+As $\WorkerCount \to \infty$, the term $\frac{\ParallelFraction}{\WorkerCount} \to 0$, and the speedup converges to $1/(1-\ParallelFraction)$. To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a training step is serial overhead (for example, Python global interpreter lock (GIL), kernel launch latency) and `{python} AmdahlSetup.p_pct_str` is parallelizable matrix math:
 
 ```{python}
 #| echo: false
@@ -512,24 +612,18 @@ class AmdahlExample:
     amdahl_inf_speedup_mult_str = fmt_multiple(amdahl_inf, precision=0, commas=False)
 ```
 
-*   With $n=1$, speedup is 1.
-*   With $n=$ `{python} AmdahlSetup.n_8_str`, speedup is 1/(`{python} AmdahlSetup.s_str` + `{python} AmdahlSetup.p_str`/`{python} AmdahlSetup.n_8_str`) ≈ `{python} AmdahlExample.amdahl_8_speedup_mult_str`.
-*   With $n \to \infty$, speedup is capped at 1/`{python} AmdahlSetup.s_str` = `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
+*   With $\WorkerCount=1$, speedup is 1.
+*   With $\WorkerCount=$ `{python} AmdahlSetup.n_8_str`, speedup is 1/(`{python} AmdahlSetup.s_str` + `{python} AmdahlSetup.p_str`/`{python} AmdahlSetup.n_8_str`) ≈ `{python} AmdahlExample.amdahl_8_speedup_mult_str`.
+*   With $\WorkerCount \to \infty$, speedup is capped at 1/`{python} AmdahlSetup.s_str` = `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
 
-No matter how many accelerators are added, this fixed workload cannot run faster than `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
+No matter how many accelerators are added, this fixed workload cannot run faster than `{python} AmdahlExample.amdahl_inf_speedup_mult_str`. The same ceiling limits a single-node optimization. @Sec-benchmarking-endtoend-vs-component-latency-9952 applies it to a measured pipeline, where an unchanged preprocessing stage caps the gain from a faster model.
 
 #### Weak scaling (Gustafson's Law) {#sec-appdx-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
-**Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling]
-
-This is the reality of Large Language Models. Rather than using 1,000 accelerators to train a model on a small dataset in milliseconds, they are used to train on a dataset 1,000$\times$ larger in reasonable time.
-
-For $n$ processors, let $s$ be the serial fraction of execution time measured on those processors for the scaled workload. Gustafson's Law [@gustafson1988] models this "scaled speedup":
-$$ \text{Scaled Speedup}(n) = n - s(n - 1) $$
+Rather than adding accelerators to finish a small, fixed dataset in milliseconds, large-model training grows the dataset and global batch size alongside the cluster so that more work completes in the same wall-clock window. **Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling] For $\WorkerCount$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCount$ processors, normalized runtime is $\Time(\WorkerCount) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $\Time(1) = (1-\ParallelFraction) + \WorkerCount \cdot \ParallelFraction = \WorkerCount - (1-\ParallelFraction)(\WorkerCount-1)$. The resulting scaled speedup is:
+$$ \text{Scaled Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \WorkerCount - (1-\ParallelFraction)(\WorkerCount - 1) $$
 
 [^fn-gustafsons-law-scaling]: **John Gustafson**\index{Gustafson, John|seealso{Gustafson's law}}: A computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.
-
-Because the parallel part grows linearly with $n$ while $s$ remains fixed, weak scaling can keep efficiency high as the problem grows.
 
 ```{python}
 #| echo: false
@@ -544,7 +638,7 @@ Because the parallel part grows linearly with $n$ while $s$ remains fixed, weak 
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GustafsonSetup:
@@ -556,15 +650,16 @@ class GustafsonSetup:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     serial_pct = int(serial_fraction * 100)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(serial_pct == 5, f"Expected 5% serial overhead, got {serial_pct}%")
+    check(round(serial_fraction, 2) == 0.05, f"Expected 0.05 serial fraction, got {serial_fraction}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     s_g_pct_str = fmt_percent(serial_pct / 100, precision=0, commas=False, style='prose')
     s_g_str = fmt(serial_fraction, precision=2, commas=False)
 ```
 
-Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($s$ = `{python} GustafsonSetup.s_g_str`), Gustafson's Law tells a very different story:
+Because the parallel part grows linearly with $\WorkerCount$ while the serial fraction $1-\ParallelFraction$ remains fixed, weak scaling can keep efficiency high as the problem grows. Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($1-\ParallelFraction$ = `{python} GustafsonSetup.s_g_str`), Gustafson's Law tells a different story:
 
 ```{python}
 #| echo: false
@@ -609,11 +704,15 @@ class GustafsonExample:
     n_1000_minus_1_str = fmt(processor_count_1000 - 1, precision=0, commas=False)
 ```
 
-*   With $n=1$, speedup is 1.
-*   With $n=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
-*   With $n=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
+*   With $\WorkerCount=1$, speedup is 1.
+*   With $\WorkerCount=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
+*   With $\WorkerCount=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
 
-In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
+In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads. @Sec-model-training-singlenode-multigpu-training-c87f shows how data-parallel training uses weak scaling to keep accelerators busy as the cluster grows.
+
+### The training-time equation {#sec-appdx-machine-foundations-training-time-equation-7c3e}
+
+Weak scaling explains why large training runs grow the dataset rather than shrink the wall-clock time, but budgeting a run still requires translating billions of parameters and tokens into days on a specific cluster. The **training-time equation**\index{Training!time estimation} combines model size, token count, accelerator count, peak rate, and sustained hardware utilization into that wall-clock estimate, which @sec-model-training-iron-law-training-performance-a53f applies to the book's training workloads.
 
 ```{python}
 #| echo: false
@@ -631,14 +730,14 @@ from mlsysim.fmt import fmt_int, fmt_flop_rate, fmt, check, fmt_math, sci_latex,
 class TrainingTimeRef:
     """
     Reference calculation for the Training Time Equation.
-    Scenario: Training 1B model on 20B tokens using 1 A100.
+    Scenario: Training 1B model on 20B tokens using 1 H100.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     p_params = 1 * BILLION
     d_tokens = Literature.Chinchilla.TokensPerParam * p_params
     n_gpus = 1
-    x_flops_q = Hardware.Cloud.A100.compute.peak_flops
+    x_flops_q = Hardware.Cloud.H100.compute.peak_flops
     u_mfu = calibration.REFERENCE_MFU_SUSTAINED
 
     # Rename variables for internal logic
@@ -657,18 +756,16 @@ class TrainingTimeRef:
     t_days_value = t_seconds_value / SEC_PER_DAY
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(t_seconds_value > 0, "Training time must be positive.")
+    check(3 < t_days_value < 4, f"Expected a 3-4 day single-H100 run, got {t_days_value:.2f} days")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    T_seconds_str = fmt_time(t_seconds, 'second', precision=1, commas=True, style='word')
-    T_minutes_str = fmt_time(t_seconds, 'minute', precision=1, commas=False, style='word')
     T_days_str = fmt_time(t_seconds, "day", precision=1, commas=False, style="word")
     # Count formatter owns the compact B suffix for parameters and tokens.
     p_params_str = fmt_count(p_params, scale='B', commas=False)
     d_tokens_str = fmt_count(d_tokens, scale='B', commas=False)
     n_gpus_str = fmt_int(n_gpus, commas=False)
     u_mfu_pct_str = fmt_percent(round(u_mfu * 100) / 100, precision=0, commas=False, style='prose')
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(x_flops_q, unit=TFLOPs / second, precision=0, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(x_flops_q, unit=TFLOPs / second, precision=0, commas=False)
     total_flops_math = fmt_math(
         f"\\text{{Total FLOPs}} = {int(Literature.Chinchilla.ComputeConstant)} \\times {sci_latex(p_params, 0)} \\times {sci_latex(d_tokens, 0)} = {sci_latex(total_flops.to(flop), 1)} \\text{{ FLOPs}}"
     )
@@ -676,41 +773,43 @@ class TrainingTimeRef:
         f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops_q.to(flop/second), 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput.to(flop/second), 3)} \\text{{ FLOP/s}}"
     )
     time_math = fmt_math(
-        f"T = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 3)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
+        f"\\Time = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 3)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
     )
 ```
-
-The same scaling lens turns model size, data size, hardware count, and utilization into a single training-time estimate\index{Training!time estimation}.
 
 ::: {#nbk-appendix-machine-training-time-equation .callout-notebook title="The training time equation"}
 
 **Problem**: How long does dense-transformer training take for a stated model size, token count, accelerator count, peak rate, and utilization?
 
 **Math**:
-$$ T \approx \frac{6 \cdot P \cdot D}{N_{\text{GPU}} \cdot R_{\text{peak}} \cdot \eta_{\text{hw}}} $$
+$$ \Time\approx \frac{6 \cdot \Parameters\cdot \DatasetSize}{\AcceleratorCount \cdot \PeakRate \cdot \EfficiencyHw} $$
 
 **Variables**:
 
-*   Training FLOP factor: The factor 6 derives from $2P\text{ FLOP/token}$ for the forward pass and $4P\text{ FLOP/token}$ for the backward pass ($2P$ for activation gradients and $2P$ for weight gradients), yielding $6PD\text{ FLOP}$ total across $D$ training tokens.
-*   $P$: Number of model parameters.
-*   $D$: Number of training tokens.
-*   $N_{\text{GPU}}$: Number of GPUs.
-*   $R_{\text{peak}}$: Peak FLOP/s of one accelerator.
-*   $\eta_{\text{hw}}$: Hardware utilization, typically 30 percent–50 percent in this training estimate.
+*   **Training FLOP factor**: The factor 6 derives from $2\Parameters\text{ FLOP/token}$ for the forward pass and $4\Parameters\text{ FLOP/token}$ for the backward pass ($2\Parameters$ for activation gradients and $2\Parameters$ for weight gradients), yielding $6\Parameters \DatasetSize\text{ FLOPs}$ total across $\DatasetSize$ training tokens.
+*   **$\Parameters$**: Number of model parameters.
+*   **$\DatasetSize$**: Number of training tokens.
+*   **$\AcceleratorCount$**: Number of accelerators.
+*   **$\PeakRate$**: Peak FLOP/s of one accelerator.
+*   **$\EfficiencyHw$**: Hardware utilization, typically 30 percent–50 percent in this training estimate.
 
-**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` tokens using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_tflop_per_s_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
+**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` tokens using `{python} TrainingTimeRef.n_gpus_str` H100 (`{python} TrainingTimeRef.h100_fp16_tflop_per_s_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
 `{python} TrainingTimeRef.total_flops_math`.
 `{python} TrainingTimeRef.throughput_math`.
 `{python} TrainingTimeRef.time_math`.
 
-**Systems insight**: Under these assumptions, training takes `{python} TrainingTimeRef.T_seconds_str` (≈ `{python} TrainingTimeRef.T_minutes_str`, or about `{python} TrainingTimeRef.T_days_str`); the estimate makes model scale, data scale, effective accelerator throughput, and utilization explicit levers.
+**Systems insight**: Under these assumptions, training takes about `{python} TrainingTimeRef.T_days_str`. In D·A·M terms, this equation is the macroscopic product of Data ($\DatasetSize$ tokens), Algorithm ($6\Parameters\text{ FLOPs/token}$), and Machine ($(\AcceleratorCount \cdot \PeakRate \cdot \EfficiencyHw)^{-1}\text{ s/FLOP}$). Doubling the token count doubles the time, while doubling the accelerator count or the utilization halves it.
 
 :::
 
 ### Little's Law {#sec-appdx-machine-foundations-littles-law-21a3}
 
-For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($Q_{\text{req}}$), mean arrival rate ($\lambda_{\text{arr}}$), and mean time in system ($T_{\text{lat}}$):[^fn-littles-law-appendix]
-$$ Q_{\text{req}} = \lambda_{\text{arr}} \times T_{\text{lat}} $$
+Whereas the training-time equation sizes a batch job whose total token volume is known up front, an online inference server receives a continuous stream of queries, and every in-flight request holds working state in memory until its response completes. An accelerator can therefore exhaust its memory capacity from concurrent request state before its arithmetic units saturate. For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
+$$ \RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem $$
+
+The law follows from operational conservation of requests over any observation interval $[0, \ObservationIntervalLength]$. Let $\CumulativeArrivals(\TimeInstant)$ denote cumulative arrivals and $\CumulativeCompletions(\TimeInstant)$ cumulative completions, so the instantaneous in-flight queue occupancy is $\InstantaneousRequestOccupancy(\TimeInstant) = \CumulativeArrivals(\TimeInstant) - \CumulativeCompletions(\TimeInstant)$. The average number of requests in the system over $[0, \ObservationIntervalLength]$ is $\IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$. The total accumulated request-time $\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$ equals the sum of residence times $\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i$ of all $\CompletedRequestCount(\ObservationIntervalLength)$ requests completed by time $\ObservationIntervalLength$ (plus boundary terms that vanish as $\ObservationIntervalLength\to \infty$). Dividing both sides by $\ObservationIntervalLength$:
+$$ \IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant= \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} \cdot \frac{1}{\CompletedRequestCount(\ObservationIntervalLength)}\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i $$
+In the limit as $\ObservationIntervalLength\to \infty$ for a stable queue, $\lim_{\ObservationIntervalLength\to\infty} \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} = \ArrivalRate$ and $\lim_{\CompletedRequestCount\to\infty} \frac{1}{\CompletedRequestCount}\sum_{i=1}^\CompletedRequestCount \RequestResidenceTime_i = \RequestTimeInSystem$. These limits yield $\RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem$ regardless of arrival distribution or service-time distribution. Because the identity requires no Poisson-arrival or exponential-service assumption, it applies directly to heavy-tailed large language model (LLM) generation workloads so long as the queue is stationary.
 
 [^fn-littles-law-appendix]: **John Little**\index{Little, John|seealso{Little's law}}: An Institute Professor at MIT and a pioneer in the field of operations research. His law, proved in 1961, is fundamental to queuing theory and is used across fields from manufacturing to computer network analysis.
 
@@ -727,7 +826,7 @@ $$ Q_{\text{req}} = \lambda_{\text{arr}} \times T_{\text{lat}} $$
 # │ How: Q_req = lambda_arr * T_lat; max_concurrent = gpu_mem/mem_per_req.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, fmt_rate, fmt_time, fmt_memory
+from mlsysim.fmt import fmt, fmt_math, fmt_rate, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LittlesLawExample:
@@ -746,8 +845,11 @@ class LittlesLawExample:
     max_concurrent_value = int((gpu_mem / mem_per_req).to_base_units().magnitude)
     max_throughput_value = max_concurrent_value / w_latency_s_value
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are monotone functions of inputs.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(l_concurrent_value == 50.0, f"Expected 50 concurrent requests, got {l_concurrent_value}")
+    check(max_concurrent_value == 24, f"Expected 24 max concurrent requests, got {max_concurrent_value}")
+    check(int(max_throughput_value) == 480, f"Expected 480 QPS max throughput, got {max_throughput_value}")
+    check(round(total_mem.to(GB).magnitude) == 50, f"Expected 50 GB total memory, got {total_mem}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     L_concurrent_str = fmt(l_concurrent_value, precision=0, commas=False)
@@ -759,157 +861,25 @@ class LittlesLawExample:
     total_mem_gb_str = fmt_memory(total_mem, unit=GB, precision=0, commas=False)
     max_concurrent_str = fmt(max_concurrent_value, precision=0, commas=False)
     max_throughput_math = fmt_math(
-        f"N_{{\\text{{max}}}}/T_{{\\text{{lat}}}} = {max_concurrent_value}/{w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}"
+        f"\\DeviceRequestCapacity/\\RequestTimeInSystem = {max_concurrent_value}/{w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}"
     )
 ```
 
 To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_qps_str` with `{python} LittlesLawExample.w_latency_ms_str` average latency. The law dictates that the system must support `{python} LittlesLawExample.lambda_qps_value_str` $\times$ `{python} LittlesLawExample.w_latency_s_str` = `{python} LittlesLawExample.L_concurrent_str` concurrent requests.
 
-This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`; Little's Law alone sets no physical maximum.
+This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots ($\DeviceRequestCapacity$, the most requests the device can hold at once) each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`. Little's law alone does not fix a maximum. Device capacity does.
 
-These physics-based models—Roofline, Amdahl, Gustafson, and Little—diagnose *where* bottlenecks lie. Translating those diagnoses into actionable optimizations, however, requires understanding the concrete hardware structures that impose them: caches, memory buses, and interconnects.
+Serving systems use this relation to size request concurrency, and @sec-model-serving-littles-law-9352 pairs it with a queueing model to show how latency degrades as utilization nears saturation. Together, these physics-based models (roofline, Amdahl, Gustafson, and Little) locate *where* a bottleneck lies. Acting on that diagnosis requires the hardware structures that impose the bounds: the memory hierarchy, the links that move data between tiers, and the classes of hardware that package them.
 
 ## Computer Architecture Essentials {#sec-appdx-machine-foundations-computer-architecture-essentials-10c2}
 
-A GPU advertises 1,000 TFLOP/s, yet a kernel achieves only 30 TFLOP/s. The gap may reflect data movement, insufficient parallelism, synchronization, launch overhead, or software inefficiency. While physics sets theoretical performance bounds, computer architecture defines the machinery that determines how close a real workload can get. The following discussion covers the latency, bandwidth, and energy trade-offs that shape system design.
-
-```{python}
-#| echo: false
-#| label: arch-reference-tables
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @tbl-latency-hierarchy, @tbl-hardware-cheatsheet, @tbl-physical-hierarchy-ref
-# │ Goal: Latency analogy, H100/TPUv5p specs, hierarchy energy/bandwidth table
-from mlsysim.core.units import pJ, flop, second, minute, hour, day, GiB, MiB
-from mlsysim.fmt import fmt_flop_rate, fmt_energy, fmt_bandwidth, fmt_multiple, fmt_time, fmt_memory_capacity, fmt_memory
-
-class ArchReferenceTables:
-    """Latency hierarchy, accelerator cheatsheet, and physical hierarchy reference."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Energy hierarchy: sourced from Hardware.Tech (taxonomy refactor; energy-as-property).
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
-    ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
-    ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
-    ENERGY_SRAM_L2_PJ = Hardware.Tech.Memory.L2.energy_per_access
-    # Latency hierarchy: sourced from Hardware.Tech/Systems.Fabrics (taxonomy refactor).
-    LATENCY_REGISTER_REF = Hardware.Tech.Memory.Register.latency
-    LATENCY_L1_REGISTER = Hardware.Tech.Memory.L1.latency
-    LATENCY_L2_CACHE = Hardware.Tech.Memory.L2.latency
-    LATENCY_HBM3 = Hardware.Tech.Memory.DRAM.latency
-    LATENCY_NVLINK = Hardware.Tech.Interconnect.NVLink.latency
-    LATENCY_PCIE_GEN5 = Hardware.Tech.Interconnect.PCIeGen5.latency
-    LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
-    LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
-    h100_l2 = Hardware.Cloud.H100.memory.l2_cache
-    tpuv5_sram = Hardware.Cloud.TPUv5p.memory.sram_capacity
-    register_ns_value = LATENCY_REGISTER_REF.to(nanosecond).magnitude
-    analogy_base_seconds = 10
-    analogy_seconds_per_ns = analogy_base_seconds / register_ns_value
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dram_pj_value = int(ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude)
-    flop_pj_value = ENERGY_FLOP_FP16_PJ.to(pJ / flop).magnitude
-    flop_energy_pj = ENERGY_FLOP_FP16_PJ * flop
-    energy_ratio_value = int(dram_pj_value / flop_pj_value)
-
-    l1_ns_value = int(LATENCY_L1_REGISTER.to(nanosecond).magnitude)
-    l2_ns_value = int(LATENCY_L2_CACHE.to(nanosecond).magnitude)
-    hbm_ns_value = int(LATENCY_HBM3.to(nanosecond).magnitude)
-    nvlink_ns_value = int(LATENCY_NVLINK.to(nanosecond).magnitude)
-    pcie_ns_value = int(LATENCY_PCIE_GEN5.to(nanosecond).magnitude)
-    ib_ns_value = int(LATENCY_INFINIBAND.to(nanosecond).magnitude)
-    ssd_ns_value = int(LATENCY_NVME_SSD.to(nanosecond).magnitude)
-
-    h100_flops = Hardware.Cloud.H100.compute.peak_flops
-    h100_bw = Hardware.Cloud.H100.memory.bandwidth
-    h100_cap = 80 * GB  # vendor nominal capacity label
-    h100_nvlink = Hardware.Cloud.H100.nvlink.bandwidth
-
-    tpuv5_flops = Hardware.Cloud.TPUv5p.compute.peak_flops
-    tpuv5_bw = Hardware.Cloud.TPUv5p.memory.bandwidth
-    tpuv5_cap = Hardware.Cloud.TPUv5p.memory.capacity
-    tpuv5_ici = Hardware.Cloud.TPUv5p.nvlink.bandwidth
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
-    flop_pj_str = fmt_energy(flop_energy_pj, unit=pJ, precision=1, commas=False)
-    energy_ratio_mult_str = fmt_multiple(energy_ratio_value, precision=0, commas=False)
-
-    l1_ns_str = fmt_time(LATENCY_L1_REGISTER, unit=nanosecond, precision=0, commas=False)
-    l2_ns_str = fmt_time(LATENCY_L2_CACHE, unit=nanosecond, precision=0, commas=False)
-    hbm_ns_str = fmt_time(LATENCY_HBM3, unit=nanosecond, precision=0, commas=False)
-    nvlink_ns_str = fmt_time(LATENCY_NVLINK, unit=nanosecond, precision=0, commas=False)
-    pcie_ns_str = fmt_time(LATENCY_PCIE_GEN5, unit=nanosecond, precision=0, commas=False)
-    ib_ns_str = fmt_time(LATENCY_INFINIBAND, unit=nanosecond, precision=0, commas=False)
-    ssd_ns_str = fmt_time(LATENCY_NVME_SSD, unit=nanosecond, precision=0, commas=False)
-    register_distance_str = fmt_time(register_ns_value * analogy_seconds_per_ns, second, precision=0, commas=False, style="word")
-    l1_distance_str = fmt_time(l1_ns_value * analogy_seconds_per_ns, second, precision=1, commas=False, style="word")
-    l2_distance_str = fmt_time(l2_ns_value * analogy_seconds_per_ns / SECONDS_PER_MINUTE, minute, precision=1, commas=False, style="word")
-    hbm_distance_str = fmt_time(hbm_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
-    nvlink_distance_str = fmt_time(nvlink_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
-    pcie_distance_str = fmt_time(pcie_ns_value * analogy_seconds_per_ns / SEC_PER_HOUR, hour, precision=1, commas=False, style="word")
-    ib_distance_str = fmt_time(ib_ns_value * analogy_seconds_per_ns / SEC_PER_DAY, day, precision=1, commas=False, style="word")
-    ssd_distance_str = fmt_time(ssd_ns_value * analogy_seconds_per_ns / SEC_PER_DAY, day, precision=1, commas=False, style="word")
-
-    h100_flops_tflop_per_s_str = fmt_flop_rate(h100_flops, unit=TFLOPs / second, precision=0, commas=False)
-    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-    h100_cap_gb_str = fmt_memory(h100_cap, unit=GB, precision=0, commas=False)
-    h100_nvlink_gb_per_s_str = fmt_bandwidth(h100_nvlink, unit=GB / second, precision=0, commas=False)
-    h100_l2_mb_str = fmt_memory_capacity(h100_l2, unit=MiB, precision=0, commas=False)
-
-    tpuv5_flops_tflop_per_s_str = fmt_flop_rate(tpuv5_flops, unit=TFLOPs / second, precision=0, commas=False)
-    tpuv5_bw_tb_per_s_str = fmt_bandwidth(tpuv5_bw, unit=TB / second, precision=2, commas=False)
-    tpuv5_cap_gib_str = fmt_memory_capacity(tpuv5_cap, unit=GiB, precision=0, commas=False)
-    tpuv5_ici_gb_per_s_str = fmt_bandwidth(tpuv5_ici, unit=GB / second, precision=0, commas=False)
-    tpuv5_sram_mib_str = fmt_memory_capacity(tpuv5_sram, unit=MiB, precision=0, commas=False)
-
-    bw_hbm_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=GB / second, precision=0)
-    bw_nvlink_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0)
-    bw_pcie_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.interconnect.bandwidth, unit=GB / second, precision=0)
-    bw_dram_gb_per_s_str = fmt_bandwidth(Hardware.Tech.Storage.SystemMemory.bandwidth, unit=GB / second, precision=0)
-    bw_ssd_gb_per_s_str = fmt_bandwidth(Hardware.Tech.Storage.NvmeGen4.bandwidth, unit=GB / second, precision=0, commas=False)
-    bw_net_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
-
-    e_dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
-```
-
-### Latencies every programmer should know {#sec-appdx-machine-foundations-latencies-every-programmer-know-e89f}
-
-The first step in systems intuition is understanding the cost of distance. @Tbl-latency-hierarchy quantifies how long the processor waits for data from different levels of the memory hierarchy. If accessing a register is like picking up a nearby pencil, fetching from high-bandwidth memory (HBM) is walking across the office, and fetching from disk is flying to the moon.
-
-| **Component**            |                **Latency (ns)**               | **Cycles (Approx)** |               **Relative "Distance"**                |
-|:-------------------------|:---------------------------------------------:|:-------------------:|:----------------------------------------------------:|
-| **Register**             |                    ~0.3 ns                    |       1 cycle       | `{python} ArchReferenceTables.register_distance_str` |
-| **L1 Cache**             |   ~`{python} ArchReferenceTables.l1_ns_str`   |      3–4 cycles     |    `{python} ArchReferenceTables.l1_distance_str`    |
-| **L2 Cache**             |   ~`{python} ArchReferenceTables.l2_ns_str`   |      12 cycles      |    `{python} ArchReferenceTables.l2_distance_str`    |
-| **HBM3 (GPU Memory)**    |   ~`{python} ArchReferenceTables.hbm_ns_str`  |     1,000 cycles    |   `{python} ArchReferenceTables.hbm_distance_str`    |
-| **NVLink (GPU-GPU)**     | ~`{python} ArchReferenceTables.nvlink_ns_str` |     1,500 cycles    |  `{python} ArchReferenceTables.nvlink_distance_str`  |
-| **PCIe (CPU-GPU)**       |  ~`{python} ArchReferenceTables.pcie_ns_str`  |     3,000 cycles    |   `{python} ArchReferenceTables.pcie_distance_str`   |
-| **InfiniBand (Network)** |   ~`{python} ArchReferenceTables.ib_ns_str`   |    15,000 cycles    |    `{python} ArchReferenceTables.ib_distance_str`    |
-| **SSD (NVMe)**           |   ~`{python} ArchReferenceTables.ssd_ns_str`  |    300,000 cycles   |   `{python} ArchReferenceTables.ssd_distance_str`    |
-
-: **The Latency Hierarchy**: Representative access times for modern AI hardware; the approximate cycle counts use a 3 GHz reference clock. The jump from SRAM cache to HBM makes cache locality a major performance factor. {#tbl-latency-hierarchy tbl-colwidths="[25,25,25,25]"}
-
-### The AI hardware cheat sheet (modern reference) {#sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1}
-
-Latency measures the wait for the *first* byte; bandwidth measures how many bytes follow. @Tbl-hardware-cheatsheet provides the constants for back-of-the-envelope "Roofline" calculations. These represent the "standard units of compute" for the current era of machine learning.
-
-| **Spec**             |                      **NVIDIA H100 (SXM)**                       |                                  **Google TPU v5p**                                  | **System Impact**                     |
-|:---------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------------------:|:--------------------------------------|
-| **BF16 Peak**        |    `{python} ArchReferenceTables.h100_flops_tflop_per_s_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflop_per_s_str`              | The "Speed Limit" ($R_{\text{peak}}$) |
-| **Memory Bandwidth** |       `{python} ArchReferenceTables.h100_bw_tb_per_s_str`        |                 `{python} ArchReferenceTables.tpuv5_bw_tb_per_s_str`                 | The "Width of the Pipe" ($\text{BW}$) |
-| **HBM Capacity**     |          `{python} ArchReferenceTables.h100_cap_gb_str`          |                   `{python} ArchReferenceTables.tpuv5_cap_gib_str`                   | Max Model Size ($P$)/Batch Size ($B$) |
-| **On-chip SRAM**     |         `{python} ArchReferenceTables.h100_l2_mb_str` L2         |             `{python} ArchReferenceTables.tpuv5_sram_mib_str` VMEM/chip              | Critical for Operator Fusion          |
-| **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_gb_per_s_str` (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_gb_per_s_str` (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling  |
-
-: **Reference Specs**: Key constants for quantitative analysis. Always check specific datasheets; HBM capacity follows vendor units, and interconnect bandwidth is aggregate bidirectional, so topology and direction matter. {#tbl-hardware-cheatsheet tbl-colwidths="[22,23,20,35]"}
+A kernel can run at a small fraction of an accelerator's advertised peak when data movement, insufficient parallelism, synchronization, launch overhead, or software inefficiency stands in the way. Physics sets the theoretical ceilings. Computer architecture defines the machinery that determines how close a real workload can get to them, across three structures: the memory hierarchy and its energy cost, the paths that move data between tiers, and the class of hardware that packages both.
 
 ### The memory hierarchy {#sec-appdx-machine-foundations-memory-hierarchy-2278}
 
-Computer systems use a hierarchy because no single technology provides both high capacity and low latency. @Fig-memory-hierarchy shows this trade-off: keeping data higher in the pyramid (registers/cache) reduces access latency when data movement is on the critical path.
+Computer systems rely on tiered storage architectures because no single physical medium simultaneously provides large storage capacity and the lowest access latency. Faster, smaller, and costlier tiers sit close to the arithmetic units; larger and cheaper tiers sit farther away (@fig-memory-hierarchy). When data movement sits on the critical execution path, staging tensors into the upper tiers avoids the orders-of-magnitude latency penalties of off-chip DRAM and persistent storage that @tbl-memory-ratios-ref quantifies.
 
-::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Performance depends on data proximity. Accessing HBM is roughly 1,000$\times$ slower than registers; accessing SSD is roughly 300,000$\times$ slower." fig-alt="Pyramid with four tiers, from top to bottom: registers, L1/L2/L3 cache, HBM/DRAM, and storage (SSD/disk). An upward arrow reads “Faster Speed, Lower Latency,” and a downward arrow reads “Larger Capacity, Lower Cost.”"}
+::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Performance depends on data proximity. Accessing HBM is roughly `{python} LatencyHierarchy.hbm_ratio_mult_str` slower than registers; accessing SSD is roughly `{python} LatencyHierarchy.ssd_ratio_mult_str` slower." fig-alt="Pyramid with four tiers, from top to bottom: registers, L1/L2/L3 cache, HBM/DRAM, and storage (SSD/disk). An upward arrow reads “Faster Speed, Lower Latency,” and a downward arrow reads “Larger Capacity, Lower Cost.”"}
 ```{.tikz}
 \scalebox{0.8}{%
 \begin{tikzpicture}[line cap=round, line join=round, font=\sffamily\small]
@@ -970,39 +940,74 @@ node[align=center,left]{Larger Capacity\\ Lower Cost}(L);
 ```
 :::
 
-The memory hierarchy\index{Memory hierarchy!appendix refresher} is the fundamental physical constraint of machine learning systems. @Tbl-physical-hierarchy-ref consolidates the physical properties—latency, bandwidth, and energy—across the entire stack.
+```{python}
+#| echo: false
+#| label: hierarchy-energy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY HIERARCHY ENERGY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-machine-foundations-memory-hierarchy-2278
+# │          (@tbl-hierarchy-energy-ref)
+# │
+# │ Goal: Energy per 32-bit access by tier and its multiple of a register access.
+# │ Show: 0.1 / 0.5 / 2 / 640 pJ per access; register multiples.
+# │ How: Tech-class energies from Hardware.Tech (45 nm reference).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import pJ
+from mlsysim.fmt import fmt_energy, fmt_multiple, check
 
-| **Layer**            | **Technology** |                  **Latency**                  |                     **Bandwidth**                     |        **Energy Reference (per 32b)**        |
-|:---------------------|:--------------:|:---------------------------------------------:|:-----------------------------------------------------:|:--------------------------------------------:|
-| **Registers**        |   Flip-Flops   |                    ~0.3 ns                    |                           —                           |                      —                       |
-| **L1 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l1_ns_str`   |                           —                           |                      —                       |
-| **L2 Cache**         |      SRAM      |   ~`{python} ArchReferenceTables.l2_ns_str`   |                           —                           |                      —                       |
-| **Memory (Local)**   |      HBM3      |   ~`{python} ArchReferenceTables.hbm_ns_str`  |   `{python} ArchReferenceTables.bw_hbm_gb_per_s_str`  | `{python} ArchReferenceTables.e_dram_pj_str` |
-| **Interconnect**     |   NVLink 4.0   | ~`{python} ArchReferenceTables.nvlink_ns_str` | `{python} ArchReferenceTables.bw_nvlink_gb_per_s_str` |                      —                       |
-| **Host Link**        |   PCIe Gen5    |  ~`{python} ArchReferenceTables.pcie_ns_str`  |  `{python} ArchReferenceTables.bw_pcie_gb_per_s_str`  |                      —                       |
-| **System RAM**       |      DDR5      |                    ~100 ns                    |  `{python} ArchReferenceTables.bw_dram_gb_per_s_str`  |                      —                       |
-| **Network (Fabric)** | InfiniBand NDR |   ~`{python} ArchReferenceTables.ib_ns_str`   |   `{python} ArchReferenceTables.bw_net_gb_per_s_str`  |                      —                       |
-| **Storage (Local)**  |    NVMe SSD    |   ~`{python} ArchReferenceTables.ssd_ns_str`  |   `{python} ArchReferenceTables.bw_ssd_gb_per_s_str`  |                      —                       |
+# ┌── LEGO ───────────────────────────────────────────────
+class HierarchyEnergy:
+    """Energy per access across the memory hierarchy (45 nm reference technology)."""
 
-: **Physical Properties of the Memory Hierarchy (c. 2024)**: Representative latency and bandwidth anchors across the memory hierarchy. The hierarchy spans roughly five orders of magnitude in latency. NVLink is aggregate bidirectional; only the cited 45 nm DRAM energy is shown because other tiers are implementation-specific. Keeping data higher in the hierarchy can therefore deliver large performance gains. {#tbl-physical-hierarchy-ref tbl-colwidths="[20,20,20,20,20]"}
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
+    ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
+    ENERGY_SRAM_L2_PJ = Hardware.Tech.Memory.L2.energy_per_access
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
 
-The hierarchy's energy costs reveal why data movement dominates modern system design.
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    l1_vs_reg = (ENERGY_SRAM_L1_PJ / ENERGY_REG_PJ).to("").magnitude
+    l2_vs_reg = (ENERGY_SRAM_L2_PJ / ENERGY_REG_PJ).to("").magnitude
+    dram_vs_reg = (ENERGY_DRAM_ACCESS_PJ / ENERGY_REG_PJ).to("").magnitude
 
-::: {#psp-appendix-machine-high-cost-data-movement .callout-perspective title="The high cost of data movement"}
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(ENERGY_DRAM_ACCESS_PJ > ENERGY_SRAM_L2_PJ > ENERGY_SRAM_L1_PJ > ENERGY_REG_PJ, "Energy hierarchy violation")
 
-In the cited 45 nm reference, fetching a 32-bit value from DRAM costs roughly `{python} ArchReferenceTables.energy_ratio_mult_str` the energy of one FP16 multiply (~`{python} ArchReferenceTables.dram_pj_str` vs. ~`{python} ArchReferenceTables.flop_pj_str`). The ratio is platform-specific and does not alone determine workload energy, which also depends on access counts and reuse. It nevertheless explains why arithmetic intensity matters.
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    reg_pj_str = fmt_energy(ENERGY_REG_PJ, unit=pJ, precision=1, commas=False)
+    l1_pj_str = fmt_energy(ENERGY_SRAM_L1_PJ, unit=pJ, precision=1, commas=False)
+    l2_pj_str = fmt_energy(ENERGY_SRAM_L2_PJ, unit=pJ, precision=0, commas=False)
+    dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
+    l1_vs_reg_mult_str = fmt_multiple(l1_vs_reg, precision=0, commas=False)
+    l2_vs_reg_mult_str = fmt_multiple(l2_vs_reg, precision=0, commas=False)
+    dram_vs_reg_mult_str = fmt_multiple(dram_vs_reg, precision=0, commas=True)
+```
 
-:::
+The memory hierarchy\index{Memory hierarchy!appendix refresher} limits ML systems in both time and energy. Each access farther from the arithmetic units costs more energy, because the signal must drive longer, higher-capacitance wires (@tbl-hierarchy-energy-ref). @Sec-hardware-acceleration-memory-hierarchy-1839 shows how accelerator design stages data in the upper tiers to avoid the off-chip cost.
 
-### Bandwidth vs. latency {#sec-appdx-machine-foundations-bandwidth-vs-latency-5320}
+| **Tier**            | **Technology** |      **Energy per 32-bit Access**      |            **Relative to a Register**           |
+|:--------------------|:--------------:|:--------------------------------------:|:-----------------------------------------------:|
+| **Register**        |   Flip-flops   | `{python} HierarchyEnergy.reg_pj_str`  |                    1$\times$                    |
+| **L1 cache**        |      SRAM      |  `{python} HierarchyEnergy.l1_pj_str`  |  `{python} HierarchyEnergy.l1_vs_reg_mult_str`  |
+| **L2 cache**        |      SRAM      |  `{python} HierarchyEnergy.l2_pj_str`  |  `{python} HierarchyEnergy.l2_vs_reg_mult_str`  |
+| **Off-chip memory** |    DRAM/HBM    | `{python} HierarchyEnergy.dram_pj_str` | `{python} HierarchyEnergy.dram_vs_reg_mult_str` |
 
-Bandwidth\index{Bandwidth!latency trade-off} (throughput) and latency\index{Latency!bandwidth trade-off} (delay) are distinct constraints. For data volume $D_{\text{vol}}$ sent over effective bandwidth $\text{BW}$ with fixed path latency $L_{\text{lat}}$, and assuming the latency and serialization costs do not overlap, total transfer time is:
-$$ T = L_{\text{lat}} + \frac{D_{\text{vol}}}{\text{BW}} $$
+: **Energy Across the Memory Hierarchy**: Energy per 32-bit access in the cited 45 nm reference technology. The DRAM value is the Horowitz measurement; the register and SRAM values are illustrative hierarchy anchors. Absolute values fall with each process node, but the ordering and the gap between on-chip and off-chip access persist. {#tbl-hierarchy-energy-ref tbl-colwidths="[25,20,30,25]"}
+
+Energy explains why data should stay high in the hierarchy. The table gives per-access costs, so the energy of a whole workload also depends on how many accesses reach each tier and how often data is reused. How long a transfer between tiers takes depends on two distinct properties of the path it crosses.
+
+### Bandwidth versus latency {#sec-appdx-machine-foundations-bandwidth-vs-latency-5320}
+
+Widening a data link tenfold barely changes the delivery time of a small inference request or control message, yet it cuts the transfer time of a multi-gigabyte model checkpoint nearly tenfold. Bandwidth\index{Bandwidth!latency trade-off} (throughput once bytes are flowing) and latency\index{Latency!bandwidth trade-off} (the fixed delay before the first byte arrives) govern those two regimes as distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
+$$ \Time= \Latency + \frac{\DataVolume}{\Bandwidth} $$
 
 The crossover point is the transfer size where the two terms are equal:
-$$ D_{\text{vol,cross}} = L_{\text{lat}} \times \text{BW} $$
+$$ \LatencyBandwidthCrossoverSize = \Latency \times \Bandwidth $$
 
-For transfers below $D_{\text{vol,cross}}$ (for example, small request or control messages), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
+For transfers below $\LatencyBandwidthCrossoverSize$ (for example, small request or control messages), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
 
 ```{python}
 #| echo: false
@@ -1017,7 +1022,7 @@ For transfers below $D_{\text{vol,cross}}$ (for example, small request or contro
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_memory
+from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencySetup:
@@ -1031,8 +1036,8 @@ class BandwidthLatencySetup:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     crossover_data = (base_latency * link_bandwidth).to(MB)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(crossover_data.to(MB).magnitude, 1) == 12.5, f"Expected 12.5 MB crossover data, got {crossover_data}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bw_gbit_per_s_str = fmt_bandwidth(link_bandwidth, unit=Gbps, precision=0, commas=False)
@@ -1057,16 +1062,16 @@ Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` 
 # │ How: tx_time = data_bytes/bandwidth; large_time = size/bandwidth + base latency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_time, fmt_memory
+from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencyExample:
-    """Namespace for latency-bound vs. bandwidth-bound transmission time example."""
+    """Namespace for latency-dominated vs. bandwidth-dominated transmission time example."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    packet_data = 1 * KB  # scenario assumption: latency-bound packet size
+    packet_data = 1 * KB  # scenario assumption: latency-dominated packet size
     link_bandwidth = Systems.Fabrics.Ethernet_10G.bandwidth
-    large_data = 1 * GB  # scenario assumption: bandwidth-bound checkpoint size
+    large_data = 1 * GB  # scenario assumption: bandwidth-dominated checkpoint size
     base_latency = 10 * ms  # scenario assumption: request/response path and protocol latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1074,8 +1079,10 @@ class BandwidthLatencyExample:
     large_tx_time = (large_data / link_bandwidth).to(ms)
     total_large_time = base_latency + large_tx_time
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are monotone functions of inputs.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(tx_time.to(microsecond).magnitude, 1) == 0.8, f"Expected 0.8 us tx_time, got {tx_time}")
+    check(round(large_tx_time.to(ms).magnitude) == 800, f"Expected 800 ms large_tx_time, got {large_tx_time}")
+    check(round(total_large_time.to(ms).magnitude) == 810, f"Expected 810 ms total_large_time, got {total_large_time}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tx_time_us_str = fmt_time(tx_time, 'microsecond', precision=1, commas=False)
@@ -1088,24 +1095,148 @@ class BandwidthLatencyExample:
     )
 ```
 
-*   Latency-bound packet (`{python} BandwidthLatencySetup.data_kb_str`):
-    *   Transmission: `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8/`{python} BandwidthLatencySetup.bw_gbit_per_s_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`.
-    *   Total Time ≈ `{python} BandwidthLatencySetup.base_latency_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.base_latency_ms_str`.
-    *   *Result*: Fixed path and protocol latency dominates; propagation is one component.
-*   Bandwidth-bound checkpoint (`{python} BandwidthLatencyExample.large_data_gb_str`):
-    *   Transmission: `{python} BandwidthLatencyExample.large_tx_math`.
-    *   Total Time `{python} BandwidthLatencyExample.large_total_math`.
-    *   *Result*: Base latency is negligible; bandwidth is the bottleneck.
+*   **Latency-dominated packet (`{python} BandwidthLatencySetup.data_kb_str`)**: Transmission time is `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8/`{python} BandwidthLatencySetup.bw_gbit_per_s_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`. Total time is approximately `{python} BandwidthLatencySetup.base_latency_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.base_latency_ms_str`. **Result**: Fixed path and protocol latency dominates; propagation is one component.
+*   **Bandwidth-dominated checkpoint (`{python} BandwidthLatencyExample.large_data_gb_str`)**: Transmission time is `{python} BandwidthLatencyExample.large_tx_math`. Total time is `{python} BandwidthLatencyExample.large_total_math`. **Result**: Base latency is negligible; bandwidth is the bottleneck.
 
-Architecture determines how fast data can move, but numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move. Halving precision from FP32 to FP16 halves bytes per parameter and can nearly double useful bandwidth when the hardware, kernels, and model accuracy support it. Understanding these trade-offs requires a closer look at how numbers are represented in hardware.
+How much bandwidth, compute, and memory capacity sit on either side of those links depends on the target form factor, which ranges from liquid-cooled data center racks to milliwatt sensor boards.
+
+### Accelerator classes {#sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1}
+
+```{python}
+#| echo: false
+#| label: accelerator-classes
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ACCELERATOR CLASSES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1
+# │          (@tbl-accelerator-classes-ref and the paragraph after it)
+# │
+# │ Goal: Summarize each hardware class as order-of-magnitude ranges over
+# │       representative registry devices, not as any one product's datasheet.
+# │ Show: Peak rate, memory bandwidth, capacity, power, and ridge point ranges
+# │       per class, rounded to one significant figure; the cross-class span.
+# │ How: Min and max over representative Hardware.* entries per class; dated
+# │      per-product values live in System Assumptions.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Hardware
+from mlsysim.core.units import flop, byte, second, TFLOPs, MFLOPs, TB, GB, MB, watt, milliwatt
+from mlsysim.fmt import fmt_int, fmt_power, fmt_qty_range, check
+
+def _sig1_bounds(quantities, unit):
+    """Return (lo, hi) of a class's values in one unit, rounded to one significant figure."""
+
+    def _sig1(q):
+        m = q.magnitude
+        return round(m, -math.floor(math.log10(abs(m)))) * q.units
+
+    values = [q.to(unit) for q in quantities]
+    return _sig1(min(values)), _sig1(max(values))
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AcceleratorClasses:
+    """Order-of-magnitude ranges for datacenter, edge, mobile, and microcontroller hardware."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Representative devices per class (registry entries, not a product survey).
+    datacenter = [Hardware.Cloud.V100, Hardware.Cloud.A100, Hardware.Cloud.H100, Hardware.Cloud.B200, Hardware.Cloud.MI300X, Hardware.Cloud.TPUv5p]
+    edge = [Hardware.Edge.JetsonOrinNano, Hardware.Edge.JetsonOrinNX, Hardware.Edge.JetsonAGXOrin, Hardware.Edge.Coral]
+    mobile = [Hardware.Mobile.iPhone15Pro, Hardware.Mobile.Pixel8, Hardware.Mobile.Snapdragon8Gen3]
+    mcu = [Hardware.Tiny.ESP32_S3, Hardware.Tiny.STM32F4, Hardware.Tiny.nRF52840, Hardware.Tiny.HimaxWE1]
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dc_peak = [h.compute.peak_flops for h in datacenter]
+    edge_peak = [h.compute.peak_flops for h in edge]
+    mobile_peak = [h.compute.peak_flops for h in mobile]
+    mcu_peak = [h.compute.peak_flops for h in mcu]
+    dc_power = [h.tdp for h in datacenter if h.tdp is not None]
+    mcu_power = [h.tdp for h in mcu if h.tdp is not None]
+    dc_ridge = [h.ridge_point().to(flop / byte) for h in datacenter]
+    mobile_ridge = [h.ridge_point().to(flop / byte) for h in mobile]
+    mcu_ridge = [h.ridge_point().to(flop / byte) for h in mcu]
+    dc_peak_lo, dc_peak_hi = _sig1_bounds([h.compute.peak_flops for h in datacenter], TFLOPs / second)
+    dc_bw_lo, dc_bw_hi = _sig1_bounds([h.memory.bandwidth for h in datacenter], TB / second)
+    dc_cap_lo, dc_cap_hi = _sig1_bounds([h.memory.capacity for h in datacenter], GB)
+    dc_power_lo, dc_power_hi = _sig1_bounds([h.tdp for h in datacenter if h.tdp is not None], watt)
+    dc_ridge_lo, dc_ridge_hi = _sig1_bounds([h.ridge_point() for h in datacenter], flop / byte)
+    edge_peak_lo, edge_peak_hi = _sig1_bounds([h.compute.peak_flops for h in edge], TFLOPs / second)
+    edge_bw_lo, edge_bw_hi = _sig1_bounds([h.memory.bandwidth for h in edge], GB / second)
+    edge_cap_lo, edge_cap_hi = _sig1_bounds([h.memory.capacity for h in edge], GB)
+    edge_power_lo, edge_power_hi = _sig1_bounds([h.tdp for h in edge if h.tdp is not None], watt)
+    edge_ridge_lo, edge_ridge_hi = _sig1_bounds([h.ridge_point() for h in edge], flop / byte)
+    mobile_peak_lo, mobile_peak_hi = _sig1_bounds([h.compute.peak_flops for h in mobile], TFLOPs / second)
+    mobile_bw_lo, mobile_bw_hi = _sig1_bounds([h.memory.bandwidth for h in mobile], GB / second)
+    mobile_cap_lo, mobile_cap_hi = _sig1_bounds([h.memory.capacity for h in mobile], GB)
+    mobile_power_lo, mobile_power_hi = _sig1_bounds([h.tdp for h in mobile if h.tdp is not None], watt)
+    mobile_ridge_lo, mobile_ridge_hi = _sig1_bounds([h.ridge_point() for h in mobile], flop / byte)
+    mcu_peak_lo, mcu_peak_hi = _sig1_bounds([h.compute.peak_flops for h in mcu], MFLOPs / second)
+    mcu_bw_lo, mcu_bw_hi = _sig1_bounds([h.memory.bandwidth for h in mcu], MB / second)
+    mcu_cap_lo, mcu_cap_hi = _sig1_bounds([h.memory.capacity for h in mcu], MB)
+    mcu_power_lo, mcu_power_hi = _sig1_bounds([h.tdp for h in mcu if h.tdp is not None], milliwatt)
+    mcu_ridge_lo, mcu_ridge_hi = _sig1_bounds([h.ridge_point() for h in mcu], flop / byte)
+    peak_span_orders = math.floor(math.log10((max(dc_peak) / min(mcu_peak)).to("").magnitude))
+    power_span_orders = math.floor(math.log10((max(dc_power) / min(mcu_power)).to("").magnitude))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        min(dc_ridge) > 50 * (flop / byte) and min(mobile_ridge) > 50 * (flop / byte),
+        "Datacenter and mobile ridges should sit in the hundreds of FLOP/byte",
+    )
+    check(max(mcu_ridge) < 10 * (flop / byte), "Microcontroller ridge should sit within a few FLOP/byte")
+    check(peak_span_orders >= 6, f"Expected at least six orders of magnitude in peak rate, got {peak_span_orders}")
+    check(mobile_power_lo == mobile_power_hi, "Mobile power is a single class value; the table shows one number")
+    check(power_span_orders >= 5, f"Expected at least five orders of magnitude in power, got {power_span_orders}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    dc_peak_str = fmt_qty_range(dc_peak_lo, dc_peak_hi, unit=TFLOPs / second, commas=True)
+    dc_bw_str = fmt_qty_range(dc_bw_lo, dc_bw_hi, unit=TB / second, commas=True)
+    dc_cap_str = fmt_qty_range(dc_cap_lo, dc_cap_hi, unit=GB, commas=True)
+    dc_power_str = fmt_qty_range(dc_power_lo, dc_power_hi, unit=watt, commas=True)
+    dc_ridge_str = fmt_qty_range(dc_ridge_lo, dc_ridge_hi, unit=flop / byte, commas=True)
+
+    edge_peak_str = fmt_qty_range(edge_peak_lo, edge_peak_hi, unit=TFLOPs / second, commas=True)
+    edge_bw_str = fmt_qty_range(edge_bw_lo, edge_bw_hi, unit=GB / second, commas=True)
+    edge_cap_str = fmt_qty_range(edge_cap_lo, edge_cap_hi, unit=GB, commas=True)
+    edge_power_str = fmt_qty_range(edge_power_lo, edge_power_hi, unit=watt, commas=True)
+    edge_ridge_str = fmt_qty_range(edge_ridge_lo, edge_ridge_hi, unit=flop / byte, commas=True)
+
+    mobile_peak_str = fmt_qty_range(mobile_peak_lo, mobile_peak_hi, unit=TFLOPs / second, commas=True)
+    mobile_bw_str = fmt_qty_range(mobile_bw_lo, mobile_bw_hi, unit=GB / second, commas=True)
+    mobile_cap_str = fmt_qty_range(mobile_cap_lo, mobile_cap_hi, unit=GB, commas=True)
+    mobile_power_str = fmt_power(mobile_power_lo, unit=watt, precision=0, commas=True)
+    mobile_ridge_str = fmt_qty_range(mobile_ridge_lo, mobile_ridge_hi, unit=flop / byte, commas=True)
+
+    mcu_peak_str = fmt_qty_range(mcu_peak_lo, mcu_peak_hi, unit=MFLOPs / second, commas=True)
+    mcu_bw_str = fmt_qty_range(mcu_bw_lo, mcu_bw_hi, unit=MB / second, commas=True)
+    mcu_cap_str = fmt_qty_range(mcu_cap_lo, mcu_cap_hi, unit=MB, commas=True)
+    mcu_power_str = fmt_qty_range(mcu_power_lo, mcu_power_hi, unit=milliwatt, commas=True)
+    mcu_ridge_str = fmt_qty_range(mcu_ridge_lo, mcu_ridge_hi, unit=flop / byte, commas=True)
+
+    peak_span_orders_str = fmt_int(peak_span_orders, commas=False)
+    power_span_orders_str = fmt_int(power_span_orders, commas=False)
+```
+
+A model trained on a 700 W data center accelerator cannot be dropped onto a battery-powered phone or a microcontroller with a few hundred kilobytes of SRAM without redesigning the workload around the target's physical envelope. The deployment paradigms of @sec-ml-systems-deployment-paradigm-framework-0d25 run on four hardware classes whose peak throughput, memory bandwidth, memory capacity, and power budgets span orders of magnitude (@tbl-accelerator-classes-ref). Each range covers representative devices in its class rather than any single product; @sec-appdx-assumptions-accelerator-matrix-c4d0 tabulates the individual chips.
+
+| **Class**                  |                 **Peak Rate**                 |             **Memory Bandwidth**            |             **Memory Capacity**              |                   **Power**                    |                **Ridge Point**                 |
+|:---------------------------|:---------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:----------------------------------------------:|:----------------------------------------------:|
+| **Datacenter accelerator** |   `{python} AcceleratorClasses.dc_peak_str`   |   `{python} AcceleratorClasses.dc_bw_str`   |   `{python} AcceleratorClasses.dc_cap_str`   |   `{python} AcceleratorClasses.dc_power_str`   |   `{python} AcceleratorClasses.dc_ridge_str`   |
+| **Edge module**            |  `{python} AcceleratorClasses.edge_peak_str`  |  `{python} AcceleratorClasses.edge_bw_str`  |  `{python} AcceleratorClasses.edge_cap_str`  |  `{python} AcceleratorClasses.edge_power_str`  |  `{python} AcceleratorClasses.edge_ridge_str`  |
+| **Mobile SoC**             | `{python} AcceleratorClasses.mobile_peak_str` | `{python} AcceleratorClasses.mobile_bw_str` | `{python} AcceleratorClasses.mobile_cap_str` | `{python} AcceleratorClasses.mobile_power_str` | `{python} AcceleratorClasses.mobile_ridge_str` |
+| **Microcontroller**        |   `{python} AcceleratorClasses.mcu_peak_str`  |   `{python} AcceleratorClasses.mcu_bw_str`  |  `{python} AcceleratorClasses.mcu_cap_str`   |  `{python} AcceleratorClasses.mcu_power_str`   |  `{python} AcceleratorClasses.mcu_ridge_str`   |
+
+: **Accelerator Classes**: Order-of-magnitude ranges across representative devices in each class, rounded to one significant figure. Peak rate is the dense rate at each device's native ML precision (FP16 or BF16 for data center accelerators, mostly INT8 for edge, mobile, and microcontroller parts), so compare rates within a class rather than across classes. The ridge point is peak rate divided by memory bandwidth. {#tbl-accelerator-classes-ref tbl-colwidths="[20,16,16,16,14,18]"}
+
+Two patterns stand out across these classes. First, they span roughly `{python} AcceleratorClasses.peak_span_orders_str` orders of magnitude in peak rate and `{python} AcceleratorClasses.power_span_orders_str` in power, so a model sized for one class rarely runs unchanged on another. Second, ridge points sit in the hundreds of FLOP per byte from data center to mobile, which leaves the same low-intensity operations bandwidth bound on all three. A microcontroller's ridge, by contrast, sits within a few FLOP per byte, which makes nearly every layer of a keyword-spotting model compute bound and shifts the binding constraint to the power budget. @Sec-hardware-acceleration-choosing-accelerator-6b2d applies these classes to the choice of accelerator. Moving between classes also changes which numerical formats the hardware supports natively, and numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move.
 
 ## Numerical Representations {#sec-appdx-machine-foundations-numerical-representations-c889}
 
-Statistics characterizes data distributions; numerical representations determine how the system stores those values. In ML systems, the choice of precision (FP32 vs. BF16 vs. INT8) is a direct trade-off between statistical fidelity and hardware throughput.
+Halving a tensor's representation from 32 bits to 16 bits cuts its memory footprint and bandwidth traffic in half and doubles peak Tensor Core throughput on the same silicon, yet choosing the wrong 16-bit layout can cause small gradients to underflow to zero during training. Because the numerical format fixes both how many bytes each value occupies and how much energy each arithmetic operation costs, choosing among FP32, BF16, FP16, FP8, and INT8 is a direct trade-off between statistical fidelity and hardware throughput.
 
-### Floating-point format comparison {#sec-appdx-machine-foundations-floatingpoint-format-comparison-1836}
+### Floating-point formats {#sec-appdx-machine-foundations-floatingpoint-format-comparison-1836}
 
-IEEE 754 formats such as FP32 and FP16, together with AI-specific formats such as BF16 and FP8, define different trade-offs between dynamic range (the span of representable values) and precision (the granularity of values within that range). @Tbl-numerical-formats summarizes the key formats and their use cases, while @fig-float-formats visualizes the bit allocations.
+A gradient of magnitude $10^{-6}$ survives in 16-bit brain floating point (BF16) but flushes to zero in standard 16-bit IEEE floating point (FP16), even though both formats occupy two bytes. IEEE 754 standards and AI-specific floating-point representations divide a fixed bit budget between a sign bit, an exponent field that sets **dynamic range** (the span of representable magnitudes), and a mantissa field that sets **precision** (the granularity of values within that range). Operational ranges and typical uses differ by format (@tbl-numerical-formats), and the bit partitions of FP32, BF16, FP16, and INT8 show where each format spends its bits (@fig-float-formats). BF16 retains FP32's full 8-bit exponent field, preserving the same dynamic range while truncating the mantissa to 7 bits, whereas FP16 widens the mantissa to 10 bits at the cost of a narrower 5-bit exponent.
 
 | **Format** | **Bits** | **Exponent** | **Mantissa** |                  **Dynamic Range**                  | **Typical Use Case**                           |
 |:-----------|:--------:|:------------:|:------------:|:---------------------------------------------------:|:-----------------------------------------------|
@@ -1115,9 +1246,9 @@ IEEE 754 formats such as FP32 and FP16, together with AI-specific formats such a
 | **FP8**    |    8     |    4 or 5    |    3 or 2    |                        Varies                       | Training/inference on supported hardware       |
 | **INT8**   |    8     |     N/A      |     N/A      |                     -128 to 127                     | Inference after quantization                   |
 
-: **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. BF16 shares FP32's normal exponent range while using half the storage. {#tbl-numerical-formats tbl-colwidths="[8,8,11,9,20,44]"}
+: **Numerical Format Comparison**: Each format trades off precision, dynamic range, memory footprint, and compute throughput. {#tbl-numerical-formats tbl-colwidths="[8,8,11,9,20,44]"}
 
-::: {#fig-float-formats fig-env="figure" fig-pos="htb" fig-cap="**Numerical Format Bit Layouts**: A visual comparison of bit allocations. BF16 preserves FP32's 8-bit exponent and therefore its normal exponent range. FP16 trades range for precision and often uses loss scaling to reduce underflow." fig-alt="Stacked horizontal bars showing bit breakdown. FP32: 1 Sign, 8 Exp, 23 Mantissa. BF16: 1 Sign, 8 Exp, 7 Mantissa. FP16: 1 Sign, 5 Exp, 10 Mantissa. INT8: 8 Integer bits."}
+::: {#fig-float-formats fig-env="figure" fig-pos="htb" fig-cap="**Numerical Format Bit Layouts**: A visual comparison of how FP32, BF16, FP16, and INT8 allocate their bits." fig-alt="Stacked horizontal bars showing bit breakdown. FP32: 1 Sign, 8 Exp, 23 Mantissa. BF16: 1 Sign, 8 Exp, 7 Mantissa. FP16: 1 Sign, 5 Exp, 10 Mantissa. INT8: 8 Integer bits."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily, scale=0.9, every node/.append style={scale=0.9}]
   \tikzset{
@@ -1158,43 +1289,40 @@ IEEE 754 formats such as FP32 and FP16, together with AI-specific formats such a
   \draw[gray!30, dashed] (0, -0.5) -- (0, 3.5);
   \draw[gray!30, dashed] (9.6, -0.5) -- (9.6, 3.5);
   \node[below, font=\scriptsize\sffamily, text=gray] at (0, -0.5) {Bit 31/15/7};
-  \node[below, font=\scriptsize\sffamily, text=gray] at (9.6, -0.5) {Bit 0};
+  \node[below, font=\scriptsize\sffamily, text=gray] at (9.6, -0.5) {FP32 bit 0};
 
 \end{tikzpicture}
 ```
 :::
 
-Beyond bit width, the allocation of bits between exponent and mantissa determines what range of values each format can represent.
+BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appendix] [@google_bfloat16; @kalamkar2019] occupies the same 16-bit storage class as FP16, yet the two formats behave very differently during training. Because BF16 allocates three more bits to the exponent than FP16, nominal bit width alone does not predict whether a training run will need gradient scaling.
 
-Among these formats, BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appendix] deserves special attention [@google_bfloat16; @kalamkar2019]. It occupies the same 16-bit storage class as FP16 but behaves differently in training, so nominal width alone does not predict the operational burden. The following systems perspective connects bit allocation to memory traffic, numerical stability, and deployment efficiency.
-
-[^fn-bf16-precision-appendix]: **BF16 (brain floating point 16)**\index{BF16!appendix refresher}: Originally introduced with Google TPUv2 and later adopted by Intel, Arm, and NVIDIA, BF16 became a common training format across accelerator ecosystems. Its adoption made format support in hardware, kernels, and distributed-training libraries a portability concern rather than a vendor-specific feature.
+[^fn-bf16-precision-appendix]: **BF16 (brain floating point 16)**\index{BF16!appendix refresher}: Originally introduced with Google TPU v2 and later adopted by Intel, Arm, and NVIDIA, BF16 became a common training format across accelerator ecosystems. Its adoption made format support in hardware, kernels, and distributed-training libraries a portability concern rather than a vendor-specific feature.
 
 ::: {#psp-appendix-machine-dynamic-range-wall .callout-perspective title="The dynamic range wall"}
 
 The choice of numerical format is a direct application of the iron law of ML systems (principle \ref{pri-iron-law}). Reducing precision from FP32 to BF16 or FP16 halves the data volume term, potentially doubling throughput on memory-bound workloads. However, the *type* of 16-bit format determines the engineering complexity:
 
-*   Dynamic range (the exponent): BF16 preserves the eight-bit exponent of FP32 and therefore the same normal exponent range [@kalamkar2019].
-*   Precision (the mantissa): FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed].
-*   Energy efficiency: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing].
+*   **Dynamic range (the exponent)**: BF16 preserves the eight-bit exponent of FP32 and therefore the same normal exponent range [@kalamkar2019].
+*   **Precision (the mantissa)**: FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed]. @Sec-model-training-mixedprecision-training-9218 develops the full mixed-precision recipe.
+*   **Energy efficiency**: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing]. @Sec-model-compression-numerical-format-comparison-8fa2 compares the formats on accuracy cost and hardware support.
 
 :::
 
 ### Integer quantization {#sec-appdx-machine-foundations-integer-quantization-5442}
 
-Quantization\index{Quantization!appendix refresher} maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers. Two approaches dominate.
+Storing weights and activations in 32-bit floating point spends four bytes per value and drives wide floating-point multipliers when 256 discrete levels often suffice for inference accuracy. Quantization\index{Quantization!appendix refresher} cuts that cost by mapping continuous floating-point values to discrete integers, typically INT8, using either a symmetric or an asymmetric mapping to assign the floating-point range to 256 integer codes.
 
-For symmetric quantization\index{Quantization!symmetric}, let $s_{\text{quant}} = \max |x|$ over the calibrated range and assume $x$ is clipped to $[-s_{\text{quant}}, s_{\text{quant}}]$. The signed INT8 code is:
-$$ x_{\text{int}} = \text{round}\left(\frac{x}{s_{\text{quant}}} \times 127\right) $$
-This mapping works well for weight distributions centered around zero.
+For symmetric quantization\index{Quantization!symmetric}, let $\SymmetricClippingThreshold= \max |\QuantizerInput|$ over the calibrated range, assume $\QuantizerInput$ is clipped to $[-\SymmetricClippingThreshold, \SymmetricClippingThreshold]$, and set the scale $\QuantizationScale= \SymmetricClippingThreshold/127$. The signed INT8 code is:
+$$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput}{\QuantizationScale}\right) $$
 
-Asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $x_{\min}$ and $x_{\max}$ bound the calibrated range, set the normalization span $s_{\text{quant}} = x_{\max} - x_{\min}$, and clip $x$ to $[x_{\min}, x_{\max}]$. A common unsigned 8-bit mapping is:
-$$ x_{\text{uint8}} = \text{round}\left(\frac{x - x_{\min}}{s_{\text{quant}}} \times 255\right) $$
+This symmetric mapping works well for weight distributions centered around zero, whereas asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\ClippingRangeLowerBound$ and $\ClippingRangeUpperBound$ bound the calibrated range, clip $\QuantizerInput$ to $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, and set the scale $\QuantizationScale= (\ClippingRangeUpperBound- \ClippingRangeLowerBound)/255$. A common unsigned 8-bit mapping is:
+$$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput- \ClippingRangeLowerBound}{\QuantizationScale}\right) $$
 
-The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications.
+The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications. @Sec-model-compression-quantization-precision-cd46 develops calibration, granularity, and the accuracy cost of each mapping on the book's workloads. Together with the floating-point formats, integer quantization completes the machine-level levers that determine how many bytes each operation moves and how much energy each arithmetic step consumes.
 
 ## Summary {.unnumbered}
 
-Machine-side diagnosis begins with units, ceilings, and working sets. Reference numbers establish orders of magnitude; the Roofline Model and the iron law identify whether operations, bytes, or latency bind; Amdahl's Law, Gustafson's Law, and Little's Law test speedup, scaling, and concurrency claims; and dimensional analysis catches impossible results. The memory hierarchy and interconnect show how those limits appear as latency and bandwidth constraints, while numerical representations show how dynamic range, precision, and quantization change storage, energy, throughput, and accuracy.
+Machine-side diagnosis begins with units, ceilings, and working sets. The roofline model and the iron law identify which ceiling binds, and Amdahl's and Gustafson's laws, the memory hierarchy, the accelerator classes, and the numerical formats explain the gap between a measurement and that ceiling.
 
-Treat peak specifications as ceilings, not predictions. Compare a measurement with the relevant ceiling, then trace the remaining gap to utilization, data movement, runtime overhead, architecture, or software. A back-of-envelope estimate is useful when it states its assumptions and units and makes the next measurement obvious.
+Treat peak specifications as ceilings, not predictions. Compare a measurement with the relevant ceiling, then trace the remaining gap to utilization, data movement, runtime overhead, architecture, or software. A back-of-envelope estimate is useful when it states its assumptions and units and makes the next measurement obvious. Chip specifications age with every product generation; the relationships here outlast them.

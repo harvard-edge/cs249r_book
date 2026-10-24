@@ -1,124 +1,73 @@
 # viz/plots.py
-# Simulator-aware plotters for generated MLSysIM figures.
-# Book publication style is owned by book.tools.figures.style; this module keeps
-# a local fallback so standalone mlsysim installs do not depend on the book tree.
-
-import os
+# Simulator-aware plotters for generated MLSysIM figures. Every plotter draws
+# through the shared style in viz/style.py.
 
 try:
     import numpy as np
 except ImportError:
     np = None
 
-try:
-    from binder.tools.figures.style import (
-        COLORS,
-        WEB_FIG_DPI,
-        bar_compare,
-        finalize_web_figure as _finalize_web_figure,
-        set_book_style,
-        setup_plot,
+from .style import (
+    BODY_FIGSIZE,
+    COLORS,
+    MIN_FONT_PT,
+    WEB_FIG_DPI,
+    bar_compare,
+    finalize_web_figure as _finalize_web_figure,
+    plt,
+    set_book_style,
+    setup_plot,
+)
+
+__all__ = [
+    "BODY_FIGSIZE",
+    "COLORS",
+    "MIN_FONT_PT",
+    "WEB_FIG_DPI",
+    "bar_compare",
+    "plt",
+    "set_book_style",
+    "setup_plot",
+    "plot_roofline",
+    "plot_distributed_roofline",
+    "plot_evaluation_scorecard",
+]
+
+
+def _slope_screen_angle(ax, x0, y0, x1, y1):
+    """Return the display-space angle (in degrees) of the line from (x0, y0) to (x1, y1)."""
+    p0 = ax.transData.transform((x0, y0))
+    p1 = ax.transData.transform((x1, y1))
+    return float(np.degrees(np.arctan2(p1[1] - p0[1], p1[0] - p0[0])))
+
+
+def _pick_slope_label_x(x_slope_start, ridge_point, workload_ais):
+    """Pick an x position along the visible memory slope clear of axes, ridge, and workloads."""
+    u_lo = np.log10(max(x_slope_start * 8.0, 1.2))
+    u_hi = np.log10(max(ridge_point * 0.15, u_lo + 0.1))
+    if u_hi <= u_lo + 0.12:
+        return float(10.0 ** ((np.log10(x_slope_start) + np.log10(ridge_point)) * 0.44))
+    center_u = 0.5 * (u_lo + u_hi)
+    if not workload_ais:
+        return float(10.0**center_u)
+    candidates = np.linspace(u_lo, u_hi, 9)
+    w_logs = [np.log10(max(ai, 1e-3)) for ai in workload_ais]
+    best_u = max(
+        candidates,
+        key=lambda u: min(abs(u - w) for w in w_logs) - 0.15 * abs(u - center_u),
     )
-except ImportError:
-    # Standalone mlsysim fallback. Keep in sync with book.tools.figures.style.
-    try:
-        import matplotlib
-
-        if "MPLBACKEND" not in os.environ:
-            matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
-
-        _matplotlib_available = True
-    except ImportError:
-        plt = None
-        _matplotlib_available = False
-
-    COLORS = {
-        "crimson": "#A51C30",
-        "primary": "#333333",
-        "grid": "#CCCCCC",
-        "BlueLine": "#006395",
-        "BlueL": "#D1E6F3",
-        "BlueFill": "#D6EAF8",
-        "RedLine": "#CB202D",
-        "RedL": "#F5D2D5",
-        "RedFill": "#F2D7D5",
-        "GreenLine": "#008F45",
-        "GreenL": "#D4EFDF",
-        "GreenFill": "#D5F5E3",
-        "OrangeLine": "#E67817",
-        "OrangeL": "#FCE4CC",
-        "VioletLine": "#7E317B",
-        "VioletL": "#E6D4E5",
-        "BrownLine": "#78492A",
-        "BrownL": "#E3D3C8",
-        "YellowFill": "#FEF9E0",
-    }
-
-    WEB_FIG_DPI = 120
-
-    def set_book_style():
-        """Apply the global matplotlib style configuration."""
-        if not _matplotlib_available:
-            raise ImportError("matplotlib is required for plot generation.")
-        plt.rcParams.update(
-            {
-                "font.family": "sans-serif",
-                "font.sans-serif": [
-                    "Helvetica",
-                    "Helvetica Neue",
-                    "Arial",
-                    "DejaVu Sans",
-                ],
-                "font.size": 10,
-                "text.color": COLORS["primary"],
-                "axes.labelsize": 11,
-                "axes.titlesize": 12,
-                "axes.titleweight": "bold",
-                "axes.grid": True,
-                "grid.color": COLORS["grid"],
-                "grid.alpha": 0.4,
-                "grid.linestyle": "--",
-                "figure.dpi": 300,
-                "savefig.bbox": "tight",
-            }
-        )
-
-    def _finalize_web_figure(fig):
-        """Match Quarto web defaults while publication figures keep print DPI."""
-        fig.set_dpi(WEB_FIG_DPI)
-        return fig
-
-    def setup_plot(figsize=(8, 5)):
-        """One-line plot setup for generated plotting blocks."""
-        set_book_style()
-        fig, ax = plt.subplots(figsize=figsize)
-        return fig, ax, COLORS, plt
-
-    def bar_compare(labels, values, *, title=None, ylabel=None, figsize=(8, 4), color=None):
-        """Render a compact bar comparison with the MLSysBook style."""
-        fig, ax, colors, _ = setup_plot(figsize=figsize)
-        bar_color = color or colors["BlueLine"]
-        bars = ax.bar(labels, values, color=bar_color, alpha=0.8)
-        if title:
-            ax.set_title(title)
-        if ylabel:
-            ax.set_ylabel(ylabel)
-        ax.tick_params(axis="x", rotation=0)
-        for bar, value in zip(bars, values):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height(),
-                f"{value:g}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color=colors["primary"],
-            )
-        return _finalize_web_figure(fig), ax
+    return float(10.0**best_u)
 
 
-def plot_roofline(hardware_node, workloads=None, title=None):
+def plot_roofline(
+    hardware_node,
+    workloads=None,
+    title=None,
+    *,
+    efficiency: float = 1.0,
+    batch_size: int = 1,
+    precision: str = "fp16",
+):
     """
     Plots a publication-quality Roofline Model for a given HardwareNode.
 
@@ -127,14 +76,17 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     - Memory-bound and compute-bound regions shaded and labeled
     - Memory bandwidth ceiling (diagonal) and compute ceiling (flat)
     - Workloads plotted with bottleneck classification
+    - Optional efficiency derate, batch_size, and precision forwarded to SingleNodeModel
     """
     # 1. PARAMETERS
-    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude
+    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude * efficiency
     peak_bw = hardware_node.memory.bandwidth.to("GB/s").magnitude
     ridge_point = peak_flops / (peak_bw / 1000)  # FLOP/Byte
 
     # 2. AXIS RANGE
-    x_min, x_max = 0.1, 10000
+    x_min = 0.1
+    x_max = max(10000.0, 10.0 ** np.ceil(np.log10(ridge_point * 30.0)))
+    y_min, y_max = peak_flops * 0.0005, peak_flops * 3.0
     x = np.logspace(np.log10(x_min), np.log10(x_max), 500)
 
     # 3. ROOFLINE CURVES
@@ -143,14 +95,14 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     y_roof = np.minimum(y_mem, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     mem_mask = x <= ridge_point
     comp_mask = x >= ridge_point
     ax.fill_between(
         x[mem_mask],
-        y_roof[mem_mask] * 0.001,
+        y_min,
         y_roof[mem_mask],
         color=colors["BlueL"],
         alpha=0.5,
@@ -158,7 +110,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     )
     ax.fill_between(
         x[comp_mask],
-        y_roof[comp_mask] * 0.001,
+        y_min,
         y_roof[comp_mask],
         color=colors["OrangeL"],
         alpha=0.5,
@@ -181,30 +133,60 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         zorder=5,
     )
 
-    # Memory bandwidth ceiling label (on the slope)
-    slope_x = ridge_point * 0.08
+    # Set limits before computing display angles and label placements
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+
+    # Resolve workload points upfront so labels never collide with them
+    resolved_workloads = []
+    if workloads:
+        from ..engine.solvers import SingleNodeModel
+
+        for model in workloads:
+            profile = SingleNodeModel().solve(
+                model,
+                hardware_node,
+                batch_size=batch_size,
+                precision=precision,
+                efficiency=efficiency,
+            )
+            ai = profile.arithmetic_intensity.magnitude
+            perf = min(peak_bw * ai / 1000, peak_flops)
+            resolved_workloads.append((model, ai, perf))
+
+    # Memory bandwidth ceiling label (placed on the open middle of the slope)
+    x_slope_start = max(x_min, y_min * 1000.0 / peak_bw)
+    avoid_xs = []
+    for _, ai, _ in resolved_workloads:
+        if ai < ridge_point:
+            avoid_xs.append(ai if ai < 2.0 else ai * 0.25)
+    slope_x = _pick_slope_label_x(x_slope_start, ridge_point, avoid_xs)
     slope_y = peak_bw * slope_x / 1000
+    slope_angle = _slope_screen_angle(
+        ax, x_slope_start, peak_bw * x_slope_start / 1000, ridge_point, peak_flops
+    )
     ax.text(
         slope_x,
-        slope_y * 1.6,
+        slope_y * 1.38,
         f"BW ceiling: {peak_bw:.0f} GB/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        rotation=38,
+        rotation=slope_angle,
+        rotation_mode="anchor",
         ha="center",
         va="bottom",
     )
 
-    # Compute ceiling label (on the flat)
+    # Compute ceiling label (above the flat roof, clear of ridge diamond)
     ax.text(
-        ridge_point * 8,
-        peak_flops * 1.12,
+        x_max * 0.94,
+        peak_flops * 1.24,
         f"Compute ceiling: {peak_flops:.0f} TFLOP/s",
         color=colors["OrangeLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -217,14 +199,16 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         markersize=9,
         zorder=10,
     )
+    ridge_label_x = (ridge_point * x_max) ** 0.45
     ax.annotate(
         f"Ridge Point\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
-        xytext=(ridge_point * 2.6, peak_flops * 0.26),
-        fontsize=8.5,
+        xytext=(ridge_label_x, peak_flops * 0.24),
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
+        va="top",
         arrowprops=dict(
             arrowstyle="->",
             color=colors["crimson"],
@@ -243,19 +227,19 @@ def plot_roofline(hardware_node, workloads=None, title=None):
 
     # Region labels
     ax.text(
-        (x_min * ridge_point) ** 0.5,
-        peak_flops * 0.02,
+        (x_slope_start * ridge_point) ** 0.64,
+        (y_min * peak_flops) ** 0.30,
         "MEMORY\nBOUND",
         color=colors["BlueLine"],
         fontsize=11,
         fontweight="bold",
         alpha=0.25,
-        ha="left",
+        ha="center",
         va="center",
     )
     ax.text(
         (ridge_point * x_max) ** 0.5,
-        peak_flops * 0.02,
+        (y_min * peak_flops) ** 0.30,
         "COMPUTE\nBOUND",
         color=colors["OrangeLine"],
         fontsize=11,
@@ -265,32 +249,44 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         va="center",
     )
 
-    # Plot workloads
-    if workloads:
-        from ..engine.solvers import SingleNodeModel
-
+    # Plot workloads with collision-free label placement
+    if resolved_workloads:
         workload_colors = [
             colors["primary"],
             colors["GreenLine"],
             colors["VioletLine"],
             colors["BrownLine"],
         ]
-        for i, model in enumerate(workloads):
-            profile = SingleNodeModel().solve(model, hardware_node, efficiency=1.0)
-            ai = profile.arithmetic_intensity.magnitude
-            perf = min(peak_bw * ai / 1000, peak_flops)
+        for i, (model, ai, perf) in enumerate(resolved_workloads):
             c = workload_colors[i % len(workload_colors)]
             bound = "memory" if ai < ridge_point else "compute"
-            ax.plot(ai, perf, "o", color=c, markersize=9, zorder=10)
+            ax.plot(ai, perf, "o", color=c, markersize=8.5, zorder=11)
+
+            if ai < ridge_point:
+                if ai < 2.0:
+                    # Low-AI workload near bottom-left: place label to the right inside the shaded region
+                    text_xy = (ai * 3.8, perf * (0.55 * (0.55**i)))
+                    ha_align, va_align = "left", "center"
+                else:
+                    # Mid/high-AI memory-bound workload: place label in the empty upper-left white region
+                    text_xy = (ai * 0.12, perf * (0.72 * (0.55**i)))
+                    ha_align, va_align = "center", "center"
+            else:
+                # Compute-bound workload: place label below the flat roof, offset from ridge label
+                text_xy = (max(ai * 0.85, ridge_point * 2.2), peak_flops * (0.06 * (0.55**i)))
+                ha_align, va_align = "center", "top"
+
             ax.annotate(
                 f"{model.name}\n({bound}-bound)",
                 xy=(ai, perf),
-                xytext=(ai * 0.3, perf * 0.4),
-                fontsize=8,
+                xytext=text_xy,
+                fontsize=MIN_FONT_PT,
                 fontweight="bold",
                 color=c,
-                ha="center",
-                arrowprops=dict(arrowstyle="->", color=c, lw=1),
+                ha=ha_align,
+                va=va_align,
+                arrowprops=dict(arrowstyle="->", color=c, lw=1.1, shrinkB=5),
+                zorder=12,
             )
 
     ax.set_xlabel("Arithmetic Intensity (FLOP/Byte)")
@@ -299,27 +295,31 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     # standalone use outside the book.
     if title:
         ax.set_title(title)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
+
 
 def plot_distributed_roofline(fleet_system, workloads=None):
     """
     Plots a Distributed (Network) Roofline Model for a given fleet.
     Maps Performance (TFLOP/s) against Communication Intensity (FLOP/Byte).
-    
+
     Timeless Principle: The Network Wall is hit when gradient/activation
     synchronization exceeds the fleet's bisection bandwidth.
     """
     # 1. PARAMETERS (Fleet Specs)
-    peak_flops = fleet_system.node.accelerator.compute.peak_flops.to("TFLOPs/s").magnitude * fleet_system.count
+    peak_flops = (
+        fleet_system.node.accelerator.compute.peak_flops.to("TFLOPs/s").magnitude
+        * fleet_system.count
+    )
     # Bisection Bandwidth (total network capacity for All-Reduce)
     peak_network_bw = fleet_system.fabric.bandwidth.to("GB/s").magnitude
-    ridge_point = peak_flops / (peak_network_bw / 1000) # FLOP/Byte
+    ridge_point = peak_flops / (peak_network_bw / 1000)  # FLOP/Byte
 
     # 2. AXIS RANGE
-    x_min, x_max = 0.1, 10000
+    x_min = 0.1
+    x_max = max(10000.0, 10.0 ** np.ceil(np.log10(ridge_point * 50.0)))
+    y_min, y_max = peak_flops * 0.0005, peak_flops * 3.0
     x = np.logspace(np.log10(x_min), np.log10(x_max), 500)
 
     # 3. ROOFLINE CURVES
@@ -328,14 +328,14 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     y_roof = np.minimum(y_net, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     net_mask = x <= ridge_point
     comp_mask = x >= ridge_point
     ax.fill_between(
         x[net_mask],
-        y_roof[net_mask] * 0.001,
+        y_min,
         y_roof[net_mask],
         color=colors["RedL"],
         alpha=0.5,
@@ -343,7 +343,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     )
     ax.fill_between(
         x[comp_mask],
-        y_roof[comp_mask] * 0.001,
+        y_min,
         y_roof[comp_mask],
         color=colors["BlueFill"],
         alpha=0.5,
@@ -359,30 +359,38 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         zorder=5,
     )
 
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+
     # Network bandwidth ceiling label
-    slope_x = ridge_point * 0.08
+    x_slope_start = max(x_min, y_min * 1000.0 / peak_network_bw)
+    slope_x = _pick_slope_label_x(x_slope_start, ridge_point, [])
     slope_y = peak_network_bw * slope_x / 1000
+    slope_angle = _slope_screen_angle(
+        ax, x_slope_start, peak_network_bw * x_slope_start / 1000, ridge_point, peak_flops
+    )
     ax.text(
         slope_x,
-        slope_y * 1.6,
+        slope_y * 1.38,
         f"Bisection BW: {peak_network_bw:.0f} GB/s",
         color=colors["RedLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        rotation=38,
+        rotation=slope_angle,
+        rotation_mode="anchor",
         ha="center",
         va="bottom",
     )
 
     # Fleet Compute ceiling label
     ax.text(
-        ridge_point * 8,
-        peak_flops * 1.12,
+        x_max * 0.94,
+        peak_flops * 1.24,
         f"Fleet Compute: {peak_flops:.0f} TFLOP/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -395,47 +403,50 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         markersize=10,
         zorder=10,
     )
+    ridge_label_x = (ridge_point * x_max) ** 0.45
+    ridge_str = f"{ridge_point:,.0f}" if ridge_point >= 1000 else f"{ridge_point:.1f}"
     ax.annotate(
-        f"Network Ridge\n{ridge_point:.1f} FLOP/Byte",
+        f"Network Ridge\n{ridge_str} FLOP/Byte",
         xy=(ridge_point, peak_flops),
-        xytext=(ridge_point * 2, peak_flops * 0.25),
-        fontsize=8.5,
+        xytext=(ridge_label_x, peak_flops * 0.24),
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
+        va="top",
         arrowprops=dict(arrowstyle="->", color=colors["crimson"], lw=1.2),
     )
 
     # Region labels
     ax.text(
-        x_min * 1.5,
-        peak_flops * 0.6,
+        (x_slope_start * ridge_point) ** 0.52,
+        (y_min * peak_flops) ** 0.36,
         "NETWORK\nBOUND",
         color=colors["RedLine"],
         fontsize=11,
         fontweight="bold",
         alpha=0.25,
-        ha="left",
+        ha="center",
         va="center",
     )
     ax.text(
-        x_max * 0.4,
-        peak_flops * 0.6,
+        (ridge_point * x_max) ** 0.5,
+        (y_min * peak_flops) ** 0.36,
         "COMPUTE\nBOUND",
         color=colors["BlueLine"],
         fontsize=11,
         fontweight="bold",
         alpha=0.25,
-        ha="right",
+        ha="center",
         va="center",
     )
 
     ax.set_xlabel("Communication Intensity (FLOP/Byte)")
     ax.set_ylabel("Fleet Performance (TFLOP/s)")
-    ax.set_title(f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}")
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.set_title(
+        f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}"
+    )
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
 
 def _metric_as_float(value, unit=None):
@@ -485,7 +496,7 @@ def plot_evaluation_scorecard(evaluation):
     ratios = [l1_ratio, l2_ratio]
     
     # 3. OUTPUT (Visualization)
-    fig, ax, colors, plt = setup_plot(figsize=(8, 4))
+    fig, ax, colors, _plt = setup_plot(figsize=(BODY_FIGSIZE[0], 3.6))
     bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
     bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
     

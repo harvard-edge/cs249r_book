@@ -11,10 +11,11 @@ TinyTorch.
 shared/styles/
 ├── _brand.scss               # raw brand colours (single source of truth)
 ├── _ecosystem-base.scss      # light-mode ecosystem defaults
-├── _ecosystem-base-dark.scss # dark-mode ecosystem defaults
+├── _ecosystem-base-dark.scss # dark-mode ecosystem defaults (MLSys·im docs)
 ├── _site-dark.scss           # dark-mode rules used by the site (landing/about/etc.)
+├── _dark-code.scss           # dark inline code, code blocks, syntax tokens (all sites)
+├── _dark-captions.scss       # dark figure/table captions (all sites)
 ├── _book-only.scss           # textbook-only rules
-├── _book-only-dark.scss      # textbook-only dark-mode rules
 ├── style-site.scss           # entrypoint for site pages (landing/about/community/newsletter)
 ├── dark-mode-site.scss       # dark-mode entrypoint for site pages
 ├── BRAND.md                  # palette + non-SCSS hardcoded reference list
@@ -37,6 +38,7 @@ shared/styles/
     ├── _theme-labs.scss
     ├── _theme-kits.scss
     ├── _theme-instructors.scss
+    ├── _theme-mlsysim.scss   # MLSys·im (cyan)
     └── _theme-tinytorch.scss
 ```
 
@@ -91,7 +93,7 @@ with this layering.
 | Labs             | [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss) | [`labs/assets/styles/dark-mode.scss`](../../labs/assets/styles/dark-mode.scss) |
 | Kits             | [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss) | [`kits/assets/styles/dark-mode.scss`](../../kits/assets/styles/dark-mode.scss) |
 | Slides           | [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../slides/assets/styles/dark-mode.scss) |
-| Instructors      | [`instructors/assets/styles/style.scss`](../../instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../instructors/assets/styles/dark-mode.scss) |
+| Instructors      | [`shared/styles/style-site.scss`](style-site.scss) | [`shared/styles/dark-mode-site.scss`](dark-mode-site.scss) |
 | MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../mlsysim/docs/styles/dark-mode.scss) |
 | TinyTorch (Guide) | [`tinytorch/guide/assets/styles/style.scss`](../../tinytorch/guide/assets/styles/style.scss) | [`tinytorch/guide/assets/styles/dark-mode.scss`](../../tinytorch/guide/assets/styles/dark-mode.scss) |
 

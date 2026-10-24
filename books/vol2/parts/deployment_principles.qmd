@@ -1,38 +1,75 @@
-# Deployment-at-Scale Principles {.unnumbered}
+---
+format:
+  html:
+    number-sections: false
+---
 
-Parts I and II built the fleet and trained the model. Production deployment now becomes the test of operational accountability. Part III shifts the focus from the single, massive training run to the global inference fleet: the thousands of geographically distributed servers and billions of edge devices that serve model outputs to users in real time. This transition from training to production fundamentally changes the engineering constraints: from maximizing throughput on a static dataset to minimizing latency on a dynamic stream of requests, all within the physics of global serving.
+# Fleet-in-Production Principles {.unnumbered}
 
-In this regime, engineering becomes a negotiation with the user's experience. The system can optimize for high batch throughput in the data center, but at the risk of violating the user's latency budget. Deploying a model to the edge eliminates network latency, but introduces the tight memory and power envelopes of mobile and Internet of Things (IoT) hardware. These principles govern the performance engineering and operational economics of deploying intelligence at scale.
+Parts I and II built the fleet, coordinated its distributed state, and executed the training run. Training, however, opens a model's lifecycle rather than completing it, and production deployment is where the model must repay its cost under real demand. Part III shifts the focus from the single, large training run orchestrated across a dedicated cluster to the deployed fleet. That fleet comprises the thousands of geographically distributed servers that answer requests in real time, the billions of edge devices that run and adapt models locally, and the operational machinery that keeps every deployed version accountable. The transition changes the engineering constraints. A training run must finish a coordinated workload. A deployed fleet must sustain useful throughput on a dynamic request stream while meeting latency targets, keep models current as data and devices change, and govern how each change reaches production.
 
-The first constraint is imposed by the mechanics of generation itself.
+A serving fleet depends on the runtime behavior of each replica (one deployed copy of the model, potentially spread across devices), whose execution time and memory footprint determine how many requests it can accept and how much capacity the fleet must provision. Part III therefore begins with fleet efficiency, which follows the fleet's capacity through scheduling, runtime, and execution to measure how much of it becomes useful work. Serving at scale uses that measured capacity to coordinate request queues, batching, serving precision, and distributed model state. Edge intelligence extends the argument to fleets of varied client devices with intermittent connectivity, including federated learning that coordinates training while data remains on participating devices. Production operations then governs rollout, monitoring, and recovery across the deployed fleet.
+
+The principles below preview the constraints that each chapter of Part III makes quantitative, turning replica-level mechanisms into fleet-wide capacity and latency models rather than assuming that local efficiency alone guarantees an efficient fleet. Before optimizing any serving mechanism, the part establishes a measure of how much of a fleet's capacity becomes useful work. Without an end-to-end accounting rule, losses in cluster scheduling, runtime recovery, and kernel execution hide behind separate team metrics.
+
+::: {#pri-ml-goodput .callout-principle title="The ML goodput decomposition"}
+
+**Invariant**: A fleet's ML productivity goodput, the fraction of its capacity-time that becomes useful work, is the product of three factors, each counted at a stated boundary so that every loss belongs to exactly one. Scheduling goodput $\SchedulingGoodput$ is the share of capacity held by complete allocations. Runtime goodput $\RuntimeGoodput$ is the share of allocated time retained as progress after startup, input stalls, checkpoint pauses, restarts, and rework. Program goodput $\ProgramGoodput$ is the fraction of the ideal rate that retained steps achieve, measured as MFU.
+$$ \MlProductivityGoodput = \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput $$
+
+**Implication**: Lost capacity must be located before it is recovered, because each factor has a different owner. A faster kernel recovers nothing that a job loses waiting for a complete gang, and a better scheduler recovers nothing that a job loses running below its hardware's rate. A change that moves a loss from one factor to another helps only if the product rises. The decomposition applies to a training step and to a serving replica alike; serving adds the latency targets that each completed request must meet.
+
+:::
+
+Over a deployed model's lifetime, serving can consume more of that capacity than training did, and serving also carries the book's scaling thesis into the request path. When quality is bought with test-time compute, by spending more computation on each query, the scaling curve that drove the training fleet moves into serving, and its cost recurs with every request.
+
+::: {#pri-serving-cost-dominance .callout-principle title="Serving cost dominance"}
+
+**Invariant**: For high-traffic production models, cumulative inference cost can exceed the one-time training cost over the model's lifetime.
+
+**Implication**: Inference efficiency often becomes the dominant lifecycle optimization target. When traffic volume, product lifetime, and retraining cadence make serving cost dominate, engineers should focus quantization, distillation, and sparsity on the inference path. The quantity to reduce is the cost per completed request at a fixed quality and latency target, not the cost of an individual operation.
+
+:::
+
+Within each request, the mechanics of generation impose the first limit. Autoregressive generation produces each new token from the preceding tokens while a key-value cache retains intermediate attention state for reuse, so a single serving replica can saturate either memory bandwidth or memory capacity long before its arithmetic units are full.
 
 ::: {#pri-autoregressive-bottleneck .callout-principle title="The autoregressive bottleneck"}
 
-**Invariant**: In low-batch dense transformer decode, throughput is memory-bandwidth bound because the model weights must be streamed across the device for every generated token. Higher batch sizes amortize weight streaming, and key-value (KV) cache traffic shifts the binding constraint at long context.
+**Invariant**: In low-batch dense transformer decode, weight streaming often makes throughput memory-bandwidth bound because every decode step must stream the model weights from device memory to the compute units. Higher batch sizes amortize weight streaming, and key-value (KV) cache traffic shifts the binding constraint at long context.
 
 **Implication**: Throughput initially improves with batch size by amortizing weight reads across requests, until per-device latency budgets, KV cache capacity, or sustained compute become the binding ceiling. Serving systems therefore need batching, cache-management, and memory-layout policies that keep bandwidth useful without violating latency SLOs.
 
 :::
 
-The same accounting extends from device bandwidth to fleet economics.
-
-::: {#pri-serving-cost-dominance .callout-principle title="The serving cost dominance law"}
-
-**Invariant**: For high-traffic production models, cumulative inference cost can exceed the one-time training cost by 10--100$\times$ over the model's lifetime.
-
-**Implication**: Inference efficiency often becomes the dominant lifecycle optimization target. Optimization efforts (quantization, distillation, sparsity) should be focused on the inference path when traffic volume, product lifetime, and retraining cadence make serving cost dominate.
-
-:::
-
-At scale, routing policy becomes another lever for protecting latency.
+At scale, routing policy becomes another lever for protecting latency. Even well-tuned replicas develop long queues if incoming queries land on busy servers while neighboring replicas have spare capacity.
 
 ::: {#pri-power-two-choices .callout-principle title="The power of two choices (P2C)"}
 
-**Invariant**: In the idealized process that sequentially places $R$ independent requests into $R$ replicas, with each request sampling replicas independently and uniformly at random, querying two replicas and selecting the least-loaded one reduces the maximum load from the one-choice bound $\Theta(\log R / \log \log R)$ to $\Theta(\log \log R)$ with high probability.
-$$ \Theta(\log R / \log \log R) \to \Theta(\log \log R) $$
+**Invariant**: In the idealized process that sequentially places $\ReplicaCount$ independent requests into $\ReplicaCount$ replicas, with each request sampling replicas independently and uniformly at random, querying two replicas and selecting the least-loaded one reduces the maximum load from the one-choice bound $\AsymptoticTightBound(\log \ReplicaCount/ \log \log \ReplicaCount)$ to $\AsymptoticTightBound(\log \log \ReplicaCount)$ with high probability.
 
-**Implication**: Simple randomized load-balancing algorithms produce dramatically lower maximum-load bounds with $\mathcal{O}(1)$ coordination overhead. Under serving queueing assumptions, the lower maximum load translates into reduced tail latency at scale.
+**Implication**: Simple randomized load-balancing algorithms produce dramatically lower maximum-load bounds with $\mathcal{O}(1)$ coordination overhead. Under serving queueing assumptions, the lower maximum load translates into reduced tail latency at scale. Serving requests differ widely in remaining work and load probes go stale, so the two probes must read a work signal, such as active tokens or KV-cache pressure, rather than a request count.
 
 :::
 
-Part III takes the trained model from the cluster to the world. The path begins with performance engineering, where precision choices, kernel behavior, and compilation determine how much of the hardware's theoretical capacity the system can actually use. It then moves to inference at scale, where request batching, cache management, routing, and sharding turn single-device efficiency into fleet-level latency control. Edge intelligence pushes the same discipline into devices with much smaller memory, power, and connectivity budgets, while operations at scale closes the loop by monitoring the deployed fleet, coordinating platform ownership, and responding when production behavior diverges from design assumptions. Together, these chapters develop the operational discipline that turns a trained model into a durable production system.
+Moving learning onto phones and other battery-powered devices adds a constraint that no data-center scheduler faces. The device belongs to its user, so background learning runs only when the device can spare it.
+
+::: {#pri-participation-selects-population .callout-principle title="The participation selection principle"}
+
+**Invariant**: An edge device contributes to on-device or federated learning only in windows its admission policy accepts, when the predicted update energy fits the remaining energy slack, the added power stays within the thermal limit, and foreground latency still meets its deadline (@eq-edge-background-admission). Those conditions correlate with hardware class, charging habits, and connectivity, so the population a shared model learns from is the admitted population, not the deployed one.
+
+**Implication**: The admission policy that protects each device also selects the training population, which makes admission a fairness decision as well as a resource decision. A fleet must measure participation and completion rates per device and user cohort against the deployed population and correct the skew through stratified selection, participation quotas, or reweighting. Loosening admission is not a remedy, because it spends the energy, thermal, and latency budgets the policy exists to protect.
+
+:::
+
+Whether a model is trained in the data center or across a population of devices, every change must eventually be released to the deployed fleet, and at fleet scale that release needs a single standard of evidence. Shipping a candidate on scattered benchmarks or informal spot checks leaves operators unable to tell whether a production incident reflects a bad release or an unmeasured shift in traffic.
+
+::: {#pri-evaluation-contract .callout-principle title="The evaluation contract principle"}
+
+**Invariant**: At fleet scale, a release decision is valid only when all of its evidence refers to one versioned evaluation contract that pins the model and its dependencies, the workload, the metrics and statistical design, the acceptance thresholds, the rollback conditions, and the accountable owners. Reliability under that contract is a vector of budgets over availability, latency, freshness, and quality. With $\ErrorBudgetConsumption_{\ReliabilityTargetIndex}$ denoting the fraction of observations that violate target $\ReliabilityTargetIndex$ divided by the violating fraction that target allows, the service is inside its reliability envelope only when
+$$ \max_{\ReliabilityTargetIndex} \ErrorBudgetConsumption_{\ReliabilityTargetIndex} \le 1 . $$
+
+**Implication**: No single accuracy number can authorize a release. Averaging the dimensions would hide a quality regression behind perfect uptime, and evidence gathered on different datasets, load profiles, or configurations certifies no single candidate. Thresholds and rollback conditions are fixed before exposure, an exhausted budget in any dimension stops promotion, and a change that leaves the contract's validated envelope reopens the decision.
+
+:::
+
+Part III takes the trained model from the cluster to the world. The path begins with fleet efficiency, which charges every lost hour of capacity to scheduling, runtime, or the program and so determines how much of the fleet's capacity becomes useful work. It then moves to serving at scale, where request batching, cache management, serving precision, routing, and sharding turn single-device efficiency into fleet-level latency control. Edge intelligence extends this discipline to phone-class devices that adapt models locally and coordinate through federated learning under unequal memory, power, and connectivity budgets. Operations at scale closes the loop by monitoring the deployed fleet, coordinating platform ownership, and responding when production behavior diverges from design assumptions. Measured against the Fleet Law, these chapters shift from the training step to the serving request. Fleet efficiency charges each term of a step to the factor that loses it and shrinks the exposed ones. Serving at scale trades batching against the queueing and routing delays that play the role of $\SynchronizationTime(\DeviceCount)$. Edge intelligence faces communication costs set by intermittent wireless links rather than a data-center fabric. Operations bounds the coordination cost of every rollout and rollback. Together, these chapters develop the operational discipline that turns a trained model into a durable production system.

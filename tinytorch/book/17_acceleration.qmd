@@ -94,7 +94,7 @@ $$\text{GELU}(x) \approx 0.5\,x\left(1 + \tanh\!\left(\sqrt{2/\pi}\,\left(x + 0.
 and `unfused_gelu` evaluates it as eight steps: cube, scale, add, scale, tanh, add one, multiply by $x$, and halve. Each step computes a NumPy array and copies it into a `Tensor`. The seven named intermediates stay alive until return. At three inputs this is easy to inspect; at millions of inputs, retaining those full arrays becomes a substantial allocation cost.
 
 ::: {.column-margin}
-![](assets/images/diagrams/17_acceleration-margin-cache-line.svg){width="100%" fig-alt="Cache line spatial locality diagram comparing 64-byte hardware transfers for row-major contiguous access versus strided column-major access."}
+![](assets/images/diagrams/17_acceleration-margin-cache-line.svg){width="100%" fig-alt="Cache line spatial locality diagram comparing 64-byte hardware transfers for row-major contiguous access vs. strided column-major access."}
 
 *Cache line spatial locality: 64-byte hardware transfers load 16 float32 values. Row walks use all 16 floats per line (1 miss, 15 hits), while column walks stride across rows and use only 1 float per line (16 misses).*
 :::
@@ -107,14 +107,14 @@ On a processor architecture with 64-byte cache lines, how many compulsory cache 
 
 ---
 
-\newpage
+
 
 ## The Idea
 
 
 ### One boundary, counted in crossings
 
-Consider a tile product that repeatedly uses the same small blocks. Keeping those blocks in a cache can avoid fetching them from main memory for every arithmetic operation. Registers hold individual working values; caches hold recently accessed chunks; main memory holds the larger arrays. @Tbl-memory-hierarchy describes their roles without assuming a particular processor.
+In modern hardware architectures, the primary performance bottleneck is the memory wall: transferring data between off-chip DRAM and the processor die consumes an order of magnitude more energy and latency than executing arithmetic instructions. High-performance systems software and GPU runtimes maximize efficiency by treating the chip boundary as a costly threshold, prioritizing reuse within registers and on-chip SRAM caches. Consider a tile product that repeatedly uses the same small blocks. Keeping those blocks in a cache can avoid fetching them from main memory for every arithmetic operation. Registers hold individual working values; caches hold recently accessed chunks; main memory holds the larger arrays. @Tbl-memory-hierarchy describes their roles without assuming a particular processor.
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-extensions
@@ -138,23 +138,23 @@ The analytical model counts requested data separately from measured time. A logi
 *Kernel fusion memory ledger: 8 unfused DRAM round-trips ($360\text{ B}$) collapse into 1 streaming fused pass ($40\text{ B}$).*
 :::
 
-At $x=1$, the first three GELU steps produce $1$, $0.044715$, and $1.044715$. In `unfused_gelu`, each value occupies the corresponding position in a different array. Naming `temp1`, `temp2`, and `temp3` keeps their `Tensor` objects reachable even after the next step has consumed their values. `Tensor` construction copies the incoming NumPy array, so these are separate owned buffers.
+In deep learning compilers like PyTorch Inductor (`torch.compile`), Triton, and XLA, operator fusion serves as the frontline defense against the memory bandwidth saturation caused by eager execution. When evaluating multi-step mathematical expressions without fusion, frameworks allocate and stream transient intermediate arrays to and from main memory, incurring severe DRAM traffic penalties. At $x=1$, the first three GELU steps produce $1$, $0.044715$, and $1.044715$. In `unfused_gelu`, each value occupies the corresponding position in a different array. Naming `temp1`, `temp2`, and `temp3` keeps their `Tensor` objects reachable even after the next step has consumed their values. `Tensor` construction copies the incoming NumPy array, so these are separate owned buffers.
 
-The compact expression avoids retaining seven named `Tensor` wrapper objects, but it does not eliminate intermediate memory traffic. In Python and NumPy, writing a compound one-liner like `0.5 * x * (1.0 + np.tanh(...))` still allocates an anonymous, temporary NumPy array buffer for every binary operator and function call. Each sub-expression executes a distinct compiled C loop that reads operands from DRAM and writes intermediate arrays back to memory. In contrast, true kernel fusion (as performed by compiler runtimes like PyTorch `torch.compile` / Inductor, Triton, or XLA) inspects the computational graph and generates a single machine-code loop: each input element $x_i$ is loaded into a processor register once, evaluated through the entire mathematical chain entirely within register space, and written back to DRAM only once as the final result. This distinction isolates allocation lifetimes during eager execution while demonstrating why optimizing compilers are indispensable for memory-bound operators.
+The compact expression avoids retaining seven named `Tensor` wrapper objects, but it does not eliminate intermediate memory traffic. In Python and NumPy, writing a compound one-liner like `0.5 * x * (1.0 + np.tanh(...))` still allocates an anonymous, temporary NumPy array buffer for every binary operator and function call. Each sub-expression executes a distinct compiled C loop that reads operands from DRAM and writes intermediate arrays back to memory. In contrast, true kernel fusion (as performed by compiler runtimes like PyTorch `torch.compile`/Inductor, Triton, or XLA) inspects the computational graph and generates a single machine-code loop: each input element $x_i$ is loaded into a processor register once, evaluated through the entire mathematical chain entirely within register space, and written back to DRAM only once as the final result. This distinction isolates allocation lifetimes during eager execution while demonstrating why optimizing compilers are indispensable for memory-bound operators.
 
-![**Memory traffic in unfused versus fused kernel execution**: In unfused execution, each elementwise operation launches a separate kernel that reads operands from DRAM and writes temporary buffers back to DRAM, saturating memory bandwidth and thrashing CPU caches. In a fused kernel, the input is loaded once into fast processor registers/L1 cache, all intermediate arithmetic evaluates in registers, and only the final result is written to memory.](assets/images/diagrams/17_kernel-fusion-traffic.svg){#fig-kernel-fusion-traffic width="100%" fig-alt="Diagram comparing DRAM round-trips for unfused multi-pass execution with single-trip register-cached fused kernel execution."}
+![**Memory traffic in unfused vs. fused kernel execution**: In unfused execution, each elementwise operation launches a separate kernel that reads operands from DRAM and writes temporary buffers back to DRAM, saturating memory bandwidth and thrashing CPU caches. In a fused kernel, the input is loaded once into fast processor registers/L1 cache, all intermediate arithmetic evaluates in registers, and only the final result is written to memory.](assets/images/diagrams/17_kernel-fusion-traffic.svg){#fig-kernel-fusion-traffic width="100%" fig-alt="Diagram comparing DRAM round-trips for unfused multi-pass execution with single-trip register-cached fused kernel execution."}
 
 ### Tiling: reuse before eviction
-
-A matrix multiply has the opposite structure. Every output element needs a whole row of $A$ and a whole column of $B$, so the data cannot be consumed in one streaming pass. It can, however, be reused. $C_{ij} = \sum_k A_{ik} B_{kj}$ uses $A_{ik}$ in the computation of every $C_{ij}$ for all $N$ values of $j$, and $B_{kj}$ in every $C_{ij}$ for all $M$ values of $i$. The question is whether those reuses happen while the value is still in fast memory or after it has been evicted and must be fetched again.
-
-Tiling answers by changing the loop order. Instead of computing $C$ one element at a time, compute it one $T \times T$ block at a time. To produce block $(I, J)$ of $C$, walk along $k$ in steps of $T$: fetch the $T \times T$ block of $A$ at $(I, K)$ and the $T \times T$ block of $B$ at $(K, J)$, multiply them, and add the product into the block of $C$. While those two input blocks sit in fast memory, every one of their $T^2$ elements is used $T$ times.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/17_acceleration-margin-tiling.svg){width="100%" fig-alt="2D block tiling diagram illustrating how partitioning large matrices into T by T blocks keeps three active tiles resident in L1 cache."}
 
 *2D cache block tiling: Partitioning matrix multiplication into $T \times T$ sub-blocks keeps three tiles ($A$, $B$, and $C$) in on-chip L1 cache ($3T^2 \times 4\text{ B} \le \text{cache size}$). Each float is reused $T$ times, cutting modeled input loads by $T\times$.*
 :::
+
+High-performance linear algebra libraries—such as NVIDIA cuBLAS, CUTLASS, and Intel oneMKL—rely on cache tiling to transform memory-bound matrix multiplications into compute-bound throughput. By partitioning large matrix operands into compact 2D sub-blocks that fit snugly within fast L1/L2 caches or GPU shared memory, hardware units reuse loaded data elements repeatedly before they are evicted back to high-latency DRAM. A matrix multiply has the opposite structure. Every output element needs a whole row of $A$ and a whole column of $B$, so the data cannot be consumed in one streaming pass. It can, however, be reused. $C_{ij} = \sum_k A_{ik} B_{kj}$ uses $A_{ik}$ in the computation of every $C_{ij}$ for all $N$ values of $j$, and $B_{kj}$ in every $C_{ij}$ for all $M$ values of $i$. The question is whether those reuses happen while the value is still in fast memory or after it has been evicted and must be fetched again.
+
+Tiling answers by changing the loop order. Instead of computing $C$ one element at a time, compute it one $T \times T$ block at a time. To produce block $(I, J)$ of $C$, walk along $k$ in steps of $T$: fetch the $T \times T$ block of $A$ at $(I, K)$ and the $T \times T$ block of $B$ at $(K, J)$, multiply them, and add the product into the block of $C$. While those two input blocks sit in fast memory, every one of their $T^2$ elements is used $T$ times.
 
 For a simplified input-load model, assume each block product loads its two input blocks once and reuses them internally. Ignore cache reuse between block products and traffic for the output accumulator. When all dimensions divide evenly by $T$, the scalar loop requests $2MNK$ input elements, while the blocked model requests $(M/T)(N/T)(K/T) \times 2T^2 = 2MNK/T$. The factor of $T$ belongs to this model. A real processor may reuse data in either loop, so this is not a measured memory-traffic reduction.
 
@@ -168,7 +168,7 @@ For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$
 
 ### Why libraries route through matrix multiply
 
-The BLAS interface that NumPy calls groups its routines into three levels by the shapes they combine, and the levels differ in how much arithmetic each moved value can support. Count float32 values and assume each operand is read once and each result written once.
+Deep learning engines like PyTorch, cuDNN, and TensorRT systematically lower diverse operations—including 2D convolutions via `im2col` and multi-head attention projections—into standard General Matrix Multiplies (GEMM). Because dense matrix-matrix multiplication possesses an operational intensity that scales with matrix dimension, transforming neural network workloads into GEMM kernels allows hardware accelerators to reach near-peak arithmetic throughput. The BLAS interface that NumPy calls groups its routines into three levels by the shapes they combine, and the levels differ in how much arithmetic each moved value can support. Count float32 values and assume each operand is read once and each result written once.
 
 - **Level 1, vector with vector**, such as AXPY ($y \leftarrow \alpha x + y$) on $n$ elements: $2n$ FLOPs over $3n$ values, or $12n$ bytes, which is $1/6$ FLOP per byte whatever $n$ is.
 - **Level 2, matrix with vector**, such as GEMV ($y \leftarrow A x$) with an $n \times n$ matrix: $2n^2$ FLOPs over about $n^2$ values, or $4n^2$ bytes, which is about $1/2$ FLOP per byte.
@@ -180,17 +180,17 @@ Only Level 3 has an intensity that grows with problem size. That growth is what 
 
 ## The Code
 
+### The two GELUs
+
+In modern Transformer architectures like GPT and BERT, the Gaussian Error Linear Unit (GELU) serves as the standard feed-forward activation function, commonly optimized in production engines via fused CUDA or Triton kernels. Because its mathematical approximation chains multiple transcendental and polynomial operations, measuring how GELU is structured reveals the stark performance difference between retaining intermediate tensor buffers and evaluating arithmetic in a single pass. The entry point receives a `Tensor` and reads `x.data`. Every intermediate has the same shape as that input because the operations act element by element. `unfused_gelu` first computes `x.data**3`, constructs a new `Tensor` from that array, and binds it to `temp1`. Each following line reads either that temporary's `.data` or the original input. The last line wraps the halved result and returns it; no input is mutated.
+
+{{< include _listings/17_acceleration/unfused_gelu.qmd >}}
+
 ::: {.column-margin}
 ![](assets/images/diagrams/17_accel-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 17 Acceleration showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Module 17 extracts operator fusion, memory traffic accounting, and tiled matrix multiplication directly from the working repository.*
 :::
-
-### The two GELUs
-
-The entry point receives a `Tensor` and reads `x.data`. Every intermediate has the same shape as that input because the operations act element by element. `unfused_gelu` first computes `x.data**3`, constructs a new `Tensor` from that array, and binds it to `temp1`. Each following line reads either that temporary's `.data` or the original input. The last line wraps the halved result and returns it; no input is mutated.
-
-{{< include _listings/17_acceleration/unfused_gelu.qmd >}}
 
 The local names keep seven intermediate `Tensor` buffers alive while the output is constructed. Each constructor copies its input into owned float32 storage, so counting just the mathematical operations misses these copies. After return, the local intermediate objects can be released. The caller receives a fresh output with the input's shape. Compare that lifetime with the compact implementation.
 
@@ -330,7 +330,7 @@ Run the unfused GELU on five inputs, $x = [-2, -1, 0, 1, 2]$, and record every i
 
 At $x=1$, the result is approximately $0.84119$, matching the tanh GELU computation. @Tbl-fusion-trace accounts for eighteen logical array passes, or 360 bytes, before Tensor copies. A hypothetical implementation that reads each input once and writes each output once accounts for 40 bytes. The ratio of nine compares two models, not the measured traffic of the two NumPy helpers, as analyzed in the Napkin Math below.
 
-::: {#nbk-acceleration-dram-traffic-ledger .callout-notebook title="Napkin Math: DRAM byte traffic ledger for unfused versus fused operations"}
+::: {#nbk-acceleration-dram-traffic-ledger .callout-notebook title="Napkin Math: DRAM byte traffic ledger for unfused vs. fused operations"}
 Track the byte traffic for an elementwise sequence over an $N$-element float32 array ($N = 10^6$, array footprint $4\text{ MB}$):
 
 - **Unfused Sequence (8 distinct operations)**:
@@ -442,7 +442,7 @@ A compiled fused kernel can compute all eight GELU steps on one element before a
 
 PyTorch's performance guide describes combining pointwise operations through TorchInductor and `torch.compile`.[^fn-pointwise-vs-reduction-fusion] Such a compiler examines a computation larger than one individual array operation, which lets it choose where to retain intermediates. Whether it fuses a particular chain depends on the supported operations and backend, as examined in the production bridge below. [PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html).
 
-[^fn-pointwise-vs-reduction-fusion]: **Pointwise versus reduction kernel fusion**: Compiler backends (such as PyTorch Inductor and OpenAI Triton) classify fusion into two primary categories: pointwise fusion and reduction fusion. Pointwise operations (such as Add, Mul, ReLU, and GELU) require no communication between distinct tensor coordinates, making them embarrassingly parallel and straightforward to fuse into a single loop over processor registers. Reduction operations (such as LayerNorm, Softmax, or GEMM), however, require aggregating values across coordinates. Fusing a reduction requires inter-thread communication through GPU shared memory, tree-based reduction sweeps, or warp-level shuffle instructions (`__shfl_down_sync`).
+[^fn-pointwise-vs-reduction-fusion]: **Pointwise vs. reduction kernel fusion**: Compiler backends (such as PyTorch Inductor and OpenAI Triton) classify fusion into two primary categories: pointwise fusion and reduction fusion. Pointwise operations (such as Add, Mul, ReLU, and GELU) require no communication between distinct tensor coordinates, making them embarrassingly parallel and straightforward to fuse into a single loop over processor registers. Reduction operations (such as LayerNorm, Softmax, or GEMM), however, require aggregating values across coordinates. Fusing a reduction requires inter-thread communication through GPU shared memory, tree-based reduction sweeps, or warp-level shuffle instructions (`__shfl_down_sync`).
 
 ::: {#psp-acceleration-torch-compile-inductor .callout-perspective title="Production Bridge: PyTorch 2.0 TorchInductor and Triton Kernel Fusion"}
 In standard eager execution (both PyTorch eager mode and TinyTorch), each operator dispatches an isolated C++ or CUDA kernel. Intermediate tensors are written to high-bandwidth device memory (HBM/DRAM) and immediately read back by the next kernel, consuming memory bandwidth and incurring kernel launch overhead.

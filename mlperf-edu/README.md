@@ -1,180 +1,346 @@
 # MLPerf EDU
 
-A benchmark suite for ML systems that runs on a laptop without giving up the
-quality gate.
+A benchmark suite for machine learning systems that runs on standard laptops and workstations without compromising on the quality gate.
 
-Production benchmark suites teach a real discipline. They hold the task, the
-data, the metric, and the quality target fixed, so that two results can be
-compared at all. Their compute and submission requirements also put them out of
-reach of a course. The usual substitute is a folder of small models, which
-solves the resource problem and quietly throws away the gate.
+Production benchmark suites teach essential empirical discipline. They hold the task, dataset, metric, and quality target fixed so that different systems, compilers, and hardware backends can be fairly compared. However, production suites typically demand multi-node GPU clusters and complex submission pipelines, putting them out of reach for courses and lightweight local experimentation. The common alternative—informal folders of toy models—solves accessibility at the cost of quietly discarding rigorous quality floors.
 
-MLPerf EDU keeps both. Fourteen workloads run locally, and **no quality target
-is set by this project**. Every one is inherited from an upstream paper,
-leaderboard, or official evaluator, so the suite has no way to move a threshold
-it fails to reach. It reports its own misses, and it currently has six of them.
+MLPerf EDU preserves both accessibility and rigor. Fourteen workloads run locally across CPU, Apple Silicon (MPS), and NVIDIA CUDA, and **no quality target is set arbitrarily by this project**. Every workload inherits its quality target from an upstream paper, official leaderboard, or reference evaluator.
 
-> This is an independent research project and a working name. It is not an
-> official MLCommons benchmark and is not endorsed by MLCommons.
+> **Note:** MLPerf EDU is an independent research project and working name. It is not an official MLCommons benchmark and is not endorsed by MLCommons.
+
+---
 
 ## Quickstart
 
-Python 3.10 or newer. A GPU is optional. Roughly five minutes.
+Requires Python 3.10 or newer and [uv](https://docs.astral.sh/uv/). An accelerator (Apple Silicon GPU or NVIDIA CUDA) is supported automatically when present; otherwise, CPU execution is used.
 
 ```bash
-git clone https://github.com/harvard-edge/cs249r_book
-cd cs249r_book/mlperf-edu
+# 1. Enter the directory and sync dependencies
+cd mlperf-edu
+uv sync --locked --extra dev
 
-uv sync --locked                 # create the locked environment
-uv run mlperf doctor             # check this machine
+# 2. Inspect your local environment, hardware, and registry
+uv run mlperf doctor
+
+# 3. Run the four-workload starter smoke test
 uv run mlperf init --profile min --output-dir submissions/first-run
-```
 
-`doctor` prints a table of your Python, PyTorch, device, caches, and registry.
-`init` then fetches what it needs and runs the four-workload `min` path, which
-is the fast functional check. It writes JSON, CSV, and HTML reports and
-verifies their provenance. Nothing opens a browser unless you ask.
-
-Look at what you produced:
-
-```bash
+# 4. View the generated report
 uv run mlperf report submissions/first-run --format html --open
 ```
 
-Then run something that carries a real quality gate:
+`doctor` checks your Python interpreter, PyTorch installation, available accelerators (MPS/CUDA/CPU), caches, and workload registry.
+
+`init` runs the representative four-workload `min` profile (image classification, language modeling, graph node classification, and time-series forecasting), verifies SHA-256 provenance manifests, and generates HTML, JSON, and CSV reports.
+
+Next, run a full quality-gated evaluation:
 
 ```bash
+# Fetch assets before timing
 uv run mlperf fetch --workload image-classification --profile max
+
+# Execute the quality-bearing benchmark
 uv run mlperf run --workload image-classification --profile max \
   --output-dir submissions/image-review
 ```
 
-That one loads the official MLPerf Tiny ResNet8 and its 200-example CIFAR-10
-accuracy set and grades the result against the inherited 85% top-1 target. It
-finishes in seconds.
+This runs the official MLPerf Tiny ResNet8 on CIFAR-10 and grades accuracy against the inherited 85.0% top-1 target in seconds.
 
-## What Just Happened
+---
 
-The `min` run proved your install works. The `max` run produced a result that
-means something, because it was graded against a target this project did not
-choose.
+## Core Concepts
 
-Three ideas explain most of the system.
+Understanding three concepts makes navigating the suite straightforward:
 
-**A workload is a task, not a configuration.** `causal-language-modeling` is
-one workload whether you train it or run inference on it, and whether you batch
-it, compile it, or quantize it. Modes, phases, and optimizations are recorded
-in the report. They never create a new workload name, because if they did, no
-two results would be comparable.
+### 1. Workload vs. Configuration
+A workload represents a fixed task and evaluation contract (e.g., `causal-language-modeling`), not a specific hardware or software configuration. Execution modes (`training` vs. `inference`), inference phases (`prefill` vs. `decode`), quantization, batch sizes, and compilation strategies are recorded as execution configurations in the result report.
 
-**A profile is why you ran it, not how hard it is.**
+### 2. Execution Profiles
+Profiles define the purpose and contract depth of a run:
 
-| Profile | Use it for | What a result can claim |
+| Profile | Purpose | Contract & Claims |
 |:---|:---|:---|
-| `min` | install checks, pre-labs, CI | functional only, never a score |
-| `max` | the comparable reference path | the inherited quality gate |
-| `pro` | ablations and research variants | only what its recorded configuration supports |
+| `min` | Install check, sanity verification, CI | Fast functional path (default runs 4 starter workloads; `--collection all` runs all 14). Never score-bearing. |
+| `max` | Authoritative reference path | Executes against the inherited quality target on local hardware. |
+| `pro` | Research and ablation envelope | Exposes controlled knobs (batch size, precision, backend, compiler flags) via YAML experiment plans. |
 
-The workload, model, data, evaluator, and gate are identical across all three.
+### 3. Cryptographic Provenance
+Every benchmark execution generates:
+- A detailed structured report (`*_report.json`)
+- Aggregate HTML and CSV summaries
+- A cryptographic provenance manifest (`*.provd.json`) binding code, model weights, dataset partitions, and hardware telemetry by SHA-256
 
-**Every run carries its own evidence.** Each produces a `*_report.json`, a CSV
-and HTML view, and a `*.provd.json` provenance manifest binding the source,
-assets, hardware, metrics, and any training checkpoint by SHA-256.
-
+Verify any run manifest with:
 ```bash
 uv run mlperf verify submissions/image-review/image-classification_max.provd.json
 ```
 
-Verification checks recorded bytes and lineage. It does not authenticate who
-produced them, and the framework says so rather than implying that a checksum
-prevents fraud.
+---
 
-## Read the Paper
+## Workload Catalog
 
-The paper, with its LaTeX source in [`paper/paper.tex`](paper/paper.tex), explains the
-design, the workload selection, and the results in about fifteen pages. The PDF
-is a build output rather than a tracked file; `make -C paper` compiles it
-locally, which requires a TeX installation.
+MLPerf EDU packages fourteen workloads organized across seven domain suites. Each workload targets a distinct ML systems bottleneck:
 
-Its numbers come from the same registry the CLI runs, regenerated on every
-build. If the paper and the suite ever disagreed, the build would fail rather
-than print a stale figure.
+### 1. Language Suite (`language`)
 
-## The Workloads
+* **`causal-language-modeling`**
+  * **Model & Data:** `nanogpt-shakespeare-char` (10.77M params) on Tiny Shakespeare.
+  * **Modes:** `training` (pinned 5,001-step training loop) and `inference` (`full`, `prefill`, `decode` phases).
+  * **Inherited Gate:** Validation cross-entropy loss ≤ 1.4697 (from nanoGPT).
+  * **Systems Lens:** Pinned training exercises compute-bound matrix multiplications (GEMMs). Autoregressive inference isolates compute-bound prompt evaluation (`prefill` / TTFT) from memory-bandwidth-bound token generation (`decode` / ITL) and demonstrates KV-cache mechanics.
 
-Fourteen workloads, all of which run locally. Eight reproduce their inherited
-target and six are recorded misses.
+* **`text-classification`**
+  * **Model & Data:** DistilBERT (`distilbert-base-uncased-finetuned-sst-2-english`, 66.96M params) on SST-2 (Stanford Sentiment Treebank).
+  * **Modes:** `inference`.
+  * **Inherited Gate:** Accuracy ≥ 0.91055 (from model card).
+  * **Systems Lens:** Standard bidirectional transformer encoder inference, batch sizing trade-offs, and tokenization overhead.
 
-| Workload | Inherited From | Mode | Gate |
-|:---|:---|:---|:---|
-| `image-classification` | MLPerf Tiny ResNet8, 200-example CIFAR-10 set | inference | top-1 ≥ 0.85 |
-| `keyword-spotting` | MLPerf Tiny DS-CNN, 1,000-example EEMBC set | inference | top-1 ≥ 0.90 |
-| `anomaly-detection` | MLPerf Tiny ToyADMOS ToyCar, 248 recordings | inference | ROC AUC ≥ 0.85 |
-| `visual-wake-words` | MLPerf Tiny MobileNetV1 0.25, 1,000-example set | inference | top-1 ≥ 0.80 |
-| `causal-language-modeling` | nanoGPT Shakespeare | training; full, prefill, decode | val loss ≤ 1.4697 |
-| `text-classification` | DistilBERT SST-2 model card | inference | accuracy ≥ 0.91055 |
-| `information-retrieval` | Sentence Transformers CrossEncoder, NanoBEIR | inference | mean nDCG@10 ≥ 0.60716 |
-| `graph-node-classification` | Official OGB GCN on `ogbn-arxiv` | training | test acc ≥ 71.74% |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe | training | test MSE ≤ 0.290 · **miss** |
-| `recommendation` | MLPerf Training v0.5 NCF, MovieLens-20M | training | HR@10 ≥ 0.635 · **miss** |
-| `code-generation` | Qwen2.5-Coder, HumanEval+ | inference | pass@1 ≥ 0.573 · **miss** |
-| `function-calling` | Qwen3-1.7B, BFCL V4 non-live AST | inference | AST acc ≥ 82.92% · **miss** |
-| `image-generation` | NVIDIA EDM, three-trial CIFAR-10 FID | inference | FID ≤ 1.79 · **miss** |
-| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | move prediction ≥ 0.40 · **miss** |
+* **`information-retrieval`**
+  * **Model & Data:** Cross-Encoder MiniLM (`cross-encoder/ms-marco-MiniLM-L6-v2`) on NanoBEIR reranking benchmark.
+  * **Modes:** `inference`.
+  * **Inherited Gate:** Mean nDCG@10 ≥ 0.60717 (from BEIR benchmark).
+  * **Systems Lens:** Pairwise multi-document cross-encoding, query-document concatenation, and high-throughput batch scoring.
 
-The misses are the interesting part. Each one is a place where a laptop
-implementation of a real contract did not reach the published number, recorded
-rather than rescued. The [selection ledger](registry/selection-ledger.yaml)
-gives the authority, rationale, and evidence for every task, and
-[MISS_DIAGNOSIS.md](docs/internal/MISS_DIAGNOSIS.md) investigates each shortfall.
+* **`code-generation`**
+  * **Model & Data:** `Qwen/Qwen2.5-Coder-0.5B-Instruct` on HumanEval+.
+  * **Modes:** `inference`.
+  * **Inherited Gate:** pass@1 ≥ 0.573 (from model card · **recorded miss**).
+  * **Systems Lens:** Long-context autoregressive code generation, token decoding latency, and unit-test execution verification.
 
-Running locally is not the same as carrying committed reference evidence, and
-the difference matters when you cite a number. The retained evidence snapshot
-covers nine workloads across twelve evidence cases, counting training and the
-full, prefill, and decode inference phases of `causal-language-modeling`
-separately. The other five workloads execute their contract end to end but are
-held at a functional stage, so they produce results you can inspect and
-reproduce, not baselines you should quote. Every workload in the suite remains
-experimental until external review.
+* **`function-calling`**
+  * **Model & Data:** `Qwen/Qwen3-1.7B` on Berkeley Function Calling Leaderboard (BFCL V4) non-live AST.
+  * **Modes:** `inference`.
+  * **Inherited Gate:** AST accuracy ≥ 82.92% (from BFCL · **recorded miss**).
+  * **Systems Lens:** Structured JSON decoding, tool-use schema parsing, and grammar-constrained decoding efficiency.
 
-## Where To Go Next
+### 2. Vision Suite (`vision`)
 
-| If you want to | Read |
-|:---|:---|
-| A guided setup with more detail | [Getting Started](site/getting-started.qmd) |
-| Understand suites, profiles, modes, and phases | [Running Benchmarks](site/guide/running.qmd) |
-| Fix a failing run | [Troubleshooting](site/guide/troubleshooting.qmd) |
-| Teach with it | [For Instructors](site/guide/instructors.qmd) |
-| Run controlled experiments | [Research Guide](site/guide/research.qmd) |
-| Work through a notebook | [Tutorial 01](tutorials/README.md) |
-| See classroom labs | [Examples](examples/README.md) |
-| Look up a command or variable | [CLI](site/reference/cli.qmd) · [Environment](site/reference/environment.qmd) |
-| Install without `uv` | [INSTALL.md](INSTALL.md) |
+* **`image-classification`**
+  * **Model & Data:** ResNet8 (MLPerf Tiny v1.0 reference) on CIFAR-10 (200-sample official evaluation set).
+  * **Modes:** `inference`.
+  * **Inherited Gate:** Top-1 accuracy ≥ 0.850 (from MLPerf Tiny).
+  * **Systems Lens:** 2D convolutions, residual skip connections, and compute-bound GEMM/im2col on compact activations.
 
-The same pages render as a browsable site with `quarto render site`.
+* **`image-generation`**
+  * **Model & Data:** NVIDIA EDM (Elucidated Diffusion Model) on CIFAR-10.
+  * **Modes:** `inference`.
+  * **Inherited Gate:** FID ≤ 1.79 (from NVIDIA EDM paper · **recorded miss**).
+  * **Systems Lens:** Iterative multi-step score-based denoising loops, latency vs. sample quality, and activation memory footprints.
 
-## Alternate Installs
+### 3. Tiny / Edge Suite (`tiny`)
 
-The quickstart uses a locked `uv` environment from a source checkout, which is
-the supported path for classrooms and artifact evaluation. [INSTALL.md](INSTALL.md)
-covers the tool install, the wheel build, and the offline and air-gapped paths.
-No package-index release is published yet.
+* **`keyword-spotting`**
+  * **Model & Data:** DS-CNN (Depthwise Separable CNN) on EEMBC / Speech Commands (1,000 1-second clips).
+  * **Modes:** `inference`.
+  * **Inherited Gate:** Top-1 accuracy ≥ 0.900 (from MLPerf Tiny).
+  * **Systems Lens:** Depthwise separable convolutions (memory-bound spatial filter + compute-bound 1×1 pointwise filter) and audio MFCC feature extraction pipelines.
 
-## For Maintainers and Reviewers
+* **`visual-wake-words`**
+  * **Model & Data:** MobileNetV1 0.25 on Visual Wake Words / COCO (1,000 images).
+  * **Modes:** `inference`.
+  * **Inherited Gate:** Top-1 accuracy ≥ 0.800 (from MLPerf Tiny).
+  * **Systems Lens:** Ultra-constrained vision for microcontrollers, strict SRAM/Flash capacity limits, and integer quantization.
+
+* **`anomaly-detection`**
+  * **Model & Data:** ToyCar Deep Autoencoder on ToyADMOS machine operating sounds (248 recordings).
+  * **Modes:** `inference`.
+  * **Inherited Gate:** ROC AUC ≥ 0.850 (from MLPerf Tiny).
+  * **Systems Lens:** Fully connected layer inference, spectral feature pipelines, and reconstruction error loss calculation.
+
+### 4. Graph Suite (`graph`)
+
+* **`graph-node-classification`**
+  * **Model & Data:** OGB GCN (2-layer Graph Convolutional Network via PyG) on `ogbn-arxiv` (169,343 nodes, 1.16M citation edges).
+  * **Modes:** `training`.
+  * **Inherited Gate:** Test accuracy ≥ 0.7174 (from official OGB benchmark).
+  * **Systems Lens:** Sparse matrix multiplication (SpMM), irregular memory access patterns, and graph neighbor aggregation.
+
+### 5. Time-Series Suite (`timeseries`)
+
+* **`time-series-forecasting`**
+  * **Model & Data:** PatchTST on ETTm1 (Electricity Transformer Temperature, 15-minute intervals).
+  * **Modes:** `training`.
+  * **Inherited Gate:** Test MSE ≤ 0.290 (from PatchTST paper · **recorded miss**).
+  * **Systems Lens:** Channel-independent patching, multivariate sequence forecasting, and temporal attention mechanisms.
+
+### 6. Recommendation Suite (`recommendation`)
+
+* **`recommendation`**
+  * **Model & Data:** NCF (Neural Collaborative Filtering: Generalized Matrix Factorization + MLP) on MovieLens-20M.
+  * **Modes:** `training`.
+  * **Inherited Gate:** Hit Rate @ 10 (HR@10) ≥ 0.635 (from MLPerf Training v0.5 · **recorded miss**).
+  * **Systems Lens:** High-cardinality sparse embedding table lookups, memory-bandwidth bottleneck, non-uniform memory access, and embedding cache misses.
+
+### 7. Reinforcement Learning Suite (`reinforcement`)
+
+* **`reinforcement-learning`**
+  * **Model & Data:** MiniGo (AlphaGo Zero dual policy-value convolutional architecture) on self-play game records.
+  * **Modes:** `training`.
+  * **Inherited Gate:** Professional move prediction accuracy ≥ 0.400 (from MLPerf Training v0.5 · **recorded miss**).
+  * **Systems Lens:** Monte Carlo Tree Search (MCTS) coupled with asynchronous neural network evaluation and self-play data generation.
+
+---
+
+## Workload Summary & Evidence Scope
+
+| Workload | Suite | Model | Dataset | Mode | Inherited Gate | Status |
+|:---|:---|:---|:---|:---|:---|:---|
+| `image-classification` | vision | ResNet8 | CIFAR-10 (200) | inference | Top-1 ≥ 0.850 | Pass |
+| `keyword-spotting` | tiny | DS-CNN | EEMBC Audio (1,000) | inference | Top-1 ≥ 0.900 | Pass |
+| `visual-wake-words` | tiny | MobileNetV1 0.25 | VWW / COCO (1,000) | inference | Top-1 ≥ 0.800 | Pass |
+| `anomaly-detection` | tiny | ToyCar Autoencoder | ToyADMOS (248) | inference | ROC AUC ≥ 0.850 | Pass |
+| `causal-language-modeling` | language | nanoGPT (10.77M) | Tiny Shakespeare | training / inference | Val Loss ≤ 1.4697 | Pass |
+| `text-classification` | language | DistilBERT (67M) | SST-2 (872) | inference | Accuracy ≥ 0.91055 | Pass |
+| `information-retrieval` | language | CrossEncoder MiniLM | NanoBEIR Reranking | inference | Mean nDCG@10 ≥ 0.60717 | Pass |
+| `graph-node-classification` | graph | OGB GCN | ogbn-arxiv | training | Test Acc ≥ 0.7174 | Pass |
+| `time-series-forecasting` | timeseries | PatchTST | ETTm1 | training | Test MSE ≤ 0.290 | Recorded miss |
+| `recommendation` | recommendation | NCF (GMF + MLP) | MovieLens-20M | training | HR@10 ≥ 0.635 | Recorded miss |
+| `code-generation` | language | Qwen2.5-Coder-0.5B | HumanEval+ | inference | pass@1 ≥ 0.573 | Recorded miss |
+| `function-calling` | language | Qwen3-1.7B | BFCL V4 non-live AST | inference | AST Acc ≥ 82.92% | Recorded miss |
+| `image-generation` | vision | NVIDIA EDM | CIFAR-10 | inference | FID ≤ 1.79 | Recorded miss |
+| `reinforcement-learning` | reinforcement | MiniGo Policy/Value | Self-play games | training | Move Pred ≥ 0.400 | Recorded miss |
+
+### The Value of Recorded Misses
+In MLPerf EDU, missed targets are explicitly recorded rather than silently relaxed or adjusted. Each miss marks an interesting systems boundary where running a published recipe on local consumer hardware requires targeted architectural, hyperparameter, or numerical adjustments. Detailed investigations of each shortfall live in [`docs/internal/MISS_DIAGNOSIS.md`](docs/internal/MISS_DIAGNOSIS.md).
+
+The committed reference evidence covers nine workloads across twelve evidence cases (treating training and the `full`, `prefill`, and `decode` inference phases of `causal-language-modeling` as distinct evidence cases). The remaining five workloads run end-to-end at a functional stage.
+
+---
+
+## Clean CLI Command Reference
+
+All operations run through the `mlperf` CLI via `uv run mlperf`.
+
+### Discovery & Inspection
 
 ```bash
-uv run pytest
-uv run mlperf validate smoke --output-dir submissions/smoke
-uv run python tools/generate_docs.py --check
-uv run python tools/export_flat_registry.py --check
+# List all 14 workloads
+uv run mlperf list
+
+# List available profiles (min, max, pro)
+uv run mlperf list profiles
+
+# Inspect a specific workload contract and quality target
+uv run mlperf show image-classification
+uv run mlperf info --workload causal-language-modeling
+
+# Inspect workload prerequisites and device compatibility
+uv run mlperf doctor --workload graph-node-classification
+```
+
+### Fetching Assets Before Measurement
+
+Downloading assets beforehand ensures timing measurements include zero network latency:
+
+```bash
+# Preview required downloads without downloading
+uv run mlperf fetch --workload image-classification --profile max --dry-run
+
+# Download and verify assets for a workload
+uv run mlperf fetch --workload image-classification --profile max
+
+# Download assets for an entire suite
+uv run mlperf fetch --suite tiny --profile max
+```
+
+### Running Benchmarks
+
+```bash
+# Run the fast 4-workload starter smoke test
+uv run mlperf run --profile min --output-dir submissions/smoke
+
+# Run all 14 workloads in min profile (complete health check)
+uv run mlperf health
+# or explicitly:
+uv run mlperf run --profile min --collection all --output-dir submissions/health-check
+
+# Run a single workload in max profile
+uv run mlperf run --workload image-classification --profile max --output-dir submissions/img-cls
+
+# Run an entire suite in max profile
+uv run mlperf run --suite tiny --profile max --output-dir submissions/tiny-suite
+
+# Run training vs. inference modes
+uv run mlperf run --workload causal-language-modeling --mode training --profile max --output-dir submissions/clm-train
+
+# Run specific inference phases (full, prefill, or decode)
+uv run mlperf run --workload causal-language-modeling --mode inference --phase decode --profile max --output-dir submissions/clm-decode
+
+# Collect hardware power and energy telemetry (macOS powermetrics or NVIDIA NVML)
+uv run mlperf run --workload keyword-spotting --profile max --power --output-dir submissions/kws-power
+```
+
+### Viewing and Verifying Results
+
+```bash
+# Print a clean terminal summary table
+uv run mlperf report submissions/first-run
+
+# Open the interactive HTML dashboard in your browser
+uv run mlperf report submissions/first-run --format html --open
+
+# Verify SHA-256 provenance manifest
+uv run mlperf verify submissions/first-run/image-classification_min.provd.json
+```
+
+---
+
+## Building the Research Paper
+
+The companion research paper explains the design, methodology, and empirical evaluation of MLPerf EDU. It is written in LaTeX and located in [`paper/`](paper/).
+
+The PDF is compiled from source and automatically validated against the live benchmark registry:
+
+```bash
+# Build the paper and run automated checks
 uv run make -C paper clean all check
 ```
 
-- [Specification](SPEC.md) · [Public result rules](PUBLIC_RULES.md) · [Security boundary](SECURITY_REVIEW.md)
-- [Status and open blockers](docs/internal/STATUS.md) · [Quality target review](docs/internal/QUALITY_TARGET_REVIEW.md)
-- [Independent audit](docs/internal/INDEPENDENT_AUDIT.md) · [Dataset release review](docs/internal/DATASET_RELEASE_REVIEW.md)
-- [Miss diagnosis](docs/internal/MISS_DIAGNOSIS.md), which is where each recorded miss is investigated
+The compiled PDF is written to:
+```text
+paper/output/pdf/mlperf-edu-review-draft.pdf
+```
 
-The component license, package publication, dataset redistribution, and
-MLCommons naming decisions remain external release gates. The implementation
-fails closed while they are pending.
+### How the Paper Build Works
+1. `generate_registry_snapshot.py` queries the live workload registry (`registry/` and `workloads.yaml`) and provisional results to export synchronized LaTeX tables (`generated_registry.tex`, `generated_dam_table.tex`, `generated_appendix_data.tex`).
+2. `pdflatex` and `bibtex` compile the 16-page document with full figures and citations.
+3. `check_paper_pdf.py` performs automated quality verification on the compiled PDF, ensuring exact page count (16 pages), valid citation linkages, and zero unresolved placeholders or overflow boxes.
+
+---
+
+## Repository Structure
+
+```text
+mlperf-edu/
+├── bench/                 # Benchmark runners and execution harnesses
+├── conformance_results/   # Conformance run artifacts
+├── data/                  # Local dataset cache (populated by fetch)
+├── datasets.yaml          # Dataset catalog with upstream URLs and checksums
+├── docs/                  # In-depth guides, design docs, and internal notes
+├── examples/              # Research plans and classroom lab exercises
+├── paper/                 # Companion research paper LaTeX source and build scripts
+│   ├── figures/           # Rendered paper figures
+│   ├── output/pdf/        # Generated paper PDF (mlperf-edu-review-draft.pdf)
+│   ├── Makefile           # Paper compilation pipeline
+│   └── paper.tex          # Paper LaTeX source
+├── provisional_results/   # Reference evaluation results and evidence index
+├── registry/              # Authoritative YAML workload definitions
+├── site/                  # Quarto source for https://mlsysbook.ai/mlperf-edu
+├── src/mlperf/            # MLPerf EDU Python core package and CLI implementation
+├── tests/                 # Unit and integration test suite
+├── tools/                 # Validation, documentation, and auditing utilities
+├── tutorials/             # Interactive Marimo and Jupyter notebook tutorials
+├── workloads.yaml         # Consolidated workload registry mirror
+└── pyproject.toml         # Packaging and dependency declarations
+```
+
+---
+
+## Further Reading
+
+- [Installation Guide](INSTALL.md) — Wheel builds, offline setups, and pip options
+- [Specification](SPEC.md) — Benchmark specification and contract definition
+- [Public Result Rules](PUBLIC_RULES.md) — Disclosure and claims policy
+- [Security Review](SECURITY_REVIEW.md) — Sandboxing and network isolation boundaries
+- [Miss Diagnosis](docs/internal/MISS_DIAGNOSIS.md) — Technical post-mortems on the recorded misses
+- [Quality Target Review](docs/internal/QUALITY_TARGET_REVIEW.md) — Detailed rationale for each inherited target

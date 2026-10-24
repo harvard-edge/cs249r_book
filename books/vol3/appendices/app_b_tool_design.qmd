@@ -1,41 +1,44 @@
+---
+notation-local: [\BreakEvenParseFailureRate, \CatalogDefinitionTokens, \CatalogStagingCallCount, \ConstrainedCallLatency, \DefinitionSerializedSize, \FirstCatalogDefinitionCount, \FirstCatalogDefinitionSize, \ModelCallIndex, \PerTokenMaskingTime, \RepairTurnLatency, \SecondCatalogDefinitionCount, \SecondCatalogDefinitionSize, \StagedDefinitionCount, \UnconstrainedCallLatency, \UnconstrainedParseFailureRate]
+---
+
 # Typed Tool Interfaces {#sec-vol3-app-b-tool-design}
 []{#sec-vol3-app-tool-design}
 
-@Sec-vol3-tool-calling explains why every tool call must pass through the runtime's validation and grant before it takes effect, and @sec-vol3-sandboxes explains how a granted call is contained once it runs. This appendix collects the reusable artifacts an engineer needs to build that boundary: schema rules and a reference tool definition, the break-even for constraining output to a schema, reference code for idempotency keys and settlement at the endpoint, reference code for the capability check and its attenuation, and the arithmetic behind a small catalog of general tools. It is a workbench for building tool interfaces, and each section points back to the chapter that argues for the design.
+An agent's tool interface must describe what a call means, reject invalid inputs, and expose enough outcome information for the runtime to continue safely. This appendix provides a bounded argument-schema example, endpoint-contract questions, and quantitative templates for decoding and catalog costs. It supports interface design and review without prescribing a framework or replacing the main text's treatment of tool use and execution containment.
 
 ## How to Use This Appendix {.unnumbered}
 
-Reach for the section that matches the failure you are seeing at the tool boundary.
+Select the section that matches the observed failure at the tool boundary. Each entry pairs the failure signature with the descriptor, schema, or result-envelope change that prevents it:
 
-- **When tool calls fail validation, invent arguments, or confuse units**, use the schema rules and reference definitions in @sec-vol3-app-b-json-schema.
-- **When the model emits malformed calls often enough that repair turns cost more than prevention**, use the break-even in @sec-vol3-app-b-logit-masking to decide whether to constrain decoding.
-- **When timeouts, dropped connections, or model retries risk duplicate side effects**, use the key derivation and endpoint record in @sec-vol3-app-b-idempotency-leases.
-- **When a tool call or a delegated subagent needs bounded authority**, use the capability check and attenuation code in @sec-vol3-app-b-idempotency-leases.
-- **When the tool catalog consumes a large share of every context or the model picks the wrong tool**, use the token arithmetic in @sec-vol3-app-b-deep-vs-shallow.
+- When calls fail validation or confuse units, @sec-vol3-app-b-json-schema supplies schema constraints and distinguishes them from execution obligations.
+- When malformed calls consume repair turns, @sec-vol3-app-b-logit-masking compares their expected latency with the overhead of constrained decoding.
+- When retries risk duplicate effects or delegation changes authority, @sec-vol3-app-b-idempotency-leases separates operation identity from capability enforcement.
+- When a catalog consumes context or causes selection errors, @sec-vol3-app-b-deep-vs-shallow supplies accounting formulas and a comparison worksheet.
 
 ## Schema Rules for Tool Definitions {#sec-vol3-app-b-json-schema}
 
-A tool schema is read twice. The model reads its names and descriptions as part of the context and proposes arguments from them, and the runtime reads its types and bounds to validate every proposed call before the grant (@sec-vol3-tool-calling-schemas). A schema that serves only one reader fails the other. Five rules make a schema serve both.
+Writing "path must stay inside the workspace" in a tool description tells the model what to propose, but leaves an unvalidated `../` traversal free to pass unless the schema and runtime enforce the constraint. A tool schema has two readers, since the model uses its names and descriptions to propose arguments while the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas). Because a description communicates intent without enforcing it, the distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
 
-1. **Close the property set (`additionalProperties: false`).** A model will propose plausible arguments the tool does not accept, such as `dry_run`, `verbose`, or `user_id`, if the schema permits them. A closed schema makes the runtime reject undeclared inputs instead of silently passing them through, and it lets a grammar-constrained decoder exclude them before they are generated (@sec-vol3-foundation-model-grammar-constrained).
-2. **List every required field in `required`.** A description that says an argument is required is a suggestion to the model; the `required` array is a rule the validator enforces.
-3. **Bound every type.** Constrain numbers with `minimum` and `maximum`, strings with `pattern`, `enum`, or `maxLength`, and arrays with `minItems` and `maxItems`. Unbounded inputs let one call carry an argument larger than the tool, or the context that records it, can hold.
-4. **Put units and conventions in names and descriptions.** Write `timeout_ms` rather than `timeout`, state whether line numbers start at 1, and say what a missing optional field means.
-5. **Tag every union.** An `anyOf` or `oneOf` without a discriminator field leaves the model to guess which branch it is filling and leaves the validator unable to report which branch failed.
+- Close each fixed argument object with `additionalProperties: false`, so the validator rejects undeclared fields rather than silently forwarding them. A constrained decoder can enforce the same restriction only when its supported schema subset includes it.
+- Put mandatory fields in `required`. An optional field needs explicit absence semantics; the `default` annotation does not insert a missing value during validation [@jsonschemaUnderstanding]. Any defaulting step is part of the runtime's argument-normalization contract.
+- Bound input size as well as type. Use finite `maxLength` limits for strings and `maxItems` limits for arrays, including bounded elements and nesting; constrain numeric values with appropriate `minimum` and `maximum` limits. A pattern restricts size only if the pattern itself imposes a finite length bound. Enforce request-byte and parser limits before schema validation, since a validator cannot undo an oversized allocation.
+- State units and conventions in field names and descriptions. A name such as `timeout_ms` reduces ambiguity, but a range check cannot detect that a plausible number was intended in seconds. Conversion and interpretation must agree across the caller, adapter, and implementation.
+- For object variants, prefer a required tag with a distinct `const` value in each branch when it clarifies the operation. A tag is a design aid, not a prerequisite for validation: `anyOf` accepts one or more matching branches, while `oneOf` requires exactly one [@jsonschemaUnderstanding]. The selected decoder and validator must support the chosen construction.
 
-The same schema also carries the side-effect annotation that tells the runtime how to treat the call (read-only, idempotent, or destructive), which maps onto the authority levels $A_0$ to $A_3$ and decides whether the call needs an idempotency key, a compensator, or an approval (@sec-vol3-tool-calling-schemas).
+Descriptors may also state side effects and repeat behavior. These are separate from authority: a read can disclose sensitive information, an idempotent update can be unauthorized, and a permitted mutation may still be unsafe to repeat. Runtime policy and the endpoint's implemented contract determine approval and retry handling, not an annotation alone (@sec-vol3-tool-calling-schemas).
 
 ### A reference tool definition
 
-@Lst-vol3-app-b-golden-schema defines an exact-replacement edit tool that follows all five rules.
+An exact-replacement file tool can express a small edit without requiring the model to reproduce the whole file, and the teaching descriptor in @lst-vol3-app-b-golden-schema bounds every variable-length argument with an explicit finite limit. Those limits are illustrative policy choices, not recommended universal values. The outer `name`, `description`, and `parameters` fields form a teaching descriptor, not a standardized tool protocol. The `$schema` declaration [@jsonschemaUnderstanding] belongs to the argument schema inside `parameters`; the runtime validates the proposed argument object against that schema, not against the outer descriptor.
 
-::: {#lst-vol3-app-b-golden-schema lst-cap="**Reference Tool Definition**: A JSON Schema (Draft 2020-12) for an exact string replacement tool with a closed property set, bounded strings, and failure behavior stated in the description."}
+::: {#lst-vol3-app-b-golden-schema lst-cap="**Bounded edit arguments**: A teaching descriptor with a closed argument object and finite string limits; authorization and atomic mutation remain implementation obligations."}
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "file_edit",
-  "description": "Replaces an exact block of text in an existing file. old_str must match exactly one contiguous block unless allow_multiple is true; if it matches zero blocks, or more than one when allow_multiple is false, the file is left unchanged and the call returns an error naming the match count.",
+  "description": "Replaces an exact block in an existing workspace file. Match counting uses the original file and non-overlapping matches. Zero matches fail; multiple matches fail unless allow_multiple is true. Match-check failure leaves the file unchanged.",
   "parameters": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
       "path": {
@@ -47,300 +50,155 @@ The same schema also carries the side-effect annotation that tells the runtime h
       "old_str": {
         "type": "string",
         "description": "The exact block to replace, including indentation and newlines.",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 16384
       },
       "new_str": {
         "type": "string",
-        "description": "The replacement text. May be empty to delete old_str."
+        "description": "The replacement text. May be empty to delete old_str.",
+        "maxLength": 16384
       },
       "allow_multiple": {
         "type": "boolean",
-        "description": "If true, replace every match; if false, fail unless exactly one match exists.",
-        "default": false
+        "description": "If true, replace every non-overlapping match in the original file; if false, fail unless exactly one match exists."
       }
     },
-    "required": ["path", "old_str", "new_str"],
+    "required": ["path", "old_str", "new_str", "allow_multiple"],
     "additionalProperties": false
   }
 }
 ```
 :::
 
-Writing schemas by hand invites drift between the schema the model sees and the code that runs. Generating the schema from a typed model of the arguments keeps them in step. @Lst-vol3-app-b-pydantic-schema shows one way, using a Python data-validation library as the example; any typed schema generator serves the same purpose.
+The required Boolean makes repeat-match intent explicit; a descriptor with an optional Boolean would instead need a documented normalization rule. JSON Schema measures `maxLength` in characters, not serialized bytes or model tokens. The request transport therefore needs its own byte bound, while context construction needs its own token accounting. Replacement size also differs from result-file size: repeated replacements can expand a file beyond either string bound.
 
-::: {#lst-vol3-app-b-pydantic-schema lst-cap="**Generating a Schema from Typed Arguments**: A typed argument model that forbids extra fields and exports the JSON Schema the runtime publishes to the model and validates against."}
-```python
-from typing import Annotated
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+The implementation must enforce the advertised match behavior and workspace boundary: because a path pattern does not establish confinement and checking a unique match before an uncoordinated write does not prevent a concurrent change, the endpoint must resolve and authorize the actual target, enforce the match precondition together with the mutation, and bound both the resulting file and the returned observation. Even then, a missing response still requires the operation-identity contract below, because a schema cannot establish whether an edit committed.
 
-class FileEditInput(BaseModel):
-    """Arguments for the exact-replacement edit tool."""
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    path: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, max_length=1024,
-                          pattern=r"^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$"),
-        Field(description="Absolute path to the target file, inside the workspace root."),
-    ]
-    old_str: Annotated[str, StringConstraints(min_length=1),
-                       Field(description="Exact block to replace.")]
-    new_str: Annotated[str, Field(description="Replacement text; may be empty.")]
-    allow_multiple: Annotated[bool, Field(default=False,
-                              description="Replace every match instead of exactly one.")]
-
-def tool_descriptor() -> dict:
-    """The descriptor the runtime publishes to the model and validates against."""
-    return {
-        "name": "file_edit",
-        "description": "Replaces an exact block of text in an existing file.",
-        "inputSchema": FileEditInput.model_json_schema(),
-    }
-```
-:::
+Keep the published schema, normalization rules, and implementation version together. Generating a schema from a typed argument model can reduce transcription drift, but it does not prove that a decoder, validator, and implementation accept the same inputs. Contract tests should include missing required fields, extra fields, oversized strings, wrong types, and valid boundary values. Tests must also exercise advertised behavior outside the schema, including concurrent edits and uncertain outcomes.
 
 ### Schema anti-patterns
 
-Tools adapted from existing service interfaces often carry patterns that suit a programmer calling from code but mislead a model proposing from a description. @Tbl-vol3-app-b-anti-patterns lists the common ones.
+Tools adapted from existing service interfaces often carry patterns that suit a programmer calling from code but mislead a model proposing from a description, so @tbl-vol3-app-b-anti-patterns pairs each recurring schema defect with its hardened form and boundary effect.
 
-| Anti-pattern                                       | What goes wrong                                                                        | Hardened form                                                           | Effect                                                                    |
-|:---------------------------------------------------|:---------------------------------------------------------------------------------------|:------------------------------------------------------------------------|:--------------------------------------------------------------------------|
-| **Untyped argument bag** (`args: dict`)            | The model invents keys; the validator has nothing to check                             | Explicit typed fields with `additionalProperties: false`                | Invalid calls are rejected, or never generated under constrained decoding |
-| **Unbounded inputs** (`string` with no limit)      | One call carries an argument larger than the tool or the context can hold              | `maxLength`, `maxItems`, and explicit windowing parameters              | Argument size is bounded before dispatch                                  |
-| **Untagged union** (`anyOf` with no discriminator) | The model mixes fields from several branches; errors cannot name the branch            | A discriminator field, such as `"kind"` with values `"file"` or `"dir"` | Each call selects one branch explicitly                                   |
-| **Implicit units** (`timeout: 30`)                 | Seconds, milliseconds, and minutes are confused                                        | Units in the name (`timeout_ms`) with range bounds                      | Unit errors become validation errors                                      |
-| **Whole-file rewrite** (`content: str`)            | Output length grows with the file, long files are truncated, and unrelated lines drift | Exact replacement of a block (`old_str`, `new_str`)                     | Output tokens scale with the change, not the file                         |
+| Anti-pattern                                  | What goes wrong                                                             | Hardened form                                                         | Effect                                                                         |
+|:----------------------------------------------|:----------------------------------------------------------------------------|:----------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| **Untyped argument bag** (`args: dict`)       | Undeclared keys can pass through without field-level checks                 | Explicit typed fields with `additionalProperties: false`              | The validator rejects undeclared fields; a supporting decoder can exclude them |
+| **Unbounded inputs** (`string` with no limit) | One call carries an argument larger than the tool or the context can hold   | `maxLength`, `maxItems`, and explicit windowing parameters            | Argument size is bounded before dispatch                                       |
+| **Ambiguous object variants**                 | The model mixes fields that belong to different operations                  | A required tag with branch-specific constraints                       | Branch intent is explicit; validation still depends on the complete schema     |
+| **Implicit units** (`timeout: 30`)            | Seconds, milliseconds, and minutes are confused                             | Units in the name (`timeout_ms`), range bounds, and agreed conversion | Meaning is documented; plausible wrong-unit values can still pass validation   |
+| **Whole-file rewrite** (`content: str`)       | Output length grows with the file, risking truncation and unrelated changes | Exact replacement of a block (`old_str`, `new_str`)                   | Output length depends on the selected block and replacement                    |
 
 : **Tool Schema Anti-Patterns**: Common schema patterns that mislead a model or defeat the validator, the hardened form of each, and its effect on the boundary. {#tbl-vol3-app-b-anti-patterns tbl-colwidths="[22,30,26,22]"}
 
-The last row matters most for latency, because output tokens are the expensive ones on an agent's critical path (@sec-vol3-foundation-model-cost). A whole-file rewrite pays decode time for every unchanged line, and @sec-vol3-foundation-model-interface-design works an example in which the rewrite misses a per-call deadline that an anchored diff meets.
+The last row can matter for latency when generated output lies on the critical path (@sec-vol3-foundation-model-cost). A whole-file rewrite pays decode time for every unchanged line, and @sec-vol3-foundation-model-interface-design works an example in which the rewrite misses a per-call deadline that an anchored diff meets. Exact replacement has its own cost when the selected anchor is ambiguous or stale; the right representation depends on the edits the workload requires.
 
-## When to Constrain Decoding {#sec-vol3-app-b-logit-masking}
+## When Constrained Decoding Pays for Itself {#sec-vol3-app-b-logit-masking}
 
-A model that samples freely can emit a malformed call: an unescaped newline, a trailing comma, a missing required field. Grammar-constrained decoding prevents that by restricting each sampling step to the tokens the schema's grammar admits in its current state (@sec-vol3-foundation-model-grammar-constrained), @sec-vol3-appendix-inference-decode-loop sizes the mask tables and explains why the mask must run beside the sampler, and @sec-vol3-appendix-math-dfa proves that the result always parses. What this section adds is the decision of when constraining pays, because the alternative, letting the malformed call fail validation and asking the model to repair it, has a cost of its own.
+A model that samples freely can emit malformed arguments. Under a supported grammar and correct masking, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
 
-Let a tool call carry $L_{\text{gen}}$ output tokens at $t_{\text{decode}}$ per token, let masking add $t_{\text{mask}}$ per token, let $p_{\text{err}}$ be the rate at which unconstrained calls fail to parse, and let a repair turn cost $T_{\text{repair}}$ of latency, including the re-sent context and the regenerated call. The expected latency without constraints, allowing one repair, is
+Let a tool call carry $\OutputLength$ output tokens at $\PerTokenDecodeTime$ per token, let masking add $\PerTokenMaskingTime$ per token, let $\UnconstrainedParseFailureRate$ be the rate at which unconstrained calls fail to parse, and let a repair turn cost $\RepairTurnLatency$ of latency, including the re-sent context and the regenerated call. The expected latency without constraints, allowing one repair, is
 
-$$\mathbb{E}[T_{\text{free}}] = L_{\text{gen}} \, t_{\text{decode}} + p_{\text{err}} \, T_{\text{repair}}$$
+$$\mathbb{E}[\UnconstrainedCallLatency] = \OutputLength \, \PerTokenDecodeTime + \UnconstrainedParseFailureRate \, \RepairTurnLatency$$
 
 and with constraints it is
 
-$$T_{\text{constrained}} = L_{\text{gen}} \, (t_{\text{decode}} + t_{\text{mask}})$$
+$$\ConstrainedCallLatency = \OutputLength \, (\PerTokenDecodeTime + \PerTokenMaskingTime)$$
 
 Setting the two equal gives the break-even error rate
 
-$$p_{\text{break}} = \frac{L_{\text{gen}} \, t_{\text{mask}}}{T_{\text{repair}}}$$ {#eq-vol3-app-b-constrain-breakeven}
+$$\BreakEvenParseFailureRate = \frac{\OutputLength \, \PerTokenMaskingTime}{\RepairTurnLatency}$$
 
-Constraining pays whenever the observed malformation rate exceeds $p_{\text{break}}$. The rate is a property of a particular model, schema, and prompt, and must be measured on the tool's own traffic. As an illustration, with an 80-token call, a mask overhead of 0.5 ms per token, and a 1.8-second repair turn, @eq-vol3-app-b-constrain-breakeven gives $p_{\text{break}} = 40\ \text{ms} / 1{,}800\ \text{ms} \approx 2.2$ percent, so a tool whose calls fail to parse more often than about one time in forty is cheaper to constrain. Latency is only part of the case. A repair turn also adds error text to the context, which makes the next proposal about the same object more likely to repeat the mistake (@sec-vol3-intro-context-poisoning).
+Under this model, constraining reduces expected latency when the malformation rate exceeds $\BreakEvenParseFailureRate$. Measure the inputs for the actual model, schema, and prompt, and express both time terms in the same unit. The ratio is dimensionless. If it exceeds one, eliminating every parse failure would still not repay the stipulated mask overhead; if repair latency is zero, the ratio is undefined and the original latency expressions should be compared directly.
 
-Constraining guarantees syntax and nothing else. A call that parses can still name a file that does not exist, pass an argument outside the task's authority, or do the wrong thing correctly, which is why validation, the grant, and the envelope stay in place behind it (@sec-vol3-foundation-model-grammar-constrained).
+The comparison holds generated length and base decode cost fixed and includes at most one repair. It omits schema-compilation and setup costs; include those when they are not already amortized or shared. A policy that stops quickly after a failed repair may look faster while completing fewer tasks. Use the break-even only among candidates with comparable task quality and completion requirements, and measure residual malformed or interrupted outputs rather than assuming that every constrained call completes.
+
+Even an accepting, syntactically valid call can name a nonexistent file, exceed the task's authority, or request the wrong operation. Completion checks, validation, grants, and execution limits therefore remain necessary (@sec-vol3-foundation-model-grammar-constrained).
 
 ## Idempotency Keys and Capabilities {#sec-vol3-app-b-idempotency-leases}
 
-Two artifacts make a granted call safe to send. An idempotency key makes a repeated call harmless, so a runtime that cannot tell whether a timed-out call ran can settle it instead of guessing (@sec-vol3-tool-calling-idempotency). A capability bounds what the call can reach once it runs, so a steered or mistaken proposal can do no more than the task allows (@sec-vol3-sandboxes-least-privilege). The chapters argue for both. This section gives the reference form of each.
+Operation identity and authorization solve different problems. An idempotency key identifies an intended operation across attempts; safe deduplication depends on the endpoint's effect and result contract (@sec-vol3-tool-calling-idempotency). A capability represents scoped authority whose enforcement is developed in @sec-vol3-sandboxes-least-privilege. Neither artifact, by its presence alone, establishes that a call is safe.
 
-### Deriving the key
+### Retaining operation identity
 
-The key must identify the logical call, not the attempt, so the runtime derives it deterministically from the trajectory. @Sec-vol3-tool-calling-idempotency uses
+Generating a fresh UUID inside a retry loop makes every network timeout look like a brand-new mutation to the receiving endpoint. Instead, the runtime must assign an identifier to the intended operation and retain it across retries and recovery. A fresh transport attempt can have a new call identifier while referring to the same operation. Conversely, two separately intended operations may have identical arguments and still need distinct identities. Deriving an identifier from recorded inputs or storing a generated identifier are both possible; either method requires enough durable state to recover the same identity after a crash.
 
-$$k_{\text{idem}} = \mathcal{H}\big(\text{trajectory\_id} \,\|\, \text{turn} \,\|\, \text{call\_id} \,\|\, \text{tool} \,\|\, \text{canonical\_args}\big)$$
+The endpoint binds this identity to the authorized scope and request payload and rejects conflicting reuse. If canonical serialization is used to compare payloads, its rules must match at both ends. Identity does not authorize the request, and hashing arguments alone cannot distinguish an intentional second operation from a retry.
 
-where $\mathcal{H}$ is a cryptographic hash, or a keyed hash when keys must not be guessable by the endpoint's other clients. The arguments must be serialized canonically before hashing. Ordinary JSON serialization does not fix key order or whitespace, so `{"path": "/a", "force": true}` and `{"force": true, "path": "/a"}` would hash to different keys and defeat deduplication. A canonical form, such as the JSON Canonicalization Scheme of RFC 8785, sorts keys and fixes number and string encoding. Because the key is derived rather than drawn at random, a runtime that recovers from a crash and re-sends a call regenerates the same key, and the endpoint recognizes the repeat (@sec-vol3-persistence-wal).
+### The endpoint contract
 
-### The endpoint record
+When a retried request arrives with the same operation ID, an endpoint that only returns "success" or "error" cannot tell the caller whether the first attempt is still running or failed partway through. A useful status model distinguishes an unseen operation, work in flight, a completed operation with a retained result, and an operation whose effect is in doubt. These states describe the required behavior, not a complete implementation:
 
-At the endpoint, each key maps to a record with one of four states, and the transitions between them are what make a retry safe.
+1. **Admission.** Claim the operation under the endpoint's concurrency and durability contract, checking scope and payload consistency.
+2. **In flight.** A repeated request must not start an independent execution of the same effect. It can obtain status or wait under the endpoint's defined limits.
+3. **Completed.** A repeat returns the retained outcome under the service's result-retention contract.
+4. **In doubt.** Preserve uncertainty and reconcile it; do not release the operation for blind repetition merely because an exception occurred.
 
-1. **Unseen.** The endpoint claims the key atomically, with a set-if-absent operation and a lease that outlives the worst-case execution time plus the caller's timeout and any clock skew (@sec-vol3-tool-calling-idempotency), and then executes the call.
-2. **In flight.** A repeat arriving while the first execution runs is refused or made to wait. It is never executed in parallel.
-3. **Completed.** A repeat of a completed call returns the stored result without executing again.
-4. **In doubt.** If execution fails in a way that leaves its effect unknown, such as a crash of the executor partway through, the record stays claimed and is marked in doubt. Repeats are refused until a reconciliation probe inspects the environment and settles the record as completed or not executed.
+The difficult boundary lies between performing the effect and retaining its outcome. A host-side map that calls an external service and then writes `COMPLETED` leaves a crash gap. Closing it requires support that couples identity to the effect, such as a transaction within the effect-owning service or that service's own deduplication contract. An expiring claim does not make an older executor unable to commit; any takeover must account for that executor.
 
-The fourth state is the one naive implementations omit. Releasing the key after an exception invites the next retry to execute again, which is exactly the duplicate the key exists to prevent, because an exception does not prove that the effect did not happen. @Lst-vol3-app-b-gateway implements all four states.
+The contract must also state how long operation identities and outcomes remain recognizable. After a deduplication record expires, an absent record may mean forgotten work rather than a never-issued operation. A retry beyond the retention window needs reconciliation or another endpoint guarantee; the identifier alone no longer establishes repeat safety.
 
-::: {#lst-vol3-app-b-gateway lst-cap="**Endpoint Deduplication with Settlement**: A reference endpoint that claims each idempotency key atomically, returns the stored result for completed keys, refuses repeats while a call is in flight, and marks a failed execution as in doubt rather than releasing its key."}
-```python
-import hashlib, json, time
-from typing import Any, Callable, Dict
-
-def canonical(args: Dict[str, Any]) -> str:
-    """Stable serialization: sorted keys, fixed separators."""
-    return json.dumps(args, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-def derive_key(trajectory_id: str, turn: int, call_id: str, tool: str,
-               args: Dict[str, Any]) -> str:
-    material = f"{trajectory_id}|{turn}|{call_id}|{tool}|{canonical(args)}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-class DedupEndpoint:
-    """Executes each logical call at most once per idempotency key."""
-
-    def __init__(self, store, lease_s: float):
-        self.store, self.lease_s = store, lease_s   # store offers set_if_absent/get/put
-
-    def handle(self, key: str, execute: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
-        claimed = self.store.set_if_absent(
-            key, {"state": "IN_FLIGHT", "until": time.time() + self.lease_s})
-        if not claimed:
-            record = self.store.get(key)
-            if record["state"] == "COMPLETED":
-                return record["result"]                       # repeat: stored result
-            return {"status": record["state"], "retry": True}  # IN_FLIGHT or IN_DOUBT
-        try:
-            result = execute()
-        except Exception as exc:                              # effect unknown
-            self.store.put(key, {"state": "IN_DOUBT", "error": str(exc)})
-            return {"status": "IN_DOUBT", "retry": False}     # settle by probe first
-        self.store.put(key, {"state": "COMPLETED", "result": result})
-        return result
-```
-:::
-
-A tool whose endpoint cannot keep such a record needs the other settlement path, a reconciliation probe that reads the environment to decide whether the effect happened before any retry (@sec-vol3-tool-calling-idempotency).
+A reconciliation probe supplies scoped evidence. Finding the pre-dispatch state does not prove that a delayed request cannot still act. If neither the endpoint contract nor terminal evidence establishes that repetition is safe, the operation remains unresolved and the runtime escalates or withholds the repeat (@sec-vol3-tool-calling-idempotency). @Sec-vol3-durable-execution develops preservation of intent and outcome across crashes; this appendix does not substitute a short cache implementation for that protocol.
 
 ### The capability check
 
-@Sec-vol3-sandboxes-least-privilege writes a capability as $C = (R, O, P, E)$, signed with a key only the runtime holds: $R$ is the set of rights (read, write, execute, connect), $O$ the objects the capability designates (path prefixes, host names, repositories), $P$ a predicate that bounds arguments and cost, and $E$ the expiry. A capability issued for one trajectory and bounded by $E$ is that trajectory's lease on the resources it names (@sec-vol3-sandboxes-lease). The runtime approves a proposal only if the signature verifies, the operation is among the rights, the target lies within the objects, the cost satisfies the predicate, and the capability has not expired.
+An idempotency key prevents duplicate execution of the same request, but does not check whether the caller is allowed to touch the target object in the first place. The capability tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes the rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$ that govern access. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
 
-When work is delegated, a child's capability must attenuate from its parent's. Writing $C_c \preceq C_p$ for "the child holds no more than the parent",
+For delegation, let $\GrantAllowedAccesses(\CapabilityGrant)$ denote the accesses a grant permits. A derived child must satisfy
 
-$$C_c \preceq C_p \iff R_c \subseteq R_p \;\land\; O_c \sqsubseteq O_p \;\land\; P_c \Rightarrow P_p \;\land\; E_c \le E_p$$
+$$\GrantAllowedAccesses(\ChildCapabilityGrant)\subseteq\GrantAllowedAccesses(\ParentCapabilityGrant).$$
 
-so a child can never hold a right its parent lacks, reach an object outside its parent's scope, spend beyond its parent's bound, or outlive its parent's grant (@sec-vol3-multiagent-authority; principle \ref{pri-vol3-monotonic-delegation}). @Lst-vol3-app-b-capability implements the check and the attenuation, with the predicate reduced to a cost ceiling for brevity.
+An issuer must authenticate the parent and validate the proposed narrowing before issuing a child. It must preserve associations between rights, objects, and conditions, not merely compare unrelated sets of names. Holding a narrower child does not revoke a broader parent. Several children must share the parent's aggregate resource allowance rather than each receiving an independent copy of its budget (@sec-vol3-multiagent-authority).
 
-::: {#lst-vol3-app-b-capability lst-cap="**Capability Check and Attenuation**: A reference implementation of the capability $C = (R, O, P, E)$, with the predicate reduced to a cost ceiling, a runtime-held signing key, and an attenuation step that refuses to widen any component."}
-```python
-import hashlib, hmac, time
-from dataclasses import dataclass
-from typing import FrozenSet
+Execution needs further controls beyond a predicate checked at dispatch. Trusted accounting and reservations govern concurrent resource consumption; a caller-supplied estimate is not a meter. Expiry or revocation must govern existing handles and ongoing work where the policy requires it. A workspace lease adds ownership, teardown, and reuse obligations rather than obtaining them from the expiry field alone (@sec-vol3-sandboxes-lease).
 
-@dataclass(frozen=True)
-class Capability:
-    rights: FrozenSet[str]     # R: e.g. {"read", "write"}
-    objects: FrozenSet[str]    # O: path or host prefixes
-    max_cost: float            # P: reduced here to a cost ceiling
-    expires_at: float          # E: epoch seconds
-    sig: str = ""
+These requirements are an implementation checklist, not a complete authorization library. The envelope and mediated services must prevent bypass of the checks, and an already issued external effect can remain unresolved after a grant expires.
 
-    def body(self) -> bytes:
-        return repr((sorted(self.rights), sorted(self.objects),
-                     self.max_cost, self.expires_at)).encode()
+## Catalog Cost and Comparison {#sec-vol3-app-b-deep-vs-shallow}
 
-def sign(cap: Capability, key: bytes) -> Capability:
-    return Capability(cap.rights, cap.objects, cap.max_cost, cap.expires_at,
-                      hmac.new(key, cap.body(), hashlib.sha256).hexdigest())
-
-def within(target: str, objects: FrozenSet[str]) -> bool:
-    return any(target == o or target.startswith(o.rstrip("/") + "/") for o in objects)
-
-def approve(cap: Capability, key: bytes, op: str, target: str, cost: float) -> bool:
-    good_sig = hmac.compare_digest(
-        cap.sig, hmac.new(key, cap.body(), hashlib.sha256).hexdigest())
-    return (good_sig and op in cap.rights and within(target, cap.objects)
-            and cost <= cap.max_cost and time.time() < cap.expires_at)
-
-def attenuate(parent: Capability, key: bytes, *, rights, objects,
-              max_cost, expires_at) -> Capability:
-    """Issue a child capability; refuse any component wider than the parent's."""
-    if not (set(rights) <= parent.rights
-            and all(within(o, parent.objects) for o in objects)
-            and max_cost <= parent.max_cost and expires_at <= parent.expires_at):
-        raise PermissionError("attenuation may only narrow a capability")
-    return sign(Capability(frozenset(rights), frozenset(objects),
-                           max_cost, expires_at), key)
-```
-:::
-
-The check runs below the model, in the runtime and the sandbox's drivers, on every access. Nothing the model writes can widen a capability, because the model never holds the signing key, and a proposal that names a target outside the capability fails before any host operation runs.
-
-## A Small Catalog of General Tools {#sec-vol3-app-b-deep-vs-shallow}
-
-A natural first catalog wraps each endpoint of an existing service as its own tool: `git_status`, `git_diff`, `git_add`, `git_commit`, and so on across every system the agent touches. The result is dozens or hundreds of narrow tools. Ousterhout calls a module shallow when its interface is large relative to the functionality behind it [@ousterhout2018philosophy], and a catalog of narrow tools is shallow in exactly that sense, with a cost an agent pays on every turn. @Sec-vol3-tool-calling-toolkit-design argues the design choice. This section gives the arithmetic.
+A catalog can expose separate service operations or combine work behind more general interfaces. The interface-to-functionality trade-off also appears in modular software design [@ousterhout2018philosophy], but tool count alone does not determine usability or authority. @Sec-vol3-tool-calling-toolkit-design separates granularity from catalog staging and evaluates both under a workload. This section isolates a stipulated token comparison.
 
 ### The token cost of a catalog
 
-Every tool's definition is sent with every call that may use it. With $K$ tools whose definitions average $S$ tokens, a trajectory of $N$ turns sends
+Suppose every one of $\CatalogStagingCallCount$ model calls stages the same $\StagedDefinitionCount$ definitions, contributing an average of $\DefinitionSerializedSize$ tokens each in the final serialization. Excluding other request content, this fixed-catalog policy sends
 
-$$T_{\text{catalog}} = N \cdot K \cdot S$$ {#eq-vol3-app-b-catalog-tokens}
+$$\CatalogDefinitionTokens = \CatalogStagingCallCount \cdot \StagedDefinitionCount \cdot \DefinitionSerializedSize$$ {#eq-vol3-app-b-catalog-tokens}
 
-tokens of tool definitions. As an illustration, a catalog of 80 narrow tools at about 350 tokens each costs 28,000 tokens per turn and 1,120,000 over a 40-turn trajectory. Four general tools at about 250 tokens each cost 1,000 tokens per turn and 40,000 over the same trajectory, a reduction of about 96 percent. Prefix caching lowers the price of the re-sent definitions as long as the catalog stays byte-identical and in a fixed position, but it does not lower their share of the context budget, and any change to the catalog mid-trajectory discards the cached prefix (@sec-vol3-context-engineering-staging). Tool selection also degrades as the catalog grows and definitions overlap, a trend that function-calling benchmarks measure by varying catalog size (@sec-vol3-tool-calling-toolkit-design).
+tokens of tool definitions. For two fixed catalogs under the same call count, their token ratio is $\FirstCatalogDefinitionCount \FirstCatalogDefinitionSize/(\SecondCatalogDefinitionCount \SecondCatalogDefinitionSize)$. Fewer definitions reduce catalog tokens only when their combined serialized size is smaller. A general interface with a long instruction manual can cost more than several concise specialized interfaces.
 
-@Tbl-vol3-app-b-deep-vs-shallow sets the two catalog shapes side by side on these costs and on where authority is enforced.
+On-demand staging changes the per-call count. If call $\ModelCallIndex$ stages ${\StagedDefinitionCount}_i$ definitions with mean serialized contribution $\DefinitionSerializedSize_i$, replace the product in @eq-vol3-app-b-catalog-tokens with $\sum_{i=1}^{\CatalogStagingCallCount} {\StagedDefinitionCount}_i \DefinitionSerializedSize_i$. Record the tokenizer and serialization convention, including any shared framing, so the estimates can be checked against actual requests. Selection calls and catalog-discovery observations need separate accounting. Neither formula establishes equal functionality, grants, selection quality, or task outcomes.
 
-| Dimension             | Many narrow tools                                            | A few general tools                               | Consequence                                                     |
-|:----------------------|:-------------------------------------------------------------|:--------------------------------------------------|:----------------------------------------------------------------|
-| **Interface surface** | Tens to hundreds of endpoint wrappers                        | A handful of general operations                   | Fewer definitions for the model to read and choose among        |
-| **Definition tokens** | Grows with $K$ on every turn (@eq-vol3-app-b-catalog-tokens) | Small and stable                                  | More of the context budget left for the task                    |
-| **Selection**         | Overlapping names and arguments invite the wrong tool        | Few, distinct choices                             | Fewer wrong-tool calls; more depends on each tool's description |
-| **Observations**      | A different result shape per tool                            | One result shape (output, error, exit status)     | One observation-shaping path in the gateway                     |
-| **Enforcement**       | Authorization logic scattered across many handlers           | Authority enforced by the envelope and capability | One place to enforce and audit, at the price of broader tools   |
+Compatible available prefix state can reduce recomputation, and qualifying cached-input billing can reduce price, without releasing logical context capacity. A changed descriptor affects reuse from its first divergence, not necessarily the entire earlier prefix (@sec-vol3-context-engineering-staging).
+
+Comparing narrow and general catalogs across definition cost, tool selection, observation shape, and enforcement (@tbl-vol3-app-b-deep-vs-shallow) separates the surface property of a catalog from the underlying runtime measurement or authority obligation.
+
+| Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                                                                 |
+|:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
+| **Interface surface** | More operation-specific names                            | Fewer names with more expressive arguments                     | Count alternatives and argument complexity separately                                                       |
+| **Definition tokens** | Depends on staged count and serialized size              | Depends on staged count and serialized size                    | Measure ${\StagedDefinitionCount}_i \DefinitionSerializedSize_i$ rather than inferring cost from tool count |
+| **Selection**         | More interfaces may offer task-specific choices          | Fewer interfaces may require more argument composition         | Compare selection and argument errors under the same workload                                               |
+| **Observations**      | Can expose task-specific structured results              | Can expose a shared result envelope                            | Either design must preserve status, scope, and omissions                                                    |
+| **Enforcement**       | Per-operation checks can coexist with shared containment | Expressive operations require limits on their possible effects | Both need authorization and execution enforcement                                                           |
 
 : **Narrow Versus General Tool Catalogs**: How catalog shape affects definition tokens, tool selection, observations, and where authority is enforced. {#tbl-vol3-app-b-deep-vs-shallow tbl-colwidths="[18,26,26,30]"}
 
-The last row is the cost of the general design. A general shell tool can do far more than a narrow one, so it moves the burden of bounding each action from the tool's code to the isolation envelope and the capability it runs under (@sec-vol3-sandboxes). A general catalog is safe only inside an envelope sized for the broadest thing its tools can do.
+General tools can express effects that are difficult to infer from their arguments alone. Their execution envelope must enforce the permitted reach (@sec-vol3-sandboxes). Narrow signatures do not remove that obligation: their implementations can still access resources, invoke other programs, or contain defects.
 
-### A reference catalog for coding agents
+### A catalog comparison worksheet
 
-Many coding agents converge on four general operations. A shell runs builds, tests, version control, and package managers inside the sandbox. A windowed file viewer returns a bounded slice of a file, so one read cannot flood the context. An exact-replacement editor changes one block at a time, following @lst-vol3-app-b-golden-schema. A search tool returns structured file and line matches without shell quoting hazards. @Lst-vol3-app-b-canonical-schemas gives their definitions. Other domains have their own small general sets, such as query, read, and a bounded write for a data agent, and the same arithmetic applies to them.
+A catalog comparison needs a fixed workload and acceptance policy. For coding tasks, a command runner, file viewer, exact-replacement editor, and structured search interface form one possible candidate. They need not be four separate tools, and a candidate that requires additional model calls may spend more even if each request carries fewer definitions. Attributing an improvement to catalog shape therefore requires recording the workload, staged tokens, selection errors, authority reach, and end-to-end outcomes across both candidates (@tbl-vol3-app-b-catalog-worksheet).
 
-::: {#lst-vol3-app-b-canonical-schemas lst-cap="**A Four-Tool Catalog for Coding Agents**: Definitions for a sandboxed shell, a windowed file viewer, an exact-replacement editor, and a structured search, each with a closed property set and bounded inputs."}
-```json
-{
-  "tools": [
-    {
-      "name": "bash_execute",
-      "description": "Runs a shell command in the task's sandbox and returns stdout, stderr, and the exit status, truncated with a marker if long.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "command": {"type": "string", "maxLength": 8192, "description": "Shell command line to run."},
-          "timeout_ms": {"type": "integer", "default": 30000, "minimum": 1000, "maximum": 300000}
-        },
-        "required": ["command"], "additionalProperties": false
-      }
-    },
-    {
-      "name": "file_view",
-      "description": "Returns a window of lines from a text file.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {"type": "string", "description": "Absolute path inside the workspace."},
-          "offset": {"type": "integer", "minimum": 1, "description": "First line to return, 1-indexed."},
-          "limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum lines to return."}
-        },
-        "required": ["path", "offset", "limit"], "additionalProperties": false
-      }
-    },
-    {
-      "name": "file_edit",
-      "description": "Replaces exactly one matching block of text in a file.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {"type": "string", "description": "Absolute path inside the workspace."},
-          "old_str": {"type": "string", "minLength": 1, "description": "Exact block to replace."},
-          "new_str": {"type": "string", "description": "Replacement text."}
-        },
-        "required": ["path", "old_str", "new_str"], "additionalProperties": false
-      }
-    },
-    {
-      "name": "grep_search",
-      "description": "Searches files for a regular expression and returns matching paths and line numbers.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "pattern": {"type": "string", "maxLength": 512, "description": "Regular expression to match."},
-          "path": {"type": "string", "description": "Directory or file to search."},
-          "glob": {"type": "string", "description": "Optional file filter, such as '*.py'."}
-        },
-        "required": ["pattern", "path"], "additionalProperties": false
-      }
-    }
-  ]
-}
-```
-:::
+| Comparison field        | Record for each candidate                                                 | Interpretation                                          |
+|:------------------------|:--------------------------------------------------------------------------|:--------------------------------------------------------|
+| Workload and acceptance | Same task set, source versions, checks, and completion deadline           | A faster rejection is not an accepted task              |
+| Available operations    | Required effects, argument expressiveness, and unavailable operations     | Compare functional coverage before token savings        |
+| Staged definitions      | Actual serialized tokens per model call and the staging policy            | Count all calls, including discovery and repair         |
+| Selection and arguments | Wrong-tool choices, invalid arguments, and ambiguous requests             | Separate interface selection from argument construction |
+| Observation contract    | Status, provenance, omitted output, and capture limits                    | A short result may omit the evidence needed to continue |
+| Authority and effects   | Reachable resources, approval conditions, and repeat behavior             | Fewer tool names do not imply narrower authority        |
+| End-to-end outcome      | Accepted tasks, unresolved outcomes, total cost, and latency distribution | Retain failures and recovery work in the accounting     |
 
-A small catalog of general tools keeps the context for the task, gives the model fewer and more distinct choices, and moves enforcement to one place. It also makes each tool more powerful, which is why the envelope and the capability, not the tool list, must carry the bound on what the agent can do.
+: **Catalog comparison worksheet**: Fields that make a workload-specific comparison interpretable rather than equating fewer tool names with a better interface. {#tbl-vol3-app-b-catalog-worksheet tbl-colwidths="[22,40,38]"}
+
+Each operation also needs explicit input, execution, and observation bounds that match its mechanics: a file viewer's line window does not bound its returned bytes because one line can be arbitrarily long, whereas a search tool needs limits on its input expression as well as its work, matches, and captured output; similarly, an editor needs a resulting-file bound in addition to bounded replacement strings, while a command runner needs containment and resource accounting beyond a timeout argument. These remain endpoint obligations even when several operations share one implementation.
+
+A compact catalog is useful when it reduces the total work required to finish the specified tasks without weakening the acceptance or authority contract. Specialized interfaces can instead reduce ambiguity and expose narrower effects. The worksheet supports that decision; it does not prescribe a catalog size.

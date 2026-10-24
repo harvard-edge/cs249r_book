@@ -1,0 +1,282 @@
+chapter: 05_collective_communication
+lecture: "05"
+title: "Collective Communication"
+subtitle: "Pricing the exchanges of a training step"
+layer: distributed
+minutes: 75
+notes_minutes: 70
+core_minutes: 58
+target_ideas: 30
+thesis: "A collective is a contract on what each rank holds afterward, and its time is the alpha-beta price paid once per round on a chunk."
+
+hook:
+  minutes: "0-5"
+  setup: "Uber, 2017 (War Story 5.1; Sergeev and Del Balso 2018). Standard distributed TensorFlow, which sends every gradient through a parameter server, on 128 NVIDIA Pascal GPUs over 25 Gb Ethernet. Step 1 shows ideal throughput outlines for Inception V3 and ResNet-101; step 2 reveals the measured bars. Next slide: Horovod, a ring AllReduce behind a one-line optimizer wrapper, on the same GPUs and network."
+  question_to_class: "At 128 GPUs, what share of ideal throughput did standard distributed TensorFlow reach? A) 90% B) 70% C) 50% D) 25%"
+  payoff: "C. Read from the paper's Figure 6: Inception V3 about 53 percent, ResNet-101 about 41 percent; the paper says about half the resources were lost to communication overhead. Horovod reached 88 percent on both. The synthesis maps each Horovod measurement to one cost term: the ring removed concentration at one port, Tensor Fusion (up to 65 percent) amortized startup, and RDMA helped VGG-16 by 30 percent but Inception V3 and ResNet-101 by 3 to 4 percent because only VGG-16 had communication on its critical path."
+  sources:
+    - "Sergeev and Del Balso 2018, arXiv 1802.05799: Figure 6 (bars read to about +/-250 images/s: Inception V3 ideal 17,000, TensorFlow 9,000, Horovod 15,000; ResNet-101 ideal 15,000, TensorFlow 6,200, Horovod 13,200); Section 2 ('about half of our resources'); Section 8 ('88 percent efficiency mark'; RDMA 3 to 4 percent, VGG-16 30 percent); Section 7 (Tensor Fusion, up to 65 percent, 64 MB buffer); Listing 1; Figure 5."
+    - "Collective Communication, War Story 5.1 (Sec. 5.6.1)."
+    - "Efficiency percentages derived in images/calcs.py."
+
+recall: "From memory: write Lecture 3's time for one message of n bytes, T(n) = alpha + n/beta, and the per-GPU bandwidth inside a DGX H100 node (NVLink 450 GB/s per direction) and across nodes (one InfiniBand port, 50 GB/s). Lecture 4 moved bytes between storage and accelerators; today every byte moves between accelerators, every step."
+
+driving_question: "How long does it take N accelerators to agree on one gradient, and which algorithm should they use?"
+
+goals:
+  - "Name the collective each parallelism split needs, by what each rank must hold."
+  - "Price a collective round by round, and say whether a chunk is latency- or bandwidth-bound."
+  - "Choose ring, tree, or hierarchical AllReduce for a message size and topology."
+  - "Decide when compression or overlap shortens a step, and what stays exposed."
+
+running_example: "One gradient synchronization on DGX H100 nodes: NVLink 450 GB/s per GPU per direction inside the node, one 50 GB/s InfiniBand NDR port per GPU, alpha = 1.5 us (Sec. 5.5, 5.7.1). Scoreboard: the chapter's 1 GB reference buffer on 64 GPUs (8 nodes of 8): parameter server 1,280 ms (derived), simple tree 240 ms, flat ring 39.4 ms (about 40 ms), hierarchical 8.3 ms. Large case: a 70B model's 140 GB BF16 gradient on 64 GPUs, 5,512.7 ms (Napkin Math 5.2); Archetype A's 175B gradient (350 GB BF16) on the 1,024-GPU reference cluster, 14.0 s flat against 3.1 s hierarchical (Sec. 5.7.1). The slide says so whenever the payload changes."
+
+segments:
+  - name: Traffic
+    divider_question: "Which data must cross between accelerators, and who must agree on it?"
+    read: "Sec. 5.1, 5.3, 5.4"
+    concept_questions: [1, 2, 3]
+    land: "Each split fixes a contract; the right primitive is the narrowest one whose output the next computation consumes."
+    data: "Horovod measurements (hook); chapter table 1."
+    minutes: 15
+  - name: Pricing
+    divider_question: "What does one collective cost, and which term dominates?"
+    read: "Sec. 5.5, 5.6.1 to 5.6.3"
+    concept_questions: [4, 5, 6, 7]
+    land: "Each round pays alpha on a chunk of M/N; the ring sends the minimum bytes but pays 2(N-1) startups."
+    data: "Chapter table 4 (vendor alpha and beta per interconnect); Napkin Math 5.1, 5.2."
+    minutes: 15
+  - name: Algorithms
+    divider_question: "Which AllReduce schedule wins, and when?"
+    read: "Sec. 5.6.4 to 5.6.7, 5.7"
+    concept_questions: [8, 9, 10, 11]
+    land: "Trees cut rounds; hierarchy keeps the slow tier's payload at M/G when each GPU has its own port."
+    data: "DGX H100 bandwidths (450 against 50 GB/s); Napkin Math 5.3, 5.4."
+    minutes: 13
+  - name: AllToAll
+    divider_question: "Why can AllToAll stall before AllReduce does?"
+    read: "Sec. 5.8"
+    concept_questions: [12, 13]
+    land: "An AllToAll finishes when its hottest receiver or narrowest cut finishes."
+    data: "Napkin Math 5.5, 5.6 (computed from the 50 GB/s port specification)."
+    minutes: 5.5
+  - name: Exposed Time
+    divider_question: "How much of the remaining communication must the step wait for?"
+    read: "Sec. 5.9 to 5.11"
+    concept_questions: [14, 15]
+    land: "Compression and overlap act on what remains; judge them by step time and time to quality."
+    data: "1-bit Adam measurements (Tang et al. 2021); Horovod Timeline trace (Figure 5); Napkin Math 5.7, 5.9."
+    minutes: 13
+
+concept_questions:
+  - q: "Which traffic does each way of splitting a model create?"
+    picture: "Build of chapter table 1: split, primitive, binding term; PyTorch's torch.distributed function names."
+    numbers: "None; a classification."
+    example: "Data parallel AllReduce; FSDP AllGather + ReduceScatter; pipeline Send/Recv; MoE AllToAll."
+    read: "Sec. 5.3"
+  - q: "What does each collective leave on each rank?"
+    picture: "Four ranks before and after AllReduce, AllGather, ReduceScatter, AllToAll (built one at a time)."
+    numbers: "None."
+    example: "Gradient synchronization is the AllReduce case."
+    read: "Sec. 5.4"
+  - q: "Why does FSDP multiply collective calls without multiplying bytes?"
+    picture: "Table of calls, bytes, startup per step; PyTorch's ShardingStrategy enum."
+    numbers: "2L or 3L calls; about 2M or 3M bytes per rank; 96 calls for 32 layers (derived)."
+    example: "FULL_SHARD."
+    read: "Sec. 5.4.2"
+  - q: "At what message size does startup stop mattering?"
+    picture: "Critical size alpha*beta for five interconnects (chapter table 4)."
+    numbers: "NDR 75 KB; NVLink about 0.7 MB."
+    example: "4 KB routing message."
+    read: "Sec. 5.5"
+  - q: "Is a 25 MB bucket latency- or bandwidth-bound in a ring?"
+    picture: "Chunk lines on the critical-size plot; table of 64 against 1,024 ranks; nccl-tests command."
+    numbers: "390.6 KB and 24.4 KB chunks; 1.2 and 4.1 ms; ratio 3.5 (derived); fusion 150 to 9.5 us."
+    example: "Napkin Math 5.1."
+    read: "Sec. 5.5"
+  - q: "What is the least any AllReduce can send, and who meets it?"
+    picture: "Scoreboard: parameter server against ring for 1 GB on 64 GPUs."
+    numbers: "1,280 ms (derived) against 39.4 ms, 32.5 times (derived)."
+    example: "Uber's parameter server."
+    read: "Sec. 5.6.1, 5.6.2"
+  - q: "How does Ring AllReduce reach the bound?"
+    picture: "Four-GPU ring and the six-step trace table, one row per step."
+    numbers: "Vectors summing to [10, 26, 18, 34]; 2(N-1) = 6 steps."
+    example: "Example 5.1."
+    read: "Sec. 5.6.3"
+  - q: "How many rounds does a tree save?"
+    picture: "Rounds against N, ring 2(N-1) and tree 2 log2 N."
+    numbers: "2,046 against 20 at 1,024 ranks."
+    example: "Scalar reductions, control messages."
+    read: "Sec. 5.6.4"
+  - q: "When does a tree beat a ring?"
+    picture: "Cost-model curves against message size with the crossover; NCCL_ALGO setting."
+    numbers: "1 MB on 64 GPUs: ring 1,456.9 us, tree 1,320 us; crossover 1.1 MB; 7.7 MB on 1,024 NDR GPUs."
+    example: "Napkin Math 5.3."
+    read: "Sec. 5.6.7"
+  - q: "Why does a flat ring waste a DGX node?"
+    picture: "HGX B200 board photo; NVLink 450 against InfiniBand 50 GB/s bars."
+    numbers: "9 times."
+    example: "Flat ring over 8 nodes runs at one port."
+    read: "Sec. 5.7.1"
+  - q: "How does hierarchical AllReduce use the fast tier?"
+    picture: "Three-phase build on nodes of GPUs, with rails; rail alignment slide with InfiniBand photo."
+    numbers: "1.94 + 4.40 + 1.94 = 8.3 ms against about 40 ms (4.8 times); 175B: 14.0 s to 3.1 s."
+    example: "Napkin Math 5.4."
+    read: "Sec. 5.7.1, 5.7.4"
+  - q: "What bounds an AllToAll?"
+    picture: "8 by 8 MoE traffic matrix; PyTorch all_to_all_single."
+    numbers: "1.84 MB per GPU; at least 36.7 us."
+    example: "Napkin Math 5.5."
+    read: "Sec. 5.8"
+  - q: "What does one hot expert rank do to the layer?"
+    picture: "Receive-bound bars, uniform against hot receiver."
+    numbers: "36.7 against 55.1 us, 1.5 times."
+    example: "Napkin Math 5.6."
+    read: "Sec. 5.8.1"
+  - q: "When does compression pay, and what keeps it correct?"
+    picture: "Payback bars; run-level bars on two networks; error-feedback trace table; DDP fp16_compress_hook; 1-bit Adam bars and DeepSpeed config."
+    numbers: "40 to 7 ms (5.7 times); 23 percent faster against 2.5 percent slower; sent 2 plus residual -0.4 equals 1.6; 1-bit Adam up to 5 times less volume."
+    example: "Napkin Math 5.7; Example 5.2; Tang et al. 2021."
+    read: "Sec. 5.9"
+  - q: "How much of a reduction can overlap hide?"
+    picture: "Timeline build: sequential, overlapped, overlapped with faster buckets; PyTorch DDP bucket code; Horovod Timeline trace redrawn at slide size (horovod_trace, phase edges in calcs.py)."
+    numbers: "1,344, 879, 487.6 ms (derived); 25 MiB default bucket."
+    example: "Napkin Math 5.9."
+    read: "Sec. 5.10, 5.11"
+
+concept_trace:
+  - concept: "Collective contracts"
+    frame: "A collective names what each rank holds afterward"
+    shows: "contracts_step1..4 build: four ranks before and after each primitive."
+  - concept: "Collective cost by rounds and chunks"
+    frame: "The same 25 MB bucket takes 3.5x longer on 1,024 GPUs"
+    shows: "Table of chunk, rounds, byte term, total on 64 and 1,024 ranks, after the chunk lines on the critical-size plot (previous frame)."
+  - concept: "Ring AllReduce and the bandwidth bound"
+    frame: "Ring AllReduce takes six steps, one chunk per GPU each"
+    shows: "Six-row trace build of Example 5.1; the bound itself on 'A parameter server pushes 32.5x the ring's bytes through one port' and the focus slide."
+  - concept: "Ring-tree crossover"
+    frame: "Ring or tree for a 1 MB buffer on 64 GPUs?"
+    shows: "Cost table, then the ring and tree curves crossing at 1.1 MB, with the formula."
+  - concept: "Hierarchical collectives"
+    frame: "Hierarchical AllReduce turns 40 ms into 8.3 ms on 8 x 8 GPUs"
+    shows: "hier_step1..3 build: in-node ReduceScatter, rails across nodes, in-node AllGather, with phase times."
+  - concept: "AllToAll active bound"
+    frame: "One rank gets 1.5x the tokens. What happens?"
+    shows: "Receive-bound bars, 36.7 against 55.1 us; the four-term bound on the matrix slide before it."
+  - concept: "Gradient compression with error feedback"
+    frame: "Error feedback carries what rounding dropped into the next step"
+    shows: "Example 5.2 trace table built row by row; payback and run-level slides before it."
+  - concept: "Exposed communication under overlap"
+    frame: "Overlap hides each reduction under the next layer's backward"
+    shows: "overlap_step1..3 build: 1,344, 879, 487.6 ms; the exposed last transfer."
+
+worked_examples:
+  - name: "Napkin Math 5.2: AllReduce of a 70B gradient on 64 GPUs"
+    steps: ["Given 70B parameters, BF16, 64 GPUs, 50 GB/s, 1.5 us", "M = 140 GB", "bytes 1.96875 x 140/50 s = 5,512.5 ms", "startup 126 x 1.5 us = 0.2 ms", "about 5.5 s per step, all bandwidth; halving saves about 4,900 GPU-hours over 100,000 steps"]
+  - name: "Example 5.1: Ring AllReduce on four GPUs"
+    steps: ["four vectors, sum [10, 26, 18, 34]", "three ReduceScatter steps, each GPU owns one reduced chunk", "three AllGather steps", "every GPU sends and receives one chunk per step", "each GPU sends 2(N-1)M/N, the bound"]
+  - name: "Napkin Math 5.3: ring against tree for 1 MB on 64 GPUs"
+    steps: ["alpha 10 us, beta 10 GB/s", "ring 1,260 + 196.9 us", "tree 120 + 1,200 us", "tree wins by 9 percent", "crossover N alpha beta / log2 N = 1.1 MB"]
+  - name: "Napkin Math 5.4: hierarchical AllReduce of 1 GB on 8 x 8 GPUs"
+    steps: ["flat ring at one port, about 40 ms", "in-node ReduceScatter 875 MB at 450 GB/s, 1.94 ms", "shard AllReduce of 125 MB over InfiniBand, 4.40 ms", "in-node AllGather 1.94 ms", "8.3 ms, 4.8 times faster, if each GPU has its own port"]
+
+active_learning:
+  - at_minute: 1.5
+    type: predict
+    prompt: "How much of 128 GPUs did TensorFlow use?"
+    answer: "About half: 53 and 41 percent read from Figure 6; Horovod 88 percent."
+  - at_minute: 6
+    type: retrieval
+    prompt: "Write T(n) for one message and the in-node and cross-node bandwidth per GPU."
+    answer: "alpha + n/beta; 450 and 50 GB/s per direction."
+  - at_minute: 15.5
+    type: concept_question
+    prompt: "Which primitive does each exchange need?"
+    answer: "AllReduce, ReduceScatter, AllGather, AllToAll."
+  - at_minute: 29
+    type: estimate
+    prompt: "How long does one 140 GB AllReduce take on 64 GPUs?"
+    answer: "5,512.5 ms of bytes plus 0.2 ms of startup, about 5.5 s."
+  - at_minute: 34
+    type: predict
+    prompt: "Ring or tree for a 1 MB buffer on 64 GPUs?"
+    answer: "Tree, 1,320 against 1,456.9 us; the payload sits just below the 1.1 MB crossover."
+  - at_minute: 47
+    type: diagnose
+    prompt: "One rank gets 1.5x the tokens. What happens?"
+    answer: "The whole layer's dispatch waits for it: 55.1 against 36.7 us."
+  - at_minute: 51.5
+    type: predict
+    prompt: "Does compression help on a fast network?"
+    answer: "Slow network 23 percent faster; fast network 2.5 percent slower."
+  - at_minute: 63
+    type: concept_question
+    prompt: "True or false: four of the chapter's fallacies."
+    answer: "All false, each with the lecture's number."
+
+open_questions:
+  - "In-switch reduction moves arithmetic into the network. Which other parts of a training step belong there?"
+  - "Routing skew is set by the data. Should the router balance load, or should the fabric absorb skew?"
+  - "Overlap needs memory for in-flight buffers. When does hiding communication cost more memory than it saves time?"
+
+more_examples:
+  - "Horovod at Uber: ring AllReduce, Tensor Fusion, RDMA (Sergeev and Del Balso 2018)."
+  - "NCCL algorithm selection and NCCL_ALGO (NCCL User Guide, environment variables)."
+  - "nccl-tests bus bandwidth, which multiplies algorithm bandwidth by 2(n-1)/n (doc/PERFORMANCE.md)."
+  - "PyTorch DDP gradient buckets (25 MiB default) and the fp16_compress_hook (PyTorch v2.4.0 source)."
+  - "DeepSpeed 1-bit Adam configuration with freeze_step (DeepSpeed v0.14.0 tutorial)."
+  - "TPU v4 pods reduce along torus axes (Sec. 5.7.2); SHARP in-switch reduction (Sec. 5.7.3)."
+
+left_to_reading:
+  - concept: "Data-movement energy per boundary (second-order)"
+    why: "Kept to the reading (Sec. 5.2, 5.6 kJ per reduction); the energy crossover belongs to Lecture 15, and time is the budget today."
+  - concept: "Torus dimension-ordered reduction and SHARP in-switch reduction"
+    why: "Two more ways to shrink payloads before a slow tier; pointed to Sec. 5.7.2 and 5.7.3 in the rail-alignment note."
+  - concept: "Recursive halving-doubling details, block quantization, Top-k index arithmetic"
+    why: "Detail better read than heard; the double-tree table and compression slides name the result."
+
+callbacks:
+  - {lecture: 1, concept: "Fleet Law (communication and overlap terms)", where: "map frame note; focus slide note; overlap note"}
+  - {lecture: 2, concept: "Bandwidth hierarchy dictates placement", where: "recall note; HGX photo note"}
+  - {lecture: 3, concept: "Alpha-beta model", where: "recall slide and note"}
+  - {lecture: 3, concept: "Bisection bandwidth and topology economics", where: "traffic map note"}
+  - {lecture: 3, concept: "Traffic-matched topology (rail-optimized)", where: "rail alignment note"}
+  - {lecture: 4, concept: "Data Storage (previous lecture, recall only)", where: "recall note"}
+  - {lecture: 6, concept: "Sharded data parallelism", where: "FSDP note; goals note"}
+  - {lecture: 6, concept: "Parallelism plan as joint placement", where: "traffic map note; next-lecture slide"}
+  - {lecture: 6, concept: "Expert parallelism", where: "MoE dispatch note; open-questions note"}
+  - {lecture: 8, concept: "Topology-aware placement", where: "rail alignment note"}
+  - {lecture: 9, concept: "Fleet profiling by hierarchy and sampling", where: "DDP and timeline note"}
+  - {lecture: 11, concept: "Federated uplink budget", where: "1-bit Adam note"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_comm(N) and T_overlap; Communication (C2)"}
+further_reading:
+  - cite: "Collective Communication, Sec. 5.3 to 5.10, and the self-checks"
+    why: "Every number in the lecture, worked."
+  - cite: "Sergeev and Del Balso, Horovod: Fast and Easy Distributed Deep Learning in TensorFlow, 2018"
+    url: "https://arxiv.org/abs/1802.05799"
+    why: "The hook's measurements, Tensor Fusion, and the timeline tool."
+  - cite: "Patarasuk and Yuan, Bandwidth Optimal All-reduce Algorithms for Clusters of Workstations, JPDC 2009"
+    url: "https://doi.org/10.1016/j.jpdc.2008.09.002"
+    why: "The ring's byte bound, proved."
+  - cite: "Karimireddy et al., Error Feedback Fixes SignSGD and Other Gradient Compression Schemes, ICML 2019"
+    why: "Why the residual restores convergence."
+  - cite: "Li et al., PyTorch Distributed: Experiences on Accelerating Data Parallel Training, VLDB 2020"
+    why: "DDP buckets and overlap from the PyTorch team."
+
+closing:
+  return_to_hook: "Back to Horovod: the ring removed concentration at one port (about half to 88 percent); Tensor Fusion amortized startup (up to 65 percent); RDMA moved per-message cost and helped only VGG-16, whose communication was on the critical path."
+  read_and_practice: ["Sec. 5.3 to 5.10", "section self-checks", "redo Napkin Math 5.3 for 10 MB", "run nccl-tests on two GPUs and fit alpha and beta"]
+  bridge: "Lecture 6, Distributed Training: how should a model too large for one node be split across a thousand accelerators?"
+
+coverage:
+  primary_taught: ["Collective contracts", "Collective cost by rounds and chunks", "Ring AllReduce and the bandwidth bound", "Ring-tree crossover", "Hierarchical collectives", "AllToAll active bound", "Gradient compression with error feedback", "Exposed communication under overlap"]
+  primary_left_to_reading: []
+  secondary: ["Collective calibration and backend selection (DDP and timeline slide, optional; nccl-tests on the bucket and estimate slides)", "Data-movement energy per boundary (left to reading)"]
+
+notes_for_author:
+  - "The AllToAll segment's data are the chapter's computed bounds from the 50 GB/s port specification, not a published measurement; a measured MoE AllToAll trace (for example from Tutel or DeepSpeed-MoE) would strengthen it."
+  - "Horovod bar heights are read from the paper's Figure 6; the paper states only 'about half' and '88 percent' in text."
+  - "The HGX photo shows the B200 generation; the numbers use DGX H100. The caption says so."
+  - "The Horovod Timeline is the paper's Figure 5 (arXiv non-exclusive license), redrawn at slide size: phase edges read from the screenshot against its 100 ms ticks (about +/-2 ms), the 184.063 ms AllReduce span from its detail pane (calcs.py). Rows are tensors, not ranks."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_comm(N) and T_overlap) and C3 axis (Communication (C2)) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

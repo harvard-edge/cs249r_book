@@ -106,7 +106,7 @@ class DatasetManager:
         """
         try:
             total, used, free = shutil.disk_usage(self.data_dir)
-            available_mb = free / (1024 * 1024)
+            available_mb = free / 1_000_000
             return available_mb, available_mb >= required_mb
         except Exception:
             # If we can't check, assume we have space
@@ -183,8 +183,8 @@ class DatasetManager:
             if total_size > 0:
                 downloaded = block_num * block_size
                 percent = min(100, (downloaded / total_size) * 100)
-                mb_downloaded = downloaded / (1024 * 1024)
-                mb_total = total_size / (1024 * 1024)
+                mb_downloaded = downloaded / 1_000_000
+                mb_total = total_size / 1_000_000
 
                 # Visual progress bar
                 bar_length = 30

@@ -56,7 +56,7 @@ The second problem appears once the integers are gone. Take the two sentences *"
 ::: {.column-margin}
 ![](assets/images/diagrams/11_embeddings-margin-lookup.svg){width="100%" fig-alt="Comparison card contrasting naive one-hot matrix multiplication allocating 206 MB and 39 billion FLOPs against direct pointer gather copying 3.1 MB with zero arithmetic."}
 
-*Gather vs One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
+*Gather vs. One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
 :::
 
 ```python
@@ -89,7 +89,7 @@ In a language model with vocabulary size $V = 100{,}000$ and hidden dimension $D
 
 ### A table, not a multiply
 
-Take a three-row table `W = [[1, 2], [3, 4], [5, 6]]`. Token 2 selects `[5, 6]`; the sequence `[2, 0, 2]` selects `[[5, 6], [1, 2], [5, 6]]`. A one-hot row `[0, 0, 1]` multiplied by `W` produces the same `[5, 6]`, because it discards the first two rows and keeps the third. Repeating a token repeats its current vector; the lookup does not change the table.
+In all modern sequence models—including BERT, GPT, and LLaMA—the input layer maps discrete token IDs into continuous semantic vectors. To eliminate the massive memory allocation and wasted arithmetic of multiplying one-hot vectors by a weight matrix, runtimes implement embeddings as a direct memory lookup (row-gather) into an embedding table. Take a three-row table `W = [[1, 2], [3, 4], [5, 6]]`. Token 2 selects `[5, 6]`; the sequence `[2, 0, 2]` selects `[[5, 6], [1, 2], [5, 6]]`. A one-hot row `[0, 0, 1]` multiplied by `W` produces the same `[5, 6]`, because it discards the first two rows and keeps the third. Repeating a token repeats its current vector; the lookup does not change the table.
 
 Write the one-hot vector for token $i$ as $\mathbf{e}_i$, a row vector of length $V$, and the weight matrix as $W$ with shape $V \times D$, where $D$ is the width of the vectors the rest of the network will use. The product picks out one row:
 
@@ -108,7 +108,7 @@ Nothing in the table says that `"dog"` and `"cat"` should be near each other. Th
 
 ### Position is a second table
 
-The simplest way to tell the network where a token sits is a second table, $P$, with shape $S_{\max} \times D$, one row per position up to some maximum length $S_{\max}$. The vector for token $i$ at position $t$ is the sum of the two rows:
+Because self-attention operations are inherently permutation-equivariant, Transformer models like BERT and GPT-2 cannot distinguish word order without explicit coordinate hints. Adding a dedicated positional embedding table directly to token representations injects sequence order into the activations without increasing tensor dimensionality. The simplest way to tell the network where a token sits is a second table, $P$, with shape $S_{\max} \times D$, one row per position up to some maximum length $S_{\max}$. The vector for token $i$ at position $t$ is the sum of the two rows:
 
 $$\mathbf{x}_{i,t} = W[i, :] + P[t, :]$$
 
@@ -126,19 +126,17 @@ There are two ways to fill $P$. The first is to learn it, exactly like $W$. The 
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/11_embed-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 11 Embeddings showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 11 extracts embedding table lookup and sinusoidal positional encodings directly from the working repository.*
-:::
-
 ### The embedding table
 
 Consider the same $V = 50{,}257$, $D = 768$ table and batch of 1,024 token IDs used in The Problem. The one-hot route allocates about 206 MB for its input and performs about 39 billion multiplications. A gather instead selects 1,024 rows of width 768. These are analytical counts, not measured timings; they identify the work avoided without assuming a particular machine or matrix-multiplication library.
 
 For a contiguous float32 table, row $i$ starts $i \times D \times 4$ bytes into the buffer (@sec-tensors), following standard row-major contiguous strides $(D, 1)$. Selecting it copies $D$ values, or 3,072 bytes at this width. The batch therefore contains about 3.1 MB of selected values. This is the payload size, not the total memory traffic of TinyTorch: NumPy creates the indexed result, and the Tensor constructor copies the result into its own storage. The lookup is constant-time with respect to vocabulary size for a fixed width, but moving one row still costs $O(D)$.
 
+::: {.column-margin}
+![](assets/images/diagrams/11_embed-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 11 Embeddings showing file path, exported package, and tested primitives."}
 
+*Source Code Mapping: Module 11 extracts embedding table lookup and sinusoidal positional encodings directly from the working repository.*
+:::
 
 Module 11 follows the pattern of every layer since @sec-activations: an operation that does the work on arrays, and a layer that owns the table and calls it. The operation is the interesting half, because its backward routes each output gradient to the row that supplied its values. Three things to watch for: the one-line gather, the way the indices travel, and the scatter-add.
 
@@ -166,7 +164,7 @@ The state boundary is small. `Embedding.weight` persists across calls; the integ
 
 ### The sinusoidal table
 
-The two occurrences of token 2 still have identical vectors after the gather. A position row makes them distinguishable before @sec-attention introduces interactions between tokens. @sec-transformers will place this composition at the front of its transformer model.
+Introduced in the seminal Transformer architecture (Vaswani et al.) and foundational to modern relative schemes like RoPE, sinusoidal positional encodings offer a deterministic mathematical alternative to learned position tables. By projecting token positions across a geometric progression of frequencies, fixed sinusoidal encodings eliminate position parameter storage while allowing attention heads to compute relative token distances. The two occurrences of token 2 still have identical vectors after the gather. A position row makes them distinguishable before @sec-attention introduces interactions between tokens. @sec-transformers will place this composition at the front of its transformer model.
 
 A learned `PositionalEncoding` owns $S_{\max} \times D$ parameters. For $S_{\max}=1{,}024$ and $D=768$, that is 786,432 values. With positions numbered from zero, row $t$ only receives a contribution from a sequence containing position $t$; in ordinary full-sequence training that requires at least $t+1$ tokens. Later rows may therefore see less data. A requested position beyond `max_seq_len - 1` has no row at all. This limit comes from the allocated table, even if every training sequence was shorter.
 
@@ -206,7 +204,7 @@ The reshape must remain a Tensor operation. Rewrapping `pos_embeddings.data` in 
 
 ### Putting the two tables together
 
-The last step is wiring the tables together, and this is where @sec-transformers picks up. `EmbeddingLayer` owns a token table and one of three position choices: a learned `PositionalEncoding`, the fixed sinusoidal table, or nothing. Its `forward` is written in a separate cell and attached to the class.
+Production Transformer architectures unify token semantics and sequence geometry at their input stage, synthesizing discrete token sequences into a contiguous $(B, S, D)$ activation tensor. Wrapping token lookup and positional injection into a single composite layer establishes a clean, modular front-end contract that feeds directly into downstream self-attention blocks. The last step is wiring the tables together, and this is where @sec-transformers picks up. `EmbeddingLayer` owns a token table and one of three position choices: a learned `PositionalEncoding`, the fixed sinusoidal table, or nothing. Its `forward` is written in a separate cell and attached to the class.
 
 {{< include _listings/11_embeddings/EmbeddingLayer.qmd >}}
 
@@ -351,9 +349,7 @@ Position schemes change where the position signal enters the model. The comparis
 
 : **Position information enters at different points**: Fixed formulas avoid learning a row for every position, but do not guarantee successful inference at unseen sequence lengths. {#tbl-position-encodings tbl-colwidths="[24,28,14,16,18]"}
 
-[Rotary position embedding (RoPE)](https://arxiv.org/html/2104.09864v5) rotates pairs of coordinates in query and key vectors, two projections of a token vector that @sec-attention will introduce. Their dot product retains both tokens' content, while its positional factor depends on their relative offset.[^fn-rope-complex-phase] This uses the same sine/cosine angle-addition identities studied here, but changes the attention computation rather than adding a second table to the input. Evaluating a rotation at a larger position does not by itself guarantee that a model trained on shorter sequences will work there. TinyTorch's `EmbeddingLayer` implements learned and sinusoidal addition, not RoPE.
-
-[^fn-rope-complex-phase]: In the 2D complex plane, RoPE represents a coordinate pair $(q_0, q_1)$ as complex number $z_q = q_0 + i q_1$. Position rotation by angle $m\theta$ corresponds to complex multiplication $z_q e^{i m \theta}$. When evaluating the attention inner product with key $z_k e^{i n \theta}$, the dot product corresponds to the real part of $(z_q e^{i m \theta})^* (z_k e^{i n \theta}) = z_q^* z_k e^{i (n - m) \theta}$. The absolute positions $m$ and $n$ cancel into their relative distance $n - m$, enabling self-attention to attend naturally across variable token separations.
+[Rotary position embedding (RoPE)](https://arxiv.org/html/2104.09864v5) rotates pairs of coordinates in query and key vectors, two projections of a token vector that @sec-attention will introduce. In the 2D complex plane, each coordinate pair is rotated by angle multiples $m\theta$ and $n\theta$; their inner product retains token content while absolute positions cancel into their relative distance $(n - m)$. This uses the same sine/cosine angle-addition identities studied here, but changes the attention computation rather than adding a second table to the input. Evaluating a rotation at a larger position does not by itself guarantee that a model trained on shorter sequences will work there. TinyTorch's `EmbeddingLayer` implements learned and sinusoidal addition, not RoPE.
 
 ::: {.column-margin}
 **Core Invariant: RoPE Shift Invariance**\

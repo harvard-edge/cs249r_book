@@ -132,9 +132,9 @@ export default function AboutPage() {
           <h2 className="text-lg font-bold text-textPrimary mb-3">What makes StaffML different</h2>
           <div className="space-y-3">
             {[
-              { title: "Textbook-grounded, not scraped", desc: `Every question traces back to a specific chapter of the Machine Learning Systems textbook. You are learning the ${TOPIC_COUNT} concepts a curriculum designer chose, not whatever the internet happened to cough up.` },
+              { title: "Textbook-grounded, not scraped", desc: `Every question traces back to a specific chapter of the Machine Learning Systems textbook. You are learning the ${TOPIC_COUNT} concepts a curriculum designer chose, not whatever the internet happens to offer.` },
               { title: "Real hardware, real numbers", desc: "When a question asks about memory bandwidth, the numbers come from actual H100, A100, and Jetson datasheets. The math works on real silicon, not on round numbers that make the answer tidy." },
-              { title: "Systems reasoning, not trivia", desc: "Questions ask you to estimate, diagnose, compare tradeoffs, and architect — the same skills tested in Staff+ interview loops. Nothing asks you to recite a definition." },
+              { title: "Systems reasoning, not trivia", desc: "Questions ask you to estimate, diagnose, compare tradeoffs, and architect. These are the skills tested in Staff+ interview loops. Nothing asks you to recite a definition." },
               { title: "Napkin math with feedback", desc: "Type your calculation, then compare it against the model answer. The app tells you whether you are in the right ballpark or off by a factor of ten." },
               { title: "Independently verified", desc: "Every question passed a second-pass math check by a separate model. The initial verification pass flagged an 8.3% error rate across the corpus. All flagged errors were corrected." },
             ].map(({ title, desc }) => (
@@ -153,7 +153,7 @@ export default function AboutPage() {
         <section className="mb-10">
           <div className="border-l-2 border-accentBlue/30 pl-4 py-1">
             <p className="text-[14px] text-textSecondary italic mb-2">
-              AI is not magic &mdash; it is infrastructure, and infrastructure has laws.
+              AI is not magic. It is infrastructure, and infrastructure has laws.
             </p>
             <p className="text-[12px] text-textTertiary">
               StaffML is part of the{' '}
@@ -196,7 +196,7 @@ export default function AboutPage() {
             {[
               { who: "Preparing for your first ML role?", action: "Start with L1–L2 recall questions to build your foundation.", href: "/practice?level=L1", cta: "Start Easy" },
               { who: "Working engineer targeting Staff+?", action: "Jump to L4–L6+ questions. Try the Mock Interview.", href: "/gauntlet", cta: "Mock Interview" },
-              { who: "Short on time?", action: "Do the Daily Challenge — 3 questions, 5 minutes, same for everyone.", href: "/practice?daily=1", cta: "Daily Challenge" },
+              { who: "Short on time?", action: "Do the Daily Challenge. It has 3 questions, takes 5 minutes, and is the same for everyone.", href: "/practice?daily=1", cta: "Daily Challenge" },
               { who: "Just curious about ML systems?", action: "Browse the question bank to see what the field looks like.", href: "/", cta: "Browse" },
             ].map(({ who, action, href, cta }) => (
               <div key={who} className="flex items-start gap-3 p-3 rounded-lg border border-borderSubtle bg-surface/50">
@@ -283,9 +283,9 @@ export default function AboutPage() {
               in-context pointer (this section IS the methodology) without
               the visual duplication. */}
           <p className="text-[14px] text-textSecondary leading-relaxed mb-4">
-            The full methodology — backward design from textbook chapters, four-axis taxonomy,
+            The full methodology (backward design from textbook chapters, four-axis taxonomy,
             LLM-assisted generation pipeline, independent math verification, and the
-            ikigai-inspired competency zone framework — is described in{' '}
+            ikigai-inspired competency zone framework) is described in{' '}
             <a href={PAPER_URL} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">our paper</a>.
           </p>
           <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">

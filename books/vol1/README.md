@@ -70,14 +70,14 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
     </tr>
     <tr>
       <td>2</td>
-      <td><b>ML Systems</b></td>
-      <td><code>ml_systems/</code></td>
+      <td><b>System Paradigms</b></td>
+      <td><code>02_system_paradigms/</code></td>
       <td>How do deployment constraints shape system design?</td>
     </tr>
     <tr>
       <td>3</td>
-      <td><b>ML Workflow</b></td>
-      <td><code>ml_workflow/</code></td>
+      <td><b>ML Lifecycle</b></td>
+      <td><code>03_ml_lifecycle/</code></td>
       <td>What does the end-to-end ML pipeline look like?</td>
     </tr>
     <tr>
@@ -152,6 +152,12 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
       <td><code>responsible_engr/</code></td>
       <td>How do you build ML systems that are fair, safe, and trustworthy?</td>
     </tr>
+    <tr>
+      <td>16</td>
+      <td><b>Conclusion</b></td>
+      <td><code>conclusion/</code></td>
+      <td>How do data, algorithms, and hardware come together across the full stack?</td>
+    </tr>
   </tbody>
 </table>
 
@@ -165,7 +171,7 @@ The chapters are designed to be read in order. Each chapter builds on the framew
 
 If you are an instructor adopting this for a course, the natural division is:
 - **Parts I and II** (Chapters 1 through 8) for a foundations course
-- **Parts III and IV** (Chapters 9 through 15) for an optimization and deployment course
+- **Parts III and IV** (Chapters 9 through 16) for an optimization and deployment course
 
 ## Feedback
 

@@ -2,7 +2,7 @@ import pytest
 
 from mlsysim import Models, Systems
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_05_experiments import (
+from mlsysim.labs.experiments.v2_05_experiments import (
     ConvergenceFixture,
     compare_straggler_policy,
     get_capacity_dimensions,

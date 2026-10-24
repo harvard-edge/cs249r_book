@@ -3,6 +3,7 @@
 # =============================================================================
 # Usage:
 #   make ch01              Build Chapter 1 PDF
+#   make v3-05_kv_cache    Build a Volume III or IV deck by directory name
 #   make all               Build all chapters (PDF)
 #   make pptx              Build all PPTX from PDFs
 #   make pptx-vol1         Build Vol1 PPTX only
@@ -10,7 +11,7 @@
 #   make svgs              Convert all SVGs to PDFs
 #   make clean             Remove build artifacts from source dirs
 #
-# Build outputs go to _build/vol{1,2}/ (source dirs stay clean).
+# Build outputs go to _build/vol{1,2,3,4}/ (source dirs stay clean).
 # PPTX outputs go to _build/vol{1,2}/ alongside PDFs.
 # SVG→PDF conversion happens automatically before LaTeX compilation.
 # =============================================================================
@@ -23,6 +24,10 @@ VOL1_SRC  := vol1
 VOL1_OUT  := $(BUILD_DIR)/vol1
 VOL2_SRC  := vol2
 VOL2_OUT  := $(BUILD_DIR)/vol2
+VOL3_SRC  := vol3
+VOL3_OUT  := $(BUILD_DIR)/vol3
+VOL4_SRC  := vol4
+VOL4_OUT  := $(BUILD_DIR)/vol4
 SCRIPTS   := scripts
 
 # All chapter directories (auto-detected)
@@ -81,7 +86,7 @@ all: vol1 vol2
 
 svgs:
 	@echo "Converting SVGs to PDFs..."
-	@find $(VOL1_SRC) $(VOL2_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
+	@find assets/kit $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
 		pdf="$${svg%.svg}.pdf"; \
 		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
 			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
@@ -112,8 +117,8 @@ build-%: svgs
 	cp $$ch_dir/$$tex_name.pdf $(VOL1_OUT)/$$tex_name.pdf; \
 	echo "  → $(VOL1_OUT)/$$tex_name.pdf"; \
 	echo ""; \
-	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
-	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
+	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
+	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
 	if [ "$$overfull" -gt 0 ]; then \
 		echo "  ⚠ $$overfull overfull boxes:"; \
 		grep "Overfull" $$ch_dir/$$tex_name.log | sed 's/^/    /' | head -10; \
@@ -129,8 +134,8 @@ build-%: svgs
 
 # Convenience aliases: ch01, ch02, ..., ch16
 ch01: build-01_introduction
-ch02: build-02_ml_systems
-ch03: build-03_ml_workflow
+ch02: build-02_system_paradigms
+ch03: build-03_ml_lifecycle
 ch04: build-04_data_engineering
 ch05: build-05_nn_computation
 ch06: build-06_nn_architectures
@@ -169,8 +174,8 @@ define build-chapter-impl
 	cp $$ch_dir/$$tex_name.pdf $(2)/$$tex_name.pdf; \
 	echo "  → $(2)/$$tex_name.pdf"; \
 	echo ""; \
-	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
-	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
+	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
+	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
 	if [ "$$overfull" -gt 0 ]; then \
 		echo "  ⚠ $$overfull overfull boxes:"; \
 		grep "Overfull" $$ch_dir/$$tex_name.log | sed 's/^/    /' | head -10; \
@@ -185,14 +190,18 @@ define build-chapter-impl
 	fi
 endef
 
+# Volume III and IV decks by directory name: make v3-05_kv_cache, make v4-01_boundary
+v3-%: svgs ; $(call build-chapter-impl,$(VOL3_SRC),$(VOL3_OUT),$*)
+v4-%: svgs ; $(call build-chapter-impl,$(VOL4_SRC),$(VOL4_OUT),$*)
+
 # Convenience aliases: v2ch01, v2ch02, ..., v2ch17
 # Each target explicitly calls the build function with vol2 paths
 v2ch01: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),01_introduction)
 v2ch02: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),02_compute_infrastructure)
 v2ch03: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),03_network_fabrics)
 v2ch04: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),04_data_storage)
-v2ch05: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),05_distributed_training)
-v2ch06: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),06_collective_communication)
+v2ch05: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),05_collective_communication)
+v2ch06: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),06_distributed_training)
 v2ch07: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),07_fault_tolerance)
 v2ch08: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),08_fleet_orchestration)
 v2ch09: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),09_performance_engineering)
@@ -221,8 +230,8 @@ pptx-vol2: vol2
 
 # Per-chapter PPTX: pptx-ch01, pptx-ch02, ..., pptx-v2ch01, ...
 pptx-ch01: ch01 ; @$(PDF2PPTX) $(VOL1_OUT)/01_introduction.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
-pptx-ch02: ch02 ; @$(PDF2PPTX) $(VOL1_OUT)/02_ml_systems.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
-pptx-ch03: ch03 ; @$(PDF2PPTX) $(VOL1_OUT)/03_ml_workflow.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
+pptx-ch02: ch02 ; @$(PDF2PPTX) $(VOL1_OUT)/02_system_paradigms.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
+pptx-ch03: ch03 ; @$(PDF2PPTX) $(VOL1_OUT)/03_ml_lifecycle.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch04: ch04 ; @$(PDF2PPTX) $(VOL1_OUT)/04_data_engineering.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch05: ch05 ; @$(PDF2PPTX) $(VOL1_OUT)/05_nn_computation.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch06: ch06 ; @$(PDF2PPTX) $(VOL1_OUT)/06_nn_architectures.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
@@ -241,8 +250,8 @@ pptx-v2ch01: v2ch01 ; @$(PDF2PPTX) $(VOL2_OUT)/01_introduction.pdf --output-dir 
 pptx-v2ch02: v2ch02 ; @$(PDF2PPTX) $(VOL2_OUT)/02_compute_infrastructure.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch03: v2ch03 ; @$(PDF2PPTX) $(VOL2_OUT)/03_network_fabrics.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch04: v2ch04 ; @$(PDF2PPTX) $(VOL2_OUT)/04_data_storage.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
-pptx-v2ch05: v2ch05 ; @$(PDF2PPTX) $(VOL2_OUT)/05_distributed_training.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
-pptx-v2ch06: v2ch06 ; @$(PDF2PPTX) $(VOL2_OUT)/06_collective_communication.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
+pptx-v2ch05: v2ch05 ; @$(PDF2PPTX) $(VOL2_OUT)/05_collective_communication.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
+pptx-v2ch06: v2ch06 ; @$(PDF2PPTX) $(VOL2_OUT)/06_distributed_training.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch07: v2ch07 ; @$(PDF2PPTX) $(VOL2_OUT)/07_fault_tolerance.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch08: v2ch08 ; @$(PDF2PPTX) $(VOL2_OUT)/08_fleet_orchestration.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch09: v2ch09 ; @$(PDF2PPTX) $(VOL2_OUT)/09_performance_engineering.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
@@ -261,13 +270,13 @@ pptx-v2ch17: v2ch17 ; @$(PDF2PPTX) $(VOL2_OUT)/17_conclusion.pdf --output-dir $(
 
 clean:
 	@echo "Cleaning build artifacts from source directories..."
-	@find $(VOL1_SRC) $(VOL2_SRC) -type f \( \
+	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -type f \( \
 		-name "*.aux" -o -name "*.log" -o -name "*.nav" -o \
 		-name "*.out" -o -name "*.snm" -o -name "*.toc" -o \
 		-name "*.vrb" -o -name "*.fls" -o -name "*.fdb_latexmk" -o \
 		-name "*.synctex.gz" -o -name "*.bbl" -o -name "*.blg" \
 	\) -delete 2>/dev/null
-	@find $(VOL1_SRC) $(VOL2_SRC) -name "*.pdf" ! -path "*/images/*" -delete 2>/dev/null
+	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.pdf" ! -path "*/images/*" -delete 2>/dev/null
 	@rm -rf $(BUILD_DIR)
 	@echo "Done. Source directories and build output are clean."
 
@@ -306,3 +315,49 @@ check: svgs
 	else \
 		echo ""; echo "✓ All slides pass overflow check"; \
 	fi
+
+# =============================================================================
+# Kit, fit check, handout, notes (any volume): make <target> V=1 D=00_course_overview
+# =============================================================================
+PY ?= python3
+
+kit:
+	@$(PY) assets/kit/make_kit.py --volume $(or $(V),1)
+
+# One deck in any volume, safe to run for many decks at once: converts only
+# this deck's SVGs (and its volume's kit), then builds the presenting PDF.
+#   make deck V=2 D=06_distributed_training
+deck-svgs:
+	@find vol$(V)/$(D) assets/kit/vol$(V) -name "*.svg" 2>/dev/null | while read svg; do \
+		pdf="$${svg%.svg}.pdf"; \
+		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
+			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
+		fi; \
+	done
+
+deck: deck-svgs
+	$(call build-chapter-impl,vol$(V),$(BUILD_DIR)/vol$(V),$(D))
+
+# Fit check: LaTeX overflow mapped to frames, plus rendered bleed per page.
+fit:
+	@$(PY) tools/fitcheck.py vol$(V)/$(D)/$(D).tex --pdf $(BUILD_DIR)/vol$(V)/$(D).pdf --log vol$(V)/$(D)/$(D).log
+
+# Student handout: the final state of every frame, no builds.
+handout:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-handout "\PassOptionsToClass{handout}{beamer}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-handout "\PassOptionsToClass{handout}{beamer}\input{$(D).tex}" > /dev/null 2>&1 && \
+	mv $(D)-handout.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-handout.pdf" || \
+	{ echo "  ✗ handout build failed"; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-handout.{aux,log,nav,out,snm,toc,vrb}
+
+# Instructor notes: each slide with its speaker notes on the right.
+notes:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	mv $(D)-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-notes.pdf" || \
+	{ echo "  ✗ notes build failed"; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-notes.{aux,log,nav,out,snm,toc,vrb}

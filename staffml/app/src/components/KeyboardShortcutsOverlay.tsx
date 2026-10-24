@@ -45,8 +45,8 @@ const SECTIONS: Section[] = [
     shortcuts: [
       { keys: ["J"],          description: "Next topic (without closing the drawer)" },
       { keys: ["K"],          description: "Previous topic (without closing the drawer)" },
-      { keys: ["↓"],          description: "Next topic — same as J" },
-      { keys: ["↑"],          description: "Previous topic — same as K" },
+      { keys: ["↓"],          description: "Next topic (same as J)" },
+      { keys: ["↑"],          description: "Previous topic (same as K)" },
     ],
   },
   {

@@ -11,18 +11,18 @@ Most chapter work needs only **build** (and optionally **preview**). You do not 
 ./binder/binder setup
 
 # Day to day: build what you're editing
-./binder/binder build html --vol1 vol1/ml_systems      # fast HTML chapter
-./binder/binder build pdf --vol1 vol1/ml_systems       # PDF chapter
-./binder/binder build epub --vol1 vol1/ml_systems      # EPUB chapter
+./binder/binder build html --vol1 system_paradigms      # fast HTML chapter
+./binder/binder build pdf --vol1 system_paradigms       # PDF chapter
+./binder/binder build epub --vol1 system_paradigms      # EPUB chapter
 ./binder/binder build html --vol1                      # whole Volume I site
 ./binder/binder build pdf --vol1                       # whole Volume I PDF
 
 # Optional: live reload while editing
-./binder/binder preview vol1/ml_systems
+./binder/binder preview system_paradigms
 
 # When a commit is blocked, pre-commit prints the failing binder command.
 # Re-run that command locally to see details, or:
-./binder/binder check refs --path books/vol1/ml_systems/ml_systems.qmd
+./binder/binder check refs --path books/vol1/02_system_paradigms/02_system_paradigms.qmd
 ```
 
 Commit as usual; hooks handle validation. Run `./binder/binder check all --vol1` only when you want a full local sweep before pushing.
@@ -633,8 +633,8 @@ How it works:
   worktree for every job it picks up.
 - Each job's log and output move to `books/_build/parallel/<run-id>/<job>/`, and
   `summary.json` lists every job. The worktrees and their temporary run
-  directory are removed at the end; `--keep-workspaces` leaves them for
-  inspection.
+  directory are removed at the end, including on Ctrl-C, SIGTERM or a closed
+  terminal; `--keep-workspaces` leaves them for inspection.
 - Workers running side by side each get a private `XDG_CACHE_HOME`, because the
   diagram filter's cache is not safe for concurrent writers.
 - Ctrl-C stops every running build (SIGTERM, then SIGKILL after 15 seconds) and
@@ -728,9 +728,14 @@ Use `./binder/binder switch <format>` to change the active configuration.
 - Never edit `books/_quarto.yml` directly; the next build overwrites it
 
 **Leftover build worktrees**
-- An interrupted `--parallel` or `debug` run that was killed outright can leave
-  worktrees in the system temporary directory; `git worktree prune` clears
-  registrations whose directories are gone, and `git worktree list` shows the rest
+- Ctrl-C, SIGTERM and a closed terminal (SIGHUP) all stop a `--parallel` or
+  `debug` run cleanly and remove its worktrees. A run killed outright (SIGKILL,
+  a crash) leaves them in the system temporary directory (`binder-workspaces/`).
+- The next `--parallel` or `debug` run removes those leftovers before it starts,
+  and `./binder/binder clean workspaces` removes them on demand. Both touch only
+  runs whose binder process has exited (the run directory name ends in its pid).
+  The automatic sweep skips runs kept with `--keep-workspaces`; `clean
+  workspaces` removes those too.
 
 ### Performance Tips
 

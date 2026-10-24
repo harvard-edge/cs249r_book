@@ -84,7 +84,6 @@ TinyVerse datasets are deliberately miniaturized for education. They are **not**
 Bundled directly within the `tinytorch/datasets/` directory of the official TinyTorch repository:
 - Git clone provides immediate access to all four datasets.
 - Available programmatically through `from milestones.data_manager import DatasetManager`.
-- Also mirrorable on Hugging Face Hub under the `harvard-edge` organization.
 
 ### How is the dataset licensed?
 - **TinyDigits**: Open educational release (scikit-learn / BSD-compatible).

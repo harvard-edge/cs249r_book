@@ -20,7 +20,7 @@ For most users, the easiest way is using our **Book Binder CLI**:
 
 # Build specific chapter(s)
 ./binder/binder build intro                    # Single chapter (HTML)
-./binder/binder build intro,ml_systems         # Multiple chapters (HTML)
+./binder/binder build intro,system_paradigms         # Multiple chapters (HTML)
 
 # Build complete book
 ./binder/binder build                          # Complete book (HTML)
@@ -296,7 +296,7 @@ The **recommended way** to build the book is using the Book Binder CLI:
 #### Build Specific Chapter(s)
 ```sh
 ./binder/binder build html intro --vol1                 # Single chapter (HTML)
-./binder/binder build html intro,ml_systems --vol1      # Several chapters in one build
+./binder/binder build html intro,system_paradigms --vol1      # Several chapters in one build
 ./binder/binder build pdf intro --vol1                  # Single chapter (PDF, selective build)
 ./binder/binder build pdf --vol1 --each-chapter --parallel 4  # Every chapter on its own, four at a time
 ```
@@ -309,7 +309,7 @@ git worktree. See [Parallel builds](BINDER.md#parallel-builds) and
 ```sh
 ./binder/binder preview                        # Preview complete book
 ./binder/binder preview intro                  # Preview specific chapter
-./binder/binder preview intro,ml_systems       # Preview multiple chapters
+./binder/binder preview intro,system_paradigms       # Preview multiple chapters
 ```
 
 #### Management Commands

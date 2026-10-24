@@ -81,9 +81,16 @@ class Pipeline:
             if missing and i > 0:
                 lines.append(f"    ⚠ needs {missing} — must be provided at run()")
 
-            # Update produced set (only add what this stage produces, not what it requires)
+            # Update produced set with both the result class name, its fields,
+            # and canonical pipeline aliases (e.g. ScalingResult -> workload/model).
             if cls.produces:
                 produced_concepts.add(produces_name)
+                if hasattr(cls.produces, "model_fields"):
+                    produced_concepts.update(cls.produces.model_fields.keys())
+                    if "optimal_parameters" in cls.produces.model_fields:
+                        produced_concepts.update({"workload", "model"})
+                    if "step_latency_total" in cls.produces.model_fields:
+                        produced_concepts.update({"training_time", "base_training_time", "duration_days"})
 
             if i < len(self.resolvers) - 1:
                 lines.append(f"    {'│':>4}")
@@ -123,19 +130,24 @@ class Pipeline:
         Stage wiring is **by parameter name**: each resolver receives only the
         kwargs matching its ``solve()`` signature, and after each stage the
         result model's fields are flattened into the shared namespace so a
-        later stage can consume them (e.g. a ``ScalingResult.optimal_tokens``
-        feeds a later ``tokens=`` parameter only if the names line up). When
-        two stages produce a field of the same name, the later stage's value
-        overwrites the earlier one. Missing required parameters are not
-        pre-validated here; the resolver's own ``solve()`` raises naturally.
+        later stage can consume them. Common concept aliases (``workload`` ↔
+        ``model``, ``ScalingResult.optimal_parameters`` → ``Workload``, and
+        default ``duration_days``) are bridged automatically.
         """
+        import inspect
+        from ..core.units import Q_
+        from ..models.types import Workload
+
         accumulated = dict(kwargs)
+        if "workload" in accumulated and "model" not in accumulated:
+            accumulated["model"] = accumulated["workload"]
+        elif "model" in accumulated and "workload" not in accumulated:
+            accumulated["workload"] = accumulated["model"]
+
         stage_results = {}
 
         for resolver in self.resolvers:
             cls = resolver.__class__
-            # Call solve with whatever kwargs match the signature
-            import inspect
             sig = inspect.signature(resolver.solve)
             valid_kwargs = {}
             for param_name, param in sig.parameters.items():
@@ -143,6 +155,8 @@ class Pipeline:
                     continue
                 if param_name in accumulated:
                     valid_kwargs[param_name] = accumulated[param_name]
+                elif param_name == "duration_days" and param.default is inspect.Parameter.empty:
+                    valid_kwargs["duration_days"] = accumulated.get("duration_days", 30.0)
                 elif param.default is inspect.Parameter.empty:
                     # Required parameter not provided — let it fail naturally
                     pass
@@ -163,6 +177,14 @@ class Pipeline:
             if hasattr(result_type, "model_fields"):
                 for field_name in result_type.model_fields:
                     accumulated[field_name] = getattr(result, field_name)
+                if "optimal_parameters" in result_type.model_fields and "model" not in accumulated:
+                    synth = Workload(
+                        name="ScalingOptimalWorkload",
+                        params=getattr(result, "optimal_parameters"),
+                        inference_flops=getattr(result, "optimal_parameters").to("param").magnitude * 2 * Q_("1 flop"),
+                    )
+                    accumulated["model"] = synth
+                    accumulated["workload"] = synth
 
         return stage_results
 

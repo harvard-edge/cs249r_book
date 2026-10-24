@@ -3,7 +3,7 @@ import json
 import pytest
 
 from mlsysim.core.units import Q_, resolve_precision
-from mlsysim.engine.v1_11_experiments import (
+from mlsysim.labs.experiments.v1_11_experiments import (
     Candidate,
     ExecutionContract,
     TRACK_SCENARIOS,

@@ -27,7 +27,7 @@ benchmark numbers single-sourced inside MLSys·im.
 | # | Configuration | mlsysim Prediction | Benchmark Anchor | Source | Delta |
 |---|---|---|---|---|---|
 | 1 | ResNet-50 A100 bs=256 training (eta=0.10) | 2,499 img/s | `Literature.Benchmarks.ResNet50A100TrainThroughput` | MLPerf Training v3.0 (single A100-80GB) | -22% |
-| 2 | ResNet-50 H100 bs=256 training (eta=0.10) | 7,677 img/s | `Literature.Benchmarks.ResNet50H100TrainThroughput` | MLPerf Training v3.1 (single H100-80GB) | +54% |
+| 2 | ResNet-50 H100 bs=256 training (eta=0.10) | 7,677 img/s | `Literature.Benchmarks.ResNet50H100TrainThroughput` | MLPerf Training v3.1 (Eos_n8, per H100 of 64) | +54% |
 | 3 | Llama-3-8B H100 bs=1 decode ITL (eta=0.50) | 5.2 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (FP16, H100-80GB) | within range |
 | 4 | Llama-3-8B H100 bs=32 decode ITL (eta=0.50) | 7.7 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | vLLM / TensorRT-LLM batched benchmarks | within range |
 | 5 | Llama-3-8B H100 bs=1 prefill TTFT (eta=0.50) | 66.5 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (seq=2048) | within range |
@@ -43,7 +43,7 @@ benchmark numbers single-sourced inside MLSys·im.
 within published ranges. This is expected: decode is memory-bandwidth-bound, and
 the model correctly computes `(weights + KV_cache) / bandwidth`. The decode ITL
 is insensitive to the `efficiency` parameter because compute is not on the
-critical path -- exactly matching the physical regime where auto-regressive
+critical path, which exactly matches the physical regime where auto-regressive
 decoding is a streaming memory read, not a compute problem.
 
 **Training FLOPs (Config 6).** The `6ND` approximation (6 * parameters * tokens)
@@ -53,7 +53,7 @@ for transformer training FLOPs matches the GPT-3 paper's reported value to withi
 ### Where the model diverges
 
 **CNN training throughput (Configs 1-2).** The default efficiency parameter
-(eta=0.10) produces predictions that bracket reality but don't hit both targets
+(eta=0.10) produces predictions that bracket reality but do not hit both targets
 simultaneously:
 
 - **A100** prediction is 22% low at eta=0.10. Setting eta=0.13 brings the
@@ -67,13 +67,13 @@ This asymmetry reveals a real insight: **the efficiency parameter is not a unive
 constant.** It encodes the gap between peak datasheet FLOP/s and actual sustained
 throughput, which depends on:
 
-1. **Tensor core utilization** -- ResNet-50 has many small convolutions that may
+1. **Tensor core utilization**: ResNet-50 has many small convolutions that may
    not saturate H100's larger tensor cores as efficiently as A100's.
-2. **Memory system pressure** -- H100's 3x higher peak FLOP/s amplifies any
+2. **Memory system pressure**: H100's 3x higher peak FLOP/s amplifies any
    memory bottleneck (the model uses peak FP16 FLOP/s of 989 TFLOP/s for H100
    vs. 312 TFLOP/s for A100, but real ResNet-50 kernels achieve a lower fraction
    of the H100 peak).
-3. **Framework overhead** -- Batch normalization layers, data loading, and
+3. **Framework overhead**: Batch normalization layers, data loading, and
    gradient synchronization are not modeled in the roofline calculation.
 
 ### Key takeaway

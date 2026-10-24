@@ -530,7 +530,7 @@ Character tokenization provides a simple, robust foundation for text processing.
 r"""
 ## 🏗️ Byte Pair Encoding (BPE) Tokenizer: Learning Subwords from Frequency
 
-Byte Pair Encoding (BPE) is the industry-standard subword tokenization algorithm utilized by modern Large Language Models, including GPT-2, GPT-4, Llama 3, and Mistral. BPE dynamically constructs a subword vocabulary by iteratively identifying and fusing the most frequently co-occurring adjacent token pairs.
+Byte Pair Encoding (BPE) is the industry-standard subword tokenization algorithm utilized by modern Large Language Models, including GPT-2, GPT-6, Llama 3, and Mistral. BPE dynamically constructs a subword vocabulary by iteratively identifying and fusing the most frequently co-occurring adjacent token pairs.
 
 <div align="center">
   <img src="bpe_merge_progression.svg" alt="BPE Merge Progression: From Characters to Subwords" width="650px">
@@ -1515,7 +1515,7 @@ def analyze_tokenization_memory():
     """📊 Measure actual memory usage of different tokenizers."""
     import tracemalloc
 
-    KB_TO_BYTES = 1024
+    KB_TO_BYTES = 1000  # Decimal kilobyte
 
     print("📊 Analyzing Tokenization Memory Usage...")
     print("=" * 70)
@@ -1645,7 +1645,7 @@ def analyze_bpe_scaling():
     import string
     import time
 
-    KB_TO_BYTES = 1024
+    KB_TO_BYTES = 1000  # Decimal kilobyte
 
     print("📊 Analyzing BPE Training Scaling...")
     print("=" * 70)

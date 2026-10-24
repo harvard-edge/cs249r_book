@@ -43,7 +43,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         _labs_dir = Path(__file__).resolve().parents[1]
@@ -251,7 +251,7 @@ def _(COLORS, lab_learning_objectives, mo):
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     No prior reading required &mdash; this lab introduces the curriculum
                     from first principles. Concepts here will be reinforced in
-                    Chapter 1: Introduction and Chapter 2: ML Systems.
+                    Chapter 1: Introduction and Chapter 2: System Paradigms.
                 </div>
             </div>
             <div style="flex: 0 0 180px;">

@@ -242,7 +242,20 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
             except Exception:
                 continue
 
+            # Equations are numbered per page in the HTML edition, in label order.
+            # Cross-chapter links get "equation N.k" (N from the NN_ chapter folder,
+            # matching the PDF), instead of a bare unnumbered "equation" (2026-10-01:
+            # 212 such links across the four web editions).
+            chap_m = re.match(r"(\d\d)_", qmd_file.parent.name)
+            chap_no = str(int(chap_m.group(1))) if chap_m else None
+            eq_counter = 0
+            in_code = False
+
             for line in lines:
+                if line.startswith("```"):
+                    in_code = not in_code
+                if in_code:
+                    continue
                 # Try heading pattern first
                 m = heading_id_re.match(line)
                 if m:
@@ -300,9 +313,11 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
                     m = equation_id_re.search(line)
                     if m:
                         sec_id = m.group(1)
+                        eq_counter += 1
                         if sec_id not in chapter_mapping:
                             chapter_mapping[sec_id] = f"{html_path_str}#{sec_id}"
-                            chapter_titles[sec_id] = _fallback_label(sec_id)
+                            number = f"{chap_no}.{eq_counter}" if chap_no else str(eq_counter)
+                            chapter_titles[sec_id] = f"equation {number}"
 
     return chapter_mapping, chapter_titles
 
@@ -375,6 +390,25 @@ PRINCIPLE_PARTS_ORDER: dict[str, list[str]] = {
         "vol2/parts/distributed_ml_principles.qmd",
         "vol2/parts/deployment_principles.qmd",
         "vol2/parts/responsible_fleet_principles.qmd",
+    ],
+    "vol3": [
+        "vol3/01_introduction/01_introduction.qmd",
+        "vol3/parts/model_principles.qmd",
+        "vol3/02_foundation_model/02_foundation_model.qmd",
+        "vol3/parts/memory_principles.qmd",
+        "vol3/parts/tool_use_principles.qmd",
+        "vol3/parts/runtime_principles.qmd",
+        "vol3/parts/learning_principles.qmd",
+        "vol3/parts/scale_principles.qmd",
+        "vol3/parts/synthesis_principles.qmd",
+    ],
+    # Added 2026-10-01: vol4 was missing, so every vol4 `principle \ref{pri-vol4-...}`
+    # shipped as raw math in the HTML edition (26 leaks).
+    "vol4": [
+        "vol4/parts/anatomy_principles.qmd",
+        "vol4/parts/teaching_principles.qmd",
+        "vol4/parts/running_principles.qmd",
+        "vol4/parts/governing_principles.qmd",
     ],
 }
 
@@ -634,6 +668,33 @@ def fix_cross_reference_link(match, from_file, build_dir, epub_mapping=None):
         return full_match
 
 
+_CALLOUT_NUMBER_CACHE: dict[str, str | None] = {}
+_CALLOUT_TITLE_NUMBER_RE = re.compile(r'<strong>[^<:]*?\s([0-9IVXA-Z]+\.[0-9]+)\s*:')
+
+
+def _callout_display_number(build_dir: Path, abs_path: str, ref_id: str) -> str | None:
+    """Return the number a callout box displays in its rendered page (e.g. "1.2").
+
+    `abs_path` is the mapping entry `vol3/01_introduction/01_introduction.html#id`.
+    The box title renders as `<summary><strong>Lighthouse 1.2: Title</strong>`.
+    """
+    if ref_id in _CALLOUT_NUMBER_CACHE:
+        return _CALLOUT_NUMBER_CACHE[ref_id]
+    number = None
+    page = Path(build_dir) / abs_path.split("#", 1)[0]
+    try:
+        text = page.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    anchor = text.find(f'id="{ref_id}"')
+    if anchor >= 0:
+        m = _CALLOUT_TITLE_NUMBER_RE.search(text, anchor, anchor + 1500)
+        if m:
+            number = m.group(1)
+    _CALLOUT_NUMBER_CACHE[ref_id] = number
+    return number
+
+
 def resolve_cross_references(
     html_content: str,
     from_file: Path,
@@ -750,11 +811,35 @@ def resolve_cross_references(
     total_matches += principle_box_fixes
     unmapped_refs.extend(principle_box_unmapped)
 
+    # Pattern 6 — the same math-span leak for every other numbered callout
+    # (lhs-, dfn-, nbk-, exmp-, psp-, thrm-, ws-, ...). The Lua filter resolves
+    # `\ref{id}` only when the target is in the same page, so a reference into a
+    # sibling chapter ships as raw math. The link text is the number the target
+    # box itself displays, read from its rendered page, so link and box agree.
+    # Volume III first relied on this (lighthouses cited from every chapter). 2026-09-29
+    pattern6 = r'<span class="math inline">\\\(\\ref\{((?!pri-)[a-z]+-[a-zA-Z0-9-]+)\}\\\)</span>'
+    matches6 = re.findall(pattern6, fixed_content)
+    total_matches += len(matches6)
+
+    def fix_callout_reference(match):
+        ref_id = match.group(1)
+        abs_path = chapter_mapping.get(ref_id)
+        number = _callout_display_number(build_dir, abs_path, ref_id) if abs_path else None
+        if number and abs_path:
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
+            return f'<a href="{rel_path}">{number}</a>'
+        unmapped_refs.append(ref_id)
+        return match.group(0)
+
+    fixed_content = re.sub(pattern6, fix_callout_reference, fixed_content)
+
     remaining1 = re.findall(pattern1, fixed_content)
     remaining2 = re.findall(pattern2, fixed_content)
     remaining3 = re.findall(pattern3, fixed_content)
     remaining4 = re.findall(pattern4, fixed_content)
-    fixed_count = total_matches - len(remaining1) - len(remaining2) - len(remaining3) - len(remaining4)
+    remaining6 = re.findall(pattern6, fixed_content)
+    fixed_count = (total_matches - len(remaining1) - len(remaining2) - len(remaining3)
+                   - len(remaining4) - len(remaining6))
 
     return fixed_content, fixed_count, unmapped_refs
 
@@ -910,40 +995,50 @@ def main():
         # actually just rendered with literal `?@sec-...` refs. CI never hit this
         # because each volume builds in a fresh checkout. (Fixed 2026-09-07.)
         active_out = _active_output_dir()
-
-        def _rank(paths: list[Path]) -> list[Path]:
-            ordered = sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
-            if active_out is not None:
-                for i, p in enumerate(ordered):
-                    if p.resolve() == active_out.resolve():
-                        return [ordered.pop(i)] + ordered
-            return ordered
-
-        html_candidates = _rank([p for p in build_root.glob("html*") if p.is_dir()])
-        epub_candidates = _rank([p for p in build_root.glob("epub*") if p.is_dir()])
+        if active_out is None and os.environ.get("QUARTO_PROJECT_OUTPUT_DIR"):
+            p = Path(os.environ["QUARTO_PROJECT_OUTPUT_DIR"])
+            if p.is_dir():
+                active_out = p
 
         epub_mapping = None
-        if html_candidates:
-            build_dir = html_candidates[0]
-            file_pattern = "*.html"
-            file_type = "HTML"
-        elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
-            build_dir = epub_candidates[0]
-            file_pattern = "*.xhtml"
-            file_type = "XHTML (EPUB)"
-            print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(build_dir)
-            print(f"   Found {len(epub_mapping)} section IDs across chapters")
-        elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
-            build_dir = Path(".")
-            file_pattern = "*.xhtml"
-            file_type = "XHTML (EPUB - extracted)"
-            print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(Path("."))
-            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+        if active_out is not None and active_out.is_dir():
+            build_dir = active_out
+            if list(build_dir.rglob("*.xhtml")):
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB)"
+                epub_base = build_dir / "EPUB" if (build_dir / "EPUB").exists() else build_dir
+                epub_mapping = build_epub_section_mapping(epub_base)
+            else:
+                file_pattern = "*.html"
+                file_type = "HTML"
         else:
-            print("⚠️  No HTML or EPUB build directory found — skipping")
-            sys.exit(0)
+            def _rank(paths: list[Path]) -> list[Path]:
+                return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
+
+            html_candidates = _rank([p for p in build_root.glob("html*") if p.is_dir()])
+            epub_candidates = _rank([p for p in build_root.glob("epub*") if p.is_dir()])
+
+            if html_candidates:
+                build_dir = html_candidates[0]
+                file_pattern = "*.html"
+                file_type = "HTML"
+            elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
+                build_dir = epub_candidates[0]
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB)"
+                print("📚 Building EPUB section mapping...")
+                epub_mapping = build_epub_section_mapping(build_dir)
+                print(f"   Found {len(epub_mapping)} section IDs across chapters")
+            elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
+                build_dir = Path(".")
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB - extracted)"
+                print("📚 Building EPUB section mapping...")
+                epub_mapping = build_epub_section_mapping(Path("."))
+                print(f"   Found {len(epub_mapping)} section IDs across chapters")
+            else:
+                print("⚠️  No HTML or EPUB build directory found — skipping")
+                sys.exit(0)
 
         files = list(build_dir.rglob(file_pattern))
         search_files = [build_dir / "search.json"] if (build_dir / "search.json").exists() else []

@@ -96,7 +96,15 @@ def load_baseline() -> set[tuple[str, str, str]]:
     if not ALLOW_LIST_PATH.exists():
         return set()
     data = json.loads(ALLOW_LIST_PATH.read_text())
-    return {(e["file"], e["key"], e["rule"]) for e in data.get("allowed", [])}
+    base = set()
+    for e in data.get("allowed", []):
+        f = e["file"]
+        base.add((f, e["key"], e["rule"]))
+        if f == "books/references.bib":
+            base.add(("bibs/references.bib", e["key"], e["rule"]))
+        elif f == "bibs/references.bib":
+            base.add(("books/references.bib", e["key"], e["rule"]))
+    return base
 
 
 def load_style_baseline() -> set[tuple[str, str, str]]:
@@ -104,7 +112,15 @@ def load_style_baseline() -> set[tuple[str, str, str]]:
     if not STYLE_ALLOW_LIST_PATH.exists():
         return set()
     data = json.loads(STYLE_ALLOW_LIST_PATH.read_text())
-    return {(e["file"], e["key"], e["rule"]) for e in data.get("allowed", [])}
+    base = set()
+    for e in data.get("allowed", []):
+        f = e["file"]
+        base.add((f, e["key"], e["rule"]))
+        if f == "books/references.bib":
+            base.add(("bibs/references.bib", e["key"], e["rule"]))
+        elif f == "bibs/references.bib":
+            base.add(("books/references.bib", e["key"], e["rule"]))
+    return base
 
 
 def save_baseline(violations: list[tuple[str, "Violation"]]) -> None:
@@ -255,20 +271,41 @@ JOURNAL_ABBREV_PATTERNS: list[tuple[str, str]] = [
 # Canonical publishers (warn if not in this set — may be OK but flag for review)
 CANONICAL_PUBLISHERS: set[str] = {
     "IEEE", "ACM", "ACM/IEEE", "PMLR", "OpenReview.net",
-    "Curran Associates Inc.", "Neural Information Processing Systems Foundation",
-    "Association for Computational Linguistics", "USENIX Association",
+    "Curran Associates Inc.", "Curran Associates, Inc.", "Curran Associates",
+    "Neural Information Processing Systems Foundation",
+    "Neural Information Processing Systems Foundation, Inc.",
+    "Neural Information Processing Systems Foundation, Inc. (NeurIPS)",
+    "Association for Computational Linguistics", "USENIX Association", "USENIX",
+    "Association for Computing Machinery", "Association for Computing Machinery (ACM)",
     "mlsys.org", "CIDR", "AAAI Press", "Springer", "Elsevier",
     "Nature Publishing Group", "AAAS", "arXiv", "Schloss Dagstuhl",
-    "MIT Press", "Cambridge University Press", "Oxford University Press",
-    "Harvard University Press", "Princeton University Press", "Morgan Kaufmann", "Wiley", "O'Reilly Media",
-    "SIAM", "Viking Penguin", "Science Research Council",
-    "The MIT Press", "Dartmouth College", "Microsoft Research",
+    "American Association for the Advancement of Science (AAAS)",
+    "MIT Press", "The MIT Press", "Cambridge University Press", "Oxford University Press",
+    "Harvard University Press", "Princeton University Press",
+    "Morgan Kaufmann", "Morgan Kaufmann Publishers",
+    "Morgan & Claypool", "Morgan & Claypool Publishers",
+    "Wiley", "John Wiley & Sons", "Wiley-IEEE Press", "Wiley-Interscience",
+    "O'Reilly Media", "Addison-Wesley", "Addison-Wesley Press",
+    "Manning", "Manning Publications", "Academic Press",
+    "Chapman & Hall", "Chapman & Hall/CRC", "Chapman and Hall/CRC", "CRC Press",
+    "No Starch Press", "Apress", "Basic Books", "Pragmatic Bookshelf",
+    "University of Chicago Press", "Public Library of Science", "PLOS", "PLOS ONE",
+    "Robotics: Science and Systems Foundation", "VLDB Endowment",
+    "SIAM", "Society for Industrial and Applied Mathematics (SIAM)",
+    "Society for Industrial & Applied Mathematics (SIAM)",
+    "Viking Penguin", "Science Research Council",
+    "Dartmouth College", "Microsoft Research",
     "Carnegie Mellon University", "University of Toronto", "Stanford University",
     "Google Research", "Uber Engineering Blog", "VentureBeat",
-    "IEEE Computer Society", "ISCA", "Sage Publications", "Routledge", "USENIX",
-    "SAGE Publications", "PLOS", "PLOS ONE", "Frontiers Media S.A.",
-    "American Statistical Association", "Pearson", "Prentice Hall",
+    "IEEE Computer Society", "ISCA", "Sage Publications", "SAGE Publications", "Routledge",
+    "Frontiers Media S.A.", "American Statistical Association", "Pearson", "Prentice Hall",
     "Internet Society", "Farrar, Straus and Giroux", "NATO Science Committee",
+    # 2026-10-13: Nissenbaum, Privacy in Context (DOI 10.1515/9780804772891),
+    # cited by Vol IV's responsibility chapter, is a Stanford University Press book.
+    "Stanford University Press",
+    # 2026-09-29: RSS proceedings (DOI prefix 10.15607) are published by the
+    # RSS Foundation per Crossref; Vol IV cites them heavily.
+    "Robotics: Science and Systems Foundation",
 }
 
 
@@ -985,12 +1022,26 @@ def report_violations(path: Path, violations: list[Violation]) -> None:
 
 
 def find_all_bib_files() -> list[Path]:
-    """Walk the repo and return all tracked .bib files."""
+    """Walk the repo and return all tracked .bib files, deduplicated by real path."""
     import subprocess
     out = subprocess.check_output(
         ["git", "ls-files", "*.bib"], cwd=Path.cwd()
     ).decode()
-    return [Path(p.strip()) for p in out.splitlines() if p.strip()]
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for p in out.splitlines():
+        p_str = p.strip()
+        if not p_str:
+            continue
+        path = Path(p_str)
+        try:
+            real = path.resolve()
+        except Exception:
+            real = path
+        if real not in seen:
+            seen.add(real)
+            result.append(path)
+    return result
 
 
 def main() -> int:

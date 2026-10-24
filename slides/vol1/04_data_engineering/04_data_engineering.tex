@@ -1,1645 +1,737 @@
 % =============================================================================
-% Chapter 4: Data Engineering — ML Systems Lecture Slides
+% Lecture 4: Data Engineering (Part 1)
+% Introduction to Machine Learning Systems (Volume I)
 % =============================================================================
-% IMAGES NEEDED (generate SVGs, convert to PDF):
-%   - ch04-dataset-compiler.pdf   - ch04-energy-movement.pdf
-%   - ch04-feeding-problem.pdf    - ch04-four-pillars.pdf
-%   - ch04-drift-types.pdf        - ch04-training-serving-skew.pdf
-%   - ch04-storage-hierarchy.pdf  - ch04-data-debt-categories.pdf
-%   - cover_data_engineering.png
+% Training data is the program of an ML system, so it needs the discipline of
+% code. Running example: keyword spotting on a smart speaker. Part 2
+% (04b_data_engineering) carries delivery, drift, and debt.
+%
+% Build: make -C slides build-04_data_engineering   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume   = {Volume I},
-  chapter  = {Chapter 4},
-  logo = {../../assets/img/logo-mlsysbook.png},
-  instlogo = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Data Engineering},
+  volume={Volume I},
+  chapter={Chapter 4},
+  chaptertitle={Data Engineering, Part 1},
+  layer=data,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+  dividerstack,
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usepackage{upquote}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
 
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation (must match actual \section{} count) ---
-\setcounter{mlsystotalsections}{8}
-
-\title{Data Engineering}
+\title{Data Engineering, Part 1}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A highlighted (revealed) answer choice
+\newcommand{\pick}[2]{\colorbox{mlsysaccent!15}{\choice{#1}{#2}}}
+% One stage box in the data-as-code diagram
+\tikzset{stage/.style={draw=#1, fill=#1!12, line width=1.2pt, rounded corners=3pt,
+  minimum width=3.0cm, minimum height=1.0cm, font=\small\bfseries, text=darktext, align=center},
+  qbox/.style={draw=#1, fill=#1!12, line width=1.1pt, rounded corners=3pt, minimum height=0.95cm, minimum width=2.5cm},
+  % evaluation streams against hard negatives: a room-audio segment and a mined clip
+  seg/.style={draw=computestroke, fill=computestroke!10, line width=0.8pt, minimum height=0.75cm,
+    font=\footnotesize, text=darktext, inner sep=0pt},
+  clip/.style={draw=routingstroke, fill=routingstroke!12, line width=1pt, rounded corners=2pt,
+    minimum width=1.25cm, minimum height=0.6cm},
+  use/.style={draw=#1, line width=1.2pt, rounded corners=3pt, fill=white, align=center,
+    font=\small, text width=6.2cm, inner sep=4pt}}
+% a short waveform glyph centered at (#1,#2)
+\newcommand{\wavelet}[2]{\draw[routingstroke, line width=0.8pt, shift={(#1,#2)}]
+  plot[domain=-0.5:0.5, samples=40, smooth] (\x, {0.22*sin(\x*1500)*exp(-6*\x*\x)});}
+
+
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE
 % =============================================================================
-\mlsystitle{Data Engineering}{Data Is the Source Code of ML Systems}{cover_data_engineering.png}
-
-% =============================================================================
-% LEARNING OBJECTIVES
-% =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-% [2 min]
-% -- LINK: This chapter opens with the statistic that 60--80\% of ML effort
-% is data-related (computed from the chapter's own LEGO cell). This slide
-% sets the learning contract: the chapter dives into that 60--80\% of effort.
-%
-% -- NARRATE: Walk through objectives. ``Data engineering consumes 60--80\%
-% of ML project effort, yet most courses spend 80\% of time on models.
-% This chapter corrects that imbalance.''
-% Ask: ``Who here has spent more time cleaning data than training models?''
-%
-% -- FLEX: [CORE] Sets the learning contract for the chapter.
-% IF SHORT: Display objectives, highlight the Four Pillars and drift detection.
-}
-
-\small
-\begin{enumerate}
-  \item Explain how \textbf{Data Cascades} propagate errors and apply the \textbf{Four Pillars framework}
-  \item Evaluate \textbf{data acquisition strategies} using cost--quality trade-offs
-  \item Compare \textbf{batch vs.\ streaming} ingestion and \textbf{ETL vs.\ ELT} patterns
-  \item Implement \textbf{training-serving consistency} through idempotent transformations and \textbf{drift detection}
-  \item Build \textbf{data labeling systems} balancing accuracy, throughput, cost, and quality control
-  \item Evaluate \textbf{storage architectures} and file formats for ML workloads, including \textbf{feature store} concepts
-  \item Identify \textbf{Data Debt} categories and apply systematic debugging
-\end{enumerate}
-
-\end{frame}
-
-\begin{frame}{Visual Language}
-\note{
-% [0.5 min]
-% -- NARRATE: ``Quick color reminder. Blue = compute, green = data, orange =
-% routing, red = cost or bottleneck. Today's chapter is dominated by green---
-% data is the protagonist.''
-%
-% -- FLEX: [CORE] Brief reminder. 15 seconds by Chapter 4.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\end{frame}
-
+\mlsysnote{[1 min] Read the thesis aloud once. Say that the data an ML system learns from is its program, so today gives it what we give code: requirements, review, tests, versions, and a release. One running example, a wake-word detector, carries the lecture. This is the first of two lectures on the chapter. Today builds a dataset we can trust; Part 2 carries delivery to the accelerator and drift after launch. The notes total about 72 minutes, which leaves a few minutes for questions. FLEX: [CORE]; notes tagged [OPTIONAL] can be cut, and cutting all of them leaves a complete lecture of about 50.5 minutes.}
+\mlsystitle{Data Engineering, Part~1}{Training data is the program of an ML system, so it needs the discipline of code, with requirements, review, tests, versions, and monitoring.}{images/echo-dot-mic-board.jpg}
 
 % =============================================================================
+% SECTION: DATA AS CODE
+% =============================================================================
+\mlsysnote{[0.5 min] Open with a system that changed its behavior without a code change. NARRATE: the stack on the right shows where we are; data runs beside every layer. FLEX: [CORE].}
+\mlsysdivider{Why does training data behave like source code?}{Data Engineering, \S4.1}
 \section{Data as Code}
-% =============================================================================
 
-\begin{frame}{The Dataset Compilation Metaphor}
-\note{
-% [3 min]
-% -- LINK: Chapter 3's SW 2.0 framing said ``data is source code.'' This
-% slide makes that metaphor concrete and actionable.
-%
-% -- NARRATE: ``Core reframe: data engineering is not `data cleaning' but
-% dataset compilation. Walk through each analogy pair in the diagram.
-% Source code = raw data. Compiler = data pipeline. Binary = training-ready
-% dataset. Just as you version control source code, debug compilation errors,
-% and run unit tests, you must version datasets, debug pipeline errors, and
-% validate data quality. The key insight: deleting a row of training data is
-% like deleting a line of code. Retraining is recompiling.''
-%
-% -- ENGAGE: ``What happens if you delete a training row?'' Give 10 seconds.
-% Expected: the model changes---potentially in unpredictable ways, especially
-% if the row contained a rare class or boundary case.
-%
-% -- WARN: Students treat data as a static input. Correct framing: datasets
-% are living artifacts that require the same engineering discipline as code---
-% version control, testing, debugging, and continuous integration.
-%
-% -- FLEX: [CORE] Foundational metaphor for the chapter.
-% IF SHORT: State the metaphor and the ``deleting a row = deleting a line of
-% code'' insight. (60 seconds)
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-dataset-compiler.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{Key insight:}{Deleting a row of training data = deleting a line of code. Retraining = recompiling.}
-
+\begin{frame}{A chatbot learned from its users and was shut down in 16 hours}
+  \centering
+  \fbox{\safeimg[width=0.95\textwidth,height=3.9cm,keepaspectratio]{tay-microsoft-blog.png}}\\[0.3cm]
+  {\small\textbf{\textcolor{mlsysaccent}{Hour 0}} launches, adapts to replies\enspace$\rightarrow$\enspace users coordinate toxic prompts\enspace$\rightarrow$\enspace\textbf{\textcolor{mlsysaccent}{hour 16}} suspended}\\[0.3cm]
+  \uncover<2->{\normalsize Nobody changed its code. Who wrote the program it ran on its last day?}
+  \mlsyscredit{Screenshot: Peter Lee, ``Learning from Tay's introduction,'' Official Microsoft Blog, March 25, 2016 (blogs.microsoft.com). Timeline: War Story 4.1.}
+  \note{[2.5 min] LINK: Lecture 3 traced how decisions made early in the lifecycle constrain every later stage; today is the stage that hands a dataset to everyone else. NARRATE: In March 2016 Microsoft launched Tay, a Twitter chatbot built to adapt its responses to public interactions. The screenshot is Microsoft's own account, two days later. Read the second sentence aloud, ``a coordinated attack by a subset of people exploited a vulnerability in Tay.'' The line beneath it explains that adversarial users coordinated toxic prompts and exploited a feature that repeated user-supplied text; within 16 hours Tay was posting abusive statements and Microsoft suspended it, inside the ``first 24 hours'' the post describes. Step 2: ask the question. ENGAGE: take two or three answers. Expected: the users did, through the data the bot learned from. WARN: students may call this a content-moderation story; it is a data-engineering story, because a public input path fed the model with no validation in between. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Data Cascades: Upstream Errors Amplify}
-\note{
-% [3 min]
-% -- LINK: The compilation metaphor said datasets need debugging. Data
-% Cascades show what happens when bugs go undetected.
-%
-% -- NARRATE: ``Sambasivan et al.\ 2021. Cascade issues take a median of 4
-% weeks to discover. By that point, the error has propagated through every
-% pipeline stage and the only fix is often a complete rebuild. The zip code
-% example: a field changed from integer to string. Leading zeros were lost.
-% The model rejected all applicants from affected regions---silently. No
-% crash. No error log. Just a biased system that passed all structural
-% validation checks.''
-%
-% -- ENGAGE: ``Why are data bugs harder to find than code bugs?'' Give 15
-% seconds. Cold-call one student.
-% Expected: data bugs do not crash the system---they silently degrade
-% predictions. There is no stack trace for a missing leading zero.
-%
-% -- WARN: Students think data quality = schema validation. Correct framing:
-% the zip code was structurally valid (it was a string). Only semantic or
-% statistical monitoring would catch the leading-zero loss. Schema checks
-% are necessary but not sufficient.
-% IF STUCK: ``The zip code `07102' became `7102'. Is `7102' a valid string?
-% Yes. Is it the right zip code? No.''
-%
-% -- FLEX: [CORE] Motivates the Four Pillars framework.
-% IF AHEAD: ``How would you design a test that catches the zip code bug?''
-}
+\begin{frame}{In machine learning, the data is the program}
+  \centering
+  \begin{tikzpicture}[>={Stealth[length=3mm]}, line width=1.2pt]
+    \node[stage=midgray] (c1) at (0,1.8) {Source code};
+    \node[stage=midgray] (c2) at (4.2,1.8) {Compiler};
+    \node[stage=midgray] (c3) at (8.4,1.8) {Program};
+    \draw[->, midgray] (c1) -- (c2); \draw[->, midgray] (c2) -- (c3);
+    \node[font=\footnotesize, text=midgray, anchor=west, align=left] at (10.2,1.8) {edit a line,\\[-2pt]change the program};
+    \uncover<2->{
+    \node[stage=GreenLine] (d1) at (0,0) {Training data};
+    \node[stage=GreenLine] (d2) at (4.2,0) {Training};
+    \node[stage=GreenLine] (d3) at (8.4,0) {Model};
+    \draw[->, GreenLine] (d1) -- (d2); \draw[->, GreenLine] (d2) -- (d3);
+    \node[font=\footnotesize, text=GreenLine, anchor=west, align=left] at (10.2,0) {edit a row,\\[-2pt]change the model};}
+  \end{tikzpicture}\\[0.7cm]
+  \uncover<3->{\normalsize A dataset needs what code has: review, tests, versions, and a build you can rerun.}
+  \note{[2.5 min] NARRATE: Step 1: in conventional software a programmer writes the logic, and a compiler turns it into a program; change a line and the program changes. Step 2: in machine learning, an optimizer extracts the logic from data, so the training set plays the role of source code; change a row, or a label, and the retrained model changes even though no code changed. Tay is the extreme case, because its users edited its source. Step 3: so a dataset needs the disciplines code already has. The pipeline that produces it is the build, and every retraining is a rebuild. Pause on that sentence, because it is why the rest of today is about requirements, tests, and a release. ENGAGE: ask what a ``code review'' of a dataset would check. Expected: labels, coverage of speakers or users, duplicates, where the data came from. WARN: students reduce data engineering to ``cleaning.'' The chapter defines it as the build pipeline that turns raw observations into validated, versioned tensors, the numeric arrays a model consumes. FLEX: [CORE].}
+\end{frame}
 
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{The failure pattern:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Bad data at collection $\to$ silent propagation
-      \item Errors amplify through every pipeline stage
-      \item 4-week median time to discovery
-      \item Often requires \textbf{complete system rebuild}
-    \end{itemize}
+\begin{frame}[c]{Recall: what did the last lecture hand to this one?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \centering
+  {\Large\bfseries Question of the day}\\[0.5cm]
+  {\normalsize Name the lifecycle stage that hands a dataset to model development.}\\[0.25cm]
+  {\normalsize Write one decision made there that every later stage inherits.}\\[0.4cm]
+  {\normalsize\textcolor{midgray}{One minute.}}
+  \note{[1.5 min] NARRATE: one minute of writing, then take two answers. Expected: the data stage of the lifecycle (Stage 2), which ends by handing a versioned dataset to model development. Decisions it fixes: which population was collected, how labels were defined, how the data was split. LINK: Lecture 3 called this constraint propagation; today we price it. FLEX: [CORE]; if short on time, ask it aloud without the writing.}
+\end{frame}
 
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Example:} A zip code field changed from integer to string. Leading zeros lost. The model rejected all applicants from affected regions --- \emph{silently}.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.2cm}
+\begin{frame}{Running example: a wake-word detector that never sleeps}
+  \centering
+  \mlsysphoto[height=3.6cm,keepaspectratio]{amazon-echo-dot-with-mug.jpg}\hfill
+  \safeimg[width=0.50\textwidth,height=3.4cm,keepaspectratio]{fig-keywords.png}\\[0.35cm]
+  \uncover<2->{%
+  \footnotesize
+  \begin{tabular}{@{}cccc@{}}
+    {\Large\bfseries\textcolor{mlsysaccent}{98\%}} & {\Large\bfseries\textcolor{mlsysaccent}{$<$1}} & {\Large\bfseries\textcolor{mlsysaccent}{256 KB}} & {\Large\bfseries\textcolor{mlsysaccent}{\$150K}}\\
+    wake words caught & false wake a month & model on the device & data budget
+  \end{tabular}}
+  \mlsyscredit{Photo: Pittigrilli, CC BY-SA 4.0, Wikimedia Commons. Data Engineering, \S4.3; the targets and budget are the chapter's illustrative scenario.}
+  \note{[1.5 min] NARRATE: the photo is a real third-generation Echo Dot beside a coffee mug, for scale; the whole speaker is smaller than the mug, and it listens all day. The diagram is the book's keyword-spotting example. An always-on detector listens for ``Alexa'' and wakes the speaker, which then streams ``dim the lights'' to a larger system. Step 2: the scenario's contract is to catch 98 percent of spoken wake words, wake falsely less than once a month, fit the model in 256 KB of the always-on island of the chip (with a separate 16 KB for audio preprocessing), and do it on a \$150,000 data budget. The reference corpus is real, the Multilingual Spoken Words Corpus; the targets are an illustrative scenario. WARN: say ``illustrative'' once, so nobody quotes these as Amazon's numbers. LINK: Lecture 2 placed this workload at the milliwatt tier. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Today you will learn to}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item Turn a product target into a data budget: labels, hours, dollars.
+    \item Plan coverage, including what training cannot measure.
+    \item Price labels, and measure how wrong they are.
+    \item Place a contract at each boundary that stops leakage, skew, and silent defects.
+    \item Record a release that makes failures traceable.
+  \end{itemize}
+  \vspace{0.3cm}
+  \threadstrip{1}{0}{1}{0}{0}
+  \note{[1 min] NARRATE: five outcomes, one per segment. Read the driving question aloud. How do we build the data an ML system learns from with the discipline we give its code? Today stays with what the model can learn, which in D·A·M terms is the Data--Algorithm overlap. Part 2 takes the Data--Machine overlap (how fast the data reaches the accelerator) and life after launch. The strip fills the right half of the dual mandate and the data factor of the iron law, because the data decides what the model gets right. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REQUIREMENTS AND COVERAGE
+% =============================================================================
+\mlsysnote{[0.5 min] From a product promise to numbers the data team can buy, and to the data it must collect. FLEX: [CORE].}
+\mlsysdivider{How does a product target become a data requirement?}{Data Engineering, \S4.3, \S4.4, and \S4.11}
+\section{Requirements}
+
+\begin{frame}{Predict: how many false wakes a month at 99.9\%?}
+  \mlsysactivity{Predict}{3 min}
+  \centering
+  {\large The detector checks one 1-second window, every second, all month.}\\[0.15cm]
+  {\large It correctly rejects 99.9\% of windows with no wake word.}\\[0.45cm]
+  \begin{minipage}[t]{0.40\textwidth}
+    \Large
+    \choice{A}{about 3}\\[0.15cm]
+    \choice{B}{about 26}\\[0.15cm]
+    \alt<2->{\pick{C}{about 2,600}}{\choice{C}{about 2,600}}\\[0.15cm]
+    \choice{D}{about 26,000}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.52\textwidth}
+    \uncover<3->{%
+    \small
     \renewcommand{\arraystretch}{1.15}
-    {\footnotesize
-    \begin{tabular}{@{}ll@{}}
+    \begin{tabular}{@{}rr@{}}
       \toprule
-      \textbf{Traditional SW} & \textbf{ML Data} \\
+      \textbf{Rejection} & \textbf{False wakes a month} \\
       \midrule
-      Compile error    & Silent degradation \\
-      Crashes loudly   & Degrades silently \\
-      Debug code       & Debug pipeline \\
+      99.9\% & 2,592 \\
+      99.99\% & 259 \\
+      99.999\% & \textcolor{RedLine}{26, still 26$\times$ over} \\
+      \textbf{99.99996\%} & \textbf{1}: rate $3.9\times10^{-7}$ \\
       \bottomrule
-    \end{tabular}
-    }
-  \end{column}
-\end{columns}
-\mlsyscite{Sambasivan et al., ``Everyone Wants to Do the Model Work,'' CHI 2021}
+    \end{tabular}}
+  \end{minipage}
+  \mlsyscredit{Data Engineering, Napkin Math 4.1 and its margin figure; values computed in images/calcs.py.}
+  \note{[3 min] ENGAGE: vote with fingers, one to four, then thirty seconds with a neighbor and vote again. Step 2 reveals C. The arithmetic: 60 seconds, 60 minutes, 24 hours, 30 days gives 2,592,000 windows a month; 0.1 percent of them is 2,592 false wakes, about 86 a day. If many chose A, they heard ``99.9 percent'' as nearly perfect; the denominator is what makes it large. If many chose D, they used 1 percent instead of 0.1 percent. Step 3: each added nine divides by ten, to 259 and then 26, still 26 times the budget. One a month takes a per-window false-positive rate (the share of wake-word-free windows that trigger a wake) of 1 in 2,592,000, about $3.9\times10^{-7}$, which is 99.99996 percent rejection. WARN: this is why overall accuracy is the wrong target. Almost every window holds no wake word, so a detector that never fires scores nearly 100 percent accuracy and is useless. The chapter's target is a detection rate measured at a threshold that holds the false-wake budget. FLEX: [CORE].}
+\end{frame}
 
+\begin{frame}{Real detectors trade misses for false alarms}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{pv_missrate.pdf}\\[0.15cm]
+  \uncover<2->{\normalsize\textcolor{mlsysaccent}{Lower the threshold and misses fall, but false alarms rise.}}
+  \mlsyscredit{Data: Picovoice wake-word benchmark, github.com/Picovoice/wake-word-benchmark, README ``Accuracy'' (commit 8491919), redrawn; run by the maker of Porcupine.}
+  \note{[1.5 min] [OPTIONAL] NARRATE: measured numbers for the trade-off the napkin math implies. Picovoice's open benchmark plays more than 300 recordings of six wake words from more than 50 speakers, mixed at 10 dB SNR with noise recorded in 18 environments such as kitchens, offices, and traffic (the DEMAND dataset), with LibriSpeech read speech as the background that must not trigger a wake. Each engine's threshold is set so that it raises 1 false alarm per 10 hours, and the bars are the share of wake words it then misses: 52.0 percent for PocketSphinx, 31.9 percent for Snowboy, 2.7 percent for Porcupine. Note the axis the industry uses, false alarms per hour of streaming audio, which replaces a per-window rate because real detectors score overlapping windows every few tens of milliseconds. One per 10 hours is 72 false alarms in a 720-hour month, 72 times our budget. Step 2: a stricter false-alarm target means a higher threshold and more misses; only better data and models move the whole curve. WARN: Picovoice makes Porcupine, so treat the ranking as the vendor's; the size of the gap between operating points is the lesson. FLEX: if cut, the budget estimate follows directly.}
+\end{frame}
+
+\begin{frame}{Your turn: what does a \$150K data budget buy?}
+  \mlsysactivity{Estimate}{4 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given (scenario)}\\[0.1cm]
+        Budget: \$150K, 6 months\\
+        Labeling share: about 60\%\\
+        Price: \$0.10 per label\\
+        Review overhead: 20\%\\
+        Device: 256 KB model,\\ 16 KB preprocessing state
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \normalsize
+      \uncover<2->{Labeling: $0.60 \times \$150\text{K} = \$90\text{K}$\\[0.3cm]}
+      \uncover<3->{Per label: $\$0.10 \times 1.2 = \$0.12$\\[0.3cm]}
+      \uncover<4->{$\$90\text{K} \,/\, \$0.12 =$ {\Large\textbf{\textcolor{mlsysaccent}{750K labels}}}\\[0.35cm]}
+      \uncover<5->{The rest: storage and processing \$37.5K, governance \$22.5K.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Data Engineering, Napkin Math 4.2.}
+  \note{[4 min] ENGAGE: give students one minute with a neighbor before step 2. Steps 2 to 4: 60 percent of the budget is \$90,000; a label costs \$0.10 plus 20 percent for review, \$0.12; so the budget buys 750,000 labeled examples. Step 5: the other two categories. Then the design choices the chapter makes with this money. It keeps 13 MFCC coefficients rather than 40 (MFCCs, mel-frequency cepstral coefficients, compress each 25 ms frame of audio to 13 to 40 numbers that emphasize the frequencies speech uses). Take a minute on why. The coefficient count sets the feature buffer the device holds every second it listens, so it lands in the 16 KB preprocessing budget, and it also sets the bytes stored and moved for every clip in training. It runs inference locally, for privacy, bandwidth, and offline operation. It spends money on a noisy-kitchen slice and on synthetic augmentation to close the gap from an illustrative 90 percent base rate toward 98. WARN: the design table's gains overlap and cannot be added; acceptance testing decides whether the plan works. WARN: 750,000 examples is not the limiting number; distinct speakers and hours of ordinary audio are, which is the next slide. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Proving one false wake a month takes 2,160 hours of audio}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{listen_hours.pdf}\\[0.35cm]
+  {\normalsize Zero false wakes in $T$ hours: the 95\% upper bound on the rate is about $3/T$.}\\[0.2cm]
+  \uncover<2->{\normalsize\textcolor{mlsysaccent}{The target sets a data requirement that no training set replaces.}}
+  \mlsyscredit{Data Engineering, \S4.11; the rule of three (Hanley and Lippman-Hand 1983).}
+  \note{[2.5 min] [OPTIONAL] NARRATE: suppose we play a month of ordinary household audio, 720 hours, and the detector never wakes. Have we shown one false wake a month? No. With zero observed events in $T$ hours, the 95 percent upper confidence bound on the true rate is about three events divided by $T$, the rule of three. To push that bound down to one per 720 hours we need $3 \times 720 = 2{,}160$ hours. At 16 kHz and 16 bits that is about 248 GB of recordings, a storage line and a collection line the \$150K allocation never priced; the team must add an evaluation-collection line. Step 2: the requirement. ENGAGE: why must these recordings stay out of training and threshold tuning? Expected: once the model or its threshold has seen them, they no longer estimate the deployed false-wake rate. FLEX: if cut, say that proving one false wake a month takes about 2,160 hours of held-out audio.}
+\end{frame}
+
+\begin{frame}{Hard negatives train; evaluation streams measure}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \begin{tikzpicture}[>={Stealth[length=6pt]}]
+    % left: one continuous recording of ordinary rooms, kept in time order
+    \node[font=\normalsize\bfseries, text=computestroke, anchor=west] at (0,1.55) {Evaluation streams};
+    \node[font=\footnotesize, text=midgray, anchor=west] at (0,1.05) {consented home audio, kept in time order};
+    \foreach \x/\w/\t in {0/1.3/talk, 1.3/1.0/TV, 2.3/1.3/music, 3.6/1.2/silence, 4.8/1.0/talk, 5.8/0.9/TV} {
+      \node[seg, minimum width=\w cm, anchor=west] at (\x,0.3) {\t};
+    }
+    \draw[->, line width=1pt, computestroke] (0,-0.3) -- node[below, font=\footnotesize, text=darktext] {2,160 hours, continuous} (6.7,-0.3);
+    \draw[->, line width=1.2pt, computestroke] (3.35,-0.85) -- (3.35,-1.35);
+    \node[use=computestroke, anchor=north] at (3.35,-1.4) {\textbf{Measure:} false accepts per hour\\{\footnotesize never trained on, never used to tune}};
+    % right: a few clips mined because they confuse the detector
+    \node[font=\normalsize\bfseries, text=routingstroke, anchor=west] at (7.9,1.55) {Hard negatives};
+    \node[font=\footnotesize, text=midgray, anchor=west] at (7.9,1.05) {near-wake phrases, confusing audio};
+    \foreach \x/\y in {8.6/0.45, 10.1/0.45, 11.6/0.45, 13.1/0.45, 9.35/-0.15, 12.35/-0.15} {
+      \node[clip] at (\x,\y) {};
+      \wavelet{\x}{\y}
+    }
+    \node[font=\footnotesize, text=darktext] at (10.85,-0.75) {picked one at a time, for difficulty};
+    \draw[->, line width=1.2pt, routingstroke] (10.85,-1.0) -- (10.85,-1.35);
+    \node[use=routingstroke, anchor=north] at (10.85,-1.4) {\textbf{Train:} better rejection\\{\footnotesize not how often such audio occurs}};
+  \end{tikzpicture}\\[0.05cm]
+  {\normalsize Can hard negatives give the false-wake rate?}\enspace
+  \uncover<2->{\normalsize\textbf{\textcolor{RedLine}{No: they were chosen to be hard.}}}
+  \mlsyscredit{Data Engineering, \S4.4.1.}
+  \note{[2 min] [OPTIONAL] NARRATE: the 2,160 hours are an acquisition requirement, and the chapter separates two kinds of non-keyword audio. Left: evaluation streams, consented recordings of representative listening conditions across the intended microphones and rooms, kept in time order with their duration so evaluation can run the deployed detection path and report false accepts per hour. They stay out of training and threshold selection, with speaker and recording-period boundaries kept. Right: hard negatives, near-wake phrases and other audio mined because it confuses the current detector. Training on them improves rejection. The left strip is one continuous recording, cut into whatever the room happened to play; the scattered clips on the right were each picked out because the detector found them hard. ENGAGE: ask the question at the bottom; take a show of hands. Step 2: no. They were sampled for difficulty, so they over-represent hard cases and say nothing about how often such audio occurs at home. WARN: a budget that funds only keyword labels and mined negatives can improve the detector while leaving its false-wake target unmeasured. FLEX: if cut, say that mined hard negatives train the model but cannot measure the false-wake rate.}
+\end{frame}
+
+\begin{frame}{Synthetic audio proposes coverage; real recordings decide}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.1cm,keepaspectratio]{synthetic_audio_step}{3}\\[0.05cm]
+  {\normalsize One synthesized ``Alexa'', made to sound like a room, then masked.}\\[0.1cm]
+  \uncover<3->{\normalsize\textcolor{mlsysaccent}{A generator samples only within its own assumptions.}}
+  \mlsyscredit{Data Engineering, \S4.4.3 and Example 4.2. Audio: macOS text-to-speech, generated for this deck; room echo simulated (0.5 s decay); masks after Park et al.\ 2019 (SpecAugment).}
+  \note{[1.5 min] [CORE] NARRATE: three spectrograms of one synthetic training clip, time across, frequency up, bright where the sound is loud. Step 1: a text-to-speech voice saying ``Alexa'', made on a laptop for this deck; it costs nothing and never tires. Step 2: the same clip convolved with a room impulse response, a recording of how a room echoes (simulated here), so the energy smears to the right as it would in a kitchen. Step 3: SpecAugment blanks one frequency band and one time span, so the model cannot rely on one narrow cue. Synthetic data is cheap and covers rare conditions. WARN: the chapter's fallacy is that synthetic data can replace real collection. A detector trained only on synthesized speech loses accuracy on real reverberation, accents, and microphones, because a generator samples only within the assumptions built into it; this voice has one accent and this room one echo. Held-out real recordings decide whether the added coverage helped. Landing line for the segment: the target sets the data, including the data training never sees.}
 \end{frame}
 
 % =============================================================================
-\section{Physics of Data}
+% SECTION: LABELS
 % =============================================================================
+\mlsysnote{[0.5 min] The label is the definition of a correct answer. What does it cost, and how often is it wrong? FLEX: [CORE].}
+\mlsysdivider{What does a label cost, and how wrong is it?}{Data Engineering, \S4.6}
+\section{Labels}
 
-\begin{frame}{The Energy-Movement Invariant}
-\note{
-% [3 min]
-% -- LINK: Data Cascades showed that data quality matters. This slide shows
-% that data MOVEMENT is the dominant physical cost---not computation.
-%
-% -- NARRATE: ``Horowitz 2014. Moving a bit from DRAM to the processor costs
-% 170$\times$ more energy than a floating-point multiply. Moving it from
-% flash costs 1,000$\times$ more. This is the physics behind the Iron Law's
-% data term. The engineering implication: deduplication---removing redundant
-% data before it moves---is the highest-leverage optimization you can make.
-% Pruning 50\% of training data eliminates the most expensive stages of the
-% pipeline: movement, not computation.''
-%
-% -- ENGAGE: ``If computation costs 1 unit of energy and DRAM access costs
-% 170 units, which should you optimize first?'' Give 10 seconds.
-% Expected: DRAM access (data movement). This is the Iron Law's data term
-% dominating energy, just as it dominates latency.
-%
-% -- WARN: Students assume compute is the expensive part because GPUs are
-% marketed on TFLOPS. Correct framing: data movement dominates energy by
-% 100--1,000$\times$. Optimizing compute while ignoring data movement is
-% like tuning the engine while ignoring that you are hauling 10 tons of
-% unnecessary cargo.
-%
-% -- FLEX: [CORE] Physical foundation for data engineering decisions.
-% IF SHORT: State the 170$\times$ number and the deduplication implication.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-energy-movement.pdf}
-
-\vspace{0.15cm}
-\mlsysalert{Systems Implication:}{Pruning 50\% of training data eliminates the \emph{most expensive} stages of the pipeline.}
-
+\begin{frame}{Finer labels multiply the work; one mask holds 2.1 million}
+  \begin{columns}[c]
+    \begin{column}{0.53\textwidth}
+      \centering
+      \mlsyssteps[width=\textwidth,height=4.4cm,keepaspectratio]{label_entries_step}{3}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \centering
+      \uncover<3->{\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{cityscapes-bamberg-fine.png}\\[0.1cm]
+      {\footnotesize A real Cityscapes fine annotation:\\each outline traced by hand.}}
+    \end{column}
+  \end{columns}
+  \vspace{0.2cm}
+  \centering
+  \uncover<3->{\normalsize One box takes about 35 s to draw; one street-scene mask, over 1.5 hours.}
+  \mlsyscredit{Data Engineering, \S4.6.1. Box time: Papadopoulos et al. 2017. Mask time and image: Cityscapes (cityscapes-dataset.com, ``Examples''), Cordts et al., CVPR 2016.}
+  \note{[2 min] NARRATE: label granularity sets cost. The image on the right is a real fine annotation from Cityscapes, a street in Bamberg with the outline of each region traced by hand and given a class: people, road, sidewalk, poles, signs, vegetation, sky. Tracing every boundary in the scene is where the hour and a half goes. Step 1: a classification label is one number per input; a keyword-spotting label is one class index per one-second clip. Step 2: ten bounding boxes, rectangles drawn around each object, of four coordinates each, 40 numbers, and a variable count per image that the data loader must pad. Step 3: a segmentation mask of a 1920 by 1080 image assigns a class to every pixel, about 2.1 million labels, 51,840 times more entries than ten boxes. Step 3 text: drawing one good box took about 35 seconds in ImageNet's annotation campaign; a Cityscapes street image took more than 1.5 hours to segment. ENGAGE: a self-driving team wants masks for one million frames. How many person-years at 1.5 hours each? Expected: 1.5 million hours, roughly 750 person-years at 2,000 hours a year. FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{Data Gravity: Move Compute, Not Data}
-\note{
-% [3 min]
-% -- LINK: The Energy-Movement Invariant showed that moving bits costs
-% 100--1,000$\times$ more than computing. Data Gravity extends that
-% principle to between-datacenter movement: when datasets reach PB scale,
-% the cost of physically moving the data exceeds the cost of running
-% compute on it.
-%
-% -- NARRATE: ``The chapter defines data gravity as movement cost: a function
-% of volume and bandwidth. A 1 PB dataset on a 10 Gbps link takes days of
-% wire time and costs $\sim$\$90K in egress fees at cloud rates. That single
-% number changes every architectural decision: instead of moving data to the
-% compute, you move the compute to the data. This is why Lakehouse architectures
-% (Spark on the storage node) exist and why cloud vendors colocate storage
-% and compute in the same availability zone.''
-%
-% -- ENGAGE: ``If training the model takes 8 GPU-days and egress costs
-% \$90K, which is faster and cheaper---moving the data or running the compute
-% on-premise where the data already lives?'' Give 15 seconds.
-% Expected: run compute where the data lives---moving the data is slower
-% and more expensive. This is the engineering implication of data gravity.
-%
-% -- WARN: Students assume egress cost is a minor line item. Correct framing:
-% at PB scale, egress fees dominate the budget. The wire cost is the cheap
-% part---the engineering cost to re-validate pipelines, migrate schemas, and
-% synchronize downstream services adds 6--9 months of human time on top.
-% IF STUCK: ``1 PB = 1,000 GB. At \$0.09/GB egress, what is the bill?''
-% (\$90,000).
-%
-% -- FLEX: [CORE] Named chapter principle with quantitative anchor.
-% IF SHORT: State the \$90K/1 PB figure and the `move compute to data' rule.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{Data Gravity = Movement Cost}
-
-    \vspace{0.15cm}
-    {\footnotesize
-    A 1 PB dataset on a 10 Gbps link:
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \textbf{Wire time:} $\sim$days (physics, fixed)
-      \item \textbf{Egress cost:} $\sim$\$90K (at \$0.09/GB)
-      \item \textbf{Engineering time:} 6--9 months\\
-      {\scriptsize (pipeline re-validation, schema migration, lineage)}
-    \end{itemize}
-    }
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{datastroke}
-    {\footnotesize \textbf{Rule:} For PB-scale data, \textbf{move compute to data}.\\
-    For GB-scale data, \textbf{move data to compute}.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.44\textwidth}
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.15}
-    {\footnotesize
-    \begin{tabular}{@{}ll@{}}
-      \toprule
-      \textbf{Scale} & \textbf{Architecture} \\
-      \midrule
-      GB dataset & Move data to GPU \\
-      TB dataset & Colocate storage/GPU \\
-      PB dataset & Lakehouse: Spark on storage \\
-      PB+ mesh  & Decentralized Data Mesh \\
-      \bottomrule
-    \end{tabular}
-    }
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Fallacy:} ``Moving a PB is just a bandwidth problem.''\\[0.05cm]
-    Wire cost $\ll$ engineering cost.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Labeling costs thousands of training runs}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=3.4cm,keepaspectratio]{label_cost_step}{2}\\[0.3cm]
+  \uncover<2->{\normalsize A \$100K labeling budget is about 2,500 to 5,000 times one training run.}
+  \mlsyscredit{Data Engineering, \S4.6.2 (tables 3 and 4; approximate 2024 prices). Training: ResNet-50, 8 A100s, 90 epochs.}
+  \note{[1.5 min] NARRATE: Step 1: labeling one million images with crowd labels plus the review and relabeling passes that quality control needs, budgeted at about \$100,000 and two to four weeks. Step 2: training ResNet-50 on them once, on eight A100s (NVIDIA datacenter GPUs), about 1.3 hours and \$20 to \$40. The ratio is about 2,500 to 5,000 times. Labeling sets the schedule as well as the budget. WARN: these are dated reference prices, and the ratio moves whenever labor or cloud prices change, and tasks that reuse labels or train many times can have a different dominant cost. Measure before optimizing. ENGAGE: where should a team spend its next dollar to improve this model? Expected: usually better labels or coverage; more GPU hours rarely help. Every wrong label is paid for twice, once when bought and again when the model learns it. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{The Feeding Problem: GPU Starvation}
-\note{
-% [3 min]
-% -- LINK: Data Gravity showed the between-datacenter movement cost.
-% The Feeding Problem shows the within-datacenter I/O bottleneck that
-% starves GPUs even when data is nearby.
-%
-% -- NARRATE: ``An A100 can process 40K images per second, but a standard
-% cloud disk delivers only 250 MB/s. At 600 KB per image, that is only 417
-% images per second---the GPU sits over 98\% idle. This is the Iron Law's
-% data term dominating: $T_{\text{step}} = \max(T_{\text{compute}},
-% T_{\text{io}})$. Adding more GPUs yields zero speedup because the bottleneck
-% is storage, not compute.''
-%
-% -- ENGAGE: ``If you have \$10K to spend, should you buy another GPU or
-% faster storage?'' Give 15 seconds. Cold-call one student.
-% Expected: faster storage---the system is I/O-bound, so another GPU yields
-% 0\% speedup. NVMe at 7 GB/s would feed the GPU 11,667 images/sec, a
-% 28$\times$ improvement over the 250 MB/s disk.
-%
-% -- WARN: Students default to ``buy more GPUs'' for training speedup.
-% Correct framing: if the Feeding Tax exceeds 50\%, storage is the
-% bottleneck. Profile $T_{\text{io}}$ vs.\ $T_{\text{compute}}$ before
-% purchasing hardware.
-% IF STUCK: ``What are the units of 40K images/sec $\times$ 600 KB/image?
-% That is 23 GB/s. Can a 250 MB/s disk deliver that?''
-%
-% -- FLEX: [CORE] Connects Iron Law to practical infrastructure decisions.
-% IF AHEAD: ``How does data format affect the Feeding Tax?'' (Answer: Parquet
-% is 10$\times$ smaller than CSV---same data, 10$\times$ less I/O.)
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{ch04-feeding-problem.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{The mismatch:}
-
-    \vspace{0.1cm}
-    \textcolor{computestroke}{\textbf{A100 GPU capacity}}\\
-    40K images/sec $\to$ needs 23 GB/s
-
-    \vspace{0.08cm}
-    \textcolor{errorstroke}{\textbf{Standard cloud disk}}\\
-    250 MB/s actual throughput
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Feeding Tax:} $>$98\% GPU idle time.\\[0.03cm]
-    Iron Law: $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$\\[0.03cm]
-    The \textcolor{datastroke}{Data Term} dominates.}
-    \end{mlsyscard}
-    \vspace{0.06cm}
-    \begin{mlsyscard}{datastroke}
-    {\footnotesize \textbf{Formal limit:}\\[0.03cm]
-    $\text{Throughput} = \min(\text{Compute}, \text{Supply Rate})$}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Benchmark test sets carry up to 10\% wrong labels}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.3cm,keepaspectratio]{label_errors.pdf}
+  \mlsyscredit{Data Engineering, \S4.6.3 (figure 11, six of its ten rows); data from Northcutt, Athalye, and Mueller, NeurIPS 2021.}
+  \note{[2 min] NARRATE: each bar is the share of a benchmark's test labels that Northcutt and colleagues found to be wrong; blue is images, orange text, violet audio. The slide shows six of the book figure's ten datasets. ImageNet validation: 5.83 percent. CIFAR-100: 5.85 percent. QuickDraw, whose labels came from a largely automated collection process: 10.12 percent. Audio does better, but AudioSet still carries 1.35 percent. ENGAGE: two published models differ by 1 point on ImageNet. What can we conclude? Expected: not much; the label error rate is larger than the gap, so a few percent of wrong labels can reorder a leaderboard whose top entries differ by less than that. LINK: the next slide shows what those errors look like. FLEX: [CORE].}
 \end{frame}
 
-% --- ACTIVE LEARNING 1: Exercise ---
-\begin{frame}{Your Turn: Calculate the Feeding Tax}
-\note{
-% [4 min]
-% -- LINK: The Feeding Problem showed GPU starvation qualitatively. This
-% exercise quantifies it.
-%
-% -- NARRATE: ``You have 90 seconds. Calculate the required bandwidth, compare
-% it to disk throughput, and determine the Feeding Tax percentage.''
-%
-% -- ENGAGE: PEER INSTRUCTION PROTOCOL:
-% 1. Present problem (30s). 2. Individual work (60s).
-% 3. If 30--70\% correct: pair discussion (90s), then re-vote.
-% 4. Reveal: Required BW = 2,000 images/sec $\times$ 250 KB = 500 MB/s.
-% Disk provides 100 MB/s. Feeding Tax = $1 - 100/500 = 80\%$. System is
-% I/O-bound. The fix is faster storage (NVMe, parallel readers), not a
-% faster GPU.
-%
-% -- WARN: Students will calculate the required bandwidth correctly but forget
-% to compare it to the actual disk throughput. Correct framing: the Feeding
-% Tax is the fraction of time the GPU is idle waiting for data. 80\% means
-% the GPU does useful work only 20\% of the time.
-% IF STUCK: ``What are the units of 2,000 $\times$ 250 KB? Convert to MB/s.
-% Now compare to 100 MB/s.''
-%
-% -- FLEX: [CORE] First hands-on calculation for the chapter.
-% IF SHORT: Skip pair discussion; go straight to reveal.
-}
+\begin{frame}{Label errors come from bad inputs or missing expertise}
+  \mlsysactivity{Vote}{1.5 min}
+  \centering
+  \safeimg[width=0.96\textwidth,height=3.6cm,keepaspectratio]{fig-hard-labels.png}\\[0.35cm]
+  {\normalsize For each image: was the label wrong because of the input, or the annotator?}\\[0.2cm]
+  \uncover<2->{\small Quality: filter the input before labeling.\quad Expertise: a rubric and a trained reviewer.}
+  \mlsyscredit{Data Engineering, \S4.6.3 (figure 12); examples from Northcutt, Athalye, and Mueller, NeurIPS 2021.}
+  \note{[1.5 min] NARRATE: six test-set errors from the same study, each with the label it was given and the corrected one. ENGAGE: thumbs up for ``bad input,'' thumbs down for ``missing expertise,'' one image at a time. Expected: the MNIST digit and the QuickDraw sketch are degraded or ambiguous inputs, hard to label from the data alone; the black stork labeled white stork and the crab labeled lobster are clear images that need knowledge to label correctly. Step 2: the two kinds need different fixes. Quality errors are filtered upstream, before anyone labels; expertise errors are routed to qualified reviewers with a rubric of canonical examples. Wake-word clips show both. A clipped or whispered ``Alexa'' that no annotator can hear is a quality problem; ``Alexis'' against ``Alexa'' is settled only by a rubric and a trained reviewer. FLEX: [CORE].}
+\end{frame}
 
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.56\textwidth}
-    {\small\bfseries Diagnose the I/O Bottleneck}
+\begin{frame}{Agreement beyond chance measures label quality}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \centering
+      {\Large $\kappa = \dfrac{\alert<2>{p_o} - \alert<3>{p_e}}{1 - p_e}$}\\[0.4cm]
+      \raggedright\small
+      \uncover<2->{$p_o$: how often two annotators agree.\\[0.15cm]}
+      \uncover<3->{$p_e$: how often they would agree by chance. If both say ``not spam'' 90\% of the time, $p_e = 0.82$.\\[0.25cm]}
+      \uncover<4->{Wake-word campaign: $\kappa$ fell from \textbf{0.85} to \textbf{0.72} in six months while every audio feature stayed flat.}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering
+      \begin{tikzpicture}[
+          ch/.style={draw=midgray, line width=0.8pt, rounded corners=2pt, font=\footnotesize,
+            minimum width=1.75cm, minimum height=0.55cm, inner sep=1pt},
+          chon/.style={draw=mlsysaccent, fill=mlsysaccent!18, font=\footnotesize\bfseries}]
+        \draw[midgray, line width=0.6pt, rounded corners=2pt] (0,-0.6) rectangle (5.8,0.6);
+        \draw[BlueLine, line width=0.9pt] plot[domain=0.15:5.65, samples=260, smooth]
+          (\x, {0.48*sin(\x*1700)*exp(-1.2*(\x-2.9)*(\x-2.9))});
+        \node[font=\footnotesize, text=midgray, anchor=south west] at (0,0.62) {one clip};
+        \node[font=\small\bfseries, anchor=east] at (1.15,-1.2) {A};
+        \node[ch, chon] at (2.3,-1.2) {Alexa};
+        \node[ch] at (4.25,-1.2) {not Alexa};
+        \node[font=\small\bfseries, anchor=east] at (1.15,-1.95) {B};
+        \node[ch] at (2.3,-1.95) {Alexa};
+        \node[ch, chon] at (4.25,-1.95) {not Alexa};
+        \node[font=\footnotesize\bfseries, text=RedLine, anchor=north] at (3.25,-2.35) {disagree: one observation of \alert<2>{$p_o$}};
+      \end{tikzpicture}\\[0.1cm]
+      \begin{minipage}[c]{0.42\linewidth}\centering
+        \fbox{\safeimg[width=0.85\linewidth,height=1.5cm,keepaspectratio]{label-studio-audio.png}}
+      \end{minipage}\hfill
+      \begin{minipage}[c]{0.54\linewidth}\raggedright
+        {\footnotesize The same choice in Label Studio.}
+      \end{minipage}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Data Engineering, \S4.6.3 and \S4.6.4 (Cohen 1960); the campaign is the chapter's illustrative scenario. Screen: Label Studio docs, Audio Classification template (labelstud.io).}
+  \note{[2 min] NARRATE: we rarely know the truth, but we can measure whether annotators agree. The drawing on the right is what a labeling tool records, and the inset is the real one, Label Studio's audio classification template: an annotator plays the clip and picks one choice, here ``Alexa'' or ``not Alexa.'' Give the same clip to two annotators and their two clicks are one observation of agreement; on this clip they disagree. Step 2: $p_o$ is observed agreement. Step 3: $p_e$ is the agreement expected by chance from each annotator's label mix. With two independent annotators who each say ``not spam'' 90 percent of the time, chance agreement is $0.9\times 0.9 + 0.1\times 0.1 = 0.82$, so a raw 85 percent agreement is barely better than chance. Cohen's kappa removes that. Step 4: label quality drift. New annotators joined without the original rubric training and began accepting near-homophones; kappa fell from 0.85 to 0.72 while every input-feature monitor stayed flat, because the inputs did not change. LINK: Part 2 returns to this as one of the failures input monitors cannot see. WARN: high agreement is not correctness; annotators can agree on the same systematic error, so gold-standard items and expert audits are still needed. FLEX: [CORE].}
+\end{frame}
 
-    \vspace{0.1cm}
-    A training pipeline processes:
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item 2,000 images/sec at 250 KB each
-      \item Storage delivers 100 MB/s
-    \end{itemize}
+\begin{frame}{Predict: can active learning fit a \$50K budget?}
+  \mlsysactivity{Predict}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given (scenario)}\\[0.1cm]
+        Pool: 10M unlabeled images\\
+        Budget: \$50K\\
+        Label: \$0.50 each\\
+        Scoring: \$0.01 per image\\
+        Goal: 85\% $\rightarrow$ 95\%
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \normalsize
+      {Active learning labels only the examples the model is least sure of. Does it fit?}\\[0.3cm]
+      \uncover<2->{Random sampling: about 1M labels, \textbf{\$500K}.\\[0.15cm]}
+      \uncover<3->{Score all 10M first: \textbf{\$100K} before one label.\\[0.15cm]}
+      \uncover<4->{Filter to 500K, score for \$5K, buy about \textbf{90K labels}. It fits; whether 90K suffices must be measured.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Data Engineering, Napkin Math 4.6.}
+  \note{[2.5 min] Define active learning first. Instead of labeling a random sample, the current model scores the unlabeled pool and humans label the examples it is least sure of. ENGAGE: vote yes or no before any reveal. Step 2: random sampling may need about a million labels to reach 95 percent, \$500,000. Step 3: active learning may need 100,000 to 200,000 hard examples, \$50,000 to \$100,000, but scoring every image in the pool with the hosted model costs \$100,000 by itself. Step 4: the version that fits filters the pool by metadata or a cheap heuristic to about 500,000 candidates, scores them for \$5,000, and spends the remaining \$45,000 on about 90,000 labels. WARN: students assume the algorithm is free; scoring is computation and data movement, and it belongs in the same budget. LINK: Lecture 9 develops data selection properly. FLEX: [CORE].}
+\end{frame}
 
-    \vspace{0.1cm}
-    \textbf{Calculate:} (1) Required bandwidth, (2) Feeding tax, (3) Dominant Iron Law term.
-
-    {\scriptsize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.40\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.05cm]
-    {\footnotesize
-    Required: $2000 \times 250\text{KB} = 500$ MB/s\\
-    Disk: 100 MB/s\\
-    Tax: $1 - 100/500 = $ \textbf{80\%}\\[0.05cm]
-    \textcolor{datastroke}{\textbf{Data-bound!}} Fix: faster storage.
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Forced alignment labeled 23.4 million clips automatically}
+  \centering
+  \safeimg[width=0.96\textwidth,height=4.3cm,keepaspectratio]{forced_alignment.pdf}\\[0.2cm]
+  \uncover<2->{\normalsize By hand at 10 s per clip: about 65,000 h, or 32.5 person-years.\\[0.1cm]}
+  \uncover<3->{\small\textcolor{mlsysaccent}{Each clip keeps its source recording, transcript version, aligner version, and boundary confidence.}}
+  \mlsyscredit{Redrawn from Data Engineering, \S4.6.6 (figure 14); Mazumder et al., ``Multilingual Spoken Words Corpus,'' NeurIPS 2021. Word boxes mark boundaries, not timings.}
+  \note{[2 min] NARRATE: how the Multilingual Spoken Words Corpus was labeled, with the chapter's example sentence carried along the bottom row. Left to right: sentence audio that comes with its transcript, words but no times; forced alignment, a speech model that estimates where each transcribed word starts and ends; a one-second clip cut around one keyword and labeled with it; and the corpus that results, 23.4 million clips across 340,000 keywords in 50 languages. Step 2: at even 10 seconds per label, doing it by hand would take about 65,000 hours, roughly 32.5 person-years. Step 3: at this scale quality control becomes sampling and provenance. Each clip must carry its source recording, transcript version, aligner version, and word-boundary confidence, so low-confidence alignments can go to human review and an extraction error can be traced later. ENGAGE: does 50 languages mean the corpus covers your users? Expected: no; language count does not guarantee speakers, accents, devices, or rooms. LINK: those per-clip fields are exactly what the release records in the last segment. Landing line for the segment: labels are the specification, and every wrong label is paid for twice. FLEX: [OPTIONAL]; keep the landing line.}
 \end{frame}
 
 % =============================================================================
-\section{Four Pillars}
+% SECTION: BOUNDARIES
 % =============================================================================
+\mlsysnote{[0.5 min] Pipelines rarely fail by crashing. Where do silent defects enter, and what stops each one? FLEX: [CORE].}
+\mlsysdivider{Where do silent defects enter, and what stops them?}{Data Engineering, \S4.1, \S4.2, \S4.5, and \S4.7.1}
+\section{Boundaries}
 
-% --- ACTIVE LEARNING 2: Predict ---
-\begin{frame}{Predict: What Makes a Reliable Data System?}
-\note{
-% [4 min]
-% -- LINK: Data Cascades and the Feeding Problem showed what goes wrong. This
-% prediction exercise asks students to reason about prevention before seeing
-% the framework.
-%
-% -- NARRATE: ``A zip code field changes from integer to string. Your ML model
-% silently rejects all applicants from a region. What system properties would
-% have prevented this?''
-%
-% -- ENGAGE: Give students 60 seconds to write 3--4 properties. Then
-% turn-and-talk for 30 seconds. Cold-call 2--3 students.
-% Expected: schema validation, data monitoring, versioning, access control.
-% These map directly to the Four Pillars (Quality, Reliability, Scalability,
-% Governance) revealed on the next slide.
-%
-% -- WARN: Students will list technical solutions (``add a check''). Correct
-% framing: individual checks are insufficient. You need a systematic framework
-% that covers quality, reliability, scalability, and governance simultaneously.
-%
-% -- FLEX: [CORE] Prediction exercise scaffolds the Four Pillars reveal.
-% IF SHORT: Cut turn-and-talk; go straight to cold-call after 60 seconds.
-}
-
-\centering
-\vspace{1.2cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.6cm}
-{\large A zip code field changes from integer to string.\\
-Your ML model silently rejects all applicants from a region.\\[0.3cm]
-\alert{What system properties would have prevented this?}}
-
-\vspace{0.6cm}
-{\normalsize Write down 3--4 properties. \textcolor{midgray}{(60 seconds)}}
-
+\begin{frame}{Data cascades: early defects surface only at deployment}
+  \centering
+  \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{cascades.pdf}\\[0.2cm]
+  {\normalsize Each stage trusts its input and turns the defect into new derived state.}
+  \mlsyscredit{Data Engineering, \S4.2.1 (figure 1, redrawn for the slide), after Sambasivan et al., CHI 2021.}
+  \note{[1.5 min] NARRATE: the stages of the lifecycle run left to right, from problem statement to deployment. Each arc starts where a data defect entered and ends where it was discovered; the colors are the causes Sambasivan and colleagues found in interviews with practitioners in high-stakes domains: brittle interaction with the physical world, missing domain expertise, conflicting incentives, and poor documentation across teams. Most arcs start in collection and end at evaluation or deployment. This is a data cascade. Data passes schemas and tests, every later stage treats it as trustworthy, and the cost to fix grows with every artifact that consumed it. WARN: unit tests do not catch cascades, because corrupted data can be perfectly well formed. The rest of this segment puts a boundary at each place a defect enters. FLEX: [CORE]; it teaches a primary concept of the chapter.}
 \end{frame}
 
-\begin{frame}{The Four Pillars Framework}
-\note{
-% [3 min]
-% -- LINK: Students just predicted system properties for reliable data. The
-% Four Pillars formalize their intuition.
-%
-% -- NARRATE: ``Reveal after prediction exercise. Quality: accuracy,
-% completeness, consistency of data. Reliability: fault tolerance, recovery,
-% durability. Scalability: handle growing data volume and velocity.
-% Governance: access control, lineage tracking, compliance. These four
-% pillars are interdependent---strengthening one creates tension with another.
-% Every pipeline decision is evaluated against all four simultaneously.''
-%
-% -- ENGAGE: ``Which pillar would have caught the zip code bug?'' Give 10
-% seconds. Expected: Quality (statistical monitoring would detect the
-% distribution change in zip code values).
-%
-% -- WARN: Students think one pillar is enough. Correct framing: the zip code
-% bug passed Quality checks (structurally valid) but would have been caught
-% by statistical monitoring under the Quality pillar. However, without
-% Governance (tracking who changed the schema), you cannot determine the
-% root cause.
-%
-% -- FLEX: [CORE] Organizing framework for all data engineering decisions.
-% IF SHORT: Show the diagram, name the four pillars, state their
-% interdependence.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-four-pillars.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Framework:}{Every pipeline decision is evaluated against all four pillars simultaneously.}
-
+\begin{frame}{Predict: will validation catch the quiet batch?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  {\normalsize A phone app update halved the microphone gain on 15\% of a crowdsourced batch.\\Every file is valid audio of the right length and sampling rate.}\\[0.4cm]
+  \begin{minipage}{0.60\textwidth}
+    \large
+    \choice{A}{the schema check rejects it}\\[0.15cm]
+    \alt<2->{\pick{B}{a loudness check against training fails}}{\choice{B}{a loudness check against training fails}}\\[0.15cm]
+    \choice{C}{nothing catches it before training}
+  \end{minipage}\\[0.4cm]
+  \uncover<3->{\small \textbf{Mechanical:} is it a valid 1 s, 16 kHz clip?\quad \textbf{Semantic:} does its loudness match training?}
+  \mlsyscredit{Data Engineering, \S4.5.3 and Systems Perspective 4.1.}
+  \note{[2.5 min] ENGAGE: vote, then thirty seconds with a neighbor. Step 2 reveals B. Every file passes the schema, so A is wrong; C is what happens if the pipeline has only a schema check. The clips are far quieter than anything the detector hears in deployment, and only a statistical check of loudness across the batch, compared with the training baseline, exposes them. Step 3: the chapter's distinction. A mechanical check validates the container: type, format, length, rate. A semantic check validates the content: does the distribution still look like training? A dataset can be mechanically perfect and semantically broken. WARN: students who chose A believe a valid file is a correct file. NARRATE: checks run at two speeds. A hard failure halts the path at once; a gradual drift, such as a null rate creeping from 1 to 5 percent, is flagged for investigation. LINK: Part 2 shows the statistical test itself, the Kolmogorov-Smirnov test, on this batch. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Four Pillars: Trade-off Tensions}
-\note{
-% [3 min]
-% -- LINK: The Four Pillars are interdependent. This slide shows the specific
-% tensions between them.
-%
-% -- NARRATE: ``Concrete tension examples. Quality vs.\ Scalability: stricter
-% schema validation catches more errors but reduces pipeline throughput. A
-% 100\% label review catches all errors but costs 10--50$\times$ more than
-% spot-checking. Reliability vs.\ Governance: redundant data copies improve
-% fault tolerance but multiply the governance surface---each copy must be
-% versioned, access-controlled, and tracked. Scalability vs.\ Quality: web
-% scraping scales to billions but requires elaborate cleaning. Curated
-% datasets are high-quality but cap at thousands.''
-%
-% -- ENGAGE: ``Your team has a budget for either 100\% label review OR
-% 10$\times$ more data with spot-checking. Which do you choose?'' Give 15
-% seconds.
-% Expected: depends on the task. Medical imaging: 100\% review (high stakes).
-% Web search: more data with spot-checking (error-tolerant). The point: there
-% is no universal answer---the Four Pillars framework structures the trade-off.
-%
-% -- WARN: Students want to maximize all four pillars simultaneously. Correct
-% framing: resources are finite. Strengthening one pillar typically weakens
-% another. The engineering discipline is navigating these tensions
-% systematically, not eliminating them.
-%
-% -- FLEX: [OPTIONAL] Deepens the trade-off understanding.
-% IF SHORT: State the Quality vs.\ Scalability tension and move on.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Quality $\leftrightarrow$ Scalability}\\[0.1cm]
-    {\footnotesize Stricter schema validation catches more errors but reduces pipeline throughput. A 100\% label review catches all errors but costs 10--50$\times$ more.}
-
-    \vspace{0.2cm}
-    \textbf{Reliability $\leftrightarrow$ Governance}\\[0.1cm]
-    {\footnotesize Redundant data copies improve fault tolerance but multiply the governance surface. Each copy must be versioned, access-controlled, and tracked.}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Scalability $\leftrightarrow$ Quality}\\[0.1cm]
-    {\footnotesize Web scraping scales to billions but requires elaborate cleaning. Curated datasets are high-quality but cap at thousands.}
-
-    \vspace{0.2cm}
-    \begin{mlsyscard}{crimson}
-    {\footnotesize \textbf{The engineering discipline:} Navigate these tensions systematically, not ad hoc. Every decision shifts the balance.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Diagnose: why is one region always rejected?}
+  \mlsysactivity{Diagnose}{2.5 min}
+  \centering
+  {\normalsize A credit model starts rejecting every applicant from one region\\after an upstream database migration. No code in the model changed.}\\[0.5cm]
+  \uncover<2->{%
+  \begin{tikzpicture}[>={Stealth[length=2.5mm]}, font=\small, every node/.style={align=center}]
+    \node[draw=GreenLine, fill=GreenL, rounded corners=3pt, minimum height=0.9cm, minimum width=2.4cm] (a) at (0,0) {Training\\``02139''};
+    \node[draw=RedLine, fill=RedL, rounded corners=3pt, minimum height=0.9cm, minimum width=2.4cm] (b) at (3.6,0) {Migration\\integer 2139};
+    \node[draw=RedLine, fill=RedL, rounded corners=3pt, minimum height=0.9cm, minimum width=2.4cm] (c) at (7.2,0) {Serving\\``2139''};
+    \node[draw=RedLine, fill=RedL, rounded corners=3pt, minimum height=0.9cm, minimum width=2.4cm] (d) at (10.8,0) {Unknown ZIP\\$\rightarrow$ high risk};
+    \draw[->, line width=1.2pt, midgray] (a) -- (b); \draw[->, line width=1.2pt, RedLine] (b) -- (c); \draw[->, line width=1.2pt, RedLine] (c) -- (d);
+  \end{tikzpicture}}\\[0.45cm]
+  \uncover<3->{\normalsize\textcolor{mlsysaccent}{Fix: a versioned data contract that rejects the record at ingestion.}}
+  \mlsyscredit{Data Engineering, Example 4.1, after Sculley et al., ``Hidden Technical Debt in Machine Learning Systems,'' NeurIPS 2015.}
+  \note{[2.5 min] ENGAGE: one minute in pairs: list where to look. Then step 2. Training stored ZIP code as a fixed-width string, ``02139.'' A database migration changed the field to an integer without telling downstream consumers. A transform serialized it as ``2139,'' so the model saw a ZIP code it had never seen, and the fallback for unknown categories assigned high risk. Every row was well formed; no exception fired. Step 3: a data contract is a machine-checked rule that declares each field's type, value bounds, and whether nulls are allowed, run at the ingestion boundary so a malformed record is rejected before it reaches the model. WARN: this one a mechanical check catches (is ZIP a five-character string?); the quiet batch needed a semantic one. Sculley and colleagues call the tangle of uncontracted transforms a pipeline jungle. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Lighthouse: DLRM vs.\ KWS --- Scalability Pillar (1/2)}
-\note{
-% [2 min]
-% -- LINK: The Four Pillars framework said every pipeline decision is
-% evaluated against all four pillars simultaneously. This slide grounds
-% the Scalability pillar in two concrete workload archetypes.
-%
-% -- NARRATE: ``The chapter designates DLRM as the scalability lighthouse.
-% Recommendation systems have TB/PB-scale embedding tables---every user ID
-% and product ID maps to a dense vector. The bottleneck is not compute; it
-% is memory capacity (tables exceed single-GPU memory) and sparse-access
-% bandwidth (billions of random lookups per second). Contrast with KWS: a
-% 23 million sample corpus with a compute/quality bottleneck. Same Four
-% Pillars framework, completely different binding constraint. Students who
-% see only KWS will misdiagnose DLRM systems.''
-%
-% -- ENGAGE: ``A recommendation team wants to improve throughput. They buy
-% more A100 GPUs. Does this help?'' Give 10 seconds.
-% Expected: probably not---if the bottleneck is sparse memory access and
-% embedding table size, more FLOPs do not solve it. They need sharding and
-% higher-bandwidth memory.
-%
-% -- WARN: Students assume compute-bound is the universal bottleneck.
-% Correct framing: at PB scale with high-cardinality categoricals, the
-% constraint shifts to memory capacity and access pattern, not arithmetic
-% intensity.
-%
-% -- FLEX: [OPTIONAL] Lighthouse anchor for the Scalability pillar.
-% IF SHORT: State the contrast: KWS = compute/quality bound; DLRM =
-% memory capacity/sparse-access bound. (30 seconds)
-}
-
+\begin{frame}[fragile]{A data contract is a test suite run on every batch}
+  \begin{columns}[T]
+    \begin{column}{0.58\textwidth}
+      \begin{mlsyscard}{datastroke}
 \scriptsize
-\begin{center}
-\small\textbf{Same Four Pillars. Different binding constraint.}
-\end{center}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lp{3.5cm}p{3.5cm}@{}}
-  \toprule
-  & \textbf{KWS (our lighthouse)} & \textbf{DLRM (recommendation)} \\
-  \midrule
-  \textbf{Data scale} & 23M samples, 736 GB & Billion+ users/items, TB/PB \\
-  \textbf{Pillar stress} & Quality + compute & Scalability = memory capacity \\
-  \textbf{Bottleneck} & Labeling throughput & Sparse embedding lookups \\
-  \textbf{Architecture} & Streaming pipeline & Embedding table sharding \\
-  \textbf{Fix} & AI-assisted labeling & Higher-BW memory, sharding \\
-  \bottomrule
-\end{tabular}
-
+\begin{verbatim}
+E = gx.expectations
+suite = gx.ExpectationSuite(name="kws_clips")
+add = suite.add_expectation
+add(E.ExpectColumnValuesToBeInSet(
+    column="sample_rate", value_set=[16000]))
+add(E.ExpectColumnValuesToBeBetween(
+    column="duration_s",
+    min_value=0.9, max_value=1.1))
+add(E.ExpectColumnValuesToBeUnique(
+    column="clip_id"))
+add(E.ExpectColumnValuesToBeInSet(
+    column="label",
+    value_set=["alexa", "none"]))
+result = batch.validate(suite)
+\end{verbatim}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \small
+      A batch of six clips arrives; two were recorded at 8 kHz.\\[0.25cm]
+      \uncover<2->{\textbf{Output:}\\[0.05cm]
+      {\scriptsize\ttfamily\begin{tabular}{@{}l@{}}
+      success: False\\
+      sample\_rate False 2 [8000, 8000]\\
+      duration\_s True 0 []\\
+      clip\_id True 0 []\\
+      label True 0 []
+      \end{tabular}}\\[0.25cm]
+      \textbf{\textcolor{mlsysaccent}{Training halts; someone looks.}}\\[0.2cm]}
+      \uncover<3->{\footnotesize The suite is versioned with the training code.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Run with Great Expectations 1.24.0 (Apache 2.0); script: images/artifacts/gx\_contract.py. Data Engineering, \S4.5.4 (listing 1; Deequ, Schelter et al., VLDB 2018).}
+  \note{[2 min] NARRATE: real code, run for this slide with Great Expectations 1.24.0 (command: python3 images/artifacts/gx\_contract.py). Each line is an expectation over a column of clip metadata: the sample rate must be 16,000, the duration between 0.9 and 1.1 seconds, each clip ID unique, and the label one of the two classes. The chapter's listing 1 writes the same kind of suite for a user table: an age between 0 and 120, a user ID that is never null and unique, a country code from a fixed set. Libraries such as Great Expectations, Pandera, and Amazon's Deequ run suites like this on every batch, the data counterpart of unit tests. Step 2: the printed result. The batch fails, and the report names the column, the count of bad rows, and their values: two clips at 8,000 Hz in a 16 kHz pipeline. Training halts and an alert fires instead of a model quietly learning from half-bandwidth audio. Step 3: when the training code changes, the expectations change with it, so code never assumes a property the pipeline stopped providing. ENGAGE: which expectation would have caught the ZIP-code failure? Expected: a type and format check on ZIP code, a five-character string. FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{Lighthouse: DLRM vs.\ KWS --- Scalability Pillar (2/2)}
-\note{
-% [1 min]
-% -- LINK: The comparison table showed the two archetypes side by side.
-% This slide draws out the systems lesson.
-%
-% -- NARRATE: ``The key insight: same Four Pillars framework, completely
-% different binding constraint. For DLRM, more GPUs do not help because
-% the bottleneck is memory capacity and sparse-access bandwidth. This is
-% why understanding the binding pillar before purchasing hardware matters.''
-%
-% -- ENGAGE: ``If the DLRM team buys higher-bandwidth HBM3 memory instead
-% of more GPU FLOPs, which Iron Law term improves?''
-% Expected: the Data Term ($D_{\text{vol}}/BW$)---higher BW reduces the
-% sparse embedding lookup cost that is the binding constraint.
-%
-% -- FLEX: [OPTIONAL] Systems lesson for the Scalability pillar.
-% IF SHORT: Read the insight aloud and move on. (20 seconds)
-}
-
-\centering
-\vspace{0.5cm}
-\mlsysinsight{Systems lesson:}{For recommendation systems, the Scalability pillar binds first---TB-scale embedding tables exceed single-GPU memory and stress sparse-access bandwidth, not compute.}
-
-\vspace{0.4cm}
-\begin{mlsyscard}{datastroke}
-{\footnotesize \textbf{Diagnostic question:} When a team says ``our training is slow,'' ask \emph{which} Iron Law term dominates before recommending a hardware upgrade.}
-\end{mlsyscard}
-
+\begin{frame}{Failed records go to a side queue and never reach the model}
+  \centering
+  \begin{tikzpicture}[>={Stealth[length=2.5mm]}, font=\small, every node/.style={align=center}]
+    \node[qbox=midgray] (src) at (0,0) {Source};
+    \node[qbox=BlueLine] (ing) at (3.6,0) {Ingest};
+    \node[qbox=GreenLine] (val) at (7.2,0) {Validate};
+    \node[qbox=GreenLine] (st) at (10.8,0) {Training store};
+    \draw[->, line width=1.1pt] (src) -- (ing); \draw[->, line width=1.1pt] (ing) -- (val); \draw[->, line width=1.1pt] (val) -- (st);
+    \draw[->, line width=1.1pt, BlueLine] (ing.north east) .. controls +(0.6,0.9) and +(-0.6,0.9) .. node[above, font=\footnotesize] {retry after 1 s, 2 s, 4 s} (ing.north west);
+    \uncover<2->{
+      \node[qbox=RedLine] (dlq) at (7.2,-1.8) {Dead-letter queue};
+      \draw[->, line width=1.1pt, RedLine] (val) -- node[right, font=\footnotesize] {still fails} (dlq);
+      \node[font=\footnotesize, text=darktext, anchor=west] at (8.7,-1.8) {reviewed: new schema,\\new device, new encoding};}
+    \uncover<3->{
+      \node[qbox=OrangeLine] (cb) at (1.8,-1.8) {Circuit breaker};
+      \node[font=\footnotesize, text=darktext] at (1.8,-2.85) {after repeated failures: fail fast\\or use a validated fallback};}
+  \end{tikzpicture}
+  \mlsyscredit{Data Engineering, \S4.5.5 (Kleppmann 2016; Nygard 2007).}
+  \note{[1.5 min] NARRATE: the reliability half of the ingestion boundary. Step 1: transient errors are retried with exponential backoff, one second, then two, then four, so retries do not flood a service that is trying to recover. Step 2: records that still fail go to a dead-letter queue, a side store that holds them without blocking the main path. Reviewed regularly, it becomes a source of diagnoses. The KWS queue might fill with clips from a new hardware revision whose audio arrives in an unexpected encoding, which calls for an ingestion fix and targeted collection. Step 3: when a whole dependency fails, a circuit breaker stops calling it after repeated failures and either fails fast or switches to a fallback, such as cached features, only if their age and quality meet a validated contract. ENGAGE: Tay in one sentence? Expected: an ingestion path with no validation, no rate limit, and no side queue. FLEX: [OPTIONAL].}
 \end{frame}
 
-% =============================================================================
-\section{Data Acquisition}
-% =============================================================================
+\begin{frame}{One speaker's clips must stay in one split}
+  \centering
+  \vspace*{0.6cm}
+  \safeimg[width=0.95\textwidth,height=3.6cm,keepaspectratio]{leak_file.pdf}\\[0.6cm]
+  {\normalsize Split by file, and the test set measures familiar voices.}
+  \note{[1 min] NARRATE: the splits are trust boundaries. Training shapes the weights, validation shapes our choices, and the test set estimates performance on data never seen. Leakage is information crossing them. Split files at random and every speaker lands on both sides; the test set then measures whether the model recognizes familiar voices. FLEX: [CORE].}
+\end{frame}
 
-\begin{frame}{Data Acquisition Strategies}
-\note{
-% [3 min]
-% -- LINK: The Four Pillars framework structures pipeline decisions. Data
-% acquisition is the first decision: where does data come from?
-%
-% -- NARRATE: ``Four main strategies, each with different cost-quality
-% trade-offs. Curated: high quality but limited scale (1K--10M). Crowdsourced:
-% medium quality at larger scale but annotator bias risk. Web scraped: massive
-% scale but noisy and legally risky. Synthetic: unlimited scale but risks
-% model collapse if used exclusively. The KWS case study shows no single
-% source suffices: curated Speech Commands for baseline, crowdsourced MSWC
-% for 50 languages, synthetic TTS for rare accents, web-scraped noise for
-% background augmentation.''
-%
-% -- ENGAGE: ``Which strategy would you use for a medical imaging system?''
-% Give 15 seconds. Expected: curated (high stakes, regulatory requirements).
-% Deepen: ``What if you need 1M images across 50 rare conditions?'' (Answer:
-% combine curated + synthetic to fill coverage gaps.)
-%
-% -- WARN: Students default to ``just scrape the web.'' Correct framing: web
-% scraping introduces legal risk (copyright), quality risk (noise), and bias
-% risk (web demographics skew). For high-stakes applications, curated +
-% synthetic is safer than scraped.
-%
-% -- FLEX: [CORE] Foundational decision for any ML project.
-% IF SHORT: Show the table, state the KWS example. Skip the medical imaging
-% question.
-}
-
+\begin{frame}[fragile]{Hashing the speaker key keeps every take in one split}
+  \centering
+  \begin{mlsyscard}{datastroke}
 \scriptsize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lp{2cm}p{2cm}p{2cm}p{2cm}@{}}
-  \toprule
-  & \textbf{Curated} & \textbf{Crowdsource} & \textbf{Web Scrape} & \textbf{Synthetic} \\
-  \midrule
-  \textbf{Scale}   & 1K--10M & 10K--100M & 1M--1B+ & Unlimited \\
-  \textbf{Quality} & High & Medium & Low (noisy) & Medium \\
-  \textbf{Cost}    & Low (reuse) & Medium & Low (infra) & Medium \\
-  \textbf{Risk}    & Overfitting & Annotator bias & Legal, noise & Model collapse \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{datastroke}
-{\scriptsize \textbf{KWS:} Curated Speech Commands (baseline) + crowdsourced MSWC (50 languages) + synthetic TTS (rare accents) + web-scraped noise. No single source suffices.}
-\end{mlsyscard}
-
-\end{frame}
-
-\begin{frame}{Labeling: The Serial Bottleneck}
-\note{
-% [3 min]
-% -- LINK: Acquisition provides raw data. Labeling converts it into training
-% signal---and it is the most expensive stage.
-%
-% -- NARRATE: ``Labeling is the serial bottleneck in any ML pipeline. The
-% 1,000$\times$ Rule: labeling costs 1,000--3,000$\times$ more than model
-% training compute. Look at the cost hierarchy: a simple classification label
-% costs \$0.01--0.10, but a medical expert annotation costs \$10--100 per
-% example. For KWS: 23M samples at 10 seconds each equals 65,000 hours of
-% human labor---32 person-years. Budget: \$150K. Timeline: 6 months. The
-% solution: AI-assisted labeling for easy cases, human consensus only for
-% ambiguous cases. This is not just a cost issue---it is a throughput issue
-% that determines iteration velocity.''
-%
-% -- ENGAGE: ``Why cannot we just parallelize labeling infinitely?'' Give 15
-% seconds. Expected: quality degrades with more annotators (disagreement,
-% bias), training overhead for new annotators, consensus mechanisms add
-% latency, and expert annotations cannot be parallelized at all.
-%
-% -- WARN: Students think labeling is a solved problem with enough money.
-% Correct framing: the 1,000$\times$ Rule means labeling dominates the
-% budget even for well-funded teams. AI-assisted labeling is essential for
-% scale, but introduces its own biases.
-%
-% -- FLEX: [CORE] Quantitative grounding for labeling costs.
-% IF SHORT: State the 1,000$\times$ Rule and the KWS scale numbers.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{The cost hierarchy:}
-    \vspace{0.1cm}
-    \renewcommand{\arraystretch}{1.15}
-    {\footnotesize
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Label Type} & \textbf{Cost / Example} \\
-      \midrule
-      Classification (crowd)     & \$0.01--0.10 \\
-      Bounding box               & \$0.10--1.00 \\
-      Segmentation mask          & \$1--10 \\
-      Expert (medical)           & \$10--100 \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.15cm}
-    \mlsysalert{The 1,000$\times$ Rule:}{Labeling costs 1,000--3,000$\times$ more than model training compute.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{KWS Scale:}\\[0.1cm]
-    {\footnotesize
-    23M samples $\times$ 10 sec each\\
-    = 65,000 hours\\
-    = \textbf{32 person-years}\\[0.1cm]
-    Budget: \$150K\\
-    Timeline: 6 months\\[0.1cm]
-    \textbf{Solution:} AI-assisted labeling + consensus for ambiguous cases only.
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
-\section{Pipeline Design}
-% =============================================================================
-
-\begin{frame}{Pipeline Architecture: ETL vs.\ ELT}
-\note{
-% [2 min]
-% -- LINK: Data acquisition and labeling produce raw data. Pipeline
-% architecture determines how that data flows to the model.
-%
-% -- NARRATE: ``Two major patterns. ETL: transform before loading. Data is
-% cleaned and structured upfront. Saves storage, but schema changes are
-% painful---you must reprocess everything. ELT: load raw, transform on query.
-% Flexible---you can redefine schemas without reprocessing. But raw data
-% lakes risk becoming `data swamps' without governance. Most modern ML
-% pipelines use ELT with data lakes because ML experimentation requires
-% flexible access to raw features.''
-%
-% -- ENGAGE: ``Which pattern do you think most Kaggle competitors use?'' Give
-% 10 seconds. Expected: ELT (download raw data, transform in notebook).
-% Deepen: ``Why might a production system prefer ETL?'' (Answer: governance,
-% smaller storage footprint, guaranteed data quality.)
-%
-% -- WARN: Students assume ELT is always better because it is more flexible.
-% Correct framing: ELT flexibility comes at the cost of governance complexity.
-% Without schema enforcement, data lakes become data swamps where no one
-% trusts the data.
-%
-% -- FLEX: [CORE] Architectural decision for any ML pipeline.
-% IF SHORT: Show the table, emphasize the trade-off row.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  & \textbf{ETL (Extract-Transform-Load)} & \textbf{ELT (Extract-Load-Transform)} \\
-  \midrule
-  \textbf{Transform}  & Before storage           & After storage (on query) \\
-  \textbf{Storage}     & Clean, smaller           & Raw, larger \\
-  \textbf{Flexibility} & Schema changes are hard   & Schema-on-read is easy \\
-  \textbf{Governance}  & Easier (structured)       & Harder (data swamp risk) \\
-  \textbf{ML Use}      & Feature engineering       & Exploratory, training \\
-  \textbf{Cost}        & Higher engineering upfront & Higher storage, lower eng. \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{computestroke}
-{\footnotesize \textbf{The trade-off:} ETL reduces storage footprint at the expense of higher engineering overhead during schema changes. ELT preserves raw data for flexibility but risks ``data swamps'' without governance.}
-\end{mlsyscard}
-
-\end{frame}
-
-\begin{frame}{Batch vs.\ Streaming Ingestion}
-\note{
-% [2 min]
-% -- LINK: ETL vs.\ ELT addressed the transform pattern. Batch vs.\ streaming
-% addresses the ingestion timing.
-%
-% -- NARRATE: ``Batch ingestion: high throughput, periodic updates. Good for
-% training data pipelines where freshness is measured in hours. Tools: Spark,
-% Airflow, dbt. Streaming ingestion: low latency, continuous updates. Good
-% for serving features where freshness is measured in seconds. Tools: Kafka,
-% Flink, Kinesis. Most ML systems use both: batch for training pipelines,
-% streaming for serving features. The dual pipeline from Ch3 is the
-% architectural pattern.''
-%
-% -- ENGAGE: ``When would you choose streaming over batch for training data?''
-% Give 15 seconds. Expected: when the model must adapt to rapidly changing
-% data (fraud detection, news recommendation). For most training workloads,
-% batch is simpler and sufficient.
-%
-% -- WARN: Students assume streaming is always better because it is more
-% real-time. Correct framing: streaming adds significant operational
-% complexity (exactly-once processing, backpressure handling, state
-% management). Use batch unless the use case demands freshness.
-%
-% -- FLEX: [OPTIONAL] Important but can be compressed.
-% IF SHORT: ``Batch for training, streaming for serving. Most systems use
-% both.'' (30 seconds)
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Batch Ingestion}\\[0.1cm]
-    {\footnotesize
-    \textbf{When:} Periodic, high-volume\\
-    \textbf{Latency:} Minutes to hours\\
-    \textbf{Use:} Training data, feature eng.\\
-    \textbf{Tools:} Spark, Airflow, dbt\\[0.05cm]
-    \textbf{Pro:} Simple, high throughput\\
-    \textbf{Con:} Stale data between runs
-    }
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Stream Ingestion}\\[0.1cm]
-    {\footnotesize
-    \textbf{When:} Continuous, real-time\\
-    \textbf{Latency:} Seconds to minutes\\
-    \textbf{Use:} Feature serving, monitoring\\
-    \textbf{Tools:} Kafka, Flink, Kinesis\\[0.05cm]
-    \textbf{Pro:} Fresh data, low latency\\
-    \textbf{Con:} Complex, expensive ops
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.15cm}
-{\small\mlsysconcept{Most ML systems use both:}{Batch for training pipelines, streaming for serving features.}}
-
-\end{frame}
-
-\begin{frame}{Quality Through Validation Gates}
-\note{
-% [3 min]
-% -- LINK: Pipeline architecture moves data. Validation gates ensure data
-% quality at every stage.
-%
-% -- NARRATE: ``Two validation layers. Schema validation catches structural
-% errors: wrong types, missing fields, out-of-range values. But the zip code
-% bug passed schema validation---`7102' is a valid string. Statistical
-% monitoring catches distributional errors: PSI, KL divergence, feature
-% distribution shifts. The self-driving car example: 15\% of LiDAR labels
-% were misaligned by 10--20 cm. Every record was structurally valid. The
-% misalignment persisted for 3 months. Only statistical monitoring---
-% comparing label distributions to historical baselines---caught it.''
-%
-% -- ENGAGE: ``The LiDAR labels were all structurally valid. Why did schema
-% validation miss the 10--20 cm misalignment?'' Give 10 seconds.
-% Expected: schema validation checks format, not semantics. A label at
-% coordinates (x, y, z) is structurally valid even if it is 15 cm off.
-%
-% -- WARN: Students think schema validation is sufficient for data quality.
-% Correct framing: schema validation is necessary but catches only structural
-% errors. Semantic and distributional errors require statistical monitoring.
-% Both layers are required.
-%
-% -- FLEX: [CORE] Two-layer validation is non-negotiable.
-% IF SHORT: State the two layers and the LiDAR example.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Two validation layers:}
-
-    \vspace{0.15cm}
-    \textcolor{datastroke}{\textbf{1. Schema Validation}} (\emph{structural})\\
-    {\footnotesize Type checks, range constraints, null detection.\\
-    Catches: format errors, missing fields.\\
-    Misses: semantically wrong but valid data.}
-
-    \vspace{0.15cm}
-    \textcolor{computestroke}{\textbf{2. Statistical Monitoring}} (\emph{distributional})\\
-    {\footnotesize PSI, KL divergence, feature distributions.\\
-    Catches: drift, subtle corruption, bias shifts.\\
-    Requires: historical baseline to compare against.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{War Story:}\\[0.1cm]
-    {\footnotesize 15\% of LiDAR labels misaligned by 10--20 cm at a self-driving company.\\[0.05cm]
-    Every record was \emph{structurally valid}.\\[0.05cm]
-    Persisted for 3 months.\\[0.05cm]
-    Only statistical monitoring caught it.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
-\section{Drift \& Skew}
-% =============================================================================
-
-\begin{frame}{Three Types of Distribution Drift}
-\note{
-% [3 min]
-% -- LINK: Validation gates catch errors at pipeline time. Distribution drift
-% is the failure mode that develops AFTER deployment---the Degradation
-% Equation from Ch1 in action.
-%
-% -- NARRATE: ``Walk through each panel. Covariate drift: input features
-% change (e.g., camera resolution improves)---detectable by monitoring
-% input distributions. Label drift: output class frequencies change (e.g.,
-% fraud becomes rarer)---detectable by monitoring prediction distributions.
-% Concept drift: the mapping from inputs to outputs changes (e.g., `fraud'
-% now looks different)---hardest to detect because it requires ground truth
-% labels, and labels arrive late. Concept drift is the most dangerous because
-% the model is confidently wrong on the new pattern.''
-%
-% -- ENGAGE: ``Which type of drift requires ground truth labels to detect?''
-% Give 10 seconds. Expected: concept drift. Covariate and label drift can be
-% detected from input/output distributions alone.
-%
-% -- WARN: Students think all drift is detectable from input monitoring.
-% Correct framing: concept drift changes the relationship between inputs and
-% outputs. Input distributions may look identical while the correct label for
-% those inputs has changed. Only ground truth comparison reveals this.
-% IF STUCK: ``If fraudsters start using the same spending patterns as
-% legitimate customers, do the input features change?'' (Answer: no---but
-% the correct label does.)
-%
-% -- FLEX: [CORE] Essential for understanding monitoring requirements.
-% IF SHORT: Name the three types, state that concept drift is hardest.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-drift-types.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Key:}{Concept drift is the most dangerous --- rules change but detection requires ground truth labels that arrive late.}
-
-\end{frame}
-
-\begin{frame}{War Story: COVID-19 Broke Every Model}
-\note{
-% [4 min]
-% -- LINK: Distribution drift was described abstractly. COVID-19 is the most
-% dramatic real-world example of simultaneous covariate and concept drift.
-%
-% -- NARRATE: ``March 2020. Every ML model trained on pre-pandemic data broke
-% simultaneously. Credit risk models: default patterns changed overnight as
-% governments issued stimulus. Fraud detection: online transaction volume
-% surged 300\%, making previously rare patterns common. Medical imaging:
-% hospital protocols changed, patient demographics shifted. Supply chain:
-% demand patterns inverted---toilet paper demand spiked 700\%, airline demand
-% dropped 96\%. This was not one type of drift---it was all three at once.
-% Covariate (inputs changed), label (class frequencies changed), and concept
-% (the mapping itself changed).''
-%
-% -- ENGAGE: ``Which type of drift hit credit risk models hardest?'' Give 10
-% seconds. Expected: concept drift---the relationship between income/spending
-% patterns and default probability changed because of stimulus payments.
-%
-% -- WARN: Students think COVID was a once-in-a-century event. Correct framing:
-% smaller distribution shifts happen constantly (holidays, elections, product
-% launches). COVID just made the invisible visible.
-%
-% -- FLEX: [CORE] Makes drift concrete and memorable.
-% IF SHORT: State ``every model broke'' and name 2 examples. (60 seconds)
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{March 2020: All three drift types at once.}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lll@{}}
-      \toprule
-      \textbf{Domain} & \textbf{What Broke} & \textbf{Drift} \\
-      \midrule
-      Credit risk   & Default patterns & Concept \\
-      Fraud         & +300\% online vol. & Covariate \\
-      Medical       & Protocol changes & All three \\
-      Supply chain  & Demand inversion & Concept \\
-      \bottomrule
-    \end{tabular}
-    }
-  \end{column}
-  \begin{column}{0.44\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Key lesson}\\[0.1cm]
-    {\footnotesize COVID made the invisible visible. Smaller shifts happen constantly: holidays, elections, product launches, competitor actions.\\[0.1cm]
-    \textbf{Every model drifts. The question is when, not whether.}}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{Training-Serving Skew}
-\note{
-% [3 min]
-% -- LINK: Drift happens over time. Training-serving skew happens at the
-% moment of deployment---a mismatch between how features are computed
-% during training vs.\ serving.
-%
-% -- NARRATE: ``Training-serving skew is the number one cause of ML
-% deployment failures. Different normalization in training vs.\ serving causes
-% 20--40\% accuracy drop, silently. 30--40\% of initial deployments at Uber
-% suffered this. The mechanism: during training, you compute features in a
-% batch pipeline with Python. During serving, you compute the same features
-% in a real-time pipeline with Java. The implementations differ subtly---
-% different rounding, different null handling, different normalization
-% windows. Solutions: shared feature computation code (one implementation
-% used by both pipelines), stored normalization parameters (compute once,
-% use everywhere), feature stores (single source of truth), idempotent
-% transforms (same input always produces same output).''
-%
-% -- ENGAGE: ``If training normalizes age as (age - mean) / std using the
-% training set mean, but serving uses the live data mean, what happens?''
-% Give 15 seconds.
-% Expected: the normalization is different, so the model receives inputs from
-% a different distribution than it was trained on. Accuracy drops silently.
-%
-% -- WARN: Students assume ``same feature name = same feature value.'' Correct
-% framing: the same feature computed by different code paths or with different
-% parameters is NOT the same feature. Feature stores enforce consistency by
-% providing a single computation path for both training and serving.
-%
-% -- FLEX: [CORE] Non-negotiable engineering requirement.
-% IF SHORT: State the 30--40\% Uber statistic and the four solutions.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch04-training-serving-skew.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysconcept{Non-negotiable:}{Any transform applied during training must be applied \emph{identically} during serving.}
-
-\end{frame}
-
-\begin{frame}{Quick Check}
-\note{
-% [1 min]
-% -- NARRATE: ``Quick recall---no peeking. Name two types of distribution
-% drift and which is hardest to detect. 30 seconds.''
-%
-% -- FLEX: [CORE] Micro-retrieval. Answer: covariate, label, concept. Concept
-% drift is hardest (requires ground truth labels that arrive late).
-}
-
-\centering
-\Large\bfseries Quick check --- no peeking.\\[0.5cm]
-\normalsize Name two types of distribution drift and which is hardest to detect.\\[0.3cm]
-{\small 30 seconds --- then we continue.}
-\end{frame}
-
-
-
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Which Drift Type Is Hardest?}
-\note{
-% [4 min]
-% -- LINK: Students just recalled the three drift types. This discussion
-% applies them to a real scenario.
-%
-% -- NARRATE: ``A fraud detection model worked perfectly at launch. Six months
-% later, loss rates have doubled. No code has changed. No data format errors.
-% Which type of drift is this? How would you detect it?''
-%
-% -- ENGAGE: Turn-and-talk for 90 seconds. Cold-call 2--3 pairs.
-% Expected: concept drift---fraudsters changed their tactics. The old fraud
-% patterns still exist in the data, but new patterns have emerged that the
-% model was not trained on. Detection requires ground truth (was a flagged
-% transaction actually fraud?), which arrives weeks later via chargebacks.
-% Some students may argue covariate drift (transaction patterns changed)---
-% accept this with the caveat that the key question is whether the
-% input-to-label mapping changed.
-%
-% -- WARN: Students conflate covariate drift with concept drift. Correct
-% framing: covariate drift = inputs change but the rules stay the same.
-% Concept drift = the rules change even if inputs look similar. For fraud:
-% if fraudsters use new spending patterns, that is covariate drift. If the
-% same spending pattern that was fraudulent is now legitimate (or vice versa),
-% that is concept drift.
-%
-% -- FLEX: [CORE] Synthesis exercise for drift concepts.
-% IF SHORT: Do a show-of-hands poll: ``Covariate? Label? Concept?''
-}
-
-\centering
-\vspace{0.5cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.4cm}
-{\large A fraud detection model worked perfectly at launch.\\
-Six months later, loss rates have doubled.\\
-No code has changed. No data format errors.\\[0.2cm]
-\alert{Which type of drift is this? How would you detect it?}}
-
-\vspace{0.4cm}
-\begin{columns}[c]
-  \begin{column}{0.30\textwidth}\centering\small Covariate\\ Shift\end{column}
-  \begin{column}{0.30\textwidth}\centering\small Label\\ Shift\end{column}
-  \begin{column}{0.30\textwidth}\centering\small Concept\\ Drift\end{column}
-\end{columns}
-
-\end{frame}
-
-\mlsysfocus{The Degradation Equation}{%
-$A(t) = A_0 - \alpha \cdot \Delta(P_{\text{train}},\; P_{\text{live}}(t))$\\[0.3cm]
-\normalsize Drift detection (PSI, KL divergence) operationalizes this equation\\
-into monitoring infrastructure%
-}
-
-% =============================================================================
-\section{Storage \& Debt}
-% =============================================================================
-
-\begin{frame}{ML Storage Hierarchy}
-\note{
-% [3 min]
-% -- LINK: Drift detection requires monitoring infrastructure. Storage
-% architecture determines how fast that infrastructure can access data.
-%
-% -- NARRATE: ``Each storage tier optimizes for a different access pattern.
-% The 50$\times$ speed gap between NVMe and S3 determines whether your team
-% iterates daily or weekly. KWS example: 736 GB on S3 costs \$17/month, on
-% NVMe costs \$74--221/month. But S3 loads in 2 hours while NVMe loads in
-% 2.5 minutes. That 50$\times$ throughput gap is the binding constraint on
-% iteration velocity---the Iteration Tax from Ch3 in physical form. Choose
-% storage tier by the Iron Law's data term: $D_{\text{vol}}/BW$.''
-%
-% -- ENGAGE: ``If your team iterates daily and each iteration starts with a
-% 2-hour data load from S3, how much time is wasted per week?'' Give 10
-% seconds. Expected: 10 hours/week on data loading alone. NVMe at 2.5
-% minutes saves 9.6 hours/week---worth the extra \$57--204/month.
-%
-% -- WARN: Students choose storage by cost alone. Correct framing: storage
-% cost must be weighed against iteration velocity. A \$200/month NVMe upgrade
-% that saves 10 engineering hours/week at \$100/hour pays for itself 200$\times$
-% over.
-%
-% -- FLEX: [CORE] Connects storage to Iron Law and iteration velocity.
-% IF SHORT: State the 50$\times$ gap and the iteration velocity implication.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-storage-hierarchy.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{Iron Law connection:}{Storage hierarchy directly sets $D_{\text{vol}}/BW$ --- the Data Term.}
-
-\end{frame}
-
-\begin{frame}{Storage Systems: Database vs.\ Warehouse vs.\ Lake}
-\note{
-% [2 min]
-% -- LINK: The storage hierarchy addressed physical tiers. This slide
-% addresses logical architectures for different access patterns.
-%
-% -- NARRATE: ``Three architectures. Database (OLTP): high IOPS, low latency,
-% point lookups in milliseconds---use for feature serving at inference time.
-% Warehouse (OLAP): high throughput columnar scans in seconds---use for
-% feature engineering and analytics. Data Lake: capacity and flexibility,
-% schema-on-read---use for raw training data at petabyte scale. Most mature
-% ML organizations use all three, orchestrated through unified catalogs. The
-% wrong system for a workload creates order-of-magnitude performance
-% penalties: a full table scan on an OLTP database or a point lookup on S3.''
-%
-% -- ENGAGE: ``Which storage system would you use for real-time feature
-% serving at inference time?'' Give 10 seconds.
-% Expected: Database (OLTP)---sub-millisecond point lookups are essential
-% for real-time serving.
-%
-% -- WARN: Students use one storage system for everything. Correct framing:
-% each system is optimized for a specific access pattern. Using a data lake
-% for point lookups or a database for bulk scans creates 10--100$\times$
-% performance penalties.
-%
-% -- FLEX: [OPTIONAL] Reference slide.
-% IF SHORT: Show the table without detailed narration. (30 seconds)
-}
-
+\begin{verbatim}
+hash_name = re.sub(r'_nohash_.*$', '', base_name)
+hash_name_hashed = hashlib.sha1(compat.as_bytes(hash_name)).hexdigest()
+percentage_hash = ((int(hash_name_hashed, 16) %
+                    (MAX_NUM_WAVS_PER_CLASS + 1)) *
+                   (100.0 / MAX_NUM_WAVS_PER_CLASS))
+\end{verbatim}
+  \end{mlsyscard}
+  \vspace{0.1cm}
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
 \scriptsize
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lp{2.5cm}p{2.5cm}p{2.5cm}@{}}
-  \toprule
-  & \textbf{Database (OLTP)} & \textbf{Warehouse (OLAP)} & \textbf{Data Lake} \\
-  \midrule
-  \textbf{Optimized for} & High IOPS, low latency & High throughput scans & Capacity, flexibility \\
-  \textbf{Data type}     & Structured              & Structured            & Any (schema-on-read) \\
-  \textbf{ML use}        & Feature serving         & Feature engineering   & Training, raw storage \\
-  \textbf{Access}        & Point lookups (ms)      & Columnar scans (s)    & Sequential reads \\
-  \textbf{Risk}          & Scaling limits           & Schema rigidity       & ``Data swamp'' \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{routingstroke}
-{\scriptsize \textbf{Mature ML organizations use all three:} Databases for real-time serving, warehouses for curated analytics, and data lakes for petabyte-scale raw data. The wrong system for a workload creates order-of-magnitude performance penalties.}
-\end{mlsyscard}
-
+\begin{verbatim}
+no/7846fd85_nohash_0.wav    -> training
+yes/7846fd85_nohash_0.wav   -> training
+tree/8b775397_nohash_0.wav  -> validation
+\end{verbatim}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \raggedright
+      {\small\textcolor{GreenLine}{\textbf{Same speaker, same split, every release.}}\\[0.15cm]}
+      \uncover<2->{\small\textcolor{RedLine}{Also leaks: statistics fitted before the split.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Code: TensorFlow v2.16.1, examples/speech\_commands/input\_data.py, which\_set() (Apache 2.0); output: images/artifacts/which\_set\_demo.py (3 of 5 lines). Data Engineering, \S4.1, \S4.8.}
+  \note{[1.5 min] NARRATE: the fix in shipped code, the function that splits Google's Speech Commands, the public keyword-spotting dataset. A file name such as no/7846fd85\_nohash\_0.wav holds the word, a hashed speaker ID, and a take number. The first line deletes everything from \_nohash\_ on, so every take by one speaker gives the same key; SHA-1 of the key, mapped to 0 to 100, picks the split (10 percent validation and 10 percent test by default). The output is real (python3 images/artifacts/which\_set\_demo.py, on names from the dataset card): speaker 7846fd85 lands in training for every word and take. The split depends only on the name, so it survives later releases, the reason Warden gives (arXiv:1804.03209, \S7). Step 2: a mean and standard deviation computed on all clips before splitting carry test information into training features; fit them on the training split only. ENGAGE: name another way information leaks. Expected: augmented copies on both sides; features computed from the future. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Data Debt: The Hidden Iceberg}
-\note{
-% [3 min]
-% -- LINK: Storage systems hold data. Data Debt describes the hidden cost of
-% poorly managed data that accumulates silently over time.
-%
-% -- NARRATE: ``65--95\% of ML failures trace to data, not models. Four
-% categories of hidden debt: Freshness debt (stale data), Quality debt
-% (errors, noise, bias), Schema debt (undocumented format changes),
-% Documentation debt (no one knows what a feature means). Unlike code debt
-% which slows development, data debt causes lower accuracy even when code is
-% perfect. Data debt compounds silently---each month without monitoring adds
-% more stale data, more undocumented changes, more quality erosion.''
-%
-% -- ENGAGE: ``Your team has perfect model code but 6-month-old training
-% data. What is the expected accuracy impact?'' Give 10 seconds.
-% Expected: 5--15\% degradation (the Degradation Equation with $\alpha
-% \times \Delta$ accumulating over 6 months). The exact number depends on
-% the domain, but the direction is always down.
-%
-% -- WARN: Students focus on code quality and ignore data quality. Correct
-% framing: 65--95\% of failures come from data. Allocating 80\% of quality
-% engineering to code and 20\% to data is backwards given the failure
-% distribution.
-%
-% -- FLEX: [CORE] Motivates sustained data engineering investment.
-% IF SHORT: State the 65--95\% statistic and the four categories.
-}
-
-% --- Layout: FULL-WIDTH IMAGE ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-data-debt-categories.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Key:}{Unlike code debt (slower development), data debt causes \emph{lower accuracy} even when code is perfect.}
-
+\begin{frame}{Predict: deduplicate before or after the split?}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  {\normalsize The same recording appears in several log partitions.\\A pipeline step keeps one canonical copy. Where must it run?}\\[0.5cm]
+  {\Large \alt<2->{\pick{A}{before the split}}{\choice{A}{before the split}}\qquad\choice{B}{after the split}\qquad\choice{C}{either}}\\[0.5cm]
+  \uncover<2->{\normalsize A copy on both sides of the split lets the model be scored on evidence it trained on.}
+  \mlsyscredit{Data Engineering, \S4.1 (self-check 1).}
+  \note{[1.5 min] ENGAGE: vote by fingers. Step 2 reveals A. Splitting creates the trust boundary; a duplicate that lands on both sides lets the model be scored on evidence it trained on, so evaluation looks better than deployment will. Deduplicating each split separately cannot remove that leak. If many chose C, they think duplicates only waste storage; they also overweight repeated examples in what the model learns. NARRATE: for KWS, deduplication must catch more than identical files, because one speaker's repeated takes are near-duplicates, which is one more reason to split by speaker. FLEX: [OPTIONAL].}
 \end{frame}
 
-% =============================================================================
-\section{Wrap-Up}
-% =============================================================================
-
-\begin{frame}{Fallacies}
-\note{
-% [2 min]
-% -- LINK: The chapter covered data cascades, physics of data movement, Four
-% Pillars, acquisition, labeling, pipeline design, drift, and data debt.
-% These fallacies test whether students internalized the key principles.
-%
-% -- NARRATE: ``Four misconceptions (the chapter lists four). First: `more
-% data always helps'---beyond a threshold, test loss follows a power law.
-% 10$\times$ more data often reduces error by less than 1 pp. Second:
-% `moving a PB to the cloud is just a bandwidth problem'---the wire cost
-% (3 weeks at 10 Gbps) is the cheap part; re-validating pipelines and
-% migrating schemas takes 6--9 months of human time. This is data gravity
-% in action. Third: `high training accuracy = production ready'---
-% training-serving skew, drift, and coverage gaps cause 99\% validation
-% accuracy to fail in deployment. Fourth: `synthetic replaces real
-% data'---synthetic inherits generator biases.''
-%
-% -- FLEX: [CORE] Corrects the most common data engineering misconceptions.
-% IF SHORT: Cover the first and third fallacies.
-}
-
-\footnotesize
-\textbf{Fallacy:} \textit{More data always improves model performance.}\\
-Beyond a threshold, test loss follows a power law: 10$\times$ more data often reduces error by $<$1 percentage point, while costs scale linearly. Smart selection outperforms naive accumulation.
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{Moving a petabyte to the cloud is just a bandwidth problem.}\\
-Wire time at 10 Gbps: $\sim$3 weeks (physics). Engineering cost---pipeline re-validation, schema migration, lineage updates: \textbf{6--9 months} of human time. Data gravity makes compute-to-data the right architecture.
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{High training accuracy indicates production readiness.}\\
-Training-serving skew, distribution drift, and coverage gaps cause 99\% validation accuracy to fail in deployment.
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{Synthetic data can fully replace real-world collection.}\\
-Synthetic data inherits generator biases. A KWS system trained on synthesized speech fails on real accents and background noise. Combine real data for coverage with synthetic for scale.
-
+\begin{frame}{Training-serving consistency needs shared statistics}
+  \centering
+  \mlsyssteps[width=0.94\textwidth,height=4.9cm,keepaspectratio]{skew_step}{2}\\[0.1cm]
+  \uncover<3->{\small\textcolor{mlsysaccent}{KWS: normalizing each stored clip against its own peak uses audio a streaming device never has.}}
+  \mlsyscredit{Data Engineering, \S4.7.1.}
+  \note{[2.5 min] NARRATE: Step 1: training normalizes each feature with the training set's mean and standard deviation. A serving service runs the same function but recomputes the mean and standard deviation on each incoming batch. The code is identical; the numbers the model receives are not. Nothing raises an error, because the model gets a valid vector and returns a confident prediction. That is training-serving skew. Step 2: the fix is to fit the statistics once, on the training split, persist them with the model, and load them at serving. Step 3: the keyword-spotting version. A stored one-second clip can be normalized against its own loudest sample, but a streaming device hears audio as it arrives and never knows the peak in advance, so training may use only gain handling the device can reproduce. WARN: students believe sharing code guarantees consistency; consistency is a state-synchronization problem. LINK: a feature store keeps one definition of each feature for both paths, and the next slide shows its other job. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Pitfalls (1/2)}
-\note{
-% [1 min]
-% -- LINK: Fallacies named misconceptions. Pitfalls name operational mistakes.
-%
-% -- NARRATE: ``First two pitfalls. Treating preprocessing as one-time---
-% drift makes it continuous. Ignoring serialization cost---teams optimize
-% GPU kernels while loading JSON/CSV; text formats are 10$\times$+ slower to
-% decode than Parquet/Arrow, so the CPU becomes the bottleneck and the H100
-% idles at single-digit utilization.''
-%
-% -- FLEX: [CORE] Operational lessons.
-% IF SHORT: Name both pitfalls and continue.
-}
-
-\small
-\textbf{Pitfall:} \textit{Treating data preprocessing as a one-time task.}\\[0.1cm]
-{\footnotesize Data distributions drift continuously. A pipeline validated at launch degrades silently. Production systems require continuous monitoring (PSI, KL divergence) and automated retraining triggers.}
-
-\vspace{0.3cm}
-\textbf{Pitfall:} \textit{Ignoring data serialization cost.}\\[0.1cm]
-{\footnotesize Teams optimize GPU kernels while loading JSON or CSV. Text formats are $\geq$10$\times$ slower to decode than Parquet/Arrow---the CPU becomes the bottleneck and an H100 idles at single-digit TFLOP/s. Fix: convert to Parquet once; every downstream job reads columnar.}
-
-\end{frame}
-
-\begin{frame}{Pitfalls (2/2)}
-\note{
-% [1 min]
-% -- LINK: Two more operational pitfalls.
-%
-% -- NARRATE: ``Third: ignoring training-serving skew until deployment---
-% feature computation differences are the leading cause of failures. Fourth:
-% neglecting data versioning---without snapshots, debugging takes 2--4$\times$
-% longer.''
-%
-% -- FLEX: [CORE] Operational lessons, continued.
-% IF SHORT: Cover training-serving skew pitfall; versioning can be brief.
-}
-
-\small
-\textbf{Pitfall:} \textit{Ignoring training-serving skew until deployment.}\\[0.1cm]
-{\footnotesize Feature computation differences are the leading cause of ML deployment failures. Feature stores and consistency contracts should be architectural requirements from day one.}
-
-\vspace{0.3cm}
-\textbf{Pitfall:} \textit{Neglecting data versioning until model debugging requires it.}\\[0.1cm]
-{\footnotesize Without versioned snapshots, teams cannot determine whether regression stems from labeling changes, schema errors, or genuine drift. Organizations that defer versioning report 2--4$\times$ longer debugging cycles.}
-
-\end{frame}
-
-
-\begin{frame}{Muddiest Point}
-\note{
-% [1 min]
-% -- NARRATE: ``One-minute paper. Write down the one concept from today that
-% was most confusing. I will open the next lecture by addressing the top
-% muddiest points.''
-%
-% -- FLEX: [CORE] Diagnostic tool (Angelo \& Cross, 1993). Never skip.
-}
-
-\centering
-\Large\bfseries One-minute paper\\[0.5cm]
-\normalsize Write down the \textbf{muddiest point} from today's lecture.\\[0.2cm]
-{\small What concept was most confusing or unclear?}\\[0.5cm]
-{\footnotesize\textcolor{midgray}{(Hand in on your way out --- or submit digitally)}}
-\end{frame}
-
-% --- RETRIEVAL PRACTICE ---
-\begin{frame}{What Were the Key Ideas?}
-\note{
-% [2 min]
-% -- NARRATE: ``Close your notes. Write down the 4 most important concepts
-% from today. 90 seconds, no peeking.'' Walk around the room.
-% Do NOT show the next slide yet.
-%
-% -- FLEX: [CORE] Retrieval practice. Never skip.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
-\end{frame}
-
-\begin{frame}{Key Takeaways}
-\note{
-% [2 min]
-% -- NARRATE: ``Reveal time. Walk through each bullet. Emphasize quantitative
-% anchors: 60--80\% effort in data, over 98\% GPU idle from feeding tax,
-% 1,000$\times$ labeling cost, 65--95\% of failures trace to data,
-% 50$\times$ NVMe vs.\ S3 speed gap.''
-%
-% -- FLEX: [CORE] Summary slide.
-% IF SHORT: Hit data-as-code, feeding tax, training-serving consistency,
-% and drift detection.
-}
-
+\begin{frame}[fragile]{A point-in-time join gives each row only its past}
+  \begin{columns}[T]
+    \begin{column}{0.57\textwidth}
+      \begin{mlsyscard}{datastroke}
 \scriptsize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Data is source code}: Datasets must be versioned, tested, debugged. Deleting a row = deleting a line of code.
-  \item \textbf{Data cascades}: Upstream errors amplify through every stage. Four Pillars (Quality, Reliability, Scalability, Governance) organize prevention.
-  \item \textbf{Energy-movement invariant}: Moving a bit costs 100--1,000$\times$ more than computing. Deduplication is the highest-leverage optimization.
-  \item \textbf{Training-serving consistency}: Non-negotiable. Feature stores and shared code prevent the \#1 deployment failure.
-  \item \textbf{Drift detection}: Degradation Equation ($A(t) = A_0 - \alpha \cdot \Delta$) operationalized through PSI and KL monitoring.
-  \item \textbf{Storage hierarchy}: 50$\times$ NVMe vs.\ S3 speed gap determines daily vs.\ weekly iteration. Choose by $D_{\text{vol}}/BW$.
-  \item \textbf{Data debt compounds}: 65--95\% of ML failures trace to data. Allocate sustained engineering capacity.
-\end{itemize}
-
+\begin{verbatim}
+driver_stats_fv = FeatureView(
+    name="driver_hourly_stats",
+    ...
+    ttl=timedelta(hours=2),
+    ...
+training_df = store.get_historical_features(
+    entity_df=entity_df,
+    features = [
+        'driver_hourly_stats:trips_today',
+        'driver_hourly_stats:earnings_today'
+    ],
+)
+\end{verbatim}
+      \end{mlsyscard}
+      {\footnotesize Feature rows: hourly, 00:00 to 05:00, 2021-09-17.}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \uncover<2->{%
+      \scriptsize
+      \renewcommand{\arraystretch}{1.2}
+      \begin{tabular}{@{}lrl@{}}
+        \toprule
+        \textbf{Label time} & \textbf{trips} & \textbf{from row} \\
+        \midrule
+        09-16 23:00:00 & \textcolor{midgray}{dropped} & \textcolor{midgray}{none earlier} \\
+        09-17 01:15:30 & 1 & 01:00 \\
+        09-17 04:32:45 & \textbf{6} & \textbf{04:00, not 05:00} \\
+        09-17 05:43:10 & 8 & 05:00 \\
+        09-17 16:26:17 & \textcolor{midgray}{dropped} & \textcolor{midgray}{none in 2 h} \\
+        \bottomrule
+      \end{tabular}\\[0.3cm]}
+      \uncover<3->{\small\textcolor{RedLine}{A join on the latest value hands every row 8 trips, from its future.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Code: Feast docs, ``Point-in-time joins'' (feast-dev/feast v0.67.0, Apache 2.0); output from running it with feast 0.67.0, images/artifacts/feast\_pit/.}
+  \note{[2.5 min] NARRATE: leakage through time, which the speaker split does not cover. A feature store such as the open-source Feast keeps features as time-stamped rows and serves one definition to training and serving. The code is the documentation's example: each driver's trips so far today, recorded hourly, with a two-hour time-to-live, and the call that builds a training set. Step 2: we ran it with Feast 0.67.0 on the documentation's rows (images/artifacts/feast\_pit/run\_pit.py). Feast scans backward from each label time, so the 04:32 row gets 6 trips, written at 04:00, never the 05:00 value that did not exist yet. One row precedes every feature row and one falls eleven hours after the last, outside the window; our run dropped both, where the documentation's table shows empty features. The ``from row'' column is our annotation. Step 3: a join on each driver's latest value would give every row 8 trips, information from after the label. For keyword spotting, any per-device statistic must come only from audio recorded before the clip. ENGAGE: why have a time-to-live? Expected: serving would not have a stale value either. Landing line for the segment: leakage and skew come from inside the pipeline; a contract at each boundary turns a silent defect into a loud one. FLEX: [OPTIONAL].}
 \end{frame}
-
-\begin{frame}{References}
-\note{
-% [1 min]
-% -- NARRATE: ``Six canonical references. Sambasivan for data cascades.
-% Sculley for hidden technical debt. Horowitz for the energy-movement
-% invariant. Hestness for scaling laws. Polyzotis for data lifecycle.
-% Northcutt for pervasive label errors.''
-%
-% -- FLEX: [OPTIONAL] Show briefly.
-}
-
-\small
-\mlsysref{Sambasivan+21}{Sambasivan et al. ``Everyone Wants to Do the Model Work, Not the Data Work.'' CHI 2021.}
-\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
-\mlsysref{Horowitz14}{M. Horowitz. ``Computing's Energy Problem.'' ISSCC 2014.}
-\mlsysref{Hestness+17}{Hestness et al. ``Deep Learning Scaling is Predictable, Empirically.'' 2017.}
-\mlsysref{Polyzotis+18}{Polyzotis et al. ``Data Lifecycle Challenges in Production ML.'' SIGMOD 2018.}
-\mlsysref{Northcutt+21}{Northcutt et al. ``Pervasive Label Errors in Test Sets.'' NeurIPS 2021.}
-
-\end{frame}
-
-\begin{frame}{Next Lecture: Neural Network Computation}
-\note{
-% [1 min]
-% -- LINK: This chapter built the dataset compiler. The next chapter runs
-% the compiled dataset on hardware.
-%
-% -- NARRATE: ``The dataset compiler has produced its output: a clean,
-% versioned, optimized training set. A compiled binary does nothing until
-% it runs on hardware. We turn next to the mathematical foundations of
-% learning---neurons, weights, gradients---and the systems that execute them.''
-%
-% -- FLEX: [CORE] Forward hook. Assign pre-reading if applicable.
-% IF SHORT: ``Next class: Neural Network Computation. Read Chapter 5.''
-}
-
-\centering
-\vspace{0.3cm}
-{\large The dataset compiler has produced its output:}\\[0.1cm]
-{\large a clean, versioned, optimized training set.}
-
-\vspace{0.4cm}
-{\large A compiled binary does nothing until it runs on hardware.}
-
-\vspace{0.4cm}
-
-\begin{mlsyscard}{crimson}
-\centering
-{\large\bfseries What happens when data meets computation?}\\[0.15cm]
-{\normalsize Neurons, weights, gradients, and the math of learning.}
-\end{mlsyscard}
-
-\vspace{0.2cm}
-{\small\textbf{Next:} Ch5 --- Neural Network Computation}
-
-\end{frame}
-
 
 % =============================================================================
-% BACKUP SLIDES
+% SECTION: RELEASE
 % =============================================================================
-\appendix
+\mlsysnote{[0.5 min] The last stage of the build records exactly what was built, so a later failure can be traced. FLEX: [CORE].}
+\mlsysdivider{What must a dataset record so a later failure can be traced?}{Data Engineering, \S4.8}
+\section{Release}
 
-\begin{frame}{Backup: ImageNet Loading --- SSD vs.\ HDD}
-\note{
-% [3 min]
-% -- NARRATE: Use as an additional exercise. ImageNet is 150 GB. NVMe SSD
-% reads at 3.5 GB/s. HDD reads at 200 MB/s. Calculate epoch load time for
-% each. At what dataset size does storage become the training bottleneck?
-%
-% -- FLEX: [OPTIONAL] Additional quantitative exercise.
-}
-\small
-\textbf{Exercise: ImageNet (150 GB) one-epoch load time}
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}lrrr@{}}
-  \toprule
-  \textbf{Storage} & \textbf{Bandwidth} & \textbf{Load Time} & \textbf{vs.\ Training} \\
-  \midrule
-  NVMe SSD & 3.5 GB/s & \textbf{43 seconds} & $\ll$ training time \\
-  SATA SSD & 550 MB/s & \textbf{4.5 minutes} & $\approx$ training time \\
-  HDD      & 200 MB/s & \textbf{12.5 minutes} & $\gg$ training time \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\textbf{Key:} On HDD, 12.5 min loading vs.\ $\sim$3 min training per epoch = \textbf{80\% Feeding Tax}. NVMe eliminates the I/O bottleneck entirely. At 1 TB+ datasets, even NVMe becomes the bottleneck.
+\begin{frame}{A release records what each clip is and how it was built}
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Field} & \textbf{Recorded value} & \textbf{Question it answers later} \\
+    \midrule
+    Recording ID & content hash of the audio & a duplicate? what came from it? \\
+    Speaker key & pseudonymous speaker ID & all of a speaker's clips in one split? \\
+    Consent record & terms of collection & may it be kept, or must it go? \\
+    \addlinespace[0.15cm]
+    \uncover<2->{Split} & \uncover<2->{hash of the speaker key} & \uncover<2->{stable across releases?} \\
+    \uncover<2->{Label, rubric version} & \uncover<2->{wake word or none, guideline version} & \uncover<2->{did the data change, or the rules?} \\
+    \addlinespace[0.15cm]
+    \uncover<3->{Alignment version} & \uncover<3->{aligner version, boundary confidence} & \uncover<3->{where did a segment error start?} \\
+    \uncover<3->{Feature configuration} & \uncover<3->{window, hop, MFCC count, code commit} & \uncover<3->{can features be recomputed exactly?} \\
+    \bottomrule
+  \end{tabular}\\[0.35cm]
+  {\small Identity, then evaluation, then build.}
+  \mlsyscredit{Data Engineering, \S4.8 (table 5) and \S4.8.2 (listing 2).}
+  \note{[3 min] NARRATE: a dataset release is an immutable, versioned record of everything that produced a training set. Table 5 lists what each KWS clip carries, in three groups. Step 1: identity. A content hash finds duplicates and traces what was derived from a clip; the speaker key groups a voice; the consent record says whether the clip may be kept. Step 2: evaluation. The split comes from a hash of the speaker key, so every clip from a speaker lands in the same split in every release, and a relabeling pass cannot leak a test speaker into training. The label carries the version of the guideline it was made under, so a change in the rules can be told apart from a change in the data. Step 3: build. The aligner version and boundary confidence from forced alignment, and the feature configuration with the code commit, so features can be recomputed exactly. Tools such as DVC keep small pointer files in Git and the bytes in object storage. ENGAGE: months after launch, detection drops on a new hardware revision. Which two fields do you check first? Expected: rubric version and feature configuration. LINK: Part 2 debugs exactly that regression with these fields. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Backup: PSI Drift Detection Walkthrough}
-\note{
-% [3 min]
-% -- NARRATE: Use if students want a worked PSI example with real numbers.
-%
-% -- FLEX: [OPTIONAL] Backup slide for quantitative depth on drift detection.
-}
-\small
-\textbf{Population Stability Index (PSI):} $\text{PSI} = \sum (p_i - q_i) \times \ln(p_i / q_i)$
+\begin{frame}[fragile]{A real dataset card records what Speech Commands holds}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{datastroke}
+\scriptsize
+\begin{verbatim}
+- config_name: v0.02
+  features:
+  ...
+  - name: speaker_id
+    dtype: string
+  ...
+  splits:
+  - name: train
+    num_examples: 84848
+  - name: validation
+    num_examples: 9982
+  - name: test
+    num_examples: 4890
+\end{verbatim}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.2}
+      \begin{tabular}{@{}p{2.3cm}p{5.6cm}@{}}
+        \toprule
+        \textbf{Release field} & \textbf{What the card says} \\
+        \midrule
+        Version & ``v0.02 \ldots{} released on April 11th 2018'' \\
+        Speaker key & \texttt{speaker\_id}, an 8-digit hashed ID \\
+        Split & counts per split; hash of the file name \\
+        Consent & ``people who have donated their voice online'' \\
+        \addlinespace[0.1cm]
+        \uncover<2->{\textcolor{RedLine}{Annotators}} & \uncover<2->{\textcolor{RedLine}{``[More Information Needed]''}} \\
+        \uncover<2->{\textcolor{RedLine}{Biases}} & \uncover<2->{\textcolor{RedLine}{``[More Information Needed]''}} \\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Hugging Face, huggingface.co/datasets/google/speech\_commands, card rev.\ 57ba463 (dataset CC BY 4.0); Warden, arXiv:1804.03209 (2018), \S5.6, \S5.7, \S7.}
+  \note{[2 min] NARRATE: a real release record for the running case: the Hugging Face card for Speech Commands, Google's public keyword-spotting dataset. Left, an exact excerpt of its metadata for version 0.02: a speaker ID field and the split sizes, 84,848 training, 9,982 validation, 4,890 test clips. Right, the last slide's fields matched to the card. Version and date are recorded. The speaker ID is an eight-digit hash that, per Warden's paper (\S5.7), cuts the link to worker IDs yet stays stable across releases. The split is the file-name hash from the last segment. Consent is one sentence. Step 2: the gaps. Under annotators and biases the card says ``[More Information Needed].'' The paper (\S5.6) says crowd workers typed the word they heard and each clip was checked by a single worker, so no agreement, no kappa, can be measured. No rubric is recorded, and since the card ships raw audio, no feature configuration either. ENGAGE: which field would you add first? Expected: the rubric and its version, since labels are the specification. WARN: a card documents the data and guarantees nothing; check it against the data. FLEX: [OPTIONAL].}
+\end{frame}
 
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}lrrrr@{}}
-  \toprule
-  \textbf{Bin} & $q_i$ (train) & $p_i$ (live) & $p_i - q_i$ & $(p_i - q_i) \ln(p_i/q_i)$ \\
-  \midrule
-  Low    & 0.30 & 0.25 & $-$0.05 & 0.009 \\
-  Medium & 0.50 & 0.45 & $-$0.05 & 0.006 \\
-  High   & 0.20 & 0.30 & +0.10  & 0.041 \\
-  \midrule
-  \textbf{PSI} & & & & \textbf{0.056} \\
-  \bottomrule
-\end{tabular}
-}
+\begin{frame}{True or false? Three beliefs that break data pipelines}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \renewcommand{\arraystretch}{1.5}
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Claim} & \textbf{Verdict} \\
+    \midrule
+    More data always improves the model. & \uncover<2->{\textbf{\textcolor{RedLine}{False}}: 10$\times$ data, only 5 to 8 points} \\
+    Preprocessing can be finished once. & \uncover<3->{\textbf{\textcolor{RedLine}{False}}: fitted parameters go stale} \\
+    Shared code keeps training and serving consistent. & \uncover<4->{\textbf{\textcolor{RedLine}{False}}: share fitted state too} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Data Engineering, \S4.13 (fallacies and pitfalls) and \S4.3.1 (design space, illustrative).}
+  \note{[2 min] ENGAGE: thumbs up or down on each, then reveal one at a time. Row 1: false. Test loss falls as a power law in dataset size, so each improvement takes multiplicatively more data; in the KWS design space, ten times the examples bought an illustrative 5 to 8 points of detection at ten times the labeling cost, and repeated examples consume bandwidth and compute without new evidence. Row 2: false. Preprocessing applies parameters fitted on historical data, such as vocabularies, normalization constants, and clipping bounds; when the inputs drift, those go stale, and a fixed normalization pushes features outside the range the model trained on. Row 3: false. Identical code with per-environment statistics produces skew. Today already answered another fallacy, that synthetic data cannot replace real recordings. FLEX: [CORE].}
+\end{frame}
 
-\vspace{0.15cm}
-PSI $< 0.1$: no significant shift. PSI $0.1$--$0.2$: investigate. PSI $> 0.2$: \textbf{retrain}.
+\begin{frame}{Tay had no boundary; the wake-word pipeline has four so far}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=5.6cm,keepaspectratio]{pipeline_step}{2}
+  \note{[2 min] Synthesis: return to the hook. Step 1: Tay's path. Public replies went straight into the model's behavior, with nothing in between to validate, filter, or rate-limit what it learned. Step 2: the keyword spotter's pipeline, built today. Ingestion enforces contracts and statistical checks, with a dead-letter queue for records that fail; labeling has a rubric and measures agreement with kappa; processing fits statistics once on the training split and freezes them; the release splits by a hash of the speaker key and records versions. Each is a boundary that turns a silent data failure into a loud one. The two gray stages, delivery to the accelerator and monitoring after launch, are Part 2. ENGAGE: which boundary would have saved Tay? Expected: ingestion, with adversarial-input filtering and rate limits before user text could shape the model. Landing line for the segment: a release that records how it was built is what makes every later comparison possible. NARRATE: the batch-against-streaming and ETL-against-ELT choices of \S4.5 sit inside the Ingest box; in the chapter's scenario, streaming compute costs about three times batch (Napkin Math 4.3). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.25cm}
+    \item Data is the program, so version it, test it, and review it.
+    \item A product target sets a data budget; 1 false wake a month means 2,160 h of audio.
+    \item Labels are the specification and usually the largest data cost.
+    \item Leakage and skew come from inside the pipeline; contracts fitted on the training split stop them.
+    \item A release records how the dataset was built.
+  \end{itemize}
+  \note{[1 min] NARRATE: one line per segment. Ask students to circle the one they would most likely forget, and to reread that section. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.35cm}
+    \item Synthetic speech is far cheaper per clip. How much of a wake-word corpus would you let it be, and what evidence would change your mind?
+    \item A model that learns from its users gets fresh data and an attack surface at once. Where would you put the boundary?
+    \item If public human text runs short near 2028, which part of data engineering becomes the bottleneck?
+  \end{itemize}
+  \note{[1 min] No single answer. Q1: the chapter's position is that synthetic data supplements real collection, and held-out real recordings must decide. Q2: Tay, recommendation clicks, and any system that retrains on user behavior. Q3: the chapter's figure 6 (\S4.4.3): corpora growing about 2.9 times a year against an estimated 300 trillion tokens of public human text (Villalobos et al. 2024); filtering, deduplication, and selection then decide what each additional token is worth (Lecture 9). FLEX: [OPTIONAL]; assign one as a short written reflection.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.2cm}
+    \item \textbf{Read:} Data Engineering, \S4.1 to \S4.8 and \S4.11, and the self-check questions.
+    \item Sambasivan et al., ``Everyone wants to do the model work, not the data work,'' CHI 2021.
+    \item Northcutt, Athalye, and Mueller, ``Pervasive Label Errors in Test Sets Destabilize ML Benchmarks,'' NeurIPS 2021.
+    \item Breck et al., ``Data Validation for Machine Learning,'' SysML 2019.
+    \item Gebru et al., ``Datasheets for Datasets,'' CACM 2021.
+    \item Mazumder et al., ``Multilingual Spoken Words Corpus,'' NeurIPS 2021.
+  \end{itemize}
+  \note{[1 min] The chapter first, especially Napkin Math 4.1, 4.2, and 4.6, which today worked through. The papers each back one segment: data cascades (Sambasivan), label errors (Northcutt), validation at the ingestion boundary in production (Breck), documenting a dataset so another team can trust it (Gebru), and the automatically labeled corpus behind the running example (Mazumder). FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} DATA ENGINEERING, PART 2}}\\[0.5cm]
+  {\LARGE\bfseries Can the pipeline keep pace with\\the accelerator and with the world?}
+  \note{[0.5 min] Today we built a dataset we can trust: budgeted, labeled, contracted, and released. It is still only bytes on a disk. Next time: how fast those bytes must reach an accelerator that consumes 3,200 images a second, and how we notice when the world stops looking like them. Read \S4.9 to \S4.12. FLEX: [CORE].}
 \end{frame}
 
 \end{document}

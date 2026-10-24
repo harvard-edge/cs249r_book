@@ -25,8 +25,10 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
   const [prevId, setPrevId] = useState(topic.id);
   if (topic.id !== prevId) { setPrevId(topic.id); setDrillLevel(null); }
 
-  // Build track-aware query params for drill links
+  // Build track-aware query params for drill links. Taxonomy subjects drill
+  // with ?subject=; legacy topics keep ?topic=.
   const trackParam = selectedTrack ? `&track=${selectedTrack}` : "";
+  const param = topic.practiceParam ?? "topic";
 
   const levelQs = drillLevel ? topic.questionsByLevel[drillLevel] || [] : [];
 
@@ -54,7 +56,10 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               <span className="text-[12px] font-semibold uppercase tracking-wide"
                 style={{ color: style.primary }}>{areaName}</span>
             </div>
-            <h2 className="text-[20px] font-bold text-textPrimary leading-tight">{topic.name}</h2>
+            <h2 className="text-[20px] font-bold text-textPrimary leading-tight">
+              {topic.code && <span className="font-mono text-[14px] text-textTertiary mr-2">{topic.code}</span>}
+              {topic.name}
+            </h2>
           </div>
           <button onClick={onClose} aria-label="Close"
             className="p-2.5 -mr-1 text-textTertiary hover:text-textPrimary hover:bg-surfaceHover rounded-lg transition-colors">
@@ -85,7 +90,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                       {levelQs.length} question{levelQs.length !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <Link href={`/practice?topic=${topic.id}&level=${drillLevel}${trackParam}`}
+                  <Link href={`/practice?${param}=${topic.id}&level=${drillLevel}${trackParam}`}
                     className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold rounded-lg transition-all"
                     style={{ backgroundColor: style.primary, color: "#101014" }}>
                     <Target className="w-4 h-4" /> Drill
@@ -144,7 +149,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               {/* Primary CTA — placed above filters (Fitts's Law).
                   Most users want "drill everything" by default; power
                   users who want to tune by difficulty can do so below. */}
-              <Link href={`/practice?topic=${topic.id}${trackParam}`}
+              <Link href={`/practice?${param}=${topic.id}${trackParam}`}
                 className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90 shadow-sm"
                 style={{ backgroundColor: style.primary, color: "#101014" }}>
                 <Target className="w-4 h-4" />
@@ -192,6 +197,28 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                   })}
                 </div>
               </div>
+
+              {/* Concepts tested — taxonomy subjects only. Each drills that concept. */}
+              {topic.concepts && topic.concepts.length > 0 && (
+                <div>
+                  <SectionDivider label="Concepts tested" />
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {topic.concepts.slice(0, 12).map((c) => (
+                      <Link key={c.id} href={`/practice?concept=${encodeURIComponent(c.id)}${trackParam}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-borderSubtle bg-surface text-[12px] text-textSecondary hover:text-textPrimary hover:border-borderHighlight transition-colors">
+                        {c.label}
+                        <span className="font-mono text-[11px] text-textMuted">{c.questionCount}</span>
+                      </Link>
+                    ))}
+                  </div>
+                  {topic.explorerUrl && (
+                    <a href={topic.explorerUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-block mt-3 text-[12px] text-textTertiary hover:text-textPrimary underline underline-offset-2">
+                      See this subject in the ML Systems Taxonomy ↗
+                    </a>
+                  )}
+                </div>
+              )}
 
               {/* Tracks — inline, compact (not a full section) */}
               <div className="flex items-center gap-2 flex-wrap pt-1">

@@ -3,7 +3,7 @@
 mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 """
 
-__version__ = "0.1.2"
+__version__ = "0.3.0"
 
 from . import core
 from . import engine
@@ -12,12 +12,12 @@ from . import models
 from . import platforms
 from . import infrastructure
 from . import systems
-from . import sim
 from . import physics
 from . import embodied
 from . import sensors
 from . import actuators
 from . import agents
+from . import solvers
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine
@@ -37,13 +37,12 @@ from .actuators.registry import Actuators
 from .agents.registry import (
     Agents,
     ReferencePlatforms as AgentPlatforms,
-    CodingAgents,
-    DeliberationAgents,
-    MultiAgents,
-    InteractiveAgents,
 )
 from .ops import Ops
 from .engine import calibration
+from .notation.registry import Notation, Symbols
+from .core.series_loader import LocalSeries, load_series
+
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.units import *  # noqa: F401,F403
@@ -64,9 +63,9 @@ from .fmt import (
     fmt_area, fmt_heat_flux, fmt_specific_heat, fmt_memory, fmt_memory_capacity,
     fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
     fmt_water_rate, fmt_water_intensity, fmt_latency,
-    fmt_frequency, fmt_acceleration, fmt_torque, fmt_torque_rate, fmt_torque_constant, fmt_velocity, fmt_jerk,
+    fmt_frequency, fmt_acceleration, fmt_torque, fmt_torque_rate, fmt_torque_constant, fmt_motor_constant, fmt_velocity, fmt_jerk,
     fmt_inertia, fmt_voltage, fmt_current, fmt_resistance, fmt_token_rate,
-    fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity,
+    fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity, fmt_angular_acceleration,
     fmt_temperature, fmt_temperature_rate, fmt_decibel, fmt_illuminance,
     fmt_energy_per_op, fmt_energy_per_bit, fmt_energy_per_byte, fmt_energy_per_flop,
     fmt_thermal_resistance, fmt_heat_capacity, fmt_density,

@@ -1,494 +1,10 @@
-"""Agentic ML systems physics and economics accounting formulas (Volume III).
-
-Domain scope:
-- Trajectory execution latency budgets
-- Trajectory error compounding and reliability bounds
-- Radix tree KV prefix caching and memory reuse
-- Test-time compute vs. capability trade-offs
-- Multi-agent coordination tax
-"""
+"""Agentic ML systems physics and memory accounting formulas (Volume III)."""
 
 from __future__ import annotations
 
+import math
 from mlsysim.core.units import ureg
-from mlsysim.core._validation import (
-    validate_positive,
-    validate_nonnegative,
-    validate_range,
-    validate_at_least,
-)
-
-
-def calc_trajectory_step_time(thinking_time, tool_time, verification_time=None):
-    """
-    Calculate the total wall-clock duration of a single agentic trajectory step.
-
-    Source: modeling assumption. The step is a serial sum of inference, tool,
-    and verification time, not taken from a published model; queueing,
-    retries, and parallel tool calls are ignored.
-
-    Parameters
-    ----------
-    thinking_time : Quantity
-        Time spent on model inference (prefill + token decoding).
-    tool_time : Quantity
-        Time spent on external tool execution / environment sandboxing.
-    verification_time : Quantity, optional
-        Time spent on safety guards or output verification (default: 0s).
-
-    Returns
-    -------
-    Quantity
-        Total step duration in seconds.
-    """
-    total = thinking_time + tool_time
-    if verification_time is not None:
-        total = total + verification_time
-    return total.to(ureg.second)
-
-
-def calc_trajectory_reliability(step_success_rate: float, num_steps: int, verifier_recovery_rate: float = 0.0):
-    """
-    Calculate end-to-end trajectory success probability under compounding errors.
-
-    Model:
-        P_step_effective = step_success_rate + (1 - step_success_rate) * verifier_recovery_rate
-        P_trajectory = (P_step_effective) ^ num_steps
-
-    Source: the product over steps is the series-system reliability model
-    for independent components, R_S = prod(R_i) (NIST/SEMATECH e-Handbook of
-    Statistical Methods, Sec. 8.1.8.2, "Series model"), applied here with
-    identical steps. The verifier_recovery_rate term is a modeling assumption,
-    not taken from a published model; it treats recovery as independent of
-    the step and of every other step.
-
-    Parameters
-    ----------
-    step_success_rate : float
-        Probability that an individual step succeeds without unrecoverable error (0.0 to 1.0).
-    num_steps : int
-        Total sequential steps in the trajectory horizon (>= 1).
-    verifier_recovery_rate : float, optional
-        Fraction of failed steps caught and repaired by verification checks (0.0 to 1.0).
-
-    Returns
-    -------
-    float
-        End-to-end trajectory success probability (0.0 to 1.0).
-    """
-    validate_range(step_success_rate, 0.0, 1.0, "step_success_rate")
-    validate_at_least(num_steps, 1, "num_steps")
-    validate_range(verifier_recovery_rate, 0.0, 1.0, "verifier_recovery_rate")
-
-    effective_step_success = step_success_rate + (1.0 - step_success_rate) * verifier_recovery_rate
-    return float(effective_step_success ** num_steps)
-
-
-def calc_pareto_scale(mean_length: float, alpha: float) -> float:
-    """
-    Recover the Pareto scale parameter from a measured mean trajectory length.
-
-    Agent trajectory lengths are heavy tailed: most tasks finish in a handful of
-    steps while a small fraction run for hundreds. A Pareto tail with index
-    ``alpha`` has mean ``alpha * x_min / (alpha - 1)``, so a measured mean pins
-    the scale:
-
-        x_min = mean * (alpha - 1) / alpha
-
-    The mean exists only for ``alpha > 1``; below that the distribution has no
-    finite mean and a scheduler cannot be sized from an average at all.
-
-    Source: Pareto type I distribution function (Nila, Das, and Balakrishna,
-    "Goodness-of-fit testing for the Pareto type-I distribution based on a
-    mean residual life characterization", arXiv:2609.04933, Eq. 1) and its
-    conditional mean alpha * t / (alpha - 1) (same paper, Theorem 2, stated
-    for x_min = 1; the scaled form follows by rescaling). That agent
-    trajectory lengths follow a Pareto tail is a modeling assumption of this
-    package, not a fitted measurement.
-
-    Parameters
-    ----------
-    mean_length : float
-        Measured mean trajectory length, in steps.
-    alpha : float
-        Pareto tail index, strictly greater than 1.
-
-    Returns
-    -------
-    float
-        Scale parameter x_min, in steps.
-    """
-    validate_positive(mean_length, "mean_length")
-    if alpha <= 1.0:
-        raise ValueError(
-            "alpha must exceed 1 for the Pareto mean to exist; got %r. Below "
-            "that the distribution has no finite mean." % (alpha,)
-        )
-    return float(mean_length * (alpha - 1.0) / alpha)
-
-
-def calc_pareto_survival(length: float, scale: float, alpha: float) -> float:
-    """
-    Probability that a Pareto-distributed trajectory exceeds ``length`` steps.
-
-    Model:
-        P(N > x) = (x_min / x) ** alpha    for x >= x_min
-
-    Source: Pareto type I survival function, 1 - F(x) with
-    F(x) = 1 - (x_min / x) ** alpha (Nila, Das, and Balakrishna,
-    arXiv:2609.04933, Eq. 1).
-
-    Parameters
-    ----------
-    length : float
-        Step count to exceed.
-    scale : float
-        Pareto scale parameter x_min, as returned by ``calc_pareto_scale``.
-    alpha : float
-        Pareto tail index.
-
-    Returns
-    -------
-    float
-        Survival probability in [0, 1].
-    """
-    validate_positive(length, "length")
-    validate_positive(scale, "scale")
-    validate_positive(alpha, "alpha")
-    if length <= scale:
-        return 1.0
-    return float((scale / length) ** alpha)
-
-
-def calc_pareto_conditional_survival(attained: float, target: float, alpha: float) -> float:
-    """
-    Probability of reaching ``target`` steps given ``attained`` steps already run.
-
-    The scale parameter cancels in the ratio of survival functions, so this
-    depends only on the two step counts and the tail index:
-
-        P(N > target | N > attained) = (attained / target) ** alpha
-
-    This is the decreasing-hazard property that inverts operator intuition: a
-    trajectory that has already run a long time is *more* likely to keep running,
-    which is why attained service is the best remaining-work estimator a
-    non-clairvoyant scheduler has.
-
-    Source: the ratio S(target) / S(attained) of the Pareto type I survival
-    function (Nila, Das, and Balakrishna, arXiv:2609.04933, Eq. 1), by the
-    definition of conditional probability. The scheduling interpretation
-    above is this package's framing.
-
-    Parameters
-    ----------
-    attained : float
-        Steps the trajectory has already completed.
-    target : float
-        Step count to survive to, at least ``attained``.
-    alpha : float
-        Pareto tail index.
-
-    Returns
-    -------
-    float
-        Conditional survival probability in [0, 1].
-    """
-    validate_positive(attained, "attained")
-    validate_positive(alpha, "alpha")
-    validate_at_least(target, attained, "target")
-    return float((attained / target) ** alpha)
-
-
-def calc_pareto_mean_residual_life(attained: float, alpha: float) -> float:
-    """
-    Expected remaining steps for a trajectory that has already run ``attained``.
-
-    Model:
-        E[N - x | N > x] = x / (alpha - 1)
-
-    Remaining work grows with attained service rather than shrinking, which is
-    the formal statement of why the session closest to finishing is the one that
-    has barely started.
-
-    Source: Pareto type I mean residual life m(x) = x / (alpha - 1) for
-    x >= x_min and alpha > 1 (Nila, Das, and Balakrishna, arXiv:2609.04933,
-    Eq. 3).
-
-    Parameters
-    ----------
-    attained : float
-        Steps the trajectory has already completed.
-    alpha : float
-        Pareto tail index, strictly greater than 1.
-
-    Returns
-    -------
-    float
-        Expected additional steps.
-    """
-    validate_positive(attained, "attained")
-    if alpha <= 1.0:
-        raise ValueError(
-            "alpha must exceed 1 for mean residual life to be finite; got %r."
-            % (alpha,)
-        )
-    return float(attained / (alpha - 1.0))
-
-
-def calc_radix_cache_effective_latency(
-    prompt_tokens: int,
-    shared_prefix_tokens: int,
-    prefill_rate,
-    decode_rate,
-    output_tokens: int = 1,
-):
-    """
-    Calculate time to first token and total response time under Radix tree prefix caching.
-
-    Source: the reuse mechanism is RadixAttention, which reuses the KV cache
-    of requests that share a prompt prefix (Zheng et al., "SGLang: Efficient
-    Execution of Structured Language Model Programs", arXiv:2312.07104). The
-    latency expression, uncached_tokens / prefill_rate plus
-    output_tokens / decode_rate, is a modeling assumption of this package
-    (constant throughputs, no queueing, no growth of per-token cost with
-    context length), not taken from the paper.
-
-    Parameters
-    ----------
-    prompt_tokens : int
-        Total prompt tokens.
-    shared_prefix_tokens : int
-        Tokens already cached in KV memory from shared system prompt / previous turns.
-    prefill_rate : Quantity
-        Prefill processing throughput (e.g., tokens / second).
-    decode_rate : Quantity
-        Autoregressive token decode throughput (e.g., tokens / second).
-    output_tokens : int, optional
-        Number of output tokens to generate (default: 1).
-
-    Returns
-    -------
-    Quantity
-        Total response duration in seconds.
-    """
-    validate_at_least(prompt_tokens, 1, "prompt_tokens")
-    validate_nonnegative(shared_prefix_tokens, "shared_prefix_tokens")
-    validate_positive(prefill_rate, "prefill_rate")
-    validate_positive(decode_rate, "decode_rate")
-
-    uncached_tokens = max(0, prompt_tokens - shared_prefix_tokens)
-    if hasattr(prefill_rate, "units"):
-        prefill_time = (uncached_tokens / prefill_rate).to(ureg.second)
-    else:
-        prefill_time = (uncached_tokens / prefill_rate) * ureg.second
-
-    if hasattr(decode_rate, "units"):
-        decode_time = (output_tokens / decode_rate).to(ureg.second)
-    else:
-        decode_time = (output_tokens / decode_rate) * ureg.second
-
-    return (prefill_time + decode_time).to(ureg.second)
-
-
-def calc_test_time_compute_cost(
-    base_sample_cost,
-    num_samples: int,
-    verifier_cost_per_sample=None,
-    aggregation_cost=None,
-):
-    """
-    Calculate total test-time compute expenditure for parallel or search-based generation.
-
-    Source: modeling assumption. The total is linear cost accounting,
-    num_samples * (sample + verifier) + aggregation, not taken from a
-    published model. Best-of-N and verifier-guided beam search, the strategies
-    it prices, are described in Snell et al., "Scaling LLM Test-Time Compute
-    Optimally can be More Effective than Scaling Model Parameters",
-    arXiv:2408.03314.
-
-    Parameters
-    ----------
-    base_sample_cost : Quantity
-        Cost or FLOPs required to generate a single candidate trajectory.
-    num_samples : int
-        Number of parallel candidate samples (Best-of-N, Tree Search, etc.).
-    verifier_cost_per_sample : Quantity, optional
-        Verification / reward model cost evaluated per sample.
-    aggregation_cost : Quantity, optional
-        Cost of aggregating or consensus-ranking candidate samples.
-
-    Returns
-    -------
-    Quantity
-        Total compute cost in base units.
-    """
-    validate_at_least(num_samples, 1, "num_samples")
-    total = base_sample_cost * num_samples
-    if verifier_cost_per_sample is not None:
-        total = total + (verifier_cost_per_sample * num_samples)
-    if aggregation_cost is not None:
-        total = total + aggregation_cost
-    return total
-
-
-def calc_multi_agent_coordination_overhead(num_agents: int, avg_message_tokens: int, cost_per_token=None):
-    """
-    Calculate token volume and cost overhead resulting from inter-agent coordination.
-
-    In a fully connected interaction graph, communication volume scales as O(N^2);
-    in a hierarchical or centralized coordinator topology, volume scales as O(N).
-
-    Source: the edge counts are graph combinatorics. A complete graph on N
-    agents has N(N-1)/2 undirected edges (Weisstein, "Complete Graph",
-    MathWorld), so one message in each direction is N(N-1) messages; a star
-    around one coordinator has N-1 edges, or 2(N-1) messages. Charging
-    avg_message_tokens per directed message per round is a modeling
-    assumption, not taken from a published model.
-
-    Parameters
-    ----------
-    num_agents : int
-        Number of active collaborating agents (>= 1).
-    avg_message_tokens : int
-        Average tokens exchanged per interaction edge.
-    cost_per_token : Quantity, optional
-        Cost per million tokens or base unit currency.
-
-    Returns
-    -------
-    dict
-        Dictionary containing pairwise and coordinator token totals and optional costs.
-    """
-    validate_at_least(num_agents, 1, "num_agents")
-    validate_nonnegative(avg_message_tokens, "avg_message_tokens")
-
-    coordinator_tokens = (num_agents - 1) * 2 * avg_message_tokens
-    pairwise_tokens = num_agents * (num_agents - 1) * avg_message_tokens
-
-    results = {
-        "coordinator_tokens": coordinator_tokens,
-        "pairwise_tokens": pairwise_tokens,
-    }
-
-    if cost_per_token is not None:
-        results["coordinator_cost"] = coordinator_tokens * cost_per_token
-        results["pairwise_cost"] = pairwise_tokens * cost_per_token
-
-    return results
-
-
-def calc_multiagent_speedup(num_agents: int, s_serial: float, alpha: float = 0.0, beta: float = 0.0) -> float:
-    """
-    Calculate effective speedup for an agent ensemble under coordination tax.
-
-    Model:
-        D(M) = s_serial + (1 - s_serial) / M + alpha * M^2 + beta * M
-        S(M) = 1 / D(M)
-
-    where:
-    - s_serial is the serial planning / decomposition fraction (Amdahl's serial term).
-    - (1 - s_serial) is the parallelizable execution fraction.
-    - alpha is the quadratic synchronization / pairwise cross-talk coefficient (O(M^2)).
-    - beta is the linear coordination / supervisor provisioning coefficient (O(M)).
-
-    Source: s_serial + (1 - s_serial) / M is Amdahl's law,
-    Speedup = 1 / (s + p / N) with s + p = 1 (as stated in Gustafson,
-    "Reevaluating Amdahl's Law", 1988). The alpha * M^2 and beta * M overhead
-    terms are a modeling assumption of this package, not taken from a
-    published model. They differ from Gunther's Universal Scalability Law,
-    C(p) = p / (1 + sigma * (p - 1) + kappa * p * (p - 1)) (Gunther,
-    arXiv:0808.1431, Eq. 5), whose normalized time 1 / C(p) grows linearly,
-    not quadratically, in p.
-
-    Parameters
-    ----------
-    num_agents : int
-        Number of collaborating agents in the ensemble (>= 1).
-    s_serial : float
-        Serial planning fraction (0.0 to 1.0).
-    alpha : float, optional
-        Quadratic synchronization coefficient (default: 0.0, >= 0.0).
-    beta : float, optional
-        Linear coordination coefficient (default: 0.0, >= 0.0).
-
-    Returns
-    -------
-    float
-        Theoretical speedup factor S(M) relative to a single agent.
-    """
-    validate_at_least(num_agents, 1, "num_agents")
-    validate_range(s_serial, 0.0, 1.0, "s_serial")
-    validate_nonnegative(alpha, "alpha")
-    validate_nonnegative(beta, "beta")
-
-    m = float(num_agents)
-    p_parallel = 1.0 - s_serial
-    d = s_serial + (p_parallel / m) + (alpha * (m ** 2)) + (beta * m)
-    if d <= 0.0:
-        return 0.0
-    return float(1.0 / d)
-
-
-def calc_multiagent_optimal_concurrency(s_serial: float, alpha: float, beta: float = 0.0) -> float:
-    """
-    Calculate the optimal concurrency boundary M* for an agent ensemble.
-
-    The stationary condition minimizing execution time D(M) satisfies:
-        D'(M) = -(1 - s) / M^2 + 2 * alpha * M + beta = 0
-        <=> 2 * alpha * M^3 + beta * M^2 - (1 - s) = 0
-
-    When alpha == 0 and beta == 0, S(M) approaches 1/s monotonically as M -> inf.
-    When alpha > 0, the cubic polynomial has strictly one positive real root by Descartes' Rule of Signs.
-
-    Source: derived here by setting dD/dM = 0 for the calc_multiagent_speedup
-    model, so it inherits that model's modeling assumption (the alpha and beta
-    overhead terms are not taken from a published model).
-
-    Parameters
-    ----------
-    s_serial : float
-        Serial planning fraction (0.0 to 1.0).
-    alpha : float
-        Quadratic synchronization coefficient (>= 0.0).
-    beta : float, optional
-        Linear coordination coefficient (default: 0.0, >= 0.0).
-
-    Returns
-    -------
-    float
-        Optimal number of concurrent agents M* maximizing speedup.
-    """
-    validate_range(s_serial, 0.0, 1.0, "s_serial")
-    validate_nonnegative(alpha, "alpha")
-    validate_nonnegative(beta, "beta")
-
-    p = 1.0 - s_serial
-    if alpha == 0.0 and beta == 0.0:
-        return float("inf")
-    if p <= 0.0:
-        return 1.0
-
-    low = 0.1
-    high = 1000.0
-
-    def f(m):
-        return 2.0 * alpha * (m ** 3) + beta * (m ** 2) - p
-
-    while f(high) < 0:
-        high *= 2.0
-        if high > 1e6:
-            return high
-
-    for _ in range(100):
-        mid = 0.5 * (low + high)
-        val = f(mid)
-        if abs(val) < 1e-12 or (high - low) < 1e-9:
-            return float(mid)
-        if val < 0:
-            low = mid
-        else:
-            high = mid
-    return float(0.5 * (low + high))
+from mlsysim.core._validation import validate_at_least
 
 
 def calc_kv_cache_bytes_per_token(
@@ -551,112 +67,399 @@ def calc_kv_cache_bytes_per_token(
     validate_at_least(d_head, 1, "head_dim")
 
     bpe = bytes_per_elem if hasattr(bytes_per_elem, "units") else bytes_per_elem * ureg.byte
-    return (2 * layers * kv_heads * d_head * bpe).to(ureg.byte)
+    total = 2 * layers * kv_heads * d_head * bpe
+    return total.to(ureg.byte) if hasattr(total, "to") else total * ureg.byte
 
 
-def calc_tool_wait_stranded_tax(
-    node_hbm_capacity,
-    model_weights_memory,
-    *,
-    context_tokens: int | None = None,
-    kv_bytes_per_token=None,
-    kv_memory=None,
-    tool_wait_duration,
-    hourly_node_cost: float,
-    num_gpus: int = 8,
-    num_concurrent_agents: int = 1,
-    num_pipeline_tools: int = 1,
-):
+
+# --- Trajectory reliability and cost per accepted task (added 2026-10-20) ----
+# Horizon compounding, cost per accepted task, independent retries, and the
+# input an append-only trajectory resends. Each is the closed form of a
+# recurring agent calculation; the solvers in engine/solvers/agents.py use them.
+
+
+def calc_unchecked_success(step_success: float, horizon: float) -> float:
     """
-    Calculate stranded HBM capacity and idle financial expenditure during synchronous tool calls.
+    Success of a task whose ``horizon`` steps must all be right, unchecked.
 
-    When an agent blocks on external execution (compilation, container sandbox,
-    network RPC), its active context KV cache remains pinned in accelerator HBM
-    without performing active compute:
-    1. Dynamic HBM pool: m_dynamic = node_capacity - weights_memory
-    2. Single-agent KV footprint: m_kv = kv_memory if given else context_tokens * kv_bytes_per_token
-    3. Stranded fraction (single): pct_single = m_kv / m_dynamic
-    4. Stranded memory (concurrent): m_concurrent = num_concurrent_agents * m_kv
-    5. Stranded fraction (concurrent): pct_concurrent = m_concurrent / m_dynamic
-    6. Idle cost per turn: cost_turn = tool_wait_duration * (hourly_node_cost / 3600 s)
-    7. Pipeline cost: cost_pipeline = num_pipeline_tools * cost_turn
+        Pr(success) = (1 - eps)^H = p_step^H
 
-    Parameters
-    ----------
-    node_hbm_capacity : Quantity
-        Total aggregate HBM capacity on the serving node (e.g. 640 GB).
-    model_weights_memory : Quantity
-        Static memory consumed by partitioned model weights (e.g. 160 GB).
-    context_tokens : int, optional
-        Active sequence token length for the agent trajectory (e.g. 160,000).
-    kv_bytes_per_token : Quantity, optional
-        Memory consumed per token (e.g. 320 KiB).
-    kv_memory : Quantity, optional
-        Total KV cache memory for a single agent session (overrides context_tokens * kv_bytes_per_token).
-    tool_wait_duration : Quantity
-        Duration of the external blocking tool invocation (e.g. 60 s).
-    hourly_node_cost : float
-        Cost of the node in dollars per hour (e.g. $24.00/hr).
-    num_gpus : int, optional
-        Number of GPUs in the node (default: 8).
-    num_concurrent_agents : int, optional
-        Number of concurrent agents stranding memory (default: 1).
-    num_pipeline_tools : int, optional
-        Number of tool invocations across the end-to-end trajectory (default: 1).
-
-    Returns
-    -------
-    dict
-        - "m_hbm_dynamic": Available dynamic memory pool (Quantity in GB).
-        - "m_hbm_dynamic_per_gpu": Available dynamic memory pool per GPU (Quantity in GB).
-        - "m_kv": KV cache memory footprint per agent (Quantity in GB).
-        - "pct_stranded_single": Fraction of dynamic pool stranded by one agent (0.0 to 1.0).
-        - "m_stranded_concurrent": Memory stranded by concurrent agents (Quantity in GB).
-        - "pct_stranded_concurrent": Fraction stranded by concurrent agents (0.0 to 1.0).
-        - "cost_turn": Dollar cost during the tool wait ($).
-        - "cost_pipeline": Cumulative dollar cost across pipeline tools ($).
+    Assumes independent steps, no check between them, and no recovery.
     """
-    validate_positive(node_hbm_capacity, "node_hbm_capacity")
-    validate_positive(model_weights_memory, "model_weights_memory")
-    validate_positive(tool_wait_duration, "tool_wait_duration")
-    validate_positive(hourly_node_cost, "hourly_node_cost")
-    validate_at_least(num_gpus, 1, "num_gpus")
-    validate_at_least(num_concurrent_agents, 1, "num_concurrent_agents")
-    validate_at_least(num_pipeline_tools, 1, "num_pipeline_tools")
+    return step_success ** horizon
 
-    if kv_memory is not None:
-        m_kv = kv_memory.to(ureg.gigabyte)
-    elif context_tokens is not None and kv_bytes_per_token is not None:
-        validate_at_least(context_tokens, 1, "context_tokens")
-        validate_positive(kv_bytes_per_token, "kv_bytes_per_token")
-        m_kv = (context_tokens * kv_bytes_per_token).to(ureg.gigabyte)
-    else:
-        raise ValueError("Must provide either kv_memory or both (context_tokens, kv_bytes_per_token).")
 
-    c_node = node_hbm_capacity.to(ureg.gigabyte)
-    m_weights = model_weights_memory.to(ureg.gigabyte)
-    if m_weights >= c_node:
-        raise ValueError(f"Model weights ({m_weights}) exceed or equal node HBM capacity ({c_node}).")
+def calc_step_error_for_target(target_success: float, horizon: float) -> float:
+    """
+    Per-step error rate that holds ``target_success`` over ``horizon`` unchecked steps.
 
-    m_dynamic = c_node - m_weights
-    m_dynamic_per_gpu = m_dynamic / num_gpus
+        eps = 1 - target^(1/H)
 
-    pct_single = float((m_kv / m_dynamic).magnitude)
-    m_concurrent = num_concurrent_agents * m_kv
-    pct_concurrent = float((m_concurrent / m_dynamic).magnitude)
+    For small eps, eps * H ~ -ln(target) at any horizon.
+    """
+    return 1 - target_success ** (1 / horizon)
 
-    cost_s = hourly_node_cost / 3600.0
-    cost_turn = float(tool_wait_duration.to(ureg.second).magnitude * cost_s)
-    cost_pipeline = float(num_pipeline_tools * cost_turn)
 
-    return {
-        "m_hbm_dynamic": m_dynamic,
-        "m_hbm_dynamic_per_gpu": m_dynamic_per_gpu,
-        "m_kv": m_kv,
-        "pct_stranded_single": pct_single,
-        "m_stranded_concurrent": m_concurrent,
-        "pct_stranded_concurrent": pct_concurrent,
-        "cost_turn": cost_turn,
-        "cost_pipeline": cost_pipeline,
-    }
+def calc_first_horizon_below(step_success: float, threshold: float) -> int:
+    """
+    First whole horizon ``n`` at which ``step_success ** n`` falls below ``threshold``.
 
+        n = floor(ln(threshold) / ln(step_success)) + 1
+    """
+    return math.floor(math.log(threshold) / math.log(step_success)) + 1
+
+
+def calc_cost_per_accepted(attempt_cost, acceptance_probability: float):
+    """
+    Expected cost per accepted task when attempts repeat until one is accepted.
+
+        C_eff = E[C_attempt] / p_acc
+
+    Attempts are geometric with mean 1 / p_acc, so every rejected attempt is
+    charged to the accepted one.
+    """
+    return attempt_cost / acceptance_probability
+
+
+def calc_break_even_acceptance(acceptance_probability: float, cut: float, share: float) -> float:
+    """
+    Acceptance that matches a price cut on one component of the attempt cost.
+
+    Removing a fraction ``cut`` of a component that is ``share`` of the attempt
+    cost gives the same cost per accepted task as raising acceptance to
+
+        p' = p_acc / (1 - cut * share)
+    """
+    return acceptance_probability / (1 - cut * share)
+
+
+def calc_independent_success(acceptance_probability: float, attempts: int) -> float:
+    """
+    Chance that at least one of ``attempts`` independent attempts is accepted.
+
+        1 - (1 - p_acc)^k
+    """
+    return 1 - (1 - acceptance_probability) ** attempts
+
+
+def calc_append_only_context(initial_tokens, tokens_per_turn, turns: int):
+    """
+    Context of the last call and total input sent by an append-only trajectory.
+
+    Turn t (from 1) reads s0 + delta (t - 1) tokens, so the last of H turns reads
+    s0 + delta (H - 1), and the H calls together send
+
+        H s0 + delta H (H - 1) / 2
+
+    tokens: input grows quadratically with the horizon when every turn resends
+    the history. Returns (last_call, cumulative).
+    """
+    last_call = initial_tokens + tokens_per_turn * (turns - 1)
+    cumulative = turns * initial_tokens + tokens_per_turn * (turns * (turns - 1) // 2)
+    return last_call, cumulative
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+# Equations behind one model call (admission, sampling, a fallible check) and
+# behind a trajectory of calls (horizon compounding, cost per accepted task, and
+# resent history live above). Pure arithmetic on stated inputs; the solvers in
+# engine/solvers/model_call.py compose them.
+
+import math as _math
+
+
+
+
+def calc_tempered_softmax(logits, temperature: float = 1.0) -> list:
+    """Softmax of ``logits / T``: the sampling distribution at temperature ``T``."""
+    exps = [_math.exp(z / temperature) for z in logits]
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
+def calc_nucleus(probabilities, top_p: float):
+    """Top-p truncation: the shortest highest-probability prefix whose mass reaches ``top_p``.
+
+    Returns ``(kept, mass, renormalized)``: how many tokens stay, their total
+    probability, and their probabilities rescaled to sum to one.
+    """
+    ordered = sorted(probabilities, reverse=True)
+    mass, kept = 0.0, 0
+    for p in ordered:
+        mass += p
+        kept += 1
+        if mass >= top_p:
+            break
+    return kept, mass, [p / mass for p in ordered[:kept]]
+
+
+def calc_pass_posterior(defect_rate: float, false_accept_rate: float, valid_accept_rate: float) -> float:
+    """Bayes' rule: share of passing candidates that are defective, ``P(Def | PASS)``."""
+    defective_pass = false_accept_rate * defect_rate
+    return defective_pass / (defective_pass + valid_accept_rate * (1 - defect_rate))
+
+
+
+
+def calc_reused_prefix_prompt_tokens(turns: int, first_prompt: int, appended: int) -> int:
+    """Fresh prefill over ``turns`` calls when each earlier prompt prefix is reused: ``S0 + (H - 1) D``."""
+    return first_prompt + (turns - 1) * appended
+
+
+# --- Test-time deliberation: pools, checks, and search (added 2026-10-20) ----
+# The closed forms behind spending more work on one decision with the weights
+# fixed: the unbiased pass@k estimate, the expected winner's error under
+# argmax selection, and the size of a search tree that a step check prunes.
+# The solvers in engine/solvers/deliberation.py compose them; pass@k for a
+# known rate is calc_independent_success above, and passing-set precision is
+# one minus calc_pass_posterior.
+
+
+def calc_pass_at_k_unbiased(samples: int, passing: int, k: int) -> float:
+    """
+    Unbiased pass@k from ``samples`` draws of which ``passing`` pass (Chen et al. 2021).
+
+        pass@k = 1 - C(n - c, k) / C(n, k)
+
+    the share of all size-``k`` subsets that hold at least one pass; 1 when
+    ``n - c < k``.
+    """
+    if samples - passing < k:
+        return 1.0
+    return 1 - _math.comb(samples - passing, k) / _math.comb(samples, k)
+
+
+def calc_expected_max_std_normal(n: int, lo: float = -10.0, hi: float = 10.0, steps: int = 40_000) -> float:
+    """
+    Expected maximum of ``n`` independent standard normals (trapezoidal integral).
+
+        E[max] = integral of x * n * phi(x) * Phi(x)^(n - 1) dx
+
+    The winner of an argmax over ``n`` equally good candidates carries this
+    much scoring error, in units of the score noise's standard deviation.
+    """
+    dx = (hi - lo) / steps
+    total = 0.0
+    for i in range(steps + 1):
+        x = lo + i * dx
+        pdf = _math.exp(-0.5 * x * x) / _math.sqrt(2 * _math.pi)
+        cdf = 0.5 * (1 + _math.erf(x / _math.sqrt(2)))
+        weight = 0.5 if i in (0, steps) else 1.0
+        total += weight * x * n * pdf * cdf ** (n - 1)
+    return total * dx
+
+
+def calc_pruned_tree_nodes(branching: int, rejection_rate: float, depth: int):
+    """
+    Nodes a search generates through ``depth`` levels, unpruned and with a step check.
+
+    Every retained node proposes ``b`` children; the check rejects each child
+    independently with probability ``r``, so ``b_eff = b (1 - r)`` children
+    survive per node. Level ``d`` generates ``b^d`` nodes unpruned and
+    ``b * b_eff^(d - 1)`` pruned. Returns ``(unpruned, pruned)``.
+    """
+    surviving = branching * (1 - rejection_rate)
+    unpruned, pruned = 0, 0.0
+    for d in range(1, depth + 1):
+        unpruned += branching ** d
+        pruned += branching * surviving ** (d - 1)
+    return unpruned, pruned
+
+
+def calc_setup_share(setup, work):
+    """Share of a fresh call spent on setup: ``T_setup / (T_setup + W)``."""
+    return float((setup / (setup + work)).to("").magnitude)
+
+
+def calc_work_for_setup_cap(setup, cap: float):
+    """Useful work per call that holds setup to a share ``phi``: ``W >= T_setup (1 - phi) / phi``."""
+    return setup * (1 - cap) / cap
+
+
+# --- Injection exposure (added 2026-10-20) -----------------------------------
+# How often a task meets attacker text: the complement of every untrusted read
+# being clean. The same form counts turns when the per-turn chance is known.
+
+
+def calc_injection_exposure(payload_fraction: float, reads: float) -> float:
+    """
+    Chance that a task reading ``reads`` independent untrusted items meets a payload.
+
+        Pr(exp) = 1 - (1 - q)^n
+
+    ``q`` is the fraction of items carrying a payload. While q n is small,
+    Pr(exp) ~ q n; a screen that misses a fraction m of payloads replaces q
+    with q m. Counted in turns, q is the per-turn chance and n the horizon.
+    """
+    return 1 - (1 - payload_fraction) ** reads
+
+
+def calc_injection_read_budget(payload_fraction: float, target_exposure: float) -> int:
+    """
+    Most untrusted reads a task may make and keep exposure at or below ``target_exposure``.
+
+        n_max = floor(ln(1 - target) / ln(1 - q))
+    """
+    return _math.floor(_math.log(1 - target_exposure) / _math.log(1 - payload_fraction))
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+# Closed forms the harness evaluates before it admits work: the most one model
+# call can bill, the long-run call rate a weighted deficit round-robin gives a
+# backlogged class, and an allowance's used fraction. The solvers in
+# engine/solvers/harness.py compose them.
+
+
+def calc_bounded_liability(input_tokens, output_allowance, input_price, output_price):
+    """
+    Most one model call can bill before it settles.
+
+        L = n_in p_in + K_out p_out
+
+    Every input token is priced at the undiscounted input rate (a cache hit is
+    not guaranteed before dispatch) and the whole output allowance at the
+    output rate. Prices are per token, in any one currency unit.
+    """
+    return input_tokens * input_price + output_allowance * output_price
+
+
+def calc_drr_calls_per_round(weight: float, quantum: float, charge: float) -> float:
+    """
+    Long-run calls per round of a backlogged class under weighted deficit round-robin.
+
+        calls/round = w q / c
+
+    The class earns ``w q`` charge units of credit per round and spends ``c``
+    per call; unspent credit carries over, so the rate holds on average even
+    when one call needs several rounds of credit (Shreedhar and Varghese 1995).
+    """
+    return weight * quantum / charge
+
+
+def calc_used_fraction(used, allowance) -> float:
+    """Share of one budget dimension consumed: ``rho = used / allowance``."""
+    ratio = used / allowance
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+# --- Failure recovery: repair, irreversible loss, cleanup order (added 2026-10-20) ---
+# Closed forms the runtime evaluates when an effect has failed or must be
+# undone: the break-even success rate of one bounded repair attempt, the
+# expected cost of trying repair first, the expected irreversible loss of a
+# plan whose checks precede or follow its pivot, and the elapsed time of a
+# cleanup graph. The solvers in engine/solvers/recovery.py compose them.
+
+
+def calc_repair_break_even(repair_cost, fallback_cost):
+    """
+    Success probability above which one repair attempt beats the fallback.
+
+        p* = C_repair / C_fallback
+
+    Holds when a failed attempt leaves the fallback available at unchanged
+    cost; evaluate it separately for each resource axis (seconds, dollars).
+    """
+    ratio = repair_cost / fallback_cost
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+def calc_repair_first_expected_cost(repair_cost, fallback_cost, success_probability: float):
+    """Expected cost of attempting repair first: ``C_repair + (1 - p) C_fallback``."""
+    return repair_cost + (1 - success_probability) * fallback_cost
+
+
+def calc_expected_irreversible_loss(defect_probability: float, consequence, recoverable_fraction: float):
+    """
+    Expected loss that no recovery action can undo.
+
+        L = P(defect) x consequence x (1 - r)
+
+    ``r`` is the fraction of a defect's consequence that recovery avoids; a
+    check ahead of the pivot that catches a fraction ``v`` and reverts with
+    fidelity ``rho`` gives ``r = v rho``.
+    """
+    return defect_probability * consequence * (1 - recoverable_fraction)
+
+
+def calc_cleanup_critical_path(durations, depends_on):
+    """
+    Elapsed time of a cleanup graph run with unlimited parallelism.
+
+    ``durations`` maps each operation to its time once admitted; ``depends_on``
+    maps it to the operations that must settle first. The elapsed time is the
+    longest path through the acyclic graph; a reverse stack runs the same
+    operations one at a time and takes their sum.
+    """
+    finish = {}
+
+    def _finish(op, trail=()):
+        if op in trail:
+            raise ValueError(f"cleanup graph has a cycle through {op!r}")
+        if op not in finish:
+            start = max((_finish(d, trail + (op,)) for d in depends_on.get(op, ())), default=0 * durations[op])
+            finish[op] = start + durations[op]
+        return finish[op]
+
+    return max(_finish(op) for op in durations)
+
+
+def calc_pass_pow_k_unbiased(samples: int, passing: int, k: int) -> float:
+    """
+    Unbiased pass^k from ``samples`` graded runs of one task of which ``passing`` pass (Yao et al. 2024).
+
+        pass^k = C(c, k) / C(n, k)
+
+    the share of all size-``k`` subsets in which every run passes; 0 when
+    ``c < k``. Its expectation is ``p^k``, the mirror of the pass@k estimate
+    ``calc_pass_at_k_unbiased`` (added 2026-10-20).
+    """
+    if passing < k:
+        return 0.0
+    return _math.comb(passing, k) / _math.comb(samples, k)
+
+
+# --- Trajectory curation: split leakage, attempt-group contrast, ordered checks (added 2026-10-20) ---
+
+def calc_split_straddle(train_fraction: float, attempts: int) -> float:
+    """
+    Chance that a task's ``attempts`` land on both sides of a random split of runs.
+
+    Each run goes to training independently with probability ``f``; the task
+    stays on one side only if every run goes the same way:
+
+        1 - f^k - (1 - f)^k
+    """
+    f = train_fraction
+    return 1 - f ** attempts - (1 - f) ** attempts
+
+
+def calc_mixed_outcome_fraction(pass_probability: float, attempts: int) -> float:
+    """
+    Chance that ``attempts`` independent attempts hold at least one success and one failure.
+
+        1 - (1 - p)^k - p^k
+    """
+    p = pass_probability
+    return 1 - (1 - p) ** attempts - p ** attempts
+
+
+def calc_cost_per_rejection(check_cost, pass_probability: float):
+    """
+    Checking cost spent per record a check rejects: ``t / (1 - p)``.
+
+    For two adjacent independent checks, running A first is cheaper when A's
+    cost per rejection is lower (the rank ordering of expensive predicates).
+    """
+    return check_cost / (1 - pass_probability)
+
+
+def calc_short_circuit_cost(pass_probabilities, check_costs):
+    """
+    Expected checking cost and pass-through share of checks run in order, stopping at the first failure.
+
+    Check ``i`` runs only when every earlier check passed, so the expected cost
+    is ``sum_i t_i prod_{j<i} p_j`` and the share that passes them all is
+    ``prod_i p_i``. Returns ``(expected_cost, passing_share)``.
+    """
+    reach = 1.0
+    cost = 0 * check_costs[0]
+    for p, t in zip(pass_probabilities, check_costs):
+        cost = cost + reach * t
+        reach *= p
+    return cost, reach

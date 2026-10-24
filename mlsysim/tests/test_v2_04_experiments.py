@@ -4,7 +4,7 @@ import math
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_04_experiments import (
+from mlsysim.labs.experiments.v2_04_experiments import (
     AccessEvent,
     TRACKS,
     TIER_PLANS,

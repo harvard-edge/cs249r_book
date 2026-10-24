@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Any, Optional
 from ..hardware.types import HardwareNode
 from ..infrastructure.types import Datacenter, GridProfile
@@ -140,12 +140,29 @@ class Node(BaseModel):
     intra_node_bw: Quantity
     nics_per_node: int = 1
     psus_per_node: int = 2
+    # PSU redundancy (added 2026-09-29). psu_redundancy is M in an N+M supply: the
+    # PSUs that may fail with the node still at full performance. The default 0 makes
+    # every PSU a single point of failure (the series model's historical behavior).
+    psu_redundancy: int = 0
+    psu_rating: Optional[Quantity] = None   # per-PSU output rating
+    max_power: Optional[Quantity] = None    # maximum system power draw
     host_memory: Optional[Quantity] = None
     host_cpu: Optional[str] = None
     host_cpu_cores: Optional[int] = None
     host_memory_bw: Optional[Quantity] = None
     host_storage: Optional[Any] = None
+    # Physical composition (added 2026-09-28; optional because only some node
+    # datasheets publish them): NVSwitch chips on the baseboard, NVLink links
+    # per accelerator, and chassis mass.
+    nvswitch_count: Optional[int] = None
+    nvlink_links_per_accelerator: Optional[int] = None
+    mass: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("mass", mode="after")
+    @classmethod
+    def _validate_mass(cls, v):
+        return require_dimensionality(v, ureg.kilogram, "mass")
 
     @field_validator("intra_node_bw", mode="after")
     @classmethod
@@ -166,6 +183,39 @@ class Node(BaseModel):
             return v
         return require_unit_family(v, ureg.bit / ureg.second, "host_memory_bw", "data")
 
+    @field_validator("psu_rating", "max_power", mode="after")
+    @classmethod
+    def _validate_power_fields(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @model_validator(mode="after")
+    def _validate_psu_redundancy(self):
+        if not 0 <= self.psu_redundancy < self.psus_per_node:
+            raise ValueError(
+                f"psu_redundancy ({self.psu_redundancy}) must satisfy "
+                f"0 <= psu_redundancy < psus_per_node ({self.psus_per_node})"
+            )
+        if self.psu_redundancy > 0 and self.psu_rating is not None and self.max_power is not None:
+            n_required = self.psus_per_node - self.psu_redundancy
+            if n_required * self.psu_rating < self.max_power:
+                raise ValueError(
+                    f"{n_required} required PSUs x {self.psu_rating} cannot carry max_power "
+                    f"{self.max_power}; the {n_required}+{self.psu_redundancy} redundancy claim is inconsistent"
+                )
+        return self
+
+    @property
+    def series_psus(self) -> int:
+        """PSUs whose single failure stops the node (the n_psu term of a series MTBF sum).
+
+        With M >= 1 hot-replaceable spares, a PSU-driven outage needs M+1 concurrent failures
+        inside one repair window. For MTTF 1e5 h and a one-day repair that rate is ~1e-10/h
+        for 4+2, about 1e-6 of a DGX node's GPU+NIC rate, so the term is dropped.
+        """
+        return 0 if self.psu_redundancy > 0 else self.psus_per_node
+
 
 class RackProfile(BaseModel):
     """Physical rack composition for node-level system profiles."""
@@ -175,12 +225,58 @@ class RackProfile(BaseModel):
     node: Node
     nodes_per_rack: int
     non_accelerator_power: Optional[Quantity] = None
+    # Optional breakdown of non_accelerator_power (added 2026-09-28). When all
+    # five are set, their sum must equal non_accelerator_power, so a table that
+    # explains the aggregate cannot drift from it.
+    host_power: Optional[Quantity] = None
+    switch_power: Optional[Quantity] = None
+    network_power: Optional[Quantity] = None
+    conversion_loss_power: Optional[Quantity] = None
+    cooling_allocation_power: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("non_accelerator_power", mode="after")
+    @field_validator(
+        "non_accelerator_power", "host_power", "switch_power", "network_power",
+        "conversion_loss_power", "cooling_allocation_power", mode="after",
+    )
     @classmethod
-    def _validate_non_accelerator_power(cls, v):
-        return require_dimensionality(v, ureg.watt, "non_accelerator_power")
+    def _validate_power_fields(cls, v, info):
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @model_validator(mode="after")
+    def _components_sum_to_aggregate(self):
+        parts = self.power_components
+        if parts is not None:
+            if self.non_accelerator_power is None:
+                raise ValueError(f"{self.name}: power components set without non_accelerator_power")
+            total = sum(q.m_as("watt") for q in parts.values())
+            if abs(total - self.non_accelerator_power.m_as("watt")) > 1e-6:
+                raise ValueError(
+                    f"{self.name}: power components sum to {total} W, "
+                    f"not non_accelerator_power {self.non_accelerator_power.m_as('watt')} W"
+                )
+        return self
+
+    @property
+    def power_components(self) -> Optional[dict]:
+        """The five-way breakdown of non_accelerator_power, or None if any part is unset."""
+        parts = {
+            "host": self.host_power,
+            "switch": self.switch_power,
+            "network": self.network_power,
+            "conversion_loss": self.conversion_loss_power,
+            "cooling_allocation": self.cooling_allocation_power,
+        }
+        if any(v is None for v in parts.values()):
+            return None
+        return parts
+
+    @property
+    def it_power(self) -> Quantity:
+        """Rack IT power: total_power minus the cooling allocation (requires the breakdown)."""
+        if self.cooling_allocation_power is None:
+            raise ValueError(f"{self.name}: cooling_allocation_power is not set")
+        return self.total_power - self.cooling_allocation_power
 
     @property
     def accelerator_count(self) -> int:
@@ -188,6 +284,8 @@ class RackProfile(BaseModel):
 
     @property
     def accelerator_power(self) -> Quantity:
+        if self.node.accelerator.tdp is None:
+            raise ValueError(f"{self.name}: accelerator '{self.node.accelerator.name}' has no tdp set")
         return self.accelerator_count * self.node.accelerator.tdp
 
     @property

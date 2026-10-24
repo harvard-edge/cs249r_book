@@ -112,8 +112,8 @@ export default function RooflinePage() {
 
         <p className="text-xs text-textTertiary mb-6 max-w-2xl leading-relaxed">
           The Roofline Model shows the maximum achievable performance for a given workload.
-          Below the ridge point, your workload is <span className="text-accentRed">memory-bandwidth limited</span> — moving data is the bottleneck.
-          Above it, you are <span className="text-accentGreen">compute limited</span> — the ALU is the bottleneck.
+          Below the ridge point, your workload is <span className="text-accentRed">memory-bandwidth limited</span>, so moving data is the bottleneck.
+          Above it, you are <span className="text-accentGreen">compute limited</span>, so the ALU is the bottleneck.
           Select hardware below and see where common models fall.
         </p>
 

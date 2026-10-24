@@ -85,32 +85,48 @@ def test_calc_kv_cache_bytes_per_token():
     assert expl_token.to("KiB").magnitude == pytest.approx(320.0)
 
 
-def test_calc_tool_wait_stranded_tax():
-    from mlsysim.physics import calc_tool_wait_stranded_tax
+def test_lighthouse_workload_profiles():
+    """Research, remediation, and support workloads carry one book-wide set of inputs."""
+    from mlsysim.agents.types import RemediationWorkload, ResearchWorkload, SupportWorkload
+
+    research = Agents.Research.OrchestratorWorker
+    assert isinstance(research, ResearchWorkload)
+    assert research.fanout_token_multiple == 15  # anthropic2025multiagent
+    assert research.agent_token_multiple == 4  # anthropic2025multiagent
+    assert research.chat_input_tokens.to("token").magnitude == pytest.approx(16_000)
+    assert research.untrusted_reads_per_task == 100
+
+    remediation = Agents.Remediation.OnCall
+    assert isinstance(remediation, RemediationWorkload)
+    assert remediation.approval_decision_time.to("minute").magnitude == pytest.approx(15)
+    assert remediation.approval_request_rate.to("1/hour").magnitude == pytest.approx(2)
+    # Reviewer effort is part of, and shorter than, the elapsed decision time.
+    assert remediation.approver_review_time < remediation.approval_decision_time
+    assert remediation.approval_cost_per_attempt.to("USD").magnitude == pytest.approx(20.0)
+
+    support = Agents.Support.CustomerOps
+    assert isinstance(support, SupportWorkload)
+    assert support.shared_prefix < support.session_context
+    assert support.session_context.to("token").magnitude == pytest.approx(8_192)
+    assert support.customer_reply_time > support.generation_residence
+
+    for workload in (research, remediation, support):
+        assert 0 < workload.acceptance_probability <= 1
+        assert workload.metadata.provenance is not None
+        assert workload.metadata.provenance.notes
+
+
+def test_workload_rejects_wrong_units():
+    from pydantic import ValidationError
+    from mlsysim.agents.types import SupportWorkload
     from mlsysim.core.units import ureg
 
-    GB = ureg.gigabyte
-    second = ureg.second
-
-    # Chapter 01 numbers: 8x H100 (640 GB total, 160 GB static weights -> 480 GB dynamic)
-    # Context 160k tokens, m_kv = 51.2 GB
-    # 60s wait @ $24/hr, 4 concurrent agents, 20 pipeline tools
-    res = calc_tool_wait_stranded_tax(
-        node_hbm_capacity=640.0 * GB,
-        model_weights_memory=160.0 * GB,
-        kv_memory=51.2 * GB,
-        tool_wait_duration=60 * second,
-        hourly_node_cost=24.0,
-        num_gpus=8,
-        num_concurrent_agents=4,
-        num_pipeline_tools=20,
-    )
-    assert res["m_hbm_dynamic"].to(GB).magnitude == pytest.approx(480.0)
-    assert res["m_hbm_dynamic_per_gpu"].to(GB).magnitude == pytest.approx(60.0)
-    assert res["pct_stranded_single"] == pytest.approx(0.106666, rel=1e-3)
-    assert res["m_stranded_concurrent"].to(GB).magnitude == pytest.approx(204.8)
-    assert res["pct_stranded_concurrent"] == pytest.approx(0.426666, rel=1e-3)
-    assert res["cost_turn"] == pytest.approx(0.40, rel=1e-3)
-    assert res["cost_pipeline"] == pytest.approx(8.00, rel=1e-3)
-
-
+    base = Agents.Support.CustomerOps.model_dump()
+    kwargs = {k: getattr(Agents.Support.CustomerOps, k) for k in base}
+    kwargs["handoff_cost"] = 4 * ureg.second
+    with pytest.raises(ValidationError):
+        SupportWorkload(**kwargs)
+    kwargs["handoff_cost"] = 4 * ureg.USD
+    kwargs["shared_prefix"] = 9_000 * ureg.token
+    with pytest.raises(ValidationError):
+        SupportWorkload(**kwargs)

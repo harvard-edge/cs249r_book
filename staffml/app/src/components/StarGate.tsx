@@ -143,7 +143,7 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
           <h2 id="stargate-title" className="text-xl font-bold text-textPrimary">Our only ask.</h2>
         </div>
         <p className="text-sm text-textSecondary text-center mb-5 leading-relaxed">
-          StaffML, the textbook, TinyTorch, the hardware kits — all free, forever.
+          StaffML, the textbook, TinyTorch, and the hardware kits are all free, forever.
         </p>
 
         {/* Live star count + the why */}
@@ -162,7 +162,7 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
           )}
           <p className="text-[12px] text-textSecondary mt-3 leading-relaxed">
             Every star tells universities, publishers, and funders that AI engineering
-            education matters. Goal: 100,000 ★ — one million engineers by 2030.
+            education matters. The goal is 100,000 ★ and one million engineers by 2030.
           </p>
         </div>
 

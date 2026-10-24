@@ -13,7 +13,7 @@ class OptimizationResult(BaseModel):
 class OptimizerProtocol(Protocol):
     """Abstract protocol for defining mathematical optimization tasks."""
     
-    def compile(self) -> Any:
+    def compile(self, *args: Any, **kwargs: Any) -> Any:
         """Transforms the Python constraints into the specific solver backend's format."""
         ...
         

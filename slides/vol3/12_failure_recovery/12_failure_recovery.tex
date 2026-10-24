@@ -1,0 +1,595 @@
+% =============================================================================
+% Lecture 12: Failure Recovery
+% Agentic Machine Learning Systems (Volume III), Chapter 12
+% =============================================================================
+% Thesis: a durable record does not change the world, so recovery decides on
+% incomplete evidence: settle before retrying, compensate in dependency order,
+% check before the point of no return, and stop loops that raise no error.
+% Hook and synthesis: Knight Capital, 1 August 2012 (War Story 12.1; SEC
+% Release 34-70694). Running case: the repair agent's temporary integration
+% environment env_r18_01 (provision_test_env_r18, release_test_env_r18), with
+% the remediation agent for the pivot (Lighthouse 12.1).
+%
+% Build: make deck V=3 D=12_failure_recovery   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 12},
+  chaptertitle={Failure Recovery},
+  layer=runtime,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+% Code and real tool output: Inconsolata is narrower than Courier.
+\usepackage[varqu,scaled=0.95]{zi4}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Failure Recovery}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An identifier from the running case, in code type
+\newcommand{\op}[1]{\texttt{#1}}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 11 made the trajectory's record durable; today's lecture is about what the runtime does with that record when the world outside it is half changed. Notes total about 71 minutes; the core lecture is about 58 minutes. FLEX: notes tagged [OPTIONAL] can be cut. Cut first the measured self-correction plot, the CrowdStrike timeline, the remediation photo, the MAST plot, the OpenHands code, the jitter slide, the incident-duration plot, and the open questions. Every concept the chapter owns stays on a core slide.}
+\mlsystitle{Failure Recovery}{A durable record does not change the world, so recovery decides on incomplete evidence: settle first, compensate in order, check before the point of no return, and stop loops that raise no error.}{cover_scheduling_blueprint.png}
+
+\begin{frame}{Predict: what did Knight's rollback do?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{nyse_floor.jpg}\\[0.05cm]
+      {\footnotesize NYSE trading floor}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \small 1 August 2012. Knight's order router runs on \textbf{8 servers}. A deployment missed \textbf{1}; it still holds a function retired in 2003.\\[0.15cm]
+      Child orders stream out without limit. Operators uninstall the new code from the other \textbf{7}.\\[0.3cm]
+      \normalsize
+      \choice{A}{The runaway orders stop.}\\[0.12cm]
+      \choice{B}{Nothing changes.}\\[0.12cm]
+      \answerat{2}{C}{All 8 servers run the retired path.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Carol M. Highsmith, Library of Congress, public domain, Wikimedia Commons. Facts: U.S. SEC, Release No. 34-70694 (2013), paras. 12 to 16 and 27; Failure Recovery, War Story 12.1.}
+  \note{[2.5 min] [CORE] NARRATE: On 1 August 2012 Knight Capital's automated order router, SMARS, began handling orders for the New York Stock Exchange's new Retail Liquidity Program. The router ran on eight servers. A technician copied the new code to seven; the eighth still held Power Peg, a function retired in 2003, and the new code reused the flag that once switched Power Peg on. Orders that reached the eighth server made it send child orders without counting fills. ENGAGE: one minute; vote with fingers on what uninstalling the new code from the other seven servers did. Step 2: C. The SEC found that the action worsened the problem: all eight servers now ran Power Peg. Students who choose A reason that a rollback is always safe; the rollback was itself an untested change applied to a live system. WARN: the lesson is not that rollbacks are bad; it is that a recovery action is an action, and it needs the same checks as forward work. LINK: the remediation agent from Lecture 1 faces this exact situation every time it changes production configuration. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Knight's rollback spread the fault to all 8 servers}
+  \centering
+  \safeimg[width=0.98\textwidth,height=1.7cm,keepaspectratio]{sec_order_par27_crop.png}\\[0.3cm]
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{knight_servers.pdf}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \centering
+      \begin{tabular}{@{}cc@{}}
+        \textbf{\large 212} & \textbf{\large 4 million}\\
+        \footnotesize parent orders & \footnotesize executions\\[0.3cm]
+        \textbf{\large 397 million} & \textbf{\large \textcolor{RedLine}{\$460 million}}\\
+        \footnotesize shares, 45 min & \footnotesize realized loss
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{U.S. Securities and Exchange Commission, Release No. 34-70694, Knight Capital Americas LLC (16 Oct 2013), para. 27 (excerpt) and para. 17.}
+  \note{[1.5 min] [CORE] NARRATE: the excerpt is the end of paragraph 27 of the SEC's order, the real record of the incident; read it aloud. The diagram shows what it says: seven servers ran the new RLP code and the eighth still held the retired Power Peg path; uninstalling RLP left all eight routing orders to Power Peg. Then the numbers from paragraph 17: 212 incoming parent orders produced 4 million executions in 154 stocks, more than 397 million shares, in about 45 minutes, and Knight realized a loss of 460 million dollars. ENGAGE: the router logged everything it did. Did the logs help stop it? (Expected: no; nothing outside the router could hold it, and staff ignored 97 automated e-mails reading ``Power Peg disabled'' before the open.) Keep three questions on the board for the synthesis: what should have been checked before going live, what should have halted the router, and what made the rollback unsafe. The lecture answers all three. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: what does the log hold after a crash?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Question of the day}\\[0.3cm]
+      {\normalsize A worker crashes after dispatching \op{test\_r18}. What did it write first, and what does the replacement know?}\\[0.3cm]
+      \uncover<2->{\small \textbf{\textcolor{mlsysaccent}{Durable intent}} written before dispatch\\
+      \textbf{\textcolor{mlsysaccent}{Control state}} rebuilt from the log, never by asking the model\\
+      \textbf{\textcolor{mlsysaccent}{Outcome unknown}}: intent with no result stays in doubt}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.6cm,keepaspectratio]{thumb_recall.pdf}\\[0.3cm]
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small\textbf{From Lecture 11:} the log tells the runtime what it intended and what it saw. It does not say what the world did.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \note{[2 min] [CORE] Retrieval from Lecture 11. Give 60 seconds of silent writing. Step 2: the runtime writes a durable intent before it dispatches an effect; a replacement worker rebuilds control state from the log and the checkpoint without resampling the model; and an intent with no recorded outcome is an in-doubt operation. The thumbnail is the log strip: five settled records and one dashed record, the intent for test\_r18 with no result. ENGAGE: can the replacement worker decide from the log alone whether test\_r18 ran? (Expected: no; it can only say the outcome is unknown.) LINK: today starts exactly there. The record survived; the world it describes may be half changed. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A durable record does not change the world}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      {\Large\bfseries Why can an agent that records every step still leave the world half changed?}\\[0.4cm]
+      \small Over a long horizon, the authority an agent has used becomes cleanup the runtime owes.
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering
+      \safeimg[width=0.6\textwidth,height=2.6cm,keepaspectratio]{hsa_locator_ha.pdf}\\[0.05cm]
+      {\footnotesize Lit: horizon (H), authority (A)}\\[0.2cm]
+      \mlsyskitfig[width=0.8\textwidth,height=2.6cm,keepaspectratio]{stack_runtime}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] The driving question. NARRATE: the locator lights two of the three exposures from Lecture 1: horizon, counted in turns, and authority, what the agent may change. Lecture 11's locator lit horizon and state; today state is assumed durable and the question moves to the world outside it. A long trajectory that holds authority accumulates effects: environments created, packages published, configurations changed. Each is a duty the runtime still owes if the task stops. The stack shows where we are: the runtime layer, third of five runtime lectures. ENGAGE: name one effect from your own agent work that a local undo cannot reverse. (Expected: a sent message, a created cloud resource, a payment, a published release.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{What will you be able to do after today?}
+  \thumbline{thumb_settle.pdf}{Classify each outcome as established, established absent, or unknown, and register its cleanup before dispatch.}\\[0.2cm]
+  \thumbline{thumb_repair.pdf}{Choose among retry, repair, compensation, and escalation, and price one repair against compensating and rebuilding.}\\[0.2cm]
+  \thumbline{thumb_pivot.pdf}{Order a plan so every possible check precedes its one irreversible step, and price the loss that remains.}\\[0.2cm]
+  \thumbline{thumb_loop.pdf}{Detect a loop that raises no error, and price how late it is stopped.}\\[0.2cm]
+  \thumbline{thumb_contain.pdf}{Contain shared failures with one retry owner, scoped breakers, and caps, and hold a suspect trajectory.}\\[0.2cm]
+  \hsathread{closes the horizon and authority exposures}
+  \note{[1 min] [CORE] Five goals, one per segment; each thumbnail is the picture that teaches it. The running case is the repair agent from Lecture 1 fixing the connection-pool race: to test candidate revision r18 it provisions a temporary integration-test environment, called env\_r18\_01 once it exists, and must release it afterward. The remediation agent, which changes production configuration, returns for the segment on irreversible steps. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: SETTLEMENT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: an effect the runtime cannot see, and the cleanup it owes for it.}
+\mlsysdivider{What does the runtime owe for an effect it cannot see?}{Failure Recovery, \S12.2 and \S12.3}
+\section{Settlement}
+
+\begin{frame}{A cloud API can time out after it has acted}
+  \begin{columns}[c]
+    \begin{column}{0.54\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{timeout_seq.pdf}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \begin{mlsyscard}{midgray}\footnotesize
+        ``Operations might also time out or encounter other server issues before they complete, even though the request has already returned a result. [\dots] you might create more resources than you intended.''
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      {\footnotesize Release replies only with a state change:}\\[0.05cm]
+      {\footnotesize\texttt{<name>shutting-down</name>}}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  \centering\small Every dispatched operation is \textbf{established}, \textbf{established absent}, or \textbf{\textcolor{RedLine}{unknown}}.
+  \mlsyscredit{Amazon EC2 Developer Guide, ``Ensuring idempotency in Amazon EC2 API requests''; EC2 API Reference, TerminateInstances sample response (read 19 Oct 2026). Failure Recovery, \S12.2.}
+  \note{[2 min] [CORE] NARRATE: the diagram first. The agent creates an instance under a client token; the instance is created, the reply is lost, and the agent sees only a timeout. A retry with the same token returns the first instance instead of creating a second. The provider's documentation, top right, warns that a blind retry creates a second resource. The token names the logical operation: operation identity from Lecture 7. Below it: the documented reply to deleting an instance, shown as its one state field. The instance moves from running to shutting-down; the reply proves only that the request was accepted; the instance may still exist. LINK: the settlement rule from Lecture 10, in the sharper form recovery needs: three mutually exclusive states. An outcome starts unknown; only evidence correlated with that operation moves it to established or established absent. A gateway timeout, an accepted-but-pending status, or an empty lookup while the request may still be in flight all leave it unknown. ENGAGE: our provision\_test\_env\_r18 times out. Which state? (Expected: unknown; its reservation and its owner stay.) WARN: a timeout marks a deadline; it carries no evidence about the effect. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Compensation restores only the predicates it declares}
+  \centering
+  {\normalsize Compensation: a \textbf{new forward action} that re-establishes declared conditions.}\\[0.15cm]
+  {\large $S_{\text{comp}} \equiv_{P} S_{\text{pre}} \iff \phi(S_{\text{comp}}) = \phi(S_{\text{pre}})\ \text{for every}\ \phi \in P$}\\[0.1cm]
+  \vspace{0.2cm}
+  \uncover<2->{\safeimg[width=0.92\textwidth,height=3.35cm,keepaspectratio]{comp_states.pdf}}\\[0.1cm]
+  \uncover<3->{\footnotesize Restoring the snapshot \op{ws\_r18} resets local files; it never releases the remote environment.}
+  \mlsyscredit{Failure Recovery, \S12.3.2, equation 2 and Definition 12.2.}
+  \note{[2.5 min] [CORE] Step 1: the definition. The environment service and the runtime's log commit separately; no transaction spans both, so the runtime cannot roll the world back. Compensation is a separately committed forward operation whose job is to make declared predicates true again. Equation 2 says the compensated world equals the original only on the predicates in P. S pre is the world before the step; S comp, after the step and its compensation. Step 2: for our environment, P holds two predicates: the environment is allocated, and an admitted test depends on it. In the diagram, both were false before provisioning, true after it, and false after release. Billing records and the audit log are outside P: the charges already accrued and the provisioning event stay forever, which is why billing needs its own settlement. Step 3: local rollback and remote compensation are different tools. The checkpoint from Lecture 11 restores ws\_r18 on the runtime's disk; the remote machine keeps running and charging. ENGAGE: a peer workflow attached to env\_r18\_01 for joint debugging. May our agent still release it? (Expected: no; admission checks live ownership and dependencies at the moment of compensation.) WARN: students read ``compensation'' as ``undo''; it is new work that can itself fail. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{Predict: where can this saga leak a withdrawal?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{mlsyscard}{midgray}\scriptsize
+\begin{verbatim}
+err = workflow.ExecuteActivity(ctx, Withdraw, transferDetails).Get(ctx, nil)
+if err != nil {
+        return err
+}
+defer func() {
+        if err != nil {
+                ... workflow.ExecuteActivity(ctx, WithdrawCompensation, ...
+\end{verbatim}
+  \end{mlsyscard}
+  {\small The withdrawal takes effect; every reply is lost and \op{Withdraw} returns an error. What compensates it?}\\[0.1cm]
+  \choice{A}{Its compensation runs.}\qquad
+  \answerat{2}{B}{Nothing: never registered.}\qquad
+  \choice{C}{None is needed.}
+  \mlsyscredit{temporalio/samples-go, saga/workflow.go (commit 014be0f, 2022), excerpt; ``...'' marks omitted code. Gray 1981; Failure Recovery, \S12.2 footnote 2 and \S12.3.1.}
+  \note{[2.5 min] [CORE] NARRATE: real code from a public sample of a durable-execution framework, a money transfer written as a saga. The withdrawal's compensation is registered by the defer statement, which runs only after Withdraw has returned success. ENGAGE: one minute in pairs. Step 2: B. If Withdraw takes effect at the bank but its replies are lost, the activity fails after the 3 attempts its retry policy allows (MaximumAttempts: 3, earlier in the same file), the function returns at the first return statement, and no compensation was ever registered. The money is gone with no record that it is owed back. Students who choose A assume the framework knows about the compensation; it learns of it only on that later line. WARN: the three attempts can make it worse; without an idempotent withdrawal, a retry may withdraw twice. LINK: this is Gray's 1981 coordinator, which logged a compensator after the forward step returned. The chapter's trajectory saga fixes it by writing the cleanup obligation before dispatch, the durable-intent rule from Lecture 11 applied to cleanup itself. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A trajectory saga registers cleanup before dispatch}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=5.85cm,keepaspectratio]{saga_step}{3}
+  \mlsyscredit{Redrawn from Failure Recovery, figure 1 and table 1 (\S12.3.1 to \S12.3.4).}
+  \note{[2 min] [CORE] Step 1: before provision\_test\_env\_r18 leaves the host, the runtime appends one record: the forward operation, its scope, its reservation, and a cleanup template for release\_test\_env\_r18 whose target field is still empty, because the environment's identifier does not exist yet. The dashed release box is planned but cannot run yet. Step 2: dispatch. If correlated evidence arrives, it binds env\_r18\_01 to the operation and the template gains a target. If the reply is lost, the outcome stays unknown with an owner; a result-recovery probe (Lecture 7) may retrieve it, but an empty lookup does not close it, because a delayed creation may still land. Step 3: the release is itself an admitted operation with its own attempts. It waits until the test has ended and artifacts are preserved, then either closes on evidence or stays retained with an owner. The scratch directory has no dependency. ENGAGE: why can't the runtime write the template after the reply? (Expected: a crash in between leaves a live, billed environment with no record of the duty.) Definition 12.1 names this the trajectory saga. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: how long does this cleanup take?}
+  \mlsysactivity{Estimate}{2 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.5cm,keepaspectratio]{cleanup_step}{2}\\[0.1cm]
+  \only<1|handout:0>{\small In pairs: total time as a reverse stack, one at a time? As a graph, in parallel? Then the test's cancel reply is lost.}%
+  \only<2->{\small Reverse stack: \textbf{105 s}.\quad Graph: \textbf{\textcolor{mlsysaccent}{75 s}}, the longest path. A lost reply blocks only its dependents.}
+  \mlsyscredit{Failure Recovery, Exercise 1 (hypothetical durations) and \S12.3.4. Times derived in images/calcs.py.}
+  \note{[2.5 min] [CORE] Five cleanup operations, durations once admitted: end the test 30 s, preserve artifacts 20 s, release the environment 40 s after both, revoke its credential 5 s after release, delete an unrelated scratch directory 10 s. ENGAGE: two minutes in pairs. Step 2: a reverse stack runs them one at a time: 30 + 20 + 40 + 5 + 10 = 105 s (derived). The cleanup graph runs independent nodes at once; the longest chain is 30 + 40 + 5 = 75 s, and the scratch deletion overlaps it. Now the cancel reply for the test is lost, so ending the test is unresolved. Preserving artifacts and deleting scratch still settle; release and revoke are blocked, each recorded with its owner and the evidence it awaits. WARN: a stack would have blocked everything after the stuck node, including the scratch deletion. The chapter's rule: an unresolved node blocks only its transitive dependents, and the graph must be acyclic. LINK: branch-scoped compensation (\S12.3.5) uses the same graph with reference counts: abandoning one search branch releases only what that branch owns alone. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REPAIR
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 1 aloud: an outcome is established, absent, or unknown, and cleanup is registered before the effect exists. Now the choice of what to do next.}
+\mlsysdivider{Retry, repair, unwind, or hand off?}{Failure Recovery, \S12.4}
+\section{Repair}
+
+\begin{frame}{Recovery chooses by evidence, then admission, then cost}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=5.75cm,keepaspectratio]{decide_step}{3}
+  \mlsyscredit{Redrawn from Failure Recovery, figure 2 and table 2 (\S12.4.1 to \S12.4.3).}
+  \note{[3 min] [CORE] LINK: Lecture 2's self-correction data showed self-review without new evidence lowering accuracy and a check's verdict raising it. For recovery, the repair success rate $p$ is therefore a measured property of one failure class and one feedback source; the chapter cites Olausson and colleagues, whose code-repair gains under matched budgets were modest and varied by problem class. Step 1: the evidence class comes first. An unknown outcome raises an effect-status question before any repair question: settle it, or retry only under a verified repeat contract (settlement before retry, Lecture 7). A rejection before dispatch or an established outcome opens the other choices. Step 2: admission removes candidates that authority, the remaining allowance with its finalization reserve, or the deadline forbid. This is the harness's admission check from Lecture 10, and recovery gets no exemption. If nothing survives, the runtime holds or escalates to a named owner. Step 3: only then does expected cost rank the survivors: retry the same operation, ask for a new proposal, repair with feedback, or compensate. Sunk cost never enters; only cost still ahead. ENGAGE: why must cost come last? (Expected: a cheap repair that needs an expired permission or overruns the dollar ceiling in the worst case must never run, however cheap on average.) Concept: the recovery decision order. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Diagnose: which recoveries can each failure use?}
+  \mlsysactivity{Diagnose}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{errorstroke}\small\textbf{1.} The provisioning call times out.\end{mlsyscard}
+      \uncover<2->{\footnotesize \textbf{Unknown.} Probe for the result or keep it owned. No second create.}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{errorstroke}\small\textbf{2.} A mutating call returns HTTP 429, too many requests.\end{mlsyscard}
+      \uncover<2->{\footnotesize \textbf{What the contract says.} Backoff times a permitted retry; it never makes an unsafe one safe.}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{errorstroke}\small\textbf{3.} The validator rejects the test configuration before dispatch.\end{mlsyscard}
+      \uncover<2->{\footnotesize \textbf{Never sent.} Repair with the field diagnostic, or unwind and rebuild.}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering\uncover<2->{\small Same words, ``try again'', three different evidence classes.}
+  \mlsyscredit{Failure Recovery, \S12.4.1 and table 2; Checkpoint 12.2.}
+  \note{[3 min] [CORE] ENGAGE: one minute alone, then one minute with a neighbor; for each card name the evidence class and the choices it permits. Step 2. Card 1: the reply was lost, so the environment may or may not exist. Only a result-recovery probe or a repeat under the endpoint's verified repeat contract is allowed; issuing a fresh create can leave two billed environments, one unowned. Card 2: HTTP 429 means rate limited. It proves only what that service's contract guarantees; unless the contract says the mutation was rejected before executing, the outcome is still unknown, and exponential backoff only times a retry that was already permitted. Card 3: local rejection is the strongest evidence of all: the action never reached the executor. Bounded repair with the field-level diagnostic is allowed, and so is compensation and rebuilding to the same endpoint. WARN: students treat card 3 as the hardest because it is a bug; it is the easiest to recover because nothing escaped. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Repair first pays when one attempt in 16 succeeds}
+  \begin{columns}[c]
+    \begin{column}{0.41\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Given (illustrative, NM 12.1)}\\[0.03cm]
+        Unwind, rebuild: $C_{\text{fallback}}$ = 86.6 s, \$0.162\\
+        One repair: $C_{\text{repair}}$ = 4.09 s, \$0.00987
+      \end{mlsyscard}
+      \small
+      \wstep{2}{$\mathbb{E}[C] = C_{\text{repair}} + (1-p)\,C_{\text{fallback}}$}
+      \wstep{2}{$p^* = C_{\text{repair}}/C_{\text{fallback}}$: \textbf{4.7\%} (s), \textbf{6.1\%} (\$)}
+      \wstep{3}{At $p = 0.5$: 47.39 s, \textbf{\textcolor{mlsysaccent}{45.3\% less}}}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{repair_curve.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Failure Recovery, Napkin Math 12.1, equations 3 and 4 (hypothetical inputs; \$3 and \$15 per million input and output tokens). Values derived in images/calcs.py.}
+  \note{[3 min] [CORE] Worked example. The environment is healthy; only the configuration failed local validation. Fallback: compensate (40.6 s) and rebuild to the same readiness endpoint (46 s, 38,500 input and 3,100 output tokens): 86.6 s and 0.162 dollars. One bounded repair call: 0.09 s before output, 180 tokens at 50 per second, 0.4 s of validation: 4.09 s and 0.00987 dollars. Step 2: if a failed repair leaves the fallback unchanged, expected cost is the repair plus (1 minus p) times the fallback, and repair first wins when p exceeds the ratio: 4.7 percent in seconds, 6.1 percent in dollars (derived). One success in 16 (6.25 percent) clears both. Step 3: at an assumed p of one half, expected time to readiness is 47.39 s, 45.3 percent less than unwinding now. ENGAGE: what happens as the fallback gets cheap? (Expected: p* rises toward 1, and unwinding first wins.) WARN: compare at the same endpoint; a rebuild that stops before the failed step looks falsely cheap. The repair is also bounded: a repair episode counts attempts at admission against a cap, and renaming the step does not reset the count. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: PIVOTS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 2 aloud: evidence class first, admission second, expected cost last, at the same endpoint. That analysis assumed the fallback stays available. Some steps remove it.}
+\mlsysdivider{Where must checks run when a step cannot be undone?}{Failure Recovery, \S12.5}
+\section{Pivots}
+
+\begin{frame}{An update pushed fleet-wide crashed 8.5 million Windows hosts}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{bsod_dulles.jpg}\\[0.05cm]
+      {\footnotesize Dulles Airport, 19 July 2024.}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{cs_window.pdf}\\[0.2cm]
+      \begin{mlsyscard}{midgray}\footnotesize
+        ``Adopt a staggered deployment strategy, starting with a canary deployment to a small subset of systems before a further staged rollout.''
+      \end{mlsyscard}
+      {\footnotesize Prevention item, CrowdStrike's post-incident review.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: reivax, CC BY-SA 2.0, Wikimedia Commons. CrowdStrike, Preliminary Post Incident Review, executive summary (24 Jul 2024). Device estimate: Microsoft blog, 20 Jul 2024. Window derived.}
+  \note{[2 min] [OPTIONAL] An outside incident that shows the segment's idea. At 04:09 UTC on 19 July 2024 a security vendor published a content update to every Windows host running its sensor; hosts online until it was reverted at 05:27 crashed, a window of 78 minutes (derived). Microsoft estimated 8.5 million affected Windows devices, under one percent of all Windows machines. The photo is the result at Dulles Airport. The vendor's own review lists, among its prevention steps, the line in the card: a canary deployment to a small subset first. ENGAGE: what was the irreversible step, and which check could have run before it? (Expected: publishing to all hosts at once; a canary on a few hosts would have crashed only those.) WARN: the update itself could be reverted; the crashes it had already caused could not. Reversibility belongs to the effect; reverting the change did not reverse the crashes. FLEX: [OPTIONAL]; the remediation agent carries the same idea on core slides.}
+\end{frame}
+
+\begin{frame}{Reversibility depends on the subsystem and the grant}
+  \centering
+  \safeimg[width=0.96\textwidth,height=4.9cm,keepaspectratio]{contracts.pdf}\\[0.2cm]
+  {\small A \textbf{pivot} is the one step in a plan region after which the region cannot be restored.}
+  \mlsyscredit{Failure Recovery, \S12.5.1 table 3 and Definition 12.3; Mehrotra et al., ICDCS 1992.}
+  \note{[1.5 min] [CORE] Before changing anything, the runtime asks three questions of each effect: what exactly is the target state, what recovery is available under this task's grant, and what evidence would show the recovery worked. The answers fall into three contracts, one per panel. A local snapshot restores tracked files but leaves remote effects and charges untouched; a release compensates a known effect but leaves logs and charges, and can itself fail; publishing a package or rolling a fleet config is a commitment whose effect remains. A local snapshot restores the files it tracks and nothing else. A compensation fixes declared predicates but leaves history. A commitment cannot be undone within the agent's authority, so it must be accepted explicitly, with a plan for verification and follow-up. ENGAGE: is deleting a database table a pivot? (Expected: it depends on the grant; with a backup and restore rights it is compensable; under a narrow grant it is a pivot.) WARN: an API named delete, or a low authority level, does not make an action reversible; the classification belongs to the action in the plan under a specific grant. The term pivot comes from multidatabase transactions, which allowed at most one per global transaction. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Hoist every check ahead of the single pivot}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=6.2cm,keepaspectratio]{reorder_step}{2}
+  \mlsyscredit{Redrawn from Failure Recovery, table 4 (\S12.5.2). Red: commitments.}
+  \note{[2 min] [CORE] An authorized publishing agent must release an approved artifact to a public registry and notify recipients. Step 1: the naive plan publishes first and validates second. If validation fails, an invalid package is already public, and nothing within the agent's authority recalls every copy. It also contains two commitments, publish and notify. Step 2: the reordered plan. Validate the signature and dependency versions locally; stage the notes and the notification privately; confirm authority and approval and record the intent and the follow-up duty; then publish, the single pivot of this region. Notification becomes a second commitment region after publication evidence arrives. This structure is the commitment region: compensable preparation, one pivot, owned follow-up. ENGAGE: which check cannot be hoisted? (Expected: confirming that a public mirror resolves the new version; it depends on the publication, so it stays after the pivot as an owned risk.) WARN: crossing the pivot does not retire cleanup; temporary resources still get released. A local outbox can record the notification duty in the same commit as the publication outcome, but it records only the duty; delivery still needs its own evidence. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The remediation agent's pivot is the fleet rollout}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{canary_mine.jpg}\\[0.05cm]
+      {\footnotesize A miner's canary: the first to show a hazard.}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{region.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: George McCaa, U.S. Bureau of Mines, public domain, Wikimedia Commons. Failure Recovery, Lighthouse 12.1.}
+  \note{[1.5 min] [OPTIONAL] The remediation agent from Lecture 1 responds when a service's error rate spikes after a configuration change. Its grant lets it query telemetry, stage a candidate configuration on a canary slice (the few servers that take traffic first, named for the bird miners carried underground because it showed bad air before they did), and roll the change across the fleet after approval. Reverting the canary is compensable, though requests the canary already served stay served. The fleet rollout with its rolling restart is the pivot: severed connections and dropped requests are beyond any action the grant allows. So every diagnostic and synthetic test that can evaluate the canary belongs above the pivot, and the human approval gate (approval escrow, Lecture 10) sits exactly at it, where an engineer's minute prevents the most loss. ENGAGE: why put approval at the pivot and not at the first telemetry query? (Expected: the earlier steps are reversible; review time is worth most where nothing can be undone.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: what does a canary save per task?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Given (illustrative, NM 12.2)}\\[0.05cm]
+        Change wrong: 4\%\\
+        Consequence: \$12,000\\
+        Canary catches 80\%\\
+        Revert avoids 90\% of a caught change
+      \end{mlsyscard}
+      \footnotesize
+      \uncover<2->{Loss $=$ Pr(bad) $\times$ consequence\\ \quad $\times\,(1 - \text{catch} \times \text{revert})$}
+    \end{column}
+    \begin{column}{0.64\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{loss_step}{3}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Failure Recovery, Napkin Math 12.2 and equation 5 (scenario values). Values derived in images/calcs.py.}
+  \note{[3 min] [CORE] ENGAGE: two minutes in pairs; expected irreversible loss per task with and without the canary. Step 1: rollout first, no recovery: 0.04 times 12,000 = 480 dollars per task. Step 2: canary first. Caught changes cost 0.04 times 0.8 times 12,000 times 0.1 = 38.40 (the 10 percent a revert cannot avoid); missed changes cost 0.04 times 0.2 times 12,000 = 96. Total 134.40 dollars, 3.6 times less (derived). The formula is the chapter's equation 5 with the recoverable fraction equal to catch rate times revert fidelity. Read the punchline on the bar: 71.4 percent of the remaining loss comes from changes the canary missed. Step 3: raising the catch rate 10 points, to 90 percent, removes 43.20 dollars per task, about 2.1 times the 20-dollar cost of an attempt (derived). ENGAGE: a cheaper model call or a better canary, which moves this loss? (Expected: the canary; token price changes only the attempt cost.) WARN: the remaining 134.40 is still 6.6 times the attempt cost; it belongs in the cost per accepted task from Lecture 1, charged to every attempt. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: LOOPS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 3 aloud: run every check that can precede the pivot before it, and own what remains after it. Commitment regions bound what a trajectory can damage. They do not bound what it can waste.}
+\mlsysdivider{How does the runtime stop a loop that raises no error?}{Failure Recovery, \S12.6}
+\section{Loops}
+
+\begin{frame}{A digest that repeats two turns back flags an oscillation}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{digest.pdf}
+    \end{column}
+    \begin{column}{0.41\textwidth}\small
+      \textbf{Semantic watchdog}: compares task-level evidence over a bounded window.\\[0.25cm]
+      \footnotesize
+      \textbf{Digest}: a hash of the declared task files\\[0.08cm]
+      \textbf{Checks}: did any declared test improve?\\[0.08cm]
+      \textbf{Action and outcome}: same call, same error?\\[0.2cm]
+      A window of $m$ digests misses cycles longer than $m$.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Redrawn from Failure Recovery, figure 3 (top) and equation 6; table 5 for the three signals.}
+  \note{[3 min] [CORE] The repair agent toggles between patch A and patch B on ws\_r18, and the same test fails each time. The runtime canonicalizes the declared task projection, the files and settings that belong to the task with timestamps and scratch files filtered out, and hashes it each turn. Equation 6 flags a recurrence of period l when the current digest equals one l turns back within the last m. Period 1 is a turn that changed nothing; period 2 is this oscillation. Three signals, each fallible: repeated state (but a planned backtrack repeats state too, and writing a timestamp each turn hides a loop); stagnant checks (but exploration can temporarily worsen a metric, and the chapter asks for a Pareto improvement: at least one declared check better, none worse); repeated action and outcome (but polling a running job legitimately repeats). ENGAGE: ws\_r18 is unchanged for six turns while test\_r18 runs. Loop? (Expected: no; the runtime knows the job is pending and enforces its deadline instead.) WARN: no finite window proves a trajectory will never progress; the runtime turns the question into a safety rule it can enforce. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{A real harness checks for loops before each step}
+  \centering\safeimg[width=0.96\textwidth,height=3.1cm,keepaspectratio]{stuck_pairs.pdf}
+  \raggedright
+  \begin{mlsyscard}{midgray}\footnotesize
+\begin{verbatim}
+# scenario 4: action, observation pattern on the last six steps
+        if self._is_stuck():
+            await self._react_to_exception(
+                AgentStuckInLoopError('Agent got stuck in a loop')
+\end{verbatim}
+  \end{mlsyscard}
+  \mlsyscredit{OpenHands 0.59.0: openhands/controller/stuck.py, lines 88 to 105 (comments); agent\_controller.py, lines 857 to 860.}
+  \note{[2 min] [CORE] LINK: Lecture 18's study of 1,642 multi-agent traces (MAST) found step repetition the most frequent failure mode, 15.7 percent; one agent loops the same way, with every call succeeding. Real code from OpenHands, an open-source coding-agent framework, at release 0.59.0. The diagram is scenario 4 drawn out: steps 1, 3 and 5 match, and steps 2, 4 and 6 match, so the controller stops the run. The code card shows that comment and the check. The stuck detector checks five patterns, listed by comments in stuck.py: the same action and observation four times, the same action with errors, a monologue, a two-step alternation over the last six steps, which is the period-2 oscillation of the previous slide, and a loop of context-window errors. The last lines: the controller runs the check before the agent's next step and, if it fires, raises an error that stops the run. Two points to draw out. The detector compares structured actions and observations the runtime controls and ignores the model's reasoning text, as the chapter recommends. And the response is a hard stop; the chapter adds two gentler responses on the next slides. ENGAGE: what false alarm could scenario 1 raise? (Expected: polling a long job returns the same observation legitimately.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: what does stopping at turn 4 save?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Given (illustrative, NM 12.3)}\\[0.05cm]
+        First input: 1,000 tokens\\
+        Each turn appends 1,100\\
+        300 output tokens per turn\\
+        \$3 / \$15 per million in / out\\
+        Ceiling: 50 turns
+      \end{mlsyscard}
+      \small Ceiling cost $\div$ stop-at-4 cost?\\[0.1cm]
+      \choice{A}{12.5$\times$}\quad\choice{B}{25$\times$}\quad\answerat{2}{C}{89$\times$}
+    \end{column}
+    \begin{column}{0.64\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{loop_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Failure Recovery, Napkin Math 12.3 and the append-only resend of equation 2.9 (hypothetical prices). Values derived in images/calcs.py.}
+  \note{[3 min] [CORE] ENGAGE: one minute; vote. Most students answer A, scaling by turns: 50 over 4. Step 2: C. Each turn resends the whole growing context, the quadratic resend from Lecture 2, so input after h turns is h times 1,000 plus 1,100 times h(h minus 1)/2. At the ceiling: 1,397,500 input tokens, 4.42 dollars, 8.33 minutes at 10 s per turn. Stopped after turn 4: 10,600 tokens, 0.050 dollars, 40 s. Ratio 88.7 (derived). The shaded area is what a late stop pays. Stopping at turn 25 instead of 50 already cuts input 3.9 times. WARN: the cumulative budget ceiling from Lecture 10 still matters, as a backstop; it trips only after nearly all the money is spent. Detection latency, the turns between the loop's start and the hold, is the control that sets cost. The saving is gross: detector cost, false alarms on useful work, and cleanup come off it, and prefix caching flattens the curve. LINK: every looping dollar lands in the expected attempt cost of Lecture 1's cost per accepted task. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The watchdog's finding becomes an admission hold}
+  \centering
+  \safeimg[width=0.96\textwidth,height=4.8cm,keepaspectratio]{watch_resp.pdf}\\[0.2cm]
+  {\small The detector is fallible evidence. The hold at the gate does not depend on the model agreeing.}
+  \mlsyscredit{Redrawn from Failure Recovery, figure 3 (bottom) and table 6 (\S12.6.3).}
+  \note{[1.5 min] [CORE] When the watchdog fires, the runtime records a finding (the observations, revisions, rule, and window) and sets the harness's pending\_control hold from Lecture 10, which withholds admission of new work. Policy then picks one of three responses. Bounded continuation stages a factual observation into the next prompt: the proposed test was withheld because the patch and failure match an earlier attempt, so form another hypothesis. The gate rejects a repeated dispatch even if the model ignores that text. Controlled backtrack restores a clean private candidate and keeps the failed branch's evidence so it is not repeated; restored files undo no external effects. Ending model-directed repair moves the trajectory to finalization, where cleanup still runs and still settles only on evidence. ENGAGE: why not just add ``do not repeat yourself'' to the system prompt? (Expected: the model may ignore advice; a gate cannot be ignored.) This is trajectory-level encapsulation: the runtime decides whether work continues, whatever the trajectory proposes. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: CONTAINMENT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 4 aloud: detection latency sets a loop's cost, and the admission gate enforces the hold whatever the prompt says. A watchdog sees one trajectory. Many trajectories share dependencies, and one may itself be the threat.}
+\mlsysdivider{What contains failures that many trajectories share?}{Failure Recovery, \S12.7 and \S12.8}
+\section{Containment}
+
+\begin{frame}{Predict: how many requests reach the service?}
+  \mlsysactivity{Predict}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \begin{mlsyscard}{midgray}\footnotesize
+        Max attempts, default \textbf{3}: ``one initial request and up to two retries.''\\[0.08cm]
+        \texttt{delay = random(0, 1) $\times$ min(20,000 ms, base\_delay $\times$ 2\^{}retry)}
+      \end{mlsyscard}
+      \small Agent loop, gateway, and client library each allow 3 attempts. One call fails everywhere:\\[0.05cm]
+      \choice{A}{3}\quad\choice{B}{9}\quad\answerat{2}{C}{27}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{retry_tree.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{AWS SDKs and Tools Reference Guide, ``Retry behavior'' (read 19 Oct 2026). Failure Recovery, \S12.7.2; Brooker 2019.}
+  \note{[2 min] [CORE] NARRATE: the card is a real client library's documented default: three attempts, one try and two retries, with capped exponential backoff and full jitter, exactly the chapter's equation 8. Now stack three such layers: the trajectory's recovery loop, an API gateway, and the client library. ENGAGE: vote. Step 2: C. Each layer multiplies the one beneath it: 3 times 3 times 3 = 27 requests reach a dependency that is already failing, where one owner with the same allowance sends 3 (derived). Students who answer 9 count two layers. WARN: every retry must still obey settlement first: a retry repeats the same logical operation under its repeat contract, and changing the payload makes a new operation. The fix is a single retry owner per logical operation, with attempts from every layer counted in one shared budget. The documented SDK adds a retry quota, a token bucket that stops retrying when failures are widespread. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Jitter lowers the mean retry rate, and a cap bounds workers}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.4cm,keepaspectratio]{jitter_bars.pdf}\\[0.2cm]
+  {\small Spread over 2 s, a 2 ms slice expects 0.128 retries; it can still get all 128.}\\[0.15cm]
+  {\small \textbf{Bulkhead}: cap one dependency at 64 workers and 32 queued. Of 256 blocking calls, 160 are rejected; 236 of 300 workers stay free.}
+  \mlsyscredit{Failure Recovery, Napkin Math 12.4 and equation 9 (hypothetical burst). Values derived in images/calcs.py.}
+  \note{[2 min] [OPTIONAL] Two separate bounds. Top: 128 eligible retries released together. If all arrive in 2 ms the rate is 64,000 per second; spread uniformly over 2 s, the expected rate is 64 per second, 1,000 times lower (derived; the factor is just the ratio of the windows). But jitter is random: the expected count in any 2 ms slice is 0.128, and the realized count can still include every retry. Jitter shapes the mean; only an admission rate limiter bounds the peak. Bottom: a bulkhead caps how much of the host one dependency can occupy. 256 trajectories each make one blocking call to an idle pool of 300 workers; uncapped, 44 workers remain for everything else. Capped at 64 occupied and 32 queued, the burst rejects 160 calls before dispatch and 236 workers stay free however long the stall lasts. LINK: Little's law from Lecture 5 gives the smooth-load version: blocked workers equal arrival rate times timeout, clipped at the pool size. WARN: a local cap does not bound remote jobs that outlive a client timeout. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Retries sustained 12 of 21 published metastable outages}
+  \centering
+  \safeimg[width=0.98\textwidth,height=5.75cm,keepaspectratio]{metastable_bars.pdf}
+  \mlsyscredit{Huang et al., ``Metastable Failures in the Wild,'' OSDI 2022, Table 1 (incidents at Google Cloud, AWS, Azure, IBM, and others); count and share derived.}
+  \note{[1.5 min] [OPTIONAL] Measured data from public incident reports. Huang and colleagues found 21 metastable failures, outages in which a trigger pushed a system into overload and a feedback loop kept it there after the trigger was gone. Retries were the sustaining effect in 12 of the 21, 57 percent by our count of their table; the paper says more than half. The bars are those incidents' durations (SPF1 reported none, so it has no bar): three lasted more than 20 hours, including 73.53 hours for IBM1 and 66.7 hours for AWS1 in 2011. AWS4 is the December 2021 AWS outage. The chapter cites Bronson and colleagues for the mechanism: retries keep offered load above capacity, so the system stays degraded until load is shed or the retry policy changes. ENGAGE: why does a system stay down after the trigger is fixed? (Expected: the retries are now the load.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Vote: does this breaker open?}
+  \mlsysactivity{Vote}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.60\textwidth}
+      \footnotesize Last 50 outcomes at the test service: 14 timeouts, 6 server errors, 12 validation rejections of one malformed trajectory, 3 authorization denials, 15 successes. Trip at failure fraction $\ge$ 0.50, at least 20 outcomes.\\[0.15cm]
+      \only<1|handout:0>{\small\choice{A}{Opens}\qquad\choice{B}{Stays closed}}%
+      \only<2->{\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{breaker_window.pdf}}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{midgray}\footnotesize
+        \textbf{resilience4j defaults}\\
+        \texttt{failureRateThreshold} 50\\
+        \texttt{minimumNumberOfCalls} 100\\
+        \texttt{waitDurationInOpenState} 60000 ms\\
+        Ignored exceptions ``neither count as a failure nor success.''
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Failure Recovery, Exercise 4 and equation 7 (hypothetical window); \S12.7.1. resilience4j CircuitBreaker documentation, configuration table (read 19 Oct 2026).}
+  \note{[2.5 min] [CORE] A circuit breaker withholds new calls to one dependency scope when recent outcomes say it cannot handle work. ENGAGE: vote, then explain to a neighbor. Step 2: B under the chapter's rule. Only infrastructure failures count: 14 timeouts plus 6 server errors, 20 of 50, a fraction of 0.40, below 0.50 (derived). The validation rejections and denials are answers from a working service. A breaker that counts every non-success sees 35 of 50, 0.70, and opens for every tenant because one trajectory sent malformed requests. Right: a real library's defaults: trip at 50 percent with at least 100 calls, wait 60 s open, then admit 10 trial calls half open; ignored exceptions count as neither. WARN: an open breaker governs only new admissions; calls already sent settle under their own rules. The chapter adds two details: a half-open probe slot claimed atomically, and a breaker\_generation counter so a late probe reply cannot close a newer trial. Concept: dependency containment, which is one retry owner, scoped breakers, and caps. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Incident containment holds model work, keeps cleanup running}
+  \centering
+  \safeimg[width=0.97\textwidth,height=5.8cm,keepaspectratio]{incident.pdf}
+  \mlsyscredit{Failure Recovery, \S12.8, table 8, and Example 12.2; Saltzer and Schroeder 1975.}
+  \note{[3 min] [CORE] The repair agent tries to send private test fixtures through an external package-search tool. The disclosure gate rejects it before dispatch (information-flow labels, Lecture 9), and the incident policy holds the trajectory. NARRATE: the supervisor sits outside the agent and enforces the hold at every dispatch boundary: the tool gateway, any adapter still holding an old token, and memory retrieval. Holding on suspicion is a fail-safe default: a wrongly held trajectory costs time and is noticed; a wrongly admitted action may be irreversible. Model-directed work stops, but cleanup does not: a trusted service runs the preregistered release of env\_r18\_01 under its own narrow grant, without asking the suspect model. Artifacts the run wrote, a summary, a memory entry, a patch, pending approvals, are quarantined by a conservative closure. The record keeps inputs, versions, and open operations, with gaps flagged. ENGAGE: test\_r18 completes after the hold. Does its result release the trajectory? (Expected: no; it settles that operation only.) WARN: blocking one call proves nothing about earlier calls. LINK: Knight's two failures, no external halt and an unvetted rollback, are this slide's two obligations. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{True or false? Six claims about recovery}
+  \mlsysactivity{Vote}{2 min}
+  \small
+  \choice{1}{A durable log makes a tool workflow atomic.}\uncover<2->{\enspace\textbf{\textcolor{RedLine}{False}}}\\[0.16cm]
+  \choice{2}{After a timeout, a fresh provisioning request is safe.}\uncover<2->{\enspace\textbf{\textcolor{RedLine}{False}}}\\[0.16cm]
+  \choice{3}{Releasing \op{env\_r18\_01} can fail and must be settled.}\uncover<2->{\enspace\textbf{\textcolor{GreenLine}{True}}}\\[0.16cm]
+  \choice{4}{Crossing the pivot retires the remaining cleanup.}\uncover<2->{\enspace\textbf{\textcolor{RedLine}{False}}}\\[0.16cm]
+  \choice{5}{A budget ceiling catches a loop early enough.}\uncover<2->{\enspace\textbf{\textcolor{RedLine}{False}}}\\[0.16cm]
+  \choice{6}{Jitter lowers the expected retry rate but leaves the peak unbounded.}\uncover<2->{\enspace\textbf{\textcolor{GreenLine}{True}}}
+  \mlsyscredit{Failure Recovery, \S12.10 (Fallacies and Pitfalls).}
+  \note{[2 min] [CORE] Peer instruction: vote on all six, discuss, vote again. Step 2, with the chapter's rebuttals. (1) False: a local transaction protects only state that takes part in it; the external environment is outside. (2) False: the first request may still complete, leaving two live environments, one unowned; settle first. (3) True: compensation is an operation with its own outcome; a timed-out release leaves three possible worlds. (4) False: in the remediation scenario 71.4 percent of the remaining expected loss comes from changes that crossed the pivot undetected, so follow-up duties and cleanup stay owned. (5) False: the 50-turn ceiling cost 88.7 times stopping at turn 4. (6) True: 64 per second expected, up to all 128 retries in one 2 ms slice. The chapter's sixth fallacy, every layer retrying on its own allowance, was the 27 requests. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: what would have stopped Knight's loss?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{nyse_floor.jpg}\\[0.05cm]
+      {\footnotesize \$460 million in about 45 min}
+    \end{column}
+    \begin{column}{0.68\textwidth}\small
+      \only<1|handout:0>{\normalsize For each of Knight's failures, name the runtime mechanism that answers it.}%
+      \only<2->{\footnotesize
+      \begin{tabular}{@{}P{4.2cm}P{5.0cm}@{}}\toprule
+        \textbf{Knight, 2012} & \textbf{Runtime mechanism}\\\midrule
+        Missed 1 of 8 servers & Every check before the pivot\\[0.04cm]
+        No halt outside the router & Hold at each dispatch gate\\[0.04cm]
+        Untested live rollback & Recovery passes the same admission\\[0.04cm]
+        No orders-out against orders-in & Progress check outside the component\\[0.04cm]
+        97 alert e-mails ignored & A finding becomes an enforced hold\\\bottomrule
+      \end{tabular}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{U.S. SEC, Release No. 34-70694 (2013), paras. 15 to 19 and 27. Photo: Carol M. Highsmith, public domain.}
+  \note{[2.5 min] [CORE] Back to the hook. Give 90 seconds of retrieval, then reveal. Row 1: the deployment was the pivot, and a second-person review or an automated check of all eight servers belonged before it (segment 3). Row 2: operators could only debug the live router; a supervisor holding admission at every gate, without the router's cooperation, would have stopped new orders (segment 5). Row 3: the rollback was a recovery action applied without the checks forward work gets; recovery receives no exemption from admission (segments 1 and 2). Row 4: no control compared orders leaving the router with orders entering it, a conservation check that must live outside the component it checks, like a watchdog outside the model (segment 4). Row 5: alerts that only inform do not stop anything; a finding must become an enforced hold. ENGAGE: which single row would have saved the most? (Expected: rows 1 or 2; either prevents most of the 45 minutes.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_settle.pdf}{An outcome is established, absent, or unknown; cleanup is registered before the effect exists and ordered as a graph.}\\[0.14cm]
+  \thumbline{thumb_repair.pdf}{Choose by evidence, then admission, then cost; one repair pays when $p > C_{\text{repair}}/C_{\text{fallback}}$.}\\[0.14cm]
+  \thumbline{thumb_pivot.pdf}{Checks before the pivot cut expected loss 3.6$\times$; what passes the pivot stays owned.}\\[0.14cm]
+  \thumbline{thumb_loop.pdf}{A loop's input grows with the square of its turns, so detection latency sets its cost.}\\[0.14cm]
+  \thumbline{thumb_contain.pdf}{One retry owner, scoped breakers, and caps contain shared failures; holds stop model work while cleanup runs.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short of time, read the first and the last: settle before retrying, and stopping a trajectory is not recovering it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.25cm}
+        \item A watchdog that ends useful backtracking costs acceptances; one that waits costs tokens. How should a team set its window?
+        \item Who should own a duty that outlives every worker and model call, such as an environment whose release stays unconfirmed for days?
+        \item What is the canary slice for an agent that acts once per task?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{canary_mine.jpg}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: George McCaa, U.S. Bureau of Mines, public domain, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. The first is Exercise 9 in miniature: false interventions on backtracking against loop turns paid, priced as cost per accepted task. The second is the residual-settlement problem of \S12.8.3: organizational liability outlives the agent loop. The third asks how staged release works when each task is its own production change; Lecture 14 develops staged release. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Failure Recovery, \S12.2 to \S12.9; Checkpoints 12.1 to 12.5; Exercises 1, 2, 6, and 9.
+    \item Gray, ``The Transaction Concept: Virtues and Limitations,'' VLDB 1981.
+    \item Garcia-Molina and Salem, ``Sagas,'' SIGMOD 1987.
+    \item Helland, ``Life Beyond Distributed Transactions,'' CIDR 2007.
+    \item Brooker, ``Timeouts, Retries, and Backoff with Jitter,'' Amazon Builders' Library, 2019.
+    \item Huang et al., ``Metastable Failures in the Wild,'' OSDI 2022.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its checkpoints and four exercises: the cleanup graph, repair on two axes, an approval gate at the pivot, and a watchdog critique priced per accepted task. Gray explains why the transaction concept breaks for long, cross-organization work and introduces compensation. Garcia-Molina and Salem define the saga. Helland shows how large services agree without distributed transactions. Brooker's article is the practitioner's guide to retries, jitter, and layered amplification. Huang and colleagues measured how retries sustain real outages. FLEX: add the lab or project your course uses for agent runtimes.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{thumb_next.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} AGENT EVALUATION}}\\[0.5cm]
+      {\LARGE\bfseries One run succeeded and every effect settled. Does the configuration work?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Recovery kept every effect owned and accounted for, but a released environment and a targeted pass on ws\_r18 each answer a narrower question than task success. One run is one draw from a stochastic process. Lecture 13 builds the acceptance contracts, isolated graders, and paired comparisons that turn many runs into evidence about one configuration. The thumbnail is a grid of runs, some accepted and some not.}
+\end{frame}
+
+\end{document}

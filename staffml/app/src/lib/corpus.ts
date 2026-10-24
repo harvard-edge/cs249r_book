@@ -1,4 +1,5 @@
 import corpusData from '../data/corpus-summary.json';
+import { getSubjectById } from "./mlsys-taxonomy";
 import { QUESTION_COUNT } from './stats';
 
 /**
@@ -67,6 +68,14 @@ export interface Question {
    * the handful of topics with no chapter mapped.
    */
   book_refs?: BookRef[];
+
+  /**
+   * ML Systems Taxonomy tags (identities, resolved for display through
+   * `@/data/mlsys-taxonomy.json`): the subject the question belongs to and
+   * the one to three concepts it centrally tests, most central first.
+   */
+  taxonomy_subject?: string;
+  taxonomy_concepts?: string[];
 
   // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
   // The summary bundle ships scenario: "" and details with empty strings
@@ -196,6 +205,8 @@ export function getQuestionsByFilter(filters: {
   track?: string;
   level?: string;
   competency_area?: string;
+  /** ML Systems Taxonomy area code (e.g. "S1"), matched through the question's subject. */
+  taxonomy_area?: string;
   topic?: string;
   zone?: string;
   /** When true, restrict results to questions that are part of a chain. */
@@ -207,6 +218,7 @@ export function getQuestionsByFilter(filters: {
     if (filters.track && q.track !== filters.track) return false;
     if (filters.level && q.level !== filters.level) return false;
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
+    if (filters.taxonomy_area && getSubjectById(q.taxonomy_subject ?? "")?.area !== filters.taxonomy_area) return false;
     if (filters.topic && q.topic !== filters.topic) return false;
     if (filters.zone && q.zone !== filters.zone) return false;
     if (filters.chainsOnly && (!q.chain_ids || q.chain_ids.length === 0)) return false;

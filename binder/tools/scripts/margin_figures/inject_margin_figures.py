@@ -25,6 +25,11 @@ def replace_exact(file_path: Path, target: str, replacement: str, description: s
     print(f"✓ Injected: {description} in {file_path.name}")
 
 def main():
+    # 2026-09-29 (MARGIN-GEN): one-shot injector, already applied. Its blocks carry
+    # stale fig-alt values and orphaned figures; re-running would reinsert them.
+    # Place new margin figures by hand per generate_margin_figures.py's docstring.
+    if "--i-know-this-is-stale" not in sys.argv:
+        sys.exit("inject_margin_figures.py is retired; see generate_margin_figures.py")
     print(f"Injecting margin figures into Volume IV chapters under {VOL4_ROOT}...")
 
     # =========================================================================
@@ -784,9 +789,9 @@ def main():
     replace_exact(ch16, target_16_seal, repl_16_seal, "Ch 16 cryptographic seal strip")
 
     # =========================================================================
-    # Ch 17: 17_frontier.qmd
+    # Ch 18: 18_frontier.qmd (numbered 17 before 2026-10-13; variable names keep ch17)
     # =========================================================================
-    ch17 = VOL4_ROOT / "17_frontier" / "17_frontier.qmd"
+    ch17 = VOL4_ROOT / "18_frontier" / "18_frontier.qmd"
 
     # Fig 31: margin_observational_indistinguishability_chain.svg + relocate pointer
     target_17_chain = (

@@ -8,12 +8,12 @@ from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 
 # --- Facility cooling tiers (PUE / WUE anchors for appendices) ---
-PUE_LIQUID_COOLED = sourced(1.06, pc.UPTIME_PUE_2022, name="PUE (Liquid-Cooled)", description="Best-in-class liquid-cooled AI datacenter PUE.")
-PUE_BEST_AIR = sourced(1.12, pc.UPTIME_PUE_2022, name="PUE (Best Air-Cooled)", description="Best-in-class air-cooled hyperscale datacenter PUE.")
-PUE_TYPICAL = sourced(1.40, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Industry average traditional datacenter PUE.")
-PUE_SIMPLE_AIR = sourced(1.50, pc.UPTIME_PUE_2022, name="PUE (Simple Air)", description="Simple air-cooled datacenter PUE tier.")
-PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2022, name="PUE (Legacy Air-Cooled)", description="Older enterprise datacenter PUE tier.")
-PUE_STATE_OF_ART = sourced(1.10, pc.UPTIME_PUE_2022, name="PUE (state of art)", description="Highly optimized modern datacenter PUE benchmark.")
+PUE_LIQUID_COOLED = sourced(1.06, pc.NREL_ESIF_PUE, name="PUE (Liquid-Cooled)", description="Annual average PUE of a warm-water liquid-cooled, chiller-less HPC data center (NREL ESIF).")
+PUE_BEST_AIR = sourced(1.12, pc.MICROSOFT_DESIGN_PUE_2022, name="PUE (Best Air-Cooled)", description="Design PUE of a newest-generation hyperscale datacenter (Microsoft, 2022).")
+PUE_TYPICAL = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Industry Average, 2022)", description="Global average annual data center PUE reported by the Uptime Institute 2022 survey.")
+PUE_SIMPLE_AIR = sourced(1.5, pc.LBNL_SMALL_SERVER_ROOMS_2013, name="PUE (Simple Air)", description="Measured PUE of a small server room cooled by window-mounted air-conditioning units (LBNL 2013, Table 4).")
+PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2023, name="PUE (Industry Average, 2023)", description="Industry average data center PUE for 2023 reported by the Uptime Institute.")
+PUE_STATE_OF_ART = sourced(1.10, pc.GOOGLE_FLEET_PUE, name="PUE (state of art)", description="Google fleet-wide trailing twelve-month PUE at Q4 2023.")
 WUE_AIR_COOLED = sourced(0.5, pc.WUE_ANCHORS, name="WUE (air-cooled)", description="Water usage effectiveness for air-cooled facilities.")
 WUE_EVAPORATIVE = sourced(1.8, pc.WUE_ANCHORS, name="WUE (evaporative)", description="Water usage effectiveness for evaporative cooling.")
 WUE_LIQUID = sourced(0.0, pc.WUE_ANCHORS, name="WUE (liquid-cooled)", description="Closed-loop liquid cooling (near-zero WUE).")
@@ -26,12 +26,30 @@ AIR_COOLING_LIMIT_KW = sourced(30, pc.RACK_POWER_TIERS, name="Air cooling limit 
 
 class FacilityCooling(Registry):
     """Datacenter cooling efficiency tiers (not regional grids)."""
-    LiquidCooled = CoolingProfile(name="Liquid-Cooled", pue=PUE_LIQUID_COOLED, wue=WUE_LIQUID, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    BestAir = CoolingProfile(name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    Typical = CoolingProfile(name="Industry Average", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    SimpleAir = CoolingProfile(name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    Legacy = CoolingProfile(name="Legacy Air-Cooled", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    StateOfArt = CoolingProfile(name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
+    LiquidCooled = CoolingProfile(
+        name="Liquid-Cooled", pue=PUE_LIQUID_COOLED, wue=WUE_LIQUID,
+        metadata=Metadata(provenance=pc.NREL_ESIF_PUE, description="Warm-water liquid-cooled data center cooling profile (PUE 1.06, WUE 0.0)."),
+    )
+    BestAir = CoolingProfile(
+        name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale datacenter design cooling profile (PUE 1.12, WUE 1.8)."),
+    )
+    Typical = CoolingProfile(
+        name="Industry Average (2022)", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Global industry average datacenter cooling profile from Uptime Institute 2022 survey (PUE 1.55, WUE 1.8)."),
+    )
+    SimpleAir = CoolingProfile(
+        name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 1.8)."),
+    )
+    Legacy = CoolingProfile(
+        name="Industry Average (2023)", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.UPTIME_PUE_2023, description="Global industry average datacenter cooling profile from Uptime Institute 2023 data (PUE 1.58, WUE 1.8)."),
+    )
+    StateOfArt = CoolingProfile(
+        name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.GOOGLE_FLEET_PUE, description="Hyperscale fleet cooling profile at Google's Q4 2023 fleet TTM PUE (PUE 1.10, WUE 1.8)."),
+    )
 
 
 # Regional grid carbon intensity (gCO2/kWh) with typical facility PUE/WUE — leaf
@@ -47,37 +65,58 @@ class Datacenters(Registry):
     Quebec_Hydro = Datacenter(
         name="Quebec Hydro Campus",
         grid=Grids.Quebec,
-        metadata=Metadata(provenance=Grids.Quebec.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.Quebec.metadata.provenance,
+            description="Hyperscale campus powered by low-carbon Quebec hydroelectric grid (30 gCO2/kWh).",
+        ),
     )
     Norway_Hydro = Datacenter(
         name="Norway Hydro Campus",
         grid=Grids.Norway,
-        metadata=Metadata(provenance=Grids.Norway.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.Norway.metadata.provenance,
+            description="Hyperscale campus powered by low-carbon Norwegian hydroelectric grid (30 gCO2/kWh).",
+        ),
     )
     US_Hyperscale = Datacenter(
         name="US Hyperscale Region",
         grid=Grids.US_Avg,
-        metadata=Metadata(provenance=Grids.US_Avg.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.US_Avg.metadata.provenance,
+            description="Reference US hyperscale facility operating on US grid average carbon intensity (388 gCO2/kWh).",
+        ),
     )
     EU_Average = Datacenter(
         name="EU Average Region",
         grid=Grids.EU_Avg,
-        metadata=Metadata(provenance=Grids.EU_Avg.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.EU_Avg.metadata.provenance,
+            description="Reference European facility operating on EU grid average carbon intensity (270 gCO2/kWh).",
+        ),
     )
     France_Nuclear = Datacenter(
         name="France Nuclear Region",
         grid=Grids.France,
-        metadata=Metadata(provenance=Grids.France.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.France.metadata.provenance,
+            description="Hyperscale facility powered by French nuclear baseload grid (50 gCO2/kWh).",
+        ),
     )
     Iowa_Reference = Datacenter(
         name="Iowa Reference Site",
         grid=Grids.Iowa,
-        metadata=Metadata(provenance=Grids.Iowa.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.Iowa.metadata.provenance,
+            description="Hyperscale campus in Iowa with high wind generation share (450 gCO2/kWh).",
+        ),
     )
     Poland_Coal = Datacenter(
         name="Poland Coal Region",
         grid=Grids.Poland,
-        metadata=Metadata(provenance=Grids.Poland.metadata.provenance),
+        metadata=Metadata(
+            provenance=Grids.Poland.metadata.provenance,
+            description="Datacenter operating on Poland coal-heavy electrical grid (700 gCO2/kWh).",
+        ),
     )
 
 
@@ -87,19 +126,28 @@ class Racks(Registry):
         name="Traditional Enterprise",
         power_kw=RACK_POWER_TRADITIONAL_KW,
         cooling_type="air",
-        metadata=Metadata(provenance=pc.RACK_POWER_TIERS),
+        metadata=Metadata(
+            provenance=pc.RACK_POWER_TIERS,
+            description="Traditional enterprise air-cooled server rack profile (12 kW).",
+        ),
     )
     AI_Standard = RackProfile(
         name="AI Cluster (Standard)",
         power_kw=RACK_POWER_AI_TYPICAL_KW,
         cooling_type="liquid",
-        metadata=Metadata(provenance=pc.RACK_POWER_TIERS),
+        metadata=Metadata(
+            provenance=pc.RACK_POWER_TIERS,
+            description="Standard AI cluster liquid-cooled server rack profile (70 kW).",
+        ),
     )
     AI_High = RackProfile(
         name="AI Cluster (High Density)",
         power_kw=RACK_POWER_AI_HIGH_KW,
         cooling_type="liquid",
-        metadata=Metadata(provenance=pc.RACK_POWER_TIERS),
+        metadata=Metadata(
+            provenance=pc.RACK_POWER_TIERS,
+            description="High-density AI cluster liquid-cooled server rack profile (100 kW).",
+        ),
     )
 
 

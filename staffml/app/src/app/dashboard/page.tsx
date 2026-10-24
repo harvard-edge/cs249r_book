@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { computeSummary, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
-import { getVaultStats, getAreaForTopic } from "@/lib/taxonomy";
+import { getVaultStats } from "@/lib/taxonomy";
+import { getSubjectById, getTaxAreaById, getTaxonomyStats } from "@/lib/mlsys-taxonomy";
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
@@ -44,7 +45,7 @@ export default function DashboardPage() {
             <Activity className="w-8 h-8 text-accentBlue" />
             <div>
               <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Dashboard</h1>
-              <p className="text-sm text-textSecondary">Anonymous usage analytics — all data stays in your browser</p>
+              <p className="text-sm text-textSecondary">Anonymous usage analytics. All data stays in your browser.</p>
             </div>
           </div>
           <button
@@ -61,8 +62,8 @@ export default function DashboardPage() {
         {/* Vault overview */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           <StatCard label="Questions" value={vaultStats.totalQuestions.toLocaleString()} icon={Target} />
-          <StatCard label="Topics" value={vaultStats.totalTopics.toString()} icon={BarChart3} />
-          <StatCard label="Areas" value={vaultStats.totalAreas.toString()} icon={BarChart3} />
+          <StatCard label="Subjects" value={getTaxonomyStats().subjects.toString()} icon={BarChart3} />
+          <StatCard label="Areas" value={getTaxonomyStats().areas.toString()} icon={BarChart3} />
           <StatCard label="Zones" value={vaultStats.totalZones.toString()} icon={BarChart3} />
         </div>
 
@@ -198,13 +199,13 @@ export default function DashboardPage() {
         )}
 
         {/* Competency radar chart */}
-        {Object.keys(summary.scoresByTopic).length > 0 && (
+        {Object.keys(summary.scoresBySubject).length > 0 && (
           <div className="mb-8">
             <SectionLabel icon={Target} label="Competency Radar" />
             <p className="text-[11px] text-textTertiary mb-3 mt-1">
               Performance across competency areas. Outer ring = 3/3 (perfect). Inner = 0/3.
             </p>
-            <CompetencyRadar scoresByTopic={summary.scoresByTopic} />
+            <CompetencyRadar scoresBySubject={summary.scoresBySubject} />
           </div>
         )}
 
@@ -372,26 +373,27 @@ function SectionLabel({ icon: Icon, label }: { icon: React.ComponentType<{ class
 
 // ─── Competency Radar ──────────────────────────
 
-const AREA_ORDER = [
-  'compute', 'memory', 'latency', 'architecture', 'optimization',
-  'parallelism', 'networking', 'deployment', 'reliability',
-  'data', 'power', 'precision', 'cross-cutting',
-];
+// One axis per ML Systems Taxonomy group, in the taxonomy's own order.
+const GROUP_ORDER = ['F', 'S', 'P', 'Q', 'T'];
 
-function CompetencyRadar({ scoresByTopic }: {
-  scoresByTopic: Record<string, { total: number; count: number; avg: number }>;
+function CompetencyRadar({ scoresBySubject }: {
+  scoresBySubject: Record<string, { total: number; count: number; avg: number }>;
 }) {
-  // Aggregate topics → areas using taxonomy
+  // Aggregate subjects → taxonomy groups (Foundations, Stack, Lifecycle, …)
   const scoresByArea: Record<string, { total: number; count: number }> = {};
-  for (const [topicId, data] of Object.entries(scoresByTopic)) {
-    const area = getAreaForTopic(topicId);
+  const groupLabel: Record<string, string> = {};
+  for (const [subjectId, data] of Object.entries(scoresBySubject)) {
+    const subject = getSubjectById(subjectId);
+    const area = subject ? getTaxAreaById(subject.area) : undefined;
     if (!area) continue;
-    if (!scoresByArea[area.id]) scoresByArea[area.id] = { total: 0, count: 0 };
-    scoresByArea[area.id].total += data.total;
-    scoresByArea[area.id].count += data.count;
+    const g = area.groupCode;
+    groupLabel[g] = area.group;
+    if (!scoresByArea[g]) scoresByArea[g] = { total: 0, count: 0 };
+    scoresByArea[g].total += data.total;
+    scoresByArea[g].count += data.count;
   }
 
-  const areas = AREA_ORDER.filter(a => scoresByArea[a]);
+  const areas = GROUP_ORDER.filter(a => scoresByArea[a]);
   if (areas.length < 3) return null; // need at least 3 for a polygon
 
   const cx = 160, cy = 160, maxR = 130;
@@ -418,7 +420,8 @@ function CompetencyRadar({ scoresByTopic }: {
 
   return (
     <div className="flex justify-center">
-      <svg viewBox="0 0 320 320" className="w-full max-w-[320px]">
+      {/* Horizontal padding so long group labels ("System types") are not clipped. */}
+      <svg viewBox="-40 0 400 320" className="w-full max-w-[400px]">
         {/* Grid rings */}
         {rings.map(r => {
           const pts = Array.from({ length: n }, (_, i) => toXY(i, r * maxR));
@@ -450,7 +453,7 @@ function CompetencyRadar({ scoresByTopic }: {
               <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="middle"
                 fontSize="8" fontFamily="var(--font-mono, monospace)" fill="var(--text-secondary)"
               >
-                {area === 'cross-cutting' ? 'x-cutting' : area}
+                {groupLabel[area] ?? area}
               </text>
               <text x={label.x} y={label.y + 10} textAnchor="middle" dominantBaseline="middle"
                 fontSize="7" fontFamily="var(--font-mono, monospace)" fill="var(--text-muted)"

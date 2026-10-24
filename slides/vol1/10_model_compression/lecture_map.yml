@@ -1,0 +1,309 @@
+chapter: 10_model_compression
+lecture: 10
+title: "Model Compression, Part 1"
+subtitle: "Fitting a trained model inside a device budget"
+layer: models
+minutes: 75
+notes_minutes: 70.5
+target_ideas: 30
+thesis: "The models that win benchmarks rarely ship as they are. Compression fits a trained model inside a device's budget by changing what it computes, how its values are stored, and how it executes, and a saving counts only when the target hardware can exploit it and the rest of the system lets it show."
+
+hook:
+  minutes: "0-6"
+  setup: "Step 1, one log scale: 350 GB of FP16 weights for a 175-billion-parameter model, 8 GB of phone RAM, 512 KB of microcontroller SRAM, about six orders of magnitude from top to bottom (§10.1, margin figure). Step 2, a model that only just misses: a 7-billion-parameter model needs 14 GB in FP16 against the phone's 8 GB. Step 3, real data that the gap can close: the smallest dense model scoring at least 60 percent on MMLU fell from Gopher's 280B (end of 2021) to Qwen2.5-Coder-3B (2024), about 93x in under three years (Epoch AI 2026, book figure fig-smallest-capable-model). Step 4, the running case: a phone camera that must blur the background at 30 FPS (33 ms per frame) runs FP32 MobileNetV2 at 8 FPS (125 ms) on the CPU (Example 10.1, labeled composite)."
+  question_to_class: "Suppose the phone gave a 7B FP16 model all of its memory and the weights somehow fit. Each token reads every weight over a 51.2 GB/s bus. How long per token, and could the phone sustain it? A) 3 ms, yes B) 27 ms, yes C) about 270 ms and about 8 W, no D) 2.7 s, yes"
+  payoff: "C. 14 GB / 51.2 GB/s is about 270 ms per token and about 2 J of DRAM energy, about 8 W of memory traffic against a sustained envelope of 3 to 5 W (§10.1). Capacity, time, and energy each bind. The synthesis returns to the ladder: INT4 puts the 7B weights at 3.5 GB (derived), the blur pipeline reaches about 20 ms per frame, and the keyword spotter fits SRAM at 200 KB."
+  sources: ["chapter §10.1 (350 GB, 8 GB, 512 KB; 14 GB, 270 ms, 2 J, 8 W, 3-5 W)", "Epoch AI 2026 via fig-smallest-capable-model (280B to 3B, 93x)", "Example 10.1 (8 FPS, 125 ms, 33 ms; labeled composite)"]
+
+driving_question: "Given a model that does not fit its device, which work can it stop doing, and when does removing that work make the device faster?"
+
+recall: "Lecture 9: data selection cut the Samples/Task factor of the iron law. After selection, is the trained model any smaller? (No. Same parameters, same precision, same footprint. This lecture works on FLOPs/Sample and on the bytes behind Seconds/FLOP.)"
+
+running_example: "Two cases. The phone camera's background blur (MobileNetV2, 3.5M parameters, 14 MB FP32, 600 MFLOP per frame, 33 ms budget, 125 ms FP32 on the CPU, about 20 ms after channel pruning and INT8 on the integer accelerator; Example 10.1 and fig-compression-waterfall, illustrative frame times) carries the structural and execution tiers and the combination. Keyword spotting in SRAM (DS-CNN, 20 MFLOP, 800 KB FP32 against a 512 KB budget, 200 KB INT8; Lighthouse 10.2) carries the precision tier's feasibility side. GPT-2 XL decoding on the same phone (3 GB FP16, 59 ms of weight streaming per token; 65 ms with the KV cache) carries the bandwidth-bound side of 'when fewer bits run faster'. ResNet-50 appears as the distillation teacher and as the closing INT8 deployment profile (table 13)."
+
+segments:
+  - name: Budget
+    divider_question: "What does a device grant each result, and which term does a model break?"
+    read: "§10.1"
+    concept_questions: [2]
+    land: "Find the binding term first. The phone's camera frame is spent on arithmetic, a token of decode on weight bytes, and a microcontroller on capacity."
+    minutes: 5.5
+  - name: Structure
+    divider_question: "Which work can the model stop doing?"
+    read: "§10.2.1 to §10.2.3, §10.4.2"
+    concept_questions: [3, 16, 17, 4, 18, 5, 6, 19, 20]
+    land: "Remove structure the hardware can drop, or train a smaller dense student; scattered zeros pay only past a break-even that the format and the kernel set."
+    minutes: 30
+  - name: Execution
+    divider_question: "When does removed work make the device faster?"
+    read: "§10.4.1, §10.4.2, §10.6.1"
+    concept_questions: [11, 21, 10]
+    land: "Removed work saves time only where it was on the critical path and the kernel can skip it."
+    minutes: 8.5
+  - name: The System
+    divider_question: "Does the saving survive the rest of the system?"
+    read: "§10.5.3, §10.6, §10.7"
+    concept_questions: [13, 14]
+    land: "Order the levers and profile after each; the rest of the pipeline caps the end-to-end gain, and every gap structure leaves is in bits per value."
+    minutes: 12.5
+
+concept_questions:
+  - id: 1
+    q: "How far apart are the models that win benchmarks and the devices that must run them?"
+    picture: "Variant of book margin-001 at slide size: log ladder 350 GB (175B FP16), 14 GB (7B FP16, added), 8 GB (phone), 512 KB (MCU); then book figure fig-smallest-capable-model"
+    numbers: "350 GB, 14 GB, 8 GB, 512 KB, about six orders of magnitude (§10.1); 7B: 270 ms per token, 2 J, 8 W against 3-5 W (§10.1); smallest MMLU>=60 model 280B -> 3B, 93x (Epoch AI 2026)"
+    example: "7B model on a phone; Gopher to Qwen2.5-Coder-3B"
+    read: "§10.1"
+  - id: 2
+    q: "What is a deployment budget, and how do we find the term a model breaks?"
+    picture: "New hbars from table 1: weight-streaming time per result on the phone's 51.2 GB/s bus against each case's budget: MobileNetV2 FP32 0.27 ms of a 33 ms frame; GPT-2 XL FP16 59 ms per token; with a separate capacity row: DS-CNN 800 KB FP32 and 200 KB INT8 against 512 KB"
+    numbers: "Table 1: MobileNetV2 14 MB, 600 MFLOP, 0.27 ms (about 1 percent of 33 ms); GPT-2 XL 3 GB, 3 GFLOP, 59 ms; INT4 0.75 GB, 15 ms; MobileNetV2 INT8 3.5 MB is still 6.7x the TinyML envelope; DS-CNN 200 KB fits"
+    example: "Blur frame against decode token against keyword spotter; then the three tiers (fig-3-sections) labeled with the iron-law term each moves (table 2): structure -> FLOPs/Sample and weight bytes; precision -> bytes and energy per operation; implementation -> bytes, fixed overhead, efficiency"
+    read: "§10.1.1, table 1"
+  - id: 3
+    q: "What does pruning remove, and how much can a trained network lose?"
+    picture: "New 3-step build after fig-sparse-matrix and fig-structured-unstructured (book versions are illegible at slide size): a 6 x 6 weight matrix shaded by magnitude; unstructured, 18 smallest zeroed, same shape; structured, 3 columns (channels) removed, 6 x 3 and dense"
+    numbers: "ResNet-50: about 80 percent of weights removed for roughly one point of top-1 with magnitude pruning and retraining (Gale et al. 2019, §10.2); Optimal Brain Damage 4x parameter reduction (LeCun et al. 1989, footnote)"
+    example: "ResNet-50; MobileNetV2 channels"
+    read: "§10.2.1"
+  - id: 4
+    q: "Why does a model with half its weights zeroed often run no faster, and when does sparsity pay?"
+    picture: "Two frames. (a) Wearable predict card beside new bars of bytes per stored nonzero: dense FP32 4 B, FP32 plus 16-bit index 6 B (2 MB -> 3 MB), CSR 8 B (break-even 50 percent), COO 12 B (66.7 percent), then the Gale et al. 2020 measured line; book margin-003 dropped (schematic, adds nothing beside measured data). (b) The 2:4 block [0, 1.4, 0, -2.1] -> [1.4, -2.1] with 2-bit indices and the vendor design peak, beside new bars redrawn from Mishra et al. 2021 Fig. 3: measured INT8 sparse-over-dense GEMM speedup on A100 at K = 1,280, 2,560, 12,800 (M = N = 10240), values read from the published plot and labeled approximate"
+    numbers: "CSR 8 B per nonzero, over 50 percent sparsity to break even on bytes; COO 12 B, over 66.7 percent (§10.7); unstructured kernels can be slower than dense until 80 to 90 percent sparsity (§10.4.2.3); unstructured sparse kernels (Gale, Zaharia, Young, Elsen 2020, abstract, read): sparse Transformer and MobileNet models 1.2 to 2.1x faster and up to 12.8x memory savings without accuracy loss, kernels reaching 27 percent of single-precision peak on V100; 2:4 Sparse Tensor Cores (Mishra et al. 2021, read): design peak 2x math throughput (Table 1, vendor peak), measured INT8 GEMM speedup about 1.2x at K = 1,280 rising to about 1.9x for K at or above 12,800 (Fig. 3, A100, cuSPARSELt against cuBLAS; read from the plot), accuracy held: ResNet-50 top-1 76.1 dense FP16, 76.2 sparse FP16, 76.2 sparse INT8 (Table 2), BERT-Large SQuAD F1 91.9 dense and sparse FP16 (Table 7); same paper: channel pruning gives ResNet-50 a 2x speedup but loses close to 1.5 percent accuracy (citing [10]); wearable scenario: survivors total 2 MB against 2 MB of flash, a 16-bit index per FP32 value makes 3 MB (§10.4.2.2, labeled scenario)"
+    example: "MobileNetV2 on a 2 MB-flash wearable"
+    read: "§10.2.1, §10.4.2"
+  - id: 5
+    q: "Why does structured pruning keep the speedup, and what shapes must it respect?"
+    picture: "Own frame: new tile diagram (256 -> 250 channels leaves a tile with 2 of 8 lanes busy; 248 fills every tile) beside new paired bars for MobileNetV2 width 0.75 (parameters 74 percent, MFLOP 70 percent); fig-channel-layer-pruning left to the reading"
+    numbers: "MobileNetV2 width 0.75: 3.5M -> 2.6M parameters, 600 -> 418 MFLOP, about 70 percent of the arithmetic kept (§10.2.4.2; Sandler et al. 2018); channel counts on multiples of 8 (§10.2.1)"
+    example: "The blur model's channel-pruned variant"
+    read: "§10.2.1, §10.2.4"
+  - id: 6
+    q: "How can a small dense model learn from a large one? (distillation)"
+    picture: "Slide variant of fig-kd-targets in two steps (hard label 100/0/0, then teacher cat 85, dog 10, fox 5), then new bars for DistilBERT relative to BERT: parameters 60 percent, speed 160 percent (1.6x), language-understanding score 97 percent"
+    numbers: "DistilBERT: 40 percent fewer parameters, 60 percent faster, 97 percent of BERT's score, by removing half the layers; 1.6x not 2x because embeddings, head, and fixed overheads stay (Sanh et al. 2019, §10.2.3); loss L = (1 - alpha) L_CE + alpha T^2 KL (notes)"
+    example: "ResNet-50 teacher (102.4 MB, 8.2 GFLOP) to MobileNetV2 student (14 MB, 600 MFLOP)"
+    read: "§10.2.3"
+  - id: 7
+    q: "What do fewer bits save: bytes, energy, or both?"
+    picture: "New grouped bars from table 8 (FP32 against INT8 pJ for add, multiply, MAC: 30x, 18.5x, 15x), step 2 adds the 640 pJ DRAM read; step 3 is one text line for the KWS capacity case (800 KB -> 200 KB against 512 KB SRAM), because a second plot did not fit at legible size; the KWS bar returns on the synthesis ladder"
+    numbers: "Add 0.90 / 0.03 pJ, multiply 3.70 / 0.20, MAC 4.60 / 0.30 (Horowitz 2014, table 8); a 32-bit DRAM read 640 pJ, about 2,100x an INT8 MAC (§10.3.2); DS-CNN 800 KB -> 200 KB against 512 KB (Lighthouse 10.2)"
+    example: "Keyword spotting in SRAM"
+    read: "§10.3.1, §10.3.2"
+  - id: 8
+    q: "How does a quantizer map real numbers onto integers? (scale and zero-point)"
+    picture: "Book figure fig-calibration-ranges (symmetric and asymmetric number lines), then the worked example as an equation-anatomy build"
+    numbers: "Napkin Math 10.1: range [-1, 3], UINT8, s = 4/255 = 0.0157, z = round(63.75) = 64, X_q = [[0, 128], [64, 255]]; real zero maps exactly to 64"
+    example: "A 2x2 activation tile"
+    read: "§10.3.3, Napkin Math 10.1"
+  - id: 9
+    q: "How do we choose the clipping range, and why per channel?"
+    picture: "Book figure fig-resnet-activations-histogram (ResNet-50 layer activations, long right tail; Wu et al. 2020), candidate clip near 1.1; per-channel ranges stated in one line (fig-quantization-granularity is illegible at thumbnail size)"
+    numbers: "Bulk below 1.1, tail past 2.0 (§10.3.3, Wu et al. 2020); 256 levels for INT8; per-channel beats per-tensor when channel ranges differ (table 9)"
+    example: "One ResNet-50 layer"
+    read: "§10.3.3"
+  - id: 10
+    q: "How far can precision fall before accuracy breaks, and when is PTQ not enough?"
+    picture: "Book figure fig-compression-methods (Han et al. 2016, one reported setting: accuracy change against model size for pruning, quantization, SVD, and pruning plus quantization); then two lines: ResNet-50 INT8 76.1 -> 75.8, and PTQ first, QAT only if PTQ misses (fig-ptq-qat thumbnail dropped as illegible)"
+    numbers: "Han et al. 2016 via §10.5.3: SVD and pruning alone fall off cliffs below about 15 and 6 percent of model size; pruning plus quantization holds to about 3 percent; ResNet-50 INT8: 76.1 -> 75.8 percent top-1 (table 13); FP32 to INT8 collapses 4 billion values to 256 (footnote 15)"
+    example: "PTQ on a calibration set first; QAT with fake quantization only when PTQ misses"
+    read: "§10.3.3, §10.5.3"
+  - id: 11
+    q: "Which fusions exist only after a model is compressed?"
+    picture: "Variant of book margin-002 at slide size: unfused Conv, BN, ReLU with 6 transfers (7.2 MB) against one fused kernel with BN folded in, 2 transfers (4 MB); step 3 is a text line on unpacking INT4 inside the matrix multiply"
+    numbers: "ResNet-50 layer 256 x 28 x 28: unfused 7.2 MB, fused 4 MB, 44.8 percent less; 2.0 against 1.2 us at 3,350 GB/s, 1.81x for traffic alone (§10.4.1); fused-chain rule 2kS -> 2S recalled from Lecture 7"
+    example: "MobileNetV2 inverted residual block; GPT-2 XL INT4 kernel"
+    read: "§10.4.1"
+  - id: 12
+    q: "Does INT8 speed up every layer by the same factor?"
+    picture: "Kit roofline (slideplot.roofline_steps, schematic) with two points revealed: GPT-2 XL decode on the memory slope, 'bytes: 3.1x'; large-batch MLP on the ceiling, 'datapath: 2x'"
+    numbers: "Compute bound: H100 INT8 1,979 TOPS against FP16 989 TFLOP/s, about 2x (Napkin Math 10.2; NVIDIA 2022); memory bound: GPT-2 XL on the phone, 3.3 GB per token in FP16 (65 ms, about 15 tokens/s) against 1.06 GB with INT4 weights (21 ms, about 48 tokens/s), 3.1x, below 4x because the FP16 KV cache is unchanged (Napkin Math 10.4)"
+    example: "Same precision change, two regimes; then measured: ResNet-50 INT8 over FP32 on the H100, batch one 0.38 -> 0.30 ms (1.3x) against large-batch 15,200 -> 89,470 img/s (5.9x; INT8 measured by MLPerf Inference, FP32 modeled) (table 13, §10.6.2)"
+    read: "§10.3.5"
+  - id: 13
+    q: "In what order should the levers be applied, and where does the frame time actually come off?"
+    picture: "Slide variant of fig-compression-waterfall revealed one stage per step: weight memory 14 -> 10.4 -> 2.6 MB and frame time 125 -> 87 -> 20 ms against the 33 ms line, tagged illustrative"
+    numbers: "Width 0.75 keeps about 70 percent of the arithmetic (125 -> 87 ms on the CPU, illustrative scaling); INT8 moves the model to the integer accelerator, about 20 ms (illustrative); modeled BERT pipeline 440 -> 28 MB, 16x, 0.6 percent loss in the staged order against 2.1 percent quantizing first (Example 10.2, modeled)"
+    example: "Blur pipeline: prune, distill from ResNet-50, quantize, fold and fuse at compile time"
+    read: "§10.5.3"
+  - id: 14
+    q: "Why does an 8x paper saving become 1.5x, and what caps it even when the model is perfect?"
+    picture: "Two bars, paper 8x against realized 1.5x (illustrative), then a variant of book margin-004 (model 20 percent, decode/resize/display 80 percent) that loses the model segment to show 1 / 0.8 = 1.25x"
+    numbers: "50 percent structured pruning x INT8 = 8x on paper, 1.5x realized, 18.8 percent (§10.4, §10.7, illustrative); model 20 percent of latency caps a perfect model speedup at 1 / 0.8 = 1.25x (Systems Perspective 10.4); Amdahl recalled from Lectures 1 and 2"
+    example: "Camera pipeline with decoding, resizing, and display; LLM serving with tokenization and network"
+    read: "§10.4, §10.6.1"
+  - id: 15
+    q: "When do we accept a compressed model?"
+    picture: "Table 13 as a deployment card with a 'what backs it' column: accuracy reported (no subgroup check), size by arithmetic, batch-one latency from one engine profile in both precisions, throughput measured INT8 against modeled FP32, energy assuming 700 W in both; a final row with no number: confidence calibration, tail latency, sustained power"
+    numbers: "Top-1 76.1 -> 75.8 percent against a 75.5 limit; batch one 0.38 -> 0.30 ms (1.3x); throughput 15,200 (modeled FP32) -> 89,470 img/s (MLPerf-measured INT8), 5.9x; size 102.4 -> 25.6 MB; energy 46.1 -> 7.8 mJ assumes full 700 W board power in both (table 13, §10.6.2). Calibration-error values are not shown (no source in the chapter)."
+    example: "ResNet-50 INT8 candidate"
+    read: "§10.6.2"
+  - id: 16
+    q: "What does magnitude pruning keep?"
+    picture: "New mask build (make_figs.py mask_step1..2): listing 1's 3x3 matrix, then the pruned matrix at |w| >= 0.5"
+    numbers: "Kept 0.8, -0.7, -0.9, -0.6; 5 of 9 zero, 56 percent (listing 1, §10.2.1; share derived); objective: minimize loss subject to at most k nonzeros (§10.2.1)"
+    example: "Listing 1"
+    read: "§10.2.1"
+  - id: 17
+    q: "What does a sparse kernel skip, and what does it pay?"
+    picture: "New 4x4 build (spmv_step1..2): 16 dense multiply-accumulates, then 6 products with column-index tags; CSR bytes line"
+    numbers: "16 against 6 (§10.4.2); dense 64 B, CSR 48 B + 20 B row pointers = 68 B (derived from §10.7's 8 B per nonzero)"
+    example: "The chapter's 4x4 matrix-vector product"
+    read: "§10.4.2"
+  - id: 18
+    q: "At what sparsity do sparse formats and kernels pay?"
+    picture: "New break-even axis (breakeven.svg): CSR 50, COO 66.7, 2:4 at 50 on a hardware path, unstructured kernels can lose to dense until 80 to 90 percent; Gale et al. 2020 measured line"
+    numbers: "§10.7, §10.4.2; Gale et al. 2020 abstract: 1.2 to 2.1x on sparse Transformer and MobileNet, 27 percent of V100 FP32 peak"
+    example: "Sparsity break-evens"
+    read: "§10.4.2, §10.7"
+  - id: 19
+    q: "One cut or several?"
+    picture: "New line plot (schedule_step1..2), illustrative: one-shot 0.995 -> 0.914 -> 0.943; iterative 0.995 -> 0.971 -> 0.992, ending 0.991"
+    numbers: "§10.2.1, figures 6 and 7 (illustrative); the chapter's caveat that the iterative run got three rounds of fine-tuning"
+    example: "Six channels removed"
+    read: "§10.2.1"
+  - id: 20
+    q: "What does low rank save and cost?"
+    picture: "Book fig-matrix-factorization beside an estimate card"
+    numbers: "4096 x 4096 FP32: 67.1 MB; rank 128: 4.2 MB, 16x (Systems Perspective 10.1); arithmetic mn to k(m + n) (§10.2.2)"
+    example: "One 4096 x 4096 layer"
+    read: "§10.2.2"
+  - id: 21
+    q: "Which part of a transformer layer do you compress first?"
+    picture: "New bars (mlpshare.svg): MLP 8d^2, projections 4d^2, LayerNorm almost none"
+    numbers: "§10.6.1 (FLOP shares; no time share stated)"
+    example: "A ViT-Base-sized layer"
+    read: "§10.6.1"
+
+worked_examples:
+  - name: "Hook estimate: a 7B model on a phone (§10.1)"
+    steps: ["given: 7B parameters, FP16, phone 8 GB RAM, 51.2 GB/s LPDDR, 3-5 W sustained", "weights 14 GB > 8 GB: does not fit", "if it fit: 14 GB / 51.2 GB/s = about 270 ms per token, about 2 J", "about 8 W of memory traffic, above 3-5 W", "meaning: capacity, time, and energy each bind; synthesis returns with INT4 (3.5 GB, derived)"]
+  - name: "Napkin Math 10.1: scale and zero-point (student exercise)"
+    steps: ["given: X = [[-1, 1], [0, 3]], range [-1, 3], UINT8", "s = 4 / 255 = 0.0157", "z = round(1 / 0.0157) = round(63.75) = 64", "X_q = [[0, 128], [64, 255]]", "meaning: real zero is exactly 64, so zero padding adds no error; values outside [-1, 3] clip"]
+  - name: "Napkin Math 10.2 and 10.4: one precision change, two regimes"
+    steps: ["given: H100 INT8 1,979 TOPS, FP16 989 TFLOP/s; phone bus 51.2 GB/s, GPT-2 XL 1.5B, 1,024-token context", "compute-bound MLP: about 2x from the integer datapath", "decode FP16: 3 GB + 0.31 GB KV = 3.3 GB, 65 ms, about 15 tokens/s", "INT4 weights: 0.75 + 0.31 = 1.06 GB, 21 ms, about 48 tokens/s, 3.1x", "meaning: the bytes set the gain when memory bound; the KV cache and an unfused dequantize pass cap it"]
+  - name: "Table 13: accept or reject the ResNet-50 INT8 candidate (diagnose)"
+    steps: ["given: table 13 profile and a 75.5 percent top-1 limit", "top-1 75.8 percent: passes", "batch one only 1.3x; the 5.9x compares measured INT8 with modeled FP32; energy assumes 700 W in both", "confidence calibration, tail latency, and sustained power are not measured", "meaning: not yet acceptable; measure FP32 and INT8 on the same stack and the missing quality checks before shipping (§10.6.2, Checkpoint 10.5)"]
+
+active_learning:
+  - at_minute: 3
+    type: predict
+    prompt: "A 7B FP16 model, given all of a phone's 8 GB, reads every weight per token over 51.2 GB/s. Time per token and sustainable? A) 3 ms B) 27 ms C) about 270 ms and about 8 W, no D) 2.7 s"
+    answer: "C: 14 GB / 51.2 GB/s = 270 ms, about 2 J per token, about 8 W against 3-5 W (§10.1)."
+  - at_minute: 8
+    type: retrieval
+    prompt: "From memory: which iron-law factor did Lecture 9's data selection change, and is the trained model smaller afterwards?"
+    answer: "Samples/Task. No: same parameter count, precision, and footprint (§10.1)."
+  - at_minute: 19.5
+    type: estimate
+    prompt: "Listing 1's 3x3 matrix, threshold |w| >= 0.5: mark the mask and the share of zeros."
+    answer: "0.8, -0.7, -0.9, -0.6 survive; 5 of 9 zero, 56 percent (listing 1; share derived)."
+  - at_minute: 25
+    type: predict
+    prompt: "Pruned MobileNetV2 survivors total 2 MB against a wearable's 2 MB of flash, with a 16-bit index per FP32 value. Does it fit? Then: at what sparsity do CSR (8 B) and COO (12 B) break even?"
+    answer: "No, 3 MB (§10.4.2, labeled scenario). CSR above 50 percent zeros, COO above 66.7 percent (§10.7)."
+  - at_minute: 36
+    type: predict
+    prompt: "Remove six channels at once and fine-tune, or two at a time with fine-tuning between: which ends higher, and is the comparison fair?"
+    answer: "Iterative, 0.991 against 0.943 (illustrative), but it also got three rounds of fine-tuning; a fair test fixes the recovery budget (§10.2.1)."
+  - at_minute: 39
+    type: estimate
+    prompt: "A 4096 x 4096 FP32 layer factored at rank 128: megabytes before and after?"
+    answer: "67.1 MB and 4.2 MB, 16x fewer values; at the cost of two kernels and an intermediate (Systems Perspective 10.1)."
+  - at_minute: 50.5
+    type: predict
+    prompt: "MLP 8d^2, projections 4d^2, LayerNorm almost no arithmetic: which do you compress first to cut latency, and how?"
+    answer: "Structured pruning for the MLP, which holds the arithmetic; fusion for LayerNorm, which is memory bound. The chapter gives FLOP shares only (§10.6.1)."
+  - at_minute: 58.5
+    type: predict
+    prompt: "The model is 20 percent of the blur pipeline's latency and becomes infinitely fast. Overall speedup? Then: 60 percent made 4x faster?"
+    answer: "1 / 0.8 = 1.25x (Systems Perspective 10.4); 1 / (0.4 + 0.15) = 1.82x (derived)."
+  - at_minute: 61.5
+    type: concept_question
+    prompt: "True or false: (1) 4x fewer parameters by magnitude pruning gives about 4x lower latency. (2) A sparse format always saves memory. (3) Pruning and quantization can be applied in any order. (4) Distillation is lossless compression."
+    answer: "All false: 40 percent fewer parameters gave 12 percent lower latency; CSR grows the model below 50 percent zeros; modeled BERT 2.1 against 0.6 percent loss; DistilBERT keeps 97 percent of BERT (§10.7, Example 10.2, §10.2.3)."
+
+open_questions:
+  - "The smallest model reaching a fixed MMLU score fell 93x in three years. Will compression of today's frontier models, or new small models trained from scratch, close the phone gap first?"
+  - "A channel-pruned model runs faster on any accelerator; a 2:4 model runs faster only on some. Which would you ship to a fleet of mixed devices?"
+  - "Hardware rewards specific patterns (2:4, INT8, multiples of 8). Should model designers target today's datapaths, or should hardware follow whatever compression works best?"
+
+more_examples:
+  - "Epoch AI 2026: smallest model at or above 60 percent MMLU, Gopher 280B to Qwen2.5-Coder-3B (fig-smallest-capable-model)."
+  - "Gale, Elsen, Hooker 2019: about 80 percent of ResNet-50's weights removed for about one point."
+  - "Sanh et al. 2019: DistilBERT, 40 percent fewer parameters, 60 percent faster, 97 percent of BERT."
+  - "Michel et al. 2019: many BERT heads removable without a significant change on MultiNLI."
+  - "Mishra et al. 2021: 2:4 Sparse Tensor Cores; measured INT8 GEMM speedup about 1.2x to 1.9x by GEMM size; ResNet-50 top-1 76.1 dense, 76.2 sparse."
+  - "Gale et al. 2020: unstructured sparse GPU kernels, 1.2 to 2.1x on sparse Transformer and MobileNet, 27 percent of V100 FP32 peak."
+  - "Han, Mao, Dally 2016: Deep Compression; pruning plus quantization to about 3 percent of size without loss in one setting."
+  - "NVIDIA A100 2:4 Sparse Tensor Cores: 2x math throughput, the vendor design peak (NVIDIA 2020; Mishra et al. 2021 Table 1)."
+  - "Lin et al. 2024: AWQ protects about 1 percent of salient channels to reach INT4-class weights for LLM decoding."
+  - "Tan et al. 2019: MnasNet measured phone latency in its search, 1.8x faster than MobileNetV2 at higher accuracy."
+  - "MLPerf Inference: ResNet-50 INT8 89,470 img/s on H100 (table 13)."
+
+left_to_reading:
+  - concept: "Low-rank factorization and tensor decomposition"
+    why: "Secondary; one note on the distillation slide (4096 x 4096 at rank 128: 67.1 MB to 4.2 MB, 16x, but two kernels and an intermediate). Pruning and distillation teach the structural trade-off more directly."
+  - concept: "Neural architecture search and efficient architecture families"
+    why: "Families are owned by Lecture 6 (MobileNetV2 already taught there); NAS is awareness only in the chapter. One note: 22,400 GPU-days (RL) against 1 to 4 (DARTS); MnasNet measured phone latency."
+  - concept: "Adaptive computation: dynamic pruning, early exit, mixture-of-experts"
+    why: "Secondary awareness; batching fragmentation belongs to Lecture 13. One open-question note."
+  - concept: "Iterative against one-shot pruning, gradient and activation criteria, lottery ticket hypothesis"
+    why: "Figures are illustrative and the chapter marks the lottery ticket as optional depth; the working rule (one-shot plus recovery first) goes in the pruning notes."
+  - concept: "QAT mechanics (fake quantization, straight-through estimator), static against dynamic ranges, INT32 accumulation and requantization"
+    why: "Named on the accuracy-limit slide and in notes; the mechanics read better than they present."
+  - concept: "FP8 and microscaling formats, binary and ternary networks"
+    why: "FP8 appears as a format in Lecture 10b, and FP8 serving is reading; binary and ternary get one line on the KWS step (the 256 KB doorbell leaves about 100 KB for weights)."
+  - concept: "Compression toolchains, the runtime dequantization trap, diagnostic visualization"
+    why: "The trap is one line on the fusion slide; toolchains and runtime selection belong to Lecture 13; diagnostics are reading."
+  - concept: "DLRM embedding quantization"
+    why: "Capacity case, one line on the bytes slide (4 to 8x on 100 GB tables); KWS carries the capacity point in this lecture."
+
+closing:
+  return_to_hook: "Back to the ladder. Channel pruning took the blur frame from 125 to about 87 ms, still over 33 (illustrative). GPT-2 XL still streams 3 GB of FP16 weights per token (59 ms), the keyword spotter's 800 KB still overflows 512 KB of SRAM, and the 7B model is still 14 GB against 8 GB. Every remaining gap is in bits per value: Part 2."
+  read_and_practice: ["§10.1, §10.2, §10.4, §10.5.3, §10.6.1, §10.7", "self-check questions at the end of each section", "TinyTorch compression module, if assigned"]
+  further_reading:
+    - cite: "Model Compression, §10.2, §10.4, §10.5.3"
+      url: "https://mlsysbook.ai"
+      why: "Pruning, distillation, low rank, sparse formats and kernels, fusion, and ordering, with every number."
+    - cite: "Han, Mao, Dally, Deep Compression, ICLR 2016"
+      url: "https://arxiv.org/abs/1510.00149"
+      why: "The source of the accuracy-against-size curves."
+    - cite: "Blalock, Gonzalez Ortiz, Frankle, Guttag, What Is the State of Neural Network Pruning?, MLSys 2020"
+      url: "https://proceedings.mlsys.org/paper_files/paper/2020/hash/6c44dc73014d66ba49b28d483a8f8b0d-Abstract.html"
+      why: "How to compare pruning results fairly; in the chapter bibliography."
+    - cite: "Hinton, Vinyals, Dean, Distilling the Knowledge in a Neural Network, 2015"
+      url: "https://arxiv.org/abs/1503.02531"
+      why: "Soft targets and temperature in eight pages."
+    - cite: "Sanh, Debut, Chaumond, Wolf, DistilBERT, a Distilled Version of BERT, 2019"
+      url: "https://arxiv.org/abs/1910.01108"
+      why: "The distilled student behind the 97 percent and 60 percent numbers."
+    - cite: "Hoefler et al., Sparsity in Deep Learning, JMLR 2021"
+      url: "https://jmlr.org/papers/v22/21-0366.html"
+      why: "When sparsity pays in storage and in time, across formats and hardware."
+  bridge: "Lecture 10b (Model Compression, Part 2): how few bits can a value keep? Today removed work; next time removes bits, and finds when that makes the device faster. The bridge to Lecture 11 moves to the end of Part 2."
+
+coverage:
+  primary_taught: ["Compression fits a deployment budget (hook, table 1 bars, three tiers)", "Accuracy-efficiency frontier (Han et al. curves; stop at thresholds, not the knee)", "Structured vs unstructured pruning (Gale 2019, mask exercise, sparse product, CSR and COO break-even, measured kernels, 2:4, tiles, schedules)", "Combined techniques do not multiply (waterfall order, BERT ordering, 8x against 1.5x)"]
+  primary_touched: ["Measured deployment evidence (Amdahl's 1.25x and 1.82x)", "When fewer bits run faster (budget-plot INT4 preview only; taught in 10b)", "Quantization regimes and the cliff (named only; taught in 10b)"]
+  primary_left_to_reading: []
+  secondary: ["Sparse storage break-even (taught in depth)", "Knowledge distillation (taught: soft targets, temperature, loss, DistilBERT)", "Low-rank factorization (one frame with estimate)", "Compression-specific fusion (batch-norm folding; fused dequantization in 10b)", "Input-dependent computation and NAS (reading)"]
+  touches_reused: ["Lecture 1: iron law, Amdahl", "Lecture 2: Amdahl and the camera pipeline", "Lecture 6: MobileNetV2, transformer layer shapes", "Lecture 7: fusion traffic rule", "Lecture 9: soft targets as training data"]
+  hand_offs: ["Lecture 10b owns precision: formats, the affine mapping, calibration, PTQ and QAT, when fewer bits run faster, and the table 13 deployment diagnose", "Lecture 11 owns the sparse datapath and the roofline", "Lecture 13 owns batching and runtime selection"]
+
+notes_for_author:
+  - "Example 10.1 uses MobileNetV2 (8 to 35 FPS); the §10.1 self-check question 6 and the concept map's applications line say MobileNetV3. The deck follows Example 10.1 (MobileNetV2). The chapter should pick one."
+  - "Example 10.1's FPS values and the waterfall's frame times (125, 87, 20 ms) are illustrative per the chapter; the slides label them so. The blur case has no measured device data."
+  - "Segment 2 measured sparse speedups now come from two primary sources read for this plan: Mishra et al. 2021 (arXiv 2104.08378; Fig. 3 INT8 GEMM speedups on A100, about 1.2x at K = 1,280 to about 1.9x at large K, values read from the plot and labeled approximate; Tables 2 and 7 accuracy) and Gale et al. 2020 (arXiv 2006.10901, abstract: 1.2 to 2.1x, 27 percent of V100 FP32 peak). The abstract gives no sparsity level for the 1.2 to 2.1x; the slide says moderate sparsity, as the abstract does. The chapter margin-003 curve stays schematic and labeled. Mishra et al. 2021 is not in the chapter bibliography; consider adding it."
+  - "The quantization plateau-and-cliff figure (fig-quantization-free-lunch) is illustrative, so the accuracy-limit slide uses Han et al. 2016 (fig-compression-methods, a reported setting) as the real-data evidence instead."
+  - "Segment 5: the blur waterfall, the 8x-to-1.5x pipeline, and the Amdahl 20 percent are the chapter's illustrative scenario and each slide is labeled illustrative. The measured anchor is table 13 (MLPerf INT8 throughput)."
+  - "Table 13's confidence-calibration values (2.1 and 3.4 percent) and its 3.0 percent limit have no source in the chapter text; they are dropped from the slides. The chapter needs a source for them or should label them as a scenario."
+  - "Table 13's 5.9x compares a measured INT8 rate (MLPerf) with a modeled FP32 rate, and its energy row assumes 700 W in both precisions; the slide credit and the notes say so."
+  - "The 7B INT4 footprint (3.5 GB) in the synthesis is derived (7e9 x 0.5 B), not printed in the chapter; the 175B-to-512 KB ratio is quoted as 'about six orders of magnitude' as the chapter does."
+  - "Frame count 34 including the title, five dividers, and the focus slide, at the top of the brief's 32 to 34 range; three tiers folded into the budget plot and width 0.75 into the structured-pruning frame to stay there."
+  - "Build changes (2026-10-16): 35 frames. Frame 8's three tiers became their own frame (the bar plot and the tier diagram could not share a slide at legible size); storyboard frame 12 split into a 2:4 frame and a channel-pruning frame; storyboard frames 22 and 23 merged (the predict cards sit beside the roofline, which reveals the answers). Book figures fig-sparse-matrix, fig-structured-unstructured, fig-kd-targets, and fig-compression-waterfall were redrawn as slide variants with the same values because the originals are illegible at slide size. Notes total 71.5 minutes."
+  - "Split into two lectures (2026-10-17), following ../10b_model_compression/part1_changes.md. Part 1 keeps budget, structure, execution of removed work, and the system; the precision tier moved to Lecture 10b: the precision divider, the energy bars, the affine focus slide and Napkin Math 10.1, the clipping histogram, the roofline predict, the ResNet-50 INT8 bars, and the deployment-card diagnose (concept questions 7 to 12 and 15 above are now taught there; 10 survives as the Han et al. pruning cliff). Added: the listing 1 mask estimate, the 4x4 sparse product with CSR bytes, a break-even frame with Gale et al. 2020, the one-cut-or-three predict, a low-rank estimate, the temperature step and loss on the distillation slide, the MLP-against-LayerNorm predict, a second Amdahl estimate (60 percent at 4x, 1.82x, derived), and a ladder synthesis ending on bits per value. Every note now carries [CORE] or [OPTIONAL]. Cover switched to the clean blueprint (cover_model_compression_blueprint.png). Closing slide points to Part 2 with Krishnamoorthi 2018's ResNet-50 bars (hook_step1.svg copied from 10b). 33 frames, notes 70.5 minutes ([OPTIONAL] 13)."
+  - "Files in images/ no longer used by the deck (kept, not deleted): energy_step1..2, numline_step1..2, roofline_int_step0..2, r50int8_step1..3, synthesis_step1..2, waterfall_step3, book_activation_histogram.svg/.pdf, cover_model_compression.png, and the older PDFs compression-deployment-spectrum, compression-tradeoff-regions, knowledge-distillation-pipeline, nas-overview, operator-fusion, optimization-stack, pruning-structured-vs-unstructured, qat-training-loop, quantization-number-line."
+  - "Visual and technical pass (2026-10-19), from the visual audit and deckcheck. Added real things in rhythm (no more than three frames in a row without one): (1) the accuracy-efficiency frontier from Howard et al. 2019 Table 3 (ImageNet top-1 against measured Pixel 1 float latency; MobileNetV2 1.0 is dominated by V3-Large 0.75, 1.64x faster and 1.3 points better, derived in calcs.py), placed after the three tiers as a predict; (2) the blur frame now shows a real iPhone XR logic board (Wikimedia Commons, Sonic8400, CC BY-SA 4.0) with the A12 package outlined (A12 over 3 GB LPDDR4X, per iFixit's teardown), and moved to the end of the hook so the hook never runs more than three frames without a real thing; (3) a real PyTorch transcript of prune.l1_unstructured on listing 1 (same shape, added weight_mask, CSR 80 B against 36 B dense with int64 indices); (4) a real fuse_modules transcript (Conv2d, BatchNorm2d, ReLU become ConvReLU2d, Identity, Identity; outputs agree to 1.7e-06); (5) a CPU measurement of torchvision MobileNetV2 (one thread, batch 1, median of 1,000 interleaved runs, Apple M5 Max, PyTorch 2.13.0): 80 percent unstructured zeros 101 percent of the dense time, width 0.75 at 70 percent of the FLOPs takes 88 percent of the time; (6) the illustrative one-cut-or-three curves replaced by Han et al. 2015 Fig. 5 (AlexNet top-5; points extracted from the figure's vector paths): retrain once holds to 5x, iterative to 9x; (7) the Epoch AI plot redrawn at slide size from the mlsysim series behind the book figure, record holders only; (8) open questions show an H100 card and a microcontroller board from the shared photo library. Goal and takeaway thumbnails dropped; takeaways name the frontier. Every derived number is now computed in images/calcs.py (make_figs.py imports it); the recomputation found one disagreement, BN-fold traffic time at 3,350 GB/s is 2.1 us unfused, not 2.0 (the chapter rounds to 2), now 2.1 in the note. PyTorch scripts (images/measure_cpu.py, images/torch_demos.py) run with the mlperf-edu venv, since the MLSysBook venv has no torch. Unused generators removed from make_figs.py. 32 frames, notes 70.5 minutes (CORE 59.5). Skipped: the DistilBERT model card (frame full), torch to_sparse_semi_structured (needs a sparse-tensor-core GPU)."
+  - "Files in images/ unused after 2026-10-19 (not deleted): book_smallest_capable_model.png, schedule_step1..2 (.svg/.pdf), synthesis_step1..2, energy_step1..2, numline_step1..2, waterfall_step3, plus the list above."
+  - "PANEL FIX 2026-10-19: (1) The concept 'combined techniques do not multiply' has its own frame, 'Pruning and INT8 promised 8x and delivered 1.5x' (1.5 min, CORE), before the Amdahl predict, which keeps its three steps (2.5 min). (2) The weight-streaming frame is retitled to what its plot shows ('Reading weights takes MobileNetV2 0.27 ms and GPT-2 XL 59 ms'); the note no longer claims arithmetic fills the frame. (3) The Deep Compression cliff figure is redrawn at slot size from the chapter's TikZ data (cliff_methods.svg); book_compression_methods.svg/.pdf are now unused. (4) Goals frame carries the course-thread strip (FLOPs/Sample, A, and the fast-enough half). (5) OPTIONAL retag for a 50-minute core: magnitude-pruning estimate, PyTorch mask code, sparse break-even, 2:4 GEMM, and the batch-norm fold call are now [OPTIONAL]; notes 71.0 minutes, 49.5 core."

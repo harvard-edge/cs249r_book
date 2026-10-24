@@ -275,7 +275,7 @@ def test_platform_threshold_anchors():
     from mlsysim import Platforms
 
     assert Platforms.Cloud.compute_threshold.to(TFLOP / second).magnitude == pytest.approx(
-        1000.0
+        200.0
     )
     assert Platforms.Cloud.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(
         1000.0
@@ -297,3 +297,59 @@ def test_mobilenetv2_variant_model_profiles():
     assert Models.Vision.MobileNetV2.metadata.provenance.ref
     assert Models.Vision.EfficientNetB0.metadata.provenance.ref
     assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref
+
+
+def test_disambiguated_state_and_interconnect_constants():
+    from mlsysim.core.units import (
+        BYTES_ADAM_STATE,
+        BYTES_ADAM_MOMENTS,
+        BYTES_ADAM_TOTAL,
+        BYTES_TRAINING_STATE_MIXED_PRECISION,
+        NVLINK4_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK4_BANDWIDTH_BIDIRECTIONAL,
+        byte,
+        GB,
+        second,
+    )
+    from mlsysim import Hardware
+
+    assert BYTES_ADAM_STATE.to(byte).magnitude == 8.0
+    assert BYTES_ADAM_MOMENTS.to(byte).magnitude == 8.0
+    assert BYTES_ADAM_TOTAL.to(byte).magnitude == 12.0
+    assert BYTES_TRAINING_STATE_MIXED_PRECISION.to(byte).magnitude == 16.0
+    assert NVLINK4_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 450.0
+    assert NVLINK4_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 900.0
+
+    from mlsysim.core.units import (
+        NVLINK3_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK3_BANDWIDTH_BIDIRECTIONAL,
+        NVLINK5_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK5_BANDWIDTH_BIDIRECTIONAL,
+    )
+    assert NVLINK3_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 300.0
+    assert NVLINK3_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 600.0
+    assert NVLINK5_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 900.0
+    assert NVLINK5_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 1800.0
+
+    # Accelerators precision FLOPs (dense vs sparse)
+    a100 = Hardware.Cloud.A100
+    assert a100.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(312.0)
+    assert a100.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(624.0)
+
+    h100 = Hardware.Cloud.H100
+    assert h100.compute.peak_flops.to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
+    assert h100.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
+    assert h100.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(1979.0)
+
+    b200 = Hardware.Cloud.B200
+    assert b200.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(2250.0)
+    assert b200.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(4500.0)
+
+    # Transformer FLOPs: 6PD baseline vs 8PD recomputation
+    from mlsysim.physics import calc_transformer_training_flops
+    from mlsysim.core.units import param, token
+    flops_6pd = calc_transformer_training_flops(1 * param, 1 * token)
+    flops_8pd = calc_transformer_training_flops(1 * param, 1 * token, activation_checkpointing=True)
+    assert flops_6pd.to(ureg.flop).magnitude == pytest.approx(6.0)
+    assert flops_8pd.to(ureg.flop).magnitude == pytest.approx(8.0)
+

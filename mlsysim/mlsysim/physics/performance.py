@@ -41,12 +41,6 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
 calc_training_time = dTime
 
 
-def calc_training_time_days(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
-    """Training duration in days."""
-    duration = dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta)
-    return duration.m_as(ureg.day)
-
-
 def calc_amdahls_speedup(p, s):
     """
     Overall system speedup (Amdahl's Law).
@@ -69,6 +63,49 @@ def calc_amdahls_speedup(p, s):
     validate_range(p, 0.0, 1.0, "p (parallel fraction)")
     validate_positive(s, "s (speedup factor)")
     return 1 / ((1 - p) + (p / s))
+
+
+def calc_partial_slowdown_stretch(stall_fraction, slowdown):
+    """
+    Stretch of a task when only a fraction of its time is slowed down.
+
+    Equation:
+        stretch = (1 - f) + f * S
+
+    Amdahl's law read as a slowdown: a fraction ``f`` of the unloaded time
+    (for example, time stalled on shared-cache misses) runs ``S`` times
+    slower under interference while the rest is unchanged. The loaded time
+    is ``t_unloaded * stretch``. Equal to ``1 / calc_amdahls_speedup(f, 1/S)``.
+
+    Source: Amdahl, "Validity of the single processor approach to achieving
+    large scale computing capabilities," AFIPS Spring Joint Computer
+    Conference, 1967 (fixed-fraction model, applied to a slowdown).
+    """
+    validate_range(stall_fraction, 0.0, 1.0, "stall_fraction")
+    validate_at_least(slowdown, 1.0, "slowdown")
+    return (1.0 - stall_fraction) + stall_fraction * slowdown
+
+
+def calc_stall_share_breakeven(allowed_stretch, slowdown):
+    """
+    Largest slowed fraction of a task that keeps it within an allowed stretch.
+
+    Equation:
+        f_max = (C / t_unloaded - 1) / (S - 1)
+
+    The inverse of ``calc_partial_slowdown_stretch``: with a budget ``C``
+    (a declared WCET or deadline) and unloaded time ``t_unloaded``, the
+    allowed stretch is ``C / t_unloaded``; a slowed share above ``f_max``
+    crosses the budget. Capped at 1 (the whole task may be slowed).
+
+    Source: Amdahl 1967 fixed-fraction model, solved for the fraction
+    (see ``calc_partial_slowdown_stretch``).
+    """
+    validate_at_least(allowed_stretch, 1.0, "allowed_stretch")
+    validate_at_least(slowdown, 1.0, "slowdown")
+    if slowdown == 1.0:
+        return 1.0
+    return min(1.0, (allowed_stretch - 1.0) / (slowdown - 1.0))
 
 
 def calc_strong_scaling_speedup(num_devices, communication_fraction):
@@ -189,24 +226,46 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
         - ratio (float): The ratio of the bottlenecked time to the non-bottlenecked time.
         - intensity (float): The arithmetic intensity (FLOP/Byte) of the workload.
     """
+    # Arithmetic intensity is an intrinsic property of the workload (FLOP / Byte)
+    # independent of device performance:
+    ops_val = ops.m_as(ureg.flop) if hasattr(ops, "m_as") else float(ops)
+    bytes_val = model_bytes.m_as(ureg.byte) if hasattr(model_bytes, "m_as") else float(model_bytes)
+
+    if bytes_val < 1e-15:
+        intensity_val = float("inf") if ops_val >= 1e-15 else 0.0
+    elif ops_val < 1e-15:
+        intensity_val = 0.0
+    elif hasattr(ops, "to") and hasattr(model_bytes, "to"):
+        # Normalize before extracting magnitude so scaled inputs such as
+        # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
+        intensity_val = (ops / model_bytes).to("flop/byte").magnitude
+    else:
+        intensity_val = float(ops / model_bytes)
+
     compute_time = ops / device_flops
     memory_time = model_bytes / device_bw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
 
-    # Degenerate-workload guards: a zero-FLOP workload (pure data movement) is
-    # memory-bound by definition, and a zero-byte workload is compute-bound.
-    # The 1e-15 epsilon catches float-rounded zeros; either case would make the
-    # ratio/intensity divisions below blow up. The epsilon applies to MILLISECOND
-    # magnitudes (effective threshold 1e-18 s) — keep that basis in mind if the
-    # internal unit ever changes.
+    # Degenerate-workload / infinite-hardware guards:
+    # If compute or memory time vanishes (< 1e-15 ms, effective threshold 1e-18 s),
+    # the non-zero resource binds with infinite ratio.
+    if t_comp_ms < 1e-15 and t_mem_ms < 1e-15:
+        return {
+            "compute_ms": 0.0,
+            "memory_ms": 0.0,
+            "bottleneck": "Compute",
+            "ratio": 1.0,
+            "intensity": intensity_val,
+        }
+
     if t_comp_ms < 1e-15:
         return {
             "compute_ms": 0.0,
             "memory_ms": t_mem_ms,
             "bottleneck": "Memory",
             "ratio": float("inf"),
-            "intensity": 0.0,
+            "intensity": intensity_val,
         }
 
     if t_mem_ms < 1e-15:
@@ -215,7 +274,7 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
             "memory_ms": 0.0,
             "bottleneck": "Compute",
             "ratio": float("inf"),
-            "intensity": float("inf"),
+            "intensity": intensity_val,
         }
 
     # The slower of the two independent ceilings binds; the ratio reports how
@@ -225,15 +284,12 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     # point is classified as (just barely) compute-bound by convention.
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
-    # Normalize before extracting magnitude so scaled inputs such as
-    # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
-    intensity = (ops / model_bytes).to("flop/byte")
     return {
         "compute_ms": t_comp_ms,
         "memory_ms": t_mem_ms,
         "bottleneck": "Memory" if is_memory_bound else "Compute",
         "ratio": ratio,
-        "intensity": intensity.magnitude,
+        "intensity": intensity_val,
     }
 
 
@@ -297,3 +353,19 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     pf = _ensure_unit(peak_flops, ureg.flop / ureg.second, "peak_flops")
     validate_positive(pf, "peak_flops")
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
+
+
+def calc_pareto_frontier(points):
+    """
+    Indices of the points no other point beats on both axes.
+
+    ``points`` is a sequence of (cost, value) pairs, lower cost and higher
+    value better (latency and accuracy, for example). A point is dominated
+    when another is at least as good on both axes and strictly better on one.
+    Added 2026-10-20.
+    """
+    keep = []
+    for i, (c, v) in enumerate(points):
+        if not any((c2 <= c and v2 >= v) and (c2 < c or v2 > v) for c2, v2 in points):
+            keep.append(i)
+    return keep

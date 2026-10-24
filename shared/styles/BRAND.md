@@ -45,7 +45,6 @@ These are pre-existing hardcoded copies (kept verbatim to avoid breaking
 independent subsite builds; future cleanup should refactor each to
 `@import` from this brand layer):
 
-- [`instructors/assets/styles/style.scss`](../../instructors/assets/styles/style.scss)
 - [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss)
 - [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss)
 - [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss)

@@ -7,8 +7,11 @@ path, derived from ``engine.solvers.__init__``); kept per-domain so the logic st
 from __future__ import annotations
 
 
+import math
+
 from ..results import (
     OrchestrationResult,
+    PreemptionTaxResult,
 )
 from ...core.units import ureg, Q_
 from ...systems.types import Fleet
@@ -77,6 +80,39 @@ class OrchestrationModel(ForwardModel):
             is_stable=utilization < 1.0,
         )
 
+
+
+class PreemptionTaxModel(ForwardModel):
+    """
+    The cost of forced preemptions to the job that is stopped.
+
+    One forced preemption discards the work since the last durable checkpoint
+    and then pays the cold-restart steps of the recovery budget: restart,
+    checkpoint reload, and warmup. There is no detection term, because the
+    scheduler itself stopped the job. A preempted job and a failed job
+    therefore pay the same relaunch.
+    """
+    requires = ("recovery", "checkpoint_bytes")
+    produces = PreemptionTaxResult
+
+    def solve(self, n_devices: int, checkpoint_bytes, lost_work, preemption_rate, recovery,
+              device_hour_rate) -> PreemptionTaxResult:
+        restart = Q_(float(recovery.restart_time_s), ureg.second)
+        reload = (checkpoint_bytes / Q_(float(recovery.checkpoint_write_bw_gbs), "GB/s")).to(ureg.second)
+        warmup = Q_(float(recovery.warmup_time_s), ureg.second)
+        relaunch = recovery.cold_restart_time(checkpoint_bytes, include_detection=False)
+        per_event = (lost_work + relaunch).to(ureg.minute)
+        rate = device_hour_rate.to("USD/hour").magnitude
+        cost = n_devices * per_event.to(ureg.hour).magnitude * rate
+        events = (preemption_rate * Q_(1, ureg.day)).to("").magnitude
+        lost_day = events * per_event
+        return PreemptionTaxResult(lost_work=lost_work, restart=restart, reload=reload, warmup=warmup,
+                                   relaunch=relaunch, per_event=per_event, cost_per_event=cost,
+                                   events_per_day=events, lost_per_day=lost_day,
+                                   gpu_hours_per_day=n_devices * lost_day.to(ureg.hour).magnitude)
+
+
 __all__ = [
     "OrchestrationModel",
+    "PreemptionTaxModel",
 ]

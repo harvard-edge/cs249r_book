@@ -8,6 +8,9 @@ Subcommands:
     update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
     sync     — Clean then update (full pipeline)
     normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → binder bib check)
+    add      — Authenticate, format, and seal a new entry (the reference gateway)
+    ingest   — Verify and promote candidate entries from bibs/inbox.bib
+    reseal   — Re-verify a house-style-edited entry against its source and re-record it
 """
 
 import argparse
@@ -15,15 +18,15 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from cli.core.bib_mechanical import run_mechanical_fixes
+from cli.core.discovery import display_path, qmd_files_under
 
 console = Console()
 
@@ -60,7 +63,7 @@ class BibCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["list", "mechanical", "clean", "update", "sync", "normalize"],
+            choices=["list", "mechanical", "clean", "update", "sync", "normalize", "add", "ingest", "reseal"],
             help="Subcommand to run",
         )
         parser.add_argument("files", nargs="*", help=".bib file(s) for mechanical fixes")
@@ -77,6 +80,17 @@ class BibCommand:
             action="store_true",
             help="Mechanical fixes: exit 1 if a file was modified",
         )
+        parser.add_argument("--doi", default=None, help="Add reference by DOI (Crossref/DataCite)")
+        parser.add_argument("--arxiv", default=None, help="Add reference by arXiv ID")
+        parser.add_argument("--isbn", default=None, help="Add reference by ISBN (OpenLibrary)")
+        parser.add_argument("--url", default=None, help="Add reference by official URL")
+        parser.add_argument("--key", default=None, help="Custom citation key for add; the entry to re-seal for reseal")
+        parser.add_argument("--note", default=None, help="reseal: what was edited after the gateway seal (required)")
+        parser.add_argument("--title", default=None, help="Custom title override for --url")
+        parser.add_argument("--author", default=None, help="Custom author override for --url")
+        parser.add_argument("--year", default=None, help="Custom year override for --url")
+        parser.add_argument("--venue", default=None, help="Custom venue override for --url")
+        parser.add_argument("--inbox", default="bibs/inbox.bib", help="Inbox path for 'ingest' subcommand")
 
         try:
             # Pre-commit appends filenames after the hook entry, so the public
@@ -97,6 +111,36 @@ class BibCommand:
                 ns.files,
                 dry_run=ns.dry_run,
                 pre_commit=ns.pre_commit,
+            )
+
+        if ns.subcommand == "add":
+            return self._run_add(
+                doi=ns.doi,
+                arxiv=ns.arxiv,
+                isbn=ns.isbn,
+                url=ns.url,
+                custom_key=ns.key,
+                title=ns.title,
+                author=ns.author,
+                year=ns.year,
+                venue=ns.venue,
+                dry_run=ns.dry_run,
+            )
+
+        if ns.subcommand == "reseal":
+            return self._run_reseal(
+                key=ns.key,
+                note=ns.note,
+                doi=ns.doi,
+                arxiv=ns.arxiv,
+                url=ns.url,
+                dry_run=ns.dry_run,
+            )
+
+        if ns.subcommand == "ingest":
+            return self._run_ingest(
+                inbox=ns.inbox,
+                dry_run=ns.dry_run,
             )
 
         root = self._resolve_path(ns.path, ns.vol1, ns.vol2)
@@ -132,6 +176,9 @@ class BibCommand:
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=50)
+        table.add_row("add", "Authenticate, format, and seal new citation into ledger")
+        table.add_row("ingest", "Verify and promote candidate citations from inbox")
+        table.add_row("reseal", "Re-verify an edited entry against its source; re-record its manifest hash")
         table.add_row("list", "Show all .bib files with entry counts")
         table.add_row("mechanical", "Apply safe §5 field-level fixes")
         table.add_row("clean", "Remove unused entries from .bib files")
@@ -146,16 +193,22 @@ class BibCommand:
         )
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
-        console.print("  [cyan]./binder/binder bib list --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --doi 10.1145/3592433[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --arxiv 1706.03762[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --url https://github.com/huggingface/lerobot --key cadene2024lerobot[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --isbn 9780136566953[/cyan]")
+        console.print("  [cyan]./binder/binder bib ingest --inbox bibs/inbox.bib[/cyan]")
+        console.print('  [cyan]./binder/binder bib reseal --key vaswani2017attention --note "title case" --dry-run[/cyan]')
+        console.print("  [cyan]./binder/binder bib list --path bibs/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib clean --dry-run[/cyan]")
-        console.print("  [cyan]./binder/binder bib update --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib update --path bibs/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib sync --dry-run[/cyan]")
         console.print(
             "  [cyan]./binder/binder bib normalize[/cyan]   "
             "# all git-tracked .bib (run from repo root)"
         )
-        console.print("  [cyan]./binder/binder bib normalize --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib normalize --path bibs/references.bib[/cyan]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -171,10 +224,7 @@ class BibCommand:
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
-        base = self.config_manager.book_dir
-        if vol1 or vol2:
-            return base
-        return base
+        return self.config_manager.book_dir
 
     # ------------------------------------------------------------------
     # Helpers
@@ -186,26 +236,18 @@ class BibCommand:
             return [root]
         return sorted(root.rglob("*.bib"))
 
-    def _find_qmd_files(self, root: Path) -> List[Path]:
-        """Find all .qmd files under root."""
-        if root.is_file():
-            return [root] if root.suffix == ".qmd" else []
-        return sorted(root.rglob("*.qmd"))
-
     def _count_entries(self, bib_path: Path) -> int:
         """Count @type{key, entries in a .bib file."""
-        try:
-            content = bib_path.read_text(encoding="utf-8")
-            return len(re.findall(r"^@\w+\{", content, re.MULTILINE))
-        except Exception:
-            return 0
+        content = bib_path.read_text(encoding="utf-8")
+        return len(re.findall(r"^@\w+\{", content, re.MULTILINE))
 
     def _extract_cited_keys(self, qmd_path: Path) -> Set[str]:
-        """Extract all citation keys from a .qmd file."""
-        try:
-            content = qmd_path.read_text(encoding="utf-8")
-        except Exception:
-            return set()
+        """Extract all citation keys from a .qmd file.
+
+        Read errors propagate: treating an unreadable chapter as citing nothing
+        would mark its entries unused and let ``bib clean`` delete them.
+        """
+        content = qmd_path.read_text(encoding="utf-8")
         # Standard @key citations
         keys = set(re.findall(r"@([\w\d:\-_.]+)", content))
         # Filter out cross-ref prefixes
@@ -218,30 +260,17 @@ class BibCommand:
 
     def _extract_bib_keys(self, bib_path: Path) -> Set[str]:
         """Extract all entry keys from a .bib file."""
-        try:
-            content = bib_path.read_text(encoding="utf-8")
-            return set(re.findall(r"^@\w+\{([^,\s]+)", content, re.MULTILINE))
-        except Exception:
-            return set()
+        content = bib_path.read_text(encoding="utf-8")
+        return set(re.findall(r"^@\w+\{([^,\s]+)", content, re.MULTILINE))
 
     def _bib_for_qmd(self, qmd_path: Path) -> Optional[Path]:
         """Find the .bib file referenced in a .qmd file's YAML front matter."""
-        try:
-            content = qmd_path.read_text(encoding="utf-8")
-        except Exception:
-            return None
+        content = qmd_path.read_text(encoding="utf-8")
         m = re.search(r"^bibliography:\s*([\w\-.]+\.bib)\s*$", content, re.MULTILINE)
         if m:
             bib = qmd_path.parent / m.group(1)
             return bib if bib.exists() else None
         return None
-
-    def _relative(self, path: Path) -> str:
-        """Return ``path`` relative to the book dir, or the full path if it lies outside."""
-        try:
-            return str(path.relative_to(self.config_manager.book_dir))
-        except ValueError:
-            return str(path)
 
     # ------------------------------------------------------------------
     # Mechanical fixes
@@ -285,7 +314,7 @@ class BibCommand:
         for bib in bib_files:
             count = self._count_entries(bib)
             total += count
-            table.add_row(self._relative(bib), str(count))
+            table.add_row(display_path(bib, self.config_manager.book_dir), str(count))
 
         console.print(Panel(table, title="Bibliography Files", border_style="cyan"))
         console.print(
@@ -299,7 +328,7 @@ class BibCommand:
 
     def _run_clean(self, root: Path, dry_run: bool = False) -> bool:
         """Remove unused entries from .bib files."""
-        qmd_files = self._find_qmd_files(root)
+        qmd_files = qmd_files_under(root)
         if not qmd_files:
             console.print("[yellow]No QMD files found.[/yellow]")
             return False
@@ -336,7 +365,7 @@ class BibCommand:
         if is_narrow:
             console.print(
                 "[yellow]⚠ Narrow scope:[/yellow] Only citations from QMD files "
-                f"under [cyan]{self._relative(root)}[/cyan] are visible.\n"
+                f"under [cyan]{display_path(root, self.config_manager.book_dir)}[/cyan] are visible.\n"
                 "  Entries cited by other chapters may appear unused. "
                 "Use the full [cyan]books[/cyan] tree for safe cleaning.\n"
             )
@@ -350,7 +379,7 @@ class BibCommand:
         for bib_path, cited_keys in sorted(bib_cited.items()):
             bib_keys = self._extract_bib_keys(bib_path)
             unused = bib_keys - cited_keys
-            rel = self._relative(bib_path)
+            rel = display_path(bib_path, self.config_manager.book_dir)
 
             if not unused:
                 console.print(f"  [green]✓[/green] {rel}: all {len(bib_keys)} entries used")
@@ -432,6 +461,8 @@ class BibCommand:
             "Mechanical section 5 fixes ([cyan]binder bib mechanical[/cyan])...\n"
         )
         if run_mechanical_fixes(repo, mechanical_files) != 0:
+            console.print("[red]Step 1/3 failed: fix the mechanical issues reported above, then rerun "
+                          "./binder/binder bib normalize.[/red]")
             return False
 
         if not shutil.which("pre-commit"):
@@ -537,7 +568,8 @@ class BibCommand:
         if result.returncode == 0:
             console.print("\n[green]Done.[/green]")
             return True
-        console.print("\n[red]sync-preserve reported failures.[/red]")
+        console.print(f"\n[red]{script.name} exited with code {result.returncode}; "
+                      "see the failures it printed above.[/red]")
         return False
 
     # ------------------------------------------------------------------
@@ -560,3 +592,181 @@ class BibCommand:
         update_ok = self._run_update(root)
 
         return clean_ok and update_ok
+
+    # ------------------------------------------------------------------
+    # Add (authoritative gateway)
+    # ------------------------------------------------------------------
+
+    def _run_add(
+        self,
+        doi: Optional[str] = None,
+        arxiv: Optional[str] = None,
+        isbn: Optional[str] = None,
+        url: Optional[str] = None,
+        custom_key: Optional[str] = None,
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+        year: Optional[str] = None,
+        venue: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """Authenticate, format, and seal a new reference into the master bibliography."""
+        from cli.core import bib_gateway
+
+        repo = self.config_manager.root_dir
+        console.print("[bold cyan]Resolving reference via authoritative gateway...[/bold cyan]")
+
+        resolved = None
+        if doi:
+            console.print(f"[dim]Authenticating DOI '{doi}' via Crossref / DataCite...[/dim]")
+            resolved = bib_gateway.fetch_doi(doi, custom_key=custom_key)
+        elif arxiv:
+            console.print(f"[dim]Authenticating arXiv ID '{arxiv}' via arXiv.org...[/dim]")
+            resolved = bib_gateway.fetch_arxiv(arxiv, custom_key=custom_key)
+        elif isbn:
+            console.print(f"[dim]Authenticating ISBN '{isbn}' via OpenLibrary...[/dim]")
+            resolved = bib_gateway.fetch_isbn(isbn, custom_key=custom_key)
+        elif url:
+            console.print(f"[dim]Authenticating URL '{url}' via HTTP live check...[/dim]")
+            resolved = bib_gateway.fetch_url(
+                url,
+                custom_key=custom_key,
+                title_override=title or "",
+                author_override=author or "",
+                year_override=year or "",
+                venue_override=venue or "",
+            )
+        else:
+            console.print("[red]Error:[/red] Must provide one of --doi, --arxiv, --isbn, or --url.")
+            return False
+
+        if not resolved:
+            console.print(
+                "[red]Authentication failed:[/red] Could not verify or retrieve canonical "
+                "metadata from primary external registries. Lookup errors, if any, are "
+                "printed above; check the identifier or pass a different source "
+                "(--doi, --arxiv, --isbn, --url)."
+            )
+            return False
+
+        console.print(
+            f"[green]Authenticated:[/green] {resolved['evidence']['source']} -> "
+            f"'{resolved['fields'].get('title')}'"
+        )
+        console.print(f"[dim]Candidate citekey: @{resolved['entry_type']}{{{resolved['key']}}}[/dim]")
+
+        if dry_run:
+            console.print("\n[yellow]Dry run — entry would be formatted and sealed as follows:[/yellow]")
+            console.print(bib_gateway.format_bibtex_entry(resolved["entry_type"], resolved["key"], resolved["fields"]))
+            return True
+
+        ok, msg, record = bib_gateway.add_entry(repo, resolved, check_duplicates=True)
+        if not ok:
+            console.print(f"[red]Error:[/red] {msg}")
+            return False
+
+        console.print(f"\n[bold green]Success![/bold green] {msg}")
+        if record:
+            console.print(f"[dim]Cryptographic SHA-256: {record['entry_hash'][:16]}...[/dim]")
+        return True
+
+    # ------------------------------------------------------------------
+    # Reseal (house-style edit to a sealed entry)
+    # ------------------------------------------------------------------
+
+    def _run_reseal(
+        self,
+        key: Optional[str],
+        note: Optional[str],
+        doi: Optional[str] = None,
+        arxiv: Optional[str] = None,
+        url: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """Re-resolve an edited entry's source, check its identity fields, and re-record it.
+
+        The source is the identifier passed on the command line, else the one the
+        manifest record was sealed from (DOI, arXiv ID, or verified URL), else the
+        entry's own ``doi``/``url`` field. Refuses when any checked field disagrees.
+        """
+        import json as _json
+
+        from cli.core import bib_gateway
+
+        if not key or not note:
+            console.print("[red]Error:[/red] reseal needs --key and --note (what was edited after the seal).")
+            return False
+
+        repo = self.config_manager.root_dir
+        record = {}
+        manifest_path = repo / "bibs" / "manifest.json"
+        if manifest_path.is_file():
+            record = _json.loads(manifest_path.read_text(encoding="utf-8")).get(key) or {}
+        details = record.get("details") or {}
+
+        entry_fields: Dict[str, str] = {}
+        bib_text = (repo / "bibs" / "references.bib").read_text(encoding="utf-8")
+        for entry in bib_gateway.bib_lint.parse_bib(bib_text)[0]:
+            if entry.key == key:
+                entry_fields = {n: (entry.get(n).value if entry.get(n) else "") for n in ("doi", "url")}
+                break
+        if not entry_fields:
+            console.print(f"[red]Error:[/red] @{{{key}}} not found in bibs/references.bib.")
+            return False
+
+        if not (doi or arxiv or url):
+            doi = details.get("doi") if details.get("source") in ("crossref", "datacite") else None
+            arxiv = details.get("arxiv_id")
+            if not (doi or arxiv) and details.get("source") == "verified_web":
+                url = details.get("url")
+        if not (doi or arxiv or url):
+            m_arx = bib_gateway.ARXIV_REGEX.search(entry_fields.get("url", "")) if "arxiv" in entry_fields.get("url", "") else None
+            if entry_fields.get("doi"):
+                doi = entry_fields["doi"]
+            elif m_arx:
+                arxiv = m_arx.group(1)
+            elif entry_fields.get("url"):
+                url = entry_fields["url"]
+        if not (doi or arxiv or url):
+            console.print("[red]Error:[/red] no source identifier found; pass --doi, --arxiv, or --url.")
+            return False
+
+        if doi:
+            source_desc, resolved = f"DOI {doi}", bib_gateway.fetch_doi(doi)
+        elif arxiv:
+            source_desc, resolved = f"arXiv {arxiv}", bib_gateway.fetch_arxiv(arxiv)
+        else:
+            source_desc, resolved = f"URL {url}", bib_gateway.fetch_url(url)
+        if not resolved:
+            console.print(f"[red]Could not resolve {source_desc}; lookup errors, if any, are printed above.[/red]")
+            return False
+
+        ok, msg, _ = bib_gateway.reseal_entry(repo, key, resolved, note, dry_run=dry_run)
+        style = "green" if ok else "red"
+        console.print(f"[{style}]{source_desc}: {msg}[/{style}]")
+        return ok
+
+    # ------------------------------------------------------------------
+    # Ingest (staging inbox)
+    # ------------------------------------------------------------------
+
+    def _run_ingest(self, inbox: str = "bibs/inbox.bib", dry_run: bool = False) -> bool:
+        """Scan staging inbox file, authenticate each entry online, promote verified entries."""
+        from cli.core import bib_gateway
+
+        repo = self.config_manager.root_dir
+        inbox_path = repo / inbox
+        if not inbox_path.is_file():
+            console.print(f"[yellow]Inbox file not found: {inbox_path}[/yellow]")
+            return True
+
+        console.print(f"[bold cyan]Scanning staging inbox {inbox_path}...[/bold cyan]")
+        added, rejected, messages = bib_gateway.ingest_inbox(repo, inbox_path, dry_run=dry_run)
+
+        for msg in messages:
+            console.print(f"  {msg}")
+
+        console.print("\n" + "=" * 50)
+        console.print(f"[bold]Ingestion Summary:[/bold] {added} verified & added, {rejected} rejected/pending.")
+        return rejected == 0
+

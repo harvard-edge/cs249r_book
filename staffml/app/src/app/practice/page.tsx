@@ -32,6 +32,16 @@ import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
 import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
+import { getSubjectById, getConceptLabel, getTaxAreas, getTaxAreaById, getSubjectIdForQuestion } from "@/lib/mlsys-taxonomy";
+
+/** Taxonomy area of a question, via its subject (e.g. "S1"). */
+function taxAreaOf(q: { taxonomy_subject?: string }): string | undefined {
+  return getSubjectById(q.taxonomy_subject ?? "")?.area;
+}
+function taxAreaLabel(id: string): string {
+  const a = getTaxAreaById(id);
+  return a ? `${a.id} ${a.name}` : id;
+}
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
@@ -44,6 +54,7 @@ import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import BookRefCard from "@/components/BookRefCard";
+import TaxonomyTags from "@/components/TaxonomyTags";
 import QuestionVisual from "@/components/QuestionVisual";
 import { track } from "@/lib/analytics";
 
@@ -72,7 +83,7 @@ function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): s
     case "realization":
       return "Sketch the implementation or the concrete steps needed to realize the scenario's goal.";
     case "evaluation":
-      return "Evaluate the scenario's proposed approach — what works, what breaks, and at what cost?";
+      return "Evaluate the scenario's proposed approach. What works, what breaks, and at what cost?";
     case "optimization":
       return "Identify the dominant bottleneck and propose an optimization that addresses it.";
     case "fluency":
@@ -88,7 +99,7 @@ function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): s
   if (b === "remember" || b === "understand") return "Identify the concept the scenario illustrates and explain the underlying principle.";
   if (b === "apply") return "Apply the relevant principle to the scenario and compute or decide the outcome.";
   if (b === "analyze") return "Analyze the trade-offs the scenario presents and recommend an approach with justification.";
-  if (b === "evaluate") return "Evaluate the scenario's setup — what succeeds, what fails, and why?";
+  if (b === "evaluate") return "Evaluate the scenario's setup. What succeeds, what fails, and why?";
   if (b === "create") return "Propose a design or plan that addresses the scenario and defend your choice.";
   return "Based on the scenario above, reason about the trade-offs and decide what approach you would take.";
 }
@@ -165,7 +176,10 @@ function PracticePage() {
 
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L3");
+  // Taxonomy area code (e.g. "S1") chosen in the sidebar.
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
+  // Legacy competency area from older links (?area=compute, e.g. the heat map).
+  const [legacyArea, setLegacyArea] = useState<string | null>(null);
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
   const [visualOnly, setVisualOnly] = useState(false);
@@ -215,7 +229,7 @@ function PracticePage() {
   const [reviewMode, setReviewMode] = useState(false); // true = SR review queue
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
   const [dailyDone, setDailyDone] = useState(false);
-  const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string } | null>(null);
+  const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string; href?: string } | null>(null);
   const [showStarGate, setShowStarGate] = useState(false);
   // Submit-gradient safeguard (per Chip Huyen's UX review).
   // Rationale: with the restructured layout, the Reveal button sits
@@ -267,7 +281,7 @@ function PracticePage() {
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
-  const areas = getCompetencyAreas();
+  const areas = getTaxAreas().map((a) => a.id);
   const zones = getZones();
 
   useEffect(() => {
@@ -319,14 +333,21 @@ function PracticePage() {
         setCurrent(directQ);
         setSelectedTrack(directQ.track);
         setSelectedLevel(directQ.level);
-        if (directQ.competency_area) setSelectedArea(directQ.competency_area);
-        // Set pool to topic-mates so "next" stays in topic
-        const topicPool = directQ.topic
-          ? getQuestions().filter(q => q.topic === directQ.topic)
-          : [directQ];
-        setPool(topicPool);
-        // Track source topic for back-navigation
-        if (directQ.topic) {
+        const directArea = taxAreaOf(directQ);
+        if (directArea) setSelectedArea(directArea);
+        // Set pool to subject-mates (ML Systems Taxonomy) so "next" stays
+        // in the same subject; fall back to topic-mates for untagged items.
+        const subject = directQ.taxonomy_subject ? getSubjectById(directQ.taxonomy_subject) : undefined;
+        const matePool = subject
+          ? getQuestions().filter(q => q.taxonomy_subject === subject.id)
+          : directQ.topic
+            ? getQuestions().filter(q => q.topic === directQ.topic)
+            : [directQ];
+        setPool(matePool);
+        // Track source for back-navigation
+        if (subject) {
+          setSourceTopic({ id: subject.id, name: subject.name, href: `/?subject=${encodeURIComponent(subject.id)}` });
+        } else if (directQ.topic) {
           const t = getTopicById(directQ.topic);
           if (t) setSourceTopic({ id: t.id, name: t.name });
         }
@@ -338,9 +359,40 @@ function PracticePage() {
       // Continue to default-flow setup so the page is still usable.
     }
 
+    // Taxonomy filters: ?subject=<id> or ?concept=<mlsys.id>, with optional
+    // ?level= and ?track=. These are the Vault's links; ?topic= below keeps
+    // working for older links.
+    const subjectParam = searchParams.get('subject');
+    const conceptParam = searchParams.get('concept');
+    const levelParam = searchParams.get('level');
+    const trackOnly = searchParams.get('track');
+    if (subjectParam || conceptParam) {
+      const taxPool = getQuestions().filter(q => {
+        if (subjectParam && q.taxonomy_subject !== subjectParam) return false;
+        if (conceptParam && !(q.taxonomy_concepts ?? []).includes(conceptParam)) return false;
+        if (levelParam && q.level !== levelParam) return false;
+        if (trackOnly && q.track !== trackOnly) return false;
+        return true;
+      });
+      if (taxPool.length > 0) {
+        skipFilterCount.current = 1;
+        setPool(taxPool);
+        setSelectedTrack(trackOnly || taxPool[0].track);
+        if (levelParam) setSelectedLevel(levelParam);
+        const subject = getSubjectById(subjectParam || taxPool[0].taxonomy_subject || "");
+        if (conceptParam) {
+          setSourceTopic({ id: conceptParam, name: getConceptLabel(conceptParam) || conceptParam,
+            href: subject ? `/?subject=${encodeURIComponent(subject.id)}` : "/" });
+        } else if (subject) {
+          setSourceTopic({ id: subject.id, name: subject.name, href: `/?subject=${encodeURIComponent(subject.id)}` });
+        }
+        pickRandom(taxPool);
+        return; // Skip other param handling
+      }
+    }
+
     // Topic filter: ?topic=<concept>&level=<L3> — filter pool to that topic
     const topicParam = searchParams.get('topic');
-    const levelParam = searchParams.get('level');
     if (topicParam) {
       const topicPool = getQuestions().filter(q => {
         if (q.topic !== topicParam) return false;
@@ -366,16 +418,22 @@ function PracticePage() {
     const trackParam = searchParams.get('track');
     const areaParam = searchParams.get('area');
     if (trackParam && getTracks().includes(trackParam)) setSelectedTrack(trackParam);
-    if (areaParam && getCompetencyAreas().includes(areaParam)) setSelectedArea(areaParam);
+    if (areaParam && getTaxAreaById(areaParam)) setSelectedArea(areaParam);
+    else if (areaParam && getCompetencyAreas().includes(areaParam)) setLegacyArea(areaParam);
 
     // Compute weakest area from progress
     const attempts = getAttempts();
     if (attempts.length >= 3) {
       const byArea: Record<string, { total: number; correct: number }> = {};
       attempts.forEach(a => {
-        if (!byArea[a.competencyArea]) byArea[a.competencyArea] = { total: 0, correct: 0 };
-        byArea[a.competencyArea].total++;
-        if (a.selfScore >= 2) byArea[a.competencyArea].correct++;
+        // Group by taxonomy area, looked up from the question (stored
+        // attempts keep their legacy competencyArea untouched).
+        const subject = getSubjectById(getSubjectIdForQuestion(a.questionId) ?? "");
+        const key = subject?.area;
+        if (!key) return;
+        if (!byArea[key]) byArea[key] = { total: 0, correct: 0 };
+        byArea[key].total++;
+        if (a.selfScore >= 2) byArea[key].correct++;
       });
       const scored = Object.entries(byArea)
         .filter(([, d]) => d.total >= 2)
@@ -397,11 +455,12 @@ function PracticePage() {
       skipFilterCount.current--;
       return;
     }
-    const filters: { track?: string; level?: string; competency_area?: string; zone?: string; chainsOnly?: boolean; visualOnly?: boolean } = {
+    const filters: { track?: string; level?: string; competency_area?: string; taxonomy_area?: string; zone?: string; chainsOnly?: boolean; visualOnly?: boolean } = {
       track: selectedTrack,
       level: selectedLevel,
     };
-    if (selectedArea) filters.competency_area = selectedArea;
+    if (selectedArea) filters.taxonomy_area = selectedArea;
+    else if (legacyArea) filters.competency_area = legacyArea;
     if (selectedZone) filters.zone = selectedZone;
     if (chainsOnly) filters.chainsOnly = true;
     if (visualOnly) filters.visualOnly = true;
@@ -417,12 +476,12 @@ function PracticePage() {
     setUserAnswer("");
     setMcqSelected(null);
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, legacyArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
 
   const pickRandom = useCallback((fromPool?: Question[]) => {
     // Track skip if there was a current question that wasn't scored
     if (current && !showAnswer) {
-      track({ type: 'question_skipped', topic: current.topic, level: current.level });
+      track({ type: 'question_skipped', topic: current.topic, subject: current.taxonomy_subject, level: current.level });
     }
     const p = fromPool || pool;
     if (p.length === 0) return;
@@ -536,12 +595,13 @@ function PracticePage() {
     if (current) {
       const hadUserAnswer = userAnswer.trim().length > 0;
       const responseTimeSec = Math.round((Date.now() - questionShownAt.current) / 1000);
-      track({ type: 'answer_revealed', topic: current.topic, zone: current.zone, hadUserAnswer });
+      track({ type: 'answer_revealed', topic: current.topic, subject: current.taxonomy_subject, zone: current.zone, hadUserAnswer });
       if (responseTimeSec > 2) {
         track({
           type: 'answer_response_time',
           questionId: current.id,
           topic: current.topic,
+          subject: current.taxonomy_subject,
           level: current.level,
           seconds: responseTimeSec,
           napkinGrade,
@@ -570,7 +630,7 @@ function PracticePage() {
       });
       // Update spaced repetition card + streak + analytics
       updateSRCard(current.id, finalScore);
-      track({ type: 'question_scored', questionId: current.id, topic: current.topic, zone: current.zone, level: current.level, track: current.track, score: finalScore });
+      track({ type: 'question_scored', questionId: current.id, topic: current.topic, subject: current.taxonomy_subject, zone: current.zone, level: current.level, track: current.track, score: finalScore });
       const activity = recordActivity();
       if (activity.newMilestone) {
         showToast({
@@ -685,7 +745,7 @@ function PracticePage() {
         {/* Back to vault link */}
         {sourceTopic && (
           <Link
-            href="/"
+            href={sourceTopic.href ?? "/"}
             className="flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-textSecondary transition-colors -mt-1 mb-2"
           >
             <ArrowLeft className="w-3 h-3" />
@@ -781,7 +841,7 @@ function PracticePage() {
             className="w-full text-left p-3 rounded-lg bg-accentRed/5 border border-accentRed/20 hover:border-accentRed/40 transition-colors"
           >
             <span className="text-[10px] font-mono text-accentRed uppercase block mb-1">Weakest area</span>
-            <span className="text-sm text-textPrimary capitalize font-medium">{weakestArea.area}</span>
+            <span className="text-sm text-textPrimary font-medium">{taxAreaLabel(weakestArea.area)}</span>
             <span className="text-xs text-textTertiary ml-2">{weakestArea.pct}% accuracy</span>
           </button>
         )}
@@ -849,16 +909,17 @@ function PracticePage() {
         {/* Competency Area — collapsible on mobile, open on desktop */}
         <details className="group" open>
           <summary className="text-[10px] font-mono text-textTertiary uppercase tracking-widest mb-2 cursor-pointer select-none flex items-center gap-1 list-none">
-            Competency
+            Area
             <span className="text-[8px] text-textMuted group-open:rotate-90 transition-transform">&#9654;</span>
-            {selectedArea && <span className="ml-auto text-[9px] text-accentBlue capitalize font-medium">{selectedArea}</span>}
+            {selectedArea && <span className="ml-auto text-[9px] text-accentBlue font-medium">{selectedArea}</span>}
+            {!selectedArea && legacyArea && <span className="ml-auto text-[9px] text-accentBlue capitalize font-medium">{legacyArea}</span>}
           </summary>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             <button
-              onClick={() => setSelectedArea(null)}
+              onClick={() => { setSelectedArea(null); setLegacyArea(null); }}
               className={clsx(
                 "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
-                !selectedArea
+                !selectedArea && !legacyArea
                   ? "bg-accentBlue/10 text-accentBlue"
                   : "text-textSecondary hover:bg-surfaceHover"
               )}
@@ -868,15 +929,15 @@ function PracticePage() {
             {areas.map(a => (
               <button
                 key={a}
-                onClick={() => setSelectedArea(a)}
+                onClick={() => { setSelectedArea(a); setLegacyArea(null); }}
                 className={clsx(
-                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
+                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
                   selectedArea === a
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
                 )}
               >
-                {a}
+                {taxAreaLabel(a)}
               </button>
             ))}
           </div>
@@ -1054,8 +1115,12 @@ function PracticePage() {
                       {/* Badges + copy-link + report */}
                       <div className="flex items-center gap-3 mb-4">
                         <LevelBadge level={current.level} />
-                        <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
-                          {current.competency_area}
+                        <span className="text-[10px] font-mono text-textTertiary px-2 py-0.5 rounded border border-border bg-surface"
+                          title={getSubjectById(current.taxonomy_subject ?? "")?.fullLabel}>
+                          {(() => {
+                            const s = getSubjectById(current.taxonomy_subject ?? "");
+                            return s ? `${s.code} ${s.name}` : current.competency_area;
+                          })()}
                         </span>
                         <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">
                           {current.zone}
@@ -1157,7 +1222,7 @@ function PracticePage() {
                           /* Scenario ends with ?; no callout needed but reserve minimal spacing */
                           <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
                             <Target className="w-3.5 h-3.5" />
-                            Your task — see scenario above
+                            Your task: see the scenario above
                           </div>
                         )}
                       </div>
@@ -1402,6 +1467,7 @@ function PracticePage() {
                             </div>
                             <QuestionFeedback question={current} />
                             <BookRefCard refs={current.book_refs} />
+                            <TaxonomyTags subject={current.taxonomy_subject} concepts={current.taxonomy_concepts} />
                             {chainInfo && (
                               <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
                             )}
@@ -1499,7 +1565,7 @@ function PracticePage() {
               <h3 id="think-confirm-title" className="text-sm font-bold text-textPrimary uppercase tracking-widest">Think longer?</h3>
             </div>
             <p className="text-sm text-textSecondary leading-relaxed mb-5">
-              You&apos;ve been on this question for less than 15 seconds and haven&apos;t typed much. The practice works better when you commit to an answer first — even a wrong one sharpens what you learn from the reveal.
+              You&apos;ve been on this question for less than 15 seconds and haven&apos;t typed much. Practice works better when you commit to an answer first. Even a wrong answer sharpens what you learn from the reveal.
             </p>
             <div className="flex gap-3">
               <button

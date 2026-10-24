@@ -20,7 +20,7 @@
 
 <!-- Build Status: Companion Ecosystem & Tools -->
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
@@ -91,10 +91,10 @@ A growing community of contributors helps improve every part of it: fixing error
 
 ## The Curriculum
 
-Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. Socratiq adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. SocratiQ adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
-  <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
+  <img src="README/curriculum-map.svg?v=5" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
 </p>
 
 ### For Students
@@ -137,7 +137,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
       <td>Deploy ML to Arduino, Seeed, Grove, and Raspberry Pi devices. Real memory limits, real power budgets, real latency.</td>
-      <td><a href="https://mlsysbook.ai/kits">Browse labs</a></td>
+      <td><a href="https://mlsysbook.ai/kits/">Browse labs</a></td>
     </tr>
     <tr>
       <td align="center">🔮</td>
@@ -169,7 +169,7 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">🎓</td>
       <td><b>Instructor Hub</b></td>
-      <td>The AI Engineering Blueprint: two 16-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td>A syllabus for each course, with weekly readings and slides: introductory, scaling, TinyML, Edge AI, Physical AI (draft), and Agentic AI (in preparation).</td>
       <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="instructors/README.md">Repo guide</a></td>
     </tr>
     <tr>
@@ -196,7 +196,7 @@ The pieces are designed to work together, but you do not need to adopt everythin
 | If you are... | Start here | Then go deeper |
 |---|---|---|
 | **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) and try [Lab 00](https://mlsysbook.ai/labs/vol1/lab_00_introduction/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), use [MLSys·im](https://mlsysbook.ai/mlsysim/), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
-| **An instructor** | Open [The AI Engineering Blueprint](https://mlsysbook.ai/instructors/) | Use the [course map](https://mlsysbook.ai/instructors/course-map.html), [slides](https://mlsysbook.ai/slides/), rubrics, and TA guide |
+| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), and labs |
 | **A contributor** | Pick the component you use most | Improve chapters, labs, tests, examples, hardware notes, simulator models, or assessment content |
 
 The learning loop is: **Read → Explore → Build → Model → Deploy → Practice → Teach**.
@@ -205,7 +205,7 @@ The learning loop is: **Read → Explore → Build → Model → Deploy → Prac
 
 Some projects are intentionally earlier-stage than the main curriculum:
 
-- [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
+- [SocratiQ](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
 
 ---
@@ -236,7 +236,7 @@ This textbook teaches you to think at the intersection of machine learning and s
     <tr>
       <td>What a transformer is</td>
       <td align="center">→</td>
-      <td><b>Why KV-cache dominates memory at inference</b></td>
+      <td><b>Why the KV cache dominates memory at inference</b></td>
     </tr>
     <tr>
       <td>Models run on GPUs</td>
@@ -247,6 +247,16 @@ This textbook teaches you to think at the intersection of machine learning and s
       <td>Edge devices have limits</td>
       <td align="center">→</td>
       <td><b>How to co-design models and hardware</b></td>
+    </tr>
+    <tr>
+      <td>How to prompt an LLM</td>
+      <td align="center">→</td>
+      <td><b>How to architect agent loops, tool sandboxes, and context memory</b></td>
+    </tr>
+    <tr>
+      <td>How vision and robotics models infer</td>
+      <td align="center">→</td>
+      <td><b>How to close real-time sensor-actuator loops under physical constraints</b></td>
     </tr>
   </tbody>
 </table>
@@ -299,6 +309,17 @@ The textbook series follows a comprehensive systems progression across four core
 
 > *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
+#### How This Curriculum Is Built and Verified
+
+Building an open engineering curriculum in a field moving as fast as machine learning requires being open and transparent about how the material is developed, how AI tools are used, and how each volume is verified:
+
+* **Volume I (Foundations)**: **Shipped & Headed to MIT Press.** Taught and refined over multiple semesters at Harvard and adopted by universities worldwide, with every chapter and lab tested with real students. AI served as a helpful sounding board and editor for sequencing, drafting code cells, and writing automated tests.
+* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Shaped by conversations with distributed systems engineers running large-scale clusters in industry. AI assisted in exploring outlines, finding seminal literature, and drafting early cluster calculations. Crucially, all numbers and topologies are verified against our [MLSys·im](https://mlsysbook.ai/mlsysim/) simulator and reviewed one-on-one with practicing systems engineers.
+* **Volume III (Agentic Systems)**: **In-Development Draft (Uncontracted).** Agentic AI is an exciting, emerging frontier. I treat the model as a "stochastic computer" and use AI interactively to explore early ideas, brainstorm edge cases, and test explanations. Every chapter is thoughtfully written, coded, and refined by hand. **This is a living draft that will undergo the same classroom teaching and expert review as earlier volumes before final publication.**
+* **Volume IV (Physical AI)**: **In-Development Draft (Uncontracted).** Embodied AI bridges classical control theory, robotics, and foundation models. I use AI to help survey connected ideas across disparate research fields, while ensuring the latency budgets, actuator dynamics, and safety constraints reflect real physical systems. **Like Volume III, this is an early draft, and community feedback is warmly welcome.**
+
+Across all four volumes, the guiding principle is simple: modern tools help explore and draft, but every idea is thoughtfully vetted, coded, and shaped by human hands.
+
 #### How the Volumes Connect
 
 Each volume in the series expands the systems boundary, answering the question that the previous level leaves open:
@@ -316,11 +337,39 @@ Each volume in the series expands the systems boundary, answering the question t
 
 <br>
 
-I consider myself a student of my own learning.
+I have always learned best by building from scratch and teaching others.
 
-Whenever I want to understand an emerging or complex systems discipline, I learn it by trying to teach and build it from first principles. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
+Whenever I want to really understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from whatever happens to be trending on social media this week.
 
-This repository—the books, software frameworks, and hardware kits—is my open research and teaching instrument. It is how I clarify my own thinking for research, benchmarking programs (like MLPerf), and classroom instruction. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
+This repository (the four textbook volumes, TinyTorch, our MLSys·im simulator, and the hands-on hardware kits) is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf.
+
+There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you. But I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. It sparked my curiosity, and it stayed with me.
+
+Students write to me now the way I once wrote to that professor, far more than I can answer one by one. This curriculum is my way of sending the package back out, to a much bigger classroom than any lecture hall can hold. If it helps you on your own engineering journey, I couldn't be happier to share it with you.
+
+</details>
+
+<details>
+<summary><b>Do you use generative AI?</b></summary>
+
+<br>
+
+Yes, and I want to be completely transparent about it.
+
+I use LLMs and modern AI tools throughout my workflow—much like an author might work with an editor, research assistant, or sounding board. They are wonderful for brainstorming analogies, drafting early scaffolding, searching across research papers, and exploring how to explain tricky concepts more clearly. In a field that moves as fast as ML systems, these tools help me keep an ambitious, four-volume open curriculum moving forward alongside full-time university teaching and research.
+
+At the same time, I am very thoughtful and deliberate about how I use them: **I only release material after I have personally derived, coded, and verified it myself.**
+
+Language models can write very smooth prose that sounds right on the surface while hiding subtle mathematical or physical errors. Because this curriculum is meant to teach real-world engineering, accuracy and pedagogical care come first:
+
+* **Executable Python code and MLSys·im:** We ground every quantitative concept in runnable code. The derivations, latency models, memory calculations, and scaling curves in these books are backed by executable Python cells right in the text, or cross-checked with our fleet simulator, [MLSys·im](https://mlsysbook.ai/mlsysim/). If there is a number or chart in a chapter, you can run the code and verify it against real hardware specifications.
+* **Classroom-tested pedagogy:** A textbook is more than an encyclopedia of facts; it is a learning journey. Knowing what order to introduce ideas, where students typically stumble, and what to leave out to keep mental models clean comes from years of teaching in the classroom and listening to students in office hours.
+* **Automated quality checks:** Every commit runs through our open-source validation suite (`binder`), which automatically checks that units balance, code references point to real definitions, citations resolve, and formatting remains consistent.
+* **Community and peer review:** This entire project is open source on GitHub. I am deeply grateful to the students, university colleagues, and industry engineers who read drafts, point out mistakes, and suggest improvements.
+
+Ultimately, tools are here to help us create, but authorship is about taking personal care and responsibility. Every concept, code snippet, and diagram in this curriculum has been reviewed and vetted by me, and I hope it serves you well in your learning journey.
+
+Each volume also includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) with more information on how tools are used and verified.
 
 </details>
 
@@ -329,7 +378,9 @@ This repository—the books, software frameworks, and hardware kits—is my open
 
 <br>
 
-This is for anyone who wants to engineer intelligent systems, not only train models: students, working engineers moving into ML infrastructure, and educators building a course. We assume you can program in Python and have met basic machine learning ideas, but the book builds the systems concepts from the ground up. You do not need a background in computer architecture, distributed systems, or datacenter operations. Volume I starts at the foundations, and the rest of the curriculum (TinyTorch, labs, hardware kits, and the simulator) lets you learn by building rather than only by reading.
+This is for anyone who wants to understand how intelligent systems actually run, not just how models are trained: curious students, software engineers transitioning into ML infrastructure, hardware architects, and educators designing courses.
+
+All I assume is that you can program in Python and have encountered basic machine learning ideas (like what a neural network or a loss function is). We build all the systems concepts from the ground up. You do not need a prior background in computer architecture, networking, or distributed systems. Volume I starts at the physical foundations, and the rest of the curriculum (TinyTorch, interactive labs, hardware kits, and the simulator) lets you build intuition with your own hands.
 
 </details>
 
@@ -338,7 +389,11 @@ This is for anyone who wants to engineer intelligent systems, not only train mod
 
 <br>
 
-The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The analogy we follow is Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*.
+They differ in systems scope, not in depth or rigor. Both are equally quantitative.
+
+Volume I is the single-node world: how an ML system works on one machine with a handful of accelerators, from the memory hierarchy and single-kernel efficiency up through quantization and on-device deployment. Volume II is the fleet-scale world: clustering thousands of accelerators across high-speed fabrics, 3D parallelism, network fault tolerance, and datacenter-scale serving.
+
+Volume II does not assume you have read Volume I cover-to-cover, so if you already have strong single-node systems foundations, you can jump straight in. But if you want the complete picture from the silicon up, starting with Volume I will give you the cleanest mental models. It's a natural progression—much like Hennessy and Patterson's *Computer Organization and Design* followed by *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) push the boundary even further into autonomous loops and embodied robotics.
 
 </details>
 
@@ -347,7 +402,9 @@ The two volumes differ in scope, not depth. Both are equally rigorous. Volume I 
 
 <br>
 
-You can just read the book. Each volume stands on its own. The rest of the curriculum (TinyTorch, the labs, the hardware kits, the simulator, and the interview practice) exists to deepen what the book teaches by making you build and measure it, but none of it is required to follow the text. Start with the book, and reach for the hands-on pieces when you want a concept to become muscle memory.
+You can absolutely just read the book! Each volume is written to stand completely on its own as a self-contained textbook.
+
+The companion tools—TinyTorch, the interactive Marimo labs, the hardware kits, the MLSys·im simulator, and StaffML interview practice—are there whenever you want to take your understanding deeper. I built them because I found that while reading builds mental models, building and measuring make those concepts unforgettable. But there is zero pressure to do everything at once. Feel free to start with the book, and reach for the hands-on pieces whenever you want an idea to turn into muscle memory.
 
 </details>
 
@@ -356,7 +413,13 @@ You can just read the book. Each volume stands on its own. The rest of the curri
 
 <br>
 
-Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.ai) teach you to design and train models: architectures, optimization, and the mathematics of learning. They mostly stop at the model. This book starts where they leave off. It treats the model as one component inside a system that has to ingest data, run on real silicon under power and latency budgets, serve predictions reliably, and keep working as the world drifts. You can finish a deep learning course knowing how a transformer learns and still not know why it stalls on a 4,000-accelerator training run, what the KV cache does to your serving memory, or why your accelerator sits idle. That gap is what we teach. Learn the model from a deep learning text, then learn the system here.
+I love classic deep learning books—texts like Goodfellow, Bengio, and Courville's *Deep Learning*, Bishop's books, d2l.ai, and fast.ai are fantastic for learning the mathematics, architectures, and optimization of machine learning models.
+
+This curriculum starts where those books leave off. It treats the model not as the entire universe, but as one computational component inside an end-to-end system that must ingest streaming data, run on real silicon under tight power and thermal budgets, serve user queries within millisecond deadlines, and operate reliably across thousands of machines.
+
+You can finish a great deep learning course knowing all about backpropagation and attention, yet still wonder: *Why is our GPU cluster idling at 30% utilization? Why did serving memory blow up from the KV cache? How do we synchronize gradients across high-speed interconnects without stalling?*
+
+That systems gap is what we focus on. Learn the machine learning fundamentals from those wonderful books, and then come here to learn how to make them fly in the real world.
 
 </details>
 
@@ -365,11 +428,15 @@ Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.a
 
 <br>
 
-This is the most common mix-up, because "ML systems" and "MLOps" sound interchangeable and several good practitioner books share the words. MLOps books are operations guides: how to wire up a feature store, a pipeline, and a deployment with today's tools. They are valuable, and they age with the tooling. This book teaches the layer underneath: the physics and quantitative reasoning that explain why those tools exist and what they cost. We ask which questions matter, why a design is the way it is, and what it cannot escape (bandwidth, latency, power, failure rates).
+It is an easy question to ask, especially because "ML systems" and "MLOps" sound very similar, and there are fantastic practitioner books in that space (such as Chip Huyen's *Designing Machine Learning Systems*).
 
-Think of the difference between following a recipe and understanding how cooking works. A recipe gives you exact steps for one dish: this temperature, this pan, this many minutes. It works beautifully until the oven, the ingredients, or the kitchen changes. Understanding why heat, salt, acid, and time transform food is different. It lets you cook in any kitchen, rescue a dish that is going wrong, and invent one that no recipe covers.
+MLOps books focus primarily on operational pipelines: how to configure feature stores, orchestrate workflow DAGs, and deploy services with today's industry tooling. They are extremely valuable practical guides.
 
-An MLOps book hands you the recipe for the stack you have today. This book teaches the underlying science, so you can reason about any stack, debug the one that is failing, and design the one that does not exist yet.
+This curriculum focuses on the engineering physics underneath: the hardware limits, quantitative trade-offs, and first principles that explain *why* those tools are designed the way they are, and what computational laws they can never escape—memory bandwidth, network latency, energy consumption, and hardware failure rates.
+
+I often compare it to the difference between following a recipe and understanding culinary science. A recipe gives you exact steps for today's dish: this temperature, this pan, this many minutes. It works beautifully until the oven changes, an ingredient is missing, or the scale grows ten-fold. Understanding how heat, salt, fat, and time interact is different. It allows you to cook in any kitchen, debug a dish when things go sideways, and invent entirely new recipes.
+
+Practitioner guides show you how to assemble today's popular software stack. This book teaches you the underlying science, so you can reason about any stack, debug the one that is failing, and design the systems of tomorrow.
 
 </details>
 
@@ -378,15 +445,15 @@ An MLOps book hands you the recipe for the stack you have today. This book teach
 
 <br>
 
-References like Barroso, Hölzle, and Clidaras's *The Datacenter as a Warehouse-Scale Computer* are excellent. They distill how one organization engineered one canonical system, written by the people who built it. This project is a different kind of artifact, and the two are complementary rather than competing.
+Books like Barroso, Hölzle, and Clidaras's *The Datacenter as a Warehouse-Scale Computer* are masterclasses in engineering. They offer an incredible, firsthand look at how world-class teams architected real-world hyperscale infrastructure. We admire that work deeply, and our goal is to complement it rather than compete with it:
 
-1. **Curriculum, not reference.** A synthesis lecture documents a finished design for practitioners who already know the field. This book teaches the discipline from the ground up, with learning objectives, worked quantitative examples, labs, and an AI tutor, and it carries the reader from a single neuron (Volume I) all the way to the warehouse-scale fleet (Volume II).
+1. **A progressive curriculum, not just a reference.** A synthesis monograph captures a mature, finished architecture for seasoned practitioners. This series is designed as an interactive learning curriculum that takes you by the hand—starting from a single neuron and memory hierarchy on one chip (Volume I) all the way to multi-node clusters and warehouse-scale fleets (Volume II), with quantitative exercises and self-check questions along the way.
 
-2. **Vendor neutral, not a single stack.** A vendor reference can say "here is how we do it" and quote real production numbers. We generalize across accelerators (GPU and TPU), across cloud and edge, and teach *why* a design is the way it is, so the reasoning survives the next hardware generation and transfers anywhere.
+2. **Vendor-neutral foundations.** While single-organization retrospectives describe specific production choices, this curriculum generalizes across diverse accelerator architectures (GPUs, TPUs, custom ASICs) and deployment targets (cloud clusters to milliwatt microcontrollers). We emphasize the enduring mathematical and physical trade-offs so your knowledge transfers across any hardware generation.
 
-3. **Living, not a snapshot.** A printed edition is frozen until its next revision. This is open source, continuously updated, and surrounded by code you build yourself (TinyTorch), hardware kits, a simulator, and interview practice.
+3. **Hands-on and living.** A published monograph is a snapshot in time. This is an open, living workshop surrounded by runnable code you build yourself (TinyTorch), open hardware kits, cluster simulation (MLSys·im), and community-contributed improvements.
 
-In short, a warehouse-scale reference tells you how one machine was built. This curriculum teaches you to reason about why, and builds the judgment to design the next one.
+A warehouse-scale reference shows you how a legendary machine was built. This curriculum aims to give you the intuition and skills to design the next one.
 
 </details>
 
@@ -395,9 +462,17 @@ In short, a warehouse-scale reference tells you how one machine was built. This 
 
 <br>
 
-Because a textbook gives you something an LLM does not: perspective. An LLM is excellent at retrieval, and we are not trying to compete on retrieval. If a paragraph only delivers a fact you could get faster by asking a model, it has not earned its place. What a book builds instead is a structured mental model in the right order, the judgment to know which questions matter, and the reasoning behind why a design is the way it is and what it costs. Much of that comes from what a textbook chooses to leave out, since deciding what is central and what is peripheral is itself a lesson that an encyclopedic pile of facts cannot teach.
+It is a question I think about constantly as both an educator and an engineer!
 
-Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): an LLM generates text that is not grounded in communicative intent, while a textbook is written by people trying to convey a model of the world to a reader. We agree, and we go one step further by building an AI tutor (SocratiQ) into the reading experience. The goal is not textbook versus LLM. A good book gives you the perspective to ask meaningful questions, and the LLM helps you answer them. Use each for what it does best.
+Language models are astonishing at retrieval, code generation, and summarizing facts. If a paragraph in a textbook only delivers a fact you could look up in three seconds with a prompt, it hasn't earned its place.
+
+What a textbook uniquely provides is **perspective and a coherent mental model**.
+
+When learning a deep engineering discipline, the hardest challenge is rarely finding individual facts—it is discovering the right sequence in which to absorb ideas, understanding how trade-offs constrain one another, and learning what *not* to worry about so your mental model stays clean. Deciding what to leave out is one of the most important pedagogical choices an author makes.
+
+Bruce Davie put this wonderfully in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): language models generate text without communicative intent, while a textbook represents an intentional journey between a teacher and a student to build a shared understanding of how the world works.
+
+Rather than viewing textbooks and LLMs in opposition, we bring them together. The book provides the principled structure and quantitative narrative, while tools like our built-in SocratiQ tutor and interactive Marimo notebooks let you converse, ask questions, and test your understanding dynamically. Use the textbook for perspective, and use AI to explore!
 
 </details>
 
@@ -406,7 +481,11 @@ Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsap
 
 <br>
 
-Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai), and the textbook is open source under a Creative Commons license (CC BY-NC-SA 4.0), so you can share and adapt it for non-commercial use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press. The surrounding tools are open source too, each under its own license.
+Yes, completely! Every volume is free to read online at [mlsysbook.ai](https://mlsysbook.ai).
+
+The textbook is published by MIT Press under a Creative Commons license ([CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)), which means you are welcome to read and share it for non-commercial educational use with attribution. Translations and other modified versions need permission. If you prefer print, the MIT Press hardcover edition is on its way.
+
+The companion frameworks, simulators, and labs are also open source under permissive licenses (like MIT and Apache 2.0). Everything is right here in this repository—dive in and enjoy!
 
 </details>
 
@@ -422,7 +501,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     </tr>
     <tr>
       <td align="center"><h3>②</h3></td>
-      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="https://mlsysbook.ai/labs/">explore trade-offs</a> (Labs), <a href="https://mlsysbook.ai/mlsysim/">model constraints</a> (MLSys·im), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="https://mlsysbook.ai/labs/">explore trade-offs</a> (Labs), <a href="https://mlsysbook.ai/mlsysim/">model constraints</a> (MLSys·im), or <a href="https://mlsysbook.ai/kits/">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
       <td align="center"><h3>③</h3></td>
@@ -430,7 +509,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     </tr>
     <tr>
       <td align="center"><h3>④</h3></td>
-      <td><b>Teach it.</b> Adopt the curriculum with the <a href="https://mlsysbook.ai/instructors/">AI Engineering Blueprint</a> and <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
+      <td><b>Teach it.</b> Use a course syllabus from the <a href="https://mlsysbook.ai/instructors/">Instructor Hub</a> and the <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
     </tr>
   </tbody>
 </table>
@@ -464,6 +543,8 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
       <td>
         <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
         <b>Volume II</b> — Scaling (active development)<br>
+        <b>Volume III</b> — Agentic Systems (in development)<br>
+        <b>Volume IV</b> — Physical AI (in development)<br>
         <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, StaffML
       </td>
       <td>
@@ -474,7 +555,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
   </tbody>
 </table>
 
-<p align="center"><i>The two-volume split replaces the single-volume edition at launch.</i></p>
+<p align="center"><i>The four-volume series replaces the single-volume edition at launch.</i></p>
 
 ---
 
@@ -553,7 +634,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">🧠</td>
       <td><b>Improve AI learning tools</b></td>
-      <td><a href="socratiq/README.md">Socratiq guide</a></td>
+      <td><a href="socratiq/README.md">SocratiQ guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
@@ -576,7 +657,8 @@ This is a multi-component repository, and **each component is released under its
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution; modified versions, including translations, need permission. |
+| Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
 | [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
 | [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
 | [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
@@ -756,6 +838,9 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/arulk"><img src="https://avatars.githubusercontent.com/u/616070?v=4?v=4?s=50" width="50px;" alt="Arul Kumaravel"/><br /><sub><b>Arul Kumaravel</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/bl00dny"><img src="https://avatars.githubusercontent.com/u/106136390?v=4?v=4?s=50" width="50px;" alt="STG"/><br /><sub><b>STG</b></sub></a><br />🪲</td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/xizhuomengcontin"><img src="https://avatars.githubusercontent.com/u/319346922?v=4?v=4?s=50" width="50px;" alt="Xizhuo"/><br /><sub><b>Xizhuo</b></sub></a><br />🧠</td>
+    </tr>
   </tbody>
 </table>
 
@@ -788,36 +873,37 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=50" width="50px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=50" width="50px;" alt="asgalon"/><br /><sub><b>asgalon</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/bdub-1"><img src="https://avatars.githubusercontent.com/u/100250017?v=4?v=4?s=50" width="50px;" alt="bdub"/><br /><sub><b>bdub</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=50" width="50px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🪲 🧑‍💻</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/SatnamCodes"><img src="https://avatars.githubusercontent.com/u/139437542?v=4?v=4?s=50" width="50px;" alt="Satnam Singh"/><br /><sub><b>Satnam Singh</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=50" width="50px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/avikde"><img src="https://avatars.githubusercontent.com/avikde?v=4?s=50" width="50px;" alt="Avik De"/><br /><sub><b>Avik De</b></sub></a><br />🪲 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Takosaga"><img src="https://avatars.githubusercontent.com/Takosaga?v=4?s=50" width="50px;" alt="Takosaga"/><br /><sub><b>Takosaga</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/joeswagson"><img src="https://avatars.githubusercontent.com/joeswagson?v=4?s=50" width="50px;" alt="joeswagson"/><br /><sub><b>joeswagson</b></sub></a><br />🧑‍💻 🛠️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Roldao-Neto"><img src="https://avatars.githubusercontent.com/u/148023227?v=4?v=4?s=50" width="50px;" alt="Rolds"/><br /><sub><b>Rolds</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/AdemolaAri"><img src="https://avatars.githubusercontent.com/u/49918815?v=4?v=4?s=50" width="50px;" alt="Ademola Arigbabuwo"/><br /><sub><b>Ademola Arigbabuwo</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/harishb00"><img src="https://avatars.githubusercontent.com/u/43300971?v=4?v=4?s=50" width="50px;" alt="Harish"/><br /><sub><b>Harish</b></sub></a><br />🧑‍💻 ✍️</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Chufeng-Jiang"><img src="https://avatars.githubusercontent.com/u/80246982?v=4?v=4?s=50" width="50px;" alt="Chufeng JIANG"/><br /><sub><b>Chufeng JIANG</b></sub></a><br />🪲 🧑‍💻</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Chufeng-Jiang"><img src="https://avatars.githubusercontent.com/u/80246982?v=4?v=4?s=50" width="50px;" alt="Chufeng JIANG"/><br /><sub><b>Chufeng JIANG</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Fabio-RibeiroB"><img src="https://avatars.githubusercontent.com/u/74654489?v=4?v=4?s=50" width="50px;" alt="Fábio"/><br /><sub><b>Fábio</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=50" width="50px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/euwyngoh"><img src="https://avatars.githubusercontent.com/u/211522196?v=4?v=4?s=50" width="50px;" alt="euwyngoh"/><br /><sub><b>euwyngoh</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/pratyushadk"><img src="https://avatars.githubusercontent.com/u/184196841?v=4?v=4?s=50" width="50px;" alt="Pratyush Adhikari"/><br /><sub><b>Pratyush Adhikari</b></sub></a><br />🧑‍💻 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/diegosaldonid-lab"><img src="https://avatars.githubusercontent.com/u/301918395?v=4?v=4?s=50" width="50px;" alt="diegosaldonid-lab"/><br /><sub><b>diegosaldonid-lab</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/choyrim"><img src="https://avatars.githubusercontent.com/u/380261?v=4?v=4?s=50" width="50px;" alt="Choy Rim"/><br /><sub><b>Choy Rim</b></sub></a><br />🪲 🧑‍💻</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/hiimnhan"><img src="https://avatars.githubusercontent.com/u/35358825?v=4?v=4?s=50" width="50px;" alt="Nhan Nguyen"/><br /><sub><b>Nhan Nguyen</b></sub></a><br />🪲 🧑‍💻</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/hiimnhan"><img src="https://avatars.githubusercontent.com/u/35358825?v=4?v=4?s=50" width="50px;" alt="Nhan Nguyen"/><br /><sub><b>Nhan Nguyen</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=50" width="50px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=50" width="50px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/wz1114841863"><img src="https://avatars.githubusercontent.com/wz1114841863?v=4?s=50" width="50px;" alt="wzz"/><br /><sub><b>wzz</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/keo-dara"><img src="https://avatars.githubusercontent.com/u/175544368?v=4?v=4?s=50" width="50px;" alt="keo-dara"/><br /><sub><b>keo-dara</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Kobra299"><img src="https://avatars.githubusercontent.com/u/4283156?v=4?v=4?s=50" width="50px;" alt="Wayne Norman"/><br /><sub><b>Wayne Norman</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=50" width="50px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/oscarf189"><img src="https://avatars.githubusercontent.com/u/28113740?v=4?v=4?s=50" width="50px;" alt="Oscar Flores"/><br /><sub><b>Oscar Flores</b></sub></a><br />✍️</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/oscarf189"><img src="https://avatars.githubusercontent.com/u/28113740?v=4?v=4?s=50" width="50px;" alt="Oscar Flores"/><br /><sub><b>Oscar Flores</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=50" width="50px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=50" width="50px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/adityamulik"><img src="https://avatars.githubusercontent.com/u/10626835?v=4?v=4?s=50" width="50px;" alt="Aditya Mulik"/><br /><sub><b>Aditya Mulik</b></sub></a><br />✍️</td>

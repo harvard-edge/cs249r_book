@@ -22,6 +22,48 @@ class ComputeCore(BaseModel):
     # on peak_flops. Populated where a device's clock is stated; absent (None)
     # for entries whose source gives only aggregate throughput.
     clock_rate: Optional[Quantity] = None
+    # Count of programmable compute cores for architectures that publish one
+    # (e.g. a wafer-scale engine's processing elements). Absent (None) where the
+    # vendor does not state a core count or where sm_count is the unit.
+    core_count: Optional[int] = None
+    # Per-SM execution units of a GPU (added 2026-10-15): FP32 (CUDA) cores and
+    # Tensor Cores per streaming multiprocessor. Absent (None) for device classes
+    # without SMs. Chip totals are derived (fp32_core_count, tensor_core_count),
+    # so a total can never disagree with sm_count.
+    fp32_cores_per_sm: Optional[int] = None
+    tensor_cores_per_sm: Optional[int] = None
+    # Matrix unit built as a square systolic array (added 2026-10-20): the
+    # array is systolic_array_dim x systolic_array_dim multiply-accumulate
+    # cells. None for devices whose matrix unit is not a published square array.
+    systolic_array_dim: Optional[int] = None
+    # Per-SM thread limits of a GPU (added 2026-10-20): resident threads per SM,
+    # registers per thread, and threads per warp. Together with
+    # register_file_per_sm they set how many threads a kernel's register use
+    # leaves resident (occupancy). None for device classes without SMs.
+    max_threads_per_sm: Optional[int] = None
+    max_registers_per_thread: Optional[int] = None
+    warp_size: Optional[int] = None
+
+    @property
+    def systolic_macs_per_cycle(self) -> Optional[int]:
+        """Multiply-accumulates one systolic array retires per cycle."""
+        if self.systolic_array_dim is None:
+            return None
+        return self.systolic_array_dim * self.systolic_array_dim
+
+    @property
+    def fp32_core_count(self) -> Optional[int]:
+        """FP32 (CUDA) cores on the chip: sm_count x fp32_cores_per_sm."""
+        if self.sm_count is None or self.fp32_cores_per_sm is None:
+            return None
+        return self.sm_count * self.fp32_cores_per_sm
+
+    @property
+    def tensor_core_count(self) -> Optional[int]:
+        """Tensor Cores on the chip: sm_count x tensor_cores_per_sm."""
+        if self.sm_count is None or self.tensor_cores_per_sm is None:
+            return None
+        return self.sm_count * self.tensor_cores_per_sm
 
     @field_validator("peak_flops", mode="after")
     @classmethod
@@ -69,13 +111,27 @@ class MemoryHierarchy(BaseModel):
     # without SMs. Multiply by ComputeCore.sm_count to derive chip-level totals.
     register_file_per_sm: Optional[Quantity] = None
     shared_memory_per_sm: Optional[Quantity] = None
+    # DRAM interface: total data-bus width and per-pin data rate (bit/s per pin,
+    # one bit per transfer, so 6.4 Gb/s is 6400 MT/s). bandwidth = width x rate / 8.
+    bus_width: Optional[Quantity] = None
+    pin_data_rate: Optional[Quantity] = None
+    # Number of active HBM stacks on the package (HBM devices only). Per-stack
+    # bandwidth/capacity = bandwidth / hbm_stacks, capacity / hbm_stacks.
+    hbm_stacks: Optional[int] = None
 
     @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
     @classmethod
     def _validate_capacity_fields(cls, v, info):
         return require_unit_family(v, ureg.byte, info.field_name, "data")
 
-    @field_validator("bandwidth", "sram_bandwidth", "flash_bandwidth", mode="after")
+    @field_validator("bus_width", mode="after")
+    @classmethod
+    def _validate_bus_width(cls, v):
+        if v is None:
+            return v
+        return require_unit_family(v, ureg.bit, "bus_width", "data")
+
+    @field_validator("bandwidth", "sram_bandwidth", "flash_bandwidth", "pin_data_rate", mode="after")
     @classmethod
     def _validate_bandwidth_fields(cls, v, info):
         return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")
@@ -192,6 +248,13 @@ class HardwareNode(BaseModel):
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
     die_area: Optional[Quantity] = None
+    # Transistors on the die, as the vendor states it (added 2026-10-20).
+    transistor_count: Optional[float] = None
+    # Package-internal link joining the compute dies of a multi-die (chiplet)
+    # accelerator, stored as the vendor quotes it. None for monolithic dies.
+    # Vendors do not state a per-direction convention for this figure, so it
+    # is not an IOInterconnect; do not feed it into beta terms as a one-way rate.
+    die_to_die_bandwidth: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
     unit_cost_max: Optional[Quantity] = None
@@ -216,6 +279,11 @@ class HardwareNode(BaseModel):
     def _validate_die_area(cls, v):
         return require_dimensionality(v, ureg.meter**2, "die_area")
 
+    @field_validator("die_to_die_bandwidth", mode="after")
+    @classmethod
+    def _validate_die_to_die_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "die_to_die_bandwidth", "data")
+
     @field_validator("battery_capacity", mode="after")
     @classmethod
     def _validate_battery_capacity(cls, v):
@@ -230,6 +298,13 @@ class HardwareNode(BaseModel):
     @classmethod
     def _validate_dispatch_tax(cls, v):
         return require_dimensionality(v, ureg.second, "dispatch_tax")
+
+    @property
+    def embodied_carbon(self) -> Optional[Quantity]:
+        """Embodied manufacturing carbon as a Pint Quantity in kg, if present."""
+        if self.embodied_carbon_kg is None:
+            return None
+        return Q_(self.embodied_carbon_kg, "kg")
 
     def ridge_point(self, precision: Optional[str] = None) -> Quantity:
         """

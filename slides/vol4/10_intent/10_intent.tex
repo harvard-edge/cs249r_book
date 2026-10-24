@@ -1,0 +1,626 @@
+% =============================================================================
+% Lecture 10: Grounded Intent
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 10
+% =============================================================================
+% Thesis: a learned target may be pursued only when it arrives bounded in
+% space, effort, and time, through an intent lease that the permission side's
+% clock can expire and that grants a goal, never a path.
+% Hook and synthesis: AutoRT's language-model task filter (Ahn et al. 2024).
+% Running case: the warehouse mobile manipulator picks a red mug from a
+% takeaway conveyor (15 mm tolerance, 60 ms untracked and 219 ms tracked
+% evidence, 336 ms intent inference at 2 Hz).
+%
+% Build: make deck V=4 D=10_intent   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 10},
+  chaptertitle={Grounded Intent},
+  layer=brain,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+% Volume IV figure roles (volumes/vol4/palette.md), for text beside figures
+\definecolor{figprop}{HTML}{1F407A}
+\definecolor{figperm}{HTML}{047857}
+\definecolor{figveto}{HTML}{991B1B}
+\definecolor{figsense}{HTML}{0F766E}
+\setcounter{mlsystotalsections}{5}
+
+\title{Grounded Intent}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% Chapter notation, as the book prints it
+\newcommand{\tauev}{\tau_{\text{ev}}}
+\newcommand{\texp}{t_{\text{exp}}}
+\newcommand{\Tadm}{T_{\text{adm}}}
+\newcommand{\tstop}{t_{\text{stop}}}
+\newcommand{\rtol}{r_{\text{tol}}}
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An exact excerpt of real source code or documentation, at a legible size
+\newenvironment{logblock}[1][7]{\par\ttfamily\bfseries\fontsize{#1}{#1}\selectfont\setlength{\baselineskip}{1.25\baselineskip}\raggedright\setlength{\parskip}{0pt}}{\par}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 9 gave the machine a remembered scene with a deadline. Today a learned model names a target in that scene, and the question is what the machine may do with it. The notes total about 71 minutes; cutting every [OPTIONAL] frame leaves a complete lecture of about 55 minutes. Cut first the VLA rates, the five failure modes, KnowNo, and the Spot SDK frame; the VoxPoser, OK-Robot, per-box score, and lease-record frames are optional too.}
+\mlsystitle{Grounded Intent}{A learned target may be pursued only inside an intent lease that bounds it in space, effort, and time and that the permission side's clock can expire.}{cover_intent_blueprint.png}
+
+\begin{frame}{Predict: how many unsafe tasks pass a model filter?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{autort_robots.png}\\[0.05cm]
+      {\footnotesize AutoRT mobile manipulators in an office building}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \small Foundation models propose tasks for the fleet. A second language-model pass screens each task against a written robot constitution.\\[0.25cm]
+      {\normalsize Of \textbf{31 unsuitable} tasks, how many pass the screen?}\\[0.2cm]
+      {\normalsize\choice{A}{0}\qquad\choice{B}{3}\qquad\answerat{2}{C}{14}\qquad\choice{D}{31}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ahn et al., ``AutoRT,'' arXiv 2401.12963, 2024 frame from the project's time-lapse video, auto-rt.github.io. Grounded Intent, War Story 10.1.}
+  \note{[2.5 min] [CORE] AutoRT is a real 2024 deployment. Language and vision models looked at office scenes and proposed manipulation tasks for a fleet of mobile manipulators, and a second language-model pass filtered each proposal against a written ``constitution'' of safety and embodiment rules (no humans, no sharp objects, one arm, and so on). Human annotators then judged a sample. ENGAGE: votes by hand. Step 2: C. The filter rejected 17 of the 31 unsuitable tasks and passed 14, a recall of 55 percent. Students who chose A trust a filter written in the same language as the proposer; students who chose D assume it does nothing. WARN: the filter did raise quality. The point is that it cannot be the referee. Every one of the 14 misses was caught by human supervisors during teleoperated collection. LINK: today asks what a machine can check itself before a learned target moves mass, and what it cannot.}
+\end{frame}
+
+\begin{frame}{A model filter passed 14 of 31 unsuitable tasks}
+  \centering
+  \mlsyssteps[width=0.94\textwidth,height=4.0cm,keepaspectratio]{autort_step}{2}\\[0.15cm]
+  \uncover<2->{\small Kept tasks: 200 of 214 acceptable (93\%), against 228 of 259 before the filter (88\%).}
+  \mlsyscredit{Ahn et al., ``AutoRT,'' arXiv 2401.12963, 2024, as quoted in Grounded Intent, War Story 10.1 (human-judged sample). Percentages derived.}
+  \note{[1.5 min] [CORE] Step 1: of 259 proposed tasks, human annotators judged 228 acceptable, 88 percent, so 31 were unsuitable. Step 2: the filter kept 214 tasks, of which 200 were acceptable, 93 percent. It rejected 17 of the 31 unsuitable tasks and passed 14, a recall of 55 percent (calcs.py). ENGAGE: the filter improved the kept set from 88 to 93 percent acceptable. Is that a safety function? (Expected: no; a safety function must catch the unsafe case every time, and its miss rate here is 45 percent.) WARN: a better filter in the same language would share the proposer's blind spots. The AutoRT team placed physical safety outside the model, in joint-force limits, emergency stops, and line-of-sight supervision. Today builds the machine version of that wall, an expiring lease checked on a separate processor.}
+\end{frame}
+
+\begin{frame}{Recall: what does a belief record promise?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      {\Large\bfseries Question of the day}\\[0.2cm]
+      {\normalsize What three fields let a belief record expire on its own?}\\[0.3cm]
+      \uncover<2->{\small\textbf{\textcolor{mlsysaccent}{Evidence epoch:}} when the sensor captured it\\
+      \textbf{\textcolor{mlsysaccent}{Initial error:}} 3 mm for the mug handle\\
+      \textbf{\textcolor{mlsysaccent}{Growth law:}} error rises until it reaches the tolerance}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{thumb_cadence_step1.pdf}\\[0.05cm]
+      {\footnotesize Mug on a 0.20 m/s belt: 3 mm grows past 15 mm after \textbf{60 ms}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lecture 9 (belief record, belief expiry). Grounded Intent, \S10.1 and \S10.5.}
+  \note{[1.5 min] [CORE] Retrieval, 45 seconds. Step 2: Lecture 9's belief record carries an evidence epoch (the capture instant, not the processing time), an initial error, and a growth law; belief expiry is the elapsed time at which the error bound reaches the task tolerance. For the mug on the takeaway conveyor: 3 mm initial error, 15 mm grasp tolerance, belt at 0.20 m/s, so the record holds for (15 minus 3) over 200 mm/s, 60 ms. The thumbnail is today's error-against-time plot. LINK: the record says where the handle is and how long that claim holds. It says nothing about what the arm may do with the handle. That gap is today's lecture. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why is recognizing the right object not enough?}
+  \thumbline{thumb_mug_affordance_step3.pdf}{Turn a spoken request into a checkable target: pose, approach, aperture, wrench ceiling, evidence epoch.}\\[0.2cm]
+  \thumbline{thumb_conformal_step2.pdf}{Decide when ambiguity or a wrong-object premise requires refusal.}\\[0.2cm]
+  \thumbline{thumb_cadence_step3.pdf}{Size how long a target stays true, and whether the arm can reach it in that time.}\\[0.2cm]
+  \thumbline{thumb_lease_terms_step4.pdf}{Compute when an intent lease expires, on the permission side's clock.}\\[0.12cm]
+  {\footnotesize\textcolor{midgray}{Thread: the third law, proposal is not permission. Record: the intent lease.}}
+  \note{[1.5 min] [CORE] The driving question is the chapter's. A model can name the right mug and still misplace its handle by more than the gripper tolerates, locate it a moment before the belt carries it away, or name a glass jar with high confidence. Once any of these becomes a coordinate, it looks exactly like a correct one, and the drive that tracks it cannot tell the difference. Four goals, one per part of the lecture; each thumbnail is the shape of the figure that teaches it. LINK: Lecture 8 stated the third law, proposal is not permission; today applies it to goals. The bottom line names it and today's record, the intent lease, a time-limited grant of one target.}
+\end{frame}
+
+% =============================================================================
+% SECTION: GROUNDING
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: what a spoken request must become before anything on the machine can check it.}
+\mlsysdivider{What must a spoken request become before a machine can check it?}{Grounded Intent, \S10.1 and \S10.2}
+\section{Grounding}
+
+\begin{frame}{A spoken request names an outcome and leaves the grasp open}
+  \centering
+  \safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{voxposer_row2.jpg}\\[0.1cm]
+  \small Each request omits where to touch, from which side, how wide, how hard, and for how long.
+  \mlsyscredit{Huang et al., ``VoxPoser,'' CoRL 2023, Fig.~3 (two of its tasks), real-robot tasks on a Franka Emika Panda.}
+  \note{[2 min] [OPTIONAL] Real robot runs from VoxPoser: a language model composes 3D value maps from a spoken request (left of each strip), and a Franka arm follows them (right). ``Turn on the lamp,'' ``open the vitamin bottle on the right.'' Each request names an outcome. None names the grasp pose, the approach direction, the jaw opening, the force, or how long the camera view behind the answer stays true. ENGAGE: for ``pick the red mug,'' which of these five can the language model alone supply? (Expected: none with a bound; it can propose values, but nothing in its output carries a metric error, a force limit, or a capture time.) The running machine's intent model decodes seven values per inference (3D position, a three-value orientation, a gripper command) in 336 ms. WARN: a motion that looks coherent on video has still passed no check; VoxPoser's planner is optimal only with respect to what its maps contain. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A grounded affordance carries five checkable quantities}
+  \centering
+  \mlsyssteps[width=0.94\textwidth,height=5.0cm,keepaspectratio]{mug_affordance_step}{3}\\[0.05cm]
+  \uncover<3->{\footnotesize In the robot's base frame and units, each tied to dated sensor evidence (Definition 10.1).}
+  \note{[3 min] [CORE] An affordance is what an object offers an agent able to act on it (Gibson). Robotics makes it quantitative. Step 1: one mug offers several sites. The rim tolerates little force, the wall needs a wide jaw span, the handle needs full six-degree-of-freedom alignment to thread the fingers. Step 2: the handle site becomes a pose in the base frame, a unit approach direction, and a jaw aperture. Step 3: a contact wrench ceiling (forces and torques) and the evidence epoch. Bound all five to one capture through a calibrated camera-to-base chain and the target is a grounded affordance. Force closure, the grasp's ability to resist any disturbance within friction cones, bounds stability and says nothing about the squeeze, so the wrench ceiling still needs a floor (hold the mug) and a ceiling (do not crack it). ENGAGE: why does the affordance carry the gripper's limits? (Expected: a handle affords a grasp only to a gripper whose aperture and force fit it.) WARN: a learned grasp score or a confident detection grounds nothing; neither carries a metric bound, a wrench limit, or an epoch.}
+\end{frame}
+
+\begin{frame}{The task profile sets the 15 mm goal set}
+  \mlsysactivity{Vote}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{goalset_step}{2}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small The estimate is 20 mm off and the model is confident. What should admission do?\\[0.25cm]
+      \choice{A}{admit; the model is confident}\\[0.1cm]
+      \choice{B}{widen the goal set to 25 mm}\\[0.1cm]
+      \answerat{2}{C}{refuse: 1.33 is outside}\\[0.25cm]
+      \uncover<2->{\footnotesize The goal set is a specification of what the grasp can absorb. Error envelope plus tracking reserve must fit inside it.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.1 and equation 1 (all semi-axes 15 mm; one slice drawn). Normalized distances derived.}
+  \note{[3 min] [CORE] The goal set is an ellipsoid of positions and an angle around the target; its semi-axes come from the verified task profile, here 15 mm on every axis for the mug. The test is a normalized distance: offset over semi-axis, at most 1. Step 1: a 10 mm offset gives 0.67, inside. ENGAGE: vote, discuss one minute, vote again. Step 2: C. A 20 mm offset gives 1.33, outside; the fingers would strike the rim or close on air. B is the trap: the goal set specifies what the physical grasp can absorb and estimates nothing, so widening it to admit an uncertain estimate corrupts the task. WARN: the proposal's error envelope plus the controller's tracking reserve must both fit inside the 15 mm; checking each axis alone is only a screen, since the full error set must fit the ellipsoid. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A symbolic operator asserts facts it cannot check}
+  \begin{columns}[c]
+    \begin{column}{0.27\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{shakey.jpg}\\[0.05cm]
+      {\footnotesize Shakey (SRI), the robot STRIPS planned for}
+    \end{column}
+    \begin{column}{0.71\textwidth}
+      {\small\texttt{pick(mug, handle, conveyor)}}\\[0.12cm]
+      \footnotesize
+      \begin{tabular}{@{}lll@{}}\toprule
+        \textbf{Operator fact} & \onslide<2->{\textbf{Motion predicate}} & \onslide<2->{\textbf{Checked at}}\\\midrule
+        Reachable(handle) & \onslide<2->{in workspace, IK in limits} & \onslide<2->{admission}\\
+        Clear(approach) & \onslide<2->{occupancy on the corridor} & \onslide<2->{admission}\\
+        Singulated(window) & \onslide<2->{one cluster, fresh depth} & \onslide<2->{station}\\
+        Holding(mug) & \onslide<2->{squeeze inside its band} & \onslide<2->{runtime}\\\bottomrule
+      \end{tabular}\\[0.2cm]
+      \uncover<2->{\footnotesize A step runs only after its facts are discharged by measurement.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: The wub, CC BY-SA 4.0, Wikimedia Commons (Computer History Museum). Grounded Intent, \S10.2 and table 1.}
+  \note{[2.5 min] [CORE] Symbolic planning began on a machine that moved: Fikes and Nilsson wrote STRIPS in 1971 to plan for Shakey, whose actions did not always have the effects their operators listed. Step 1: the operator pick(mug, handle, conveyor) lists preconditions and adds Holding(mug). A planner can mark the mug held even when no inverse-kinematics solution reaches the handle or a bin wall blocks the approach. Step 2: each fact maps to a motion predicate checked on live measurements, at a stated place. Task and motion planning (TAMP) does this with geometric samplers that certify facts; a sampler failure means only that none was found; one may still exist. ENGAGE: an LLM writes the PDDL problem (LLM+P). Which column does that change? (Expected: none; the language model now writes the left column, and nothing writes the right one.) WARN: Holding(mug) after closure is a hypothesis until retention checks pass, and a squeeze inside its band still does not prove it is the right mug. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A learned grasp score ranks poses without measuring success}
+  \begin{columns}[c]
+    \begin{column}{0.54\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{okrobot_pipeline.jpg}\\[0.05cm]
+      {\footnotesize OK-Robot: detect, mask, sample grasps, filter, pick one}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{okrobot_fail.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Liu et al., ``OK-Robot,'' arXiv 2401.12202, 2024: pipeline figure (CC BY 4.0) and failure analysis, Figs.~3 and 4; bars redrawn from its counts.}
+  \note{[2.5 min] [OPTIONAL] OK-Robot is a real open-vocabulary pick-and-drop system on a Hello Robot Stretch: OWL-ViT and SAM isolate the named object, AnyGrasp samples dense six-degree-of-freedom grasps on the point cloud, and geometric heuristics prune them to one pose (left, the paper's Fig. 3). That pose is an uncertified Stage 4 proposal. It carries a learned quality score and no error bound, wrench ceiling, or expiry. Right: the paper's own failure analysis (Fig. 4), 375 trials across three levels of home clutter. 254 succeeded, 67.7 percent. The largest single cause was localization of the wrong object or none, 35 trials, 9.3 percent; the grasp models failed in 45 (including 17 where the segmenter picked the wrong object). Over 10 homes as found, the paper reports 58.5 percent, and 82.4 percent in decluttered homes. ENGAGE: which bar would a better grasp score not move? (Expected: wrong or no object; that failure is one of identity, and a grasp score ranks geometry.) WARN: these are pick-and-drop outcomes and include no safety incidents; the point is that a score from training data measures no success on this gripper and object. Land the segment aloud. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REFUSAL
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the first segment aloud: a target is checkable only as a pose, an approach, an aperture, a wrench ceiling, and an epoch, inside a goal set the task sets. Next: which object, and how sure.}
+\mlsysdivider{Which object, and how sure must the producer be?}{Grounded Intent, \S10.3, \S10.7, \S10.9}
+\section{Refusal}
+
+\begin{frame}{Per-box scores cannot say whether one candidate is present}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{mug.jpg}\\[0.05cm]
+      {\small raw score \textbf{0.62}}
+    \end{column}
+    \begin{column}{0.22\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{glass-jar.jpg}\\[0.05cm]
+      {\small raw score \textbf{0.48}}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \small Prompt: ``pick the red ceramic mug.''\\[0.2cm]
+      An open-vocabulary detector scores each box against the text on its own. Nothing makes the scores sum to one.\\[0.2cm]
+      \uncover<2->{Two identical mugs can both score high. A lone jar can pass the threshold when no mug is present.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: Niki Odolphie, CC BY 2.0; Dwight Burdette, CC BY 3.0; Wikimedia Commons. Scores illustrative, Grounded Intent \S10.3.1.}
+  \note{[2 min] [OPTIONAL] In the chapter's running variant, a red glass jar sits beside the requested red mug on the belt. Detectors such as OWL-ViT and Grounding DINO score each candidate box against the prompt independently; OWL-ViT trains with a per-box sigmoid loss, so the scores form no distribution over objects. Here the mug scores 0.62 and the jar 0.48 (the chapter's illustrative values). Step 2: two failures follow. Two identical mugs both score high and nothing flags the tie; keeping the top box is an arbitrary choice. And a lone jar can score above threshold with no mug present. LINK: Lecture 3's softmax illusion, in which a confident output passes for a calibrated probability. ENGAGE: what would make the scores comparable across boxes? (Expected: normalize the retained candidates; the next slide does, and then calibrates.) WARN: the photos stand in for the belt scene; no detector produced these scores from these photos. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: does the producer refuse the jar?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize\textbf{Given}\\[0.03cm]
+        Raw: mug 0.62, jar 0.48\\
+        200 scenes, $\alpha = 0.10$\\
+        Rank 181: $\hat{q} = 0.60$ (assumed)\\
+        Keep if normalized $\ge 0.40$
+      \end{mlsyscard}
+      \footnotesize
+      \uncover<2->{0.56 and 0.44: \textbf{\textcolor{figveto}{size 2, refuse}}\\[0.03cm]}
+      \uncover<3->{Jar 0.10: 0.86, 0.14: \textbf{\textcolor{figperm}{size 1}}}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.4cm,keepaspectratio]{conformal_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.3.1 and equation 3 (worked example; qhat assumed in the chapter). Values derived in calcs.py.}
+  \note{[3 min] [CORE] Conformal prediction replaces the best answer with a set of answers whose coverage is calibrated. On 200 labeled calibration scenes, the nonconformity score is one minus the normalized score of the true object; the threshold is the score at rank ceiling of 201 times 0.9, rank 181. The chapter assumes that score is 0.60, so a candidate stays if its normalized score is at least 0.40. ENGAGE: two minutes in pairs. Step 2: 0.62 and 0.48 normalize to 0.56 and 0.44; both stay, the set has two members, and the producer refuses with ERR\_GROUNDING\_AMBIGUITY before any motion proposal crosses the board link. Entropy (0.685 of a possible 0.693 nats) shows spread but gives no error bound. Step 3: if the jar scores 0.10, it normalizes to 0.14 and drops out; the singleton proceeds to the metric checks. WARN: coverage holds across scenes when calibration and deployment are exchangeable. New lighting or a new belt layout breaks that silently, so calibration records expire per station. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{KnowNo turns a calibrated set into a question to a person}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{knowno_set.png}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small Request: ``Place the bowl in the microwave, please.''\\[0.2cm]
+      Same rule, real robot: four options scored, threshold 0.21, two options remain, so the robot asks.\\[0.2cm]
+      \footnotesize Measured, kitchen mobile manipulator at 0.85 target: task success 0.76 with KnowNo against 0.51 with no help; help in 67\% of trials, 14 points fewer than a simple set.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ren et al., ``Robots That Ask for Help,'' CoRL 2023, arXiv 2307.01928, Fig.~1 (right panel) and Table 2.}
+  \note{[2 min] [OPTIONAL] The paper's own example, Fig. 1: ``Place the bowl in the microwave, please,'' with a metal bowl and a plastic bowl on the counter. The language model scores four options; the calibrated threshold is 0.21, two options exceed it, so the set has two members and the robot asks ``Which one, plastic or metal?'' This is the producer-side refusal of the previous slide, with a person as the fallback. Measured in the paper's kitchen hardware test (Table 2) at a target of 0.85: KnowNo reached task success 0.76 and asked for help in 67 percent of trials; a simpler set rule reached 0.75 but asked in 81 percent; asking nothing gave 0.51. ENGAGE: why is asking in two thirds of trials acceptable here and not on a conveyor? (Expected: the kitchen waits; the belt carries the mug out of reach in 60 ms.) WARN: the guarantee is coverage across scenes under exchangeability; it guarantees nothing about the object the robot ends up holding. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A confident wrong object passes every physical check}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{imprecise.pdf}\\[0.02cm]
+      {\footnotesize Distant view: 95\% region against 15 mm. \textbf{\textcolor{figveto}{Rejected.}}}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \uncover<2->{\small Jar \emph{in place of} the mug: one candidate, sharp estimate.\\[0.15cm]
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{wrong_object.pdf}\\[0.15cm]}
+      \uncover<3->{\small\textbf{Admission checks physics.} Whether the object is the mug needs its own evidence.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.3.3 (illustrative sensor model: 4, 5, 12 mm standard deviations; chi-square 7.815). Semi-axes derived.}
+  \note{[2.5 min] [CORE] Two cases the chapter separates. Step 1: the wrist camera sees the mug from across the station. Standard deviations of 4 and 5 mm across the image and 12 mm along the optical axis give a 95 percent region with semi-axes 11.2, 14.0, and 33.5 mm. Two axes fit the 15 mm tolerance; the depth axis is 2.2 times too long, so admission rejects it, and the remedy is a closer view (the staged approach in segment 4). LINK: Lecture 8's clearance inset is the same idea at perception. Step 2: now no mug is present and the jar stands where the mug should be. The model names it with high confidence; the only candidate normalizes to 1.00, so the set is a singleton. Inverse kinematics, joint limits, and clearance all pass, and the permission path authorizes a squeeze rated for a heavy ceramic mug. Step 3: the safety controller can check coordinates, limits, and clearance; it cannot check that the coordinate is the mug. ENGAGE: where must that premise go? (Expected: task-level evidence, operator oversight, and the safety case, Lecture 16.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{True or false?}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \choice{1}{A confident singleton set proves the robot has the right object.}\uncover<2->{\enspace\textbf{\textcolor{figveto}{False}}}\\[0.3cm]
+  \choice{2}{Averaging two mug detections gives a safe target between them.}\uncover<2->{\enspace\textbf{\textcolor{figveto}{False}}}\\[0.3cm]
+  \choice{3}{A score above threshold can skip the ambiguity check.}\uncover<2->{\enspace\textbf{\textcolor{figveto}{False}}}\\[0.45cm]
+  \uncover<2->{\small A score measures match to the prompt. It cannot show that exactly one object is present.}
+  \mlsyscredit{Grounded Intent, \S10.9 (fallacies).}
+  \note{[2 min] [CORE] Peer instruction: vote on all three, one minute with a neighbor, vote again. Step 2: all false. (1) The jar in place of the mug is a confident singleton; a singleton says only that no other retained candidate survived. (2) A regressor trained with squared error converges to the mean of its targets (Lecture 6, mode averaging); the midpoint between two mugs lies on empty belt or on whatever separates them, and the free space around a robot is not convex. An averaged estimate can even look sharp and pass covariance gates. (3) Detector scores are not calibrated probabilities (Guo et al. 2017) and do not measure uniqueness. The station's independent singulation check, a count of clusters in fresh depth, runs on every proposal regardless of confidence. WARN: a refusal does not revoke an active, unexpired lease; existing motion continues under its own evidence and fallback. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Five grounding failures arrive as the same seven numbers}
+  \small\renewcommand{\arraystretch}{1.0}
+  \begin{tabular}{@{}lll@{}}\toprule
+    \textbf{Failure} & \textbf{Check that can expose it} & \textbf{When}\\\midrule
+    Phantom (glare, glass) & fresh depth in a covered region & before motion\\
+    Stale (belt moved) & capture epoch on the MCU clock & before, during\\
+    Ambiguous (two mugs) & set size; station count & before motion\\
+    Misclassified handle & contact force residuals & after contact\\
+    Unreachable in time & transit time against evidence & before motion\\\bottomrule
+  \end{tabular}\\[0.3cm]
+  \begin{logblock}[8]
+    self.bins = np.linspace(min\_action, max\_action, self.n\_bins)\\
+    discretized\_action = np.digitize(action, self.bins)
+  \end{logblock}
+  \vspace{0.1cm}
+  {\footnotesize OpenVLA's action head: 256 bin edges over its \emph{training} range. A token in range carries no clearance proof.}
+  \mlsyscredit{Grounded Intent, \S10.7 and table 5. Code: openvla/openvla, prismatic/vla/action\_tokenizer.py, lines 31 and 41, commit c8f03f4 (MIT License).}
+  \note{[2 min] [OPTIONAL] Every failure crosses the proposal boundary as a candidate position and orientation, seven numbers. Read the table by the last column. Four of five can be refused before motion if the proposal carries its evidence epoch, its error bound, and its expiry. A misclassified affordance, a bolted fixture taken for a handle, may first show up as contact force, so precontact speed and force limits decide how hard the first touch is. The code is OpenVLA's action tokenizer, quoted from its repository. Each action dimension is clipped to its training range and binned against 256 uniform bin edges (255 bins, as the file's own docstring notes). A token inside that range is in distribution; it says nothing about obstacles, joint limits, or force. LINK: an attacker who injects an instruction or prints a patch in the camera view also produces a well-formed pose (Lecture 15, proposer attacks). ENGAGE: which row can no admission check catch? (Expected: misclassified affordance before contact, and the wrong-object case, which has no row because nothing physical flags it.) FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: EXPIRY
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the second segment: refuse when the set holds more than one candidate, and remember that a confident singleton can still be the wrong object. Next: a target that passes still needs a ceiling on effort and a deadline.}
+\mlsysdivider{How hard may the arm press, and for how long is the target true?}{Grounded Intent, \S10.4 and \S10.5}
+\section{Expiry}
+
+\begin{frame}{The permission side checks four invariants first}
+  \begin{columns}[c]
+    \begin{column}{0.74\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{ap_mcu_step}{3}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{mcu-board.jpg}\\[0.05cm]
+      {\footnotesize STM32 Nucleo (Cortex-M4) board}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \uncover<3->{\footnotesize\textbf{Cheapest first:} fresh evidence, inside the goal set, effort under ratings, a stop that fits.}
+  \mlsyscredit{Redrawn from Grounded Intent, figure 1 and \S10.4. Photo: Ordercrazy, CC0, Wikimedia Commons.}
+  \note{[2 min] [CORE] Step 1: on the application processor, the intent model (336 ms per inference, 2 Hz; Lecture 3's two-speed brain) proposes, and the producer refuses ambiguous referents there. Step 2: an admitted proposal crosses a board link (SPI with DMA) into a mailbox in the safety MCU's own memory; the two processors share no memory, and the link is untrusted, guarded by CRC and sequence numbers. Step 3: the MCU's permission path runs at 1 kHz and arms a lease timer that can stop the drives with no message from the host. The four handoff invariants, checked in cost order: temporal freshness, spatial containment, dynamic effort, and a certified fallback whose stop fits the clearance. The photo shows the class of part; the running machine's chip is unspecified. ENGAGE: why must the timer live on the MCU? (Expected: the fault that makes cancellation necessary, a hung host, also prevents sending the cancel.) WARN: the lease grants a goal and effort ceilings; the path is admitted later, on its own. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: what force when the brake fires?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{door-latch.jpg}\\[0.05cm]
+      {\footnotesize A spring gate latch}\\[0.15cm]
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        Trip 15 N, 0.03 m/s\\ 400 N/mm, 2 ms loop\\ Limit 100 N
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{latch_step}{3}\\[0.1cm]
+      \uncover<2->{\footnotesize $15 + 400 \times 0.03 \times 2 = \mathbf{39}$ N at the brake command}\\
+      \uncover<3->{\footnotesize No local trip, 200 ms stall: 6 mm $\times$ 400 N/mm $=$ \textbf{\textcolor{figveto}{2,400 N}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, Napkin Math 10.1 (illustrative values); derived in calcs.py. Photo: Gaius Cornelius, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] The running machine opens a spring-latched cage door. The intent lease requests a 15 N tripwire and a guarded 0.03 m/s approach against a 100 N latch limit. The photo shows a simple gate latch for orientation; the numbers are the chapter's illustrative plate. ENGAGE: predict the force when the brake command issues. Step 1: the tripwire fires at 15 N. Step 2: the plate keeps compressing while the 2 ms contact loop responds: 400 N/mm times 0.03 m/s is 12 N per ms, so 24 N more, 39 N. Step 3: the counterfactual with no local trip, where pressing stops only when the proposer or the lease acts: a 200 ms stall travels 6 mm and the spring model predicts 2,400 N, 24 times the limit; the latch has failed long before. WARN: the lease does not arrest contact; the fast local loop does. The lease supplies the ceilings that keep the load inside what that loop can brake (Lecture 12 owns contact margins). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The mug's evidence lasts 60 ms; one inference takes 336 ms}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.3cm,keepaspectratio]{cadence_step}{3}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{conveyor-pick.jpg}\\[0.05cm]
+      {\footnotesize Delta robots picking from a moving conveyor}\\[0.2cm]
+      \uncover<3->{\footnotesize After a 200 ms host stall: \textbf{\textcolor{figveto}{43 mm}} off untracked, \textbf{13 mm} tracked.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.5, Napkin Math 10.2, figure 5 (redrawn; illustrative scenario). Photo: Trungdoanhong, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] Step 1: target error against time since capture. With no tracker the belt adds 0.2 mm per ms to the 3 mm start, so the handle leaves the 15 mm tolerance at 60 ms. Lecture 3 owns this evidence horizon; today it becomes a lease term. Step 2: the intent model's inference takes 336 ms, 5.6 times the horizon, and the next proposal comes at 500 ms; by then the error is 103 mm. Step 3: a qualified tracker re-measures the mug every frame and cancels belt velocity, so only residual slip (0.5 m/s squared) grows the error: 219 ms. Each lease bar is followed by the 22 ms stop onset (one tick, one bus cycle, 20 ms brake onset). After a 200 ms host stall the untracked target is 43 mm off, the tracked one 13 mm. ENGAGE: in the bottom lanes, can the model renew either lease? (Expected: no; both end before its inference returns.) WARN: the tracked bar matters only when tracker renewals stop; normally each tracked frame restarts it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: how slow must the belt run?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given}\\[0.05cm]
+        Budget $15 - 3 = 12$ mm\\
+        Proposal period 500 ms\\
+        Inference 336 ms
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      {\footnotesize A model-only renewal installs a target from a frame captured one inference earlier, and it holds for one period.}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \small
+      \wstep{2}{Oldest evidence: $500 + 336 = 836$ ms}
+      \wstep{2}{Drift it can follow: $12 / 0.836 = \mathbf{14.4}$ mm/s}
+      \wstep{2}{\textbf{\textcolor{mlsysaccent}{7.2\%}} of the 200 mm/s belt}
+      \wstep{3}{At 50 mm/s: $\tauev = 12/50 = 240$ ms, still $< 836$ ms}
+      \uncover<3->{\footnotesize Remedies: a tracker, a slower belt, or refusal.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, Napkin Math 10.2 and Checkpoint 10.1 (illustrative); derived in calcs.py.}
+  \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs. Step 2: each model-only renewal computes its target from a frame captured one inference earlier, 336 ms, and that target stays in force until the next renewal 500 ms later, so just before replacement the evidence behind it is 836 ms old. The drift it can follow is 12 mm over 0.836 s, 14.4 mm/s, 7.2 percent of the belt speed. Even a mug still sliding to rest at 20 mm/s (a 600 ms horizon) is too fast. Step 3: the chapter's checkpoint, 50 mm/s: the horizon is 240 ms, still far under 836. Students who compare 336 ms against the horizon forget the period; students who compare 500 ms forget that the frame was captured before inference began. WARN: inflating the requested lease to cover inference leaves the target outside its tolerance for 276 ms. Faster inference fits inside the window; it never lengthens it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Published action models take 73 to 1,000 ms per inference}
+  \centering
+  \safeimg[width=0.94\textwidth,height=4.6cm,keepaspectratio]{vla_rates.pdf}\\[0.1cm]
+  {\small Even $\pi_0$'s 73 ms chunk inference outlasts the 60 ms horizon.}
+  \mlsyscredit{Brohan et al., RT-1 (RSS 2023) Fig.~1(a) and \S4 and RT-2 (2023) \S3.3; Kim et al., OpenVLA (2024) \S3.5, one RTX 4090, bf16; Black et al., $\pi_0$ (2024) Table I, on-board RTX 4090. Periods derived.}
+  \note{[2 min] [OPTIONAL] Published measurements, each from its paper: RT-1 runs at 3 Hz; RT-2's 55-billion-parameter model at 1 to 3 Hz on cloud TPUs and its 5-billion-parameter model near 5 Hz; OpenVLA at about 6 Hz on one RTX 4090 in bfloat16; pi0 computes a 50-step action chunk in 73 ms on an on-board RTX 4090 and streams it at up to 50 Hz. As periods: 333 to 1,000, 333, 200, 167, and 73 ms (derived). The running machine's 336 ms intent model sits among them. ENGAGE: which models could renew the mug's 60 ms untracked target from their own inference? (Expected: none; even pi0's 73 ms is 1.2 times the horizon, and that is inference alone, before capture and transport.) WARN: chunking keeps the joints supplied at 50 Hz, but every step of a chunk aims at where the mug was when its frame was captured (Lecture 3's two-speed brain). Land the segment: drift and tolerance set the horizon; only fresh captures, from a tracker, extend it. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REACH
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the third segment: drift and tolerance set the evidence horizon, and only fresh captures renew it. Next: given that window, can the arm get there, and is the path clear of people?}
+\mlsysdivider{Can the arm get there before its evidence expires, and is the path clear?}{Grounded Intent, \S10.6}
+\section{Reach}
+
+\begin{frame}{A handle 300 mm away needs 300 ms; its evidence lasts 219 ms}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{franka-panda.jpg}\\[0.05cm]
+      {\footnotesize A Franka Emika arm}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.0cm,keepaspectratio]{transit_step}{2}\\[0.1cm]
+      {\small Transit floor: distance $/$ speed ceiling $\le$ time left on the evidence.}\\[0.08cm]
+      \uncover<2->{\footnotesize Refuse the terminal promise (ERR\_DYNAMIC\_TIME\_INSUFFICIENT); stage it on two fresh captures.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.6, equation 6, Definition 10.2 (1 m/s TCP ceiling, illustrative). Photo: Ims, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] Dynamic reachability prices a target in time as well as space. No trajectory covers a distance faster than distance over the speed ceiling allows, so a terminal move must satisfy distance over speed at most the time left before expiry. Step 1: the gripper is 300 mm from the handle at the arm's 1 m/s TCP limit: at least 300 ms, against the 219 ms tracked window. The handle is well inside the static workspace and still inadmissible on one capture. Without a tracker the window is 60 ms, so the speed-only reach is 60 mm. Step 2: the rejection returns its margin (81 ms short), and the planner asks for a pre-contact observation goal instead: guarded segments, each admitted on a newer capture, at least two. ENGAGE: does better sensing shorten the 300 ms? (Expected: no; it renews the window, the transit floor stays.) WARN: passing this bound proves neither a collision-free path nor a feasible stop; acceleration only lengthens the time. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The corridor is screened against where a person could be}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=4.3cm,keepaspectratio]{aisle_step}{3}\\[0.1cm]
+  {\small Forward occupancy: last measured position $+$ body $+$ 1.6 m/s $\times$ elapsed time.}
+  \mlsyscredit{Grounded Intent, \S10.6.1, equation 7, Napkin Math 10.3, figure 7 (redrawn); ISO 13855 walking approach speed 1.6 m/s. Radii show the growth term only.}
+  \note{[2.5 min] [CORE] Dynamic reachability asks where the robot can get in time; forward occupancy asks where a person might be. The set is centered on the coworker's last measurement and grows with a body envelope, a validated speed bound, and the track's error. Step 1: over the 60 ms untracked horizon the growth term is 96 mm. Step 2: over the 219 ms tracked horizon, 351 mm; the corridor enters the larger disc (red), so the early screen refuses with ERR\_DYNAMIC\_OCCUPANCY\_CONFLICT and returns the conflict time and the person's track. Step 3: screen two seconds ahead and the set is 3.2 m, 2.5 times the aisle: the robot never moves. LINK: memory erodes free space behind an occlusion at the same speed (Lecture 9); a person who walks out of view does not free the space. Lecture 12 owns speed and separation monitoring, the certified function beneath this early screen; Lecture 17 asks whether people can read the robot's intent. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: when does one person's set span the aisle?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{walking.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small Aisle 1.30 m; design speed 1.6 m/s.\\ Beyond what screening horizon does the growth term alone span the aisle?\\[0.2cm]
+      \uncover<2->{$1.30 / 1.6 = \mathbf{0.81}$ s\\[0.1cm]
+      \footnotesize Screen the admitted prefix and its stop. A forecast of several seconds freezes the robot.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Bohannon, Age and Ageing 26(1), 1997, reference table (comfortable and maximum speed), as reproduced by Shirley Ryan AbilityLab. ISO 13855 constant K = 1,600 mm/s. Ratio derived.}
+  \note{[2.5 min] [CORE] Left: measured walking speeds. Healthy adults walk at about 1.4 m/s when comfortable and reach 2.0 to 2.5 m/s when asked to walk as fast as they can (Bohannon 1997). The dashed line is ISO 13855's design approach speed, 1.6 m/s, above usual walking and below the fastest walking by up to 1.58 times. A coworker who hurries, runs, or reaches across the corridor lies outside that bound, so the growth term must be validated on the site itself (the chapter's footnote; the standard uses 2,000 mm/s for hand reach close in). ENGAGE: one minute. Step 2: 1.30 m over 1.6 m/s is 0.81 s; past that horizon one person's set covers the aisle before the body envelope and tracking terms are added. This is the freezing robot problem (Trautman and Krause 2010): when every person's uncertainty grows independently, the predicted crowd covers every path and the robot stops, though people would make room. Three remedies: short receding horizons that still cover the admitted motion and its stop; re-centering on fresh measurements; and interaction-aware prediction, admitted only after its own error is bounded. Land the segment. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: LEASE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the fourth segment: a target is admissible only if the arm can reach it inside its evidence window and its corridor stays clear of every person's forward set. Now the record that binds all of it: the intent lease.}
+\mlsysdivider{Who ends the authority, and on whose clock?}{Grounded Intent, \S10.8 and \S10.9}
+\section{Lease}
+
+\mlsysnote{[1.5 min] [CORE] Equation 9, the definition of the expiring intent lease. Read it term by term. The first term dates from the sensor capture t0 plus the evidence horizon: only fresh evidence extends it. The second dates from admission plus the administrative lease the host requested and the MCU clamped: a silent or hung host triggers it. The third is the stopping deadline: the latest instant from which a worst-case stop, 22 ms of onset and then braking, still ends inside the clearance; a change in speed or clearance forces the MCU to recompute it. The minimum runs on the MCU's monotonic hardware clock, never wall time. On expiry a timer interrupt revokes tracking authority and the MCU engages the fallback it chose for the measured load: a powered hold, a controlled deceleration, or torque off. WARN: the intent lease authorizes a goal; Lecture 4's 60 ms chunk lease authorizes motion. Each ends authority from its own side.}
+\mlsysfocus{The intent lease expires at the earliest of three deadlines}{%
+$\texp = \min\big(\underbrace{t_0 + \tauev}_{\text{evidence}},\;
+\underbrace{t_{\text{adm}} + \Tadm}_{\text{host silence}},\;
+\underbrace{\tstop}_{\text{stopping}}\big)$%
+}
+
+\begin{frame}{Whichever margin runs out first ends the lease}
+  \centering
+  \mlsyssteps[width=0.94\textwidth,height=4.4cm,keepaspectratio]{lease_terms_step}{4}\\[0.1cm]
+  {\small The proposal requests a duration; the MCU clamps it. Expiry needs no message from the host.}
+  \mlsyscredit{Grounded Intent, \S10.8, equation 9, and the red-mug lease (100 ms administrative lease; 300 mm clearance at the 1 m/s ceiling). Derived in calcs.py.}
+  \note{[2 min] [CORE] One clock, the MCU's monotonic counter. Step 1: the evidence term, 219 ms after capture under a qualified tracker (60 ms without), shortened further once the controller's tracking reserve is subtracted. Step 2: the host-silence term guards against a scheduler stall, a garbage-collection pause, or a kernel panic, even for an object that never moves. Step 3: the stopping deadline, from the clearance that remains and the arm's speed. For the mug the chapter chooses a 100 ms administrative lease and 300 mm of clearance; at the 1 m/s ceiling, the arm's credible deceleration of 3.1 m/s squared and the 22 ms onset take 184 mm to stop, so the stopping deadline falls 116 ms after admission. Step 4: the earliest wins. Tracked, the 100 ms administrative lease binds; untracked, the 60 ms evidence term does. Which binds depends on the requested lease and the arm's clearance, so a deployment evaluates both horizons. ENGAGE: which term can a faster model extend? (Expected: none of them; fresh captures extend the first, and nothing the model does extends the third.) WARN: generous timeouts to hide p99 inference stalls create open-loop windows in which the arm sweeps space after the world has changed. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[t]{A commercial robot API already expires its commands}
+  \begin{columns}[T]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.8cm,keepaspectratio]{spot.jpg}\\[0.05cm]
+      {\footnotesize Boston Dynamics Spot}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+\begin{logblock}[8]
+        \textcolor{midgray}{// basic\_command.proto}\\
+        // The timestamp (in robot time) by which a command\\
+        // must finish executing. This is a required field\\
+        // and used to prevent runaway commands.\\
+        google.protobuf.Timestamp end\_time = 1;
+      \end{logblock}
+      \vspace{0.15cm}
+      {\footnotesize\itshape ``Clients are encouraged to send short-lived commands and continuously resend them so that the robot stops in the event of a client-side issue.''}\\[0.12cm]
+      {\footnotesize\itshape ``If an owner can no longer be reached within a certain period of time, the lease will become `stale' and may be acquired by another client.''}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Boston Dynamics spot-sdk v5.2.0: basic\_command.proto l.~235--237; docs robot\_services.md l.~53, lease\_service.md l.~13. Photo: Jonte, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] Real artifacts from a commercial robot's public SDK. The velocity command's end\_time is a required field ``used to prevent runaway commands''; the docs tell clients to send short-lived commands and resend them so the robot stops if the client fails; and a lease marks exclusive ownership of the robot's resources that goes stale when its owner stops checking in. These are the same two ideas as today's record: authority that expires on the robot's clock, and a single owner. The difference: Spot's lease tracks communication with its owner; an intent lease also expires when the evidence behind the target goes stale, which a keepalive cannot show. ENGAGE: which of equation 9's terms does Spot's end time resemble? (Expected: the host-silence term.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Diagnose: why does the arm stop?}
+  \mlsysactivity{Diagnose}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \begin{mlsyscard}{errorstroke}\footnotesize
+        Renewals every 50 ms: new sequence numbers, same pose. Mug at 0.20 m/s.
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      \uncover<2->{\footnotesize Same capture epoch: the lease expires \textbf{60 ms} after it.}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.5cm,keepaspectratio]{lifecycle_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.8 figure 8 (redrawn) and \S10.9 (fallacy: a renewal from the same stale frame).}
+  \note{[2.5 min] [CORE] Step 1: the lease lifecycle on the MCU. A proposal waits in Pending; admission refuses it (no authority) or arms the timer and enters Active. Renewed requires a higher sequence number, a newer parent belief record with a newer capture, and a passing re-check. The held lease ends three ways: terminal predicates met, the timer reaches expiry, or a contact limit or lost evidence aborts it; expiry and abort both go to the fallback the MCU selects. ENGAGE: one minute; what is happening in the card? Step 2: the intent model is reprocessing its last frame. Every field a network keepalive inspects looks healthy, but no new photons reached the camera. The self-loop: a renewal with the same capture is rejected and the timer keeps running, so the lease expires 60 ms after the original capture and braking begins within 22 ms. WARN: a controller that dated authority from packet arrival would let a spinning loop hold an obsolete target forever. Lease validity is anchored to the evidence epoch. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The intent lease grants a goal and leaves the path open}
+  \begin{columns}[c]
+    \begin{column}{0.54\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}ll@{}}\toprule
+        \textbf{Field} & \textbf{For the red mug}\\\midrule
+        parent, epoch & the handle's belief record\\
+        target pose & handle affordance frame\\
+        goal region & 15 mm and angle, from the profile\\
+        dynamic limits & 1 m/s TCP ceiling\\
+        wrench ceiling & default profile\\
+        expiry & min of three terms\\
+        fallback & chosen by the MCU\\\bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \small The planner may not widen the goal set or outlast the expiry.\\[0.3cm]
+      The lease links back to the belief record and forward to the trajectory record.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Grounded Intent, \S10.8 and table 6 (fields abridged).}
+  \note{[1 min] [OPTIONAL] The record the safety MCU latches, filled in for the mug, abridged from table 6. It links back to the belief record by digest and capture epoch (Lecture 9) and forward to the trajectory record by its own digest (Lecture 11), an auditable chain from camera photons to actuator torque; the digest traces lineage and authenticates nothing. The facility catalog lists no fragile profile for this mug, so the default wrench ceiling applies; a cataloged fragile item would carry a ceiling between its hold force and its crush limit. ENGAGE: what does the lease leave out on purpose? (Expected: the path; the planner proposes a timed trajectory, which the permission path admits separately.) LINK: the intent lease is the third law written as a record for goals. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{The intent lease is the eighth record in the chain}
+  \centering
+  \mlsyskitfig[width=\textwidth,height=5.8cm,keepaspectratio]{record_chain_l10}
+  \mlsyscredit{The record chain, The Causal Boundary, \S1.11.}
+  \note{[0.5 min] [CORE] NARRATE: the record chain from Lecture 1 with today's record lit. The intent lease follows the belief record of Lecture 9 and feeds the trajectory record of Lecture 11; the records after it are still dimmed. Read it as an argument: the lease grants a goal only as long as the belief behind it holds. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{What would the lease have caught in AutoRT?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{thumb_autort_step2.pdf}\\[0.05cm]
+      {\footnotesize 14 of 31 unsuitable tasks passed the model filter}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \only<1|handout:0>{\normalsize Sort the failures: which can the lease and its checks refuse, and which can they not?}%
+      \only<2->{\footnotesize
+      \begin{tabular}{@{}p{1.5cm}p{5.4cm}@{}}\toprule
+        \textbf{Caught} & stale evidence, out of the goal set, unreachable in time, over the effort ceiling, ambiguous set, blocked corridor, a silent host\\\midrule
+        \textbf{Not caught} & a confident, well-formed target with the wrong object or meaning\\\bottomrule
+      \end{tabular}\\[0.15cm]
+      The second row needs task evidence, people, and the safety case.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ahn et al., AutoRT, 2024; Grounded Intent, \S10.10.}
+  \note{[2.5 min] [CORE] Back to the hook. Step 1: retrieval, 60 seconds. Step 2: the lease and its gates refuse what physics can see, such as a target whose capture is too old, outside the 15 mm goal set, unreachable before its evidence expires, asking for more force than the latch or the windings allow, ambiguous between two candidates, or crossing a coworker's forward set, and they end authority when the host goes silent. They cannot see meaning, such as a task that is well formed but wrong, or the jar in place of the mug. AutoRT's own answer made the same split, with hardware force limits and emergency stops on the machine, and human supervisors for the rest. ENGAGE: which of AutoRT's 14 misses would you expect in the second row? (Expected: most; a constitution violation such as handling a sharp object is an error of meaning, which no geometric check sees.) LINK: the residual premise is carried in the safety case (Lecture 16) and the residual-claims register (Lecture 18). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_mug_affordance_step3.pdf}{A request becomes checkable only as pose, approach, aperture, wrench ceiling, and evidence epoch, inside a 15 mm goal set the task sets.}\\[0.12cm]
+  \thumbline{thumb_conformal_step2.pdf}{Refuse when the calibrated set holds two candidates; a confident singleton can still be the wrong object.}\\[0.12cm]
+  \thumbline{thumb_cadence_step3.pdf}{The mug's evidence lasts 60 ms against a 336 ms inference; only fresh captures renew it.}\\[0.12cm]
+  \thumbline{thumb_transit_step2.pdf}{300 mm at 1 m/s outlasts a 219 ms window; screen corridors over the admitted prefix and its stop.}\\[0.12cm]
+  \thumbline{thumb_lease_terms_step4.pdf}{The lease expires at the earliest of evidence, host silence, and the stop, on the MCU's clock.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the second and the fifth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.15cm}
+        \item Which premises should a robot ask a person about, and which should it check with a second sensor?
+        \item Should the coverage rate of a referent set be the same for a mug and for a knife?
+        \item When people in a shared aisle would make room, how much of their yielding may the robot assume?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{robot-crowd-starship.jpg}\\[0.05cm]
+      {\footnotesize A delivery robot crossing a busy event hall}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Aron Urb (EU2017EE), CC BY 2.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. The first asks how to split the wrong-object premise between oversight and independent sensing (\S10.7). The second asks whether coverage should depend on consequence; the team chooses the conformal rate. The third is Trautman and Krause's interaction-aware prediction. Predicting people and robot jointly narrows the sets, but only after that prediction's own error is bounded.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Grounded Intent, \S10.1 to \S10.10; Checkpoints 10.1 and 10.2; Napkin Math 10.1 to 10.3 by hand.
+    \item Ren et al., ``Robots That Ask for Help,'' CoRL 2023: calibrated sets decide when to ask.
+    \item Angelopoulos and Bates, ``Conformal Prediction: A Gentle Introduction,'' 2023.
+    \item Gray and Cheriton, ``Leases,'' SOSP 1989: where the lease comes from.
+    \item Garrett et al., ``Integrated Task and Motion Planning,'' 2021.
+    \item Trautman and Krause, ``Unfreezing the Robot,'' IROS 2010: the freezing robot problem.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its two checkpoints. Ren et al. carry conformal prediction to a robot deciding when to ask for help. Angelopoulos and Bates state the coverage argument and its exchangeability premise plainly. Gray and Cheriton introduced leases for file-cache consistency; this lecture's lease replaces their clock-skew term with evidence drift. Garrett et al. survey task and motion planning. Trautman and Krause name the freezing robot problem. FLEX: add the lab your course uses for grasping or perception.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{thumb_transit_step2.pdf}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} TRAJECTORY PLANNING}}\\[0.5cm]
+      {\LARGE\bfseries The lease names a goal. How does a moving arm get there and still stop in time?}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] The intent lease fixes the target region, the effort ceilings, and the deadline, but no timed velocity profile. Lecture 11 starts at the moment the next inference is late. It turns the lease into a timed trajectory that joins the motion already under way without a step in acceleration, sizes its replacement deadline against the inference tail, and attaches a stop that runs even if no later pass returns. The thumbnail is today's staged approach, which Lecture 11 times.}
+\end{frame}
+
+\end{document}

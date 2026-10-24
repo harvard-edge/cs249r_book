@@ -21,7 +21,7 @@ SYSTEM_DESIGN_LAB_IDS = (
     "v2_02_compute_wall",
     "v2_03_network_fabric_design",
     "v2_04_data_pipeline_wall",
-    "v2_05_parallelism_design",
+    "v2_06_parallelism_design",
     "v2_07_failure_budget_engineering",
     "v2_08_fleet_orchestration",
     "v2_09_optimization_trap",

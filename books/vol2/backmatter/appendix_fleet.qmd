@@ -1,5 +1,9 @@
 ---
 engine: jupyter
+notation-local: [\RealizedDeviceComputeRate]
+format:
+  html:
+    number-sections: false
 ---
 
 # Fleet Foundations {#sec-appdx-fleet-foundations}
@@ -8,56 +12,93 @@ Single-node performance engineering centers on memory hierarchy latencies and ro
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference when translating fleet-scale design questions into specific physical constraints and identifying available optimization levers.
+This appendix is designed as a reference when translating fleet-scale design questions into specific physical constraints and identifying available optimization levers. The five routing bullets below map common engineering questions to the sections that follow.
 
 - **When evaluating inter-node communication**: Consult @sec-appdx-fleet-foundations-numbers-to-know for the bandwidth and latency hierarchy.
 - **When sizing GPU allocations**: Consult @sec-appdx-fleet-foundations-scaling-physics to analyze why doubling accelerator counts does not halve training time.
 - **When calculating cluster reliability**: Check @sec-appdx-fleet-foundations-numbers-to-know for mean time between failures (MTBF) tables and failure probability models.
 - **When evaluating power and cooling limits**: Consult @sec-appdx-fleet-foundations-thermal-power for power density ceilings and cooling constraints.
-- **When budgeting runtime overhead**: Use @sec-appdx-fleet-foundations-numbers-to-know for the four overhead categories that erode goodput.
+- **When budgeting runtime overhead**: Use @sec-appdx-fleet-foundations-numbers-to-know for the four overhead categories that erode useful wall time.
 
 ## The Three System Paradigms {#sec-appdx-fleet-foundations-system-paradigms}
 
-Machine learning infrastructure at scale inherits design DNA from two distinct computing lineages---and then breaks the assumptions of both. Understanding where ML systems borrow from high-performance computing (HPC) and where they borrow from warehouse-scale computing (WSC) is essential for choosing the right design trade-offs. A system architect who treats ML training as "just HPC" will build infrastructure that cannot tolerate failures. One who treats it as "just web services" will build infrastructure that cannot sustain the tight coupling that synchronous training demands.
+Machine learning infrastructure at scale inherits design DNA from two distinct computing lineages and then breaks the assumptions of both. A designer must understand where ML systems borrow from high-performance computing (HPC) and where they borrow from warehouse-scale computing (WSC) to choose the right design trade-offs. A system architect who treats ML training as "just HPC" will build infrastructure that cannot tolerate failures. One who treats it as "just web services" will build infrastructure that cannot sustain the tight coupling that synchronous training demands.
 
 ### High-performance computing {.unnumbered}
 
-HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOP/s on tightly coupled simulations---weather modeling, molecular dynamics, nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **Checkpoint/Restart**\index{Checkpoint/Restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and restarts from scratch. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are pets---individually important, individually tracked.
+HPC systems descend from the supercomputer tradition, where the design goal is to maximize FLOP/s on tightly coupled simulations such as weather modeling, molecular dynamics, and nuclear physics. Because every node participates in lockstep, these clusters rely on specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Their fault tolerance follows the **checkpoint/restart**\index{Checkpoint/restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and resumes from that saved state. Batch schedulers such as Slurm allocate rigid resource shapes ("512 nodes for 24 hours"), treating nodes as individually tracked "pets."
 
 ### Warehouse-scale computing {.unnumbered}
 
-WSC systems descend from the web services tradition. Their design philosophy is to maximize queries per second across loosely coupled services---search, email, social media. Hardware is commodity Ethernet, varying generations coexist, and nodes are heterogeneous. Fault tolerance follows the **Redundancy**\index{Redundancy!fault tolerance model} model: if one node fails, the load balancer reroutes traffic to another replica. The user never notices. Scheduling is dynamic (Kubernetes, Borg), with elastic bin-packing. Nodes are cattle---interchangeable and expendable.
+WSC systems descend from the web services tradition, aiming instead to maximize queries per second across loosely coupled services such as search, email, and social media. Because requests are independent, these fleets mix hardware generations over commodity Ethernet and rely on **redundancy**\index{Redundancy!fault tolerance model} for fault tolerance: when a node fails, a load balancer reroutes traffic to another replica without the user noticing. Dynamic schedulers such as Kubernetes and Borg bin-pack workloads elastically across interchangeable, expendable "cattle" nodes.
 
-### The ML fleet: A hybrid architecture {.unnumbered}
+### The ML fleet as hybrid architecture {.unnumbered}
 
-ML systems require the computational throughput of HPC (to train massive models with synchronous gradient updates) but must operate at the scale and unreliability of WSC (thousands of accelerators running for weeks). This creates a hybrid that borrows selectively from both traditions.
+ML systems require the computational throughput of HPC to train large models with synchronous gradient updates, yet they must operate at the scale and failure rates of WSC, where thousands of accelerators run for weeks. This tension produces a hybrid architecture that borrows selectively from both lineages.
 
-Training workloads are synchronous and bandwidth-hungry like HPC, but long-running and failure-tolerant like WSC. Inference workloads are latency-sensitive like WSC, but computationally heavy like HPC. The network is a fusion: TCP/IP for control planes, InfiniBand or NVLink for data planes. Fault tolerance uses **Elastic Training**\index{Elastic Training!fleet fault tolerance} strategies: training jobs can shrink, expand, pause, or resume without full restarts. Scheduling combines gang allocation (all-or-nothing for training) with dynamic preemption and replacement.
+Training workloads are synchronous and bandwidth-hungry like HPC jobs, whereas long-running fleet operations demand WSC-style fault tolerance, and inference workloads reverse the blend by pairing WSC latency sensitivity with HPC compute density. To serve both regimes, the network fuses TCP/IP control planes with InfiniBand or NVLink data planes. Fault tolerance combines checkpoint/restart with **elastic training**\index{Elastic training!fleet fault tolerance} strategies where supported, which allow jobs to adjust resource allocations even when resharding, state restoration, or worker restarts remain necessary. Scheduling pairs all-or-nothing gang allocation for training with dynamic preemption and replacement. ML fleets therefore cannot adopt either HPC or WSC patterns wholesale; they combine elements from each according to the workload phase, as the design trade-offs across the three paradigms in @tbl-fleet-paradigm-comparison show.
 
-@Tbl-fleet-paradigm-comparison summarizes the design trade-offs across the three paradigms. The key insight is that ML fleets cannot simply adopt either HPC or WSC patterns wholesale; they must selectively combine elements from each based on the workload phase.
-
-| **Dimension**   |   **HPC (Supercomputer)**   |  **WSC (Web Cloud)**  | **ML Fleet (AI Cluster)**              |
-|:----------------|:---------------------------:|:---------------------:|:---------------------------------------|
-| **Philosophy**  |       Maximize FLOP/s       |      Maximize QPS     | Maximize Model Quality per Dollar/Watt |
-| **Coupling**    |         Tight (MPI)         |    Loose (RPC/HTTP)   | Hybrid (NCCL + RPC)                    |
-| **State**       |        Stateful (RAM)       | Stateless (DB-backed) | Semi-Stateful (Checkpoints + KV Cache) |
-| **Network**     |      Latency-optimized      |  Bandwidth-optimized  | Bisection-bandwidth critical           |
-| **Bottleneck**  | Compute throughput (FLOP/s) |     I/O (Disk/Net)    | Memory bandwidth (HBM)                 |
-| **Fault model** |      Checkpoint/Restart     |  Redundancy/Replicas  | Elastic shrink/expand                  |
-| **Scheduling**  |        Batch (Slurm)        |  Orchestration (K8s)  | Gang + preemption                      |
-| **Node model**  |        Pets (tracked)       |  Cattle (expendable)  | Pets during job, cattle between jobs   |
+| **Dimension**   |   **HPC (supercomputer)**   |  **WSC (web cloud)**  | **ML fleet (AI cluster)**                |
+|:----------------|:---------------------------:|:---------------------:|:-----------------------------------------|
+| **Philosophy**  |       Maximize FLOP/s       |      Maximize QPS     | Maximize Model Quality per Dollar/Watt   |
+| **Coupling**    |         Tight (MPI)         |    Loose (RPC/HTTP)   | Hybrid (NCCL + RPC)                      |
+| **State**       |        Stateful (RAM)       | Stateless (DB-backed) | Semi-Stateful (Checkpoints + KV Cache)   |
+| **Network**     |      Latency-optimized      |  Bandwidth-optimized  | Bisection-bandwidth critical             |
+| **Bottleneck**  | Compute throughput (FLOP/s) |     I/O (Disk/Net)    | Fabric or HBM, by workload phase         |
+| **Fault model** |      Checkpoint/Restart     |  Redundancy/Replicas  | Checkpoint/restart + optional elasticity |
+| **Scheduling**  |        Batch (Slurm)        |  Orchestration (K8s)  | Gang + preemption                        |
+| **Node model**  |        Pets (tracked)       |  Cattle (expendable)  | Pets during job, cattle between jobs     |
 
 : **Three System Paradigms**: ML fleets inherit design DNA from both HPC and WSC but break assumptions of each. Training resembles HPC (tight coupling), inference resembles WSC (elastic serving), and fault tolerance is a hybrid of both. {#tbl-fleet-paradigm-comparison}
 
+```{python}
+#| echo: false
+#| label: fleet-training-state-rule
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING STATE RULE (MIXED-PRECISION ADAM BYTES PER PARAMETER)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Foundations recap list and the node-level numbers callout.
+# │
+# │ Goal: Pin the 16 / 14 / 12 bytes-per-parameter accounting to the registry.
+# │ Show: training state, resumable checkpoint, and optimizer-only bytes.
+# │ How: ReferenceStats.MixedPrecisionAdam anchors.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt
+
+class FleetStateRule:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    state_bpp_q = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
+    ckpt_bpp_q = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    optim_bpp_q = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    state_bpp = state_bpp_q.to(byte / param).magnitude
+    ckpt_bpp = ckpt_bpp_q.to(byte / param).magnitude
+    optim_bpp = optim_bpp_q.to(byte / param).magnitude
+    weight_bpp = BYTES_FP16.to(byte).magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(ckpt_bpp == weight_bpp + optim_bpp, "Checkpoint = BF16 weights + FP32 optimizer state")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    state_bpp_str = fmt(state_bpp, precision=0, commas=False)
+    ckpt_bpp_str = fmt(ckpt_bpp, precision=0, commas=False)
+    optim_bpp_str = fmt(optim_bpp, precision=0, commas=False)
+    weight_bpp_str = fmt(weight_bpp, precision=0, commas=False)
+```
+
 ### Foundations recap {.unnumbered}
 
-The following provides a compact reference for the key foundational ideas that reappear throughout the distributed systems chapters.
+Five single-machine models reappear throughout the distributed chapters, each extended by a fleet-scale term. @Sec-appdx-dam-taxonomy states the single-machine forms; the list below records only what changes at scale.
 
-- **Iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
-- **Roofline model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **Network-Bound**\index{Network-bound workload} workloads whose performance is limited by inter-node bandwidth.
-- **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ [@amdahl1967]. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
-- **Training state rule**: About 14 bytes per parameter for common mixed-precision Adaptive Moment Estimation (Adam) checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
-- **Little's Law** ($Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$): Sizes inference infrastructure, where $\lambda_{\text{arr}}$ is the request arrival rate and $Q_{\text{req}}$ is the expected concurrent request count [@little1961]. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
+- **Iron law** ($\Time\approx \DataVolume/\Bandwidth + \Operations/(\PeakRate \cdot \EfficiencyHw) + \Latency$, @sec-appdx-dam-taxonomy-iron-law-mapping): At fleet scale, the data-movement term expands to include inter-node communication, and the Fleet Law replaces the single-machine sum.
+- **Roofline Model** (@sec-appdx-dam-taxonomy-roofline): At fleet scale, a third ceiling appears. **Network-bound**\index{Network-bound workload} workloads are limited by inter-node bandwidth, which the communication-computation ratio in @sec-appdx-fleet-foundations-comm-compute-ratio measures.
+- **Amdahl's Law**: Caps strong-scaling speedup at $1/\SerialFraction$ for serial fraction $\SerialFraction$ [@amdahl1967]. At fleet scale, the serial fraction includes synchronization barriers, exposed collective communication, and pipeline bubbles (@sec-appdx-fleet-foundations-amdahls-fleet).
+- **Training state rule** (@sec-appdx-dam-taxonomy-training-memory): Mixed-precision training with the Adaptive Moment Estimation (Adam) optimizer holds about `{python} FleetStateRule.state_bpp_str` bytes per parameter during training and about `{python} FleetStateRule.ckpt_bpp_str` bytes per parameter in a resumable checkpoint, before activations and framework metadata. At fleet scale, this footprint determines how model state is partitioned across devices (ZeRO, tensor parallelism, pipeline parallelism).
+- **Little's Law** ($\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$) [@little1961]: Relates in-flight requests to arrival rate and time in system. At fleet scale, it sizes the number of serving replicas behind a load balancer (@sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0).
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
 
@@ -65,11 +106,11 @@ The transition from single-machine to fleet-scale reasoning requires extending t
 
 ## Numbers Every Fleet Engineer Should Know {#sec-appdx-fleet-foundations-numbers-to-know}
 
-Just as single-machine analysis depends on a set of core numbers, fleet-scale engineering is governed by a set of predictable ratios and scaling behaviors. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces between nodes. While absolute values evolve with hardware generations, the ratios between communication tiers and the scaling behavior of failure rates remain remarkably stable. The ratios and scaling trends serve as structural invariants, while specific values provide numerical sanity checks.
+Crossing a server chassis boundary drops per-direction interconnect bandwidth by nearly an order of magnitude from intra-node NVLink to inter-node InfiniBand, while scaling a job from one node to thousands of accelerators shrinks the expected interval between hardware failures from years to hours. Just as single-machine analysis depends on a set of core numbers within each node, fleet-scale engineering is governed by the ratios and scaling behaviors that operate between nodes. Because hardware ratios shift across generations and failure rates depend on the assumed fault model, the reference values below provide baseline sanity checks while the accompanying equations show how to substitute different system assumptions.
 
 ::: {#psp-appendix-fleet-node-level-numbers .callout-perspective title="Node-level numbers for fleet reasoning"}
 
-Fleet reasoning depends on a few node-level numbers that directly affect fleet design: the training state rule\index{Training state rule} of about 14 bytes per parameter for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; NVLink vs. high-bandwidth memory (HBM) bandwidth for intra-node parallelism placement; and peak FLOP/s and HBM capacity for model FLOPs utilization (MFU), effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
+Fleet reasoning depends on a few node-level numbers that directly affect fleet design. The training state rule\index{Training state rule} of about `{python} FleetStateRule.ckpt_bpp_str` bytes per parameter describes common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included. NVLink vs. high-bandwidth memory (HBM) bandwidth informs intra-node parallelism placement. Peak FLOP/s and HBM capacity feed model FLOPs utilization (MFU), effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values. The memory hierarchy and roofline ridge points within a node (@sec-appdx-dam-taxonomy-memory-hierarchy) provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
 :::
 
 ```{python}
@@ -82,22 +123,23 @@ from mlsysim.fmt import fmt, fmt_count, fmt_percent
 from mlsysim.physics import calc_mtbf_cluster, calc_effective_flops
 
 class FleetNumbersHighlights:
+    n_ref_gpus = Systems.Clusters.Training_1K.total_accelerators
     nvlink_to_ib = int((Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to("").magnitude)
     operational_ratio = 1.0 - (Ops.TrainingRunOverheads.Checkpoint + Ops.TrainingRunOverheads.FailureRecovery + Ops.TrainingRunOverheads.Maintenance)
     eff_fraction = float(
         calc_effective_flops(
-            1024 * Hardware.Cloud.H100.compute.peak_flops,
+            n_ref_gpus * Hardware.Cloud.H100.compute.peak_flops,
             Literature.Training.MfuHigh,
             ReferenceStats.TrainingScaleProfiles.Eff1024Gpu,
             operational_ratio,
         )
         .to(TFLOPs / second)
         .magnitude
-        / (1024 * Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude)
+        / (n_ref_gpus * Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude)
     )
     nvlink_to_ib_ratio_mult_str = fmt_multiple(nvlink_to_ib, precision=0, commas=False)
     cl_mega_str = fmt(Systems.Clusters.Mega_100K.total_accelerators, precision=0)
-    cluster_1024_gpus_str = fmt_count(1024, label="GPU", commas=True)
+    cluster_1024_gpus_str = fmt_count(n_ref_gpus, label="GPU", commas=True)
     mtbf_100k_min_str = fmt_time(
         calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Mega_100K.total_accelerators).to(minute).magnitude,
         'minute',
@@ -110,13 +152,13 @@ class FleetNumbersHighlights:
 
 ::: {#psp-appendix-fleet-three-numbers .callout-perspective title="Three fleet numbers that matter most"}
 
-* **Bandwidth gap**: NVLink per-direction bandwidth within a node is ~`{python} FleetNumbersHighlights.nvlink_to_ib_ratio_mult_str` faster than an InfiniBand NDR port between nodes. This ratio determines where parallelism boundaries belong---model parallelism within a node, data parallelism across nodes.
-* **MTBF scaling**: A cluster's mean time between failures is the single-component MTBF divided by the number of components ($1/N$ scaling). At `{python} FleetNumbersHighlights.cl_mega_str` GPUs, expect a failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`.
+* **Bandwidth gap**: NVLink per-direction bandwidth within a node is ~`{python} FleetNumbersHighlights.nvlink_to_ib_ratio_mult_str` faster than an InfiniBand NDR port between nodes. This ratio determines where parallelism boundaries belong, with model parallelism within a node and data parallelism across nodes.
+* **MTBF scaling**: A cluster's mean time between failures is the single-component mean time to failure (MTTF) divided by the number of components ($1/\RequiredComponentCount$ scaling). At `{python} FleetNumbersHighlights.cl_mega_str` GPUs, expect a failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`.
 * **Effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a cluster with `{python} FleetNumbersHighlights.cluster_1024_gpus_str` delivers roughly `{python} FleetNumbersHighlights.eff_fraction_pct_str` of its peak FLOP/s as useful training work.
 
 :::
 
-@Tbl-fleet-numbers-quick-ref condenses the fleet-scale numbers into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
+Back-of-envelope checks need only the condensed values in @tbl-fleet-numbers-quick-ref. Design and debugging work should use the detailed tables in each subsection.
 
 ```{python}
 #| echo: false
@@ -132,11 +174,13 @@ class FleetNumbersHighlights:
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_mtbf_cluster, calc_checkpoint_size
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_percent, fmt_percent_range, fmt_power, fmt_qty_int, fmt_time
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_params, fmt_percent, fmt_percent_range, fmt_power, fmt_qty_int, fmt_time
 
 class FleetQuickRef:
     nvlink_ib = int((Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to("").magnitude)
-    goodput_ratio = 1.0 - (
+    # Share of wall time left after the four overheads; it mixes a program
+    # goodput loss (pipeline bubbles) with losses outside the steps, so it is no single factor.
+    retained_share = 1.0 - (
         Ops.TrainingRunOverheads.PipelineBubble
         + Ops.TrainingRunOverheads.Checkpoint
         + Ops.TrainingRunOverheads.FailureRecovery
@@ -144,7 +188,8 @@ class FleetQuickRef:
     )
     mtbf_8192_min = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Frontier_8K.total_accelerators).to(minute).magnitude
     mtbf_100k_min = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Mega_100K.total_accelerators).to(minute).magnitude
-    ckpt_175b = calc_checkpoint_size(Models.Language.GPT3.parameters.to(param).magnitude)
+    ckpt_175b = calc_checkpoint_size(Models.Language.GPT3.parameters, ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter)
+    gpt3_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     tenk_gpus = Systems.Clusters.Training_10K.total_accelerators
     tenk_it_power = tenk_gpus * Hardware.Cloud.H100.tdp
     nvlink_ib_ratio_mult_str = fmt_multiple(nvlink_ib, precision=0, commas=False)
@@ -154,8 +199,8 @@ class FleetQuickRef:
     eff_8192_str = fmt_percent(round(ReferenceStats.TrainingScaleProfiles.Eff8192Gpu * 100) / 100, precision=0, commas=False, style='symbol')
     mtbf_8k_min_str = fmt_time(mtbf_8192_min, 'minute', precision=1, commas=False)
     mtbf_100k_min_str = fmt_time(mtbf_100k_min, 'minute', precision=0, commas=False)
-    ckpt_175_gb_str = fmt_qty_int(ckpt_175b, GB, commas=False)
-    goodput_str = fmt_percent(goodput_ratio, precision=0, commas=False, style='symbol')
+    ckpt_175_gb_str = fmt_qty_int(ckpt_175b, GB, commas=True)
+    retained_str = fmt_percent(retained_share, precision=0, commas=False, style='symbol')
     mfu_range_str = fmt_percent_range(Literature.Training.MfuLow, Literature.Training.MfuHigh, precision=0, commas=False, style='symbol')
     rack_ai_kw_str = fmt_power(Infrastructure.Racks.AI_Standard.power_kw * kilowatt, unit=kilowatt, precision=0, commas=False)
     air_limit_kw_str = fmt_power(Infrastructure.AIR_COOLING_LIMIT_KW * kilowatt, unit=kilowatt, precision=0, commas=False)
@@ -166,16 +211,16 @@ class FleetQuickRef:
     tenk_it_mw_str = fmt_power(tenk_it_power, unit=MW, precision=0, commas=False)
 ```
 
-| **Category**               | **Number**                                                                                                                                                                                                                                        | **Use**                                                                   |
-|:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|
-| **Communication**          | NVLink per-direction bandwidth ~`{python} FleetQuickRef.nvlink_ib_ratio_mult_str` IB NDR                                                                                                                                                          | Parallelism boundary (in-node vs. cross-node)                             |
-| **Communication**          | IB NDR ~`{python} FleetQuickRef.ib_ndr_gb_per_s_str`, ~`{python} FleetQuickRef.ib_ndr_us_str` one-way                                                                                                                                             | Inter-node bandwidth and latency                                          |
-| **Compute**                | MFU `{python} FleetQuickRef.mfu_range_str`, $\eta_{\text{scaling}}$ ~`{python} FleetQuickRef.eff_1024_str` @ 1K, ~`{python} FleetQuickRef.eff_8192_str` @ 8K                                                                                      | Effective FLOP/s and scaling sanity checks                                |
-| **Coordination**           | MTBF 8K: ~`{python} FleetQuickRef.mtbf_8k_min_str`; 100K: ~`{python} FleetQuickRef.mtbf_100k_min_str`                                                                                                                                             | Failure expectation and checkpoint cadence                                |
-| **Coordination**           | 175B checkpoint ~`{python} FleetQuickRef.ckpt_175_gb_str` (14 B/param common Adam state)                                                                                                                                                          | Recovery and storage sizing                                               |
-| **Coordination**           | Goodput ~`{python} FleetQuickRef.goodput_str` after overheads                                                                                                                                                                                     | Wall-clock utilization                                                    |
-| **Power & sustainability** | AI rack ~`{python} FleetQuickRef.rack_ai_kw_str`; air limit ~`{python} FleetQuickRef.air_limit_kw_str`                                                                                                                                            | Cooling feasibility (liquid required above air limit)                     |
-| **Power & sustainability** | PUE liquid ~`{python} FleetQuickRef.pue_liq_str`, typical ~`{python} FleetQuickRef.pue_typ_str`; H100 `{python} FleetQuickRef.h100_tdp_w_str` -> `{python} FleetQuickRef.tenk_gpus_str` ≈ `{python} FleetQuickRef.tenk_it_mw_str` IT $\times$ PUE | Facility load and carbon (see @sec-appdx-fleet-foundations-thermal-power) |
+| **Category**               | **Number**                                                                                                                                                                                                                                                    | **Use**                                                                                                    |
+|:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
+| **Communication**          | NVLink per-direction bandwidth ~`{python} FleetQuickRef.nvlink_ib_ratio_mult_str` IB NDR                                                                                                                                                                      | Parallelism boundary (in-node vs. cross-node)                                                              |
+| **Communication**          | IB NDR ~`{python} FleetQuickRef.ib_ndr_gb_per_s_str`, ~`{python} FleetQuickRef.ib_ndr_us_str` one-way                                                                                                                                                         | Inter-node bandwidth and latency                                                                           |
+| **Compute**                | MFU `{python} FleetQuickRef.mfu_range_str`, $\ScalingEfficiency$ ~`{python} FleetQuickRef.eff_1024_str` @ 1K, ~`{python} FleetQuickRef.eff_8192_str` @ 8K                                                                                                     | Effective FLOP/s and scaling sanity checks                                                                 |
+| **Coordination**           | MTBF 8K: ~`{python} FleetQuickRef.mtbf_8k_min_str`; 100K: ~`{python} FleetQuickRef.mtbf_100k_min_str`                                                                                                                                                         | Failure expectation and checkpoint cadence                                                                 |
+| **Coordination**           | `{python} FleetQuickRef.gpt3_b_str` checkpoint ~`{python} FleetQuickRef.ckpt_175_gb_str` (`{python} FleetStateRule.ckpt_bpp_str` B/param common Adam state)                                                                                                   | Recovery and storage sizing                                                                                |
+| **Coordination**           | ~`{python} FleetQuickRef.retained_str` of wall time left after overheads                                                                                                                                                                                      | Wall-clock utilization                                                                                     |
+| **Power & sustainability** | AI rack ~`{python} FleetQuickRef.rack_ai_kw_str`; air limit ~`{python} FleetQuickRef.air_limit_kw_str`                                                                                                                                                        | Cooling feasibility for the installed configuration                                                        |
+| **Power & sustainability** | PUE liquid ~`{python} FleetQuickRef.pue_liq_str`, typical ~`{python} FleetQuickRef.pue_typ_str`; `{python} FleetQuickRef.tenk_gpus_str` H100s at `{python} FleetQuickRef.h100_tdp_w_str` ≈ `{python} FleetQuickRef.tenk_it_mw_str` GPU-only proxy, before PUE | GPU-only proxy; add other IT loads before facility sizing (see @sec-appdx-fleet-foundations-thermal-power) |
 
 : **Numbers Every Fleet Engineer Should Know (Quick Reference)**: One-page summary of the fleet-scale reference numbers in this section. See @tbl-fleet-bandwidth-hierarchy and @tbl-fleet-latency-hierarchy for communication, @tbl-fleet-scaling-efficiency for compute, and @tbl-fleet-mtbf for coordination. {#tbl-fleet-numbers-quick-ref}
 
@@ -195,36 +240,38 @@ class FleetInvariantNumbers:
     )
 ```
 
-### The invariants: Ratios that will not change {.unnumbered}
+### Invariant scaling ratios {.unnumbered}
 
-These relationships are governed by physics or architecture---they will still be true in 2035.
+Three structural relationships govern how bandwidth, reliability, and collective communication behave as a cluster grows: the intra-to-inter-node bandwidth gap, the $1/\RequiredComponentCount$ scaling of system MTBF, and the asymptotic per-GPU volume of Ring AllReduce. Because hardware ratios shift across generations, their numerical values must be re-evaluated for each target system.
 
 #### Network hierarchy ratio {.unnumbered}
 
-The bandwidth gap between intra-node and inter-node communication is an architectural invariant. Chip-to-chip links (NVLink, ICI) connect through short, wide, dedicated paths on a shared substrate. Inter-node links (InfiniBand, Ethernet) must traverse cables, switches, and protocol stacks. This structural difference guarantees that intra-node bandwidth will always be an order of magnitude higher than inter-node bandwidth.
+The bandwidth gap between intra-node and inter-node communication is an important architectural comparison. Chip-to-chip links (NVLink, ICI) connect through short, wide, dedicated paths on a shared substrate. Inter-node links (InfiniBand, Ethernet) must traverse cables, switches, and protocol stacks. These design differences often favor intra-node bandwidth, but lane counts, multiple network ports, and topology determine the actual ratio.
 
-Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port. Even as both technologies improve, the ratio persists because both are constrained by the same physics: signaling rates, lane counts, and connector density. This ratio is the single most important number for parallelism strategy: any operation requiring more bandwidth than the inter-node link can provide must be confined within a single node.
+Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port. The ratio compares one accelerator's aggregate intra-node connectivity with one network port; it is not a universal constant. Parallelism placement must compare the workload's traffic with the sustained bandwidth actually provisioned at each boundary.
 
-#### Failure scaling law {.unnumbered}
+#### System MTBF scaling {.unnumbered}
 
-For $N$ independent components under a constant-failure-rate assumption, system MTBF (@eq-fleet-mtbf-system) scales inversely with component count:
+For $\RequiredComponentCount$ independent components under a constant-failure-rate assumption, system MTBF (@eq-fleet-mtbf-system) scales inversely with component count:
 
-$$ \text{MTBF}_{\text{system}} = \frac{\text{MTBF}_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
+$$ \SystemMtbf = \frac{\ComponentMttf}{\RequiredComponentCount} $$ {#eq-fleet-mtbf-system}
 
-This is pure arithmetic, not an approximation. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this---the question is how quickly the system recovers.
+Under this model the relation is exact rather than approximate. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU MTTF of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this; the question is how quickly the system recovers.
 
 #### AllReduce overhead scaling {.unnumbered}
 
-The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)M/N$ bytes per participant, where $M$ is the message size and $N$ is the number of participants [@patarasuk2009]. As $N$ grows large, this approaches $2M$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
+The bandwidth-optimal Ring AllReduce algorithm transfers $2(\AcceleratorCount-1)\CollectivePayloadSize/\AcceleratorCount$ bytes per participant, where $\CollectivePayloadSize$ is the collective payload size and $\AcceleratorCount$ is the number of participating GPUs [@patarasuk2009]. As $\AcceleratorCount$ grows large, this approaches $2\CollectivePayloadSize$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(\AcceleratorCount-1) \times \MessageStartupLatency$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
 
 ### Communication numbers {.unnumbered}
 
-Communication defines the boundaries of parallelism. These tables quantify the bandwidth and latency at each tier of the network hierarchy, from the fastest intra-node links to the slowest wide-area connections. For any distributed ML operation, the relevant question is which network tier its communication crosses.
+Whether a parallelism strategy can exchange activations on every layer or must amortize gradient updates across microbatches depends on which tier of the network hierarchy its traffic crosses. Each step down the hierarchy trades lower per-link bandwidth and higher one-way latency for larger physical reach across racks and data centers.
 
 ```{python}
 #| echo: false
 
 from mlsysim.physics import calc_mtbf_cluster, calc_failure_probability, calc_checkpoint_size, calc_effective_flops, calc_amdahls_speedup
+from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
+from mlsysim.core.units import km, terabit
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLEET COMMUNICATION BANDWIDTH AND LATENCY
@@ -253,36 +300,50 @@ class FleetCommNumbers:
     roce_lat_us_str = fmt_time(Systems.Fabrics.RoCE_100G.latency, unit=microsecond, precision=0, commas=False)
     tcp_lat_us_str = fmt_time(Systems.Fabrics.Ethernet_100G.latency, unit=microsecond, precision=0, commas=False)
     nvlink_to_ib_ratio_mult_str = fmt_multiple(nvlink_to_ib, precision=0, commas=False)
+    ib_gxdr_line_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_GXDR.bandwidth, unit=terabit / second, precision=1, commas=False)
+    ib_xdr_line_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=Gbps, precision=0, commas=False)
+    ib_ndr_line_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
+    ib_hdr_line_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_HDR.bandwidth, unit=Gbps, precision=0, commas=False)
+    roce_line_str = fmt_bandwidth(Systems.Fabrics.RoCE_100G.bandwidth, unit=Gbps, precision=0, commas=False)
+    # Cross-data-center floor: speed of light in fiber over an intercontinental path.
+    cross_dc_distance = 8_000 * km  # scenario assumption: intercontinental fiber route length
+    cross_dc_latency = (cross_dc_distance / SPEED_OF_LIGHT_FIBER_KM_S).to(ms)
+    cross_dc_lat_us_str = fmt_time(cross_dc_latency, unit=microsecond, precision=0, commas=True)
+    cross_dc_lat_ms_str = fmt_time(cross_dc_latency, unit=ms, precision=0, commas=False)
+    cross_dc_km_str = fmt(cross_dc_distance.to(km).magnitude, precision=0, commas=True)
+    tcp_ndr_ratio_mult_str = fmt_multiple(
+        (Systems.Fabrics.Ethernet_100G.latency / Systems.Fabrics.InfiniBand_NDR.latency).to("").magnitude, precision=0, commas=False
+    )
 ```
 
-@Tbl-fleet-bandwidth-hierarchy lists the bandwidth tiers that determine where tensor, pipeline, and data-parallel traffic should stay local.
+The bandwidth cliff between intra-node fabrics and scale-out network ports decides where tensor, pipeline, and data-parallel traffic must stay local (@tbl-fleet-bandwidth-hierarchy).
 
-| **Interconnect**       |                    **Bandwidth**                    | **Typical Role**                            |
-|:-----------------------|:---------------------------------------------------:|:--------------------------------------------|
-| **NVLink 4.0 (H100)**  |  `{python} FleetCommNumbers.nvlink_bw_gb_per_s_str` | Tensor/pipeline parallelism within a node   |
-| **TPU v5p ICI**        |  `{python} FleetCommNumbers.tpuv5_ici_gb_per_s_str` | Intra-pod model parallelism (Google)        |
-| **PCIe Gen5 x16**      |  `{python} FleetCommNumbers.pcie5_bw_gb_per_s_str`  | CPU-GPU data transfer, NIC attachment       |
-| **IB GXDR (1.6 Tbps)** | `{python} FleetCommNumbers.ib_gxdr_bw_gb_per_s_str` | Next-gen inter-node (2026+)                 |
-| **IB XDR (800 Gbps)**  |  `{python} FleetCommNumbers.ib_xdr_bw_gb_per_s_str` | Inter-node standard (2025+)                 |
-| **IB NDR (400 Gbps)**  |  `{python} FleetCommNumbers.ib_ndr_bw_gb_per_s_str` | Current inter-node standard for AI clusters |
-| **IB HDR (200 Gbps)**  |  `{python} FleetCommNumbers.ib_hdr_bw_gb_per_s_str` | Previous-gen inter-node                     |
-| **RoCE v2 (100 GbE)**  |   `{python} FleetCommNumbers.roce_bw_gb_per_s_str`  | Budget clusters, inference fleets           |
+| **Interconnect**                                           |                    **Bandwidth**                    | **Typical role**                            |
+|:-----------------------------------------------------------|:---------------------------------------------------:|:--------------------------------------------|
+| **NVLink 4.0 (H100)**                                      |  `{python} FleetCommNumbers.nvlink_bw_gb_per_s_str` | Tensor/pipeline parallelism within a node   |
+| **TPU v5p ICI**                                            |  `{python} FleetCommNumbers.tpuv5_ici_gb_per_s_str` | Intra-pod model parallelism (Google)        |
+| **PCIe Gen5 x16**                                          |  `{python} FleetCommNumbers.pcie5_bw_gb_per_s_str`  | CPU-GPU data transfer, NIC attachment       |
+| **IB GXDR (`{python} FleetCommNumbers.ib_gxdr_line_str`)** | `{python} FleetCommNumbers.ib_gxdr_bw_gb_per_s_str` | Next-gen inter-node (2026+)                 |
+| **IB XDR (`{python} FleetCommNumbers.ib_xdr_line_str`)**   |  `{python} FleetCommNumbers.ib_xdr_bw_gb_per_s_str` | Inter-node standard (2025+)                 |
+| **IB NDR (`{python} FleetCommNumbers.ib_ndr_line_str`)**   |  `{python} FleetCommNumbers.ib_ndr_bw_gb_per_s_str` | Current inter-node standard for AI clusters |
+| **IB HDR (`{python} FleetCommNumbers.ib_hdr_line_str`)**   |  `{python} FleetCommNumbers.ib_hdr_bw_gb_per_s_str` | Previous-gen inter-node                     |
+| **RoCE v2 (`{python} FleetCommNumbers.roce_line_str`)**    |   `{python} FleetCommNumbers.roce_bw_gb_per_s_str`  | Budget clusters, inference fleets           |
 
 : **Communication Bandwidth Hierarchy**: Per-direction bandwidth drops by roughly `{python} FleetCommNumbers.nvlink_to_ib_ratio_mult_str` crossing from intra-node (NVLink) to inter-node (InfiniBand). This ratio compares the H100 NVLink one-way rate against one InfiniBand NDR port and determines parallelism placement. {#tbl-fleet-bandwidth-hierarchy}
 
-One-way latency across interconnect tiers (@tbl-fleet-latency-hierarchy) determines whether synchronous collective operations are viable.
+One-way latency across interconnect tiers (@tbl-fleet-latency-hierarchy) determines whether synchronous collective operations are viable. Whereas microsecond-scale fabrics support per-step gradient synchronization, wide-area links require asynchronous or amortized updates.
 
-| **Interconnect**      |              **One-Way Latency**               | **Implication**                       |
-|:----------------------|:----------------------------------------------:|:--------------------------------------|
-| **InfiniBand NDR**    | ~`{python} FleetCommNumbers.ib_ndr_lat_us_str` | Low enough for synchronous AllReduce  |
-| **InfiniBand HDR**    | ~`{python} FleetCommNumbers.ib_hdr_lat_us_str` | Adequate for most training topologies |
-| **RoCE v2**           |  ~`{python} FleetCommNumbers.roce_lat_us_str`  | Acceptable for data parallelism       |
-| **TCP/IP (Ethernet)** |  ~`{python} FleetCommNumbers.tcp_lat_us_str`   | Too slow for synchronous training     |
-| **Cross-data-center** |             ~40,000 $\mu$s (40 ms)             | Physics floor; async training only    |
+| **Interconnect**      |                                        **One-way latency**                                         | **Implication**                                    |
+|:----------------------|:--------------------------------------------------------------------------------------------------:|:---------------------------------------------------|
+| **InfiniBand NDR**    |                           ~`{python} FleetCommNumbers.ib_ndr_lat_us_str`                           | Low enough for synchronous AllReduce               |
+| **InfiniBand HDR**    |                           ~`{python} FleetCommNumbers.ib_hdr_lat_us_str`                           | Adequate for most training topologies              |
+| **RoCE v2**           |                            ~`{python} FleetCommNumbers.roce_lat_us_str`                            | Acceptable for data parallelism                    |
+| **TCP/IP (Ethernet)** |                            ~`{python} FleetCommNumbers.tcp_lat_us_str`                             | Higher overhead; workload-dependent viability      |
+| **Cross-data-center** | ~`{python} FleetCommNumbers.cross_dc_lat_us_str` (`{python} FleetCommNumbers.cross_dc_lat_ms_str`) | Distance-dependent floor; amortize synchronization |
 
-: **Communication Latency Hierarchy**: Latency determines whether synchronous training is feasible. TCP/IP is roughly 10$\times$ slower than InfiniBand NDR, making it unsuitable for gradient synchronization in large clusters. {#tbl-fleet-latency-hierarchy}
+: **Communication Latency Hierarchy**: Latency determines whether synchronous training is feasible. TCP/IP is roughly `{python} FleetCommNumbers.tcp_ndr_ratio_mult_str` slower than InfiniBand NDR, raising synchronization cost in latency-sensitive configurations. The cross-data-center row is the speed-of-light floor for an illustrative `{python} FleetCommNumbers.cross_dc_km_str` km fiber path. {#tbl-fleet-latency-hierarchy}
 
-These latency bounds demonstrate why synchronous gradient synchronization requires low-latency fabrics like InfiniBand or RoCE, whereas cross-data-center training must rely on asynchronous execution or pipeline boundaries.
+These latency differences favor low-latency fabrics for frequent synchronization. Cross-data-center training must amortize transfers, place pipeline boundaries carefully, or relax synchronization when its learning algorithm permits.
 
 ```{python}
 #| echo: false
@@ -300,30 +361,30 @@ class FleetComputationNumbers:
 
 ### Compute numbers {.unnumbered}
 
-Raw peak FLOP/s is a necessary but misleading metric for fleet capacity planning. Two multiplicative losses---MFU and scaling efficiency---reduce effective throughput dramatically. Understanding these losses transforms fleet sizing from guesswork into engineering.
+Raw peak FLOP/s is a necessary but misleading metric for fleet capacity planning. Single-device execution losses and additional scaling losses reduce effective throughput. Multiplying the two is valid only when their measurement windows exclude overlapping costs. Understanding these losses transforms fleet sizing from guesswork into engineering.
 
-MFU measures what fraction of peak FLOP/s a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FleetComputationNumbers.mfu_range_str` MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below the low end of that range signals optimization opportunities; MFU above the high end indicates excellent hardware utilization.
+MFU measures what fraction of peak FLOP/s a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FleetComputationNumbers.mfu_range_str` MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. These are workload-dependent reference values. Fleet-step MFU already includes in-step communication and pipeline losses; a separate scaling factor applies only to a single-device baseline that excludes those losses.
 
-Scaling efficiency ($\eta_{\text{scaling}}$) measures how much useful computation survives as accelerators are added. Empirical scaling efficiency (@tbl-fleet-scaling-efficiency) demonstrates throughput degradation as cluster size expands.
+Scaling efficiency ($\ScalingEfficiency$) measures how much useful computation survives as accelerators are added. Modeled scaling efficiency for the 175B reference job (@tbl-fleet-scaling-efficiency) shows how per-GPU throughput erodes as cluster size grows at a fixed global batch.
 
-| **Cluster Size** | **Scaling Efficiency ($\eta_{\text{scaling}}$)** | **Implication**                                  |
+| **Cluster size** |  **Scaling efficiency ($\ScalingEfficiency$)**   | **Implication**                                  |
 |:-----------------|:------------------------------------------------:|:-------------------------------------------------|
-| **32 GPUs**      |  ~`{python} FleetComputationNumbers.eff_32_str`  | Near-linear scaling; communication is negligible |
-| **256 GPUs**     | ~`{python} FleetComputationNumbers.eff_256_str`  | Communication starts to erode throughput         |
-| **1,024 GPUs**   | ~`{python} FleetComputationNumbers.eff_1024_str` | Significant overhead; optimization critical      |
-| **8,192 GPUs**   | ~`{python} FleetComputationNumbers.eff_8192_str` | Fleet-scale regime; 65% of compute is overhead   |
+| **32 GPUs**      |  ~`{python} FleetComputationNumbers.eff_32_str`  | Near-linear regime; book convention, not modeled |
+| **256 GPUs**     | ~`{python} FleetComputationNumbers.eff_256_str`  | Tensor-parallel communication is the main loss   |
+| **1,024 GPUs**   | ~`{python} FleetComputationNumbers.eff_1024_str` | Pipeline fill and drain become visible           |
+| **8,192 GPUs**   | ~`{python} FleetComputationNumbers.eff_8192_str` | Pipeline bubble dominates at a fixed batch       |
 
-: **Scaling Efficiency by Cluster Size**: Efficiency degrades roughly as the logarithm of cluster size. These ranges assume well-optimized data parallelism with gradient compression. Poorly optimized systems can lose 2--3$\times$ more. {#tbl-fleet-scaling-efficiency}
+: **Scaling Efficiency by Cluster Size**: Modeled for the 175B reference job (eight-way tensor and eight-way pipeline parallelism, HDR InfiniBand, fixed GPT-3 batch); the 32-GPU row is a book convention. These values are not a universal function of cluster size, since workload, parallelism, batch, fabric, and baseline measurement determine the observed loss. {#tbl-fleet-scaling-efficiency}
 
-This efficiency degradation underscores why scaling past thousands of GPUs requires optimizing collective communication algorithms and topology layout to protect compute MFU.
+Past a few thousand GPUs the fixed per-step costs of pipeline fill and drain dominate, which is why production systems grow the global batch, interleave pipeline stages, and overlap collectives with compute. Systems built this way, such as MegaScale, report near-linear scaling on thousands of GPUs [@jiang2024megascale].
 
 ### Coordination numbers {.unnumbered}
 
-At fleet scale, coordination---failure recovery, checkpointing, and maintenance---consumes a measurable fraction of wall-clock time. These numbers quantify the costs of keeping a large cluster running.
+At fleet scale, coordination (failure recovery, checkpointing, and maintenance) consumes a measurable fraction of wall-clock time. These numbers quantify the costs of keeping a large cluster running.
 
 #### Failure rates by cluster size {.unnumbered}
 
-Cluster MTBF scaling (@tbl-fleet-mtbf, calculated for a per-GPU MTTF of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`) dictates the required checkpoint frequency.
+Cluster MTBF scaling (@tbl-fleet-mtbf, calculated for a per-GPU MTTF of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`) dictates the required checkpoint frequency. As accelerator counts grow from hundreds to tens of thousands, the interval between expected hardware interruptions shrinks from days to minutes.
 
 ```{python}
 #| echo: false
@@ -363,27 +424,32 @@ class FleetMtbfTable:
     pfail_8192_str = fmt_percent(round(pfail_8192_24h * 100) / 100, precision=0, commas=False, style='symbol')
     pfail_8192_prose_str = fmt_percent(round(pfail_8192_24h * 100) / 100, precision=0, commas=False, style='prose')
     pfail_100k_str = fmt_percent(pfail_100k_24h, precision=0, commas=False, style='symbol')
+    gpu_mttf_hours_str = fmt_time(Systems.Reliability.Gpu.mttf_hours, "hour", precision=0, commas=True, style="word")
+    n_256_str = fmt(Systems.Clusters.Research_256.total_accelerators, precision=0, commas=True)
+    n_2048_str = fmt(Systems.Clusters.Production_2K.total_accelerators, precision=0, commas=True)
+    n_8192_str = fmt(Systems.Clusters.Frontier_8K.total_accelerators, precision=0, commas=True)
+    n_100k_str = fmt(Systems.Clusters.Mega_100K.total_accelerators, precision=0, commas=True)
 ```
 
-| **Cluster Size** |              **MTBF (GPU-only)**              |                 **Minutes**                 |  **$\Pr(\text{failure})$ in 24 hours**   |
-|:-----------------|:---------------------------------------------:|:-------------------------------------------:|:----------------------------------------:|
-| **256 GPUs**     |  `{python} FleetMtbfTable.mtbf_256_hours_str` |  `{python} FleetMtbfTable.mtbf_256_min_str` | `{python} FleetMtbfTable.pfail_256_str`  |
-| **2,048 GPUs**   | `{python} FleetMtbfTable.mtbf_2048_hours_str` | `{python} FleetMtbfTable.mtbf_2048_min_str` | `{python} FleetMtbfTable.pfail_2048_str` |
-| **8,192 GPUs**   | `{python} FleetMtbfTable.mtbf_8192_hours_str` | `{python} FleetMtbfTable.mtbf_8192_min_str` | `{python} FleetMtbfTable.pfail_8192_str` |
-| **100,000 GPUs** | `{python} FleetMtbfTable.mtbf_100k_hours_str` | `{python} FleetMtbfTable.mtbf_100k_min_str` | `{python} FleetMtbfTable.pfail_100k_str` |
+| **Cluster size**                              |              **MTBF (GPU-only)**              |                 **Minutes**                 |  **$\Pr(\text{failure})$ in 24 hours**   |
+|:----------------------------------------------|:---------------------------------------------:|:-------------------------------------------:|:----------------------------------------:|
+| **`{python} FleetMtbfTable.n_256_str` GPUs**  |  `{python} FleetMtbfTable.mtbf_256_hours_str` |  `{python} FleetMtbfTable.mtbf_256_min_str` | `{python} FleetMtbfTable.pfail_256_str`  |
+| **`{python} FleetMtbfTable.n_2048_str` GPUs** | `{python} FleetMtbfTable.mtbf_2048_hours_str` | `{python} FleetMtbfTable.mtbf_2048_min_str` | `{python} FleetMtbfTable.pfail_2048_str` |
+| **`{python} FleetMtbfTable.n_8192_str` GPUs** | `{python} FleetMtbfTable.mtbf_8192_hours_str` | `{python} FleetMtbfTable.mtbf_8192_min_str` | `{python} FleetMtbfTable.pfail_8192_str` |
+| **`{python} FleetMtbfTable.n_100k_str` GPUs** | `{python} FleetMtbfTable.mtbf_100k_hours_str` | `{python} FleetMtbfTable.mtbf_100k_min_str` | `{python} FleetMtbfTable.pfail_100k_str` |
 
-: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of 50,000 hours. Real clusters also include NIC, PSU, cable, and switch failures, making these estimates conservative. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-T/\text{MTBF}}$ for $T = 24$ hours. {#tbl-fleet-mtbf}
+: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of `{python} FleetMtbfTable.gpu_mttf_hours_str`. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-\TimeInstant/\MeanTimeBetweenFailures}$ for $\TimeInstant= 24$ hours. {#tbl-fleet-mtbf}
 
-Failure is no longer an edge case at 8,192 GPUs and above. GPU-only MTBF is about `{python} FleetMtbfTable.mtbf_8192_min_str` at 8,192 GPUs, and the probability of at least one GPU failure within 24 hours is `{python} FleetMtbfTable.pfail_8192_prose_str`. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any long-running training job. @Sec-fault-tolerance-reliability covers the mechanisms in detail.
+Failure is no longer an edge case at `{python} FleetMtbfTable.n_8192_str` GPUs and above. GPU-only MTBF is about `{python} FleetMtbfTable.mtbf_8192_min_str` at `{python} FleetMtbfTable.n_8192_str` GPUs, and the probability of at least one GPU failure within 24 hours is `{python} FleetMtbfTable.pfail_8192_prose_str`. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any long-running training job. @Sec-fault-tolerance-reliability covers the mechanisms in detail.
 
 #### Checkpoint sizes {.unnumbered}
 
-Checkpointing is the primary recovery mechanism, and its cost depends on the model size. @Tbl-fleet-checkpoint-sizes shows checkpoint sizes for common mixed-precision Adam training checkpoints (14 bytes per parameter: 2B for BF16 weights and 12B for FP32 master weights + momentum + variance). Gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state.
+Checkpointing is the primary recovery mechanism, and its storage footprint grows linearly with model parameter count. A common mixed-precision Adam checkpoint serializes `{python} FleetStateRule.ckpt_bpp_str` bytes per parameter (`{python} FleetStateRule.weight_bpp_str` bytes for BF16 weights and `{python} FleetStateRule.optim_bpp_str` bytes for FP32 master weights, momentum, and variance), which sets both total checkpoint capacity and write duration at a given storage bandwidth (@tbl-fleet-checkpoint-sizes). Gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state.
 
 ```{python}
 #| echo: false
 
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_int, fmt_qty_int, fmt_time
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_int, fmt_params, fmt_qty_int, fmt_time
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLEET CHECKPOINT SIZES
@@ -397,10 +463,15 @@ from mlsysim.fmt import fmt, fmt_bandwidth, fmt_int, fmt_qty_int, fmt_time
 # └─────────────────────────────────────────────────────────────────────────────
 
 class FleetCheckpointSizes:
-    ckpt_7b = calc_checkpoint_size(7e9 * param)
-    ckpt_70b = calc_checkpoint_size(Models.Language.Llama2_70B.parameters)
-    ckpt_175b = calc_checkpoint_size(Models.Language.GPT3.parameters)
-    ckpt_1t = calc_checkpoint_size(1e12 * param)
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    params_7b = Models.Language.Llama2_7B.parameters
+    params_70b = Models.Language.Llama2_70B.parameters
+    params_175b = Models.Language.GPT3.parameters
+    params_1t = ReferenceStats.CheckpointArchetypes.TrillionParameterReference
+    ckpt_7b = calc_checkpoint_size(params_7b, ckpt_bpp)
+    ckpt_70b = calc_checkpoint_size(params_70b, ckpt_bpp)
+    ckpt_175b = calc_checkpoint_size(params_175b, ckpt_bpp)
+    ckpt_1t = calc_checkpoint_size(params_1t, ckpt_bpp)
     write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs * GB / second
     write_7b = (ckpt_7b / write_bw).to(second)
     write_70b = (ckpt_70b / write_bw).to(second)
@@ -415,20 +486,24 @@ class FleetCheckpointSizes:
     write_70b_s_str = fmt_time(write_70b, unit=second, precision=None, commas=False)
     write_175b_s_str = fmt_time(write_175b, unit=second, precision=None, commas=False)
     write_1t_min_str = fmt_time(write_1t, unit=minute, precision=None, commas=False)
+    params_7b_str = fmt_params(params_7b, scale="B", precision=0, commas=False)
+    params_70b_str = fmt_params(params_70b, scale="B", precision=0, commas=False)
+    params_175b_str = fmt_params(params_175b, scale="B", precision=0, commas=False)
+    params_1t_str = fmt_params(params_1t, scale="T", precision=0, commas=False)
 ```
 
-| **Model Size**      |               **Checkpoint Size**                | **Write Time @ `{python} FleetCheckpointSizes.write_bw_gb_per_s_str`** |
-|:--------------------|:------------------------------------------------:|:----------------------------------------------------------------------:|
-| **7B parameters**   |  `{python} FleetCheckpointSizes.ckpt_7b_gb_str`  |             `{python} FleetCheckpointSizes.write_7b_s_str`             |
-| **70B parameters**  | `{python} FleetCheckpointSizes.ckpt_70b_gb_str`  |            `{python} FleetCheckpointSizes.write_70b_s_str`             |
-| **175B parameters** | `{python} FleetCheckpointSizes.ckpt_175b_gb_str` |            `{python} FleetCheckpointSizes.write_175b_s_str`            |
-| **1T parameters**   |  `{python} FleetCheckpointSizes.ckpt_1t_tb_str`  |            `{python} FleetCheckpointSizes.write_1t_min_str`            |
+| **Model size**                                                 |               **Checkpoint size**                | **Write time @ `{python} FleetCheckpointSizes.write_bw_gb_per_s_str`** |
+|:---------------------------------------------------------------|:------------------------------------------------:|:----------------------------------------------------------------------:|
+| **`{python} FleetCheckpointSizes.params_7b_str` parameters**   |  `{python} FleetCheckpointSizes.ckpt_7b_gb_str`  |             `{python} FleetCheckpointSizes.write_7b_s_str`             |
+| **`{python} FleetCheckpointSizes.params_70b_str` parameters**  | `{python} FleetCheckpointSizes.ckpt_70b_gb_str`  |            `{python} FleetCheckpointSizes.write_70b_s_str`             |
+| **`{python} FleetCheckpointSizes.params_175b_str` parameters** | `{python} FleetCheckpointSizes.ckpt_175b_gb_str` |            `{python} FleetCheckpointSizes.write_175b_s_str`            |
+| **`{python} FleetCheckpointSizes.params_1t_str` parameters**   |  `{python} FleetCheckpointSizes.ckpt_1t_tb_str`  |            `{python} FleetCheckpointSizes.write_1t_min_str`            |
 
-: **Checkpoint Sizes by Model Scale**: Uses 14 bytes/parameter for common mixed-precision Adam checkpoint state. Write time assumes `{python} FleetCheckpointSizes.write_bw_gb_per_s_str` aggregate storage bandwidth. Asynchronous checkpointing (@sec-fault-tolerance-reliability) can overlap writes with training, reducing the visible overhead. {#tbl-fleet-checkpoint-sizes}
+: **Checkpoint Sizes by Model Scale**: Uses `{python} FleetStateRule.ckpt_bpp_str` bytes/parameter for common mixed-precision Adam checkpoint state. Write time assumes `{python} FleetCheckpointSizes.write_bw_gb_per_s_str` aggregate storage bandwidth. Asynchronous checkpointing (@sec-fault-tolerance-reliability) can overlap writes with training, reducing the visible overhead. {#tbl-fleet-checkpoint-sizes}
 
 #### Overhead budgets {.unnumbered}
 
-Failure recovery and checkpointing are only part of the wall-clock budget. At fleet scale, @tbl-fleet-overhead-budgets separates four recurring categories of overhead that consume time not spent on useful training:
+Failure recovery and checkpointing are only part of the wall-clock budget. At fleet scale, @tbl-fleet-overhead-budgets separates four recurring categories of overhead that consume time not spent on useful training.
 
 ```{python}
 #| echo: false
@@ -439,10 +514,10 @@ Failure recovery and checkpointing are only part of the wall-clock budget. At fl
 # │ Context: @tbl-fleet-overhead-budgets cells and caption; also the Amdahl
 # │          serial-fraction prose in the comm-comp ratio section.
 # │
-# │ Goal: Format FF.oh_* overheads and FF.goodput_ratio as percent strings (and
+# │ Goal: Format FF.oh_* overheads and the retained wall-time share as percent strings (and
 # │       a math-mode breakdown for the caption) so the table and prose stay
 # │       in sync with the underlying constants.
-# │ Show: Per-category overhead %, goodput %, and the additive caption math.
+# │ Show: Per-category overhead %, retained share %, and the additive caption math.
 # │ How:  fmt_percent() on each FF.oh_* attribute; fmt_math() to assemble the
 # │       additive breakdown expression for the caption.
 # │
@@ -451,7 +526,7 @@ Failure recovery and checkpointing are only part of the wall-clock budget. At fl
 from mlsysim.fmt import fmt, fmt_math, fmt_percent
 
 class FleetOverheadBudget:
-    goodput_ratio = 1.0 - (
+    retained_share = 1.0 - (
         Ops.TrainingRunOverheads.PipelineBubble
         + Ops.TrainingRunOverheads.Checkpoint
         + Ops.TrainingRunOverheads.FailureRecovery
@@ -461,25 +536,25 @@ class FleetOverheadBudget:
     checkpoint_pct_str = fmt_percent(Ops.TrainingRunOverheads.Checkpoint, precision=0, commas=False, style='symbol')
     failure_pct_str = fmt_percent(Ops.TrainingRunOverheads.FailureRecovery, precision=0, commas=False, style='symbol')
     maintenance_pct_str = fmt_percent(Ops.TrainingRunOverheads.Maintenance, precision=0, commas=False, style='symbol')
-    goodput_pct_str = fmt_percent(goodput_ratio, precision=0, commas=False)
+    retained_pct_str = fmt_percent(retained_share, precision=0, commas=False)
     breakdown_math = fmt_math(
         rf"\approx 1.0 - ({fmt(Ops.TrainingRunOverheads.PipelineBubble, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.Checkpoint, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.FailureRecovery, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.Maintenance, precision=2, commas=False)}) "
-        f"= {fmt(goodput_ratio, precision=2, commas=False)} "
-        rf"\approx {fmt_percent(goodput_ratio, precision=0, commas=False)}\%"
+        f"= {fmt(retained_share, precision=2, commas=False)} "
+        rf"\approx {fmt_percent(retained_share, precision=0, commas=False)}\%"
     )
 ```
 
-| **Overhead Category**   |                  **Typical Budget**                 | **Lever**                                |
+| **Overhead category**   |                  **Typical budget**                 | **Lever**                                |
 |:------------------------|:---------------------------------------------------:|:-----------------------------------------|
 | **Pipeline bubbles**    |   ~`{python} FleetOverheadBudget.pipeline_pct_str`  | Increase microbatches per pipeline stage |
 | **Checkpointing**       |  ~`{python} FleetOverheadBudget.checkpoint_pct_str` | Async checkpointing, faster storage      |
 | **Failure recovery**    |   ~`{python} FleetOverheadBudget.failure_pct_str`   | Faster detection, elastic rescheduling   |
 | **Maintenance windows** | ~`{python} FleetOverheadBudget.maintenance_pct_str` | Rolling upgrades, live migration         |
 
-: **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time. At 10,000+ GPUs, failure recovery dominates. The compound effect is additive: total goodput ratio `{python} FleetOverheadBudget.breakdown_math`. {#tbl-fleet-overhead-budgets}
+: **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time, and failure recovery is the largest of the four. Combined additively, the share of wall time left is `{python} FleetOverheadBudget.breakdown_math`. Pipeline bubbles lie inside retained steps and are a program goodput loss, while the other three fall outside the steps, so this share is not a single goodput factor. {#tbl-fleet-overhead-budgets}
 
 ```{python}
 #| echo: false
@@ -498,6 +573,7 @@ class FleetPowerNumbers:
     pue_liquid_str = fmt(Infrastructure.FacilityCooling.LiquidCooled.pue, precision=2, commas=False)
     pue_air_str = fmt(Infrastructure.FacilityCooling.BestAir.pue, precision=2, commas=False)
     pue_typical_str = fmt(Infrastructure.FacilityCooling.Typical.pue, precision=2, commas=False)
+    pue_industry_avg_str = fmt(Infrastructure.FacilityCooling.Typical.pue, precision=2, commas=False)
     h100_tdp_w_str = fmt_power(h100_tdp_power, unit=watt, precision=0, commas=False)
     tenk_gpus_str = fmt(tenk_gpus, precision=0)
     tenk_it_mw_str = fmt_power(tenk_it_power, unit=MW, precision=0, commas=False)
@@ -510,26 +586,26 @@ class FleetPowerNumbers:
 
 #### Power and sustainability numbers {.unnumbered}
 
-Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **Rack Power Density**\index{Power Density!rack}, **power usage effectiveness (PUE)**\index{PUE}, and the **Air-Cooling Limit**\index{Air-cooling limit}---they determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values:
+Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the key numbers are **rack power density**\index{Power density!rack}, **power usage effectiveness (PUE)**\index{PUE}, and the **air-cooling limit**\index{Air-cooling limit}, which determine where construction is feasible and what the facility load will be (@tbl-appendix-fleet-power-cooling-reference).
 
-| **Quantity**               |                    **Typical value**                    | **Use**                                                                                                                                                |
-|:---------------------------|:-------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Traditional rack**       |      `{python} FleetPowerNumbers.rack_trad_kw_str`      | Baseline for non-AI data centers                                                                                                                       |
-| **AI rack (current gen)**  |       `{python} FleetPowerNumbers.rack_ai_kw_str`       | Liquid cooling required                                                                                                                                |
-| **AI rack (high-density)** |     `{python} FleetPowerNumbers.rack_ai_high_kw_str`    | Direct-to-chip liquid                                                                                                                                  |
-| **Air cooling limit**      | ~`{python} FleetPowerNumbers.air_limit_kw_str` per rack | Physics ceiling; above this, liquid is mandatory                                                                                                       |
-| **PUE (liquid-cooled AI)** |       ~`{python} FleetPowerNumbers.pue_liquid_str`      | Best case: facility load ≈ IT load                                                                                                                     |
-| **PUE (best air-cooled)**  |        ~`{python} FleetPowerNumbers.pue_air_str`        | Hyperscale best practice                                                                                                                               |
-| **PUE (industry average)** |      ~`{python} FleetPowerNumbers.pue_typical_str`      | Sanity check for cost/carbon                                                                                                                           |
-| **H100 TDP**               |   `{python} FleetPowerNumbers.h100_tdp_w_str` per GPU   | IT load: `{python} FleetPowerNumbers.tenk_gpus_str` $\times$ `{python} FleetPowerNumbers.h100_tdp_w_str` = `{python} FleetPowerNumbers.tenk_it_mw_str` |
+| **Quantity**               |                    **Typical value**                    | **Use**                                                                                                                                                       |
+|:---------------------------|:-------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Traditional rack**       |      `{python} FleetPowerNumbers.rack_trad_kw_str`      | Baseline for non-AI data centers                                                                                                                              |
+| **AI rack (current gen)**  |       `{python} FleetPowerNumbers.rack_ai_kw_str`       | Evaluate cooling capacity                                                                                                                                     |
+| **AI rack (high-density)** |     `{python} FleetPowerNumbers.rack_ai_high_kw_str`    | Direct-to-chip liquid                                                                                                                                         |
+| **Air cooling limit**      | ~`{python} FleetPowerNumbers.air_limit_kw_str` per rack | Illustrative configuration limit; verify installed capacity                                                                                                   |
+| **PUE (liquid-cooled AI)** |       ~`{python} FleetPowerNumbers.pue_liquid_str`      | Best case: facility load ≈ IT load                                                                                                                            |
+| **PUE (best air-cooled)**  |        ~`{python} FleetPowerNumbers.pue_air_str`        | Hyperscale best practice                                                                                                                                      |
+| **PUE (industry average)** |    ~`{python} FleetPowerNumbers.pue_industry_avg_str`   | Sanity check for cost/carbon                                                                                                                                  |
+| **H100 TDP**               |   `{python} FleetPowerNumbers.h100_tdp_w_str` per GPU   | GPU-only proxy: `{python} FleetPowerNumbers.tenk_gpus_str` $\times$ `{python} FleetPowerNumbers.h100_tdp_w_str` = `{python} FleetPowerNumbers.tenk_it_mw_str` |
 
 : **Power and Cooling Reference Numbers**: Rack power densities, air-cooling limits, and PUE values that govern fleet-scale capacity planning and sustainability reporting. Each row pairs a typical value with the engineering decision it informs. {#tbl-appendix-fleet-power-cooling-reference}
 
-Rule of thumb: IT load\index{PUE!IT load} (MW) = (number of GPUs $\times$ thermal design power (TDP) per GPU)/$10^6$; facility load\index{PUE!facility load} = IT load $\times$ PUE. A `{python} FleetPowerNumbers.tenk_gpus_str`-GPU H100 cluster at `{python} FleetPowerNumbers.h100_tdp_w_str` each is `{python} FleetPowerNumbers.tenk_it_mw_str` IT; at PUE `{python} FleetPowerNumbers.pue_typical_str` that is `{python} FleetPowerNumbers.tenk_facility_mw_typical_str` facility draw. For carbon and cost, see @sec-appdx-fleet-foundations-thermal-power and @sec-sustainable-ai.
+A GPU-only power proxy\index{PUE!IT load} (MW) = (number of GPUs $\times$ thermal design power (TDP) per GPU)/$10^6$ excludes host CPUs, memory, storage, and networking. Facility load\index{PUE!facility load} = total IT load $\times$ PUE; applying PUE to the GPU-only proxy omits those other IT loads and is not a complete facility budget. A `{python} FleetPowerNumbers.tenk_gpus_str`-GPU H100 cluster at `{python} FleetPowerNumbers.h100_tdp_w_str` each gives a `{python} FleetPowerNumbers.tenk_it_mw_str` GPU-only proxy; multiplying by PUE `{python} FleetPowerNumbers.pue_typical_str` gives `{python} FleetPowerNumbers.tenk_facility_mw_typical_str` before accounting for the other IT loads. @Sec-appdx-fleet-foundations-thermal-power carries this power arithmetic into facility overhead, and @sec-sustainable-ai converts it into carbon and cost.
 
 ### Current hardware reference (c. 2025--2026) {.unnumbered}
 
-These numbers (@tbl-fleet-hardware-ref) reflect the current generation of fleet-scale hardware. Use them for back-of-envelope calculations, but expect them to improve ~2$\times$ every 2--3 years.
+Frontier accelerators from the 2025--2026 generation provide the point-in-time per-chip specifications needed for back-of-envelope fleet sizing (@tbl-fleet-hardware-ref), illustrating how compute throughput, memory capacity, and interconnect bandwidth evolve at different rates across vendors.
 
 ```{python}
 #| echo: false
@@ -544,113 +620,86 @@ These numbers (@tbl-fleet-hardware-ref) reflect the current generation of fleet-
 # │ How: fmt() on FF hardware values; use FF string attributes where preformatted.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_memory_capacity, fmt_power, fmt_qty_int
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_memory_capacity, fmt_power, fmt_qty_int
 
 class FleetHardwareRef:
     b200_flops_tflop_per_s_str = fmt_qty_int(Hardware.Cloud.B200.compute.peak_flops, TFLOP / second, commas=True)
     b200_cap_gb_str = fmt_memory_capacity(Hardware.Cloud.B200.memory.capacity, unit=GiB, precision=0, commas=True)
-    b200_tdp_w_str = fmt_power(Hardware.Cloud.B200.tdp, unit=watt, precision=0)
+    b200_tdp_w_str = fmt_power(Hardware.Cloud.B200.tdp, unit=watt, precision=0, commas=True)
     tpuv6_flops_tflop_per_s_str = fmt_qty_int(Hardware.Cloud.TPUv6.compute.peak_flops, TFLOP / second, commas=True)
     tpuv6_cap_gb_str = fmt_memory_capacity(Hardware.Cloud.TPUv6.memory.capacity, unit=GiB, precision=0, commas=True)
     mi300x_flops_tflop_per_s_str = fmt_qty_int(Hardware.Cloud.MI300X.compute.peak_flops, TFLOP / second, commas=True)
     mi300x_cap_gb_str = fmt_memory_capacity(Hardware.Cloud.MI300X.memory.capacity, unit=GiB, precision=0, commas=True)
     mi300x_tdp_w_str = fmt_power(Hardware.Cloud.MI300X.tdp, unit=watt, precision=0)
+    tpuv6_ici_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.TPUv6.nvlink.bandwidth, unit=GB / second, precision=0, commas=True)
+    check(
+        Hardware.Cloud.B200.nvlink.direction == Hardware.Cloud.TPUv6.nvlink.direction,
+        "B200 and TPU v6e intra-node links must share a direction convention in one table row",
+    )
+    # Named production installations for the scale-context paragraph
+    superpod_nodes_str = fmt(Systems.Clusters.DgxH100SuperPodSU.count, precision=0, commas=True)
+    superpod_gpus_str = fmt(Systems.Clusters.DgxH100SuperPodSU.total_accelerators, precision=0, commas=True)
+    meta_genai_gpus = Systems.Clusters.Meta_GenAI_H100_24K_RoCE.total_accelerators
+    check(meta_genai_gpus == Systems.Clusters.Meta_GenAI_H100_24K_IB.total_accelerators, "Meta's two GenAI clusters are the same size")
+    meta_genai_gpus_str = fmt(meta_genai_gpus, precision=0, commas=True)
+    tpuv5p_pod_chips_str = fmt(Systems.Pods.TPUv5p_8960.chips, precision=0, commas=True)
+    mega_gpus_str = fmt(Systems.Clusters.Mega_100K.total_accelerators, precision=0, commas=True)
 ```
 
-| **Spec**             |                            **NVIDIA B200**                            |                      **AMD MI300X**                      |                    **Google TPU v6e**                   |
-|:---------------------|:---------------------------------------------------------------------:|:--------------------------------------------------------:|:-------------------------------------------------------:|
-| **BF16/FP16 Peak**   |         `{python} FleetHardwareRef.b200_flops_tflop_per_s_str`        | `{python} FleetHardwareRef.mi300x_flops_tflop_per_s_str` | `{python} FleetHardwareRef.tpuv6_flops_tflop_per_s_str` |
-| **Memory Bandwidth** |           `{python} FleetPowerNumbers.b200_bw_tb_per_s_str`           |   `{python} FleetPowerNumbers.mi300x_bw_tb_per_s_str`    |    `{python} FleetPowerNumbers.tpuv6_bw_tb_per_s_str`   |
-| **HBM Capacity**     |              `{python} FleetHardwareRef.b200_cap_gb_str`              |      `{python} FleetHardwareRef.mi300x_cap_gb_str`       |       `{python} FleetHardwareRef.tpuv6_cap_gb_str`      |
-| **Intra-Node Link**  | `{python} FleetPowerNumbers.b200_nvlink_bw_gb_per_s_str` (NVLink 5.0) |               ~890 GB/s (Infinity Fabric)                |  800 GB/s bidirectional (ICI) [@googleCloudTpuV6eDocs]  |
-| **TDP**              |               `{python} FleetHardwareRef.b200_tdp_w_str`              |       `{python} FleetHardwareRef.mi300x_tdp_w_str`       |                    ~600 W (estimated)                   |
+| **Spec**             |                            **NVIDIA B200**                            |                      **AMD MI300X**                      |                                 **Google TPU v6e**                                |
+|:---------------------|:---------------------------------------------------------------------:|:--------------------------------------------------------:|:---------------------------------------------------------------------------------:|
+| **BF16/FP16 Peak**   |         `{python} FleetHardwareRef.b200_flops_tflop_per_s_str`        | `{python} FleetHardwareRef.mi300x_flops_tflop_per_s_str` |              `{python} FleetHardwareRef.tpuv6_flops_tflop_per_s_str`              |
+| **Memory Bandwidth** |           `{python} FleetPowerNumbers.b200_bw_tb_per_s_str`           |   `{python} FleetPowerNumbers.mi300x_bw_tb_per_s_str`    |                 `{python} FleetPowerNumbers.tpuv6_bw_tb_per_s_str`                |
+| **HBM Capacity**     |              `{python} FleetHardwareRef.b200_cap_gb_str`              |      `{python} FleetHardwareRef.mi300x_cap_gb_str`       |                    `{python} FleetHardwareRef.tpuv6_cap_gb_str`                   |
+| **Intra-Node Link**  | `{python} FleetPowerNumbers.b200_nvlink_bw_gb_per_s_str` (NVLink 5.0) |       896 GB/s (Infinity Fabric) [@amd2023mi300x]        | `{python} FleetHardwareRef.tpuv6_ici_gb_per_s_str` (ICI) [@googleCloudTpuV6eDocs] |
+| **TDP**              |               `{python} FleetHardwareRef.b200_tdp_w_str`              |       `{python} FleetHardwareRef.mi300x_tdp_w_str`       |                                   Not published                                   |
 
-: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the 2025--2026 generations. The B200, MI300X, and TPU v6e (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
+: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the 2025--2026 generations. The B200, MI300X, and TPU v6e (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. Intra-node link rates are bidirectional aggregates per accelerator. Google does not publish a per-chip TDP for the TPU v6e. {#tbl-fleet-hardware-ref}
 
-For scale context, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta announced two 24,576-H100 data-center-scale clusters built on the Grand Teton hardware platform. Google's Tensor Processing Unit (TPU) v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
+At the cluster level, a single DGX H100 SuperPOD scalable unit packages `{python} FleetHardwareRef.superpod_nodes_str` DGX H100 nodes (`{python} FleetHardwareRef.superpod_gpus_str` H100 GPUs) [@nvidia2023dgxSuperpodH100], whereas full data-center deployments link dozens of such pods together. Meta's Grand Teton clusters reach `{python} FleetHardwareRef.meta_genai_gpus_str` H100 GPUs [@meta2024genaiInfrastructure], Google's Tensor Processing Unit (TPU) v5p pods scale to `{python} FleetHardwareRef.tpuv5p_pod_chips_str` chips, and the largest announced clusters as of 2025 exceed `{python} FleetHardwareRef.mega_gpus_str` accelerators.
 
 ---
 
 ## Scaling Physics {#sec-appdx-fleet-foundations-scaling-physics}
 
-The numbers in the previous section describe what the hardware can do. Scaling physics describes what happens when more of it is brought to bear. Reasoning starts from the ceiling on a single accelerator---the roofline---and then asks what survives as devices are added, governed by three models: Amdahl's Law extended to fleet overhead, the communication-computation ratio, and weak scaling behavior.
+When a training job expands from a single 8-GPU server to thousands of accelerators across a fabric, network transfers, synchronization barriers, and pipeline bubbles consume a growing share of each step. The reference numbers in @sec-appdx-fleet-foundations-numbers-to-know describe what individual links and devices can deliver; scaling physics explains how much of that capacity survives as devices are added. Reasoning starts from the ceiling on a single accelerator (the roofline) and extends it to the cluster through three models: Amdahl's Law for fleet serial overhead, the communication-computation ratio, and weak scaling.
 
-### The single-accelerator roofline {#sec-appdx-fleet-foundations-roofline}
-
-Fleet performance rests on per-accelerator performance, and a single accelerator is bounded by one of two resources: the rate its arithmetic units sustain (peak FLOP/s) or the rate its memory delivers operands (HBM bandwidth). Which one binds a given kernel depends on its **Arithmetic Intensity**\index{Arithmetic Intensity} $I$, the number of useful operations performed per byte moved from memory, as @eq-fleet-arithmetic-intensity defines:
-
-$$ I = \frac{\text{FLOPs}}{\text{bytes moved}} $$ {#eq-fleet-arithmetic-intensity}
-
-Intensity is a property of the workload, not the hardware. A large matrix multiply has high intensity because each weight loaded from memory is reused across many multiply-accumulates; an element-wise operation, or the generation of a single token, has low intensity because each loaded value feeds only one or two operations before the next must be fetched.
-
-The **Roofline Model**\index{Roofline Model} [@williams2009] turns intensity into a performance ceiling. @Eq-fleet-roofline states that attainable throughput is the lesser of the compute ceiling and the bandwidth-limited slope:
-
-$$ R_{\text{attain}} = \min\!\left(R_{\text{peak}},\; I \times \text{BW}\right) $$ {#eq-fleet-roofline}
-
-Plotted against intensity, @eq-fleet-roofline traces a roof: a rising bandwidth-limited line on the left and a flat compute ceiling on the right. The two meet at the **Ridge Point**\index{Roofline Model!ridge point}, the intensity at which a workload first saturates the arithmetic units, defined by @eq-fleet-ridge-point:
-
-$$ I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}} $$ {#eq-fleet-ridge-point}
-
-A workload with $I < I_{\text{ridge}}$ is memory bound: it sits on the slope, and faster arithmetic units change nothing because the operands cannot arrive quickly enough. A workload with $I > I_{\text{ridge}}$ is compute bound: it sits under the flat roof, limited by the arithmetic units themselves.
+### From the accelerator roofline to the fleet {#sec-appdx-fleet-foundations-roofline}
 
 ```{python}
 #| echo: false
 #| label: fleet-roofline
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_memory, fmt_params
+from mlsysim.fmt import check, fmt_arithmetic_intensity
 
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ SINGLE-ACCELERATOR ROOFLINE — RIDGE POINT + MEMORY-BOUND DECODE
+# │ SINGLE-ACCELERATOR RIDGE POINT (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-appdx-fleet-foundations-roofline; @eq-fleet-arithmetic-intensity,
-# │          @eq-fleet-roofline, @eq-fleet-ridge-point. In-volume single-accelerator
-# │          bound referenced from the compute-infrastructure and inference chapters.
+# │ Context: @sec-appdx-fleet-foundations-roofline bridge to the fleet ratio.
 # │
-# │ Goal: Compute the H100 ridge point and show autoregressive decode is memory-bound.
-# │ Show: Ridge point (FLOP/byte); Llama-3.1-8B decode footprint, intensity, token rate.
-# │ How: I* = peak_flops/HBM bandwidth (Tera prefixes cancel → FLOP/byte). Decode reads
-# │      all weights once per token, so intensity ≈ 1 and throughput = bandwidth/weights.
+# │ Goal: Recall the H100 ridge point that the network ratio generalizes.
+# │ Show: ~295 FLOP/byte.
+# │ How: I_ridge = peak_flops / HBM bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_flops, fmt_rate
 
 class FleetRoofline:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     peak_flops = Hardware.Cloud.H100.compute.peak_flops
     hbm_bw = Hardware.Cloud.H100.memory.bandwidth
-    weight_cap = Hardware.Cloud.H100.memory.capacity
-    n_params = Models.Language.Llama3_8B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge_q = (peak_flops / hbm_bw).to(flop / byte)
-    weight_q = (n_params * BYTES_FP16).to(byte)
-    decode_flops = 2 * n_params * flop / param
-    intensity_q = (decode_flops / weight_q).to(flop / byte)
-    tokens_q = (hbm_bw / weight_q).to(1 / second)  # weight-read rate
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    ridge = ridge_q.magnitude
-    intensity = intensity_q.magnitude
-    check(ridge > 100, "H100 ridge point should be hundreds of FLOP/byte")
-    check(intensity < ridge, "Decode must be memory-bound (intensity below ridge)")
-    check(weight_q < weight_cap, "8B BF16 weights must fit in one H100")
+    check(ridge_q.magnitude > 100, "H100 ridge point should be hundreds of FLOP/byte")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    peak_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    bw_tb_per_s_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2, commas=False)
     ridge_str = fmt_arithmetic_intensity(ridge_q, unit=flop / byte, precision=1, commas=False)
-    rounded_params = round(n_params.to(param).magnitude / BILLION) * BILLION * param
-    params_b_str = fmt_params(rounded_params, scale='B', precision=0, commas=False)
-    weight_gb_str = fmt_memory(weight_q, unit=GB, precision=1, commas=False)
-    intensity_str = fmt_arithmetic_intensity(intensity_q, unit=flop / byte, precision=0, commas=False)
-    tokens_per_s_str = fmt_rate(tokens_q.to(1 / second).magnitude, "tokens/s", precision=1)
-    decode_flops_str = fmt_flops(decode_flops, unit=GFLOP, precision=1, commas=False)
 ```
 
-For an H100---BF16 peak `{python} FleetRoofline.peak_tflop_per_s_str`, HBM bandwidth `{python} FleetRoofline.bw_tb_per_s_str`---the ridge point is `{python} FleetRoofline.ridge_str`. A workload must perform hundreds of operations per byte fetched merely to keep the arithmetic units busy.
+Fleet performance rests on per-accelerator performance. @Sec-appdx-dam-taxonomy-roofline states the single-accelerator roofline, $\AttainableComputeRate = \min(\PeakRate, \ArithmeticIntensity\times \Bandwidth)$, and its ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$, which is about `{python} FleetRoofline.ridge_str` for an H100. A kernel below the ridge is memory bound, and a kernel above it is compute bound.
 
-Autoregressive decoding falls far short of that line, which is why it is the defining serving bottleneck. Generating one token requires reading every model weight from HBM exactly once---`{python} FleetRoofline.weight_gb_str` for a `{python} FleetRoofline.params_b_str`-parameter model in BF16---to perform about `{python} FleetRoofline.decode_flops_str` of matrix work, an intensity of `{python} FleetRoofline.intensity_str`. That sits far below the ridge point, so single-stream decode is purely bandwidth bound: throughput is the weight-read rate, about `{python} FleetRoofline.tokens_per_s_str`, no matter how much compute the accelerator advertises. Serving systems batch many requests precisely to raise this intensity, amortizing each weight read across every sequence in the batch and pushing decode back toward the compute roof.
-
-The roofline is a single-accelerator law, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. That ratio of network bytes to local arithmetic is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio): the roofline of the fleet, and the lens the rest of this section applies.
+The roofline is a single-accelerator bound, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. The ratio of network time to local arithmetic time is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio), the roofline of the fleet and the lens the rest of this section applies.
 
 ```{python}
 #| echo: false
@@ -658,7 +707,8 @@ The roofline is a single-accelerator law, but its logic is what scales. At fleet
 from mlsysim.fmt import fmt
 
 class FleetScalingCalloutRecap:
-    baseline, target, observed = 1024, 4096, 2.5
+    baseline = Systems.Clusters.Training_1K.total_accelerators
+    target, observed = 4096, 2.5  # scenario assumption: illustrative scale-up and measured speedup
     implied = (observed * baseline * ReferenceStats.TrainingScaleProfiles.Eff1024Gpu) / target
     scaling_callout_baseline_gpus_str = fmt(baseline, precision=0)
     scaling_callout_target_gpus_str = fmt(target, precision=0)
@@ -666,11 +716,11 @@ class FleetScalingCalloutRecap:
     scaling_callout_implied_eff_str = fmt_percent(implied, precision=1, commas=False, style='prose')
 ```
 
-A training job provisioned with `{python} FleetScalingCalloutRecap.scaling_callout_target_gpus_str` GPUs achieves only `{python} FleetScalingCalloutRecap.scaling_callout_observed_ratio_mult_str` the throughput of a `{python} FleetScalingCalloutRecap.scaling_callout_baseline_gpus_str`-GPU run. That observation implies about `{python} FleetScalingCalloutRecap.scaling_callout_implied_eff_str` scaling efficiency at the larger size, so scaling physics provides the diagnostic tools to determine whether the system is performing as physics allows or whether there is an engineering problem to fix.
+On a real cluster, that shift from HBM bandwidth to network and synchronization limits shows up directly in step throughput: when a training job provisioned with `{python} FleetScalingCalloutRecap.scaling_callout_target_gpus_str` GPUs achieves only `{python} FleetScalingCalloutRecap.scaling_callout_observed_ratio_mult_str` the throughput of a `{python} FleetScalingCalloutRecap.scaling_callout_baseline_gpus_str`-GPU run, the implied scaling efficiency is about `{python} FleetScalingCalloutRecap.scaling_callout_implied_eff_str` at the larger size. The three subsections that follow separate whether that loss comes from an unavoidable Amdahl serial fraction, an unfavorable communication-computation ratio, or a fixed-problem strong-scaling regime.
 
 ### Amdahl's Law at fleet scale {#sec-appdx-fleet-foundations-amdahls-fleet}
 
-Amdahl's Law establishes that the maximum speedup of a parallel system is limited by its serial fraction $s$. At fleet scale, the "serial fraction" is not just sequential code---it includes every operation that forces all $N$ GPUs to wait:
+When a distributed training loop spends 10 percent of every step waiting on exposed AllReduce collectives, pipeline bubbles, or checkpoint flushes, adding thousands of extra GPUs cannot accelerate the fixed job by more than 10$\times$. Amdahl's Law establishes that the maximum speedup of a parallel system is limited by its serial fraction $\SerialFraction$. At fleet scale, the "serial fraction" includes more than sequential code; it covers every operation that forces all $\DeviceCount$ GPUs to wait:
 
 - **AllReduce synchronization**: All GPUs must complete their gradient computation before any can proceed.
 - **Pipeline bubbles**: The warmup and cooldown phases of pipeline parallelism leave stages idle.
@@ -727,9 +777,9 @@ To see the fleet-scale implications, consider a training workload where `{python
 - With 256 GPUs: `{python} FleetAmdahlExample.speedup_256_mult_str` speedup (diminishing returns begin)
 - With 1,024 GPUs: `{python} FleetAmdahlExample.speedup_1024_mult_str` speedup (approaching the ceiling)
 - With 8,192 GPUs: `{python} FleetAmdahlExample.speedup_8192_mult_str` speedup (nearly at the Amdahl limit)
-- With $N \to \infty$: capped at `{python} FleetAmdahlExample.max_speedup_mult_str`
+- With $\DeviceCount\to \infty$: capped at `{python} FleetAmdahlExample.max_speedup_mult_str`
 
-With just `{python} FleetAmdahlExample.s_fleet_pct_str` serial overhead, no amount of hardware can deliver more than `{python} FleetAmdahlExample.max_speedup_mult_str` speedup on this fixed workload. This is why fleet-scale training does not simply add more GPUs to the same problem---it scales the problem (weak scaling) to keep the serial fraction small relative to the total work.
+With `{python} FleetAmdahlExample.s_fleet_pct_str` serial overhead, no amount of hardware can deliver more than `{python} FleetAmdahlExample.max_speedup_mult_str` speedup on this fixed workload. This is why fleet-scale training does not add more GPUs to the same problem. It scales the problem (weak scaling) to keep the serial fraction small relative to the total work.
 
 ```{python}
 #| echo: false
@@ -745,17 +795,23 @@ class FleetAmdahlOverheadRecap:
 
 ::: {#psp-appendix-fleet-compound-overhead .callout-perspective title="The compound overhead trap"}
 
-The `{python} FleetAmdahlExample.s_fleet_pct_str` serial fraction above is optimistic. In practice, fleet-scale serial overhead accumulates from multiple sources: `{python} FleetAmdahlOverheadRecap.pipeline_pct_str` pipeline bubbles + `{python} FleetAmdahlOverheadRecap.checkpoint_pct_str` checkpointing + `{python} FleetAmdahlOverheadRecap.failure_pct_str` failure recovery + `{python} FleetAmdahlOverheadRecap.maintenance_pct_str` maintenance. These are not all strictly serial in the Amdahl sense---some overlap with computation---but they illustrate how quickly small per-category overheads compound into significant throughput loss.
+The `{python} FleetAmdahlExample.s_fleet_pct_str` serial fraction above is optimistic. In practice, fleet-scale serial overhead accumulates from multiple sources: `{python} FleetAmdahlOverheadRecap.pipeline_pct_str` pipeline bubbles + `{python} FleetAmdahlOverheadRecap.checkpoint_pct_str` checkpointing + `{python} FleetAmdahlOverheadRecap.failure_pct_str` failure recovery + `{python} FleetAmdahlOverheadRecap.maintenance_pct_str` maintenance. These are not all strictly serial in the Amdahl sense (some overlap with computation), but they illustrate how quickly small per-category overheads compound into significant throughput loss.
 
 :::
 
 ### The communication-computation ratio {#sec-appdx-fleet-foundations-comm-compute-ratio}
 
-Any distributed training strategy must determine whether computation between synchronization points takes long enough to hide the communication. @Eq-comm-compute-ratio defines the **communication-computation ratio** ($\rho$) that answers this directly:
+When 256 GPUs train a 350M-parameter model over InfiniBand, gradient AllReduce takes three times longer than the forward and backward passes combined, leaving the accelerators idle for most of the step. Any distributed training strategy must determine whether computation between synchronization points takes long enough to hide the communication. @Eq-comm-compute-ratio defines the **communication-computation ratio** ($\CommunicationComputeRatio$) that answers this directly:
 
-$$ \rho = \frac{T_{\text{comm}}(N)}{T_{\text{compute}}/N} $$ {#eq-comm-compute-ratio}
+$$ \CommunicationComputeRatio= \frac{\CommunicationTime(\DeviceCount)}{\IronLawComputeTime/\DeviceCount} $$ {#eq-comm-compute-ratio}
 
-When $\rho < 1$, computation dominates and communication can be overlapped. When $\rho > 1$, the system is **Communication-Bound**\index{Communication-bound workload}---GPUs spend more time waiting for data than computing on it.
+When $\CommunicationComputeRatio< 1$, computation takes longer than communication; hiding that communication still requires independent work and sufficient resources. When $\CommunicationComputeRatio> 1$, the system is communication bound\index{Communication-bound workload}, and GPUs spend more time waiting for data than computing on it.
+
+The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $\NetworkTrafficVolume$ bytes across the network per step at effective network bandwidth $\NetworkBandwidth$ and executes its $\Operations$ local FLOPs at realized rate $\RealizedDeviceComputeRate$, then in the bandwidth-dominated regime
+
+$$ \CommunicationComputeRatio\approx \frac{\NetworkTrafficVolume/\NetworkBandwidth}{\Operations/\RealizedDeviceComputeRate} = \CommunicationIntensity \times \frac{\RealizedDeviceComputeRate}{\NetworkBandwidth}, \qquad \CommunicationIntensity = \frac{\NetworkTrafficVolume}{\Operations} $$ {#eq-fleet-ci-rho}
+
+@Eq-fleet-ci-rho shows that exposed communication begins when $\CommunicationIntensity$ exceeds $\NetworkBandwidth/\RealizedDeviceComputeRate$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
 
 ```{python}
 #| echo: false
@@ -792,7 +848,7 @@ class FleetCommCompRatio:
     rho_7b = (allreduce_time_7b / comp_time_7b).to("").magnitude
 
     # ── SCENARIO 2: Data parallelism, small model ──────────────────────────
-    # 350M model, 256 GPUs, IB NDR
+    # BERT-Large-sized model, 256 GPUs, IB NDR
     grad_350m = (Models.Language.BERT_Large.parameters * BYTES_FP16).to(byte)  # BF16 gradients
     allreduce_time_350m = calc_ring_allreduce_time(
         message_bytes=grad_350m,
@@ -800,7 +856,7 @@ class FleetCommCompRatio:
         bandwidth_bytes_s=Systems.Fabrics.InfiniBand_NDR.bandwidth,
         latency_s=Systems.Fabrics.InfiniBand_NDR.latency,
     )  # Quantity[second]
-    comp_time_350m = 0.010 * second  # scenario assumption: 10 ms for smaller model
+    comp_time_350m = 0.010 * second  # scenario assumption: 10 ms for the smaller model
     rho_350m = (allreduce_time_350m / comp_time_350m).to("").magnitude
 
     # ── SCENARIO 3: Ideal one-way activation-transfer lower bound ──────
@@ -828,28 +884,27 @@ class FleetCommCompRatio:
     comp_time_layer_ms_str = fmt_time(comp_time_layer.to(ms).magnitude, 'millisecond', precision=0, commas=False)
     rho_p2p_lower_bound_str = fmt(rho_p2p_lower_bound, precision=3, commas=False)
     act_payload_mb_str = fmt_memory(act_payload, unit=MB, precision=0, commas=False)
-    params_7b_b_str = fmt_params(7 * BILLION, scale="B", precision=0, commas=False)
+    params_7b_b_str = fmt_params(Models.Language.Llama2_7B.parameters, scale="B", precision=0, commas=False)
+    params_small_m_str = fmt_params(Models.Language.BERT_Large.parameters, scale="M", precision=0, commas=False)
 ```
 
-Communication-to-computation ratios across representative scenarios (@tbl-fleet-comm-comp) reveal why parallelism strategy must match the workload.
+Communication-to-computation ratios across representative scenarios (@tbl-fleet-comm-comp) reveal why the parallelism strategy must match the workload's arithmetic footprint. Comparing a multi-billion-parameter model against a smaller architecture on the same interconnect shows how quickly collective synchronization can overtake local compute.
 
-| **Scenario**                                                                         | **$T_{\text{comm}}(N)$**                                                                    |                     **$T_{\text{compute}}/N$**                    |                       **$\rho$**                      |
-|:-------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------------:|:-----------------------------------------------------:|
-| **Data parallel, 7B model, `{python} FleetCommCompRatio.dp_gpu_count_str`**          | `{python} FleetCommCompRatio.ar_7b_ms_str` (AllReduce over IB NDR)                          |    ~`{python} FleetCommCompRatio.comp_time_7b_s_str` (fwd+bwd)    |        `{python} FleetCommCompRatio.rho_7b_str`       |
-| **Data parallel, 350M model, `{python} FleetCommCompRatio.dp_gpu_count_str`**        | `{python} FleetCommCompRatio.ar_350m_ms_str` (AllReduce over IB NDR)                        |   ~`{python} FleetCommCompRatio.comp_time_350m_ms_str` (fwd+bwd)  |       `{python} FleetCommCompRatio.rho_350m_str`      |
-| **Ideal one-way `{python} FleetCommCompRatio.act_payload_mb_str` transfer (NVLink)** | ~`{python} FleetCommCompRatio.act_transfer_lower_bound_ms_str` (bandwidth-only lower bound) | ~`{python} FleetCommCompRatio.comp_time_layer_ms_str` (one layer) | `{python} FleetCommCompRatio.rho_p2p_lower_bound_str` |
+| **Scenario**                                                                                                                   | **$\CommunicationTime(\DeviceCount)$**                                                      |               **$\IronLawComputeTime/\DeviceCount$**              |            **$\CommunicationComputeRatio$**           |
+|:-------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------------:|:-----------------------------------------------------:|
+| **Data parallel, `{python} FleetCommCompRatio.params_7b_b_str` model, `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs**    | `{python} FleetCommCompRatio.ar_7b_ms_str` (AllReduce over IB NDR)                          |    ~`{python} FleetCommCompRatio.comp_time_7b_s_str` (fwd+bwd)    |        `{python} FleetCommCompRatio.rho_7b_str`       |
+| **Data parallel, `{python} FleetCommCompRatio.params_small_m_str` model, `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs** | `{python} FleetCommCompRatio.ar_350m_ms_str` (AllReduce over IB NDR)                        |   ~`{python} FleetCommCompRatio.comp_time_350m_ms_str` (fwd+bwd)  |       `{python} FleetCommCompRatio.rho_350m_str`      |
+| **Ideal one-way `{python} FleetCommCompRatio.act_payload_mb_str` transfer (NVLink)**                                           | ~`{python} FleetCommCompRatio.act_transfer_lower_bound_ms_str` (bandwidth-only lower bound) | ~`{python} FleetCommCompRatio.comp_time_layer_ms_str` (one layer) | `{python} FleetCommCompRatio.rho_p2p_lower_bound_str` |
 
-: **Communication-Computation Ratio ($\rho$)**: When $\rho \ll 1$, communication can be fully overlapped with computation. When $\rho \gg 1$, the system is communication-bound and GPUs sit idle waiting for data. The NVLink row is a bandwidth-only point-to-point lower bound; a tensor-parallel collective also incurs topology, latency, and contention costs. {#tbl-fleet-comm-comp}
+: **Communication-Computation Ratio ($\CommunicationComputeRatio$)**: When $\CommunicationComputeRatio\ll 1$, communication can potentially be hidden if dependencies permit. When $\CommunicationComputeRatio\gg 1$, the system is communication-bound and GPUs sit idle waiting for data. The NVLink row is a bandwidth-only point-to-point lower bound; a tensor-parallel collective also incurs topology, latency, and contention costs. {#tbl-fleet-comm-comp}
 
-The `{python} FleetCommCompRatio.params_7b_b_str` model on `{python} FleetCommCompRatio.dp_gpu_count_str` achieves $\rho =$ `{python} FleetCommCompRatio.rho_7b_str`---communication takes about `{python} FleetCommCompRatio.rho_7b_pct_str` as long as computation, which can be partially overlapped. The 350M model on the same cluster has $\rho =$ `{python} FleetCommCompRatio.rho_350m_str`---communication dominates, making this configuration communication-bound. The solution is either to use fewer GPUs (reduce $N$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation).
-
-For the single `{python} FleetCommCompRatio.act_payload_mb_str` point-to-point payload, the ideal bandwidth-only lower bound is $\rho =$ `{python} FleetCommCompRatio.rho_p2p_lower_bound_str`. This is not a tensor-parallel collective model and cannot by itself establish whether an implementation is compute-bound.
+The `{python} FleetCommCompRatio.params_7b_b_str` model on `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs achieves $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_7b_str`, so communication takes about `{python} FleetCommCompRatio.rho_7b_pct_str` as long as computation, which can be partially overlapped. The `{python} FleetCommCompRatio.params_small_m_str` model on the same cluster has $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_350m_str`. Communication dominates, which makes this configuration communication-bound. The solution is either to use fewer GPUs (reduce $\DeviceCount$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation). For the single `{python} FleetCommCompRatio.act_payload_mb_str` point-to-point payload, the ideal bandwidth-only lower bound is $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_p2p_lower_bound_str`, which is not a tensor-parallel collective model and cannot by itself establish whether an implementation is compute-bound.
 
 ### Weak scaling at fleet scale {#sec-appdx-fleet-foundations-weak-scaling-fleet}
 
-Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **Weak Scaling**\index{Weak scaling!fleet scale}: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view [@gustafson1988].
+Provisioning 8,192 GPUs to finish a fixed 7B-parameter training run faster quickly hits Amdahl's synchronization wall. Using those same 8,192 GPUs to train a 70B- or 700B-parameter model keeps per-device arithmetic work high enough to amortize communication. Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **weak scaling**\index{Weak scaling!fleet scale}: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view [@gustafson1988].
 
-The key insight for fleet-scale ML is that weak scaling is not just a mathematical convenience---it reflects reality. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes, so the communication-computation ratio $\rho$ depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
+Weak scaling reflects how fleets are actually used, not merely a mathematical convenience. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes. The communication-computation ratio $\CommunicationComputeRatio$ therefore depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
 
 ```{python}
 #| echo: false
@@ -869,7 +924,7 @@ from mlsysim.fmt import fmt, fmt_percent, fmt_power, fmt_qty_int
 # └─────────────────────────────────────────────────────────────────────────────
 
 class FleetEffectiveFlops:
-    n_gpus = 1_024
+    n_gpus = Systems.Clusters.Training_1K.total_accelerators
     peak_1024_qty = n_gpus * Hardware.Cloud.H100.compute.peak_flops
     peak_1024 = peak_1024_qty.to(TFLOP / second).magnitude
     # Keep the multiplicative scopes disjoint: scaling efficiency owns
@@ -907,22 +962,23 @@ class FleetEffectiveFlops:
 
 ::: {#psp-appendix-fleet-compound-loss-utilization .callout-perspective title="The compound loss of fleet utilization"}
 
-A `{python} FleetEffectiveFlops.n_gpus_str`-GPU H100 cluster has a peak aggregate throughput of `{python} FleetEffectiveFlops.peak_tflop_per_s_str`. This illustrative decomposition keeps the factors disjoint: MFU represents per-device kernel and memory efficiency, scaling efficiency represents distributed communication and pipeline losses, and operational goodput represents checkpointing, failure recovery, and maintenance. The effective throughput is:
+A `{python} FleetEffectiveFlops.n_gpus_str`-GPU H100 cluster has a peak aggregate throughput of `{python} FleetEffectiveFlops.peak_tflop_per_s_str`. This illustrative decomposition keeps the factors disjoint: MFU represents per-device kernel and memory efficiency, scaling efficiency represents distributed communication and pipeline losses, and runtime goodput represents checkpointing, failure recovery, and maintenance. The effective throughput is:
 
-$$R_{\text{eff}} = N R_{\text{peak}} \times \text{MFU} \times \eta_{\text{scaling}} \times \eta_{\text{operational}}$$
+$$\EffectiveFleetThroughput = \DeviceCount\PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times \RuntimeGoodput$$
 
 `{python} FleetEffectiveFlops.effective_eq_math`
 
-The cluster delivers `{python} FleetEffectiveFlops.eff_pct_str` of its peak FLOP/s as useful training work. The remaining `{python} FleetEffectiveFlops.loss_pct_str` is explained by retained factors of `{python} FleetEffectiveFlops.mfu_pct_str` MFU, `{python} FleetEffectiveFlops.scaling_pct_str` scaling efficiency, and `{python} FleetEffectiveFlops.operational_pct_str` operational goodput.
+The cluster delivers `{python} FleetEffectiveFlops.eff_pct_str` of its peak FLOP/s as useful training work. The remaining `{python} FleetEffectiveFlops.loss_pct_str` is explained by retained factors of `{python} FleetEffectiveFlops.mfu_pct_str` MFU, `{python} FleetEffectiveFlops.scaling_pct_str` scaling efficiency, and `{python} FleetEffectiveFlops.operational_pct_str` runtime goodput.
 
-These losses reflect the physics of fleet-scale computation rather than a failure of engineering. Every additional GPU adds less marginal useful work, but the total throughput still far exceeds what a smaller cluster could achieve. The goal is not to reach `{python} FleetEffectiveFlops.full_util_pct_str` utilization; the goal is to deliver trained models faster than any smaller configuration could.
+These losses reflect the physics of fleet-scale computation rather than a failure of engineering. Additional GPUs can increase useful throughput while reducing efficiency, but the gain must be measured against smaller configurations. The goal is not to reach `{python} FleetEffectiveFlops.full_util_pct_str` utilization; the goal is to deliver trained models faster than any smaller configuration could.
 
 :::
 
 ```{python}
 #| echo: false
 
-from mlsysim.fmt import fmt, fmt_percent, fmt_power
+from mlsysim.core.units import HOURS_PER_YEAR
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_power, fmt_usd
 
 class FleetThermalRecap:
     rack_ratio = Infrastructure.Racks.AI_Standard.power_kw / Infrastructure.Racks.Traditional.power_kw
@@ -945,7 +1001,6 @@ class FleetThermalRecap:
     pue_legacy_str = fmt(Infrastructure.FacilityCooling.Legacy.pue, precision=2, commas=False)
     pue_liquid_overhead_kw_str = fmt_power((Infrastructure.FacilityCooling.LiquidCooled.pue - 1) * MW, unit=kilowatt, precision=0, commas=False)
     pue_air_overhead_kw_str = fmt_power((Infrastructure.FacilityCooling.BestAir.pue - 1) * MW, unit=kilowatt, precision=0, commas=False)
-    pue_typical_overhead_kw_str = fmt_power((Infrastructure.FacilityCooling.Typical.pue - 1) * MW, unit=kilowatt, precision=0, commas=False)
     pue_legacy_overhead_kw_str = fmt_power((Infrastructure.FacilityCooling.Legacy.pue - 1) * MW, unit=kilowatt, precision=0, commas=False)
     pue_reduction_pct_str = fmt_percent(
         (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue) / Infrastructure.FacilityCooling.Legacy.pue,
@@ -955,51 +1010,65 @@ class FleetThermalRecap:
     )
     pue_legacy_overhead_mw_str = fmt_power((Infrastructure.FacilityCooling.Legacy.pue - 1) * MW, unit=MW, precision=2, commas=False)
     pue_liquid_overhead_mw_str = fmt_power((Infrastructure.FacilityCooling.LiquidCooled.pue - 1) * MW, unit=MW, precision=2, commas=False)
-    tenmw_it_load_str = fmt_power(10 * MW, unit=MW, precision=0, commas=False)
-    pue_legacy_facility_10mw_str = fmt_power(10 * Infrastructure.FacilityCooling.Legacy.pue * MW, unit=MW, precision=1, commas=False)
-    pue_liquid_facility_10mw_str = fmt_power(10 * Infrastructure.FacilityCooling.LiquidCooled.pue * MW, unit=MW, precision=1, commas=False)
+    ref_it_load = ReferenceStats.FacilityScaleAnchors.ReferenceItLoad
+    tenmw_it_load_str = fmt_power(ref_it_load, unit=MW, precision=0, commas=False)
+    pue_legacy_facility_10mw_str = fmt_power(ref_it_load * Infrastructure.FacilityCooling.Legacy.pue, unit=MW, precision=1, commas=False)
+    pue_liquid_facility_10mw_str = fmt_power(ref_it_load * Infrastructure.FacilityCooling.LiquidCooled.pue, unit=MW, precision=1, commas=False)
     pue_savings_10mw_str = fmt_power(
-        10 * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue) * MW, unit=MW, precision=1, commas=False
+        ref_it_load * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue),
+        unit=MW,
+        precision=1,
+        commas=False,
     )
+    # Annual electricity value of the legacy-to-liquid PUE gap at the reference IT load,
+    # priced at the on-premises industrial rate (replaces an uncomputed "millions of dollars").
+    onprem_kwh_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.m
+    pue_savings_annual_usd = (
+        (ref_it_load * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue)).to(kilowatt).magnitude
+        * HOURS_PER_YEAR
+        * onprem_kwh_rate
+    )
+    check(pue_savings_annual_usd > 1e6, "Prose: the PUE gap at the reference IT load is worth millions of dollars per year")
+    onprem_kwh_rate_str = fmt_usd(onprem_kwh_rate, precision=2, commas=False, per="kWh")
+    pue_savings_annual_musd_str = fmt_usd(pue_savings_annual_usd, scale="M", precision=1, commas=False)
+    pue_industry_avg = Infrastructure.FacilityCooling.Typical.pue
+    pue_industry_avg_str = fmt(pue_industry_avg, precision=2, commas=False)
+    pue_industry_avg_overhead_kw_str = fmt_power((pue_industry_avg - 1) * MW, unit=kilowatt, precision=0, commas=False)
 ```
 
 ## Thermal and Power Physics {#sec-appdx-fleet-foundations-thermal-power}
 
-Compute performance ultimately converts to heat, and heat must be removed. At fleet scale, thermal and power constraints are not secondary concerns---they determine where construction is feasible, how densely accelerators can be packed, and what the operating costs will be. A cluster that is architecturally sound but thermally infeasible cannot be built.
-
-A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPUs at `{python} FleetThermalRecap.h100_tdp_w_str` each---`{python} FleetThermalRecap.tenk_it_mw_str` of IT load---and a PUE of `{python} FleetThermalRecap.pue_typical_str` puts the facility load at `{python} FleetThermalRecap.tenk_facility_mw_typical_str` total. This is the electrical load of a small town. Before optimizing software, the physics of power delivery and heat removal must be feasible.
+A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPUs at `{python} FleetThermalRecap.h100_tdp_w_str` each represents a `{python} FleetThermalRecap.tenk_it_mw_str` GPU-only power proxy and draws `{python} FleetThermalRecap.tenk_facility_mw_typical_str` of facility power at a typical PUE of `{python} FleetThermalRecap.pue_typical_str`, the electrical load of a small town even before adding host CPUs, memory, storage, and networking inside the IT boundary. Because every watt of electrical power delivered to silicon converts to heat that must be removed, thermal and power limits govern where a cluster can be built, how densely accelerators can be packed into each rack, and what the facility will cost to operate. A cluster that is architecturally sound in software and networking but exceeds its power-delivery or heat-removal envelope cannot be deployed.
 
 ### Power density wall {#sec-appdx-fleet-foundations-power-density}
 
-The shift from traditional data center workloads to AI training has created a **Power Density Crisis**\index{Power Density!crisis}. @Tbl-fleet-power-density-fleet quantifies the gap.
+The shift from traditional data center workloads to AI training has multiplied the power each rack draws\index{Power density!AI training racks}, and @tbl-fleet-power-density-fleet quantifies the gap. As accelerator TDPs climb toward a kilowatt per chip, standard air-cooled server rooms quickly run out of thermal headroom.
 
-| **Configuration**             |                **Power per Rack**                | **Cooling Implication**                   |
-|:------------------------------|:------------------------------------------------:|:------------------------------------------|
-| **Traditional data center**   |  `{python} FleetThermalRecap.rack_trad_kw_str`   | Standard air cooling sufficient           |
-| **AI cluster (current gen)**  |   `{python} FleetThermalRecap.rack_ai_kw_str`    | Liquid cooling required                   |
-| **AI cluster (high-density)** | `{python} FleetThermalRecap.rack_ai_high_kw_str` | Direct-to-chip liquid cooling required    |
-| **Air cooling limit**         |  ~`{python} FleetThermalRecap.air_limit_kw_str`  | Physics ceiling for forced-air convection |
+| **Configuration**             |                **Power per rack**                | **Cooling implication**                     |
+|:------------------------------|:------------------------------------------------:|:--------------------------------------------|
+| **Traditional data center**   |  `{python} FleetThermalRecap.rack_trad_kw_str`   | Standard air cooling sufficient             |
+| **AI cluster (current gen)**  |   `{python} FleetThermalRecap.rack_ai_kw_str`    | Evaluate cooling capacity                   |
+| **AI cluster (high-density)** | `{python} FleetThermalRecap.rack_ai_high_kw_str` | Evaluate direct-to-chip cooling             |
+| **Air cooling limit**         |  ~`{python} FleetThermalRecap.air_limit_kw_str`  | Illustrative forced-air configuration limit |
 
-: **Power Density: Traditional vs. AI Workloads**: AI racks consume roughly `{python} FleetThermalRecap.rack_ratio_mult_str` the power of traditional racks. Air cooling physically cannot remove heat fast enough above ~`{python} FleetThermalRecap.air_limit_kw_str` per rack, making liquid cooling mandatory for modern AI clusters. {#tbl-fleet-power-density-fleet}
+: **Power Density: Traditional vs. AI Workloads**: AI racks consume roughly `{python} FleetThermalRecap.rack_ratio_mult_str` the power of traditional racks. The ~`{python} FleetThermalRecap.air_limit_kw_str` air-cooling value is a configuration reference, not a universal physical ceiling. Higher rack density requires checking the installed airflow, heat exchangers, and server cooling design. {#tbl-fleet-power-density-fleet}
 
-The `{python} FleetThermalRecap.rack_ratio_mult_str` increase in rack power density between traditional and AI workloads is not merely an engineering challenge---it represents a fundamental constraint on facility design. Existing data centers built for `{python} FleetThermalRecap.rack_trad_kw_str` racks cannot simply be "retrofitted" with AI hardware. The electrical distribution, cooling infrastructure, and floor loading must all be redesigned. This is why new AI-focused data centers are being built from the ground up with liquid cooling as the baseline assumption.
+The `{python} FleetThermalRecap.rack_ratio_mult_str` increase in rack power density between traditional and AI workloads is a binding constraint on facility design, not merely an engineering challenge. Existing data centers built for `{python} FleetThermalRecap.rack_trad_kw_str` racks cannot be "retrofitted" with AI hardware. The electrical distribution, cooling infrastructure, and floor loading must all be redesigned. This is why new AI-focused data centers are being built from the ground up with liquid cooling as the baseline assumption.
 
 ### The energy hierarchy at scale {#sec-appdx-fleet-foundations-energy-hierarchy}
 
-PUE measures facility energy overhead: total facility energy divided by IT equipment energy [@thegreengrid2007pue; @davis2022uptime]. A PUE of 1.0 would mean all facility energy is delivered to IT equipment; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems.
+In a data center at the 2023 industry-average PUE, delivering 1 MW of electrical power to GPU racks requires another 580 kW to run the chillers, fans, and power conversion equipment that keep the room operating. PUE measures facility energy overhead: total facility energy divided by IT equipment energy [@thegreengrid2007pue; @davis2022uptime]. A PUE of 1.0 would mean all facility energy is delivered to IT equipment; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems. Cooling technology drives much of that overhead, so PUE falls from legacy enterprise facilities to liquid-cooled AI data centers (@tbl-fleet-pue-fleet).
 
-@Tbl-fleet-pue-fleet compares PUE across data center generations and cooling technologies.
+| **Data center type**             |                      **PUE**                      |                          **Overhead per MW of IT load**                          |
+|:---------------------------------|:-------------------------------------------------:|:--------------------------------------------------------------------------------:|
+| **Liquid-cooled AI data center** |    `{python} FleetThermalRecap.pue_liquid_str`    | `{python} FleetThermalRecap.pue_liquid_overhead_kw_str` cooling + infrastructure |
+| **Best-in-class air-cooled**     |      `{python} FleetThermalRecap.pue_air_str`     |          `{python} FleetThermalRecap.pue_air_overhead_kw_str` overhead           |
+| **Industry average (2022)**      | `{python} FleetThermalRecap.pue_industry_avg_str` |      `{python} FleetThermalRecap.pue_industry_avg_overhead_kw_str` overhead      |
+| **Industry average (2023)**      |    `{python} FleetThermalRecap.pue_legacy_str`    |         `{python} FleetThermalRecap.pue_legacy_overhead_kw_str` overhead         |
 
-| **Data Center Type**             |                   **PUE**                    |                          **Overhead per MW of IT Load**                          |
-|:---------------------------------|:--------------------------------------------:|:--------------------------------------------------------------------------------:|
-| **Liquid-cooled AI data center** | `{python} FleetThermalRecap.pue_liquid_str`  | `{python} FleetThermalRecap.pue_liquid_overhead_kw_str` cooling + infrastructure |
-| **Best-in-class air-cooled**     |   `{python} FleetThermalRecap.pue_air_str`   |          `{python} FleetThermalRecap.pue_air_overhead_kw_str` overhead           |
-| **Industry average**             | `{python} FleetThermalRecap.pue_typical_str` |        `{python} FleetThermalRecap.pue_typical_overhead_kw_str` overhead         |
-| **Legacy enterprise**            | `{python} FleetThermalRecap.pue_legacy_str`  |         `{python} FleetThermalRecap.pue_legacy_overhead_kw_str` overhead         |
+: **Power usage effectiveness by facility type**: Lower is better. The listed PUE values are facility scenarios. Direct liquid cooling can reduce heat-removal overhead, but PUE also depends on climate, heat rejection, power conversion, and load. The gap between the 2023 industry average (`{python} FleetThermalRecap.pue_legacy_str`) and liquid-cooled (`{python} FleetThermalRecap.pue_liquid_str`) represents about a `{python} FleetThermalRecap.pue_reduction_pct_str` reduction in total facility power at fixed IT load; the non-IT overhead drops from `{python} FleetThermalRecap.pue_legacy_overhead_mw_str` to `{python} FleetThermalRecap.pue_liquid_overhead_mw_str` per MW of IT load. {#tbl-fleet-pue-fleet}
 
-: **power usage effectiveness (PUE)**: Lower is better. Liquid cooling achieves PUE near 1.0 because it removes heat directly from the chip without the intermediate step of heating air. The gap between legacy (`{python} FleetThermalRecap.pue_legacy_str`) and liquid-cooled (`{python} FleetThermalRecap.pue_liquid_str`) represents about a `{python} FleetThermalRecap.pue_reduction_pct_str` reduction in total facility power at fixed IT load; the non-IT overhead drops from `{python} FleetThermalRecap.pue_legacy_overhead_mw_str` to `{python} FleetThermalRecap.pue_liquid_overhead_mw_str` per MW of IT load. {#tbl-fleet-pue-fleet}
-
-For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A `{python} FleetThermalRecap.tenmw_it_load_str` IT load in a legacy data center (PUE `{python} FleetThermalRecap.pue_legacy_str`) requires `{python} FleetThermalRecap.pue_legacy_facility_10mw_str` total, while the same load in a liquid-cooled facility (PUE `{python} FleetThermalRecap.pue_liquid_str`) requires only `{python} FleetThermalRecap.pue_liquid_facility_10mw_str`---a savings of `{python} FleetThermalRecap.pue_savings_10mw_str`. At typical commercial electricity rates, this difference translates to millions of dollars per year. @Sec-sustainable-ai covers the full sustainability implications.
+For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A `{python} FleetThermalRecap.tenmw_it_load_str` IT load in a data center at the 2023 industry average (PUE `{python} FleetThermalRecap.pue_legacy_str`) requires `{python} FleetThermalRecap.pue_legacy_facility_10mw_str` total. The same load in a liquid-cooled facility (PUE `{python} FleetThermalRecap.pue_liquid_str`) requires only `{python} FleetThermalRecap.pue_liquid_facility_10mw_str`, a savings of `{python} FleetThermalRecap.pue_savings_10mw_str`. For a facility that runs continuously at the reference on-premises electricity price of `{python} FleetThermalRecap.onprem_kwh_rate_str`, that difference is worth about `{python} FleetThermalRecap.pue_savings_annual_musd_str` per year. @Sec-sustainable-ai covers the full sustainability implications.
 
 ---
 
@@ -1017,36 +1086,33 @@ class FleetSummaryRecap:
     )
     air_limit_kw_str = fmt_power(Infrastructure.AIR_COOLING_LIMIT_KW * kilowatt, unit=kilowatt, precision=0, commas=False)
     operational_ratio = 1.0 - (Ops.TrainingRunOverheads.Checkpoint + Ops.TrainingRunOverheads.FailureRecovery + Ops.TrainingRunOverheads.Maintenance)
+    n_ref_gpus = Systems.Clusters.Training_1K.total_accelerators
     eff_fraction = float(
         calc_effective_flops(
-            1024 * Hardware.Cloud.H100.compute.peak_flops,
+            n_ref_gpus * Hardware.Cloud.H100.compute.peak_flops,
             Literature.Training.MfuHigh,
             ReferenceStats.TrainingScaleProfiles.Eff1024Gpu,
             operational_ratio,
         )
         .to(TFLOPs / second)
         .magnitude
-        / (1024 * Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude)
+        / (n_ref_gpus * Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude)
     )
     mtbf_8192_h = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Frontier_8K.total_accelerators)
+    n_8192_str = fmt(Systems.Clusters.Frontier_8K.total_accelerators, precision=0, commas=True)
     mfu_pct_str = fmt_percent(Literature.Training.MfuHigh, precision=0, commas=False, style='prose')
     scaling_pct_str = fmt_percent(ReferenceStats.TrainingScaleProfiles.Eff1024Gpu, precision=0, commas=False, style='prose')
     operational_pct_str = fmt_percent(operational_ratio, precision=0, commas=False, style='prose')
     eff_pct_str = fmt_percent(eff_fraction, precision=1, style='prose')
     mtbf_8192_min_str = fmt_time(mtbf_8192_h.to(minute).magnitude, 'minute', precision=1, commas=True, style='word')
-    pfail_8192_str = fmt_percent(calc_failure_probability(mtbf_8192_h, HOURS_PER_DAY * hour), precision=2, commas=False, style='prose')
+    pfail_8192_str = fmt_percent(
+        round(calc_failure_probability(mtbf_8192_h, HOURS_PER_DAY * hour) * 100) / 100, precision=0, commas=False, style='prose'
+    )
+    n_ref_gpus_str = fmt(n_ref_gpus, precision=0, commas=True)
 ```
 
 ## Summary {.unnumbered}
 
-::: {.callout-takeaways title="Fleet scale changes every constraint"}
+Fleet scale changes every constraint a single machine imposes. ML fleets combine the tight coupling of high-performance computing for training with the elastic fault tolerance of warehouse-scale computing for serving, and they cannot adopt either tradition wholesale. NVLink provides about `{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port, which is why bandwidth-hungry parallelism stays inside the node. Cluster MTBF scales as $1/\RequiredComponentCount$, so at `{python} FleetSummaryRecap.n_8192_str` GPUs a GPU fails about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability of at least one failure in 24 hours. After disjoint factors for MFU (about `{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (about `{python} FleetSummaryRecap.scaling_pct_str`), and runtime goodput (about `{python} FleetSummaryRecap.operational_pct_str`), a `{python} FleetSummaryRecap.n_ref_gpus_str`-GPU cluster delivers about `{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
 
-* **Three paradigms, one hybrid**: ML fleets combine HPC's tight coupling (for training) with WSC's elastic fault tolerance (for inference), creating a new architectural paradigm that cannot adopt either predecessor's patterns wholesale.
-* **Bandwidth gap**: NVLink provides ~`{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than InfiniBand NDR. This invariant ratio determines parallelism placement: tensor parallelism within nodes, data parallelism across nodes.
-* **Failures become routine at scale**: Cluster MTBF scales as $1/N$. At 8,192 GPUs, expect a GPU failure about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability over 24 hours. Fault tolerance is not optional---it is a prerequisite for completing any fleet-scale training job.
-* **Compound utilization loss**: After disjoint factors for MFU (~`{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (~`{python} FleetSummaryRecap.scaling_pct_str`), and operational goodput (~`{python} FleetSummaryRecap.operational_pct_str`) compound, a 1,024-GPU cluster delivers ~`{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
-* **Power density demands liquid cooling**: AI racks consume `{python} FleetSummaryRecap.rack_ratio_mult_str` the power of traditional racks. Air cooling fails above ~`{python} FleetSummaryRecap.air_limit_kw_str` per rack, making liquid cooling a physical requirement for modern AI clusters.
-* **Communication-computation ratio ($\rho$) governs scaling strategy**: When $\rho > 1$, GPUs are idle waiting for data---reduce parallelism or increase computation per step. When $\rho \ll 1$, communication can be fully overlapped.
-* **Weak scaling is the fleet-scale paradigm**: Engineers do not use more GPUs to solve the same problem faster (strong scaling); they use more GPUs to solve larger problems in reasonable time. This keeps the serial fraction small and utilization high.
-
-:::
+Three considerations govern the design response. The communication-computation ratio $\CommunicationComputeRatio$ indicates the potential for overlap and the pressure from communication; dependencies and available resources determine how much communication can be hidden behind computation. Weak scaling, which grows the problem with the fleet, preserves useful work per device, while strong scaling remains the right choice when the goal is to finish fixed work sooner. Rack power density, about `{python} FleetSummaryRecap.rack_ratio_mult_str` the traditional reference for current AI racks, determines the cooling design, subject to the installed heat-removal capacity rather than a universal threshold.

@@ -16,6 +16,7 @@ from vault_cli.legacy_export import (
     emit_corpus_summary,
     emit_legacy_corpus,
     emit_manifest,
+    emit_taxonomy_labels,
     select_release_items,
 )
 from vault_cli.loader import load_all
@@ -136,6 +137,14 @@ def register(app: typer.Typer) -> None:
                 f"{visuals_result.get('copied', 0)} copied, "
                 f"{visuals_result.get('deleted', 0)} pruned → "
                 f"{visuals_out}/question-visuals/[/dim]"
+            )
+
+        if local_json or site_bundle:
+            labels_result = emit_taxonomy_labels(vault_dir, Path("staffml/app/src/data/mlsys-taxonomy.json"))
+            result["taxonomy_labels"] = labels_result
+            console.print(
+                f"[dim]mlsys-taxonomy.json: {labels_result['subjects']} subjects, "
+                f"{labels_result['concepts']} concepts → {labels_result['output']}[/dim]"
             )
 
         # The site imports this manifest at build time for release labels and

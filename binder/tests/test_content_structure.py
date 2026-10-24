@@ -22,7 +22,16 @@ CONTENTS = QUARTO
 CONFIG = QUARTO / "config"
 
 VOLUMES = ("vol1", "vol2", "vol3", "vol4")
-RESERVED = {"frontmatter", "backmatter", "parts", "appendices"}
+RESERVED = {
+    "frontmatter",
+    "backmatter",
+    "parts",
+    "appendices",
+    "covers",
+    "styles",
+    "tex",
+    "images",
+}
 
 QMD_REF = re.compile(r"(?<![\w/.-])(?:vol[1-4]|shared)/[A-Za-z0-9_./-]+\.qmd")
 INCLUDE = re.compile(r"\{\{<\s*include\s+([^>}]+?)\s*>\}\}")
@@ -57,7 +66,7 @@ def test_chapter_dir_matches_its_qmd(vol: str) -> None:
     """
     bad = []
     for d in sorted((CONTENTS / vol).iterdir()):
-        if not d.is_dir() or d.name in RESERVED:
+        if not d.is_dir() or d.name in RESERVED or d.name.startswith(("_", ".")):
             continue
         if not (d / f"{d.name}.qmd").exists():
             bad.append(f"{vol}/{d.name} has no {d.name}.qmd")

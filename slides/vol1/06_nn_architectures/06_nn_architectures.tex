@@ -1,1896 +1,821 @@
 % =============================================================================
-% Chapter 6: Network Architectures — ML Systems Lecture Slides
+% Lecture 6: Network Architectures, Part 1 (Dense, Convolutional, Recurrent)
+% Introduction to Machine Learning Systems (Volume I)
 % =============================================================================
-% IMAGES:
-%   - ch06-inductive-bias-spectrum.pdf
-%   - ch06-architecture-bottleneck-map.pdf
-%   - ch06-cnn-weight-sharing.pdf
-%   - ch06-attention-mechanism.pdf
-%   - ch06-transformer-block.pdf
-%   - ch06-rnn-unrolled.pdf
-%   - ch06-architecture-selection-flowchart.pdf
+% Each architecture is a bet about the structure of the data, and each bet
+% commits the machine to its own compute and memory signature. Part 1 prices
+% the families whose weights are fixed: dense layers, convolution with its
+% depth and efficiency blocks, and recurrence. Part 2 (06b) takes attention,
+% the transformer, the recommender, and the five-lighthouse comparison.
+%
+% Build: make -C slides build-06_nn_architectures   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder; the split is in
+%        ../06b_nn_architectures/part1_changes.md.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume   = {Volume I},
-  chapter  = {Chapter 6},
-  logo = {../../assets/img/logo-mlsysbook.png},
-  instlogo = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Network Architectures},
+  volume={Volume I},
+  chapter={Chapter 6},
+  chaptertitle={Network Architectures, Part 1},
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+  layer=models,
+  dividerstack,
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\def\colkind{col}% normalization diagram: shade a column (BatchNorm) or a row
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
 
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation ---
-\setcounter{mlsystotalsections}{7}
-
-\title{Network Architectures}
+\title{Network Architectures, Part 1}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A highlighted answer choice, shown from overlay #1 on
+\newcommand{\answer}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% Styles for the TikZ diagrams
+\tikzset{
+  blk/.style={draw=#1, fill=#1!12, line width=1pt, rounded corners=2pt,
+    align=center, font=\small, text=darktext, minimum height=0.8cm},
+  arr/.style={-{Stealth[length=2.2mm]}, line width=0.9pt, color=midgray},
+  cell/.style={draw=lightgray, line width=0.6pt, minimum width=#1, minimum height=0.55cm,
+    inner sep=0pt, font=\small, text=darktext},
+  cell/.default=0.6cm,
+  px/.style={draw=lightgray, line width=0.4pt, minimum size=0.3cm, inner sep=0pt},
+  ox/.style={draw=lightgray, line width=0.4pt, minimum size=0.42cm, inner sep=0pt, font=\scriptsize},
+}
+
+
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE
 % =============================================================================
-\mlsystitle{Network Architectures}{Architecture Is Infrastructure}{cover_dl_arch.png}
+\mlsysnote{[0.5 min] Read the thesis once. Say that today covers three families of networks (dense, convolutional, recurrent), and for each one the picture of what it computes and what it asks of the machine. Attention and recommenders come next lecture. The lecture ends with a comparison the class builds. Notes total about 71.5 minutes, which leaves a few minutes for questions. FLEX: [CORE]. Cutting every [OPTIONAL] note leaves a lecture of about 51 minutes.}
+\mlsystitle{Network Architectures, Part~1}{Each architecture is a bet about the structure of the data, and each bet sets what the machine must supply.}{../../assets/photos/datacenter-server-racks.jpg}
 
 % =============================================================================
-% LEARNING OBJECTIVES
+% HOOK (before the first section)
 % =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-[1 min] Walk through each objective briefly; students follow along.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through each objective. Stress that this chapter is about the
-\emph{systems consequences} of architecture choice, not model accuracy.
-``Every architecture signs a contract with physics---by the end of today,
-you will be able to read that contract.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``When you pick a Transformer, what hardware contract are you signing?''
-Cold-call one student. [Expected answer: O(N\^{}2) memory, high bandwidth demand.]
-
-% -- FLEX: [CORE] This slide is essential --- do not skip.
-[CORE] Sets the framing for the entire lecture.
-IF SHORT: Read objectives 1, 4, and 6 aloud; let students read the rest.
-}
-
-\small
-\begin{enumerate}\setlength\itemsep{0pt}
-  \item Distinguish the \textbf{computational signatures} of MLPs, CNNs, RNNs, Transformers, and DLRM
-  \item Explain how \textbf{inductive biases} encode data structure into computation
-  \item Analyze \textbf{arithmetic intensity} and memory scaling across architectures
-  \item Identify shared \textbf{building blocks} (skip connections, normalization, gating)
-  \item Apply the \textbf{architecture selection framework} to match data, hardware, and constraints
-  \item Evaluate how architecture determines \textbf{Iron Law} bottlenecks ($O$, $D_{\text{vol}}$, $L_{\text{lat}}$)
-  \item Critique common architectural selection \textbf{fallacies} using systems reasoning
-\end{enumerate}
-
+\begin{frame}{Predict: did Netflix ship the million-dollar winner?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.1cm,keepaspectratio]{netflix-prize.jpg}\\[0.1cm]
+      {\footnotesize\textcolor{midgray}{The final leaderboard, 2009: \$1 million for 10 percent better predictions.}}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \Large
+      \choice{A}{Yes, all of it}\\[0.2cm]
+      \choice{B}{Parts of it}\\[0.2cm]
+      \answer{2}{C}{No}\\[0.4cm]
+      \normalsize\uncover<2->{It was more accurate. It never ran in production.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Leaderboard: Ivongala, public domain, Wikimedia Commons. Prize: Network Architectures, War Story 6.1 (Johnston 2012).}
+  \note{[2.5 min] Setup: from 2006 to 2009 Netflix ran an open contest. Anyone who could predict movie ratings 10 percent more accurately than Netflix's own system would win \$1 million. In 2009 a merged team, BellKor's Pragmatic Chaos, crossed the line; the leaderboard shows 10.05 percent. ENGAGE: students vote with one to three fingers before step 2. Many will pick A, because the contest was built to be won and paid for. Step 2: the answer is C. Netflix did not deploy the Grand Prize code. Do not explain why yet; ask the room for one guess. Expected guesses: "it was too slow" or "too expensive to run". Both are close; the next slide gives the record. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Visual Language}
-\note{
-[0.5 min] Show briefly; students internalize through use across the lecture.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each card: ``Blue means compute---anytime you see blue in a diagram,
-that is where the GPU is doing math. Green is data flow. Orange is scheduling
-decisions. Red flags a bottleneck or cost.''
-
-% -- FLEX: [CORE] Establishes the visual vocabulary for every subsequent slide.
-[CORE] First time students see the color system; revisit briefly at start of Ch7.
-IF SHORT: Show for 30 seconds and move on---students will internalize through use.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
+\begin{frame}{The winning blend fit the contest dataset and missed the service}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{netflix-envelope.jpg}\\[0.1cm]
+      {\footnotesize\textcolor{midgray}{2009: the business was moving from mailed DVDs to streaming.}}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \begin{tikzpicture}[font=\small]
+        \node[blk=BlueLine, minimum width=8.6cm, text width=8.3cm, font=\small\raggedright] (a) at (0,2.6)
+          {\textbf{2007 Progress Prize:} a blend of 107 algorithms, 8.43\% better};
+        \node[blk=GreenLine, minimum width=8.6cm, text width=8.3cm, font=\small\raggedright] (b) at (0,1.1)
+          {\textbf{Netflix kept two of them}, rewritten for 5 billion ratings instead of 100 million};
+        \node[blk=RedLine, minimum width=8.6cm, text width=8.3cm, font=\small\raggedright] (c) at (0,-0.4)
+          {\textbf{2009 Grand Prize:} not worth the engineering to ship};
+        \draw[arr] (a) -- (b); \draw[arr] (b) -- (c);
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: BlueMint, CC BY 2.5, Wikimedia Commons. War Story 6.1; Amatriain and Basilico, Netflix Tech Blog and RecSys tutorial, 2012.}
+  \note{[2.5 min] The record, in the order it happened. First box: the 2007 Progress Prize went to a linear blend of 107 algorithms, 8.43 percent better than Netflix's system. Second box: Netflix engineers kept the two strongest pieces of that blend (a matrix factorization and a restricted Boltzmann machine) and had to rebuild them, because the contest data held 100 million ratings and production held about 5 billion. Third box: by 2009 the extra accuracy of the Grand Prize blend did not justify the engineering to bring it into production, and the shift to streaming (the envelope) had changed what the recommender needed to optimize. The chapter's lesson is that an offline accuracy gain is worth something only when its cost and its objective still match the production system. LINK: today we learn to read that cost off the architecture itself, before anyone builds it. WARN: the 107 and 5 billion figures are Netflix's own 2012 account, reported in its tech blog; the chapter's War Story gives the prize and the outcome. FLEX: [CORE].}
 \end{frame}
 
-
-% =============================================================================
-\section{Inductive Bias}
-% =============================================================================
-
-% --- War Story: Netflix Prize (chapter's primary real-world hook) ---
-\begin{frame}{War Story: The Ensemble Netflix Did Not Ship (2009)}
-\note{
-[1.5 min] This is the chapter's only war-story callout and its primary
-motivating example---do not skip it.
-
-% -- LINK: What prior concept connects to this slide
-Students have seen architectural contracts listed abstractly. This slide
-grounds the thesis in a real production failure before any equations appear.
-
-% -- NARRATE: What to SAY while showing this slide
-``In 2006, Netflix offered \$1 million to any team that could beat their
-Cinematch recommendation system by 10 percent. In 2009, BellKor's Pragmatic
-Chaos won---blending over 100 component models into a grand ensemble.
-10.06 percent improvement on the offline metric. One million dollars.
-And Netflix never shipped it.''
-Pause. ``Why? The engineering effort to put that ensemble into production
-was not justified by the accuracy gain. By 2012 the product had already
-shifted from DVD ratings to streaming personalization---where the rating
-signal mattered less anyway.''
-Point to the Systems Lesson: ``Benchmark accuracy is necessary but not
-sufficient. The architecture must fit the system that has to keep it running.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What would it take to make the ensemble deployable?''
-Give 20 seconds. [Expected answers: cheaper inference, model compression,
-simpler ensemble, or accepting a smaller accuracy gain from a single model.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume the winning model is always the right choice.
-Correct framing: the right architecture must be judged against deployment
-cost, not only benchmark accuracy. A simpler model that fits production
-constraints beats a complex one that does not.
-
-% -- FLEX: [CORE] Sets up the chapter's central thesis before any equations.
-[CORE] This motivates every subsequent architecture trade-off discussion.
-IF SHORT: Read Context and Systems Lesson only---skip the 2012 streaming note.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Context}: Netflix Prize (2006--2009)
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \$1M prize: beat Cinematch by 10\%
-      \item Winner: BellKor's Pragmatic Chaos
-      \item Method: \textbf{100+ model ensemble}
-      \item Result: 10.06\% improvement on test set
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Failure}: Offline accuracy $\neq$ deployable system\\
-    {\footnotesize Engineering effort to ship the ensemble was not
-    justified by the accuracy gain. By 2012, the product had
-    shifted to streaming---rating signal mattered less.}
-
-    \vspace{0.1cm}
-    \textbf{Consequence}: Netflix deployed \emph{simpler} earlier ideas.\\
-    The Grand Prize ensemble was \textbf{never shipped}.
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.3cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Systems Lesson}\\[0.2cm]
-    {\footnotesize Architecture choice must be judged against the \alert{cost
-    of running the model}, not only benchmark accuracy.\\[0.2cm]
-    A network with more parameters can lose to a simpler one whose compute
-    and memory budgets fit the production system.}
-    \end{mlsyscard}
-
-    \vspace{0.2cm}
-    \mlsysinsight{The thesis:}{Architecture = Infrastructure.}
-  \end{column}
-\end{columns}
-\mlsyscite{Johnston \& Nikolova, Netflix Prize Retrospective, 2012}
-
+\begin{frame}{Recall: what does the MNIST network spend its time on?}
+  \mlsysactivity{Recall}{1 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{mnist-examples.png}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Real MNIST test digits, 28$\times$28 pixels.}}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \centering
+      {\large Question of the day}\\[0.25cm]
+      {\normalsize The digit classifier from Lecture 5 (784, 128, 64, 10): how many multiply-adds per digit, and what share is matrix multiply?}\\[0.35cm]
+      \uncover<2->{\Large\textbf{\textcolor{mlsysaccent}{109,184 MACs}}\\[0.05cm]{\normalsize\textbf{over 99 percent matrix multiply}}}\\[0.3cm]
+      \uncover<2->{\small Today: the same multiply-adds, arranged three ways.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Neural Computation, Napkin Math 5.1 and the forward-pass FLOP budget. Digits: Josef Steppan, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[1.5 min] The images are real digits from the MNIST test set, each 28 by 28 pixels, the 784 inputs of the network. ENGAGE: thirty seconds, write both numbers. Step 2: 109,184 multiply-accumulates (a MAC is one multiply and one add, counted as two FLOPs, floating-point operations), and matrix multiply is over 99 percent of the forward-pass arithmetic. If students only recall "a lot", ask which layer dominates. It is the first, 784 by 128. Say the bridge aloud: "Every architecture today is built from those same multiply-adds. What changes is how they are arranged, and the arrangement decides what the machine runs out of first." FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Architecture Is a Contract with Physics}
-\note{
-[2 min] Core thesis slide; spend time on the table.
-
-% -- LINK: What prior concept connects to this slide
-Students learned the Iron Law ($O$, $D_{\text{vol}}$, $L_{\text{lat}}$) and the
-roofline model in earlier chapters. This slide shows that the architecture
-\emph{determines} which Iron Law term dominates.
-
-% -- NARRATE: What to SAY while showing this slide
-``Architecture is not a modeling decision---it is an infrastructure commitment.
-When you pick a CNN, you commit to spatial locality and high arithmetic intensity.
-When you pick a Transformer, you commit to O(N\^{}2) memory.''
-Point to the table on the right: ``RNN: 30--50\% GPU utilization. That is the
-contract you sign.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Has anyone picked an architecture and later regretted the systems cost?''
-Let 2 students share experiences before continuing.
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students choose architectures based on accuracy benchmarks alone,
-ignoring memory, latency, and power constraints.
-Correct framing: architecture determines the physical resources required to
-run the model---accuracy is necessary but not sufficient.
-
-% -- FLEX: [CORE] This slide is the chapter thesis.
-[CORE] Do not skip---every subsequent slide builds on this framing.
-IF AHEAD: ``Can you name an architecture whose systems cost killed a product?''
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    Choosing an architecture means \alert{signing a contract}:
-
-    \vspace{0.1cm}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \textbf{CNN} $\to$ spatial locality, parallel convolutions
-      \item \textbf{Transformer} $\to$ $O(N^2)$ memory, global attention
-      \item \textbf{RNN} $\to$ sequential dependencies, low parallelism
-      \item \textbf{DLRM} $\to$ TB-scale embedding tables
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{crimson}
-    Architecture determines \textbf{Iron Law terms}:
-    Operations ($O$), data movement ($D_{\text{vol}}$), overhead ($L_{\text{lat}}$).
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \renewcommand{\arraystretch}{1.15}
-    {\footnotesize
-    \begin{tabular}{@{}ll@{}}
-      \toprule
-      \textbf{Choice} & \textbf{Consequence} \\
-      \midrule
-      CNN    & Fits mobile memory \\
-      Transf.& Needs datacenter \\
-      RNN    & 30--50\% GPU util. \\
-      DLRM   & TB of DRAM \\
-      \bottomrule
-    \end{tabular}
+\begin{frame}{One accelerator, three requests, three different limits}
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \node[blk=OrangeLine, minimum width=3.2cm] (r1) at (0,2.1) {A camera frame\\(image classifier)};
+    \node[blk=BlueLine, minimum width=3.2cm] (r2) at (0,0.5) {A prompt\\(language model)};
+    \node[blk=VioletLine, minimum width=3.2cm] (r3) at (0,-1.1) {A click\\(recommender)};
+    \node[blk=midgray, minimum width=3.2cm, minimum height=4.3cm, font=\small\bfseries] (acc) at (4.6,0.5) {\mlsysphoto[width=2.9cm]{nvidia-h100-pcie.jpg}\\[0.15cm]Same\\accelerator};
+    \foreach \r in {r1,r2,r3} \draw[arr] (\r.east) -- (acc.west |- \r.east);
+    \uncover<2->{
+    \node[text width=5.4cm, font=\small, text=OrangeLine] at (9.7,2.1) {\textbf{Arithmetic units busy}};
+    \node[text width=5.4cm, font=\small, text=BlueLine] at (9.7,0.5) {\textbf{Arithmetic waits on memory}};
+    \node[text width=5.4cm, font=\small, text=VioletLine] at (9.7,-1.1) {\textbf{Tables do not fit in memory}};
+    \foreach \y in {2.1,0.5,-1.1} \draw[arr] (6.3,\y) -- (6.98,\y);
     }
-  \end{column}
-\end{columns}
-
+  \end{tikzpicture}\\[0.4cm]
+  \uncover<3->{{\large\textbf{What does each architecture commit the machine to?}}}
+  \mlsyscredit{Network Architectures, \S6.1 and \S6.9. Photo: NVIDIA H100 PCIe card, Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[1 min] The chapter's opening scene. The card in the middle is a real accelerator, an NVIDIA H100 in its PCIe form. Step 1: three requests reach the same accelerator: a camera frame for an image classifier, a prompt for a language model, a click for a recommender. Step 2: the silicon is identical, yet the first keeps the arithmetic units busy, the second leaves them waiting for memory, and the third cannot start until the system decides where its multi-gigabyte tables live. Step 3: the driving question. What differs is the architecture, the way each model arranges the same multiply-adds around the structure of its data. ENGAGE: ask which of the three requests the Netflix recommender resembles (the click). FLEX: [CORE].}
 \end{frame}
 
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: What Unifies All Architectures?}
-\note{
-[2 min] Active learning moment; do not skip neighbor sharing.
-
-% -- LINK: What prior concept connects to this slide
-The previous slide showed four architectures with wildly different contracts.
-Now students must identify what single concept explains \emph{why} those
-contracts differ.
-
-% -- NARRATE: What to SAY while showing this slide
-``Four architectures, four very different hardware contracts. There is one
-concept that explains all of them. Write your answer---60 seconds.''
-Do NOT reveal ``inductive bias'' yet.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students write individually for 60 seconds. Then share with a neighbor.
-Cold-call 2--3 students to share answers before moving to the reveal slide.
-[Expected answer: inductive bias---the structural assumption each architecture
-encodes about data.]
-
-% -- FLEX: [CORE] This prediction primes the key concept reveal.
-[CORE] The prediction must happen before the reveal slide.
-IF SHORT: Reduce to 30 seconds writing, skip neighbor sharing.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.6cm}
-{\large MLPs, CNNs, RNNs, and Transformers look very different.\\
-What single concept \emph{unifies} all architecture choices?}
-
-\vspace{0.5cm}
-{\normalsize Write your answer. \textcolor{midgray}{(60 seconds)}}
-
-\vspace{0.5cm}
-{\small\textcolor{lightgray}{Hint: it explains why CNNs use 47$\times$ fewer parameters than MLPs on MNIST.}}
-
-\end{frame}
-
-\begin{frame}{Inductive Bias: The Unifying Concept}
-\note{
-[2 min] Key concept reveal; walk the spectrum diagram carefully.
-
-% -- LINK: What prior concept connects to this slide
-Students just predicted the unifying concept. This slide reveals the answer:
-inductive bias. Connect to the hint---47x fewer parameters (MNIST MLP vs.\ CNN)
-is the consequence of the locality bias in CNNs.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the spectrum diagram left to right: ``Stronger bias means fewer
-parameters means less flexibility but better hardware mapping. An MLP has
-no bias---it must learn everything from scratch. A CNN assumes spatial
-locality and saves 47x parameters (MNIST: 20M-param MLP vs.\ 421K-param CNN).
-The bias determines which Iron Law term dominates.''
-ANALOGY: ``Inductive bias is like building codes---they constrain what you
-can build, but the constraints make the building possible.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Where on this spectrum would you place a Graph Neural Network?''
-Give 15 seconds. [Expected answer: between CNN and Transformer---structural
-bias on graph topology, but more flexible than spatial grids.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think stronger bias is always better.
-Correct framing: stronger bias reduces parameters but restricts what the
-model can learn. Transformers sacrifice efficiency for flexibility.
-IF STUCK: ``Think of bias as a constraint---when does a constraint help
-vs.\ hurt?''
-
-% -- FLEX: [CORE] This is the chapter's central definition.
-[CORE] Every subsequent architecture slide references inductive bias.
-IF AHEAD: ``What happens when your bias mismatches the data structure?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-inductive-bias-spectrum.pdf}
-
-\vspace{0.15cm}
-\mlsysconcept{Definition:}{Inductive bias is a structural constraint that restricts the hypothesis space, encoding domain assumptions directly into the computational graph.}
-
+\begin{frame}{By the end of today, you will be able to}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.35cm}
+    \item Name the bet each family makes about its data.
+    \item Count the weights, multiply-adds, and bytes of dense, convolutional, depthwise, and recurrent layers.
+    \item Explain how a convolution becomes one matrix multiply, and what that costs in memory.
+    \item Predict whether compute, bandwidth, or a serial chain limits a layer.
+  \end{itemize}
+  \vspace{0.35cm}
+  \threadstrip{0}{1}{0}{1}{0}
+  \note{[0.5 min] Four outcomes, one per kind of reasoning. The comparison at the end of the lecture tests all four. The strip fills the algorithm factor, FLOPs per sample, which each architecture sets, and the fast-enough half, since its bytes and its serial steps decide whether it meets a budget. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Architecture Zoo}
+% SECTION: DENSE
 % =============================================================================
+\mlsysnote{[0.5 min] Start with the family that assumes nothing about its data. FLEX: [CORE].}
+\mlsysdivider{What does a layer with no assumptions cost?}{Network Architectures, \S6.1 and \S6.2}
+\section{Dense}
 
-\begin{frame}{Five Lighthouse Models}
-\note{
-[1.5 min] Establish all five lighthouses; students must remember which bottleneck each isolates.
-
-% -- LINK: What prior concept connects to this slide
-Inductive bias explains \emph{why} architectures differ. Now we introduce
-five concrete architectures that each isolate a different system bottleneck,
-mapping to the workload archetypes from Ch2.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each lighthouse in the diagram: ``ResNet isolates compute.
-GPT-2 isolates bandwidth. DLRM isolates memory capacity. MobileNet
-isolates latency on edge. KWS isolates power on microcontrollers.
-No single architecture is best---each teaches us about a different
-physical constraint.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why do we need five lighthouse models, not one?''
-Cold-call. [Expected answer: each isolates a different bottleneck;
-one model cannot teach all system constraints.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think ``lighthouse'' means ``best'' architecture.
-Correct framing: lighthouses are diagnostic tools, not recommendations.
-Each reveals a specific hardware-workload interaction.
-
-% -- FLEX: [CORE] Establishes the five recurring examples for the rest of the course.
-[CORE] Students must memorize which bottleneck each lighthouse isolates.
-IF SHORT: Name all five quickly; spend detail time on the next slides.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-architecture-bottleneck-map.pdf}
-
-\vspace{0.1cm}
-{\small Each lighthouse isolates a \textbf{distinct system bottleneck} --- no single ``best'' architecture exists.}
-
-\end{frame}
-
-\begin{frame}{Arithmetic Intensity Spectrum}
-\note{
-[2 min] Key quantitative slide; work through the table row by row.
-
-% -- LINK: What prior concept connects to this slide
-The five lighthouses each live at different points on the roofline model
-from Ch1. Arithmetic intensity (FLOPs/byte) determines whether a workload
-is compute-bound or memory-bound.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each row: ``ResNet at 40 FLOPs/byte---above the ridge point,
-compute-bound, GPU-friendly. GPT-2 at 0.5 FLOPs/byte---below the ridge,
-bandwidth-starved. Roughly 80$\times$ (about two orders of magnitude) separate
-them. The architecture determines whether your system needs a faster processor or faster memory.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If MobileNet has 21 FLOPs/byte and a datacenter GPU ridge point is
-156 FLOPs/byte, what regime is MobileNet in on that GPU?''
-Give 10 seconds. [Expected answer: memory-bound---it starves the GPU.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume high FLOPs = fast execution.
-Correct framing: speed depends on arithmetic intensity relative to the
-hardware's ridge point, not absolute FLOP count.
-IF STUCK: ``Draw the roofline---where does each model land?''
-
-% -- FLEX: [CORE] Arithmetic intensity is the quantitative bridge between
-architecture and hardware.
-[CORE] This table is referenced in the Fallacies slide and the selection framework.
-IF AHEAD: ``What would it take to make GPT-2 inference compute-bound?''
-}
-
-\small
-\textbf{Arithmetic Intensity} ($I$) = FLOPs per byte of data moved
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Model} & \textbf{Intensity} & \textbf{Regime} & \textbf{Hardware Affinity} \\
-  \midrule
-  \textbf{ResNet-50} & $\sim$40 FLOPs/B & \textcolor{computestroke}{Compute-bound} & GPU/TPU (saturates ALUs) \\
-  \textbf{MobileNet} & $\sim$21 FLOPs/B & Balanced & Mobile NPU \\
-  \textbf{GPT-2 (inf)} & $\sim$0.5 FLOPs/B & \textcolor{datastroke}{Memory-bound} & HBM3 bandwidth \\
-  \textbf{DLRM} & $\ll 1$ FLOPs/B & \textcolor{errorstroke}{Capacity-bound} & TB-scale DRAM \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.2cm}
-\begin{mlsyscard}{crimson}
-{\footnotesize \textbf{Roughly 80$\times$ (about two orders of magnitude)} separate ResNet and GPT-2. The architecture determines whether your system needs a faster processor or faster memory.}
-\end{mlsyscard}
-
-\end{frame}
-
-\begin{frame}{MLPs: The Universal Baseline}
-\note{
-[2 min] Establishes the baseline against which all other architectures are compared.
-
-% -- LINK: What prior concept connects to this slide
-The inductive bias spectrum placed MLPs at the far left---zero bias, full
-connectivity. This slide unpacks what that means in systems terms.
-
-% -- NARRATE: What to SAY while showing this slide
-``MLPs are the simplest architecture: no structural assumption, every input
-connects to every output. The Universal Approximation Theorem guarantees
-they can represent anything, but at enormous cost. One 1024-to-1024 layer:
-over one million parameters. That is the price of zero inductive bias.''
-Point to the table: ``High parallelism and 80--90\% utilization---the
-computation is simple dense MatMul, which GPUs love.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If MLPs can approximate any function, why do we need CNNs or
-Transformers at all?''
-Give 15 seconds. [Expected answer: MLPs require exponentially more parameters
-to learn structure that biased architectures encode for free.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students dismiss MLPs as outdated. In practice, MLP layers
-are the computational workhorse inside every Transformer (the FFN block).
-Correct framing: MLPs are the universal building block; other architectures
-add constraints on top.
-
-% -- FLEX: [CORE] Establishes the baseline against which all other architectures
-are compared.
-[CORE] The 1M parameter number recurs in the CNN comparison.
-IF SHORT: Skip the UAT card; keep the table and the ``baseline'' insight.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Multi-Layer Perceptrons}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item {\footnotesize \textbf{Bias}: None --- any input relates to any output}
-      \item {\footnotesize \textbf{Data}: Tabular, unstructured features}
-      \item {\footnotesize \textbf{Scaling}: $O(d^2)$ params per layer}
-      \item {\footnotesize \textbf{1024 $\to$ 1024}: 1,048,576 parameters}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize UAT guarantees MLPs \emph{can} represent any function. Catch: ``sufficiently wide'' can mean exponentially many neurons.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \renewcommand{\arraystretch}{1.05}
-    {\scriptsize
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Property} & \textbf{Value} \\
-      \midrule
-      Bias & None \\
-      Params/layer & $O(d^2)$ \\
-      Parallelism & High \\
-      Utilization & 80--90\% \\
-      Bottleneck & Bandwidth \\
-      \bottomrule
-    \end{tabular}
+\begin{frame}{An inductive bias is a bet about the structure of the data}
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \draw[{Stealth[length=3mm]}-{Stealth[length=3mm]}, line width=1.4pt, color=midgray] (0,0) -- (13.4,0);
+    \node[anchor=north west, font=\small, text=midgray] at (0,-0.15) {Strong prior, less data};
+    \node[anchor=north east, font=\small, text=midgray] at (13.4,-0.15) {Weak prior, more data};
+    \foreach \x/\name/\col/\data in {1.6/CNN/OrangeLine/{Images: nearby\\pixels matter},
+                                     5.0/RNN/GreenLine/{Sequences: order\\matters},
+                                     8.4/Transformer/BlueLine/{Any token may\\matter to any other},
+                                     11.8/MLP/midgray/{Tabular: no fixed\\neighbors}} {
+      \fill[\col] (\x,0) circle (0.17);
+      \node[above=0.25cm, font=\large\bfseries, text=\col] at (\x,0) {\name};
+      \uncover<2->{\node[below=0.75cm, align=center, font=\small, text=darktext] at (\x,0) {\data};}
     }
-
-    \vspace{0.1cm}
-    \mlsysinsight{Baseline:}{Every other architecture is an MLP + structural constraints.}
-  \end{column}
-\end{columns}
-
+  \end{tikzpicture}
+  \mlsyscredit{Ordering: Network Architectures, \S6.1 and \S6.9.4.}
+  \note{[2 min] Step 1: an inductive bias is a structural assumption built into the architecture before training starts. A strong one does part of the learning in advance, so a matching task needs fewer examples and less compute. Step 2: what each family assumes. A CNN assumes nearby pixels matter more than distant ones; an RNN assumes order; a transformer lets any token use any other; an MLP assumes nothing. Transformers are next lecture; they sit on this axis so students see the whole ordering once. WARN: students hear "stronger is better". The chapter's pitfall is that a strong prior that does not match the data excludes useful solutions too; a CNN represents long-range relations in language poorly. LINK: the bitter lesson (Lecture 1) says that weak priors win once data and compute are large enough to pay for them. Recommenders sit off this axis; their bet is on lookup tables. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{CNNs: Spatial Pattern Processing}
-\note{
-[2 min] Walk the weight sharing diagram; emphasize the 47x (MNIST) ratio.
-
-% -- LINK: What prior concept connects to this slide
-MLPs required 1M parameters for a 1024x1024 layer. CNNs apply the locality
-bias to achieve the same task with 47x fewer parameters (MNIST).
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the weight sharing diagram: ``Left side: MLP connects every
-pixel to every output---1,048,576 parameters. Right side: a single 3x3
-filter slides across the entire image---9,408 parameters. Same spatial
-task, 47x cheaper. That is the power of the locality bias: if nearby
-pixels matter most, do not waste parameters on distant connections.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What happens to CNN accuracy if you shuffle the pixel order of
-every image?'' Give 10 seconds.
-[Expected answer: accuracy collapses---the locality bias assumes spatial
-structure. Shuffled pixels destroy that structure.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think weight sharing only saves parameters.
-Correct framing: weight sharing also increases arithmetic intensity
-because each weight is reused across many spatial positions, making
-CNNs compute-bound and GPU-friendly.
-
-% -- FLEX: [CORE] The 47x MNIST ratio is a key quantitative anchor (chapter-canonical).
-[CORE] Referenced in Key Takeaways and the Fallacies slide.
-IF AHEAD: ``How does depthwise separable convolution change this ratio?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch06-cnn-weight-sharing.pdf}
-
-\vspace{0.1cm}
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \centering
-    \textcolor{errorstroke}{\textbf{MLP}}: 1,048,576 parameters\\
-    {\footnotesize Every pixel $\to$ every output}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \centering
-    \textcolor{datastroke}{\textbf{CNN}}: 9,408 parameters\\
-    {\footnotesize Shared 3$\times$3 filter slides across image}
-  \end{column}
-\end{columns}
-\vspace{0.05cm}
-\mlsysconcept{Key:}{Weight sharing = 47$\times$ fewer params (MNIST) = fits on mobile devices.}
-
+\begin{frame}{A shared filter learns 87 times fewer weights per detector}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.9cm,keepaspectratio]{mnist_detectors_step}{2}\\[0.3cm]
+  \uncover<3->{\normalsize Whole networks: a small CNN, 421,408 weights; the 784-128-64-10 MLP, 109,184.\\[0.1cm]
+  The CNN's dense head holds 96 percent of its weights.}
+  \mlsyscredit{Network Architectures, Example 6.1 (MNIST).}
+  \note{[1.5 min] The chapter's MNIST comparison. Step 1: a dense unit learns one weight for every pixel, so 32 features on a 28 by 28 image cost 32 times 784, 25,088 weights. Step 2: a convolutional layer learns one 3 by 3 filter per feature and reuses it at all 784 positions, for 288 weights, 87 times fewer. Step 3: the surprise. Count whole networks and the small two-convolution CNN has more weights than the MLP, because its dense classifier head holds 96 percent of them. ENGAGE: ``So did convolution save weights or not?'' Expected: per feature detector, yes; per network, it depends on the width choices. WARN: the saving is per detector, and a network can still grow; a claim that ``CNNs are smaller'' needs the widths. FLEX: [OPTIONAL] If short, give the 87 times aloud on the previous slide.}
 \end{frame}
 
-\begin{frame}{CNN System Properties}
-\note{
-[2 min] The FLOPs-vs-speed paradox is the central lesson; emphasize it.
+\begin{frame}[fragile]{A dense layer gives every input a weight to every output}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\footnotesize]
+        \foreach \i in {1,...,4} \node[circle, draw=GreenLine, fill=GreenL, minimum size=0.55cm] (x\i) at (0,3.6-1.0*\i) {};
+        \foreach \j in {1,...,3} \node[circle, draw=OrangeLine, fill=OrangeL, minimum size=0.55cm] (h\j) at (2.6,3.1-1.0*\j) {};
+        \foreach \i in {1,...,4} \foreach \j in {1,...,3} \draw[color=midgray, line width=0.6pt] (x\i) -- (h\j);
+        \node[font=\footnotesize, text=midgray] at (0,-1.1) {4 inputs};
+        \node[font=\footnotesize, text=midgray] at (2.6,-1.1) {3 outputs};
+        \node[font=\normalsize\bfseries, text=darktext] at (1.3,-1.75) {12 weights};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering
+      \begin{uncoverenv}<2->{\normalsize MNIST layer, 784 $\rightarrow$ 128}\\[0.1cm]
+        {\LARGE\textbf{100,352} weights}\\[0.05cm]
+\begin{semiverbatim}\footnotesize
+>{}>{}> layer = nn.Linear(784, 128)
+>{}>{}> layer.weight.shape
+torch.Size([128, 784])
+>{}>{}> sum(p.numel()
+... for p in layer.parameters())
+100480
+\end{semiverbatim}
+      \end{uncoverenv}
+      \uncover<3->{{\normalsize A 2,048 $\rightarrow$ 2,048 layer:}\\
+        {\normalsize\textbf{\textcolor{mlsysaccent}{4.19 million}} weights, 16.8 MB in FP32}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Example 6.2 and \S6.2.5. Console: run here, PyTorch 2.14.1 (images/torch\_shapes.py).}
+  \note{[2 min] Step 1: the chapter's toy layer, four pixels into three neurons; every line is a weight, so twelve weights, and the layer is one matrix-vector product. Step 2: the MNIST reference layer, 784 inputs to 128 outputs, 100,352 weights. The console is real output from PyTorch. The layer stores its weights as a 128 by 784 matrix, one row per output, and its parameter count, 100,480, adds the 128 biases. This is the line students will type in the TinyTorch and PyTorch labs. Step 3: a production-width layer, 2,048 by 2,048, about 4.19 million weights, 16.8 MB in FP32 (32-bit floating point, four bytes per number). Weights grow as the product of the widths. ENGAGE: "If an image input doubles in width and height, how do this layer's weights change?" Expected: four times, because the input count quadruples. WARN: MLPs are not obsolete; every transformer block and every recommender contains them. FLEX: [CORE].}
+\end{frame}
 
-% -- LINK: What prior concept connects to this slide
-Weight sharing (previous slide) explains why CNNs have fewer parameters.
-This slide shows the systems consequence: high arithmetic intensity and
-excellent GPU utilization.
+\begin{frame}{Four pixels into three neurons, computed by hand}
+  \mlsysactivity{Your turn}{1 min}
+  \centering
+  \begin{tikzpicture}
+    \node[font=\small\bfseries, text=GreenLine] at (0,0.6) {pixels};
+    \node[font=\small\bfseries, text=darktext] at (3.1,0.6) {weights $W$ (4 $\times$ 3)};
+    \foreach \r/\v in {1/0.8, 2/0.2, 3/0.9, 4/0.1} \node[cell=0.8cm, fill=GreenL] at (0,-0.55*\r+0.55) {\v};
+    \foreach \r/\a/\b/\c in {1/0.5/0.1/-0.2, 2/-0.3/0.8/0.4, 3/0.2/-0.4/0.6, 4/0.7/0.3/-0.1} {
+      \node[cell=1.0cm] at (2.1,-0.55*\r+0.55) {\a}; \node[cell=1.0cm] at (3.1,-0.55*\r+0.55) {\b}; \node[cell=1.0cm] at (4.1,-0.55*\r+0.55) {\c};}
+    \only<2|handout:0>{\draw[OrangeLine, line width=1.4pt, rounded corners=2pt] (1.6,0.3) rectangle (2.6,-1.95);}
+    \node[font=\small, text=midgray, anchor=east] at (1.5,-2.5) {sum};
+    \node[font=\small, text=midgray, anchor=east] at (1.5,-3.2) {ReLU};
+    \foreach \c in {1,2,3} {\node[cell=1.0cm] at (1.1+\c,-2.5) {}; \node[cell=1.0cm] at (1.1+\c,-3.2) {};}
+    \only<2-|handout:1>{\node[cell=1.0cm, fill=OrangeL, font=\small\bfseries] at (2.1,-2.5) {0.59};}
+    \only<3-|handout:1>{\node[cell=1.0cm, fill=OrangeL, font=\small\bfseries] at (3.1,-2.5) {$-$0.09};
+      \node[cell=1.0cm, fill=OrangeL, font=\small\bfseries] at (4.1,-2.5) {0.45};}
+    \only<4-|handout:1>{\foreach \c/\v in {1/0.59, 2/0, 3/0.45} \node[cell=1.0cm, fill=BlueL, font=\small\bfseries] at (1.1+\c,-3.2) {\v};}
+    \node[anchor=west, text width=7.6cm, font=\normalsize] at (5.4,-1.0) {%
+      \only<2|handout:0>{$0.5{\times}0.8 - 0.3{\times}0.2 + 0.2{\times}0.9 + 0.7{\times}0.1 = 0.59$}%
+      \only<3|handout:0>{Each output reads every pixel, with its own column of weights.}%
+      \only<4-|handout:1>{12 weights, 12 multiply-adds:\\each weight used once per input.}};
+  \end{tikzpicture}
+  \mlsyscredit{Network Architectures, Example 6.2.}
+  \note{[2 min] [OPTIONAL] The chapter's Example 6.2, by hand; Part 2 opens attention the same way, so this sets the habit of computing the small case, then counting the large one. Step 1: four pixel values, 0.8, 0.2, 0.9, 0.1, and a 4 by 3 weight matrix, one column per neuron. Step 2: the first neuron multiplies each pixel by its column and sums, 0.40 minus 0.06 plus 0.18 plus 0.07, which is 0.59. Step 3: ENGAGE, one minute: half the room computes the second neuron, half the third, before the reveal. Expected: minus 0.09 and 0.45. Step 4: ReLU sets the negative value to zero, giving 0.59, 0, 0.45. Twelve weights, twelve multiply-adds, and each weight is used exactly once for this input. ENGAGE: ``With a batch of 8 images, how many times is each weight used?'' Expected: 8; that reuse is what the next slide prices. FLEX: if cut, the next slide's counts carry the point.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-``Because each weight is reused many times across spatial positions, CNNs
-achieve high arithmetic intensity---around 40 FLOPs/byte for ResNet-50.
-That puts them above the ridge point: compute-bound, the ideal regime for
-GPUs. ResNet-50 achieves 80--95\% of peak throughput.''
-Point to the MobileNet column: ``Depthwise separable convolutions cut
-FLOPs by 8--9x, making MobileNet fit on phones at 14 MB and 300 MFLOPs.
-But the tradeoff: low intensity starves datacenter GPUs.''
+\begin{frame}{At batch one, an FP32 dense layer does 0.5 FLOP per byte it reads}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given}\\[0.1cm]
+        {\small $d_{\text{in}} \times d_{\text{out}}$ FP32 weights, 4 B each\\
+        Batch one; per weight one multiply-add, 2 FLOPs}
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      \centering
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          wt/.style={draw=BlueLine, fill=BlueL, line width=1pt, rounded corners=2pt,
+            minimum width=1.5cm, minimum height=0.8cm, align=center, font=\footnotesize},
+          mac/.style={draw=OrangeLine, fill=OrangeL, line width=1pt, rounded corners=2pt,
+            minimum width=2.1cm, minimum height=0.45cm, font=\footnotesize}]
+        \node[wt] (w) at (0,0) {one weight\\in memory};
+        \node[mac] (m1) at (3.6,0.62) {MAC, example 1};
+        \draw[->, line width=1.2pt, BlueLine] (w.east) -- node[above, sloped, font=\scriptsize, text=darktext] {4 B} (m1.west);
+        \uncover<6->{
+          \node[mac] (m2) at (3.6,0) {MAC, example 2};
+          \node[font=\footnotesize] at (3.6,-0.36) {$\vdots$};
+          \node[mac] (mb) at (3.6,-0.8) {MAC, example $B$};
+          \draw[->, line width=1.2pt, BlueLine] (w.east) -- (m2.west);
+          \draw[->, line width=1.2pt, BlueLine] (w.east) -- (mb.west);
+          \node[font=\footnotesize\bfseries, text=mlsysaccent, anchor=north west, align=left] at (-0.75,-0.55) {one read,\\[-2pt]$B$ uses};}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \normalsize
+      \uncover<2->{FLOPs $= 2\,d_{\text{in}}\,d_{\text{out}}$\\[0.3cm]}
+      \uncover<3->{Bytes read $= 4\,d_{\text{in}}\,d_{\text{out}}$\\[0.3cm]}
+      \uncover<4->{$I = \dfrac{2\,d_{\text{in}}\,d_{\text{out}}}{4\,d_{\text{in}}\,d_{\text{out}}} = $ {\Large\textbf{\textcolor{mlsysaccent}{0.5 FLOP/byte}}}\\[0.35cm]}
+      \uncover<5->{Accelerators need tens to hundreds of FLOPs per byte to stay busy.\\[0.2cm]}
+      \uncover<6->{Batch $B$: each weight read serves $B$ examples.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, equation 2 (weight-only model; ignores inputs, outputs, and caches).}
+  \note{[3 min] Worked example 1. Step 1: the given. Step 2: each weight takes part in one multiply-add, two FLOPs. Step 3: each weight is read once, four bytes in FP32. Step 4: the ratio, arithmetic intensity, is half a FLOP per byte, whatever the widths, because both counts grow with the same product. Step 5: an accelerator's arithmetic can consume tens to hundreds of FLOPs for every byte its memory delivers, so this layer leaves most of the arithmetic idle, waiting for weights. Step 6: the one change that raises the ratio. The diagram under the given card shows it: with a batch of B examples each weight read serves B multiply-adds, so intensity grows to about 0.5 times B until activation traffic takes over (Lecture 5). Low intensity also costs energy. In Horowitz's 45 nm figures, reading one FP32 weight from DRAM costs about 139 multiply-adds' worth, so batching that divides the reads also cuts energy per inference; Lecture 11 shows the full energy table. ENGAGE: ``At what batch does this layer reach 100 FLOP per byte?'' Expected: about 200. WARN: this is a weight-only model; a small layer such as 784 by 128 can stay in on-chip cache, and then dispatch overhead dominates over memory bandwidth. FLEX: [CORE].}
+\end{frame}
 
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``MobileNet uses 14x fewer FLOPs than ResNet. Will it run 14x faster
-on an A100?'' Give 10 seconds.
-[Expected answer: no---low arithmetic intensity means MobileNet is
-memory-bound on datacenter GPUs and may actually run slower.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students equate fewer FLOPs with faster execution.
-Correct framing: FLOPs predict speed only when compute-bound. MobileNet's
-low intensity means the GPU waits for memory, not math.
-IF STUCK: ``Draw both models on the roofline---which hits the ceiling?''
-
-% -- FLEX: [CORE] The FLOPs-vs-speed paradox is a central lesson.
-[CORE] This directly supports the ``FLOPs != speed'' fallacy slide.
-IF SHORT: Skip MobileNet details; keep the ResNet utilization numbers.
+\mlsysnote{[1.5 min] The one ratio to remember today. Arithmetic intensity is the work done per byte moved. Compare it with the machine's balance, its peak FLOP/s divided by its memory bandwidth: above the balance the arithmetic limits (the compute term of the iron law), below it the memory limits (the data term). Each family today lands at a different intensity, and recurrence escapes this axis entirely, because its limit is a chain of steps. ENGAGE: is the batch-one dense layer from the last slide above or below an accelerator's balance? Below, by more than a hundredfold, so its memory term binds. LINK: Lecture 11 draws the full roofline. FLEX: [CORE].}
+\mlsysfocus{Arithmetic intensity decides which term binds}{%
+  $\displaystyle I = \frac{\text{operations}}{\text{bytes moved}}\quad\text{(FLOP/byte)}$\\[0.7cm]
+  {\normalsize\textcolor{white!80}{Above the machine's balance: compute bound.\quad Below it: memory bound.}}%
 }
 
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{Why CNNs map well to GPUs:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Weight reuse $\to$ high arithmetic intensity
-      \item Regular memory access $\to$ cache-friendly
-      \item Batch processing $\to$ saturates tensor cores
-      \item \textbf{ResNet-50}: 80--95\% peak throughput
-    \end{itemize}
+% =============================================================================
+% SECTION: CONVOLUTION
+% =============================================================================
+\mlsysnote{[0.5 min] Images have structure the dense layer ignores. What does it buy to assume it? FLEX: [CORE].}
+\mlsysdivider{What does assuming locality buy?}{Network Architectures, \S6.3}
+\section{Convolution}
 
-    \vspace{0.1cm}
-    \textbf{MobileNet (Depthwise Separable):}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item 8--9$\times$ fewer FLOPs for 3$\times$3 kernels
-      \item Fits phones: 14 MB, 300 MFLOPs
-      \item But: \alert{starves datacenter GPUs} (low intensity)
-    \end{itemize}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \renewcommand{\arraystretch}{1.1}
-    {\scriptsize
-    \begin{tabular}{@{}lrr@{}}
-      \toprule
-      & \textbf{ResNet-50} & \textbf{MobileNet} \\
-      \midrule
-      Params     & 25.6 M & 3.5 M \\
-      FLOPs      & 4.1 G  & 300 M \\
-      Memory     & 98 MB  & 14 MB \\
-      Intensity  & $\sim$40  & $\sim$21 \\
-      GPU util.  & 80--95\% & 30--50\% \\
-      \bottomrule
-    \end{tabular}
+\begin{frame}{A convolution slides one small filter across the whole image}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{book-cnn.pdf}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \normalsize
+      \textbf{\textcolor{OrangeLine}{Local:}} each output reads a 3$\times$3 window.\\[0.4cm]
+      \uncover<2->{\textbf{\textcolor{OrangeLine}{Shared:}} the same 9 weights at every position.\\[0.4cm]}
+      \uncover<3->{Shift the input, and the output shifts with it.}
+    \end{column}
+  \end{columns}
+  \note{[1 min] In the book figure, a 3 by 3 window on the input grid (orange) produces one value of the output map (the purple cell above). Step 1: locality, each output depends on a small neighborhood. Step 2: sharing, the same nine weights (per input channel) are used at every position; sliding the window fills the whole output map. Step 3: because the filter is the same everywhere, moving an edge in the image moves its response in the output by the same amount; the next slide shows it with numbers. ENGAGE: "Why is sharing a sensible bet for photographs?" Expected: an edge is an edge wherever it appears. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Shifting the input shifts the feature map}
+  \mlsysactivity{Estimate}{1 min}
+  \centering
+  \begin{tikzpicture}
+    % original
+    \foreach \r in {1,...,7} \foreach \c in {1,...,7} {
+      \ifnum\c=3 \node[px, fill=darktext] at (0.3*\c,-0.3*\r) {}; \else \node[px] at (0.3*\c,-0.3*\r) {}; \fi}
+    \node[font=\small, text=darktext] at (1.2,0.15) {edge at column 3};
+    \draw[arr] (2.55,-1.2) -- (3.25,-1.2);
+    \foreach \r in {1,...,5} \foreach \c/\v in {1/3, 2/0, 3/{$-$3}, 4/0, 5/0} {
+      \ifnum\c=1 \node[ox, fill=OrangeL] at (3.3+0.42*\c,-0.12-0.42*\r) {\v};
+      \else\ifnum\c=3 \node[ox, fill=BlueL] at (3.3+0.42*\c,-0.12-0.42*\r) {\v};
+      \else \node[ox] at (3.3+0.42*\c,-0.12-0.42*\r) {\v}; \fi\fi}
+    \node[font=\small, text=darktext] at (4.56,0.15) {feature map};
+    % shifted
+    \uncover<2->{
+    \foreach \r in {1,...,7} \foreach \c in {1,...,7} {
+      \ifnum\c=5 \node[px, fill=darktext] at (7.0+0.3*\c,-0.3*\r) {}; \else \node[px] at (7.0+0.3*\c,-0.3*\r) {}; \fi}
+    \node[font=\small, text=darktext] at (8.2,0.15) {shifted to column 5};
+    \draw[arr] (9.55,-1.2) -- (10.25,-1.2);
+    \foreach \r in {1,...,5} \foreach \c/\v in {1/0, 2/0, 3/3, 4/0, 5/{$-$3}} {
+      \ifnum\c=3 \node[ox, fill=OrangeL] at (10.3+0.42*\c,-0.12-0.42*\r) {\v};
+      \else\ifnum\c=5 \node[ox, fill=BlueL] at (10.3+0.42*\c,-0.12-0.42*\r) {\v};
+      \else \node[ox] at (10.3+0.42*\c,-0.12-0.42*\r) {\v}; \fi\fi}
+    \node[font=\small, text=darktext] at (11.56,0.15) {same map, shifted 2};}
+  \end{tikzpicture}\\[0.5cm]
+  {\small Filter: $[-1\ 0\ 1]$ in each of 3 rows (a vertical-edge detector).}\\[0.25cm]
+  \uncover<3->{\normalsize Each 3$\times$3 layer widens the view by 2 pixels: three layers see 7$\times$7.}
+  \mlsyscredit{Network Architectures, Example 6.3 and \S6.3.2.}
+  \note{[2 min] The chapter's Example 6.3. Step 1: a 7 by 7 image with a vertical edge in column 3 (dark), convolved with a vertical-edge filter. The 5 by 5 output has a column of 3s where the window goes from dark to bright and a column of minus 3s where it goes back. Step 2: move the edge two columns right. The output is the same pattern, two columns right. This is translation equivariance. The layer reports where the edge is, in addition to whether one exists. Pooling at the end of a classifier then discards the position so the label does not depend on it. Step 3: the cost of locality. Each 3 by 3 layer sees only 2 more pixels than the layer before, so three layers see 7 by 7, and a network needs depth or downsampling to see an object 100 pixels wide. ENGAGE, one minute: ``How many 3 by 3 layers, without downsampling, to see 21 by 21?'' Expected: 10, because each layer adds 2 pixels to the 1-pixel start. FLEX: [CORE]. If short, skip step 3 and keep the one-minute estimate.}
+\end{frame}
+
+\begin{frame}{Trained first-layer filters are edge and color detectors}
+  \centering
+  \begin{tikzpicture}
+    \node[inner sep=0, anchor=south west] (k) at (0,0) {\safeimg[width=10.6cm]{alexnet-conv1-kernels.jpg}};
+    \begin{scope}[x={(k.south east)}, y={(k.north west)}]
+      \only<2->{\draw[mlsysaccent, line width=2pt, rounded corners=1pt] (0.437,0.330) rectangle (0.503,0.500);}
+    \end{scope}
+  \end{tikzpicture}\\[0.15cm]
+  {\normalsize AlexNet's first layer: 96 filters of $11{\times}11{\times}3$ weights, learned from ImageNet.}\\[0.1cm]
+  \uncover<2->{\normalsize Nobody drew them. Training found the vertical-edge filter of the last slide.}
+  \mlsyscredit{Krizhevsky, Sutskever, and Hinton, ``ImageNet Classification with Deep Convolutional Neural Networks,'' NeurIPS 2012, figure 3.}
+  \note{[1.5 min] These are real learned weights. Each small square is one filter of AlexNet's first convolutional layer, 11 by 11 pixels by 3 color channels, shown as an image; gray is zero, light and dark are positive and negative weights. Step 1: let the room look. Most filters are oriented edges and stripes; others are blobs of color. Step 2: the outlined filter is a vertical edge detector, the same pattern as the hand-built filter on the previous slide, found by gradient descent from random weights. The top three rows were trained on one GPU and the bottom three on the other; the paper notes that one group became mostly color-agnostic and the other mostly color-specific. LINK: weight sharing makes this picture possible, because each filter is one set of weights reused at every position, so it can be shown as one small image. ENGAGE: ``How many weights does this whole layer hold?'' Expected: 96 times 11 times 11 times 3, 34,848 weights (biases aside), for a 224 by 224 color image. FLEX: [OPTIONAL] If short, show the picture for ten seconds and move on.}
+\end{frame}
+
+\begin{frame}{Weight sharing cuts 205.5 million weights to 36,864}
+  \centering
+  {\normalsize Input 224$\times$224$\times$64, 64 features out.\quad
+   Dense: $224^2 \times 64 \times 64$.\quad
+   \uncover<2->{Conv: $3 \times 3 \times 64 \times 64$.}}\\[0.25cm]
+  \mlsyssteps[width=0.95\textwidth,height=4.0cm,keepaspectratio]{params_step}{2}\\[0.2cm]
+  \uncover<2->{\normalsize The filter budget does not grow with the image.}
+  \mlsyscredit{Network Architectures, Definition 6.3.}
+  \note{[2.5 min] Worked example 2. Given: a 224 by 224 feature map with 64 channels, and we want 64 features. Step 1: a dense layer gives every one of the 224 times 224 times 64 inputs its own weight to each of 64 outputs: about 205.5 million weights. Step 2: a 3 by 3 convolution needs 3 times 3 times 64 times 64, 36,864 weights, about 5,575 times fewer. Let the last line land. If the image grows to 1,024 by 1,024, the dense layer grows about 21 times and the convolution not at all. WARN: the outputs are not the same shape. The dense layer gives 64 numbers; the convolution gives 64 full feature maps. The comparison is per feature detector, which is the point, because sharing decouples the weights from the resolution. ENGAGE: "Where did the memory go, then?" Hold the answer for the next slide. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Each filter weight is reused 50,176 times per image}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.2cm,keepaspectratio]{intensity_cnn_step}{2}\\[0.25cm]
+  \uncover<2->{\normalsize One layer: 1.85 billion multiply-adds from 147.5 KB of weights.\\[0.1cm]}
+  \uncover<3->{\normalsize Its activations: 12.8 MB per image, kept until the backward pass.}
+  \mlsyscredit{Dense: equation 2. ResNet-50: Table 8, weight-only proxy, FP32. Layer counts: \S6.3.4.}
+  \note{[2.5 min] Step 1: the dense layer at batch one, 0.5 FLOP per byte. Step 2: ResNet-50, about 80 FLOP per weight byte, about 160 times more, because each filter weight is used at all 50,176 positions of a 224 by 224 map. The example layer does 1.85 billion multiply-adds from 147.5 KB of weights, small enough to stay on chip. That reuse is why batched ResNet-50 is the compute-bound lighthouse. Step 3: the answer to the last slide's question. The same layer writes 3.2 million output values, 12.8 MB per image in FP32, about 87 times its weights, and in training those maps stay in memory until the backward pass. For CNNs, activation memory binds training more than the weights do. WARN: the intensity is a weight-only proxy; real traffic includes the activations, so the measured value depends on batch size and on how the kernel tiles the image. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Unfolding makes a convolution one matrix multiply}
+  \mlsysactivity{Estimate}{1 min}
+  \centering
+  \begin{tikzpicture}
+    \node[font=\small\bfseries, text=darktext] at (0.6,0.55) {input};
+    \foreach \r in {1,2,3} \foreach \c in {1,2,3} {
+      \pgfmathtruncatemacro{\v}{3*(\r-1)+\c}
+      \node[cell] at (0.6*\c-0.6,-0.6*\r+0.6) {\v};}
+    \draw[OrangeLine, line width=1.4pt, rounded corners=2pt] (-0.33,0.33) rectangle (0.93,-0.93);
+    \node[font=\small\bfseries, text=darktext] at (0.3,-2.0) {filter};
+    \foreach \r/\c/\w in {1/1/w_1, 1/2/w_2, 2/1/w_3, 2/2/w_4} \node[cell, fill=GreenL] at (0.6*\c-0.6,-0.6*\r-1.85) {$\w$};
+    \draw[arr, line width=1.4pt] (2.0,-1.0) -- (3.0,-1.0);
+    \node[font=\small\bfseries, text=darktext] at (4.6,0.55) {unfolded patches};
+    \foreach \x/\v in {1/1, 2/2, 3/4, 4/5} \node[cell, fill=OrangeL!50] at (3.1+0.6*\x,0) {\v};
+    \only<2-|handout:1>{\foreach \r/\a/\b/\c/\d in {2/2/3/5/6, 3/4/5/7/8}
+      \foreach \x/\v in {1/\a, 2/\b, 3/\c, 4/\d} \node[cell, fill=OrangeL!50] at (3.1+0.6*\x,-0.6*\r+0.6) {\v};}
+    \foreach \r in {2,3,4} \foreach \x in {1,...,4} \node[cell] at (3.1+0.6*\x,-0.6*\r+0.6) {};
+    \only<3|handout:0>{\foreach \x in {1,...,4} \node[cell, fill=mlsysaccent!12, text=mlsysaccent, font=\small\bfseries] at (3.1+0.6*\x,-1.8) {?};}
+    \only<4-|handout:1>{\foreach \x/\v in {1/5, 2/6, 3/8, 4/9} \node[cell, fill=OrangeL!50] at (3.1+0.6*\x,-1.8) {\v};}
+    \node[font=\Large] at (6.55,-0.9) {$\times$};
+    \foreach \r/\w in {1/w_1, 2/w_2, 3/w_3, 4/w_4} \node[cell, fill=GreenL] at (7.3,-0.6*\r+0.6) {$\w$};
+    \node[font=\Large] at (8.05,-0.9) {$=$};
+    \foreach \r in {1,...,4} \node[cell] at (8.8,-0.6*\r+0.6) {$o_{\r}$};
+    \node[anchor=west, text width=4.3cm, font=\normalsize, align=left] at (9.5,-0.9) {%
+      \only<1|handout:0>{Each 2$\times$2 window becomes one row.}%
+      \only<2|handout:0>{Rows 2 and 3 overlap row 1.}%
+      \only<3|handout:0>{\textbf{Your turn:} the last window's row.}%
+      \only<4-|handout:1>{9 values became 16.\\For 3$\times$3 filters, up to 9 copies of each pixel.}};
+  \end{tikzpicture}\\[0.35cm]
+  \uncover<4->{\normalsize Implicit GEMM computes each address instead of storing the copies.}
+  \mlsyscredit{Network Architectures, \S6.3.3 (figure 5; Chetlur et al. 2014).}
+  \note{[3.5 min] The chapter's im2col miniature. Step 1: a 3 by 3 input and a 2 by 2 filter. The first window (orange box) covers 1, 2, 4, 5; flattened, it becomes the first row of a new matrix. Step 2: the window slides; rows two and three are 2, 3, 5, 6 and 4, 5, 7, 8. Point out that 5 is already in three rows. Step 3: ENGAGE, one minute: students write the last row. Expected: 5, 6, 8, 9. Step 4: the whole convolution is now one matrix times the flattened filter, a GEMM that runs on the tuned matrix libraries and the accelerator's matrix units. The price: 9 input values became 16 stored values, and for 3 by 3 filters on a large image each pixel can appear up to 9 times. The last line says that implicit GEMM runs the same matrix multiply but computes each patch address on the fly, so the copies are never stored. This is the chapter's claim that every family lowers onto GEMM; Part 2 recalls it for attention's projections. LINK: Lecture 7 shows the library call; Lecture 11 the hardware. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{PyTorch's unfold builds the same patch matrix}
+  \centering
+\begin{semiverbatim}\small
+>{}>{}> x = torch.arange(1., 10.).reshape(1, 1, 3, 3)
+>{}>{}> F.unfold(x, kernel_size=2)
+tensor([[[1., 2., 4., 5.],
+         [2., 3., 5., 6.],
+         [4., 5., 7., 8.],
+         [5., 6., 8., 9.]]])
+\end{semiverbatim}
+  \vspace{0.2cm}
+  \begin{center}
+  {\normalsize Each column is one $2{\times}2$ window: the four rows you just wrote.}\\[0.15cm]
+  \uncover<2->{\normalsize The convolution is then one matrix multiply: the filter, $1{\times}4$, times this $4{\times}4$.}
+  \end{center}
+  \mlsyscredit{Run here: torch.nn.functional.unfold, PyTorch 2.14.1 (images/torch\_shapes.py). Method: Chetlur et al. 2014.}
+  \note{[1.5 min] Real output from the framework, produced by running the three lines in the deck's images folder. Step 1: the input is the slide's 3 by 3 grid, the values 1 to 9, shaped as one image with one channel. unfold with a 2 by 2 window returns the patch matrix the class just built by hand. PyTorch stores each window as a column, so the first column is 1, 2, 4, 5 and the last is 5, 6, 8, 9; in this small case the matrix is symmetric, so the rows read the same as the columns. Step 2: the convolution is the flattened filter times this matrix, one GEMM, which is what cuDNN-style libraries run. WARN: students may think unfold is how every framework computes convolution; it is the plainest route, and production libraries usually use implicit GEMM or direct kernels that avoid storing the copies. ENGAGE: ``How many columns for a 224 by 224 image and a 3 by 3 window, without padding?'' Expected: 222 times 222, 49,284. FLEX: [OPTIONAL] If short, show the output for ten seconds as proof of the previous slide.}
+\end{frame}
+
+\begin{frame}{Your turn: is one GPU enough for 30 frames a second?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.45\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given}\\[0.1cm]
+        ResNet-50: 8.2 GFLOP per image\\
+        Video: 30 frames per second\\
+        GPU: 10 TFLOP/s peak, at\\
+        50 to 60\% $\approx$ 5 TFLOP/s
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      \normalsize
+      \uncover<2->{$30 \times 8.2$ GFLOP $=$ 246 GFLOP/s needed\\[0.3cm]}
+      \uncover<3->{5 TFLOP/s $\div$ 246 GFLOP/s $=$ {\Large\textbf{\textcolor{mlsysaccent}{20.3$\times$}}} headroom\\[0.3cm]}
+      \uncover<4->{A 100 GFLOP detector: 3 TFLOP/s needed, 1.7$\times$ headroom}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Napkin Math 6.3 and Lighthouse 6.1.}
+  \note{[3.5 min] [OPTIONAL] Worked example 3. ENGAGE: two minutes in pairs. ResNet-50 does about 8.2 GFLOP per 224 by 224 image; 3 by 3 convolutions are about 48 percent of its multiply-adds. Step 2: 30 frames times 8.2 GFLOP is 246 GFLOP per second. Step 3: a mid-range GPU with 10 TFLOP/s peak, at the planning figure of 50 to 60 percent utilization, delivers about 5 TFLOP/s; 5 divided by 0.246 is about 20 times headroom. Step 4: swap in an object detector at 100 GFLOP per frame and the need is 3 TFLOP/s, 1.7 times headroom at the lower estimate. WARN: the headroom assumes the GPU stays busy. One 30-frame-per-second stream runs at batch one, where kernel launches and small matrices keep utilization well below 50 percent, so measure before promising. Students who divide 10 TFLOP/s by 8.2 GFLOP and report over 1,000 frames per second have used peak throughput in place of achieved throughput. FLEX: if cut, say that 30 frames need about 246 GFLOP/s.}
+\end{frame}
+
+% =============================================================================
+% SECTION: DEPTH AND EFFICIENCY
+% =============================================================================
+\mlsysnote{[0.5 min] ResNet-50 has fifty layers, and phones run models with a few million weights. Two questions: what makes depth trainable, and what makes a network small? FLEX: [CORE].}
+\mlsysdivider{What does it take to go deep, and to go small?}{Network Architectures, \S6.4 and \S6.3.5}
+\section{Depth}
+
+\begin{frame}{Skip connections make depth trainable, at a memory cost}
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \node (x) at (0,0) {\large $x$};
+    \node[blk=BlueLine, minimum width=2.2cm] (w1) at (2.4,0) {Weight layer};
+    \node[blk=GreenLine, minimum width=1.2cm] (r1) at (4.9,0) {ReLU};
+    \node[blk=BlueLine, minimum width=2.2cm] (w2) at (7.4,0) {Weight layer};
+    \node[circle, draw=darktext, line width=1pt, inner sep=1pt, font=\large] (add) at (9.9,0) {$+$};
+    \node[blk=GreenLine, minimum width=1.2cm] (r2) at (11.5,0) {ReLU};
+    \draw[arr] (x) -- (w1); \draw[arr] (w1) -- (r1); \draw[arr] (r1) -- (w2);
+    \draw[arr] (w2) -- node[above, font=\footnotesize, text=darktext] {$F(x)$} (add);
+    \draw[arr] (add) -- (r2);
+    \draw[arr, color=RedLine, line width=1.4pt] (0.4,0.2) -- (0.4,1.15) -- node[above, font=\footnotesize, text=RedLine] {identity: $x$ skips the block} (9.9,1.15) -- (add.north);
+  \end{tikzpicture}\\[0.4cm]
+  \begin{columns}[T]
+    \begin{column}{0.45\textwidth}
+      \centering\normalsize
+      \uncover<2->{Plain stack, 50 layers of gain 0.9:\\$0.9^{50} \approx 0.005$}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \centering\normalsize
+      \uncover<3->{$x$ stays in memory through the branch.\\The add: about 0.08 FLOP/byte.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, \S6.4.1 (He et al. 2016).}
+  \note{[2 min] [OPTIONAL] The original residual block (the chapter's figure 6): two weight layers compute F of x, and the red identity path adds x back before the last ReLU. Step 2: why depth alone fails. The gradient reaching early layers is a product of one factor per layer; if each factor averages 0.9, fifty of them multiply to about 0.005, and early layers stop learning. With a skip, each factor is the identity plus a small term, so the product stays near one; the next slide shows the measured result. Step 3: the cost to the machine. The input x must stay in memory until the add, which raises peak activation memory, and the add does one FLOP per 12 bytes moved, so unfused it is a memory stall. LINK: kernel fusion, Lecture 7; Part 2's transformer block reuses this block. FLEX: cut with the next two slides; say that skip connections let gradients reach early layers.}
+\end{frame}
+
+\begin{frame}{Deeper plain networks train worse; residual ones train better}
+  \begin{columns}[T]
+    \begin{column}{0.49\textwidth}
+      \centering
+      {\normalsize\textbf{Plain}: 20, 32, 44, 56 layers}\\[0.1cm]
+      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{resnet-cifar-plain.png}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \centering
+      \uncover<2->{{\normalsize\textbf{Residual}: 20 to 110 layers}\\[0.1cm]
+      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{resnet-cifar-residual.png}}
+    \end{column}
+  \end{columns}\vspace{0.1cm}
+  \centering
+  {\small CIFAR-10. Dashed: training error. Bold: test error.}\\[0.05cm]
+  \uncover<2->{\small Test error, both with skips: ResNet-56 7.0\%, ResNet-20 8.8\%.}
+  \mlsyscredit{He, Zhang, Ren, and Sun, ``Deep Residual Learning for Image Recognition,'' CVPR 2016, figure 6 (left, middle) and table 6 (arXiv 1512.03385).}
+  \note{[2 min] [OPTIONAL] The most cited measurement behind the residual block, from the paper that introduced it. Step 1, left: plain networks of 20, 32, 44, and 56 layers trained on CIFAR-10. The deeper the network, the higher its error, and the dashed training curves rule out overfitting, because the 56-layer network fits its own training data worse than the 20-layer one. Adding layers made optimization fail. Step 2, right: the same depths with skip connections, plus 110 layers. Now error falls as depth grows. The paper's table 6 gives the test errors: 8.75 percent for ResNet-20 and 6.97 percent for ResNet-56, rounded on the slide; both are residual networks, so the comparison varies depth with skips held fixed. ENGAGE: ``Which curve tells you this is an optimization problem and not overfitting?'' Expected: the dashed training error of plain-56, above plain-20's. LINK: the gradient product of the last slide is the mechanism.}
+\end{frame}
+
+\begin{frame}{LayerNorm works per token; BatchNorm needs the batch}
+  \centering
+  \begin{tikzpicture}[x=0.4cm, y=0.28cm,
+      normgrid/.style={draw=midgray, line width=0.5pt},
+      hl/.style={draw=BlueLine, line width=1.5pt, fill=BlueL}]
+    \foreach \ox/\name/\what/\kind in {0/BatchNorm/{one feature, across the batch}/col,
+                                       10.5/LayerNorm/{one example, its features}/row,
+                                       21/RMSNorm/{one example, no mean}/row} {
+      \begin{scope}[shift={(\ox,0)}]
+        \ifx\kind\colkind \fill[BlueL] (2,0) rectangle (3,-4);
+        \else \fill[BlueL] (0,-1) rectangle (6,-2); \fi
+        \foreach \gx in {0,...,6} \draw[normgrid] (\gx,0) -- (\gx,-4);
+        \foreach \gy in {0,...,4} \draw[normgrid] (0,-\gy) -- (6,-\gy);
+        \ifx\kind\colkind \draw[BlueLine, line width=1.5pt] (2,0) rectangle (3,-4);
+        \else \draw[BlueLine, line width=1.5pt] (0,-1) rectangle (6,-2); \fi
+        \node[font=\small\bfseries, anchor=south, text height=1.7ex, text depth=0.5ex] at (3,0.15) {\name};
+        \node[font=\footnotesize, text=midgray, anchor=north] at (3,-4.15) {\what};
+      \end{scope}
     }
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{FLOPs $\neq$ speed!} MobileNet uses 14$\times$ fewer FLOPs but can run \emph{slower} on datacenter GPUs.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+    \node[font=\footnotesize, text=midgray, anchor=east, align=right] at (-0.2,-2) {rows: examples\\columns: features};
+  \end{tikzpicture}\\[0.15cm]
+  \small
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{@{}l l l l@{}}
+    \toprule
+    & \textbf{BatchNorm} & \textbf{LayerNorm} & \textbf{RMSNorm} \\
+    \midrule
+    Depends on batch size & yes, noisy when small & no & no \\
+    Training and serving & \alert<2->{different (running stats)} & identical & identical \\
+    \bottomrule
+  \end{tabular}\\[0.2cm]
+  \uncover<2->{\normalsize BatchNorm switches to stored averages when it serves, a source of skew.}
+  \mlsyscredit{Network Architectures, \S6.4.2 and Table 4 (Ioffe and Szegedy 2015; Ba et al. 2016; Zhang and Sennrich 2019).}
+  \note{[2 min] [OPTIONAL] Skip connections protect the backward pass; normalization steadies the forward pass by re-centering and re-scaling activations at each block. The chapter's Table 4 compares three kinds. Step 1: BatchNorm computes its mean and variance across the examples in the mini-batch (and, for CNNs, across positions), so its output depends on which other examples share the batch; small batches give noisy statistics, and a batch split across accelerators needs an all-reduce to agree on them. LayerNorm computes them across the features of one token, so it works at batch one and for text generated one token at a time. RMSNorm drops the mean and keeps only the root mean square, a simpler kernel. Typical use: BatchNorm in CNNs, LayerNorm in transformers and RNNs, RMSNorm in Llama-family models. Step 2: the operational cost. BatchNorm keeps running averages and switches to them at serving, so a mismatch between those averages and live data is a frequent source of training-serving skew. All three are elementwise and memory bound. ENGAGE: ``Which one could you use to generate text one token at a time?'' Expected: LayerNorm or RMSNorm. LINK: Part 2's transformer block. FLEX: if cut, Part 2 names LayerNorm in the transformer block.}
 \end{frame}
 
-\begin{frame}{Quick Check}
-\note{
-[0.5 min] Micro-retrieval; 30 seconds student time plus reveal.
-
-% -- NARRATE: What to SAY while showing this slide
-``Quick check---no peeking. What is the memory scaling of Transformer
-attention with respect to sequence length? 30 seconds.''
-After 30 seconds, take one answer aloud. [Expected answer: O(N\^{}2).]
-
-% -- FLEX: [OPTIONAL] Micro-retrieval for spaced practice.
-[OPTIONAL] If running behind, skip this and move directly to RNNs.
-}
-
-\centering
-\Large\bfseries Quick check --- no peeking.\\[0.5cm]
-\normalsize What is the memory scaling of Transformer attention with respect to sequence length?\\[0.3cm]
-{\small 30 seconds --- then we continue.}
+\begin{frame}{Factoring a convolution cuts its work about eight times}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.6cm,keepaspectratio]{depthwise_step}{2}\\[0.3cm]
+  \uncover<2->{\normalsize Depthwise: one 3$\times$3 filter per channel, $9 \times 64 = 576$.\quad Pointwise: $64 \times 64 = 4{,}096$.\\[0.15cm]}
+  \uncover<3->{\normalsize $36{,}864 / 4{,}672 \approx$ {\large\textbf{\textcolor{mlsysaccent}{7.9$\times$}}} fewer, the fraction $\frac{1}{64} + \frac{1}{9}$.}
+  \mlsyscredit{Network Architectures, \S6.3.5 (Howard et al. 2017). Count for 64 channels derived from the chapter's formula.}
+  \note{[2.5 min] Worked example 4. Step 1: a standard 3 by 3 convolution with 64 input and 64 output channels does 3 times 3 times 64 times 64, 36,864 multiply-adds at each output position, because every filter looks at every channel. Step 2: MobileNet factors it into two steps. A depthwise step gives each channel its own 3 by 3 filter, 576 multiply-adds; a pointwise 1 by 1 step mixes the channels, 4,096. Together 4,672. Step 3: about 7.9 times fewer, and the chapter's formula gives the fraction directly as one over the output channels plus one over the filter area. With many channels it approaches 9 times. ENGAGE: ``Where did the saving come from?'' Expected: spatial filtering and channel mixing no longer multiply each other. WARN: hold the conclusion that this makes MobileNet 8 times faster; the next slide tests it. FLEX: [CORE].}
 \end{frame}
 
+\begin{frame}{Check: is 13.7 times fewer FLOPs 13.7 times faster?}
+  \mlsysactivity{Vote}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering\footnotesize
+      \begin{tabular}{@{}lrr@{}}
+        \toprule
+        & \textbf{ResNet50} & \textbf{MobileNetV2} \\
+        \midrule
+        Parameters & 25.6M & 3.5M \\
+        FLOPs/image & 8.2 G & 0.6 G \\
+        Top-1 accuracy & 74.9\% & 71.3\% \\
+        \midrule
+        \uncover<2->{CPU, ms/step} & \uncover<2->{58.2} & \uncover<2->{25.9} \\
+        \uncover<2->{A100 GPU, ms/step} & \uncover<2->{4.6} & \uncover<2->{3.8} \\
+        \bottomrule
+      \end{tabular}\\[0.2cm]
+      {\footnotesize\textcolor{midgray}{Measured rows: Keras Applications, batch 32}}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \large
+      \choice{A}{Yes, about 13.7$\times$ faster}\\[0.2cm]
+      \answer{2}{B}{Faster, but far less}\\[0.2cm]
+      \choice{C}{No faster than ResNet-50}\\[0.35cm]
+      \normalsize\uncover<2->{Measured: \textbf{2.2$\times$} on a CPU, \textbf{1.2$\times$} on an A100.\\[0.1cm]Depthwise layers move more bytes per FLOP and leave matrix units idle.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{FLOPs: Network Architectures, Lighthouses 6.1 and 6.2. Other rows: keras.io/api/applications, retrieved 2026-10-18 (CPU: AMD EPYC, 92 cores).}
+  \note{[3 min] The chapter's fallacy as a vote. The top rows are the published model sizes and accuracies; MobileNetV2 is 3.6 points less accurate. MobileNetV2 is built from the factored convolution of the last slide. ENGAGE: vote, one minute with a neighbor, vote again. Step 2: B, and the bottom rows are the measurement. Keras publishes, for every model in its library, the time per inference step at batch 32: ResNet50 takes 58.2 ms on a 92-core CPU and 4.6 ms on an A100 GPU; MobileNetV2 takes 25.9 and 3.8 ms. That is 2.2 times faster on the CPU and 1.2 times on the GPU, from 13.7 times fewer FLOPs. The chapter adds that in some framework setups it runs no faster than ResNet-50. Its depthwise layers have low intensity and are split into many small kernels (a kernel here is one compiled routine the accelerator runs), so launch overhead and memory traffic dominate. Students who chose C are close, because the chapter reports configurations where it runs no faster. WARN: FLOPs measure work; time depends on the hardware's achieved rate. On a phone CPU, whose small peak is easy to keep busy, MobileNetV2's FLOP savings do turn into speed; that is the hardware it was designed for. FLEX: [CORE].}
+\end{frame}
 
-
-\begin{frame}{RNNs: Sequential Pattern Processing}
-\note{
-[2 min] Sets up the RNN-vs-Transformer trade-off; single-lane highway analogy lands well.
-
-% -- LINK: What prior concept connects to this slide
-CNNs exploited spatial locality for parallelism. RNNs handle sequential
-data but pay a steep systems cost: each step depends on the previous one,
-killing GPU parallelism.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the unrolled RNN diagram: ``Each timestep reads the hidden
-state from the previous step. The GPU cannot start step $t$ until step
-$t-1$ finishes. This sequential dependency limits utilization to 30--50\%.''
-Point to the dashed red line: ``The vanishing gradient---by the time
-gradients reach early timesteps, they have shrunk exponentially. LSTM
-and GRU gates partially solve this but cannot fix the parallelism problem.''
-ANALOGY: ``An RNN is like a single-lane highway---no matter how fast each
-car goes, throughput is limited by sequential flow.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If RNNs have O(1) memory per step, why did Transformers replace
-them for language?'' Give 15 seconds.
-[Expected answer: O(1) memory is great for streaming, but sequential
-processing is too slow for training on modern GPUs.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume RNNs are obsolete.
-Correct framing: RNNs are ideal for streaming edge deployment (O(1) memory,
-low latency per step). They fail at training throughput, not at all tasks.
-
-% -- FLEX: [CORE] Sets up the RNN-vs-Transformer trade-off on the next slide.
-[CORE] The 30--50\% utilization number is referenced in the comparison table.
-IF SHORT: Focus on the sequential bottleneck; skip the vanishing gradient detail.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch06-rnn-unrolled.pdf}
-
-\vspace{0.1cm}
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \centering
-    \textcolor{routingstroke}{\textbf{Strength}}: $O(1)$ memory per step\\
-    {\footnotesize Constant state size, streaming-friendly}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \centering
-    \textcolor{errorstroke}{\textbf{Weakness}}: Sequential bottleneck\\
-    {\footnotesize 30--50\% GPU utilization, gradient vanishes}
-  \end{column}
-\end{columns}
-
+\begin{frame}{In FP32 a keyword spotter fills 76 percent of a microcontroller's flash}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{arduino-nano33-ble-sense.jpg}\\[0.15cm]
+      {\small Arduino Nano 33 BLE Sense Rev2:\\nRF52840, 1 MB flash, 256 KB SRAM, 64 MHz}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{kws_bytes.pdf}
+    \end{column}
+  \end{columns}\vspace{0.3cm}
+  \centering
+  {\normalsize 8-bit weights cut the keyword spotter fourfold and leave room for code and buffers.}
+  \mlsyscredit{Photo and specifications: Arduino, store.arduino.cc (Nano 33 BLE Sense Rev2, ABX00069). KWS: Network Architectures, Lighthouse 6.3 and Table 10 (Warden 2018; Banbury et al. 2021).}
+  \note{[1.5 min] KWS, the keyword-spotting lighthouse: the always-on model that listens for a wake word on a microcontroller with a milliwatt power budget. The photo is a real board used in TinyML courses, small enough to hold between two fingers; its whole memory is 1 MB of flash for code and constants and 256 KB of SRAM for everything that changes while it runs. The keyword spotter is a depthwise separable CNN over a spectrogram, so the factoring of two slides ago is what makes it small. With 200,000 weights it needs 800 KB in FP32, 76 percent of the board's flash before a single line of program code. Stored as 8-bit integers, 200 KB, 19 percent, and it fits with room to spare. ENGAGE: ``The weights fit in flash; what must fit in the 256 KB of SRAM?'' Expected: the activations of the largest layer, the audio buffer, and the runtime. LINK: Lecture 10b covers quantization. FLEX: [OPTIONAL] If short, give the two numbers aloud during the vote's reveal.}
 \end{frame}
 
 % =============================================================================
-\section{Attention}
+% SECTION: RECURRENCE
 % =============================================================================
+\mlsysnote{[0.5 min] From grids to streams, data where order carries the meaning. FLEX: [CORE].}
+\mlsysdivider{What does carrying state through time cost?}{Network Architectures, \S6.5}
+\section{Recurrence}
 
-\begin{frame}{Attention: Dynamic Processing}
-\note{
-[2 min] Walk the QKV diagram; the 32 MB per head calculation drives the point home.
-
-% -- LINK: What prior concept connects to this slide
-RNNs process sequentially with O(1) memory. Attention replaces fixed
-sequential processing with learned, content-dependent routing---but at
-O(N\^{}2) memory cost.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the QKV diagram: ``Query asks `what am I looking for?'
-Key says `what do I contain?' Value says `here is my content.'
-The attention matrix computes relevance between ALL pairs of elements.
-For 4096 tokens, that matrix is 4096x4096 = 16M entries. At 2 bytes
-each (FP16), that is 32 MB per layer per head.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If you double the sequence length from 4096 to 8192, how much
-more attention memory do you need?'' Give 10 seconds.
-[Expected answer: 4x---quadratic scaling.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think attention is expensive because of the
-dot products. In reality, the bottleneck is \emph{materializing} the
-NxN matrix in HBM---it is a memory problem, not a compute problem.
-IF STUCK: ``Think about where the NxN matrix lives during computation.''
-
-% -- FLEX: [CORE] O(N\^{}2) scaling is the defining constraint of Transformers.
-[CORE] This sets up the memory budget exercise two slides later.
-IF AHEAD: ``How does FlashAttention avoid materializing this matrix?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ch06-attention-mechanism.pdf}
-
-\vspace{0.05cm}
-\mlsysalert{Key:}{Doubling sequence length \textbf{quadruples} attention memory --- $O(N^2)$ is permanent.}
-
-\end{frame}
-
-\mlsysfocus{The Attention Trade-off}{%
-\begin{minipage}{0.8\textwidth}\centering
-\large
-RNN: $O(1)$ memory, $O(N)$ sequential steps\\[0.5cm]
-Transformer: $O(N^2)$ memory, $O(1)$ information depth\\[0.5cm]
-\normalsize\textcolor{white}{Choose your constraint: time or space.}
-\end{minipage}%
-}
-\note{
-[0.5 min] Hold this slide for 20--30 seconds. Let students read silently.
-
-% -- NARRATE: What to SAY while showing this slide
-Read the two lines aloud slowly. ``RNN: constant memory per step, but
-N sequential steps to see the whole sequence. Transformer: one pass, full
-context---but at the cost of N-squared memory.''
-Then: ``Every architecture choice is a trade between physical resources.
-Time or space. You cannot have both for free.''
-
-% -- FLEX: [CORE] Most dramatic visual moment in the lecture.
-[CORE] Do not skip---it crystallizes the RNN-vs.-Transformer contrast.
-IF SHORT: Read the two lines, say `choose your constraint,' move on in 15 seconds.
-}
-
-\begin{frame}{The Transformer Architecture}
-\note{
-[2 min] The 33/67 attention/FFN FLOP split is a key misconception target.
-
-% -- LINK: What prior concept connects to this slide
-The focus frame just presented the RNN-vs-Transformer trade-off. This
-slide dissects the Transformer block to show where compute actually goes.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the diagram: ``Two sub-layers per block. Multi-head attention
-is 33\% of FLOPs but owns the O(N\^{}2) memory. The feed-forward MLP
-is 67\% of FLOPs---it is the computational workhorse, not attention.''
-Point to skip connections: ``These gradient highways enable stacking
-100+ layers. Without them, training collapses beyond 20 layers.''
-Point to parallelization card: ``All N tokens processed simultaneously---
-this is why Transformers replaced RNNs for training throughput.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which sub-layer would you optimize first to speed up a Transformer:
-attention or FFN?'' Give 15 seconds.
-[Expected answer: FFN---it accounts for 67\% of FLOPs. But attention
-dominates memory, so the answer depends on whether you are compute-bound
-or memory-bound.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume attention is the expensive part because
-it gets all the research attention. The FFN is actually the larger
-compute cost per block.
-Correct framing: attention dominates \emph{memory}; FFN dominates \emph{compute}.
-
-% -- FLEX: [CORE] Students must understand the two-sub-layer anatomy.
-[CORE] The 33/67 split recurs in Ch8 (training optimization).
-IF SHORT: Skip the parallelization card; keep the diagram walkthrough.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{ch06-transformer-block.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Two sub-layers per block:}
-
-    \vspace{0.15cm}
-    \textcolor{computestroke}{\textbf{Multi-Head Attention}}\\
-    {\footnotesize $\sim$33\% of FLOPs, $O(N^2)$ memory}
-
-    \vspace{0.1cm}
-    \textcolor{routingstroke}{\textbf{Feed-Forward MLP (4$\times$ hidden)}}\\
-    {\footnotesize $\sim$67\% of FLOPs, dense MatMul}
-
-    \vspace{0.1cm}
-    \textcolor{datastroke}{\textbf{Skip + LayerNorm}}\\
-    {\footnotesize Enables training 100+ layer networks}
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{computestroke}
-    {\footnotesize \textbf{Parallelization:} All $N$ tokens processed simultaneously --- vs.\ RNN's $N$ sequential steps.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: Attention Memory Budget}
-\note{
-[3 min] Active learning exercise; give 90 seconds for calculation plus peer instruction.
-
-% -- LINK: What prior concept connects to this slide
-Students learned O(N\^{}2) attention memory two slides ago. Now they
-must calculate the concrete memory cost for a real model configuration.
-
-% -- NARRATE: What to SAY while showing this slide
-``Time for math. A Transformer with 4096 tokens, 32 heads, 32 layers.
-How much memory just for attention matrices?'' Present the problem (30s).
-After 90 seconds, use peer instruction: if 30--70\% get it right, have
-pairs discuss for 90s, then re-vote. Then reveal.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students calculate individually (90s), then compare with a neighbor.
-Per head: 4096\^{}2 * 2 bytes = 32 MB.
-Total: 32 heads * 32 layers * 32 MB = 32 GB.
-This exceeds a single GPU's memory for the attention matrix alone.
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students forget to multiply by number of heads AND layers.
-They compute per-head correctly but miss the 32*32 multiplier.
-IF STUCK: ``Start with one head, one layer. Then scale up.''
-
-% -- FLEX: [CORE] This exercise makes O(N\^{}2) viscerally concrete.
-[CORE] The 32 GB number motivates FlashAttention in Ch8.
-IF AHEAD: ``What if we use FP32 instead of FP16?'' [Answer: 64 GB.]
-IF SHORT: Show the solution immediately and walk through the arithmetic.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.58\textwidth}
-    {\small\bfseries Calculate Attention Memory}
-
-    \vspace{0.1cm}
-    A Transformer processes $N = 4{,}096$ tokens.
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Attention matrix: $N \times N$ in FP16 (2 bytes/entry)
-      \item Model: 32 layers, 32 heads per layer
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Calculate:} (1) Memory per attention matrix, (2) Total across all heads/layers
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.38\textwidth}
-    \pause
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Solution:}\\[0.05cm]
-    {\footnotesize
-    Per head: $4096^2 \times 2 = $ \textbf{32 MB}\\[0.05cm]
-    Total: $32 \times 32 \times 32$ MB = \textbf{32 GB}\\[0.05cm]
-    \textcolor{errorstroke}{\textbf{Exceeds a single GPU!}}
+\begin{frame}{A recurrent network carries one state vector through time}
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \foreach \t/\lab/\s in {0/{t{-}1}/1, 1/{t}/2, 2/{t{+}1}/3, 3/{t{+}2}/4} {
+      \uncover<\s->{
+      \node[blk=GreenLine, minimum width=2.1cm, minimum height=1.3cm, font=\Large] (h\t) at (3.6*\t,0) {$h_{\lab}$};
+      \node[blk=midgray, minimum width=1.3cm, minimum height=0.8cm, font=\large] (x\t) at (3.6*\t,-1.9) {$x_{\lab}$};
+      \draw[arr] (x\t) -- (h\t);
+      }
     }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{Transformer Compute Cost}
-\note{
-[2 min] Quantitative FLOP analysis; the 45,000x GPT-2-to-GPT-3 gap is viscerally memorable.
-
-% -- LINK: Students just saw the Transformer block anatomy (33\% attention,
-% 67\% FFN). This slide derives the exact FLOP count so students can
-% calculate training and inference costs for any Transformer configuration.
-
-% -- NARRATE: Walk through the formula.
-``The total FLOPs for a Transformer forward pass scale as $12 \times L
-\times H^2 \times S$ where $L$ is layers, $H$ is hidden dimension, and
-$S$ is sequence length. For GPT-2 (12 layers, 768 hidden, 1024 tokens):
-$\sim$7 GFLOPs per forward pass. GPT-3 (96 layers, 12288 hidden, 2048
-tokens): $\sim$314 TFLOPs per forward pass. That is a 45,000$\times$
-gap from GPT-2 to GPT-3.''
-
-% -- ENGAGE: ``GPT-3 has 100$\times$ more parameters than GPT-2.
-% Why is the FLOP count 45,000$\times$ more, not 100$\times$?''
-% Give 15 seconds. [Expected answer: FLOPs scale with $H^2$, so doubling
-% hidden dimension quadruples FLOPs. Plus longer sequences.]
-
-% -- WARN: Students will confuse parameter count with FLOP count.
-% Parameters scale as $O(H^2)$, FLOPs scale as $O(H^2 \times S)$.
-% Sequence length is the multiplicative factor students forget.
-
-% -- FLEX: [CORE] Quantitative FLOP analysis for Transformers.
-% IF SHORT: Show the formula and the GPT-2 vs GPT-3 comparison only.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Transformer forward pass FLOPs:}
-
-    \vspace{0.1cm}
-    {\small $\text{FLOPs} \approx 12 \times L \times H^2 \times S$}
-
-    \vspace{0.1cm}
-    {\scriptsize
-    \begin{tabular}{@{}ll@{}}
-      $L$ & Number of layers \\
-      $H$ & Hidden dimension \\
-      $S$ & Sequence length \\
-    \end{tabular}
+    \foreach \a/\b/\s in {0/1/2, 1/2/3, 2/3/4} {
+      \uncover<\s->{\draw[arr, color=RedLine, line width=1.4pt] (h\a) -- node[above, font=\normalsize, text=RedLine] {$W_{hh}$} (h\b);}
     }
+  \end{tikzpicture}\\[0.5cm]
+  \uncover<2->{\normalsize Each step: $128 \times 128 + 100 \times 128 = 29{,}184$ multiply-adds.\\[0.1cm]}
+  \uncover<4->{\normalsize 1,000 tokens means 1,000 updates in order. Each waits for the last.}
+  \mlsyscredit{Network Architectures, \S6.5.2 and \S6.5.5 (Elman 1990). Step count: \S6.5 self-check.}
+  \note{[2.5 min] Build it one link at a time. Step 1: the state h is a running summary of everything seen so far, updated from the previous state and the new input. h sub t equals tanh of W sub hh times h sub t minus 1, plus W sub hx times x sub t, plus a bias. Step 2: the first link. With input width 100 and state width 128, one step is 128 times 128 plus 100 times 128, 29,184 multiply-adds, and the same weights serve every step, so the weight count does not depend on sequence length. Steps 3 and 4: the red arrows are the problem, because step t cannot start until step t minus 1 has finished. A 1,000-token sequence is 1,000 ordered updates however many arithmetic units the chip has. WARN: "parallel hardware fixes this" is wrong; the chip can parallelize across sequences in a batch and within each matrix product, never along time. FLEX: [CORE].}
+\end{frame}
 
-    \vspace{0.1cm}
-    \textbf{Training} adds $\sim$2$\times$ (backward pass):
-    $$\text{Train FLOPs} \approx 6 \times N \times D$$
-    {\scriptsize where $N$ = parameters, $D$ = tokens processed.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \renewcommand{\arraystretch}{1.1}
-    {\scriptsize
-    \begin{tabular}{@{}lrr@{}}
-      \toprule
-      & \textbf{GPT-2} & \textbf{GPT-3} \\
-      \midrule
-      Layers & 12 & 96 \\
-      Hidden & 768 & 12,288 \\
-      Seq len & 1,024 & 2,048 \\
-      Params & 117M & 175B \\
-      Fwd FLOPs & $\sim$7G & $\sim$314T \\
-      \textbf{Ratio} & \multicolumn{2}{c}{\textbf{45,000$\times$}} \\
-      \bottomrule
-    \end{tabular}
-    }
+\begin{frame}{Predict: ten times the FLOP/s, how much faster?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      {\normalsize One 1,000-step sequence at batch one. New accelerator: 10$\times$ the peak FLOP/s, same memory.}\\[0.25cm]
+      \large
+      \choice{A}{About 10$\times$ faster}\\[0.15cm]
+      \choice{B}{About 3$\times$ faster}\\[0.15cm]
+      \answer{2}{C}{Barely faster}\\[0.15cm]
+      \small\uncover<2->{Still 1,000 steps in order.}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \begin{uncoverenv}<3->
+      \centering\footnotesize
+      \textbf{Vaswani et al. 2017, tables 1 and 2}\\[0.1cm]
+      \begin{tabular}{@{}lc@{}}
+        \toprule
+        Layer type & Sequential operations \\
+        \midrule
+        Recurrent & $O(n)$ \\
+        Self-attention & $O(1)$ \\
+        \bottomrule
+      \end{tabular}\\[0.2cm]
+      \begin{tabular}{@{}lrr@{}}
+        \toprule
+        English to German & BLEU & Training FLOPs \\
+        \midrule
+        GNMT + RL (recurrent) & 24.6 & $2.3 \times 10^{19}$ \\
+        Transformer (base) & 27.3 & $3.3 \times 10^{18}$ \\
+        \bottomrule
+      \end{tabular}\\[0.2cm]
+      {\small Better translation from 7$\times$ less training compute.}
+      \end{uncoverenv}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, \S6.5.4 and \S6.5.5. Tables: Vaswani et al., ``Attention Is All You Need,'' NeurIPS 2017 (arXiv 1706.03762), excerpted.}
+  \note{[3 min] ENGAGE: students vote before the reveal. Step 2: C. Two reasons stack. First, the 1,000 steps stay in order. Second, each step at batch one is the same matrix-vector product as the dense layer, about 0.5 FLOP per byte if FP32 weights stream from DRAM (about 1 with 16-bit weights), so memory bandwidth and launch overhead limit the step, and arithmetic waits. More FLOP/s shortens almost nothing. What helps: batching many independent sequences (more reuse per weight read), keeping the recurrent weights on chip, and fusing each step into one kernel. WARN: students who chose A are applying "faster chip, faster model", which holds only for compute-bound work. This is the iron law's lesson in miniature. Step 3: the published record of what the field did next. Table 1 of the transformer paper counts the sequential operations per layer: n for a recurrent layer over n tokens, a constant for self-attention, so attention trains all positions at once. Table 2 shows the payoff on English to German translation, where the base Transformer scored 27.3 BLEU against 24.6 for Google's recurrent GNMT system, with 7 times less training compute. Next lecture prices what attention pays instead. FLEX: [CORE].}
+\end{frame}
 
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize FLOPs scale with $H^2 \times S$. Doubling hidden dimension \textbf{quadruples} compute.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}[fragile]{An LSTM step costs four plain steps; training keeps every state}
+  \begin{columns}[T]
+    \begin{column}{0.50\textwidth}
+      \centering
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          gate/.style={draw=white, line width=0.8pt, minimum width=1.05cm, minimum height=0.9cm,
+            font=\footnotesize\bfseries, text=darktext}]
+        \node[font=\footnotesize, align=center] (in) at (-0.4,0) {$x_t$\\$h_{t-1}$};
+        \node[gate, fill=BlueL] (g1) at (1.2,0) {input};
+        \node[gate, fill=OrangeL] (g2) at (2.25,0) {forget};
+        \node[gate, fill=GreenL] (g3) at (3.3,0) {cand.};
+        \node[gate, fill=RedL] (g4) at (4.35,0) {output};
+        \draw[midgray, line width=1pt, rounded corners=2pt] (0.67,-0.45) rectangle (4.88,0.45);
+        \draw[->, line width=1pt, midgray] (in.east) -- (0.67,0);
+        \draw[->, line width=1pt, midgray] (4.88,0) -- (5.4,0) node[right, font=\footnotesize] {$c_t, h_t$};
+        \node[font=\footnotesize, anchor=north] at (2.78,-0.5) {one matrix, 512 rows $= 4 \times 128$};
+      \end{tikzpicture}\\[0.15cm]
+\begin{semiverbatim}\scriptsize
+>{}>{}> lstm = nn.LSTM(input_size=100,
+... hidden_size=128)
+>{}>{}> lstm.weight_ih_l0.shape
+torch.Size([512, 100])
+>{}>{}> lstm.weight_hh_l0.shape
+torch.Size([512, 128])
+\end{semiverbatim}
+      {\small 4$\times$ the weights and MACs of a plain step.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering
+      \uncover<2->{%
+      \begin{tikzpicture}[>={Stealth[length=5pt]},
+          st/.style={draw=BlueLine, fill=BlueL, line width=1pt, rounded corners=2pt,
+            minimum width=0.66cm, minimum height=0.58cm, font=\footnotesize}]
+        \node[font=\small\bfseries, anchor=west] at (0,1.25) {Inference: one state};
+        \node[st] (s) at (0.4,0.45) {$h$};
+        \draw[->, line width=1pt, BlueLine] (s.north east) to[out=30, in=-30, looseness=4] (s.south east);
+        \node[font=\footnotesize, anchor=west, align=left] at (1.55,0.45) {overwritten every step:\\512 wide, 2 KB at any length};
+        \node[font=\small\bfseries, anchor=west] at (0,-0.5) {Training: one state per step};
+        \foreach \k/\t in {0/$h_1$, 1/$h_2$, 2/$h_3$, 3/$h_4$} {
+          \node[st] (t\k) at (0.5+0.85*\k,-1.3) {\t};
+        }
+        \foreach \a/\b in {0/1, 1/2, 2/3} {\draw[->, line width=0.9pt, BlueLine] (t\a) -- (t\b);}
+        \node[font=\small] at (4.0,-1.3) {$\cdots$};
+        \node[st] (tT) at (4.75,-1.3) {$h_T$};
+        \node[font=\footnotesize, anchor=north] at (2.6,-1.7) {all kept for backward: 1,000 steps, 1,000 states};
+      \end{tikzpicture}}\\[0.35cm]
+      \raggedright
+      \uncover<3->{\textcolor{mlsysaccent}{\textbf{Next lecture removes the serial chain and pays for it in memory.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, \S6.5.2, \S6.5.3, and \S6.5.5 (Hochreiter and Schmidhuber 1997). Console: run here, PyTorch 2.14.1 (images/torch\_shapes.py); layout: torch.nn.LSTM documentation.}
+  \note{[2 min] Step 1: a plain recurrent step has one affine map. An LSTM adds gates, elementwise valves between zero and one, as input, forget, and output gates plus a candidate update, four affine maps, so four times the weights and four times the multiply-adds per step. The forget gate lets the cell state, the second state vector, pass forward almost unchanged, so gradients cross many steps. In the real PyTorch console, an LSTM with input width 100 and state width 128 stores its input weights as one 512 by 100 matrix and its recurrent weights as one 512 by 128 matrix. The documentation for torch.nn.LSTM names the blocks: weight\_ih\_l[k] is (W\_ii|W\_if|W\_ig|W\_io), of shape (4*hidden\_size, input\_size). The four gate maps are fused into one matrix multiply four times as wide, which is the chapter's claim that every family lowers onto GEMM; it raises intensity but does not shorten the chain. Step 2: memory. At inference a recurrent network keeps only its current state, 2 KB for a 512-wide FP32 vector, at any stream length. Training by backpropagation through time keeps a state for every step, so training memory grows with sequence length. Step 3: say the bridge aloud. ENGAGE: ``Why is a fixed 2 KB state attractive on a microcontroller?'' Expected: memory does not grow with the stream. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Sparse \& RecSys}
+% SECTION: COMPARING
 % =============================================================================
+\mlsysnote{[0.5 min] Three families, five models. Put them side by side. FLEX: [CORE].}
+\mlsysdivider{How do these three families compare on one machine?}{Network Architectures, \S6.9 and \S6.10}
+\section{Comparing}
 
-\begin{frame}{DLRM: Sparse Architectures}
-\note{
-[2 min] Completes the five-lighthouse set; the capacity-bottleneck regime is new to most students.
-
-% -- LINK: What prior concept connects to this slide
-All previous architectures (MLP, CNN, RNN, Transformer) use dense operations.
-DLRM is fundamentally different: the bottleneck is raw memory \emph{capacity},
-not compute or bandwidth.
-
-% -- NARRATE: What to SAY while showing this slide
-``DLRM powers recommendation systems at Meta, Google, TikTok. The core
-operation is not matrix multiplication---it is embedding table lookups.
-Each user ID and item ID maps to a row in a table with 25 billion+ entries.
-Each lookup is a random memory access, not a dense computation. This makes
-DLRM the worst case for GPU caches---random access patterns defeat
-spatial locality.''
-Point to the table: ``Arithmetic intensity far below 1. The GPU's compute
-units sit idle while memory fetches rows from terabytes of DRAM.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why can't you just put DLRM embedding tables in GPU HBM?''
-Give 10 seconds. [Expected answer: tables are 100+ GB in production;
-GPU HBM is 80 GB max. The tables do not fit.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students try to apply GPU optimization strategies
-(batching, fusion) to DLRM. These do not help because the bottleneck
-is capacity, not compute or bandwidth.
-Correct framing: DLRM requires a fundamentally different system design---
-distributed memory across many machines, SSD-backed embedding tables.
-
-% -- FLEX: [CORE] DLRM represents a completely different bottleneck regime.
-[CORE] Completes the five-lighthouse set.
-IF SHORT: Cover the capacity bottleneck; skip the random access detail.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Deep Learning Recommendation Model}
-
-    \vspace{0.05cm}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \textbf{Data}: Categorical features (user ID, item ID)
-      \item \textbf{Core op}: Embedding table lookups, not MatMul
-      \item \textbf{Tables}: 25B+ entries, 100+ GB in production
-      \item \textbf{Access}: Random, sparse --- worst case for caches
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    Neither compute nor bandwidth but \alert{raw memory capacity} is the binding constraint.
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \renewcommand{\arraystretch}{1.1}
-    {\scriptsize
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Property} & \textbf{Value} \\
-      \midrule
-      Embed.\ entries & 25B+ \\
-      Table size & 100+ GB \\
-      Arith.\ intensity & $\ll 1$ \\
-      Access pattern & Random \\
-      GPU utilization & Very low \\
-      \bottomrule
-    \end{tabular}
-    }
-  \end{column}
-\end{columns}
-
+\begin{frame}{Your turn: what limits each of today's models?}
+  \mlsysactivity{Diagnose}{3 min}
+  \centering\small
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}l l r l@{}}
+    \toprule
+    \textbf{Model} & \textbf{Family} & \textbf{FLOP/byte} & \textbf{Binding limit} \\
+    \midrule
+    Dense layer, batch one & MLP & 0.5 & \uncover<2->{\textbf{\textcolor{BlueLine}{Memory bandwidth}}} \\
+    ResNet-50 & CNN & 80.2 & \uncover<3->{\textbf{\textcolor{OrangeLine}{Compute}}} \\
+    MobileNetV2 & depthwise CNN & 42.8 & \uncover<4->{\textbf{\textcolor{OrangeLine}{Compute (phone latency)}}} \\
+    KWS (DS-CNN) & depthwise CNN & 25 & \uncover<5->{\textbf{\textcolor{GreenLine}{Power, milliwatts}}} \\
+    RNN, 1,000 steps & recurrent & 0.5 per step & \uncover<6->{\textbf{\textcolor{RedLine}{The serial chain}}} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Network Architectures, equation 2 and Table 8 (FLOPs over FP32 weight bytes, a weight-only proxy); \S6.5.5; Lighthouses 6.1 to 6.3.}
+  \note{[4 min] ENGAGE: two minutes in pairs to fill the last column from today, then reveal row by row (steps 2 to 6), asking one pair per row for its reasoning. The intensity column is the chapter's weight-only proxy with FP32 weights. Dense layer at batch one: each weight read once, 0.5 FLOP per byte, so memory bandwidth binds; batching is the fix. ResNet-50: each filter reused across the image puts it above the machine's balance when batched, so peak FLOP/s binds. MobileNetV2: built to meet a latency target on a phone; on a datacenter GPU its small kernels underuse the matrix units. KWS: 200K weights on a microcontroller listening all day; the budget is milliwatts. The RNN: each step is the dense layer again, but its real limit is the chain of 1,000 ordered steps, which neither compute nor bandwidth removes. WARN: deployment budgets or dependencies bind the last three rows, and intensity alone does not predict them. If time allows, ask: ``Which row changes if you batch 64 requests?'' (the dense layer moves toward compute; the RNN's chain does not shorten). FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{DLRM at Meta: Production Numbers}
-\note{
-[1.5 min] Grounds DLRM's capacity bottleneck in real production scale.
-
-% -- LINK: Students just learned DLRM's architectural properties. This slide
-% grounds them with real production numbers from Meta's recommendation system.
-
-% -- NARRATE: Walk through the numbers.
-``Meta's DLRM serves billions of recommendations per day. The embedding
-tables total 10+ TB across the fleet. Each inference touches 50--100 tables.
-A single recommendation requires reading scattered rows from TB-scale
-tables---the antithesis of dense MatMul.''
-
-% -- ENGAGE: ``If each recommendation reads 100 embedding rows of 128
-% floats each, how much data is accessed per inference?''
-% Give 10 seconds. [Expected answer: 100 $\times$ 128 $\times$ 4 = 50 KB.
-% But scattered across TB of memory, defeating all caching.]
-
-% -- WARN: Students will try to apply GPU optimization strategies (batching,
-% fusion) to DLRM. These help the dense MLP part but not the embedding
-% lookups---the dominant cost.
-
-% -- FLEX: [OPTIONAL] Concrete production numbers for DLRM.
-% IF SHORT: Show the table for 20 seconds; emphasize the TB-scale challenge.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Meta DLRM Production System:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item {\scriptsize Serves \textbf{billions} of recommendations/day}
-      \item {\scriptsize Embedding tables: \textbf{10+ TB} across fleet}
-      \item {\scriptsize Each inference: 50--100 table lookups}
-      \item {\scriptsize DLRM accounts for \textbf{$>$50\%} of Meta's AI training compute}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{System design:} Distributed across 100s of machines. SSD-backed embedding tables. Custom hardware (ZionEX) with high-bandwidth memory pooling.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \renewcommand{\arraystretch}{1.05}
-    {\scriptsize
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Metric} & \textbf{Value} \\
-      \midrule
-      Daily inferences & Billions \\
-      Total embed.\ size & 10+ TB \\
-      Tables per query & 50--100 \\
-      Latency budget & $<$50 ms \\
-      \% of AI compute & $>$50\% \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    \mlsysalert{Key:}{Recommendation is the largest AI workload at Meta---not LLMs.}
-  \end{column}
-\end{columns}
-\mlsyscite{Naumov et al., ``Deep Learning Recommendation Model,'' 2019}
-
+\begin{frame}{The Prize scored one column; shipping scores all of them}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{netflix-prize.jpg}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\small]
+        \node[blk=GreenLine, minimum width=5.6cm] at (0,2.4) {\textbf{Accuracy}: the Prize measured this};
+        \foreach \y/\t in {1.4/{Weights and where they live}, 0.5/{Multiply-adds per request}, -0.4/{Bytes moved per request}, -1.3/{Engineering to run it at 5B ratings}}
+          \node[blk=midgray, minimum width=5.6cm, minimum height=0.7cm] at (0,\y) {\t};
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{War Story 6.1; Amatriain and Basilico, Netflix Tech Blog, 2012.}
+  \note{[2 min] Return to the hook. The contest scored one column, accuracy on a fixed dataset. The columns built today are what production pays for, namely how many weights and where they live, how many multiply-adds and bytes each request costs, and whether the work runs in parallel or in a chain. A blend of over a hundred models multiplies all of them. Netflix kept the two pieces whose costs it could pay. Next lecture adds two columns, memory that grows with the input, and tables larger than the device, which is where the Netflix recommender itself lives. ENGAGE: "If you were Netflix's engineer in 2009, which column would you have measured first?" Accept any of the gray ones with a reason; the point is that the answer is not accuracy. FLEX: [CORE].}
 \end{frame}
 
-% =============================================================================
-\section{Building Blocks}
-% =============================================================================
-
-\begin{frame}{Shared Building Blocks Across Architectures}
-\note{
-[2 min] Three primitives that enable depth; skip connections as a structural requirement, not an optimization.
-
-% -- LINK: What prior concept connects to this slide
-We have seen five architectures with different biases and bottlenecks.
-Now we identify three building blocks that transfer across all of them---
-the common infrastructure underneath the diversity.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each row: ``Skip connections: born in ResNets, now in every
-Transformer block. They create gradient highways that enable training
-beyond 20 layers. Normalization: rescales activations to prevent
-explosion or collapse. Gating: learned switches that selectively retain
-or forget state---LSTM invented this, Transformers inherited it.''
-``These are prerequisites, not optimizations. Without skip connections,
-you cannot train deep networks at all.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What would happen to a 100-layer Transformer if you removed all
-skip connections?'' Give 10 seconds.
-[Expected answer: training would fail---gradients would vanish or explode
-without the identity shortcut.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students treat these as optional performance tricks.
-Correct framing: skip connections and normalization are structural
-requirements for depth. Removing them breaks training, not just slows it.
-
-% -- FLEX: [CORE] These three primitives appear in every modern architecture.
-[CORE] Skip connections are referenced in the Key Takeaways.
-IF SHORT: Focus on skip connections only; mention normalization and gating
-in passing.
-}
-
-\footnotesize
-\textbf{Three primitives that enable deep networks:}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.1}
-{\scriptsize
-\begin{tabular}{@{}lp{3cm}p{3cm}l@{}}
-  \toprule
-  \textbf{Block} & \textbf{What It Does} & \textbf{Why It Matters} & \textbf{Used In} \\
-  \midrule
-  \textbf{Skip Conn.} & $y = F(x) + x$ & Gradient highway, trains 100+ layers & ResNet, Transf. \\
-  \textbf{Norm.} & Rescale activations & Prevents explosion/collapse & All modern nets \\
-  \textbf{Gating} & Learned switches & Selectively retains/forgets state & LSTM, GRU, Transf. \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{datastroke}
-These are \textbf{prerequisites}, not optimizations. Without skip connections, networks cannot train beyond $\sim$20 layers. Born in CNNs/RNNs, they transfer to every modern architecture.
-\end{mlsyscard}
-
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.25cm}
+    \item Each architecture bets on the data's structure; a matching bet saves weights and data.
+    \item Dense layers at batch one do 0.5 FLOP per byte with FP32 weights; convolution reuses each weight at every position.
+    \item A convolution becomes a matrix multiply by unfolding its patches, at up to $K^2$ times the input memory.
+    \item Skip connections and normalization make depth trainable; each adds memory traffic.
+    \item Recurrence holds state fixed and pays in serial steps.
+  \end{itemize}
+  \note{[1.5 min] One line per idea. Ask students to circle the one they could not have explained an hour ago. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Computational Primitives}
-\note{
-[1.5 min] Dense MatMul vs. MatVec utilization difference is the key number.
-
-% -- LINK: What prior concept connects to this slide
-Building blocks are the architectural patterns. Computational primitives
-are the low-level operations those blocks reduce to on hardware.
-
-% -- NARRATE: What to SAY while showing this slide
-``Every architecture, no matter how complex, reduces to five types of
-primitive operations. Dense MatMul---matrix times matrix---maps perfectly
-to GPUs at 80--95\% utilization. MatVec is bandwidth-bound because one
-operand is a vector. Sparse lookups (DLRM) are capacity-bound. Reductions
-(softmax, LayerNorm) are bandwidth-bound because they read all data but
-produce a small result.''
-Point to the mapping rule: ``Maximize time spent in dense MatMul. That is
-the engineering goal.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which primitive dominates during GPT-2 inference: MatMul or MatVec?''
-Give 10 seconds. [Expected answer: MatVec---during autoregressive
-generation, each step multiplies the weight matrix by a single token vector.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume all matrix operations are equally fast.
-Correct framing: MatMul (matrix*matrix) achieves 80--95\% utilization;
-MatVec (matrix*vector) achieves 10--30\%. The shape of the operands
-determines GPU efficiency.
-
-% -- FLEX: [OPTIONAL] Reinforces the roofline model concepts.
-[OPTIONAL] Safe to abbreviate if running short.
-IF SHORT: Show the table for 30 seconds; state the mapping rule; move on.
-}
-
-\scriptsize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lllrl@{}}
-  \toprule
-  \textbf{Primitive} & \textbf{Operation} & \textbf{Bottleneck} & \textbf{FLOPs/B} & \textbf{GPU Util.} \\
-  \midrule
-  \textbf{Dense MatMul} & Matrix $\times$ Matrix & Compute & 200+ & 80--95\% \\
-  \textbf{MatVec} & Matrix $\times$ Vector & Bandwidth & $\sim$2 & 10--30\% \\
-  \textbf{Sparse Lookup} & Embedding gather & Capacity & $\ll 1$ & $<$10\% \\
-  \textbf{Reduction} & Softmax, LayerNorm & Bandwidth & 5--8 & 15--30\% \\
-  \textbf{Elementwise} & ReLU, Add & Bandwidth & 0.1 & $<$5\% \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\footnotesize
-\mlsysconcept{Mapping rule:}{Dense MatMul achieves 80--95\% GPU utilization. Everything else: 10--50\%. Maximize time in dense MatMul.}
-
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.4cm}
+    \item If weak priors win at scale, is there still a reason to design architectures by hand?
+    \item Mamba keeps recurrence's fixed state and trains in parallel. Is a fixed state worth giving up attention's direct links?
+    \item When is a few percent of accuracy worth building a new system?
+  \end{itemize}
+  \note{[1 min] No single answer. The first is the bitter lesson against the edge budgets of MobileNet and KWS. The second previews next lecture. State-space models such as Mamba keep a fixed decode-time state like an RNN and train with a parallel scan (Gu and Dao 2023), trading attention's direct links between tokens for memory that does not grow. The third is the Netflix question. Ask students to write one sentence on one of them. FLEX: [OPTIONAL].}
 \end{frame}
 
-% =============================================================================
-\section{Selection}
-% =============================================================================
-
-\begin{frame}{Architecture Selection Framework}
-\note{
-[2 min] Two-phase decision flowchart; the zero-utility rule for constraint violations lands strongly.
-
-% -- LINK: What prior concept connects to this slide
-Students now know five architectures, their biases, their bottlenecks,
-and their primitives. This slide provides the decision framework for
-choosing among them.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the flowchart: ``Two phases. Phase 1: match your data type
-to architecture candidates---spatial data suggests CNN, sequential suggests
-RNN or Transformer. Phase 2: validate against deployment constraints---
-memory, latency, power. Failing ANY constraint means the model has zero
-utility regardless of accuracy. The retry loop forces scaling down or
-switching architecture entirely.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``A model achieves 99\% accuracy but exceeds the memory budget by
-10\%. Is it deployable?'' Give 10 seconds.
-[Expected answer: no---violating any deployment constraint means zero
-utility. 99\% accuracy is irrelevant if it cannot run.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students evaluate architecture by accuracy first, then
-try to fit it into constraints afterward.
-Correct framing: constraints are hard gates. Filter by constraints first,
-then maximize accuracy within the feasible set.
-
-% -- FLEX: [CORE] This flowchart is the practical tool students take away.
-[CORE] Directly used in the Discussion exercise next.
-IF AHEAD: ``What if no architecture meets all constraints?'' [Answer:
-change the constraints or change the problem.]
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-architecture-selection-flowchart.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Rule:}{A model that violates any deployment constraint has \textbf{zero utility} --- regardless of accuracy.}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.2cm}
+    \item \textbf{Read:} Network Architectures, \S6.1 to \S6.5, and the self-checks (mlsysbook.ai).
+    \item \textbf{Practice:} the TinyTorch convolution module.
+    \item He et al., ``Deep Residual Learning for Image Recognition,'' CVPR 2016.
+    \item Howard et al., ``MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications,'' 2017 (arXiv 1704.04861).
+    \item Chetlur et al., ``cuDNN: Efficient Primitives for Deep Learning,'' 2014 (arXiv 1410.0759).
+  \end{itemize}
+  \note{[1 min] The chapter first; \S6.3.3 has the im2col miniature in full and \S6.4 the normalization comparison. He et al. is the residual network; Howard et al. introduced the depthwise separable factoring; Chetlur et al. describe how a library lowers convolution onto matrix multiply. FLEX: [OPTIONAL] Replace a paper with your own lab or TinyTorch module.}
 \end{frame}
 
-\begin{frame}{Architecture Complexity Comparison}
-\note{
-[1.5 min] Summary table; students scan it while you narrate two key columns only.
-
-% -- LINK: What prior concept connects to this slide
-The selection flowchart identifies candidates. This comparison table
-provides the quantitative data to choose among them.
-
-% -- NARRATE: What to SAY while showing this slide
-``No single best architecture. CNNs dominate spatial perception at 80--95\%
-GPU utilization. Transformers master reasoning but cost O(N\^{}2) memory.
-RNNs have zero parallelism---30--50\% utilization. DLRM needs terabytes
-of memory for embedding tables.''
-Point to the bottom card: ``Match bias to data, validate against constraints.
-That is the full decision procedure.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If you have spatial data and an edge device with 4 GB RAM, which
-column do you pick?'' Give 10 seconds.
-[Expected answer: CNN---spatial bias matches the data, and CNNs fit in
-small memory budgets.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students default to Transformers for everything because
-of recent hype.
-Correct framing: Transformers are the most flexible but the most expensive.
-For spatial data on edge, a CNN or MobileNet variant is the right choice.
-
-% -- FLEX: [OPTIONAL] The table summarizes what students already know.
-[OPTIONAL] If running short, let students read it; do not narrate every cell.
-IF SHORT: Point to the CNN and Transformer columns only; move to Discussion.
-}
-
-\scriptsize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}llllll@{}}
-  \toprule
-  & \textbf{MLP} & \textbf{CNN} & \textbf{RNN} & \textbf{Transformer} & \textbf{DLRM} \\
-  \midrule
-  \textbf{Bias}    & None    & Spatial      & Temporal     & Learned      & Categorical \\
-  \textbf{Params}  & $O(d^2)$  & $O(K^2 C)$ & $O(d^2)$   & $O(d^2)$   & $O(\text{vocab})$ \\
-  \textbf{Memory}  & Linear  & Linear       & $O(1)$/step  & $O(N^2)$     & TB-scale \\
-  \textbf{Parallel}& Full    & Full         & None         & Full         & Full \\
-  \textbf{GPU util.}& 80--90\% & 80--95\%   & 30--50\%     & 50--80\%     & 10--30\% \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\footnotesize
-\begin{mlsyscard}{crimson}
-No single ``best'' architecture. CNNs dominate spatial perception. Transformers master reasoning at quadratic cost. DLRM needs TB-scale memory. \textbf{Match bias to data, validate against constraints.}
-\end{mlsyscard}
-
-\end{frame}
-
-% --- Quantitative Exercise ---
-\begin{frame}{Your Turn: Jetson Orin Throughput}
-\note{
-[3 min] Quantitative deployment exercise; 60 seconds individual then reveal.
-
-% -- LINK: Students just saw the selection framework and comparison table.
-% This exercise forces them to apply quantitative reasoning to a real
-% deployment constraint.
-
-% -- NARRATE: Present the problem (30s). Individual work (60s).
-``You need to process 1000 images per second on a Jetson Orin NX (100 TOPS
-INT8). ResNet-50 takes 5 ms per image. ViT-B takes 12 ms. Which fits?
-What batch size is needed?''
-
-% -- ENGAGE: Students calculate individually (60s), then compare.
-% ResNet-50: 1/5ms = 200 img/s per stream. Need 1000/200 = 5 parallel
-% streams. At batch=5: 5$\times$5ms = 25ms per batch of 5 = 200 batches/s
-% = 1000 img/s. Fits!
-% ViT-B: 1/12ms = 83 img/s. Need 1000/83 = 12 streams. But 12$\times$340MB
-% = 4 GB weights alone. 32 GB RAM, activations scale too. Tight.
-
-% -- WARN: Students will divide peak TOPS by model FLOPs.
-% Correct framing: use measured latency, not theoretical peak.
-% Real utilization on edge is 30--50\% of peak TOPS.
-
-% -- FLEX: [CORE] Practical deployment calculation.
-% IF SHORT: Show the solution immediately; emphasize the memory constraint.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\small\bfseries Edge Deployment Calculation}
-
-    \vspace{0.1cm}
-    \textbf{Target}: 1,000 images/sec on \textbf{Jetson Orin NX}\\
-    (100 TOPS INT8, 32 GB LPDDR5)
-
-    \vspace{0.1cm}
-    Measured inference latency (batch=1):
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item ResNet-50: \textbf{5 ms/image}
-      \item ViT-B: \textbf{12 ms/image}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Calculate:} Which model meets the target?\\
-    What batch size is needed?
-
-    {\footnotesize\textcolor{midgray}{(60 seconds --- then compare)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.05cm]
-    {\scriptsize
-    ResNet: $1/5\text{ms} = 200$ img/s\\
-    Need batch $\geq 5$ for 1000 img/s\\
-    Memory: $5 \times 98$ MB = 490 MB\\
-    \textcolor{datastroke}{\textbf{Fits easily!}}\\[0.1cm]
-    ViT-B: $1/12\text{ms} = 83$ img/s\\
-    Need batch $\geq 12$ for 1000 img/s\\
-    Memory: $12 \times 340$ MB = 4 GB\\
-    \textcolor{routingstroke}{\textbf{Tight on 32 GB}}
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Pick the Architecture}
-\note{
-[2.5 min] Turn and talk (90s) plus cold-call debrief (60s).
-
-% -- LINK: What prior concept connects to this slide
-Students just saw the selection framework and comparison table. This
-exercise forces them to apply both to a concrete scenario with real
-constraints.
-
-% -- NARRATE: What to SAY while showing this slide
-``Turn and talk with your neighbor for 90 seconds. A startup has a
-vision model on an edge device: 4 GB RAM, 100 ms latency. They trained
-a ViT with 86M parameters requiring 340 MB weights. Should they deploy
-it? If not, what architecture should they use?''
-After 90 seconds, take a show-of-hands poll across the four options.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students discuss in pairs for 90 seconds. The question is falsifiable:
-ViT attention memory at inference will exceed the budget for long sequences,
-and the 100 ms latency target is hard to meet without compilation.
-Cold-call 2--3 pairs for their reasoning.
-[Expected answer: ViT is risky---quadratic memory on 4 GB is tight.
-CNN or MobileNet variant is the safer choice for spatial data on edge.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students say ``just quantize the ViT to INT8.''
-Correct framing: quantization halves weight memory (170 MB) but does not
-fix the O(N\^{}2) attention memory scaling. At high resolution, attention
-memory can exceed the budget even with quantized weights.
-
-% -- FLEX: [CORE] This is the chapter's primary application exercise.
-[CORE] Must complete this discussion before moving to Wrap-Up.
-IF SHORT: Do a show-of-hands poll (30s) instead of full turn-and-talk.
-}
-
-\centering
-\vspace{0.5cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.4cm}
-{\normalsize A startup deploys a vision model on an edge device\\
-with \textbf{4 GB RAM} and a \textbf{100 ms latency} target.\\[0.2cm]
-Their ML team trained a Vision Transformer (ViT)\\
-with 86M parameters requiring 340 MB weights.}
-
-\vspace{0.3cm}
-\alert{Should they deploy this model? If not, what architecture?}
-
-\vspace{0.2cm}
-\begin{columns}[c]
-  \begin{column}{0.20\textwidth}\centering\footnotesize Deploy ViT\end{column}
-  \begin{column}{0.20\textwidth}\centering\footnotesize Switch to CNN\end{column}
-  \begin{column}{0.20\textwidth}\centering\footnotesize Switch to MobileNet\end{column}
-  \begin{column}{0.20\textwidth}\centering\footnotesize Quantize ViT\end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
-\section{Wrap-Up}
-% =============================================================================
-
-\begin{frame}{Fallacies}
-\note{
-[2 min] Four fallacies; read each with its quantitative rebuttal.
-
-% -- LINK: What prior concept connects to this slide
-Students applied the selection framework in the discussion exercise.
-These fallacies show what goes wrong when people skip that framework.
-
-% -- NARRATE: What to SAY while showing this slide
-Read each fallacy and its rebuttal. Emphasize the numbers:
-``CNN hits 99\% on MNIST with 421K params vs.\ MLP's 20M---complexity
-is not a proxy for performance.''
-``Transformer at 50 ms on A100 becomes 2,000 ms on mobile---a 40x
-slowdown because mobile lacks HBM.''
-``MobileNet uses 14x fewer FLOPs but runs slower on datacenter GPUs---
-FLOPs do not predict speed.''
-``KV cache at 2048 tokens, 32 layers, 32 heads, head\_dim=128: $\approx$1 GB per user (FP16).
-Four concurrent users rival model weight memory.''
-
-% -- FLEX: [CORE] Fallacies reinforce the chapter's quantitative reasoning.
-[CORE] Each fallacy maps to a specific concept from the lecture.
-IF SHORT: Cover fallacies 1 and 3 (complexity and FLOPs); skip 2 and 4.
-}
-
-\footnotesize
-\textbf{Fallacy:} \textit{More complex architectures always perform better.}\\
-CNN: 99\% on MNIST with 421K params. MLP: 98\% with 20M params. Defaulting to Transformers for tabular data wastes 5--10$\times$ resources.
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{Architecture performance transfers across hardware.}\\
-Transformer at 50 ms on A100 $\to$ 2,000 ms on mobile SoC (40$\times$ slowdown, no HBM).
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{FLOPs determine inference speed.}\\
-MobileNet: 14$\times$ fewer FLOPs than ResNet but runs \emph{slower} on datacenter GPUs (low intensity starves ALUs).
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{KV cache is a minor serving cost.}\\
-Seq 2,048, 32 layers $\times$ 32 heads, head\_dim=128, FP16: each user needs $\approx$1 GB KV cache. At 4 users, rivals model weights.
-
-\end{frame}
-
-\begin{frame}{Pitfalls}
-\note{
-[2 min] Operational mistakes; each maps to a systems failure students will encounter.
-
-% -- LINK: What prior concept connects to this slide
-Fallacies are wrong beliefs; pitfalls are operational mistakes that follow
-from correct knowledge applied carelessly.
-
-% -- NARRATE: What to SAY while showing this slide
-``Pitfall 1: selecting by accuracy alone. A Transformer at sequence 2048
-needs 16x more memory than at 512. You hit latency SLAs, you drop to
-25\% GPU efficiency.''
-``Pitfall 2: mixing architectural patterns without profiling. Adding
-attention to a CNN flushes feature maps from cache---ResNet drops from
-250 to 80 img/s, a 3x hit.''
-``Pitfall 3: designing for training hardware. Your 8xA100 cluster has
-640 GB; your edge device has 4 GB---a 160x gap that quantization alone
-cannot bridge.''
-
-% -- FLEX: [CORE] Operational pitfalls complement the conceptual fallacies.
-[CORE] These are real-world mistakes students will encounter in projects.
-IF SHORT: Cover pitfalls 1 and 3; skip pitfall 2.
-}
-
-\footnotesize
-\textbf{Pitfall:} \textit{Selecting architectures based solely on accuracy.}\\
-Transformers: seq 2,048 needs 16$\times$ more memory than 512. Miss latency SLAs (100 ms $\to$ 500 ms), 25\% GPU efficiency.
-
-\vspace{0.08cm}
-\textbf{Pitfall:} \textit{Combining patterns without profiling interactions.}\\
-Attention + CNN flushes feature maps from cache. ResNet: 250 img/s $\to$ 80 img/s (3$\times$ drop).
-
-\vspace{0.08cm}
-\textbf{Pitfall:} \textit{Designing for training hardware, ignoring deployment.}\\
-8$\times$ A100 cluster (640 GB) $\to$ 4 GB edge device = 160$\times$ gap. Requires architectural changes, not just quantization.
-
-\end{frame}
-
-
-\begin{frame}{Muddiest Point}
-\note{
-[1 min] Diagnostic tool; collect responses before students leave.
-
-% -- NARRATE: What to SAY while showing this slide
-``One-minute paper. Write down the muddiest point---the concept that was
-most confusing or unclear. Hand it in on your way out or submit digitally.
-I will open next lecture by addressing the top 2--3 muddiest points.''
-
-% -- FLEX: [CORE] Diagnostic tool for the instructor.
-[CORE] Collect responses to open the next lecture with targeted clarification.
-IF SHORT: Ask students to submit digitally after class instead of in person.
-}
-
-\centering
-\Large\bfseries One-minute paper\\[0.5cm]
-\normalsize Write down the \textbf{muddiest point} from today's lecture.\\[0.2cm]
-{\small What concept was most confusing or unclear?}\\[0.5cm]
-{\footnotesize\textcolor{midgray}{(Hand in on your way out --- or submit digitally)}}
-\end{frame}
-
-% --- RETRIEVAL PRACTICE ---
-\begin{frame}{What Were the Key Ideas?}
-\note{
-[1.5 min] Retrieval practice; 90 seconds writing then hold for Key Takeaways.
-
-% -- NARRATE: What to SAY while showing this slide
-``Close your notes. Write down the four most important concepts from today.
-90 seconds, no peeking.'' Walk around the room to monitor engagement.
-Do NOT show the Key Takeaways slide yet.
-
-% -- FLEX: [CORE] Retrieval practice is the highest-impact learning activity.
-[CORE] Students must write before seeing the answer slide.
-IF SHORT: Reduce to 60 seconds.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
-\end{frame}
-
-\begin{frame}{Key Takeaways}
-\note{
-[2 min] Reveal after retrieval practice; walk each bullet with its quantitative anchor.
-
-% -- LINK: What prior concept connects to this slide
-Students just did retrieval practice. This slide reveals the answers
-so they can compare against their own lists.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through each bullet with its quantitative anchor:
-``Inductive bias unifies all architectures---locality, sequence, global context.''
-``Arithmetic intensity spans roughly 80x from ResNet to GPT-2---about two orders of magnitude.''
-``O(N\^{}2) attention is permanent---it constrains deployment.''
-``Five lighthouses, five bottlenecks: compute, bandwidth, capacity, latency, power.''
-``FLOPs do not equal speed---MobileNet proves it.''
-``Skip connections enable depth---prerequisite, not optimization.''
-``Architecture equals deployment---the model determines your infrastructure.''
-
-% -- FLEX: [CORE] Consolidates the lecture.
-[CORE] Read all bullets; emphasize the numbers.
-IF SHORT: Read bullets 1, 3, and 7; let students read the rest.
-}
-
-\footnotesize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Inductive bias unifies all architectures}: Locality (CNN), sequence (RNN), global context (Transformer). Bias trades generality for efficiency.
-  \item \textbf{Arithmetic intensity determines bottleneck}: High (CNN) = compute-bound. Low (GPT-2) = memory-bound. $\approx$80$\times$ gap.
-  \item \textbf{$O(N^2)$ is permanent}: Transformer attention scales quadratically. This constrains deployment.
-  \item \textbf{Lighthouses isolate bottlenecks}: ResNet (compute), GPT-2 (bandwidth), DLRM (capacity), MobileNet (latency), KWS (power).
-  \item \textbf{FLOPs $\neq$ speed}: MobileNet uses 14$\times$ fewer FLOPs but runs slower on datacenter GPUs.
-  \item \textbf{Skip connections enable depth}: Prerequisites for networks beyond $\sim$20 layers.
-  \item \textbf{Architecture = deployment}: The model determines memory, latency, power, and cost.
-\end{itemize}
-
-\end{frame}
-
-\begin{frame}{References}
-\note{
-[0.5 min] Point to the slide; do not read citations aloud.
-
-% -- NARRATE: What to SAY while showing this slide
-``These are the canonical papers behind today's content. He et al.\ for
-ResNets, Vaswani et al.\ for Transformers, Howard et al.\ for MobileNets.
-Read at least the abstracts before next class.''
-
-% -- FLEX: [OPTIONAL] Reference slides are for student self-study.
-[OPTIONAL] Do not read citations aloud; point students to the slide.
-}
-
-\small
-\mlsysref{He+16}{K. He et al. ``Deep Residual Learning for Image Recognition.'' CVPR 2016.}
-\mlsysref{Vaswani+17}{A. Vaswani et al. ``Attention Is All You Need.'' NeurIPS 2017.}
-\mlsysref{Howard+17}{A. Howard et al. ``MobileNets.'' arXiv 2017.}
-\mlsysref{Naumov+19}{M. Naumov et al. ``Deep Learning Recommendation Model (DLRM).'' arXiv 2019.}
-\mlsysref{Radford+19}{A. Radford et al. ``Language Models are Unsupervised Multitask Learners.'' 2019.}
-\mlsysref{Bahdanau+14}{D. Bahdanau et al. ``Neural Machine Translation by Jointly Learning to Align.'' 2014.}
-
-\end{frame}
-
-\begin{frame}{Next Lecture: ML Frameworks}
-\note{
-[1 min] Forward hook; end on the compiler-enforces-the-contract metaphor.
-
-% -- LINK: What prior concept connects to this slide
-We now have the architectural blueprints---five lighthouses, their biases,
-their bottlenecks. The next chapter asks: how do we actually build and
-run these architectures on hardware?
-
-% -- NARRATE: What to SAY while showing this slide
-``We have the blueprints. Now we need the tools. PyTorch, TensorFlow,
-and JAX translate these high-level graphs into low-level kernels that
-run on silicon. The contract with physics that we signed today? The
-framework compiler is what enforces it.''
-
-% -- FLEX: [CORE] Forward hook must connect to Ch7.
-[CORE] Keep to 1 minute. End on the compiler metaphor.
-}
-
-\footnotesize
-\centering
-\vspace{0.3cm}
-{\large We have the \textbf{blueprints}. Now we need the \textbf{tools}.}
-
-\vspace{0.4cm}
-\begin{columns}[c]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{computestroke}
-    {\normalsize\bfseries PyTorch}\\[0.1cm]
-    {\scriptsize Eager execution\\Dynamic graphs}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{datastroke}
-    {\normalsize\bfseries TensorFlow}\\[0.1cm]
-    {\scriptsize Graph-based\\Production serving}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{routingstroke}
-    {\normalsize\bfseries JAX}\\[0.1cm]
-    {\scriptsize Functional transforms\\XLA compilation}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.3cm}
-{\normalsize How do frameworks translate architecture graphs\\into the low-level kernels that run on silicon?}\\[0.1cm]
-{\small\textbf{The ``contract with physics'' signed here is enforced by the compiler.}}
-
-\end{frame}
-
-
-% =============================================================================
-% BACKUP SLIDES
-% =============================================================================
-\appendix
-
-\begin{frame}{Backup: KV Cache Memory Calculation}
-\note{
-[1 min] Use if students want to understand KV cache scaling in detail.
-
-% -- NARRATE: Use if students want to understand KV cache scaling in detail.
-Per layer, per head: $2 \times N \times d_k$ values (K and V).
-With $N=2048$, $d_k=128$, FP16: $2 \times 2048 \times 128 \times 2 = 2$ MB per head per layer.
-32 heads $\times$ 32 layers = $\approx$2 GB just for KV cache at 2K context.
-Chapter canonical (KVCacheServingPitfall LEGO): layers=32, heads=32, head\_dim=128, seq=2048, FP16 → 1.07 GB.
-
-% -- FLEX: [OPTIONAL] Backup slide for advanced questions.
-}
-\small
-Use if students want to understand KV cache scaling.
-
-\vspace{0.2cm}
-\textbf{Formula}: Per layer, per head: $2 \times N \times d_k$ values (K and V).
-
-\vspace{0.1cm}
-\textbf{Chapter example} (32 layers, 32 heads, $d_k=128$, seq=2,048, FP16):
-$$32 \times 2 \times 32 \times 2048 \times 128 \times 2 \text{ bytes} \approx \textbf{1 GB per request}$$
-
-\vspace{0.1cm}
-\begin{mlsyscard}{errorstroke}
-{\scriptsize At 4 concurrent users: $\approx$4 GB KV cache alone.
-This rivals the model weights---making KV cache the binding serving constraint.}
-\end{mlsyscard}
-\end{frame}
-
-\begin{frame}{Backup: Why FLOPs Do Not Predict Speed}
-\note{
-[1 min] Use if students question the MobileNet paradox.
-
-% -- NARRATE: Use if students question the MobileNet paradox.
-
-% -- FLEX: [OPTIONAL] Backup slide for the FLOPs paradox.
-}
-\small
-Use if students question the MobileNet paradox.\\
-MobileNet: 300 MFLOPs but low arithmetic intensity ($\sim$21 FLOPs/byte).\\
-ResNet-50: 4.1 GFLOPs but high intensity ($\sim$40 FLOPs/byte).\\
-On datacenter GPUs, ResNet saturates tensor cores; MobileNet starves them.\\
-Result: MobileNet can be \emph{slower} despite 14$\times$ fewer FLOPs.
-\end{frame}
-
-\begin{frame}{Backup: The Architecture Arms Race}
-\note{
-[1 min] Use when students ask whether architecture choice matters in practice.
-
-% -- NARRATE: War story about architecture selection gone wrong.
-% Use when students ask ``does architecture choice really matter in practice?''
-
-% -- FLEX: [OPTIONAL] Motivational backup for industry context.
-}
-\footnotesize
-\textbf{War Story: When Architecture Meets Production}
-
-\vspace{0.1cm}
-In 2020, a major cloud provider migrated their image classification pipeline from ResNet-50 to ViT-B, expecting accuracy gains. Results:
-
-\vspace{0.05cm}
-\scriptsize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lrr@{}}
-  \toprule
-  & \textbf{ResNet-50} & \textbf{ViT-B} \\
-  \midrule
-  Accuracy & 76.1\% & 77.9\% (+1.8\%) \\
-  Latency (A100) & 3.2 ms & 8.7 ms \\
-  Memory/request & 98 MB & 340 MB \\
-  Serving cost & \$1.00 & \$2.70 \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.05cm}
-\footnotesize
-\begin{mlsyscard}{errorstroke}
-{\scriptsize \textbf{Lesson}: 1.8\% accuracy gain cost 2.7$\times$ more to serve. The team reverted to ResNet-50 with better data augmentation, achieving 77.5\% accuracy at the original cost.}
-\end{mlsyscard}
-\end{frame}
-
-\begin{frame}{Backup: Architecture Memory Cheat Sheet}
-\note{
-[0.5 min] Quick reference for assignments and projects.
-
-% -- NARRATE: Quick reference for architecture memory scaling.
-% -- FLEX: [OPTIONAL] Reference slide for assignments and projects.
-}
-\scriptsize
-\renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}lllll@{}}
-  \toprule
-  \textbf{Architecture} & \textbf{Weight Memory} & \textbf{Activation Memory} & \textbf{Total (batch=32)} & \textbf{Fits On} \\
-  \midrule
-  MLP (784-1024-10) & 3.2 MB & 128 KB $\times$ B & $\sim$7 MB & Any \\
-  ResNet-50 & 98 MB & 2 MB $\times$ B & $\sim$162 MB & Mobile \\
-  GPT-2 (117M) & 468 MB & 50 MB $\times$ B & $\sim$2 GB & Edge GPU \\
-  GPT-2 XL (1.5B) & 6 GB & 200 MB $\times$ B & $\sim$12 GB & Datacenter \\
-  DLRM (production) & 100+ GB & Minimal & 100+ GB & Fleet \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{crimson}
-{\scriptsize \textbf{Rule of thumb}: Weights determine if the model \emph{fits}. Activations determine if a \emph{batch} fits. Architecture determines both.}
-\end{mlsyscard}
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} NETWORK ARCHITECTURES, PART 2}}\\[0.5cm]
+  {\LARGE\bfseries Why do transformers and recommenders\\wait on memory?}
+  \note{[0.5 min] Today priced the families whose weights are fixed. Next time: attention, whose cost grows with the square of its input, and the recommender, whose tables may not fit the device. Ask students to read 6.6 to 6.8 before then. FLEX: [CORE].}
 \end{frame}
 
 \end{document}

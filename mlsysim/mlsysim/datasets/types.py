@@ -25,7 +25,30 @@ class DatasetProfile(BaseModel):
     total_duration: Optional[Quantity] = None
     embodiments: Optional[int] = None
     tasks: Optional[int] = None
+    # Tabular click-log feature counts (added 2026-10-20): integer-valued
+    # (dense) and categorical columns per example, e.g. Criteo's 13 and 26.
+    dense_features: Optional[int] = Field(default=None, ge=1)
+    categorical_features: Optional[int] = Field(default=None, ge=1)
+    # Size of the distributed (compressed) training-split archive, e.g. the
+    # ILSVRC-2012 training tarball (added 2026-09-28).
+    training_archive_size: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("training_archive_size", mode="after")
+    @classmethod
+    def _validate_training_archive_size(cls, v):
+        if v is None:
+            return v
+        return require_unit_family(v, ureg.byte, "training_archive_size", "data")
+
+    @property
+    def mean_compressed_image_size(self) -> Optional[Quantity]:
+        """Mean compressed (as-distributed) bytes per training example:
+        training_archive_size / training_examples. None if either is unset."""
+        if self.training_archive_size is None or self.training_examples is None:
+            return None
+        n = self.training_examples.to(ureg.count).magnitude
+        return (self.training_archive_size / n).to(ureg.byte)
 
     @field_validator("training_examples", "full_examples", "validation_examples", "test_examples", "episodes", mode="after")
     @classmethod

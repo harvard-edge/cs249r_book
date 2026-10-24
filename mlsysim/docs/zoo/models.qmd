@@ -2,16 +2,43 @@
 title: "The Model Zoo"
 subtitle: "Reference Workloads for Systems Modeling"
 ---
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+
+_ds = mlsysim.Models.Language.DeepSeek_V3
+_ds_total_b = _ds.parameters.to("Bparam").magnitude
+_ds_active_b = _ds.active_parameters.to("Bparam").magnitude
+
+_mix = mlsysim.Models.Language.Mixtral_8x7B
+_mix_total_b = _mix.parameters.to("Bparam").magnitude
+_mix_active_b = _mix.active_parameters.to("Bparam").magnitude
+
+_llama70 = mlsysim.Models.Language.Llama3_70B
+_llama70_b = _llama70.parameters.to("Bparam").magnitude
+_llama70_fp16_gb = _llama70.size_in_bytes("fp16").to("GB").magnitude
+
+_a100_gib = mlsysim.Hardware.Cloud.A100.memory.capacity.to("GiB").magnitude
+_a100_gb = mlsysim.Hardware.Cloud.A100.memory.capacity.to("GB").magnitude
+_h200_gib = mlsysim.Hardware.Cloud.H200.memory.capacity.to("GiB").magnitude
+_stm32_kib = mlsysim.Hardware.Tiny.STM32F4.memory.capacity.to("KiB").magnitude
+_esp32_mib = mlsysim.Hardware.Tiny.ESP32_S3.memory.capacity.to("MiB").magnitude
+_jetson_nano_gib = mlsysim.Hardware.Edge.JetsonOrinNano.memory.capacity.to("GiB").magnitude
+_jetson_agx_gib = mlsysim.Hardware.Edge.JetsonAGXOrin.memory.capacity.to("GiB").magnitude
+```
+
 The Model Zoo defines the **Computational Demand** placed on the hardware. Every workload is
 pulled from the `mlsysim.Models` registry and characterized by its FLOPs, parameter count, and
-architecture type—independent of any specific hardware.
+architecture type, independent of any specific hardware.
 
 ::: {.callout-tip}
 ## Arithmetic Intensity = FLOPs ÷ Bytes
-The key number for roofline analysis is each model's **arithmetic intensity**—how many floating-point
+The key number for roofline analysis is each model's **arithmetic intensity**, the number of floating-point
 operations it performs per byte of memory loaded. Models with low arithmetic intensity (small batch,
 decoder-only inference) tend to be memory-bound on any hardware. Pair these specs with the
-[Silicon Zoo](hardware.qmd) to find your bottleneck.
+[Silicon Zoo](hardware.qmd) to find the bottleneck.
 :::
 
 ## Workload Types
@@ -22,13 +49,13 @@ MLSys·im supports five workload architectures, each with distinct scaling chara
 |:-----|:-------------|:-------------------|:---------------|
 | **Transformer** | Dense attention | 2P FLOPs/token; KV-cache grows with sequence length | GPT-4, LLaMA, BERT |
 | **CNN** | Convolutional | Fixed FLOPs per image; no sequence dependence | ResNet-50, EfficientNet |
-| **Sparse (MoE)** | Mixture-of-Experts | Active params ≪ total params; All-to-All dispatch | Mixtral, GShard |
+| **Sparse (MoE)** | Mixture-of-Experts | Active params ≪ total params; All-to-All dispatch | Mixtral, DeepSeek-V3 |
 | **SSM (Mamba)** | State-space model | O(1) state cache; linear-time sequence processing | Mamba, S4 |
 | **Diffusion** | Iterative denoising | T × FLOPs/step; latency scales with denoising steps | Stable Diffusion, DALL-E |
 
 ::: {.callout-note}
 ## Active vs. Total Parameters
-For Sparse/MoE models, `parameters` refers to total parameters (used for memory sizing), while `active_parameters` refers to the subset active per token (used for FLOP counting). This distinction is critical: a 340B MoE model may use only 47B parameters per forward pass.
+For Sparse/MoE models, `parameters` refers to total parameters (used for memory sizing), while `active_parameters` refers to the subset active per token (used for FLOP counting). This distinction matters: `{python} _ds.name` stores `{python} f"{_ds_total_b:.0f}B"` total parameters but activates `{python} f"{_ds_active_b:.0f}B"` per token, and `{python} _mix.name` stores `{python} f"{_mix_total_b:.1f}B"` total parameters while activating `{python} f"{_mix_active_b:.1f}B"` per forward pass.
 :::
 
 ---
@@ -38,8 +65,6 @@ For Sparse/MoE models, `parameters` refers to total parameters (used for memory 
 ```{python}
 #| echo: false
 #| output: asis
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-
 def auto_scale(q):
     if q is None: return "---"
     if q.is_compatible_with('flop'):
@@ -84,21 +109,21 @@ else:
 
 ### Parameters vs. Inference FLOPs
 
-These two numbers tell very different stories:
+These two numbers measure different things:
 
-- **Parameters** determine memory footprint: at fp16, each parameter is 2 bytes. A 70B-parameter model needs ~140 GB just for weights — more than a single A100.
+- **Parameters** determine memory footprint: at fp16, each parameter is 2 bytes. `{python} _llama70.name` (`{python} f"{_llama70_b:.1f}B"` parameters) needs `{python} f"{_llama70_fp16_gb:.1f} GB"` for the weights alone, more than a single `{python} f"{_a100_gib:.0f} GiB"` (`{python} f"{_a100_gb:.1f} GB"`) A100 holds.
 - **Inference FLOPs** determine compute time: the total floating-point operations for one forward pass. Higher FLOPs means more work for the GPU's compute cores.
 
 The ratio of FLOPs to memory accessed (the **arithmetic intensity**) determines whether a workload is compute-bound or memory-bound. At small batch sizes, most models are memory-bound because the weights must be loaded regardless of batch size.
 
-### Which Model for Which Hardware?
+### Matching Models to Hardware
 
 As a rough guide:
 
-- **TinyML MCUs** (KB-scale memory) — only `Tiny` models fit (MobileNetV2, TinyBERT)
-- **Edge devices** (Jetson, 8-32 GB) — small Vision and Language models at int8
-- **Single Cloud GPU** (40-80 GB) — models up to ~30B parameters at fp16
-- **Multi-GPU clusters** — 70B+ models require distributed serving or training
+- **TinyML MCUs** (`{python} f"{_stm32_kib:.0f} KiB–{_esp32_mib:.0f} MiB"` memory): only `Tiny` models fit (DS-CNN, MicroSpeech, WakeVision)
+- **Edge devices** (Jetson, `{python} f"{_jetson_nano_gib:.0f}–{_jetson_agx_gib:.0f} GiB"`): small Vision and Language models at int8
+- **Single Cloud GPU** (`{python} f"{_a100_gib:.0f}–{_h200_gib:.0f} GiB"`): models up to ~30B parameters at fp16 on an `{python} f"{_a100_gib:.0f} GiB"` GPU
+- **Multi-GPU clusters**: `{python} f"{_llama70_b:.1f}B"`+ models in fp16 require distributed serving or training
 
 ### Textbook Connection
 
@@ -107,15 +132,15 @@ The *Model Training* and *Model Serving* chapters use these workload profiles to
 ---
 
 ::: {.callout-note}
-## Add your own model
-Defining custom workloads is straightforward. You can extend the registry or define a
-`TransformerWorkload` (or `CNNWorkload`, `SSMWorkload`, `DiffusionWorkload`) object directly in your code.
-Learn more in the [Contributing Guide](../contributing.qmd) and the [Models API Reference](../api/models.qmd).
+## Adding a custom model
+Custom workloads are straightforward to define: extend the registry, or define a
+`TransformerWorkload` (or `CNNWorkload`, `SSMWorkload`, `DiffusionWorkload`) object directly in code.
+Learn more in the [Contributing Guide](../contributing.qmd) and the [Models API Reference](../api/models.types.Workload.qmd).
 :::
 
 ::: {.callout-tip}
 ## CLI Access
-Browse the Model Zoo from your terminal: `mlsysim zoo models`
+Browse the Model Zoo from the terminal: `mlsysim zoo models`
 :::
 
-*For dynamic memory footprint and KV-cache calculations, see the [API Reference](../api/models.qmd).*
+*For dynamic memory footprint and KV-cache calculations, see the [API Reference](../api/models.types.TransformerWorkload.qmd).*

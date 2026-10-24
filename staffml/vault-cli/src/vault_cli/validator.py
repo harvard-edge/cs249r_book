@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vault_cli.loader import LoadedQuestion
+from vault_cli.ml_systems_taxonomy import load_taxonomy
 from vault_cli.paths import is_lowercase, vault_questions_root
 from vault_cli.yaml_io import load_file
 
@@ -136,6 +137,10 @@ def fast_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
     return failures
 
 
+# The curated StaffML topic registry (87 topics, prerequisite edges).
+TOPIC_REGISTRY = "schema/taxonomy_data.yaml"
+
+
 def _load_yaml_set(vault_dir: Path, filename: str, key: str) -> set[str]:
     """Load ``{vault_dir}/{filename}`` and extract IDs from its top-level ``key`` list."""
     path = vault_dir / filename
@@ -155,8 +160,10 @@ def structural_tier(
     """Structural invariants — CI-tier checks."""
     failures: list[InvariantFailure] = []
 
-    # #11: every `topic` exists in taxonomy.yaml
-    known_topics = _load_yaml_set(vault_dir, "taxonomy.yaml", "topics")
+    # #11: every `topic` exists in the topic registry. Until 2026-10-22 this
+    # read vault/taxonomy.yaml, which no longer exists, so the check silently
+    # passed; it now reads schema/taxonomy_data.yaml, the curated registry.
+    known_topics = _load_yaml_set(vault_dir, TOPIC_REGISTRY, "topics")
     if known_topics:
         for lq in loaded:
             if lq.question.topic not in known_topics:
@@ -166,7 +173,7 @@ def structural_tier(
                         "topic-in-taxonomy",
                         qid=lq.id,
                         path=lq.path,
-                        message=f"topic {lq.question.topic!r} not found in taxonomy.yaml",
+                        message=f"topic {lq.question.topic!r} not found in {TOPIC_REGISTRY}",
                     )
                 )
 
@@ -304,12 +311,38 @@ def structural_tier(
     # #15: applicability matrix respected — no questions in excluded (track, topic) cells (B.8).
     failures.extend(_check_applicability(loaded, vault_dir))
 
+    # #20 (2026-10-22): ML Systems Taxonomy tags cite identities that exist.
+    failures.extend(_check_ml_systems_taxonomy(loaded, vault_dir))
+
     # #19 (2026-05-04): published YAMLs follow the AUTHORING.md marker
     # convention on common_mistake / napkin_math, as a corpus-wide invariant.
     # Drafts are exempt — author-in-progress drafts may not yet be marker-
     # compliant, and `vault check --strict` runs against the published set.
     failures.extend(_check_format_markers(loaded))
 
+    return failures
+
+
+def _check_ml_systems_taxonomy(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFailure]:
+    taxonomy = load_taxonomy(vault_dir)
+    if taxonomy is None:
+        return []
+    subjects, concepts, retired = set(taxonomy.subjects), set(taxonomy.concepts), taxonomy.retired
+    failures: list[InvariantFailure] = []
+    for lq in loaded:
+        q = lq.question
+        if q.taxonomy_concepts and not q.taxonomy_subject:
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message="taxonomy_concepts requires a taxonomy_subject"))
+        if q.taxonomy_subject and q.taxonomy_subject not in subjects:
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message=f"taxonomy_subject {q.taxonomy_subject!r} is not a subject in the ML Systems Taxonomy"))
+        for c in q.taxonomy_concepts or []:
+            if c in concepts:
+                continue
+            hint = f"; retired, replaced by {retired[c]!r}" if c in retired else ""
+            failures.append(_fail("structural", "taxonomy-tags", qid=lq.id, path=lq.path,
+                                  message=f"taxonomy concept {c!r} is not in the ML Systems Taxonomy{hint}"))
     return failures
 
 
@@ -360,22 +393,25 @@ def _check_format_markers(loaded: list[LoadedQuestion]) -> list[InvariantFailure
 
 
 def _check_taxonomy_dag(vault_dir: Path) -> list[InvariantFailure]:
-    """Invariant #14: taxonomy prerequisite edges form a DAG (B.8 / §5)."""
-    tax_path = vault_dir / "taxonomy.yaml"
+    """Invariant #14: topic prerequisite edges form a DAG (B.8 / §5).
+
+    Edges are declared per topic in schema/taxonomy_data.yaml as
+    ``edges: [{target, edge_type: prerequisite}]``; other edge types
+    (related, hierarchical) may cycle and are ignored.
+    """
+    tax_path = vault_dir / TOPIC_REGISTRY
     if not tax_path.exists():
         return []
     data = load_file(tax_path)
     if not isinstance(data, dict):
         return []
-    edges = data.get("edges", []) or []
     graph: dict[str, set[str]] = {}
-    for edge in edges:
-        if not isinstance(edge, dict):
+    for topic in data.get("topics", []) or []:
+        if not isinstance(topic, dict):
             continue
-        src = edge.get("source") or edge.get("from")
-        dst = edge.get("target") or edge.get("to")
-        if src and dst:
-            graph.setdefault(src, set()).add(dst)
+        for edge in topic.get("edges", []) or []:
+            if isinstance(edge, dict) and edge.get("edge_type") == "prerequisite" and edge.get("target"):
+                graph.setdefault(topic["id"], set()).add(edge["target"])
 
     # Detect cycle via DFS with 3-color marking.
     WHITE, GRAY, BLACK = 0, 1, 2

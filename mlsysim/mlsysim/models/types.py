@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional
 from ..core.units import ureg, BYTES_FP16
 from ..core.types import (
@@ -91,6 +91,9 @@ class Workload(BaseModel):
     training_dataset_size: Optional[Quantity] = None
     parameter_range_min: Optional[Quantity] = None
     parameter_range_max: Optional[Quantity] = None
+    # Calendar year of first publication or release (added 2026-10-12 for
+    # growth-trend figures that plot a model against time).
+    release_year: Optional[int] = None
 
     @field_validator("parameters", "embedding_entries", mode="after")
     @classmethod
@@ -117,7 +120,7 @@ class Workload(BaseModel):
     def _validate_data_rate(cls, v):
         return require_unit_family(v, ureg.byte / ureg.second, "data_rate", "data")
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         """
         Lowers the workload into a hardware-agnostic computation graph.
 
@@ -125,6 +128,8 @@ class Workload(BaseModel):
         directly.  Subclasses (Transformer, CNN, etc.) override this with
         architecture-specific lowering.
         """
+        from ..core.units import resolve_precision
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
         if self.parameters is None and self.model_size is not None:
             weight_bytes = self.model_size.to(ureg.byte)
             ops = self.inference_flops if self.inference_flops else (0 * ureg.flop)
@@ -139,7 +144,7 @@ class Workload(BaseModel):
             raise NotImplementedError(
                 f"{type(self).__name__} has no 'parameters'; override lower() or set parameters."
             )
-        bpp = precision.to(ureg.byte).magnitude
+        bpp = prec_qty.to(ureg.byte).magnitude
         param_count = self.parameters.to(ureg.count).magnitude
         weight_bytes = (param_count * bpp * ureg.byte).to(ureg.byte)
         ops = self.inference_flops if self.inference_flops else (2 * param_count * ureg.flop)
@@ -151,13 +156,17 @@ class Workload(BaseModel):
             arithmetic_intensity=(ops / weight_bytes).to("flop/byte"),
         )
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        if self.model_size is not None:
+    def size_in_bytes(self, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        if self.model_size is not None and precision in (BYTES_FP16, "fp16", "bf16"):
             return self.model_size
         if self.parameters is not None:
+            from ..core.units import resolve_precision
+            prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
             param_count = self.parameters.to(ureg.count).magnitude
-            bpp = precision.to(ureg.byte).magnitude
+            bpp = prec_qty.to(ureg.byte).magnitude
             return (param_count * bpp * ureg.byte).to(ureg.byte)
+        if self.model_size is not None:
+            return self.model_size
         raise NotImplementedError("Workload must define either parameters or model_size to calculate size in bytes.")
 
 class TransformerWorkload(Workload):
@@ -167,6 +176,10 @@ class TransformerWorkload(Workload):
     hidden_dim: Optional[int] = None
     heads: Optional[int] = None
     kv_heads: Optional[int] = None
+    # Attention head width when it is not hidden_dim // heads (added 2026-10-20):
+    # PaLM uses heads of 256 with d_model 18,432 and 48 heads (Chowdhery et al.
+    # 2022, Table 1). None keeps the hidden_dim // heads convention.
+    head_dim: Optional[int] = None
     # Multi-Head Latent Attention (DeepSeek-V2/V3). When both are present the
     # model caches one compressed latent per token per layer instead of a K and
     # a V tensor per key-value head, so KV sizing takes the MLA path below.
@@ -180,6 +193,19 @@ class TransformerWorkload(Workload):
     training_gpu_days: Optional[float] = None
     training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None
+    # Architecture facts from the model card / paper (added 2026-09-28).
+    # ``context_length`` is the pre-training / supported context window in
+    # tokens; ``vocab_size`` is the tokenizer vocabulary. Both are optional
+    # because not every source states them.
+    context_length: Optional[int] = None
+    vocab_size: Optional[int] = None
+    # Reported training emissions (mass of CO2e, e.g. metric tonnes).
+    training_co2e: Optional[Quantity] = None
+
+    @field_validator("training_co2e", mode="after")
+    @classmethod
+    def _validate_training_co2e(cls, v):
+        return require_dimensionality(v, ureg.kilogram, "training_co2e")
 
     @field_validator("training_ops", mode="after")
     @classmethod
@@ -195,14 +221,35 @@ class TransformerWorkload(Workload):
     @classmethod
     def _validate_training_days_ref(cls, v):
         return require_dimensionality(v, ureg.day, "training_days_ref")
-    
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
-    def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
+    @model_validator(mode="after")
+    def _check_training_fleet_consistency(self):
+        """Keep the reference fleet internally consistent.
+
+        When an entry states a reference accelerator count, a reference
+        duration, and an accelerator-day total, the product of the first two
+        must match the third within 1%. Added 2026-09-29 after GPT-4 stored
+        25,000 accelerators x 90 days beside a 2.5M accelerator-day anchor,
+        a 10% self-contradiction.
+        """
+        gpu_days = self.training_gpu_days
+        accel = self.training_accelerators_ref
+        days = self.training_days_ref
+        if gpu_days is None or accel is None or days is None:
+            return self
+        implied = accel.to(ureg.count).magnitude * days.to(ureg.day).magnitude
+        if abs(gpu_days - implied) / gpu_days > 0.01:
+            raise ValueError(
+                f"{self.name}: training_accelerators_ref x training_days_ref = "
+                f"{implied:,.0f} accelerator-days, but training_gpu_days = "
+                f"{gpu_days:,.0f} (must agree within 1%)."
+            )
+        return self
+
+    def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        from ..core.units import resolve_precision
         from ..physics import calc_kv_cache_size, calc_mla_cache_size
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
 
         if self.kv_lora_rank is not None and self.qk_rope_head_dim is not None:
             return calc_mla_cache_size(
@@ -211,14 +258,29 @@ class TransformerWorkload(Workload):
                 qk_rope_head_dim=self.qk_rope_head_dim,
                 seq_len=seq_len,
                 batch_size=batch_size,
-                bytes_per_elem=precision,
+                bytes_per_elem=prec_qty,
             )
 
         h_dim = self.hidden_dim or 4096
         n_heads = self.heads or 32
-        head_dim = h_dim // n_heads
+        head_dim = self.head_dim or h_dim // n_heads
         n_kv_heads = self.kv_heads or n_heads
-        return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=precision)
+        return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=prec_qty)
+
+    @property
+    def head_width(self) -> int:
+        """Width of one attention head: ``head_dim`` when stated, else hidden_dim // heads (added 2026-10-20)."""
+        return self.head_dim or self.hidden_dim // self.heads
+
+    @property
+    def kv_width(self) -> int:
+        """Key (or value) width cached per layer per token: key-value heads x head width (added 2026-10-20)."""
+        return (self.kv_heads or self.heads) * self.head_width
+
+    @property
+    def queries_per_kv_head(self) -> int:
+        """Query heads that share one key-value head (one for multi-head attention; added 2026-10-20)."""
+        return self.heads // (self.kv_heads or self.heads)
 
     def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
         """
@@ -295,7 +357,7 @@ class TransformerWorkload(Workload):
         
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GiB)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
@@ -318,7 +380,7 @@ class SparseTransformerWorkload(TransformerWorkload):
     def _validate_active_parameters(cls, v):
         return require_unit_family(v, ureg.count, "active_parameters", "count")
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,
         # but active parameters define the computation flops.
         ops = self.inference_flops or (2 * self.active_parameters.to(ureg.count).magnitude * ureg.flop)
@@ -337,13 +399,11 @@ class CNNWorkload(Workload):
     parameters: Quantity
     inference_flops: Quantity
     layers: Optional[int] = None
+    # Optional (added 2026-10-20): the channel-width multiplier of a scalable
+    # family (MobileNet's alpha), relative to the family's base network.
+    width_multiplier: Optional[float] = None
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
-
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
             name=self.name,
@@ -361,21 +421,18 @@ class SSMWorkload(Workload):
     state_size: int
     hidden_dim: int
     inference_flops: Optional[Quantity] = None
-    
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
-    def get_state_cache_size(self, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
+    def get_state_cache_size(self, batch_size: int, precision: Quantity | str = BYTES_FP16) -> Quantity:
         # State space model memory footprint is independent of sequence length (O(1) w.r.t seq_len)
         # Represents the recursive state vector maintained by the model (e.g., Mamba)
         # Typically: layers * batch * hidden_dim * state_size * precision
-        bpp = precision.to(ureg.byte).magnitude
+        from ..core.units import resolve_precision
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
+        bpp = prec_qty.to(ureg.byte).magnitude
         size_bytes = self.layers * batch_size * self.hidden_dim * self.state_size * bpp
         return (size_bytes * ureg.byte).to(ureg.byte)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
@@ -394,13 +451,8 @@ class DiffusionWorkload(Workload):
     denoising_steps: int
     resolution: int
     inference_flops: Optional[Quantity] = None  # FLOPs for ONE denoising step
-    
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # Total inference flops = Flops per step * denoising steps
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         total_ops = base_ops * self.denoising_steps
@@ -425,12 +477,7 @@ class EmbodiedWorkload(Workload):
     layers: Optional[int] = None
     hidden_dim: Optional[int] = None
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
-
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(

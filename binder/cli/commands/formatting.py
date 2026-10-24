@@ -19,12 +19,14 @@ import re
 import sys
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from rich.console import Console
 from rich.markup import escape as _rich_escape
 from rich.panel import Panel
 from rich.table import Table
+
+from ..core.discovery import display_path
 
 console = Console()
 
@@ -202,28 +204,8 @@ class FormatCommand:
         """
         from cli.checks.mitpress_terms import fix_text, should_skip_file
 
-        qmd_files = self._resolve_files(file_args)
-        modified = []
-        for path in qmd_files:
-            if should_skip_file(path):
-                continue
-            content = path.read_text(encoding="utf-8")
-            new_content, n = fix_text(content)
-            if n:
-                if not check_only:
-                    path.write_text(new_content, encoding="utf-8")
-                modified.append(path)
-
-        if modified:
-            label = "Would modify" if check_only else "Modified"
-            console.print(f"[yellow]mitpress-terms: {label} {len(modified)} file(s)[/yellow]")
-            for p in modified[:10]:
-                console.print(f"  {self._rel(p)}")
-            if len(modified) > 10:
-                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
-            return False
-        console.print("[green]mitpress-terms: All files clean[/green]")
-        return True
+        files = [p for p in self._resolve_files(file_args) if not should_skip_file(p)]
+        return self._rewrite_files("mitpress-terms", files, lambda text: fix_text(text)[0], check_only)
 
     def _run_percent_tables(self, file_args: List[str], check_only: bool) -> bool:
         """Rewrite the word 'percent' to the % symbol inside pipe tables.
@@ -237,51 +219,13 @@ class FormatCommand:
         """
         from cli.checks.percent_tables import fix_text
 
-        qmd_files = self._resolve_files(file_args)
-        modified = []
-        for path in qmd_files:
-            content = path.read_text(encoding="utf-8")
-            new_content, n = fix_text(content)
-            if n:
-                if not check_only:
-                    path.write_text(new_content, encoding="utf-8")
-                modified.append(path)
-
-        if modified:
-            label = "Would modify" if check_only else "Modified"
-            console.print(f"[yellow]percent-tables: {label} {len(modified)} file(s)[/yellow]")
-            for p in modified[:10]:
-                console.print(f"  {self._rel(p)}")
-            if len(modified) > 10:
-                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
-            return False  # pre-commit convention: modified = exit 1
-        console.print("[green]percent-tables: All files clean[/green]")
-        return True
+        files = self._resolve_files(file_args)
+        return self._rewrite_files("percent-tables", files, lambda text: fix_text(text)[0], check_only)
 
     def _run_blanks(self, file_args: List[str], check_only: bool) -> bool:
         """Collapse multiple consecutive blank lines into single blank lines."""
-        qmd_files = self._resolve_files(file_args)
-        modified = []
-
-        for path in qmd_files:
-            content = path.read_text(encoding="utf-8")
-            new_content = self._collapse_blank_lines(content)
-            if new_content != content:
-                if not check_only:
-                    path.write_text(new_content, encoding="utf-8")
-                modified.append(path)
-
-        if modified:
-            label = "Would modify" if check_only else "Modified"
-            console.print(f"[yellow]blanks: {label} {len(modified)} file(s)[/yellow]")
-            for p in modified[:10]:
-                console.print(f"  {self._rel(p)}")
-            if len(modified) > 10:
-                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
-            return False  # pre-commit convention: modified = exit 1
-        else:
-            console.print("[green]blanks: All files clean[/green]")
-            return True
+        files = self._resolve_files(file_args)
+        return self._rewrite_files("blanks", files, self._collapse_blank_lines, check_only)
 
     @staticmethod
     def _collapse_blank_lines(content: str) -> str:
@@ -350,32 +294,8 @@ class FormatCommand:
 
     def _run_lists(self, file_args: List[str], check_only: bool) -> bool:
         """Fix list spacing: blank line before lists, tight consecutive items."""
-        qmd_files = self._resolve_files(file_args)
-        modified = []
-
-        for path in qmd_files:
-            try:
-                content = path.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            new_content = self._fix_list_spacing(content)
-            if new_content != content:
-                if not check_only:
-                    path.write_text(new_content, encoding="utf-8")
-                modified.append(path)
-
-        if modified:
-            label = "Would modify" if check_only else "Modified"
-            console.print(f"[yellow]lists: {label} {len(modified)} file(s)[/yellow]")
-            for p in modified[:10]:
-                console.print(f"  {self._rel(p)}")
-            if len(modified) > 10:
-                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
-            return False
-        else:
-            console.print("[green]lists: All files clean[/green]")
-            return True
+        files = self._resolve_files(file_args)
+        return self._rewrite_files("lists", files, self._fix_list_spacing, check_only)
 
     @classmethod
     def _is_list_item(cls, line: str) -> bool:
@@ -509,21 +429,13 @@ class FormatCommand:
             console.print("[green]divs: No files to process[/green]")
             return True
 
-        modified_count = 0
-        for path in qmd_files:
-            mode = "--check" if check_only else "-f"
-            cmd = [sys.executable, str(script), mode, str(path)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                modified_count += 1
-
-        if modified_count:
-            label = "Would modify" if check_only else "Modified"
-            console.print(f"[yellow]divs: {label} {modified_count} file(s)[/yellow]")
-            return False
-        else:
-            console.print("[green]divs: All files clean[/green]")
-            return True
+        mode = "--check" if check_only else "-f"
+        modified = [
+            path for path in qmd_files
+            if subprocess.run([sys.executable, str(script), mode, str(path)],
+                              capture_output=True, text=True).returncode != 0
+        ]
+        return self._report_modified("divs", modified, check_only)
 
     # ------------------------------------------------------------------
     # Tables  (delegates to format_tables.py)
@@ -588,9 +500,34 @@ class FormatCommand:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _rel(self, path: Path) -> str:
-        """Return path relative to book dir for display."""
-        try:
-            return str(path.relative_to(self.config_manager.book_dir))
-        except ValueError:
-            return str(path)
+    def _rewrite_files(self, name: str, files: List[Path], transform, check_only: bool) -> bool:
+        """Apply *transform* (text -> text) to each file, writing changes unless *check_only*.
+
+        Returns False when any file changed (or would change): the pre-commit
+        convention that a modifying hook exits 1.
+        """
+        modified = []
+        for path in files:
+            content = path.read_text(encoding="utf-8")
+            new_content = transform(content)
+            if new_content != content:
+                if not check_only:
+                    path.write_text(new_content, encoding="utf-8")
+                modified.append(path)
+        return self._report_modified(name, modified, check_only)
+
+    def _report_modified(self, name: str, modified: List[Path], check_only: bool) -> bool:
+        """Print which files *name* changed (first ten) and return True only when none did."""
+        if not modified:
+            console.print(f"[green]{name}: All files clean[/green]")
+            return True
+        label = "Would modify" if check_only else "Modified"
+        console.print(f"[yellow]{name}: {label} {len(modified)} file(s)[/yellow]")
+        for path in modified[:10]:
+            console.print(f"  {display_path(path, self.config_manager.book_dir)}")
+        if len(modified) > 10:
+            console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
+        if check_only:
+            console.print(f"[dim]Apply by rerunning ./binder/binder format {name} without --check.[/dim]")
+        return False
+

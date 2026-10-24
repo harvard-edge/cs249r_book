@@ -17,7 +17,7 @@ async def _():
             ["pydantic", "pint", "plotly", "pandas"], keep_going=False
         )
         await micropip.install(
-            "../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False
+            "../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False
         )
         await micropip.install(
             "../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False
@@ -31,7 +31,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v1_06_experiments import (
+    from mlsysim.labs.experiments.v1_06_experiments import (
         MODEL_KEY,
         choose_architecture,
         default_scale_candidate,

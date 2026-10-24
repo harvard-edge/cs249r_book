@@ -14,7 +14,7 @@ Use the [Arduino UNO Q user manual](https://docs.arduino.cc/tutorials/uno-q/user
 
 Record the UNO Q RAM variant, board image, App Lab version, MCU firmware hash, LeRobot version, Feetech adapter variant, motor supply, camera, policy hash, dataset revision, and exact host OS in the report. Keep the pilot dataset local (`--dataset.push_to_hub=False`) until the team decides what may be shared.
 
-## Step 0 — Receive and make the station safe
+## Step 0: Receive and make the station safe
 
 1. Photograph the box contents and name every delivered part. Verify whether there is a **follower arm, leader or other teleoperator, USB motor adapter, motor supply, camera, cable, mount, and cutoff**. An assembled follower alone does not provide the rest of the station.
 2. Draw the as-delivered power and command path. Label the board supply and motor supply separately. Record connector polarity and the delivered servo/controller model from its label, not from a product listing.
@@ -23,7 +23,7 @@ Record the UNO Q RAM variant, board image, App Lab version, MCU firmware hash, L
 
 **Save and check:** inventory with photographs, power diagram, boot/cutoff video, measured safe state, and a list of absent parts or unknown electrical facts. Stop here if the cutoff or safe reset cannot be demonstrated.
 
-## Step 1 — Reproduce stock LeRobot on a workstation
+## Step 1: Reproduce stock LeRobot on a workstation
 
 Install the chosen LeRobot release with its hardware and recording extras in an isolated Python 3.12 environment, as required by the current installation guide. For the current stable documentation, the package shape is:
 
@@ -73,7 +73,7 @@ Locate and save the local dataset directory and inspect one episode. Replay it o
 
 **Save and check:** exact commands with substituted ports and IDs, calibration files, camera frame, one replayable episode, and an uncut teleoperation/recording video. Log any camera or motor cadence warnings. This step establishes native LeRobot behavior only.
 
-## Step 2 — Test UNO Q Linux ↔ STM32 communication without motors
+## Step 2: Test UNO Q Linux ↔ STM32 communication without motors
 
 Set up the delivered UNO Q in [Arduino App Lab](https://docs.arduino.cc/software/app-lab/). With motor power physically disconnected, run a built-in example that sends a Linux-side command through Bridge to an MCU-controlled LED or pin, such as the documented Pin Toggle example. Show an accepted command, a repeated command, and loss/restart of the Linux app. Capture both Linux and MCU logs and the observed output state.
 
@@ -88,7 +88,7 @@ df -h
 
 **Save and check:** one Bridge request/response trace with MCU-side output, both software versions, and restart behavior. This does **not** prove any arm interface, servo timing, or safety authority.
 
-## Step 3 — Put the STM32 in the motor command path, first with no motor load
+## Step 3: Put the STM32 in the motor command path, first with no motor load
 
 The stock SO-101 motor bus uses a host USB adapter. Before connecting a servo to the MCU route, identify its bus controller, signal voltage, protocol, baud rate, servo power, ground, and required transceiver or level conversion from the delivered hardware and documentation. Draw the proposed circuit and have a second staff member check it. The UNO Q header is **not** assumed electrically compatible with the servo bus. Keep the stock USB controller disconnected from the live servo bus during governed tests.
 
@@ -117,9 +117,9 @@ First replay synthetic proposals with the servo bus disconnected. Write the expe
 
 Verify the MCU log and output-enable state for each. Then connect **one unloaded, guarded servo** through the qualified interface and repeat with the minimum measured travel. Finally extend the same route to the arm, rechecking calibration, gripper, cutoff, and reset. No alternate host cable may reach the live servo bus in governed mode.
 
-**Save and check:** circuit and wiring photographs; firmware and adapter revisions; synthetic refusal matrix; one-servo and arm traces containing requested, mapped, enforced, and measured action; cutoff and no-queued-motion video; second-person reproduction notes. If the STM32-to-servo route does not work, do not claim STM32-controlled arm actions; test the [one-axis fallback](../../labs/lab-sequence.md).
+**Save and check:** circuit and wiring photographs; firmware and adapter revisions; synthetic refusal matrix; one-servo and arm traces containing requested, mapped, enforced, and measured action; cutoff and no-queued-motion video; second-person reproduction notes. If the STM32-to-servo route does not work, do not claim STM32-controlled arm actions; test the [one-axis fallback](../staff-build-brief.md#one-axis-fallback-assignment).
 
-## Step 4 — Run a learned action policy locally on the Q
+## Step 4: Run a learned action policy locally on the Q
 
 Use the local LeRobot episodes plus a linked sidecar if needed for the four action taps and object outcome. For the first policy, constrain the soft target to an arc where one qualified SO-101 joint can reduce image-plane error. From each demonstration cycle, pair the **current** camera-derived target coordinate and measured joint angle with the operator's **next** small joint change. Split by whole recording session or target position, never adjacent frames from the same episode. Fit a small regression policy to propose the signed bounded joint change or abstention; compare it with a geometric rule under the same starts. The camera-derived coordinate may come from a fixed marker detector for this pilot, but the **action decision itself must be learned from demonstrations**, vary with both target and measured arm state, and change after a new observation. A label that dispatches a fixed reach script is a bring-up check only. Train on the workstation; pin units, normalization, dataset split, model, and export. ACT and SmolVLA are separate comparison experiments, not prerequisites for this first local loop.
 
@@ -127,7 +127,7 @@ Before motor power, feed identical held-out observations to the workstation and 
 
 **Save and check:** exact model/dataset hashes, training or adaptation command, held-out split, host-versus-Q outputs, runtime measurements, and a physical action trace. If no learned action policy runs locally, report the observed obstacle instead of substituting off-board inference.
 
-## Step 5 — Observe again, compare policies, and test faults
+## Step 5: Observe again, compare policies, and test faults
 
 Freeze a small pilot trial set: **two held-out starts × two controllers** (learned and scripted) **× two conditions** (unchanged and target shifted after the first action). That gives eight matched physical trials, enough to test whether the protocol can run; it is not an accuracy estimate for a deployed system. Use the same camera, fixture, target positions, and outcome measure. Record the initial image and measured joints, first proposal, MCU decision, measured move, changed scene, second image, revised proposal or abstention, and final tool/target state. Keep failed trials.
 
@@ -135,7 +135,7 @@ After the matched set, run one trial each for an expired/duplicate proposal, out
 
 **Save and check:** eight linked trial traces, baseline comparison, raw camera and MCU logs, timing distribution, uncut video of at least one changed-scene run and one refusal, and a fault table with observed outcomes. A fresh image followed by an unchanged queued action does not show a revised decision.
 
-## Step 6 — Reproduce as a student would
+## Step 6: Reproduce as a student would
 
 A second staff member follows only the written instructions, without Andrea's private setup knowledge. Fill the [one-page bench card](bench-card-template.md), then time the full setup, calibration check, episode collection, reset, one baseline trial, one learned disturbed trial, and one refusal test. Count hands-on minutes, queue time, and every intervention by staff. This determines whether a two- or three-student team can finish inside the provisional lab block and how many stations or booking slots are needed. Keep one spare or replay path for other weeks; weeks 6, 10, and 14 still require witnessed physical evidence.
 

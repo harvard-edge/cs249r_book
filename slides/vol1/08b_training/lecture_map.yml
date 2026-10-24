@@ -1,0 +1,266 @@
+chapter: 08_training
+lecture: "08b"
+title: "Model Training, Part 2"
+subtitle: "Fitting a training step on one accelerator"
+layer: training
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "A training step that needs seven accelerators' worth of memory fits on one once each memory term meets the technique that removes it: 16-bit formats halve the activations, tiling stops storing the attention scores, and micro-batches or recomputation trade time for the rest, each at a cost the engineer must name."
+
+hook:
+  minutes: "0-6"
+  setup: "Step 1, 2012: AlexNet's 60 million parameters were split across two GTX 580 GPUs because one 3 GB card could not hold the training run (photo: the GTX 580 die, CC0). Step 2, today: GPT-2 XL at batch 32 of 1,024-token sequences, in FP32 with standard attention, needs 598 GB per step against one H100's 80 GB (85.9 GB decimal), about seven accelerators of memory. The scoreboard bar from Part 1 appears with the capacity line."
+  question_to_class: "Same model, same batch of 32, same arithmetic per update. By the end of today, how many H100s does this step need? A) 8 B) 4 C) 2 D) 1"
+  payoff: "D. Mixed precision (598 to 311 GB), FlashAttention (to 109.6 GB), and two micro-batches of 16 (66.8 GB) fit it on one H100, nine times smaller; segment checkpointing reaches 35.5 GB instead at about one-third more arithmetic (47 days instead of 35). The synthesis returns to AlexNet's two cards with the bill for each technique."
+  sources: ["chapter §8.7.1 and footnote 16 (AlexNet: 60M parameters, two GTX 580s, 3 GB ceiling; Krizhevsky et al. 2012)", "chapter Napkin Math 8.10 (598, 311, 109.6, 66.8 GB; 85.9 GB capacity)", "chapter Napkin Math 8.8 (35.5 GB, about one-third more arithmetic, 47 days)", "photo: shared library nvidia-gtx580-die.jpg (Fritzchens Fritz, CC0); nvidia-h100-pcie.jpg (Geekerwan, CC BY 3.0)"]
+
+driving_question: "How do we fit a training step that needs seven accelerators' memory onto one, and what does each technique cost?"
+
+recall: "Part 1: mixed-precision Adam holds 16 bytes per parameter (2 + 2 + 4 + 8), 24 GB for GPT-2 XL, and only the activations grow with batch and sequence length; at batch 32 the scores alone were about 201 GB. From memory, write the four terms and which one grows."
+
+running_example: "GPT-2 XL (1.5B parameters, 48 layers, hidden 1,600, 25 heads of 64) at batch 32 of 1,024-token sequences on one H100 (80 GB HBM, 85.9 GB decimal, 3.35 TB/s; 67 TFLOP/s FP32, 494 TF32, 989 BF16/FP16 dense). The scoreboard runs 598 GB (FP32) to 311 GB (mixed precision) to 109.6 GB (FlashAttention) to 66.8 GB (two micro-batches of 16), with 35.5 GB as the checkpointing alternative (Napkin Math 8.6, 8.8, 8.10)."
+
+goals:
+  - "Explain what FP16 and BF16 keep and lose, and why FP32 master weights and loss scaling remain."
+  - "Trace where attention's bytes go and compute softmax one tile at a time."
+  - "Size a micro-batch and a checkpoint schedule for a model that does not fit."
+  - "Name what each memory technique costs: numerics, recomputation, update frequency, or time."
+
+segments:
+  - name: Precision
+    divider_question: "What does a 16-bit number keep, and what does it lose?"
+    read: "§8.6.3"
+    concept_questions: [2, 3, 4, 5, 6]
+    minutes: 18
+    land: "Sixteen-bit formats raise the arithmetic ceiling and halve the activations, but small updates and small gradients need 32-bit master weights and loss scaling, and the 16 bytes per parameter do not move."
+  - name: Tiling
+    divider_question: "Why does attention move more bytes than its arithmetic needs, and how does tiling avoid it?"
+    read: "§8.3.3, §8.3.4, §8.6.4"
+    concept_questions: [7, 8, 9, 10, 11]
+    minutes: 17
+    land: "FlashAttention computes the same attention one tile at a time in on-chip memory, keeping two numbers per row instead of the score matrix, so it does a little more arithmetic and moves far fewer bytes."
+  - name: Trading time for memory
+    divider_question: "When the activations still do not fit, what do we give up to fit them?"
+    read: "§8.6.5, §8.6.6"
+    concept_questions: [12, 13, 14, 15]
+    minutes: 16.5
+    land: "Accumulation keeps the arithmetic and gives up update frequency; checkpointing keeps the batch resident and pays about one extra forward pass; both fit GPT-2 XL's step on one H100."
+
+concept_questions:
+  - id: 1
+    q: "Why did AlexNet need two GPUs, and how many H100s does GPT-2 XL's batch-32 step need?"
+    picture: "GTX 580 die photo beside an H100 photo; then Part 1's scoreboard bar at 598 GB against the 85.9 GB capacity line"
+    numbers: "AlexNet 60M parameters on two GTX 580s with a 3 GB ceiling (§8.7.1, footnote 16; Krizhevsky et al. 2012); GPT-2 XL FP32 step 598 GB = 24 GB static + 574 GB activations, about 7x the H100 (Napkin Math 8.10)"
+    example: "AlexNet 2012; GPT-2 XL on one H100"
+    read: "§8.6.6, §8.7.1"
+  - id: 2
+    q: "Why does an FP32 training run leave most of an H100's arithmetic idle?"
+    picture: "Book figure fig-precision-ladder (peak dense throughput by format, V100 to B200, log scale), revealed V100 first, then all four generations; H100 bars annotated"
+    numbers: "H100 FP32 67, TF32 494, FP16/BF16 989, FP8 1,979 TFLOP/s; V100 to B200: FP32 grew 4.8x, FP16/BF16 tensor 18x; on B200 the 16-bit tensor path is 30x FP32 (§8.6.3, figure 10; NVIDIA datasheets cited in the chapter)"
+    example: "GPT-2 XL in FP32 uses about 1/15 of the H100's dense peak"
+    read: "§8.6.3"
+  - id: 3
+    q: "What do the exponent and mantissa bits of FP32, FP16, and BF16 buy?"
+    picture: "Bit layouts to scale (1/8/23, 1/5/10, 1/8/7), then a log number line from 1e-40 to 1e5 with each format's normal range as a band; Lecture 5's underflowing gradient marked"
+    numbers: "Exponent bits 8, 5, 8; mantissa 23, 10, 7; FP16 smallest normal 6.1e-5, largest 65,504, subnormals to about 6e-8; BF16 and FP32 smallest normal about 1e-38; about 7, 3, and 2 to 3 decimal digits (§8.6.3, table 9)"
+    example: "Exponent sets range; mantissa sets precision. BF16 keeps FP32's range and gives up precision; FP16 keeps more precision and gives up range."
+    read: "§8.6.3"
+  - id: 4
+    q: "What happens when a small update meets a large 16-bit weight?"
+    picture: "Number line around 0.5 showing the FP16 grid spacing (4.9e-4) and an arrow for an update of 1e-4 that rounds back; then two lines over 10,000 steps, FP32 rising from 0.5 to 1.5 and FP16 flat at 0.5"
+    numbers: "Updates more than 2^11 (about 2,048) times smaller than the weight round away in FP16 (§8.6.3). Worked: 0.5 + 0.0001 = 0.5 in FP16 (grid spacing 4.9e-4 near 0.5); after 10,000 such updates FP16 holds 0.5 and FP32 holds 1.5; BF16's spacing near 0.5 is 3.9e-3, worse (derived from the IEEE 754 binary16 and bfloat16 formats; checked numerically)"
+    example: "Learning rate times gradient is usually orders of magnitude below the weight: the reason for FP32 master weights under FP16 and BF16 alike"
+    read: "§8.6.3 (Mixed-precision benefits)"
+  - id: 5
+    q: "How does loss scaling keep small FP16 gradients alive, and how does the scale adapt?"
+    picture: "Histogram of gradient magnitudes on a log2 axis with FP16's normal floor and ceiling marked; step 2 the whole histogram shifted right by S = 2^10; step 3 the dynamic rule as a small state diagram (overflow: skip step, halve S; 2,000 clean steps: double S)"
+    numbers: "Scaling is exact by linearity: grad(S x L) = S x grad(L); S such as 2^10 or 2^15; skip and halve on overflow past 65,504; double after a window such as 2,000 clean steps (§8.6.3 Loss scaling). Worked: a 1e-6 gradient (below the 6.1e-5 normal floor) becomes 1.02e-3 at S = 1,024; at that S, any gradient above 64 overflows (derived). Measured: in FP32 training of the Multibox SSD detector, much of FP16's range went unused while many activation gradients fell below it; unscaled FP16 training diverged, and a scale of 8 matched FP32 accuracy (Micikevicius et al. 2018, §3.2, Figure 3, Table 2); about 5 percent of a Mandarin speech model's weight gradients had exponents below -24 (Figure 2b)"
+    example: "BF16 usually needs no loss scaling because its floor is about 1e-38"
+    read: "§8.6.3"
+  - id: 6
+    q: "Which tensors stay in 32 bits, and what does mixed precision save in memory and time?"
+    picture: "Book figure fig-mixed-precision (six-stage FP16 cycle) built in three steps, each tensor tagged with its bytes per parameter; then the run-time bars by format (regenerated from Part 1's precision_days) and the scoreboard at 311 GB"
+    numbers: "2 + 2 + 4 + 8 = 16 B/param, unchanged from FP32 Adam; activations 574 to 287 GB; step 598 to 311 GB (Napkin Math 8.6). Run at 50 percent utilization: FP32 518 days ($49,751), TF32 70 days ($6,748), BF16 35 days ($3,370); the 15x and 2x peak ratios bound the gain, because elementwise kernels, optimizer updates, and input waits do not run on Tensor Cores (Napkin Math 8.7)"
+    example: "GPT-2 XL on one H100"
+    read: "§8.6.3"
+  - id: 7
+    q: "Where do one GPT-2 XL layer's activation bytes go?"
+    picture: "One stacked bar per layer at batch 32: projections 419 MB, feed-forward 419 MB, attention scores 4,194 MB, LayerNorm about 10 MB; labeled as a recall from Part 1; step 2 splits the score bar into its three saved copies (P 2 B, dropout mask 1 B, P after dropout 2 B), none of which FlashAttention stores (revised 2026-10-18; the 2,048-token bar repeated Part 1)"
+    numbers: "Per layer 5,043 MB line items; scores 5 bytes x 25 heads x 1,024^2 x 32 = 4,194 MB, 83 percent of the line items (derived share); across the step about 201 of 287 GB, 70 percent (Napkin Math 8.3, §8.6.4). Library total 286.9 GB exceeds the 242.1 GB line items because it counts saved inputs the list omits (Napkin Math 8.3)"
+    example: "Each score is saved three times for backward: FP16 probabilities, a 1-byte dropout mask, and the dropped-out probabilities"
+    read: "§8.3.3"
+  - id: 8
+    q: "Why does memory traffic limit materialized attention?"
+    picture: "Kit machine_hl_hbm then machine_hl_sram, with HBM and on-chip SRAM sizes and bandwidths; step 3 the standard attention data flow drawn on it: write S to HBM, read it for softmax, write P, read P for PV, and read both again in backward"
+    numbers: "HBM 80 GB at 3.35 TB/s; on-chip SRAM 30 to 50 MB at about 15 to 20 TB/s (§8.3); 228 KB of shared memory per SM (Hardware Acceleration, Lighthouse 11.2); materialized scores about 32 FLOP/byte (d_head / 2 = 64 / 2) against the H100 ridge of 295.2 (§8.3.4)"
+    example: "Standard PyTorch attention: matmul, softmax, matmul, each a separate trip through HBM"
+    read: "§8.3.4, §8.6.4"
+  - id: 9
+    q: "What is a tile, and why does one fit on chip when the matrix does not?"
+    picture: "New tiling diagram: a 4,096 x 4,096 score grid cut into 128 x 128 tiles, one query block row highlighted, key and value blocks streaming past it; log bars 67.1 MB against 65.5 KB beside the 228 KB shared-memory line"
+    numbers: "4,096^2 x 4 B = 67.1 MB per head in FP32; 128^2 x 4 B = 65.5 KB; 1,024 tiles per head (derived); 16 heads would hold 1.1 GB of scores (§8.6.4, margin figure)"
+    example: "GPT-2 XL attention at 4,096 tokens"
+    read: "§8.6.4 (IO-aware attention through tiling)"
+  - id: 10
+    q: "How can softmax be computed one block at a time?"
+    picture: "Worked example table: one row of four scores split into two blocks, with running maximum m, running sum l, and the rescale factor revealed one block at a time; final probabilities compared with the direct softmax"
+    numbers: "Scores (1, 3 | 2, 5): block 1 gives m = 3, l = e^-2 + e^0 = 1.135; block 2 raises m to 5, rescales l by e^(3-5) = 0.135 and adds e^-3 + e^0, l = 1.203, equal to the direct sum; probabilities 0.015, 0.112, 0.041, 0.831 (derived toy; algorithm §8.6.4, Milakov and Gimelshein 2018)"
+    example: "The same rescale factor corrects the partial output accumulated from earlier blocks"
+    read: "§8.6.4"
+  - id: 11
+    q: "What does FlashAttention keep for the backward pass, and does its extra arithmetic slow it down?"
+    picture: "Log bars of stored per-head footprint, 138.4 MB against 4.2 MB; then a predict card; then a three-row table from Dao et al. 2022 (GFLOPs, HBM reads and writes, runtime) for standard and FlashAttention; then the scoreboard at 109.6 GB"
+    numbers: "Per head at 4,096 tokens: 138.4 MB stored by the conventional baseline against 4.2 MB (inputs, output, and two numbers per row), 32.7x (§8.6.4). Dao et al. 2022, Figure 2 left (forward plus backward, GPT-2 medium attention, sequence 1,024, head dimension 64, 16 heads, batch 64, A100): standard against FlashAttention 66.6 against 75.2 GFLOPs, 40.3 against 4.4 GB of HBM reads and writes, 41.7 against 7.3 ms; Figure 1: 7.6x on GPT-2 attention; up to 3x end-to-end over HuggingFace GPT-2 (Dao et al. 2022, Table 2; chapter §8.3.4). GPT-2 XL step 311 to 109.6 GB (§8.6.4)"
+    example: "F.scaled_dot_product_attention dispatching to the fused kernel (listing 7)"
+    read: "§8.6.4"
+  - id: 12
+    q: "How large a batch fits once the scores are gone?"
+    picture: "Scoreboard at 109.6 GB, then a line of step memory against batch size (24 GB + 2.68 GB per sequence) crossing the 85.9 GB line near 23, with batch 16 (66.8 GB) and batch 32 (109.6 GB) marked"
+    numbers: "85.6 GB of activations at batch 32, 2.68 GB per sequence (derived); about 23 sequences fit (Napkin Math 8.10); batch 16 needs 24 + 42.8 = 66.8 GB (Napkin Math 8.9, 8.10)"
+    example: "GPT-2 XL with FlashAttention"
+    read: "§8.6.6"
+  - id: 13
+    q: "How does gradient accumulation reproduce the large-batch gradient, and how does it break?"
+    picture: "Book figure fig-grad-accumulation built in three steps (micro-batch losses, gradients, sum then one update), with equation 10 beneath; then a ten-line training loop with the loss division missing"
+    numbers: "B = K x b: two micro-batches of 16 give the batch-32 gradient with the same FLOPs and 66.8 GB of memory (equation 10, table 12, Napkin Math 8.10); summed instead of averaged losses make the gradient K times too large (§8.6.5 Practical considerations). Illustrative profile: utilization 90 percent at batch 256 against 60 to 70 percent at batch 16 (§8.8, labeled illustrative)"
+    example: "GPT-2 uses LayerNorm, so accumulation is exact up to dropout and rounding order; BatchNorm would not be"
+    read: "§8.6.5"
+  - id: 14
+    q: "How does activation checkpointing fit GPT-2 XL, and what does it cost?"
+    picture: "Book figure fig-activation-checkpointing (kept, dropped, recomputed) as step 1; then GPT-2 XL's 48 layers as eight segments of six (regenerated from Part 1's ckpt_segments): forward keeps eight inputs, backward rebuilds one segment at a time; then a memory bar against the capacity line and a days bar"
+    numbers: "Segment input 32 x 1,024 x 1,600 x 2 B, eight of them 0.84 GB; one live segment of six layers 10.7 GB; 11.5 GB against 85.6 GB of activations (7.4x); step 35.5 GB; each layer runs forward twice, about one-third more arithmetic, 47 days instead of 35 (Napkin Math 8.8, 8.10)"
+    example: "torch.utils.checkpoint around each six-layer segment"
+    read: "§8.6.5.1, §8.6.5.2"
+  - id: 15
+    q: "Where should the checkpoints go, and why every square root of L layers?"
+    picture: "Plot of activation memory in layer units, k + 48/k, against checkpoint count k (derived from table 13), minimum near k = 7, with k = 1 and k = 48 marked; step 2 one measured point from Chen et al. 2016"
+    numbers: "k = 1 gives 49 units, no saving; k = 7 gives about 14 units against 48, 71 percent less, for about 33 percent more step arithmetic (§8.6.5.2, table 13; curve derived). Chen et al. 2016 (abstract): a 1,000-layer residual network on ImageNet from 48 GB to 7 GB for 30 percent more running time"
+    example: "GPT-2 XL's eight segments of six sit at k = 8, also 14 units"
+    read: "§8.6.5.2"
+
+worked_examples:
+  - name: "Swamping and the master copy (derived from the FP16 format, §8.6.3)"
+    steps: ["given: weight 0.5, update 0.0001 per step, FP16 and FP32", "FP16 grid spacing near 0.5 is 2^-11 = 4.9e-4; half a step is 2.4e-4", "0.0001 is below half a step: 0.5 + 0.0001 rounds to 0.5", "after 10,000 updates: FP16 still 0.5, FP32 1.5", "meaning: keep a 32-bit master copy for the update; BF16 (spacing 3.9e-3) needs it too"]
+  - name: "Online softmax by hand (derived toy, §8.6.4)"
+    steps: ["given: one row of scores (1, 3, 2, 5) in two blocks of two", "block 1: m = 3, l = e^-2 + e^0 = 1.135", "block 2: new max 5; rescale l by e^(3-5) = 0.135; add e^-3 + e^0; l = 1.203", "with values v = (10, 20, 30, 40): running output O after block 1 = 10e^-2 + 20 = 21.35; after block 2 = 21.35 e^-2 + 30e^-3 + 40 = 44.38, the whole-row value", "result: O / l = 44.38 / 1.203 = 36.9, the softmax-weighted average of the values, exact", "meaning: the row never has to sit in memory at once, so no score matrix is stored"]
+  - name: "Napkin Math 8.8: GPT-2 XL in eight checkpointed segments"
+    steps: ["given: 48 layers, batch 32, 85.6 GB of activations with FlashAttention, 24 GB static", "keep 8 segment inputs: 8 x 32 x 1,024 x 1,600 x 2 B = 0.84 GB", "rebuild one six-layer segment at a time: 10.7 GB", "11.5 GB of activations, 35.5 GB in all, about 50 GB to spare", "cost: one extra forward per layer, about one-third more arithmetic, 47 days instead of 35"]
+  - name: "Napkin Math 8.10: the scoreboard (running across all three segments)"
+    steps: ["FP32, standard attention: 598 GB", "mixed precision: 311 GB", "FlashAttention: 109.6 GB, about 23 sequences fit", "two micro-batches of 16: 66.8 GB, fits", "meaning: nine times smaller, same arithmetic per update; then profile the run that now exists"]
+
+active_learning:
+  - at_minute: 3
+    type: predict
+    prompt: "Same model, same batch of 32, same arithmetic per update. By the end of today, how many H100s does GPT-2 XL's 598 GB step need? A) 8 B) 4 C) 2 D) 1"
+    answer: "D. 66.8 GB with mixed precision, FlashAttention, and two micro-batches of 16; answered on the scoreboard at the end of each segment."
+  - at_minute: 5.5
+    type: retrieval
+    prompt: "From memory. Write the four terms of training memory, the bytes per parameter of mixed-precision Adam, and which term grows with batch."
+    answer: "Weights, gradients, optimizer state, activations; 2 + 2 + 4 + 8 = 16 B per parameter (24 GB for GPT-2 XL); activations grow with batch and sequence length."
+  - at_minute: 14.5
+    type: predict
+    prompt: "A weight of 0.5 is stored in FP16. The optimizer adds 0.0001. What is stored now? After 10,000 such steps?"
+    answer: "0.5 both times. FP16's spacing near 0.5 is 4.9e-4, so an increment below half of it rounds away. FP32 reaches 1.5. Hence FP32 master weights."
+  - at_minute: 23
+    type: diagnose
+    prompt: "Two FP16 runs. Run A: the loss scale halves every few dozen steps and many steps are skipped. Run B: the loss flattens early, most gradients in late layers read exactly zero, and the scale is fixed at 1. What is wrong with each?"
+    answer: "A: overflow; scaled gradients pass 65,504, so the scaler keeps halving; look for a real gradient spike or a bad batch. B: underflow; without scaling, gradients below 6.1e-5 flush to zero; enable dynamic loss scaling or switch to BF16."
+  - at_minute: 37
+    type: estimate
+    prompt: "Your turn: block 1 of the row gave m = 3 and l = 1.135. Block 2 holds scores 2 and 5. Finish the running sum."
+    answer: "New maximum 5; rescale 1.135 by e^-2 = 0.135 to 0.154; add e^-3 = 0.050 and e^0 = 1; l = 1.203, the same as the direct sum."
+  - at_minute: 41.5
+    type: predict
+    prompt: "FlashAttention recomputes score tiles in the backward pass, so it does more arithmetic than standard attention. Faster or slower?"
+    answer: "Faster. In Dao et al. 2022 it does about 13 percent more FLOPs (75.2 against 66.6 GFLOPs) but moves about 9x fewer HBM bytes (4.4 against 40.3 GB) and runs about 5.7x faster (7.3 against 41.7 ms), because the kernel was limited by bytes, not arithmetic."
+  - at_minute: 50
+    type: diagnose
+    prompt: "A loop accumulates four micro-batches with SGD and momentum, calling loss.backward() on each loss without dividing it by 4. Training behaves as if the learning rate were too high. Why?"
+    answer: "The accumulated gradient is the sum of four micro-batch means, four times the batch mean, so each update is four times too large. Divide each loss by 4, or divide the learning rate. WARN: with Adam the scale mostly cancels, but gradient clipping at norm 1.0 and epsilon still change, so the bug hides."
+  - at_minute: 57.5
+    type: concept_question
+    prompt: "After FlashAttention, GPT-2 XL needs 109.6 GB. A) accumulate two micro-batches of 16, B) checkpoint eight segments, C) both. Which, and what does each cost?"
+    answer: "A or B both fit. A: 66.8 GB, same arithmetic, one update per two micro-batches, smaller micro-batches can lower utilization. B: 35.5 GB, about one-third more arithmetic, 47 days instead of 35. The chapter takes A because the needed batch fits without recomputation; choose B when the resident batch or depth matters more than arithmetic; C when neither alone fits."
+  - at_minute: 61
+    type: concept_question
+    prompt: "True or false: (1) FlashAttention reduces attention's FLOPs. (2) Gradient accumulation multiplies activation memory by the number of micro-batches. (3) BF16 needs no FP32 master weights. (4) Mixed precision makes training 15x faster on an H100."
+    answer: "All false. (1) It does slightly more FLOPs and moves far fewer bytes. (2) Only one micro-batch is resident (self-check §8.6.6). (3) BF16 fixes range, not precision; its grid near 0.5 is 3.9e-3, so small updates vanish. (4) 15x is the peak ratio; work off the Tensor Cores bounds the gain (Amdahl, §8.8 pitfall)."
+
+open_questions:
+  - "BF16 gave up precision for range, and FP8 halves the bytes again but needs per-tensor scaling. How far down can training precision go before the scaling machinery costs more than it saves?"
+  - "Checkpointing costs GPT-2 XL 12 extra days on one H100; a second H100 costs a second rental. Which would you buy, and what numbers decide it?"
+  - "FlashAttention does more arithmetic to move fewer bytes. Which other kernels in a training step deserve the same rewrite, and when does recomputation stop paying?"
+
+more_examples:
+  - "AlexNet (Krizhevsky et al. 2012): two 3 GB GTX 580s because one card did not hold the run (§8.7.1)."
+  - "FlashAttention-2 (Dao 2023): a further 1.5 to 2x from better parallelism; FlashAttention-3 (Shah et al. 2024): asynchrony and FP8 on Hopper (§8.6.4)."
+  - "Online softmax (Milakov and Gimelshein 2018): the running-maximum recurrence FlashAttention builds on."
+  - "Selective activation recomputation: discarding only the attention intermediates cuts GPT-2 XL's activations by 70.2 percent (Napkin Math 8.3)."
+  - "Memory-efficient optimizers attack the 16 B/param that mixed precision leaves alone: Adafactor (Shazeer and Stern 2018), 8-bit optimizers (Dettmers et al. 2022), GaLore (Zhao et al. 2024) (§8.3.2)."
+  - "Precision by GPU generation: FP16 with loss scaling on V100, BF16 on A100, BF16 or validated FP8 on H100 (§8.6.3, table 11)."
+  - "Large-batch ResNet-50 at batch 8,192 with linear learning-rate scaling and warmup (Goyal et al. 2017): what accumulation lets one accelerator imitate."
+
+left_to_reading:
+  - concept: "Autocast and GradScaler API"
+    why: "Lecture 7 owns the mechanism; this lecture owns when and why, and shows the policy, not the calls."
+  - concept: "FP8 recipes and per-tensor scaling; Tensor Core datapath"
+    why: "Lectures 10b and 11 own reduced-precision datapaths; FP8 appears as one bar on the precision ladder and one open question."
+  - concept: "The full memory hierarchy, tiling for matrix multiplication, the roofline"
+    why: "Lecture 11 owns them (and Lecture 2 introduced the roofline); this lecture uses two tiers, HBM and on-chip SRAM, and one intensity comparison."
+  - concept: "Feeding the accelerator: storage tiers, loader workers, prefetching"
+    why: "Lecture 4b teaches the feeding problem and Part 1 reads the profile; the synthesis names the 48 percent busy result and points there."
+  - concept: "Selective checkpointing by layer type (table 14), CPU activation offloading"
+    why: "Detail better read than heard; one line in the checkpoint notes."
+  - concept: "Distributed accumulation (no_sync), data parallelism, sharding"
+    why: "Beyond one accelerator (§8.7); one line in the synthesis (eight H100s: 35 days to 4.4 with perfect scaling)."
+  - concept: "Wave quantization and tile-size alignment"
+    why: "Detail better read than heard (§8.4.3)."
+
+closing:
+  return_to_hook: "Back to AlexNet's two cards. GPT-2 XL's step went 598 to 311 to 109.6 to 66.8 GB on one H100, nine times smaller, and every step carried a bill: 32-bit master weights and loss scaling for precision, recomputed tiles for FlashAttention, one update per two micro-batches for accumulation (or 12 extra days for checkpointing). Fitting comes first because a step that does not fit gives no profile; the first profile of the fitted run shows the accelerator busy about 48 percent of the time on a single-core tokenizer, the input problem of Lecture 4b and Part 1."
+  read_and_practice: ["§8.6.3 to §8.6.6", "self-check questions at the end of §8.6", "Checkpoint 8.3 (from a feasible configuration to a validated run)", "redo Napkin Math 8.8 for 12 segments of 4 layers", "TinyTorch optimizer and autograd modules, if assigned"]
+  further_reading:
+    - cite: "Model Training, §8.6.3 to §8.6.6"
+      url: "https://mlsysbook.ai"
+      why: "Mixed precision, FlashAttention, accumulation, checkpointing, and the GPT-2 XL walkthrough with every number."
+    - cite: "Micikevicius et al., Mixed Precision Training, ICLR 2018"
+      url: "https://arxiv.org/abs/1710.03740"
+      why: "FP32 master weights and loss scaling, with the gradient histogram that motivates scaling."
+    - cite: "Kalamkar et al., A Study of BFLOAT16 for Deep Learning Training, 2019"
+      url: "https://arxiv.org/abs/1905.12322"
+      why: "Why BF16's range makes loss scaling unnecessary across many workloads."
+    - cite: "Dao et al., FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness, NeurIPS 2022"
+      url: "https://arxiv.org/abs/2205.14135"
+      why: "Tiling, online softmax, and recomputation in backward, with measured traffic and runtime."
+    - cite: "Chen et al., Training Deep Nets with Sublinear Memory Cost, 2016"
+      url: "https://arxiv.org/abs/1604.06174"
+      why: "The square-root checkpoint schedule and its measured cost."
+    - cite: "Horace He, Making Deep Learning Go Brrrr From First Principles, 2022"
+      url: "https://horace.io/brrr_intro.html"
+      why: "A short outside explanation of compute, memory traffic, and overhead as the three places time goes."
+  bridge: "Lecture 9: today made each FLOP cheaper and made the step fit; the work itself, 6PD, never changed. Which of the D tokens are worth a step?"
+
+coverage:
+  primary_taught: ["Mixed precision", "Checkpointing and accumulation", "Training memory at scale (the reduction techniques)"]
+  primary_touched: ["Profile to find the binding term (synthesis: fit first, then profile; taught in Part 1)", "Training-time law (checkpointing enters through utilization; taught in Part 1)"]
+  primary_left_to_reading: []
+  secondary: ["IO-aware attention (taught in depth; this lecture owns FlashAttention tiling for the course)", "Training input pipeline (pointer to Lecture 4b and Part 1)", "Single-node data parallelism and sharding (one line)"]
+  touches_reused: ["Lecture 5: FP16 range and gradient underflow", "Lecture 6b: the score matrix cannot be stored (this lecture shows how tiling avoids it)", "Lecture 7: the framework API (autocast, GradScaler, torch.utils.checkpoint); this deck calls back to it and does not re-teach it", "Lecture 2 and Lecture 11: roofline ridge 295.2 (used once)", "Part 1: 16 B/param, the 311 GB bar, MFU"]
+  hand_offs: ["Lecture 11 recalls FlashAttention as the IO-aware answer and owns the full hierarchy", "Lecture 10b owns quantization formats below 16 bits"]
+
+callbacks:
+  - {lecture: 1, concept: "AlexNet split across two GTX 580s (Krizhevsky et al. 2012)", where: "hook note, one recall line; Lecture 1 tells it in full"}
+
+notes_for_author:
+  - "2026-10-19 sweep (D3): the hook's AlexNet telling is recast as a one-line recall of Lecture 1, which owns the story; minutes unchanged."
+  - "2026-10-19, panel fixes. The Hugging Face slide's code now sets per_device_train_batch_size=16 and gradient_accumulation_steps=2, the running case the table beside it reports (66.8 GB); the credit and note say the guide's own example uses 4 and 16 (L5). Goals slide carries the course-thread strip with the fast-enough half and the machine factor filled (H1). The FP32 ladder, the vanishing-update predict, the A100 attention breakdown, and the SDPA call slide moved to [OPTIONAL]; the core runs about 51.5 minutes (M1)."
+  - "Outside numbers were checked against the papers on 2026-10-17: Dao et al. 2022 Figure 2 left and Figure 1 (7.6x), and Table 2 (up to 3x); Chen et al. 2016 abstract (48G to 7G, 30 percent); Micikevicius et al. 2018 section 3.2 (SSD diverges unscaled, a factor of 8 suffices; 2048x swamping ratio) and Figure 2b (about 5 percent of weight gradients below 2^-24). Figure 3's 67 percent zeros are exact zeros in FP32 and are not used on the slide."
+  - "Loss-scaling histogram: redraw Micikevicius et al. 2018 Figure 3 with credit, keeping its uneven bins and separate zero bin, or draw an illustrative histogram labeled as such. The FP16 floor and the shift by S are drawn on it."
+  - "Derived on the slide, not stated in the chapter: FP16 and BF16 grid spacings near 0.5, the 10,000-update result (checked with numpy float16), the 1e-6 x 1,024 example and the overflow threshold of 64, the online-softmax toy, 1,024 tiles, 2.68 GB per sequence, 83 percent per layer, and the k + 48/k curve. Each is labeled derived."
+  - "Part 1's folder is not edited. Part 2 regenerates scoreboard_step1..4, precision_days, ckpt_segments, and the bit-layout figure from a copy of Part 1's make_figs.py in this folder."
+  - "Capacity line is 85.9 GB (80 GiB in decimal GB), as in the chapter and Part 1."
+  - "Ownership: this lecture owns FlashAttention tiling and online softmax (Lectures 6, 6b, 7, 11, and 11b point here). The memory hierarchy stays at two tiers, with a LINK to Lecture 11. Lecture 5 already showed FP16's range and gradient underflow; this lecture recalls it in one line and goes on to swamping, master weights, and loss-scaling policy, which only this chapter covers."
+  - "2026-10-17 build: deck written as 08b_training.tex, 35 frames, notes 71 minutes (10.5 tagged [OPTIONAL]). Changes from the storyboard: an opening section divider (The Step, 0.5 min) so the header shows five sections; the precision run-time bars are a narrower column version (precision_days_col); the checkpointing frame adds a color key under the book figure; the vote frame reveals the scoreboard only (a separate memory-and-days chart was cut as too small to read). The loss-scaling histogram is illustrative (labeled), after Micikevicius et al. 2018 Figure 3. Online softmax is a TikZ build with the toy row on the slide. The book's mixed-precision and accumulation figures are built with masks over the PNG (the book SVGs are glyph outlines and cannot be split)."
+  - "2026-10-18 revision (review round 1): 36 frames, 74 overlay pages, notes 71 minutes, 9.5 of them tagged [OPTIONAL] (the earlier 10.5 was a miscount). Changes: the true-or-false vote is a two-column table with a header row; the open-questions LINK and the hand-off name Lecture 10b; online softmax adds a value row and a running-output column, so the rescaling of the partial output is worked, not asserted (5.5 min, from the attention-bytes slide, now a 1.5 min recall plus the three saved copies); the attention-traffic figure draws four numbered HBM transfers and grays out the bypassed SRAM, and shows d_head / 2 = 64 / 2 = 32 FLOP per byte (Model Training, Sec. 8.3.4); the SRAM figures of 30 to 50 MB and 15 to 20 TB/s are kept because the chapter states them (Sec. 8.3) and the credit now cites it; the FlashAttention slide drops its small scoreboard for one line, 311 to 109.6 GB; the Run B card says small gradients fall below FP16's floor and become zero; the loss-scaling figure marks 1e-6 before and 1.02e-3 after scaling and the 65,504 overflow ceiling; the mixed-precision slide's line and ENGAGE no longer repeat Part 1, and autocast is a LINK to Lecture 7; accumulation shows a divide-by-K tag; checkpointing is two frames (book figure with slide-size labels; GPT-2 XL segments at larger type); the square-root curve is labeled k + 48/k; the vote scoreboard adds option B as a dashed 35.5 GB bar; the synthesis caption and the last takeaway replace two slogans, and the repeated eight-H100 FLEX line is gone."
+  - "2026-10-19 (visual and technical pass): real things added in rhythm, every derived number computed in images/calcs.py (new; it also recomputes the deck's existing numbers, all of which agree except the batch line's per-sequence slope, 2.68 corrected to 2.67 GB). Loss-scaling slide now redraws the measured SSD histogram from Micikevicius et al. Figure 3 (bins read from the figure; x8 shift) instead of an illustrative shape. Diagnose FP16 slide shows a real torch.amp.GradScaler trace (images/scaler_run.py, PyTorch 2.13, Apple M5 Max GPU). New frames: FlashAttention Figure 1 panels (A100 hierarchy and GPT-2 attention time by kernel) after the standard-attention slide; a real torch.profiler excerpt of F.scaled_dot_product_attention, flash kernel against the forced math path (images/sdpa_profile.py) after the measured table; Korthikanti et al. selective recomputation (Table 4 bars, Table 2 formula giving the chapter's 287 and 85.6 GB) after the sqrt(L) slide, OPTIONAL; the Hugging Face TrainingArguments snippet (Transformers v5.0.0 docs) after the vote. Precision ladder note names the datasheet sparsity asterisk (NVIDIA H100 page). Predict title shortened to clear its tag; AlexNet synthesis names profiling to find the binding term; closing slide names the training-time law. Notes 71 minutes (11.5 OPTIONAL) after trimming fourteen notes by 0.5 min; 34 frames, 40 handout pages, 80 overlay pages."

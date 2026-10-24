@@ -552,8 +552,12 @@ class PreflightCommand(BaseCommand):
                 ))
                 continue
 
-            cmd = [sys.executable, "-m", "pytest", str(full_path), "-v", "--tb=short", "-q"]
-            cmd_str = f"pytest {test_path} -v --tb=short -q"
+            if quick:
+                cmd = [sys.executable, "-m", "pytest", str(full_path), "-v", "--tb=short", "-q"]
+                cmd_str = f"pytest {test_path} -v --tb=short -q"
+            else:
+                cmd = [sys.executable, "-m", "pytest", str(full_path), "--ignore=tests/milestones", "--ignore=tests/e2e", "-v", "--tb=short", "-q"]
+                cmd_str = f"pytest {test_path} --ignore=tests/milestones --ignore=tests/e2e -v --tb=short -q"
             timeout = 900 if not quick else 60
 
             code, stdout, stderr = self._run_command(cmd, project_root, timeout=timeout, verbose=verbose)

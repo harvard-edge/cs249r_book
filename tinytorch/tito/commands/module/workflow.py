@@ -26,6 +26,7 @@ from .test import ModuleTestCommand
 from ...core.exceptions import ModuleNotFoundError
 from ...core import auth
 from ...core.submission import SubmissionHandler, auto_sync_after_completion
+from ...core.virtual_env_manager import resolve_venv_tool
 from ...core.modules import (
     get_module_mapping,
     get_module_name,
@@ -860,7 +861,8 @@ class ModuleWorkflowCommand(BaseCommand):
 
         try:
             # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
-            module_dir = self.config.project_root / "modules" / module_name
+            modules_dir = self.config.project_root / "modules"
+            module_dir = modules_dir / module_name
             if not module_dir.exists():
                 self.console.print(f"[yellow]⚠️  Module directory not found: {module_name}[/yellow]")
                 return 1
@@ -885,25 +887,28 @@ class ModuleWorkflowCommand(BaseCommand):
             existing_pid = self._running_jupyter_pid()
             if existing_pid is not None:
                 self.console.print(f"\n[cyan]Jupyter Lab is already running (pid {existing_pid}).[/cyan]")
-                self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
                 if notebook_path:
-                    self.console.print(f"  [dim]then open {notebook_path.name}[/dim]")
+                    relative_nb = notebook_path.relative_to(modules_dir).as_posix()
+                    self.console.print(f"  Open [cyan]http://localhost:8888/lab/tree/{relative_nb}[/cyan] in your browser")
+                else:
+                    self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
                 self.console.print("  [dim]Stop that server first if you want a fresh one.[/dim]")
                 return 0
 
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
             # Launch Jupyter Lab with the notebook file directly
-            cmd = ["jupyter", "lab"]
+            jupyter_path = resolve_venv_tool("jupyter")
+            cmd = [jupyter_path, "lab", f"--ServerApp.root_dir={modules_dir}"]
             if notebook_path and notebook_path.exists():
-                cmd.append(str(notebook_path))
+                cmd.append(notebook_path.relative_to(modules_dir).as_posix())
 
             log_file = self._jupyter_log_file()
             log_file.parent.mkdir(parents=True, exist_ok=True)
             with open(log_file, "a", encoding="utf-8") as log_f:
                 process = subprocess.Popen(
                     cmd,
-                    cwd=str(module_dir),
+                    cwd=str(modules_dir),
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
                 )
@@ -921,17 +926,21 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
             self.console.print("[green]✅ Jupyter Lab started![/green]")
-            self.console.print(f"[dim]Working directory: {module_dir}[/dim]")
+            self.console.print(f"[dim]Working directory: {modules_dir}[/dim]")
             self.console.print(f"[dim]Log file: {log_file}[/dim]")
             self.console.print()
             self.console.print("[bold]If Jupyter doesn't open automatically:[/bold]")
-            self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
+            if notebook_path and notebook_path.exists():
+                relative_nb = notebook_path.relative_to(modules_dir).as_posix()
+                self.console.print(f"  Open [cyan]http://localhost:8888/lab/tree/{relative_nb}[/cyan] in your browser")
+            else:
+                self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
             self.console.print(f"  [dim]Or check {log_file.name} for the full URL with token[/dim]")
             return 0
 
         except FileNotFoundError:
-            self.console.print("[yellow]⚠️  Jupyter Lab not found. Install with:[/yellow]")
-            self.console.print("[dim]pip install jupyterlab[/dim]")
+            self.console.print(f"[yellow]⚠️  Jupyter not found at '{jupyter_path}' and not on PATH.[/yellow]")
+            self.console.print("[dim]Activate your virtual environment, or run: tito setup[/dim]")
             return 1
         except Exception as e:
             self.console.print(f"[red]❌ Failed to launch Jupyter: {e}[/red]")

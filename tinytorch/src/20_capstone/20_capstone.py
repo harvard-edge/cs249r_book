@@ -185,7 +185,7 @@ An Olympics needs events, and one number cannot rank a model, because latency, s
 | :--- | :--- | :--- |
 | **Latency Sprint** | Lowest median single-sample latency | Accuracy $\ge 85\%$ |
 | **Memory Challenge** | Smallest stored model | Accuracy $\ge 85\%$ |
-| **Accuracy Contest** | Highest accuracy | Latency $< 100\text{ ms}$ and storage $< 10\text{ MiB}$ |
+| **Accuracy Contest** | Highest accuracy | Latency $< 100\text{ ms}$ and storage $< 10\text{ MB}$ |
 | **Extreme Push** | Most aggressive optimization that still works | Accuracy $\ge 80\%$ |
 | **All-Around** | The three metrics, side by side, with no combined score | None |
 
@@ -306,7 +306,7 @@ Submission schema (the fields validate_submission_schema requires):
     "model_name": "simple_mlp",
     "metrics": {
       "parameter_count": 1000,
-      "model_size_mb": 0.0038,           ← MiB (bytes / 2**20)
+      "model_size_mb": 0.004,            ← MB (bytes / 10**6)
       "accuracy": 0.92,
       "latency_ms_mean": 0.15,           ← single sample
       "latency_ms_std": 0.02,
@@ -443,19 +443,19 @@ Let's break down where the parameter allocations originate in the network hierar
 
 ### Memory Footprint Derivations
 
-The storage requirement scales directly with the numerical data type ($\text{dtype}$). `measure_memory` divides by $2^{20}$, so the `model_size_mb` field holds **mebibytes**, and every figure below is binary to match:
+The storage requirement scales directly with the numerical data type ($\text{dtype}$). `measure_memory` divides by $10^6$, so the `model_size_mb` field holds decimal **megabytes**, and every figure below is decimal to match:
 
-$$\text{Memory}_{\text{FP32}} = 283\text{ params} \times 4\text{ bytes} = 1{,}132\text{ bytes} = 1.105\text{ KiB} \quad (0.00108\text{ MiB})$$
+$$\text{Memory}_{\text{FP32}} = 283\text{ params} \times 4\text{ bytes} = 1{,}132\text{ bytes} = 1.132\text{ KB} \quad (0.00113\text{ MB})$$
 
 Packing the parameter tensors to INT8 (Module 15) would store one byte per weight, plus a float32 scale and zero point for each of the four quantized arrays ($32\text{ bytes}$ of metadata in total):
 
-$$\text{Memory}_{\text{INT8}} = 283\text{ codes} \times 1\text{ byte} + 32\text{ bytes} = 315\text{ bytes} = 0.308\text{ KiB} \quad (0.00030\text{ MiB})$$
+$$\text{Memory}_{\text{INT8}} = 283\text{ codes} \times 1\text{ byte} + 32\text{ bytes} = 315\text{ bytes} = 0.315\text{ KB} \quad (0.000315\text{ MB})$$
 
 $$\text{Compression Factor} = \frac{1{,}132\text{ bytes}}{315\text{ bytes}} = \mathbf{3.59\times\text{ memory reduction}}$$
 
 The factor is $3.59\times$ rather than a round $4\times$ because the metadata does not shrink with the weights. On a model this small the scales and zero points are $10\%$ of the packed size; on a production model they vanish into the noise, which is why $4\times$ is the number people quote.
 
-**One unit, stated once.** The field is MiB ($\text{bytes} / 2^{20}$) everywhere in this module. Mixing it with decimal MB ($\text{bytes} / 10^6$) introduces a $4.86\%$ error, and since the compression ratio is a quotient of two sizes, the error cancels only when both sides used the same convention. Question 4 returns to exactly this failure.
+**One unit, stated once.** The field is decimal MB ($\text{bytes} / 10^6$) everywhere in this module, as it is across TinyTorch. Mixing it with binary MiB ($\text{bytes} / 2^{20}$) introduces a $4.86\%$ error, and since the compression ratio is a quotient of two sizes, the error cancels only when both sides used the same convention. Question 4 returns to exactly this failure.
 
 This compact architecture provides a fast benchmark probe, at the cost of being far too small for any optimization to show its production behavior.
 """
@@ -644,7 +644,7 @@ class BenchmarkReport:
 
         print(f"\n📊 Benchmark Results for {self.model_name}:")
         print(f"  Parameters: {param_count:,}")
-        print(f"  Size: {model_size_mb:.5f} MiB ({model_size_mb * 1024 * 1024:,.0f} bytes)")
+        print(f"  Size: {model_size_mb:.5f} MB ({model_size_mb * 1_000_000:,.0f} bytes)")
         print(f"  Accuracy: {accuracy*100:.1f}%")
         print(f"  Latency: {avg_latency:.2f}ms ± {std_latency:.2f}ms (median {median_latency:.2f}ms)")
         print(f"  Tail latency: p95 {p95_latency:.2f}ms, p99 {p99_latency:.2f}ms")
@@ -698,14 +698,14 @@ class BenchmarkReport:
 
     def measure_memory(self, model) -> float:
         """
-        Measure model memory footprint, in MiB.
+        Measure model memory footprint, in decimal MB.
 
-        TODO: Calculate the model's stored size in MiB
+        TODO: Calculate the model's stored size in MB
 
         APPROACH:
         1. If the model reports its array storage via size_bytes(), use it
         2. Otherwise sum parameter array nbytes (zeros still occupy storage)
-        3. Convert to MiB (divide by 1024*1024)
+        3. Convert to MB (divide by 1,000,000)
 
         HINTS:
         - Measure the ARRAYS, never a parameter count times an assumed dtype width.
@@ -714,12 +714,12 @@ class BenchmarkReport:
         - `array.nbytes` is the array's real storage; a zeroed float still costs 4 bytes
         - A model that overrides size_bytes() knows something you do not; honor it.
           The optimization workflow later in this module depends on that
-        - 1 MiB = 1024 * 1024 bytes, so the returned figure is mebibytes, not megabytes
+        - 1 MB = 1,000,000 bytes (decimal), the convention used throughout TinyTorch
         """
         ### BEGIN SOLUTION role="scaffold"
         if hasattr(model, 'size_bytes'):
-            return model.size_bytes() / (1024 * 1024)
-        return sum(param.data.nbytes for param in model.parameters()) / (1024 * 1024)
+            return model.size_bytes() / 1_000_000
+        return sum(param.data.nbytes for param in model.parameters()) / 1_000_000
         ### END SOLUTION
 
 # %% [markdown]
@@ -841,9 +841,9 @@ not qualify. These thresholds are classroom rules, not official MLPerf criteria.
 
 `OlympicEvent` gives each event one stable name. `qualifies_event` reads the
 accuracy, median single-sample latency, and model array storage already collected
-by `BenchmarkReport`. The legacy key `model_size_mb` stores MiB (bytes / 2**20).
+by `BenchmarkReport`. The key `model_size_mb` stores decimal MB (bytes / 10**6).
 Latency and memory events require at least 85% accuracy; the accuracy event
-requires latency below 100 ms and storage below 10 MiB. Extreme push lowers the
+requires latency below 100 ms and storage below 10 MB. Extreme push lowers the
 accuracy floor to 80%. All-around has no eligibility floor: it keeps the separate
 metrics for discussion and does not invent a combined ranking.
 
@@ -871,7 +871,7 @@ def qualifies_event(metrics: Dict[str, Any], event: OlympicEvent) -> bool:
         event: The event whose rule to apply, as an OlympicEvent or its string value.
 
     Requires accuracy in [0, 1], positive median latency in milliseconds, and
-    positive array storage in MiB. Unknown events and invalid values raise;
+    positive array storage in MB. Unknown events and invalid values raise;
     missing measurements raise KeyError rather than receiving default values.
     A False result means a valid measurement failed the selected event's rule.
     """
@@ -923,7 +923,7 @@ def test_unit_qualifies_event():
     # The accuracy contest gates on latency and storage, strictly below the limits
     assert qualifies_event(metrics(accuracy=0.10, latency=99.99, size=9.99), OlympicEvent.ACCURACY_CONTEST)
     assert not qualifies_event(metrics(latency=100.0), OlympicEvent.ACCURACY_CONTEST), "100 ms is not below 100 ms"
-    assert not qualifies_event(metrics(size=10.0), OlympicEvent.ACCURACY_CONTEST), "10 MiB is not below 10 MiB"
+    assert not qualifies_event(metrics(size=10.0), OlympicEvent.ACCURACY_CONTEST), "10 MB is not below 10 MB"
 
     # All-around has no floor, and accepts the string form of the event name
     assert qualifies_event(metrics(accuracy=0.0), OlympicEvent.ALL_AROUND), "All-around has no floor"
@@ -2145,7 +2145,7 @@ Enforcing `model_size_mb` as a floating-point number is fundamentally superior t
 2. **Elimination of Binary vs Decimal Unit Ambiguity**:
    The string `"4MB"` is notorious for creating conflicting interpretations across software stacks:
    $$\text{Decimal (SI)}: 4 \times 10^6 = 4{,}000{,}000\text{ bytes} \quad \text{vs} \quad \text{Binary (IEC)}: 4 \times 2^{20} = 4{,}194{,}304\text{ bytes}$$
-   A $4.86\%$ discrepancy corrupts compression ratio calculations ($C = M_{\text{base}} / M_{\text{opt}}$). By enforcing a float defined explicitly as megabytes ($M / 10^6$) or mebibytes ($M / 2^{20}$), all submissions adhere to the identical unit baseline.
+   A $4.86\%$ discrepancy corrupts compression ratio calculations ($C = M_{\text{base}} / M_{\text{opt}}$). Because `model_size_mb` is defined as a float in decimal megabytes ($\text{bytes} / 10^6$), every submission adheres to the identical unit baseline.
 
 3. **Automated Mathematical Validation and Constraint Checking**:
    A float can be bounded in one line. `validate_submission_schema` does it directly:

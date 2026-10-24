@@ -25,20 +25,20 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         book_anchor="Volume I, Chapter 1: Introduction to Machine Learning Systems",
         updated_at="2026-09-15",
     ),
-    "vol1/lab_02_ml_systems.py": LabMetadata(
+    "vol1/lab_02_system_paradigms.py": LabMetadata(
         lab_id="v1_02_physics_of_deployment",
         title="Where Should Inference Run?",
         volume="Volume I",
         chapter="Chapter 2",
-        book_anchor="Volume I, Chapter 2: Machine Learning Systems",
+        book_anchor="Volume I, Chapter 2: System Paradigms",
         updated_at="2026-09-15",
     ),
-    "vol1/lab_03_ml_workflow.py": LabMetadata(
+    "vol1/lab_03_ml_lifecycle.py": LabMetadata(
         lab_id="v1_03_constraint_tax",
         title="Carry the Constraint",
         volume="Volume I",
         chapter="Chapter 3",
-        book_anchor="Volume I, Chapter 3: ML Workflow",
+        book_anchor="Volume I, Chapter 3: ML Lifecycle",
         updated_at="2026-09-15",
     ),
     "vol1/lab_04_data_engr.py": LabMetadata(
@@ -177,22 +177,22 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         book_anchor="Volume II, Chapter 4: Data Storage",
         updated_at="2026-09-15",
     ),
-    "vol2/lab_05_dist_train.py": LabMetadata(
-        lab_id="v2_05_parallelism_design",
-        title="Scaling Without Illusions",
-        volume="Volume II",
-        chapter="Chapter 5",
-        book_anchor="Volume II, Chapter 5: Distributed Training",
-        updated_at="2026-09-15",
-    ),
-    "vol2/lab_06_collective_communication.py": LabMetadata(
-        lab_id="v2_06_collective_communication",
+    "vol2/lab_05_collective_communication.py": LabMetadata(
+        lab_id="v2_05_collective_communication",
         title="Collective Communication",
         volume="Volume II",
-        chapter="Chapter 6",
-        book_anchor="Volume II, Chapter 6: Collective Communication",
+        chapter="Chapter 5",
+        book_anchor="Volume II, Chapter 5: Collective Communication",
         updated_at="2026-09-15",
         release_channel="preview",
+    ),
+    "vol2/lab_06_dist_train.py": LabMetadata(
+        lab_id="v2_06_parallelism_design",
+        title="Scaling Without Illusions",
+        volume="Volume II",
+        chapter="Chapter 6",
+        book_anchor="Volume II, Chapter 6: Distributed Training",
+        updated_at="2026-09-15",
     ),
     "vol2/lab_07_fault_tolerance.py": LabMetadata(
         lab_id="v2_07_failure_budget_engineering",

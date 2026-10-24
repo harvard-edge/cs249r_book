@@ -6,7 +6,10 @@ by manually sweeping a parameter (Batch Size) to find the "Cliff."
 """
 
 import mlsysim
-import pandas as pd # Optional, but common for students
+try:
+    import pandas as pd  # Optional, but common for students
+except ImportError:
+    pd = None
 
 def main():
     print("Scenario: Autonomous Vehicle Perception on Jetson Orin NX")
@@ -29,7 +32,7 @@ def main():
         
         # Print a quick summary row
         status = row['p_status'] if row['f_status'] == "PASS" else "OOM"
-        latency = f"{row['p_latency']:.2f}" if row['f_status'] == "PASS" else "---"
+        latency = f"{row['p_latency']:.2f~P}" if row['f_status'] == "PASS" else "---"
         bottleneck = row.get('p_bottleneck', "---")
         
         print(f"{b:<10} | {status:<10} | {latency:<15} | {bottleneck:<15}")
@@ -37,10 +40,11 @@ def main():
         # Collect for later deep analysis
         results.append(row)
 
-    # 2. Convert the list of dicts to a DataFrame for analysis
-    df = pd.DataFrame(results)
-    print("\nDataFrame Summary (First 5 rows):")
-    print(df[['scenario', 'f_status', 'p_latency']].head())
+    # 2. Convert the list of dicts to a DataFrame for analysis (if pandas is installed)
+    if pd is not None:
+        df = pd.DataFrame(results)
+        print("\nDataFrame Summary (First 5 rows):")
+        print(df[['scenario', 'f_status', 'p_latency']].head())
 
 if __name__ == "__main__":
     main()

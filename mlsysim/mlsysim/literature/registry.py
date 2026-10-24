@@ -22,108 +22,10 @@ Benchmarks = _load("benchmarks", "Benchmarks", "Published benchmark anchors used
 Chinchilla = _load("chinchilla", "Chinchilla")
 Communication = _load("communication", "Communication")
 BatchSize = _load("batchsize", "BatchSize", "McCandlish et al. (2018) critical batch size estimates.")
-Fairness = _load("fairness", "Fairness", "Buolamwini & Gebru (2018) Gender Shades intersectional error rates.")
-Surveys = _load("surveys", "Surveys", "Industry survey figures (CrowdFlower 2016 data-science time allocation).")
-Crypto = _load("crypto", "Crypto", "Security/crypto overhead anchors (TEE, FHE, HSM) for the security_privacy chapter.")
-ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsible-AI technique overhead ranges for the responsible_ai chapter.")
+TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field figures (GPU counts, durations, MFU, interruptions).")
 
 
-# ---------------------------------------------------------------------------
-# Compute-growth trend (a SERIES, not a scalar anchor) for
-# @fig-ai-training-compute-growth. The scalar-anchor YAML schema used by the
-# other literature data files cannot express a multi-field series, so this
-# curated milestone list lives in Python (per the mlsysim taxonomy rule:
-# "composing / series -> Python"). Values are order-of-magnitude
-# training-compute (FLOP) estimates, not vendor disclosures.
-# ---------------------------------------------------------------------------
 from ..core.provenance import Provenance, ProvenanceKind
-
-_COMPUTE_TREND_PROVENANCE = Provenance(
-    kind=ProvenanceKind.LITERATURE,
-    ref="Sevilla et al. (2022), Compute Trends Across Three Eras of Machine Learning (Epoch AI)",
-    url="https://arxiv.org/abs/2202.05924",
-    verified="2026-05-30",
-)
-
-# (model, calendar year, training FLOP, era)
-_COMPUTE_TREND_ROWS = (
-    ("AlexNet", 2012, 1.2e18, "Deep Learning"),
-    ("VGG-16", 2014, 3.0e19, "Deep Learning"),
-    ("ResNet-50", 2015, 5.0e19, "Deep Learning"),
-    ("GoogLeNet", 2014, 2.0e19, "Deep Learning"),
-    ("AlphaGoZero", 2017, 3.0e22, "Deep Learning"),
-    ("Transformer", 2017, 5.0e20, "Large Scale"),
-    ("BERT-Large", 2018, 3.0e21, "Large Scale"),
-    ("GPT-2-XL", 2019, 2.0e22, "Large Scale"),
-    ("T5-11 billion", 2019, 5.0e22, "Large Scale"),
-    ("GPT-3", 2020, 3.1e23, "Large Scale"),
-    ("Gopher", 2021, 6.0e23, "Large Scale"),
-    ("PaLM", 2022, 2.5e24, "Large Scale"),
-    ("GPT-4-class", 2023, 2.0e25, "Large Scale"),
-    ("Llama-3-70 billion", 2024, 8.0e24, "Large Scale"),
-    ("Gemini-Ultra", 2024, 5.0e25, "Large Scale"),
-    ("Llama 3.1 405B", 2024, 3.8e25, "Large Scale"),
-    ("Grok-3", 2025, 3.0e26, "Large Scale"),
-)
-
-
-class ComputeTrend:
-    """Representative training-compute milestones (FLOP) by year and era.
-
-    Source: see ``provenance``. Consumed by @fig-ai-training-compute-growth.
-    Each entry is a dict ``{"model", "year", "flops", "era"}``.
-    """
-
-    provenance = _COMPUTE_TREND_PROVENANCE
-    entries = tuple(
-        {"model": m, "year": y, "flops": f, "era": e}
-        for (m, y, f, e) in _COMPUTE_TREND_ROWS
-    )
-    list = entries  # parity with the Registry `.list` convention
-
-
-# ---------------------------------------------------------------------------
-# Edge-inference latency/energy scatter for @fig-edge-inference-landscape. A
-# multi-field series (device, latency, energy, tier), so it lives in Python like
-# ComputeTrend above. Values are published MLPerf Tiny / vendor measurements.
-# ---------------------------------------------------------------------------
-_EDGE_INFERENCE_PROVENANCE = Provenance(
-    kind=ProvenanceKind.LITERATURE,
-    ref=(
-        "MLPerf Tiny benchmark (Banbury et al. 2021) and vendor inference "
-        "benchmarks (Syntiant, STMicroelectronics, Google Coral, NVIDIA Jetson)"
-    ),
-    url="https://arxiv.org/abs/2106.07597",
-    verified="2026-06-11",
-)
-
-# (name, latency_ms, energy_uj, tier)  tier: 0 = MCU/ASIC, 1 = edge accelerator, 2 = edge GPU
-_EDGE_INFERENCE_ROWS = (
-    ("Syntiant Core 2\n(KWS, low-energy)", 4.4, 31.5, 0),
-    ("Syntiant Core 2\n(KWS, high-perf)", 1.5, 43.8, 0),
-    ("STM32N6 NPU\n(KWS, low-power)", 1.6, 156.5, 0),
-    ("STM32N6 NPU\n(IC, high-perf)", 2.9, 443.9, 0),
-    ("Syntiant Core 2\n(VWW)", 12.7, 71.7, 0),
-    ("Syntiant Core 2\n(IC)", 5.1, 139.4, 0),
-    ("Google Coral\nEdge TPU", 2.4, 4800, 1),
-    ("Jetson AGX Orin\n(ResNet-50)", 0.64, 15000, 2),
-)
-
-
-class EdgeInferenceBenchmarks:
-    """Published edge-inference latency (ms) and energy (uJ) by device and tier.
-
-    Source: see ``provenance``. Consumed by @fig-edge-inference-landscape.
-    Each entry is a dict ``{"name", "latency_ms", "energy_uj", "tier"}``.
-    """
-
-    provenance = _EDGE_INFERENCE_PROVENANCE
-    entries = tuple(
-        {"name": n, "latency_ms": l, "energy_uj": e, "tier": t}
-        for (n, l, e, t) in _EDGE_INFERENCE_ROWS
-    )
-    list = entries  # parity with the Registry `.list` convention
-
 
 # ---------------------------------------------------------------------------
 # Kaplan et al. (2020) test-loss power laws for @fig-model-scaling. Each law is
@@ -133,9 +35,9 @@ class EdgeInferenceBenchmarks:
 # ---------------------------------------------------------------------------
 _KAPLAN_SCALING_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
-    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models",
+    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models (Figure 1; Tables 2, 3, 5, 6)",
     url="https://arxiv.org/abs/2001.08361",
-    verified="2026-06-13",
+    verified="2026-10-15",
 )
 
 # (axis, x_c, alpha, x_min, x_max)  -- L = (X / x_c)^(-alpha) on [x_min, x_max]
@@ -161,6 +63,51 @@ class KaplanScalingLaws:
     )
     list = entries  # parity with the Registry `.list` convention
 
+    # -- Added 2026-10-15: the joint fits and the compute-efficient frontier, so
+    # learning-curve and allocation figures regenerate from the published laws.
+    # Values verified against arXiv:2001.08361v1. ``entries`` above keep the
+    # constants printed on Figure 1 (C_min scale 2.3e8 PF-days); Table 5 states
+    # the same law's scale as 3.1e8 PF-days (``single_variable_fits`` below).
+
+    # Table 5 (Appendix A): single-variable power laws L = (X_c / X)^alpha.
+    # Units: params (non-embedding), tokens, PF-days, tokens, steps.
+    single_variable_fits = {
+        "params": {"alpha": 0.076, "scale": 8.8e13},
+        "data": {"alpha": 0.095, "scale": 5.4e13},
+        "compute_naive": {"alpha": 0.057, "scale": 1.6e7},
+        "compute_min": {"alpha": 0.050, "scale": 3.1e8},
+        "critical_batch": {"alpha": 0.21, "scale": 2.1e8},
+        "steps": {"alpha": 0.76, "scale": 2.1e3},
+    }
+
+    # Table 2 (Section 4.2): L(N, D) = [(N_c/N)^(alpha_N/alpha_D) + D_c/D]^alpha_D,
+    # Eq. 1.5, fit with early stopping. N in non-embedding params, D in tokens.
+    loss_vs_params_and_data = {"alpha_n": 0.076, "alpha_d": 0.103, "n_c": 6.4e13, "d_c": 1.8e13}
+
+    # Table 3 (Section 5.2): L(N, S_min) = (N_c/N)^alpha_N + (S_c/S_min)^alpha_S,
+    # Eq. 1.6 / 5.6, infinite-data learning curves. S_min = S / (1 + B_crit(L)/B)
+    # (Eq. 5.4), with B_crit(L) = B_star / L^(1/alpha_B) (Eq. 5.3, Table 5 values).
+    loss_vs_params_and_steps = {"alpha_n": 0.077, "alpha_s": 0.76, "n_c": 6.5e13, "s_c": 2.1e3}
+
+    # Table 6 (Appendix A): compute-efficient frontier X = X_e * C_min^p,
+    # C_min in PF-days. Units: params, tokens, steps, tokens.
+    compute_efficient_frontier = {
+        "params": {"p": 0.73, "scale": 1.3e9},
+        "batch_tokens": {"p": 0.24, "scale": 2.0e6},
+        "steps_min": {"p": 0.03, "scale": 5.4e3},
+        "tokens": {"p": 0.27, "scale": 2e10},
+    }
+
+    # Section 2.2: default run, 2.5e5 steps of 512 sequences x 1024 tokens
+    # (B = 2^19 tokens). Compute is C = 6NBS (Eq. 5.5; the 6 is
+    # Literature.Chinchilla.ComputeConstant); a PF-day is 1e15 FLOP/s for one
+    # day (Section 1.2), so build it with pint units rather than a constant here.
+    default_steps = 2.5e5
+    default_batch_sequences = 512
+    default_context_tokens = 1024
+
+
+
 
 class Literature(Registry):
     """Registry namespace for Literature."""
@@ -169,10 +116,5 @@ class Literature(Registry):
     Chinchilla = Chinchilla
     Communication = Communication
     BatchSize = BatchSize
-    Fairness = Fairness
-    Surveys = Surveys
-    Crypto = Crypto
-    ResponsibleAIOverhead = ResponsibleAIOverhead
-    ComputeTrend = ComputeTrend
-    EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
+    TrainingRuns = TrainingRuns
     KaplanScalingLaws = KaplanScalingLaws

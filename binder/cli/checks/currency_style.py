@@ -43,8 +43,8 @@ RAW_LATEX_PATTERN = re.compile(
 CURRENCY_MATH_SPAN_PATTERN = re.compile(
     r"\\\([^)]*\b\d[\d,]*(?:\.\d+)?[KMBT]\),\s+[A-Za-z][\w-]*"
 )
-# The notation body is shared by all volumes and lives outside any one of them.
-NOTATION_REL_PATH = Path("books/shared/_partials/_notation_body.qmd")
+# The series notation core is shared by all volumes; its Units section holds the USD line.
+NOTATION_REL_PATH = Path("books/shared/_includes/_notation_core_tail.qmd")
 NOTATION_DEFINITION = (
     "*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise "
     "noted, dollar-denominated costs are U.S. dollars (USD)."
@@ -108,13 +108,17 @@ def iter_html_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def _is_allowed_notation_definition(path: Path, line: str) -> bool:
-    """Return True if *line* is the one sanctioned ``USD`` definition in the notation partial."""
-    # Match on the trailing "_partials/_notation_body.qmd" rather than the whole
+    """Return True if *line* is the one sanctioned ``USD`` definition in the notation chapter or partial."""
+    if line.strip() != NOTATION_DEFINITION:
+        return False
+    if path.name == "notation.qmd":
+        return True
+    # Match on the trailing "_partials/_notation_core_tail.qmd" rather than the whole
     # path, so the check holds whether it runs from the repository root or from
     # books/.
     tail = Path(*path.parts[-2:]) if len(path.parts) >= 2 else path
     expected_tail = Path(*NOTATION_REL_PATH.parts[-2:])
-    return tail == expected_tail and line.strip() == NOTATION_DEFINITION
+    return tail == expected_tail
 
 
 def _audit_file(path: Path) -> list[Violation]:
@@ -182,7 +186,7 @@ def _audit_file(path: Path) -> list[Violation]:
                             "Render dollar amounts with `fmt_usd(value, ...)` "
                             "(escapes `$` automatically); for plain prose use "
                             "`$`. Keep the currency-code definition only in "
-                            "books/shared/_partials/_notation_body.qmd."
+                            "books/shared/_partials/_notation_core_tail.qmd."
                         ),
                     )
                 )

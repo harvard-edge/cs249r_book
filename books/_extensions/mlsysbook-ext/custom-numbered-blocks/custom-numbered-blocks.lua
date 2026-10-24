@@ -255,7 +255,8 @@ end
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
-  fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf")
+  -- EPUB is rendered as one document like PDF, so it uses single-document numbering.
+  fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf") and not quarto.doc.is_format("epub")
   fbx.processedfile = processedfile
 
   fbx.output_file = PANDOC_STATE.output_file
@@ -267,6 +268,8 @@ local function Meta_findChapterNumber(meta)
     local chinfo = chapterinfo(meta.book, processedfile)
     if fbx.ishtmlbook then
       fbx.xreffile= "._htmlbook_xref.json"
+    elseif quarto.doc.is_format("epub") then
+      fbx.xreffile= "._epubbook_xref.json"
     else
       fbx.xreffile= "._pdfbook_xref.json"
       -- fbx.xreffile= "._"..chinfo.lastchapter.."_xref.json"
@@ -299,8 +302,19 @@ local function Meta_findChapterNumber(meta)
   else -- not a book
     fbx.in_part_principles = false
     fbx.xreffile ="._"..processedfile.."_xref.json"
-    fbx.chapno = ""
-    fbx.unnumbered = true
+    -- The HTML editions build as `type: website`, which carries no book
+    -- metadata, so callouts were numbered from a constant prefix (0.x or 1.x
+    -- in every chapter). Chapter files are named NN_slug, and NN is the
+    -- chapter's number in the PDF, so take the prefix from it. (2026-09-29)
+    local nn = pandoc.path.filename(processedfile):match("^(%d%d)_")
+    if nn then
+      fbx.chapno = tostring(tonumber(nn))
+      fbx.unnumbered = false
+      fbx.site_chapno = true
+    else
+      fbx.chapno = ""
+      fbx.unnumbered = true
+    end
   end
 end
 
@@ -343,6 +357,9 @@ local function seed_global_counters(book, processedfile)
   for _, g in ipairs(fbx.global_scoped_groups) do
     fbx.counter[g.cntname] = 0
   end
+  -- ePub renders the whole book as one document, so Pandoc_prefix_count already
+  -- walks every callout in order; seeding here would count each one twice.
+  if quarto.doc.is_format("epub") then return end
 
   for _, v in ipairs(book.render) do
     if str(v.type) == "chapter" then
@@ -463,11 +480,6 @@ local function Meta_initClassDefaults (meta)
 end
 
 local initMeta = function(m)
-  -- Skip this extension entirely for ePub builds
-  -- ePub will use Quarto's native callout rendering with custom CSS
-  if quarto.doc.is_format("epub") then
-    return(m)
-  end
 
   -- Configuration is now only under filter-metadata
   local config = nil
@@ -589,7 +601,7 @@ local function Pandoc_prefix_count(doc)
   -- do evt later: non numeric chapernumbers
   local secno = 0
   local prefix = "0"
-  if fbx.ishtmlbook then prefix = fbx.chapno end
+  if fbx.ishtmlbook or fbx.site_chapno then prefix = fbx.chapno end
   -- PDF: part-principles files have no H1 at start; use part index so we get 1.1, 1.2; 2.1, 2.2; etc.
   if ispdf and fbx.in_part_principles and fbx.chapno and fbx.chapno ~= "" then prefix = fbx.chapno end
 
@@ -609,7 +621,7 @@ local function Pandoc_prefix_count(doc)
   for i, blk in ipairs(doc.blocks) do
 --    print(prefix.."-"..i.." "..blk.t.."\n")
 
-    if blk.t=="Header" and not fbx.ishtmlbook then
+    if blk.t=="Header" and not fbx.ishtmlbook and not fbx.site_chapno then
       if (blk.level == 1) then -- increase prefix
          local header_text = str(blk.content):gsub("^%s+", ""):gsub("%s+$", "")
          local appendix_prefix = fbx.appendix_headers and fbx.appendix_headers[blk.identifier]
@@ -1108,9 +1120,19 @@ local function Pandoc_makeListof(doc)
   return(doc)
 end
 
--- Skip all processing for ePub format - return empty filter list
+-- ePub keeps Quarto's native callout rendering and the shared EPUB CSS, so the
+-- title and rendering passes are skipped. It still needs numbering and xref
+-- resolution: without them every \ref{pri-...} renders as an empty "( )".
+-- (2026-10-04: 461 empty callout refs across the four EPUBs.)
 if quarto.doc.is_format("epub") then
-  return {}
+  return {
+      {Meta = initMeta}
+    , {Meta = Meta_readxref, Div=fboxDiv_mark_for_processing,
+       Pandoc = Pandoc_prefix_count}
+    , {Div = Divs_getid, Pandoc = Pandoc_preparexref}
+    , {Pandoc = Pandoc_resolvexref}
+    , {Div = Div_cleanupAttribs}
+  }
 end
 
 return{

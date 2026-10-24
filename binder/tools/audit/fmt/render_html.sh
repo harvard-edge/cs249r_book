@@ -23,8 +23,8 @@ case "$VOL" in
     BUILD_DIR="books/_build/html-vol1/vol1"
     CHAPTERS=(
       introduction/introduction
-      ml_systems/ml_systems
-      ml_workflow/ml_workflow
+      02_system_paradigms/02_system_paradigms
+      ml_lifecycle/ml_lifecycle
       data_engineering/data_engineering
       nn_computation/nn_computation
       nn_architectures/nn_architectures
@@ -53,8 +53,8 @@ case "$VOL" in
       compute_infrastructure/compute_infrastructure
       network_fabrics/network_fabrics
       data_storage/data_storage
-      distributed_training/distributed_training
       collective_communication/collective_communication
+      distributed_training/distributed_training
       fault_tolerance/fault_tolerance
       fleet_orchestration/fleet_orchestration
       performance_engineering/performance_engineering

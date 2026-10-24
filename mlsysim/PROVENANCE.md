@@ -40,3 +40,8 @@ Rendered-content checks live outside the package. Those checks should consume
 MLSysIM through public registries such as
 `Systems.Reliability.Gpu.mttf_hours` and `Literature.Training.MfuHigh`; the
 package does not scan downstream content files.
+
+## Colocation vs. Shared Catalog
+
+- **Colocated provenance (default for components):** Hardware devices (YAML), server nodes, and custom systems define their `metadata.provenance` inline alongside the component, or inherit directly from their accelerator (`accelerator.metadata.provenance`).
+- **Shared catalog (`mlsysim.core.provenance_catalog`):** Reserved for cross-cutting bibliographic literature, industry reports, grid carbon benchmarks, and pricing datasets that are referenced by multiple models or chapters.

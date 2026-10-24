@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v1_08_experiments import (
+from mlsysim.labs.experiments.v1_08_experiments import (
     FIXTURE_NOTE,
     TRACKS,
     batch_experiment,

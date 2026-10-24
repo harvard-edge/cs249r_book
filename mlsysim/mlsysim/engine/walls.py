@@ -350,6 +350,9 @@ for w in ALL_WALLS:
 _BY_RESOLVER["TrainingMemoryModel"] = [MEMORY]
 _BY_RESOLVER["ServingCapacityModel"] = [SERVING, BATCHING, TAIL_LATENCY]
 _BY_RESOLVER["MoERoutingModel"] = [COMMUNICATION]
+_BY_RESOLVER["ParallelismOptimizer"] = [COMMUNICATION]
+_BY_RESOLVER["BatchingOptimizer"] = [BATCHING, TAIL_LATENCY]
+_BY_RESOLVER["PlacementOptimizer"] = [CAPITAL, SUSTAINABILITY]
 
 
 def wall(number: int) -> Wall:

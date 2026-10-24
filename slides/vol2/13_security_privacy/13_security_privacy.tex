@@ -1,1845 +1,597 @@
 % =============================================================================
-% Chapter 13: Security and Privacy — ML Systems Lecture Slides (Vol II)
+% Lecture 13: Security and Privacy
+% Scaling Machine Learning Systems (Volume II), Chapter 13
 % =============================================================================
-% IMAGES:
-%   - security-vs-privacy.pdf      - attack-surface-layers.pdf
-%   - supply-chain-attack.pdf      - ml-lifecycle-threats.pdf
-%   - model-theft-economics.pdf    - data-poisoning.pdf
-%   - differential-privacy.pdf     - defense-stack.pdf
-%   - hw-security-stack.pdf        - implementation-roadmap.pdf
+% Thesis: a learned system is attacked through interfaces it exposes on
+% purpose, so its defenses are threat models, budgets, and provenance, each
+% priced in a Fleet Law term.
+% Hook and synthesis: the Strava global heatmap, January 2018.
+% Running case: the reference fleet (1,024 GPUs in 128 nodes, an Archetype A
+% model) and the six interfaces it exposes.
+%
+% Build: make deck V=2 D=13_security_privacy   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume       = {Volume II},
-  chapter      = {Chapter 13},
-  logo         = {../../assets/img/logo-mlsysbook.png},
-  instlogo     = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Security and Privacy},
+  volume={Volume II},
+  chapter={Chapter 13},
+  chaptertitle={Security and Privacy},
+  layer=assurance,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
-
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\DP}{Differential Privacy}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
-        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation ---
-\setcounter{mlsystotalsections}{8}
+\usepackage{booktabs,amsmath}
+\frenchspacing
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
 
 \title{Security and Privacy}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.22cm]}
+% Fleet Law symbols as the course writes them
+\newcommand{\Tstep}{T_{\text{step}}}
+\newcommand{\Tcomp}{T_{\text{compute}}}
+\newcommand{\Tcomm}{T_{\text{comm}}}
+\newcommand{\Tsync}{T_{\text{sync}}}
+\newcommand{\Tover}{T_{\text{overlap}}}
+
+% Golden thread (D4): the Fleet Law term and C3 axis this lecture acts on, once, on the goals slide
+\newcommand{\fleetterm}[2]{\par\vspace{0.08cm}{\small\textcolor{mlsysaccent}{\textbf{Fleet Law term:}}~#1\qquad\textcolor{mlsysaccent}{\textbf{C$^3$ axis:}}~#2\par}}
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE AND HOOK
 % =============================================================================
-\mlsystitle{Security \& Privacy}{Defending the ML Fleet}{cover_security_privacy.png}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 12 released models through staged rollouts; today asks who else can use the fleet's interfaces. The notes total about 71 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 57 minutes. Cut first the hardware-price slide, the theft-paths slide, and the open questions.}
+\mlsystitle{Security and Privacy}{A learned system is attacked through interfaces it exposes on purpose, so its defenses are threat models, budgets, and provenance, each priced in a Fleet Law term.}{cover_security_privacy_blueprint.png}
 
-% =============================================================================
-% LEARNING OBJECTIVES
-% =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Walk through each objective. Emphasize that this chapter treats security as
-a systems property unique to ML --- not just traditional IT security bolted on.
-ANALOGY: ``Traditional security guards the doors; ML security must also guard the
-learned function inside.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What makes securing an ML system fundamentally harder than securing a web
-application?'' Cold-call one student. [Expected: the model itself is an attack surface.]
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This slide sets the chapter scope --- do not skip.
-IF SHORT: Read objectives 1, 3, and 4 aloud; let students scan the rest.
-}
-
-\small
-\begin{enumerate}
-  \item Distinguish \textbf{security} from \textbf{privacy} in ML through formal definitions and \textbf{threat models}
-  \item Extract attack patterns from historical breaches (\textbf{Stuxnet}, \textbf{Jeep Cherokee}, \textbf{Mirai})
-  \item Analyze ML-specific attacks: \textbf{model theft}, \textbf{data poisoning}, \textbf{adversarial examples}
-  \item Implement \textbf{differential privacy} with privacy budgets and accuracy trade-offs
-  \item Design \textbf{layered defense} architectures from data to hardware
-  \item Evaluate \textbf{hardware security primitives} (TEEs, HSMs, PUFs) with overhead analysis
-  \item Apply the \textbf{three-phase implementation roadmap} to build context-appropriate security architectures for specific threat models
-\end{enumerate}
-
+\begin{frame}{Predict: what can a map with no names reveal?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{strava-heatmap.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Strava global heatmap: aggregate GPS tracks, no names.}}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \normalsize In January 2018, what did the public heatmap reveal?\\[0.3cm]
+      \choice{A}{Nothing: it held no names}\\[0.15cm]
+      \choice{B}{Each user's password}\\[0.15cm]
+      \answerat{2}{C}{Where staff at remote bases ran}\\[0.15cm]
+      \choice{D}{Each user's home address}\\[0.25cm]
+      \uncover<2->{\small In sparse regions, a few bright tracks traced base perimeters.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Screenshot: HistoryLV, CC BY-SA 4.0, Wikimedia Commons (Strava Labs heatmap, Purwokerto). Incident: Security \& Privacy, War Story 13.1 (Russell 2018).}
+  \note{[3.5 min] [CORE] The screenshot is the real tool, Strava's global heatmap, every uploaded run and ride summed into brightness. This tile is a city, where thousands of people make every road glow. ENGAGE: one minute, vote with fingers. Step 2: C. In late January 2018 people noticed that in sparsely populated regions the few bright tracks came largely from military personnel exercising on and around bases, so the map traced base perimeters and running routes (War Story 13.1). No name, password, or record leaked, and nobody broke in; the release was the product working as designed. Students who chose A assume aggregation hides individuals; it does so only where many people contribute. Students who chose D are close; home locations can leak the same way, but the documented case is the bases. WARN: this is a privacy failure without an attacker breaking any access control. Keep the picture in mind; the synthesis returns to it with a threat model and a number. LINK: today's question is what an adversary can learn or change through interfaces a fleet exposes on purpose.}
 \end{frame}
 
-\begin{frame}{Visual Language}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[1 min] Point to each card: ``Blue is compute, green is data, orange is routing,
-red is error or bottleneck. In this chapter, red will dominate --- security threats
-live in the error/bottleneck domain.''
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] Skip if students have seen this in a previous lecture.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
+\begin{frame}{Recall: what does a 5 percent canary bound?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      {\Large\bfseries Question of the day}\\[0.3cm]
+      {\normalsize What does a staged rollout limit, and what stops a stage?}\\[0.3cm]
+      \uncover<2->{\small Exposure: 5\% of traffic, 20 times less than a cutover (all traffic at once). A stage stops when a monitored signal moves.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=2.9cm,keepaspectratio]{recall_canary.pdf}}\\[0.3cm]
+      \uncover<3->{\begin{mlsyscard}{errorstroke}\small A backdoor fires on one trigger input in a million. Does the canary see it?\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lecture 12: ML Operations at Scale, Napkin Math 12.5 (equal request rate and rollback time assumed). Security \& Privacy, \S13.8.3.}
+  \note{[2 min] [CORE] Retrieval from Lecture 12. Give 45 seconds. Step 2: a staged rollout is an exposure budget. A 5 percent canary exposes 20 times less traffic than a 100 percent cutover, under equal request rates and rollback times, and a stage advances or stops on a monitored signal. Step 3: ENGAGE: does the canary catch a backdoor whose trigger appears once in a million requests? Expected answer: almost certainly not. The model behaves normally on every other input, so no metric moves, and the trigger may never appear in the canary window. The chapter says directly that a small traffic share does not make continued use of a compromised model safe, and a rare trigger may never appear during the canary window (\S13.8.3). WARN: operational health and security are different properties; a copied model or a planted backdoor need not move any availability, latency, or aggregate-quality signal (\S13.1). FLEX: [CORE].}
 \end{frame}
 
-
-
-% =============================================================================
-\section{Attack Surface}
-% =============================================================================
-
-\begin{frame}{The Expanded ML Attack Surface}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students just saw the learning objectives. This slide reveals the first core insight:
-ML systems create attack surfaces that do not exist in traditional software.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Point to the bullet list on the left: ``A database breach steals records;
-an ML breach reverse-engineers the training data from the weights themselves.''
-Point to the diagram on the right: ``Each layer --- API, gradient sync, model
-weights, training data --- is a distinct attack vector.''
-ANALOGY: ``A traditional vault protects objects. An ML model IS the object AND
-the blueprint for reconstructing everything inside it.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``When a model memorizes a patient record, who is responsible --- the data
-provider, the trainer, or the deployer?'' Give 15 seconds, then cold-call.
-[Expected: students will say the trainer; correct answer is all three.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume traditional IT security (firewalls, auth) is sufficient
-for ML. Correct framing: adversarial inputs bypass all network-layer defenses because
-they exploit the learned function, not the infrastructure.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This slide establishes the chapter thesis --- do not skip.
-IF AHEAD: Ask students to name a fifth attack vector not on the slide.
-IF SHORT: Skip the analogy, keep the diagram walkthrough.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    ML systems create \alert{fundamentally new} attack surfaces:
-
-    \vspace{0.1cm}
-    \begin{itemize}\setlength\itemsep{1pt}
-      \item Models \textbf{memorize} training data in weights
-      \item Gradient sync creates \textbf{leakage channels}
-      \item APIs expose \textbf{side channels} (logits, confidence)
-      \item Multi-tenant serving enables \textbf{cross-tenant attacks}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \mlsysalert{Key:}{Traditional firewalls cannot defend against adversarial inputs --- these exploit the model's \textbf{learned functions}.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{attack-surface-layers.pdf}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{Security vs.\ Privacy: Distinct Concerns}
-\note{
-% -- LINK: What prior concept connects to this slide
-The previous slide showed that ML creates new attack surfaces. Now we split
-those threats into two distinct categories: security and privacy.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Point to the left half of the diagram: ``Security defends against adversarial
-manipulation --- someone trying to break your model.'' Point to the right half:
-``Privacy defends against unauthorized inference --- someone trying to learn from
-your model's outputs.'' Key reveal: ``These can be in tension. Robust models
-trained with adversarial examples are MORE susceptible to membership inference
-because they memorize more of the training distribution.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Can you have perfect security without privacy? Privacy without security?''
-Give 20 seconds. [Expected: students realize you can lock down a system but still
-leak data through the model's outputs.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students conflate security and privacy as the same problem.
-Correct framing: security requires worst-case analysis (adversarial); privacy
-requires statistical guarantees (epsilon-delta). Different math, different tools.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This distinction structures the rest of the chapter.
-IF AHEAD: ``Name a real system where security and privacy are in tension.''
-IF SHORT: Focus on the callout box at the bottom; skip the full diagram walkthrough.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{security-vs-privacy.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysalert{Key distinction:}{Security requires \emph{worst-case} analysis; Privacy requires \emph{statistical guarantees}.}
-
-\end{frame}
-
-% --- WAR STORY: Strava Heatmap ---
-\begin{frame}{War Story: The Heatmap That Revealed Bases (2018)}
-\note{
-% -- LINK: What prior concept connects to this slide
-The previous slide established that privacy protects against \emph{unauthorized inference}
-from model outputs. This war story makes that half of the split viscerally concrete:
-no breach, no attacker, no model weights --- just aggregated GPS data doing the leaking.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Walk through the four cards: ``In January 2018, Strava released a global heatmap
-built from 27 million users and one billion activities --- presented as anonymous.
-An undergraduate analyst, Nathan Ruser, noticed bright jogging tracks in the Syrian
-desert that matched the perimeters of undisclosed US military forward bases.
-The heatmap exposed patrol routes, base layouts, and personnel movement across Syria,
-Afghanistan, Iraq, and Niger --- with no breach of any kind.''
-Key insight: ``Aggregating individually anonymous data does NOT guarantee privacy when
-the context is sparse. The statistical structure of behavior was the information.''
-Point to the Systems Lesson callout: ``You do not need model weights or PII to leak
-private structure. Frequency and geometry are enough.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What would have prevented this?'' Give 15 seconds.
-[Expected: privacy zones, opt-in heatmap participation, sparse-context suppression.
-Key insight: you cannot fix a contextual disclosure problem with technical anonymization alone.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think de-identification (removing names, IDs) is sufficient for privacy.
-Correct framing: location traces aggregated over time are re-identifying in sparse contexts
-regardless of whether names are removed. The privacy failure occurs at the statistical
-structure level, not the identifier level.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Concrete failure anchor for the privacy half of the chapter.
-IF SHORT: State ``27M users, no breach, military bases leaked'' and the systems lesson
-in one sentence. The story does its job in 30 seconds.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \begin{itemize}\setlength\itemsep{2pt}
-      \item[\textbf{Context}] Strava heatmap: 27M users, 1B+ GPS activities --- ``anonymized''
-      \item[\textbf{Failure}] Analyst noticed bright running tracks in Syrian desert
-        matching undisclosed US military base perimeters
-      \item[\textbf{Consequence}] Forward bases, patrol routes, personnel movement
-        exposed across Syria, Afghanistan, Iraq, Niger --- \emph{without any breach}
-    \end{itemize}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Systems lesson:}\\[0.1cm]
-    {\footnotesize Privacy failures can occur \textbf{without names, passwords,
-    or model weights leaking}. Aggregated location traces remain identifying when
-    the context is sparse --- ``anonymous'' aggregation is no defense when the
-    aggregate carries behavioral structure.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.1cm}
-\small
-\mlsysalert{Key:}{Unauthorized inference does not require an attacker. Statistical structure in sparse contexts leaks without any explicit access violation.}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: What Makes ML Security Different?}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students just learned security vs.\ privacy. Now they must apply that knowledge
-to articulate WHY ML security differs from traditional IT security.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Read the prompt aloud. ``A properly authenticated request containing an
-adversarial input bypasses all network-layer defenses. Why?'' Give 60 seconds
-of silent writing. Do NOT reveal the answer yet.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-After writing, ask 2--3 students to share. Key insight to surface: ML adds an
-algorithmic attack surface orthogonal to infrastructure --- the learned function
-itself is the vulnerability.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This active learning moment primes the attack vectors section.
-IF SHORT: Reduce writing time to 30 seconds; still cold-call 2 students.
-}
-
-\centering
-\vspace{0.5cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.4cm}
-{\large A properly authenticated API request containing an\\
-adversarial input bypasses all network-layer defenses.\\[0.3cm]
-\alert{Why can't traditional IT security protect ML systems?}}
-
-\vspace{0.4cm}
-{\normalsize Write down 2 reasons. \textcolor{midgray}{(60 seconds)}}
-
-\vspace{0.3cm}
-{\small\textcolor{lightgray}{Compare your answer with a neighbor.}}
-
+\begin{frame}{What can an attacker learn or change through a working model?}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.26cm}
+    \item Write a threat model (asset, boundary, adversary, control) for each interface a fleet exposes.
+    \item Bound query-based extraction with a cumulative budget, and trace poisoning to the provenance record.
+    \item Show why one worker can corrupt a mean, and charge each defense to a Fleet Law term.
+    \item Bound what a release reveals with differential privacy, and account the budget across releases.
+  \end{itemize}
+  \fleetterm{all four}{all three}
+  \note{[1.5 min] [CORE] The driving question: what can an attacker learn or change through a model that is working correctly, and what does each defense cost the fleet? Four goals, in lecture order. The running case is the course's reference fleet, an Archetype A model trained on 1,024 GPUs in 128 nodes of 8, released through a registry, and served behind a public API. It exposes six interfaces on purpose, and every attack today arrives through one of them. Two smaller cases carry the arithmetic where the chapter carries it: a ResNet-50 image API for extraction, and a salary table for differential privacy. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Historical Lessons}
+% SECTION: THREATS
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] First, the map: which interfaces does the fleet expose, and how do we write down a threat against one of them?}
+\mlsysdivider{Which interfaces does a fleet expose, and to whom?}{Security \& Privacy, \S13.1 to \S13.4, \S13.5.5, \S13.5.6}
+\section{Threats}
 
-\begin{frame}{Learning from Breaches: Stuxnet}
-\note{
-% -- LINK: What prior concept connects to this slide
-The prediction exercise surfaced that ML has unique attack surfaces. Now we ground
-this in historical precedent: Stuxnet shows what silent manipulation looks like.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the supply chain diagram: ``Stuxnet (2010) chained 4 zero-day
-exploits to reach air-gapped PLCs. It altered centrifuge speeds while reporting
-normal telemetry --- silent manipulation beats loud destruction.''
-ANALOGY: ``A poisoned ML model is Stuxnet for inference: it shifts decision
-boundaries silently while reporting 95\%+ accuracy on clean data.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What is the ML equivalent of fake telemetry?'' Give 10 seconds.
-[Expected answer: a model with 95\%+ clean accuracy but a hidden backdoor trigger.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think supply chain attacks require exotic nation-state
-capabilities. Correct framing: a poisoned PyPI package or a backdoored model
-on HuggingFace achieves the same effect with commodity effort.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Stuxnet is the anchor example for the entire supply chain threat model.
-IF AHEAD: ``How would you verify that a pre-trained model from a public registry
-is not backdoored?''
-IF SHORT: State the Stuxnet lesson in one sentence and move to the next slide.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{supply-chain-attack.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysinsight{Stuxnet lesson:}{Silent manipulation of learned parameters is more devastating than crashing the system.}
-
+\begin{frame}{Match: which boundary did each breach cross?}
+  \mlsysactivity{Concept question}{2 min}
+  \centering
+  \begin{columns}[T]
+    \begin{column}{0.23\textwidth}\centering
+      \parbox[b][2.1cm][b]{\textwidth}{\centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{strava-heatmap.jpg}}\\[0.05cm]
+      {\footnotesize\textbf{Strava, 2018}}\\
+      \uncover<2->{\footnotesize\textcolor{errorstroke}{an aggregate release}}
+    \end{column}
+    \begin{column}{0.23\textwidth}\centering
+      \parbox[b][2.1cm][b]{\textwidth}{\centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{siemens-s7-300-plc.jpg}}\\[0.05cm]
+      {\footnotesize\textbf{Stuxnet, 2010}}\\
+      \uncover<2->{\footnotesize\textcolor{errorstroke}{accepted components}}
+    \end{column}
+    \begin{column}{0.23\textwidth}\centering
+      \parbox[b][2.1cm][b]{\textwidth}{\centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{jeep-cherokee-2014.jpg}}\\[0.05cm]
+      {\footnotesize\textbf{Jeep Cherokee, 2015}}\\
+      \uncover<2->{\footnotesize\textcolor{errorstroke}{a path to brakes}}
+    \end{column}
+    \begin{column}{0.23\textwidth}\centering
+      \parbox[b][2.1cm][b]{\textwidth}{\centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{ip-camera.jpg}}\\[0.05cm]
+      {\footnotesize\textbf{Mirai, 2016}}\\
+      \uncover<2->{\footnotesize\textcolor{errorstroke}{default credentials}}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  {\small Boundaries: default credentials \textperiodcentered{} a path to brakes \textperiodcentered{} accepted components \textperiodcentered{} an aggregate release}\\[0.15cm]
+  \uncover<2->{\small Stuxnet used 4 zero-day exploits; Mirai peaked near 600,000 infected devices.}
+  \mlsyscredit{Photos, Wikimedia Commons: HistoryLV, CC BY-SA 4.0; Ulli1105, CC BY-SA 2.5; Ethan Llamas, CC BY-SA 4.0; Olli Niemitalo, CC0. Security \& Privacy, \S13.3.}
+  \note{[3 min] [OPTIONAL] ENGAGE: pairs, one minute: match each case to the boundary it crossed. Step 2: Strava, an aggregate release (no record left the company). Stuxnet, accepted components: four zero-day exploits, spread on USB media into Siemens Step7 software and the PLCs it managed (the S7-300 family in the photo) at Natanz, while operators saw normal telemetry. Jeep, a path to safety control: Miller and Valasek reached engine, transmission, and brakes through the Uconnect entertainment unit of a 2014 Cherokee. Mirai, endpoint credentials: cameras and recorders with default passwords became a botnet that peaked near 600,000 infections and disrupted Dyn. The ML analogs: a released model is an aggregate; a pretrained checkpoint or a pip package is an accepted component; a perception model that can command an actuator is a path to control; a federated phone with a stolen identity is an endpoint. WARN: Stuxnet's normal telemetry is the same failure as the canary question; health signals can hide a compromise. FLEX: [OPTIONAL]; the fleet map and the threat model carry the method.}
 \end{frame}
 
-\begin{frame}{Jeep Cherokee \& Mirai: More Parallels}
-\note{
-% -- LINK: What prior concept connects to this slide
-Stuxnet showed silent supply chain manipulation. These two cases extend the pattern
-to isolation failures (Jeep Cherokee) and fleet-scale credential weakness (Mirai).
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to each row in the table. Jeep Cherokee (2015): insufficient CAN bus
-isolation let attackers control steering from the infotainment system. ML parallel:
-multi-tenant GPU sharing without MIG isolation. Mirai (2016): 600K devices with
-default credentials weaponized into a botnet launching a 1.2 Tbps DDoS attack. ML
-parallel: edge ML fleet with unpatched firmware. Emphasize the ``Quantitative Impact''
-column --- real dollars and real scale.
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students treat these as ``hardware security'' problems unrelated to ML.
-Correct framing: every attack vector in the table has a direct ML analog today.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] If short on time, point to the table and read the callout box only.
-IF AHEAD: Ask students to identify a fourth historical incident with an ML parallel.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lp{3.4cm}p{3.4cm}p{3.4cm}@{}}
-  \toprule
-  \textbf{Incident} & \textbf{Vulnerability} & \textbf{ML Parallel} & \textbf{Quantitative Impact} \\
-  \midrule
-  \textbf{Stuxnet} (2010) & Supply chain compromise via 4 zero-day exploits & Poisoned PyPI packages, backdoored model weights & Multi-million \$ weapon \\
-  \textbf{Jeep Cherokee} (2015) & No CAN bus isolation between infotainment and control & Multi-tenant GPU without MIG isolation & 1.4M vehicle recall \\
-  \textbf{Mirai} (2016) & Default credentials on 600K IoT devices & Unpatched edge ML firmware across fleet & 1.2 Tbps DDoS \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\mlsysalert{Pattern:}{Every attack vector here has a direct analog in modern ML deployments.}
-
-\end{frame}
-
-% =============================================================================
-\section{Attack Vectors}
-% =============================================================================
-
-\begin{frame}{Threats Across the ML Lifecycle}
-\note{
-% -- LINK: What prior concept connects to this slide
-Historical breaches showed that attacks target weak links. This slide maps those
-weak links onto the ML lifecycle: data collection, training, deployment, inference.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the diagram left to right: ``Data collection is where poisoning
-enters. Training is where backdoors embed. Deployment is where supply chain
-compromises strike. Inference is where adversarial inputs and extraction happen.''
-Key punchline: ``Different threats need different defenses at different layers.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which lifecycle stage is most vulnerable?'' Give 10 seconds.
-[Expected: students say inference; correct answer is data collection --- poisoning
-has the highest leverage at 0.1\% corruption.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students focus only on inference-time attacks because they are the
-most visible. Correct framing: training-time attacks (poisoning, backdoors) are
-harder to detect and persist through model updates.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This lifecycle mapping structures all subsequent attack/defense slides.
-IF SHORT: Point to the diagram and name the four stages without elaboration.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ml-lifecycle-threats.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysconcept{Lifecycle mapping:}{Match defenses to the stage where the threat operates.}
-
-\end{frame}
-
-\begin{frame}{Model Theft: 100{,}000$\times$ Cost Asymmetry}
-\note{
-% -- LINK: What prior concept connects to this slide
-The lifecycle diagram showed inference as an attack surface. Model theft is the
-highest-impact inference-time attack --- this slide quantifies the economics.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Point to the cost asymmetry in the diagram: ``A GPT-4-class model costs
-\$100M to train but can be extracted for \$1,000 via 10K--100K black-box queries
-achieving 90\% functional accuracy.'' Point to the BERT callout: ``This is not
-hypothetical. Tram\`er et al.\ sent 2 million queries (\$50 in API fees) to a
-BERT-based API and trained a student model with 97\%+ agreement. The 100,000x
-asymmetry is a published, reproducible result.'' Point to the API rate limit:
-``At 100K queries/day, extraction is trivially achievable in a single day.''
-Defenses: rate limiting, output perturbation, top-k filtering.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If you were the attacker, how would you minimize detection?'' Give 15 seconds.
-[Expected: vary query patterns, use multiple accounts, space requests over time.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume rate limiting alone prevents extraction. Correct
-framing: rate limits are necessary but not sufficient --- an attacker within the
-limit still extracts the model.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The 100,000x asymmetry is the key quantitative anchor for this chapter.
-IF AHEAD: ``What if the API returns only top-1 class labels with no confidence?''
-IF SHORT: State the 100,000x number and move on.
-}
-
-% --- Layout: diagram + BERT callout ---
-\begin{columns}[T]
-  \begin{column}{0.58\textwidth}
-    \safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{model-theft-economics.pdf}
-  \end{column}
-  \begin{column}{0.39\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{BERT Extraction (Tram\`er et al.):}\\[0.05cm]
-    {\scriptsize
-    \textbf{Queries:} 2 million (\$50 in fees)\\
-    \textbf{Result:} $>$97\% agreement with victim\\
-    \textbf{Mechanism:} confidence scores + logits\\[0.05cm]
-    The 100{,}000$\times$ asymmetry is not hypothetical ---
-    it is a published, reproducible result on a real API.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.05cm}
-\small
-\mlsysalert{Every API response leaks information:}{Confidence scores and logits form a side channel for extraction.}
-
-\end{frame}
-
-% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
-\begin{frame}{Quick Check}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[1 min] Read the question aloud. Give 15 seconds of silence. Cold-call.
-Answer: 100,000x --- \$100M training vs.\ \$1K extraction.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Micro-retrieval cue reinforcing the key number from the previous slide.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Quick Check}
-
-\vspace{0.6cm}
-{\large What is the cost asymmetry in model theft?}
-
-\vspace{0.5cm}
-{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
-
+\begin{frame}{Discuss: which interface do you guard first?}
+  \mlsysactivity{Discuss}{1 min}
+  \centering
+  \mlsyssteps[width=0.97\textwidth,height=5.6cm,keepaspectratio]{fleetmap_step}{2}\\[0cm]
+  {\footnotesize\textcolor{midgray}{Attestation: signed evidence of what a node booted. Co-tenant: another customer on a shared GPU.}}
+  \note{[2 min] [CORE] Step 1: the reference fleet. A data feed of web text, user feedback, and labels enters a training cluster of 1,024 GPUs in 128 nodes. Each step reduces the gradient across the job (the ring, amber). Nodes are admitted with attestation and keys. Checkpoints go to a registry, and the release record carries them to a serving API that runs on shared GPUs for users and tenants. Step 2: six interfaces, each needed for ordinary work. (1) The data feed accepts records. (2) The gradient exchange accepts every worker's contribution. (3) Node admission hands out keys. (4) The release path moves weights. (5) The API answers queries. (6) Shared accelerators let one tenant time another. ENGAGE: one minute with a neighbor. Which interface would you guard first, and why can that not be answered before naming the asset? (Expected: the answer depends on what must stay confidential, intact, or available.) WARN: a firewall and authentication guard none of these against an authorized caller; each attack today uses a permitted operation. LINK: every later segment returns to one or two numbers on this map.}
 \end{frame}
 
 
-
-\begin{frame}{Data Poisoning: Extreme Leverage}
-\note{
-% -- LINK: What prior concept connects to this slide
-Model theft targets inference. Data poisoning targets the opposite end of the
-lifecycle --- corrupting training data to embed persistent vulnerabilities.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Point to the left column (diagram): ``0.1\% corruption --- just 1,000
-samples in 1 million --- degrades accuracy 10--50\%.'' Point to the right column:
-``Backdoor attacks need only 0.01\% to achieve 90\%+ attack success while
-preserving 95\%+ clean accuracy. Backdoors survive retraining and transfer learning.''
-ANALOGY: ``Poisoning is like salting a city's water supply --- a tiny amount
-contaminates everything downstream.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``How would you detect 1,000 poisoned samples in 1 million?'' Give 15 seconds.
-[Expected: students suggest manual review; correct answer is statistical outlier
-detection and activation clustering.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think only large-scale corruption matters. Correct framing:
-backdoor attacks are effective at 0.01\% precisely because they are invisible to
-aggregate accuracy metrics --- the model looks healthy on clean data.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Data poisoning is the highest-leverage attack in the chapter.
-IF AHEAD: ``What makes backdoor attacks survive transfer learning?''
-IF SHORT: Focus on the 0.1\% and 0.01\% numbers in the right column only.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{data-poisoning.pdf}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \textbf{Attack economics favor adversaries:}
-
-    \vspace{0.15cm}
-    \textcolor{errorstroke}{\textbf{Poisoning:}} 0.1\% of data\\
-    {\footnotesize $\to$ 10--50\% accuracy drop}
-
-    \vspace{0.1cm}
-    \textcolor{errorstroke}{\textbf{Backdoors:}} 0.01\% of data\\
-    {\footnotesize $\to$ 90\%+ attack success rate}\\
-    {\footnotesize $\to$ 95\%+ clean accuracy preserved}
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize Backdoors \textbf{persist} through retraining and transfer learning. ``Clean enough'' data does not mean ``safe enough'' models.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A threat model writes down asset, boundary, adversary, and control}
+  \centering
+  \safeimg[width=0.95\textwidth,height=3.5cm,keepaspectratio]{threatmodel.pdf}\\[-0.2cm]
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{A: confidentiality}\\
+        Asset: the client's data in its update\\
+        Adversary: the coordinator \emph{reads} messages\\
+        Control: secure aggregation (Lecture 11)
+      \end{mlsyscard}}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \uncover<3->{\begin{mlsyscard}{errorstroke}\footnotesize
+        \textbf{B: integrity}\\
+        Asset: the global model\\
+        Adversary: the client \emph{writes} any update\\
+        Control: bound or check each contribution
+      \end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, \S13.4 and \S13.4.1 (threat vector classification).}
+  \note{[3 min] [CORE] The chapter's four fields: asset (what must stay confidential, intact, or available), boundary (where trust changes), adversary (capability and goal), and control (a permission, isolation, or signal that constrains the attack). Step 1: one federated round. The coordinator follows the protocol but can read messages; one enrolled client is compromised. The same update crosses two boundaries. Step 2: boundary A. The coordinator could invert a client's update to recover its data; hiding individual updates from it is confidentiality, the job of secure aggregation (Lecture 11 owns the masking). Step 3: boundary B. The client can submit an arbitrary update; checking or bounding contributions is integrity. Authenticating the client proves who sent the update and says nothing about whether it is benign. The italics on the cards mark black-box, gray-box, and white-box, which describe how much of the model an adversary sees. Poisoning needs a write capability, which is recorded separately. ENGAGE: an attacker queries a public API, knows the task, has no weights. Visibility? Write access? Timing? (Expected: black box, no write, inference time.) WARN: defense comparisons are meaningful only after the actors and collusions are stated. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Adversarial Examples \& Prompt Injection}
-\note{
-% -- LINK: What prior concept connects to this slide
-Poisoning attacks the training pipeline. Adversarial examples and prompt injection
-attack the inference pipeline --- the two runtime-side threats.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the left card: ``Less than 0.01\% pixel change causes
-misclassification. These transfer across architectures with 60--80\% success ---
-you do not need access to the production model.'' Point to the right card:
-``Prompt injection exploits LLMs' inability to distinguish instruction from
-content. Direct injection overrides system prompts; indirect injection poisons
-retrieved context in RAG pipelines.''
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think adversarial examples require white-box access.
-Correct framing: transfer attacks work with zero access to the target model ---
-craft on a surrogate, apply to production.
-IF STUCK: Explain that neural networks share geometric properties in their
-decision boundaries, enabling cross-architecture transfer.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[CORE] Both attacks establish why network-layer defenses are insufficient.
-IF SHORT: Focus on prompt injection as the newer, more deployment-relevant threat.
-IF AHEAD: ``Why is prompt injection fundamentally harder to defend than adversarial
-examples?'' [Answer: no clear boundary between instruction and content.]
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Adversarial Examples}\\[0.1cm]
-    {\footnotesize
-    $<$0.01\% pixel change $\to$ misclassification\\[0.05cm]
-    Transfer across architectures: 60--80\%\\[0.05cm]
-    Stop sign $+$ tape $\to$ ``speed limit'' \\[0.05cm]
-    Exploits shared geometric properties of decision boundaries}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{crimson}
-    \textbf{Prompt Injection (LLM-specific)}\\[0.1cm]
-    {\footnotesize
-    \textbf{Direct:} ``Ignore previous instructions\ldots''\\[0.05cm]
-    \textbf{Indirect:} Poison retrieved context in RAG\\[0.05cm]
-    Exploits inability to distinguish instruction from content\\[0.05cm]
-    No buffer overflow --- the model IS the attack surface}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.15cm}
-\mlsysalert{Both attacks:}{bypass all network-layer defenses --- they exploit the \textbf{learned function} itself.}
-
-\end{frame}
-
-\begin{frame}{LLM Prompt Injection: A New Attack Class}
-\note{
-% -- LINK: What prior concept connects to this slide
-Adversarial examples exploit vision models. Prompt injection exploits LLMs ---
-a fundamentally different attack surface unique to generative AI.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the three attack tiers: ``Direct injection: `ignore
-previous instructions' overrides the system prompt. Indirect injection:
-poison documents in a RAG pipeline so the model executes attacker commands
-when it retrieves them. Multi-step: chain injections across tool calls in
-agentic systems.'' Key punchline: ``There is no buffer overflow here --- the
-model cannot distinguish instruction from content because both are text.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why is prompt injection fundamentally harder to defend than SQL injection?''
-Give 15 seconds. [Expected: SQL injection has a clear boundary between code and
-data; LLMs process both in the same token stream.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think input filtering (blocklists) solves prompt injection.
-Correct framing: adversaries rephrase continuously. No static filter catches
-all injections because the attack surface is the entire natural language space.
-
-% -- FLEX: [CORE] + contingency
-[CORE] Prompt injection is the highest-profile LLM vulnerability in production.
-IF AHEAD: ``How would you defend a RAG pipeline against indirect injection?''
-IF SHORT: Focus on the three-tier taxonomy and the ``no boundary'' insight.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Three tiers of prompt injection:}
-
-    \vspace{0.1cm}
-    \begin{enumerate}\setlength\itemsep{2pt}
-      \item \textbf{Direct}: ``Ignore previous instructions\ldots''\\
-        {\scriptsize Overrides system prompt with attacker goals}
-      \item \textbf{Indirect}: Poison RAG-retrieved documents\\
-        {\scriptsize Model executes attacker commands from context}
-      \item \textbf{Multi-step}: Chain injections across tool calls\\
-        {\scriptsize Agentic systems amplify attack surface}
-    \end{enumerate}
-
-    \vspace{0.1cm}
-    \mlsysalert{No boundary:}{LLMs cannot distinguish instruction from content --- both are tokens.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Defenses (partial):}\\[0.05cm]
-    {\scriptsize
-    Input/output filtering: 60--80\%\\
-    Instruction hierarchy: emerging\\
-    Sandboxed tool execution: reduces blast radius\\
-    Human-in-the-loop for sensitive actions\\[0.1cm]
-    \textbf{No complete defense exists.}\\
-    Defense-in-depth is the only viable strategy.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{War Story: Tesla Autopilot IP Theft}
-\note{
-% -- LINK: What prior concept connects to this slide
-Model theft was quantified as 100,000x cost asymmetry via API extraction.
-This war story shows that insider theft is equally devastating --- and
-involves real criminal prosecution.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Walk through the timeline: ``In 2019, a Tesla engineer copied
-Autopilot source code to personal devices before joining a Chinese
-competitor. The trade secret --- neural network architectures and training
-pipelines --- represented years of R\&D. DOJ filed criminal charges under
-the Economic Espionage Act.'' Key insight: ``Model IP theft does not
-require API extraction. Insider access bypasses all external defenses.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What organizational controls could have prevented this?''
-Give 10 seconds. [Expected: access controls, DLP, code watermarking,
-exit interviews with forensic audit.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students focus entirely on external threats (API extraction).
-Correct framing: insider threats account for a significant fraction of
-IP theft --- access control and audit trails are as important as API defenses.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Concrete case study grounding model theft economics.
-IF SHORT: State the case in one sentence and emphasize insider threat vector.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Tesla Autopilot IP Theft (2019):}
-
-    \vspace{0.1cm}
-    \begin{itemize}\setlength\itemsep{1pt}
-      \item Engineer copied Autopilot source to personal devices
-      \item Neural network architectures + training pipelines
-      \item Joined Chinese autonomous driving competitor
-      \item DOJ criminal charges (Economic Espionage Act)
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \mlsysalert{Insider threat:}{External API defenses are irrelevant when an employee walks out with the weights.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Organizational Controls:}\\[0.05cm]
-    {\footnotesize
-    Access: Least-privilege, MFA\\
-    DLP: Block USB, monitor exfil\\
-    Watermarking: Trace leaked weights\\
-    Audit: Exit forensics\\[0.1cm]
-    \textbf{Defense requires both technical and organizational layers.}}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- DUAL-USE SLIDE ---
-\begin{frame}{ML as Attack Tool: The Dual-Use Pivot}
-\note{
-% -- LINK: What prior concept connects to this slide
-We have treated ML systems as \emph{targets} --- stolen, poisoned, adversarially attacked.
-The Tesla war story showed insider theft of a model. This slide completes the threat
-model: the same model can be both the asset being defended and the weapon in the attack.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the left column: ``Traditional phishing emails contain 19\% grammatical
-accuracy --- easy to detect. An LLM fine-tuned on phishing corpora generates emails with
-99\%+ grammatical accuracy and targeted personalization. The same fluency that powers
-your chatbot can be fine-tuned for social engineering at scale.'' Point to the right
-column: ``SCAAML (Side-Channel Attacks Assisted with Machine Learning), a Google research
-framework, used a CNN to extract AES cryptographic keys from power traces on embedded
-hardware --- automating an expert-driven process that previously required specialist
-skills.'' Key punchline: ``The same foundation models, datasets, and open-source tooling
-that lower barriers for beneficial AI also lower barriers for attack-oriented AI.
-Attack capability scales with training data, just like any other ML task.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which of your current AI capabilities has the highest dual-use risk?'' Give 20 seconds.
-[Expected: text generation for phishing, image synthesis for deepfakes, code generation
-for exploit development, time-series models for side-channel analysis.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume offensive ML requires exotic nation-state capabilities.
-Correct framing: public pre-trained models + a fine-tuning dataset turns commodity
-hardware into an attack platform. The ecosystem that drives beneficial AI (open weights,
-public datasets, accessible APIs) directly lowers the barrier for offensive adaptation.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] This is the chapter's key intellectual pivot --- ML systems as both target
-and weapon. Include when time permits; the phishing anchor alone is worth 30 seconds.
-IF SHORT: State ``99\% grammatical accuracy vs.\ 19\% for traditional phishing'' and
-the dual-use principle in one sentence, then move on.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{AI-Generated Phishing:}\\[0.05cm]
-    {\scriptsize
-    Traditional phishing: \textbf{19\%} grammatical accuracy\\
-    LLM-generated phishing: \textbf{99\%+} grammatical accuracy\\
-    Click-through: 30\%+ in documented campaigns\\[0.05cm]
-    Same fluency powering customer chatbots $\to$
-    fine-tuned for social engineering at fleet scale.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{ML-Assisted Side-Channel (SCAAML):}\\[0.05cm]
-    {\scriptsize
-    CNN trained on power traces $\to$ AES key extraction\\
-    Automates a process requiring specialist expertise\\
-    Runs on embedded hardware (STM32 microcontroller)\\[0.05cm]
-    Same convolutional architecture used in beneficial
-    vision tasks --- retargeted to cryptographic attack.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.1cm}
-\small
-\mlsysalert{Dual-use principle:}{The same models, datasets, and open-source tooling that power beneficial AI lower the barrier for attack-oriented AI. Attack capability scales with compute, just like any other ML task.}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: Assess the Threat}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students just learned three attack types: theft, poisoning, adversarial. This
-exercise asks them to diagnose an attack from observable symptoms.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Read the scenario aloud. Give 90 seconds of silent work. After the pause
-reveal, walk through the solution card: ``This is model extraction. 50K systematic
-queries with full confidence scores is a textbook extraction pattern.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students must identify the attack type AND propose 3 defenses. After 90 seconds,
-have pairs compare. Cold-call one pair. [Expected answer: extraction; defenses =
-output perturbation, top-k filtering, query pattern anomaly detection.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students propose rate limiting as the primary defense. Correct
-framing: the attacker is WITHIN the rate limit (50K < 100K). Rate limits are
-necessary but not sufficient.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This is the second of three required active learning moments.
-IF SHORT: Reduce to 60 seconds writing, skip pair comparison.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.58\textwidth}
-    {\normalsize\bfseries Diagnose the Attack}
-
-    \vspace{0.2cm}
-    An API serves a medical diagnosis model. You observe:
-    \begin{itemize}
-      \item 50K queries/day from one account (limit: 100K)
-      \item Queries are systematically varied inputs
-      \item Each response includes full confidence scores
-    \end{itemize}
-
-    \vspace{0.15cm}
-    \textbf{Identify} the attack type and propose 3 defenses.
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.38\textwidth}
-    \pause
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    \textbf{Attack:} Model extraction\\[0.1cm]
-    \textbf{Defenses:}\\
-    1. Output perturbation (add noise to logits)\\
-    2. Top-k filtering (return only top-3)\\
-    3. Query pattern anomaly detection\\[0.1cm]
-    Rate limits alone $\neq$ sufficient!
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}[fragile]{A language-model API mixes control with data and meters cost}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.1cm,keepaspectratio]{llm_stream.pdf}\\[-0.15cm]
+\begin{semiverbatim}\footnotesize
+[\{"role":"user", "content":"Summarize this."\},
+ \{"role":"tool", "content":"\textcolor{errorstroke}{\textbf{Ignore previous instructions.}}"\}]
+\end{semiverbatim}
+  \vspace{-0.1cm}
+  \uncover<2->{\small\textbf{Denial of wallet:} requests that maximize tokens and retrievals.}
+  \mlsyscredit{Security \& Privacy, \S13.5.5 and \S13.5.6 (Perez and Ribeiro 2022; Greshake et al. 2023; Saltzer and Schroeder 1975).}
+  \note{[2.5 min] [CORE] Step 1: a language-model interface puts system instructions, user text, and retrieved documents into one token stream; the code line is the message list a chat API receives (illustrative content). The model cannot tell control from data by position or delimiter, so a fetched web page that says ``ignore previous constraints'' may be followed, which is indirect prompt injection (Greshake et al. 2023). The chapter's defense moves authority out of the model. Treat every model output as untrusted input, give the model least privilege, and let an external policy point check the authenticated principal before any tool call. Filters detect some attempts; only the external check enforces permission. Step 2: the second new boundary is the cost budget. A request's cost grows with generated tokens and retrieved documents, so an attacker can choose expensive requests while the endpoint stays up. Autoscaling then buys capacity, and spend and tail latency exceed their limits while HTTP success stays normal. The defense meters tokens, retrievals, and cost per authenticated principal. LINK: these are Lecture 10's overload controls (admission, timeouts, circuit breakers), acting on a per-principal signal. ENGAGE: which dashboard metric reveals denial of wallet? (Expected: cost per successful result.) Land the segment aloud: write the asset, boundary, adversary, and control before choosing a defense. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Hardware Security}
+% SECTION: THEFT
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Interface 5 on the map: the query API. How much of a model can an attacker copy through it, and what bounds the copy?}
+\mlsysdivider{How much of a model can its own API give away?}{Security \& Privacy, \S13.5.1 (Napkin Math 13.1)}
+\section{Theft}
 
-\begin{frame}{Hardware-Level Vulnerabilities}
-\note{
-% -- LINK: What prior concept connects to this slide
-We have covered software-level attacks (theft, poisoning, adversarial). Now we
-go below the software: hardware vulnerabilities form the foundation of the trust chain.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the table row by row. Highlight the ``ML Impact'' column for
-each: ``Spectre leaks weights from shared cache. Chip probing extracts weights from
-edge devices. A laser glitch can flip parameter bits to inject a backdoor.''
-Key punchline: ``Software security is only as strong as the silicon it runs on.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which hardware vulnerability category is most relevant to multi-tenant
-ML clouds?'' [Expected answer: HW bugs (Spectre/Meltdown) or side-channels.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students dismiss hardware attacks as requiring physical access.
-Correct framing: Spectre/Meltdown are remote exploits that leak weights from
-shared cache lines in multi-tenant GPU clusters.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[CORE] Hardware trust anchors all subsequent defense discussion.
-IF SHORT: Focus on side-channels and TEEs rows only --- the two most ML-relevant.
-}
-
-\scriptsize
-\renewcommand{\arraystretch}{1.0}
-\begin{tabular}{@{}lp{3cm}p{3.5cm}p{2.8cm}@{}}
-  \toprule
-  \textbf{Category} & \textbf{Mechanism} & \textbf{ML Impact} & \textbf{Defense} \\
-  \midrule
-  \textbf{HW Bugs} & Spectre/Meltdown & Leak weights from shared cache & Microcode, isolation \\
-  \textbf{Physical} & Chip probing & Extract weights from edge devices & Tamper-resistant pkg \\
-  \textbf{Fault Inj.} & Laser/voltage glitch & Bit-flip params for backdoor & Error detection \\
-  \textbf{Side-Chan.} & Power/timing/EM & Recover keys, infer data & Constant-time code \\
-  \textbf{Leaky I/F} & DMA, JTAG ports & Direct access to model weights & Disable in production \\
-  \textbf{Counterfeit} & Fake supply chain chips & Reduced security margins & PUFs, audit \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.05cm}
-\footnotesize
-\mlsysalert{Key:}{Software protections are only as secure as the silicon they run on.}
-
+\begin{frame}{A thief either takes the file or copies the behavior}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.3cm,keepaspectratio]{theft_types.pdf}\\[0.15cm]
+  {\small Loading a pickle checkpoint can run code; SafeTensors stores only tensors.}\\[0.05cm]
+  {\footnotesize\ttfamily torch.load(path, weights\_only=True)\quad safetensors.torch.load\_file(path)}
+  \mlsyscredit{Security \& Privacy, \S13.5.1 and figure 5 (redrawn); Tram\`er et al. 2016; Orekondy et al. 2019; Hugging Face, SafeTensors documentation.}
+  \note{[2 min] [OPTIONAL] Two objectives that need different controls (figure 5). Left: exact artifact theft obtains the file from a bucket, registry, or device; the thief runs the same weights and pays none of the training cost. Controls: encryption with keys inside the boundary, access control, and signatures for integrity. Insider access is often the shortest path; the Waymo and Tesla trade-secret cases were about code and documents, a reminder that the asset includes the pipeline. Right: approximate behavioral theft queries the API and trains a surrogate on the answers (knockoff nets, model distillation). It needs only an account. Krishna et al. (2020) extracted BERT-based APIs with random word sequences, because victim and copy started from the same public BERT and the answers had to supply only the fine-tuning signal. The line below the figure says that Python's pickle format can execute arbitrary code during loading, so loading an untrusted checkpoint is running untrusted code; SafeTensors removes that path. ENGAGE: which control helps against both columns? (Expected: none; they need separate controls.) FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{Hardware Security Primitives}
-\note{
-% -- LINK: What prior concept connects to this slide
-The previous slide cataloged hardware vulnerabilities. This slide introduces
-the four primitives that defend against them.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the diagram bottom to top: ``TEEs create encrypted memory
-enclaves at 5--30\% throughput cost. Secure Boot establishes a chain of trust from
-silicon to ML runtime. HSMs are dedicated crypto processors at 2--10x latency.
-PUFs are unclonable chip fingerprints for edge device authentication.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which primitive would you deploy first for a multi-tenant ML cloud?''
-Give 10 seconds. [Expected answer: TEEs --- they isolate tenant workloads.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume TEEs have zero overhead. Correct framing: 5--30\%
-throughput cost is the ``isolation tax'' --- real capacity lost for real security.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] These primitives are referenced in the defense architecture section.
-IF AHEAD: ``When would you choose PUFs over TEEs?'' [Answer: edge devices
-without enough compute for full TEE overhead.]
-IF SHORT: Name all four, state the TEE overhead number, and move on.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{hw-security-stack.pdf}
-
-\vspace{0.1cm}
-\footnotesize
-\mlsysconcept{Multi-tenant clouds $\to$ TEEs;}{edge fleets $\to$ PUFs; model registries $\to$ HSMs.}
-
+\begin{frame}{A public API gave away a production model's hidden width}
+  \centering
+  \safeimg[width=0.95\textwidth,height=3.6cm,keepaspectratio]{carlini_queries.pdf}\\[0.05cm]
+  {\small Full projection matrix of ada and babbage, under \$20 in queries, using}\\[0.02cm]
+  {\footnotesize\ttfamily "logprobs": true, "top\_logprobs": 5, "logit\_bias": \{token: bias\}}\\[0.05cm]
+  \uncover<2->{\small Top 5 of 1,000 scores gives 200 times fewer per answer.}
+  \mlsyscredit{Carlini et al., ``Stealing Part of a Production Language Model,'' 2024, abstract and table (as Security \& Privacy, table 4). Output shaping: \S13.5.1.}
+  \note{[2.5 min] [OPTIONAL] Real data. Carlini et al. (2024) attacked OpenAI's production API with ordinary queries. Using the API's top-k log-probabilities and logit-bias parameters (the code line shows the request fields), they recovered the final projection matrix of ada and babbage with root-mean-square error near 0.0005 and 0.0007, for under 20 dollars, and recovered the hidden width of gpt-3.5-turbo (two versions, under 40 million queries each), estimating under 2,000 dollars for its full matrix (the gray bar is dimension recovery only). The chapter's table also lists babbage-002, width 1,536. This is partial parameter extraction, neither a stolen file nor a surrogate. Step 2: the operator's first lever is the output contract. Returning the top 5 of 1,000 class scores exposes 200 times fewer scores per answer (99.5 percent fewer entries). Rounding scores from 6 decimal places to 2 removes about 13.3 bits per class under a decimal-bin count (4 digits at 3.3 bits each). ENGAGE: why did two harmless-looking features, log-probabilities and logit bias, matter together? (Expected: one returns detail, the other lets the attacker steer queries; the threat model must consider their interaction.) WARN: noisy or rounded scores are not differential privacy; that needs adjacency, sensitivity, and accounting. FLEX: [OPTIONAL]; the cumulative-bill slide carries extraction budgets.}
 \end{frame}
 
-\begin{frame}{The Tax of Trusted Compute}
-\note{
-% -- LINK: What prior concept connects to this slide
-TEEs impose overhead. This slide makes that overhead concrete with a worked
-example using MIG partitioning on H100.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the table: ``Dedicated GPU: 1,000 tokens/sec. After MIG with
-secure context switching: 850 tokens/sec. That is a 15\% throughput loss --- the
-isolation tax.'' Point to the TEE overhead ranges on the right: ``This cost
-compounds across the fleet.''
-ANALOGY: ``The isolation tax is like airport security --- slower, but you accept
-it because the alternative is unacceptable risk.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``When is 15\% throughput loss worth paying?'' Give 10 seconds.
-[Expected: when tenant data is sensitive (medical, financial, legal).]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think MIG partitioning is free because NVIDIA markets it
-as a feature. Correct framing: 15\% throughput loss is the minimum cost; TEE
-encryption overhead adds another 5--30\% on top.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] The numbers reinforce TEEs from the previous slide.
-IF SHORT: State ``15\% isolation tax'' and move to differential privacy.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Multi-Instance GPU (MIG) Isolation}
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Metric} & \textbf{Value} \\
-      \midrule
-      Dedicated GPU throughput & 1,000 tok/s \\
-      After MIG partitioning   & 850 tok/s \\
-      \textbf{Isolation Tax}   & \textcolor{errorstroke}{\textbf{15\%}} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{routingstroke}
-    {\footnotesize Security is a \textbf{capacity drain}. Providing a secure enclave costs 15\% of raw throughput. Multi-tenancy is an economic necessity, but isolation is not free.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.2cm}
-    {\footnotesize\textbf{TEE Overhead Ranges:}}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Primitive} & \textbf{Cost} \\
-      \midrule
-      TEE (SGX/SEV) & 5--30\% \\
-      Secure Boot   & Boot time \\
-      HSM key ops   & 2--10$\times$ \\
-      PUF auth      & Minimal \\
-      \bottomrule
-    \end{tabular}
-    }
-  \end{column}
-\end{columns}
-
+\begin{frame}{Predict: does a daily quota stop a patient extractor?}
+  \mlsysactivity{Predict}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize\textbf{Given: ResNet-50 API (scenario)}\\
+        Training cost: \$5K\\
+        90\% copy: 5M queries\\
+        Paid tier: \$50/month, 10K/day\\
+        Pay per query: \$0.001
+      \end{mlsyscard}
+      \footnotesize
+      \only<1-2|handout:0>{What does the full copy cost on the paid tier?}%
+      \uncover<3->{5M / 10K = 500 days\\ $500 \times \$50/30 = \mathbf{\$833}$\\[0.05cm]}
+      \uncover<4->{Bill each query past 100K:\\ $\$17 + \$4{,}900 = \mathbf{\textcolor{mlsysaccent}{\$4{,}917}}$}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering
+      \only<1-2|handout:0>{\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{bill_step1.pdf}}%
+      \only<3|handout:0>{\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{bill_step2.pdf}}%
+      \only<4-|handout:1>{\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{bill_step3.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, Napkin Math 13.1 and figure 6 (scenario inputs, constructed). Lifetime bill as in the book: 10 days at \$50/30 plus 4.9M $\times$ \$0.001.}
+  \note{[3.5 min] [CORE] The chapter's worked example, with a smaller model than the reference fleet: a ResNet-50 image API whose training cost is about 5,000 dollars, and an extractor that needs about 5 million queries for 90 percent fidelity. Step 1: if every query cost 0.001 dollars, the full set would cost 5,000 dollars, equal to training (dotted line). ENGAGE: two minutes in pairs. On the paid tier, 50 dollars a month for up to 10,000 queries a day, what does the full copy cost? Step 3: 500 days and about 833 dollars, a sixth of the training cost. A daily quota slows collection and never caps its total. Step 4: the chapter's fix is a lifetime budget per principal, which bills every query beyond an allowance of 100,000 at the pay-as-you-go price. The full set then costs about 4,917 dollars (about 17 dollars of tier fees plus 4,900), close to training. Break-even is the design target, because the extractor still pays for training the surrogate and gets a less faithful copy. WARN: the budget binds only as far as principals map to real actors, so account issuance and cross-account detection close the remaining route. Land the segment aloud: extraction is bounded by cumulative budgets and an output contract. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Differential Privacy}
+% SECTION: POISONING
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Interface 1 and interface 4: what the model learns from, and what deployment loads. Theft reads; poisoning writes.}
+\mlsysdivider{What can an attacker change by writing what the model learns?}{Security \& Privacy, \S13.3.1, \S13.5.3, \S13.8.3 (integrity checks)}
+\section{Poisoning}
 
-\mlsysfocus{Differential Privacy}{%
-$\Pr[\mathcal{M}(D) \in S] \leq e^{\epsilon} \cdot \Pr[\mathcal{M}(D') \in S] + \delta$%
-}
-
-\begin{frame}{Differential Privacy: Calibrated Noise}
-\note{
-% -- LINK: What prior concept connects to this slide
-Hardware primitives defend the infrastructure. Differential privacy defends the
-data --- it is the mathematical foundation for privacy guarantees.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Point to the Information Leakage Invariant callout: ``This is the named
-principle governing the entire privacy design space: privacy is a budget, not a
-switch. Every model output leaks something. DP doesn't stop the leak --- it
-quantifies and caps it.'' Walk through the diagram: ``DP adds calibrated noise so
-no individual's data can be reverse-engineered from the output.'' Point to the
-three parameters: ``Epsilon is the privacy budget. Sensitivity is how much one
-record changes the output. Noise scale = sensitivity / epsilon.'' Key reveal:
-``Epsilon=0.1 gives strong privacy but 10--15\% accuracy loss. This is a
-quantitative trade-off, not a toggle.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why does DP only work at scale?'' Give 15 seconds.
-[Expected answer: error per person is approximately Noise/N, so larger N dampens
-the per-person noise to acceptable levels.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think DP makes data ``anonymous.'' Correct framing: DP
-provides a mathematical bound on information leakage per individual, calibrated
-by epsilon. It does not remove individuals from the dataset.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] DP is the central privacy mechanism --- all subsequent slides build on it.
-IF AHEAD: ``What happens when epsilon approaches infinity?'' [Answer: no privacy.]
-IF SHORT: State the epsilon trade-off and skip the diagram walkthrough.
-}
-
-% --- Layout: diagram + invariant callout ---
-\begin{columns}[T]
-  \begin{column}{0.62\textwidth}
-    \safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{differential-privacy.pdf}
-  \end{column}
-  \begin{column}{0.35\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Information Leakage Invariant:}\\[0.05cm]
-    {\scriptsize \emph{``Privacy is a budget, not a switch.''} Every model output
-    potentially leaks information about training data. Perfect privacy is
-    mathematically impossible if the model remains useful.
-    DP \textbf{quantifies} the leak via $\epsilon$ --- it does not eliminate it.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.05cm}
-\small
-\mlsysinsight{Scale matters:}{Error per person $\approx$ Noise$/N$. DP kills utility for small $N$ but works at fleet scale.}
-
+\begin{frame}{A poisoner optimizes through the defender's own training}
+  \centering
+  \safeimg[width=0.97\textwidth,height=5.0cm,keepaspectratio]{bilevel.pdf}\\[0.05cm]
+  {\small $\max_{P}\ \mathcal{L}\big(f_{S \cup P},\, S_{\text{test}}\big)$, where $f_{S \cup P}$ is trained on $S \cup P$}
+  \mlsyscredit{Security \& Privacy, \S13.5.3, equations 1 and 2, figure 9 (redrawn); Biggio et al. 2012.}
+  \note{[2.5 min] [CORE] Poisoning needs a write capability: something the model learns from, such as scraped web pages, user feedback, or labels. Read the loop. The outer loop is the attacker, who chooses poison records $P$ to maximize loss on a target set. The inner loop is the defender's ordinary training, which minimizes training loss on the clean data $S$ plus the poison. The attacker cannot change the training code; it changes the data and lets the defender's own optimizer carry the effect. Evaluating a poison means estimating what training does with it, which is why the chapter calls the problem bilevel and why evaluation can need repeated training or a surrogate. The targeted form lowers the loss on one chosen input and label instead. Example from the chapter: an attacker with accounts on an email service reports campaign-style spam as ``not spam,'' so the retrained filter lets the campaign through while accuracy on other mail looks normal. ENGAGE: why does a targeted attack barely move validation accuracy? (Expected: it changes the model only near the target; the validation set has almost no inputs there.) LINK: poisoning changes the model before deployment; a sticker on a stop sign changes only the input at inference (Lecture 14 owns adversarial inputs). FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{DP Worked Example: Salary Privacy}
-\note{
-% -- LINK: What prior concept connects to this slide
-The previous slide introduced DP parameters abstractly. This slide grounds them
-in a concrete salary calculation.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Walk through the table row by row: ``N=1000 employees, salary range
-\$0--\$200K, epsilon=1. Sensitivity = \$200K. Noise scale = 200K/1 = \$200K.
-Error per person = \$200K / 1000 = \$200 --- acceptable.'' Now point to the red
-row: ``For N=100, error = \$2,000 --- DP is impractical at small scale.''
-Key example: ``Apple uses DP for emoji usage (billions of events) but not
-for small clinical trials.''
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students apply DP to small datasets and blame the algorithm when
-utility collapses. Correct framing: DP requires large N to be practical ---
-error per person scales as 1/N.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[CORE] This worked example makes the privacy-utility trade-off quantitative.
-IF SHORT: Point to the N=1000 vs.\ N=100 rows and state the key insight.
-}
-
-\small
-\textbf{Computing average salary with $\epsilon=1.0$ privacy}
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.2}
-{\footnotesize
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Step} & \textbf{Parameter} & \textbf{Value} & \textbf{Meaning} \\
-  \midrule
-  Sensitivity ($S$)    & Max one person changes sum & \$200,000 & Range of salaries \\
-  Privacy budget       & $\epsilon$ & 1.0 & Moderate privacy \\
-  Noise scale ($b$)    & $S / \epsilon$ & \$200,000 & Laplace noise magnitude \\
-  Error ($N$=1,000)    & $b / N$ & \textcolor{datastroke}{\textbf{\$200}} & Acceptable \\
-  Error ($N$=100)      & $b / N$ & \textcolor{errorstroke}{\textbf{\$2,000}} & Impractical \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{routingstroke}
-{\footnotesize \textbf{The Privacy-Utility Trade-off}: $\epsilon=0.1$ gives strong privacy but 10--15\% accuracy loss. $\epsilon=1.0$ is moderate (5--10\% loss). $\epsilon=10$ is weak but minimal loss.}
-\end{mlsyscard}
-
+\begin{frame}{Three hundred poisoned images changed what a model draws}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.9cm,keepaspectratio]{nightshade.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}\small
+      Each poisoned image matches its caption, so a label audit passes it.\\[0.4cm]
+      \textbf{Web scale:} 0.01\% of LAION-400M, about 40,000 images, could have been poisoned for \$60.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Images: Shan et al., ``Nightshade,'' IEEE S\&P 2024 (as Security \& Privacy, figure 12), relabeled. Carlini et al., ``Poisoning Web-Scale Training Datasets is Practical,'' IEEE S\&P 2024, abstract.}
+  \note{[1.5 min] [OPTIONAL] Measured. Nightshade fine-tuned Stable Diffusion XL with 50, 100, and 300 poisoned images per concept. Each poisoned image looks like its prompt (a dog photo captioned as a dog), so every label is correct; this is clean-label poisoning, which a label audit cannot flag. By 300 images, ``dog'' produces cats and ``car'' produces cows (the slide shows the paper's first four prompts; top labels are the prompts, red labels the attacker's targets). Nightshade was built to deter unauthorized scraping of artists' work; the same technique can sabotage a legitimate pipeline, the dual-use problem the chapter names. The line below gives a second measured result. Carlini et al. showed that buying expired domains that web-scale datasets still point to would have let an attacker control 0.01 percent of LAION-400M or COYO-700M for about 60 dollars. ENGAGE: why does a correct caption not protect the pipeline? (Expected: the poison is in the pixels; the label is honest.) WARN: these effects depend on the model, the poison construction, and the training procedure. FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{Privacy Budget Composition}
-\note{
-% -- LINK: What prior concept connects to this slide
-The worked example showed DP for a single query. This slide reveals the critical
-implementation trap: privacy budgets compound across multiple uses.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the left column: ``10 models at epsilon=1 each = total epsilon=10.
-Monthly retraining for 2 years = epsilon=24.'' Let that sink in: ``Organizations
-failing to track cumulative loss exceed their privacy guarantees by orders of
-magnitude --- violating regulations despite using DP libraries.'' Point to the
-DP-SGD steps on the right: ``Clip per-sample gradients, add noise, track budget
-per step, stop when exhausted. Cost: 5--10\% accuracy at epsilon=1.''
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students treat each DP query independently and forget that epsilon
-accumulates. Correct framing: total epsilon is the SUM across all uses of the
-data --- including hyperparameter tuning, which most teams forget to count.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Budget compounding is the single most common DP implementation failure.
-IF SHORT: State ``budgets compound'' with the 10-model example and move on.
-IF AHEAD: ``How does Renyi DP tighten the composition bound?''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Privacy budgets compound:}
-
-    \vspace{0.15cm}
-    \begin{itemize}\setlength\itemsep{2pt}
-      \item 10 models $\times$ $\epsilon=1.0$ each $=$ total $\epsilon=10$
-      \item Monthly retrain $\times$ 24 months $=$ $\epsilon=24$
-      \item Hyperparameter tuning adds more budget
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize Organizations failing to track cumulative privacy loss exceed guarantees by \textbf{orders of magnitude} --- violating regulations despite using DP libraries.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    {\footnotesize\textbf{DP-SGD for Training:}}
-    \vspace{0.1cm}
-    \begin{enumerate}\setlength\itemsep{1pt}
-      \item[\footnotesize 1.] Clip per-sample gradients
-      \item[\footnotesize 2.] Add calibrated Gaussian noise
-      \item[\footnotesize 3.] Track privacy budget per step
-      \item[\footnotesize 4.] Stop when budget exhausted
-    \end{enumerate}
-
-    \vspace{0.15cm}
-    {\footnotesize\textbf{Cost:} 5--10\% accuracy loss at $\epsilon \approx 1.0$. Requires 2--5$\times$ more training steps.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{True or false: what does poisoning need?}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \choice{1}{An attacker must corrupt a large share of the data.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.25cm]
+  \choice{2}{A backdoored model shows lower clean validation accuracy.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.25cm]
+  \choice{3}{Clean-label poisons pass a label audit.}\uncover<2->{\enspace\textbf{\textcolor{GreenLine}{True}}}\\[0.25cm]
+  \choice{4}{Retraining on new data removes a planted backdoor.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.4cm]
+  \uncover<2->{\small Clean accuracy cannot certify integrity; targeted and trigger tests must.}
+  \mlsyscredit{Security \& Privacy, \S13.5.3, \S13.4.1, and \S13.11 (Shafahi et al. 2018; Gu et al. 2017).}
+  \note{[2 min] [CORE] Peer instruction: vote on all four, discuss with a neighbor for one minute, vote again. Step 2: (1) false. The chapter's pitfall: a small, chosen set can target a decision without a visible drop in accuracy (Shafahi et al. 2018); a team that assumes an attacker needs 10 percent of 10 million images plans for the wrong threat. (2) false. BadNets (Gu et al. 2017) behaves normally on clean inputs and misbehaves only on the trigger, so clean validation passes. (3) true; every label in a clean-label poison is correct. (4) false. A compromised source keeps feeding later versions, and training that reuses an affected checkpoint can keep the backdoor; retraining needs renewed testing. Students who say true to (1) picture an availability attack, which does need volume; targeted and backdoor attacks do not. LINK: Lecture 14 owns the layered defense along the data path (sanitization, robust training, targeted evaluation). Today owns the threat. FLEX: [CORE].}
 \end{frame}
 
-% --- ACTIVE LEARNING: DP Noise Scale Exercise ---
-\begin{frame}{Your Turn: Calibrate the Noise}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students learned DP parameters and budget composition. This exercise makes
-the privacy-utility trade-off concrete by computing noise at two epsilon values.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Read the parameters. Give 90 seconds. After pause reveal:
-``At epsilon=1: noise = 200K/1 = \$200K, error/person = \$200K/10K = \$20 ---
-acceptable. At epsilon=0.1: noise = 200K/0.1 = \$2M, error/person = \$200 ---
-still tolerable at this N. But at N=1000, error = \$2,000 --- utility collapses.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students calculate noise scale at two epsilon values and determine the
-crossover where utility becomes unacceptable. [Expected: epsilon=0.1 is
-the practical floor for N=10K; for N=1K the floor is epsilon=1.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students set epsilon without considering dataset size.
-Correct framing: the acceptable epsilon depends on N --- small datasets
-need larger epsilon (weaker privacy) to maintain utility.
-
-% -- FLEX: [CORE] + contingency
-[CORE] Quantitative DP exercise connecting theory to practice.
-IF SHORT: Reduce to 60 seconds; show epsilon=1 answer only.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Calculate DP Noise Scale}
-
-    \vspace{0.15cm}
-    \textbf{Dataset}: 10K users, salary range \$0--\$200K.\\
-    \textbf{Sensitivity}: $S = \$200{,}000$.
-
-    \vspace{0.1cm}
-    \textbf{Calculate noise scale and error/person for:}
-    \begin{enumerate}
-      \item $\epsilon = 1.0$ (moderate privacy)
-      \item $\epsilon = 0.1$ (strong privacy)
-    \end{enumerate}
-
-    \textbf{At what $\epsilon$ does utility drop below \$500 error?}
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    $\epsilon=1$: $b = 200K/1 = \$200K$\\
-    Error: $\$200K / 10K$ = \textcolor{datastroke}{\textbf{\$20/person}}\\[0.1cm]
-    $\epsilon=0.1$: $b = 200K/0.1 = \$2M$\\
-    Error: $\$2M / 10K$ = \textcolor{routingstroke}{\textbf{\$200/person}}\\[0.1cm]
-    \$500 threshold: $\epsilon \geq 0.04$\\
-    (for $N=10K$)\\[0.1cm]
-    \textcolor{errorstroke}{At $N=1K$: need $\epsilon \geq 0.4$}
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A model is trusted only as far as its provenance record reaches}
+  \centering
+  \mlsyssteps[width=0.98\textwidth,height=4.6cm,keepaspectratio]{supply_step}{2}\\[0.05cm]
+  \uncover<3->{\small Provenance record: data snapshot, lockfile, code, image, registry principal, node.}\\[0.05cm]
+  \uncover<3->{\small A signature proves who shipped an artifact; only tests probe what it does.}
+  \mlsyscredit{Security \& Privacy, \S13.3.1 and figure 2 (redrawn), principle 22 (provenance bound on trust), \S13.8.3 (integrity checks).}
+  \note{[3.5 min] [CORE] Step 1: Stuxnet's chain. USB media carried the payload past an air gap into Windows hosts, through Siemens Step7 software, into PLC logic that damaged centrifuges while operators saw normal readings. Every stage accepted the previous one's output. Step 2: the ML chain has the same shape. A public artifact (a PyPI package, a dataset, pretrained weights, accelerator firmware) passes through a trusted build host and training job into a model artifact whose misbehavior health checks need not reveal. The chapter's principle 22, the provenance bound on trust: a model can be trusted only as far as a verifiable record of its data, code, weights, and hardware reaches. Step 3: the release record binds every input of a deployable artifact: the dataset snapshot, dependency lockfile, preprocessing code, container image, the registry principal who promoted it, and the endpoints that loaded it. With it, a suspect model can be rolled back to a release that does not share the input, and forensics can ask which data produced it. ENGAGE: a signed checkpoint from a trusted vendor contains a backdoor. Which control failed? (Expected: none; a signature establishes origin and integrity, and an authentic artifact can still be harmful. Behavioral tests are a separate control.) Land the segment aloud. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Defense Architecture}
+% SECTION: FLEET
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Interfaces 2, 3, and 6: the boundaries inside the fleet that no API gateway sees. Here every defense has a price in the Fleet Law.}
+\mlsysdivider{What does the fleet's own machinery expose, and what does defense cost?}{Security \& Privacy, \S13.6, \S13.7, \S13.8.1}
+\section{Fleet}
 
-\begin{frame}{Layered Defense Architecture}
-\note{
-% -- LINK: What prior concept connects to this slide
-We have covered individual attacks and individual defenses. This slide assembles
-them into a layered defense architecture --- the chapter's design pattern.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the diagram bottom to top: ``Layer 1: hardware root of trust
-(TEEs, PUFs). Layer 2: data integrity (poisoning detection, DP). Layer 3: model
-hardening (adversarial training, watermarking). Layer 4: serving defense (rate
-limiting, output perturbation). Layer 5: governance (audit, compliance).''
-Key punchline: ``No single layer suffices; composition creates graceful degradation.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What happens if you skip the hardware root of trust?'' Give 10 seconds.
-[Expected answer: all software-layer protections can be undermined by hardware
-exploits like Spectre.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think one strong layer (e.g., encryption) is sufficient.
-Correct framing: defense in depth means each layer catches threats the layers
-above cannot --- a breach at one layer is contained by the next.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This is the chapter's integrating framework.
-IF SHORT: Name the five layers without elaborating each.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{defense-stack.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysconcept{Defense in depth:}{Each layer catches threats the layers above cannot.}
-
+\begin{frame}{One compromised worker can move the mean for every replica}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.4cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{One H100 (PCIe card shown).}}\\[0.15cm]
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        Reference cluster: 1,024 GPUs\\
+        350 GB of FP16 gradients per step\\
+        2.45 TB checkpoint
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{breakdown.pdf}\\[0.05cm]
+      {\footnotesize The gradient mean has a breakdown point of zero.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Geekerwan, CC BY 3.0, Wikimedia Commons. Security \& Privacy, \S13.6 and \S13.6.1 (Blanchard et al. 2017; Yin et al. 2018). Plot illustrative: 63 values near 1.0 and one chosen value.}
+  \note{[2 min] [CORE] Back to the running case: the reference cluster of 1,024 GPUs (the photo shows one H100 card), which reduces 350 GB of FP16 gradients every step and writes a 2.45 TB checkpoint. In the illustrative plot, 63 honest workers send a gradient coordinate near 1.0; one compromised worker sends the value on the x axis. The mean, which is what a ring AllReduce computes when it sums and divides, follows the attacker without bound, so a sent value of 10,000 moves the mean to about 157. The median of the 64 stays near 1.0. Statisticians call this the breakdown point: the fraction of inputs that can move an estimator arbitrarily far. For the mean it is zero, since one input suffices. Weighting by 1 over N does not help when the value itself is unbounded. Robust rules such as Krum and the coordinate-wise trimmed mean tolerate a stated number of faulty workers (Blanchard et al. 2017; Yin et al. 2018). ENGAGE: why does an adaptive attacker defeat a fixed norm check over many steps? (Expected: it sends updates just under the threshold, repeatedly.) LINK: Lecture 7's silent-data-corruption checks (hot spares, dual and triple modular redundancy) assume random faults; an attacker chooses its values. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Secure Aggregation for Federated Learning}
-\note{
-% -- LINK: What prior concept connects to this slide
-The defense stack showed data integrity as Layer 2. Federated learning claims to
-protect data by keeping it on-device --- but raw gradients still leak.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the left column: ``Gradient inversion reconstructs training
-images from gradient vectors. Membership inference achieves 70--90\% accuracy
-on FL models. FL is NOT inherently private.'' Point to the Gboard card on the
-right: ``Google's solution: secure aggregation prevents the server from seeing
-individual gradient contributions, plus DP noise at epsilon approximately 6.
-Next-word prediction trained on millions of phones without centralizing any text.''
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume federated learning = private by default because
-data never leaves the device. Correct framing: gradient updates ARE the data ---
-they can reconstruct training images with high fidelity.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] This extends the DP section to distributed settings.
-IF SHORT: State ``FL is not inherently private'' and show the Gboard card only.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Federated learning is NOT inherently private:}
-
-    \vspace{0.1cm}
-    \begin{itemize}\setlength\itemsep{1pt}
-      \item Gradient inversion reconstructs training data
-      \item Membership inference: 70--90\% accuracy
-      \item Raw gradients $\to$ the server sees everything
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \mlsysinsight{Required:}{Secure aggregation + DP ($\epsilon \approx 6$) + cryptographic protection.}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.2cm}
-    \begin{mlsyscard}{crimson}
-    \textbf{Google Gboard}\\[0.1cm]
-    {\footnotesize Next-word prediction trained on millions of phones. No text leaves device. Secure aggregation + DP noise protect typing patterns.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Estimate: what does a robust median cost the fabric?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize\textbf{Given:} $N_{\text{DP}} = 64$ replicas\\
+        Ring: $2(N_{\text{DP}}-1)/N_{\text{DP}} \times S$ per worker\\
+        A median needs every gradient
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.54\textwidth}\small
+      \uncover<2->{Ring: $2 \times 63/64 = 1.97\,S$\quad Gather: $63\,S$}\\[0.15cm]
+      \uncover<3->{$N_{\text{DP}}/2 = \mathbf{\textcolor{mlsysaccent}{32\times}}$ the bytes, on $\Tcomm$}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \centering\uncover<3->{\safeimg[width=0.95\textwidth,height=2.8cm,keepaspectratio]{gather_traffic.pdf}}
+  \mlsyscredit{Security \& Privacy, \S13.6.1 (derived; 64 replicas of 16 GPUs each on the reference cluster). Ring AllReduce: Lecture 5.}
+  \note{[3 min] [CORE] ENGAGE: two minutes. The chapter assumes 64 data-parallel replicas on the reference cluster, each spanning two nodes of 8 GPUs with tensor parallelism inside; $N_{\text{DP}}$ counts replicas, not GPUs. Lecture 5's ring AllReduce moves about $2(N-1)/N$ times the gradient size per worker, 1.97 S here. A median needs every individual gradient, which a sum discards, so a direct implementation gathers them, and each worker receives the 63 others, 63 S. Step 3: 32 times the bytes. Gradient synchronization is bandwidth-bound, so its share of $T_{\text{comm}}$ grows by roughly that factor unless backward compute hides it. Students who answer 2 times think one more ring pass suffices; students who answer 64 times count the worker's own gradient. WARN: 32 times is the cost of this gather-based implementation, not a lower bound for every robust protocol. And worker admission by attestation restricts which machines join; it does not prove their gradients are benign. FLEX: [CORE].}
 \end{frame}
 
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Where Is the Weakest Link?}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students just saw the layered defense stack and secure aggregation. This
-discussion tests whether they can identify gaps in a seemingly complete defense.
+\mlsysnote{[3 min] [CORE] This is the lecture's key law from Lecture 1. Step time is compute divided across N, plus communication, plus synchronization, minus what overlaps. The chapter's claim is that every security control is paid in one of these terms, so it belongs in capacity planning. Compute: DP-SGD's per-example clipping and noise, redundant computation to check gradients, and memory scrubbing between tenants. Communication: robust aggregation by gather, 32 times the ring's bytes at 64 replicas; encrypting collective traffic over RDMA (Lecture 3) at half the link rate halves effective bandwidth and roughly doubles the bandwidth part of the AllReduce. A cipher that keeps pace with the link adds little. Synchronization: attestation and key release when a node joins or recovers. A node that restarts must present fresh evidence and receive the checkpoint key again, so every failure costs that delay on top of the lost work that Lecture 7's Young-Daly interval already charges. Serving pays too. The chapter's scenario of a matched serving configuration dropping from 1,000 to 850 tokens per second, 15 percent, splits into stranded partitions, scrubbing time, and lost cache hits (Lecture 8 owns accelerator sharing). ENGAGE: which term does a per-tenant prefix cache charge? (Expected: compute, through lost reuse.) Land the segment's first half aloud.}
+\mlsysfocus{Every defense adds step time}{%
+\normalsize
+$\Tstep(N) = \underbrace{\dfrac{\Tcomp}{N}}_{\substack{\text{private-training clipping}\\ \text{redundant checks}\\ \text{memory scrubbing}}}
+ + \underbrace{\Tcomm(N)}_{\substack{\text{robust gather } 32\times\\ \text{encrypted collectives}}}
+ + \underbrace{\Tsync(N)}_{\substack{\text{attestation}\\ \text{key release}}} - \Tover$\\[0.5cm]
+{\small Each control is priced on one C$^3$ axis and charged to one term.}}
 
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Read the scenario aloud. Point to the five candidate weak links at the
-bottom. Give 90 seconds for pair discussion. Cold-call 2--3 pairs.
+\begin{frame}{Hardware answers four narrow trust questions}
+  \begin{columns}[c]
+    \begin{column}{0.51\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{power_analysis_password.png}\\[0.05cm]
+      {\footnotesize Power jumps at the first wrong byte; $256^{5}$ guesses become $5 \times 256$.}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.5cm}P{4.1cm}@{}}\toprule
+        \textbf{Question} & \textbf{Typical answer} \\\midrule
+        Isolation & trusted execution (TEE) \\
+        Physical access & secure boot, tamper detection \\
+        Side channel & constant-time code, shielding \\
+        Provenance & part records, attestation \\\bottomrule
+      \end{tabular}\\[0.2cm]
+      \uncover<2->{\small Fleets buy few part numbers, so one flaw repeats on all 128 nodes.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trace: Colin O'Flynn (as Security \& Privacy, figure 16; Kocher et al. 2011). Security \& Privacy, \S13.7, table 6, \S13.7.6, \S13.8.1.}
+  \note{[2 min] [CORE] Every software control assumes some layer beneath it is honest. The chapter turns hardware security into four deployment questions, each with its own evidence. The trace is real, from an oscilloscope on a device checking a password one byte at a time. Power stays steady while bytes match and jumps at the first wrong byte, so an attacker learns how many leading bytes are correct and searches 5 times 256 values instead of 256 to the fifth power, about $10^{12}$. ML inference leaks the same way when code branches on a ReLU sign or hardware skips zeros. Read the table: isolation (can a co-tenant read it; Spectre and Meltdown say test it), physical access (can someone touch it; laser fault injection skipped one jump instruction in a ReLU, Breier et al. 2018), side channel (does power or timing reveal it), and provenance (is it the part we certified). Step 2: fleet procurement correlates these failures. All 128 nodes carry the same accelerators, adapters, and firmware, so one compromised design or batch affects many nodes at once. ENGAGE: which question does a counterfeit memory module raise? (Expected: provenance.) LINK: Lecture 7's check-and-verify defenses against silent data corruption help here only if the attacker cannot target the check too. FLEX: [CORE].}
+\end{frame}
 
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-The question is falsifiable: students must name the specific attack vector.
-Strong API defenses are useless if model weights leak through CI/CD pipelines,
-monitoring logs, unencrypted snapshots, batch endpoints, or public registries.
-The correct meta-answer: ``It depends on the deployment'' --- security is a
-systems property, not a component property.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This is the third required active learning moment.
-IF SHORT: Reduce to 60 seconds discussion; still cold-call 2 pairs.
-}
-
-\centering
-\vspace{0.6cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.4cm}
-{\large A production ML system has strong API rate limiting,\\
-encrypted model storage, and DP in training.\\[0.3cm]
-\alert{An attacker still extracts the model. How?}}
-
-\vspace{0.4cm}
-\begin{columns}[c]
-  \begin{column}{0.19\textwidth}\centering\small Unencrypted\\snapshots\end{column}
-  \begin{column}{0.19\textwidth}\centering\small Monitoring\\logs\end{column}
-  \begin{column}{0.19\textwidth}\centering\small CI/CD\\pipeline\end{column}
-  \begin{column}{0.19\textwidth}\centering\small Batch\\endpoint\end{column}
-  \begin{column}{0.19\textwidth}\centering\small Public\\registry\end{column}
-\end{columns}
-
+\begin{frame}{A protected boundary has a size and a latency price}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{epc.pdf}\\[0.05cm]
+      {\footnotesize EPC: SGX's protected memory. Fleet weights: 350 GB.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{fhe.pdf}\\[0.05cm]
+      {\footnotesize FHE: compute on encrypted data (assumed).}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, \S13.8.1 (older SGX enclave page cache) and Napkin Math 13.2 (10,000$\times$ FHE overhead assumed, not measured).}
+  \note{[2 min] [OPTIONAL] Left: an older Intel SGX configuration keeps 128 MiB of protected memory resident, the enclave page cache. ResNet-50's FP32 weights alone, 102.2 MB, fill about 76 percent of it before activations; the INT8 versions fit easily. The reference model's FP16 weights are 350 GB, so fleet-scale confidential computing draws the boundary around a whole confidential virtual machine (AMD SEV-SNP, Intel TDX, or a confidential GPU) instead of an enclave. Overflow pages out with cryptographic protection at a workload-dependent cost. Right: the chapter's health-monitoring scenario with assumed overheads. Plaintext inference takes 20 ms; AES around it adds 0.5 ms; fully homomorphic encryption, at an assumed 10,000 times, takes 200 s. The multiplier is a scenario input; real FHE cost depends on circuit depth, packing, and parameters. ENGAGE: which trust assumption does a TEE add that FHE does not? (Expected: trust in the hardware vendor and its attestation.) Land the segment aloud: the fleet's internal boundaries need their own controls, and each control is charged to a Fleet Law term. FLEX: [OPTIONAL].}
 \end{frame}
 
 % =============================================================================
-\section{Implementation}
+% SECTION: PRIVACY
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Back to interface 5, but now the asset is the training data. What can authorized answers reveal, and what bounds it?}
+\mlsysdivider{What can a correct model reveal about its training data?}{Security \& Privacy, \S13.5.2, \S13.8.5, \S13.9}
+\section{Privacy}
 
-\begin{frame}{Three-Phase Implementation Roadmap}
-\note{
-% -- LINK: What prior concept connects to this slide
-The defense architecture showed WHAT to build. This roadmap shows WHEN ---
-a phased approach that prioritizes the highest-leverage defenses first.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the three phases in the diagram: ``Phase 1 (weeks 1--4):
-foundation IT security adapted for ML --- blocks 80\% of commodity attacks.
-Phase 2 (weeks 5--12): ML-specific defenses --- DP, watermarking, backdoor
-scans at 5--10\% accuracy cost. Phase 3 (weeks 13--24): advanced --- TEEs,
-adversarial training, red teaming at 30--100\% extra training time.''
-Key punchline: ``Start with Phase 1. It is the highest leverage.''
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students want to jump to Phase 3 (adversarial training, TEEs)
-because it sounds more impressive. Correct framing: Phase 1 (patching, auth,
-encryption) blocks 80\% of real-world attacks and costs the least.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This roadmap is the actionable output of the chapter.
-IF SHORT: Show the diagram and state ``Phase 1 blocks 80\%'' without elaborating
-each phase.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{implementation-roadmap.pdf}
-
-\vspace{0.1cm}
-\small
-\mlsysinsight{Phase 1 blocks 80\% of attacks:}{Standard IT security adapted for ML pipelines is the highest-leverage starting point.}
-
+\begin{frame}{Predict: can a correct model leak its data?}
+  \mlsysactivity{Predict}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{diffusion_memorization_new.png}\\[0.05cm]
+      {\footnotesize Training photo (left) and a diffusion model's output (right).}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\only<1|handout:0>{\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{gpt2_funnel_step2.pdf}}%
+      \only<2-|handout:1>{\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{gpt2_funnel_step3.pdf}}\\[0.1cm]
+      \small Membership: 1 bit\\
+      Inversion: a property\\
+      Extraction: the record itself
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Carlini et al., USENIX Security 2023 (as Security \& Privacy, figure 8). GPT-2: Carlini et al., USENIX Security 2021. Security \& Privacy, \S13.5.2.}
+  \note{[3 min] [CORE] Persistent learning: a model can keep what it learned after the data processing ends, and authorized answers can carry it out. Encryption at rest and caller authentication do not help, because the attacker reads only permitted outputs. Three attacks, from least to most detail. Membership inference learns one bit: was this record in training? Model inversion reconstructs a property, such as a representative face for an identity. Extraction recovers the record itself. ENGAGE: of the 1,800 top-ranked GPT-2 samples the researchers inspected, how many were verbatim training text? Take guesses, then step 2. Left, measured: under one extraction protocol, a diffusion model reproduced a training photograph almost exactly (Carlini et al. 2023). Right, measured: the GPT-2 study generated 600,000 samples, ranked them by how much more likely GPT-2 found them than a reference model or zlib did, inspected 1,800, and confirmed 604 as memorized training text, including names, phone numbers, and email addresses. Larger GPT-2 models exposed more. ENGAGE: why does the risk concentrate on rare records? (Expected: the model must fit them individually, so its behavior on them differs most from unseen data.) LINK: for Archetype A, the deployment must test its own corpus and outputs; parameter count alone does not predict leakage. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Distributed Systems Multiply the Surface}
-\note{
-% -- LINK: What prior concept connects to this slide
-The roadmap assumed a single deployment. This slide shows what happens when
-you scale to distributed systems --- the attack surface grows superlinearly.
+\begin{frame}{An audit measures a lower bound; DP sets the ceiling}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.7cm,keepaspectratio]{audit_roc.pdf}
+    \end{column}
+    \begin{column}{0.45\textwidth}\small
+      Each point is one membership test.\\[0.25cm]
+      Under differential privacy with budget $\epsilon$ (next slide), every test obeys\\[0.1cm]
+      {\normalsize $\text{TPR} \le e^{\epsilon}\,\text{FPR}$}\\[0.25cm]
+      \uncover<2->{Shaded band: leakage neither side has ruled in or out.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, \S13.5.2 and figure 7 (redrawn; $\epsilon = 1$, $\delta = 0$; audit curve illustrative).}
+  \note{[2 min] [OPTIONAL] Axes: how often a membership test flags nonmembers (false positive rate) against how often it flags true members (true positive rate). Chance is the diagonal. An audit runs the strongest attack available, such as a shadow-model attack, and traces the blue curve. A successful attack proves leakage; a failed attack shows only that this attack found none, so the audit is a lower bound. Differential privacy, defined on the next slide, supplies the upper bound. Under a guarantee with budget $\epsilon$ and no slack, any test's true positive rate can exceed its false positive rate by at most a factor of $e^{\epsilon}$, and no test can do better, whatever it is. At $\epsilon = 1$ that is the black ceiling. Step 2: the shaded band is the uncertainty a privacy claim carries. ENGAGE: a team's audit finds attack accuracy barely above chance. What does it establish? (Expected: only that this attack, under these assumptions, found little; it is not a bound.) WARN: adversarial training can widen the gap between member and nonmember behavior (Song et al. 2019), so recheck each new control against membership inference. FLEX: [OPTIONAL]; the leakage and DP slides carry the bounds.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Point to the topology table: ``All-to-all = O(n-squared) attack vectors.
-Ring = O(n log n).'' Point to the concrete examples: ``128 GPUs in 16 machines:
-compromising one node injects poisoned gradients globally. FL with 10K clients:
-1\% compromise (100 devices) degrades accuracy 10--50\%.''
+\begin{frame}{Differential privacy bounds what one person can change}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.5cm,keepaspectratio]{dp_step}{2}\\[0.05cm]
+  {\small $\Pr[\mathcal{A}(D) \in S] \le e^{\epsilon}\,\Pr[\mathcal{A}(D') \in S] + \delta$ \quad for adjacent $D$, $D'$}\\[0.05cm]
+  \uncover<2->{\small Adjacency names the protected unit: one record, or all of one person's records.}
+  \mlsyscredit{Security \& Privacy, Definition 13.5 and figure 24 (redrawn, illustrative); Dwork et al. 2006; Dwork and Roth 2014.}
+  \note{[2 min] [CORE] A randomized mechanism $\mathcal{A}$ releases a noisy answer. Step 1: run it on dataset $D$ and on an adjacent dataset $D'$ that differs in one protected contribution; the two output distributions overlap without matching. Step 2: the guarantee. For any set of outcomes $S$, the probability under $D$ is at most $e^{\epsilon}$ times the probability under $D'$, plus a small slack $\delta$. $\epsilon$ is the privacy budget: smaller means the two releases are harder to tell apart. It is not an accuracy percentage. The guarantee holds against any adversary, with any side information, because it is a property of the algorithm. Adjacency decides what it protects. Per-example clipping protects one record, so a person who contributes many records needs person-level adjacency and a bound on that person's total contribution. ENGAGE: querying a fixed DP-trained model a million times. Does it spend more budget? (Expected: no; it is post-processing of one release, though extraction controls still matter.) WARN: removing names is not privacy; 8 movie ratings with approximate dates identified 99 percent of Netflix Prize records (Narayanan and Shmatikov 2008). FLEX: [CORE].}
+\end{frame}
 
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why is superlinear growth worse than linear?'' Give 10 seconds.
-[Expected: because doubling machines more than doubles attack vectors ---
-security does not scale linearly with infrastructure.]
+\begin{frame}{Estimate: how much noise hides one salary?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize\textbf{Given:} mean salary, 1,000 people\\
+        Salaries \$0 to \$200,000\\
+        $\epsilon = 1$, public roster\\
+        Laplace noise on the sum
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      \centering\uncover<3->{\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{salary_err.pdf}}
+    \end{column}
+    \begin{column}{0.56\textwidth}\small
+      \wstep{2}{Sensitivity: one person moves the sum $\Delta f = \$200{,}000$}
+      \wstep{2}{Laplace scale on the sum: $\Delta f/\epsilon = \$200{,}000$}
+      \wstep{3}{Error in the mean: $\$200{,}000/1{,}000 = \mathbf{\textcolor{mlsysaccent}{\$200}}$}
+      \wstep{3}{For 100 people: \textbf{\textcolor{errorstroke}{\$2,000}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, Napkin Math 13.3 (expected absolute error; fixed roster, salary-replacement adjacency).}
+  \note{[3 min] [CORE] ENGAGE: two minutes with a neighbor. The chapter's worked example: publish the mean salary of 1,000 employees under $\epsilon = 1$, with a fixed public roster and salaries between 0 and 200,000 dollars. Step 2: the sensitivity is the most one person can change the sum, 200,000 dollars. The Laplace mechanism adds noise with scale sensitivity over $\epsilon$, 200,000 dollars, once, to the sum. Step 3: dividing by the public group size spreads that one draw over the mean, for an expected absolute error of 200 dollars. For 100 people, 2,000 dollars. The noise that hides one person is fixed by the sensitivity, while the signal grows with the number of people, so small groups pay the largest relative cost. Students who divide the noise by 1,000 twice, or add noise per person, get 0.2 dollars; one draw is added to one sum. WARN: if who is on the roster is itself private, adjacency becomes add or remove, and the count needs its own privacy treatment. LINK: hold onto ``small groups pay most''; it is the Strava answer. FLEX: [CORE].}
+\end{frame}
 
-% -- WARN: What students will get wrong on THIS topic
-Common error: students assume distributed training is just ``more of the same''
-security problem. Correct framing: inter-node communication creates new attack
-vectors (gradient poisoning, Byzantine faults) that do not exist on a single node.
+\begin{frame}[fragile]{Privacy loss adds up across releases, and an accountant tracks it}
+  \begin{columns}[T]
+    \begin{column}{0.41\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{accountant.pdf}\\[0.2cm]
+      {\small Ten releases at $\epsilon = 1$: basic bound $\epsilon = 10$.}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+\begin{semiverbatim}\footnotesize
+from opacus import PrivacyEngine
+engine = PrivacyEngine(accountant="rdp")
+model, opt, loader = \textbackslash
+  engine.make_private_with_epsilon(
+    module=model, optimizer=opt,
+    data_loader=loader, epochs=60,
+    target_epsilon=3.0,
+    target_delta=1e-5,
+    max_grad_norm=1.0)
+# ... train ...
+eps = engine.get_epsilon(delta=1e-5)
+\end{semiverbatim}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Security \& Privacy, \S13.9.2 (Abadi et al. 2016: one DP-SGD run, $q = 0.01$, $\sigma = 4$, $\delta = 10^{-5}$) and \S13.9.2.3 (CIFAR-10 inputs: $\epsilon = 3$, $\delta = 10^{-5}$, 60 epochs, $C = 1$). Code: Opacus PrivacyEngine API.}
+  \note{[2.5 min] [CORE] Every data-dependent release about the same population spends budget. Ten models trained on one cohort at $\epsilon = 1$ each give at most $\epsilon = 10$ under basic composition, which adds the budgets. Training is itself thousands of releases, because DP-SGD clips each example's gradient, adds Gaussian noise to the sum, and repeats every step. Left, measured: for one DP-SGD run (sampling rate 0.01, noise multiplier 4, $\delta = 10^{-5}$), the moments accountant reports $\epsilon = 1.26$ after 100 epochs and 2.55 after 400, where strong composition reports 9.34 and 24.22. Same run, 7.4 and 9.5 times tighter accounting (derived). Right: real code from Opacus, PyTorch's DP-SGD library, set up with the chapter's CIFAR-10 inputs. It clips to norm 1, picks a noise level for $\epsilon = 3$, and the accountant reports what was spent. The release record pins the accountant, its version, the sampling rule, and the adjacency. The utility cost depends on the task. MNIST stays within 3.3 points of 98.3 percent at single-digit $\epsilon$, while CIFAR-10 from scratch lands 14 to 22 points below 95.0 percent at $\epsilon = 8$ (\S13.9.3). ENGAGE: a team retunes hyperparameters on the private data five times. Is that free? (Expected: no; each run is a release.) FLEX: [CORE].}
+\end{frame}
 
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] Connects to Vol II distributed systems themes.
-IF SHORT: State the O(n-squared) result and the 128-GPU example only.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Scale multiplies vulnerabilities:}
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.2}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Topology} & \textbf{Attack Vectors} \\
-      \midrule
-      All-to-All & $O(n^2)$ \\
-      Ring        & $O(n \log n)$ \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.15cm}
-    \begin{itemize}\setlength\itemsep{1pt}
-      \item {\footnotesize 128 GPUs / 16 nodes: 1 compromised node poisons the global model}
-      \item {\footnotesize FL with 10K clients: 1\% compromise $\to$ 10--50\% accuracy drop}
-      \item {\footnotesize Centralized 0.1\% $\equiv$ distributed 0.01\% per node}
-    \end{itemize}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Superlinear growth}\\[0.05cm]
-    {\scriptsize Single-node $\to$ distributed ML is a fundamentally expanded attack surface requiring holistic threat modeling.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    {\scriptsize\textbf{Required:} Secure inter-node channels, cross-domain identity mgmt, coordinated policies.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Vote: is federated learning private by itself?}
+  \mlsysactivity{Vote}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.74\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.9cm}P{3.75cm}P{3.6cm}@{}}\toprule
+        \textbf{Technique} & \textbf{Keeps out} & \textbf{Still revealed} \\\midrule
+        Federated learning & a central copy of raw data & each update \\
+        Secure aggregation & the coordinator, per update & the aggregate \\
+        Homomorphic enc. & the server, from inputs & the output \\
+        Synthetic data & users of the source table & what the generator kept \\
+        \uncover<2->{\textbf{Differential privacy}} & \uncover<2->{bounds the release itself} & \uncover<2->{at most $e^{\epsilon}$ more} \\\bottomrule
+      \end{tabular}\\[0.15cm]
+      \uncover<2->{\small\textbf{\textcolor{errorstroke}{False:}} gradients can reconstruct training examples.}
+    \end{column}
+    \begin{column}{0.25\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio,trim=0 40 0 830,clip]{gboard-screenshot.jpg}\\[0.05cm]
+      {\footnotesize Gboard: next-word prediction learned on phones.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Screenshot: Rodney Araujo, CC BY-SA 4.0, Wikimedia Commons. Security \& Privacy, \S13.8.5, table 8, Lighthouse 13.1, \S13.11 (Zhu et al. 2019; Hard et al. 2018).}
+  \note{[3 min] [CORE] ENGAGE: vote first. Gboard, Google's keyboard, learns next-word prediction from typing that stays on phones (Archetype C, Lighthouse 13.1). Is that private by itself? Step 2: false, the chapter's fallacy. Gradient inversion reconstructs training examples from a client's update under the conditions studied (Zhu et al. 2019). Read the table as excluded observers. Each technique keeps a different party from seeing something, and none bounds what the released model or aggregate reveals. Federated learning keeps raw data off the server; secure aggregation (Lecture 11 owns the pairwise masks) hides each update from the coordinator, if enough clients do not collude and dropouts are handled; homomorphic encryption hides inputs from the server; synthetic data hides the source table but can leak what the generator memorized. k-anonymity, not shown, constrains only the shape of a released table. Only differential privacy bounds the release. The chapter's Gboard point is that a deployment claim must name which contracts its training run satisfies; the reports do not establish that every model combined secure aggregation with formal DP. Land the segment aloud: privacy is an accounted budget on releases. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Wrap-Up}
+% CLOSE
 % =============================================================================
-
-\begin{frame}{Fallacies}
-\note{
-% -- LINK: What prior concept connects to this slide
-Students just worked through attacks, defenses, and the three-phase roadmap.
-Fallacies test whether they carry forward the misconceptions that cause teams
-to misconfigure exactly those defenses.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Read each fallacy and its rebuttal aloud. Emphasize the quantitative
-counter-evidence: 10K--100K queries for extraction, epsilon compounding to 10x,
-70--90\% membership inference on FL, 0.1\% poisoning leverage. The key fallacy
-is ``security through obscurity'' --- black-box extraction demolishes it.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Think-pair-share (30 seconds): ``Which of these four fallacies is most likely to
-trap a team subject to GDPR compliance?''
-[Expected: Fallacy 2 --- DP automatically ensures privacy. Teams add DP libraries
-and check the box, not realizing epsilon accumulates across every training run and
-hyperparameter search. GDPR requires demonstrable, computable privacy guarantees,
-not just library usage.]
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Fallacies correct the most dangerous misconceptions from the chapter.
-IF SHORT: Read fallacies 1 and 4 only (obscurity and poisoning). Skip the ENGAGE.
-}
-
-\scriptsize
-\textbf{Fallacy:} \textit{Security through obscurity protects ML models.}\\
-Black-box extraction reconstructs 90\% accuracy with 10K--100K queries, within typical API rate limits.
-
-\vspace{0.06cm}
-\textbf{Fallacy:} \textit{Differential privacy automatically ensures privacy.}\\
-Budgets compound: 10 runs at $\epsilon=1$ each $=$ total $\epsilon=10$. Organizations exceed guarantees by orders of magnitude.
-
-\vspace{0.06cm}
-\textbf{Fallacy:} \textit{Federated learning inherently provides privacy.}\\
-Membership inference: 70--90\% accuracy on FL models. Gradient inversion reconstructs training data.
-
-\vspace{0.06cm}
-\textbf{Fallacy:} \textit{Data poisoning requires compromising large portions of data.}\\
-0.1\% (1K in 1M) reduces accuracy 10--50\%. Backdoors need only 0.01\% for 90\%+ attack success.
-
+\begin{frame}{Retrieval: what was the heatmap's threat model?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{strava-heatmap.jpg}\\[0.1cm]
+      \only<1|handout:0>{\normalsize Fill in the four fields.}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Asset:} routines of people near sensitive sites\\
+        \textbf{Boundary:} the public aggregate release\\
+        \textbf{Adversary:} any viewer with a map\\
+        \textbf{Control:} suppress sparse cells, or DP per person
+      \end{mlsyscard}}
+      \uncover<3->{\small Small groups pay most: \$2,000 of error for 100 people, \$200 for 1,000. The sparse cells were the leak.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Screenshot: HistoryLV, CC BY-SA 4.0, Wikimedia Commons. Security \& Privacy, War Story 13.1, Napkin Math 13.3.}
+  \note{[2.5 min] [CORE] Retrieval: 60 seconds to write the four fields. Step 2: asset, the routines of personnel at sensitive sites. Boundary, the public aggregate release: no access control was crossed, so encryption and authentication were irrelevant. Adversary, any viewer with geographic knowledge. Control, the chapter's design response: assess what sparse regions reveal, limit sensitive contributions, make participation controls understandable. Step 3: the salary arithmetic explains why the sparse regions failed. The noise needed to hide one contributor is fixed, so a cell with few contributors either gets noise as large as its signal or leaks. A dense city tile hides each runner; a desert base with a few hundred runners does not. WARN: the chapter's caution matters here, because an individual-level DP guarantee does not automatically hide a population-level pattern such as where a base is. The release objective must say what is protected. ENGAGE: which of today's other attacks also crossed no access control? (Expected: extraction, membership inference, memorization, denial of wallet; each used a permitted interface.) FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Pitfalls}
-\note{
-% -- LINK: What prior concept connects to this slide
-The fallacies addressed misconceptions about mechanisms (DP, FL, obscurity, poisoning).
-Pitfalls address how teams implement correctly-understood mechanisms incorrectly.
-
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Read each pitfall. The first is the key takeaway: ``Security is a system
-property, not a component property --- strong API defenses are bypassed through
-batch endpoints, monitoring logs, or public registries.'' The second connects
-to the distributed attack surface slide: O(n-squared) growth.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Quick cold-call: ``Name one defense from the three-phase roadmap that protects
-against a batch-endpoint bypass --- and one that does not.''
-[Expected: rate limiting on the main API does NOT protect the batch endpoint;
-output perturbation applied consistently to all endpoints does. This surfaces
-the component-vs-system framing directly.]
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[CORE] Pitfalls reinforce the systems-level thinking from the chapter.
-IF SHORT: Cover only the first pitfall (component vs.\ system property). Skip ENGAGE.
-}
-
-\footnotesize
-\textbf{Pitfall:} \textit{Treating security as an isolated component.}\\
-Strong API defenses are bypassed through batch endpoints, monitoring logs, or public registries. A single weak link compromises the entire system. Security is a \textbf{system property}, not a component property.
-
-\vspace{0.15cm}
-\textbf{Pitfall:} \textit{Underestimating distributed attack surface expansion.}\\
-The shift from 1 to $n$ machines increases attack vectors by $O(n^2)$, not $O(n)$. Inter-node channels, federated aggregation, and edge deployment each create new vulnerability classes requiring dedicated threat modeling.
-
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.18cm}
+    \item A fleet is attacked through interfaces it exposes on purpose; write the threat model for each.
+    \item A daily quota slows extraction; a lifetime budget and an output contract bound it.
+    \item Poisoning writes through your training; trust reaches only as far as the provenance record.
+    \item One worker can move a mean; every defense is paid in a Fleet Law term.
+    \item Audits bound leakage from below; differential privacy bounds it from above, and the budget adds up.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment. Ask which slide taught each line. If short on time, read the first and the last.}
 \end{frame}
 
-% --- RETRIEVAL PRACTICE ---
-
-% --- MUDDIEST POINT ---
-\begin{frame}{Muddiest Point}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[2 min] ``Write down the single concept from today that you found most confusing.
-Anonymous, one sentence.'' Collect responses (paper or digital). Scan for patterns
-to address in the next lecture's opening --- e.g., DP budget compounding or the
-distinction between security and privacy.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[CORE] Closes the feedback loop. Do not skip even if running short.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries What was the \alert{muddiest point} today?}
-
-\vspace{0.8cm}
-{\normalsize Write down the concept you found \textbf{most confusing}.}
-
-\vspace{0.5cm}
-{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
-
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item Returning log-probabilities helps developers and helped attackers recover a production model's width. Who should decide which scores an API returns?
+    \item A privacy budget is spent per population, across teams and years. Who owns the account, and what happens when it runs out?
+    \item A federated fleet cannot attest every phone. How much robust-aggregation traffic is a defense against one compromised client in 10,000 worth?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for discussion or assign one as a short written response. The first comes from Carlini et al. 2024 and the chapter's output contract. The second is the chapter's maturity model, in which the release budget becomes a system resource. The third combines the 32 times gather cost with the chapter's 10,000-client pitfall. FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{What Were the Key Ideas?}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[2 min] ``Close your notes. Write down the 4 most important concepts from today.
-90 seconds, no peeking.'' Walk around the room. Do NOT show the next slide yet.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Retrieval practice is the highest-impact learning intervention in the deck.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Security \& Privacy, \S13.4 to \S13.6 and \S13.9; Napkin Math 13.1 and 13.3 by hand; the self-check questions.
+    \item Carlini et al., ``Stealing Part of a Production Language Model,'' ICML 2024.
+    \item Carlini et al., ``Extracting Training Data from Large Language Models,'' USENIX Security 2021.
+    \item Carlini et al., ``Poisoning Web-Scale Training Datasets is Practical,'' IEEE S\&P 2024.
+    \item Blanchard et al., ``Machine Learning with Adversaries,'' NeurIPS 2017.
+    \item Dwork and Roth, \emph{The Algorithmic Foundations of Differential Privacy}, 2014.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first, with the self-checks. Carlini 2024 is the partial extraction of a production model. Carlini 2021 is the GPT-2 memorization study. Carlini 2024 (S\&P) shows poisoning at web scale for 60 dollars. Blanchard et al. introduce Krum and the Byzantine view of gradient aggregation. Dwork and Roth is the standard reference for differential privacy, readable in its first three chapters. FLEX: add the lab your course uses for DP-SGD (Opacus) or extraction.}
 \end{frame}
 
-\begin{frame}{Key Takeaways}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[2 min] Reveal after retrieval practice. Walk through each bullet, anchoring on
-the quantitative numbers: 100,000x extraction asymmetry, 0.1\% poisoning leverage,
-15\% isolation tax, epsilon compounding. Ask: ``How many of these did you recall?''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] This is the synthesis slide --- do not skip.
-IF SHORT: Read bullets 2, 3, and 6 (theft, poisoning, layered defense).
-}
-
-\scriptsize
-\begin{itemize}\setlength\itemsep{1pt}
-  \item \textbf{Security $\neq$ Privacy}: Security defends against \emph{adversarial manipulation}; Privacy protects against \emph{unauthorized inference}. Both required.
-  \item \textbf{Model theft is cheap}: 100,000$\times$ cost asymmetry --- BERT extraction for \$50/2M queries vs.\ \$100M training. Every confidence score is a side channel.
-  \item \textbf{Information Leakage Invariant}: Privacy is a budget, not a switch. Every model output leaks. DP quantifies $\epsilon$ --- but budgets compound across training runs.
-  \item \textbf{Data poisoning has extreme leverage}: 0.1\% corruption $\to$ 10--50\% accuracy drop; backdoors at 0.01\% persist through retraining.
-  \item \textbf{Hardware is the root of trust}: TEEs (5--30\% cost), Secure Boot, HSMs, PUFs anchor software protections.
-  \item \textbf{ML is both target and weapon}: Dual-use principle --- the same models enabling beneficial AI enable phishing at 99\%+ grammatical accuracy and ML-assisted side-channel attacks.
-  \item \textbf{Layered defense + distributed surface}: No single layer suffices. Distributed attack vectors grow $O(n^2)$.
-\end{itemize}
-
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{stop-sign.jpg}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} ROBUST AI}}\\[0.5cm]
+      {\LARGE\bfseries Every access check passes. How do we know the answers are still right?}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Dori, public domain, Wikimedia Commons.}
+  \note{[0.5 min] [CORE] Today decided who may reach the model and what its releases may disclose. Lecture 14 stays on the Assurance row and asks whether answers stay valid when inputs shift, a crafted input satisfies the interface contract, or a faulty accelerator returns plausible numbers. It also owns the defenses against today's poisoning threat and the stop-sign attack, in which stickers on a sign like this one changed what a classifier read.}
 \end{frame}
-
-\begin{frame}{References}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[1 min] Point to Dwork+06 and Abadi+16 as the two foundational DP papers.
-Tramer+16 is the model theft paper. Recommend Goodfellow+14 for adversarial examples.
-
-% -- FLEX: [OPTIONAL] or [CORE] + contingency
-[OPTIONAL] Students can photograph this slide. Do not read every entry aloud.
-}
-
-\scriptsize
-\mlsysref{Farwell+11}{Farwell \& Rohozinski. ``Stuxnet and the Future of Cyber War.'' Survival, 2011.}
-\mlsysref{Dwork+06}{Dwork et al. ``Calibrating Noise to Sensitivity in Private Data Analysis.'' TCC, 2006.}
-\mlsysref{Abadi+16}{Abadi et al. ``Deep Learning with Differential Privacy.'' CCS, 2016.}
-\mlsysref{Goodfellow+14}{Goodfellow et al. ``Explaining and Harnessing Adversarial Examples.'' ICLR, 2015.}
-\mlsysref{Biggio+12}{Biggio et al. ``Poisoning Attacks Against SVMs.'' ICML, 2012.}
-\mlsysref{Tramer+16}{Tram\`er et al. ``Stealing ML Models via Prediction APIs.'' USENIX Security, 2016.}
-
-\end{frame}
-
-\begin{frame}{Next Lecture: Robust AI}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-[1 min] ``Security addresses intentional threats. But a model perfectly protected
-from attackers can still fail when the real world shifts beneath it.'' Point to
-the three cards: distribution drift, hardware faults, cascading failures.
-``Next lecture shifts from malicious threats to operational stress.''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The forward hook motivates attendance at the next lecture.
-}
-
-\footnotesize
-\begin{columns}[c]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{errorstroke}
-    {\large\bfseries Distribution Drift}\\[0.15cm]
-    {\footnotesize The world changes; the model doesn't.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{routingstroke}
-    {\large\bfseries Hardware Faults}\\[0.15cm]
-    {\footnotesize Silent bit-flips corrupt predictions.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{computestroke}
-    {\large\bfseries Cascading Failures}\\[0.15cm]
-    {\footnotesize One failure triggers ten more.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.3cm}
-\centering
-{\normalsize Security protects against \textbf{malicious} threats.\\
-Robustness protects against \textbf{operational} stress.}\\[0.1cm]
-{\small\textbf{A defended fleet must also be a resilient fleet.}}
-
-\end{frame}
-
-
-
-\appendix
-
-\begin{frame}{Backup: Threat Prioritization Matrix}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-Backup. Risk matrix mapping attack likelihood vs.\ impact for ML-specific threats.
-Use when students ask how to prioritize security investment.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Show if students want a framework for security investment decisions.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Attack} & \textbf{Likelihood} & \textbf{Impact} & \textbf{Priority} \\
-  \midrule
-  Model extraction (API)   & High   & High (\$100M IP)      & \textcolor{errorstroke}{\textbf{Critical}} \\
-  Data poisoning (public)  & Medium & Very High (persistent) & \textcolor{errorstroke}{\textbf{Critical}} \\
-  Prompt injection (LLM)   & High   & Medium--High           & \textcolor{routingstroke}{\textbf{High}} \\
-  Insider IP theft         & Low    & Very High              & \textcolor{routingstroke}{\textbf{High}} \\
-  Adversarial examples     & Medium & Medium (targeted)      & \textcolor{computestroke}{\textbf{Medium}} \\
-  Side-channel (HW)        & Low    & Medium                 & \textcolor{computestroke}{\textbf{Medium}} \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-{\footnotesize Phase 1 defenses (auth, rate limits, encryption) address the top 4 threats. Phase 2 (DP, watermarking) adds ML-specific protection.}
-
-\end{frame}
-
-\begin{frame}{Backup: DP-SGD Implementation Checklist}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-Backup. Step-by-step DP-SGD implementation guide with common pitfalls.
-Use when students ask about practical DP deployment.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Implementation detail for students building DP pipelines.
-}
-
-\footnotesize
-\textbf{DP-SGD Implementation Steps:}
-
-\vspace{0.1cm}
-\begin{enumerate}\setlength\itemsep{1pt}
-  \item \textbf{Set privacy budget}: Choose $\epsilon$ with privacy/legal stakeholders; no universal GDPR value exists
-  \item \textbf{Compute sensitivity}: $S = \max \|\nabla L(x_i)\|_2$ after clipping
-  \item \textbf{Clip per-sample gradients}: $\bar{g}_i = g_i \cdot \min(1, C / \|g_i\|_2)$
-  \item \textbf{Add Gaussian noise}: $\tilde{g} = \frac{1}{B}\sum \bar{g}_i + \mathcal{N}(0, \sigma^2 C^2 I)$
-  \item \textbf{Track cumulative budget}: Use R\'enyi DP accountant (tighter than basic composition)
-  \item \textbf{Stop when exhausted}: Do not exceed total $\epsilon$ --- including hyperparameter tuning
-\end{enumerate}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{errorstroke}
-{\footnotesize \textbf{Common pitfall}: Forgetting to count hyperparameter search in the privacy budget. Each configuration tried consumes budget.}
-\end{mlsyscard}
-
-\end{frame}
-
 
 \end{document}

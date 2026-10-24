@@ -5,10 +5,14 @@ import { Search, X, Target, Crosshair, Flame, Calendar, ChevronUp, ChevronDown, 
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
+import type { Topic } from "@/lib/taxonomy";
+// The Vault browses the ML Systems Taxonomy: areas → subjects, in the same
+// shapes the Vault components render. Legacy topics remain on each question.
 import {
-  getAreas, getAreaStyle, getAreaForTopic, searchTopics,
-  type Topic,
-} from "@/lib/taxonomy";
+  getTaxAreas as getAreas, getTaxAreaStyle as getAreaStyle,
+  getTaxAreaForSubject as getAreaForTopic, searchSubjects as searchTopics,
+  getSubjectById,
+} from "@/lib/mlsys-taxonomy";
 import { getTracks, searchQuestions, getTrackCount } from "@/lib/corpus";
 import { track as trackAnalytics } from "@/lib/analytics";
 import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
@@ -62,6 +66,22 @@ function HomePage() {
   const [attemptCount, setAttemptCount] = useState(0);
   const [dailyDone, setDailyDone] = useState(false);
   const areas = getAreas();
+
+  // Deep links: ?subject=<id> opens that subject's drawer. A legacy ?topic=
+  // link has no single subject (topics and subjects overlap), so it goes to
+  // practice, which still filters by topic.
+  useEffect(() => {
+    const subject = searchParams.get("subject");
+    if (subject) {
+      const found = getSubjectById(subject);
+      if (found) setSelectedTopic(found);
+      return;
+    }
+    const topic = searchParams.get("topic");
+    if (topic) router.replace(`/practice?topic=${encodeURIComponent(topic)}`);
+    // Only on first load; later navigation is handled in-page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -464,8 +484,8 @@ function HomePage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search topics — KV cache, roofline, quantization..."
-                aria-label="Search topics"
+                placeholder="Search subjects and concepts, e.g. KV cache, roofline, quantization..."
+                aria-label="Search subjects and concepts"
                 data-testid="topic-search"
                 className="w-full pl-10 pr-10 py-2 bg-surface border border-border rounded-lg text-[13px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
               />
@@ -532,7 +552,7 @@ function HomePage() {
                   </div>
                 )}
                 {searchResults.length === 0 && questionSearchResults.length === 0 && (
-                  <p className="text-sm text-textTertiary py-8 text-center">No topics or questions match &ldquo;{query}&rdquo;</p>
+                  <p className="text-sm text-textTertiary py-8 text-center">No subjects or questions match &ldquo;{query}&rdquo;</p>
                 )}
               </>
             ) : singleExpandedArea ? (

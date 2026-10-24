@@ -106,8 +106,8 @@ class SustainabilityModel(ForwardModel):
         if fleet.node.accelerator.tdp:
             base_tdp = fleet.node.accelerator.tdp
         else:
-            from ...hardware.registry import Cloud as _CloudHardware
-            base_tdp = _CloudHardware.H100.tdp
+            from ...hardware.registry import Hardware
+            base_tdp = Hardware.Cloud.H100.tdp
         # Energy proportionality: Idle power is ~30% of TDP. Dynamic power scales with compute utilization (MFU).
         idle_power = base_tdp * cal.ENERGY_IDLE_FRACTION
         dynamic_power = base_tdp * cal.ENERGY_DYNAMIC_FRACTION * mfu
@@ -347,7 +347,7 @@ class PlacementOptimizer(BaseOptimizer):
     produces = PlacementOptimizerResult
 
     def solve(self, fleet: Fleet, duration_days: float,
-              regions: List[str] = ["US_Avg", "Quebec", "Iowa"],
+              regions: Optional[List[str]] = None,
               carbon_tax_per_ton: float = 100.0, mfu: float = 1.0) -> PlacementOptimizerResult:
         """
         Determine the datacenter region minimizing TCO plus carbon tax.
@@ -375,6 +375,8 @@ class PlacementOptimizer(BaseOptimizer):
             PUE, and the full ranked candidate list.
         """
         from ...infrastructure.registry import Infrastructure
+        if regions is None:
+            regions = ["US_Avg", "Quebec", "Iowa"]
         econ_model = EconomicsModel()
 
         candidates = []

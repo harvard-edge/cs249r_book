@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from mlsysim.engine.v2_13_experiments import (
+from mlsysim.labs.experiments.v2_13_experiments import (
     ArtifactCopy,
     IncidentEvidence,
     PrivacyEvent,

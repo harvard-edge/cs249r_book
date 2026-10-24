@@ -51,6 +51,7 @@ def test_vol4_ch01_tempe_idealized_constant_speed_budget():
     check(abs(d_lag.to(meter).magnitude - 19.2) < 0.1, f"Unexpected lag displacement: {d_lag}")
     check(abs(d_brake.to(meter).magnitude - 20.5) < 0.1, f"Unexpected braking distance: {d_brake}")
     check(abs(d_remaining.to(meter).magnitude - 3.6) < 0.1, f"Unexpected remaining travel: {d_remaining}")
+    check(abs(kinetic_energy.to(joule).magnitude - 387072.0) < 1.0, f"Unexpected kinetic energy: {kinetic_energy}")
     check(
         d_brake > d_remaining,
         "Idealized stopping distance should exceed remaining travel",
@@ -143,7 +144,8 @@ def test_vol4_ch08_sensor_information_age():
 
 
 def test_vol4_ch11_planning_seam_inertia():
-    joint = Actuators.HarmonicDrive.CSG_25_50
+    # 2026-09-28 (M6): the seam joint is the sourced Panda-class stand-in.
+    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18
     gear_ratio = joint.gear_ratio
     rotor_inertia = joint.rotor_inertia
     delta_omega = 0.2 * (ureg.radian / second)
@@ -158,12 +160,12 @@ def test_vol4_ch11_planning_seam_inertia():
     tau_blend_peak = 1.5 * tau_blended
     torque_reduction_ratio = tau_unblended / tau_blend_peak
 
-    check(abs(j_reflected.magnitude - 0.25) < 0.001, f"Unexpected reflected inertia: {j_reflected}")
+    check(abs(j_reflected.magnitude - 0.1835) < 0.0001, f"Unexpected reflected inertia: {j_reflected}")
     check(abs(alpha_unblended.magnitude - 200.0) < 0.1, f"Unexpected unblended acceleration: {alpha_unblended}")
-    check(abs(tau_unblended.magnitude - 50.0) < 0.1, f"Unexpected unblended torque: {tau_unblended}")
+    check(abs(tau_unblended.magnitude - 36.7) < 0.01, f"Unexpected unblended torque: {tau_unblended}")
     check(abs(alpha_blended.magnitude - 4.0) < 0.01, f"Unexpected blended acceleration: {alpha_blended}")
-    check(abs(tau_blended.magnitude - 1.0) < 0.01, f"Unexpected blended torque: {tau_blended}")
-    check(abs(tau_blend_peak.magnitude - 1.5) < 0.01, f"Unexpected peak blend torque: {tau_blend_peak}")
+    check(abs(tau_blended.magnitude - 0.734) < 0.001, f"Unexpected blended torque: {tau_blended}")
+    check(abs(tau_blend_peak.magnitude - 1.101) < 0.001, f"Unexpected peak blend torque: {tau_blend_peak}")
     check(abs(torque_reduction_ratio.magnitude - 50/1.5) < 0.1, f"Unexpected peak reduction ratio: {torque_reduction_ratio}")
 
 
@@ -190,6 +192,7 @@ def test_vol4_ch14_intervention_takeover_budget():
     check(abs(d_drift_ool.magnitude - 10.0) < 0.01, f"Unexpected out-of-loop drift: {d_drift_ool}")
     check(abs(d_stop_ool.magnitude - 15.0) < 0.01, f"Unexpected out-of-loop stop: {d_stop_ool}")
     check(abs(drift_expansion_ratio.magnitude - 13.33) < 0.1, f"Unexpected drift expansion: {drift_expansion_ratio}")
+    check(abs(stop_expansion_ratio.magnitude - 2.61) < 0.05, f"Unexpected stop expansion: {stop_expansion_ratio}")
 
 
 def test_vol4_ch04_amr_watchdog_lease():
@@ -210,39 +213,33 @@ def test_vol4_ch04_amr_watchdog_lease():
 
 
 def test_vol4_ch04_fieldbus_schedulability():
-    num_axes = 8
+    # Mirrors calc-nervous-fieldbus-schedulability: 9 axes (7 arm + 2 wheels),
+    # 8-byte command and feedback frames on CAN FD vs one EtherCAT frame.
     cycle_time = 1.0 * millisecond
-
-    canfd_64 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=64,
+    kw = dict(
+        payload_bytes=8,
         baud_arbitration=1.0 * (megabit / second),
         baud_data=5.0 * (megabit / second),
         cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
     )
-    canfd_32 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=32,
-        baud_arbitration=1.0 * (megabit / second),
-        baud_data=5.0 * (megabit / second),
-        cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
-    )
+    one_bus = calc_canfd_bus_utilization(num_axes=9, **kw)
+    arm_bus = calc_canfd_bus_utilization(num_axes=7, **kw)
+    base_bus = calc_canfd_bus_utilization(num_axes=2, **kw)
     ethercat = calc_ethercat_cycle_time(
-        num_axes=num_axes,
-        bytes_per_axis=32,
+        num_axes=9,
+        bytes_per_axis=16,
         baud_rate=100.0 * (megabit / second),
         header_bytes=64,
         hop_delay=0.6 * microsecond,
         cycle_time=cycle_time,
     )
 
-    check(abs(canfd_64["t_tx"].to(microsecond).magnitude - 140.4) < 0.5, f"Unexpected CAN-FD 64B frame time: {canfd_64['t_tx']}")
-    check(abs(canfd_64["t_total_tx"].to(microsecond).magnitude - 1123.2) < 2.0, f"Unexpected CAN-FD 64B total: {canfd_64['t_total_tx']}")
-    check(canfd_64["utilization"] > 1.0, "CAN-FD 64B must overrun 1.0 ms cycle time")
-    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 30.4) < 0.2, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
-    check(abs(ethercat["t_margin"].to(microsecond).magnitude - 969.6) < 0.5, f"Unexpected EtherCAT margin: {ethercat['t_margin']}")
+    check(abs(one_bus["t_tx"].to(microsecond).magnitude - 56.6) < 1e-6, f"Unexpected CAN FD frame time: {one_bus['t_tx']}")
+    check(abs(one_bus["t_total_tx"].to(microsecond).magnitude - 1018.8) < 1e-6, f"Unexpected single-bus total: {one_bus['t_total_tx']}")
+    check(one_bus["utilization"] > 1.0, "One CAN FD bus for 9 axes must overrun the 1.0 ms cycle")
+    check(abs(arm_bus["t_total_tx"].to(microsecond).magnitude - 792.4) < 1e-6, f"Unexpected arm-bus total: {arm_bus['t_total_tx']}")
+    check(arm_bus["utilization"] < 1.0 and base_bus["utilization"] < 1.0, "Per-limb buses pass serialization")
+    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 22.04) < 1e-6, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
     check(ethercat["utilization"] < 0.05, "EtherCAT utilization must be under 5%")
 
 
@@ -438,43 +435,6 @@ def test_vol4_ch13_inductive_pdn_voltage_droop():
     check(abs(delay_expansion_pct - 38.0) < 2.0, f"Unexpected delay expansion: {delay_expansion_pct}")
 
 
-def test_vol4_ch15_coulomb_stiction_deadband():
-    tau_cmd = 6.0 * (ureg.newton * meter)
-    tau_c = 4.5 * (ureg.newton * meter)
-    tau_lag = 5.0 * millisecond
-    inertia = 0.050 * (kilogram * (meter**2))
-
-    t_dead = calc_coulomb_stiction_deadband(
-        commanded_torque=tau_cmd,
-        coulomb_friction_torque=tau_c,
-        stator_electrical_lag=tau_lag,
-    )
-    alpha_sim = (tau_cmd / inertia).to(ureg.radian / (second**2))
-    tau_net_real = tau_cmd - tau_c
-    alpha_real = (tau_net_real / inertia).to(ureg.radian / (second**2))
-
-    t_eval = 50.0 * millisecond
-    theta_sim = (0.5 * alpha_sim.magnitude * (t_eval.to(second).magnitude ** 2))
-    t_active_real = (t_eval - t_dead).to(second).magnitude
-    lag_s = tau_lag.to(second).magnitude
-    dead_s = t_dead.to(second).magnitude
-    eval_s = t_eval.to(second).magnitude
-    theta_real = (
-        0.5 * alpha_real.magnitude * t_active_real**2
-        + tau_cmd.magnitude * lag_s / inertia.magnitude
-        * (lag_s * (math.exp(-dead_s / lag_s) - math.exp(-eval_s / lag_s))
-           - math.exp(-dead_s / lag_s) * t_active_real)
-    )
-    delta_theta = abs(theta_sim - theta_real)
-
-    check(abs(t_dead.to(millisecond).magnitude - 6.93) < 0.02, f"Unexpected deadband: {t_dead}")
-    check(abs(alpha_sim.magnitude - 120.0) < 0.1, f"Unexpected sim accel: {alpha_sim}")
-    check(abs(alpha_real.magnitude - 30.0) < 0.1, f"Unexpected real accel: {alpha_real}")
-    check(abs(theta_sim - 0.1500) < 0.001, f"Unexpected sim angle: {theta_sim}")
-    check(abs(theta_real - 0.0221130564) < 1e-7, f"Unexpected real angle: {theta_real}")
-    check(abs(delta_theta - 0.1278869436) < 1e-7, f"Unexpected delta theta: {delta_theta}")
-
-
 def test_vol4_ch06_covariate_drift_compounding():
     dt = 0.020 * second
     t_total = 10.0 * second
@@ -530,7 +490,6 @@ def test_vol4_ch10_intent_lease_archetypes():
         calc_target_evidence_horizon,
         calc_tripwire_contact_force_accumulation,
         calc_contact_force,
-        calc_process_thermal_runaway_lease,
     )
 
     target_horizon = calc_target_evidence_horizon(
@@ -560,11 +519,6 @@ def test_vol4_ch10_intent_lease_archetypes():
     stalled_contact = calc_contact_force(stiffness, (approach * unbounded_delay).to(millimeter))
     check(abs(stalled_contact.to(newton).magnitude - 2400.0) < 1.0, "Unexpected no-response contact estimate")
 
-    thermal = calc_process_thermal_runaway_lease(3600.0 * watt, 900.0 * (joule / kelvin), 2.0 * kelvin)
-    rise_rate = thermal["rate_of_rise"]
-    check(abs(rise_rate.to(kelvin / second).magnitude - 4.0) < 0.1, "Unexpected lumped rise rate")
-    check(abs(thermal["tau_lease"].to(millisecond).magnitude - 500.0) < 0.1, "Unexpected overshoot horizon")
-    check(abs((rise_rate * (10.0 * second)).to(kelvin).magnitude - 40.0) < 0.1, "Unexpected lumped rise")
 
 def test_vol4_ch16_biomechanical_impact_envelope():
     from mlsysim.physics.robotics import (

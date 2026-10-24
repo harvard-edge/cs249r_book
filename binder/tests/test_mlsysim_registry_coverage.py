@@ -13,9 +13,8 @@ from pathlib import Path
 import mlsysim
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BOOK_ROOTS = (
-    REPO_ROOT  / "books" / "vol1",
-    REPO_ROOT  / "books" / "vol2",
+BOOK_ROOTS = tuple(
+    REPO_ROOT / "books" / f"vol{i}" for i in range(1, 5)
 )
 
 REGISTRY_ROOTS = (
@@ -29,6 +28,10 @@ REGISTRY_ROOTS = (
     "Scenarios",
     "ReferenceStats",
     "Ops",
+    "Sensors",
+    "Actuators",
+    "Embodied",
+    "Agents",
 )
 REGISTRY_PATH_RE = re.compile(
     r"\b(" + "|".join(REGISTRY_ROOTS) + r")(?:\.[A-Za-z_]\w*)+"

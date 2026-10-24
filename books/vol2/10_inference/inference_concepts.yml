@@ -1,82 +1,139 @@
 concept_map:
+  schema_version: 2
   source: 10_inference.qmd
-  generated_date: 2026-05-21
+  generated_date: '2026-10-15'
   primary_concepts:
-    - Inference at Scale
-    - Serving Cost Dominance
-    - Serving Tax
-    - Training vs. Inference Inversion
-    - Serving Hierarchy
-    - Workload-Specific Batching
-    - Continuous Batching
-    - KV Cache
-    - PagedAttention
-    - Prefill
-    - Decode
-    - Disaggregated Serving
-    - Model Sharding
-    - Tensor Parallelism
-    - Pipeline Parallelism
-    - Expert Parallelism
-    - Mixture of Experts (MoE)
-    - Load Balancing
-    - Multi-Tenancy and Isolation
-    - Autoscaling
-    - Weight Quantization for Serving
+    - Serving cost dominance
+    - SLO goodput and the serving tax
+    - Batch formation trades waiting for reuse
+    - Iteration-level batching
+    - Prefill-decode interference and chunked prefill
+    - KV cache as admission budget
+    - Serving parallelism chosen by the SLO
+    - State-aware request routing
   secondary_concepts:
-    - Request-Level Optimization
-    - Replica-Level Optimization
-    - Service-Level Routing
-    - Platform-Level Resource Management
-    - Stateful vs. Stateless Serving
-    - Static Batching
-    - Dynamic Batching
-    - Feature-Parallel Batching
-    - Streaming Inference
-    - Adaptive Batching
-    - Batching Efficiency Curve
-    - Queuing Theory for Batched Inference
-    - Little's Law
-    - M/G/c/K Queue Model
-    - TTFT
-    - TPOT
-    - Logic Wall
-    - Test-Time Compute
-    - KV Cache Wall
-    - KV Cache Fragmentation
-    - Prefix Caching
-    - KV Cache Quantization
-    - Grouped Query Attention
-    - Speculative Decoding
-    - Draft Model Verification
-    - Chunked Prefill
-    - KV Cache Migration
-    - Dynamic Memory Swapping
-    - LoRA Adapter Swapping
-    - Embedding Sharding
-    - Hybrid Sharding
-    - Communication Overhead
-    - Power of Two Choices
-    - Least-Connections Routing
-    - Consistent Hashing
-    - Sticky Routing
-    - Health Checking and Failover
-    - Circuit Breakers
-    - Backpressure
-    - Resource Quotas
-    - Priority Scheduling
-    - Bulkhead Pattern
-    - Model Isolation
-    - Noisy Neighbor Effects
-    - Cold Start
-    - Predictive Scaling
-    - Warm Pool Management
-    - Spot-Aware Routing
-    - Global Load Balancing
-    - Edge Caching
-    - Ranking Cascade
-    - Two-Tower Architecture
-    - Deadline Awareness
+    - Paged KV allocation and prefix sharing
+    - Serving precision decision
+    - Speculative decoding
+    - Per-request compute budget
+    - Overload containment
+    - Token-denominated tenant isolation
+    - Phase-aware autoscaling and cold start
+    - Tail latency under fan-out
+  claims:
+    Serving cost dominance: Lifetime cost is training once plus cost per query times traffic times deployment time,
+      so at high volume serving overtakes training within days to weeks and the lever is cost per completed request
+      at a fixed mix, quality, and SLO.
+    SLO goodput and the serving tax: Serving capacity is the rate of completed requests that meet stated TTFT and
+      per-token targets for a fixed mix, and end-to-end latency adds network, serialization, coordination, and queueing
+      to model time, so a 70 ms model in a 100 ms budget leaves 30 ms for everything else.
+    Batch formation trades waiting for reuse: With batch service time t_0 + B t_req throughput saturates toward
+      1/t_req past a knee near t_0/t_req, and request latency is queueing plus formation plus execution, so a batching
+      window caps formation but not queueing, while Little's law (in-flight work = arrival rate x mean latency) sizes
+      the concurrency and replica count a target rate and latency imply.
+    Iteration-level batching: Fixed batch membership strands slots when output lengths differ, and admitting requests
+      at iteration boundaries recovers that capacity only when requests are waiting, KV memory is free, and per-iteration
+      scheduling is cheap relative to a decode step.
+    Prefill-decode interference and chunked prefill: Prefill sits far above the ridge while decode intensity grows
+      roughly linearly with batch, so batching buys a large cost-per-token cut until KV capacity stops it, and a
+      monolithic prefill colocated with active streams lands in every decoder's per-token latency, which chunked prefill
+      caps per iteration by moving rather than removing the cost into the long prompt's time to first token; separate
+      prefill and decode pools remove the interference instead but pay alpha + KV bytes / beta per handoff, so
+      disaggregation earns that transfer cost only through measured goodput.
+    KV cache as admission budget: KV bytes per token = 2 x layers x KV heads x head dimension x bytes, so maximum
+      batch is free HBM over context times bytes per token, weight fit does not establish serving capacity, and
+      each lever changes a different factor; resident LoRA adapters draw on the same HBM pool, so adapter locality
+      is an admission decision, and preempting a running request means choosing to retain, swap, recompute, or
+      reject its KV state against the waiting request's deadline.
+    Serving parallelism chosen by the SLO: Weight bytes set the minimum shard count, but latency follows the per-request
+      Fleet Law, so tensor parallelism divides layer compute while paying collectives per token whose fixed latency
+      dominates decode and keeps it inside one fast domain.
+    State-aware request routing: Two random probes cut the maximum load from log n / log log n to log log n in the
+      static model, but serving needs a work signal (active tokens, remaining decode, KV pressure) and atomic admit-or-reject
+      because probes go stale and requests differ fiftyfold in remaining work; across regions the balancer first
+      filters by data-placement policy, artifact version, readiness, and capacity and only then chooses by measured
+      latency or cost.
+    Paged KV allocation and prefix sharing: Contiguous maximum-length reservation strands most reserved KV memory,
+      and paged allocation through per-sequence block tables bounds waste to the last block and lets compatible
+      prefixes share physical blocks copy-on-write.
+    Serving precision decision: The roofline regime picks the format, weight-only low-bit formats for bandwidth-bound
+      decode and weight-activation W8A8 or FP8 for compute-bound prefill, with block-wise scaling containing weight
+      outliers and PTQ tried before QAT, so a precision change is deployed only for the resource that binds and only
+      with quality measured beside throughput, and the runtime must keep the packed format resident, select supported
+      kernels, and plan KV around real allocations.
+    Overload containment: A slowing replica becomes a fleet failure when timeouts and retries consume neighbors'
+      headroom, so circuit breakers withdraw it, backpressure pushes overload upstream to admission control, and
+      deadlines travel with cancellation.
+    Token-denominated tenant isolation: Pooling tenants raises utilization only with enforced isolation, so quotas
+      bound request rate, concurrency, input and output tokens, KV pages, and accelerator time, checked and reserved
+      atomically.
+    Phase-aware autoscaling and cold start: Average utilization is the wrong control signal, so scaling acts on
+      outstanding work against phase-specific service rates with asymmetric hysteresis, and a large-model cold start
+      takes minutes that a ready reserve must cover.
+    Per-request compute budget: Serial reasoning tokens multiply latency by the ratio of reasoning tokens to answer
+      tokens and extend KV residency, so test-time compute is a recurring serving cost per request whose budget must
+      be stated in both time and capacity and justified by measured quality gain.
+    Tail latency under fan-out: A request that waits for N independent leaves is slow with probability 1 - (1 - q)^N,
+      so 100 leaves at their own p99 leave about 63 percent of requests slow and holding the request at p99 needs
+      each leaf near p99.99, which makes fan-out width a tail cost that fewer shards, queue-aware routing, deadlines
+      with partial results, and hedging each attack.
+    Speculative decoding: A draft model proposes K tokens that the target verifies in one pass while preserving
+      its distribution, so the gain depends on acceptance rate, draft cost, and spare compute, and it vanishes as
+      batching consumes decode's compute headroom.
+  previews:
+    - concept: Adaptation method by budget term
+      owner: 11_edge_intelligence
+    - concept: Local training must earn its place
+      owner: 11_edge_intelligence
+    - concept: Staged rollout exposure budget
+      owner: 12_ops_scale
+    - concept: Security controls priced on a C3 axis
+      owner: 13_security_privacy
+  touches:
+    - concept: Fleet Law
+      owner: 01_introduction
+    - concept: Naming the efficiency measure
+      owner: 01_introduction
+    - concept: Capacity and bandwidth are separate tests
+      owner: 02_compute_infrastructure
+    - concept: Alpha-beta model
+      owner: 03_network_fabrics
+    - concept: Hedged reads against storage tail latency
+      owner: 04_data_storage
+    - concept: Ring AllReduce and the bandwidth bound
+      owner: 05_collective_communication
+    - concept: AllToAll active bound
+      owner: 05_collective_communication
+    - concept: Tensor parallelism in the fast domain
+      owner: 06_distributed_training
+    - concept: Pipeline parallelism bubble
+      owner: 06_distributed_training
+    - concept: Expert parallelism
+      owner: 06_distributed_training
+    - concept: Parallelism plan as joint placement
+      owner: 06_distributed_training
+    - concept: Sparse embedding sharding
+      owner: 06_distributed_training
+    - concept: Serving replication sized to state
+      owner: 07_fault_tolerance
+    - concept: Graceful degradation ladder
+      owner: 07_fault_tolerance
+    - concept: Quota guarantees bounded by reclaim
+      owner: 08_fleet_orchestration
+    - concept: Feasibility before fairness
+      owner: 08_fleet_orchestration
+    - concept: Serving envelope and accelerator sharing
+      owner: 08_fleet_orchestration
+    - concept: Interruption economics
+      owner: 08_fleet_orchestration
+    - concept: Scheduling objectives and matched signals
+      owner: 08_fleet_orchestration
+    - concept: ML goodput
+      owner: 09_performance_engineering
+    - concept: Tensor-parallel collectives under contention
+      owner: 09_performance_engineering
+    - concept: Reproducible measurement contract
+      owner: 09_performance_engineering
   technical_terms:
     - Time to First Token
     - Time Per Output Token
@@ -117,7 +174,7 @@ concept_map:
     - Target Model
     - Acceptance Rate
     - Rejection Sampling
-    - Speculation Tax
+    - Speculation Overhead
     - Self-Speculative Decoding
     - Medusa
     - Lookahead Decoding
@@ -151,6 +208,33 @@ concept_map:
     - W4A4
     - Spot Instances
     - Preemptible Instances
+  formulas:
+    - T_{\text{total}} = T_{\text{compute}} + T_{\text{network}} + T_{\text{serialization}} + T_{\text{coordination}}
+      + T_{\text{queuing}}
+    - C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deployment}} \times Q_{\text{rate}}
+    - T_{\text{lat}}(B) = T_{\text{fixed}} + B \times T_{\text{variable}}
+    - X(B) = \frac{B}{L_{\text{lat}}(B)} = \frac{B}{T_{\text{fixed}} + B \times T_{\text{variable}}}
+    - Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}}
+    - S(B) = \alpha + \beta \cdot B
+    - \mu_{\text{eff}}(B) = \frac{B}{S(B)} = \frac{B}{\alpha + \beta \cdot B}
+    - E[T] = E[W] + E[S_{\text{batch}}] + E[S_{\text{compute}}]
+    - E[B] = \min(B_{\text{max}}, \lambda \cdot T_{\text{max}})
+    - B = \operatorname{arg\,min}_{B} E[T(B)] \quad \text{subject to} \quad \mu_{\text{eff}}(B) \geq \lambda
+    - E[T(B)] = E[W(B)] + \frac{B}{2\lambda} + S(B)
+    - E[W] = \frac{\lambda \cdot E[S^2]}{2(1 - \rho)}
+    - \text{Throughput gain} \approx 1 + \frac{\text{CV}^2}{2}
+    - W = 1 - \frac{O_{\text{useful}}}{O_{\text{traditional}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}
+    - M_{\text{KV,total}} = 2 \times N_{\text{layers}} \times N_{\text{KV heads}} \times d_{\text{head}} \times
+      s_{\text{elem}} \times S \times B
+    - \text{Memory}_{\text{weights}} = P \times \frac{b}{8} \text{ bytes}
+    - T_{\text{inference}} = \frac{T_{\text{compute}}}{t} + 2 \times T_{\text{allreduce}}\left(\frac{A}{t}\right)
+    - E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log n)
+    - T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provision}} + T_{\text{warmup}}
+    - \text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model size in bytes}}
+    - \mathbb{E}[N_{\text{emit}}] = \frac{1-\alpha_{\text{acc}}^{K+1}}{1-\alpha_{\text{acc}}}
+    - s_i = \frac{x_{\max,i} - x_{\min,i}}{2^{b} - 1}
+    - T_{\text{handoff}} = \alpha + \frac{M_{\text{KV}}}{\beta}
+    - P(\text{request slow}) = 1 - (1 - p)^{N}
   methodologies:
     - Total cost of serving analysis
     - Serving tax latency budgeting
@@ -165,16 +249,17 @@ concept_map:
     - PagedAttention block allocation
     - Prefix cache hit-rate analysis
     - KV cache compression strategy selection
+    - Block-wise quantization and outlier handling
+    - Precision dividend analysis
     - Speculative decoding acceptance-rate analysis
     - Prefill and decode phase separation
     - Chunked prefill scheduling
     - Disaggregated serving pool design
+    - Decode-step budget accounting
     - Tensor parallel sharding analysis
     - Pipeline parallel throughput analysis
     - Expert parallel routing analysis
-    - Embedding sharding strategy selection
-    - Hybrid sharding composition
-    - AllReduce and AllToAll communication modeling
+    - Collective cost budgeting by interconnect
     - Power-of-two-choices routing
     - Weighted and adaptive load balancing
     - Consistent hashing for stateful affinity
@@ -195,28 +280,8 @@ concept_map:
     - Quantization method selection
     - Calibration-driven weight quantization
     - Deadline propagation in cascaded serving
-  formulas:
-    - T_{\text{total}} = T_{\text{compute}} + T_{\text{network}} + T_{\text{serialization}} + T_{\text{coordination}} + T_{\text{queuing}}
-    - C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deployment}} \times Q_{\text{rate}}
-    - T_{\text{lat}}(B) = T_{\text{fixed}} + B \times T_{\text{variable}}
-    - X(B) = \frac{B}{L_{\text{lat}}(B)} = \frac{B}{T_{\text{fixed}} + B \times T_{\text{variable}}}
-    - Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}}
-    - S(B) = \alpha + \beta \cdot B
-    - \mu_{\text{eff}}(B) = \frac{B}{S(B)} = \frac{B}{\alpha + \beta \cdot B}
-    - E[T] = E[W] + E[S_{\text{batch}}] + E[S_{\text{compute}}]
-    - E[B] = \min(B_{\text{max}}, \lambda \cdot T_{\text{max}})
-    - B = \operatorname{arg\,min}_{B} E[T(B)] \quad \text{subject to} \quad \mu_{\text{eff}}(B) \geq \lambda
-    - E[T(B)] = E[W(B)] + \frac{B}{2\lambda} + S(B)
-    - E[W] = \frac{\lambda \cdot E[S^2]}{2(1 - \rho)}
-    - \text{Throughput gain} \approx 1 + \frac{\text{CV}^2}{2}
-    - W = 1 - \frac{O_{\text{useful}}}{O_{\text{traditional}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}
-    - M_{\text{KV,total}} = 2 \times N_{\text{layers}} \times N_{\text{KV heads}} \times d_{\text{head}} \times s_{\text{elem}} \times S \times B
-    - \text{Memory}_{\text{weights}} = P \times \frac{b}{8} \text{ bytes}
-    - T_{\text{inference}} = \frac{T_{\text{compute}}}{t} + 2 \times T_{\text{allreduce}}\left(\frac{A}{t}\right)
-    - T_{\text{allreduce}} \approx 2(N-1)\alpha + \frac{2(N-1)}{N} \times \frac{M}{\beta}
-    - E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log n)
-    - T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provision}} + T_{\text{warmup}}
-    - \text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model size in bytes}}
+    - Fan-out tail budgeting by leaf percentile
+    - Per-request compute budgeting for test-time compute
   applications:
     - Large language model API serving
     - Real-time chatbot serving
@@ -244,270 +309,188 @@ concept_map:
     - OpenAI-style API infrastructure
     - Google-style search ranking
     - TikTok-style multimodal recommendation
-keywords:
-  - Inference at Scale
-  - serving cost dominance
-  - serving tax
-  - serving hierarchy
-  - stateful serving
-  - sticky routing
-  - workload-specific batching
-  - Continuous Batching
-  - streaming inference
-  - adaptive batching
-  - KV Cache
-  - KV cache wall
-  - PagedAttention
-  - Prefill
-  - Decode
-  - Disaggregated Serving
-  - Speculative Decoding
-  - Mixture of Experts (MoE)
-  - MoE
-  - TTFT
-  - TPOT
-  - tensor parallelism
-  - pipeline parallelism
-  - expert parallelism
-  - embedding sharding
-  - power of two choices
-  - consistent hashing
-  - tail latency
-  - multi-tenancy
-  - autoscaling
-  - cold start
-  - warm pools
-  - global inference
-  - weight quantization
-topics_covered:
-  - topic: The Economics and Architecture of Inference
-    subtopics:
-      - When single-machine serving is insufficient
-      - 'The fundamental inversion: Training vs. inference'
-      - 'The serving tax: Overhead of distribution'
-      - Serving cost dominates training cost
-      - 'The inference landscape: Beyond LLMs'
-      - The serving hierarchy
-  - topic: Serving Architecture Dimensions
-    subtopics:
-      - 'Batching strategy: The throughput-latency trade-off'
-      - 'Memory management: From preallocation to paging'
-      - 'Scheduling policy: FCFS, preemptive, and priority-aware'
-      - 'Deployment topology: Single-GPU to disaggregated'
-      - 'Stateful vs. stateless: The scaling divide'
-      - Architectural comparison
-  - topic: Batching Strategies at Scale
-    subtopics:
-      - Why batching differs across model types
-      - 'The physics of batching: The efficiency curve'
-      - Queuing theory for batched inference
-      - Static and dynamic batching for vision models
-      - Continuous batching for LLM inference
-      - Continuous batching throughput analysis
-  - topic: 'The Logic Wall: Test-Time Compute Scaling'
-    subtopics:
-      - 'Quantitative analysis: Traditional vs. continuous batching'
-      - Feature-parallel batching for recommendation systems
-      - Streaming inference for real-time applications
-      - Adaptive batching strategies
-      - 'Quantitative summary: Batching strategy selection'
-  - topic: KV Cache Management
-    subtopics:
-      - KV cache fundamentals
-      - 'The KV cache wall: Memory-bound capacity'
-      - The fragmentation problem
-      - PagedAttention
-      - Prefix caching
-      - KV cache compression and architectural optimization
-      - Speculative decoding
-      - KV cache in distributed settings
-  - topic: Model Sharding for Inference
-    subtopics:
-      - When sharding becomes necessary
-      - Tensor parallelism
-      - Pipeline parallelism for inference
-      - Expert parallelism for MoE models
-      - Embedding sharding for recommendation systems
-      - Hybrid sharding strategies
-      - Communication overhead analysis
-      - Sharding strategy selection
-  - topic: Load Balancing and Request Routing
-    subtopics:
-      - Load balancing principles
-      - Round-robin and random assignment
-      - The power of two choices
-      - Weighted and adaptive load balancing
-      - Least-connections load balancing
-      - Consistent hashing for stateful routing
-      - Request routing for sharded models
-      - Health checking and failover
-  - topic: Multi-Tenancy and Isolation
-    subtopics:
-      - The multi-tenancy challenge
-      - Noisy neighbor problems
-      - Resource quotas and fair sharing
-      - Priority scheduling
-      - Bulkhead pattern
-      - Model isolation
-      - Observability for multi-tenancy
-  - topic: Autoscaling and Global Infrastructure
-    subtopics:
-      - Scaling dimensions
-      - The cold start problem
-      - Reactive scaling
-      - Predictive scaling
-      - Warm pool management
-      - Scaling response time analysis
-      - Spot and preemptible instances
-      - Global inference infrastructure
-  - topic: Weight Quantization for Serving
-    subtopics:
-      - LLM-specific quantization challenges
-      - 'GPTQ: Layer-by-layer weight quantization'
-      - 'AWQ: Activation-aware weight quantization'
-      - 'SmoothQuant: Migrating quantization difficulty'
-      - Rotation-based quantization
-      - Hardware-deployment co-design
-      - Framework integration
-      - Quantization selection guidelines
-  - topic: Case Studies
-    subtopics:
-      - Meta recommendation serving
-      - OpenAI API infrastructure
-      - Google search ranking
-      - TikTok multimodal recommendation
-      - Cross-cutting observations
-  - topic: Fallacies and Pitfalls
-    subtopics:
-      - 'Summary: Resource bottleneck hierarchy'
-  - topic: Inference Economics and Architecture
-    subtopics:
-      - serving cost dominance
-      - training vs inference inversion
-      - serving tax
-      - total cost of serving
-      - inference landscape
-      - serving hierarchy
-  - topic: Serving Architecture Dimensions
-    subtopics:
-      - batching strategy
-      - memory management
-      - scheduling policy
-      - deployment topology
-      - stateful vs stateless serving
-      - workload-specific architecture
-  - topic: Batching Strategies
-    subtopics:
-      - static batching
-      - dynamic batching
-      - Continuous Batching
-      - feature-parallel batching
-      - batching efficiency curve
-      - Little's Law
-      - M/G/c/K queue
-      - streaming inference
-      - adaptive batching
-  - topic: KV Cache Management
-    subtopics:
-      - KV Cache
-      - KV cache wall
-      - fragmentation
-      - PagedAttention
-      - prefix caching
-      - KV cache quantization
-      - Grouped Query Attention
-      - Speculative Decoding
-      - KV cache migration
-  - topic: Prefill and Decode Serving
-    subtopics:
-      - Prefill
-      - Decode
-      - TTFT
-      - TPOT
-      - compute-bound prefill
-      - bandwidth-bound decode
-      - chunked prefill
-      - disaggregated serving
-      - dynamic memory swapping
-  - topic: Model Sharding
-    subtopics:
-      - tensor parallelism
-      - pipeline parallelism
-      - expert parallelism
-      - Mixture of Experts (MoE)
-      - embedding sharding
-      - hybrid sharding
-      - AllReduce
-      - AllToAll
-      - communication overhead
-  - topic: Load Balancing and Routing
-    subtopics:
-      - round-robin
-      - random assignment
-      - power of two choices
-      - weighted load balancing
-      - least-connections
-      - consistent hashing
-      - sharded-model routing
-      - health checks
-      - failover
-      - circuit breakers
-      - backpressure
-  - topic: Multi-Tenancy and Isolation
-    subtopics:
-      - noisy neighbor effects
-      - resource quotas
-      - fair sharing
-      - priority scheduling
-      - preemption
-      - bulkhead pattern
-      - model isolation
-      - MIG
-      - observability
-      - chargeback
-  - topic: Autoscaling and Global Infrastructure
-    subtopics:
-      - horizontal scaling
-      - batch size scaling
-      - cold start
-      - reactive scaling
-      - predictive scaling
-      - warm pools
-      - spot instances
-      - multi-region inference
-      - edge caching
-      - model rollout
-      - cost-aware routing
-  - topic: Quantization for Serving
-    subtopics:
-      - LLM quantization challenges
-      - GPTQ
-      - AWQ
-      - SmoothQuant
-      - QuaRot
-      - hardware-deployment co-design
-      - FP8
-      - INT8
-      - INT4
-      - W4A16
-      - W8A8
-      - PagedAttention integration
-  - topic: Production Case Studies
-    subtopics:
-      - Meta recommendation serving
-      - OpenAI-style API infrastructure
-      - Google search ranking
-      - TikTok multimodal recommendation
-      - ranking cascade
-      - two-tower caching
-      - deadline awareness
-  - topic: Fallacies and Pitfalls
-    subtopics:
-      - LLM-only inference fallacy
-      - training infrastructure for serving
-      - continuous batching limits
-      - average-throughput capacity planning
-      - load balancing impact
-      - serving tax budgeting
-      - memory vs bandwidth bottlenecks
-      - isolation design
+
+  explorer_graph:
+    schema_version: 1
+    relationships:
+    - source: Serving cost dominance
+      predicate: makes cost depend on useful serving output in
+      target:
+        chapter: 10_inference
+        concept: SLO goodput and the serving tax
+      explanation: Serving cost dominance makes cost depend on useful serving output in SLO goodput and the serving
+        tax.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 10_inference
+        concept: Serving cost dominance
+        quote: Lifetime cost is training once plus cost per query times traffic times deployment time, so at
+          high volume serving overtakes training within days to weeks and the lever is cost per completed request
+          at a fixed mix, quality, and SLO.
+      - chapter: 10_inference
+        concept: SLO goodput and the serving tax
+        quote: Serving capacity is the rate of completed requests that meet stated TTFT and per-token targets
+          for a fixed mix, and end-to-end latency adds network, serialization, coordination, and queueing to
+          model time, so a 70 ms model in a 100 ms budget leaves 30 ms for everything else.
+    - source: Batch formation trades waiting for reuse
+      predicate: trades throughput against
+      target:
+        chapter: 10_inference
+        concept: SLO goodput and the serving tax
+      explanation: Batch formation trades waiting for reuse trades throughput against SLO goodput and the serving
+        tax.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 10_inference
+        concept: Batch formation trades waiting for reuse
+        quote: With batch service time t_0 + B t_req throughput saturates toward 1/t_req past a knee near t_0/t_req,
+          and request latency is queueing plus formation plus execution, so a batching window caps formation
+          but not queueing, while Little's law (in-flight work = arrival rate x mean latency) sizes the concurrency
+          and replica count a target rate and latency imply.
+      - chapter: 10_inference
+        concept: SLO goodput and the serving tax
+        quote: Serving capacity is the rate of completed requests that meet stated TTFT and per-token targets
+          for a fixed mix, and end-to-end latency adds network, serialization, coordination, and queueing to
+          model time, so a 70 ms model in a 100 ms budget leaves 30 ms for everything else.
+    - source: SLO goodput and the serving tax
+      predicate: includes network completion costs from
+      target:
+        chapter: 03_network_fabrics
+        concept: ML traffic inversion
+      explanation: SLO goodput and the serving tax includes network completion costs from ML traffic inversion.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 10_inference
+        concept: SLO goodput and the serving tax
+        quote: Serving capacity is the rate of completed requests that meet stated TTFT and per-token targets
+          for a fixed mix, and end-to-end latency adds network, serialization, coordination, and queueing to
+          model time, so a 70 ms model in a 100 ms budget leaves 30 ms for everything else.
+      - chapter: 03_network_fabrics
+        concept: ML traffic inversion
+        quote: Synchronous training releases a few large, correlated flows whose completion gates a job-wide
+          barrier, so a fabric is judged by collective completion time and its tail, static ECMP hashing makes
+          persistent hot spots, and oversubscription becomes a workload decision. The chapter defines bulk synchronous
+          parallel (BSP) execution, the barrier model that distributed training later trades against SSP and
+          ASP, and tail latency (p99) at its first use, the completion-time measure later chapters reuse.
+    - source: Batch formation trades waiting for reuse
+      predicate: trades concurrency against memory feasibility in
+      target:
+        chapter: 02_compute_infrastructure
+        concept: Capacity and bandwidth are separate tests
+      explanation: Batch formation trades waiting for reuse trades concurrency against memory feasibility in
+        Capacity and bandwidth are separate tests.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 10_inference
+        concept: Batch formation trades waiting for reuse
+        quote: With batch service time t_0 + B t_req throughput saturates toward 1/t_req past a knee near t_0/t_req,
+          and request latency is queueing plus formation plus execution, so a batching window caps formation
+          but not queueing, while Little's law (in-flight work = arrival rate x mean latency) sizes the concurrency
+          and replica count a target rate and latency imply.
+      - chapter: 02_compute_infrastructure
+        concept: Capacity and bandwidth are separate tests
+        quote: Memory capacity decides whether model state fits and memory bandwidth decides how fast low-reuse
+          phases run, so batch-1 decode is floored at weight bytes over HBM bandwidth and bandwidth per dollar
+          becomes a procurement metric; the roofline and its ridge point (peak arithmetic over bandwidth) are
+          the hardware screen that tells which ceiling a phase meets before any purchase.
+
+  learner_graph:
+    schema_version: 1
+    concepts:
+    - id: vol2.serving.slo-goodput
+      label: SLO goodput
+      teaches: SLO goodput and the serving tax
+      summary: The rate of completed requests that meet the stated time-to-first-token (TTFT) and time-per-output-token
+        (TPOT) targets for a fixed request mix.
+      section: sec-inference-scale-fundamental-inversion-training-vs-inference-8834
+    - id: vol2.serving.batching
+      label: Request batching
+      teaches: Batch formation trades waiting for reuse
+      summary: Grouping requests for shared accelerator execution to trade weight reuse against waiting
+        time and resource demand.
+      section: sec-inference-scale-physics-batching-efficiency-curve-021c
+    - id: vol2.serving.kv-cache
+      label: KV cache
+      teaches: KV cache as admission budget
+      summary: Stored attention keys and values whose per-sequence growth constrains concurrent autoregressive
+        requests.
+      section: sec-inference-scale-kv-cache-wall
+    - id: vol2.serving.concurrency
+      label: Resident sequence count
+      teaches: KV cache as admission budget
+      section: sec-inference-scale-kv-cache-wall
+      summary: The number of active sequences whose attention state resides in a serving replica; feasible
+        count depends on their total cached tokens and available memory.
+    relationships:
+    - id: vol2.field.30
+      source: vol2.serving.batching
+      predicate: trades waiting against
+      target: vol2.serving.slo-goodput
+      explanation: Batching improves reuse but can make requests miss the serving latency contract.
+      conditions: A batch policy must be evaluated at the specified arrival process and latency percentile.
+      status: draft
+      evidence:
+        section: sec-inference-scale-batching-strategies-scale-6733
+        quote: Processing multiple requests together shares weight reads and kernel launch overhead across
+          more useful work. The resulting service-rate gain can reduce queueing, but waiting to form a batch
+          adds delay; the net effect on request latency depends on load. Single-machine serving applies
+          this insight through dynamic batching\index{Dynamic batching}, which collects requests within
+          a time window before processing them together.
+    - id: vol2.field.31
+      source: vol2.serving.kv-cache
+      predicate: bounds
+      target: vol2.serving.concurrency
+      explanation: Growing per-request KV state constrains how many active sequences can share a replica.
+      conditions: Capacity depends on model, precision, sequence lengths, allocator behavior, and reserved
+        headroom.
+      status: draft
+      evidence:
+        section: sec-inference-scale-kv-cache-wall
+        quote: A replica's KV footprint is that cost multiplied by every token it holds, $\KvCacheMemory
+          = \BatchSize \times \SequenceLength \times \KvCacheBytesPerToken$, so the largest admissible batch
+          at context $\SequenceLength$ is the HBM left after weights and runtime allocations divided by
+          $\SequenceLength \times \KvCacheBytesPerToken$. Each serving lever acts on a different factor.
+          Grouped-query attention lowers $\KvHeadCount$, KV quantization lowers $\ElementStorageSize$, a
+          shorter admitted context lowers $\SequenceLength$, and paging returns HBM lost to fragmentation
+          without changing the per-token cost. The notebook below turns this budget into an explicit batch-size
+          limit for a production node.
+    - id: vol2.field.32
+      source: vol2.serving.slo-goodput
+      predicate: uses a different contract from
+      target: vol2.goodput.ml
+      explanation: Serving useful work counts only output satisfying the declared serving contract.
+      conditions: Do not equate raw token throughput with deadline-qualified useful output or training progress.
+      status: draft
+      evidence:
+        section: sec-inference-scale-fundamental-inversion-training-vs-inference-8834
+        quote: The same targets also define the serving system's capacity metric. **SLO goodput**\index{Goodput!SLO-constrained}
+          is the rate of completed requests that meet the stated TTFT and TPOT targets for a fixed request
+          mix. It is the serving counterpart of the useful-progress goodput that coordination protects in
+          training (@sec-vol2-introduction-dim-coord), and it applies after ML goodput, which measures how
+          much of a replica's held capacity runs at its ideal rate. SLO goodput then counts how much of
+          that capacity completes requests within their targets. A request that misses its contract counts
+          for nothing, however busy the accelerators were while serving it, so increasing arrivals without
+          completing more requests within those targets does not increase useful capacity.
+    - id: vol2.field.54
+      source: vol2.hardware.memory-capacity
+      predicate: bounds admission using
+      target: vol2.serving.kv-cache
+      explanation: The cache budget is the memory left after weights and other runtime allocations.
+      conditions: Reserve runtime headroom and account for total cached tokens rather than request count
+        alone.
+      status: draft
+      evidence:
+        section: sec-inference-scale-kv-cache-wall
+        quote: A replica's KV footprint is that cost multiplied by every token it holds, $\KvCacheMemory
+          = \BatchSize \times \SequenceLength \times \KvCacheBytesPerToken$, so the largest admissible batch
+          at context $\SequenceLength$ is the HBM left after weights and runtime allocations divided by
+          $\SequenceLength \times \KvCacheBytesPerToken$. Each serving lever acts on a different factor.
+          Grouped-query attention lowers $\KvHeadCount$, KV quantization lowers $\ElementStorageSize$, a
+          shorter admitted context lowers $\SequenceLength$, and paging returns HBM lost to fragmentation
+          without changing the per-token cost. The notebook below turns this budget into an explicit batch-size
+          limit for a production node.
+    maps: []

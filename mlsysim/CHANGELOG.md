@@ -33,170 +33,80 @@ Release body. Omit any section that has no entries for a given release.
     - @profvjreddi
 -->
 
-## Unreleased
+## v0.3.0 (2026-10-24)
 
-### Physical AI & Embodied Modeling
+MLSys·im 0.3.0 reorganizes the package around nested registries and a dedicated
+`mlsysim.engine` layer, adds Physical AI and agentic modeling (embodied
+platforms, sensors, actuators, robotics and drivetrain physics), and corrects
+several distributed-training, serving, and hardware-registry numbers. It
+removes a number of top-level convenience imports, so code written against
+0.1.1 needs the import updates listed below.
 
-- **Embodied Hardware & Platform Registry (`mlsysim.embodied`)**: Added first-principles registries for physical robotics platforms:
-  - `Embodied.Vehicle`: Autonomous vehicles (e.g. `UberATG_VolvoXC90`, `Waymo_Pacifica_Chrysler`) with mass, max velocity, acceleration, braking profiles, and thermal/power envelopes.
-  - `Embodied.AMR`: Autonomous mobile robots (e.g. `LogisticsAMR`, `WarehouseAMR`) with mass, velocity limits, sensor latencies, and stopping clearances.
-  - `Embodied.Manipulator`: Articulated robotic arms (e.g. `Franka_Emika_Panda`, `UR5e`) with joint count, effective end-effector inertia, payload capacity, and stiction thresholds.
-- **Physical Robotics Closed-Form Physics (`mlsysim.physics.robotics`)**: Added closed-form analytical solvers for cyber-physical AI:
-  - `calc_safe_stopping_distance`: Safe stopping envelope combining reaction lag, braking deceleration, and localization margins.
-  - `calc_kinetic_energy`: Kinetic energy for moving mass.
-  - `calc_transient_impact_force`: Transient collision impact force using effective mass and tissue stiffness.
-  - `calc_coulomb_stiction_deadband`: Torque deadband latency from Coulomb friction and motor torque slewing.
-  - `calc_watchdog_lease_bound`: Maximum safety watchdog lease duration bounded by optical sensor clearance and stopping distance.
-  - `calc_canfd_bus_utilization`: Deterministic bus frame transmission time and utilization under CAN-FD arbitration/data phases.
-  - `calc_ethercat_cycle_time`: Sum-frame EtherCAT cycle time, transmission latency, and timing margin.
-  - `calc_teleop_ingestion_budget`: Multi-camera teleoperation ingestion data rates, PCIe bus bandwidth, and raw memory footprint.
-  - `calc_demonstration_yield_fatigue`: Ergonomic teleoperator fatigue decay and usable demonstration throughput yield.
-  - `calc_covariate_drift_compounding`: Exponential error compounding across closed-loop horizon under covariate shift.
-  - `calc_action_chunk_denoising_cadence`: Diffusion policy denoising step latency vs camera frame cycle time.
-  - `calc_clopper_pearson_zero_failure_bound`: Exact binomial lower confidence bound on operational survival probability from zero-failure trials.
-  - `calc_zero_failure_sample_size`: Required flawless trials to demonstrate target reliability at confidence level.
-  - `calc_sensor_information_age`: End-to-end information age and spatial error displacement from sensor acquisition to actuator current.
-  - `calc_tsdf_voxel_grid_budget`: Memory capacity and bandwidth requirements for 3D TSDF voxel grids vs octrees.
-  - `calc_intent_drift_lease`: Temporal validity lease for high-level semantic goals bounded by odometry drift and workspace obstacles.
-  - `calc_tripwire_contact_force_accumulation`: Contact force integration across actuator response delay.
-  - `calc_process_thermal_runaway_lease`: Critical thermal runaway lease duration before actuator or plant temperature exceeds safety limits.
-  - `calc_planning_seam_inertia_discontinuity`: Trajectory stitch acceleration spike and mechanical jerk from replanning discontinuities.
-  - `calc_cbf_qp_orthogonal_projection`: Control Barrier Function minimum-norm QP projection to enforce safe forward-invariant set.
-  - `calc_inductive_pdn_voltage_droop`: Fast inductive power distribution network (PDN) $L \cdot di/dt$ voltage droop under transient current steps.
-  - `calc_intervention_takeover_budget`: Human takeover reaction time, out-of-loop drift displacement, and total safety stopping distance.
-  - `calc_architectural_shield_dilution`: Reliability dilution across layered runtime defense shields.
-- **Physical AI SI Units (`mlsysim.core.units`)**: Added exported aliases and quantities for `millimeter`, `mm`, `newton`, `N`, `volt`, `V`, `millivolt`, `mV`, `ampere`, `A`, `milliampere`, `mA`, `ohm`, `milliohm`, `radian`, `rad`, `hertz`, `Hz`.
-- **Provenance Catalog (`mlsysim.core.provenance_catalog`)**: Integrated verifiable engineering sources and datasheets for all embodied platforms and parameters.
-
-### Bug Fixes
-
-- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
-  with no way to change it, so INT4 always reported 8x compression and an 8x
-  memory-bound speedup, even for models served from FP16/BF16 weights where
-  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
-  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
-  defaults to `"fp32"`, so existing results are unchanged:
-  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
-  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
-  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
-  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
-  `r = b_base/b`.
-- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
-  forward path only) for a training step and priced them as one collective of
-  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
-  in the forward path and two in the backward path per layer (Shoeybi et al.
-  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
-  with its own ring latency term: the bandwidth term of `tp_communication_latency`
-  doubles and the latency term quadruples.
-- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
-  as binding when the configuration does not fit in memory (for example
-  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
-  perturbation moves it, and `max()` broke the tie on the first key.
-  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
-  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
-  Memory Wall failure.
-- `DistributedModel` priced the local step with `Engine.solve` on the whole,
-  unsharded model on one accelerator and counted one token per sequence. Any
-  multi-billion-parameter transformer therefore failed the memory check and
-  was priced at the PCIe offload bandwidth, so step time ignored `efficiency`
-  and every TP/PP/DP split looked alike (Llama-3 70B at TP=8 on 512 H100s:
-  9.5 TB "per GPU"). The step is now one model-parallel replica: step FLOPs
-  (`inference_flops * seq_len * local_batch`, 3x for training, 4x with
-  recomputation) shared across its `tp * pp * ep` accelerators, and
-  feasibility from `TrainingMemoryModel` with the same TP/PP/EP/ZeRO
-  sharding, selective recomputation (full when `activation_recomputation`),
-  and the microbatches a 1F1B stage holds in flight. Non-transformer
-  workloads without model parallelism keep the `Engine.solve` path.
-  - Tensor-parallel communication now covers one pipeline stage's layers
-    (stages run concurrently) instead of charging every layer to every stage.
-  - The pipeline bubble is added as idle time `compute * b / (1 - b)`, since
-    `calc_pipeline_bubble` returns the idle share of the whole step; it was
-    added as `compute * b`, which understated it most for few microbatches.
-  - `effective_throughput` multiplies by the DP replica count, not the
-    accelerator count.
-- `DistributedModel`'s data-parallel AllReduce sized each rank's gradients as
-  the model over TP, ignoring PP, and split the ring by accelerators per node
-  rather than DP ranks per node. A TP=8 group on 8-GPU nodes therefore ringed
-  part of its gradients over NVLink although every DP rank sits on a different
-  node, and one-accelerator nodes ringed over the intra-node link. Each rank
-  now holds a `tp * pp` shard, a node holds `accelerators_per_node // (tp * pp
-  * ep)` ranks of a group, and the collective is an intra-node ring, a fabric
-  ring (one rank per node), or hierarchical accordingly.
-- `ParallelismOptimizer` drops candidates whose replica does not fit once
-  activations are counted, prices pipelined candidates with one-sample
-  microbatches, takes `seq_len` and `activation_recomputation`, and names the
-  memory remedies when nothing fits.
-- `TrainingMemoryModel` never divided activations by the tensor-parallel
-  degree. With `sequence_parallel=True` (the default, Korthikanti et al. 2023)
-  activations shard across the TP group; `tp_size=1` results are unchanged.
-- `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
-  reducing units, overstating utilization by 7.4%.
-
-### Solvers, Models & Taxonomy
-
-- `ContinuousBatchingModel` now derives static and paged capacity from a
-  request-length distribution instead of assuming static batching reaches 60%
-  of the paged batch. Static allocation reserves `max_seq_len` per request;
-  paged allocation holds `ceil(S/p)` blocks averaged over exponential request
-  lengths capped at `max_seq_len` with mean `mean_request_tokens`. Page size
-  now changes fragmentation and capacity even when the context divides evenly
-  by the page size, and `speedup_vs_static` compares memory-bound decode
-  throughput at the two concurrencies. Provenance now cites Kwon et al. (2023)
-  Fig. 2 correctly (20.4% to 38.2% of KV memory holds token states under
-  contiguous pre-allocation).
-- `ServingCapacityModel` accepts `mean_request_tokens` and evaluates base
-  latency at the mean request length.
-- Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
-  `mlsysim.physics`.
-- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
-  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
-  `Interactive.StreamingVoice`) and the `mlsysim.Embodied` registry
-  (`Quadruped.Spot`, `Humanoid.Atlas`, `Humanoid.Unitree_H1`,
-  `Manipulator.Panda`, `Drone.DJI_Matrice`, `AMR.LogisticsAMR`,
-  `Vehicle.Robotaxi`). Provenance states what is sourced. The Panda record is
-  a datasheet. Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
-  estimates that link their spec pages and name the unsourced fields. The AMR
-  and robotaxi are estimated class profiles, and the four agent profiles are
-  illustrative teaching assumptions.
-- Added `mlsysim.physics.agents` (trajectory step time and reliability, Pareto
-  trajectory-length tail, radix prefix-cache latency, test-time compute cost,
-  multi-agent coordination overhead, speedup, and optimal concurrency) and
-  `mlsysim.physics.robotics` (sensor-to-actuator latency, stopping distance
-  and maximum permitted velocity, kinetic energy, reflected inertia and seam
-  torque, inverted-pendulum fall time, actuator Joule heating, and
-  action-chunk cadence). Each docstring has a `Source:` line that cites a
-  checked reference or names the formula as a modeling assumption.
-
-### Hardware Registry
-
-- `Hardware.Cloud.TPUv4` records its inter-chip interconnect (ICI) as 300 GB/s
-  per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4, which
-  quotes the A100's NVLink at the same one-way convention). Its provenance now
-  carries the paper's actual title.
-
-### Documentation
-
-- Align website tutorials and landing pages with canonical nested registry paths
-  (`Hardware.Cloud.*`, `Models.Language.*`, etc.).
-- Add Zoo pages for Platforms, Datasets, Literature, and Ops; document
-  `Infrastructure.Pricing` and provenance audit workflow on the public site.
-- Add CI gate `test_doc_registry_paths.py` for docs and tutorial markdown.
-- Document physics module layout, formatting helpers, and import surface in
-  `api-stability.md` and `contributing.qmd`.
-
-### Internal
-
-- Converged book-facing provenance on `Provenance` + `Sourced` (`sourced()` factory);
-  removed `TraceableConstant`. Appendix lineage and `audit_provenance` use one type.
-- Removed duplicate `GPU_UNIT_COST_*` (use `Hardware.Cloud.*.unit_cost`).
-- `Metadata` accepts only `provenance` (dropped `source` / `source_url` coalesce fields).
-- Removed `mlsysim.core.defaults`; reorganized into `Literature`, `Systems`, `Infrastructure`,
-  `Ops.Monitoring`, and `core.calibration` (solver/engine parameters only).
-- Added `Infrastructure.Pricing` (`Cloud`, `Storage`, `Labeling`, `Fleet`, `Capital`).
-  Appendix lineage audits registry paths and rejects stale `defaults.*` references.
+> **PyPI note:** 0.1.2 and 0.2.0 were tagged but never published to PyPI, so
+> on PyPI 0.3.0 directly follows 0.1.1. If you are upgrading from the PyPI
+> 0.1.1 release, the v0.1.2 entry below also applies to you.
 
 ### Breaking Changes
 
+**Top-level imports.** The following names are no longer importable from the
+top-level `mlsysim` package. Import them from their defining module instead.
+
+| 0.1.1 import | 0.3.0 import |
+|---|---|
+| `from mlsysim import Workload, TransformerWorkload, CNNWorkload` | `from mlsysim.models.types import Workload, TransformerWorkload, CNNWorkload` |
+| `from mlsysim import HardwareNode` | `from mlsysim.hardware.types import HardwareNode` |
+| `from mlsysim import Fleet, Node, NetworkFabric` | `from mlsysim.systems.types import Fleet, Node, NetworkFabric` |
+| `from mlsysim import DeploymentTier` | `from mlsysim.systems.types import DeploymentTier` |
+| `from mlsysim import PerformanceProfile` | `from mlsysim.engine.engine import PerformanceProfile` |
+| `from mlsysim import SystemEvaluator, SystemEvaluation` | `from mlsysim.engine.evaluation import SystemEvaluator, SystemEvaluation` |
+| `from mlsysim import SimulationConfig, load_config` | `from mlsysim.engine.config import SimulationConfig, load_config` |
+| `from mlsysim import SingleNodeModel` (and every other solver or optimizer class) | `from mlsysim.solvers import SingleNodeModel` |
+| `from mlsysim import Infra` | `from mlsysim import Infrastructure` (`Infra.Grids`, `Infra.Racks` become `Infrastructure.Grids`, `Infrastructure.Racks`; `Infra.Quebec` becomes `Infrastructure.Grids.Quebec`, likewise `US_Avg`, `Poland`) |
+| `from mlsysim import infra` (subpackage) | `from mlsysim import infrastructure` |
+| `from mlsysim import Applications` | `from mlsysim import Scenarios` (`Applications.Doorbell` becomes `Scenarios.SmartDoorbell`, `AutoDrive` becomes `AutonomousVehicle`, `Workstation` becomes `LocalTraining`, `Frontier` becomes `FrontierTraining`, `Chatbot` becomes `ChatbotServing`, `KWS` becomes `KeywordSpotting`) |
+| `from mlsysim import Archetypes` | `from mlsysim import Scenarios` (same mapping as `Applications`; `Archetypes.Cloud_V100` becomes `Scenarios.FrontierTraining`, `Archetypes.TinyML_M7` becomes `Scenarios.SmartDoorbell`) |
+| `from mlsysim import show` | `import mlsysim.show` or `from mlsysim import show` still works as an explicit submodule import; it is no longer imported eagerly |
+| `mlsysim.viz` attribute access without import | `import mlsysim.viz` (top-level `plot_roofline` and `plot_evaluation_scorecard` are unchanged) |
+| `from mlsysim import ureg` | Unchanged; `ureg` is still exported (now from `mlsysim.core.units`) |
+| `from mlsysim import Tiers` | Removed, no replacement registry. The `DeploymentTier` type remains in `mlsysim.systems.types`. |
+| `from mlsysim import sim` (`Persona`, `BaseSimulation`, `SystemLedger`, ...) | Removed, no replacement. |
+| `from mlsysim import constants` / `mlsysim.core.constants` | Removed. Units and `Q_` live in `mlsysim.core.units`; physical constants in `mlsysim.physics.constants`; specs in the registries. |
+
+**Moved modules.** `mlsysim.core.engine`, `mlsysim.core.solver`,
+`mlsysim.core.evaluation`, `mlsysim.core.scenarios`, and `mlsysim.core.config`
+moved to `mlsysim.engine.*`. Use `mlsysim.solvers` as the stable import path
+for solver classes. `mlsysim.core.defaults` is removed (see Internal).
+
+**Registry paths.** Flat registry aliases are removed; use the nested paths.
+
+| 0.1.1 | 0.3.0 |
+|---|---|
+| `Hardware.H100`, `H200`, `B200`, `A100`, `V100`, `T4`, `MI250X`, `MI300X`, `Gaudi2`, `Gaudi3`, `TPUv5p`, `TPUv6`, `Trainium2` | `Hardware.Cloud.<same name>` |
+| `Hardware.NVL72` | `Hardware.Cloud.GB200_NVL72` |
+| `Hardware.CerebrasCS3` | `Hardware.Cloud.Cerebras_CS3` |
+| `Hardware.DGXSpark`, `Hardware.MacBook` | `Hardware.Workstation.DGX_Spark`, `Hardware.Workstation.MacBookM3Max` |
+| `Hardware.Jetson` | `Hardware.Edge.JetsonOrinNX` |
+| `Hardware.iPhone`, `Hardware.Snapdragon` | `Hardware.Mobile.iPhone15Pro`, `Hardware.Mobile.Snapdragon8Gen3` |
+| `Hardware.ESP32`, `Hardware.Himax` | `Hardware.Tiny.ESP32_S3`, `Hardware.Tiny.HimaxWE1` |
+| `Hardware.Networks.*` | `Systems.Fabrics.*` |
+| `Models.GPT2`, `GPT3`, `GPT4`, `Llama2_70B`, `Llama3_8B`, `Llama3_70B` | `Models.Language.<same name>` |
+| `Models.ResNet50`, `MobileNetV2`, `AlexNet` | `Models.Vision.<same name>` |
+| `Models.WakeVision` | `Models.Tiny.WakeVision` |
+| `Models.DLRM` | `Models.Recommendation.DLRM` |
+| `Models.Mamba_2_8B` | `Models.StateSpace.Mamba_2_8B` |
+| `Models.StableDiffusion_v1_5` | `Models.GenerativeVision.StableDiffusion_v1_5` |
+| `Systems.Cloud`, `Edge`, `Mobile`, `Tiny`, `Systems.Tiers` | Removed; use the `Hardware.*` entries directly |
+
+**Behavior changes.**
+
+- `Hardware.TPUv4` and `Hardware.Cloud.TPUv4` were aliases of TPU v5p in
+  0.1.1. `Hardware.Cloud.TPUv4` is now a distinct TPU v4 record (275 TFLOP/s,
+  32 GiB), so results computed against it change. To reproduce 0.1.1 numbers,
+  use `Hardware.Cloud.TPUv5p`; the flat `Hardware.TPUv4` alias is removed.
+- `Engine.solve` raises `ValueError` for an unknown `precision` name instead of
+  silently using FP16 byte widths.
+- `Infrastructure.FacilityCooling.UptimeSurvey2022Average` is removed; use
+  `Infrastructure.FacilityCooling.Typical` (now 1.55).
 - `ContinuousBatchingModel.solve()` and `ServingCapacityModel.solve()` rename
   `seq_len` to `max_seq_len`.
 - `ContinuousBatchingResult.memory_fragmentation_pct` is replaced by
@@ -204,6 +114,203 @@ Release body. Omit any section that has no entries for a given release.
   (fractions in [0, 1]). New fields: `static_max_active_requests`,
   `static_throughput_tokens_per_sec`, `static_kv_cache_size`, and
   `mean_request_tokens`.
+- `Metadata` accepts only `provenance` (the `source` and `source_url` fields
+  are dropped); `TraceableConstant` is removed in favor of `sourced()`.
+
+### Physical AI & Embodied Modeling
+
+- **Embodied, Sensors, and Actuators registries (`mlsysim.Embodied`,
+  `mlsysim.Sensors`, `mlsysim.Actuators`).** `Embodied` covers
+  `Vehicle.UberATG_VolvoXC90`, `Vehicle.Robotaxi`, `AMR.LogisticsAMR`,
+  `AMR.WarehouseAMR`, `Manipulator.Panda`, `Quadruped.Spot`,
+  `Humanoid.Atlas`, `Humanoid.Unitree_H1`, and `Drone.DJI_Matrice`, with mass,
+  velocity, braking, sensing latency, and power envelopes. `Sensors` covers
+  `Camera`, `IMU`, and `LiDAR`; `Actuators` covers `FramelessMotor`,
+  `HarmonicDrive`, `HubMotor`, `QuasiDirectDrive`, `Servo`, and the composed
+  `PandaClassJoint`. Provenance states what is sourced: the Panda record is a
+  datasheet; Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
+  estimates that link their spec pages and name the unsourced fields; the AMR
+  and robotaxi are estimated class profiles.
+- **Robotics physics (`mlsysim.physics.robotics`).** Closed-form models for
+  stopping and safety envelopes (`calc_safe_stopping_distance`,
+  `calc_max_permitted_velocity`, `calc_watchdog_lease_bound`,
+  `calc_cbf_qp_orthogonal_projection`), contact and impact
+  (`calc_kinetic_energy`, `calc_transient_impact_force`,
+  `calc_tripwire_contact_force_accumulation`), robot buses
+  (`calc_canfd_bus_utilization`, `calc_ethercat_cycle_time`), perception and
+  mapping budgets (`calc_teleop_ingestion_budget`,
+  `calc_tsdf_voxel_grid_budget`), validation statistics
+  (`calc_clopper_pearson_zero_failure_bound`, `calc_zero_failure_sample_size`),
+  and dynamics such as reflected inertia, seam torque, inverted-pendulum fall
+  time, and action-chunk cadence. Each docstring has a `Source:` line that
+  cites a checked reference or names the formula as a modeling assumption.
+- **Drivetrain braking physics (`mlsysim.physics.drivetrain`).** Checks a
+  requested deceleration for a wheeled base against three independent
+  ceilings: traction (`calc_traction_deceleration_limit`,
+  `calc_required_friction`), tip-over (`calc_tipover_deceleration_limit`,
+  `calc_max_cg_height_ratio`), and drive torque
+  (`calc_drive_torque_deceleration_limit`), plus `calc_drive_voltage_headroom`.
+  `calc_braking_limits` combines them and reports the binding ceiling.
+- **Physical AI SI units (`mlsysim.core.units`).** Exported `millimeter`/`mm`,
+  `newton`/`N`, `volt`/`V`, `millivolt`/`mV`, `ampere`/`A`,
+  `milliampere`/`mA`, `ohm`, `milliohm`, `radian`/`rad`, and `hertz`/`Hz`.
+- **Provenance catalog (`mlsysim.core.provenance_catalog`)** carries the
+  sources and datasheets behind the embodied platforms and parameters.
+
+### Solvers, Models & Taxonomy
+
+- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
+  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
+  `Interactive.StreamingVoice`); the four agent profiles are illustrative
+  teaching assumptions.
+- Added `mlsysim.physics.agents`: trajectory step time and reliability,
+  Pareto trajectory-length tail, radix prefix-cache latency, test-time compute
+  cost, multi-agent coordination overhead, speedup, and optimal concurrency.
+- `ContinuousBatchingModel` derives static and paged capacity from a
+  request-length distribution instead of assuming static batching reaches 60%
+  of the paged batch. Static allocation reserves `max_seq_len` per request;
+  paged allocation holds `ceil(S/p)` blocks averaged over exponential request
+  lengths capped at `max_seq_len` with mean `mean_request_tokens`. Page size
+  now changes fragmentation and capacity even when the context divides evenly
+  by the page size, and `speedup_vs_static` compares memory-bound decode
+  throughput at the two concurrencies. Provenance cites Kwon et al. (2023)
+  Fig. 2 (20.4% to 38.2% of KV memory holds token states under contiguous
+  pre-allocation).
+- `ServingCapacityModel` accepts `mean_request_tokens` and evaluates base
+  latency at the mean request length.
+- Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
+  `mlsysim.physics`.
+
+### Hardware Registry
+
+- `Hardware.Cloud.TPUv4` records its inter-chip interconnect (ICI) as 300 GB/s
+  per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4), and its
+  provenance carries the paper's actual title.
+- `Hardware.Cloud.TPUv3`: peak 123 TFLOP/s per chip (BF16) and TDP 450 W per
+  chip (Jouppi et al. 2020, CACM, Table 3), replacing 105 TFLOP/s and 250 W;
+  ICI 280 GB/s per direction, four links at 70 GB/s (Jouppi et al. 2023,
+  Table 4); `release_year` 2018. Provenance points to the CACM article
+  (DOI 10.1145/3360307).
+- `Hardware.Cloud.TPUv2`: peak 46 TFLOP/s per chip (BF16) and TDP 280 W per
+  chip (Jouppi et al. 2020, CACM, Table 3), replacing 45 TFLOP/s and 200 W;
+  `release_year` 2017. Provenance points to the CACM article.
+
+### Workload & Model Registry
+
+- `Models.Language.GPT3` reference run is 10,000 V100 GPUs for about 14.8 days
+  (Patterson et al. 2021, Table 4), replacing 1,024 accelerators for 25 days,
+  which implied more than 100 percent MFU. It gains
+  `training_hardware_label: V100`.
+- `Models.Language.GPT4` reference duration is 100 days (SemiAnalysis 2023
+  estimate of 90 to 100 days on about 25,000 A100s), matching its
+  `training_gpu_days` anchor.
+- `TransformerWorkload` validates that `training_accelerators_ref` times
+  `training_days_ref` agrees with `training_gpu_days` within 1 percent when all
+  three are set.
+- `Scenarios.FrontierTraining` keeps its 8,192-H100 fleet; its description now
+  states that this is the H100 restatement of a GPT-4-class run.
+
+### Infrastructure & Systems Registry
+
+- Each `Infrastructure.FacilityCooling` tier cites its own primary source:
+  liquid-cooled 1.06 (NREL ESIF), best air-cooled 1.12 (Microsoft design PUE,
+  2022), industry average 1.55 (Uptime 2022) and 1.58 (Uptime 2023, display
+  name "Industry Average (2023)", formerly "Legacy"), simple air 1.5 (LBNL
+  small server rooms, 2013), state of the art 1.10 (Google fleet TTM,
+  Q4 2023). `FacilityCooling.Typical` is 1.55 (Uptime 2022), replacing 1.40.
+- Added `Infrastructure.Pricing` (`Cloud`, `Storage`, `Labeling`, `Fleet`,
+  `Capital`).
+- `Node` gains `psu_redundancy` (M in an N+M supply), `psu_rating`, and
+  `max_power`, validated so that the N required PSUs can carry `max_power`.
+  The new `series_psus` property counts the PSUs whose single failure stops
+  the node. Defaults leave custom nodes unchanged.
+- `Systems.Nodes.DGX_H100` (six 3.3 kW PSUs, 4+2, 10.2 kW max),
+  `DGX_A100` (six 3 kW PSUs, 3+3, 6.5 kW max), and `DGX_B200` (six 3.3 kW
+  PSUs, 5+1, 14.3 kW max) record their supplies from the NVIDIA user guides.
+  `ReliabilityModel` now sums `series_psus` rather than `psus_per_node`, so
+  node MTBF on these three rises from 4,285.7 h to 4,687.5 h and every fleet
+  built on them (including `Clusters.Training_1K_A100`, `Lab_64_A100`, and
+  `Meta_RSC_A100_16K`) gains 9.4 percent in fleet MTBF. `HGX_H100_EPYC`,
+  `GrandTeton_H100`, `Kempner_H100_4GPU`, and custom nodes keep the
+  non-redundant two-PSU default.
+
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline,
+  so INT4 always reported 8x compression, even for FP16/BF16-served models.
+  `solve`, `candidate`, and `sweep` now take `baseline_precision` (default
+  `"fp32"`, so existing results are unchanged); pass `"fp16"` for FP16/BF16
+  models (INT4 = 4x). `CompressionResult` and `CompressionCandidate` record
+  the baseline, and the Wall 13 equation reads `r = b_base/b`.
+- `DistributedModel` tensor parallelism: a training step now pays 4 separate
+  AllReduces per layer (two forward, two backward; Shoeybi et al. 2019, p.4),
+  each with its own ring latency term, instead of 2 priced as one collective of
+  twice the size. The bandwidth term of `tp_communication_latency` doubles and
+  the latency term quadruples.
+- `DistributedModel` local step: it priced the whole unsharded model on one
+  accelerator with one token per sequence, so multi-billion-parameter
+  transformers fell to PCIe offload bandwidth and every TP/PP/DP split looked
+  alike. The step is now one model-parallel replica: step FLOPs
+  (`inference_flops * seq_len * local_batch`, 3x for training, 4x with
+  recomputation) shared across `tp * pp * ep` accelerators, with feasibility
+  from `TrainingMemoryModel` under the same sharding, recomputation, and 1F1B
+  in-flight microbatches. Tensor-parallel communication covers one pipeline
+  stage's layers; the pipeline bubble is added as `compute * b / (1 - b)`;
+  `effective_throughput` multiplies by the DP replica count.
+- `DistributedModel` data-parallel AllReduce: each rank now holds a `tp * pp`
+  shard, a node holds `accelerators_per_node // (tp * pp * ep)` ranks, and the
+  collective is an intra-node ring, a fabric ring, or hierarchical
+  accordingly. Previously gradients were sized over TP only and the ring was
+  split by accelerators per node.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration did not fit in memory. `SensitivityResult`
+  now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` with the Memory Wall failure in
+  `constraint_trace`.
+- `ParallelismOptimizer` drops candidates whose replica does not fit once
+  activations are counted, prices pipelined candidates with one-sample
+  microbatches, takes `seq_len` and `activation_recomputation`, and names the
+  memory remedies when nothing fits.
+- `TrainingMemoryModel` now divides activations by the tensor-parallel degree
+  when `sequence_parallel=True` (the default; Korthikanti et al. 2023).
+  `tp_size=1` results are unchanged.
+- `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
+  reducing units, overstating utilization by 7.4%.
+
+### Documentation
+
+- Website tutorials and landing pages use canonical nested registry paths
+  (`Hardware.Cloud.*`, `Models.Language.*`, and so on), enforced by the CI
+  gate `test_doc_registry_paths.py`.
+- Added Zoo pages for Platforms, Datasets, Literature, and Ops; documented
+  `Infrastructure.Pricing` and the provenance audit workflow.
+- Documented the physics module layout, formatting helpers, and import surface
+  in `api-stability.md` and `contributing.qmd`.
+
+### Packaging & Dependencies
+
+- Version bumped to `0.3.0` across `pyproject.toml`, `mlsysim/__init__.py`,
+  and `CITATION.cff`.
+- Raised dependency floors: `numpy>=2.0` (was 1.24), `pint>=0.24.4`,
+  `pydantic>=2.10.5`, `typer>=0.25.1`, `rich>=15.0.0`. The floors match the
+  Pyodide bundles used by the browser labs.
+- New `mcp` extra; `full` now includes it. The `labs` extra no longer pulls in
+  `plotly`.
+
+### Internal
+
+- Book-facing provenance converged on `Provenance` + `Sourced` (`sourced()`
+  factory). Appendix lineage and `audit_provenance` use one type, audit
+  registry paths, and reject stale `defaults.*` references.
+- Removed duplicate `GPU_UNIT_COST_*` constants (use
+  `Hardware.Cloud.*.unit_cost`).
+- Removed `mlsysim.core.defaults`; its contents moved to `Literature`,
+  `Systems`, `Infrastructure`, `Ops.Monitoring`, and `core.calibration`
+  (solver and engine parameters only).
+
+### Contributors
+
+- @profvjreddi
 
 ## v0.1.2 (2026-05-17) — CLI & Website Release Polish
 

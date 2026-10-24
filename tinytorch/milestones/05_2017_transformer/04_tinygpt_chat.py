@@ -625,7 +625,7 @@ def run_milestone(args=None):
         "[yellow]TinyTorch Teaching TinyTorch: Conversational Q&A[/yellow]",
         "[yellow]and The Overfitting Detective Experiment[/yellow]",
         "",
-        "• Model: Causal Pre-LN Transformer (Vaswani / GPT-4)",
+        "• Model: Causal Pre-LN Transformer (Vaswani / GPT-6)",
         f"• Dataset: Curated concept Q&A pairs ({dataset_title})",
         "• Overfitting Detective: Train Loss vs Held-Out Test Loss divergence",
         "• Decoding: Temperature scaling, top-k filtering, and live streaming",

@@ -225,8 +225,8 @@ def generate_ch13_plot():
             
     ax1.set_ylim(0, 315)
     ax1.set_ylabel("System Energy Efficiency\n(Closed-Loop Tasks Solved / MJ)", fontsize=10.5, fontweight="bold", color=PALETTE["charcoal"], labelpad=8)
-    ax1.set_title("Robotics-Aware Design Space Exploration (DSE): Chip Configuration vs. System Efficiency",
-                  fontsize=13.0, fontweight="bold", color=PALETTE["charcoal"], pad=14)
+    ax1.set_title("(a) System energy efficiency across edge accelerator configurations",
+                  fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], pad=12)
     
     # Zone Labels in top panel
     ax1.text(1.5, 296, "Under-Provisioned Zone\n(Sluggish VLA Execution -> Static Drain)", ha="center", va="top", fontsize=8.2, fontweight="bold", color="#B91C1C")
@@ -275,8 +275,8 @@ def generate_ch13_plot():
     ax2.set_ylabel("Closed-Loop Energy per Task (kJ)", fontsize=10.5, fontweight="bold", color=PALETTE["charcoal"], labelpad=8)
     ax2.set_ylim(0, 32)
     
-    ax2.set_title("Energy Breakdown: Static Chassis Standby Burden vs. Dynamic Accelerator Dissipation",
-                  fontsize=12.5, fontweight="bold", color=PALETTE["charcoal"], pad=14)
+    ax2.set_title("(b) Energy breakdown: static chassis standby burden vs. dynamic accelerator dissipation",
+                  fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], pad=12)
     
     # Badges in Bottom Panel (placed in large whitespace above bars)
     add_clean_badge(ax2, "Minimum Energy: 4.40 kJ / Task\nCo-design equilibrium:\nAmortizes inference to 155 ms\nwithout wasteful GPU TDP.",
@@ -307,6 +307,14 @@ def generate_ch13_plot():
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "ch13_placement_robotics_aware_dse.png")
     plt.savefig(out_path, dpi=300, facecolor="#FFFFFF", bbox_inches="tight")
+
+    repo_root = os.path.abspath(os.path.join(out_dir, ".."))
+    for name in ["fig13_placement_robotics_aware_dse.png", "ch13_placement_robotics_aware_dse.png"]:
+        book_path = os.path.join(repo_root, f"books/vol4/13_placement/images/png/{name}")
+        if os.path.exists(os.path.dirname(book_path)):
+            plt.savefig(book_path, dpi=300, facecolor="#FFFFFF", bbox_inches="tight")
+            print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated {out_path}")
 

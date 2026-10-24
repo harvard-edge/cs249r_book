@@ -14,7 +14,7 @@ async def _():
         import micropip
 
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -25,7 +25,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v1_10_experiments import (
+    from mlsysim.labs.experiments.v1_10_experiments import (
         MODEL_ID, MODEL_KEYS, RECIPE_SEQUENCES, SPARSITY_CASES,
         evaluate_distillation, evaluate_precision, evaluate_recipe_id,
         evaluate_resource, evaluate_sparsity_case, get_scenario, snapshot_result,

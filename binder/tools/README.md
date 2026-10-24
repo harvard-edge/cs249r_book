@@ -33,31 +33,22 @@ release scripts, documentation, and generated-asset workflows.
 
 ## Figure Tool Ownership
 
-Historically, the book used `mlsysim.viz` for two different kinds of plotting:
-
-- Simulator visualizations that understand `mlsysim` objects, such as roofline,
-  distributed roofline, and evaluation scorecard plots.
-- Book publication style helpers, such as the shared palette, matplotlib style,
-  and one-line `setup_plot()` helper used by many QMD figure blocks.
-
-The simulator-aware plotting functions should stay in `mlsysim`. The book
-publication style helpers are owned by Book Tools because they are book
-production policy rather than simulator domain logic. Current QMD figure-style
-imports should use `book.tools.figures.style`.
-
-Current figure-tool structure:
+The matplotlib figure style (palette, font stack, font sizes, figure size, and
+the `setup_plot()` helper) has one source: `mlsysim/mlsysim/viz/style.py`,
+alongside the simulator-aware plotters in `mlsysim.viz`. Every figure, whether
+a chapter cell or an `mlsysim` plotter, inherits the same sizes from it.
 
 ```text
-binder/tools/
-  figures/
-    style.py        # COLORS, set_book_style(), setup_plot(), web DPI
+mlsysim/mlsysim/viz/
+  style.py        # COLORS, set_book_style(), setup_plot(), BODY_FIGSIZE, MIN_FONT_PT
+  fonts/          # bundled TeX Gyre Heros faces registered by set_book_style()
+binder/tools/figures/
+  style.py        # re-export of mlsysim.viz.style (the import path chapter cells use)
 ```
 
-Compatibility policy:
+Chapter cells may import either `binder.tools.figures.style` or `mlsysim.viz`;
+both resolve to the same objects. Define nothing style-related in binder.
 
-1. New and migrated book code imports book style from `book.tools.figures.style`.
-2. `mlsysim.viz` may continue to re-export the style helpers only as a
-   compatibility bridge for older snippets and standalone simulator tutorials.
-
-This keeps simulator-object plotting in `mlsysim` while keeping book publication
-policy in Book Tools.
+`./binder/binder check figures --scope print-scale --volN` renders every
+matplotlib body figure and checks it against the limits in `viz/style.py`
+(print scale, minimum font size, figures created without the style).

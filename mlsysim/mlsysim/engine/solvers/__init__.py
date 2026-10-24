@@ -1,13 +1,23 @@
 """Domain-oriented MLSysIM solver implementations."""
 
 from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .collective import (AllReduceAlgorithmModel, AllToAllDispatchModel, CompressionRunModel, ErrorFeedbackModel,
+                         HierarchicalAllReduceModel, OverlapBudgetModel, RingTraceModel)
 from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
-from .orchestration import OrchestrationModel
-from .performance import EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
-from .reliability import ReliabilityModel
+from .orchestration import OrchestrationModel, PreemptionTaxModel
+from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
+from .interconnect import (AlphaBetaModel, BisectionModel, CommunicationIntensityModel,
+                           GradientSyncModel, IncastModel, TensorParallelCommModel, TransferLadderModel)
+from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
+from .reliability import FailureIntervalModel, ReliabilityModel
+from .reliability import (  # added 2026-10-20
+    SeriesFailureModel,
+    CheckpointIntervalModel,
+    RecoveryBudgetModel,
+)
 from .serving import (
     BatchingOptimizer,
     ContinuousBatchingModel,
@@ -17,14 +27,104 @@ from .serving import (
     TailLatencyModel,
     WeightStreamingModel,
 )
-from .training import CheckpointModel, ScalingModel, TrainingMemoryModel
+from .storage import (
+    StorageFootprintModel,
+    TieredCheckpointModel,
+    CheckpointStormModel,
+    InputDemandModel,
+    DataStallModel,
+    PrefetchDepthModel,
+    TieredCacheModel,
+    HostIoCpuModel,
+    ObjectStorageBillModel,
+    StreamVsStageModel,
+    UtilizationLossModel,
+    SyntheticFootprintModel,
+)
+from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
+from .embodied import TakeoverBudgetModel  # supervisory intervention (added 2026-10-20)
+from .embodied import ShieldCoverageBillModel  # shield credit against a hazard target (added 2026-10-20)
+from .trajectory import BrakingBlendModel  # added 2026-10-20
+from .realtime import CommandAuthenticationModel  # added 2026-10-20
+from .embodied import OnsetTrialModel, RailHoldUpModel  # added 2026-10-20
+# Agent trajectories (added 2026-10-20)
+from .agents import (AcceptedTaskCostModel, AppendOnlyContextModel,
+                     HorizonCompoundingModel)
+# Model calls and agent trajectories (added 2026-10-20)
+from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCallModel, SamplingModel,
+                         TrajectoryResendModel)
+from .parallelism import (AlignmentMemoryModel, DataParallelScaleOutModel, ParallelLayoutModel,
+                          TensorParallelLayerModel, ZeroShardingModel)
+# Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
+from .performance import AmdahlModel, IronLawModel
+from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
+from .goodput import GoodputModel, RuntimeGoodputModel  # fleet goodput (added 2026-10-20)
 
 __all__ = [
+    "GoodputModel",
+    "RuntimeGoodputModel",
     "BaseResolver",
     "ForwardModel",
     "BaseSolver",
     "BaseOptimizer",
     "SingleNodeModel",
+    "DecodeBoundModel",
+    "TransferLadderModel",
+    "TensorParallelCommModel",
+    "TrainingRunModel",
+    "TrainingStateModel",
+    "PowerTransientModel",
+    "CoolantFlowModel",
+    "OutageCostModel",
+    "FailureIntervalModel",
+    "SeriesFailureModel",
+    "CheckpointIntervalModel",
+    "RecoveryBudgetModel",
+    "GradientSyncModel",
+    "CommunicationIntensityModel",
+    "AlphaBetaModel",
+    "BisectionModel",
+    "IncastModel",
+    "AllReduceAlgorithmModel",
+    "HierarchicalAllReduceModel",
+    "AllToAllDispatchModel",
+    "RingTraceModel",
+    "ErrorFeedbackModel",
+    "CompressionRunModel",
+    "OverlapBudgetModel",
+    "StoppingBudgetModel",
+    "TakeoverBudgetModel",
+    "ShieldCoverageBillModel",
+    "BrakingBlendModel",
+    "CommandAuthenticationModel",
+    "TractionLossModel",
+    "ParallelLayoutModel",
+    "ZeroShardingModel",
+    "DataParallelScaleOutModel",
+    "TensorParallelLayerModel",
+    "AlignmentMemoryModel",
+    "IronLawModel",
+    "AmdahlModel",
+    "StorageFootprintModel",
+    "TieredCheckpointModel",
+    "CheckpointStormModel",
+    "InputDemandModel",
+    "DataStallModel",
+    "PrefetchDepthModel",
+    "TieredCacheModel",
+    "HostIoCpuModel",
+    "ObjectStorageBillModel",
+    "StreamVsStageModel",
+    "UtilizationLossModel",
+    "SyntheticFootprintModel",
+    "HorizonCompoundingModel",
+    "AcceptedTaskCostModel",
+    "AppendOnlyContextModel",
+    "ContextAdmissionModel",
+    "SamplingModel",
+    "CheckerPosteriorModel",
+    "ModelCallModel",
+    "TrajectoryResendModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",
@@ -51,5 +151,563 @@ __all__ = [
     "DataModel",
     "TransformationModel",
     "OrchestrationModel",
+    "PreemptionTaxModel",
     "CompressionModel",
+]
+
+# --- Physical-plant budgets: stopping, actuation, heat, power (added 2026-10-20) ---
+from .plant import (
+    SpeedStepModel,
+    FreshnessProfileModel,
+    BrakingCeilingsModel,
+    HubDriveElectricalModel,
+    GearedRotorModel,
+    GearRatioCostModel,
+    ThermalBurstModel,
+    StallDeratingModel,
+    ContinuousDeratingModel,
+    DriveBusModel,
+    ZeroFailureModel,
+    ExponentialRareEventModel,
+    DiagnosticCoverageModel,
+    ThrottledStageModel,
+)
+
+__all__ += [
+    "SpeedStepModel",
+    "FreshnessProfileModel",
+    "BrakingCeilingsModel",
+    "HubDriveElectricalModel",
+    "GearedRotorModel",
+    "GearRatioCostModel",
+    "ThermalBurstModel",
+    "StallDeratingModel",
+    "ContinuousDeratingModel",
+    "DriveBusModel",
+    "ZeroFailureModel",
+    "ExponentialRareEventModel",
+    "DiagnosticCoverageModel",
+    "ThrottledStageModel",
+]
+
+# --- Test-time deliberation: allocation, pools, checks, search (added 2026-10-20) ---
+from .deliberation import (
+    ProbeVsAnswerModel,
+    AllocationAxesModel,
+    BestOfNPoolModel,
+    VerifiedPoolModel,
+    ArgmaxNoiseModel,
+    ScopedRevisionModel,
+    PrunedSearchTreeModel,
+    SearchAccountsModel,
+    DeadlinePolicyModel,
+)
+
+__all__ += [
+    "ProbeVsAnswerModel",
+    "AllocationAxesModel",
+    "BestOfNPoolModel",
+    "VerifiedPoolModel",
+    "ArgmaxNoiseModel",
+    "ScopedRevisionModel",
+    "PrunedSearchTreeModel",
+    "SearchAccountsModel",
+    "DeadlinePolicyModel",
+]
+
+# --- Context engineering: budget, dilution, layout, compaction (added 2026-10-20) ---
+from .context import (
+    ContextBudgetModel,
+    AttentionDilutionModel,
+    PrefixLayoutBillModel,
+    CompactionCadenceModel,
+    ContextInvalidationModel,
+    ProtectedFieldCheckModel,
+)
+
+__all__ += [
+    "ContextBudgetModel",
+    "AttentionDilutionModel",
+    "PrefixLayoutBillModel",
+    "CompactionCadenceModel",
+    "ContextInvalidationModel",
+    "ProtectedFieldCheckModel",
+]
+
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+from .proposer import (
+    VlaEvaluationModel,
+    DecoderFamiliesModel,
+    ProposerTrafficModel,
+    EvidenceHorizonModel,
+)
+
+__all__ += [
+    "VlaEvaluationModel",
+    "DecoderFamiliesModel",
+    "ProposerTrafficModel",
+    "EvidenceHorizonModel",
+]
+
+# --- Serving at scale: traces, frontiers, admission, routing (added 2026-10-20) ---
+from .serving_scale import (
+    KvAdmissionModel,
+    PrecisionDividendModel,
+)
+
+__all__ += [
+    "KvAdmissionModel",
+    "PrecisionDividendModel",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    RetrievalPayloadModel,
+    Bm25PairModel,
+    ExactScanFloorModel,
+    AnnFootprintModel,
+    GraphNeighborhoodModel,
+    IndexMaintenanceModel,
+    StorageAmplificationModel,
+)
+
+__all__ += [
+    "RetrievalPayloadModel",
+    "Bm25PairModel",
+    "ExactScanFloorModel",
+    "AnnFootprintModel",
+    "GraphNeighborhoodModel",
+    "IndexMaintenanceModel",
+    "StorageAmplificationModel",
+]
+
+# --- Tool calling (added 2026-10-20) ---
+from .tool_calls import (
+    BlindRetryModel,
+    ObservationCarryModel,
+    ModelPollingModel,
+    ToolCatalogSelectionModel,
+    ToolkitGranularityModel,
+)
+
+__all__ += [
+    "BlindRetryModel",
+    "ObservationCarryModel",
+    "ModelPollingModel",
+    "ToolCatalogSelectionModel",
+    "ToolkitGranularityModel",
+]
+
+# --- KV cache management (added 2026-10-20) ---
+from .kv_cache import (
+    KvAttentionDesignModel,
+    PagedAllocationModel,
+    PrefixRebuildModel,
+    ChunkedPrefillModel,
+    PausedKvStateModel,
+    KvBlockSharingModel,
+    KvResidencyArchetypeModel,
+)
+
+__all__ += [
+    "KvAttentionDesignModel",
+    "PagedAllocationModel",
+    "PrefixRebuildModel",
+    "ChunkedPrefillModel",
+    "PausedKvStateModel",
+    "KvBlockSharingModel",
+    "KvResidencyArchetypeModel",
+]
+
+# --- The real-time permission path: phase, response time, fieldbus, lease (added 2026-10-20) ---
+from .realtime import (
+    PhaseLagBudgetModel,
+    ResponseTimeModel,
+    CanFdBusModel,
+    EtherCatCycleModel,
+    LeaseBudgetModel,
+    SharedDramReadModel,
+    ThermalThrottleModel,
+)
+
+__all__ += [
+    "PhaseLagBudgetModel",
+    "ResponseTimeModel",
+    "CanFdBusModel",
+    "EtherCatCycleModel",
+    "LeaseBudgetModel",
+    "SharedDramReadModel",
+    "ThermalThrottleModel",
+]
+
+# --- Agent sandboxes (added 2026-10-20) ---
+from .sandboxes import (
+    SyscallTaxModel,
+    EnvelopeAmortizationModel,
+    WorkspaceProvisioningModel,
+    SandboxPoolReserveModel,
+)
+
+__all__ += [
+    "SyscallTaxModel",
+    "EnvelopeAmortizationModel",
+    "WorkspaceProvisioningModel",
+    "SandboxPoolReserveModel",
+]
+from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation (added 2026-10-20)
+__all__ += [
+    "DenseNetworkModel",
+    "EpochOverheadModel",
+]
+__all__ += [
+]
+
+# --- Agent security (added 2026-10-20) ---
+from .security import InjectionExposureModel, PolicyComparisonModel
+
+__all__ += [
+    "InjectionExposureModel",
+    "PolicyComparisonModel",
+]
+# --- The agent harness (added 2026-10-20) ---
+from .harness import (
+    ApprovalEscrowModel,
+    DeficitRoundRobinModel,
+    BoundedLiabilityAdmissionModel,
+    TrajectoryBudgetMeterModel,
+)
+
+__all__ += [
+    "ApprovalEscrowModel",
+    "DeficitRoundRobinModel",
+    "BoundedLiabilityAdmissionModel",
+    "TrajectoryBudgetMeterModel",
+]
+
+# --- Sensor perception (added 2026-10-20) ---
+from .perception import (
+    ObservationAgeModel,
+    RollingShutterSkewModel,
+    TimingAttitudeErrorModel,
+    LidarSweepAgeModel,
+    StereoDepthErrorModel,
+    DelayPhaseMarginModel,
+    ConformalInsetModel,
+    ClockConversionModel,
+    VisibilityRangeModel,
+    ThermalExpansionModel,
+)
+
+__all__ += [
+    "ObservationAgeModel",
+    "RollingShutterSkewModel",
+    "TimingAttitudeErrorModel",
+    "LidarSweepAgeModel",
+    "StereoDepthErrorModel",
+    "DelayPhaseMarginModel",
+    "ConformalInsetModel",
+    "ClockConversionModel",
+    "VisibilityRangeModel",
+    "ThermalExpansionModel",
+]
+
+# --- Durable execution (added 2026-10-20) ---
+from .durability import GroupCommitModel, SnapshotVolumeModel, CheckpointTraceModel, RetentionCostModel
+
+__all__ += [
+    "GroupCommitModel",
+    "SnapshotVolumeModel",
+    "CheckpointTraceModel",
+    "RetentionCostModel",
+]
+# --- Failure recovery (added 2026-10-20) ---
+from .recovery import (
+    RepairBreakEvenModel,
+    IrreversibleLossModel,
+    UndetectedLoopModel,
+    RetryAmplificationModel,
+    BulkheadAdmissionModel,
+    RetryJitterModel,
+)
+
+__all__ += [
+    "RepairBreakEvenModel",
+    "IrreversibleLossModel",
+    "UndetectedLoopModel",
+    "RetryAmplificationModel",
+    "BulkheadAdmissionModel",
+    "RetryJitterModel",
+]
+
+# --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
+from .estimation import (
+    RangeFusionModel,
+    EstimatorConsistencyModel,
+    ReplayBufferModel,
+    InertialCoastModel,
+    OdometryDriftModel,
+    BeliefExpiryModel,
+    StaleTransformModel,
+    FreeSpaceExpiryModel,
+    EpochGapModel,
+    SensorBiasDriftModel,
+    FrozenTransformModel,
+)
+from .mapping import (
+    ClearanceQueryModel,
+    HostMapSizingModel,
+    RaymarchTrafficModel,
+    EncoderRateModel,
+)
+
+__all__ += [
+    "RangeFusionModel",
+    "EstimatorConsistencyModel",
+    "ReplayBufferModel",
+    "InertialCoastModel",
+    "OdometryDriftModel",
+    "BeliefExpiryModel",
+    "StaleTransformModel",
+    "FreeSpaceExpiryModel",
+    "EpochGapModel",
+    "SensorBiasDriftModel",
+    "FrozenTransformModel",
+    "ClearanceQueryModel",
+    "HostMapSizingModel",
+    "RaymarchTrafficModel",
+    "EncoderRateModel",
+]
+
+# --- Grounded intent: cadence, reach, occupancy, lease expiry, referent sets (added 2026-10-20) ---
+from .grounding import (
+    IntentCadenceModel,
+    DynamicReachModel,
+    ForwardOccupancyModel,
+    IntentLeaseExpiryModel,
+    ReferentSetModel,
+    ConfidenceRegionModel,
+)
+
+__all__ += [
+    "IntentCadenceModel",
+    "DynamicReachModel",
+    "ForwardOccupancyModel",
+    "IntentLeaseExpiryModel",
+    "ReferentSetModel",
+    "ConfidenceRegionModel",
+]
+
+# --- Sustainability (added 2026-10-20) ---
+from .sustainability import (
+    FacilityPowerModel,
+    WaterUseModel,
+    RunFootprintModel,
+    PueRetrofitModel,
+    GridPlacementModel,
+    EmbodiedPaybackModel,
+    ServiceLifeExtensionModel,
+    RepeatedWorkEnergyModel,
+    ServingCrossoverModel,
+    CascadeEnergyModel,
+    DutyCycledPowerModel,
+    DataMovementEnergyModel,
+    DemandReboundModel,
+    DevelopmentSweepModel,
+    CarbonPricedPlacementModel,
+)
+
+__all__ += [
+    "FacilityPowerModel",
+    "WaterUseModel",
+    "RunFootprintModel",
+    "PueRetrofitModel",
+    "GridPlacementModel",
+    "EmbodiedPaybackModel",
+    "ServiceLifeExtensionModel",
+    "RepeatedWorkEnergyModel",
+    "ServingCrossoverModel",
+    "CascadeEnergyModel",
+    "DutyCycledPowerModel",
+    "DataMovementEnergyModel",
+    "DemandReboundModel",
+    "DevelopmentSweepModel",
+    "CarbonPricedPlacementModel",
+]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    BinomialIntervalsModel,
+    ProportionPlanningModel,
+    PairedComparisonModel,
+    TaskMixConsistencyModel,
+    CappedSelectionCostModel,
+)
+
+__all__ += [
+    "BinomialIntervalsModel",
+    "ProportionPlanningModel",
+    "PairedComparisonModel",
+    "TaskMixConsistencyModel",
+    "CappedSelectionCostModel",
+]
+
+# --- Agent operations: traces, retention, staged release (added 2026-10-20) ---
+from .operations import (
+    SpanCriticalPathModel,
+    TraceRetentionModel,
+    SequentialCanaryModel,
+)
+
+__all__ += [
+    "SpanCriticalPathModel",
+    "TraceRetentionModel",
+    "SequentialCanaryModel",
+]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    PairedComparisonModel,
+)
+
+__all__ += [
+    "PairedComparisonModel",
+]
+
+# --- Trajectory planning: joint rates, handoffs, seams, swings, jerk-limited stops (added 2026-10-20) ---
+from .trajectory import (
+    TwoLinkJointRateModel,
+    HandoffExposureModel,
+    ChunkReplacementModel,
+    JerkLimitedStopModel,
+    SpillLimitedStopModel,
+    TrajectoryDeadlinesModel,
+    SeamBridgeModel,
+    ShoulderSwingModel,
+    DynamicWindowModel,
+    StaleAnchorModel,
+)
+
+__all__ += [
+    "TwoLinkJointRateModel",
+    "HandoffExposureModel",
+    "ChunkReplacementModel",
+    "JerkLimitedStopModel",
+    "SpillLimitedStopModel",
+    "TrajectoryDeadlinesModel",
+    "SeamBridgeModel",
+    "ShoulderSwingModel",
+    "DynamicWindowModel",
+    "StaleAnchorModel",
+]
+
+# --- Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ---
+from .curation import (
+    FailureTriageModel,
+    RunSplitLeakageModel,
+    AdmissionOrderModel,
+    CorpusDenominatorsModel,
+    StagingBurstModel,
+)
+
+__all__ += [
+    "FailureTriageModel",
+    "RunSplitLeakageModel",
+    "AdmissionOrderModel",
+    "CorpusDenominatorsModel",
+    "StagingBurstModel",
+]
+
+# --- Fine-tuning on trajectories: masks, weighting, packing, preference, release (added 2026-10-20) ---
+from .fine_tuning import (
+    TargetMaskModel,
+    PerInvocationSerializationModel,
+    LossNormalizationModel,
+    SequencePackingModel,
+    PreferencePairModel,
+)
+
+__all__ += [
+    "TargetMaskModel",
+    "PerInvocationSerializationModel",
+    "LossNormalizationModel",
+    "SequencePackingModel",
+    "PreferencePairModel",
+]
+
+__all__ += [
+    "OnsetTrialModel",
+    "RailHoldUpModel",
+]
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+from .reinforcement import (
+    RewardCompositionModel,
+    CenteredRewardModel,
+    ForkValueModel,
+    ContinuationForkCostModel,
+    GroupCoefficientsModel,
+    LengthNormalizationModel,
+    RolloutStepBudgetModel,
+    RepeatedVerificationModel,
+    RatioClipModel,
+    RolloutSlotCycleModel,
+    GroupBarrierModel,
+    VerifierPoolModel,
+)
+
+__all__ += [
+    "RewardCompositionModel",
+    "CenteredRewardModel",
+    "ForkValueModel",
+    "ContinuationForkCostModel",
+    "GroupCoefficientsModel",
+    "LengthNormalizationModel",
+    "RolloutStepBudgetModel",
+    "RepeatedVerificationModel",
+    "RatioClipModel",
+    "RolloutSlotCycleModel",
+    "GroupBarrierModel",
+    "VerifierPoolModel",
+]
+
+# --- Responsible physical AI: detection shortfall, one assistant's queue (added 2026-10-20) ---
+from .supervision import DetectionShortfallModel, SupervisorQueueModel
+
+__all__ += [
+    "DetectionShortfallModel",
+    "SupervisorQueueModel",
+]
+
+# --- Agent cost accounting (added 2026-10-20) ---
+from .cost_accounting import (
+    CohortAttemptCostModel,
+    PrefixCacheBillModel,
+    CompactionPaybackModel,
+    RetryPolicyModel,
+    SerialEpisodeModel,
+    SpeculativeEpisodeModel,
+    ModelCascadeModel,
+    TrajectoryAdmissionModel,
+    KingmanQueueModel,
+    DedicatedBreakEvenModel,
+    ConservedBudgetModel,
+    ArchitectureChoiceModel,
+    AdaptationPaybackModel,
+    WorkloadLeverModel,
+)
+
+__all__ += [
+    "CohortAttemptCostModel",
+    "PrefixCacheBillModel",
+    "CompactionPaybackModel",
+    "RetryPolicyModel",
+    "SerialEpisodeModel",
+    "SpeculativeEpisodeModel",
+    "ModelCascadeModel",
+    "TrajectoryAdmissionModel",
+    "KingmanQueueModel",
+    "DedicatedBreakEvenModel",
+    "ConservedBudgetModel",
+    "ArchitectureChoiceModel",
+    "AdaptationPaybackModel",
+    "WorkloadLeverModel",
 ]

@@ -1,5 +1,5 @@
 import type { CompetencyArea, Topic } from "@/lib/taxonomy";
-import { getAreaStyle } from "@/lib/taxonomy";
+import { getTaxAreaStyle as getAreaStyle } from "@/lib/mlsys-taxonomy";
 import { LEVELS as LEVEL_DEFS } from "@/lib/levels";
 import TopicCard from "./TopicCard";
 
@@ -17,10 +17,13 @@ export default function ExpandedArea({ area, selectedId, onSelect }: {
           <Icon className="w-6 h-6" style={{ color: style.primary }} />
         </div>
         <div className="flex-1">
-          <h2 className="text-[22px] font-bold text-textPrimary">{area.name}</h2>
+          <h2 className="text-[22px] font-bold text-textPrimary">
+            {area.code && <span className="font-mono text-[16px] text-textTertiary mr-2">{area.code}</span>}
+            {area.name}
+          </h2>
           <p className="text-[14px] text-textSecondary mt-0.5">
             <span className="font-mono font-semibold">{area.questionCount}</span> questions across{" "}
-            <span className="font-mono font-semibold">{area.topicCount}</span> topics
+            <span className="font-mono font-semibold">{area.topicCount}</span> subjects
           </p>
         </div>
         {/* Level color legend — top right, mirrors histogram position */}

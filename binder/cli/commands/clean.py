@@ -5,14 +5,23 @@ Handles cleaning build artifacts and restoring configurations.
 """
 
 import shutil
+from pathlib import Path
 from rich.console import Console
 from rich.markup import escape as _rich_escape
 from rich.panel import Panel
 from rich.table import Table
 
 from cli.core.artifacts import clean_build_artifacts
+from cli.core.workspace import WORKSPACE_ROOT, remove_stale_runs
 
 console = Console()
+
+FORMATS = ("html", "pdf", "epub")
+
+
+def _count_files(directory: Path) -> int:
+    """Return the number of files below *directory*."""
+    return sum(1 for path in directory.rglob("*") if path.is_file())
 
 
 class CleanCommand:
@@ -59,31 +68,27 @@ class CleanCommand:
         return success
 
     def _clean_build_directories(self) -> bool:
-        """Clean build output directories."""
+        """Clean build output directories, stopping at the first failure."""
         console.print("[blue]📁 Cleaning build directories...[/blue]")
-
-        formats = ["html", "pdf", "epub"]
-        cleaned_dirs = []
-
-        for format_type in formats:
-            try:
-                output_dir = self.config_manager.get_output_dir(format_type)
-                if output_dir.exists():
-                    # Count files before deletion
-                    files = list(output_dir.rglob("*"))
-                    file_count = len([f for f in files if f.is_file()])
-
-                    # Remove the directory
-                    shutil.rmtree(output_dir)
-                    cleaned_dirs.append(f"{format_type.upper()}: {file_count} files")
-                    console.print(f"  ✅ Cleaned {format_type.upper()} build ({file_count} files)")
-                else:
-                    console.print(f"  📁 {format_type.upper()} build directory not found (already clean)")
-
-            except Exception as e:
-                console.print(f"  ❌ Error cleaning {format_type.upper()}: {e}")
+        for format_type in FORMATS:
+            if not self._remove_output_dir(format_type, indent="  "):
                 return False
+        return True
 
+    def _remove_output_dir(self, format_type: str, indent: str = "") -> bool:
+        """Delete the active output directory for *format_type* and report what was removed."""
+        output_dir = self.config_manager.get_output_dir(format_type)
+        label = format_type.upper()
+        if not output_dir.exists():
+            console.print(f"{indent}📁 {label} build directory not found (already clean): {output_dir}")
+            return True
+        file_count = _count_files(output_dir)
+        try:
+            shutil.rmtree(output_dir)
+        except OSError as e:
+            console.print(f"{indent}❌ Could not remove {label} build directory {output_dir}: {e}")
+            return False
+        console.print(f"{indent}✅ Cleaned {label} build ({file_count} files) from {output_dir}")
         return True
 
     def _clean_temp_files(self) -> bool:
@@ -112,8 +117,9 @@ class CleanCommand:
                         elif temp_file.is_dir():
                             shutil.rmtree(temp_file)
                             cleaned_count += 1
-            except Exception as e:
-                console.print(f"  ⚠️ Warning cleaning {pattern}: {e}")
+            except OSError as e:
+                console.print(f"  ⚠️ Could not remove some files matching {pattern} under "
+                              f"{self.config_manager.book_dir}: {e}")
 
         console.print(f"  ✅ Cleaned {cleaned_count} temporary files/directories")
         return True
@@ -135,8 +141,8 @@ class CleanCommand:
 
             return True
 
-        except Exception as e:
-            console.print(f"  ❌ Error restoring configs: {e}")
+        except OSError as e:
+            console.print(f"  ❌ Could not remove {self.config_manager.active_config}: {e}")
             return False
 
     def _show_cleanup_status(self) -> None:
@@ -147,12 +153,10 @@ class CleanCommand:
         self.config_manager.show_active_config()
 
         # Show build directory status
-        for format_type in ["html", "pdf", "epub"]:
+        for format_type in FORMATS:
             output_dir = self.config_manager.get_output_dir(format_type)
             if output_dir.exists():
-                files = list(output_dir.rglob("*"))
-                file_count = len([f for f in files if f.is_file()])
-                console.print(f"  📁 {format_type.upper()}: {file_count} files remaining")
+                console.print(f"  📁 {format_type.upper()}: {_count_files(output_dir)} files remaining in {output_dir}")
             else:
                 console.print(f"  📁 {format_type.upper()}: Clean (no build directory)")
 
@@ -166,23 +170,7 @@ class CleanCommand:
             True if cleaning succeeded, False otherwise
         """
         console.print(f"[blue]🧹 Cleaning {format_type.upper()} artifacts...[/blue]")
-
-        try:
-            output_dir = self.config_manager.get_output_dir(format_type)
-            if output_dir.exists():
-                files = list(output_dir.rglob("*"))
-                file_count = len([f for f in files if f.is_file()])
-
-                shutil.rmtree(output_dir)
-                console.print(f"✅ Cleaned {file_count} {format_type.upper()} files")
-            else:
-                console.print(f"📁 {format_type.upper()} directory not found (already clean)")
-
-            return True
-
-        except Exception as e:
-            console.print(f"❌ Error cleaning {format_type.upper()}: {e}")
-            return False
+        return self._remove_output_dir(format_type)
 
     def clean_artifacts(self) -> bool:
         """Clean build artifacts using Binder-native cleanup primitives.
@@ -190,6 +178,26 @@ class CleanCommand:
         This is the same cleanup that runs as a pre-commit hook.
         """
         clean_build_artifacts(self.config_manager.book_dir, console=console)
+        return True
+
+    def clean_workspaces(self) -> bool:
+        """Remove build worktrees left by parallel or debug runs that were killed.
+
+        Only runs whose binder process has exited are touched, so a build that
+        is still running keeps its worktrees. Runs kept with
+        ``--keep-workspaces`` are removed too.
+
+        Returns:
+            True (leftovers that cannot be removed are reported, not fatal).
+        """
+        repo_root = self.config_manager.book_dir.parent
+        removed = remove_stale_runs(repo_root, include_kept=True)
+        if removed:
+            console.print(f"[green]✅ Removed {len(removed)} leftover build run(s) from {_rich_escape(str(WORKSPACE_ROOT))}[/green]")
+            for run_dir in removed:
+                console.print(f"[dim]  {_rich_escape(run_dir.name)}[/dim]")
+        else:
+            console.print("[green]✅ No leftover build worktrees[/green]")
         return True
 
     def print_help(self) -> None:
@@ -202,9 +210,11 @@ class CleanCommand:
         table.add_row("pdf", "Clean the active PDF output directory")
         table.add_row("epub", "Clean the active EPUB output directory")
         table.add_row("artifacts", "Clean generated build artifacts using the same native primitive used by pre-commit")
+        table.add_row("workspaces", "Remove build worktrees left by finished --parallel or debug runs (killed or --keep-workspaces)")
         console.print(Panel(table, title=_rich_escape("binder clean [target]"), border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder/binder clean[/cyan]            [dim]# full local cleanup[/dim]")
         console.print("  [cyan]./binder/binder clean html[/cyan]       [dim]# clean HTML output only[/dim]")
         console.print("  [cyan]./binder/binder clean artifacts[/cyan]  [dim]# generated-artifact cleanup[/dim]")
+        console.print("  [cyan]./binder/binder clean workspaces[/cyan] [dim]# leftover build worktrees[/dim]")
         console.print()

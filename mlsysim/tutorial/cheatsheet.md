@@ -14,7 +14,7 @@ Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
 |--------|---------|---------------|
 | FLOPs | Total operations for the workload | 6PD for training (Chinchilla) |
 | N | Number of accelerators | 1 to 100,000+ |
-| Peak_FLOPS | Hardware peak (per device) | 312 TFLOPS (H100 FP16) |
+| Peak_FLOPS | Hardware peak (per device) | 312 TFLOP/s (A100 FP16), 989 TFLOP/s (H100 FP16) |
 | MFU | Model FLOPs Utilization | 0.30 - 0.55 |
 | eta_scaling | Scaling efficiency (communication overhead) | 0.70 - 0.95 |
 | Goodput | Fraction of time doing useful work (1 - failures - checkpoints) | 0.85 - 0.98 |
@@ -29,8 +29,8 @@ Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
 T = max(FLOPs / Peak_effective, Bytes / BW_effective)
 ```
 
-If compute time > memory time, you are **compute-bound** (increase FLOPS).
-If memory time > compute time, you are **memory-bound** (increase bandwidth).
+If compute time > memory time, the workload is **compute-bound** (increase FLOPS).
+If memory time > compute time, the workload is **memory-bound** (increase bandwidth).
 
 ### 2. KV-Cache Memory (PagedAttention)
 

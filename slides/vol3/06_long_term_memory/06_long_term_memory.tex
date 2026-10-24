@@ -1,0 +1,524 @@
+% =============================================================================
+% Lecture 6: Long-Term Memory
+% Agentic Machine Learning Systems (Volume III), Chapter 6
+% =============================================================================
+% Thesis: persistent memory is a store of fallible claims with sources and
+% versions, so retrieval needs a contract and writes need a policy, or the
+% agent acts on stale facts it ranks highly.
+% Hook and synthesis: Moffatt v. Air Canada, 2024 BCCRT 149 (War Story 6.1).
+% Running case: the repair agent's connection-pool repair across sessions
+% (r17 failure, r18 candidate, test_waiter_notified_on_return).
+%
+% Build: make deck V=3 D=06_long_term_memory   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: the rendered chapter, cited papers, and this deck's own scan
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 6},
+  chaptertitle={Long-Term Memory},
+  layer=memory,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Long-Term Memory}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\raggedright\small #2\end{minipage}}
+% A narrower goal line for the goals slide, which carries the stack beside it
+\newcommand{\goalline}[2]{%
+  \begin{minipage}[c]{2.3cm}\centering\includegraphics[width=2.2cm,height=0.9cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.2cm}\begin{minipage}[c]{6.9cm}\raggedright\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lectures 4 and 5 kept state inside one model call, in the selected working set and the attention state computed over it. Today the state outlives the call, the session, and the process. The notes total about 71.5 minutes, 59 of them core. FLEX: cutting every [OPTIONAL] slide leaves a complete lecture of about 59 minutes. Cut first the measured laptop scan, the approximate-index bytes, and the exclusion-cost bars; each has a one-line summary on the slide before or after it.}
+\mlsystitle{Long-Term Memory}{Persistent memory is a store of fallible claims with sources and versions, so retrieval needs a contract and writes need a policy.}{cover_episodic_memory_blueprint.png}
+
+\begin{frame}{Who pays when a chatbot contradicts its policy?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{air-canada-787-yvr.jpg}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \small November 2022. An airline's website chatbot tells a bereaved passenger he can claim a bereavement refund within 90 days. The airline's policy page allows none after travel.\\[0.1cm]
+      \choice{A}{The passenger, since the policy page was public.}\\
+      \choice{B}{Nobody, since the chatbot is a separate entity.}\\
+      \answerat{2}{C}{The airline.}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  \uncover<2->{\begin{mlsyscard}{mlsysaccent}\footnotesize Tribunal, 2024: ``It should be obvious to Air Canada that it is responsible for all the information on its website.'' Award: CA\$650.88 damages + \$36.14 interest + \$125 fees = \textbf{CA\$812.02}.\end{mlsyscard}}
+  \mlsyscredit{Photo: Eric Salard, CC BY-SA 2.0, Wikimedia Commons (Air Canada 787-8 at YVR). Moffatt v. Air Canada, 2024 BCCRT 149, paras 15 to 17, 27, 44 (total derived).}
+  \note{[3.5 min] [CORE] The chapter's war story, from the tribunal's decision itself. In November 2022 Jake Moffatt asked Air Canada's website chatbot about bereavement fares after his grandmother died. The chatbot told him to buy now and submit a refund claim within 90 days of the ticket's issue date. The airline's published policy page said the policy does not apply after travel is completed. ENGAGE: one minute, vote with fingers. Step 2: C. The tribunal called the airline's argument that the chatbot was a separate legal entity ``a remarkable submission'' and held the airline responsible for everything on its website, chatbot or static page. It awarded the fare difference, CA\$650.88, plus \$36.14 interest and \$125 in fees, CA\$812.02 in all (our sum). Students who chose A reason that the right answer was one click away; the tribunal rejected that customers must cross-check one part of a website against another (para 28). WARN: the amount is small. The tribunal treated a generated answer as the company's own commitment, and that is what carries over to stored memory. LINK: today asks what happens when such an answer is stored and read again in a later session. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why does an agent with full search still act on stale facts?}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \goalline{thumb_roles_step4.pdf}{Classify a stored record by role, and name the source a claim is checked against.}\\[0.2cm]
+      \goalline{thumb_contract_step3.pdf}{Specify a retrieval contract, and count the records a token allowance holds.}\\[0.2cm]
+      \goalline{thumb_scan_floor_step2.pdf}{Match a method to an information need, and screen an exact scan by its bandwidth floor.}\\[0.2cm]
+      \goalline{thumb_write_step3.pdf}{Design a write policy that supersedes, deletes, and invalidates derived copies.}
+    \end{column}
+    \begin{column}{0.30\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=3.0cm,keepaspectratio]{stack_memory}\\[0.1cm]
+      \safeimg[width=1.5cm,height=1.4cm,keepaspectratio]{hsa_locator_s.pdf}\\
+      \hsathread{closes the state exposure}
+    \end{column}
+  \end{columns}
+  \note{[1.5 min] [CORE] The driving question comes from the chapter. An agent that can search everything it stored can still act on the wrong facts. Point to the stack; this is the third and last memory lecture. Point to the locator, which lights the state exposure, here durable state that survives across sessions, the highest state level. LINK, as a quick recall with no slide. Lecture 4 taught that a staged observation loses its authority over current state once its source changes (context invalidation); Lecture 5 taught that a prefix-cache hit certifies identical tokens and nothing about whether they are still true. Both were about one call. Today the same two failures move into storage that persists for months. Four goals, one per part of the lecture after the first; each thumbnail is the figure that teaches it. The running case is Lecture 1's repair agent, now working on the connection-pool defect across several sessions.}
+\end{frame}
+
+% =============================================================================
+% SECTION: RECORDS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The first segment asks what a stored record actually proves when the next session reads it.}
+\mlsysdivider{What does each stored record actually prove?}{Long-Term Memory, \S6.1 and \S6.2}
+\section{Records}
+
+\begin{frame}{Each stored record plays one role in an evidence chain}
+  \centering
+  \mlsyssteps[width=\textwidth,height=6.0cm,keepaspectratio]{roles_step}{4}
+  \mlsyscredit{Long-Term Memory, \S6.2.1, Table 1 (redrawn with the repair agent's records).}
+  \note{[3 min] [CORE] The repair agent's first session ends. The next session must rebuild where it was, and none of it survives in the context window. Step 1: the source record, the designated origin of a claim: src/pool.py at revision r18, or a user's stated preference. It confers provenance and says nothing about correctness; a commit can hold a bug. Step 2: the observation log: the waiter test failed at r17 and passed at r18 under configuration c18. Both entries stay true forever as history. Step 3: agent-written memory: a note saying where to resume. It records a plan and asserts no fact. Step 4: the derived index, search entries over all three, which only locates candidates. The arrows point from each derived record to what it came from. ENGAGE: the progress note says the repair is complete. Which row must a later session check that claim against? (Expected: the observation log, and through it the source at r18.) WARN: students treat these as storage tiers (fast, slow, cold). They are roles; one database can hold all four. The durable, replicated log itself is Lecture 11's subject (the trajectory log). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The chatbot's answer linked to the page it contradicted}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{OrangeLine}\small
+        \textbf{Derived answer} (chatbot, para 15)\\[0.1cm]
+        ``If you need to travel immediately \dots\ and would like to submit your ticket for a reduced bereavement rate, kindly do so within 90 days of the date your ticket was issued \dots''
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{VioletLine}\small
+        \textbf{Source of record} (policy page, para 17)\\[0.1cm]
+        ``The webpage says, in part, the bereavement policy does not apply to requests for bereavement consideration after travel has been completed.''
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering\small The words ``bereavement fares'' in the answer were a hyperlink to that page (para 16).\\[0.15cm]
+  \uncover<2->{\normalsize Stored and retrieved later, the answer would read as precedent.}
+  \mlsyscredit{Moffatt v. Air Canada, 2024 BCCRT 149, paras 15 to 17 (quoted from the decision; para 17 is the tribunal's summary of the page).}
+  \note{[2 min] [CORE] The decision itself, quoted. Left: the chatbot's answer as the passenger's screenshot recorded it. Right: the tribunal's summary of the policy page. In the record-role table, the page is the source of record and the answer is a derived artifact. Students remember one detail. The answer hyperlinked to the very page it contradicted, so the source was one step away and nothing checked the answer against it. Step 2: suppose the support agent logs its answers and retrieves them for the next bereavement question. The stored answer is now agent-written memory. Unless the record carries its role (a derived answer) and a link to the policy version it claimed to reflect, the next session reads it as the company's own past practice. ENGAGE: what two fields on that stored answer would have let a later session catch the error? (Expected: role equals derived answer; source equals policy page at version v.) FLEX: [CORE]; the hook already carries the ruling if time is short.}
+\end{frame}
+
+\begin{frame}{Which record shows that r18 fixes the waiter?}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \choice{A}{The r17 failure log of test\_waiter\_notified\_on\_return}\\[0.2cm]
+  \answerat{2}{B}{The r18 pass log of the same test, configuration c18}\\[0.2cm]
+  \choice{C}{The progress note ``repair complete; resume at integration''}\\[0.2cm]
+  \choice{D}{The index entry for src/pool.py}\\[0.4cm]
+  \uncover<2->{\small B, for that reproducer under c18 only. C is a claim about B. D locates a file. A explains why the work began.}
+  \mlsyscredit{Long-Term Memory, \S6.2.1 and Table 7.}
+  \note{[2.5 min] [CORE] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: B, with its scope. The pass log is primary evidence that the targeted reproducer passed under the recorded configuration at r18. It does not show that every concurrent caller path is race-free; only the integration checks can, and they remain open. C is agent-written memory that asserts what B shows; it adds no evidence of its own. D is a derived index entry, and a high score shows that the entry matches the query text, nothing about the code's behavior. A remains valid history and explains why the repair started, but says nothing about r18. Students who choose C trust the most recent and most confident record. Students who choose D trust rank. WARN: the generalization ``connection-pool timeouts always come from missed notifications'' is a lesson no single run can support; segment 4 returns to it. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: CONTRACT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 1 aloud: a record is a role in an evidence chain, and authority stays with the source of record. Now the read side: what must every read specify, and what must it report back?}
+\mlsysdivider{What must every read specify and report?}{Long-Term Memory, \S6.3 and \S6.4}
+\section{Contract}
+
+\begin{frame}{A read is a bounded request answered by an envelope}
+  \centering
+  \mlsyssteps[width=\textwidth,height=6.0cm,keepaspectratio]{contract_step}{3}
+  \mlsyscredit{Long-Term Memory, Definition 6.1, \S6.3.1 (Table 2), \S6.3.2 (listing 1), redrawn.}
+  \note{[3 min] [CORE] Definition 6.1: a retrieval contract specifies what is requested, the permitted scope and limits of the read, and the provenance, applicability, and completion information returned. Step 1: the runtime sets the bounds. ``Find the notification logic'' says nothing about which revision, which principal, or how many tokens the caller can take. Count and payload size are separate limits; ten whole files are not ten docstrings. A scope string grants no access; Lecture 4's scope rule applies. Step 2: the service checks access and searches inside the bounds, and it cancels backend work when the client times out. Step 3: the envelope. Status is complete, partial with a reason, or unavailable. It names the snapshot actually searched, and every item carries path, lines, revision, content hash, role, and the method behind any score. Scores are not probabilities. The red line is the absence rule. Zero hits prove the symbol is absent only from a complete scan, and only within that scope and snapshot. A partial scan or an approximate index proves nothing. ENGAGE: a search hits its deadline with no matches; which status, and what may the agent conclude? (Expected: partial; nothing about absence.) WARN: a content hash proves the bytes and says nothing about their truth. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{More retrieved context raised recall and lowered success}
+  \centering
+  \safeimg[width=0.96\textwidth,height=5.05cm,keepaspectratio]{swebench_context.pdf}\\[0.1cm]
+  {\small SWE-bench with BM25 pre-staged files, one model, three context limits.}
+  \mlsyscredit{Jimenez et al., ``SWE-bench,'' ICLR 2024, Table 2 (Claude 2, \% resolved) and Table 3 (BM25 recall of oracle files, ``Avg.'' row).}
+  \note{[2 min] [OPTIONAL] Real data from the benchmark the chapter cites. The SWE-bench authors pre-staged repository files with BM25 ranking, using the issue text as the query, at three context limits: 13,000, 27,000, and 50,000 tokens. Left: recall of the files the real fix edited rose from 29.58 to 44.41 to 51.06 percent. Right: the share of issues the same model resolved fell from 1.96 to 1.87 to 1.22 percent. The authors attribute it to distraction by unrelated code and cite the position effects of Liu et al. More evidence in the window did not mean more evidence used. ENGAGE: what should a retrieval policy maximize, then? (Expected: task acceptance, measured; recall is a diagnostic.) LINK: Lecture 4 named this usable working context. WARN: the resolve rates are tiny because this is the non-interactive setting; the next slide shows what changes when the model searches. FLEX: [OPTIONAL]; the estimate that follows makes the budget point with numbers.}
+\end{frame}
+
+\begin{frame}{How many records fit 6,144 tokens?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.37\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize\textbf{Given (illustrative)}\\[0.03cm]
+        Window 32,768; output 2,048\\
+        Prompt, tools, history 24,576\\
+        Record 512 + 64; envelope 128
+      \end{mlsyscard}
+      \small
+      \wstep{2}{Allowance: $32{,}768 - 2{,}048 - 24{,}576 = 6{,}144$}
+      \uncover<3->{$\lfloor (6{,}144 - 128) / 576 \rfloor = \mathbf{10}$ records}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \only<1-2|handout:0>{\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{fit_step1.pdf}}%
+      \only<3-|handout:1>{\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{fit_step2.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Long-Term Memory, Napkin Math 6.1 (hypothetical scenario; arithmetic in calcs.py).}
+  \note{[3 min] [CORE] ENGAGE: two minutes in pairs; how many complete records can the runtime stage? Step 2: the retrieval allowance is what remains after the output reserve and everything else in the prompt: 6,144 tokens. Step 3: subtract the 128-token envelope, then divide by the full serialized record, 512 body plus 64 metadata, 576 tokens: 10 records in 5,888 tokens, 256 left, too few for an eleventh. A policy that counts bodies only admits 12 (6,144 divided by 512), which serialize to 7,040 tokens, 896 over. The red segment is the provenance that lets the model tell r17 from r18; dropping it to make room defeats the contract. WARN: measure on the final serialized prompt with the target model's tokenizer; subword tokens merge across boundaries, so summing fragments miscounts. Every staged token also costs prefill and resident KV memory (Lecture 5). If metadata doubles to 128 tokens, 9 records fit (Checkpoint 6.1). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Query formulation follows how much the task names}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.35cm}P{1.5cm}P{2.0cm}@{}}\toprule
+        \textbf{The need} & \textbf{Policy} & \textbf{Price} \\\midrule
+        Named (src/pool.py) & Direct read & No extra round \\[0.15cm]
+        Predictable (its tests) & Pre-stage & Some unneeded tokens \\[0.15cm]
+        Found from the last & Model probes & One round per hop \\\bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{swe_agent.pdf}\\[0.05cm]
+      {\footnotesize Search tools: 6.7$\times$ the issues resolved by pre-staging.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Long-Term Memory, \S6.4 and Table 3. Yang et al., ``SWE-agent,'' NeurIPS 2024, Table 1 (SWE-bench Lite; GPT-4 Turbo in all three settings).}
+  \note{[3 min] [CORE] Who formulates the query? Read the table top to bottom. When the task names its target, a direct read stages exactly that record and spends no exploratory turn. When the need is predictable but unnamed, the runtime pre-stages it in one step and pays in irrelevant tokens. When each item can be found only from the one before (a failing assertion names a helper, whose definition names a lock), nothing pre-staged can anticipate the chain, and the model probes, paying one model round per dependent hop. A hybrid seeds the first hop and probes the rest. Step 2: measured. On SWE-bench Lite, the same model resolved 2.67 percent of issues with BM25 pre-staging, 11.00 percent with plain shell commands, and 18.00 percent with search and navigation tools shaped for code, 6.7 times the pre-staged rate (calcs.py). The paper reports the agent costing 8 to 13 times more per resolved issue than pre-staging. ENGAGE: which policy for ``reconcile pinned notes n-4412 and n-4413''? (Expected: a direct read.) WARN: under every policy the model only proposes queries; it cannot widen scope or raise its own limits. Lecture 7 owns how tool schemas enforce that. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: MATCHING
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 2 aloud: every read is a bounded request answered by an envelope, and how much the task names decides who writes the query. Now: which index answers which question, and what does each cost?}
+\mlsysdivider{Which index answers which question, and at what cost?}{Long-Term Memory, \S6.5 to \S6.7}
+\section{Matching}
+
+\begin{frame}{An inverted index finds every notify, even in a stale log}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{inverted_index.pdf}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{card-catalog.jpg}\\[0.1cm]
+      {\footnotesize ``Our ineptitude in getting at the record is largely caused by the artificiality of systems of indexing.'' Vannevar Bush, 1945}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: TBurmeister (WMF), CC BY-SA 4.0, Wikimedia Commons (Indiana State Library card catalog). Bush, ``As We May Think,'' The Atlantic Monthly, July 1945, \S6. Diagram after Long-Term Memory, \S6.5.}
+  \note{[2 min] [CORE] Real, then abstract. A card catalog is an index. Each subject card lists the books where the subject appears. An inverted index maps each term to its postings list, the documents that contain it, with counts and positions. Step through the diagram. The term notify points to src/pool.py and to an archived r17 failure log alike. The index records occurrences; it does not know which file defines the method, which is a comment, or which log describes a superseded revision. BM25 then ranks the postings by term rarity, saturating term frequency, and document length; the chapter's Example 6.1 scores a short file with one match at 14.58 above a long file with six at 8.46. A structural index parses code instead, so it can return the whole enclosing function and the caller chain from the waiter test to the return method to notify. A missing structural edge means the analysis did not resolve it; the path may still run. Bush's 1945 complaint was about exactly this mismatch between how records are filed and how we look for them. ENGAGE: which method for ``find all callers of the return method''? (Expected: structural.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[t,fragile]{Which search finds the notify() call site?}
+  \mlsysactivity{Vote}{2 min}
+  \begin{mlsyscard}{BlueLine}
+  {\footnotesize\ttfamily
+  def wait(self, timeout=None):\\
+  \hspace*{1.2em}"""Wait until notified or until a timeout occurs.\\
+  def notify(self, n=1):\\
+  \hspace*{1.2em}"""Wake up one or more threads waiting on this condition, if any.\\
+  def notify\_all(self):\\
+  \hspace*{1.2em}"""Wake up all threads waiting on this condition.\\
+  \hspace*{1.2em}self.notify(len(self.\_waiters))}
+  \end{mlsyscard}
+  \small\choice{A}{Dense match to ``a caller keeps waiting''}\quad \answerat{2}{B}{Literal search for \texttt{notify(}}\quad \choice{C}{Either}\\[0.1cm]
+  \uncover<2->{\small Dense search finds all three; the two notify docstrings share 7 of 13 words.}
+  \mlsyscredit{CPython v3.14.4, Lib/threading.py, class Condition, lines 337 to 446 (excerpt; docstrings truncated after the first line). Word count derived in calcs.py.}
+  \note{[2.5 min] [CORE] This is real code, Python's own condition variable, from the CPython 3.14.4 source. The repair agent's bug report says ``a caller keeps waiting'', words the source never uses. Dense retrieval embeds the query and each record as vectors and ranks by similarity, so it can bridge that vocabulary gap and find the condition-variable code. But wait blocks, notify wakes one waiter, and notify\_all wakes every waiter, and all three share the same vocabulary; notify\_all is literally one call to notify. An encoder places them close together. ENGAGE: vote, then one minute with a neighbor. Step 2: B isolates the one call site, and BM25 gives the rare identifier a high weight. A gets you to the right region, C overstates it. The two docstrings share 7 of their 13 distinct words (our count). This is why production systems run lexical and dense search together and fuse the two rankings by rank alone, with reciprocal rank fusion, after joining candidates on full identity, so an r17 span never merges with its r18 counterpart (\S6.6.3). WARN: a similarity score measures closeness in the embedding and gives no probability of relevance, and a reranker can only reorder what was retrieved. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{An exact scan's time is set by the bytes it streams}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        $N$ = 10 million vectors\\
+        $d$ = 768 values each\\
+        $b$ = 2 bytes (FP16)\\
+        $BW$ = 50 GB/s; 1 TFLOP/s
+      \end{mlsyscard}
+      \small
+      $t \ge N d\, b / BW$\\[0.05cm]
+      15.36 GB per scan: \textbf{307.2 ms}\\[0.05cm]
+      {\footnotesize 1 FLOP per byte; ridge at 20}\\[0.1cm]
+      \uncover<2->{10 ms allows about \textbf{326,000} vectors}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.9cm,keepaspectratio]{scan_floor_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Long-Term Memory, Napkin Math 6.2 and its figure (hypothetical host; values derived in calcs.py).}
+  \note{[3 min] [CORE] An exact scan scores the query against every eligible vector. N is the count of eligible vectors, d their dimension, b the bytes per value, BW the memory bandwidth. Step 1: 10 million 768-dimension FP16 vectors are 15.36 GB, streamed on every search, which takes at least 307.2 ms at 50 GB/s. The scoring is 2Nd, 15.36 GFLOP, so the intensity is 2/b, 1 FLOP per byte whatever the corpus size. The host's ridge point is 20 FLOP per byte, so bandwidth sets the floor; the arithmetic alone would take 15.36 ms. Twenty such searches in one trajectory spend 6.1 s moving vectors. Step 2: the floor is linear in N. A 10 ms budget allows about 326,000 vectors (325,521, calcs.py), before query encoding and record fetches. A scope filter that leaves 10,000 vectors streams in 0.31 ms. ENGAGE: would a faster processor help the 10-million scan? (Expected: no; only fewer bytes per vector or fewer vectors touched.) LINK: Lecture 2 met the same limit as output-bound latency: decode also does a few operations per byte streamed. WARN: the floor rules scans out; whether a scan meets the budget is a measurement of the full request. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A measured scan on one laptop streamed about 126 GB/s}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{scan_measured.pdf}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.3cm,keepaspectratio]{ddr5-rdimm.jpg}\\[0.05cm]
+      {\footnotesize One DDR5-4800 module: 38.4 GB/s peak (derived)}\\[0.25cm]
+      \small Arithmetic ran at 44 to 64 GFLOP/s.\\[0.1cm]
+      10 ms held about \textbf{411,000} FP32 vectors here.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured for this deck: images/scan\_bench.py, numpy 2.5.3 on an Apple M5 Max, 2026-10-18 (FP32, median of 7). Photo: PantheraLeo1359531, CC BY 4.0, Wikimedia Commons (Micron 64 GiB DDR5-4800 RDIMM).}
+  \note{[2 min] [OPTIONAL] The previous slide's floor, measured. We ran one matrix-vector product, a query against N stored 768-dimension vectors, on a laptop with numpy; the script is in the deck's images folder, so any instructor can rerun it. FP32 here, 4 bytes per value, because numpy has no fast FP16 product. The orange points lie on a straight line of slope one; time grows with bytes. The fit through them is 126 GB/s streamed, and the arithmetic rate stays at 44 to 64 GFLOP/s, a small fraction of what the chip can compute, because there is half a FLOP per byte at FP32. A 10 ms budget held about 411,000 vectors on this machine (calcs.py). The photo is one server memory module: 4,800 million transfers per second times 8 bytes is 38.4 GB/s peak; servers reach higher bandwidth by running many channels in parallel. ENGAGE: what would FP16 storage do to the measured line? (Expected: halve the bytes, so halve the time.) WARN: a laptop's unified memory differs from a server's, so carry away the slope and leave the constant. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Approximate indexes touch fewer bytes and promise no absence}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.7cm,keepaspectratio]{ann_bytes.pdf}\\[0.15cm]
+  {\small IVF-PQ reads 64 one-byte codes per vector instead of 1,536 bytes: 24$\times$ fewer.}\\[0.1cm]
+  {\small HNSW visits few vectors, but a scope filter can strand its graph walk.}
+  \mlsyscredit{Long-Term Memory, \S6.6.2 and Table 5 (32 eight-byte links per node; 64 subvectors; values derived in calcs.py).}
+  \note{[2 min] [OPTIONAL] Two ways to touch fewer bytes than a scan. HNSW, a hierarchical navigable small-world graph, keeps every vector plus 32 eight-byte links per node, 2.56 GB of edges on top of 15.36 GB, and walks greedily toward the query; a vector the walk never visits cannot be returned. IVF-PQ clusters the vectors into cells, probes only the nearest cells, and stores each vector as 64 one-byte codes, 0.64 GB in all, 24 times smaller; distances come from a 65.5 KB lookup table. Both trade recall for bytes, so neither supports the absence rule even when the search completes. Filters are the trap. Masking out-of-scope nodes during an HNSW walk can strand the walk at a local minimum, and filtering after the search can return nothing although eligible records exist. The chapter gives three escapes. Partition the index by scope, seed entry points inside the scope, or scan the filtered set exactly when it is small enough. Deletion leaves tombstoned nodes in the graph, which segment 5 returns to. ENGAGE: a tenant filter leaves 8,000 vectors; which index? (Expected: an exact scan.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Does a depth-3 neighborhood fit 6,144 tokens?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.6cm,keepaspectratio]{depth_step}{2}\\[0.05cm]
+  \uncover<2->{\small Bound edge types, direction, depth, and visited nodes before ranking.}
+  \mlsyscredit{Long-Term Memory, Napkin Math 6.3 and its figure (hypothetical tree; values derived in calcs.py).}
+  \note{[2.5 min] [CORE] Multi-hop retrieval follows explicit relationships, for example from the failing test to the method it calls to the queue that method changes. Setup: a neighborhood that is an exact tree with 3 children per node, 180 serialized tokens per node, and 100 tokens for edges and envelope. Depths 0 to 2 fit: 1, 4, then 13 nodes, 2,440 tokens. ENGAGE: predict depth 3 before the reveal. Step 2: 40 nodes, 1 + 3 + 9 + 27, 7,300 tokens, over the 6,144 allowance; the allowance holds at most 33 such nodes. Depth, more than node size, decides the fit. Typed edges are the control. Following only call and mutation edges from the waiter test reaches the return method and the waiter queue and skips every module that merely imports the pool. WARN: within the bounds, keep the connecting nodes of a path even when their scores are low; a top-k of disconnected fragments explains nothing. A traversal halted by a budget is partial under the absence rule. Real code graphs have cycles and hubs, so the exact-tree count overstates distinct nodes; that is no reason to drop the depth bound. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: WRITES
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 3 aloud: each method answers a different need, an exact scan is bounded by bytes streamed, and every hop multiplies the evidence. Retrieval can return only what was retained. Who decides what persists?}
+\mlsysdivider{Who decides what persists, and when it stops counting?}{Long-Term Memory, \S6.8}
+\section{Writes}
+
+\begin{frame}{Five planted passages among millions steered most answers}
+  \centering
+  \safeimg[width=0.88\textwidth,height=4.3cm,keepaspectratio]{poisonedrag.pdf}\\[0.1cm]
+  {\small The planted texts were about 2 per million in the smallest corpus.}
+  \mlsyscredit{Zou et al., ``PoisonedRAG,'' USENIX Security 2025 (arXiv 2402.07867v3), Table 1: black-box attack, PaLM 2 generator. Per-million share derived in calcs.py.}
+  \note{[2 min] [OPTIONAL] Measured data from outside the chapter. PoisonedRAG injected 5 crafted texts per target question into knowledge bases of 2.7, 5.2, and 8.8 million clean texts. Without access to the retriever's weights, the attack made the system give the attacker's chosen answer for 97, 99, and 91 percent of the target questions. Five texts among 2.7 million is 1.86 per million (calcs.py). The texts are written to sit close to the question in embedding space, so similarity ranking retrieves them first. For this lecture, the retriever ranks whatever the store admitted, so the write path, run once per record, is the cheapest place to stop a bad claim. Greshake et al., cited in the chapter, show the agent-memory version: an injected instruction in a fetched page can be saved by a reflection worker as a permanent project lesson. Lecture 9 owns prompt injection, instructions hidden in data the model reads. ENGAGE: why does a larger corpus not dilute the attack? (Expected: ranking selects the top few; corpus size barely matters.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{The runtime decides what persists, in a fixed order}
+  \centering
+  \mlsyssteps[width=\textwidth,height=6.0cm,keepaspectratio]{write_step}{3}
+  \mlsyscredit{Long-Term Memory, Definition 6.2, \S6.8.2 and \S6.8.3 (the 10:00 and 11:00 preference; word count derived in calcs.py).}
+  \note{[3 min] [CORE] Definition 6.2: a memory write policy governs which proposed records enter durable storage, what scope they carry, and how they are corrected, superseded, expired, or deleted. Step 1: commit the raw observation first: the tool output, revision, and task id. Summaries and embeddings run afterward, so a crash in a summarizer cannot lose the evidence. Acknowledgments say which boundary was reached: buffered, committed, or indexed. Step 2: the admission gate checks permission and consent, classifies the record, and checks its evidence. For free-text summaries the fidelity check is a verifier with a false-acceptance rate (Lecture 3, verifier precision); an interpretive conclusion enters only as a tagged hypothesis. Step 3: identity before deduplication. ``No meetings before 10:00'' becomes ``before 11:00'' for the same calendar: same entity, same scope, so the runtime supersedes the old record with a compare-and-swap on its base version and keeps it for audit. A scoped exception (Fridays only) coexists. An ambiguous overlap is flagged, never blended. ENGAGE: why does similarity-first deduplication fail here? (Expected: the two directives share 5 of 6 words, so the correction looks like a repeat and is dropped.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Deletion must reach every derived copy, including the cache}
+  \begin{columns}[c]
+    \begin{column}{0.31\textwidth}
+      \begin{mlsyscard}{VioletLine}\footnotesize
+        \textbf{GDPR, Article 17(1)}\\[0.05cm]
+        ``\dots\ the right to obtain \dots\ the erasure of personal data \dots\ without undue delay \dots''
+      \end{mlsyscard}
+      \vspace{0.15cm}
+      {\small\raggedright Reuse is not revalidation: 30 retrievals add no evidence.\par}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      \centering\safeimg[width=\textwidth,height=6.0cm,keepaspectratio]{deletion_copies.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Regulation (EU) 2016/679, Art.~17(1)(b), via gdpr-info.eu (excerpt). Long-Term Memory, \S6.8.4.}
+  \note{[2.5 min] [CORE] This is a real legal text, the European right to erasure. Withdrawn consent, an elapsed retention period, and an explicit request all start the same deletion procedure, and the chapter asks each user record to carry the consent and retention period under which it was admitted. Step through the figure. First, write a tombstone, a durable exclusion record that hides the entity from every read path at once; the name comes from replicated databases, where a deleted row without one is resurrected by a lagging replica. Then find and purge each derived copy: the row, keyword postings, the vector, any episode summary, the runtime's prompt templates, and the cached prompt prefix. Lecture 5's rule applies, since a prefix hit certifies identical tokens, so a cached prefix containing the deleted preference still matches until it is evicted. The gray box is outside the runtime's reach, and the deletion receipt must say so. On the left, the other lifecycle rule. Revalidation means fresh authoritative evidence; reuse counts nothing, so a store keeps separate timestamps for creation, last access, and last confirmation. ENGAGE: expiry by down-ranking or by hard filter? (Expected: hard filter; a penalized record still surfaces when few records match.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Invalidation must cascade to records derived from a claim}
+  \centering
+  \mlsyssteps[width=\textwidth,height=6.0cm,keepaspectratio]{cascade_step}{2}
+  \mlsyscredit{Long-Term Memory, \S6.8.5 and \S6.8.6 (the repair agent's lesson and its derived records).}
+  \note{[2.5 min] [CORE] Memory poisoning is the persistence of an unverified or withdrawn claim through the records derived from it. Step 1: the observation is sound: the reproducer passed at r18 under c18. A reflection worker turns it into a lesson, ``timeouts always come from a missed notify'', a universal rule one run cannot support. An episode summary repeats the lesson, a weekly report cites the summary, and a cross-project heuristic absorbs the report. Each later record looks like independent support, yet all rest on one inference, and 30 retrievals of it add no evidence. Step 2: an operator or a verification pass invalidates the lesson. The store must follow its provenance edges and mark every descendant suspect or retract it. Tombstoning the lesson alone leaves three copies circulating through the index. Consolidation is where this starts. Clustering by embedding proximity proposes candidates for a summary, but similarity cannot show that two failures share a cause. ENGAGE: what must the lesson have recorded at write time for the cascade to work? (Expected: links to the observations it was induced from.) WARN: even a valid lesson is a suggestion; acting on it still needs authorization and a precondition check (Lecture 7). Lecture 9 owns the information-flow labels that travel through summaries. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{True or false: which memory shortcuts hold?}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \choice{1}{A rule retrieved 30 times without complaint is verified.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.22cm]
+  \choice{2}{Two directives sharing 5 of 6 words are duplicates.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.22cm]
+  \choice{3}{A top-ranked record describes the current state.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.22cm]
+  \choice{4}{An exact scan of 10,000 vectors can meet a 10 ms budget.}\uncover<2->{\enspace\textbf{\textcolor{GreenLine}{True}}}\\[0.35cm]
+  \uncover<2->{\small Rank, reuse, and similarity measure the query and the past.}
+  \mlsyscredit{Long-Term Memory, \S6.11 (Fallacies and Pitfalls), Napkin Math 6.2.}
+  \note{[2 min] [CORE] The chapter's fallacies and pitfalls as peer instruction: vote on all four, one minute with a neighbor, vote again. Step 2: (1) false: frequent use is not evidence; an unchecked error retrieved often is reused often. (2) false: the 10:00 and 11:00 directives share 5 of 6 words and are mutually exclusive; a flipped flag reverses a rule with one word. (3) false: in the trace that opens the next segment, a stale r17 excerpt ranks first for the notification query. (4) true: the floor is 0.31 ms at 10,000 FP16 vectors on the chapter's host, so the claim that every dense store needs an approximate index fails; the full request still has to be measured. Students who say true to (1) confuse usage logs with confirmation; ask what new fact the 30th retrieval added. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: FRESHNESS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 4 aloud: the runtime decides what persists, supersedes on identity, deletes every copy, and cascades invalidation. Those decisions reach the agent only through indexes rebuilt after the store changes. How does a store stay truthful while they lag?}
+\mlsysdivider{How does a store stay truthful as its sources change?}{Long-Term Memory, \S6.9 and \S6.10}
+\section{Freshness}
+
+\begin{frame}{Each derived entry is valid for an interval of generations}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=\textwidth,height=6.0cm,keepaspectratio]{generations.pdf}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \raggedright\small Admit entry $e$ at generation $g$ only if\\[0.2cm]
+      \centering{\normalsize$\text{birth}(e) \le g < \text{death}(e)$}\\[0.4cm]
+      \raggedright
+      \begin{mlsyscard}{VioletLine}\footnotesize
+        \textbf{PostgreSQL} keeps the same two fields on every row version: \texttt{xmin} and \texttt{xmax}.
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Long-Term Memory, Definition 6.3, \S6.9.1 and equation 4. PostgreSQL 18 Documentation, \S5.6 System Columns (quoted).}
+  \note{[3 min] [CORE] The motivating trace from \S6.9: at turn 12 the agent edits the return path and the tool confirms r18. At turn 13 a search returns the r17 chunk with no version label. At turn 14 the agent reissues the edit, which fails. At turn 15 it concludes the filesystem is corrupt and starts speculative edits. One unlabeled stale read cost three turns, and each wasted turn lengthens the horizon over which errors compound (Lecture 1). The fix records on every derived entry the source generation it was built from, a monotonic version number, since timestamps can tie. Each entry is valid from its birth generation until a later edit to its source closes the interval. A current query at r18 admits only the r18 chunk; a diagnostic query set to r17 admits the r17 chunk and the summary. One rule serves both. A retrieval index is a materialized view that cannot be updated by deltas, since a nonlinear encoder cannot patch a vector from a text diff; exclusion and rebuilding are separate jobs. PostgreSQL keeps exactly these two fields (xmin, xmax) on every row version. ENGAGE: why not use file modification times? (Expected: clock skew, branch switches, and edits within one clock tick.) LINK: Lecture 4's context invalidation, applied to records that persist. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Exclusion costs microseconds; re-indexing costs milliseconds}
+  \centering
+  \safeimg[width=0.96\textwidth,height=4.95cm,keepaspectratio]{exclusion.pdf}\\[0.1cm]
+  {\small A lagging replica waits, routes to the primary, or reports partial.}
+  \mlsyscredit{Long-Term Memory, Napkin Math 6.4 (stipulated per-stage costs; 8 files, 16 chunks; values derived in calcs.py) and \S6.9.2.}
+  \note{[2 min] [OPTIONAL] Who pays for keeping the index current? The repair's next edit changes 8 files and 16 chunks. Synchronous re-indexing parses, updates postings, and embeds before the write returns: 88 ms with a local encoder, 210 ms with one remote batch, 1.26 s with one remote call per file. Exclusion records 8 entries in 0.4 microseconds and adds 1.5 microseconds to check 50 candidates per query, about 220,000 times less local work than the local rebuild (calcs.py). That ratio leaves out the durable commit and coordination both strategies share. Background rebuilding with exclusion is the usual choice. The source commit and the generation watermark move together, a straggling worker that started at r17 must have its output discarded at publication, and queries in the rebuild window get a direct read of src/pool.py or an explicit partial result. The bottom line is read-your-writes. A query carries the log sequence number of the agent's own write, and a replica that has not applied it waits briefly, routes to the primary, or says partial. ENGAGE: when is synchronous re-indexing right? (Expected: when a dependent query arrives inside the rebuild window and a direct read cannot answer it.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Memory is evaluated as a whole policy across sessions}
+  \centering
+  \begin{tikzpicture}[font=\footnotesize,
+      src/.style={draw=midgray,fill=vlightgray,rounded corners=2pt,line width=0.8pt,align=center,minimum height=1.2cm,text width=2.0cm},
+      lane/.style={draw=VioletLine,fill=VioletL,rounded corners=2pt,line width=0.8pt,align=left,text width=7.4cm,minimum height=0.78cm,inner sep=3pt},
+      card/.style={draw=mlsysaccent,fill=white,rounded corners=2pt,line width=1.2pt,align=left,text width=3.45cm,inner sep=4pt},
+      ar/.style={->,line width=0.9pt,midgray}]
+    \node[src] (t) at (0,0) {\textbf{Same tasks}\\same budgets};
+    \foreach \y/\c/\q [count=\k] in {
+        1.71/{New writes disabled}/{Can the allowed sources alone finish?},
+        0.57/{Unchecked writes}/{Do notes help, or spread unsupported claims?},
+        -0.57/{Checked admission only}/{Do records mislead after the world changes?},
+        -1.71/{Admission and lifecycle}/{Supersede, expire, delete: is useful evidence left?}}{
+      \node[lane] (l\k) at (5.35,\y) {\textbf{\c}\\[-1pt]\q};
+      \draw[ar] (t.east) -- (l\k.west);
+    }
+    \node[card] (s) at (12.0,0) {\textbf{Scorecard}\\[2pt]task acceptance\\cost per accepted task\\stale-return rate\\(beside recall)};
+    \foreach \k in {1,...,4}{\draw[ar] (l\k.east) -- (s.west);}
+  \end{tikzpicture}\\[0.25cm]
+  {\small Each policy gets its own isolated store.}
+  \mlsyscredit{Long-Term Memory, \S6.10.1 (Table 10), \S6.10.2, \S6.10.3.}
+  \note{[3.5 min] [CORE] The unit of evaluation is the whole memory policy: what it writes, indexes, retrieves, stages, and maintains. Read the four conditions; each isolates one decision under the same access controls and the same schedule of source edits. Each policy starts from a fixed source snapshot and its own store, so one policy's reflections cannot leak into another's trial. Two lifecycle fixtures make it concrete. One sets a preference at 10:00, supersedes it at 11:00, then deletes it, and inspects every tier afterward; the repair fixture keeps r17 and r18 apart. Metrics: precision at $k$, recall, and the stale-return rate, the share of current-state queries that return an invalidated record. A policy that returns nothing has a perfect stale-return rate, so the rate is never reported alone. Staging depth is one more setting the trials sweep, because recall at $k$ always rises with $k$ while task success need not; Lecture 4's position data showed an answer in the middle of 20 documents scoring below the no-document baseline. The final scores are task acceptance and cost per accepted task, maintenance included. Lecture 13 owns hermetic evaluation. ENGAGE: why does a static snapshot benchmark miss today's failures? (Expected: nothing changes, so nothing goes stale.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Does policy B lower cost per accepted task?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        Policy A accepts 50\% of tasks\\
+        Policy B accepts 60\%, adds maintenance of 0.1 of A's attempt cost
+      \end{mlsyscard}
+      \small
+      \wstep{2}{$C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$}
+      \wstep{2}{A: $1/0.5 = 2.00$;\quad B: $1.1/0.6 = 1.83$}
+      \wstep{3}{8.3\% lower; break-even at $p_{\text{acc}} = 0.55$}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering
+      \only<1|handout:0>{\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{ceff_step1.pdf}}%
+      \only<2-|handout:1>{\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{ceff_step2.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Long-Term Memory, Checkpoint 6.4; cost per accepted task, equation 1.2 (values derived in calcs.py).}
+  \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs. Policy B maintains its store (re-embedding, compaction, revalidation), which adds a tenth of A's attempt cost, and lifts acceptance from 50 to 60 percent. Step 2: cost per accepted task, from Lecture 1, is the expected attempt cost divided by the acceptance probability, $p_{\text{acc}}$. In units of A's attempt cost, A is 1 over 0.5, 2.00; B is 1.1 over 0.6, 1.83. Step 3: B is 8.3 percent cheaper per accepted task, and it breaks even if its acceptance falls to 0.55: 1.1 divided by 2.00 (calcs.py). Students who compare attempt costs alone pick A because it is cheaper per attempt. WARN: the maintenance must be counted, including background jobs that never block a user request, and the chapter's Store B pays an order of magnitude more auxiliary bytes for dense vectors than a lexical and structural store (8.52 against 0.36 times the source, Napkin Math 6.5). A dense index earns its place only if acceptance rises enough to repay that. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Each mechanism closes one gap the case exposed}
+  \mlsysactivity{Retrieval}{1 min}
+  \begin{columns}[c]
+    \begin{column}{0.21\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.9cm,keepaspectratio]{air-canada-787-yvr.jpg}\\[0.1cm]
+      {\footnotesize Name the mechanism for each gap.}
+    \end{column}
+    \begin{column}{0.77\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.8cm}P{8.2cm}@{}}\toprule
+        \textbf{Gap} & \textbf{Mechanism} \\\midrule
+        Answer drifted & \only<2->{Stage the versioned page; mark answers derived} \\[0.08cm]
+        Answer reused & \only<2->{Admit as a hypothesis, linked to the policy version} \\[0.08cm]
+        Policy revised & \only<2->{The generation interval closes derived answers} \\[0.08cm]
+        Repair read r17 & \only<2->{Gateway checks the generation; read the source} \\[0.08cm]
+        Did memory help? & \only<2->{Multi-session trial, cost per accepted task} \\\bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Moffatt v. Air Canada, 2024 BCCRT 149. Long-Term Memory, War Story 6.1, \S6.3, \S6.8, \S6.9, \S6.10.}
+  \note{[2.5 min] [CORE] Back to the hook. Step 1: retrieval, one minute, from memory. Step 2: one mechanism per gap. The chapter's own remedy for the chatbot is to stage the versioned source of record into the call and constrain the answer to claims that text supports, which is the retrieval contract. If answers are stored, they enter as derived records with a link to the policy version they reflect, so a later session cannot read them as policy. When the policy page changes, the generation interval of every answer derived from the old version closes. The repair agent's stale r17 read is the same failure inside a code store, closed by the gateway's generation check and a direct read during the rebuild. Whether any of it helped is decided by multi-session trials scored on accepted tasks and their full cost. ENGAGE: which of these is enforced below the model and which is checked above it? (Expected: admission, generation checks, and staging are mechanical bounds below the model; the trial is evidence above it; Lecture 1's invariant closure.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_roles_step4.pdf}{A stored record is a role in an evidence chain; authority stays with the source of record.}\\[0.12cm]
+  \thumbline{thumb_contract_step3.pdf}{Every read is a bounded request; its envelope reports scope, snapshot, status, and provenance.}\\[0.12cm]
+  \thumbline{thumb_scan_floor_step2.pdf}{Each method answers one need; an exact scan's floor is bytes over bandwidth; hops multiply.}\\[0.12cm]
+  \thumbline{thumb_write_step3.pdf}{The runtime admits, supersedes, deletes every copy, and cascades invalidation.}\\[0.12cm]
+  \thumbline{thumb_generations.pdf}{Generation intervals keep stale entries out; policies are judged on accepted tasks.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the second and the fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item An agent consolidates a hundred sessions into one lesson. How much provenance must the lesson carry before the store becomes too large to search?
+    \item Who should be allowed to invalidate a shared lesson (the agent, an operator, or a verifier), and with what evidence?
+    \item A deletion cannot recall tokens already sent to a model provider. What should a deletion receipt promise?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer; pick one for discussion or assign one as a short written response. The first weighs consolidation (\S6.8.5) against provenance cost. The second is the chapter's open problem of memory as a state architecture. The third comes from \S6.8.4's deletion perimeter.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Long-Term Memory, \S6.3, \S6.8, \S6.9; Checkpoints 6.1 and 6.3; Napkin Math 6.1 to 6.4 by hand.
+    \item Terry et al., ``Session Guarantees for Weakly Consistent Replicated Data,'' PDIS 1994.
+    \item Malkov and Yashunin, HNSW graphs, TPAMI 2018; J\'egou et al., product quantization, TPAMI 2011.
+    \item Park et al., ``Generative Agents,'' UIST 2023: memory streams and reflection.
+    \item Zou et al., ``PoisonedRAG,'' USENIX Security 2025: knowledge-base poisoning.
+    \item Run images/scan\_bench.py on your own machine and compare its slope with the floor.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with the self-check questions. Terry et al. define read-your-writes and the other session guarantees in a few pages. Malkov and Yashunin, and J\'egou et al., are the two index designs behind every vector store. Park et al. is the reference agent memory architecture to test against today's record roles. PoisonedRAG measures how few planted texts it takes. The scan script reproduces the measured slide on any machine with numpy. FLEX: add the lab or assignment your course uses for retrieval.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_tools}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} TOOL CALLING}}\\[0.5cm]
+      {\LARGE\bfseries\raggedright A retrieved record names the version it saw. What checks that version still holds when the edit commits?\par}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] Memory decides what the agent knows; it cannot decide what the agent may do. Lecture 7 opens the tools layer, where the runtime validates, authorizes, dispatches, and settles every call, and an execution-time precondition such as an optimistic version check makes sure the r18 the agent read is still r18 when its edit lands.}
+\end{frame}
+
+\end{document}

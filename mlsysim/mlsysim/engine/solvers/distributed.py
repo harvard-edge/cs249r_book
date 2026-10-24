@@ -119,7 +119,7 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
             trainable_fraction=trainable_fraction,
         )
         memory_footprint = memory.total_memory
-        memory_trace = list(memory.constraint_trace)
+        memory_trace = list(memory.constraint_trace or [])
     else:
         n_params = (graph.weight_bytes / bpp).to_base_units()
         optimizer_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
@@ -136,7 +136,11 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
         offload_spill = memory_footprint - accelerator.memory.capacity
         pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
         pcie_bw = (
-            getattr(accelerator.interconnect, "bandwidth", pcie_fallback)
+            getattr(
+                accelerator.interconnect,
+                "bandwidth_per_direction",
+                getattr(accelerator.interconnect, "bandwidth", pcie_fallback),
+            )
             if accelerator.interconnect else pcie_fallback
         )
         effective_bw = min(accelerator.memory.bandwidth, pcie_bw)

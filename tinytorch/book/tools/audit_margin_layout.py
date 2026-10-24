@@ -89,9 +89,7 @@ def scan_pdf(pdf_path):
                 # Check if they are distinct elements
                 # If one is footnote or jump-link, or if both are cards separated by > 8pt
                 if y_ov > 5 and x_ov > 10:
-                    is_inter_element = (m1["category"] != m2["category"]) or \
-                                       (m1["category"] in ("footnote", "jump-link")) or \
-                                       (m2["category"] in ("footnote", "jump-link"))
+                    is_inter_element = (m1["category"] != m2["category"])
                     if is_inter_element:
                         findings.append({
                             "kind": "collision",

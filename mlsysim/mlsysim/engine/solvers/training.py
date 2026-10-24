@@ -365,4 +365,100 @@ __all__ = [
     "CheckpointModel",
     "TrainingMemoryModel",
     "ScalingModel",
+    "TrainingRunModel",
+    "TrainingStateModel",
 ]
+
+
+class TrainingRunModel(ForwardModel):
+    """
+    Wall-clock time of a training run, from peak throughput to delivered time.
+
+    The chain starts from the ``6PD`` training FLOPs at every device's peak,
+    divides by the local compute efficiency (the compute-only baseline), then
+    by the scaling efficiency (communication and pipeline bubbles), then
+    multiplies by each operational overhead in order (checkpointing, failures
+    and restarts, maintenance), each relative to the subtotal before it.
+
+    Literature Source:
+    1. Kaplan et al. (2020) and Hoffmann et al. (2022), the 6PD rule.
+    2. Narayanan et al. (2021), scaling efficiency at cluster scale.
+    """
+    requires = ("workload", "fleet")
+    produces = None
+
+    def solve(self, model: Workload, fleet, local_efficiency: float, scaling_efficiency: float,
+              overheads: dict, precision: str = "fp8", tokens: Quantity = None):
+        from ..results import TrainingRunResult
+        from ...physics.performance import dTime
+        from ...physics.transformer import calc_transformer_training_flops
+
+        hardware = fleet.node.accelerator
+        peak = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
+        n_tokens = tokens if tokens is not None else model.training_tokens
+        flops = calc_transformer_training_flops(model.parameters, n_tokens)
+        n = fleet.total_accelerators
+        t_peak = dTime(flops, n, peak, 1.0).to("hour")
+        t_compute = dTime(flops, n, peak, local_efficiency).to("hour")
+        t = t_compute / scaling_efficiency
+        t_scaled = t
+        stages = {}
+        for name, fraction in overheads.items():
+            t = t * (1 + fraction)
+            stages[name] = t
+        return TrainingRunResult(
+            total_flops=flops,
+            peak_time=t_peak,
+            compute_time=t_compute,
+            scaled_time=t_scaled,
+            stage_times=stages,
+            total_time=t,
+            delivered_fraction=(t_peak / t).to("").magnitude,
+        )
+
+
+class TrainingStateModel(ForwardModel):
+    """
+    Persistent mixed-precision Adam state and how parallelism shards it.
+
+    Per parameter: FP16 weights and gradients (2 B each), FP32 master weights
+    (4 B), and two FP32 Adam moments (4 B each), 16 B in all. Tensor
+    parallelism splits every term across the TP group; ZeRO-style sharding
+    further splits the optimizer moments across the data-parallel replicas.
+    Activations are a stated total, not derived (they depend on sequence
+    length, microbatch, and recomputation).
+
+    Literature Source:
+    1. Rajbhandari et al. (2020), "ZeRO" (16 B/param accounting, sharding).
+    2. Shoeybi et al. (2019), "Megatron-LM" (tensor parallelism).
+    """
+    requires = ("workload",)
+    produces = None
+
+    def solve(self, model: Workload, tp_size: int, dp_size: int, activations: Quantity):
+        from ..results import TrainingStateResult
+        from ...core.units import BYTES_FP16, BYTES_FP32
+
+        p = model.parameters
+        weights = model.size_in_bytes(BYTES_FP16).to("GB")
+        gradients = weights
+        master = (p.to("count").magnitude * BYTES_FP32).to("GB")
+        moment = master
+        moments = 2 * moment
+        persistent = weights + gradients + master + moments
+        act = activations.to("GB")
+        tp = tp_size
+        zero = tp_size * dp_size
+        return TrainingStateResult(
+            weights=weights, gradients=gradients, master_weights=master,
+            adam_moment=moment, optimizer_moments=moments, persistent_state=persistent,
+            activations=act,
+            tp_weights_per_device=weights / tp, tp_gradients_per_device=gradients / tp,
+            tp_master_per_device=master / tp, tp_moments_per_device=moments / tp,
+            tp_activations_per_device=act / tp,
+            tp_total_per_device=(persistent + act) / tp,
+            tp_offloaded_per_device=(persistent + act - master - moments) / tp,
+            zero_moments_per_device=moments / zero,
+            zero_moments_per_tp_group=moments / dp_size,
+            zero_weights_and_moments_per_device=weights / tp + moments / zero,
+        )

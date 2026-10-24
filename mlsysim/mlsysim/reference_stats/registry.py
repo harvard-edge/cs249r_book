@@ -11,6 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
+from ..models.registry import Models
 from ..core.units import (
     ureg,
     GB,
@@ -31,6 +32,9 @@ from ..core.units import (
     param,
     second,
     TRILLION,
+    BYTES_ADAM_STATE,
+    BYTES_FP16,
+    BYTES_FP32,
 )
 
 _hour = ureg.hour
@@ -43,15 +47,31 @@ class Workloads(Registry):
     GmailEmailsPerDay = sourced(
         121e9, pc.REFERENCE_WORKLOAD_SCALE,
         name="Gmail emails per day", description="Approximate daily Gmail volume.")
+    # 2026-10-13: was 8.5e9, a third-party web-counter estimate; now Google's own
+    # disclosure of more than 5 trillion searches a year, divided by 365.
     GoogleSearchesPerDay = sourced(
-        8.5e9, pc.REFERENCE_WORKLOAD_SCALE,
-        name="Google searches per day", description="Approximate daily Google search volume.")
+        13.7e9, pc.GOOGLE_SEARCH_VOLUME_2025,  # 5e12 / 365, rounded
+        name="Google searches per day",
+        description="Lower bound from Google's disclosure of more than 5 trillion searches a year (2025).")
+    ChatGptPromptsPerDay = sourced(  # added 2026-10-20
+        2.5e9, pc.CHATGPT_DAILY_PROMPTS_2025,
+        name="ChatGPT prompts per day",
+        description="Prompts ChatGPT receives from users worldwide each day, July 2025 (OpenAI to Axios).")
     WaymoDataPerHourLow = sourced_qty(
         1 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (low)", description="Lower-bound AV sensor data generation rate.")
     WaymoDataPerHourHigh = sourced_qty(
         19 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (high)", description="Upper-bound AV sensor data generation rate.")
+
+
+class TextTokenization(Registry):
+    """Rules of thumb that convert tokens to words of English text (added 2026-10-20)."""
+
+    WordsPerToken = sourced(
+        0.75, pc.OPENAI_TOKENIZER_GUIDE,
+        name="English words per token",
+        description="OpenAI's rule of thumb: one token is roughly 3/4 of an English word (100 tokens ~ 75 words).")
 
 
 class AnomalyModel(Registry):
@@ -151,26 +171,142 @@ class TrainingScaleProfiles(Registry):
         0.9,
         pc.SCALING_EFFICIENCY_TIERS,
         name="Scaling efficiency (32 GPUs)",
-        description="Near-linear scaling regime for a reference training scenario.",
+        description="Book convention for small jobs; the 175B reference job needs 64 GPUs per TP8xPP8 replica, so this tier is not modeled.",
     )
     Eff256Gpu = sourced(
-        0.7,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.87,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (256 GPUs)",
-        description="Reference training scenario where communication begins to reduce scaling efficiency.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; tensor-parallel communication is the main loss.",
     )
     Eff1024Gpu = sourced(
-        0.5,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.83,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (1024 GPUs)",
-        description="Reference training scenario with significant communication overhead at 1k GPUs.",
+        description="Modeled for the 175B reference job; pipeline fill and drain become visible (~6% of step).",
     )
     Eff8192Gpu = sourced(
-        0.35,
-        pc.MEGASCALE,
+        0.56,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (8192 GPUs)",
-        description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; pipeline bubble dominates (~33% of step). Production runs with larger batches and interleaved pipelines retain more (MegaScale).",
     )
+    # Added 2026-09-28.
+    LocalComputeEfficiency = sourced(
+        0.45,
+        pc.LOCAL_COMPUTE_EFFICIENCY_ASSUMPTION,
+        name="Per-accelerator compute efficiency",
+        description="Fraction of peak each accelerator achieves on its local compute before communication losses.",
+    )
+
+
+# --- Added 2026-10-15: shared fleet-scheduling scenarios. Each was hand-typed in
+# one LEGO cell and copied by hand into others; every reader now loads it here.
+class ForcedPreemptionProfile(Registry):
+    """Forced-preemption scenario for a low-priority job on a shared fleet.
+
+    The preemption tax is ``LostWork`` plus the cold-restart steps of
+    ``Systems.Reliability.Recovery.cold_restart_time(ckpt, include_detection=False)``,
+    so a preempted job and a failed job pay the same relaunch, reload, and warmup.
+    """
+
+    LostWork = sourced_qty(
+        15 * minute, pc.FORCED_PREEMPTION_SCENARIO,
+        name="Work lost per forced preemption",
+        description="Execution discarded since the last durable checkpoint (half of a 30-minute interval).")
+    UnbudgetedRate = sourced_qty(
+        12 / day, pc.FORCED_PREEMPTION_SCENARIO,
+        name="Forced preemptions without a budget",
+        description="Forced preemptions per day for a lowest-priority job with no preemption budget.")
+
+
+class SpotInterruptionProfile(Registry):
+    """Spot-capacity interruption scenario (graceful save to slow storage)."""
+
+    CheckpointOverhead = sourced_qty(
+        15 * minute, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Spot checkpoint overhead",
+        description="Graceful save to slow storage per spot interruption.")
+    RestartOverhead = sourced_qty(
+        30 * minute, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Spot restart overhead",
+        description="Reacquire capacity, restart, and reload per spot interruption.")
+    RetainedInterval = sourced_qty(
+        2 * _hour, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Retained progress between spot interruptions",
+        description="Hours of retained training progress between consecutive interruptions.")
+
+
+class ElasticResizeProfile(Registry):
+    """Elastic-resize decision: start small, wait for the full allocation, or step up."""
+
+    Window = sourced_qty(
+        24 * _hour, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Comparison window", description="Wall-clock window over which the strategies are compared.")
+    QueueWait = sourced_qty(
+        4 * _hour, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Queue wait for the full allocation", description="Hours until the full allocation frees.")
+    RescaleOverhead = sourced_qty(
+        10 * minute, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Resize overhead", description="Time to checkpoint, reshard, and restart at a resize.")
+    SmallGpus = sourced(
+        128, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Small allocation (GPUs)", description="Allocation available immediately.")
+    StepUpGpus = sourced(
+        256, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Step-up allocation (GPUs)", description="Capped allocation after the elastic step-up.")
+    FullGpus = sourced(
+        512, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Full allocation (GPUs)", description="Allocation the target batch calls for.")
+    SmallThroughput = sourced(
+        1.0, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the small allocation (epochs/hour)", description="Baseline relative throughput.")
+    StepUpThroughput = sourced(
+        1.8, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the step-up allocation (epochs/hour)", description="90 percent scaling efficiency against the baseline.")
+    FullThroughput = sourced(
+        3.2, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the full allocation (epochs/hour)", description="80 percent scaling efficiency against the baseline.")
+
+
+class UtilizationTierProfile(Registry):
+    """One team's allocated, active, and productive capacity (time-averaged GPU equivalents)."""
+
+    AllocatedGpus = sourced(
+        500, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Allocated GPUs", description="GPUs held by the team's complete allocations.")
+    ActiveEquivalents = sourced(
+        350, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Active-device equivalents", description="Time-averaged devices showing hardware activity.")
+    ProductiveEquivalents = sourced(
+        280, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Productive-device equivalents",
+        description="Time-averaged useful work at the job's fault-free step rate, in device equivalents.")
+
+
+class FleetUtilizationSnapshot(Registry):
+    """Shares of a shared fleet's in-service capacity in one utilization snapshot."""
+
+    AssignedShare = sourced(
+        0.80, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Assigned share", description="In-service capacity assigned to jobs, including incomplete gangs.")
+    IncompleteGangShare = sourced(
+        0.15, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Incomplete-gang share", description="In-service capacity held by gangs still waiting for members.")
+    InputWaitShare = sourced(
+        0.05, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Input-wait share", description="In-service capacity in complete allocations waiting for input.")
+
+
+class ProfilerTraceProfile(Registry):
+    """Trace volume of a short GPU profiling window (added 2026-10-20)."""
+
+    NsightTracePerGpu = sourced_qty(
+        500 * ureg.MB, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Nsight Systems trace per GPU", description="Trace bytes for one GPU over one window.")
+    TraceWindow = sourced_qty(
+        5 * ureg.second, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Trace window", description="Length of the traced window.")
 
 
 class TrainingCostAnchors(Registry):
@@ -187,6 +323,13 @@ class TrainingCostAnchors(Registry):
         pc.GPT4_TRAINING_COST_EST,
         name="GPT-4 training cost (estimate)",
         description="Commonly cited nine-figure estimate for GPT-4-class training runs.",
+    )
+    # Added 2026-09-28.
+    Gpt3CostEstimate = sourced_qty(
+        4.6 * MILLION * USD,
+        pc.GPT3_TRAINING_COST_EST,
+        name="GPT-3 training cost (estimate)",
+        description="Widely cited third-party estimate of one GPT-3 (175B) training run at 2020 cloud prices.",
     )
 
 
@@ -258,6 +401,19 @@ class StorageTrainingCorpus(Registry):
         name="Storage running-example checkpoint bytes per parameter",
         description="Resumable mixed-precision Adam checkpoint footprint: FP16 weights, FP32 master weights, and two FP32 moments; gradients excluded.",
     )
+    # Added 2026-09-28.
+    StepTime = sourced_qty(
+        200 * ureg.ms,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training step time",
+        description="Reference per-step compute time the input pipeline must keep fed.",
+    )
+    TokenizedShardSize = sourced_qty(
+        3 * GB,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example tokenized shard size",
+        description="Reference size of one tokenized training shard file.",
+    )
 
 
 class ModelLoading(Registry):
@@ -286,6 +442,36 @@ class ModelLoading(Registry):
         pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
         name="PCIe model-swap reference model size",
         description="Reference model footprint for host-to-device model-swap latency examples.",
+    )
+
+
+class ReplicaColdStartProfile(Registry):
+    """Cold start of a newly placed LLM serving replica (autoscaling scenario).
+
+    A replica is ready after provisioning, fetching its weight artifact from
+    object storage at ``ArtifactFetchBandwidth``, and ``LoadWarmupTime`` of
+    device loading and warmup. The artifact size comes from the model registry
+    (e.g. ``Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)``), so the fetch
+    term scales with the model while these three inputs stay shared.
+    """
+
+    ArtifactFetchBandwidth = sourced_qty(
+        0.5 * GB / second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica artifact fetch bandwidth",
+        description="Effective object-storage read rate for a replica's weight artifact during cold start.",
+    )
+    ProvisioningTime = sourced_qty(
+        60 * second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica provisioning time",
+        description="Instance acquisition and boot before the artifact fetch begins.",
+    )
+    LoadWarmupTime = sourced_qty(
+        60 * second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica load and warmup time",
+        description="Device loading of the fetched weights plus runtime warmup before the replica serves traffic.",
     )
 
 
@@ -387,6 +573,11 @@ class ServingProfiles(Registry):
 class CheckpointArchetypes(Registry):
     """Reusable checkpoint-size scenario anchors for fault-tolerance examples."""
 
+    # NOTE (2026-09-28): despite its name and description, this 12 B/param value
+    # is the OPTIMIZER STATE only (ZeRO's K = FP32 master + Adam m, v). A
+    # resumable checkpoint is 14 B/param and full training state 16 B/param;
+    # see ReferenceStats.MixedPrecisionAdam. Value and name intentionally
+    # unchanged (rename belongs to a separate cleanup pass).
     MixedPrecisionOptimizerBytesPerParameter = sourced_qty(
         12 * (byte / param),
         pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
@@ -411,6 +602,185 @@ class CheckpointArchetypes(Registry):
         name="Medium vision-transformer checkpoint size",
         description="Representative checkpoint footprint for a medium vision transformer.",
     )
+    # Added 2026-09-28.
+    TrillionParameterReference = sourced_qty(
+        1 * TRILLION * param,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Trillion-parameter reference model size",
+        description="Round 1T-parameter model used as the top rung of checkpoint-size ladders.",
+    )
+
+
+class MixedPrecisionAdam(Registry):
+    """Mixed-precision Adam bytes-per-parameter accounting (ZeRO, Rajbhandari et al. 2020).
+
+    16 = 2 (FP16 weights) + 2 (FP16 gradients) + 4 (FP32 master) + 8 (Adam m, v).
+    14 = 16 - 2: a resumable checkpoint omits the gradients.
+    12 = optimizer state only (FP32 master + m + v), ZeRO's K.
+
+    The 14 and 12 entries are ALIASES of the existing objects in
+    StorageTrainingCorpus and CheckpointArchetypes (same object, one home);
+    only the 16 B/param training-state figure is new here.
+    """
+
+    TrainingStateBytesPerParameter = sourced_qty(
+        (2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE) / param,
+        pc.ZERO_MIXED_PRECISION_ADAM_ACCOUNTING,
+        name="Mixed-precision Adam training state bytes per parameter",
+        description="FP16 weights + FP16 gradients + FP32 master weights + two FP32 Adam moments (16 B/param).",
+    )
+    CheckpointBytesPerParameter = StorageTrainingCorpus.CheckpointBytesPerParameter
+    OptimizerStateBytesPerParameter = CheckpointArchetypes.MixedPrecisionOptimizerBytesPerParameter
+
+
+assert abs(MixedPrecisionAdam.TrainingStateBytesPerParameter.m_as("byte/param") - 16) < 1e-12
+assert abs(
+    MixedPrecisionAdam.TrainingStateBytesPerParameter.m_as("byte/param")
+    - BYTES_FP16.m_as("byte")
+    - MixedPrecisionAdam.CheckpointBytesPerParameter.m_as("byte/param")
+) < 1e-12, "checkpoint = training state minus FP16 gradients"
+assert abs(
+    MixedPrecisionAdam.CheckpointBytesPerParameter.m_as("byte/param")
+    - BYTES_FP16.m_as("byte")
+    - MixedPrecisionAdam.OptimizerStateBytesPerParameter.m_as("byte/param")
+) < 1e-12, "checkpoint = FP16 weights + optimizer state"
+
+
+class RecommenderAtScaleProfile(Registry):
+    """Reference industrial recommender serving profile (DLRM-class; the book's
+    Archetype B). Workload architecture: Models.Recommendation.DLRM."""
+
+    P99LatencySlo = sourced_qty(
+        100 * ureg.ms,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender end-to-end P99 latency SLO",
+        description="End-to-end P99 latency budget (P99 <= 100 ms).",
+    )
+    EmbeddingTableSize = sourced_qty(
+        10 * TB,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender embedding-table size (lower bound)",
+        description="Embedding tables of at least 10 TB for one production recommender (render as '10 TB+').",
+    )
+    PlatformQps = sourced_qty(
+        1e7 * count / second,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender platform traffic",
+        description="Platform-scale serving rate (10^7 queries per second).",
+    )
+    PlatformResidentEmbeddingFootprint = sourced_qty(
+        100 * TB,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Platform-wide resident embedding footprint",
+        description="Resident embedding budget across many models on the platform (not one model's table).",
+    )
+    EntityCatalogIds = sourced_qty(
+        10 * TRILLION * count,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender entity catalog size",
+        description="Unique sparse-feature identifiers in the platform entity catalog.",
+    )
+
+
+class DataParallelScalingProfile(Registry):
+    """Single-node data-parallel scaling scenario (workload: Models.Language.GPT2)."""
+
+    SingleGpuStepTime = sourced_qty(
+        1.8 * second, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Single-GPU step time", description="Per-step time on one GPU before data parallelism.")
+    PerGpuBatch = sourced(
+        16, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Per-GPU batch size (samples)", description="Samples per GPU per step.")
+    SingleGpuTrainingTime = sourced_qty(
+        25 * _hour, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Single-GPU training time", description="End-to-end training time on one GPU.")
+
+
+class CollectiveCommunicationProfile(Registry):
+    """Reusable collective-communication scenario anchors."""
+
+    GradientBuffer = sourced_qty(
+        1 * GB, pc.COLLECTIVE_COMMUNICATION_SCENARIO,
+        name="AllReduce gradient buffer", description="Gradient payload reduced per AllReduce.")
+    TrainingRunSteps = sourced(
+        100_000, pc.COLLECTIVE_COMMUNICATION_SCENARIO,
+        name="Training-run steps", description="Optimizer steps in the reference training campaign.")
+
+
+class NetworkEconomicsProfile(Registry):
+    """Reusable cluster network-economics scenario anchors."""
+
+    ClusterCapex = sourced_qty(
+        300 * MILLION * USD, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Cluster capital cost", description="Capital cost of the reference training cluster.")
+    CommunicationFraction = sourced(
+        0.30, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Communication fraction of step time", description="Fraction of step time spent in exposed communication.")
+    PerGpuGradientPayload = sourced_qty(
+        5 * GB, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Per-GPU gradient payload", description="Gradient bytes each GPU exchanges per step.")
+
+
+class ClusterTcoProfile(Registry):
+    """Build-vs-buy TCO line items for the 1K- and 10K-GPU reference clusters."""
+
+    Reference1KNetworkCapex = sourced_qty(
+        5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster network capex", description="Fat-tree network capital cost for the ~1K-GPU cluster.")
+    Reference1KFacilityCapex = sourced_qty(
+        10 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster facility capex", description="Facility build-out capital cost for the ~1K-GPU cluster.")
+    Reference1KAnnualOpex = sourced_qty(
+        1.5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster annual opex", description="Annual operating cost (non-hardware) for the ~1K-GPU cluster.")
+    Reference10KNetworkCapex = sourced_qty(
+        25 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster network capex", description="Network capital cost for the 10K-GPU cluster.")
+    Reference10KFacilityCapex = sourced_qty(
+        75 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster facility capex", description="Facility capital cost for the 10K-GPU cluster.")
+    Reference10KAnnualStaffing = sourced_qty(
+        5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster annual staffing", description="Annual staffing cost for the 10K-GPU cluster.")
+
+
+class FacilityScaleAnchors(Registry):
+    """Order-of-magnitude datacenter facility scale anchors."""
+
+    HyperscaleCampusPower = sourced_qty(
+        100 * ureg.megawatt, pc.FACILITY_SCALE_ANCHORS,
+        name="Hyperscale AI campus power", description="Round facility power of a hyperscale AI campus.")
+    ReferenceItLoad = sourced_qty(
+        10 * ureg.megawatt, pc.FACILITY_SCALE_ANCHORS,
+        name="Reference facility IT load", description="Round IT load used for facility water and power examples.")
+
+
+class CarbonPlacementProfile(Registry):
+    """Carbon-aware placement scenario anchors."""
+
+    TrainingRunEnergy = sourced_qty(
+        10_000 * MWh, pc.CARBON_PLACEMENT_SCENARIO,
+        name="Placement-example training-run energy", description="Energy of the training run compared across grids.")
+
+
+class MidScaleTrainingCarbonProfile(Registry):
+    """Mid-scale training carbon scenario: Models.Language.Llama2_7B on
+    Systems.Clusters.Lab_64_A100."""
+
+    TrainingDays = sourced_qty(
+        14 * day, pc.MIDSCALE_TRAINING_CARBON_SCENARIO,
+        name="Mid-scale training duration", description="Wall-clock duration of the 64-GPU training run.")
+
+
+class WaterAnchors(Registry):
+    """Everyday water-use comparison anchors."""
+
+    UsHouseholdAnnualWaterLow = sourced_qty(
+        380_000 * ureg.liter, pc.EPA_WATERSENSE_HOUSEHOLD,
+        name="US household annual water use (low)", description="Lower edge of the per-household annual indoor+outdoor water band.")
+    UsHouseholdAnnualWaterHigh = sourced_qty(
+        450_000 * ureg.liter, pc.EPA_WATERSENSE_HOUSEHOLD,
+        name="US household annual water use (high)", description="Upper edge of the per-household annual water band.")
 
 
 class EdgeDeviceSpectrum(Registry):
@@ -445,6 +815,13 @@ class EdgeDeviceSpectrum(Registry):
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Flagship smartphone RAM endpoint",
         description="Upper mobile memory endpoint used for edge device-spectrum examples.",
+    )
+    # Added 2026-10-20: the IoT rung of the device-class memory ladder.
+    IotDeviceRamHigh = sourced_qty(
+        1 * GiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="IoT-class device RAM upper endpoint",
+        description="Upper memory endpoint of an IoT-class edge device, between microcontroller and phone.",
     )
     CortexMClock = sourced_qty(
         48 * ureg.megahertz,
@@ -709,41 +1086,6 @@ class PhoneBattery(Registry):
         name="Flagship phone battery energy", description="Modern flagship smartphone battery pack energy rating.")
 
 
-class Sensors(Registry):
-    """Physical AI and embodied perception reference sensors (Volume IV)."""
-
-    Camera_4K_30Hz_Raw12_FrameSize = sourced_qty(
-        12.44 * MB, pc.PHYSICAL_AI_SENSORS,
-        name="4K 30Hz 12-bit RAW camera frame size",
-        description="Uncompressed frame footprint for 3840x2160 12-bit RAW sensor data.",
-    )
-    Camera_4K_30Hz_QuadStream_Ingress = sourced_qty(
-        1.49 * GB / second, pc.PHYSICAL_AI_SENSORS,
-        name="4-camera 4K 30Hz aggregate ingress",
-        description="Sustained DRAM ingress traffic generated by four 4K 30Hz 12-bit cameras.",
-    )
-    LiDAR_128Beam_PointRate = sourced(
-        2.4e6, pc.PHYSICAL_AI_SENSORS,
-        name="128-beam automotive LiDAR point rate",
-        description="Point cloud generation rate for a 128-beam automotive LiDAR (points/sec).",
-    )
-    LiDAR_128Beam_Ingress = sourced_qty(
-        100 * MB / second, pc.PHYSICAL_AI_SENSORS,
-        name="128-beam automotive LiDAR ingress rate",
-        description="Packetized point cloud ingestion rate over automotive Ethernet.",
-    )
-    ManipulatorEyeInHand_BurstIngress = sourced_qty(
-        600 * MB / second, pc.PHYSICAL_AI_SENSORS,
-        name="Manipulator eye-in-hand burst ingress",
-        description="Combined burst ingress for dual high-speed eye-in-hand cameras with tactile arrays.",
-    )
-    ProcessPyrometry_ContinuousIngress = sourced_qty(
-        1.2 * GB / second, pc.PHYSICAL_AI_SENSORS,
-        name="Coaxial NIR pyrometry continuous ingress",
-        description="High-frequency 1000 Hz optical ingress for laser powder-bed additive manufacturing.",
-    )
-
-
 class PhysicalAIRates(Registry):
     """Execution frequency and period hierarchy across the five physical AI machine levels."""
 
@@ -849,27 +1191,61 @@ class PhysicalAINumbers(Registry):
     Compute = PhysicalAICompute
 
 
+class TorchvisionParameterCounts(Registry):
+    """Exact parameter counts of three torchvision model constructors (a counted run, added 2026-10-20).
+
+    ``Models.Vision`` holds these exact counts for ResNet-50, VGG-16, and MobileNetV2
+    (provenance prov:torchvision-0-28-parameter-counts); the aliases below keep the run's
+    three counts together for slides that show the run.
+    """
+
+    MobileNetV2 = sourced_qty(Models.Vision.MobileNetV2.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                              name="torchvision mobilenet_v2 parameters")
+    ResNet50 = sourced_qty(Models.Vision.ResNet50.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                           name="torchvision resnet50 parameters")
+    VGG16 = sourced_qty(Models.Vision.VGG16.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                        name="torchvision vgg16 parameters")
+
+
 class ReferenceStats(Registry):
     """Registry namespace for non-executable real-world scenario statistics."""
 
     Workloads = Workloads
+    TextTokenization = TextTokenization  # added 2026-10-20
     AnomalyModel = AnomalyModel
     OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging
+    TorchvisionParameterCounts = TorchvisionParameterCounts  # added 2026-10-20
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
+    ForcedPreemptionProfile = ForcedPreemptionProfile
+    SpotInterruptionProfile = SpotInterruptionProfile
+    ElasticResizeProfile = ElasticResizeProfile
+    UtilizationTierProfile = UtilizationTierProfile
+    FleetUtilizationSnapshot = FleetUtilizationSnapshot
+    ProfilerTraceProfile = ProfilerTraceProfile  # added 2026-10-20
     TrainingCostAnchors = TrainingCostAnchors
     FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
+    ReplicaColdStartProfile = ReplicaColdStartProfile
     ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
+    MixedPrecisionAdam = MixedPrecisionAdam
+    RecommenderAtScaleProfile = RecommenderAtScaleProfile
+    DataParallelScalingProfile = DataParallelScalingProfile
+    CollectiveCommunicationProfile = CollectiveCommunicationProfile
+    NetworkEconomicsProfile = NetworkEconomicsProfile
+    ClusterTcoProfile = ClusterTcoProfile
+    FacilityScaleAnchors = FacilityScaleAnchors
+    CarbonPlacementProfile = CarbonPlacementProfile
+    MidScaleTrainingCarbonProfile = MidScaleTrainingCarbonProfile
+    WaterAnchors = WaterAnchors
     EdgeDeviceSpectrum = EdgeDeviceSpectrum
     EdgeAdaptationTierProfile = EdgeAdaptationTierProfile
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
-    Sensors = Sensors
     PhysicalAIRates = PhysicalAIRates
     PhysicalAIKinematics = PhysicalAIKinematics
     PhysicalAIThermal = PhysicalAIThermal

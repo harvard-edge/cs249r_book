@@ -1,7 +1,7 @@
 import pytest
 
 from mlsysim.core.units import Q_, USD, count, hour, minute
-from mlsysim.engine.v2_12_experiments import (
+from mlsysim.labs.experiments.v2_12_experiments import (
     ArtifactRequirement,
     CanaryCohort,
     DependencyContract,

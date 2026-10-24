@@ -194,12 +194,6 @@ def generate_plot():
     ax.set_xlabel("Sense-to-Act Loop Latency $\\tau_{\\mathrm{delay}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
     ax.set_ylabel("Vehicle Operational Speed Envelope $v$ (km/h, log scale)", fontsize=11, fontweight="bold", labelpad=8)
     
-    # Title block
-    fig.suptitle("The Causal Boundary: Sense-to-Act Latency vs Safe Operating Speed (1970–2026)",
-                 fontsize=14, fontweight="bold", x=0.08, y=0.98, ha="left", color=PALETTE["charcoal"])
-    ax.set_title(r"Physical AI kinematic roofline: stopping envelope $d_{\mathrm{stop}} = v \tau + \frac{v^2}{2 a_{\max}} \leq R_{\mathrm{sensor}}$ under emergency braking ($a = 0.7\,\mathrm{g}$)",
-                 fontsize=9.5, color="#475569", loc="left", pad=14)
-    
     # Legend
     legend = ax.legend(loc="lower left", frameon=True, framealpha=0.95, edgecolor="#CBD5E1",
                        fontsize=8.5, title="Kinematic Safety Ceilings ($a_{\\max} = 6.86\\,\\mathrm{m/s}^2$)",
@@ -208,12 +202,14 @@ def generate_plot():
     legend.set_zorder(15)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.96)
+    plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.96)
     
     out_path = os.path.join(os.path.dirname(__file__), "ch01_latency_vs_velocity.png")
     fig.savefig(out_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(__file__), "..", "books", "vol4", "01_boundary", "images", "png", "fig01_latency_vs_velocity.png")
+    fig.savefig(book_path, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_plot()

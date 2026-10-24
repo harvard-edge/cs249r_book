@@ -8,7 +8,7 @@ LABS_ROOT = Path(__file__).resolve().parents[2] / "labs"
 if str(LABS_ROOT) not in sys.path:
     sys.path.insert(0, str(LABS_ROOT))
 
-from mlsysim.engine.v1_02_experiments import (
+from mlsysim.labs.experiments.v1_02_experiments import (
     FILTERING_ALTERNATIVES,
     MODEL_KEY,
     TRACKS,
@@ -18,6 +18,7 @@ from mlsysim.engine.v1_02_experiments import (
     sustained_operation,
     workload_feasibility,
 )
+pytest.importorskip("marimo", reason="marimo not installed (optional dependency)")
 from mlsysbook_labs.experiment_evidence import capture_evidence
 
 
@@ -314,3 +315,12 @@ def test_duty_cycle_step_allows_selecting_baseline_and_minimum():
         assert round(minimum / step, 6).is_integer(), (
             f"{track_id}: minimum {minimum} not selectable with step {step}"
         )
+
+
+def test_legacy_engine_experiments_alias_resolves_identically():
+    import mlsysim.engine.v1_02_experiments as legacy_mod
+    import mlsysim.labs.experiments.v1_02_experiments as canonical_mod
+
+    assert legacy_mod is canonical_mod
+    assert legacy_mod.TRACKS is TRACKS
+

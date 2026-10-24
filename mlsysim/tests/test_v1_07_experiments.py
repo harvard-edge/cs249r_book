@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from mlsysim.engine.v1_07_experiments import (
+from mlsysim.labs.experiments.v1_07_experiments import (
     OPERATION_GRAPH,
     MODEL_KEY,
     TRACKS,

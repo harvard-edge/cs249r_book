@@ -113,7 +113,7 @@ $R$ is **accuracy retention**, the fraction of the baseline's accuracy the candi
 
 ### Events
 
-The capstone module defines classroom events through `OlympicEvent` and checks eligibility with `qualifies_event`. A latency sprint requires accuracy of at least 85 percent; a memory challenge has the same floor. An accuracy contest requires latency strictly below 100 ms and stored size strictly below 10 in the report's `model_size_mb` units, each equal to $2^{20}$ bytes. An "extreme push" lowers the accuracy floor to 80 percent. The all-around event accepts any valid measurements without adding an eligibility floor. These rules determine eligibility; the helper neither ranks candidates nor invents a combined all-around score. The floors are absolute here, rather than relative to a baseline, and they are classroom policy rather than official MLPerf requirements. Milestone 06 applies a third, separate set of pass gates that test your modules rather than rank candidates: the baseline must reach 80 percent test accuracy, and the INT8 candidate must stay within 3 percentage points of it.
+The capstone module defines classroom events through `OlympicEvent` and checks eligibility with `qualifies_event`. A latency sprint requires accuracy of at least 85 percent; a memory challenge has the same floor. An accuracy contest requires latency strictly below 100 ms and stored size strictly below 10 in the report's `model_size_mb` units, each equal to $10^6$ bytes. An "extreme push" lowers the accuracy floor to 80 percent. The all-around event accepts any valid measurements without adding an eligibility floor. These rules determine eligibility; the helper neither ranks candidates nor invents a combined all-around score. The floors are absolute here, rather than relative to a baseline, and they are classroom policy rather than official MLPerf requirements. Milestone 06 applies a third, separate set of pass gates that test your modules rather than rank candidates: the baseline must reach 80 percent test accuracy, and the INT8 candidate must stay within 3 percentage points of it.
 
 The set of candidates that cannot improve on one axis without giving something up on another is called the **Pareto frontier**.[^fn-pareto-frontier-scorecard] A benchmark with floors is a way of asking one question about that frontier at a time. Where on the frontier a deployment should sit depends on its quality requirements and resource budget, and the scorecard's job is to make the frontier visible so that the decision can be made with numbers.
 
@@ -122,7 +122,7 @@ The set of candidates that cannot improve on one axis without giving something u
 ![**The MLPerf Optimization Olympics Pareto frontier**: Evaluating optimization candidates across accuracy retention, memory compression, and inference speedup reveals the multi-objective trade-off curve. The chapter's relative retention floor ($R \ge 0.99$) disqualifies over-compressed or degraded models before the frontier of non-dominated candidates is drawn. The capstone events apply separate absolute accuracy floors (85%, or 80% for the extreme push). The plotted values are illustrative, not one measured run.](assets/images/diagrams/milestone_03_pareto-frontier.svg){#fig-milestone3-pareto-frontier width="100%" fig-alt="Pareto frontier curve plotting memory compression ratio against inference speedup for illustrative candidates, with the retention floor listed as a selection rule and dominated points below the curve."}
 
 ::: {.callout-tip title="Pause & Predict: MLPerf Inference Scenarios and Operational Constraints"}
-Consider evaluating a 7B parameter quantized model across two distinct deployment targets: (1) an interactive voice assistant on a smartphone, and (2) a high-volume batch indexing pipeline in a data center. Which MLPerf scenario (Single-Stream vs Offline) governs each deployment? Why does reporting a single average latency metric fail to characterize either system?
+Consider evaluating a 7B parameter quantized model across two distinct deployment targets: (1) an interactive voice assistant on a smartphone, and (2) a high-volume batch indexing pipeline in a data center. Which MLPerf scenario (Single-Stream vs. Offline) governs each deployment? Why does reporting a single average latency metric fail to characterize either system?
 :::
 
 ---
@@ -130,12 +130,6 @@ Consider evaluating a 7B parameter quantized model across two distinct deploymen
 ## The Code
 
 The course scripts execute the experiments. The chapter's smaller score function explains how to interpret their results. Keeping these roles separate allows tracing the experiment without mistaking an illustrative ledger for measured evidence.
-
-::: {.column-margin}
-![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis III MLPerf Olympics showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Synthesis III combines Modules 14 to 20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
-:::
 
 ### Script 1: profile, quantize, prune, benchmark
 
@@ -157,6 +151,12 @@ outputs = model(X_test)
 predictions = np.argmax(outputs.data, axis=1)
 baseline_acc = np.mean(predictions == y_test) * 100
 ```
+
+::: {.column-margin}
+![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis III MLPerf Olympics showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Synthesis III combines Modules 14 to 20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
+:::
 
 The byte count sums the actual parameter arrays. It excludes Python object overhead, intermediate activations, and any serialized file header, so it should be labeled parameter-array storage. The profiler times one held-out input row; accuracy uses all held-out rows. These are different batch sizes because they answer different questions, but every candidate must use the same timing input shape and the same accuracy dataset as the baseline. The script stops unless the baseline reaches 80 percent test accuracy; a model whose optimizer never moved it would otherwise become the reference every candidate is measured against. It also stops if the profiler's own numbers are wrong: the parameter and FLOP counts must equal those derived from the layer shapes (2,410 parameters, and 4,736 FLOPs at $2 \cdot \text{in} \cdot \text{out}$ per `Linear`), and the latency must be a positive, finite measurement. During training, your `CrossEntropyLoss` on the first batch must match a NumPy computation, because training can converge on a wrong loss value while every reported loss is meaningless. Later steps apply the same discipline to the other tools: `BenchmarkResult` and `pareto_frontier` must reproduce hand-worked fixtures and consistent latency summaries before they score anything, and the GPT must show that its logits vary, that no position reads later tokens, and that earlier tokens matter before it is cached, timed, or quantized.
 
@@ -288,7 +288,7 @@ def qualifies(candidate, event):
     metrics = {
         "accuracy": candidate["accuracy"],
         "latency_ms_median": candidate["p50_ms"],
-        "model_size_mb": candidate["bytes"] / 2**20,
+        "model_size_mb": candidate["bytes"] / 1e6,
     }
     return qualifies_event(metrics, event)
 ```
@@ -356,9 +356,9 @@ A benchmark is more useful when the expected output is calculated in advance, so
 Napkin math for the rest. A hypothetical packed INT8 format keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 32 = 2{,}442$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of @sec-compression costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. Both reconstructed quantization and dense pruning leave the matrix shapes and dense arithmetic unchanged. Their latency therefore has to be measured; neither representation claim supplies a speedup.
 
 ::: {.column-margin}
-![](assets/images/diagrams/milestone_03-margin-csr-overhead.svg){width="100%" fig-alt="Storage breakdown comparing dense INT8 at 2,442 bytes versus 50% pruned CSR format at 2,638 bytes, showing index overhead negating compression."}
+![](assets/images/diagrams/milestone_03-margin-csr-overhead.svg){width="100%" fig-alt="Storage breakdown comparing dense INT8 at 2,442 bytes vs. 50% pruned CSR format at 2,638 bytes, showing index overhead negating compression."}
 
-*CSR Sparsity Overhead: At 8-bit precision, adding a 1-byte column index per non-zero weight doubles per-element storage, making 50% pruned CSR (2,638 B) larger than dense INT8 (2,442 B) until sparsity exceeds about 54%.*
+*CSR Sparsity Overhead: At 8-bit precision, adding a 1-byte column index per nonzero weight doubles per-element storage, making 50% pruned CSR (2,638 B) larger than dense INT8 (2,442 B) until sparsity exceeds about 54%.*
 :::
 
 The ledger in the listing below is a separate arithmetic exercise. In lines 1 to 6, the analytical storage formulas compute dense FP32 (9,640 bytes), packed INT8 (2,442 bytes), and 50% sparse CSR representation (2,638 bytes). Lines 8 to 12 populate the candidate dictionary. The loop in lines 14 to 19 calls `score(base, cand)` to evaluate accuracy retention $R$, size compression ratio $C$, speedup $S$, and event qualification, printing the rows of @tbl-m3-scorecard.
@@ -412,11 +412,16 @@ Deploying quantized transformer models on consumer hardware (phones, laptops, em
 - **GGUF Format and llama.cpp**: Georgi Gerganov's `llama.cpp` uses the unified binary file format **GGUF** (successor to GGML). GGUF bundles model architecture hyperparameters, tokenizer vocabulary, and mixed-precision quantized tensor weights (e.g., Q4_K_M, Q8_0) into a single mmap-friendly file.
 - **Zero-Copy Memory Mapping (`mmap`)**: Instead of allocating and loading gigabytes of weights into heap RAM on startup, edge runtimes map the GGUF file directly into virtual address space. Pages are faulted into memory on demand by the OS kernel, enabling near-instantaneous startup and memory sharing across processes.
 - **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends, offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
-- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.[^fn-zero-allocation-edge]
+- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.
+- **Embedded Microcontrollers (Bare-Metal Arena)**: In bare-metal environments (ARM Cortex-M, RISC-V targeted by MLPerf Tiny), dynamic heap allocation (`malloc`/`new`) is strictly prohibited. Runtimes like TFLite Micro and TinyEngine mandate static memory arenas pre-allocated at compile time into fixed contiguous SRAM offsets to prevent fragmentation crashes.
 :::
 
-[^fn-zero-allocation-edge]: **Zero-allocation invariants on embedded microcontrollers**: In bare-metal edge environments (such as ARM Cortex-M or RISC-V microcontrollers targeted by MLPerf Tiny), dynamic memory allocation via `malloc` or `new` is strictly prohibited during inference. Heap fragmentation over millions of cycles can trigger unrecoverable crashes. Production runtimes (such as TFLite Micro and TinyEngine) mandate a static memory arena where all tensor weights, activation lifetimes, and scratchpad buffers are pre-allocated at compile time into fixed contiguous SRAM offsets.
 
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-mlperf-scenarios.svg){width="100%" fig-alt="Diagram of MLPerf Inference operational scenarios including Single-Stream, Server, Offline, and Multi-Stream, with the universal accuracy retention floor."}
+
+*MLPerf Inference Scenarios: Workload arrival patterns determine whether latency (Single-Stream), QPS under SLA (Server), or throughput (Offline) is benchmarked, all bounded by the non-negotiable R >= 0.99 accuracy retention floor.*
+:::
 
 @Tbl-m3-tinytorch-vs-mlperf separates the local experiment from the additional controls around an official result.
 
@@ -440,15 +445,7 @@ Before any compressed or accelerated model artifact is deployed into production 
 4. **Logit and Numerical Equivalence Bounds:** Intermediate layer activations and output logits must match reference single-precision executions within expected floating-point rounding tolerances before measuring speedups.
 :::
 
-::: {.column-margin}
-![](assets/images/diagrams/milestone_03-margin-mlperf-scenarios.svg){width="100%" fig-alt="Diagram of MLPerf Inference operational scenarios including Single-Stream, Server, Offline, and Multi-Stream, with the universal accuracy retention floor."}
-
-*MLPerf Inference Scenarios: Workload arrival patterns determine whether latency (Single-Stream), QPS under SLA (Server), or throughput (Offline) is benchmarked, all bounded by the non-negotiable R >= 0.99 accuracy retention floor.*
-:::
-
 ---
-
-{{< pagebreak >}}
 
 ## Summary
 

@@ -140,7 +140,7 @@ def compare_cached_replay(model, tokens, repeats=7):
                 'cached_ms': cached_ms,
                 'speedup': baseline_ms / cached_ms,
                 'max_logit_error': float(np.max(np.abs(actual - expected))),
-                'cache_bytes': int(round(memory['total_mb'] * 1024 * 1024)),
+                'cache_bytes': int(round(memory['total_mb'] * 1_000_000)),
                 'tokens_processed': cache.seq_pos,
             }
         finally:

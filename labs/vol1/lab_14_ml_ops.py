@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v1_14_experiments import (
+    from mlsysim.labs.experiments.v1_14_experiments import (
         TRACKS, canary_experiment, experiment_options, get_track_scenario,
         incident_experiment, monitoring_experiment, retraining_experiment,
     )

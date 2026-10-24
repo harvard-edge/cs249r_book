@@ -1,0 +1,195 @@
+chapter: 09_performance_engineering
+lecture: "09"
+title: Fleet Efficiency
+subtitle: "Where a fleet's capacity goes"
+minutes: 75
+notes_minutes: {total: 70, core: 60}
+target_ideas: 30
+thesis: "A fleet's useful output is the product of scheduling, runtime, and program goodput, and each lost hour is charged to exactly one factor."
+hook:
+  minutes: "0-4"
+  setup: "Llama 3 405B on 16,384 H100 GPUs kept more than 90 percent of a 54-day snapshot as effective training time and ran its kept steps at about 41 percent MFU. A photo of a Meta data center (not the Llama 3 cluster)."
+  question_to_class: "What share of the capacity the run held became progress? A 90%, B 41%, C 37%, D 10%."
+  payoff: "The two numbers are R and P; their product is about 0.37. About 10% was lost to interruptions and 53% inside kept steps that ran below peak, so the program boundary, not reliability, held most of the gap."
+  sources: ["Fleet Efficiency, Lighthouse 9.1 and Napkin Math 9.1", "Dubey et al. 2024, The Llama 3 Herd of Models, Table 4 (via MLSysIM Literature.TrainingRuns)"]
+driving_question: "Where does a fleet's capacity go, and which loss should be fixed first?"
+running_example: "Llama 2 70B pretrained on 128 H100 GPUs (16 nodes of 8; tensor parallel 8 in a node, data parallel across nodes) in a shared pool: S = 0.65 (constructed snapshot, illustrative), R = 0.90, P = 0.48, MPG = 0.28, $7.09 per useful GPU-hour at a $2 internal rate. Inference twin: one eight-GPU replica with a 5.2 ms per-token weight-streaming floor."
+concept_questions:
+  - q: "What do two efficiency numbers of one run mean together?"
+    picture: "Llama 3 split bars: 90% effective time, 41% MFU, product split 10/53/37"
+    numbers: "R >= 0.90, P = 0.41, product 0.37 (Napkin Math 9.1; Dubey et al. 2024)"
+    example: "Llama 3 405B"
+    read: "§9.1, §9.2.1"
+  - q: "What does a utilization tier miss?"
+    picture: "Tier bars 500 / 350 / 280 GPUs"
+    numbers: "productive / allocated = 56% (Sec. 9.2.3, from Fleet Orchestration)"
+    example: "the orchestrator's snapshot"
+    read: "§9.2.3"
+  - q: "Through which boundaries does capacity pass before it is useful work?"
+    picture: "Goodput chain build, S then R then P (schematic widths)"
+    numbers: "MPG = S x R x P"
+    example: "a gang holding half its nodes; a restart; an exposed collective"
+    read: "§9.2.1, §9.2.3"
+  - q: "Which efficiency measure is someone quoting?"
+    picture: "Five-row table of measures and their denominators"
+    numbers: "none"
+    example: "utilization tiers, scaling efficiency, MPG, SLO goodput, statistical goodput"
+    read: "§9.2.4"
+  - q: "What must a measurement hold fixed?"
+    picture: "Contract table plus the real MLPerf system-file software lines of one DGX H100 in two rounds"
+    numbers: "fault every 12.6 days at 128 GPUs (302 h MTBF)"
+    example: "TensorRT 9.0.0 vs 9.3.0 on identical hardware"
+    read: "§9.3.1"
+  - q: "How much can software alone change a measurement?"
+    picture: "MLPerf Inference offline throughput on one DGX H100, four rounds"
+    numbers: "GPT-J 2.69x, Llama 2 70B 1.44x, SDXL 1.25x, ResNet-50 and BERT 1.00x (MLCommons via MLSysIM)"
+    example: "TensorRT 9.0 to 10.8"
+    read: "§9.3.1"
+  - q: "Which record settles which factor?"
+    picture: "Localization ladder build: scheduler records, job timeline, step traces"
+    numbers: "none"
+    example: "the running job's week-long shortfall"
+    read: "§9.3.2"
+  - q: "Why can't a fleet trace everything?"
+    picture: "Trace volume bars: 500 MB for one GPU, 512 GB for 1,024 GPUs, 5 s"
+    numbers: "512 GB per 5 s at 1,024 GPUs; MegaScale found about 0.5% of machines slow"
+    example: "MegaScale per-rank heat map (Jiang et al. 2024)"
+    read: "§9.3.3"
+  - q: "How much capacity does a shared pool lose before any job holds it?"
+    picture: "Pool snapshot bar build; Leonardo machine hall photo"
+    numbers: "S = 0.80 - 0.15 = 0.65; ceiling 0.80"
+    example: "partial gangs, idle fragments"
+    read: "§9.4"
+  - q: "Where does a job's held time go?"
+    picture: "Five-term runtime loss equation and bars"
+    numbers: "7.7 / 1.4 / 0.4 / 0.05 / 0.03 percent; R about 0.90"
+    example: "the running job over one week"
+    read: "§9.5.2"
+  - q: "How does the order of runtime terms change with job size?"
+    picture: "Runtime loss stacked bars, 128 to 16,384 GPUs (derived), Llama 3 bound"
+    numbers: "10% to 18%; crossover near 13,000 GPUs"
+    example: "running job vs Llama 3"
+    read: "§9.5.2, §9.5.3"
+  - q: "What is program goodput for training and for decode?"
+    picture: "Published MFU bars; roofline with batch-one decode and measured LayerNorm"
+    numbers: "MFU 21.3% to 46.2%; Llama 3 43% to 41%; decode 0.34% of peak; floor 5.2 ms"
+    example: "PaLM, Llama 3, the serving replica"
+    read: "§9.2.2, §9.6.3"
+  - q: "How much of a node's efficiency survives scale, and which Fleet Law term holds the loss?"
+    picture: "Node vs fleet step bars; Fleet Law equation anatomy"
+    numbers: "180 vs 245 ms; 0.735 kept; P = 0.48"
+    example: "exposed gradient reductions after backward"
+    read: "§9.6.1, §9.6.2"
+  - q: "Which lever should be funded first?"
+    picture: "Waterfall 100/65/59/28; lever ceiling bars"
+    numbers: "MPG 0.28; levers 0.35 / 0.31 / 0.38; point worth 0.43 / 0.31 / 0.59"
+    example: "scheduling vs input pipeline vs program"
+    read: "§9.8.1"
+  - q: "How is a trade between factors judged, and where does a job sit on the frontier?"
+    picture: "Iso-goodput curves; Llama 3 at 8,192 vs 16,384 GPUs"
+    numbers: "+35% vs 26% break-even; 1.008; time 0.52 at 1.049 GPU-hours"
+    example: "compilation, preemption, doubling the GPUs"
+    read: "§9.9"
+concept_trace:
+  - concept: ML goodput
+    frame: "Capacity crosses three boundaries before it becomes work"
+    shown_by: "goodput_chain build (S, R, P boundaries with the losses charged at each), then the focus slide MPG = S x R x P"
+  - concept: Reproducible measurement contract
+    frame: "A goodput claim holds only under a fixed contract"
+    shown_by: "Contract table and the real MLPerf system-file lines; then the MLPerf software-gain plot"
+  - concept: Fleet profiling by hierarchy and sampling
+    frame: "Fleet profiling reads a hierarchy, cheapest record first; Tracing 1,024 GPUs for 5 seconds yields 512 GB"
+    shown_by: "ladder build of three records; trace-volume bars with always-on and sampled or triggered cards"
+  - concept: Scheduling goodput
+    frame: "What is this pool's scheduling goodput?"
+    shown_by: "pool_snapshot build: assigned 0.80, partial gangs 0.15, S = 0.65"
+  - concept: Runtime goodput
+    frame: "Runtime loss is the sum of five owners' terms"
+    shown_by: "equation with owner lectures plus runtime_terms bars"
+  - concept: Program goodput
+    frame: "How much node efficiency survives at 128 GPUs?; Batch-one decode sits on the bandwidth slope at 0.34% of peak"
+    shown_by: "node_fleet build (MFU 65% to 48%); roofline with decode and MBU definition"
+  - concept: Trading between goodput factors
+    frame: "A trade pays only if the product of ratios exceeds one; Twice the GPUs cut Llama 3's time to 0.52 at 4.9% more cost"
+    shown_by: "iso-goodput curves; two-point frontier from Llama 3 Table 4"
+worked_examples:
+  - name: "Napkin Math 9.2: scheduling goodput of a shared pool"
+    steps: ["given: assigned 0.80, partial gangs 0.15, input wait 0.05", "S = 0.80 - 0.15 = 0.65", "input wait crosses to R", "ceiling 0.80 if freed devices are refilled", "a loss before allocation no job can recover"]
+  - name: "Napkin Math 9.4: from one node to 128 GPUs"
+    steps: ["given: 65% MFU, 180 ms node; 245 ms fleet, same work per GPU", "180 / 245 = 0.735", "0.65 x 0.735 = 0.478", "check: 14.9 / 31.0 PFLOP = 0.48", "65 ms bounds communication plus synchronization; a trace attributes it"]
+  - name: "Napkin Math 9.5 and Sec. 9.8: where the pool's capacity went and which lever comes first"
+    steps: ["given: S 0.65, R 0.90, P 0.48", "MPG 0.282; shares 35 / 6 / 31", "lever ratios 1.23 / 1.09 / 1.35", "MPG 0.35 / 0.31 / 0.38", "program lever first; $7.09 per useful GPU-hour"]
+  - name: "Napkin Math 9.6: when a compilation build pays for itself"
+    steps: ["given: 8.33 ms step, 50/35/15 split, 15 min build", "0.635 of the step, 5.3 ms, saves 3.0 ms", "296,000 tokens, 26 min", "12 s each when 128 replicas share; 32 GPU-hours if each builds"]
+active_learning:
+  - {at_minute: 2.5, type: predict, prompt: "What share of held capacity became progress?", answer: "C, 37%: 10% runtime, 53% program."}
+  - {at_minute: 4.5, type: retrieval, prompt: "What does each utilization tier count?", answer: "Allocated, active, productive; 500, 350, 280 GPUs; 56%."}
+  - {at_minute: 15.5, type: predict, prompt: "How much faster did software alone make it?", answer: "GPT-J 2.69x, Llama 2 70B 1.44x, SDXL 1.25x on unchanged hardware."}
+  - {at_minute: 24, type: diagnose, prompt: "Which record settles each symptom?", answer: "Scheduler then timeline; timeline then trace; timeline (startup, R)."}
+  - {at_minute: 26.5, type: estimate, prompt: "What is this pool's scheduling goodput?", answer: "0.65; ceiling 0.80."}
+  - {at_minute: 35.5, type: concept_question, prompt: "Which factor does each loss lower?", answer: "S, R, R, R, P, P."}
+  - {at_minute: 41, type: estimate, prompt: "How much node efficiency survives at 128 GPUs?", answer: "0.735; fleet MFU 0.48."}
+  - {at_minute: 51, type: concept_question, prompt: "True or false (four fallacies)?", answer: "All false."}
+  - {at_minute: 56, type: predict, prompt: "Which lever should the team fund first?", answer: "C, program: MPG 0.38 (+35%)."}
+open_questions:
+  - "Should a fleet that runs training and decode report one program goodput against arithmetic, or two against different ideals?"
+  - "Who should pay for capacity no job holds?"
+  - "Past 13,000 GPUs, does the reliability layer become the first lever again?"
+more_examples:
+  - "Google TPU fleet: scheduling goodput above 95% in every size cohort, U-shaped by job size (Wongpanich et al. 2025)."
+  - "Cloudflare, July 2, 2019: a firewall regular expression drove edge CPUs to nearly 100% for 27 minutes; traffic fell about 82% (Cloudflare postmortem)."
+  - "MegaScale: about 0.5% of machines ran substantially slower; per-rank timers located them (Jiang et al. 2024)."
+  - "MLPerf Inference DGX H100 system files, v3.1 and v4.0: same hardware, different software stack (MLCommons, Apache 2.0)."
+  - "Meta reliability study: effective training time ratio (Kokolis et al. 2025), the reading (§9.5.2 footnote)."
+segments:
+  - {name: Goodput, minutes: 13.5, aha: "Useful work is offered capacity times S x R x P, each loss charged once."}
+  - {name: Measurement, minutes: 13, aha: "Fix the contract and window, then read scheduler records, timeline, traces in that order."}
+  - {name: Held Time, minutes: 12.5, aha: "Partial gangs cost S; five owners' terms add to R, ordered by job size."}
+  - {name: The Step, minutes: 15, aha: "MFU or MBU measures P; a fix helps only through the exposed term it shortens."}
+  - {name: Trades, minutes: 12, aha: "Rank levers by ratio at a reachable ceiling; judge trades by the product; time and cost place the frontier."}
+  - {name: Wrap-Up, minutes: 4.5, aha: "Llama 3 on a shared pool: 0.24."}
+callbacks:
+  - {lecture: 8, concept: "Utilization tiers", where: "Recall slide and note; measures table"}
+  - {lecture: 8, concept: "Gang scheduling", where: "Snapshot note"}
+  - {lecture: 8, concept: "Interruption economics", where: "Runtime equation (preemption term) and note"}
+  - {lecture: 7, concept: "Young-Daly checkpoint interval", where: "Runtime equation and note"}
+  - {lecture: 7, concept: "Recovery-time budget and fencing", where: "Runtime equation and note"}
+  - {lecture: 7, concept: "Gray failure detection", where: "Trace-volume note"}
+  - {lecture: 4, concept: "Data stall ratio", where: "Runtime equation and note"}
+  - {lecture: 5, concept: "Exposed communication under overlap", where: "Fleet Law note"}
+  - {lecture: 6, concept: "Scaling efficiency and the scaling wall", where: "Measures table; node vs fleet note"}
+  - {lecture: 6, concept: "Synchronization models and stragglers", where: "Fleet Law note"}
+  - {lecture: 1, concept: "Fleet Law", where: "Fleet Law note"}
+  - {lecture: 1, concept: "Naming the efficiency measure", where: "Measures note"}
+  - {lecture: 10, concept: "SLO goodput and the serving tax", where: "Measures table; next-lecture slide"}
+  - {lecture: 10, concept: "KV cache as admission budget", where: "Decode note (gloss)"}
+  - {lecture: 12, concept: "ML goodput (portfolio split)", where: "Cost note"}
+  - {lecture: 12, concept: "Staged rollout exposure budget", where: "Cloudflare note"}
+  - {lecture: null, concept: "Statistical goodput", where: "Measures table: the reading (§9.2.4)"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: all four; all three"}
+left_to_reading:
+  - concept: "Compiler-derived partitioning (GSPMD) and the device mesh"
+    why: "Secondary; named in the overlap and kernel notes; the annotations and resharding audit read better than heard (§9.7.1)."
+  - concept: "Archetype B goodput (Lighthouse 9.2)"
+    why: "Named in the lever note as a workload with a different order; details in §9.8.1."
+  - concept: "Asynchronous checkpoint staging trade"
+    why: "Appears as a row of the sort quiz; pricing in §9.9.2."
+coverage:
+  primary_taught: [ML goodput, Reproducible measurement contract, Fleet profiling by hierarchy and sampling, Scheduling goodput, Runtime goodput, Program goodput, Trading between goodput factors]
+  primary_left_to_reading: []
+  secondary: [Composed re-profiled optimization (kernel levers slide), Tensor-parallel collectives under contention (overlap slide, optional), Graph compilation amortization (compile slide, optional)]
+closing:
+  return_to_hook: "Llama 3's 0.90 and 0.41 are R and P; product 0.37; on the running job's pool it would deliver 0.65 x 0.37 = 0.24."
+  read_and_practice: ["Fleet Efficiency §9.2 to §9.9", "§9.8 self-check", "redo Napkin Math 9.5 with P = 0.41"]
+  further_reading:
+    - {cite: "Wongpanich et al., Machine Learning Fleet Efficiency: ML Productivity Goodput, 2025", why: "The three-factor decomposition measured on Google's TPU fleet."}
+    - {cite: "Dubey et al., The Llama 3 Herd of Models, 2024", why: "The hook's numbers and the 8,192 vs 16,384 GPU trade (Table 4)."}
+    - {cite: "Jiang et al., MegaScale, NSDI 2024", why: "Per-rank timers and straggler hunting at 10,000 GPUs."}
+    - {cite: "Chowdhery et al., PaLM, 2022", why: "Definition of MFU and published MFU values (Table 3)."}
+    - {cite: "Ren et al., Google-Wide Profiling, IEEE Micro 2010", why: "Statistical fleet profiling."}
+  bridge: "Lecture 10, Serving at Scale: how many requests can a fleet serve within its latency targets?"
+notes_for_author:
+  - "Stack kit has no intensity variant; dividers show stack_runtime only, not Execution 55 and Control 30 (course plan amendment 1)."
+  - "deckcheck expects the next lecture to read 'Inference at Scale'; the course plan and launch message say 'Serving at Scale'. The deck follows the plan."
+  - "Where the chapter rounds differently from calcs.py, the slide shows the computed value and the note gives the chapter's rounding (0.735 vs 74%, 3.55x vs 3.5x, 296,000 vs 300,000 tokens, 0.34% vs 0.3%)."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (all four) and C3 axis (all three) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."
