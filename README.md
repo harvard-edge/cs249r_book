@@ -94,7 +94,7 @@ A growing community of contributors helps improve every part of it: fixing error
 Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. SocratiQ adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
-  <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
+  <img src="README/curriculum-map.svg?v=5" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
 </p>
 
 ### For Students
@@ -341,7 +341,11 @@ I have always learned best by building from scratch and teaching others.
 
 Whenever I want to really understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from whatever happens to be trending on social media this week.
 
-This repository—the four textbook volumes, TinyTorch, our MLSys·im simulator, and the hands-on hardware kits—is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Putting it all out in the open is my way of giving back to the community. If following along helps you on your own engineering journey, I couldn't be happier to share it with you.
+This repository (the four textbook volumes, TinyTorch, our MLSys·im simulator, and the hands-on hardware kits) is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf.
+
+There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you. But I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. It sparked my curiosity, and it stayed with me.
+
+Students write to me now the way I once wrote to that professor, far more than I can answer one by one. This curriculum is my way of sending the package back out, to a much bigger classroom than any lecture hall can hold. If it helps you on your own engineering journey, I couldn't be happier to share it with you.
 
 </details>
 
