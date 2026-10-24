@@ -365,6 +365,8 @@ __all__ = [
     "CheckpointModel",
     "TrainingMemoryModel",
     "ScalingModel",
+    "TrainingRunModel",
+    "TrainingStateModel",
 ]
 
 

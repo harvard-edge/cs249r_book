@@ -476,6 +476,9 @@ __all__ = [
     "EfficiencyModel",
     "SensitivitySolver",
     "SynthesisSolver",
+    "DecodeBoundModel",
+    "IronLawModel",
+    "AmdahlModel",
 ]
 
 
