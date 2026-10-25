@@ -2,20 +2,23 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.38">
+<meta name="generator" content="quarto-1.10.19">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Distributed Training: 3D Parallelism and Scaling Efficiency – MLSys·im — Machine Learning Systems</title>
+<title>Distributed Training: 3D Parallelism and Scaling Efficiency – MLSys·im</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
 */
-code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
 div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
 ul.task-list{list-style: none;}
 ul.task-list li input[type="checkbox"] {
@@ -67,21 +70,23 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="../site_libs/quarto-search/fuse.min.js"></script>
 <script src="../site_libs/quarto-search/quarto-search.js"></script>
 <meta name="quarto:offset" content="../">
-<link href="../logo.svg" rel="icon" type="image/svg+xml">
+<link href="../tutorials/06_scaling_1000_gpus.html" rel="next">
+<link href="../tutorials/05_quantization.html" rel="prev">
+<link href="../assets/images/mlsysim-mark.svg" rel="icon" type="image/svg+xml">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-d58168542e1b05ab509c510cbeb13b13.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-88e37a8f5ac5aee93fe4de4f1f74577c.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-d58168542e1b05ab509c510cbeb13b13.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-842b59a411228a47553837caccf5722c.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-43f9c5728a6ecd39305b58679907e2cb.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-842b59a411228a47553837caccf5722c.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-fa3df308f44789d063cffd87b6133c39.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-dark-6e88db5068cc37de6ff62343570ac35e.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
-<link href="../site_libs/bootstrap/bootstrap-fa3df308f44789d063cffd87b6133c39.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-29787efc3a63dcb88e7547192a4041ae.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-5d6b8c11f1eddc2102a3905ed2670cd2.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-29787efc3a63dcb88e7547192a4041ae.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -111,6 +116,53 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="../site_libs/quarto-diagram/mermaid-init.js"></script>
 <link href="../site_libs/quarto-diagram/mermaid.css" rel="stylesheet">
 <!-- Shared head includes — MLSysBook ecosystem -->
+
+<!--
+  release-gate (inline, sync) — the live site (mlsysbook.ai) shows only the
+  released volumes; every other host (the dev preview at
+  harvard-edge.github.io/cs249r_book_dev, local previews) shows the whole
+  series. Unreleased content is hidden by default and revealed by the
+  `mls-staging` class, so a page without JavaScript still hides it.
+  To release a volume, drop its `.mls-unreleased` markers and its href rule
+  below. Added 2026-10-23: Volumes III and IV stay staging-only until their
+  public preview.
+-->
+<script>
+(function () {
+  var host = window.location.hostname;
+  if (!/(^|\.)mlsysbook\.ai$/.test(host)) {
+    document.documentElement.classList.add('mls-staging');
+  }
+})();
+</script>
+<style>
+  html:not(.mls-staging) .mls-unreleased,
+  html:not(.mls-staging) .navbar li:has(> a[href*="/vol3/"]),
+  html:not(.mls-staging) .navbar li:has(> a[href*="/vol4/"]),
+  html:not(.mls-staging) .navbar li:has(> a[href$="vol3.html"]),
+  html:not(.mls-staging) .navbar li:has(> a[href$="vol4.html"]),
+  html:not(.mls-staging) li.sidebar-item:has(> .sidebar-item-container > a[href$="vol3.html"]),
+  html:not(.mls-staging) li.sidebar-item:has(> .sidebar-item-container > a[href$="vol4.html"]),
+  html:not(.mls-staging) .nav-page:has(> a[href$="vol3.html"]),
+  html:not(.mls-staging) .nav-page:has(> a[href$="vol4.html"]),
+  html.mls-staging .mls-live-only {
+    display: none !important;
+  }
+</style>
+<script>
+// On the live site, an inline link into an unreleased volume (its book or
+// its slide deck) would 404, so it is unwrapped to plain text in place.
+// Navigation chrome is left alone: the :has() rules above hide it by its link.
+document.addEventListener('DOMContentLoaded', function () {
+  if (document.documentElement.classList.contains('mls-staging')) return;
+  var dead = /^\/(vol3|vol4)(\/|$)|^\/slides\/vol[34]\.html$/;
+  document.querySelectorAll('a[href]').forEach(function (a) {
+    if (a.hostname !== window.location.hostname || !dead.test(a.pathname)) return;
+    if (a.closest('nav, .navbar, .sidebar, .nav-page, .mls-unreleased')) return;
+    a.replaceWith.apply(a, Array.prototype.slice.call(a.childNodes));
+  });
+});
+</script>
 
 <!--
   theme-persist (inline, sync) — applies stored color-scheme before first paint.
@@ -268,6 +320,81 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
 <link rel="icon" href="https://mlsysbook.ai/vol1/assets/images/icons/favicon.png" type="image/png">
+<meta name="author" content="Vijay Janapa Reddi">
+
+<!-- Schema.org JSON-LD structured data for Google Knowledge Graph & Rich Snippets -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://mlsysbook.ai/#website",
+      "url": "https://mlsysbook.ai/",
+      "name": "Machine Learning Systems",
+      "description": "An open textbook series on machine learning systems.",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Harvard Edge Computing Lab",
+        "url": "https://edge.seas.harvard.edu"
+      }
+    },
+    {
+      "@type": "BookSeries",
+      "@id": "https://mlsysbook.ai/#bookseries",
+      "name": "Machine Learning Systems: Principles and Practices of Engineering Artificially Intelligent Systems",
+      "alternateName": ["MLSysBook", "Machine Learning Systems", "AI Engineering Textbook"],
+      "url": "https://mlsysbook.ai/",
+      "inLanguage": "en-US",
+      "author": {
+        "@type": "Person",
+        "name": "Vijay Janapa Reddi",
+        "jobTitle": "Gordon McKay Professor of Electrical Engineering and Computer Science",
+        "worksFor": {
+          "@type": "EducationalOrganization",
+          "name": "Harvard University",
+          "sameAs": "https://www.harvard.edu"
+        },
+        "sameAs": [
+          "https://profvjreddi.github.io/homepage/"
+        ]
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "MIT Press",
+        "url": "https://mitpress.mit.edu"
+      },
+      "hasPart": [
+        {
+          "@type": "Book",
+          "name": "Volume I: Introduction to Machine Learning Systems",
+          "url": "https://mlsysbook.ai/vol1/",
+          "bookFormat": "https://schema.org/EBook",
+          "about": "Foundations, Lifecycle, Data Engineering, Training, Inference, Benchmarking, and Responsible AI"
+        },
+        {
+          "@type": "Book",
+          "name": "Volume II: Scaling Machine Learning Systems",
+          "url": "https://mlsysbook.ai/vol2/",
+          "bookFormat": "https://schema.org/EBook",
+          "about": "Distributed Training, Accelerator Architecture, Parallelism, Memory Systems, and Serving"
+        }
+      ]
+    },
+    {
+      "@type": "Course",
+      "@id": "https://mlsysbook.ai/#course",
+      "name": "CS249r: Machine Learning Systems",
+      "description": "Harvard University course on principles and practices of engineering artificially intelligent systems.",
+      "provider": {
+        "@type": "EducationalOrganization",
+        "name": "Harvard University",
+        "sameAs": "https://www.harvard.edu"
+      }
+    }
+  ]
+}
+</script>
 
 <!--
   navbar-theme-toggle-relocate — moves the Quarto theme toggle into the
@@ -341,14 +468,89 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   }
 })();
 </script>
+
+<!--
+  margin-figure-size — keep margin illustrations proportionate.
+
+  Margin figures are authored narrow (about 120 pt wide) and stretched to
+  the full margin column by width="100%". Tall ones (the architecture-stack
+  locator, vertical ladders) then run 350-520 px down the page. CSS cannot
+  say "full column width unless that makes the image taller than X" without
+  each image's aspect ratio, so this sets that width once per image from
+  its natural size: min(100%, cap x aspect). Short images are untouched.
+-->
+<script>
+(function () {
+  'use strict';
+  var CAP_REM = 20;
+  function capOne(img) {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    var maxW = CAP_REM * rem * img.naturalWidth / img.naturalHeight;
+    img.style.setProperty('width', 'min(100%, ' + Math.round(maxW) + 'px)', 'important');
+    img.style.setProperty('height', 'auto', 'important');
+    img.style.display = 'block';
+    img.style.marginLeft = 'auto';
+    img.style.marginRight = 'auto';
+  }
+  function capMarginFigures() {
+    var imgs = document.querySelectorAll('.column-margin img');
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (img.complete) capOne(img);
+      else img.addEventListener('load', capOne.bind(null, img), { once: true });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', capMarginFigures);
+  } else {
+    capMarginFigures();
+  }
+})();
+</script>
+
+<!--
+  lightbox-caption — show the typeset figure caption inside the zoom view.
+
+  Quarto's GLightbox copies each caption into the slide as plain text with
+  the math delimiters stripped, so notation macros (\RecurrentInputWeights)
+  appear raw. After each slide loads, replace that text with the figure's
+  own rendered <figcaption>, which MathJax has already typeset.
+-->
+<script>
+(function () {
+  'use strict';
+  function captionFor(trigger) {
+    if (!trigger) return null;
+    var fig = trigger.closest('figure, .quarto-float, .quarto-figure');
+    return fig ? fig.querySelector('figcaption') : null;
+  }
+  function hook() {
+    var lb = window.lightboxQuarto;
+    if (!lb || !lb.on) return;
+    lb.on('slide_after_load', function (data) {
+      var node = data && data.slideNode;
+      var cap = captionFor(data && data.trigger);
+      if (!node || !cap) return;
+      var desc = node.querySelector('.gslide-title') || node.querySelector('.gslide-desc');
+      if (desc) desc.innerHTML = cap.innerHTML;
+    });
+  }
+  window.addEventListener('load', hook);
+})();
+</script>
 <meta name="theme-color" content="#0284C7">
+<!-- Absolute URLs: Quarto rewrites root-relative paths in header
+     includes against the project root (/mlsysim/x -> ./mlsysim/x). -->
+<link rel="apple-touch-icon" href="https://mlsysbook.ai/mlsysim/apple-touch-icon.png">
+<link rel="manifest" href="https://mlsysbook.ai/mlsysim/site.webmanifest">
 <!-- Release identity (rendered into the footer pill below).
      The publish workflow drops release-manifest.json at the
      site root before deploy. -->
 <meta name="release-manifest" content="/mlsysim/release-manifest.json">
 
   <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
-  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-chtml.js" type="text/javascript"></script>
 
 <script type="text/javascript">
 const typesetMath = (el) => {
@@ -377,13 +579,12 @@ window.Quarto = {
 };
 </script>
 
-<link rel="stylesheet" href="../styles/landing.css">
-<meta property="og:title" content="MLSys·im — ML Systems Infrastructure Modeling">
-<meta property="og:description" content="Predict ML system performance, cost, and carbon from first principles. Companion to the ML Systems textbook.">
-<meta property="og:site_name" content="MLSys·im — Machine Learning Systems">
+<meta property="og:title" content="MLSys·im: First-Principles Modeling for ML Systems">
+<meta property="og:description" content="Predict ML system performance, cost, and carbon from first principles. Companion to the Machine Learning Systems textbook.">
+<meta property="og:site_name" content="MLSys·im">
 <meta property="og:locale" content="en_US">
-<meta name="twitter:title" content="MLSys·im — ML Systems Infrastructure Modeling">
-<meta name="twitter:description" content="Predict ML performance, cost, and carbon from first principles. Open source.">
+<meta name="twitter:title" content="MLSys·im: First-Principles Modeling for ML Systems">
+<meta name="twitter:description" content="Predict ML system performance, cost, and carbon from first principles. Open source.">
 <meta name="twitter:card" content="summary">
 </head>
 
@@ -585,7 +786,7 @@ window.Quarto = {
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-mlsys·im">    
         <li>
-    <a class="dropdown-item" href="../index.html"><i class="bi bi-calculator" role="img">
+    <a class="dropdown-item" href="../index.html"><i class="bi bi-house" role="img">
 </i> 
  <span class="dropdown-text">MLSys·im Home</span></a>
   </li>  
@@ -596,16 +797,11 @@ window.Quarto = {
  <span class="dropdown-text">Getting Started</span></a>
   </li>  
         <li>
-    <a class="dropdown-item" href="../cli-reference.html"><i class="bi bi-terminal" role="img">
-</i> 
- <span class="dropdown-text">CLI Reference</span></a>
-  </li>  
-        <li><hr class="dropdown-divider"></li>
-        <li>
     <a class="dropdown-item" href="../tutorials/index.html"><i class="bi bi-journal-code" role="img">
 </i> 
  <span class="dropdown-text">Tutorials</span></a>
   </li>  
+        <li><hr class="dropdown-divider"></li>
         <li>
     <a class="dropdown-item" href="../zoo/index.html"><i class="bi bi-collection" role="img">
 </i> 
@@ -616,16 +812,26 @@ window.Quarto = {
 </i> 
  <span class="dropdown-text">API Reference</span></a>
   </li>  
-        <li><hr class="dropdown-divider"></li>
         <li>
-    <a class="dropdown-item" href="../mlsysim-paper.pdf" target="_blank"><i class="bi bi-file-pdf" role="img">
+    <a class="dropdown-item" href="../cli-reference.html"><i class="bi bi-terminal" role="img">
 </i> 
- <span class="dropdown-text">MLSys·im Paper (PDF)</span></a>
+ <span class="dropdown-text">CLI Reference</span></a>
   </li>  
+        <li><hr class="dropdown-divider"></li>
         <li>
     <a class="dropdown-item" href="../slides.html"><i class="bi bi-easel" role="img">
 </i> 
  <span class="dropdown-text">Tutorial Slides</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="../blog/index.html"><i class="bi bi-pencil-square" role="img">
+</i> 
+ <span class="dropdown-text">Blog</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="../mlsysim-paper.pdf" target="_blank"><i class="bi bi-file-pdf" role="img">
+</i> 
+ <span class="dropdown-text">MLSys·im Paper (PDF)</span></a>
   </li>  
     </ul>
   </li>
@@ -635,36 +841,36 @@ window.Quarto = {
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-read">    
         <li>
+    <a class="dropdown-item" href="https://mlsysbook.ai/explore/"><i class="bi bi-diagram-3" role="img">
+</i> 
+ <span class="dropdown-text">Concept Explorer</span></a>
+  </li>  
+        <li><hr class="dropdown-divider"></li>
+        <li>
     <a class="dropdown-item" href="https://mlsysbook.ai/vol1/"><i class="bi bi-journal" role="img">
 </i> 
- <span class="dropdown-text">Volume I: Foundations</span></a>
+ <span class="dropdown-text">Volume I: Introduction to Machine Learning Systems</span></a>
   </li>  
         <li>
     <a class="dropdown-item" href="https://mlsysbook.ai/vol2/"><i class="bi bi-journal" role="img">
 </i> 
- <span class="dropdown-text">Volume II: At Scale</span></a>
+ <span class="dropdown-text">Volume II: Scaling Machine Learning Systems (preview)</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://mlsysbook.ai/vol3/"><i class="bi bi-journal" role="img">
+</i> 
+ <span class="dropdown-text">Volume III: Agentic Machine Learning Systems (in preparation)</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://mlsysbook.ai/vol4/"><i class="bi bi-journal" role="img">
+</i> 
+ <span class="dropdown-text">Volume IV: Physical AI (in preparation)</span></a>
   </li>  
         <li><hr class="dropdown-divider"></li>
         <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf" target="_blank"><i class="bi bi-file-pdf" role="img">
+    <a class="dropdown-item" href="https://mlsysbook.ai/tinytorch/"><i class="bi bi-fire" role="img">
 </i> 
- <span class="dropdown-text">Volume I PDF</span></a>
-  </li>  
-        <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub" target="_blank"><i class="bi bi-journal-text" role="img">
-</i> 
- <span class="dropdown-text">Volume I EPUB</span></a>
-  </li>  
-        <li><hr class="dropdown-divider"></li>
-        <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf" target="_blank"><i class="bi bi-file-pdf" role="img">
-</i> 
- <span class="dropdown-text">Volume II PDF</span></a>
-  </li>  
-        <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub" target="_blank"><i class="bi bi-journal-text" role="img">
-</i> 
- <span class="dropdown-text">Volume II EPUB</span></a>
+ <span class="dropdown-text">TinyTorch (Standalone Book)</span></a>
   </li>  
     </ul>
   </li>
@@ -673,6 +879,11 @@ window.Quarto = {
  <span class="menu-text">Build</span>
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-build">    
+        <li>
+    <a class="dropdown-item" href="https://mlsysbook.ai/games/"><i class="bi bi-controller" role="img">
+</i> 
+ <span class="dropdown-text">Playground Games</span></a>
+  </li>  
         <li>
     <a class="dropdown-item" href="https://mlsysbook.ai/labs/"><i class="bi bi-sliders" role="img">
 </i> 
@@ -701,19 +912,19 @@ window.Quarto = {
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-teach">    
         <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/instructors/course-map.html"><i class="bi bi-signpost-split" role="img">
+    <a class="dropdown-item" href="https://mlsysbook.ai/instructors/"><i class="bi bi-person-video3" role="img">
 </i> 
- <span class="dropdown-text">Course Map</span></a>
+ <span class="dropdown-text">Instructor Hub</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://mlsysbook.ai/courses/"><i class="bi bi-mortarboard" role="img">
+</i> 
+ <span class="dropdown-text">Courses</span></a>
   </li>  
         <li>
     <a class="dropdown-item" href="https://mlsysbook.ai/slides/"><i class="bi bi-easel" role="img">
 </i> 
  <span class="dropdown-text">Lecture Slides</span></a>
-  </li>  
-        <li>
-    <a class="dropdown-item" href="https://mlsysbook.ai/instructors/"><i class="bi bi-person-video3" role="img">
-</i> 
- <span class="dropdown-text">Instructor Hub</span></a>
   </li>  
     </ul>
   </li>
@@ -809,7 +1020,7 @@ window.Quarto = {
 </ul>
             <ul class="navbar-nav navbar-nav-scroll ms-auto">
   <li class="nav-item">
-    <a class="nav-link" href="../#subscribe"> <i class="bi bi-envelope" role="img">
+    <a class="nav-link" href="https://mlsysbook.ai/newsletter/"> <i class="bi bi-envelope" role="img">
 </i> 
 <span class="menu-text">Subscribe</span></a>
   </li>  
@@ -864,7 +1075,7 @@ window.Quarto = {
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item">Distributed Training: 3D Parallelism and Scaling Efficiency</li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../tutorials/index.html">Tutorials</a></li><li class="breadcrumb-item"><a href="../tutorials/distributed.html">Scale &amp; Cost</a></li><li class="breadcrumb-item"><a href="../tutorials/distributed.html">Distributed Training: 3D Parallelism and Scaling Efficiency</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
       <button type="button" class="btn quarto-search-button" aria-label="Search" onclick="window.quartoOpenSearch();">
@@ -872,14 +1083,20 @@ window.Quarto = {
       </button>
     </div>
   </nav>
-  <div id="quarto-announcement" data-announcement-id="39468e00f216bbeb332b8900e283ba5c" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
-<p>🧮 <strong>MLSys·im</strong> — first-principles analytical modeling for ML training and inference; model the physics before you build.<br> 📘 <strong>The book:</strong> <a href="https://mlsysbook.ai/vol1/">Vol I: Foundations</a> · <a href="https://mlsysbook.ai/vol2/">Vol II: At Scale</a> — open access, free forever.<br> 🛠️ <strong>Alongside the book:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/labs/">Labs</a> (explore) · <a href="https://mlsysbook.ai/staffml/">StaffML</a> (practice) · <a href="https://mlsysbook.ai/slides/">Lecture Slides</a><br> 📬 <strong>Newsletter:</strong> ML Systems insights &amp; updates — <a href="https://mlsysbook.ai/newsletter/">Subscribe →</a></p>
+  <div id="quarto-announcement" data-announcement-id="225921c99b76333b94da0e0ea9dde862" class="alert alert-primary hidden"><i class="bi bi-megaphone quarto-announcement-icon"></i><div class="quarto-announcement-content">
+<p><span class="mls-ann-line"><strong>MLSys·im</strong>: analytical models of ML training and inference.</span> <span class="mls-ann-line"><strong>The books:</strong> <a href="https://mlsysbook.ai/vol1/">Introduction to Machine Learning Systems</a> · <a href="https://mlsysbook.ai/vol2/">Scaling Machine Learning Systems</a> (preview)<span class="mls-unreleased"> · <a href="https://mlsysbook.ai/vol3/">Agentic Machine Learning Systems</a> (in preparation) · <a href="https://mlsysbook.ai/vol4/">Physical AI</a> (in preparation)</span>. All are open access.</span> <span class="mls-ann-line mls-ann-siblings"><strong>Companion resources:</strong> <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a> (build) · <a href="https://mlsysbook.ai/kits/">Hardware Kits</a> (deploy) · <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a> (model) · <a href="https://mlsysbook.ai/labs/">Labs</a> (explore) · <a href="https://mlsysbook.ai/slides/">Lecture Slides</a> (teach) · <a href="https://mlsysbook.ai/instructors/">Instructor Hub</a> (teach) · <a href="https://mlsysbook.ai/staffml/">StaffML</a> (practice) · <a href="https://mlsysbook.ai/newsletter/">Newsletter</a></span></p>
 </div><i class="bi bi-x-lg quarto-announcement-action"></i></div>
 </header>
 <!-- content -->
 <div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
 <!-- sidebar -->
   <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation floating overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+      <a href="../tutorials/index.html" class="sidebar-logo-link">
+      <img src="../assets/images/mlsysim-wordmark-light.svg" alt="" class="sidebar-logo light-content py-0 d-lg-inline d-none">
+      <img src="../assets/images/mlsysim-wordmark-dark.svg" alt="" class="sidebar-logo dark-content py-0 d-lg-inline d-none">
+      </a>
+      </div>
         <div class="mt-2 flex-shrink-0 align-items-center">
         <div class="sidebar-search">
         <div id="quarto-search" class="" title="Search"></div>
@@ -887,15 +1104,22 @@ window.Quarto = {
         </div>
     <div class="sidebar-menu-container"> 
     <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">MLSys·im Home</span></a>
+  </div>
+</li>
+        <li class="px-0"><hr class="sidebar-divider hi "></li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true">
+            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="false">
  <span class="menu-text">Get Started</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="true" aria-label="Toggle section">
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 show">  
+      <ul id="quarto-sidebar-section-1" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../getting-started.html" class="sidebar-item-text sidebar-link">
@@ -910,8 +1134,32 @@ window.Quarto = {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
+  <a href="../solver-guide.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Choosing a Solver</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
   <a href="../cli-reference.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">CLI Reference</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../for-students.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">For Students</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../for-instructors.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">For Instructors</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../for-engineers.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">For Engineers &amp; Researchers</span></a>
   </div>
 </li>
       </ul>
@@ -985,13 +1233,19 @@ window.Quarto = {
   </li>
           <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="false">
+            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true">
  <span class="menu-text">Scale &amp; Cost</span></a>
-          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="false" aria-label="Toggle section">
+          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-5" role="navigation" aria-expanded="true" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth2 ">  
+      <ul id="quarto-sidebar-section-5" class="collapse list-unstyled sidebar-section depth2 show">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../tutorials/distributed.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text">Distributed Training: 3D Parallelism and Scaling Efficiency</span></a>
+  </div>
+</li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../tutorials/06_scaling_1000_gpus.html" class="sidebar-item-text sidebar-link">
@@ -1078,19 +1332,13 @@ window.Quarto = {
   </li>
           <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-8" role="navigation" aria-expanded="false">
+            <a href="../tutorial/index.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">Self-Paced Tutorial</span></a>
           <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-8" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
       <ul id="quarto-sidebar-section-8" class="collapse list-unstyled sidebar-section depth2 ">  
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../tutorial/exercises.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Tutorial Exercises</span></a>
-  </div>
-</li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../tutorial/cheatsheet.html" class="sidebar-item-text sidebar-link">
@@ -1110,12 +1358,12 @@ window.Quarto = {
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
             <a href="../zoo/index.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">The MLSys Zoo</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-9" role="navigation" aria-expanded="true" aria-label="Toggle section">
+ <span class="menu-text">The Zoo</span></a>
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-9" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-9" class="collapse list-unstyled sidebar-section depth1 show">  
+      <ul id="quarto-sidebar-section-9" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../zoo/hardware.html" class="sidebar-item-text sidebar-link">
@@ -1160,6 +1408,30 @@ window.Quarto = {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
+  <a href="../zoo/embodied.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">The Embodied Zoo</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../zoo/sensors.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">The Sensor Zoo</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../zoo/actuators.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">The Actuator Zoo</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../zoo/agents.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">The Agents Zoo</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
   <a href="../zoo/literature.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">The Literature Zoo</span></a>
   </div>
@@ -1174,42 +1446,149 @@ window.Quarto = {
   </li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-10" role="navigation" aria-expanded="true">
- <span class="menu-text">For Your Role</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-10" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <a href="../api/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">API Reference</span></a>
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-10" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-10" class="collapse list-unstyled sidebar-section depth1 show">  
+      <ul id="quarto-sidebar-section-10" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../for-students.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">For Students</span></a>
+  <a href="../api/engine.engine.Engine.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Engine</span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../for-instructors.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">For Instructors</span></a>
+  <a href="../api/engine.scenarios.Scenario.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Scenario</span></a>
+  </div>
+</li>
+          <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-11" role="navigation" aria-expanded="false">
+ <span class="menu-text">Physics formulas</span></a>
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-11" role="navigation" aria-expanded="false" aria-label="Toggle section">
+            <i class="bi bi-chevron-right ms-2"></i>
+          </a> 
+      </div>
+      <ul id="quarto-sidebar-section-11" class="collapse list-unstyled sidebar-section depth2 ">  
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.performance.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Performance</span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../for-engineers.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">For Engineers &amp; Researchers</span></a>
+  <a href="../api/physics.memory.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Memory</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.transformer.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Transformer</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.quantities.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Quantities</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.communication.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Communication</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.networking.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Networking</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.serving.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Serving</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.reliability.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Reliability</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.statistics.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Statistics</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.economics.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Economics</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.agents.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Agents</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.drivetrain.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Drivetrain</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.robotics.stopping.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Robotics: stopping</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.robotics.actuation.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Robotics: actuation</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.robotics.control.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Robotics: control</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.robotics.perception.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Robotics: perception</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../api/physics.robotics.assurance.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Robotics: assurance</span></a>
   </div>
 </li>
       </ul>
   </li>
+      </ul>
+  </li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-11" role="navigation" aria-expanded="true">
+            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-12" role="navigation" aria-expanded="false">
  <span class="menu-text">Concepts</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-11" role="navigation" aria-expanded="true" aria-label="Toggle section">
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-12" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-11" class="collapse list-unstyled sidebar-section depth1 show">  
+      <ul id="quarto-sidebar-section-12" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../philosophy.html" class="sidebar-item-text sidebar-link">
@@ -1220,6 +1599,12 @@ window.Quarto = {
   <div class="sidebar-item-container"> 
   <a href="../architecture.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">The 5-Layer Architecture</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../DATA_MODEL.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">MLSysSim Data Model</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -1242,14 +1627,14 @@ window.Quarto = {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../api-stability.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">API Stability Promise</span></a>
+  <a href="../empirical-calibration.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Empirical Calibration: mlsysim vs.&nbsp;Published Benchmarks</span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="../empirical-calibration.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Empirical Calibration: mlsysim vs.&nbsp;Published Benchmarks</span></a>
+  <a href="../api-stability.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">API Stability Promise</span></a>
   </div>
 </li>
           <li class="sidebar-item">
@@ -1262,13 +1647,13 @@ window.Quarto = {
   </li>
         <li class="sidebar-item sidebar-item-section">
       <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-12" role="navigation" aria-expanded="true">
- <span class="menu-text">Build &amp; Extend</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-12" role="navigation" aria-expanded="true" aria-label="Toggle section">
+            <a class="sidebar-item-text sidebar-link text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-13" role="navigation" aria-expanded="false">
+ <span class="menu-text">Contribute</span></a>
+          <a class="sidebar-item-toggle text-start collapsed" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-13" role="navigation" aria-expanded="false" aria-label="Toggle section">
             <i class="bi bi-chevron-right ms-2"></i>
           </a> 
       </div>
-      <ul id="quarto-sidebar-section-12" class="collapse list-unstyled sidebar-section depth1 show">  
+      <ul id="quarto-sidebar-section-13" class="collapse list-unstyled sidebar-section depth1 ">  
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../extending-the-engine.html" class="sidebar-item-text sidebar-link">
@@ -1284,118 +1669,7 @@ window.Quarto = {
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
   <a href="../contributing.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Contributing to MLSYSIM</span></a>
-  </div>
-</li>
-      </ul>
-  </li>
-        <li class="sidebar-item sidebar-item-section">
-      <div class="sidebar-item-container"> 
-            <a href="../api/index.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">API Reference</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-13" role="navigation" aria-expanded="true" aria-label="Toggle section">
-            <i class="bi bi-chevron-right ms-2"></i>
-          </a> 
-      </div>
-      <ul id="quarto-sidebar-section-13" class="collapse list-unstyled sidebar-section depth1 show">  
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/hardware.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Hardware</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/models.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Models</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/systems.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Systems</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/infrastructure.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Infrastructure</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/platforms.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Platforms</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/datasets.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Datasets</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/literature.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Literature</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/ops.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Ops</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/physics.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Physics</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/core.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Core</span></a>
-  </div>
-</li>
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../api/solvers.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">Solvers</span></a>
-  </div>
-</li>
-      </ul>
-  </li>
-        <li class="sidebar-item sidebar-item-section">
-      <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-14" role="navigation" aria-expanded="true">
- <span class="menu-text">Blog</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-14" role="navigation" aria-expanded="true" aria-label="Toggle section">
-            <i class="bi bi-chevron-right ms-2"></i>
-          </a> 
-      </div>
-      <ul id="quarto-sidebar-section-14" class="collapse list-unstyled sidebar-section depth1 show">  
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../blog/how-much-memory-llama3.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text">How Much Memory Does Llama-3 70B Need?</span></a>
-  </div>
-</li>
-      </ul>
-  </li>
-        <li class="sidebar-item sidebar-item-section">
-      <div class="sidebar-item-container"> 
-            <a class="sidebar-item-text sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-15" role="navigation" aria-expanded="true">
- <span class="menu-text">Project</span></a>
-          <a class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-15" role="navigation" aria-expanded="true" aria-label="Toggle section">
-            <i class="bi bi-chevron-right ms-2"></i>
-          </a> 
-      </div>
-      <ul id="quarto-sidebar-section-15" class="collapse list-unstyled sidebar-section depth1 show">  
-          <li class="sidebar-item">
-  <div class="sidebar-item-container"> 
-  <a href="../mlsysim-paper.pdf" class="sidebar-item-text sidebar-link" target="_blank">
- <span class="menu-text">MLSys·im Paper (PDF)</span></a>
+ <span class="menu-text">Contributing to MLSys·im</span></a>
   </div>
 </li>
       </ul>
@@ -1416,8 +1690,6 @@ window.Quarto = {
   <li><a href="#ring-all-reduce-the-network-tax" id="toc-ring-all-reduce-the-network-tax" class="nav-link" data-scroll-target="#ring-all-reduce-the-network-tax">4. Ring All-Reduce: The Network Tax</a></li>
   <li><a href="#pipeline-parallelism-and-the-bubble" id="toc-pipeline-parallelism-and-the-bubble" class="nav-link" data-scroll-target="#pipeline-parallelism-and-the-bubble">5. Pipeline Parallelism and the Bubble</a></li>
   <li><a href="#finding-the-optimal-configuration" id="toc-finding-the-optimal-configuration" class="nav-link" data-scroll-target="#finding-the-optimal-configuration">6. Finding the Optimal Configuration</a></li>
-  <li><a href="#your-turn" id="toc-your-turn" class="nav-link" data-scroll-target="#your-turn">Your Turn</a></li>
-  <li><a href="#what-you-learned" id="toc-what-you-learned" class="nav-link" data-scroll-target="#what-you-learned">What You Learned</a></li>
   <li><a href="#advanced-network-topologies" id="toc-advanced-network-topologies" class="nav-link" data-scroll-target="#advanced-network-topologies">Advanced: Network Topologies</a></li>
   <li><a href="#next-steps" id="toc-next-steps" class="nav-link" data-scroll-target="#next-steps">Next Steps</a></li>
   </ul>
@@ -1427,10 +1699,10 @@ window.Quarto = {
 <main class="content" id="quarto-document-content">
 
 
-<header id="title-block-header" class="quarto-title-block default">
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../tutorials/index.html">Tutorials</a></li><li class="breadcrumb-item"><a href="../tutorials/distributed.html">Scale &amp; Cost</a></li><li class="breadcrumb-item"><a href="../tutorials/distributed.html">Distributed Training: 3D Parallelism and Scaling Efficiency</a></li></ol></nav>
 <div class="quarto-title">
 <h1 class="title">Distributed Training: 3D Parallelism and Scaling Efficiency</h1>
-<p class="subtitle lead">Discover why 1024 GPUs rarely deliver 1024× speedup — and how to minimize the gap.</p>
+<p class="subtitle lead">Discover why 1024 GPUs rarely deliver 1024× speedup, and how to minimize the gap.</p>
 </div>
 
 
@@ -1453,15 +1725,15 @@ window.Quarto = {
 <i class="callout-icon"></i>
 </div>
 <div class="callout-title-container flex-fill">
-<span class="screen-reader-only">Note</span>Background: Why distributed training?
+<span class="screen-reader-only">Note</span>Background: Why distributed training is needed
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>Some models are too large to fit in a single GPU’s memory, and some training jobs would take months on one GPU. <strong>Distributed training</strong> splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. You should complete the Hello World and LLM Serving tutorials before this one.</p>
+<p>Some models are too large to fit in a single GPU’s memory, and some training jobs would take months on one GPU. <strong>Distributed training</strong> splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. Complete the Hello World and LLM Serving tutorials before this one.</p>
 </div>
 </div>
 <p>Scaling a training job from 1 GPU to 1024 GPUs incurs overhead at every step. Communication, pipeline stalls, and coordination each chip away at theoretical speedup. Understanding where that efficiency goes, and how to recover it, is what separates a well-tuned distributed training job from an expensive waste of cluster time.</p>
-<p>By the end of this tutorial you will understand:</p>
+<p>This tutorial explains:</p>
 <ul>
 <li>How <strong>Data Parallelism</strong>, <strong>Tensor Parallelism</strong>, and <strong>Pipeline Parallelism</strong> decompose work across GPUs</li>
 <li>Why synchronization (ring all-reduce) overhead depends on model size and network bandwidth</li>
@@ -1518,7 +1790,7 @@ window.Quarto = {
 <h2 class="anchored" data-anchor-id="setup">1. Setup</h2>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> mlsysim</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim.solvers <span class="im">import</span> DistributedModel</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div id="8142f5ff" class="cell" data-execution_count="2">
+<div id="77954f31" class="cell" data-execution_count="2">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim.solvers <span class="im">import</span> DistributedModel</span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Llama-3.1-70B: the model requires distributed training — too large for a single GPU</span></span>
@@ -1528,25 +1800,25 @@ window.Quarto = {
 <span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="co"># (DGX is NVIDIA's pre-built server containing 8 H100 GPUs connected via NVLink)</span></span>
 <span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>cluster <span class="op">=</span> mlsysim.Systems.Clusters.Research_256</span>
 <span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Model:   </span><span class="sc">{</span>model<span class="sc">.</span>name<span class="sc">}</span><span class="ss">  (</span><span class="sc">{</span>model<span class="sc">.</span>parameters<span class="sc">.</span>to(<span class="st">'Gparam'</span>)<span class="sc">:.0f}</span><span class="ss"> params)"</span>)</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Model:   </span><span class="sc">{</span>model<span class="sc">.</span>name<span class="sc">}</span><span class="ss">  (</span><span class="sc">{</span>model<span class="sc">.</span>parameters<span class="sc">.</span>to(<span class="st">'Gparam'</span>)<span class="sc">.</span>magnitude<span class="sc">:.1f}</span><span class="ss">B params)"</span>)</span>
 <span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Cluster: </span><span class="sc">{</span>cluster<span class="sc">.</span>name<span class="sc">}</span><span class="ss">"</span>)</span>
 <span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"  Nodes: </span><span class="sc">{</span>cluster<span class="sc">.</span>count<span class="sc">}</span><span class="ss">  ×  </span><span class="sc">{</span>cluster<span class="sc">.</span>node<span class="sc">.</span>accelerators_per_node<span class="sc">}</span><span class="ss"> GPUs/node"</span>)</span>
 <span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"  Total: </span><span class="sc">{</span>cluster<span class="sc">.</span>total_accelerators<span class="sc">}</span><span class="ss"> accelerators"</span>)</span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"  Fabric: </span><span class="sc">{</span>cluster<span class="sc">.</span>fabric<span class="sc">.</span>name<span class="sc">}</span><span class="ss"> @ </span><span class="sc">{</span>cluster<span class="sc">.</span>fabric<span class="sc">.</span>bandwidth<span class="sc">.</span>to(<span class="st">'GB/s'</span>)<span class="sc">:.0f}</span><span class="ss"> GB/s/link"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"  Fabric: </span><span class="sc">{</span>cluster<span class="sc">.</span>fabric<span class="sc">.</span>name<span class="sc">}</span><span class="ss"> @ </span><span class="sc">{</span>cluster<span class="sc">.</span>fabric<span class="sc">.</span>bandwidth<span class="sc">.</span>to(<span class="st">'GB/s'</span>)<span class="sc">.</span>magnitude<span class="sc">:.1f}</span><span class="ss"> GB/s/link"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Model:   Llama-3.1-70B  (71 gigaparam params)
+<pre><code>Model:   Llama-3.1-70B  (70.6B params)
 Cluster: Research Cluster (256 GPUs)
   Nodes: 32  ×  8 GPUs/node
   Total: 256 accelerators
-  Fabric: 100GbE @ 12 GB / second GB/s/link</code></pre>
+  Fabric: 100GbE @ 12.5 GB/s/link</code></pre>
 </div>
 </div>
 <hr>
 </section>
 <section id="visualizing-3d-parallelism" class="level2">
 <h2 class="anchored" data-anchor-id="visualizing-3d-parallelism">2. Visualizing 3D Parallelism</h2>
-<p>Before working through the numbers, consider how 3D parallelism decomposes a training job across a cluster. Each dimension splits work differently and introduces a different type of overhead:</p>
-<p><strong>Data Parallelism (DP=4)</strong> — each GPU holds a full model copy and processes 1/4 of the batch. After the backward pass, gradients are synchronized via All-Reduce.</p>
+<p>Before working through the numbers, consider how 3D parallelism decomposes a training job across a cluster (80 layers across 256 GPUs). Each dimension splits work differently and introduces a different type of overhead:</p>
+<p><strong>Data Parallelism (DP=4).</strong> Each GPU holds a full model copy and processes 1/4 of the batch. After the backward pass, gradients are synchronized via All-Reduce.</p>
 <div class="cell" data-layout-align="default">
 <div class="cell-output-display">
 <div>
@@ -1562,7 +1834,7 @@ Cluster: Research Cluster (256 GPUs)
 </div>
 </div>
 </div>
-<p><strong>Tensor Parallelism (TP=2)</strong> — each layer is split across GPUs. Requires fast interconnect (NVLink).</p>
+<p><strong>Tensor Parallelism (TP=2).</strong> Each layer is split across GPUs, which requires a fast interconnect (NVLink).</p>
 <div class="cell" data-layout-align="default">
 <div class="cell-output-display">
 <div>
@@ -1576,7 +1848,7 @@ Cluster: Research Cluster (256 GPUs)
 </div>
 </div>
 </div>
-<p><strong>Pipeline Parallelism (PP=4)</strong> — model layers are partitioned across stages. Activations flow forward; gradients flow backward.</p>
+<p><strong>Pipeline Parallelism (PP=4).</strong> Model layers are partitioned across stages. Activations flow forward; gradients flow backward.</p>
 <div class="cell" data-layout-align="default">
 <div class="cell-output-display">
 <div>
@@ -1592,13 +1864,13 @@ Cluster: Research Cluster (256 GPUs)
 </div>
 </div>
 </div>
-<p>The key insight: <strong>DP</strong> uses inter-node bandwidth (network fabric), <strong>TP</strong> uses intra-node bandwidth (NVLink), and <strong>PP</strong> introduces idle time (pipeline bubbles). The optimal configuration balances all three overheads.</p>
+<p><strong>DP</strong> uses inter-node bandwidth (network fabric), <strong>TP</strong> uses intra-node bandwidth (NVLink), and <strong>PP</strong> introduces idle time (pipeline bubbles). The optimal configuration balances all three overheads.</p>
 <hr>
 </section>
 <section id="baseline-pure-data-parallelism" class="level2">
 <h2 class="anchored" data-anchor-id="baseline-pure-data-parallelism">3. Baseline: Pure Data Parallelism</h2>
-<p>Start with the simplest configuration — no model splitting, just replicate the full model on every GPU and split the batch. The per-GPU compute time is determined by the same roofline model you used in the Hello World tutorial. The new element here is <strong>communication overhead</strong>: after each training step, all GPUs must synchronize their gradients via the network before the next step can begin.</p>
-<div id="49164668" class="cell" data-execution_count="3">
+<p>Start with the simplest configuration: no model splitting, only the full model replicated on every GPU and the batch split across them. The per-GPU compute time is determined by the same roofline model used in the Hello World tutorial. The new element here is <strong>communication overhead</strong>: after each training step, all GPUs must synchronize their gradients via the network before the next step can begin.</p>
+<div id="df92c9c7" class="cell" data-execution_count="3">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>solver <span class="op">=</span> DistributedModel()</span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>result_dp <span class="op">=</span> solver.solve(</span>
@@ -1636,11 +1908,11 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 <i class="callout-icon"></i>
 </div>
 <div class="callout-title-container flex-fill">
-<span class="screen-reader-only">Note</span>What does scaling efficiency mean?
+<span class="screen-reader-only">Note</span>What scaling efficiency means
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>If scaling efficiency is 80%, then your 256-GPU cluster is delivering the equivalent of about 205 fully-utilized GPUs. The other ~51 GPUs worth of compute is being spent on communication overhead. This is the <strong>communication tax</strong> of distributed training.</p>
+<p>At a scaling efficiency of <strong>42.5%</strong>, a 256-GPU cluster delivers the equivalent of about <strong>109 fully utilized GPUs</strong>. The remaining <strong>147 GPUs</strong> worth of compute goes to communication overhead (3288.0 ms of ring all-reduce out of every 5717.3 ms step). This is the <strong>communication tax</strong> of distributed training.</p>
 <p>The tax is paid in <strong>ring all-reduce</strong>: after the backward pass, every GPU must synchronize gradients with every other GPU. The time to do this grows with model size and shrinks with network bandwidth.</p>
 </div>
 </div>
@@ -1663,7 +1935,7 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 </div>
 </div>
 <p>The following sweep shows how fabric bandwidth affects overhead:</p>
-<div id="9aceb490" class="cell" data-execution_count="4">
+<div id="99685cd5" class="cell" data-execution_count="4">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim <span class="im">import</span> Systems</span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> mlsysim.systems.types <span class="im">import</span> Fleet, NetworkFabric</span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
@@ -1691,16 +1963,16 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 <span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>    )</span>
 <span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(</span>
 <span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>        <span class="ss">f"</span><span class="sc">{</span>fab_name<span class="sc">:&gt;10}</span><span class="ss">  "</span></span>
-<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>        <span class="ss">f"</span><span class="sc">{</span>fabric<span class="sc">.</span>bandwidth<span class="sc">.</span>to(<span class="st">'GB/s'</span>)<span class="sc">:</span><span class="op">&gt;</span><span class="fl">10.0</span><span class="er">f</span><span class="op">~</span><span class="sc">}</span><span class="ss">  "</span></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>        <span class="ss">f"</span><span class="sc">{</span>fabric<span class="sc">.</span>bandwidth<span class="sc">.</span>to(<span class="st">'GB/s'</span>)<span class="sc">:</span><span class="op">&gt;</span><span class="fl">10.1</span><span class="er">f</span><span class="op">~</span><span class="sc">}</span><span class="ss">  "</span></span>
 <span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>        <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>dp_communication_latency<span class="sc">.</span>to(<span class="st">'ms'</span>)<span class="sc">:</span><span class="op">&gt;</span><span class="fl">14.2</span><span class="er">f</span><span class="op">~</span><span class="sc">}</span><span class="ss">  "</span></span>
 <span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>        <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>scaling_efficiency<span class="sc">:&gt;11.1%}</span><span class="ss">"</span></span>
 <span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>    Fabric   BW (GB/s)   Comm overhead   Efficiency
 ----------------------------------------------------
-    100GbE          12 GB / s         3287.97 ms        42.5%
-    IB HDR          25 GB / s         1917.43 ms        55.9%
-    IB NDR          50 GB / s         1233.37 ms        66.3%</code></pre>
+    100GbE        12.5 GB / s         3287.97 ms        42.5%
+    IB HDR        25.0 GB / s         1917.43 ms        55.9%
+    IB NDR        50.0 GB / s         1233.37 ms        66.3%</code></pre>
 </div>
 </div>
 <div class="callout callout-style-default callout-warning callout-titled">
@@ -1713,7 +1985,7 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>Upgrading from 100GbE to InfiniBand NDR roughly doubles the effective inter-node bandwidth. On a model the size of Llama-70B (140 GB of gradients per step in fp16), that difference is significant. For smaller models, it matters less — compute time dominates.</p>
+<p>Upgrading from 100GbE (12.5 GB / s) to InfiniBand NDR (50 GB / s) increases inter-node link bandwidth by <strong>4×</strong>. On Llama-3.1-70B (141.2 GB of FP16 gradients per step), that upgrade cuts DP communication latency from 3288 ms to 1233 ms and lifts scaling efficiency from 42.5% to 66.3%. For smaller models, it matters less, because compute time dominates.</p>
 </div>
 </div>
 <hr>
@@ -1735,7 +2007,7 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 <p>For the full equation governing pipeline bubbles and interleaved 1F1B schedules, see the <a href="../math.html#sec-pipeline">Mathematical Foundations: Pipeline Parallelism Bubble</a>.</p>
 </div>
 </div>
-<div id="bf9eb44d" class="cell" data-execution_count="5">
+<div id="4de8bc3b" class="cell" data-execution_count="5">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"</span><span class="sc">{</span><span class="st">'PP stages'</span><span class="sc">:&gt;10}</span><span class="ss">  </span><span class="sc">{</span><span class="st">'Microbatches'</span><span class="sc">:&gt;13}</span><span class="ss">  </span><span class="sc">{</span><span class="st">'Bubble %'</span><span class="sc">:&gt;9}</span><span class="ss">  </span><span class="sc">{</span><span class="st">'Comm (ms)'</span><span class="sc">:&gt;10}</span><span class="ss">  </span><span class="sc">{</span><span class="st">'Efficiency'</span><span class="sc">:&gt;11}</span><span class="ss">"</span>)</span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"-"</span> <span class="op">*</span> <span class="dv">60</span>)</span>
 <span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
@@ -1744,37 +2016,36 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 <span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Only show interesting combinations</span></span>
 <span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> pp_size <span class="op">==</span> <span class="dv">1</span> <span class="kw">and</span> m <span class="op">&gt;</span> <span class="dv">1</span>:</span>
 <span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>            <span class="cf">continue</span></span>
-<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        tp <span class="op">=</span> <span class="bu">min</span>(<span class="dv">8</span>, cluster.total_accelerators <span class="op">//</span> (pp_size <span class="op">*</span> <span class="dv">4</span>))</span>
-<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>        r <span class="op">=</span> solver.solve(</span>
-<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>            model<span class="op">=</span>model,</span>
-<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>            fleet<span class="op">=</span>cluster,</span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>            batch_size<span class="op">=</span><span class="dv">256</span>,</span>
-<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>            precision<span class="op">=</span><span class="st">"fp16"</span>,</span>
-<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>            tp_size<span class="op">=</span><span class="dv">1</span>,</span>
-<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>            pp_size<span class="op">=</span>pp_size,</span>
-<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>            microbatch_count<span class="op">=</span>m</span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>        )</span>
-<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>        bubble_pct <span class="op">=</span> r.bubble_fraction <span class="op">*</span> <span class="dv">100</span></span>
-<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>        <span class="bu">print</span>(</span>
-<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>pp_size<span class="sc">:&gt;10}</span><span class="ss">  "</span></span>
-<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>m<span class="sc">:&gt;13}</span><span class="ss">  "</span></span>
-<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>bubble_pct<span class="sc">:&gt;9.1f}</span><span class="ss">%  "</span></span>
-<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>pipeline_bubble_latency<span class="sc">.</span>to(<span class="st">'ms'</span>)<span class="sc">:</span><span class="op">&gt;</span><span class="fl">10.1</span><span class="er">f</span><span class="op">~</span><span class="sc">}</span><span class="ss">  "</span></span>
-<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>scaling_efficiency<span class="sc">:&gt;11.1%}</span><span class="ss">"</span></span>
-<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>        )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        r <span class="op">=</span> solver.solve(</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>            model<span class="op">=</span>model,</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>            fleet<span class="op">=</span>cluster,</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>            batch_size<span class="op">=</span><span class="dv">256</span>,</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>            precision<span class="op">=</span><span class="st">"fp16"</span>,</span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>            tp_size<span class="op">=</span><span class="dv">1</span>,</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>            pp_size<span class="op">=</span>pp_size,</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>            microbatch_count<span class="op">=</span>m</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>        bubble_pct <span class="op">=</span> r.bubble_fraction <span class="op">*</span> <span class="dv">100</span></span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>        <span class="bu">print</span>(</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>pp_size<span class="sc">:&gt;10}</span><span class="ss">  "</span></span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>m<span class="sc">:&gt;13}</span><span class="ss">  "</span></span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>bubble_pct<span class="sc">:&gt;9.1f}</span><span class="ss">%  "</span></span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>pipeline_bubble_latency<span class="sc">.</span>to(<span class="st">'ms'</span>)<span class="sc">:</span><span class="op">&gt;</span><span class="fl">10.1</span><span class="er">f</span><span class="op">~</span><span class="sc">}</span><span class="ss">  "</span></span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f"</span><span class="sc">{</span>r<span class="sc">.</span>scaling_efficiency<span class="sc">:&gt;11.1%}</span><span class="ss">"</span></span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>        )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code> PP stages   Microbatches   Bubble %   Comm (ms)   Efficiency
 ------------------------------------------------------------
          1              1        0.0%         0.0 ms        42.5%
-         2              1       50.0%      1325.0 ms        36.9%
-         2              4       20.0%       530.0 ms        41.5%
-         2             16        5.9%       155.9 ms        44.1%
-         4              1       75.0%      2318.4 ms        36.7%
-         4              4       42.9%      1324.8 ms        41.6%
-         4             16       15.8%       488.1 ms        46.8%
-         8              1       87.5%      3477.0 ms        39.3%
-         8              4       63.6%      2528.7 ms        43.3%
-         8             16       30.4%      1209.4 ms        50.6%</code></pre>
+         2              1       50.0%      1756.8 ms        27.1%
+         2              4       20.0%       439.2 ms        34.0%
+         2             16        5.9%       109.8 ms        36.3%
+         4              1       75.0%      5270.3 ms        17.8%
+         4              4       42.9%      1317.6 ms        29.8%
+         4             16       15.8%       329.4 ms        35.8%
+         8              1       87.5%     12297.4 ms        10.5%
+         8              4       63.6%      3074.4 ms        23.2%
+         8             16       30.4%       768.6 ms        33.4%</code></pre>
 </div>
 </div>
 <div class="callout callout-style-default callout-tip callout-titled">
@@ -1787,16 +2058,16 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>Increasing the number of <strong>microbatches</strong> (<span class="math inline">\(M\)</span>) reduces the bubble fraction. With <span class="math inline">\(M = 16\)</span> and <span class="math inline">\(P = 8\)</span>, the bubble is only <span class="math inline">\(7/(7+16) ≈ 30\%\)</span> of the pipeline, down from <span class="math inline">\(88\%\)</span> with <span class="math inline">\(M = 1\)</span>.</p>
-<p>In practice, frameworks like Megatron-LM use <strong>interleaved pipeline schedules</strong> that further reduce the bubble. But even with the standard 1F1B schedule, choosing <span class="math inline">\(M \gg P\)</span> is essential.</p>
+<p>Increasing the number of <strong>microbatches</strong> (<span class="math inline">\(M\)</span>) reduces the bubble fraction. With <span class="math inline">\(M = 16\)</span> and <span class="math inline">\(P = 8\)</span>, the bubble is only <span class="math inline">\(7/(7+16) = 30\.4%\)</span> of the pipeline, down from <span class="math inline">\(87\.5%\)</span> with <span class="math inline">\(M = 1\)</span>.</p>
+<p>In practice, frameworks like Megatron-LM use <strong>interleaved pipeline schedules</strong> that further reduce the bubble. Even with the standard 1F1B schedule, however, choosing <span class="math inline">\(M \gg P\)</span> is essential.</p>
 </div>
 </div>
 <hr>
 </section>
 <section id="finding-the-optimal-configuration" class="level2">
 <h2 class="anchored" data-anchor-id="finding-the-optimal-configuration">6. Finding the Optimal Configuration</h2>
-<p>Now combine all three parallelism strategies and find the configuration that maximizes scaling efficiency for the <code>Research_256</code> cluster. In practice, 70-80% scaling efficiency on hundreds of GPUs is considered excellent. Below 50% typically signals a suboptimal parallelism configuration or insufficient network bandwidth.</p>
-<div id="c4d31a37" class="cell" data-execution_count="6">
+<p>Now combine all three parallelism strategies and find the configuration that maximizes scaling efficiency for the <code>Research_256</code> cluster (256 GPUs over 100GbE).</p>
+<div id="493e71a6" class="cell" data-execution_count="6">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>configs <span class="op">=</span> [</span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    <span class="co"># (description,             tp, pp, m)</span></span>
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    (<span class="st">"DP only"</span>,                  <span class="dv">1</span>,  <span class="dv">1</span>,  <span class="dv">1</span>),</span>
@@ -1834,48 +2105,19 @@ Parallelism:                 DP=256  TP=1  PP=1</code></pre>
 <pre><code>Config                        DP   TP   PP   Efficiency      Throughput
 ------------------------------------------------------------------------
 DP only                      256     1     1        42.5%            44.8
-DP + TP=2                    128     2     1        62.0%           119.8
-DP + PP=4, M=16               64     1     4        46.8%           155.2
-DP + TP=2 + PP=4, M=16        32     2     4        65.9%           339.6
-DP + TP=8 + PP=4, M=16         8     8     4        80.8%           714.2</code></pre>
+DP + TP=2                    128     2     1        36.8%            53.6
+DP + PP=4, M=16               64     1     4        35.8%            52.2
+DP + TP=2 + PP=4, M=16        32     2     4        36.1%            52.5
+DP + TP=8 + PP=4, M=16         8     8     4        57.8%            84.2</code></pre>
 </div>
 </div>
-<hr>
-</section>
-<section id="your-turn" class="level2">
-<h2 class="anchored" data-anchor-id="your-turn">Your Turn</h2>
-<div class="callout callout-style-default callout-caution callout-titled">
-<div class="callout-header d-flex align-content-center">
-<div class="callout-icon-container">
-<i class="callout-icon"></i>
-</div>
-<div class="callout-title-container flex-fill">
-<span class="screen-reader-only">Caution</span>Exercises
-</div>
-</div>
-<div class="callout-body-container callout-body">
-<p><strong>Exercise 1: Predict before you observe.</strong> For a 256-GPU cluster training Llama-3.1-70B, predict: will DP=256, TP=1, PP=1 have higher or lower scaling efficiency than DP=32, TP=4, PP=2? Write your prediction and reasoning, then run both configurations. Were you right?</p>
-<p><strong>Exercise 2: Find the optimal configuration.</strong> Sweep all valid 3D parallelism configurations for 256 GPUs (where DP x TP x PP = 256). Which configuration maximizes scaling efficiency? Is it the same for Ethernet 100G vs.&nbsp;InfiniBand NDR? (Hint: valid TP values are divisors of 8, the GPUs per node: 1, 2, 4, 8. For each TP, valid PP values are divisors of 256/TP.)</p>
-<p><strong>Exercise 3: The microbatch lever.</strong> With PP=8, sweep microbatch count M from 1 to 64. Plot the pipeline bubble fraction vs.&nbsp;M. At what value of M does the bubble fraction drop below 10%? (Use the formula from Section 5: bubble = (P-1)/(P-1+M). Predict the answer analytically before running the sweep.)</p>
-<p><strong>Self-check:</strong> Why must tensor parallelism (TP) stay within a single node on most clusters? What would happen to communication overhead if TP crossed node boundaries?</p>
-</div>
-</div>
-<hr>
-</section>
-<section id="what-you-learned" class="level2">
-<h2 class="anchored" data-anchor-id="what-you-learned">What You Learned</h2>
-<ul>
-<li><strong>3D Parallelism</strong> decomposes the training problem across <span class="math inline">\(\text{DP} \times \text{TP} \times \text{PP}\)</span> GPUs, each with distinct communication costs.</li>
-<li><strong>Ring all-reduce</strong> is the network tax of data parallelism. It grows with model size and shrinks with fabric bandwidth. Switching from 100GbE to InfiniBand can recover 10-30% efficiency on large models.</li>
-<li><strong>Pipeline bubbles</strong> waste GPU cycles proportional to <span class="math inline">\(\frac{P-1}{P-1+M}\)</span>. Use large microbatch counts (<span class="math inline">\(M \gg P\)</span>) to minimize waste.</li>
-<li><strong>Scaling efficiency below 100%</strong> is normal and unavoidable. A well-tuned job at 70-80% efficiency on hundreds of GPUs is excellent. Below 50% signals a configuration problem.</li>
-</ul>
+<p>Confining <code>TP=8</code> within each 8-GPU node over NVLink (450 GB / s) and pairing <code>PP=4</code> (<span class="math inline">\(M=16\)</span>) with DP=8 raises scaling efficiency from 42.5% (44.8 samples/s) under pure DP to <strong>57.8%</strong> (<strong>84.2 samples/s</strong>)—both fitting the model shards inside per-GPU HBM and shrinking the cross-node DP gradient payload by <span class="math inline">\(8 \times 4 = 32\times\)</span>.</p>
 <hr>
 </section>
 <section id="advanced-network-topologies" class="level2">
 <h2 class="anchored" data-anchor-id="advanced-network-topologies">Advanced: Network Topologies</h2>
 <p>The same communication equations can be used to compare topology assumptions. A ring collective is bandwidth-optimal for large gradient buffers, while tree-style collectives reduce startup latency for smaller messages. In practice, topology choice matters because the fabric determines which term dominates: link bandwidth, oversubscription, or per-hop latency.</p>
-<p>For this release, the built-in <code>DistributedModel</code> exposes the core ring and hierarchical all-reduce model. Use the lower-level formulas in <code>mlsysim.physics</code> when you want to compare algorithmic assumptions directly.</p>
+<p>For this release, the built-in <code>DistributedModel</code> exposes the core ring and hierarchical all-reduce model. Use the lower-level formulas in <code>mlsysim.physics</code> to compare algorithmic assumptions directly.</p>
 <hr>
 </section>
 <section id="next-steps" class="level2">
@@ -2303,6 +2545,18 @@ DP + TP=8 + PP=4, M=16         8     8     4        80.8%           714.2</code>
     }
   });
   </script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+      <a href="../tutorials/05_quantization.html" class="pagination-link" aria-label="Quantization: Not a Free Lunch">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text">Quantization: Not a Free Lunch</span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="../tutorials/06_scaling_1000_gpus.html" class="pagination-link" aria-label="Scaling to 1000 GPUs">
+        <span class="nav-page-text">Scaling to 1000 GPUs</span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav>
 </div> <!-- /content -->
 <footer class="footer">
   <div class="nav-footer">
@@ -2310,7 +2564,7 @@ DP + TP=8 + PP=4, M=16         8     8     4        80.8%           714.2</code>
 <p>© 2024-2026 Harvard University. Code: <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache-2.0</a> · Docs: <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC-BY-NC-SA 4.0</a></p>
 </div>   
     <div class="nav-footer-center">
-<p>Part of the <a href="../">Machine Learning Systems</a> textbook</p>
+<p>Part of the <a href="../">Machine Learning Systems</a> textbook · <a href="mlsysim-paper.pdf" target="_blank">MLSys·im paper (PDF)</a></p>
 </div>
     <div class="nav-footer-right">
       <ul class="footer-items list-unstyled">
@@ -2327,6 +2581,52 @@ DP + TP=8 + PP=4, M=16         8     8     4        80.8%           714.2</code>
     </div>
   </div>
 </footer>
+<!--
+  MLSys·im sidebar brand block: tagline + version chip under the sidebar logo.
+  Mirrors tinytorch/guide/assets/scripts/sidebar-subtitle.html so the two
+  companion sites read the same way.
+
+  TEMPLATE (config/sidebar-brand.html.in): scripts/build_api.py stamps 0.3.0 from
+  mlsysim.__version__ into config/sidebar-brand.html on every render.
+  Edit this file, not the generated one.
+-->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const logoLink = document.querySelector('#quarto-sidebar .sidebar-logo-link');
+  if (!logoLink || document.querySelector('.mlsysim-sidebar-tagline')) return;
+  const host = logoLink.parentNode;
+
+  const tagline = document.createElement('div');
+  tagline.className = 'mlsysim-sidebar-tagline';
+  tagline.innerHTML = 'First-principles modeling companion to the<br>' +
+    '<a href="https://mlsysbook.ai">Machine Learning Systems</a> textbook';
+  host.insertBefore(tagline, logoLink.nextSibling);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'mlsysim-version-chip-wrap';
+  const chip = document.createElement('a');
+  chip.className = 'mlsysim-version-chip';
+  chip.href = 'https://pypi.org/project/mlsysim/';
+  chip.target = '_blank';
+  chip.rel = 'noopener';
+  chip.innerHTML = '<span class="mlsysim-version-dot"></span>' +
+    '<span class="mlsysim-chip-label">MLSys·im&nbsp;</span>' +
+    '<span class="mlsysim-version-tag">v0.3.0</span>';
+  wrap.appendChild(chip);
+  tagline.parentNode.insertBefore(wrap, tagline.nextSibling);
+
+  // On the deployed site, prefer the release manifest so a cached page still
+  // shows the current release.
+  fetch('/mlsysim/release-manifest.json?_t=' + Date.now(), { cache: 'no-store' })
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (manifest) {
+      if (!manifest || !manifest.releaseId) return;
+      const tag = chip.querySelector('.mlsysim-version-tag');
+      tag.textContent = 'v' + String(manifest.releaseId).replace(/^v/, '');
+    })
+    .catch(function () {});
+});
+</script>
 <!--
   MLSysBook release-pill — shared footer version chip for Quarto + static sites.
 
@@ -2435,7 +2735,9 @@ DP + TP=8 + PP=4, M=16         8     8     4        80.8%           714.2</code>
           ' · hash ' + shortHash;
 
         pills.forEach(function (el) {
-          var linkHref = el.getAttribute('data-link') || '#release';
+          var rawLink = el.getAttribute('data-link') || '#release';
+          // XSS hardening: allow only anchor, relative, or http(s) links; reject javascript:/data: URLs.
+          var linkHref = /^(?:#|\/|\.{1,2}\/|https?:\/\/)/i.test(rawLink) ? rawLink : '#release';
           var a = document.createElement('a');
           a.href = linkHref;
           a.title = title;
