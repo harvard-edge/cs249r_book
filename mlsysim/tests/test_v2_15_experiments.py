@@ -166,7 +166,7 @@ def test_cleanest_site_is_rejected_when_it_misses_deadline():
     rows = evaluate_placements(workload, _placement_sites())
 
     assert rows[0].feasible
-    assert rows[0].water_use == Q_(195, "liter")
+    assert rows[0].water_use.to("liter").magnitude == pytest.approx(195)
     assert not rows[1].feasible
     assert "execution misses deadline" in rows[1].reasons
     assert select_lowest_carbon_placement(workload, _placement_sites()).site == "home"

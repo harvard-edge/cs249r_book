@@ -1,7 +1,9 @@
 """Smoke tests for the Vol IV timing-strip builders (mlsysim.viz.timing_strip)."""
 from types import SimpleNamespace
 
-import matplotlib
+import pytest
+
+matplotlib = pytest.importorskip("matplotlib")
 
 matplotlib.use("Agg")
 
