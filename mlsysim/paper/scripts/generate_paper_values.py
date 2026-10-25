@@ -1381,6 +1381,8 @@ def section_diagram_labels(V: Values) -> None:
     V.num("RegLlamaSeventyWeightsGB", gb(llama70.size_in_bytes(bpp16)), "Models.Language.Llama3_70B.size_in_bytes(FP16)")
     V.num("DiagramStackMoreResolvers", V.records["CountResolvers"]["raw"] - STACK_RESOLVERS_DRAWN,
           "CountResolvers minus the resolver boxes drawn in architecture-stack.svg")
+    V.num("DiagramAnatomyMorePhysics", V.records["CountPhysicsDomainModules"]["raw"] - len(physics_modules_drawn()),
+          "CountPhysicsDomainModules minus the module boxes drawn in system-anatomy.svg")
     bottleneck = V.records["CaseRThreeNodeBottleneck"]["raw"]
     wall = {"Memory": 2, "Compute": 1}.get(bottleneck)
     require(wall is not None, f"R3: unexpected node bottleneck {bottleneck!r}")
@@ -1390,12 +1392,21 @@ def section_diagram_labels(V: Values) -> None:
     V.num("OverviewDMfu", OVERVIEW_MFU, "scenario input (section_overview)", nd=2)
 
 
-def guard_diagram_names(V: Values) -> None:
-    """Every physics domain module must be drawn in system-anatomy.svg."""
+def physics_modules_drawn() -> list[str]:
+    """Module names drawn as boxes in the Physics Engine row of system-anatomy.svg."""
     text = (FIGURES_DIR / "system-anatomy.svg").read_text(encoding="utf-8")
-    for name in V.records["ListPhysicsDomainModules"]["raw"].split(", "):
-        if not re.search(rf">\s*{re.escape(name)}\s*<", text):
-            fail(f"system-anatomy.svg does not draw physics module {name!r}")
+    section = text.split("<!-- ===== Physics Engine ===== -->", 1)[1].split("<!-- ===== Core ===== -->", 1)[0]
+    return re.findall(r'font-weight="600" fill="#444">\s*([a-z_]+)\s*<', section)
+
+
+def guard_diagram_names(V: Values) -> None:
+    """Every physics module drawn in system-anatomy.svg must exist; the rest are summarized as "+N more"."""
+    domain = set(V.records["ListPhysicsDomainModules"]["raw"].split(", "))
+    drawn = physics_modules_drawn()
+    require(drawn, "system-anatomy.svg: no physics module boxes found")
+    for name in drawn:
+        if name not in domain:
+            fail(f"system-anatomy.svg draws physics module {name!r}, which mlsysim.physics no longer has")
 
 
 def sync_diagrams(V: Values, write: bool) -> list[str]:
