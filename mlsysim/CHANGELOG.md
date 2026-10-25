@@ -33,7 +33,7 @@ Release body. Omit any section that has no entries for a given release.
     - @profvjreddi
 -->
 
-## v0.3.0 (2026-10-24)
+## v0.3.0 (2026-10-25)
 
 MLSys·im 0.3.0 reorganizes the package around nested registries and a dedicated
 `mlsysim.engine` layer, adds Physical AI and agentic modeling (embodied
