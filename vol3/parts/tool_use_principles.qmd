@@ -1,0 +1,43 @@
+---
+format:
+  html:
+    number-sections: false
+---
+
+# Tool Use Principles {.unnumbered}
+
+Part II separated the information selected for each call, reusable attention computation, and persistent records governed across sessions. Its policies already assumed operations that read sources and update records. Part III develops those operations: how a proposal becomes a permitted effect, how far the executing code can reach, and how untrusted information can redirect an agent using otherwise valid tools. These are the interface, containment, and adversarial-defense responsibilities that govern the authority exposure of H·S·A. Authority covers what an action can read and send as well as what it can change: a read-only tool that brings a customer record into context can disclose private data without mutating the source. Every tool call therefore begins at a mediated boundary that validates and authorizes the proposed action before anything executes.
+
+::: {#pri-vol3-strict-action-abi .callout-principle title="The typed action contract"}
+
+**Invariant**: A tool call reaches the environment only after the runtime validates the proposal against its declared interface, checks applicable action preconditions, and authorizes it under the session's grants and resource limits. A server's advertisement supplies a tool description, not permission for this session to invoke it. The full treatment appears in @sec-vol3-tool-calling-schemas and @sec-vol3-tool-calling-mcp.
+
+**Implication**: The runtime binds a discovered interface to the policy it enforces; the endpoint still enforces its own access boundary. Constrained decoding can restrict supported output structure, but it replaces neither host validation nor authorization. A mutation that depends on an unchanged source version needs that precondition enforced with the mutation, not merely checked during an earlier read, because a read-then-write race stays open until the endpoint checks the expected version at application. Rejected proposals return structured diagnostics, and returning observations preserve outcome and omission information within their payload bounds.
+
+:::
+
+Validation and authorization decide whether a call may be dispatched. They say nothing about what the runtime should do when the dispatch times out.
+
+::: {#pri-vol3-exactly-once-settlement .callout-principle title="Settlement before retry"}
+
+**Invariant**: A timeout alone does not establish whether a mutating effect occurred or whether an earlier attempt can still commit. The request may be lost, delayed, still executing, partially applied, or completed without a delivered reply. Under independent request and reply delivery outcomes, if requests are lost with probability $\RequestLossProbability$ and replies with probability $\ReplyLossProbability$, one blind retry of a non-idempotent operation without deduplication duplicates its effect with probability
+$$ \DuplicateEffectProbability = (1-\RequestLossProbability)\, \ReplyLossProbability\, (1-\RequestLossProbability) $$
+When request loss is rare, the duplicate rate tracks the reply-loss rate almost one for one.
+
+**Implication**: Before repeating an action, establish that repetition is safe under its operation semantics or the endpoint's deduplication contract. A stable logical-operation identity must be bound to the actual effect and retained result; a token or host-side lease alone supplies no such guarantee. An unchanged-state probe cannot exclude a delayed first attempt. Without sufficient evidence or enforcement, the effect remains unresolved and the runtime withholds a blind retry, preserving the uncertainty for reconciliation or escalation. @Sec-vol3-tool-calling-idempotency develops the settlement rules and prices the duplicate path.
+
+:::
+
+Even an authorized call with a sound retry contract can execute faulty or untrusted code, including code proposed by the model. Moreover, untrusted input can redirect an operation within whatever reach the call is given, requiring mechanical containment beneath the model's instructions.
+
+::: {#pri-vol3-zero-trust-sandboxing .callout-principle title="Containment beneath the model"}
+
+**Invariant**: Permission to invoke a tool does not bound the resources its implementation can reach or consume, and text from an observation, a reader model, or stored memory cannot grant authority or establish its own trust. The runtime enforces the task's execution envelope and information-flow policy with metadata and decisions outside the model's control. For a grant $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ of rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$, a proposed access $\ProposedAccess$ is admitted at time $\AccessAttemptTime$ only if
+$$ \text{admit}(\ProposedAccess, \CapabilityGrant, \AccessAttemptTime) \iff \text{authentic}(\CapabilityGrant) \land \ProposedAccess.\text{op} \in \GrantRights \land \ProposedAccess.\text{target} \sqsubseteq \mathcal{O}_\CapabilityGrant \land \GrantCondition(\ProposedAccess) \land \AccessAttemptTime < \GrantExpiryTime $$
+and an operation that sends data onward is dispatched only if the applicable policy admits its recipient and use on the joined confidentiality and integrity labels, or under a separately authenticated, use-scoped decision.
+
+**Implication**: Reach is bounded by the envelope rather than by what the model complies with. Choose an envelope by the code and interfaces it must support, the components it shares and trusts, the task's authority, and measured resource costs. Deriving a narrower grant does not revoke a broader one still held. Track integrity provenance separately from confidentiality and preserve dependencies through extraction, summarization, and reuse. Endorsement for a protected use and declassification for an authorized release require their own policy and evidence. A workspace can preserve task-local changes across turns, but reuse requires supervised teardown and restoration of the declared mutable state. Ending an environment does not undo external effects or establish task acceptance. Evaluate these controls under a stated threat model, including useful task completion and false blocks. @Sec-vol3-sandboxes-least-privilege develops the grant verdict (@eq-vol3-capability-verdict), @sec-vol3-sandboxes-blast-radius the envelope, and @sec-vol3-security the information-flow form (@eq-vol3-flow-dispatch).
+
+:::
+
+Together, these three principles govern how a proposal crosses into the environment, how uncertain outcomes settle, and how execution and data flow stay contained beneath the model. @Sec-vol3-tool-calling specifies the mediated request and returning observation, including the conditions for safe repetition when an effect is uncertain. @Sec-vol3-sandboxes enforces scoped grants, execution envelopes, workspace continuity, governed egress, and reset, with their resource and provisioning trade-offs. @Sec-vol3-security defends against adversarial influence, unauthorized information flow, and confused deputy delegation across those interfaces. Each of these controls governs one call, one envelope, or one dispatch, and none decides whether the trajectory should propose again. The jobs, leases, approvals, and uncertain effects they leave behind need a single owner, and Part IV composes them into supervision and recovery of the whole trajectory.

@@ -1,0 +1,45 @@
+---
+format:
+  html:
+    number-sections: false
+---
+
+# Agent Runtime Principles {.unnumbered}
+
+Part III developed tool, containment, and security contracts that already span jobs, leases, approvals, and uncertain effects. Part IV gives their continuing obligations a common trajectory-level owner, then develops crash persistence, effect recovery, evaluation, and live operation. The runtime carries one trajectory across its horizon, bounding the horizon exposure of H·S·A. A long horizon also reshapes the other two exposures: it turns state into a durability problem, because the evidence needed to continue must survive the process that holds it, and it turns authority into an ordering problem, because some effects cannot be undone once later steps depend on them. Governing those obligations across turns begins by encapsulating every call, lease, and budget reservation inside a single runtime-owned trajectory record.
+
+::: {#pri-vol3-trajectory-encapsulation .callout-principle title="Trajectory-level encapsulation"}
+
+**Invariant**: The runtime governs each model call as part of a whole trajectory. Its runtime-owned record tracks identity, lifecycle state, actual and reserved consumption, grants and leases, continuation references, observation eligibility, and unresolved effect obligations. The trajectory advances only through transitions and admissions that the runtime's guards permit, because it cannot be relied on to yield, to stop, or to notice that it has stopped making progress. For each cumulative resource dimension, admission requires
+$$ \text{actual} + \text{reserved} + \text{proposed liability} + \text{finalization reserve} \le \text{allowance} $$
+A derived grant or allowance handed to another worker can only narrow what its holder has, and concurrent holders reserve against one shared allowance.
+
+**Implication**: Model output proposes changes; the runtime admits them through current state, authority, and budget checks, so spend stays within the allowance even when final usage arrives late, and final checks stay funded. Control requests are recorded independently of model output, so the runtime can stop new admission and abort supported local work while preserving unresolved external obligations; a loop that passes every per-call limit still halts at the dispatch ceiling or deadline. Progress checks use task-scoped observations rather than heartbeats or the model's own reports, and can miss a loop or flag useful repetition. Per-worker ceilings alone would let $\WorkerCount$ concurrent workers spend up to $\WorkerCount$ times the budget, and a parent stopping does not prove that its children or their external operations have stopped. Waiting can release a worker while cache state, workspaces, credentials, or effect obligations retain their own lifetimes (@sec-vol3-kvcache-swapping). @Sec-vol3-harness-multidim-budgets develops the admission test (@eq-vol3-bounded-liability-admission).
+
+:::
+
+A record held only in memory dies with the process that holds it, and the environment's state is not restored by recovering the runtime's own. When an action crosses the process boundary into an external service, the runtime must therefore record what it intends to do before the effect can occur.
+
+::: {#pri-vol3-intent-before-effect .callout-principle title="Intent before effect"}
+
+**Invariant**: Before dispatching an external effect, the runtime obtains a durable acknowledgment of the authorized intent, its admission state, and its recovery template. For an attempt that proceeds to dispatch and later produces an observation, the required order is
+$$ \ValidatedProposalEvent \prec \AdmissionDecisionEvent \prec \IntentAcknowledgmentEvent \prec \ExternalDispatchAction \prec \EvidenceRecordEvent $$
+so, provided every external effect passes through the runtime and the log is durable, a crash before the flush leaves no effect, and after it the log names every operation that still needs settlement. Recovery then works forward from that record. A snapshot restores selected local state, and compensation is a new operation that establishes declared conditions. Neither erases external history, incurred charges, or unresolved effects, and an irreversible commitment ends the compensable region.
+
+**Implication**: An intent without adequate terminal outcome evidence remains unresolved; a timeout or recorded result label does not settle it. Compensations have their own admission, outcome, and repeat contracts, and uncertainty or failure retains a responsible owner. The expected irreversible loss of a plan, $\ExpectedIrreversibleLoss = \sum_\PlanAction \Pr(\text{bad}\ \PlanAction)\cdot \text{consequence}(\PlanAction)\cdot(1-\ActionRecoverableFraction)$ with $\ActionRecoverableFraction$ the recoverable fraction, favors reversible, information-gathering steps before the pivot, since past it only forward recovery remains. @Sec-vol3-persistence-wal develops the ordering (@eq-vol3-wal-ordering), and @sec-vol3-sagas-pivot develops commitment regions and the loss (@eq-vol3-expected-irreversible-loss).
+
+:::
+
+These principles organize supervision, reconstruction, and recovery for one agent. They do not establish task acceptance, and a population reliability claim cannot rest on one successful run.
+
+::: {#pri-vol3-release-evidence .callout-principle title="Causal and statistical release evidence"}
+
+**Invariant**: Activity signals alone do not establish task acceptance. Acceptance requires evidence for declared outcome, process, resource, and residual-duty criteria, with the coverage and limits of each check stated. Comparing system versions requires a declared task population, comparable trials, and uncertainty appropriate to the design. For two independent arms with average acceptance probability $\PooledAcceptanceProbability$, a target difference $\TargetAcceptanceDifference$, two-sided significance $\StatisticalSignificanceLevel$, and power $1-\StatisticalFalseNegativeRate$, the tasks needed per arm are approximately
+$$ \TasksPerComparisonArm \approx \frac{2\,(\SignificanceCriticalQuantile+\StatisticalPowerQuantile)^2\,\PooledAcceptanceProbability(1-\PooledAcceptanceProbability)}{\TargetAcceptanceDifference^2} $$
+Trace records connect observed decisions and outcomes without proving a unique cause.
+
+**Implication**: Halving the detectable difference quadruples the tasks per arm, so a small suite cannot rank close systems. A biased or contaminated measurement invalidates any sample size. The evaluation harness therefore protects graders from the agent and from untrusted submitted artifacts, calibrates fallible judgments where the rubric uses them, and preserves task, configuration, candidate, operation, and attempt identities so that reconstruction, captured-input replay tests, and new experimental runs remain distinct. A release then advances under a prespecified evidence and exposure policy, while runtime authority, budgets, and unresolved-effect obligations remain in force. @Sec-vol3-evaluation-paired develops the planning estimate (@eq-vol3-eval-planning-power).
+
+:::
+
+The five chapters of Part IV build these principles in order, each on the one before. @Sec-vol3-agent-harness gives each trajectory a record and a harness that can pause, approve, budget, and stop it without the model's cooperation, which is trajectory-level encapsulation. @Sec-vol3-durable-execution specifies the recorded history, storage acknowledgment, checkpoints, and ownership needed to reconstruct selected state and admit continuation under stated failure conditions; it also distinguishes reconstruction from replay tests and new execution. @Sec-vol3-failure-recovery uses recorded evidence to choose bounded repair, compensation, containment, or escalation, governs declared commitment regions, and adds fallible task-progress checks, which together complete intent before effect. @Sec-vol3-evaluation then measures the single-agent system, defining the accepted task and the evidence a comparison of configurations requires, and @sec-vol3-operations carries that evidence into live operation through traces, controlled diagnosis, and staged release under a declared gate. Those evaluation and operational records do not by themselves certify that training on them is safe, but when cheaper fixes no longer resolve a measured failure, they supply the evidence Part V needs to curate trajectories and update the model's weights under the same runtime contracts.
