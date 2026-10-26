@@ -1,1 +1,0 @@
-import{u as e}from"./src-COk1uIaa.js";import{n as m}from"./src-DSbF9mby.js";import{b as s}from"./chunk-ABZYJK2D-CSzcbtsR.js";var a=m(t=>{var r;let{securityLevel:n}=s(),o=e("body");return n==="sandbox"&&(o=e((((r=e(`#i${t}`).node())==null?void 0:r.contentDocument)??document).body)),o.select(`#${t}`)},"selectSvgElement");export{a as t};

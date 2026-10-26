@@ -1,1 +1,0 @@
-import{et as i,tt as m}from"./cells-BqYYXi6G.js";import{t as a}from"./strings-pfr2N700.js";function e(t){return t.mimetype.startsWith("application/vnd.marimo")||t.mimetype==="text/html"?m(a.asString(t.data)):i(a.asString(t.data))}export{e as t};

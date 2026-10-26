@@ -1,1 +1,0 @@
-import{t as o}from"./toDate-BGIVWsZ9.js";function e(t){return t instanceof Date||typeof t=="object"&&Object.prototype.toString.call(t)==="[object Date]"}function r(t){return!(!e(t)&&typeof t!="number"||isNaN(+o(t)))}export{r as t};
