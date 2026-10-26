@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import re
 import pytest
-from matplotlib.mathtext import MathTextParser
 
 from mlsysim.notation import Notation, Symbols
 from mlsysim.notation.types import NotationSymbol
-
-_parser = MathTextParser("path")
 
 
 def test_notation_registry_loaded():
@@ -47,6 +44,8 @@ def test_iron_law_reserved_symbols():
 
 def test_all_symbols_render_in_matplotlib():
     """Every symbol's latex string must be renderable in Matplotlib without crashing."""
+    mathtext = pytest.importorskip("matplotlib.mathtext")
+    _parser = mathtext.MathTextParser("path")
     failures = []
     for s in Notation:
         math_str = f"${s.latex}$"
