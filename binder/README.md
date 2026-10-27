@@ -577,6 +577,7 @@ Thanks to these wonderful people who helped improve the book!
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/xizhuomengcontin"><img src="https://avatars.githubusercontent.com/u/319346922?v=4?v=4?s=80" width="80px;" alt="Xizhuo"/><br /><sub><b>Xizhuo</b></sub></a><br />🧠</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Ben-Home"><img src="https://avatars.githubusercontent.com/u/238533482?v=4?v=4?s=80" width="80px;" alt="CorpusIQ"/><br /><sub><b>CorpusIQ</b></sub></a><br />🧠</td>
     </tr>
   </tbody>
 </table>
