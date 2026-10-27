@@ -62,7 +62,7 @@ const stripDelimiters = (s: string): string => s.replace(DELIMITER_PATTERN, "");
 
 /** Mirror of the worker's napkinAssumptions(): the given-facts part of a
  *  napkin_math block, everything before "**Calculations". */
-const napkinAssumptions = (napkin: string): string => {
+export const napkinAssumptions = (napkin: string): string => {
   const cut = napkin.search(/\*\*Calculations/i);
   return cut > 0 ? napkin.slice(0, cut).trim() : "";
 };
