@@ -122,7 +122,7 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     write(root, model)
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/explore"
+    site = root / "site/taxonomy"
     # Three internal files plus six public downloads.
     assert len(artifacts) == 9
     data = json.loads(artifacts[site / "framework-data.json"])
@@ -155,7 +155,7 @@ def test_empty_candidate_row_and_secondary_links_do_not_inflate_home_counts(cand
     assert framework["summary"]["concepts"] == 2
     assert framework["summary"]["book_links"] == 1
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/explore"
+    site = root / "site/taxonomy"
     rows = list(csv.DictReader(io.StringIO(artifacts[site / "framework-table.csv"].decode())))
     assert len(rows) == 2
     assert rows[1]["concept_ids"] == ""
@@ -194,7 +194,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     write(root, model)
     framework = load_framework(root, field)
     exports = framework_artifacts(root, field, framework)
-    result = list(csv.DictReader(io.StringIO(exports[root / "site/explore/framework-table.csv"].decode())))[0]
+    result = list(csv.DictReader(io.StringIO(exports[root / "site/taxonomy/framework-table.csv"].decode())))[0]
     assert json.loads(result["includes"]) == row["includes"]
     assert json.loads(result["excludes"]) == row["excludes"]
     assert result["warrant_source_ids"] == "skos"

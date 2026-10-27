@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from .concept_graph import ConceptGraphError
+from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
 from .field_graph import load_taxonomy_yaml
 from .taxonomy_release import release_artifacts
 
@@ -281,7 +281,7 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
         return {}
     concepts = {c["id"]: c for c in field["concepts"]}
     facets = {name: {r["id"]: r["label"] for r in framework["dimensions"][name]} for name in DIMENSIONS}
-    payload = {"schema_version": 1, "framework": framework, "concepts": field["concepts"],
+    payload = {"schema_version": 1, "url": PAGE_URL, "framework": framework, "concepts": field["concepts"],
                "book_links": field.get("book_links", []), "relationships": field.get("relationships", []),
                "relations": field.get("relations", []), "retired": field.get("retired", [])}
     stream = io.StringIO(newline="")
@@ -355,7 +355,7 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
         lines.extend(['', f'- **{topic}{_md(gap["label"])}** (`{gap["id"]}`): {_md(gap["reason"])}'])
     lines.extend(['', '## Design references', '', 'These references inform design and scope; they are not assertion-level validation.', ''])
     lines.extend(f'- [{_md(s["title"])}]({s["url"]}): {_md(s["role"])}' for s in framework["sources"])
-    site = root / "site/explore"
+    site = root / SITE_DIR
     return {**release_artifacts(root, framework, field),
             site / "framework-data.json": (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(),
             site / "framework-table.csv": stream.getvalue().encode(),

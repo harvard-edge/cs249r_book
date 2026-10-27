@@ -113,7 +113,7 @@ def test_portable_view_and_svg_use_same_records_without_script_injection(landsca
     root, model = landscape
     model["concepts"][0]["definition"] = "</script><script>window.bad=true</script>"
     save(root, model)
-    site = root / "site/explore"
+    site = root / "site/taxonomy"
     site.mkdir(parents=True)
     (site / "field.qmd").write_text('---\n---\n```{=html}\n<div>Field</div>\n```\n')
     artifacts = field_artifacts(root, {"nodes": {}, "chapters": {}})

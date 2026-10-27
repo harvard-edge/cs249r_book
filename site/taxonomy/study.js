@@ -143,7 +143,7 @@
 
   function renderRelease() {
     const fw = data.framework;
-    const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. https://mlsysbook.ai/explore/`;
+    const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
     $('bok-cite-text').textContent = citation;
     $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Licensed <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> · Editorial draft for expert review`;
     $('bok-copy-cite').addEventListener('click', async () => {

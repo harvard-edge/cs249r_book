@@ -425,7 +425,7 @@ def emit_taxonomy_labels(vault_dir: Path, output: Path) -> dict[str, Any]:
               "group": groups.get(a.get("group"), {}).get("label", ""), "group_code": groups.get(a.get("group"), {}).get("code", ""),
               "question": a.get("question", ""), "subjects": [r["id"] for r in a.get("rows", [])]}
              for a in taxonomy.framework.get("areas", [])]
-    payload = {"version": taxonomy.framework.get("version", ""), "explorer": "https://mlsysbook.ai/explore/",
+    payload = {"version": taxonomy.framework.get("version", ""), "explorer": "https://mlsysbook.ai/taxonomy/",
                "areas": areas, "subjects": subjects, "concepts": concepts}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -1,6 +1,6 @@
 # Concept Explorer
 
-The main Quarto page is `index.qmd`, served at `/explore/`. It shares the site's
+The main Quarto page is `index.qmd`, served at `/taxonomy/`. It shares the site's
 navigation, announcement, typography, color-mode switch, and footer. Its neutral
 palette spans all four volumes. Taxonomy provides card and tree layouts; Concept
 map displays every authored field relationship, with selection highlighting,
@@ -23,7 +23,7 @@ See [the authoring and pipeline guide](../../docs/CONCEPT_MAPS.md).
 ./binder/binder concepts build
 ```
 
-Then run `quarto preview explore/index.qmd` from `site/`, or render the Model
+Then run `quarto preview taxonomy/index.qmd` from `site/`, or render the Model
 Serving chapter through Binder. Normal HTML builds regenerate the maps.
 
 Edit chapter YAML, not generated catalog JSON, map JSON, DOT, SVG, or chapter

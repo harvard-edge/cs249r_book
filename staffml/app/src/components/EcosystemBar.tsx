@@ -83,7 +83,7 @@ const LEFT_MENUS: MenuGroup[] = [
   },
   {
     id: "prepare", label: "Prepare", items: [
-      { icon: "bi-diagram-3", label: "ML Systems Taxonomy", href: `${BASE}/explore/` },
+      { icon: "bi-diagram-3", label: "ML Systems Taxonomy", href: `${BASE}/taxonomy/` },
       { divider: true },
       { icon: "bi-mortarboard", label: "StaffML", href: "/", active: true },
       { icon: "bi-map", label: "Study Plans", href: "/plans" },

@@ -52,7 +52,7 @@ StaffML is a free, open-source interview prep platform for ML systems engineers.
 > [!TIP]
 > If StaffML helps your prep, **[give us a star](https://github.com/harvard-edge/cs249r_book)**. Stars help others find this resource.
 
-**Data:** question YAMLs in [`vault/questions/`](vault/questions/), tagged with the [ML Systems Taxonomy](https://mlsysbook.ai/explore/) (`taxonomy_subject`, `taxonomy_concepts`) · **App source:** [`app/`](app/)
+**Data:** question YAMLs in [`vault/questions/`](vault/questions/), tagged with the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) (`taxonomy_subject`, `taxonomy_concepts`) · **App source:** [`app/`](app/)
 
 ---
 
