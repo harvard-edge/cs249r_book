@@ -56,6 +56,7 @@ What should the system achieve, and within which limits?
 - Cost-sensitive decision (`mlsys.cost-sensitive-decision`)
 - Pareto frontier (`mlsys.pareto-frontier`)
 - Accuracy-efficiency frontier (`mlsys.efficiency-frontier`)
+- Recovery time and point objectives (`mlsys.recovery-objectives`)
 
 ### Data and representation
 
@@ -115,6 +116,12 @@ What information reaches learning and execution?
 - Processing delivery semantics (`mlsys.delivery-semantics`)
 - Online and offline feature consistency (`mlsys.online-feature-consistency`)
 - Zero-copy sensor input via DMA (`mlsys.zero-copy-dma`)
+- Sequence packing (`mlsys.sequence-packing`)
+- Model collapse (`mlsys.model-collapse`)
+- Data curriculum and annealing (`mlsys.data-curriculum`)
+- Sharded streaming dataset format (`mlsys.streaming-dataset-format`)
+- Model-assisted labeling (`mlsys.model-assisted-labeling`)
+- Erasure coding (`mlsys.erasure-coding`)
 
 ### Model regimes
 
@@ -160,6 +167,8 @@ How does model structure change computation and behavior?
 - Graph neural network (`mlsys.graph-neural-network`)
 - Large language model (`mlsys.large-language-model`)
 - Encoder-only, decoder-only, and encoder-decoder Transformers (`mlsys.transformer-variants`)
+- Multi-head latent attention (`mlsys.multi-head-latent-attention`)
+- Residual connection (`mlsys.residual-connection`)
 
 ### Learning and experimentation
 
@@ -221,6 +230,10 @@ How should learning work and experimental effort be allocated?
 - Offline reinforcement learning (`mlsys.offline-rl`)
 - Gradient clipping (`mlsys.gradient-clipping`)
 - Weight initialization (`mlsys.weight-initialization`)
+- Model merging (`mlsys.model-merging`)
+- Group relative policy optimization (`mlsys.group-relative-policy-optimization`)
+- Agent training environment (`mlsys.agent-training-environment`)
+- Multi-task learning (`mlsys.multi-task-learning`)
 
 ### Numerical execution
 
@@ -290,6 +303,10 @@ How does a mathematical model become machine work?
 - OS memory pressure and paging (`mlsys.os-memory-pressure`)
 - Managed-runtime interop and garbage collection (`mlsys.managed-runtime-interop`)
 - Asynchronous on-device inference (`mlsys.ui-thread-inference`)
+- Register pressure (`mlsys.register-pressure`)
+- Software pipelining (`mlsys.software-pipelining`)
+- Integer-only inference (`mlsys.integer-only-inference`)
+- Quantization granularity (`mlsys.quantization-granularity`)
 
 ### Hardware and performance
 
@@ -362,6 +379,13 @@ Which physical resource limits useful work?
 - Energy-harvesting intermittent computing (`mlsys.intermittent-computing`)
 - Duty cycling and sleep states (`mlsys.duty-cycling`)
 - Sensor interconnect bandwidth (`mlsys.sensor-interconnect`)
+- Advanced accelerator packaging (`mlsys.advanced-accelerator-packaging`)
+- FPGA-based ML acceleration (`mlsys.fpga-acceleration`)
+- Wafer-scale acceleration (`mlsys.wafer-scale-acceleration`)
+- Execute-in-place weights (`mlsys.execute-in-place`)
+- Always-on sensing cascade (`mlsys.always-on-cascade`)
+- DMA cache maintenance (`mlsys.dma-cache-maintenance`)
+- Cross-stack profiling (`mlsys.cross-stack-profiling`)
 
 ### Distributed execution and state
 
@@ -434,6 +458,17 @@ How do communication and failures affect collective work?
 - Network propagation delay (`mlsys.network-propagation-delay`)
 - Consistency-availability trade-off (`mlsys.cap-tradeoff`)
 - Decentralized gossip averaging (`mlsys.gossip-averaging`)
+- Pipeline schedule (`mlsys.pipeline-schedule`)
+- Optical circuit switching (`mlsys.optical-circuit-switching`)
+- Co-packaged optics (`mlsys.co-packaged-optics`)
+- Device-initiated communication (`mlsys.device-initiated-communication`)
+- Collective algorithm selection (`mlsys.collective-algorithm-selection`)
+- Incremental checkpointing (`mlsys.incremental-checkpointing`)
+- Forward error correction (`mlsys.forward-error-correction`)
+- Backfill scheduling (`mlsys.backfill-scheduling`)
+- Network traffic classes and QoS (`mlsys.traffic-classes`)
+- Variable-length parallelism planning (`mlsys.variable-length-parallelism`)
+- Graph pipeline parallelism (`mlsys.graph-pipeline-parallelism`)
 
 ### Serving and capacity
 
@@ -510,6 +545,12 @@ How are requests admitted, executed, and completed?
 - Latency percentiles (`mlsys.latency-percentiles`)
 - Cache-aware request routing (`mlsys.cache-aware-routing`)
 - Finite buffers and overflow (`mlsys.finite-buffer`)
+- Inter-token latency (`mlsys.inter-token-latency`)
+- Fan-out tail amplification (`mlsys.fan-out-tail-amplification`)
+- Masked diffusion decoding (`mlsys.masked-diffusion-decoding`)
+- Bandwidth-delay product (`mlsys.bandwidth-delay-product`)
+- Expert offloading (`mlsys.expert-offloading`)
+- Intra-device overlap of bottlenecks (`mlsys.intra-device-overlap`)
 
 ### Evaluation and uncertainty
 
@@ -565,6 +606,9 @@ What does the evidence justify?
 - Performance regression testing (`mlsys.performance-regression-testing`)
 - Performance measurement variability (`mlsys.measurement-variability`)
 - Out-of-distribution detection (`mlsys.ood-detection`)
+- Off-policy evaluation (`mlsys.off-policy-evaluation`)
+- Model-grader bias (`mlsys.judge-bias`)
+- Multiple comparisons correction (`mlsys.multiple-comparisons`)
 
 ### Operations and recovery
 
@@ -633,6 +677,10 @@ How is behavior maintained after deployment?
 - Model and feature compatibility (`mlsys.model-feature-compatibility`)
 - Data deletion propagation (`mlsys.deletion-propagation`)
 - Health checks and readiness probes (`mlsys.health-checks`)
+- Error-correcting code memory (`mlsys.ecc-memory`)
+- Metastable failure (`mlsys.metastable-failure`)
+- Misuse monitoring (`mlsys.misuse-monitoring`)
+- Telemetry sampling and cardinality control (`mlsys.telemetry-sampling`)
 
 ### Security, privacy, and responsibility
 
@@ -710,6 +758,13 @@ Whose data, authority, and outcomes need protection?
 - Content provenance (`mlsys.content-provenance`)
 - Workload identity and secrets management (`mlsys.secrets-management`)
 - Certified robustness by randomized smoothing (`mlsys.randomized-smoothing`)
+- Training data extraction (`mlsys.training-data-extraction`)
+- Resource-exhaustion attack (`mlsys.resource-exhaustion-attack`)
+- Generated-content watermarking (`mlsys.generated-content-watermarking`)
+- Representational bias evaluation (`mlsys.representational-bias-evaluation`)
+- Confused deputy (`mlsys.confused-deputy`)
+- Fault tree analysis (`mlsys.fault-tree-analysis`)
+- Proxy discrimination (`mlsys.proxy-discrimination`)
 
 ### Energy and economics
 
@@ -745,6 +800,7 @@ What does useful work cost over the system lifecycle?
 - Datacenter demand response (`mlsys.demand-response`)
 - Rebound effect (`mlsys.rebound-effect`)
 - Data transfer cost (`mlsys.data-transfer-cost`)
+- Fine-grained accelerator sharing (`mlsys.fine-grained-accelerator-sharing`)
 
 ### Agent systems
 
@@ -778,6 +834,7 @@ How are model-directed trajectories bounded and evaluated?
 - Agent loop detection (`mlsys.agent-loop-detection`)
 - Agent credentials and delegated authority (`mlsys.agent-credentials`)
 - Agentic workload (`mlsys.agentic-workload`)
+- Model-directed control flow (`mlsys.model-directed-control-flow`)
 
 ### Physical systems
 
@@ -823,7 +880,7 @@ When is a computed action feasible and admissible?
 - Watchdog timer (`mlsys.watchdog-timer`)
 - Task and motion planning (`mlsys.task-and-motion-planning`)
 - Multi-object tracking (`mlsys.multi-object-tracking`)
-- Diffusion policy (`mlsys.diffusion-policy`)
+- Diffusion or flow-matching policy (`mlsys.diffusion-policy`)
 - Robotics middleware and dataflow (`mlsys.robotics-middleware`)
 - Parallel physics simulation (`mlsys.parallel-simulation`)
 - Perception latency budget (`mlsys.perception-latency-budget`)
@@ -831,6 +888,15 @@ When is a computed action feasible and admissible?
 - Active sensor interference (`mlsys.sensor-interference`)
 - Interrupt latency (`mlsys.interrupt-latency`)
 - Priority inversion (`mlsys.priority-inversion`)
+- System identification (`mlsys.system-identification`)
+- Motion forecasting (`mlsys.motion-forecasting`)
+- Action tokenization (`mlsys.action-tokenization`)
+- Over-refusal (`mlsys.over-refusal`)
+- Coordinate frames and transforms (`mlsys.coordinate-frames`)
+- Sensor degradation (`mlsys.sensor-degradation`)
+- Cross-embodiment training (`mlsys.cross-embodiment-training`)
+- Dual-rate hierarchical policy (`mlsys.dual-rate-hierarchical-policy`)
+- Robot kinematics (`mlsys.robot-kinematics`)
 
 ### Retrieval and search
 
@@ -847,6 +913,10 @@ How is relevant information located within a resource budget?
 - Filtered vector search (`mlsys.filtered-vector-search`)
 - Vector index freshness (`mlsys.index-freshness`)
 - Iterative multi-hop retrieval (`mlsys.multi-hop-retrieval`)
+- Document chunking (`mlsys.document-chunking`)
+- Hybrid retrieval (`mlsys.hybrid-retrieval`)
+- Embedding model migration (`mlsys.embedding-migration`)
+- RAG pipeline scheduling (`mlsys.rag-pipeline-scheduling`)
 
 ## Concept definitions
 
@@ -896,7 +966,7 @@ Fitness of recorded examples for the intended task, including validity, coverage
 
 Identity: `mlsys.labels`
 
-Correctness, consistency, and availability of supervisory targets.
+The correctness, consistency, and coverage of recorded supervision relative to the intended task, which bound the training signal and the trustworthiness of evaluation.
 
 ### Feature engineering
 
@@ -950,7 +1020,7 @@ Allocating learning effort to examples according to value, coverage, and acquisi
 
 Identity: `mlsys.tokenization`
 
-Mapping text into vocabulary-dependent symbols and their identifiers.
+Mapping text into vocabulary-dependent token identifiers, which sets sequence lengths and so influences context usage, embedding size, and processing cost.
 
 ### Distribution shift
 
@@ -1226,7 +1296,7 @@ Executing model replicas on different examples while coordinating learning state
 
 Identity: `mlsys.tensor-parallel`
 
-Partitioning tensor operations and their state across devices.
+Partitioning a layer's tensors and operations across devices so each computes a slice, reducing per-device state while adding communication along the partitioned dimensions, usually within a fast scale-up domain.
 
 ### Pipeline parallelism
 
@@ -1460,7 +1530,7 @@ A deployed system's outputs changing the data or behavior encountered by future 
 
 Identity: `mlsys.retraining`
 
-Updating learned parameters from new or revised training information.
+Training a replacement version of a deployed model on updated or revised data, with timing and data chosen to balance staleness against training and validation cost.
 
 ### Incident response
 
@@ -1568,7 +1638,7 @@ Constructing and revising prospective actions in response to goals, dependencies
 
 Identity: `mlsys.context`
 
-The information serialized into a model invocation under its input budget.
+The maximum token span a model supports in a stated execution mode, bounding the history it can use and the longest sequences the system must process.
 
 ### Retrieval
 
@@ -2162,7 +2232,7 @@ A functional unit that executes small dense matrix multiply-accumulate tiles per
 
 Identity: `mlsys.simt`
 
-Single-instruction multiple-thread execution, in which groups of threads issue the same instruction and divergent control flow within a group is serialized.
+An execution model in which groups of threads issue common instructions to active lanes, with divergent paths executed under lane masks and architecture-specific reconvergence.
 
 ### Accelerator dataflow
 
@@ -2792,7 +2862,7 @@ Training a policy directly on preferred-versus-rejected output pairs with a clas
 
 Identity: `mlsys.rlvr`
 
-Reinforcement learning in which rewards come from programmatic checks of outcomes, such as answer matching or test execution, rather than learned preference models.
+Reinforcement learning whose rewards come from programmatic outcome checks, making verifier correctness and reward computation part of the training system.
 
 ### RL rollout generation
 
@@ -2978,7 +3048,7 @@ Latency from request arrival until the first generated token is returned, domina
 
 Identity: `mlsys.tpot`
 
-Average latency between successive generated tokens after the first, dominated by decode step time.
+For a request producing multiple tokens, its elapsed decoding time after the first output divided by its remaining generated-token count, summarizing average decoding speed at a declared measurement boundary.
 
 ### Hedged requests
 
@@ -3110,7 +3180,7 @@ Translating a trained model into the format and operator set of a target runtime
 
 Identity: `mlsys.on-device-runtime`
 
-An interpreter or compiled engine that executes models on mobile, embedded, or microcontroller targets within their memory and operator limits.
+An interpreter or compiled engine that executes models locally on personal or embedded devices, including inside browsers, under the target environment's memory, operator, and execution limits.
 
 ### Over-the-air model update
 
@@ -3326,7 +3396,7 @@ Factoring a standard convolution into a per-channel spatial convolution followed
 
 Identity: `mlsys.efficiency-frontier`
 
-The set of model configurations for which no alternative improves quality without worsening a stated cost measure on a stated platform.
+The set of model configurations for which no alternative improves quality without worsening a stated cost measure, such as latency, memory, or energy, on a stated platform.
 
 ### Model-hardware co-design
 
@@ -3488,7 +3558,7 @@ Inferring whether a specific record was in a model's training data from the mode
 
 Identity: `mlsys.model-inversion`
 
-Reconstructing sensitive attributes or representative training inputs from a model's outputs, confidence scores, or gradients.
+Reconstructing sensitive attributes or representative training inputs from a model's outputs, confidence scores, or shared parameter gradients.
 
 ### DP-SGD
 
@@ -3854,7 +3924,7 @@ A model emitting a structured invocation of a declared tool, which the harness v
 
 Identity: `mlsys.model-context-protocol`
 
-An open client-server protocol through which agent hosts discover and invoke tools, resources, and prompts exposed by external servers.
+A shared client-server interface through which agent hosts discover the tools, resources, and prompts external services expose, with their schemas, reducing custom integration.
 
 ### Computer use
 
@@ -3884,7 +3954,7 @@ A harness checkpoint that holds a specific proposed action until an authorized h
 
 Identity: `mlsys.durable-execution`
 
-Recording each workflow step's intent and result in a persistent log so execution resumes after failure without repeating completed steps.
+Execution that persists workflow progress and reuses recorded results on recovery, with external-effect guarantees determined by endpoint idempotency, transactional boundaries, and reconciliation.
 
 ### Record and replay
 
@@ -4840,11 +4910,11 @@ Identity: `mlsys.data-valuation`
 
 Estimating each training example's or data source's contribution to model quality, for example through influence or Shapley-style attribution, to guide selection, pricing, or removal.
 
-### Diffusion policy
+### Diffusion or flow-matching policy
 
 Identity: `mlsys.diffusion-policy`
 
-A robot policy that generates actions by iterative denoising, representing multimodal action distributions that regression policies average into invalid in-between actions.
+Robot policies that generate continuous actions through iterative denoising or learned-flow integration, representing multiple action modes while spending an inference-iteration budget.
 
 ### Sensor spoofing
 
@@ -4898,7 +4968,7 @@ Partitioning a model graph across runtime backends by operator support, running 
 
 Identity: `mlsys.large-language-model`
 
-A language model used as a workload class: one whose training and serving are dominated by parameter memory, attention state that grows with context, and token-by-token decoding. Tag it only when an item is about that workload class itself, not merely because an LLM is involved.
+A language model large enough that parameter memory, attention state that grows with context, and token-by-token decoding usually dominate its training and serving cost. Tag it only when an item is about that workload class itself, not merely because an LLM is involved.
 
 ### Inference compute and memory estimate
 
@@ -5259,3 +5329,423 @@ A queue with bounded capacity drops or blocks arrivals once full, so its size tr
 Identity: `mlsys.ui-thread-inference`
 
 Running inference off the application's main thread, so a model call does not block rendering and input handling, with results delivered back by callback or message.
+
+### Multi-head latent attention
+
+Identity: `mlsys.multi-head-latent-attention`
+
+Attention that caches one low-rank latent vector per token in place of per-head keys and values, reconstructing them or absorbing the up-projections into the query and output weights, which shrinks the KV cache and decode memory traffic.
+
+### Training data extraction
+
+Identity: `mlsys.training-data-extraction`
+
+Recovering particular training examples or their sensitive contents through a trained model's outputs, exposing information that was not intended for release.
+
+### System identification
+
+Identity: `mlsys.system-identification`
+
+Estimating the parameters of a dynamics model, such as masses, friction, delays, and actuator gains, from measured input-output data of the physical system.
+
+### Off-policy evaluation
+
+Identity: `mlsys.off-policy-evaluation`
+
+Estimating a proposed policy's expected outcomes from interactions collected under another policy, by propensity reweighting, outcome modeling, or doubly robust estimators, subject to assumptions about action coverage and confounding.
+
+### Pipeline schedule
+
+Identity: `mlsys.pipeline-schedule`
+
+The order in which pipeline stages run the forward and backward passes of microbatches (fill-drain, one-forward-one-backward, interleaved), which sets the bubble fraction and how many microbatches' activations each stage holds.
+
+### Sequence packing
+
+Identity: `mlsys.sequence-packing`
+
+Combining variable-length training examples into packed token buffers with explicit example boundaries and attention semantics to reduce padding work without unintended cross-example attention.
+
+### Document chunking
+
+Identity: `mlsys.document-chunking`
+
+Dividing source documents into retrievable units with chosen boundaries, overlap, and source identifiers so retrieval granularity fits embedding and generation budgets.
+
+### Resource-exhaustion attack
+
+Identity: `mlsys.resource-exhaustion-attack`
+
+Crafting inputs that maximize a model service's compute, energy, output length, or tool calls, degrading service for other users or running up the operator's cost.
+
+### Generated-content watermarking
+
+Identity: `mlsys.generated-content-watermarking`
+
+Embedding a statistically detectable signal into generated text, images, or audio at generation time, such as by biasing token sampling, so that content can later be identified as model-generated.
+
+### Model merging
+
+Identity: `mlsys.model-merging`
+
+Combining compatible model parameters or parameter updates, by averaging or arithmetic on weight differences, into one model that consolidates capabilities without further training or serving the sources separately.
+
+### Optical circuit switching
+
+Identity: `mlsys.optical-circuit-switching`
+
+Reconfiguring optical connections between endpoints to match communication demand, trading switching delay and topology coordination against delivered bandwidth and network power.
+
+### Co-packaged optics
+
+Identity: `mlsys.co-packaged-optics`
+
+Placing optical transceivers inside the switch or accelerator package beside the silicon, so electrical paths shrink and energy per bit falls, at the cost of field serviceability and added package heat.
+
+### Advanced accelerator packaging
+
+Identity: `mlsys.advanced-accelerator-packaging`
+
+Integrating compute and memory dies through chiplets, interposers, or three-dimensional bonding to trade local bandwidth and manufacturing flexibility against power-delivery and heat-removal constraints.
+
+### Motion forecasting
+
+Identity: `mlsys.motion-forecasting`
+
+Predicting the future trajectories of other moving agents, usually as several weighted hypotheses, from their tracked history and the map, so a planner can avoid where they will be rather than where they are.
+
+### Representational bias evaluation
+
+Identity: `mlsys.representational-bias-evaluation`
+
+Measuring stereotyped, demeaning, or unequal portrayals of groups in generated outputs, revealing representational harms that aggregate quality or decision-rate metrics can miss.
+
+### Group relative policy optimization
+
+Identity: `mlsys.group-relative-policy-optimization`
+
+A policy-gradient method that scores each sampled response against the mean reward of a group of responses to the same prompt, removing the learned critic at the cost of generating several rollouts per prompt.
+
+### Inter-token latency
+
+Identity: `mlsys.inter-token-latency`
+
+The time between consecutive output tokens or chunks delivered to a streaming client, whose distribution, not only its mean, exposes decode stalls that an average time per output token hides.
+
+### Hybrid retrieval
+
+Identity: `mlsys.hybrid-retrieval`
+
+Combining lexical and dense retrieval results through score or rank fusion to recover complementary matches while managing additional search cost and ranking calibration.
+
+### FPGA-based ML acceleration
+
+Identity: `mlsys.fpga-acceleration`
+
+Mapping ML operations to reconfigurable logic, arithmetic blocks, and local memories so datapaths can match a workload at the cost of hardware compilation and resource constraints.
+
+### Device-initiated communication
+
+Identity: `mlsys.device-initiated-communication`
+
+Communication in which kernels on the accelerator issue and synchronize inter-device transfers themselves, without a host call per exchange, allowing fine-grained fusion of compute and communication at the cost of explicit ordering and completion handling.
+
+### Model collapse
+
+Identity: `mlsys.model-collapse`
+
+Loss of coverage of the original data distribution across generations trained on model-generated data, making provenance and real-versus-synthetic mixture policies part of quality control.
+
+### Action tokenization
+
+Identity: `mlsys.action-tokenization`
+
+Encoding continuous robot actions or action sequences as discrete model tokens, making reconstruction error and token count determinants of policy fidelity and execution cost.
+
+### Wafer-scale acceleration
+
+Identity: `mlsys.wafer-scale-acceleration`
+
+Executing ML on a compute-and-memory array spanning most of a semiconductor wafer, making spatial placement and communication between tiles central to performance.
+
+### Embedding model migration
+
+Identity: `mlsys.embedding-migration`
+
+Changing the encoder behind a vector index while keeping queries and stored vectors comparable, by re-encoding the corpus, validated mappings, or backward-compatible training, with a controlled serving cutover.
+
+### Register pressure
+
+Identity: `mlsys.register-pressure`
+
+Demand for registers from simultaneously live kernel values, which can reduce resident threads or force values to spill into slower memory.
+
+### Software pipelining
+
+Identity: `mlsys.software-pipelining`
+
+Scheduling independent operations from different loop iterations to overlap, such as loading the next tile while computing the current one, hiding latency at the cost of extra live state and buffering.
+
+### Error-correcting code memory
+
+Identity: `mlsys.ecc-memory`
+
+Memory protected by redundant check bits that correct supported error patterns and report detectable uncorrectable errors, reducing the risk of silent corruption.
+
+### Integer-only inference
+
+Identity: `mlsys.integer-only-inference`
+
+Executing a quantized model with integer arithmetic throughout its operator graph, including accumulation and rescaling, so no floating-point operations are needed at inference time.
+
+### Execute-in-place weights
+
+Identity: `mlsys.execute-in-place`
+
+Reading immutable model weights from memory-mapped flash during inference without first copying them into SRAM, reducing working memory while exposing flash-access latency.
+
+### Confused deputy
+
+Identity: `mlsys.confused-deputy`
+
+A security failure in which a component uses its legitimate authority for an untrusted party's purpose because it does not distinguish the requester's authority from its own.
+
+### Model-grader bias
+
+Identity: `mlsys.judge-bias`
+
+Systematic scoring errors in model-based graders, such as preferences for response position, length, or style, that distort comparisons independently of task quality.
+
+### Over-refusal
+
+Identity: `mlsys.over-refusal`
+
+Refusing benign requests that resemble harmful ones, the false-positive side of a safety filter or refusal policy, which is traded against missed harmful requests when setting the operating point.
+
+### Coordinate frames and transforms
+
+Identity: `mlsys.coordinate-frames`
+
+Reference frames and the spatial transforms between them that express sensor observations, robot geometry, and actions in consistent coordinates.
+
+### Sensor degradation
+
+Identity: `mlsys.sensor-degradation`
+
+Loss of sensor measurement fidelity under environmental or operating conditions, such as glare, rain, fog, dust, or a dirty lens, that degrades perception even when the sensing hardware has not failed.
+
+### Data curriculum and annealing
+
+Identity: `mlsys.data-curriculum`
+
+Changing the training data distribution over a run, such as raising the share of high-quality or long-sequence data during the final learning-rate decay, to improve final capability per unit of compute.
+
+### Sharded streaming dataset format
+
+Identity: `mlsys.streaming-dataset-format`
+
+Organizing training examples into sequentially readable shard files so workers can stream records from remote storage with few small-object reads and bounded local staging.
+
+### Collective algorithm selection
+
+Identity: `mlsys.collective-algorithm-selection`
+
+Choosing, per call, among collective algorithms (ring, tree, switch-offloaded) and wire protocols by message size, participant count, and link hierarchy, to minimize latency for small messages and maximize bandwidth for large ones.
+
+### Always-on sensing cascade
+
+Identity: `mlsys.always-on-cascade`
+
+Using a low-power sensing or inference stage to wake a more expensive stage only when needed, cutting continuous-monitoring energy at the risk of missed triggers and wake latency.
+
+### Fault tree analysis
+
+Identity: `mlsys.fault-tree-analysis`
+
+Top-down hazard analysis that decomposes an undesired top event into Boolean combinations of contributing faults, so minimal cut sets and their probabilities can be computed.
+
+### Metastable failure
+
+Identity: `mlsys.metastable-failure`
+
+A state in which a transient trigger, such as a load spike or slowdown, starts a self-sustaining loop of retries, cache misses, or timeouts that keeps a system overloaded after the trigger is gone.
+
+### Fan-out tail amplification
+
+Identity: `mlsys.fan-out-tail-amplification`
+
+The growth in a request's latency tail when it waits on many parallel subrequests, because the chance that at least one subrequest is slow rises with the fan-out.
+
+### Proxy discrimination
+
+Identity: `mlsys.proxy-discrimination`
+
+Decisions driven by features that encode protected-group membership, so group disparities persist even when the protected attribute itself is omitted.
+
+### Cross-embodiment training
+
+Identity: `mlsys.cross-embodiment-training`
+
+Training one policy across datasets from several robot embodiments, aligning observations and action interfaces so learning is shared despite differences in sensors and control.
+
+### Dual-rate hierarchical policy
+
+Identity: `mlsys.dual-rate-hierarchical-policy`
+
+Splitting a robot policy into a slow high-level model that sets goals or latent commands and a fast low-level controller that tracks them at control rate, so large-model latency does not set the control loop's rate.
+
+### Robot kinematics
+
+Identity: `mlsys.robot-kinematics`
+
+The geometric mapping between joint positions and velocities and the pose and velocity of a robot's links and end effector, including inverse solutions and singular configurations where motion authority is lost.
+
+### Quantization granularity
+
+Identity: `mlsys.quantization-granularity`
+
+The grouping of values that share quantization parameters, such as a scale and an optional zero point, from per tensor to per channel to small groups, trading approximation error against metadata and kernel cost.
+
+### Agent training environment
+
+Identity: `mlsys.agent-training-environment`
+
+A task system that supplies observations, accepts actions, and manages episode state for training tool-using policies, whose throughput and reset fidelity limit rollout collection.
+
+### Model-directed control flow
+
+Identity: `mlsys.model-directed-control-flow`
+
+A control structure in which model outputs select the next step, tool call, or stopping decision within runtime-enforced limits, increasing flexibility while making cost and behavior harder to predict and test.
+
+### Misuse monitoring
+
+Identity: `mlsys.misuse-monitoring`
+
+Detecting policy-violating use of a deployed model across requests, sessions, and accounts, such as coordinated abuse or capability probing, and responding with throttling, review, or account action.
+
+### Masked diffusion decoding
+
+Identity: `mlsys.masked-diffusion-decoding`
+
+Generating text by repeatedly predicting and committing masked positions in parallel, trading refinement passes for token parallelism while weakening the attention-state reuse that autoregressive decoding relies on.
+
+### Residual connection
+
+Identity: `mlsys.residual-connection`
+
+A connection that adds a block's input, or a projection of it, to the block's output, so information and gradients can bypass the block and deep stacks stay trainable.
+
+### Multi-task learning
+
+Identity: `mlsys.multi-task-learning`
+
+Jointly learning several tasks through shared parameters, often a shared backbone with task-specific heads, so their training signals can help or interfere with one another.
+
+### Recovery time and point objectives
+
+Identity: `mlsys.recovery-objectives`
+
+Stated limits on how long restoring service may take (RTO) and how far recovered state may lag the state before the failure (RPO), which constrain checkpointing, replication, and failover design.
+
+### Incremental checkpointing
+
+Identity: `mlsys.incremental-checkpointing`
+
+Persisting only the state that changed since the preceding checkpoint, with periodic full checkpoints as bases, which cuts write volume when updates are sparse at the cost of reconstructing state from a chain on restore.
+
+### Multiple comparisons correction
+
+Identity: `mlsys.multiple-comparisons`
+
+Adjusting significance thresholds when many hypotheses, metrics, or slices are tested together, so the chance of a false declared effect, by family-wise error or false discovery rate, stays controlled.
+
+### Model-assisted labeling
+
+Identity: `mlsys.model-assisted-labeling`
+
+Using a model's predictions as draft labels that annotators accept or correct, which raises labeling throughput but can anchor annotators to the model's errors.
+
+### Forward error correction
+
+Identity: `mlsys.forward-error-correction`
+
+Adding redundant bits to transmitted data so the receiver corrects supported error patterns without retransmission, at the cost of coding overhead and decoding delay.
+
+### Erasure coding
+
+Identity: `mlsys.erasure-coding`
+
+Encoding stored data into data and parity fragments so it can be reconstructed after a bounded number of fragment losses, trading storage overhead against encoding and recovery work.
+
+### Bandwidth-delay product
+
+Identity: `mlsys.bandwidth-delay-product`
+
+A path's bottleneck bandwidth times its round-trip time, the amount of outstanding data a window-controlled flow must sustain to keep the path full.
+
+### Backfill scheduling
+
+Identity: `mlsys.backfill-scheduling`
+
+Running lower-priority jobs in idle resource-time gaps without delaying the reserved start of a higher-priority job, which raises cluster utilization.
+
+### Network traffic classes and QoS
+
+Identity: `mlsys.traffic-classes`
+
+Classifying traffic on a shared network into separately scheduled queues with configured priorities or bandwidth shares, limiting interference between collective, storage, and control traffic.
+
+### Telemetry sampling and cardinality control
+
+Identity: `mlsys.telemetry-sampling`
+
+Choosing which traces, events, and metric label combinations to keep, by sampling and by bounding or aggregating label values, so fleet telemetry stays affordable at the risk of losing rare failures and fine-grained detail.
+
+### DMA cache maintenance
+
+Identity: `mlsys.dma-cache-maintenance`
+
+Cleaning and invalidating processor caches around DMA transfers on hardware without coherent DMA, with buffers aligned to cache lines, so a device and the CPU do not read stale copies of a shared buffer; each maintenance step adds latency.
+
+### Expert offloading
+
+Identity: `mlsys.expert-offloading`
+
+Keeping some mixture-of-experts weights in host memory or storage and fetching the experts a batch needs into accelerator memory, often prefetching predicted ones, which lets a model larger than accelerator memory run at the cost of transfers.
+
+### Variable-length parallelism planning
+
+Identity: `mlsys.variable-length-parallelism`
+
+Choosing, for each training step, sequence or context parallel degrees and how packed documents are sharded across ranks from that step's sequence lengths and attention patterns, so ranks receive balanced attention work.
+
+### Fine-grained accelerator sharing
+
+Identity: `mlsys.fine-grained-accelerator-sharing`
+
+Scheduling co-located workloads on one accelerator in small units of a kernel, so latency-sensitive work can preempt background work quickly and interference stays bounded.
+
+### Intra-device overlap of bottlenecks
+
+Identity: `mlsys.intra-device-overlap`
+
+Scheduling generative-inference operations with complementary compute, memory, or communication demands concurrently on one accelerator, using small batches or fused kernels so several hardware resources stay busy together.
+
+### Graph pipeline parallelism
+
+Identity: `mlsys.graph-pipeline-parallelism`
+
+Pipeline parallelism that partitions a model whose layers form a branching graph into stages that follow the graph, so independent branches, such as separate modality encoders, run concurrently in parallel stages instead of being serialized into one chain.
+
+### RAG pipeline scheduling
+
+Identity: `mlsys.rag-pipeline-scheduling`
+
+Coordinating the retrieval and generation work of retrieval-augmented requests across requests and processors, overlapping and batching work across the stage boundary and optionally adapting retrieval settings per query, to meet latency and answer-quality targets.
+
+### Cross-stack profiling
+
+Identity: `mlsys.cross-stack-profiling`
+
+Profiling that correlates timestamped events and calling contexts from model code, frameworks, native libraries, and accelerator kernels, so that device time and stalls can be attributed to the operations that launched them.
