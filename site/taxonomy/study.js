@@ -628,6 +628,14 @@
 
   function bind() {
     window.addEventListener('hashchange', restore);
+    // "Ways to use it": a lens example turns that highlight on in the matrix.
+    document.querySelectorAll('[data-try-lens]').forEach((a) => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (location.hash) location.hash = '';
+      const b = document.querySelector(`#bok-lenses [data-lens="${a.dataset.tryLens}"]`);
+      if (b && b.getAttribute('aria-pressed') !== 'true') b.click();
+      $('bok-matrix').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
     $('bok-tab-home').addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', location.pathname + location.search); restore(); });
     $('bok-tab-concept').addEventListener('click', (e) => {
       if (!visited.length) return;
