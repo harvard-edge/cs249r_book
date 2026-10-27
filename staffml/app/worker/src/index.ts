@@ -169,11 +169,11 @@ const ADAPTERS: Adapter[] = [
   {
     name: "groq",
     vendorLabel: "Groq",
-    modelLabel: "Llama 3.3 70B",
+    modelLabel: "GPT-OSS 120B",
     privacyNote: "Groq does not train on API inputs.",
     requestShape: "openai-compat",
     defaultBaseUrl: "https://api.groq.com/openai/v1",
-    defaultModel: "llama-3.3-70b-versatile",
+    defaultModel: "openai/gpt-oss-120b",
     apiKeyEnv: "GROQ_API_KEY",
     baseUrlEnv: "GROQ_BASE_URL",
     modelEnv: "GROQ_MODEL",

@@ -1584,7 +1584,7 @@ async function handleSummativeAction(
 
   getConfig_summative.set_field("quote", text);
   const params = getConfig_summative.return_all_fields();
-  // Model will be set by the Cloudflare agent (llama-3.3-70b-versatile)
+  // Model will be set by the Cloudflare agent (openai/gpt-oss-120b)
   let clone = get_message_element(shadowRoot, "ai", ele);
 
   updateCloneAttributes(clone, text, "quiz", title);
@@ -1985,7 +1985,7 @@ async function handleQuizAction(
   if (context) {
     params.context = context;
   }
-  // Model will be set by the Cloudflare agent (llama-3.3-70b-versatile)
+  // Model will be set by the Cloudflare agent (openai/gpt-oss-120b)
   const chapterTitle = `Chapter ${chapterInfo.chapter || '1'}: ${chapterInfo.title || 'UNKNOWN'}`;
   params.chapterId = chapterTitle;
   params.sectionId = title || chapterInfo.title || 'UNKNOWN';  // Use provided title or fall back to chapter title
