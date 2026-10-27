@@ -17,14 +17,14 @@ This section supersedes counts and interface details below where they differ.
 - **Compiler.** `framework.py` accepts `0.2-draft`, validates an optional `groups` tier, resolves `book_chapters` codes (`v2/08`) to chapter titles and clean URLs, and rejects `[[identity]]` scope references that name no row or area. `concept_graph.py` now emits the flattened published chapter URL (`/volN/NN_chapter/…`); the old `/volN/volN/…` form is a redirect after publish. Vol III and IV pages are not live yet.
 - **Page.** `_workspace.qmd`, `study.js`, and `study.css` were rewritten: a field map, area views, a concept panel, an A–Z index, lenses, and URL-hash state, in the neutral mlsysbook.ai style with dark mode. The interactive whole-graph canvas is retired from the page; `field-all.svg` remains a download. Old 0.1 row deep links fall back to the overview.
 - **Concept map and glossary (later pass).** The relationship graph was rebuilt for mapping: every link classified into a controlled relation, 530 links added so no concept has fewer than two and the graph is connected (mean path about five links, down from seven), and an audit that read each link literally corrected or removed 76. After a review of how established taxonomies present themselves (MITRE ATT&CK/ATLAS, SFIA, ESCO, CS2023, MeSH) and of concept-map conventions, the page was rebuilt as a matrix home plus entry pages (area, subject, concept) with a sidebar tree, facts box, and tables, and a table glossary. Each concept page carries a neutral local concept map drawn with the vendored Cytoscape build. `field_graph.py` validates the relation vocabulary and rejects duplicate concept pairs.
-- **Taxonomy release.** Groups, areas, and subjects have nested readable codes (`P4.3`). The Taxonomy tab shows the overview figure, a full collapsible outline with codes (filterable, printable to PDF), and a Download & cite section. `binder/cli/core/taxonomy_release.py` writes CSV, JSON, SKOS Turtle, GraphML, and BibTeX to `site/explore/downloads/` (ignored by Git, regenerated each build). License is the book's CC BY-NC-SA pending a decision; no DOI has been minted.
+- **Taxonomy release.** Groups, areas, and subjects have nested readable codes (`P4.3`). The Taxonomy tab shows the overview figure, a full collapsible outline with codes (filterable, printable to PDF), and a Download & cite section. `binder/cli/core/taxonomy_release.py` writes CSV, JSON, SKOS Turtle, GraphML, and BibTeX to `site/taxonomy/downloads/` (ignored by Git, regenerated each build). License is the book's CC BY-NC-SA pending a decision; no DOI has been minted.
 - **Coverage.** `binder concepts coverage --check` scores recorded checklists in `shared/concepts/coverage/`. Design input (214 course, conference, and standards topics): 100% covered. First held-out measurement: MLSys 2025–2026 papers 67% covered by a concept and 97% homed in a subject; Volume I–II primary chapter concepts 85% and 99.5%; Volume III–IV 70% and 100%. After closing the field-level gaps those tests surfaced, they read 88%, 89%, and 83% and are now design inputs; the next held-out test is MLSys 2027. Remaining open topics are listed as partial in each checklist. Next planned use: StaffML questions re-expressed in taxonomy subjects and concepts (phased; see the session plan).
 - **Review status.** All new concepts, placements, relationships, and chapter pointers are AI-authored drafts. Five ledger decisions are now stale because the vocabulary changed. All source URLs were link-checked: 232 load directly, all 34 DOIs match their cited titles in Crossref, and ISO, RAND, and ACM pages that block scripts were matched by identifier. One dead host was replaced with its DOI.
 
 ## Start the review here
 
 1. Read this note, `docs/ML_SYSTEMS_FRAMEWORK.md`, and `docs/CONCEPT_COVERAGE_AUDIT.md`.
-2. Inspect the canonical website entry at `site/explore/index.qmd` and its shared body, `site/explore/_workspace.qmd`.
+2. Inspect the canonical website entry at `site/taxonomy/index.qmd` and its shared body, `site/taxonomy/_workspace.qmd`.
 3. Run the checks below and examine the generated reconciliation report before adding concepts or changing relationships.
 4. Review the subject model and relationship semantics separately from the visual presentation. A valid build proves structural consistency, not conceptual completeness.
 
@@ -45,7 +45,7 @@ Every current field concept has one candidate maintenance home. Secondary placem
 
 ## Website implementation
 
-- `/explore/` serves the canonical Concept Explorer. It retains the main Quarto navbar, announcement, typography, theme switch, and footer. The explorer itself uses neutral slate across all volumes.
+- `/taxonomy/` serves the canonical Concept Explorer. It retains the main Quarto navbar, announcement, typography, theme switch, and footer. The explorer itself uses neutral slate across all volumes.
 - The primary modes are **Taxonomy** and **Concept map**. Taxonomy has Cards and Tree layouts. Concept map defaults to every current field concept and authored relationship; Neighborhood is optional.
 - Selection preserves the full graph, emphasizes directly connected nodes/edges, and opens an in-page reader. Locate on map frames the selected concept and its neighbors. Search, keyboard navigation, pan/zoom, and an explicit expanded window are supported.
 - Book passages remain behind one disclosure. Conditions appear with relationship details. Draft and unassessed teaching-depth wording is intentional.
@@ -83,7 +83,7 @@ The human reconciliation gate covers selected primary declarations only. Seconda
 From the repository root:
 
 ```sh
-python3 -m pip install -r site/explore/requirements.txt
+python3 -m pip install -r site/taxonomy/requirements.txt
 # Install Graphviz through the local package manager if `dot` is unavailable.
 ./binder/binder concepts check
 ./binder/binder concepts build
@@ -110,11 +110,11 @@ python3 -m pytest \
 Render/preview the main page from `site/`:
 
 ```sh
-quarto render explore/index.qmd --to html
-quarto preview explore/index.qmd
+quarto render taxonomy/index.qmd --to html
+quarto preview taxonomy/index.qmd
 ```
 
-Also render `explore/taxonomy-study.qmd`, `explore/volume-maps.qmd`, and `explore/field.qmd` when changing their integration. The shared stats pre-render hook can update `site/config/stats-cache.json` and can retain cached values when external services are unavailable. Do not commit an unrelated stats refresh or weaken TLS validation to render the explorer.
+Also render `taxonomy/taxonomy-study.qmd`, `taxonomy/volume-maps.qmd`, and `taxonomy/field.qmd` when changing their integration. The shared stats pre-render hook can update `site/config/stats-cache.json` and can retain cached values when external services are unavailable. Do not commit an unrelated stats refresh or weaken TLS validation to render the explorer.
 
 The pages were rendered locally and visually inspected at desktop, tablet, and phone widths, in light and dark modes. Search, two-tab keyboard navigation, selected concept/relationship reading, complete node/edge retention, legacy expanded deep links, and expanded-window navigation were checked. Mobile controls and horizontal overflow were inspected. This is not a formal accessibility audit or a student usability study. No complete book/PDF builds or remote CI validation were performed.
 

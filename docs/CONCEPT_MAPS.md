@@ -41,7 +41,7 @@ and are excluded from the student map selector when a learner volume view exists
 - `learner_graph` defines finer concepts and question or volume views, with exact
   chapter-section excerpts. The original focused serving maps remain available.
 
-`site/explore/atlas.yml` stores only volume navigation metadata. It does not own
+`site/taxonomy/atlas.yml` stores only volume navigation metadata. It does not own
 concepts or edges. Source excerpts establish provenance and freshness, not
 semantic entailment. Review must confirm the predicate, direction, and
 qualification of each proposed edge before its status becomes `reviewed`.
@@ -207,10 +207,10 @@ it does not imply that detailed semantic maps have been authored for every chapt
 
 ## Generated locations
 
-- `site/explore/catalog.json`: series ownership/reuse catalog, volume metadata, and map manifest.
-- `site/explore/atlas.html`: offline series preview with embedded catalog and detailed maps.
-- `site/explore/volumes/volN.json`: volume teaching overview.
-- `site/explore/maps/<map-id>/`: map JSON, DOT, and SVG.
+- `site/taxonomy/catalog.json`: series ownership/reuse catalog, volume metadata, and map manifest.
+- `site/taxonomy/atlas.html`: offline series preview with embedded catalog and detailed maps.
+- `site/taxonomy/volumes/volN.json`: volume teaching overview.
+- `site/taxonomy/maps/<map-id>/`: map JSON, DOT, and SVG.
 - `books/volN/<chapter>/concepts-generated/`: portable local chapter viewer.
 - `books/_build/concepts/chapters.json`: manifest used by the HTML injection filter.
 
@@ -445,8 +445,8 @@ sources, and `field-preview.html` are ignored build artifacts. Invalid field
 records fail before existing outputs are replaced. No external model or network
 request is needed during a build.
 
-The website page is `site/explore/field.qmd`, linked from the book explorer.
-The standalone local preview is `site/explore/field-preview.html`. Both use the
+The website page is `site/taxonomy/field.qmd`, linked from the book explorer.
+The standalone local preview is `site/taxonomy/field-preview.html`. Both use the
 same data and SVG geometry. The viewer supports background drag, wheel panning,
 modified-wheel zoom, keyboard pan/zoom, family focus, full-model search, book-link
 highlighting, and concept-to-concept exploration. HTML explanations and the

@@ -80,7 +80,7 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 
 ## Website
 
-`site/explore/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
+`site/taxonomy/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
 
 - **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
@@ -98,7 +98,7 @@ Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-sy
 
 Every group, area, and subject carries a readable code: a group letter (F, S, P, Q, T; Lifecycle uses P so a code never reads as a StaffML depth level), an area number, and a subject number, so `P4.3` is Lifecycle › Deployment & serving › its third subject. The compiler requires codes to be unique and nested. Codes are for people and may be renumbered between versions; concept identities such as `mlsys.kv-cache` are permanent and are what tools should store.
 
-`binder concepts build` writes the public release to `site/explore/downloads/` from the same compiled records as the page:
+`binder concepts build` writes the public release to `site/taxonomy/downloads/` from the same compiled records as the page:
 
 | File | Format | Contents |
 |---|---|---|

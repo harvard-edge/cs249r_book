@@ -14,8 +14,10 @@ import json
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
-BASE = "https://mlsysbook.ai/taxonomy/"
-PAGE = "https://mlsysbook.ai/explore/"
+from .concept_graph import PAGE_URL, SITE_DIR
+
+BASE = PAGE_URL
+PAGE = PAGE_URL
 NAME = "ML Systems Taxonomy"
 AUTHOR = "Vijay Janapa Reddi"
 LICENSE = {"name": "CC BY-NC-SA 4.0", "url": "https://creativecommons.org/licenses/by-nc-sa/4.0/"}
@@ -40,7 +42,7 @@ def _outline(framework: dict, field: dict) -> dict:
 
 
 def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, bytes]:
-    out = root / "site/explore/downloads"
+    out = root / SITE_DIR / "downloads"
     version = framework["version"]
     outline = _outline(framework, field)
     concepts = outline["concepts"]

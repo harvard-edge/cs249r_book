@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from .concept_graph import ConceptGraphError, digest, svg_map
+from .concept_graph import SITE_DIR, ConceptGraphError, digest, svg_map
 
 
 def load_taxonomy_yaml(path: Path) -> object:
@@ -209,7 +209,7 @@ def field_artifacts(root: Path, book_graph: dict) -> dict[Path, bytes]:
     field = load_field(root, book_graph)
     if field is None:
         return {}
-    site = root / "site/explore"
+    site = root / SITE_DIR
     nodes = {n["id"]: n for n in field["concepts"]}
     artifacts, diagrams, neighborhoods = {}, {}, {}
     render_views = list(field["views"])
