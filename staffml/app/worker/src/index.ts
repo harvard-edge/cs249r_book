@@ -202,22 +202,26 @@ const ADAPTERS: Adapter[] = [
   {
     name: "anthropic",
     vendorLabel: "Anthropic",
-    modelLabel: "Claude 3.5 Haiku",
+    modelLabel: "Claude Haiku 5.5",
     privacyNote: "Anthropic does not train on API submissions.",
     requestShape: "anthropic",
     defaultBaseUrl: "https://api.anthropic.com/v1",
-    defaultModel: "claude-3-5-haiku-latest",
+    // 2026-10-27: claude-3-5-haiku-latest is retired. Haiku 5.5 rejects a
+    // non-default temperature and thinks by default, so callAnthropic sends
+    // neither a temperature nor thinking.
+    defaultModel: "claude-haiku-5-5",
     apiKeyEnv: "ANTHROPIC_API_KEY",
     modelEnv: "ANTHROPIC_MODEL",
   },
   {
     name: "gemini",
     vendorLabel: "Google",
-    modelLabel: "Gemini 1.5 Flash",
+    modelLabel: "Gemini 3.8 Flash",
     privacyNote: "Google's free Gemini API may use prompts to improve products. Avoid sensitive content.",
     requestShape: "gemini",
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    defaultModel: "gemini-1.5-flash",
+    // 2026-10-27: gemini-1.5-flash is shut down.
+    defaultModel: "gemini-3.8-flash",
     apiKeyEnv: "GEMINI_API_KEY",
     modelEnv: "GEMINI_MODEL",
   },
@@ -499,7 +503,8 @@ async function callAnthropic(
       system,
       messages: coalesced,
       max_tokens: maxTokens,
-      temperature: 0.4,
+      // Thinking would spend the short reply budget before any text.
+      thinking: { type: "disabled" },
     }),
   });
   if (!res.ok) {
