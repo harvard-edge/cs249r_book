@@ -64,7 +64,7 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
                   <span className="text-textPrimary">{l.operation}</span>
                   <div className="flex items-center gap-3 text-textSecondary">
                     <span>{formatLatency(l.latency_ns)}</span>
-                    <span className="text-textTertiary w-24 whitespace-nowrap text-right">{l.human_scale}</span>
+                    <span className="text-textTertiary w-16 text-right">{l.human_scale}</span>
                   </div>
                 </div>
               ))}
@@ -86,7 +86,7 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
           )}
 
           <div className="mt-2 text-[10px] text-textTertiary italic">
-            Source: MLSysIM hardware, systems, and model registries
+            Source: mlsysim/core/constants.py
           </div>
         </div>
       )}
@@ -96,8 +96,7 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
 
 function formatBandwidth(tbs: number): string {
   if (tbs >= 1) return `${tbs} TB/s`;
-  if (tbs >= 0.001) return `${Math.round(tbs * 1000)} GB/s`;
-  return `${Math.round(tbs * 1e6)} MB/s`;
+  return `${Math.round(tbs * 1000)} GB/s`;
 }
 
 function formatMemory(gb: number): string {
@@ -109,5 +108,5 @@ function formatMemory(gb: number): string {
 function formatLatency(ns: number): string {
   if (ns >= 1e6) return `${(ns / 1e6).toFixed(0)} ms`;
   if (ns >= 1e3) return `${(ns / 1e3).toFixed(0)} µs`;
-  return `${Number(ns.toPrecision(3))} ns`;
+  return `${ns} ns`;
 }
