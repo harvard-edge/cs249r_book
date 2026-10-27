@@ -17,7 +17,7 @@ The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy
 
 ## Organizing frame
 
-An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.3-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups, with 798 concepts:
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.3-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups, with 805 concepts:
 
 | Group | Areas |
 |---|---|
@@ -92,7 +92,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,679 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,697 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
 
 ## Codes, downloads, and citation
 
