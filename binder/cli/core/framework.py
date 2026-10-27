@@ -27,7 +27,7 @@ DIMENSIONS = ("activities", "layers", "concerns", "contexts")
 # relabeled row cannot leave a stale pointer behind.
 SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
 REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
-SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft")
+SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft", "0.3-draft")
 
 
 def _fail(message):
