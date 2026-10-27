@@ -254,6 +254,22 @@ def test_groups_and_chapter_pointers_resolve_without_claiming_depth(candidate):
     assert rows[0]["group_id"] == "stack" and rows[0]["group_label"] == "Stack"
 
 
+def test_chapter_pointer_ignores_leftover_build_folders(candidate):
+    # 2026-10-27: an untracked books/vol1/02_ml_systems/ (old rendered HTML) beside the renamed
+    # 02_system_paradigms/ made `v1/02` ambiguous and failed every concepts build in the main checkout.
+    root, model, field = candidate
+    chapter = root / "books/vol1/02_system_paradigms"
+    chapter.mkdir(parents=True)
+    (chapter / "02_system_paradigms.qmd").write_text("# System Paradigms\n")
+    leftover = root / "books/vol1/02_ml_systems"
+    leftover.mkdir(parents=True)
+    (leftover / "02_ml_systems.html").write_text("<html></html>")
+    model["areas"][0]["rows"][0].update(book_chapters=["v1/02"])
+    write(root, model)
+    framework = load_framework(root, field)
+    assert framework["areas"][0]["rows"][0]["book_chapters"][0]["chapter"] == "vol1/02_system_paradigms"
+
+
 def test_scope_references_render_current_labels(candidate):
     root, model, field = candidate
     model["areas"][0]["rows"][0].update(excludes=["Persisting state ([[row.state]]) and the area ([[area.execution]])"])

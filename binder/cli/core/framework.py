@@ -96,7 +96,11 @@ def _chapters(root: Path, codes, context):
         if not match:
             _fail(f"{context} has malformed chapter code {code}")
         volume = f"vol{match[1]}"
-        folders = sorted((root / "books" / volume).glob(f"{match[2]}_*/"))
+        # A chapter folder holds its own QMD; leftover build-output folders do not.
+        folders = sorted(
+            folder for folder in (root / "books" / volume).glob(f"{match[2]}_*/")
+            if (folder / f"{folder.name}.qmd").exists()
+        )
         if len(folders) != 1:
             _fail(f"{context} chapter code {code} does not resolve to one chapter")
         folder = folders[0]
