@@ -35,7 +35,10 @@ The 445 questions tagged with a subject only were then offered the new concepts
 question gets a concept for 76.6% of questions. A concept was written only where
 both chose it: 106 questions gained concepts, most often advanced packaging,
 telemetry sampling, forward error correction, recovery objectives, and DMA cache
-maintenance. 339 questions remain subject-only.
+maintenance. After seven more concepts closed gaps found by the held-out test, the
+remaining subject-only questions were offered those seven the same way; both
+taggers chose expert offloading for the same six MoE questions and nothing else.
+333 questions remain subject-only.
 
 ---
 
