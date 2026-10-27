@@ -143,7 +143,7 @@
 
   function renderRelease() {
     const fw = data.framework;
-    const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. https://mlsysbook.ai/explore/`;
+    const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
     $('bok-cite-text').textContent = citation;
     $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Licensed <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> · Editorial draft for expert review`;
     $('bok-copy-cite').addEventListener('click', async () => {
@@ -628,6 +628,14 @@
 
   function bind() {
     window.addEventListener('hashchange', restore);
+    // "Ways to use it": a lens example turns that highlight on in the matrix.
+    document.querySelectorAll('[data-try-lens]').forEach((a) => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (location.hash) location.hash = '';
+      const b = document.querySelector(`#bok-lenses [data-lens="${a.dataset.tryLens}"]`);
+      if (b && b.getAttribute('aria-pressed') !== 'true') b.click();
+      $('bok-matrix').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
     $('bok-tab-home').addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', location.pathname + location.search); restore(); });
     $('bok-tab-concept').addEventListener('click', (e) => {
       if (!visited.length) return;
