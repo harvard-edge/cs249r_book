@@ -18,24 +18,33 @@ from pathlib import Path
 import yaml
 
 
+from .field_graph import load_taxonomy_yaml
+
+
 STATUSES = ("covered", "partial", "missing", "out-of-scope")
+CHECKLIST_KEYS = {"schema_version", "id", "title", "basis", "held_out", "topics"}
+TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
 
 
 def _vocabulary(root: Path):
-    field = yaml.safe_load((root / "shared/concepts/ml-systems-field.yml").read_text())
-    framework = yaml.safe_load((root / "shared/concepts/ml-systems-framework.yml").read_text())
+    field = load_taxonomy_yaml(root / "shared/concepts/ml-systems-field.yml")
+    framework = load_taxonomy_yaml(root / "shared/concepts/ml-systems-framework.yml")
     concepts = {c["id"] for c in field["concepts"]}
-    subjects = {}
+    subjects, homes = {}, {}
     for area in framework["areas"]:
         for row in area["rows"]:
             subjects[row["id"]] = row
             if row.get("code"):
                 subjects[row["code"]] = row
-    return concepts, subjects
+            for concept_id in row.get("concepts", []):
+                homes[concept_id] = row["id"]
+    return concepts, subjects, homes
 
 
-def _check(checklist: dict, concepts: set, subjects: dict, name: str) -> list[str]:
+def _check(checklist: dict, concepts: set, subjects: dict, homes: dict, name: str) -> list[str]:
     errors = []
+    if set(checklist) - CHECKLIST_KEYS:
+        errors.append(f"{name}: unknown checklist keys: {', '.join(sorted(set(checklist) - CHECKLIST_KEYS))}")
     for key in ("id", "title", "basis"):
         if not str(checklist.get(key, "")).strip():
             errors.append(f"{name}: requires {key}")
@@ -46,6 +55,10 @@ def _check(checklist: dict, concepts: set, subjects: dict, name: str) -> list[st
         return errors + [f"{name}: requires a nonempty topics list"]
     for index, item in enumerate(topics, 1):
         where = f"{name} topic {index} ({item.get('topic', '?')})"
+        if set(item) - TOPIC_KEYS:
+            errors.append(f"{where}: unknown topic keys: {', '.join(sorted(set(item) - TOPIC_KEYS))}")
+        if not isinstance(item.get("topic"), str) or not item["topic"].strip():
+            errors.append(f"{where}: requires topic")
         status = item.get("status")
         if status not in STATUSES:
             errors.append(f"{where}: unknown status {status}")
@@ -56,8 +69,17 @@ def _check(checklist: dict, concepts: set, subjects: dict, name: str) -> list[st
             errors.append(f"{where}: cites unknown subject {item['subject']}")
         if status == "covered" and not item.get("concepts"):
             errors.append(f"{where}: covered requires at least one concept")
+        # 2026-10-27: 13 covered topics kept a stale subject after concepts moved
+        # or were added in another row. When a covered topic names a subject, it
+        # must match the home of at least one cited concept.
+        if status == "covered" and item.get("subject") in subjects:
+            concept_homes = {homes[c] for c in item.get("concepts", []) if c in homes}
+            if concept_homes and subjects[item["subject"]]["id"] not in concept_homes:
+                errors.append(f"{where}: subject {item['subject']} disagrees with concept homes {sorted(concept_homes)}")
         if status == "partial" and not item.get("subject"):
             errors.append(f"{where}: partial requires a subject")
+        if status in ("missing", "out-of-scope") and item.get("concepts"):
+            errors.append(f"{where}: {status} must not cite concepts")
     return errors
 
 
@@ -81,11 +103,11 @@ def _summary(topics: list[dict]) -> dict:
 
 def coverage_report(root: Path) -> dict:
     folder = root / "shared/concepts/coverage"
-    concepts, subjects = _vocabulary(root)
+    concepts, subjects, homes = _vocabulary(root)
     checklists, errors = [], []
     for path in sorted(folder.glob("*.yml")):
-        checklist = yaml.safe_load(path.read_text())
-        errors += _check(checklist, concepts, subjects, path.name)
+        checklist = load_taxonomy_yaml(path)
+        errors += _check(checklist, concepts, subjects, homes, path.name)
         if isinstance(checklist.get("topics"), list):
             checklists.append({"id": checklist.get("id"), "title": checklist.get("title"), "basis": checklist.get("basis"),
                                "held_out": checklist.get("held_out"), "file": path.name,

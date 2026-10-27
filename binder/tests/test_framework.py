@@ -78,6 +78,7 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["chapter five"]), "malformed chapter code"),
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["v1/07"]), "does not resolve"),
     (lambda m: m["areas"][0]["rows"][0].update(excludes=["Storage ([[row.missing]])"]), "cites unknown row or area row.missing"),
+    (lambda m: m["sources"][0].update(**{"run rules).": None}), "unknown keys"),
 ])
 def test_bad_edits_fail_before_exports(candidate, mutation, error):
     root, model, field = candidate
@@ -319,3 +320,27 @@ def test_bad_codes_fail(candidate, edit, error):
     write(root, model)
     with pytest.raises(ConceptGraphError, match=error):
         load_framework(root, field)
+
+
+def test_v03_enforces_two_relationships_per_concept_and_connected_graph(candidate):
+    root, model, field = candidate
+    model["version"] = "0.3-draft"
+    write(root, model)
+    with pytest.raises(ConceptGraphError, match="at least two relationships"):
+        load_framework(root, field)
+    # Two separate 3-cycles satisfy degree >= 2 everywhere but are disconnected.
+    ids = [f"mlsys.c{i}" for i in range(6)]
+    field["concepts"] = [dict(id=c, label=c, definition="A concept.") for c in ids]
+    field["relationships"] = [
+        dict(id=f"r{i}", source=a, target=b, predicate="links")
+        for i, (a, b) in enumerate([
+            ("mlsys.c0", "mlsys.c1"), ("mlsys.c1", "mlsys.c2"), ("mlsys.c2", "mlsys.c0"),
+            ("mlsys.c3", "mlsys.c4"), ("mlsys.c4", "mlsys.c5"), ("mlsys.c5", "mlsys.c3"),
+        ])
+    ]
+    model["areas"][0]["rows"][0]["concepts"] = ids
+    write(root, model)
+    with pytest.raises(ConceptGraphError, match="disconnected"):
+        load_framework(root, field)
+    field["relationships"].append(dict(id="bridge", source="mlsys.c2", target="mlsys.c3", predicate="links"))
+    assert load_framework(root, field)["summary"]["concepts"] == 6

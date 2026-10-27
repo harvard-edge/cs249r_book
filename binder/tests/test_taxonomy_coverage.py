@@ -10,7 +10,10 @@ def repo(tmp_path):
     concepts = tmp_path / "shared/concepts"
     (concepts / "coverage").mkdir(parents=True)
     (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": "mlsys.kv-cache"}, {"id": "mlsys.batching"}]}))
-    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [{"id": "llm-inference", "code": "L4.4"}]}]}))
+    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [
+        {"id": "llm-inference", "code": "L4.4", "concepts": ["mlsys.kv-cache"]},
+        {"id": "request-scheduling", "code": "L4.3", "concepts": ["mlsys.batching"]},
+    ]}]}))
     return tmp_path
 
 
@@ -44,6 +47,9 @@ def test_numbers_are_computed_and_weighted_by_sources(repo):
     ({"topic": "No concept", "status": "covered"}, "covered requires at least one concept"),
     ({"topic": "No subject", "status": "partial"}, "partial requires a subject"),
     ({"topic": "Bad subject", "status": "partial", "subject": "Z9.9"}, "unknown subject Z9.9"),
+    ({"topic": "Stale subject", "status": "covered", "concepts": ["mlsys.kv-cache"], "subject": "request-scheduling"}, "disagrees with concept homes"),
+    ({"topic": "Missing with concept", "status": "missing", "concepts": ["mlsys.kv-cache"]}, "missing must not cite concepts"),
+    ({"topic": "Bad key", "status": "missing", "extra": None}, "unknown topic keys: extra"),
     ({"topic": "Bad status", "status": "kind of"}, "unknown status"),
 ])
 def test_stale_or_malformed_judgments_are_reported(repo, topic, error):
