@@ -9,6 +9,8 @@ from html import escape
 from pathlib import Path
 import textwrap
 
+from .concept_graph import SITE_DIR
+
 _FONT = 'Helvetica Neue, Helvetica, Arial, sans-serif'
 _INK = '#333333'
 _MUTED = '#666666'
@@ -174,7 +176,7 @@ def _layers(framework: dict) -> bytes:
 
 def framework_figures(root: Path, framework: dict) -> dict[Path, bytes]:
     """Return three reproducible SVG exports without modifying the filesystem."""
-    output = root / 'site' / 'explore'
+    output = root / SITE_DIR
     return {output / 'framework-atlas.svg': _atlas(framework),
             output / 'framework-matrix.svg': _matrix(framework),
             output / 'framework-layers.svg': _layers(framework)}

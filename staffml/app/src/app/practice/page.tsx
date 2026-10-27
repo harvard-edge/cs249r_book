@@ -15,7 +15,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 // shareable links to the 4,754 cohort-tagged IDs renamed to the clean
 // form on 2026-04-25.
 import idRedirects from "@/data/id-redirects.json";
-import AskInterviewer from "@/components/AskInterviewer";
+import AskInterviewer, { interviewerContext } from "@/components/AskInterviewer";
 import MarkdownText from "@/components/MarkdownText";
 import MCQOptions from "@/components/MCQOptions";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
@@ -1526,7 +1526,8 @@ function PracticePage() {
               <NapkinCalc defaultOpen={false} />
               <AskInterviewer
                 key={`${current.id}-${showAnswer ? "study" : "interview"}`}
-                questionContext={current.scenario}
+                questionContext={interviewerContext(current)}
+                napkinMath={current.details.napkin_math}
                 defaultOpen={true}
                 mode={showAnswer ? "study" : "interview"}
                 canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}

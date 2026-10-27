@@ -21,6 +21,11 @@ from urllib.parse import quote as urlquote
 import yaml
 
 
+# The ML Systems Taxonomy page: its source folder and its public address.
+SITE_DIR = "site/taxonomy"
+PAGE_URL = "https://mlsysbook.ai/taxonomy/"
+
+
 class ConceptGraphError(ValueError):
     """An authored graph cannot be resolved against its chapter contracts."""
 
@@ -635,7 +640,7 @@ def build(root: Path, volumes: tuple[str, ...] = (), check: bool = False) -> dic
     """Compile first, then publish artifacts; invalid authoring never overwrites outputs."""
     # Shared catalogs/maps always cover the series; volume flags scope chapter viewers.
     graph = load_graph(root)
-    site = root / "site/explore"
+    site = root / SITE_DIR
     navigation_path = site / "atlas.yml"
     navigation = (
         yaml.safe_load(navigation_path.read_text()) if navigation_path.exists() else {}

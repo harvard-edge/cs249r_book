@@ -13,10 +13,10 @@ from urllib.parse import quote, urlparse
 
 import yaml
 
-from .concept_graph import ConceptGraphError
+from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
 
 
-PREFIX = "https://mlsysbook.ai/taxonomy/"
+PREFIX = PAGE_URL
 
 
 def _fail(message):
@@ -207,6 +207,6 @@ def taxonomy_artifacts(root: Path, field: dict, taxonomy: dict | None) -> dict[P
     lines.extend(['', '## Concept definitions'])
     for node in field["concepts"]:
         lines.extend(['', f'### {md(node["label"])}', '', f'Identity: `{node["id"]}`', '', md(node["definition"])])
-    site = root / "site/explore"
+    site = root / SITE_DIR
     return {site / "taxonomy.ttl": ("\n".join(ttl) + "\n").encode(),
             site / "taxonomy-reference.md": ("\n".join(lines) + "\n").encode()}

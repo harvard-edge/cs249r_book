@@ -73,7 +73,7 @@ def curriculum(tmp_path):
         (folder / "intro_concepts.yml").write_text(
             yaml.safe_dump({"concept_map": contract})
         )
-    site = root / "site/explore"
+    site = root / "site/taxonomy"
     (site / "vendor").mkdir(parents=True)
     (site / "index.qmd").write_text("---\n---\n```{=html}\n<div>Viewer</div>\n```\n")
     for name in (
@@ -95,7 +95,7 @@ def edit_contract(root, change):
 
 
 def test_chapter_viewers_use_volume_template_when_explorer_has_its_own_page(curriculum):
-    site = curriculum / "site/explore"
+    site = curriculum / "site/taxonomy"
     (site / "index.qmd").write_text('```{=html}\n<div id="study-root">Field explorer</div>\n```\n')
     (site / "volume-maps.qmd").write_text('```{=html}\n<div id="concept-map">Volume viewer</div>\n```\n')
     build(curriculum)
@@ -107,7 +107,7 @@ def test_chapter_viewers_use_volume_template_when_explorer_has_its_own_page(curr
 
 
 def test_field_explorer_cannot_silently_become_chapter_viewer(curriculum):
-    (curriculum / "site/explore/index.qmd").write_text('```{=html}\n<div id="study-root">Field explorer</div>\n```\n')
+    (curriculum / "site/taxonomy/index.qmd").write_text('```{=html}\n<div id="study-root">Field explorer</div>\n```\n')
     with pytest.raises(ConceptGraphError, match="volume-map template"):
         build(curriculum)
 
@@ -185,7 +185,7 @@ def test_refresh_only_proposes_definitions_and_tracks_source_changes(curriculum)
 def test_rerun_is_stable_and_authoring_propagates_to_all_views(curriculum):
     build(curriculum)
     assert build(curriculum, check=True)["stale"] == []
-    catalog = json.loads((curriculum / "site/explore/catalog.json").read_text())
+    catalog = json.loads((curriculum / "site/taxonomy/catalog.json").read_text())
     assert [v["id"] for v in catalog["volumes"]] == ["vol1", "vol2"]
     edit_contract(
         curriculum,
@@ -196,7 +196,7 @@ def test_rerun_is_stable_and_authoring_propagates_to_all_views(curriculum):
     assert build(curriculum, check=True)["stale"]
     build(curriculum, ("vol1",))
     website = json.loads(
-        (curriculum / "site/explore/maps/vol1.queue-map/graph.json").read_text()
+        (curriculum / "site/taxonomy/maps/vol1.queue-map/graph.json").read_text()
     )
     chapter = json.loads(
         (
@@ -209,7 +209,7 @@ def test_rerun_is_stable_and_authoring_propagates_to_all_views(curriculum):
     # A scoped chapter build must retain the full series catalog.
     assert (
         len(
-            json.loads((curriculum / "site/explore/catalog.json").read_text())[
+            json.loads((curriculum / "site/taxonomy/catalog.json").read_text())[
                 "volumes"
             ]
         )
@@ -220,7 +220,7 @@ def test_rerun_is_stable_and_authoring_propagates_to_all_views(curriculum):
 @pytest.mark.skipif(not shutil.which("dot"), reason="Graphviz is needed for rendering")
 def test_bad_authoring_does_not_overwrite_published_assets(curriculum):
     build(curriculum)
-    asset = curriculum / "site/explore/maps/vol1.queue-map/graph.json"
+    asset = curriculum / "site/taxonomy/maps/vol1.queue-map/graph.json"
     original = asset.read_bytes()
     edit_contract(
         curriculum,
@@ -329,13 +329,13 @@ def test_series_preview_embeds_all_concepts_and_matches_site_catalog(curriculum)
     import re
 
     build(curriculum)
-    page = (curriculum / "site/explore/atlas.html").read_text()
+    page = (curriculum / "site/taxonomy/atlas.html").read_text()
     payload = re.search(
         r'<script type="application/json" id="concept-data">(.*?)</script>', page
     ).group(1)
     embedded = json.loads(payload)
     assert embedded["catalog"] == json.loads(
-        (curriculum / "site/explore/catalog.json").read_text()
+        (curriculum / "site/taxonomy/catalog.json").read_text()
     )
     assert embedded["catalog"]["scope"] == "series"
     assert len(embedded["maps"]) == 2
@@ -446,7 +446,7 @@ def test_refresh_tracks_pending_changes_to_volume_claim_evidence(volume_connecti
 @pytest.mark.skipif(not shutil.which("dot"), reason="Graphviz is needed for rendering")
 def test_chapter_viewer_uses_the_same_volume_graph(volume_connections):
     build(volume_connections)
-    site = volume_connections / "site/explore/maps/vol1.overview/graph.json"
+    site = volume_connections / "site/taxonomy/maps/vol1.overview/graph.json"
     chapter = (
         volume_connections
         / "books/vol1/02_capacity/concepts-generated/maps/vol1.overview/graph.json"

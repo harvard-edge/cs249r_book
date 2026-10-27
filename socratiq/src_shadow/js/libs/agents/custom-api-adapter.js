@@ -71,7 +71,7 @@ export class CustomAPIAdapter {
       'ollama': 'gemma3:270m',
       'openai': 'gpt-3.5-turbo',
       'open-router': 'meta-llama/llama-4-scout:free',
-      'groq': 'llama-3.1-8b-instant',
+      'groq': 'openai/gpt-oss-20b',
       'google-gemini': 'gemini-2.5-flash',
       'anthropic': 'claude-3-sonnet-20240229'
     };

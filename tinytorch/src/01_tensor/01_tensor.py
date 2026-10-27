@@ -751,14 +751,26 @@ Element-wise Addition Visual:
 [1, 2, 3] + [4, 5, 6] = [1+4, 2+5, 3+6] = [5, 7, 9]
 
 Matrix Addition:
-[[1, 2]]   [[5, 6]]   [[1+5, 2+6]]   [[6, 8]]
-[[3, 4]] + [[7, 8]] = [[3+7, 4+8]] = [[10, 12]]
+[[1, 2],   [[5, 6],   [[1+5, 2+6],   [[6, 8],
+ [3, 4]] +  [7, 8]] =  [3+7, 4+8]] =  [10, 12]]
 
-Broadcasting Addition (Matrix + Vector):
-[[1, 2]]   [10]   [[1, 2]]   [[10, 10]]   [[11, 12]]
-[[3, 4]] + [20] = [[3, 4]] + [[20, 20]] = [[23, 24]]
-     ↑      ↑           ↑         ↑            ↑
-  (2,2)   (2,1)      (2,2)    broadcast    result
+Broadcasting Addition (Matrix + Vector), the way a bias is added to a matmul output:
+[[1, 2],               [[1, 2],   [[10, 20],   [[11, 22],
+ [3, 4]] + [10, 20] =   [3, 4]] +  [10, 20]] =  [13, 24]]
+    ↑        ↑             ↑         ↑            ↑
+  (2,2)    (2,)          (2,2)    broadcast    result
+
+Broadcasting Addition (Matrix + 2D Row Vector):
+[[1, 2],                [[1, 2],   [[10, 20],   [[11, 22],
+ [3, 4]] + [[10, 20]] =  [3, 4]] +  [10, 20]] =  [13, 24]]
+    ↑         ↑            ↑         ↑            ↑
+  (2,2)     (1,2)        (2,2)    broadcast    result
+
+Broadcasting Addition (Matrix + 2D Column Vector):
+[[1, 2],   [[10],   [[1, 2],   [[10, 10],   [[11, 12],
+ [3, 4]] +  [20]] =  [3, 4]] +  [20, 20]] =  [23, 24]]
+    ↑        ↑          ↑         ↑            ↑
+  (2,2)    (2,1)      (2,2)    broadcast    result
 
 Broadcasting Rules:
 1. Start from rightmost dimension
