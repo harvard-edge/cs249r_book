@@ -300,6 +300,12 @@ def test_readable_codes_must_nest_and_reach_every_download(candidate):
     assert artifacts["mlsys-taxonomy-subjects.csv"].splitlines()[1].startswith("S1.1,Stack,")
     assert 'skos:notation "S1.1"' in artifacts["mlsys-taxonomy.ttl"]
     assert artifacts["mlsys-concept-graph.graphml"].count("<node ") == 2
+    # Researchers and instructors read gaps and book passages from the release, not the YAML.
+    assert outline["gaps"] == [{"id": "gap.candidate", "topic": "", "subject": "", "status": "candidate",
+                                "reason": "Investigate the boundary."}]
+    state = next(c for c in outline["concepts"] if c["id"] == "mlsys.state")
+    assert state["book_passages"] == [{"volume": "vol1", "chapter": "Execution", "url": "https://mlsysbook.ai/state"}]
+    assert artifacts["mlsys-taxonomy-concepts.csv"].splitlines()[0].endswith(",background,taught_in")
 
 
 @pytest.mark.parametrize("edit,error", [
