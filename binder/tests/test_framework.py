@@ -78,6 +78,7 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["chapter five"]), "malformed chapter code"),
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["v1/07"]), "does not resolve"),
     (lambda m: m["areas"][0]["rows"][0].update(excludes=["Storage ([[row.missing]])"]), "cites unknown row or area row.missing"),
+    (lambda m: m["sources"][0].update(**{"run rules).": None}), "unknown keys"),
 ])
 def test_bad_edits_fail_before_exports(candidate, mutation, error):
     root, model, field = candidate
@@ -254,6 +255,22 @@ def test_groups_and_chapter_pointers_resolve_without_claiming_depth(candidate):
     assert rows[0]["group_id"] == "stack" and rows[0]["group_label"] == "Stack"
 
 
+def test_chapter_pointer_ignores_leftover_build_folders(candidate):
+    # 2026-10-27: an untracked books/vol1/02_ml_systems/ (old rendered HTML) beside the renamed
+    # 02_system_paradigms/ made `v1/02` ambiguous and failed every concepts build in the main checkout.
+    root, model, field = candidate
+    chapter = root / "books/vol1/02_system_paradigms"
+    chapter.mkdir(parents=True)
+    (chapter / "02_system_paradigms.qmd").write_text("# System Paradigms\n")
+    leftover = root / "books/vol1/02_ml_systems"
+    leftover.mkdir(parents=True)
+    (leftover / "02_ml_systems.html").write_text("<html></html>")
+    model["areas"][0]["rows"][0].update(book_chapters=["v1/02"])
+    write(root, model)
+    framework = load_framework(root, field)
+    assert framework["areas"][0]["rows"][0]["book_chapters"][0]["chapter"] == "vol1/02_system_paradigms"
+
+
 def test_scope_references_render_current_labels(candidate):
     root, model, field = candidate
     model["areas"][0]["rows"][0].update(excludes=["Persisting state ([[row.state]]) and the area ([[area.execution]])"])
@@ -284,6 +301,12 @@ def test_readable_codes_must_nest_and_reach_every_download(candidate):
     assert artifacts["mlsys-taxonomy-subjects.csv"].splitlines()[1].startswith("S1.1,Stack,")
     assert 'skos:notation "S1.1"' in artifacts["mlsys-taxonomy.ttl"]
     assert artifacts["mlsys-concept-graph.graphml"].count("<node ") == 2
+    # Researchers and instructors read gaps and book passages from the release, not the YAML.
+    assert outline["gaps"] == [{"id": "gap.candidate", "topic": "", "subject": "", "status": "candidate",
+                                "reason": "Investigate the boundary."}]
+    state = next(c for c in outline["concepts"] if c["id"] == "mlsys.state")
+    assert state["book_passages"] == [{"volume": "vol1", "chapter": "Execution", "url": "https://mlsysbook.ai/state"}]
+    assert artifacts["mlsys-taxonomy-concepts.csv"].splitlines()[0].endswith(",background,taught_in")
 
 
 @pytest.mark.parametrize("edit,error", [
@@ -297,3 +320,27 @@ def test_bad_codes_fail(candidate, edit, error):
     write(root, model)
     with pytest.raises(ConceptGraphError, match=error):
         load_framework(root, field)
+
+
+def test_v03_enforces_two_relationships_per_concept_and_connected_graph(candidate):
+    root, model, field = candidate
+    model["version"] = "0.3-draft"
+    write(root, model)
+    with pytest.raises(ConceptGraphError, match="at least two relationships"):
+        load_framework(root, field)
+    # Two separate 3-cycles satisfy degree >= 2 everywhere but are disconnected.
+    ids = [f"mlsys.c{i}" for i in range(6)]
+    field["concepts"] = [dict(id=c, label=c, definition="A concept.") for c in ids]
+    field["relationships"] = [
+        dict(id=f"r{i}", source=a, target=b, predicate="links")
+        for i, (a, b) in enumerate([
+            ("mlsys.c0", "mlsys.c1"), ("mlsys.c1", "mlsys.c2"), ("mlsys.c2", "mlsys.c0"),
+            ("mlsys.c3", "mlsys.c4"), ("mlsys.c4", "mlsys.c5"), ("mlsys.c5", "mlsys.c3"),
+        ])
+    ]
+    model["areas"][0]["rows"][0]["concepts"] = ids
+    write(root, model)
+    with pytest.raises(ConceptGraphError, match="disconnected"):
+        load_framework(root, field)
+    field["relationships"].append(dict(id="bridge", source="mlsys.c2", target="mlsys.c3", predicate="links"))
+    assert load_framework(root, field)["summary"]["concepts"] == 6

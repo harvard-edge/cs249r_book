@@ -45,9 +45,14 @@ def _index(records, name):
     return result
 
 
-def _text(record, keys, context):
+def _text(record, keys, context, allowed=None):
     if not isinstance(record, dict):
         raise ConceptGraphError(f"field model: {context} must be a mapping")
+    # 2026-10-27: unquoted commas in flow mappings split strings into `key: null`
+    # siblings that previously passed when required keys were still present.
+    if allowed is not None and set(record) - set(allowed):
+        extra = ", ".join(sorted(set(record) - set(allowed)))
+        raise ConceptGraphError(f"field model: {context} has unknown keys: {extra}")
     for key in keys:
         if not isinstance(record.get(key), str) or not record[key].strip():
             raise ConceptGraphError(f"field model: {context} requires {key}")
@@ -67,25 +72,28 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     model = load_taxonomy_yaml(path)
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
-    _text(model, ("id", "title", "scope", "status"), "metadata")
+    _text(model, ("id", "title", "scope", "status"), "metadata",
+          {"schema_version", "id", "title", "scope", "status", "background_boundary", "limitations",
+           "sources", "families", "concepts", "relations", "retired", "relationships", "views", "learning_paths"})
     if model["status"] != "editorial-draft":
         raise ConceptGraphError("field model: only editorial-draft is supported before review provenance exists")
     sources = _index(model.get("sources"), "source")
     for ref in sources.values():
-        _text(ref, ("title", "url", "kind", "scope"), ref["id"])
+        _text(ref, ("title", "url", "kind", "scope"), ref["id"], {"id", "title", "url", "kind", "scope"})
         url = urlparse(ref["url"])
         if url.scheme != "https" or not url.netloc:
             raise ConceptGraphError(f"field model: unsafe reading URL {ref['id']}")
     families = _index(model.get("families"), "family")
     scopes = {"core", "background", "model-extension", "generative-extension", "agent-extension", "physical-extension", "specialist"}
     for family in families.values():
-        _text(family, ("label", "scope", "question"), family["id"])
+        _text(family, ("label", "scope", "question"), family["id"], {"id", "label", "scope", "question", "references"})
         if family["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown scope {family['scope']}")
         _references(family, sources, family["id"])
     concepts = _index(model.get("concepts"), "concept")
     for node in concepts.values():
-        _text(node, ("label", "definition", "family", "status"), node["id"])
+        _text(node, ("label", "definition", "family", "status"), node["id"],
+              {"id", "label", "definition", "family", "status", "aliases", "scope", "references"})
         if not re.fullmatch(r"mlsys\.[a-z0-9-]+", node["id"]) or node["family"] not in families:
             raise ConceptGraphError(f"field model: invalid concept identity or family {node['id']}")
         if node["status"] != "draft":
@@ -99,18 +107,31 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if node["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown concept scope {node['id']}")
         _references(node, sources, node["id"])
+    # A name looked up in the glossary or by a tagger must lead to one concept,
+    # and a concept must not repeat its own label or alias in another case.
+    # 2026-10-27: five names resolved to two concepts, and two concepts repeated
+    # an alias with different capitalization.
+    named = {}
+    for node in concepts.values():
+        for raw in [node["label"], *node.get("aliases", [])]:
+            name = " ".join(raw.lower().split())
+            if name in named:
+                raise ConceptGraphError(f"field model: '{name}' names both {named[name]} and {node['id']}")
+            named[name] = node["id"]
     # A controlled relation vocabulary (optional) gives every edge a verb with a
     # forward and inverse phrase, so readers can ask "what reduces X?". When the
     # vocabulary exists, every edge must use it and its kind must agree.
     relations = _index(model["relations"], "relation") if "relations" in model else {}
     for relation in relations.values():
-        _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"])
+        _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"],
+              {"id", "forward", "inverse", "kind", "meaning"})
         if relation["kind"] not in {"mechanism", "constraint", "tradeoff", "evaluation", "dependency", "failure", "composition"}:
             raise ConceptGraphError(f"field model: invalid relation kind {relation['id']}")
     # Concept identities are permanent: a retired identity is never reused and
     # names its replacement, so links and tags elsewhere keep resolving.
     for record in model.get("retired", []):
-        _text(record, ("id", "replaced_by", "version", "reason"), "retired concept")
+        _text(record, ("id", "replaced_by", "version", "reason"), "retired concept",
+              {"id", "replaced_by", "version", "reason"})
         if record["id"] in concepts or record["replaced_by"] not in concepts:
             raise ConceptGraphError(f"field model: retired identity {record['id']} must be unused and name a current replacement")
     edges = _index(model.get("relationships"), "relationship")
@@ -125,7 +146,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if pair in pairs:
             raise ConceptGraphError(f"field model: duplicate concept pair {edge['id']}")
         pairs.add(pair)
-        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"])
+        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"],
+              {"id", "source", "target", "relation", "kind", "predicate", "conditions", "references",
+               "basis", "status", "reference_role"})
         if edge["source"] not in concepts or edge["target"] not in concepts or edge["source"] == edge["target"]:
             raise ConceptGraphError(f"field model: missing or identical endpoints {edge['id']}")
         if edge["basis"] != "editorial-synthesis" or edge["status"] != "draft":
@@ -137,7 +160,7 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     if "overview" not in views or "all" not in views:
         raise ConceptGraphError("field model: overview and all views are required")
     for view in views.values():
-        _text(view, ("title",), view["id"])
+        _text(view, ("title",), view["id"], {"id", "title", "concepts"})
         members = view.get("concepts", [])
         if not isinstance(members, list) or not members or len(set(members)) != len(members) or any(x not in concepts for x in members):
             raise ConceptGraphError(f"field model: invalid view members {view['id']}")
@@ -150,7 +173,8 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         raise ConceptGraphError("field model: unsupported book-alignment schema")
     links, seen = [], set()
     for record in alignment["links"]:
-        _text(record, ("concept", "book_concept", "status", "depth"), "book link")
+        _text(record, ("concept", "book_concept", "status", "depth"), "book link",
+              {"concept", "book_concept", "status", "depth", "relation"})
         key = (record["concept"], record["book_concept"])
         if key in seen or key[0] not in concepts or key[1] not in book_graph["nodes"]:
             raise ConceptGraphError(f"field model: duplicate or unresolved book link {key}")

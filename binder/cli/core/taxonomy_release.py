@@ -50,6 +50,12 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
             for subject in area["subjects"]:
                 for cid in subject["concepts"]:
                     home[cid] = (group, area, subject)
+    code_of = {s["id"]: s["code"] for g in outline["groups"] for a in g["areas"] for s in a["subjects"]}
+    # Where the books discuss each concept (section-level candidate links, depth not assessed).
+    passages = {}
+    for link in field.get("book_links", []):
+        passages.setdefault(link["concept"], []).append(
+            {"volume": link.get("volume", ""), "chapter": link.get("chapter_title", ""), "url": link.get("url", "")})
     relationships = field.get("relationships", [])
     relations = field.get("relations", [])
     citation = (f"{AUTHOR}. {NAME}, version {version}. Machine Learning Systems, {YEAR}. {PAGE}")
@@ -63,8 +69,11 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
                 "groups": outline["groups"],
                 "concepts": [{"id": c["id"], "label": c["label"], "aliases": c.get("aliases", []), "definition": c["definition"],
                               "background": c.get("scope") == "background", "home": home[c["id"]][2]["code"] if c["id"] in home else "",
-                              "home_id": home[c["id"]][2]["id"] if c["id"] in home else ""}
+                              "home_id": home[c["id"]][2]["id"] if c["id"] in home else "",
+                              "book_passages": passages.get(c["id"], [])}
                              for c in field["concepts"]],
+                "gaps": [{"id": g["id"], "topic": g.get("topic", ""), "subject": code_of.get(g.get("subject_row"), ""),
+                          "status": g.get("status", ""), "reason": g["reason"]} for g in framework.get("gaps", [])],
                 "relations": relations,
                 "relationships": [{"source": r["source"], "relation": r.get("relation", ""), "target": r["target"],
                                    "statement": r.get("predicate", ""), "conditions": r.get("conditions", "")} for r in relationships],
@@ -82,11 +91,12 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
                                  "; ".join(f'{t["volume"]}: {t["chapter"]}' for t in s["taught_in"])])
     glossary = io.StringIO(newline="")
     writer = csv.writer(glossary, lineterminator="\n")
-    writer.writerow(["id", "term", "aliases", "definition", "subject_code", "subject", "area", "group", "background"])
+    writer.writerow(["id", "term", "aliases", "definition", "subject_code", "subject", "area", "group", "background", "taught_in"])
     for c in sorted(field["concepts"], key=lambda c: c["label"].casefold()):
         group, area, subject = home.get(c["id"], ({"label": ""}, {"label": ""}, {"code": "", "label": ""}))
         writer.writerow([c["id"], c["label"], "; ".join(c.get("aliases", [])), c["definition"], subject["code"], subject["label"],
-                         area["label"], group["label"], "yes" if c.get("scope") == "background" else "no"])
+                         area["label"], group["label"], "yes" if c.get("scope") == "background" else "no",
+                         "; ".join(sorted({f'{p["volume"]}: {p["chapter"]}' for p in passages.get(c["id"], [])}))])
 
     # SKOS (Turtle).
     def lit(value):

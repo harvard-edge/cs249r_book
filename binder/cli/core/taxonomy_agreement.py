@@ -17,9 +17,17 @@ from pathlib import Path
 import yaml
 
 
+from .field_graph import load_taxonomy_yaml
+
+
+RECORD_KEYS = {"schema_version", "id", "title", "basis", "items", "runs"}
+RUN_KEYS = {"id", "held_out", "note", "taggers"}
+TAG_KEYS = {"n", "subject", "concepts", "proposed", "reason"}
+
+
 def _vocabulary(root: Path):
-    field = yaml.safe_load((root / "shared/concepts/ml-systems-field.yml").read_text())
-    framework = yaml.safe_load((root / "shared/concepts/ml-systems-framework.yml").read_text())
+    field = load_taxonomy_yaml(root / "shared/concepts/ml-systems-field.yml")
+    framework = load_taxonomy_yaml(root / "shared/concepts/ml-systems-framework.yml")
     rows = {row["id"]: (row, area) for area in framework["areas"] for row in area["rows"]}
     home = {c: rid for rid, (row, _) in rows.items() for c in row.get("concepts", [])}
     return {c["id"] for c in field["concepts"]}, rows, home
@@ -63,19 +71,33 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
 
 def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
     errors = [f"{name}: requires {key}" for key in ("id", "title", "basis") if not str(record.get(key, "")).strip()]
-    numbers = {item["n"] for item in record.get("items", [])}
+    if set(record) - RECORD_KEYS:
+        errors.append(f"{name}: unknown record keys: {', '.join(sorted(set(record) - RECORD_KEYS))}")
+    items = record.get("items", [])
+    numbers = {item["n"] for item in items}
+    if len(numbers) != len(items) or not numbers:
+        errors.append(f"{name}: items must have distinct sample numbers")
     for run in record.get("runs", []):
+        if set(run) - RUN_KEYS:
+            errors.append(f"{name} run {run.get('id')}: unknown run keys: {', '.join(sorted(set(run) - RUN_KEYS))}")
+        if not isinstance(run.get("held_out"), bool):
+            errors.append(f"{name} run {run.get('id')}: requires held_out true or false")
         taggers = run.get("taggers", {})
         if len(taggers) != 2:
             errors.append(f"{name} run {run.get('id')}: requires exactly two taggers")
         for tagger, tags in taggers.items():
             where = f"{name} run {run.get('id')} tagger {tagger}"
-            if {t["n"] for t in tags} != numbers:
+            if len(tags) != len(numbers) or {t["n"] for t in tags} != numbers:
                 errors.append(f"{where}: does not tag every sample item exactly once")
             for t in tags:
+                if set(t) - TAG_KEYS:
+                    errors.append(f"{where} item {t.get('n')}: unknown tag keys: {', '.join(sorted(set(t) - TAG_KEYS))}")
                 if t["subject"] not in rows:
                     errors.append(f"{where} item {t['n']}: unknown subject {t['subject']}")
-                gone = [c for c in t.get("concepts", []) if c not in concepts]
+                cs = t.get("concepts", [])
+                if len(set(cs)) != len(cs):
+                    errors.append(f"{where} item {t['n']}: duplicate concept tags")
+                gone = [c for c in cs if c not in concepts]
                 if gone:
                     errors.append(f"{where} item {t['n']}: cites concepts that no longer exist: {', '.join(gone)}")
     return errors
@@ -85,7 +107,7 @@ def agreement_report(root: Path) -> dict:
     concepts, rows, home = _vocabulary(root)
     records, errors = [], []
     for path in sorted((root / "shared/concepts/agreement").glob("*.yml")):
-        record = yaml.safe_load(path.read_text())
+        record = load_taxonomy_yaml(path)
         errors += _check(record, concepts, rows, path.name)
         runs = []
         for run in record.get("runs", []):

@@ -27,16 +27,21 @@ DIMENSIONS = ("activities", "layers", "concerns", "contexts")
 # relabeled row cannot leave a stale pointer behind.
 SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
 REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
-SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft")
+SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft", "0.3-draft")
 
 
 def _fail(message):
     raise ConceptGraphError(f"framework: {message}")
 
 
-def _text(record, names, context):
+def _text(record, names, context, allowed=None):
     if not isinstance(record, dict):
         _fail(f"{context} must be a mapping")
+    # 2026-10-27: reject unknown keys so unquoted flow-mapping comma splits
+    # (`run rules).: null`) cannot truncate text fields silently.
+    if allowed is not None and set(record) - set(allowed):
+        extra = ", ".join(sorted(set(record) - set(allowed)))
+        _fail(f"{context} has unknown keys: {extra}")
     for name in names:
         if not isinstance(record.get(name), str) or not record[name].strip():
             _fail(f"{context} requires {name}")
@@ -96,7 +101,11 @@ def _chapters(root: Path, codes, context):
         if not match:
             _fail(f"{context} has malformed chapter code {code}")
         volume = f"vol{match[1]}"
-        folders = sorted((root / "books" / volume).glob(f"{match[2]}_*/"))
+        # A chapter folder holds its own QMD; leftover build-output folders do not.
+        folders = sorted(
+            folder for folder in (root / "books" / volume).glob(f"{match[2]}_*/")
+            if (folder / f"{folder.name}.qmd").exists()
+        )
         if len(folders) != 1:
             _fail(f"{context} chapter code {code} does not resolve to one chapter")
         folder = folders[0]
@@ -120,12 +129,16 @@ def load_framework(root: Path, field: dict) -> dict | None:
     model = load_taxonomy_yaml(path)
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
-    _text(model, ("id", "title", "version", "status", "scope"), "metadata")
+    _text(model, ("id", "title", "version", "status", "scope"), "metadata",
+          {"schema_version", "id", "title", "version", "status", "scope", "rationale", "row_rule",
+           "secondary_policy", "relationship_semantics", "context_policy", "book_mapping_policy",
+           "warrant_policy", "competency_policy", "tagging_rules", "placement_examples",
+           "sources", "dimensions", "groups", "areas", "gaps"})
     if model["status"] != "editorial-draft" or model["version"] not in SUPPORTED_VERSIONS:
         _fail(f"only versions {', '.join(SUPPORTED_VERSIONS)} with editorial-draft status are supported")
     sources = _records(model.get("sources"), "source")
     for source in sources:
-        _text(source, ("title", "url", "role"), source["id"])
+        _text(source, ("title", "url", "role"), source["id"], {"id", "title", "url", "role"})
         url = urlparse(source["url"])
         if (url.scheme != "https" or not url.netloc or url.username or url.password
                 or re.search(r'[\s<>"{}|\\^`]', source["url"])):
@@ -139,7 +152,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
     for name in DIMENSIONS:
         records = _records(dimensions.get(name, []), name, nonempty=name != "contexts")
         for record in records:
-            _text(record, ("label",), record["id"])
+            _text(record, ("label",), record["id"], {"id", "label"})
         if len({r["label"].strip().casefold() for r in records}) != len(records):
             _fail(f"duplicate {name} label")
         facets[name] = {r["id"] for r in records}
@@ -155,7 +168,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
     # present, every area names exactly one group; groups carry no concepts.
     groups = _records(model["groups"], "group") if "groups" in model else []
     for group in groups:
-        _text(group, ("label", "question"), group["id"])
+        _text(group, ("label", "question"), group["id"], {"id", "code", "label", "question"})
         if group["id"] in identities:
             _fail(f"group identity overlaps another source {group['id']}")
         identities.add(group["id"])
@@ -180,7 +193,9 @@ def load_framework(root: Path, field: dict) -> dict | None:
                     _fail(f"subject code {row['code']} does not extend area code {area['code']}")
     resolved_areas = []
     for area in areas:
-        _text(area, ("label", "question", "scope"), area["id"])
+        _text(area, ("label", "question", "scope"), area["id"],
+              {"id", "code", "group", "label", "display_label", "question", "scope", "status",
+               "includes", "excludes", "warrants", "warrant_role", "inventory_status", "rows"})
         _scope_notes(area, source_ids, area["id"])
         if groups and area.get("group") not in group_ids:
             _fail(f"area {area['id']} requires a known group")
@@ -196,7 +211,10 @@ def load_framework(root: Path, field: dict) -> dict | None:
         rows = _records(area.get("rows"), "row")
         resolved_rows = []
         for row in rows:
-            _text(row, ("label", "definition"), row["id"])
+            _text(row, ("label", "definition"), row["id"],
+                  {"id", "code", "label", "display_label", "definition", "status", "includes", "excludes",
+                   "warrants", "warrant_role", "inventory_status", "concepts", "secondary_concepts",
+                   "book_chapters", *DIMENSIONS})
             _scope_notes(row, source_ids, row["id"])
             if row["id"] in identities or row["id"] in row_ids:
                 _fail(f"duplicate or overlapping row identity {row['id']}")
@@ -247,11 +265,30 @@ def load_framework(root: Path, field: dict) -> dict | None:
     unassigned = sorted(set(concepts) - set(homes))
     if unassigned:
         _fail(f"unassigned field concepts require a candidate home decision: {', '.join(unassigned)}")
+    # 2026-10-27: docs/ML_SYSTEMS_FRAMEWORK.md and .claude/rules/taxonomy.md
+    # claim at least two relationships per concept and a connected graph.
+    if model["version"] not in ("0.1-draft", "0.2-draft"):
+        adj = {ident: set() for ident in concepts}
+        for edge in field.get("relationships", []):
+            adj[edge["source"]].add(edge["target"])
+            adj[edge["target"]].add(edge["source"])
+        under = sorted(ident for ident, neighbors in adj.items() if len(neighbors) < 2)
+        if under:
+            _fail(f"concepts require at least two relationships: {', '.join(under)}")
+        seen, stack = set(), [next(iter(concepts))] if concepts else []
+        while stack:
+            curr = stack.pop()
+            if curr not in seen:
+                seen.add(curr)
+                stack.extend(adj[curr] - seen)
+        if len(seen) != len(concepts):
+            _fail(f"concept graph is disconnected: {', '.join(sorted(set(concepts) - seen))}")
     gaps = _records(model.get("gaps"), "gap", nonempty=False)
     resolved_gaps = []
     rows_by_id = {row["id"]: row for area in resolved_areas for row in area["rows"]}
     for gap in gaps:
-        _text(gap, ("reason", "status"), gap["id"])
+        _text(gap, ("reason", "status"), gap["id"],
+              {"id", "topic", "label", "subject_row", "reason", "status"})
         if "subject_row" in gap:
             _text(gap, ("subject_row",), gap["id"])
             if gap["subject_row"] not in rows_by_id:

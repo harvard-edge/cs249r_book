@@ -10,6 +10,35 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ---
 
+## [Unreleased] — 2026-10-27
+
+### ML Systems Taxonomy 0.3-draft
+
+The taxonomy gained 63 concepts and moved two (no identity was retired or
+renamed), so every existing tag still validates. `app/src/data/mlsys-taxonomy.json`
+was regenerated with the new labels and homes.
+
+The 25 questions tagged with a moved concept were re-reviewed under the
+published tagging rules. Seven had taken their subject from the concept's old
+home and were retagged; the other 18 are tagged by what they test (serving,
+batching, guardrails, capacity) and keep their subject.
+
+- `mlsys.pii-deidentification` moved from Data contracts & lineage to Privacy:
+  cloud-4232, tinyml-1203, edge-1821 `data-lineage` → `privacy-dp`.
+- `mlsys.inference-compute-estimate` moved from Scaling laws to Workload
+  characterization: edge-1187, mobile-0353, mobile-1312, cloud-3129
+  `scaling-laws` → `workload-characterization`.
+
+The 445 questions tagged with a subject only were then offered the new concepts
+(and their own subject's concepts) by two independent taggers, `gpt-6.1-sol` and
+`claude-opus-5-5`, under the published tagging rules. They agreed on whether a
+question gets a concept for 76.6% of questions. A concept was written only where
+both chose it: 106 questions gained concepts, most often advanced packaging,
+telemetry sampling, forward error correction, recovery objectives, and DMA cache
+maintenance. 339 questions remain subject-only.
+
+---
+
 ## [Unreleased] — 2026-10-22
 
 ### Summary

@@ -49,10 +49,15 @@ def test_scores_are_computed_from_tags(repo):
 
 
 def test_retired_identities_and_missing_items_are_errors(repo):
-    a = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.retired"]}, {"n": 2, "subject": "gone-subject", "concepts": []}]
+    a = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.retired"]},
+         {"n": 2, "subject": "gone-subject", "concepts": ["mlsys.kv-cache", "mlsys.kv-cache"]}]
     b = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.kv-cache"]}]
-    save(repo, record(a, b))
+    data = record(a, b)
+    del data["runs"][0]["held_out"]
+    save(repo, data)
     errors = agreement_report(repo)["errors"]
     assert any("no longer exist" in e for e in errors)
     assert any("unknown subject gone-subject" in e for e in errors)
     assert any("every sample item exactly once" in e for e in errors)
+    assert any("duplicate concept tags" in e for e in errors)
+    assert any("held_out true or false" in e for e in errors)
