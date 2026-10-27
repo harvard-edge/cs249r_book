@@ -112,7 +112,7 @@ Expected response:
 { "ok": true, "providers": ["cf-workers-ai"], "waitlist": true }
 ```
 
-If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
+If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.3 70B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
 
 Test an actual question:
 

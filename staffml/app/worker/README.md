@@ -7,7 +7,7 @@ See [`../WORKER_DEPLOY.md`](../WORKER_DEPLOY.md) for the full deploy guide.
 ## At a glance
 
 - **Single file**: [`src/index.ts`](src/index.ts) (~750 lines)
-- **Default provider**: Cloudflare Workers AI (Llama 3.1 8B), no API key required, free
+- **Default provider**: Cloudflare Workers AI (Llama 3.3 70B), no API key required, free
 - **Built-in providers**: Groq, OpenAI, Anthropic, Gemini, OpenRouter, Cloudflare Workers AI
 - **Drop-in providers** (any OpenAI-compatible API): Together AI, DeepSeek, Fireworks, Cerebras, Mistral La Plateforme, xAI Grok, Perplexity, vLLM, Ollama, LiteLLM — see [Adding a provider](#adding-a-provider) below
 - **Rate limit**: 10/IP/hour, 60/IP/day, 8000/global/day (all configurable via env vars)

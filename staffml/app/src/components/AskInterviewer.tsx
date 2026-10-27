@@ -12,7 +12,7 @@
  *   2. HOSTED   — NEXT_PUBLIC_INTERVIEWER_ENDPOINT is set. Each clarification
  *                 is POSTed to the Worker, which forwards to whichever LLM
  *                 provider is configured (default: Cloudflare Workers AI
- *                 Llama 3.1 8B). Inline attribution shows the actual model
+ *                 Llama 3.3 70B). Inline attribution shows the actual model
  *                 that answered.
  *
  *   3. FALLBACK — Hosted mode was configured but failed (rate-limited, 503,

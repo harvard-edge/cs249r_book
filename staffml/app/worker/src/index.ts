@@ -227,11 +227,15 @@ const ADAPTERS: Adapter[] = [
   {
     name: "cf-workers-ai",
     vendorLabel: "Cloudflare",
-    modelLabel: "Llama 3.1 8B",
+    modelLabel: "Llama 3.3 70B",
     privacyNote: "Cloudflare Workers AI does not train on inference traffic.",
     requestShape: "cf-workers-ai",
     defaultBaseUrl: "",
-    defaultModel: "@cf/meta/llama-3.1-8b-instruct",
+    // 2026-10-27: @cf/meta/llama-3.1-8b-instruct now routes to a variant
+    // retired on 2026-05-30 (AiError 5028) when called through the binding,
+    // and the 8B fp8 model timed out on study prompts. The 70B fast model
+    // answered every endpoint in under 4s.
+    defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     modelEnv: "CF_WORKERS_AI_MODEL",
     // No apiKeyEnv — this adapter uses the AI binding directly
   },
