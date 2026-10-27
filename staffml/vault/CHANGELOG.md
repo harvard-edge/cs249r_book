@@ -29,8 +29,13 @@ batching, guardrails, capacity) and keep their subject.
   characterization: edge-1187, mobile-0353, mobile-1312, cloud-3129
   `scaling-laws` → `workload-characterization`.
 
-The 449 questions tagged with a subject only were not re-tagged against the new
-concepts; that is the next tagging pass.
+The 445 questions tagged with a subject only were then offered the new concepts
+(and their own subject's concepts) by two independent taggers, `gpt-6.1-sol` and
+`claude-opus-5-5`, under the published tagging rules. They agreed on whether a
+question gets a concept for 76.6% of questions. A concept was written only where
+both chose it: 106 questions gained concepts, most often advanced packaging,
+telemetry sampling, forward error correction, recovery objectives, and DMA cache
+maintenance. 339 questions remain subject-only.
 
 ---
 
