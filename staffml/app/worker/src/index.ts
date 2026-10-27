@@ -1182,7 +1182,9 @@ export default {
           ? "AI interviewer is temporarily unavailable. Use the 'Copy as prompt' button to ask in your own LLM."
           : limit.reason === "global_quota"
             ? "AI interviewer is over today's global quota. Use the 'Copy as prompt' button to ask in your own LLM."
-            : "You've hit the rate limit for this hour. Try again later, or use 'Copy as prompt'.";
+            : limit.reason === "daily_limit"
+              ? "You've hit today's limit for the AI interviewer. It resets at midnight UTC; until then, use 'Copy as prompt'."
+              : "You've hit the rate limit for this hour. Try again later, or use 'Copy as prompt'.";
       return jsonResponse(
         env,
         origin,
