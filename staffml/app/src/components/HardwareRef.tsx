@@ -86,7 +86,7 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
           )}
 
           <div className="mt-2 text-[10px] text-textTertiary italic">
-            Source: mlsysim/core/constants.py
+            Source: MLSysIM hardware, systems, and model registries
           </div>
         </div>
       )}
