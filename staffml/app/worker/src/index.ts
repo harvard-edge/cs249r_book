@@ -377,6 +377,22 @@ async function parseJsonRequest(request: Request, maxBytes: number): Promise<unk
 
 // ─── Adapter implementations ─────────────────────────────────
 
+// Groq's gpt-oss models reason before they answer. Keep that reasoning short
+// and out of the reply, and give it room so the per-mode cap still bounds the
+// visible answer rather than being spent on thinking.
+const REASONING_HEADROOM_TOKENS = 512;
+
+function reasoningOptions(adapter: Adapter, model: string, maxTokens: number) {
+  if (adapter.name !== "groq" || !model.startsWith("openai/gpt-oss")) {
+    return { max_tokens: maxTokens };
+  }
+  return {
+    max_tokens: maxTokens + REASONING_HEADROOM_TOKENS,
+    reasoning_effort: "low",
+    include_reasoning: false,
+  };
+}
+
 async function callOpenAICompat(
   adapter: Adapter,
   env: Env,
@@ -386,6 +402,7 @@ async function callOpenAICompat(
 ): Promise<string> {
   const apiKey = env[adapter.apiKeyEnv!] as string;
   const url = `${getBaseUrl(adapter, env)}/chat/completions`;
+  const model = getModel(adapter, env);
   const res = await timedFetch(url, {
     method: "POST",
     headers: {
@@ -393,9 +410,9 @@ async function callOpenAICompat(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: getModel(adapter, env),
+      model,
       messages: [{ role: "system", content: system }, ...messages],
-      max_tokens: maxTokens,
+      ...reasoningOptions(adapter, model, maxTokens),
       temperature: 0.4,
     }),
   });
