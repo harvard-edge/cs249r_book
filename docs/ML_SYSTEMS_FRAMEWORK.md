@@ -1,6 +1,6 @@
 # Machine learning systems: a candidate subject framework
 
-Status: editorial draft, version `0.2-draft`. This document specifies a proposal for review, rather than a claim of field completeness or community consensus.
+Status: editorial draft, version `0.3-draft`. This document specifies a proposal for review, rather than a claim of field completeness or community consensus.
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
@@ -17,7 +17,7 @@ The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy
 
 ## Organizing frame
 
-An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.2-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups:
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.3-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups, with 798 concepts:
 
 | Group | Areas |
 |---|---|
@@ -92,7 +92,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.2-draft` the graph has 1,531 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship corrected or removed 76 that read false or backwards.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,679 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
 
 ## Codes, downloads, and citation
 
@@ -103,8 +103,8 @@ Every group, area, and subject carries a readable code: a group letter (F, S, P,
 | File | Format | Contents |
 |---|---|---|
 | `mlsys-taxonomy-subjects.csv` | CSV | One row per subject: code, group, area, definition, concepts, chapters |
-| `mlsys-taxonomy-concepts.csv` | CSV | One row per concept: identity, term, aliases, definition, home code, background flag |
-| `mlsys-taxonomy.json` | JSON | The full outline, concepts, relation vocabulary, and typed relationships |
+| `mlsys-taxonomy-concepts.csv` | CSV | One row per concept: identity, term, aliases, definition, home code, background flag, book chapters |
+| `mlsys-taxonomy.json` | JSON | The full outline, concepts (with candidate book passages), relation vocabulary, typed relationships, declared gaps, and retired identities |
 | `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes; concepts as `skos:Concept`; relationships as properties under `skos:related` |
 | `mlsys-concept-graph.graphml` | GraphML | The concept graph for Gephi, yEd, Cytoscape, or a graph database |
 | `mlsys-taxonomy.bib` | BibTeX | Citation for the current version |
@@ -119,6 +119,10 @@ The taxonomy is meant to be complete enough to rely on and cheap to keep current
 2. **Build.** `./binder/binder concepts build` validates homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
 3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `shared/concepts/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
 4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `docs/ML_SYSTEMS_TAXONOMY_CHANGELOG.md`, and retire rather than delete any withdrawn identity.
+
+A label or alias may name only one concept; the compiler rejects a name shared by two, so a glossary search or a tagger always lands on one entry.
+
+**Periodic review.** A few times a year, and before any citable release, the whole taxonomy is reviewed for completeness. Three model reviewers from different families review it independently through different lenses (the research and teaching frontier; the people who use it and the jobs they do; internal soundness, subject by subject), and their proposals are merged, keeping those raised by more than one reviewer or backed by named evidence. All three then check the merged change set item by item: whether it duplicates an existing concept, whether it belongs, where it lives, whether its definition holds, and whether each relationship is true when read as a sentence. StaffML questions that the tagging pass could not tag with a concept are a standing source of real-use gaps. Model reviewers are not people; human expert review remains the stronger test.
 
 ## Authoring and illustration tools
 
