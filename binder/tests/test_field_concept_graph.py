@@ -55,6 +55,7 @@ def test_field_identity_and_unmapped_concepts_survive_empty_books(landscape):
     (lambda m: m["sources"][0].update(url="javascript:alert(1)"), "unsafe reading URL"),
     (lambda m: m["views"][1]["concepts"].pop(), "retain every"),
     (lambda m: m["relationships"][0].update(kind="prerequisite"), "relationship kind"),
+    (lambda m: m["concepts"][1].update(aliases=[" " + m["concepts"][0]["label"].upper()]), "names both"),
 ])
 def test_invalid_model_cannot_publish_false_identity_or_certainty(landscape, mutation, error):
     root, model = landscape

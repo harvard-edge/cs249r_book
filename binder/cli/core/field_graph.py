@@ -99,6 +99,14 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if node["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown concept scope {node['id']}")
         _references(node, sources, node["id"])
+    # A name looked up in the glossary or by a tagger must lead to one concept.
+    # 2026-10-27: five names (Pareto frontier, SIL, model export, data loader,
+    # app memory limit) each resolved to two concepts.
+    named = {}
+    for node in concepts.values():
+        for name in {" ".join(n.lower().split()) for n in [node["label"], *node.get("aliases", [])]}:
+            if named.setdefault(name, node["id"]) != node["id"]:
+                raise ConceptGraphError(f"field model: '{name}' names both {named[name]} and {node['id']}")
     # A controlled relation vocabulary (optional) gives every edge a verb with a
     # forward and inverse phrase, so readers can ask "what reduces X?". When the
     # vocabulary exists, every edge must use it and its kind must agree.
