@@ -50,7 +50,8 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     assert row["book_link_count"] == 1
     assert row["book_volumes"] == ["vol1"]
     assert row["contexts"] == []
-    assert framework["summary"] == dict(groups=0, areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1)
+    assert framework["summary"] == dict(groups=0, areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1,
+                                        roles=0, symptoms=0, learning_paths=0)
     assert "coverage" not in row and "competence" not in row
     assert field == before
     assert original["areas"][0]["rows"][0].get("contexts") is None
@@ -344,3 +345,42 @@ def test_v03_enforces_two_relationships_per_concept_and_connected_graph(candidat
         load_framework(root, field)
     field["relationships"].append(dict(id="bridge", source="mlsys.c2", target="mlsys.c3", predicate="links"))
     assert load_framework(root, field)["summary"]["concepts"] == 6
+
+
+# 2026-10-28: reader guides (roles, symptoms, learning paths) may only point at existing subjects and
+# concepts, and a symptom's checks and levers must share a relationship with one of its causes.
+def _guide_field():
+    return {"concepts": [{"id": i, "label": i} for i in ("mlsys.state", "mlsys.capacity", "mlsys.lever")],
+            "relationships": [{"source": "mlsys.lever", "relation": "reduces", "target": "mlsys.state"}]}
+
+
+def _write_guides(root, symptom_levers, role_core=("row.state",)):
+    guides = {"schema_version": 1,
+              "roles": [{"id": "r", "label": "Role", "summary": "Does things.", "core": list(role_core)}],
+              "symptoms": [{"id": "s", "label": "Symptom", "signal": "Something is slow.", "causes": ["mlsys.state"],
+                            "levers": list(symptom_levers)}],
+              "learning_paths": [{"id": "p", "label": "Path", "audience": "Students.",
+                                  "steps": [{"subject": "row.state", "why": "First."}, {"subject": "row.b", "why": "Second."},
+                                            {"subject": "row.c", "why": "Third."}]}]}
+    (root / "shared/concepts/ml-systems-guides.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
+
+
+def test_guides_compile_and_reach_the_release(tmp_path):
+    from core.framework import _guides
+    (tmp_path / "shared/concepts").mkdir(parents=True)
+    _write_guides(tmp_path, ["mlsys.lever"])
+    rows = {"row.state": {}, "row.b": {}, "row.c": {}}
+    guides = _guides(tmp_path, rows, _guide_field())
+    assert guides["symptoms"][0]["levers"] == ["mlsys.lever"] and len(guides["learning_paths"][0]["steps"]) == 3
+
+
+@pytest.mark.parametrize("levers, core, error", [
+    (["mlsys.capacity"], ("row.state",), "shares no relationship"),
+    (["mlsys.lever"], ("row.missing",), "unknown r core value"),
+])
+def test_guides_reject_ungrounded_entries(tmp_path, levers, core, error):
+    from core.framework import _guides
+    (tmp_path / "shared/concepts").mkdir(parents=True)
+    _write_guides(tmp_path, levers, core)
+    with pytest.raises(ConceptGraphError, match=error):
+        _guides(tmp_path, {"row.state": {}, "row.b": {}, "row.c": {}}, _guide_field())
