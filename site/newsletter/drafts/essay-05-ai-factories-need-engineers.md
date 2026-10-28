@@ -10,6 +10,10 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 <!-- buttondown-editor-mode: plaintext -->
 
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning the frontier of AI into a teachable engineering discipline, connecting how modern AI systems are built in industry to the first principles we teach the next generation.*
+
+---
+
 It has been a few months since my last essay here. Moving to Zürich for my academic sabbatical kept me away from this desk, and last week I traveled from Zürich to NVIDIA GTC Berlin.
 
 ## From Steam Engines to Token Factories

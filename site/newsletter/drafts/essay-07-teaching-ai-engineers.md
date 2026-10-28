@@ -10,6 +10,10 @@ image: "figures/gtc-berlin-robotics.jpg"
 
 <!-- buttondown-editor-mode: plaintext -->
 
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning the frontier of AI into a teachable engineering discipline, connecting how modern AI systems are built in industry to the first principles we teach the next generation.*
+
+---
+
 The [first essay](https://mlsysbook.ai/newsletter/) in this GTC Berlin series examined why containerized token factories still depend on human engineering judgment, and the [second essay](https://mlsysbook.ai/newsletter/) traced how an engineer diagnoses a single request across the layers of an AI service. Those two observations point to an immediate educational challenge: preparing students to make and defend those systems decisions before they ever step into a production facility.
 
 As researchers from Universidad Autónoma de Occidente observed in an earlier community issue ([From Tool Training to Process Thinking](https://mlsysbook.ai/newsletter/posts/2026/2026-04-14_team-newsletter-from-tool-training-to-process-thinking-a-spiral-model-for-ai-in.html)), university training that stops at tool familiarity rarely changes how courses are designed or what students can build when the tools change. A traditional machine learning assignment starts with a dataset and grades the student on validation accuracy. An AI engineering assignment can instead begin with a model that already achieves acceptable accuracy, and then place that model inside a physical environment with a strict memory budget, a latency deadline, and a power envelope. Once those constraints are introduced, the student's job shifts from following a recipe to making an engineering decision that holds the system together.

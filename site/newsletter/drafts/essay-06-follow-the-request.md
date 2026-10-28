@@ -10,6 +10,10 @@ image: "figures/gtc-berlin-stack.jpg"
 
 <!-- buttondown-editor-mode: plaintext -->
 
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning the frontier of AI into a teachable engineering discipline, connecting how modern AI systems are built in industry to the first principles we teach the next generation.*
+
+---
+
 In the [previous essay](https://mlsysbook.ai/newsletter/), I wrote from NVIDIA GTC Berlin about the rise of the AI factory, an industrial installation designed to convert electrical power and data into a continuous stream of tokens. Operators measure the capacity of that facility in tokens generated per second per megawatt. A person using an application built on that facility, however, never experiences aggregate cluster throughput. The user experiences the wall-clock time of a single request from submission to completion.
 
 As I argued in [The Model Is Not the Product](https://mlsysbook.ai/newsletter/posts/2026/2026-03-10_the-model-is-not-the-product.html), the model weights account for only a fraction of what determines whether a production system succeeds; the surrounding serving, retrieval, and orchestration infrastructure governs cost and reliability. Following a single request gives an AI engineer a concrete diagnostic starting point across that surrounding system. Before an answer appears on a screen or actuates a machine, a request accepts network input, waits for an available worker, retrieves supporting context, processes the prompt to produce its first token, and decodes subsequent tokens one step at a time. A response deadline belongs to that entire path. Measuring the model in isolation leaves most of the deadline unexplained.
