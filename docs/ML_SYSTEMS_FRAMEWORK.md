@@ -85,10 +85,11 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 - **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
 - **Concept map.** Each concept page carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
+- **Guides.** Ways in for people who arrive with a job rather than a concept (`shared/concepts/ml-systems-guides.yml`): eleven role profiles with core and working subjects, seventeen production symptoms with their likely causes, what to check, and what to change, and five learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
 - **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
 - **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
-State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#view=glossary`); earlier hash formats still resolve.
+State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#view=glossary`, `#view=guides&role=…|symptom=…|path=…`); earlier hash formats still resolve.
 
 ## Relationships
 
@@ -109,7 +110,7 @@ Every group, area, and subject carries a readable code: a group letter (F, S, P,
 | `mlsys-concept-graph.graphml` | GraphML | The concept graph for Gephi, yEd, Cytoscape, or a graph database |
 | `mlsys-taxonomy.bib` | BibTeX | Citation for the current version |
 
-The page's *Print / PDF* action prints the expanded outline. The release currently carries the book's CC BY-NC-SA 4.0 license; a more permissive license would ease adoption by other courses and organizations and is an open decision.
+The page's *Print / PDF* action prints the expanded outline. The taxonomy release (identifiers, labels, definitions, relationships, and guides) is licensed CC BY 4.0, so courses, standards bodies, and companies can reuse and adapt it with attribution; the book prose keeps its own license.
 
 ## Maintaining the taxonomy
 
