@@ -1,6 +1,6 @@
 """Read the ML Systems Taxonomy that question tags refer to.
 
-The taxonomy lives in the repository at ``shared/concepts/`` (two levels above
+The taxonomy lives in the repository at ``taxonomy/`` (two levels above
 ``staffml/vault``), maintained and validated by ``./binder/binder concepts``.
 It is not a vault file, so it is read with the standard safe loader rather than
 the per-question hardened loader and its size cap; the binder build already
@@ -43,7 +43,7 @@ class Taxonomy:
 
 def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
     """Return the repo's taxonomy, or None in a vault-only checkout."""
-    root = vault_dir.parent.parent / "shared" / "concepts"
+    root = vault_dir.parent.parent / "taxonomy"
     framework_path, field_path = root / "ml-systems-framework.yml", root / "ml-systems-field.yml"
     if not (framework_path.exists() and field_path.exists()):
         return None

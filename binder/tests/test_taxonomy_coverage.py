@@ -7,7 +7,7 @@ from core.taxonomy_coverage import coverage_report, write_report
 
 @pytest.fixture
 def repo(tmp_path):
-    concepts = tmp_path / "shared/concepts"
+    concepts = tmp_path / "taxonomy"
     (concepts / "coverage").mkdir(parents=True)
     (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": "mlsys.kv-cache"}, {"id": "mlsys.batching"}]}))
     (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [
@@ -22,7 +22,7 @@ def checklist(topics, held_out=True):
 
 
 def save(root, data):
-    (root / "shared/concepts/coverage/test.yml").write_text(yaml.safe_dump(data))
+    (root / "taxonomy/coverage/test.yml").write_text(yaml.safe_dump(data))
 
 
 def test_numbers_are_computed_and_weighted_by_sources(repo):

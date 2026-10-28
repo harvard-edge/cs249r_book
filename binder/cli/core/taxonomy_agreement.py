@@ -1,7 +1,7 @@
 """Agreement between independent taggers using the ML systems taxonomy.
 
 A taxonomy that things are labeled with is only useful if two people label
-the same item the same way. An agreement record (shared/concepts/agreement/*.yml)
+the same item the same way. An agreement record (taxonomy/agreement/*.yml)
 holds a fixed sample of items and, for each run, every tagger's subject and
 concepts per item. This module recomputes agreement from those records, so the
 reported numbers can be rerun, and fails when a recorded tag cites a subject or
@@ -26,8 +26,8 @@ TAG_KEYS = {"n", "subject", "concepts", "proposed", "reason"}
 
 
 def _vocabulary(root: Path):
-    field = load_taxonomy_yaml(root / "shared/concepts/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(root / "shared/concepts/ml-systems-framework.yml")
+    field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
+    framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
     rows = {row["id"]: (row, area) for area in framework["areas"] for row in area["rows"]}
     home = {c: rid for rid, (row, _) in rows.items() for c in row.get("concepts", [])}
     return {c["id"] for c in field["concepts"]}, rows, home
@@ -106,7 +106,7 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
 def agreement_report(root: Path) -> dict:
     concepts, rows, home = _vocabulary(root)
     records, errors = [], []
-    for path in sorted((root / "shared/concepts/agreement").glob("*.yml")):
+    for path in sorted((root / "taxonomy/agreement").glob("*.yml")):
         record = load_taxonomy_yaml(path)
         errors += _check(record, concepts, rows, path.name)
         runs = []

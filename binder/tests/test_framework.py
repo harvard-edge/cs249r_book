@@ -25,14 +25,14 @@ def candidate(tmp_path):
                            dict(id="mlsys.capacity", label="Capacity", definition="Available storage.")],
                  relationships=[dict(id="relation", source="mlsys.state", target="mlsys.capacity", predicate="occupies")],
                  book_links=[dict(concept="mlsys.state", book_concept="vol1.state", volume="vol1", label="State", chapter_title="Execution", url="https://mlsysbook.ai/state", depth="not-assessed", status="draft")])
-    path = tmp_path / "shared/concepts/ml-systems-framework.yml"
+    path = tmp_path / "taxonomy/ml-systems-framework.yml"
     path.parent.mkdir(parents=True)
     path.write_text(yaml.safe_dump(model, sort_keys=False))
     return tmp_path, model, field
 
 
 def write(root, model):
-    (root / "shared/concepts/ml-systems-framework.yml").write_text(yaml.safe_dump(model, sort_keys=False))
+    (root / "taxonomy/ml-systems-framework.yml").write_text(yaml.safe_dump(model, sort_keys=False))
 
 
 def test_missing_optional_framework_preserves_old_build(tmp_path):
@@ -124,7 +124,7 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     write(root, model)
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/taxonomy"
+    site = root / "taxonomy"
     # Three internal files plus six public downloads.
     assert len(artifacts) == 9
     data = json.loads(artifacts[site / "framework-data.json"])
@@ -157,7 +157,7 @@ def test_empty_candidate_row_and_secondary_links_do_not_inflate_home_counts(cand
     assert framework["summary"]["concepts"] == 2
     assert framework["summary"]["book_links"] == 1
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/taxonomy"
+    site = root / "taxonomy"
     rows = list(csv.DictReader(io.StringIO(artifacts[site / "framework-table.csv"].decode())))
     assert len(rows) == 2
     assert rows[1]["concept_ids"] == ""
@@ -196,7 +196,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     write(root, model)
     framework = load_framework(root, field)
     exports = framework_artifacts(root, field, framework)
-    result = list(csv.DictReader(io.StringIO(exports[root / "site/taxonomy/framework-table.csv"].decode())))[0]
+    result = list(csv.DictReader(io.StringIO(exports[root / "taxonomy/framework-table.csv"].decode())))[0]
     assert json.loads(result["includes"]) == row["includes"]
     assert json.loads(result["excludes"]) == row["excludes"]
     assert result["warrant_source_ids"] == "skos"
@@ -204,7 +204,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     assert json.loads(result["warrant_source_titles"]) == ["SKOS"]
     assert result["warrant_role"] == "design-reading-not-claim-proof"
     assert result["inventory_status"] == "draft-inventory"
-    assert result["source_file"] == "shared/concepts/ml-systems-framework.yml"
+    assert result["source_file"] == "taxonomy/ml-systems-framework.yml"
     assert result["area_question"] == area["question"]
     assert result["row_display_label"] == "State"
 
@@ -362,12 +362,12 @@ def _write_guides(root, symptom_levers, role_core=("row.state",)):
               "learning_paths": [{"id": "p", "label": "Path", "audience": "Students.",
                                   "steps": [{"subject": "row.state", "why": "First."}, {"subject": "row.b", "why": "Second."},
                                             {"subject": "row.c", "why": "Third."}]}]}
-    (root / "shared/concepts/ml-systems-guides.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
+    (root / "taxonomy/ml-systems-guides.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
 
 
 def test_guides_compile_and_reach_the_release(tmp_path):
     from core.framework import _guides
-    (tmp_path / "shared/concepts").mkdir(parents=True)
+    (tmp_path / "taxonomy").mkdir(parents=True)
     _write_guides(tmp_path, ["mlsys.lever"])
     rows = {"row.state": {}, "row.b": {}, "row.c": {}}
     guides = _guides(tmp_path, rows, _guide_field())
@@ -380,7 +380,7 @@ def test_guides_compile_and_reach_the_release(tmp_path):
 ])
 def test_guides_reject_ungrounded_entries(tmp_path, levers, core, error):
     from core.framework import _guides
-    (tmp_path / "shared/concepts").mkdir(parents=True)
+    (tmp_path / "taxonomy").mkdir(parents=True)
     _write_guides(tmp_path, levers, core)
     with pytest.raises(ConceptGraphError, match=error):
         _guides(tmp_path, {"row.state": {}, "row.b": {}, "row.c": {}}, _guide_field())

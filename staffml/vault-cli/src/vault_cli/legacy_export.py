@@ -409,7 +409,7 @@ def emit_taxonomy_labels(vault_dir: Path, output: Path) -> dict[str, Any]:
 
     Questions carry identities (``taxonomy_subject``, ``taxonomy_concepts``);
     this maps them to display codes and labels, read from the repo's
-    ``shared/concepts/`` so the site never drifts from the taxonomy.
+    ``taxonomy/`` so the site never drifts from the taxonomy.
     """
     taxonomy = load_taxonomy(vault_dir)
     if taxonomy is None:

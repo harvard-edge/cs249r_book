@@ -21,7 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _VISUAL_PATH_RE = re.compile(r"^[a-z0-9-]+\.svg$")
-# ML Systems Taxonomy identities (shared/concepts/ml-systems-*.yml). Format is
+# ML Systems Taxonomy identities (taxonomy/ml-systems-*.yml). Format is
 # checked here; membership in the current taxonomy is a structural-tier check.
 _TAXONOMY_SUBJECT_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _TAXONOMY_CONCEPT_RE = re.compile(r"^mlsys\.[a-z0-9]+(-[a-z0-9]+)*$")

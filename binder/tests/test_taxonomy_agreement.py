@@ -7,7 +7,7 @@ from core.taxonomy_agreement import agreement_report, write_report
 
 @pytest.fixture
 def repo(tmp_path):
-    concepts = tmp_path / "shared/concepts"
+    concepts = tmp_path / "taxonomy"
     (concepts / "agreement").mkdir(parents=True)
     (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": c} for c in ("mlsys.kv-cache", "mlsys.batching", "mlsys.quantization")]}))
     (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [
@@ -24,7 +24,7 @@ def record(tags_a, tags_b):
 
 
 def save(root, data):
-    (root / "shared/concepts/agreement/test.yml").write_text(yaml.safe_dump(data))
+    (root / "taxonomy/agreement/test.yml").write_text(yaml.safe_dump(data))
 
 
 def test_scores_are_computed_from_tags(repo):

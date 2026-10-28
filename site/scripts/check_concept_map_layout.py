@@ -5,7 +5,7 @@ Cytoscape instance, and fails if any edge label overlaps another label or a
 node. Added 2026-10-22 after two-link concept maps stacked their verb labels
 (107 concepts affected before the layout fix). Needs Playwright with Chrome.
 
-Usage: render site/taxonomy, serve site/_build, then
+Usage: render site, serve site/_build, then
     python3 site/scripts/check_concept_map_layout.py http://localhost:8000/taxonomy/index.html
 """
 from playwright.sync_api import sync_playwright
@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 ROOT = Path(__file__).resolve().parents[2]
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000/taxonomy/index.html"
-ids = [c["id"] for c in yaml.safe_load((ROOT / "shared/concepts/ml-systems-field.yml").read_text())["concepts"]]
+ids = [c["id"] for c in yaml.safe_load((ROOT / "taxonomy/ml-systems-field.yml").read_text())["concepts"]]
 HOOK = """
 (() => { let f; Object.defineProperty(window, 'cytoscape', { configurable: true,
   set(v) { f = v; }, get() { if (!f) return undefined; const w = function(...a) { const c = f(...a); window.__cy = c; return c; };

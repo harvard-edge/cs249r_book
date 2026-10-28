@@ -123,7 +123,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
     New field identities deliberately block compilation until their candidate
     home is considered. No classification or additional book link is guessed.
     """
-    path = root / "shared/concepts/ml-systems-framework.yml"
+    path = root / "taxonomy/ml-systems-framework.yml"
     if not path.exists():
         return None
     model = load_taxonomy_yaml(path)
@@ -265,7 +265,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
     unassigned = sorted(set(concepts) - set(homes))
     if unassigned:
         _fail(f"unassigned field concepts require a candidate home decision: {', '.join(unassigned)}")
-    # 2026-10-27: docs/ML_SYSTEMS_FRAMEWORK.md and .claude/rules/taxonomy.md
+    # 2026-10-27: taxonomy/README.md and .claude/rules/taxonomy.md
     # claim at least two relationships per concept and a connected graph.
     if model["version"] not in ("0.1-draft", "0.2-draft"):
         adj = {ident: set() for ident in concepts}
@@ -316,7 +316,7 @@ def _guides(root: Path, rows_by_id: dict, field: dict) -> dict:
     Every reference must name an existing subject or concept, and every symptom check or lever must
     share a relationship with one of the symptom's causes, so the guide stays tied to the graph (2026-10-28).
     """
-    path = root / "shared/concepts/ml-systems-guides.yml"
+    path = root / "taxonomy/ml-systems-guides.yml"
     if not path.exists():
         return {"roles": [], "symptoms": [], "learning_paths": []}
     model = load_taxonomy_yaml(path)
@@ -405,7 +405,7 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
         lines.extend(['', f'{heading} {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
         for row in area["rows"]:
             writer.writerow({"framework_id": framework["id"], "framework_title": framework["title"], "framework_scope": framework["scope"],
-                             "version": framework["version"], "status": framework["status"], "source_file": "shared/concepts/ml-systems-framework.yml",
+                             "version": framework["version"], "status": framework["status"], "source_file": "taxonomy/ml-systems-framework.yml",
                              "group_id": area.get("group", ""), "group_label": group["label"] if group else "",
                              "area_id": area["id"], "area_label": area["label"], "area_display_label": area.get("display_label", ""),
                              "area_question": area["question"], "area_scope": area["scope"],

@@ -112,8 +112,12 @@ CI_INJECTED_BASENAMES = {
 # Directories rendered on every build and gitignored, so links into them
 # resolve only after a render. mlsysim/docs/api/ is written by
 # mlsysim/docs/scripts/build_api.py (2026-10-22: the solver guide, the
-# engineers' page and the zoo pages link into it).
-GENERATED_DIRS = (REPO_ROOT / "mlsysim" / "docs" / "api",)
+# engineers' page and the zoo pages link into it). site/taxonomy/ is staged
+# from root taxonomy/ during site Quarto builds.
+GENERATED_DIRS = (
+    REPO_ROOT / "mlsysim" / "docs" / "api",
+    REPO_ROOT / "site" / "taxonomy",
+)
 
 # Match explicit Quarto / Pandoc anchor syntax inside headings:
 #   ## My Header {#sec-foo}

@@ -110,7 +110,7 @@
     if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
       + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
       + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
-    $('bok-method').textContent = `Version ${fw.version}. Generated from shared/concepts/ml-systems-framework.yml and ml-systems-field.yml.`;
+    $('bok-method').textContent = `Version ${fw.version}. Generated from taxonomy/ml-systems-framework.yml and ml-systems-field.yml.`;
   }
 
   // -------------------------------------------------------------------- matrix

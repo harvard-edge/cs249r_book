@@ -1,7 +1,7 @@
 """Compile chapter-owned learner graphs into maps and curriculum catalogs.
 
 Book records live in chapter *_concepts.yml files. The independent field model
-and book-link overlay live in shared/concepts. Published JSON, DOT, SVG, chapter
+and book-link overlay live in taxonomy. Published JSON, DOT, SVG, chapter
 viewers, and the catalog are deterministic build artifacts.
 """
 
@@ -22,7 +22,7 @@ import yaml
 
 
 # The ML Systems Taxonomy page: its source folder and its public address.
-SITE_DIR = "site/taxonomy"
+SITE_DIR = "taxonomy"
 PAGE_URL = "https://mlsysbook.ai/taxonomy/"
 
 

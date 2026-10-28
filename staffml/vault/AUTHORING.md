@@ -239,7 +239,7 @@ change — open a PR against `enums.py` *and* `schema/taxonomy_data.yaml`, then 
 
 Every question also carries tags from the ML Systems Taxonomy, the shared
 vocabulary the textbooks, quizzes, and courses use
-(`shared/concepts/ml-systems-framework.yml` and `ml-systems-field.yml`;
+(`taxonomy/ml-systems-framework.yml` and `ml-systems-field.yml`;
 browsable at <https://mlsysbook.ai/taxonomy/>). Tags are identities, never
 display codes:
 

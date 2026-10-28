@@ -1,6 +1,6 @@
 """Coverage of the ML systems taxonomy against recorded external checklists.
 
-A checklist (shared/concepts/coverage/*.yml) lists topics from a bounded,
+A checklist (taxonomy/coverage/*.yml) lists topics from a bounded,
 named source, such as course syllabi or a conference's accepted papers, with
 an authored judgment for each: covered by specific concepts, partially covered
 by a subject, missing, or out of scope. The judgment is editorial; this module
@@ -27,8 +27,8 @@ TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
 
 
 def _vocabulary(root: Path):
-    field = load_taxonomy_yaml(root / "shared/concepts/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(root / "shared/concepts/ml-systems-framework.yml")
+    field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
+    framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
     concepts = {c["id"] for c in field["concepts"]}
     subjects, homes = {}, {}
     for area in framework["areas"]:
@@ -102,7 +102,7 @@ def _summary(topics: list[dict]) -> dict:
 
 
 def coverage_report(root: Path) -> dict:
-    folder = root / "shared/concepts/coverage"
+    folder = root / "taxonomy/coverage"
     concepts, subjects, homes = _vocabulary(root)
     checklists, errors = [], []
     for path in sorted(folder.glob("*.yml")):
@@ -121,7 +121,7 @@ def write_report(root: Path) -> dict:
     out = root / "books/_build/concepts"
     out.mkdir(parents=True, exist_ok=True)
     lines = ["# Taxonomy coverage against recorded checklists", "",
-             "Judgments are editorial and recorded in shared/concepts/coverage/. Numbers are computed by `binder concepts coverage`.", ""]
+             "Judgments are editorial and recorded in taxonomy/coverage/. Numbers are computed by `binder concepts coverage`.", ""]
     for c in report["checklists"]:
         s = c["summary"]
         lines += [f"## {c['title']}", "", f"Basis: {c['basis']}", "",

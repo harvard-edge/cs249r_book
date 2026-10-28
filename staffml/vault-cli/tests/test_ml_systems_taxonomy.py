@@ -51,7 +51,7 @@ def test_malformed_tags_are_rejected(tags):
 
 @pytest.fixture
 def vault_dir(tmp_path: Path) -> Path:
-    concepts = tmp_path / "shared" / "concepts"
+    concepts = tmp_path / "taxonomy"
     concepts.mkdir(parents=True)
     (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [{"id": "llm-inference"}]}]}))
     (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({

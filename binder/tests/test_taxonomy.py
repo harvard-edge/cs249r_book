@@ -27,7 +27,7 @@ def example(tmp_path):
 
 
 def save(root, model):
-    path = root / "shared/concepts/ml-systems-taxonomy.yml"
+    path = root / "taxonomy/ml-systems-taxonomy.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(model, sort_keys=False))
 
@@ -91,8 +91,8 @@ def test_skos_exports_authored_broader_and_collections_without_technical_edges(e
     save(root, model)
     taxonomy = load_taxonomy(root, field)
     artifacts = taxonomy_artifacts(root, field, taxonomy)
-    ttl = artifacts[root / "site/taxonomy/taxonomy.ttl"].decode()
-    md = artifacts[root / "site/taxonomy/taxonomy-reference.md"].decode()
+    ttl = artifacts[root / "taxonomy/taxonomy.ttl"].decode()
+    md = artifacts[root / "taxonomy/taxonomy-reference.md"].decode()
     assert ttl.count("a skos:Concept ;") == 4
     assert ttl.count(" skos:broader ") == 2
     assert " skos:narrower " not in ttl  # Standard inverse semantics need no duplicate assertions.

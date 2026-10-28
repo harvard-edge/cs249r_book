@@ -66,7 +66,7 @@ def _references(record, sources, context):
 
 def load_field(root: Path, book_graph: dict) -> dict | None:
     """Validate authored identities and resolve only explicitly recorded links."""
-    path = root / "shared/concepts/ml-systems-field.yml"
+    path = root / "taxonomy/ml-systems-field.yml"
     if not path.exists():
         return None
     model = load_taxonomy_yaml(path)

@@ -54,7 +54,7 @@ def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
     if field is None:
         raise ConceptGraphError("coverage: field model is required")
     field_nodes = {c["id"]: c for c in field["concepts"]}
-    path = root / "shared/concepts/coverage-ledger.yml"
+    path = root / "taxonomy/coverage-ledger.yml"
     ledger = yaml.safe_load(path.read_text()) if path.exists() else {"schema_version": 1, "decisions": []}
     if not isinstance(ledger, dict) or ledger.get("schema_version") != 1 or not isinstance(ledger.get("decisions"), list):
         raise ConceptGraphError("coverage: invalid ledger schema")

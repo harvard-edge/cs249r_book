@@ -31,7 +31,7 @@ def decision(root):
 
 
 def write(root, decisions):
-    path = root / "shared/concepts/coverage-ledger.yml"
+    path = root / "taxonomy/coverage-ledger.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(dict(schema_version=1, decisions=decisions)))
 

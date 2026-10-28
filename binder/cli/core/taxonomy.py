@@ -46,7 +46,7 @@ def _records(model, name):
 
 def load_taxonomy(root: Path, field: dict) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    path = root / "shared/concepts/ml-systems-taxonomy.yml"
+    path = root / "taxonomy/ml-systems-taxonomy.yml"
     if not path.exists():
         return None
     model = yaml.safe_load(path.read_text())

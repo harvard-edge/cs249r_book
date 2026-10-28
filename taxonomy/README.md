@@ -8,9 +8,9 @@ The framework organizes the engineering knowledge needed to construct, evaluate,
 
 | Record | Question it answers | Authoritative source |
 |---|---|---|
-| Subject framework | What belongs in this engineering field, and where can I find it? | `shared/concepts/ml-systems-framework.yml` |
-| Concept vocabulary and relationships | What does an idea mean, and how does it affect other ideas under stated conditions? | `shared/concepts/ml-systems-field.yml` |
-| Book alignment | Where does MLSysBook discuss an idea? | `shared/concepts/mlsysbook-alignment.yml` |
+| Subject framework | What belongs in this engineering field, and where can I find it? | `taxonomy/ml-systems-framework.yml` |
+| Concept vocabulary and relationships | What does an idea mean, and how does it affect other ideas under stated conditions? | `taxonomy/ml-systems-field.yml` |
+| Book alignment | Where does MLSysBook discuss an idea? | `taxonomy/mlsysbook-alignment.yml` |
 | Competency specification, proposed | What can a learner demonstrate under a stated task, context, and evidence requirement? | Separate task records, not yet adopted |
 
 The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy pilot. It does not silently acquire broader/narrower assertions from the new subject collections. A predictable browsing location is useful without asserting that every collection is a semantic superclass.
@@ -66,7 +66,7 @@ Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with 
 
 ### Tagging agreement
 
-A vocabulary that things are labeled with must label the same item the same way for different taggers. `shared/concepts/agreement/staffml-300-2026-10.yml` records two independent taggers, `gpt-6.1-sol` and `claude-opus-5-5`, tagging the same 300 StaffML questions (sampled across all topics and tracks) without seeing each other's work, and `./binder/binder concepts agreement --check` recomputes the numbers and fails if a recorded tag cites a retired identity.
+A vocabulary that things are labeled with must label the same item the same way for different taggers. `taxonomy/agreement/staffml-300-2026-10.yml` records two independent taggers, `gpt-6.1-sol` and `claude-opus-5-5`, tagging the same 300 StaffML questions (sampled across all topics and tracks) without seeing each other's work, and `./binder/binder concepts agreement --check` recomputes the numbers and fails if a recorded tag cites a retired identity.
 
 | Run | Subject | Area | Main concept | Same concept set | Compatible |
 |---|---|---|---|---|---|
@@ -80,12 +80,12 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 
 ## Website
 
-`site/taxonomy/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
+`taxonomy/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
 
 - **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
 - **Concept map.** Each concept page carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
-- **Guides.** Ways in for people who arrive with a job rather than a concept (`shared/concepts/ml-systems-guides.yml`): eleven role profiles with core and working subjects, seventeen production symptoms with their likely causes, what to check, and what to change, and five learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
+- **Guides.** Ways in for people who arrive with a job rather than a concept (`taxonomy/ml-systems-guides.yml`): eleven role profiles with core and working subjects, seventeen production symptoms with their likely causes, what to check, and what to change, and five learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
 - **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
 - **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
@@ -99,7 +99,7 @@ Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-sy
 
 Every group, area, and subject carries a readable code: a group letter (F, S, P, Q, T; Lifecycle uses P so a code never reads as a StaffML depth level), an area number, and a subject number, so `P4.3` is Lifecycle › Deployment & serving › its third subject. The compiler requires codes to be unique and nested. Codes are for people and may be renumbered between versions; concept identities such as `mlsys.kv-cache` are permanent and are what tools should store.
 
-`binder concepts build` writes the public release to `site/taxonomy/downloads/` from the same compiled records as the page:
+`binder concepts build` writes the public release to `taxonomy/downloads/` from the same compiled records as the page:
 
 | File | Format | Contents |
 |---|---|---|
@@ -118,8 +118,8 @@ The taxonomy is meant to be complete enough to rely on and cheap to keep current
 
 1. **Add or edit.** A new concept is one record in `ml-systems-field.yml` (identity, label, definition, family, optional aliases) plus at least two relationships using the controlled relations, and its identity added to one subject's `concepts` in `ml-systems-framework.yml`. Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
 2. **Build.** `./binder/binder concepts build` validates homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
-3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `shared/concepts/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
-4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `docs/ML_SYSTEMS_TAXONOMY_CHANGELOG.md`, and retire rather than delete any withdrawn identity.
+3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `taxonomy/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
+4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `taxonomy/CHANGELOG.md`, and retire rather than delete any withdrawn identity.
 
 A label or alias may name only one concept; the compiler rejects a name shared by two, so a glossary search or a tagger always lands on one entry.
 

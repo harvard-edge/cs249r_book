@@ -12,19 +12,19 @@ The current interface cleanup is implemented. The taxonomy and concept relations
 
 This section supersedes counts and interface details below where they differ.
 
-- **Frame.** The framework is now version `0.2-draft`: 5 groups (Foundations, Stack, Lifecycle, Qualities, System types), 20 areas, 101 subjects. The field vocabulary has 735 concepts and 1,531 relationships, each using one of 17 controlled relations. `docs/ML_SYSTEMS_FRAMEWORK.md` states the placement rules, the system-type admission test, the background tier, and the declared-gap policy.
+- **Frame.** The framework is now version `0.2-draft`: 5 groups (Foundations, Stack, Lifecycle, Qualities, System types), 20 areas, 101 subjects. The field vocabulary has 735 concepts and 1,531 relationships, each using one of 17 controlled relations. `taxonomy/README.md` states the placement rules, the system-type admission test, the background tier, and the declared-gap policy.
 - **How it was built.** Three research passes: an external survey of 33 sources (no comprehensive ML-systems body of knowledge was found), a four-volume book inventory, and a critique of the 0.1 rows. Then four authoring passes, one per group, and an adversarial red-team review whose P0 findings were applied: GPU programming model, recommendation and embedding systems, multimodal, aliases, identity-checked scope references, a background tier, and published known gaps. A follow-up pass closed all 16 P1 gaps with 38 concepts. The 12 P2 findings are now the declared `gaps` for v0.3.
 - **Compiler.** `framework.py` accepts `0.2-draft`, validates an optional `groups` tier, resolves `book_chapters` codes (`v2/08`) to chapter titles and clean URLs, and rejects `[[identity]]` scope references that name no row or area. `concept_graph.py` now emits the flattened published chapter URL (`/volN/NN_chapter/…`); the old `/volN/volN/…` form is a redirect after publish. Vol III and IV pages are not live yet.
 - **Page.** `_workspace.qmd`, `study.js`, and `study.css` were rewritten: a field map, area views, a concept panel, an A–Z index, lenses, and URL-hash state, in the neutral mlsysbook.ai style with dark mode. The interactive whole-graph canvas is retired from the page; `field-all.svg` remains a download. Old 0.1 row deep links fall back to the overview.
 - **Concept map and glossary (later pass).** The relationship graph was rebuilt for mapping: every link classified into a controlled relation, 530 links added so no concept has fewer than two and the graph is connected (mean path about five links, down from seven), and an audit that read each link literally corrected or removed 76. After a review of how established taxonomies present themselves (MITRE ATT&CK/ATLAS, SFIA, ESCO, CS2023, MeSH) and of concept-map conventions, the page was rebuilt as a matrix home plus entry pages (area, subject, concept) with a sidebar tree, facts box, and tables, and a table glossary. Each concept page carries a neutral local concept map drawn with the vendored Cytoscape build. `field_graph.py` validates the relation vocabulary and rejects duplicate concept pairs.
-- **Taxonomy release.** Groups, areas, and subjects have nested readable codes (`P4.3`). The Taxonomy tab shows the overview figure, a full collapsible outline with codes (filterable, printable to PDF), and a Download & cite section. `binder/cli/core/taxonomy_release.py` writes CSV, JSON, SKOS Turtle, GraphML, and BibTeX to `site/taxonomy/downloads/` (ignored by Git, regenerated each build). License is the book's CC BY-NC-SA pending a decision; no DOI has been minted.
-- **Coverage.** `binder concepts coverage --check` scores recorded checklists in `shared/concepts/coverage/`. Design input (214 course, conference, and standards topics): 100% covered. First held-out measurement: MLSys 2025–2026 papers 67% covered by a concept and 97% homed in a subject; Volume I–II primary chapter concepts 85% and 99.5%; Volume III–IV 70% and 100%. After closing the field-level gaps those tests surfaced, they read 88%, 89%, and 83% and are now design inputs; the next held-out test is MLSys 2027. Remaining open topics are listed as partial in each checklist. Next planned use: StaffML questions re-expressed in taxonomy subjects and concepts (phased; see the session plan).
+- **Taxonomy release.** Groups, areas, and subjects have nested readable codes (`P4.3`). The Taxonomy tab shows the overview figure, a full collapsible outline with codes (filterable, printable to PDF), and a Download & cite section. `binder/cli/core/taxonomy_release.py` writes CSV, JSON, SKOS Turtle, GraphML, and BibTeX to `taxonomy/downloads/` (ignored by Git, regenerated each build). License is the book's CC BY-NC-SA pending a decision; no DOI has been minted.
+- **Coverage.** `binder concepts coverage --check` scores recorded checklists in `taxonomy/coverage/`. Design input (214 course, conference, and standards topics): 100% covered. First held-out measurement: MLSys 2025–2026 papers 67% covered by a concept and 97% homed in a subject; Volume I–II primary chapter concepts 85% and 99.5%; Volume III–IV 70% and 100%. After closing the field-level gaps those tests surfaced, they read 88%, 89%, and 83% and are now design inputs; the next held-out test is MLSys 2027. Remaining open topics are listed as partial in each checklist. Next planned use: StaffML questions re-expressed in taxonomy subjects and concepts (phased; see the session plan).
 - **Review status.** All new concepts, placements, relationships, and chapter pointers are AI-authored drafts. Five ledger decisions are now stale because the vocabulary changed. All source URLs were link-checked: 232 load directly, all 34 DOIs match their cited titles in Crossref, and ISO, RAND, and ACM pages that block scripts were matched by identifier. One dead host was replaced with its DOI.
 
 ## Start the review here
 
-1. Read this note, `docs/ML_SYSTEMS_FRAMEWORK.md`, and `docs/CONCEPT_COVERAGE_AUDIT.md`.
-2. Inspect the canonical website entry at `site/taxonomy/index.qmd` and its shared body, `site/taxonomy/_workspace.qmd`.
+1. Read this note, `taxonomy/README.md`, and `docs/CONCEPT_COVERAGE_AUDIT.md`.
+2. Inspect the canonical website entry at `taxonomy/index.qmd` and its shared body, `taxonomy/_workspace.qmd`.
 3. Run the checks below and examine the generated reconciliation report before adding concepts or changing relationships.
 4. Review the subject model and relationship semantics separately from the visual presentation. A valid build proves structural consistency, not conceptual completeness.
 
@@ -33,11 +33,11 @@ This section supersedes counts and interface details below where they differ.
 | Source | Responsibility |
 |---|---|
 | `books/vol*/*/*_concepts.yml` | Chapter-owned primary/secondary concepts, teaching claims, learner graphs, and cross-chapter explorer propositions |
-| `shared/concepts/ml-systems-field.yml` | Independent field vocabulary, definitions, aliases, conditional typed relationships, and reading references |
-| `shared/concepts/ml-systems-framework.yml` | Candidate subject areas and rows, boundaries, display labels, facets, and investigation proposals |
-| `shared/concepts/mlsysbook-alignment.yml` | Explicit candidate links from field concepts to section-backed book concepts |
-| `shared/concepts/ml-systems-taxonomy.yml` | Small explicit SKOS hierarchy pilot; not the entire subject framework |
-| `shared/concepts/coverage-ledger.yml` | Authored reconciliation decisions, reviewer attribution, manuscript quotations, and dependency fingerprints |
+| `taxonomy/ml-systems-field.yml` | Independent field vocabulary, definitions, aliases, conditional typed relationships, and reading references |
+| `taxonomy/ml-systems-framework.yml` | Candidate subject areas and rows, boundaries, display labels, facets, and investigation proposals |
+| `taxonomy/mlsysbook-alignment.yml` | Explicit candidate links from field concepts to section-backed book concepts |
+| `taxonomy/ml-systems-taxonomy.yml` | Small explicit SKOS hierarchy pilot; not the entire subject framework |
+| `taxonomy/coverage-ledger.yml` | Authored reconciliation decisions, reviewer attribution, manuscript quotations, and dependency fingerprints |
 
 The current field vocabulary has 175 concepts and 195 relationships. The organizing framework has 12 areas and 56 subject rows. There are 102 candidate passage links involving 86 distinct field concepts. These are inventory counts, not coverage scores. Empty subject rows are proposals awaiting an inventory, not proof that a book omits their subject.
 
@@ -83,7 +83,7 @@ The human reconciliation gate covers selected primary declarations only. Seconda
 From the repository root:
 
 ```sh
-python3 -m pip install -r site/taxonomy/requirements.txt
+python3 -m pip install -r taxonomy/requirements.txt
 # Install Graphviz through the local package manager if `dot` is unavailable.
 ./binder/binder concepts check
 ./binder/binder concepts build
