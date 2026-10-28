@@ -20,7 +20,9 @@ BASE = PAGE_URL
 PAGE = PAGE_URL
 NAME = "ML Systems Taxonomy"
 AUTHOR = "Vijay Janapa Reddi"
-LICENSE = {"name": "CC BY-NC-SA 4.0", "url": "https://creativecommons.org/licenses/by-nc-sa/4.0/"}
+# The taxonomy release (identifiers, labels, definitions, relationships, guides) is CC BY 4.0 so courses and
+# companies can reuse it; the book prose keeps its own license (decided 2026-10-28).
+LICENSE = {"name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 YEAR = "2026"
 
 
@@ -79,7 +81,8 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
                 "relations": relations,
                 "relationships": [{"source": r["source"], "relation": r.get("relation", ""), "target": r["target"],
                                    "statement": r.get("predicate", ""), "conditions": r.get("conditions", "")} for r in relationships],
-                "retired": field.get("retired", [])}
+                "retired": field.get("retired", []),
+                "guides": framework.get("guides", {"roles": [], "symptoms": [], "learning_paths": []})}
 
     # CSV: one row per subject (the outline) and one row per concept (the glossary).
     subjects = io.StringIO(newline="")
