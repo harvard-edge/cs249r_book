@@ -10,7 +10,7 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 <!-- buttondown-editor-mode: plaintext -->
 
-*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning the frontier of AI into a teachable engineering discipline, connecting how modern AI systems are built in industry to the first principles we teach the next generation.*
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning AI systems into a teachable engineering discipline, connecting how modern AI infrastructure is built and operated in industry to the first principles we teach the next generation.*
 
 ---
 
@@ -24,7 +24,7 @@ In Berlin, that comparison ceased to be a metaphor. Across the keynote and techn
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across OpenRouter showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
-When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. I am asking a curriculum question: if industry is building this infrastructure, what is the underlying body of knowledge required to engineer it, and how do we teach that discipline to the next generation.
+When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. I am asking a curriculum question: if industry is building this infrastructure, what is the underlying body of AI systems knowledge required to engineer it, and how do we teach that discipline to the next generation.
 
 Every past industrial transition faced that same human bottleneck. In the first Industrial Revolution, James Watt's steam engine converted coal into mechanical force, yet early steam plants wasted most of their fuel or failed under pressure until thermodynamics and mechanical engineering emerged to govern boilers, heat transfer, and control governors. A century later, electrical power grids forced electrical engineering to split from physics, and Henry Ford's moving assembly lines required a new discipline of industrial systems engineering.
 
@@ -76,7 +76,7 @@ Consider an engineering assistant that retrieves maintenance manuals and answers
 
 To diagnose that slowdown, an engineer has to look past aggregate token throughput and trace how each request moves through the system: waiting in an admission queue, retrieving documents, processing the prompt during prefill, and generating output tokens step by step during decoding. Longer retrieved passages and multi-step reasoning chains enlarge the key-value (KV) cache that each active request holds in high-bandwidth memory. Once high-bandwidth memory fills with KV-cache state, the serving runtime must restrict batch concurrency, which lowers arithmetic utilization on the accelerators while lengthening the queue of users waiting outside them.
 
-Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, while risking the loss of evidence the model needs for a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format efficiently and answer quality holds on edge cases. The machine manufactures tokens; the AI engineer measures these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
+Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, while risking the loss of evidence the model needs for a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format efficiently and answer quality holds on edge cases. The machine manufactures tokens; the AI systems engineer measures these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
 
 ## The Builder's Gap Inside the Factory
 
@@ -94,11 +94,11 @@ Preparing engineers for this environment does not require placing a shipping-con
 
 That continuity is the foundation of our [Machine Learning Systems](https://mlsysbook.ai) textbook. Whether a student is calculating analytical bottlenecks, deploying onto a constrained microcontroller kit, or trying the new [MLSysBook Playground](https://mlsysbook.ai/games/), where interactive simulations such as *KV Cache Packer* and *Cluster Commander* turn memory fragmentation and fleet scheduling into sixty-second decisions, the underlying engineering habit is identical: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
 
-Over the next two essays, we will follow this thread from the factory floor into daily engineering practice and classroom design. The next essay traces a single request through an AI service to show where waiting and execution accumulate across the stack, and the third examines how we can teach and grade the decisions an AI engineer must defend.
+Over the next two essays, we will follow this thread from the factory floor into daily engineering practice and classroom design. The next essay traces a single request through an AI service to show where waiting and execution accumulate across the stack, and the third examines how we can teach and grade the decisions an AI systems engineer must defend.
 
 ## Continuing the Conversation
 
-I write this newsletter to connect what is happening at the industrial frontier to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note:
+I write this newsletter to connect what is happening at the industrial frontier of AI systems to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note:
 
 {{ survey.gtc_berlin_pulse }}
 
@@ -108,12 +108,12 @@ Vijay
 
 ---
 
-*P.S. If this essay helped clarify why token factories will need AI engineers, consider forwarding it to three colleagues:*
+*P.S. If this essay helped clarify why token factories will need AI systems engineers, consider forwarding it to three colleagues:*
 
 *An infrastructure or platform lead planning new cluster capacity who knows that plugging in the racks is where the systems engineering work begins.*
 
 *An ML engineer whose model works in a notebook, and who wants to understand how queueing, KV-cache memory, and power limits govern production serving in [MLSysBook](https://mlsysbook.ai).*
 
-*An educator designing next semester's AI curriculum who wants to explore the new [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) and the [Instructor Hub](https://mlsysbook.ai/instructors/).*
+*An educator designing next semester's AI systems curriculum who wants to explore the new [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) and the [Instructor Hub](https://mlsysbook.ai/instructors/).*
 
 [MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [Playground](https://mlsysbook.ai/games/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)

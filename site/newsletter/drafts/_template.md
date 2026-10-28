@@ -26,7 +26,7 @@ draft: true
     "hands-on"  — TinyTorch, hardware kits, labs, tools — the buildable stuff
 -->
 
-*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning the frontier of AI into a teachable engineering discipline, connecting how modern AI systems are built in industry to the first principles we teach the next generation.*
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning AI systems into a teachable engineering discipline, connecting how modern AI infrastructure is built and operated in industry to the first principles we teach the next generation.*
 
 ---
 
