@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Quarto hook: compile the root taxonomy/ folder and stage it into site/taxonomy/."""
 
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -44,7 +45,11 @@ def clean_site_taxonomy() -> None:
 
 if __name__ == "__main__":
     if "--clean" in sys.argv[1:]:
-        clean_site_taxonomy()
+        # Only a whole-project render may remove the staged copy. A single-page render
+        # (`quarto render taxonomy/index.qmd`) stats its input after post-render, so
+        # cleaning then fails the render (2026-10-28). Quarto sets this for full renders.
+        if os.environ.get("QUARTO_PROJECT_RENDER_ALL") == "1":
+            clean_site_taxonomy()
         raise SystemExit(0)
     sys.path.insert(0, str(ROOT / "binder"))
     from cli.commands.concepts import run
