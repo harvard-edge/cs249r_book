@@ -62,6 +62,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: ML Operations at Scale — Evaluation contract (`vol2.operations.evaluation-contract`)
 - vol1: Model Serving — Request latency (`vol1.serving.latency`)
 - vol2: Serving at Scale — SLO goodput (`vol2.serving.slo-goodput`)
+- vol1: Model Serving — Request latency (`vol1.serving.latency`)
 
 #### Workload characterization
 
@@ -97,6 +98,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Model Serving — Arrival rate (`vol1.serving.arrivals`)
+- vol1: Model Serving — Serving capacity (`vol1.serving.capacity`)
 
 #### Objectives, proxies &amp; decision policies
 
@@ -380,6 +382,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Hardware Acceleration — Arithmetic intensity (`vol1.hardware.intensity`)
 - vol1: System Paradigms — Data locality (`vol1.system.locality`)
 - vol1: Hardware Acceleration — Tiling (`vol1.hardware.tiling`)
+- vol1: Hardware Acceleration — Operand transfer time (`vol1.hardware.transfer`)
+- vol4: The Cognitive Brain — Weight bandwidth (`vol4.inference.bandwidth`)
 
 #### Amdahl's law &amp; scaling efficiency
 
@@ -415,6 +419,8 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Hardware Acceleration — Accelerated fraction (`vol1.hardware.amdahl`)
 - vol2: Collective Communication — Communication overlap (`vol2.collective.overlap`)
+- vol1: Hardware Acceleration — Accelerated fraction (`vol1.hardware.amdahl`)
+- vol2: Introduction — Distributed step time (`vol2.fleet.step-time`)
 
 #### Queueing &amp; capacity models
 
@@ -459,6 +465,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Request latency (`vol1.serving.latency`)
 - vol1: Model Serving — Batching (`vol1.serving.batching`)
 - vol2: Serving at Scale — Request batching (`vol2.serving.batching`)
+- vol1: Model Serving — Queueing delay (`vol1.serving.queue`)
+- vol1: Model Serving — Batch formation delay (`vol1.serving.formation`)
 
 #### Scaling laws &amp; compute-optimal allocation
 
@@ -490,6 +498,8 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Introduction — Empirical scaling laws (`vol2.fleet.scaling-laws`)
+- vol1: Model Training — Time to target quality (`vol1.training.quality-time`)
+- vol1: Data Selection — Model-data allocation (`vol1.selection.balance`)
 
 ## Stack
 
@@ -539,7 +549,8 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol1: Neural Computation — Matrix multiplication (`vol1.computation.matmul`)
+- vol1: Hardware Acceleration — Operand reuse (`vol1.hardware.reuse`)
 
 #### Memory hierarchy &amp; bandwidth
 
@@ -581,6 +592,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Hardware Acceleration — Memory bandwidth (`vol1.hardware.bandwidth`)
 - vol1: System Paradigms — Data locality (`vol1.system.locality`)
 - vol1: Hardware Acceleration — Tiling (`vol1.hardware.tiling`)
+- vol1: Hardware Acceleration — Memory bandwidth (`vol1.hardware.bandwidth`)
+- vol4: The Cognitive Brain — Weight bandwidth (`vol4.inference.bandwidth`)
 
 #### Host-device &amp; scale-up interconnect
 
@@ -650,6 +663,8 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Sustainable AI — Operating energy (`vol2.sustainability.energy`)
+- vol4: The Physical Body — Supply integrity (`vol4.plant.supply`)
+- vol4: Workload Placement — Thermal throttling (`vol4.placement.throttling`)
 
 #### Edge &amp; embedded hardware
 
@@ -689,6 +704,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Model Compression — Quantization (`vol1.compression.quantization`)
+- vol1: System Paradigms — Power budget (`vol1.system.power`)
 
 ### Frameworks, compilers &amp; runtimes
 
@@ -772,6 +788,7 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: ML Frameworks — Kernel fusion (`vol1.framework.fusion`)
 - vol1: Hardware Acceleration — Tiling (`vol1.hardware.tiling`)
+- vol1: Neural Computation — Matrix multiplication (`vol1.computation.matmul`)
 
 #### Kernel &amp; GPU programming model
 
@@ -918,7 +935,9 @@ Candidate home concepts:
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol1: Data Engineering — Input pipeline (`vol1.data.pipeline`)
+- vol2: Data Storage — Input pipeline (`vol2.storage.input-pipeline`)
+- vol2: Data Storage — Prefetching (`vol2.storage.prefetch`)
 
 #### Numerical formats &amp; precision
 
@@ -1011,6 +1030,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Distributed Training — Tensor parallelism (`vol2.training.tensor-parallelism`)
 - vol2: Distributed Training — Pipeline parallelism (`vol2.training.pipeline-parallelism`)
 - vol2: Distributed Training — Training-state sharding (`vol2.training.state-sharding`)
+- vol2: Distributed Training — Pipeline parallelism (`vol2.training.pipeline-parallelism`)
+- vol2: Distributed Training — Pipeline parallelism (`vol2.training.pipeline-parallelism`)
 
 #### Parallelization planning &amp; placement
 
@@ -1090,6 +1111,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Collective Communication — AllReduce (`vol2.collective.allreduce`)
 - vol2: Collective Communication — Communication overlap (`vol2.collective.overlap`)
 - vol2: Network Fabrics — Bisection bandwidth (`vol2.network.bisection-bandwidth`)
+- vol2: Network Fabrics — Message startup latency (`vol2.network.startup-latency`)
+- vol2: Network Fabrics — Bisection bandwidth (`vol2.network.bisection-bandwidth`)
+- vol2: Collective Communication — Gradient compression (`vol2.collective.gradient-compression`)
 
 #### Coordination &amp; consensus
 
@@ -1129,6 +1153,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Durable Execution — Recovery checkpoint (`vol3.checkpoint`)
 - vol2: Fault Tolerance — Consistent checkpoint cut (`vol2.reliability.consistent-cut`)
 - vol3: Tool Calling — Operation identity (`vol3.operation`)
+- vol2: Fault Tolerance — Recovery (`vol2.reliability.recovery`)
+- vol4: The Nervous System — Chunk lease (`vol4.authority.chunk-lease`)
 
 #### Federated &amp; decentralized learning
 
@@ -1165,6 +1191,8 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Edge Intelligence — Federated averaging (`vol2.federated.fedavg`)
 - vol2: Security &amp; Privacy — Differential privacy (`vol2.privacy.dp`)
+- vol2: Edge Intelligence — Federated averaging (`vol2.federated.fedavg`)
+- vol2: Edge Intelligence — Client participation (`vol2.federated.participation`)
 
 ### Datacenter infrastructure &amp; fleet
 
@@ -1214,6 +1242,10 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Responsible Engineering — Operational carbon (`vol1.responsibility.carbon`)
 - vol2: Sustainable AI — Embodied carbon (`vol2.sustainability.embodied-carbon`)
 - vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol2: Compute Infrastructure — Rack power envelope (`vol2.hardware.power-envelope`)
+- vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol4: The Physical Body — Supply integrity (`vol4.plant.supply`)
+- vol4: Workload Placement — Thermal throttling (`vol4.placement.throttling`)
 
 #### Network fabrics
 
@@ -1259,6 +1291,9 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Collective Communication — AllReduce (`vol2.collective.allreduce`)
 - vol2: Network Fabrics — Bisection bandwidth (`vol2.network.bisection-bandwidth`)
+- vol2: Network Fabrics — Bisection bandwidth (`vol2.network.bisection-bandwidth`)
+- vol2: Network Fabrics — Network congestion (`vol2.network.congestion`)
+- vol2: Network Fabrics — Network congestion (`vol2.network.congestion`)
 
 #### Storage &amp; data delivery
 
@@ -1296,6 +1331,8 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Data Storage — Durable checkpoint (`vol2.storage.durable-checkpoint`)
 - vol3: Durable Execution — Recovery checkpoint (`vol3.checkpoint`)
+- vol1: Data Engineering — Input pipeline (`vol1.data.pipeline`)
+- vol2: Data Storage — Input pipeline (`vol2.storage.input-pipeline`)
 
 #### Cluster scheduling &amp; orchestration
 
@@ -1337,6 +1374,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Utilization (`vol1.serving.utilization`)
 - vol2: Data Storage — Durable checkpoint (`vol2.storage.durable-checkpoint`)
 - vol3: Durable Execution — Recovery checkpoint (`vol3.checkpoint`)
+- vol2: Fleet Orchestration — Gang scheduling (`vol2.scheduling.gang`)
+- vol2: Fleet Orchestration — Topology-aware placement (`vol2.scheduling.placement`)
+- vol2: Fleet Orchestration — Resource fairness (`vol2.scheduling.fairness`)
 
 #### Capacity planning &amp; multi-tenancy
 
@@ -1377,6 +1417,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Agent Sandboxes — Isolation envelope (`vol3.isolation`)
 - vol4: Workload Placement — Resource isolation (`vol4.placement.isolation`)
 - vol3: Agent Economics — Cost per accepted task (`vol3.cost`)
+- vol1: Model Serving — Serving capacity (`vol1.serving.capacity`)
 
 ## Lifecycle
 
@@ -1424,6 +1465,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Data Engineering — Labels (`vol1.data.labels`)
+- vol1: Data Engineering — Labels (`vol1.data.labels`)
 
 #### Data selection &amp; curation
 
@@ -1464,6 +1506,7 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Data Selection — Training subset (`vol1.selection.subset`)
 - vol2: Introduction — Empirical scaling laws (`vol2.fleet.scaling-laws`)
+- vol1: Data Selection — Selection overhead (`vol1.selection.scoring`)
 
 #### Data validation &amp; feature engineering
 
@@ -1503,6 +1546,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Data Engineering — Training-serving parity (`vol1.data.parity`)
+- vol1: ML Lifecycle — Stage interface contract (`vol1.lifecycle.contract`)
 
 #### Data pipelines &amp; storage formats
 
@@ -1541,7 +1585,8 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol1: Data Engineering — Input pipeline (`vol1.data.pipeline`)
+- vol2: Data Storage — Input pipeline (`vol2.storage.input-pipeline`)
 
 #### Data contracts, versioning &amp; lineage
 
@@ -1580,6 +1625,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Long-Term Memory — Source provenance (`vol3.provenance`)
 - vol2: Data Storage — Versioned artifact (`vol2.storage.versioned-artifact`)
 - vol4: Deployment Release — Release manifest (`vol4.assurance.manifest`)
+- vol1: ML Lifecycle — Stage interface contract (`vol1.lifecycle.contract`)
 
 #### Leakage &amp; training-serving skew
 
@@ -1661,6 +1707,9 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Edge Intelligence — Federated averaging (`vol2.federated.fedavg`)
+- vol3: Trajectory Fine-Tuning — Exposure bias (`vol3.exposure-bias`)
+- vol4: Physical Data — Compounding error (`vol4.learning.compounding-error`)
+- vol4: Physical Data — Recovery demonstrations (`vol4.learning.recovery`)
 
 #### Optimization &amp; training dynamics
 
@@ -1702,6 +1751,9 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Model Training — Training batch size (`vol1.training.batch`)
 - vol2: Distributed Training — Data parallelism (`vol2.training.data-parallelism`)
+- vol1: Neural Computation — Parameter gradients (`vol1.computation.gradients`)
+- vol1: Neural Computation — Parameter gradients (`vol1.computation.gradients`)
+- vol2: Distributed Training — Critical batch size (`vol2.training.critical-batch`)
 
 #### Training memory &amp; state
 
@@ -1817,6 +1869,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Model Compression — Quantization (`vol1.compression.quantization`)
+- vol3: Trajectory Fine-Tuning — Loss mask (`vol3.mask`)
 
 #### Preference &amp; RL post-training
 
@@ -1858,6 +1911,9 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol3: Reinforcement Learning from Verifiable Rewards — Reward hacking (`vol3.reward-hacking`)
+- vol3: Test-Time Compute — Verifier precision (`vol3.precision`)
+- vol3: Reinforcement Learning from Verifiable Rewards — Verifiable reward (`vol3.reward`)
+- vol3: Reinforcement Learning from Verifiable Rewards — Credit assignment (`vol3.credit`)
 
 #### Continual &amp; online learning
 
@@ -1941,6 +1997,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Data Engineering — Data leakage (`vol1.data.leakage`)
+- vol3: Trajectory Curation — Task-group split (`vol3.split`)
 
 #### Metrics, calibration &amp; uncertainty
 
@@ -1976,6 +2033,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Benchmarking — Model quality (`vol1.measurement.quality`)
+- vol2: Robust AI — Selective prediction (`vol2.robustness.selective-prediction`)
 - vol2: Robust AI — Selective prediction (`vol2.robustness.selective-prediction`)
 
 #### Sliced &amp; robustness evaluation
@@ -2014,6 +2072,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol4: Physical Data — Endogenous covariate shift (`vol4.learning.shift`)
 - vol1: Responsible Engineering — Subgroup fairness (`vol1.responsibility.fairness`)
 - vol2: Responsible AI — Fairness criterion (`vol2.governance.fairness`)
+- vol1: Benchmarking — Model quality (`vol1.measurement.quality`)
 
 #### Evaluating generative &amp; agentic systems
 
@@ -2054,6 +2113,9 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol3: Agent Evaluation — Task acceptance (`vol3.acceptance`)
+- vol3: Test-Time Compute — Candidate selection (`vol3.selection`)
+- vol3: Test-Time Compute — Verifier precision (`vol3.precision`)
+- vol3: Agent Evaluation — Repeated-run consistency (`vol3.repeatability`)
 
 #### ML testing &amp; debugging
 
@@ -2090,7 +2152,8 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol4: Adversarial Verification — Fault injection (`vol4.verification.fault`)
+- vol4: Adversarial Verification — Test oracle (`vol4.verification.oracle`)
 
 ### Deployment &amp; serving
 
@@ -2221,6 +2284,10 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Queueing delay (`vol1.serving.queue`)
 - vol1: Model Serving — Request latency (`vol1.serving.latency`)
 - vol2: Serving at Scale — SLO goodput (`vol2.serving.slo-goodput`)
+- vol1: Benchmarking — Latency SLO (`vol1.measurement.slo`)
+- vol1: Model Serving — Request latency (`vol1.serving.latency`)
+- vol1: Model Serving — Time to first token (`vol1.serving.ttft`)
+- vol1: Model Serving — Time per output token (`vol1.serving.tpot`)
 
 #### Batching, admission &amp; autoscaling
 
@@ -2261,6 +2328,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Serving capacity (`vol1.serving.capacity`)
 - vol1: Model Serving — Batching (`vol1.serving.batching`)
 - vol2: Serving at Scale — Request batching (`vol2.serving.batching`)
+- vol1: Model Serving — Batch formation delay (`vol1.serving.formation`)
+- vol1: Model Serving — Serving capacity (`vol1.serving.capacity`)
+- vol1: Model Serving — Continuous batching (`vol1.serving.continuous`)
 
 #### LLM &amp; generative inference
 
@@ -2321,6 +2391,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Paged KV allocation (`vol1.serving.paging`)
 - vol1: Model Serving — Prefix caching (`vol1.serving.prefix`)
 - vol3: KV Cache Management — Prefix reuse (`vol3.prefix-reuse`)
+- vol1: Model Serving — Continuous batching (`vol1.serving.continuous`)
+- vol3: KV Cache Management — Paused-state residency (`vol3.residency`)
 
 #### Decoding, sampling &amp; structured output
 
@@ -2353,7 +2425,7 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol3: The Foundation Model — Grammar constraint (`vol3.grammar`)
 
 #### Test-time compute
 
@@ -2392,6 +2464,10 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol3: Agent Economics — Cost per accepted task (`vol3.cost`)
+- vol3: Test-Time Compute — Test-time search (`vol3.search`)
+- vol3: Test-Time Compute — Candidate selection (`vol3.selection`)
+- vol3: Test-Time Compute — Verifier precision (`vol3.precision`)
+- vol3: Agent Evaluation — Repeated-run consistency (`vol3.repeatability`)
 
 #### Retrieval &amp; vector search
 
@@ -2524,6 +2600,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: ML Operations at Scale — Staged rollout (`vol2.operations.rollout`)
 - vol3: Operating Agents — Staged release (`vol3.release`)
 - vol1: ML Operations — Rollback (`vol1.operations.rollback`)
+- vol1: ML Lifecycle — Release gate (`vol1.lifecycle.gate`)
+- vol2: ML Operations at Scale — Evaluation contract (`vol2.operations.evaluation-contract`)
+- vol2: ML Operations at Scale — Dependency registry (`vol2.operations.registry`)
 
 #### Monitoring &amp; observability
 
@@ -2566,6 +2645,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Robust AI — Distribution shift (`vol2.robustness.shift`)
 - vol4: Physical Data — Endogenous covariate shift (`vol4.learning.shift`)
 - vol1: ML Operations — Production monitoring (`vol1.operations.monitor`)
+- vol1: ML Operations — Distribution shift (`vol1.operations.drift`)
+- vol3: Operating Agents — Trajectory trace (`vol3.trace`)
 
 #### Drift, feedback loops &amp; retraining
 
@@ -2606,6 +2687,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Robust AI — Distribution shift (`vol2.robustness.shift`)
 - vol4: Physical Data — Endogenous covariate shift (`vol4.learning.shift`)
 - vol1: Responsible Engineering — Bias feedback (`vol1.responsibility.feedback`)
+- vol1: ML Operations — Distribution shift (`vol1.operations.drift`)
+- vol2: Robust AI — Distribution shift (`vol2.robustness.shift`)
 
 #### Incident response
 
@@ -2639,6 +2722,7 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: ML Operations — Rollback (`vol1.operations.rollback`)
+- vol3: Operating Agents — Causal diagnosis (`vol3.diagnosis`)
 
 #### ML pipelines &amp; reproducibility
 
@@ -2712,7 +2796,7 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol2: ML Operations at Scale — Dependency registry (`vol2.operations.registry`)
 
 #### Model retirement
 
@@ -2796,6 +2880,11 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Utilization (`vol1.serving.utilization`)
 - vol2: Serving at Scale — SLO goodput (`vol2.serving.slo-goodput`)
 - vol1: Benchmarking — Benchmark protocol (`vol1.measurement.protocol`)
+- vol1: Model Training — Model FLOPs utilization (`vol1.training.mfu`)
+- vol1: Hardware Acceleration — Operand transfer time (`vol1.hardware.transfer`)
+- vol1: Model Serving — Host-path overhead (`vol1.serving.host`)
+- vol2: Fleet Efficiency — ML goodput (`vol2.goodput.ml`)
+- vol2: Fleet Efficiency — Program goodput (`vol2.goodput.program`)
 
 #### System benchmarking
 
@@ -2835,6 +2924,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Serving at Scale — SLO goodput (`vol2.serving.slo-goodput`)
 - vol1: Benchmarking — Benchmark protocol (`vol1.measurement.protocol`)
 - vol2: Sustainable AI — Operating energy (`vol2.sustainability.energy`)
+- vol1: Model Training — Time to target quality (`vol1.training.quality-time`)
 
 #### Model compression
 
@@ -2879,6 +2969,9 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Model Compression — Weight precision (`vol1.compression.precision`)
+- vol1: Model Compression — Quantization (`vol1.compression.quantization`)
+- vol1: Model Compression — Weight sparsity (`vol1.compression.sparsity`)
+- vol1: Model Compression — Quantization (`vol1.compression.quantization`)
 - vol1: Model Compression — Quantization (`vol1.compression.quantization`)
 - vol1: Model Compression — Weight sparsity (`vol1.compression.sparsity`)
 
@@ -3001,6 +3094,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Data Storage — Durable checkpoint (`vol2.storage.durable-checkpoint`)
 - vol3: Durable Execution — Recovery checkpoint (`vol3.checkpoint`)
 - vol2: Fault Tolerance — Consistent checkpoint cut (`vol2.reliability.consistent-cut`)
+- vol2: Fleet Efficiency — ML goodput (`vol2.goodput.ml`)
 
 #### Hardware faults &amp; silent data corruption
 
@@ -3038,7 +3132,8 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol2: Fault Tolerance — Job failure rate (`vol2.reliability.failure-rate`)
+- vol4: Workload Placement — Thermal throttling (`vol4.placement.throttling`)
 
 #### Fault injection &amp; resilience testing
 
@@ -3072,7 +3167,7 @@ Secondary concept connections (not additional homes):
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol4: Adversarial Verification — Fault injection (`vol4.verification.fault`)
 
 ### Security &amp; privacy
 
@@ -3196,6 +3291,8 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol2: Edge Intelligence — Federated averaging (`vol2.federated.fedavg`)
 - vol2: Security &amp; Privacy — Differential privacy (`vol2.privacy.dp`)
+- vol2: Edge Intelligence — Secure aggregation (`vol2.federated.secure-aggregation`)
+- vol2: Security &amp; Privacy — Privacy budget (`vol2.privacy.budget`)
 
 #### Access control &amp; isolation
 
@@ -3238,6 +3335,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Agent Sandboxes — Capability grant (`vol3.capability`)
 - vol3: Agent Sandboxes — Isolation envelope (`vol3.isolation`)
 - vol4: Workload Placement — Resource isolation (`vol4.placement.isolation`)
+- vol3: Agent Sandboxes — Capability grant (`vol3.capability`)
+- vol3: Agent Sandboxes — Egress control (`vol3.egress`)
+- vol3: Agent Security — Information-flow policy (`vol3.flow`)
 
 ### Safety &amp; assurance
 
@@ -3324,6 +3424,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol4: Trajectory Planning — Kinodynamic feasibility (`vol4.motion.feasibility`)
 - vol4: Safety Enforcement — Runtime safety filter (`vol4.enforcement.filter`)
 - vol4: Safety Enforcement — Stopping envelope (`vol4.enforcement.envelope`)
+- vol3: Agent Security — Action-bound approval (`vol3.approval`)
+- vol4: The Causal Boundary — Stopping distance (`vol4.stopping.distance`)
+- vol4: Safety Enforcement — Runtime safety filter (`vol4.enforcement.filter`)
 
 #### Safety verification &amp; validation
 
@@ -3362,6 +3465,11 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol4: Policy Training — Reality gap (`vol4.learning.reality-gap`)
+- vol3: Trajectory Fine-Tuning — Closed-loop evaluation (`vol3.closed-loop`)
+- vol4: Closed-Loop Evaluation — Closed-loop trial (`vol4.evaluation.trial`)
+- vol4: Closed-Loop Evaluation — Failure-rate bound (`vol4.evaluation.confidence`)
+- vol4: Adversarial Verification — Fault injection (`vol4.verification.fault`)
+- vol4: Adversarial Verification — Test oracle (`vol4.verification.oracle`)
 
 #### Safety cases, standards &amp; certification
 
@@ -3404,6 +3512,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Operating Agents — Staged release (`vol3.release`)
 - vol4: Physical Data — Operational design domain (`vol4.deployment.odd`)
 - vol4: Deployment Release — Safety case (`vol4.assurance.case`)
+- vol2: Responsible AI — Assurance case (`vol2.governance.assurance`)
+- vol4: Safety Enforcement — Certified safety function (`vol4.enforcement.certified-floor`)
+- vol4: Safety Enforcement — Certified safety function (`vol4.enforcement.certified-floor`)
 
 ### Responsible AI
 
@@ -3448,6 +3559,10 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Responsible Engineering — Bias feedback (`vol1.responsibility.feedback`)
+- vol1: Responsible Engineering — Subgroup fairness (`vol1.responsibility.fairness`)
+- vol2: Responsible AI — Fairness criterion (`vol2.governance.fairness`)
+- vol1: Benchmarking — Model quality (`vol1.measurement.quality`)
+- vol1: Responsible Engineering — Subgroup fairness (`vol1.responsibility.fairness`)
 - vol1: Responsible Engineering — Subgroup fairness (`vol1.responsibility.fairness`)
 - vol2: Responsible AI — Fairness criterion (`vol2.governance.fairness`)
 
@@ -3521,6 +3636,10 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: Robust AI — Selective prediction (`vol2.robustness.selective-prediction`)
 - vol4: Responsible Physical AI — Human oversight (`vol4.accountability.oversight`)
 - vol4: The Causal Boundary — Irreversibility (`vol4.boundary.irreversibility`)
+- vol2: Responsible AI — Contestability (`vol2.governance.contestability`)
+- vol3: Agent Security — Action-bound approval (`vol3.approval`)
+- vol4: Supervisory Intervention — Takeover delay (`vol4.intervention.delay`)
+- vol4: Supervisory Intervention — Single-writer handoff (`vol4.intervention.handoff`)
 
 #### AI governance, audit &amp; regulation
 
@@ -3559,6 +3678,8 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol4: Deployment Release — Safety case (`vol4.assurance.case`)
+- vol2: Responsible AI — Assurance case (`vol2.governance.assurance`)
+- vol4: Responsible Physical AI — Approval record (`vol4.accountability.approval`)
 
 ### Sustainability &amp; cost
 
@@ -3609,6 +3730,12 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Responsible Engineering — Operational carbon (`vol1.responsibility.carbon`)
 - vol2: Sustainable AI — Embodied carbon (`vol2.sustainability.embodied-carbon`)
 - vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol1: System Paradigms — Power budget (`vol1.system.power`)
+- vol1: Responsible Engineering — Operational carbon (`vol1.responsibility.carbon`)
+- vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol2: Sustainable AI — Carbon-aware scheduling (`vol2.sustainability.carbon-scheduling`)
+- vol4: The Physical Body — Supply integrity (`vol4.plant.supply`)
 
 #### Embodied carbon &amp; lifecycle impact
 
@@ -3637,7 +3764,7 @@ Candidate home concepts:
 
 Related MLSysBook passages (teaching depth not assessed):
 
-No passage link is recorded. This is not evidence of absence from the books.
+- vol2: Sustainable AI — Embodied carbon (`vol2.sustainability.embodied-carbon`)
 
 #### Cost, TCO &amp; unit economics
 
@@ -3675,6 +3802,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: Model Serving — Prefix caching (`vol1.serving.prefix`)
 - vol3: KV Cache Management — Prefix reuse (`vol3.prefix-reuse`)
 - vol3: Agent Economics — Cost per accepted task (`vol3.cost`)
+- vol1: Model Serving — Serving capacity (`vol1.serving.capacity`)
 
 ## System types
 
@@ -3729,6 +3857,10 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Context Engineering — Working context (`vol3.working-context`)
 - vol3: Long-Term Memory — Retrieval contract (`vol3.retrieval`)
 - vol3: Agent Security — Prompt injection (`vol3.injection`)
+- vol3: Context Engineering — Working context (`vol3.working-context`)
+- vol3: Context Engineering — Context compaction (`vol3.compaction`)
+- vol3: Context Engineering — Evidence invalidation (`vol3.invalidation`)
+- vol3: Long-Term Memory — Persistent memory record (`vol3.memory`)
 
 #### Tool use &amp; action interfaces
 
@@ -3815,6 +3947,10 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Agent Economics — Cost per accepted task (`vol3.cost`)
 - vol3: Introduction — Trajectory (`vol3.trajectory`)
 - vol3: Agent Evaluation — Task acceptance (`vol3.acceptance`)
+- vol3: Agent Security — Action-bound approval (`vol3.approval`)
+- vol3: The Agent Harness — Transition guard (`vol3.guard`)
+- vol3: The Agent Harness — Trajectory budget (`vol3.budget`)
+- vol3: Failure Recovery — Semantic watchdog (`vol3.watchdog`)
 
 #### Durable execution &amp; agent state
 
@@ -3853,6 +3989,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Durable Execution — Recovery checkpoint (`vol3.checkpoint`)
 - vol3: Tool Calling — Operation identity (`vol3.operation`)
 - vol3: Failure Recovery — Semantic compensation (`vol3.compensation`)
+- vol2: Fault Tolerance — Recovery (`vol2.reliability.recovery`)
+- vol3: Durable Execution — Trajectory log (`vol3.log`)
 
 #### Multi-agent orchestration
 
@@ -3887,6 +4025,8 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol3: Agent Evaluation — Task acceptance (`vol3.acceptance`)
+- vol2: Fault Tolerance — Recovery (`vol2.reliability.recovery`)
+- vol3: Multi-Agent Coordination — Task delegation (`vol3.delegation`)
 
 ### Embodied &amp; physical systems
 
@@ -3971,6 +4111,8 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol4: Spatial Memory — Belief state (`vol4.estimation.belief`)
+- vol4: Spatial Memory — Belief state (`vol4.estimation.belief`)
+- vol4: Engineering Physical AI — Observational indistinguishability (`vol4.limits.indistinguishability`)
 
 #### Motion planning &amp; control
 
@@ -4014,6 +4156,9 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol4: Trajectory Planning — Kinodynamic feasibility (`vol4.motion.feasibility`)
 - vol4: Safety Enforcement — Contact margin (`vol4.enforcement.contact`)
 - vol4: Safety Enforcement — Stopping envelope (`vol4.enforcement.envelope`)
+- vol4: The Causal Boundary — Stopping distance (`vol4.stopping.distance`)
+- vol4: The Physical Body — Braking authority (`vol4.plant.braking`)
+- vol4: The Physical Body — Thermal headroom (`vol4.plant.thermal`)
 
 #### Real-time &amp; mixed-criticality computing
 
@@ -4059,6 +4204,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol4: Sensor Perception — Observation age (`vol4.sensing.age`)
 - vol4: The Nervous System — Feedback-loop delay (`vol4.timing.feedback-delay`)
 - vol4: Workload Placement — Worst-case execution time (`vol4.timing.wcet`)
+- vol4: The Nervous System — Response-time bound (`vol4.timing.response-bound`)
+- vol4: Workload Placement — Thermal throttling (`vol4.placement.throttling`)
 
 #### Robot learning &amp; sim-to-real
 
@@ -4101,6 +4248,8 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol1: ML Operations — Distribution shift (`vol1.operations.drift`)
 - vol2: Robust AI — Distribution shift (`vol2.robustness.shift`)
 - vol4: Physical Data — Endogenous covariate shift (`vol4.learning.shift`)
+- vol4: Policy Training — Reality gap (`vol4.learning.reality-gap`)
+- vol4: The Cognitive Brain — Action chunk (`vol4.proposal.chunk`)
 - vol4: Policy Training — Reality gap (`vol4.learning.reality-gap`)
 
 ## Candidate scope gaps

@@ -5,6 +5,7 @@
 //   #                         matrix          #area=<id>          area page
 //   #subject=<id>             subject page    #concept=<id>[&to=] concept page
 //   #view=concept             concept map     #view=glossary[&term=<id>]
+//   #view=guides[&role=|&symptom=|&path=<id>]  roles, production symptoms, learning paths
 // Older hashes (#row=, #view=graph…, #view=map, #view=index) still resolve.
 (() => {
   'use strict';
@@ -22,7 +23,7 @@
   const MAP_LIMIT = 6;
 
   let data, groups, areas, rows, concepts, homeOf, areaOf, outgoing, incoming, secondaryOf, linksOf, gapsOf, relations, neighbors, lenses;
-  const state = { view: 'home', area: null, subject: null, concept: null, to: null, term: null, lens: null, showConcepts: false };
+  const state = { view: 'home', area: null, subject: null, concept: null, to: null, term: null, guide: null, lens: null, showConcepts: false };
   const visited = [];
 
   async function load() {
@@ -109,7 +110,7 @@
     if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
       + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
       + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
-    $('bok-method').textContent = `Version ${fw.version}. Generated from shared/concepts/ml-systems-framework.yml and ml-systems-field.yml.`;
+    $('bok-method').textContent = `Version ${fw.version}. Generated from taxonomy/ml-systems-framework.yml and ml-systems-field.yml.`;
   }
 
   // -------------------------------------------------------------------- matrix
@@ -145,7 +146,7 @@
     const fw = data.framework;
     const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
     $('bok-cite-text').textContent = citation;
-    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Licensed <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> · Editorial draft for expert review`;
+    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review`;
     $('bok-copy-cite').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(citation); $('bok-copy-cite').textContent = 'Copied'; } catch { $('bok-copy-cite').textContent = 'Select the text to copy'; }
       setTimeout(() => { $('bok-copy-cite').textContent = 'Copy citation'; }, 1800);
@@ -488,6 +489,27 @@
       }).join('')}</tbody>`).join('')}</table>`;
   }
 
+  // Guides: ways in for a role, a production symptom, or a learning goal. Every
+  // entry links to the subject and concept pages; nothing here is a new claim.
+  function renderGuides() {
+    const g = data.framework.guides || { roles: [], symptoms: [], learning_paths: [] };
+    const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
+    const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
+    const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span></td>
+        <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
+    const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span></td>
+        <td>${list(s.causes, conceptLink)}</td><td>${list(s.checks, conceptLink)}</td><td>${list(s.levers, conceptLink)}</td></tr>`).join('');
+    const paths = g.learning_paths.map((lp) => `<section class="bok-guide-path" id="guide-path-${esc(lp.id)}"><h4>${esc(lp.label)}</h4><p class="bok-lead">${esc(lp.audience)}</p>
+        <ol>${lp.steps.map((st) => `<li>${subj(st.subject)} <span class="bok-muted">${esc(st.why)}</span></li>`).join('')}</ol></section>`).join('');
+    $('bok-guides').innerHTML = `<div class="bok-entry-head"><div><h2>Guides</h2><p class="bok-lead">Ways into the taxonomy for a role, a production symptom, or a learning goal. Each entry links to the subject and concept pages.</p></div></div>
+      <nav class="bok-jump" aria-label="Jump to guide"><a href="#view=guides&amp;section=roles">By role</a><a href="#view=guides&amp;section=symptoms">By symptom</a><a href="#view=guides&amp;section=paths">Learning paths</a></nav>
+      <h3 id="guide-section-roles">By role</h3><p class="bok-lead">${esc(g.roles_note || '')}</p>
+      <table class="bok-table bok-guide-table"><thead><tr><th>Role</th><th>Core subjects</th><th>Working knowledge</th></tr></thead><tbody>${roles}</tbody></table>
+      <h3 id="guide-section-symptoms">By symptom</h3><p class="bok-lead">${esc(g.symptoms_note || '')}</p>
+      <table class="bok-table bok-guide-table"><thead><tr><th>Symptom</th><th>Likely causes</th><th>Check</th><th>Change</th></tr></thead><tbody>${symptoms}</tbody></table>
+      <h3 id="guide-section-paths">Learning paths</h3><p class="bok-lead">${esc(g.paths_note || '')}</p>${paths}`;
+  }
+
   function filterGlossary() {
     const q = $('bok-gloss-filter').value.trim().toLowerCase();
     const area = $('bok-gloss-area').value;
@@ -585,7 +607,10 @@
     const subject = [p.get('subject'), p.get('row')].find((id) => rows.has(id)) || null;
     const area = areas.some((a) => a.id === p.get('area')) ? p.get('area') : null;
     Object.assign(state, { area, subject, concept, to: concepts.has(p.get('to')) ? p.get('to') : null, term: concepts.has(p.get('term')) ? p.get('term') : null });
-    if (view === 'glossary' || view === 'index') state.view = 'glossary';
+    const guide = ['role', 'symptom', 'path', 'section'].map((k) => p.get(k) && `${k}-${p.get(k)}`).find(Boolean) || null;
+    state.guide = guide;
+    if (view === 'guides') state.view = 'guides';
+    else if (view === 'glossary' || view === 'index') state.view = 'glossary';
     else if (concept) state.view = 'concept';
     else if (view === 'concept' || view === 'graph') state.view = 'landing';
     else if (subject) state.view = 'subject';
@@ -600,7 +625,8 @@
     $('bok-home').hidden = v !== 'home';
     $('bok-entry').hidden = !entry;
     $('bok-glossary').hidden = v !== 'glossary';
-    for (const [tab, views] of [['bok-tab-home', ['home', 'area', 'subject']], ['bok-tab-concept', ['concept', 'landing']], ['bok-tab-glossary', ['glossary']]]) {
+    $('bok-guides').hidden = v !== 'guides';
+    for (const [tab, views] of [['bok-tab-home', ['home', 'area', 'subject']], ['bok-tab-concept', ['concept', 'landing']], ['bok-tab-guides', ['guides']], ['bok-tab-glossary', ['glossary']]]) {
       if (views.includes(v)) $(tab).setAttribute('aria-current', 'page');
       else $(tab).removeAttribute('aria-current');
     }
@@ -609,7 +635,9 @@
     else if (v === 'concept') renderConcept();
     else if (v === 'landing') renderConceptLanding();
     else if (v === 'glossary') filterGlossary();
-    const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`) : null;
+    else if (v === 'guides' && !$('bok-guides').innerHTML) renderGuides();
+    const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
+      : v === 'guides' && state.guide ? document.getElementById(state.guide.startsWith('section-') ? `guide-${state.guide}` : `guide-${state.guide}`) : null;
     if (target) {
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target.classList.add('is-focus');
