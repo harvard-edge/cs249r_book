@@ -10,7 +10,7 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 <!-- buttondown-editor-mode: plaintext -->
 
-*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on turning AI systems into a teachable engineering discipline, connecting how modern AI infrastructure is built and operated in industry to the first principles we teach the next generation.*
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on building **AI Engineering** as a teachable discipline, connecting how modern AI systems are built and operated in industry to the first principles we teach the next generation.*
 
 ---
 
@@ -40,7 +40,7 @@ In Berlin, that comparison ceased to be a metaphor. Across the keynote and techn
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across OpenRouter showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
-When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. Instead, I am asking a curriculum question about what underlying body of AI systems knowledge is required to engineer this infrastructure, and how we teach that discipline to the next generation.
+When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. Instead, I am asking a curriculum question about what underlying body of AI systems knowledge is required to engineer this infrastructure, and how we teach AI Engineering to the next generation.
 
 Every past industrial transition faced that same human bottleneck. In the first Industrial Revolution, James Watt's steam engine converted coal into mechanical force, yet early steam plants wasted most of their fuel or failed under pressure until thermodynamics and mechanical engineering emerged to govern boilers, heat transfer, and control governors. A century later, electrical power grids forced electrical engineering to split from physics, and Henry Ford's moving assembly lines required a new discipline of industrial systems engineering.
 
