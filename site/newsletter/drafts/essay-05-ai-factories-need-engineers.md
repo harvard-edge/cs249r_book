@@ -40,15 +40,15 @@ In Berlin, that comparison ceased to be a metaphor. Across the keynote and techn
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across [OpenRouter](https://openrouter.ai/rankings) showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
+![Keynote slides from GTC Berlin showing the AI factory industrial ecosystem and the 34-fold surge in weekly agentic token consumption across OpenRouter.](figures/gtc-berlin-ai-factory.jpg)
+
+**The AI factory and the token surge behind it.** The GTC Berlin keynote framed AI infrastructure as a token factory for European industrial partners including Siemens, Mercedes-Benz, Roche, and Deutsche Telekom (left), driven by a 34-fold surge in weekly agentic token traffic on OpenRouter (right).
+
 Listening to these announcements as an educator raises a practical question. If industry is building token factories at this scale, we need to train the AI engineers who can design and operate them, and we need to keep that training accessible to learners everywhere.
 
 Every past industrial transition faced that same human bottleneck. In the first Industrial Revolution, James Watt's steam engine converted coal into mechanical force, yet early steam plants wasted most of their fuel or failed under pressure until thermodynamics and mechanical engineering emerged to govern boilers, heat transfer, and control governors. A century later, electrical power grids forced electrical engineering to split from physics, and Henry Ford's moving assembly lines required a new discipline of industrial systems engineering.
 
 Before Ford, skilled artisans built one carriage at a time on a workbench. Once production moved to an integrated assembly line, a bottleneck or tolerance error at a single station stalled the entire plant. Machine learning today sits in that exact transition. Most courses and tutorials still train people like artisans at a workbench, tuning a single model inside a notebook, while industry is bolting down continuous token factories.
-
-![Keynote slides from GTC Berlin showing the AI factory industrial ecosystem and the 34-fold surge in weekly agentic token consumption across OpenRouter.](figures/gtc-berlin-ai-factory.jpg)
-
-**The AI factory and the token surge behind it.** The GTC Berlin keynote framed AI infrastructure as a token factory for European industrial partners including Siemens, Mercedes-Benz, Roche, and Deutsche Telekom (left), driven by a 34-fold surge in weekly agentic token traffic on OpenRouter (right).
 
 ## What Arrives When a Token Factory Ships in a Container
 
@@ -58,13 +58,13 @@ In Berlin, NVIDIA [introduced DSX POD](https://nvidianews.nvidia.com/news/nvidia
 
 **A token factory inside a shipping container.** The NVIDIA DSX POD reference design pre-integrates Vera Rubin racks, networking cabling, power distribution, and liquid cooling manifolds on the factory floor before transport. (Image: NVIDIA)
 
+Pre-integrating those modules is an economic decision. A gigawatt-scale facility represents tens of billions of dollars in capital, and it earns a return only once it begins generating tokens. Every month spent pulling cables on site leaves that capital idle.
+
 A single container is only one module inside a much larger machine. Across a full-scale warehouse under the DSX platform, seven distinct rack architectures drop into the facility together, spanning [Vera Rubin NVL72](https://www.nvidia.com/en-us/data-center/vera-rubin-nvl72/) compute nodes, [NVLink 6](https://www.nvidia.com/en-us/data-center/nvlink/) and [Spectrum-6](https://www.nvidia.com/en-us/networking/products/ethernet/) switches, [BlueField-4](https://developer.nvidia.com/blog/nvidia-bluefield-4-powers-new-scale-in-network-infrastructure-for-agentic-ai-factories/) compute and storage racks, and [Groq 3 LPX](https://www.nvidia.com/en-us/data-center/lpx/) inference racks, all paired with [CUDA-X libraries](https://www.nvidia.com/en-us/technologies/cuda-x/), platform runtimes, and open models.
 
 ![The NVIDIA DSX Full-Stack AI Factory Platform slide from the GTC Berlin keynote.](figures/gtc-berlin-dsx-warehouse.jpg)
 
 **All the pieces dropping into the warehouse.** The full-stack AI factory combines seven specialized compute, switching, inference, and storage rack architectures with three layers of software libraries and models inside a single facility.
-
-Pre-integrating those modules is an economic decision. A gigawatt-scale facility represents tens of billions of dollars in capital, and it earns a return only once it begins generating tokens. Every month spent pulling cables on site leaves that capital idle.
 
 Compressing on-site installation from six months to two weeks removes construction as the bottleneck and exposes the systems engineering problem underneath. Once the racks are bolted into the warehouse and connected to site power, water, and networking, sustained output depends on the engineers operating the line. Hardware assembly can be containerized on a manufacturing floor, but the engineering judgment required to run changing workloads across that warehouse cannot.
 
@@ -92,11 +92,11 @@ Consider an engineering assistant that retrieves maintenance manuals and answers
 
 To diagnose that slowdown, an engineer has to look past aggregate token throughput and trace each request across four stages: waiting in an admission queue, retrieving documents, processing the prompt during prefill, and generating output tokens step by step during decoding. Longer retrieved passages and multi-step reasoning chains enlarge the key-value (KV) cache that each active request holds in high-bandwidth memory. Once high-bandwidth memory fills with KV-cache state, the serving runtime must restrict batch concurrency, which lowers arithmetic utilization on the accelerators and lengthens the queue of users waiting outside them.
 
-Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The factory manufactures raw tokens, while the AI systems engineer balances these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
-
 ![Architectural diagram showing how raw token capacity passes through admission queueing, context retrieval, prompt prefill, and decode KV cache to become useful work.](figures/essay-05-token-factory-to-useful-work.png)
 
 **From raw token capacity to useful engineering work.** A token factory measures output in tokens per second per megawatt, whereas an application succeeds only when accurate answers clear admission, retrieval, prefill, and decoding within the response deadline.
+
+Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The factory manufactures raw tokens, while the AI systems engineer balances these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
 
 ## The Builder's Gap Inside the Factory
 
@@ -120,9 +120,9 @@ Over the next two essays, we will follow this thread from the factory floor into
 
 I want this newsletter to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
-{{ survey.gtc_berlin_poll }}
+{{ survey.gtc_berlin_ai_engineering_poll }}
 
-You can also reply directly to this email to share where raw token throughput stops being the bottleneck in the systems your team builds or teaches, and which layer of the stack actually limits useful work. I read every reply, and the cases you send will inform the next essay once I cross to the other side of Lake Zürich.
+If you have a minute, reply directly to this email with a concrete example from your work or classroom: a time when a model looked fine in isolation, but failed or slowed down once it was deployed as part of a larger system. I read every reply, and the cases you share will help shape the next issue once I cross to the other side of Lake Zürich.
 
 Vijay
 
