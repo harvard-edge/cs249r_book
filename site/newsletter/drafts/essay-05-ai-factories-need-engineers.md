@@ -16,15 +16,15 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 ## Hello 👋 from Zürich
 
-Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Switzerland for my academic sabbatical from Harvard at ETH Zürich, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
+Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical from Harvard at ETH Zürich, and relocating a household across the Atlantic took time. Now that we are settled in, I am finally getting back into a regular rhythm at this desk.
 
-Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch.
+Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them that we do hard things even when we start from scratch.
 
-True to form for a systems person, I broke the loop around the lake into 28 lakeside train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the S-Bahn down to meet me at the finish stop. As the blue line at the bottom of the map shows, I have reached the southern tip of the lake. My next leg crosses the causeway to Rapperswil on the other side of Lake Zürich, and I plan to send the next issue of this newsletter as soon as I make that crossing. Wish me luck!
+True to form for a systems person, I broke the loop into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the S-Bahn down to meet me at the finish stop. As the blue line at the bottom of the map shows, I have reached the southern tip of the lake. My next leg crosses the causeway to Rapperswil on the other side, and I plan to send the next issue as soon as I make that crossing. Wish me luck!
 
 ![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
 
-**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore. The next issue will go out once I cross to the other side of the lake.
+**One station at a time around Lake Zürich.** My running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore.
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
@@ -32,15 +32,15 @@ Between runs around the lake, being based in Zürich makes it easy to reach the 
 
 ![Morning crowd lined up outside NVIDIA GTC Berlin and Jensen Huang on stage.](figures/gtc-berlin-line-and-jensen.jpg)
 
-**On the ground in Berlin.** The morning line stretching past badge pickup beneath the railway viaduct outside STATION Berlin (left), and Jensen Huang taking the keynote stage (right). Photographs from my visit.
+**On the ground in Berlin.** The morning line outside STATION Berlin (left), and Jensen Huang taking the keynote stage (right).
 
-Walking the floor in Berlin brought me back to an observation from the first essay in this series, [The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html). If AI is the new electricity, we have been training almost everyone to use the appliances, while very few people learn how to build and operate the power plants. Closing that gap means training AI engineers, and making sure that training remains accessible to everyone rather than locked inside a handful of frontier labs.
+Walking the floor in Berlin brought me back to an observation from the first essay in this series, [The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html). If AI is the new electricity, we have been training almost everyone to use the appliances, while very few people learn how to build and operate the power plants.
 
 In Berlin, that comparison ceased to be a metaphor. Across the keynote and technical sessions, Jensen Huang framed the current moment as a new Industrial Revolution centered on the **AI factory**, a specialized manufacturing plant whose commodity output is **tokens**. A traditional cloud data center stores files and runs thousands of independent software services for different tenants. An AI factory takes electrical power and data as raw inputs and manufactures a continuous stream of tokens: floating-point representations of intelligence that translate into words, software code, molecular structures, video frames, or robot control actions.
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across [OpenRouter](https://openrouter.ai/rankings) showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
-When I sit in an industry keynote as an educator and textbook author, I am not looking at these announcements the way a market analyst does. Instead, I am asking what underlying body of systems knowledge is required to engineer this infrastructure, and how we keep the path to becoming an AI engineer open and accessible to learners everywhere.
+Listening to these announcements as an educator raises a practical question. If industry is building token factories at this scale, we need to train the AI engineers who can design and operate them, and we need to keep that training accessible to learners everywhere.
 
 Every past industrial transition faced that same human bottleneck. In the first Industrial Revolution, James Watt's steam engine converted coal into mechanical force, yet early steam plants wasted most of their fuel or failed under pressure until thermodynamics and mechanical engineering emerged to govern boilers, heat transfer, and control governors. A century later, electrical power grids forced electrical engineering to split from physics, and Henry Ford's moving assembly lines required a new discipline of industrial systems engineering.
 
@@ -48,7 +48,7 @@ Before Ford, skilled artisans built one carriage at a time on a workbench. Once 
 
 ![Keynote slides from GTC Berlin showing the AI factory industrial ecosystem and the 34-fold surge in weekly agentic token consumption across OpenRouter.](figures/gtc-berlin-ai-factory.jpg)
 
-**The AI factory and the token surge driving it.** The GTC Berlin keynote framed AI infrastructure as a token factory powering European industrial partners including Siemens, Mercedes-Benz, Roche, and Deutsche Telekom (left), driven by a 34-fold increase in weekly agentic token consumption from 3.9 trillion to 132.6 trillion tokens between February and October (right). Photographs from my visit.
+**The AI factory and the token surge behind it.** The GTC Berlin keynote framed AI infrastructure as a token factory for European industrial partners including Siemens, Mercedes-Benz, Roche, and Deutsche Telekom (left), driven by a 34-fold surge in weekly agentic token traffic on OpenRouter (right).
 
 ## What Arrives When a Token Factory Ships in a Container
 
@@ -62,19 +62,19 @@ A single container is only one module inside a much larger machine. Across a ful
 
 ![The NVIDIA DSX Full-Stack AI Factory Platform slide from the GTC Berlin keynote.](figures/gtc-berlin-dsx-warehouse.jpg)
 
-**All the pieces dropping into the warehouse.** The full-stack AI factory combines seven specialized compute, switching, inference, and storage rack architectures with three layers of software libraries and models inside a single facility. Photograph from my visit.
+**All the pieces dropping into the warehouse.** The full-stack AI factory combines seven specialized compute, switching, inference, and storage rack architectures with three layers of software libraries and models inside a single facility.
 
-The economic case for pre-integrating those modules is straightforward. An AI factory creates value when it starts producing tokens, not when construction is complete. Because a gigawatt-scale facility represents tens of billions of dollars in capital, every month spent pulling cables on site delays the moment the plant begins generating output.
+Pre-integrating those modules is an economic decision. A gigawatt-scale facility represents tens of billions of dollars in capital, and it earns a return only once it begins generating tokens. Every month spent pulling cables on site leaves that capital idle.
 
-Compressing physical installation from six months to two weeks exposes the next bottleneck immediately. Physical construction no longer hides the systems engineering problem. Once those racks are bolted into the warehouse and connected to site power, water, and networking, turning installed hardware into sustained output depends entirely on the engineers operating the line. We can containerize hardware assembly on a manufacturing floor. We cannot containerize the engineering judgment required to run changing workloads across that warehouse.
+Compressing on-site installation from six months to two weeks removes construction as the bottleneck and exposes the systems engineering problem underneath. Once the racks are bolted into the warehouse and connected to site power, water, and networking, sustained output depends on the engineers operating the line. Hardware assembly can be containerized on a manufacturing floor, but the engineering judgment required to run changing workloads across that warehouse cannot.
 
 ## From Energy to Tokens: The Stack Expands Downward
 
-In earlier essays ([The Builder's Gap](https://mlsysbook.ai/newsletter/posts/2026/2026-04-21_the-builders-gap.html) and [From the Builder's Gap to a Builder's Stack](https://mlsysbook.ai/newsletter/posts/2026/2026-05-19_from-the-builders-gap-to-a-builders-stack.html)), we traced how failures cross four layers inside a single machine, from hardware through the runtime and framework to the application. At the close of both essays, I promised to examine what changes when that stack expands from one machine to a fleet. In Berlin, that fleet stack was presented on stage as five layers: **Energy**, **Compute**, **AI Factories**, **Models**, and **Applications**.
+Earlier essays in this series ([The Builder's Gap](https://mlsysbook.ai/newsletter/posts/2026/2026-04-21_the-builders-gap.html) and [From the Builder's Gap to a Builder's Stack](https://mlsysbook.ai/newsletter/posts/2026/2026-05-19_from-the-builders-gap-to-a-builders-stack.html)) traced how failures cross four layers inside a single machine, from hardware through the runtime and framework to the application. Scaling from a single machine to a fleet extends that stack downward into the physical plant. In Berlin, the fleet stack was presented on stage as five layers: **Energy**, **Compute**, **AI Factories**, **Models**, and **Applications**.
 
 ![Applications, models, AI factories, compute, and energy shown as five layers during the GTC Berlin keynote.](figures/gtc-berlin-stack.jpg)
 
-**The five-layer stack in Berlin.** Applications sit above Models, AI Factories, Compute, and Energy. Decisions at the application layer activate physical constraints all the way down to the power grid. Photograph from my visit.
+**The five-layer stack in Berlin.** Applications sit above Models, AI Factories, Compute, and Energy. Decisions at the application layer activate physical constraints all the way down to the power grid.
 
 In most regions, electrical power sets the hard ceiling on how much compute an operator can deploy. Measurements released with the [NVIDIA DSX platform](https://nvidianews.nvidia.com/news/european-ecosystem-builds-worlds-most-efficient-ai-factories-with-nvidia-dsx) show how directly software scheduling now governs that ceiling. Dynamic power allocation (DSX MaxLPS) lets an operator generate the same number of tokens with up to 30 percent less power. In a proof of concept on HGX B200 systems, Lambda used that headroom to raise cluster token throughput by 24 percent and run 19 percent more GPUs within a fixed power budget.
 
@@ -92,7 +92,7 @@ Consider an engineering assistant that retrieves maintenance manuals and answers
 
 To diagnose that slowdown, an engineer has to look past aggregate token throughput and trace each request across four stages: waiting in an admission queue, retrieving documents, processing the prompt during prefill, and generating output tokens step by step during decoding. Longer retrieved passages and multi-step reasoning chains enlarge the key-value (KV) cache that each active request holds in high-bandwidth memory. Once high-bandwidth memory fills with KV-cache state, the serving runtime must restrict batch concurrency, which lowers arithmetic utilization on the accelerators and lengthens the queue of users waiting outside them.
 
-Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The machine manufactures tokens. The AI systems engineer measures these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
+Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The factory manufactures raw tokens, while the AI systems engineer balances these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
 
 ![Architectural diagram showing how raw token capacity passes through admission queueing, context retrieval, prompt prefill, and decode KV cache to become useful work.](figures/essay-05-token-factory-to-useful-work.png)
 
@@ -106,19 +106,19 @@ As we saw in [The Model Is Not the Product](https://mlsysbook.ai/newsletter/post
 
 No individual engineer needs to design every subsystem from the transformer architecture down to the heat exchangers. A functioning engineering organization, however, needs a shared systems vocabulary so specialists can connect the evidence each role sees.
 
-To make that shared structure explicit for our book and curriculum, we recently released a draft of the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/), an open map of 101 subjects and 735 concepts across foundations, the system stack, the lifecycle, system qualities, and system types. Historically, academic courses have split between a compute-stack tradition and an operational MLOps tradition while leaving out datacenter infrastructure, energy, safety assurance, and physical AI. Our goal with the taxonomy is to join those traditions into a single teachable map of the discipline.
+Historically, courses in this field have split between a compute-stack tradition and an operational MLOps tradition, leaving out data center infrastructure, energy, safety assurance, and physical AI. The [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) brings those traditions together into an open map of 101 subjects and 735 concepts across foundations, the system stack, the lifecycle, system qualities, and system types.
 
 ## Teaching the Physics Behind the Factory
 
 Training AI engineers for this environment does not require placing a shipping-container cluster on every campus or inside every company. The physical laws that govern a gigawatt token factory are the same laws that govern a laptop or a thirty-dollar microcontroller, scaled across orders of magnitude. Memory capacity still determines whether weights and working state fit on the device. Memory bandwidth relative to arithmetic throughput still determines whether a processor spends its cycles computing or waiting on data movement. Queueing and scheduling still determine how shared hardware translates into individual response times.
 
-That continuity is the foundation of [Machine Learning Systems](https://mlsysbook.ai). Becoming an AI engineer should not depend on access to a billion-dollar cluster, a specific company, or a particular university. Whether someone is a student, a self-taught developer, or a practicing engineer, they can calculate analytical bottlenecks, build framework components from scratch, and deploy models onto constrained microcontroller kits. Across all of those settings, we train the same engineering habit: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
+That continuity is the foundation of [Machine Learning Systems](https://mlsysbook.ai). Any student, developer, or practicing engineer can calculate analytical bottlenecks, build framework components from scratch, and deploy models onto constrained microcontroller kits without access to a billion-dollar cluster. Across all of those settings, the engineering habit is the same: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
 
 Over the next two essays, we will follow this thread from the factory floor into daily engineering practice and classroom design. The next essay traces a single request through an AI service to show where waiting and execution accumulate across the stack, and the third examines how we can teach and grade the decisions an AI systems engineer must defend.
 
 ## Continuing the Conversation
 
-I write this newsletter to connect what is happening at the industrial frontier of AI systems to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
+I want this newsletter to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
 {{ survey.gtc_berlin_poll }}
 
@@ -128,12 +128,6 @@ Vijay
 
 ---
 
-*P.S. If this essay helped clarify why token factories will need AI systems engineers, consider forwarding it to three colleagues:*
-
-*An infrastructure or platform lead planning new cluster capacity who knows that plugging in the racks is where the systems engineering work begins.*
-
-*An ML engineer whose model works in a notebook, and who wants to understand how queueing, KV-cache memory, and power limits govern production serving in [MLSysBook](https://mlsysbook.ai).*
-
-*An educator designing next semester's AI systems curriculum who wants to explore the new [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) and the [Instructor Hub](https://mlsysbook.ai/instructors/).*
+*P.S. If you found this essay useful, please feel free to share it with a colleague who is building AI infrastructure, moving models from notebooks into production, or designing an AI systems course around [MLSysBook](https://mlsysbook.ai), the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/), and the [Instructor Hub](https://mlsysbook.ai/instructors/).*
 
 [MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
