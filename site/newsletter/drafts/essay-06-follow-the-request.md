@@ -14,15 +14,21 @@ image: "figures/gtc-berlin-stack.jpg"
 
 ---
 
+## From the Other Side of Lake Zürich
+
+In the last issue, I promised to write again once I crossed Lake Zürich to Rapperswil. This past weekend I ran across the Seedamm causeway to reach the eastern shore, and the kids rode the S-Bahn out to meet me at the Rapperswil station at the end of the boardwalk. With the southern tip of the lake behind us, the next legs turn north along the eastern shore back toward Zürich.
+
+## Following One Request Across the Stack
+
 In the [previous essay](https://mlsysbook.ai/newsletter/), I wrote from NVIDIA GTC Berlin about the rise of the AI factory, an industrial installation designed to convert electrical power and data into a continuous stream of tokens. Operators measure the capacity of that facility in tokens generated per second per megawatt. A person using an application built on that facility, however, never experiences aggregate cluster throughput. The user experiences the wall-clock time of a single request from submission to completion.
 
-As I argued in [The Model Is Not the Product](https://mlsysbook.ai/newsletter/posts/2026/2026-03-10_the-model-is-not-the-product.html), the model weights account for only a fraction of what determines whether a production system succeeds. The surrounding serving, retrieval, and orchestration infrastructure governs both cost and reliability.
-
-Following a single request gives an AI systems engineer a concrete diagnostic starting point across that surrounding system. Before an answer appears on a screen or actuates a machine, a request accepts network input, waits for an available worker, retrieves supporting context, processes the prompt to produce its first token, and decodes subsequent tokens one step at a time. A response deadline belongs to that entire path. Measuring the model in isolation leaves most of the deadline unexplained.
+As I argued in [The Model Is Not the Product](https://mlsysbook.ai/newsletter/posts/2026/2026-03-10_the-model-is-not-the-product.html), the model weights account for only a fraction of what determines whether a production system succeeds. The surrounding serving, retrieval, and orchestration infrastructure governs both cost and reliability across every layer of the stack.
 
 ![A layered AI stack displayed during the GTC Berlin keynote.](figures/gtc-berlin-stack.jpg)
 
-**A single request crosses every layer of the stack.** The GTC Berlin keynote placed Applications above Models, AI Factories, Compute, and Energy. A live request traverses those boundaries on every call. Photograph from my visit.
+**A single request crosses every layer of the stack.** The GTC Berlin keynote placed Applications above Models, AI Factories, Compute, and Energy. A live request traverses those boundaries on every call.
+
+Following a single request gives an AI engineer a concrete diagnostic starting point across that surrounding system. Before an answer appears on a screen or actuates a machine, a request accepts network input, waits for an available worker, retrieves supporting context, processes the prompt to produce its first token, and decodes subsequent tokens one step at a time. A response deadline belongs to that entire path. Measuring the model in isolation leaves most of the deadline unexplained.
 
 ![Follow the complete request.](figures/essay-06-request-path.png)
 
@@ -62,20 +68,22 @@ Alternatively, the team might separate short interactive queries from long diagn
 
 ## Practicing the Habit at Any Scale
 
-Tracing a request from arrival to final token builds a core habit of AI systems engineering: connect the user-visible symptom to a physical mechanism before changing the system. A slow response is a symptom. KV-cache exhaustion or head-of-line queue blocking is a mechanism that an engineer can model, measure, and fix.
+Tracing a request from arrival to final token builds a core habit of AI engineering: connect the user-visible symptom to a physical mechanism before changing the system. A slow response is a symptom. KV-cache exhaustion or head-of-line queue blocking is a mechanism that an engineer can model, measure, and fix.
 
-Inside an AI factory, this habit governs how megawatts of installed computing capacity translate into responsive applications. Learners and educators can practice the exact same reasoning on a laptop or a single workstation, using the analytical models in [MLSys·im](https://mlsysbook.ai/mlsysim/) to predict where the first wall will appear before running an experiment. The third essay in this series examines how we structure university courses and hands-on assignments around these decisions so that students learn to defend a systems trade-off with evidence.
+Inside an AI factory, this habit governs how megawatts of installed computing capacity translate into responsive applications. Any student, developer, or practicing engineer can practice the same reasoning on a laptop or a single workstation, using the analytical models in [MLSys·im](https://mlsysbook.ai/mlsysim/) to predict where the first wall will appear before running an experiment. Aggregate throughput tells an operator how busy the factory is; following a single request across the stack tells an AI engineer whether the factory is doing useful work. The final essay in this series examines how we build university courses and hands-on assignments around these decisions so that learners can defend a systems trade-off with evidence.
 
 ## Continuing the Conversation
 
-Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to share a note on what you observe when profiling your own services.
+I want this newsletter to be a two-way exchange with the engineers, researchers, students, and educators who read it. As we study how teams debug production services and what comes up in systems design interviews, selecting one of the options below records your experience in a single click:
 
-{{ survey.essay_06_pulse }}
+{{ survey.essay_06_interview_poll }}
 
-You can also reply directly to this email to share which stage boundary most often surprises your team when you profile an AI service under load.
+If you have a minute, reply directly to this email and share which stage boundary most often surprises your team (or trips up candidates in interviews) when an AI service is put under load. I read every reply, and your examples will help shape the next issue as I work my way up the eastern shore of Lake Zürich.
 
 Vijay
 
 ---
+
+*P.S. If you found this essay useful, please feel free to share it with a colleague who is debugging production inference latency, preparing for AI systems design interviews, or teaching with [MLSysBook](https://mlsysbook.ai), [MLSys·im](https://mlsysbook.ai/mlsysim/), and [StaffML](https://mlsysbook.ai/staffml/).*
 
 [MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
