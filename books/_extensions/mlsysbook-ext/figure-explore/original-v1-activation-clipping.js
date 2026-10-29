@@ -1,0 +1,112 @@
+/* Original activation histogram; one clipping threshold moves across the printed bars and a UINT8 code ruler. */
+(()=>{'use strict';
+const NAME='original-v1-activation-clipping',NS='http://www.w3.org/2000/svg';
+// Lesson values are exported by original-v1-activation-clipping.calc.py from the figure's TikZ tables and
+// MLSysIM's UINT8 QuantizationGridScenario; `calc.py --check` asserts this block. The browser computes no reported value.
+// BEGIN calc.py output
+const D={"geometry":{"x0":40.553,"xPerUnit":163.177312,"y0":151.7584,"yPerUnit":123.274027,"yTop":28.4843,"barWidth":14.9156},"bars":[{"x":41.2541,"y":28.4843,"w":14.9156,"h":123.274,"lo":0.0,"tail":false},{"x":57.5718,"y":34.648,"w":14.9156,"h":117.1103,"lo":0.1,"tail":false},{"x":73.8895,"y":39.579,"w":14.9156,"h":112.1794,"lo":0.2,"tail":false},{"x":90.2072,"y":48.2082,"w":14.9156,"h":103.5502,"lo":0.3,"tail":false},{"x":106.525,"y":60.5356,"w":14.9156,"h":91.2228,"lo":0.4,"tail":false},{"x":122.8427,"y":77.7939,"w":14.9156,"h":73.9644,"lo":0.5,"tail":false},{"x":139.1604,"y":93.8196,"w":14.9156,"h":57.9388,"lo":0.6,"tail":false},{"x":155.4782,"y":107.3797,"w":14.9156,"h":44.3786,"lo":0.7,"tail":false},{"x":171.7959,"y":117.2416,"w":14.9156,"h":34.5167,"lo":0.8,"tail":false},{"x":188.1136,"y":125.8708,"w":14.9156,"h":25.8875,"lo":0.9,"tail":false},{"x":204.4314,"y":132.0345,"w":14.9156,"h":19.7238,"lo":1.0,"tail":false},{"x":220.7491,"y":136.9655,"w":14.9156,"h":14.7929,"lo":1.1,"tail":false},{"x":237.0668,"y":140.6637,"w":14.9156,"h":11.0947,"lo":1.2,"tail":true},{"x":253.3846,"y":144.3619,"w":14.9156,"h":7.3964,"lo":1.3,"tail":true},{"x":269.7023,"y":146.8274,"w":14.9156,"h":4.931,"lo":1.4,"tail":true},{"x":286.02,"y":147.4438,"w":14.9156,"h":4.3146,"lo":1.5,"tail":true},{"x":302.3378,"y":148.0601,"w":14.9156,"h":3.6982,"lo":1.6,"tail":true},{"x":318.6555,"y":148.6765,"w":14.9156,"h":3.0819,"lo":1.7,"tail":true},{"x":334.9732,"y":149.2929,"w":14.9156,"h":2.4655,"lo":1.8,"tail":true},{"x":351.2909,"y":149.9092,"w":14.9156,"h":1.8491,"lo":1.9,"tail":true},{"x":367.6087,"y":150.5256,"w":14.9156,"h":1.2327,"lo":2.0,"tail":true}],"candidate":1.1,"top":2.1,"xmax":2.5,"bin":0.1,"codes":255,"tickEvery":17,"labels":[[231.83,36.66,310.53,55.44],[310.56,88.68,400.3,116.21]],"story":["2.1","1.6","1.1","0.5"],"table":[{"beta":0.1,"betaText":"0.1","step":0.0003921568627450981,"stepText":"0.000392","halfStep":0.00019607843137254904,"halfStepText":"0.000196","clippedBins":20,"clippedShare":0.8564249820531228,"clippedShareText":"85.6%","maxClipError":2.0,"maxClipErrorText":"2.0","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.2,"betaText":"0.2","step":0.0007843137254901962,"stepText":"0.000784","halfStep":0.0003921568627450981,"halfStepText":"0.000392","clippedBins":19,"clippedShare":0.7200287150035893,"clippedShareText":"72.0%","maxClipError":1.9,"maxClipErrorText":"1.9","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.3,"betaText":"0.3","step":0.001176470588235294,"stepText":"0.00118","halfStep":0.000588235294117647,"halfStepText":"0.000588","clippedBins":18,"clippedShare":0.589375448671931,"clippedShareText":"58.9%","maxClipError":1.8,"maxClipErrorText":"1.8","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.4,"betaText":"0.4","step":0.0015686274509803923,"stepText":"0.00157","halfStep":0.0007843137254901962,"halfStepText":"0.000784","clippedBins":17,"clippedShare":0.46877243359655424,"clippedShareText":"46.9%","maxClipError":1.7,"maxClipErrorText":"1.7","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.5,"betaText":"0.5","step":0.00196078431372549,"stepText":"0.00196","halfStep":0.000980392156862745,"halfStepText":"0.000980","clippedBins":16,"clippedShare":0.36252692031586503,"clippedShareText":"36.3%","maxClipError":1.6,"maxClipErrorText":"1.6","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.6,"betaText":"0.6","step":0.002352941176470588,"stepText":"0.00235","halfStep":0.001176470588235294,"halfStepText":"0.00118","clippedBins":15,"clippedShare":0.2763819095477387,"clippedShareText":"27.6%","maxClipError":1.5,"maxClipErrorText":"1.5","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.7,"betaText":"0.7","step":0.002745098039215686,"stepText":"0.00275","halfStep":0.001372549019607843,"halfStepText":"0.00137","clippedBins":14,"clippedShare":0.2089016511127064,"clippedShareText":"20.9%","maxClipError":1.4,"maxClipErrorText":"1.4","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.8,"betaText":"0.8","step":0.0031372549019607846,"stepText":"0.00314","halfStep":0.0015686274509803923,"halfStepText":"0.00157","clippedBins":13,"clippedShare":0.15721464465183058,"clippedShareText":"15.7%","maxClipError":1.3,"maxClipErrorText":"1.3","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":0.9,"betaText":"0.9","step":0.0035294117647058825,"stepText":"0.00353","halfStep":0.0017647058823529412,"halfStepText":"0.00176","clippedBins":12,"clippedShare":0.11701363962670495,"clippedShareText":"11.7%","maxClipError":1.2,"maxClipErrorText":"1.2","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.0,"betaText":"1.0","step":0.00392156862745098,"stepText":"0.00392","halfStep":0.00196078431372549,"halfStepText":"0.00196","clippedBins":11,"clippedShare":0.08686288585786073,"clippedShareText":"8.7%","maxClipError":1.1,"maxClipErrorText":"1.1","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.1,"betaText":"1.1","step":0.004313725490196079,"stepText":"0.00431","halfStep":0.0021568627450980395,"halfStepText":"0.00216","clippedBins":10,"clippedShare":0.06389088298636038,"clippedShareText":"6.4%","maxClipError":1.0,"maxClipErrorText":"1.0","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.2,"betaText":"1.2","step":0.004705882352941176,"stepText":"0.00471","halfStep":0.002352941176470588,"halfStepText":"0.00235","clippedBins":9,"clippedShare":0.046661880832735106,"clippedShareText":"4.7%","maxClipError":0.9,"maxClipErrorText":"0.9","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.3,"betaText":"1.3","step":0.005098039215686275,"stepText":"0.00510","halfStep":0.0025490196078431374,"halfStepText":"0.00255","clippedBins":8,"clippedShare":0.03374012921751615,"clippedShareText":"3.4%","maxClipError":0.8,"maxClipErrorText":"0.8","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.4,"betaText":"1.4","step":0.005490196078431372,"stepText":"0.00549","halfStep":0.002745098039215686,"halfStepText":"0.00275","clippedBins":7,"clippedShare":0.02512562814070352,"clippedShareText":"2.5%","maxClipError":0.7,"maxClipErrorText":"0.7","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.5,"betaText":"1.5","step":0.0058823529411764705,"stepText":"0.00588","halfStep":0.0029411764705882353,"halfStepText":"0.00294","clippedBins":6,"clippedShare":0.019382627422828428,"clippedShareText":"1.9%","maxClipError":0.6,"maxClipErrorText":"0.6","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.6,"betaText":"1.6","step":0.006274509803921569,"stepText":"0.00627","halfStep":0.0031372549019607846,"halfStepText":"0.00314","clippedBins":5,"clippedShare":0.014357501794687725,"clippedShareText":"1.4%","maxClipError":0.5,"maxClipErrorText":"0.5","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.7,"betaText":"1.7","step":0.006666666666666666,"stepText":"0.00667","halfStep":0.003333333333333333,"halfStepText":"0.00333","clippedBins":4,"clippedShare":0.010050251256281409,"clippedShareText":"1.0%","maxClipError":0.4,"maxClipErrorText":"0.4","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.8,"betaText":"1.8","step":0.007058823529411765,"stepText":"0.00706","halfStep":0.0035294117647058825,"halfStepText":"0.00353","clippedBins":3,"clippedShare":0.006460875807609475,"clippedShareText":"0.6%","maxClipError":0.3,"maxClipErrorText":"0.3","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":1.9,"betaText":"1.9","step":0.007450980392156863,"stepText":"0.00745","halfStep":0.0037254901960784314,"halfStepText":"0.00373","clippedBins":2,"clippedShare":0.0035893754486719313,"clippedShareText":"0.4%","maxClipError":0.2,"maxClipErrorText":"0.2","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":2.0,"betaText":"2.0","step":0.00784313725490196,"stepText":"0.00784","halfStep":0.00392156862745098,"halfStepText":"0.00392","clippedBins":1,"clippedShare":0.0014357501794687725,"clippedShareText":"0.1%","maxClipError":0.1,"maxClipErrorText":"0.1","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":2.1,"betaText":"2.1","step":0.00823529411764706,"stepText":"0.00824","halfStep":0.00411764705882353,"halfStepText":"0.00412","clippedBins":0,"clippedShare":0.0,"clippedShareText":"0.0%","maxClipError":0.0,"maxClipErrorText":"0","emptyRange":0.0,"emptyRangeText":"0.0"},{"beta":2.2,"betaText":"2.2","step":0.008627450980392158,"stepText":"0.00863","halfStep":0.004313725490196079,"halfStepText":"0.00431","clippedBins":0,"clippedShare":0.0,"clippedShareText":"0.0%","maxClipError":0.0,"maxClipErrorText":"0","emptyRange":0.1,"emptyRangeText":"0.1"},{"beta":2.3,"betaText":"2.3","step":0.009019607843137253,"stepText":"0.00902","halfStep":0.004509803921568627,"halfStepText":"0.00451","clippedBins":0,"clippedShare":0.0,"clippedShareText":"0.0%","maxClipError":0.0,"maxClipErrorText":"0","emptyRange":0.2,"emptyRangeText":"0.2"},{"beta":2.4,"betaText":"2.4","step":0.009411764705882352,"stepText":"0.00941","halfStep":0.004705882352941176,"halfStepText":"0.00471","clippedBins":0,"clippedShare":0.0,"clippedShareText":"0.0%","maxClipError":0.0,"maxClipErrorText":"0","emptyRange":0.3,"emptyRangeText":"0.3"},{"beta":2.5,"betaText":"2.5","step":0.00980392156862745,"stepText":"0.00980","halfStep":0.004901960784313725,"halfStepText":"0.00490","clippedBins":0,"clippedShare":0.0,"clippedShareText":"0.0%","maxClipError":0.0,"maxClipErrorText":"0","emptyRange":0.4,"emptyRangeText":"0.4"}]};
+// END calc.py output
+const G=D.geometry,X=v=>G.x0+v*G.xPerUnit,ROW=Object.fromEntries(D.table.map(t=>[t.betaText,t]));
+const VIEW_H=226,RULER_Y=208,INK='#17212b',BETA='#1f407a',MUTED='#5b6670';
+const svg=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(a))n.setAttribute(k,v);if(text!=null)n.textContent=text;return n;};
+const html=(tag,cl,text)=>{const n=document.createElement(tag);if(cl)n.className=cl;if(text!=null)n.textContent=text;return n;};
+
+// Committed endpoints: the printed figure, then one threshold change per step, then the reader's own threshold.
+// Story thresholds and every number in the narration come from D (calc.py), not from typed literals.
+const[B_MAX,B_MID,B_CAND,B_DEEP]=D.story,R=b=>ROW[b],TAIL=D.bars.filter(b=>b.tail).length;
+const STATES=[
+ {beta:null,label:'The printed histogram',description:`The original bars, red outlier tail, and green candidate line at ${D.candidate} are unchanged. No clipping threshold has been applied yet; the UINT8 code ruler below is empty.`},
+ {beta:B_MAX,label:`Max method: β at the last occupied bin, ${B_MAX}`,description:`Setting β to the top of the last occupied bin keeps every bar in range, so nothing is clipped. The ${D.codes} UINT8 steps must span the whole axis up to ${B_MAX}, so the step and its rounding error are the largest in this sequence.`},
+ {beta:B_MID,label:`Lower β to ${B_MID}`,description:`The ${R(B_MID).clippedBins} tail bars from ${B_MID} to ${D.top} now lie beyond β and are clipped: each of those values is stored as code ${D.codes}, which reads back as ${B_MID}. The same ${D.codes} steps now cover a shorter range, so the step shrinks.`},
+ {beta:B_CAND,label:`Lower β to the printed candidate, ${B_CAND}`,description:`At the green candidate line, all ${TAIL} red tail bars and ${R(B_CAND).clippedBins-TAIL} blue bar beyond ${B_CAND} are clipped. The bulk gets a finer step, but a clipped value can now be off by up to ${R(B_CAND).maxClipErrorText}, far more than any rounding error.`},
+ {beta:B_DEEP,label:`Push β into the bulk, ${B_DEEP}`,description:'Clipping now removes part of the dense bulk itself. The step keeps shrinking, but the clipped share of the plotted mass jumps. This is the “clipping too aggressively truncates signal” side of the trade-off.'},
+ {beta:B_CAND,label:'Compare the two error terms',description:'Back at the printed candidate. Drag β to see the trade-off: a lower β shrinks the rounding bound s/2 and raises the clipped share. Max, percentile, and entropy calibration resolve this trade-off differently; neither term alone predicts accuracy.',free:true}
+];
+
+window.MLSysFigureLessons=window.MLSysFigureLessons||{};
+window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
+ if(!verifiedArtwork||!window.MLSysOriginalPlayer)throw Error('Verified histogram artwork and shared player required');
+ if(verifiedArtwork.getAttribute('viewBox')!=='0 0 458.13 193.829')throw Error('Histogram artwork geometry changed; review the mappings');
+ root.classList.add(NAME);
+ const art=verifiedArtwork.cloneNode(true);art.removeAttribute('width');art.removeAttribute('height');
+ // Extend the canvas downward only, for the code ruler; the original drawing keeps its coordinates.
+ art.setAttribute('viewBox',`0 0 458.13 ${VIEW_H}`);art.classList.add('ac-art');art.setAttribute('role','img');
+ art.setAttribute('aria-label','Original ResNet-50 activation histogram with a movable clipping threshold, hatched clipped bars, and a UINT8 code ruler below the axis');
+ const hatch=`${outer.id||NAME}-ac-hatch`,defs=svg('defs'),pattern=svg('pattern',{id:hatch,width:4,height:4,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'});
+ pattern.append(svg('rect',{width:4,height:4,fill:'#ffffff','fill-opacity':.55}),svg('line',{x1:0,y1:0,x2:0,y2:4,stroke:'#39424b','stroke-width':1.3}));defs.append(pattern);
+ const overlay=svg('g',{'data-clipping-overlay':'true'});
+ const empty=svg('rect',{y:G.yTop,height:G.y0-G.yTop,fill:'#9aa5ae','fill-opacity':.18});
+ const masks=D.bars.map(b=>svg('rect',{x:b.x,y:b.y,width:b.w,height:b.h,fill:`url(#${hatch})`,stroke:'#39424b','stroke-width':.6,'data-clipped':'false'}));
+ const line=svg('path',{stroke:BETA,'stroke-width':1.6,fill:'none'});
+ // Code ruler: the 255 UINT8 steps laid on the same activation axis, a tick every 17 codes. The β label lives
+ // here, clear of the printed subtitle and candidate annotation; a dashed gray run marks codes above 2.1.
+ const ruler=svg('g',{class:'ac-ruler'}),small=[];const t=(a,text)=>{const n=svg('text',{fill:INK,...a},text);small.push(n);return n;};
+ const rulerLabel=[t({x:4,y:RULER_Y-1},'UINT8'),t({x:4,y:RULER_Y+8},'codes')];
+ const kept=svg('line',{x1:X(0),y1:RULER_Y,y2:RULER_Y,stroke:BETA,'stroke-width':1.6}),waste=svg('line',{y1:RULER_Y,y2:RULER_Y,stroke:'#7d8892','stroke-width':1.6,'stroke-dasharray':'2 1.5'});
+ const ticks=svg('path',{stroke:BETA,'stroke-width':.6,fill:'none'}),lo=t({x:X(0),y:RULER_Y+13,'text-anchor':'middle'},'0'),hi=t({y:RULER_Y+13,'text-anchor':'middle'},'255');
+ const tag=t({y:RULER_Y-5,'text-anchor':'middle',fill:BETA,'font-weight':700});
+ const placeholder=t({x:X(0)+4,y:RULER_Y+3,fill:MUTED},'no range chosen yet');
+ ruler.append(...rulerLabel,kept,waste,ticks,lo,hi,tag,placeholder);
+ overlay.append(empty,...masks,line);art.append(defs,overlay,ruler);
+ const source=html('div','ac-source');source.tabIndex=0;source.setAttribute('aria-label','Activation histogram with the current clipping threshold');source.append(art);
+
+ // Readout: committed values only, as text.
+ const readout=html('div','ac-readout'),cells={};
+ for(const[key,name]of[['beta','Threshold β'],['step','Step s = β / 255'],['half','Rounding error in range ≤ s/2'],['share','Clipped share of plotted mass*'],['clip',`Clipped-value error ≤ ${D.top} − β`]]){
+  const card=html('div','ac-card');card.dataset.kind=key;const v=html('span','ac-value');card.append(html('span','ac-name',name),v);readout.append(card);cells[key]=v;}
+ const betaNote=html('span','ac-note');readout.querySelector('[data-kind=beta]').append(betaNote);
+ const foot=html('p','ac-foot','*Share of the figure’s digitized relative-frequency bars (adapted from Wu et al.), not activation counts; illustrative. UINT8 grid: α = 0, z = 0, codes 0–255; ruler ticks every 17 codes.');
+ // Final state only: a reader-controlled threshold on the bin edges, and the visited thresholds side by side.
+ const explore=html('div','ac-explore'),sliderLabel=html('label','ac-slider'),slider=document.createElement('input');
+ slider.type='range';slider.min='1';slider.max=String(D.table.length);slider.step='1';slider.id=`${outer.id||NAME}-ac-beta`;
+ sliderLabel.htmlFor=slider.id;sliderLabel.append(html('span','','Try a threshold β (bin edges 0.1 to 2.5)'),slider);
+ // A role=table grid rather than <table>: chapter table styles would otherwise widen it on phones.
+ const tbl=html('div','ac-compare');tbl.setAttribute('role','table');tbl.setAttribute('aria-label','Visited thresholds and their two error terms');
+ const row=(cells,cls,kind)=>{const r=html('div','ac-row '+cls);r.setAttribute('role','row');cells.forEach(v=>{const c=html('span','',v);c.setAttribute('role',kind);r.append(c);});tbl.append(r);return r;};
+ row(['β','Rounding bound s/2','Clipped share*','Clipped-value error'],'ac-head','columnheader');
+ const body=tbl;D.story.forEach(b=>{const t=ROW[b];row([t.betaText,t.halfStepText,t.clippedShareText,t.maxClipErrorText],'ac-data','cell').dataset.beta=b;});
+ explore.append(sliderLabel,html('p','ac-cap','Thresholds visited above:'),tbl);
+
+ let committed=0,beta=null,mounted=false;
+ const narrow=matchMedia('(max-width:600px)');
+ function paint(b,opacity=1,toward=null){
+  const size=narrow.matches?14:7.5;small.forEach(n=>n.setAttribute('font-size',size));art.setAttribute('viewBox',`0 0 458.13 ${narrow.matches?VIEW_H+12:VIEW_H}`);
+  // Phones keep one left label word so it stays clear of the 0 tick label.
+  rulerLabel[0].style.display=narrow.matches?'none':'';rulerLabel[0].setAttribute('y',RULER_Y-size*.3);rulerLabel[1].setAttribute('y',narrow.matches?RULER_Y-4:RULER_Y+size*.98);rulerLabel[1].setAttribute('x',narrow.matches?X(0)-3:4);if(narrow.matches)rulerLabel[1].setAttribute('font-size',12);rulerLabel[1].setAttribute('text-anchor',narrow.matches?'end':'start');lo.setAttribute('y',RULER_Y+4+size*1.05);hi.setAttribute('y',RULER_Y+4+size*1.05);tag.setAttribute('y',RULER_Y-6);
+  const on=b!=null;line.style.display=tag.style.display=on?'':'none';
+  [kept,ticks,hi].forEach(n=>n.style.display=on?'':'none');placeholder.style.display=on?'none':'';
+  masks.forEach((m,i)=>{const c=on&&D.bars[i].lo>=b-1e-9;m.style.display=c?'':'none';m.dataset.clipped=String(c);});
+  if(!on){empty.style.display=waste.style.display='none';return;}
+  const x=X(b);
+  // Full-height line, broken where it would cross a printed annotation.
+  let y=G.yTop,seg='';for(const[l,t,r,bt]of D.labels.filter(([l,,r])=>x>l-1.5&&x<r+1.5).sort((p,q)=>p[1]-q[1])){seg+=`M${x},${y}V${t-1.5}`;y=bt+1.5;}line.setAttribute('d',seg+`M${x},${y}V${G.y0}`);line.dataset.x=String(x);line.style.opacity=tag.style.opacity=opacity;
+  const label=toward?`β → ${toward}`:`β = ${b.toFixed(1)}`,half=label.length*size*.29;tag.textContent=label;tag.setAttribute('x',Math.max((narrow.matches?50:X(0))+half,Math.min(456-half,x)));
+  const over=b>D.top+1e-9;empty.style.display=waste.style.display=over?'':'none';
+  if(over){empty.setAttribute('x',X(D.top));empty.setAttribute('width',x-X(D.top));waste.setAttribute('x1',X(D.top));waste.setAttribute('x2',x);}
+  kept.setAttribute('x2',over?X(D.top):x);hi.setAttribute('x',Math.min(Math.max(x,X(0)+size*1.5),456-size));
+  let d='';for(let k=0;k<=D.codes;k+=D.tickEvery){const u=X(b*k/D.codes);d+=`M${u},${RULER_Y-(k%85?2.5:4)}V${RULER_Y+2.5}`;}ticks.setAttribute('d',d);
+ }
+ narrow.addEventListener('change',()=>paint(beta==null?null:ROW[beta].beta));
+ function commitValues(b){
+  beta=b;const t=b==null?null:ROW[b];
+  cells.beta.textContent=t?t.betaText:'not set';betaNote.textContent=t&&t.emptyRange?`codes above ${D.top} unused`:'';cells.step.textContent=t?t.stepText:'—';cells.half.textContent=t?t.halfStepText:'—';
+  cells.share.textContent=t?`${t.clippedShareText} (${t.clippedBins} of ${D.bars.length} bars)`:'—';cells.clip.textContent=t?(t.maxClipError?t.maxClipErrorText:'none clipped'):'—';
+  root.dataset.ledger=JSON.stringify(t?{beta:t.beta,step:t.step,halfStep:t.halfStep,clippedBins:t.clippedBins,clippedShare:t.clippedShare,maxClipError:t.maxClipError}:{beta:null});
+  root.dataset.beta=t?t.betaText:'';
+  body.querySelectorAll('.ac-data').forEach(r=>r.classList.toggle('is-current',r.dataset.beta===b));
+  paint(t?t.beta:null);
+ }
+ slider.addEventListener('input',()=>{const t=D.table[Number(slider.value)-1];slider.setAttribute('aria-valuetext',`β = ${t.betaText}`);commitValues(t.betaText);});
+ const player=window.MLSysOriginalPlayer.create({root,outer,
+  title:'How much do I clip, and how coarse is the step?',
+  scope:'The original histogram from one ResNet-50 layer (bar heights digitized and adapted from Wu et al., normalized to a peak of 1). All plotted activations are non-negative, so the range starts at α = 0 and the chapter’s affine UINT8 grid gives s = β / 255 and z = 0; the signed INT8 mappings of the calibration-ranges figure are a different grid. Thresholds sit on the 0.1-wide bin edges, so a bar is either kept or clipped; “max” is the top edge of the last occupied bin. Clipped shares are illustrative, not counts. No KL, MSE, or accuracy optimum is computed. Motion is illustrative and encodes no time.',
+  // Only a committed endpoint states its result; a move in progress says so (as in original-v1-benchmark-async-timing).
+  steps:STATES.map((st,i)=>({label:st.label,get description(){return committed===i?st.description:`In progress: ${st.label.charAt(0).toLowerCase()+st.label.slice(1)}. Bars become hatched as the line passes them; the values below describe the last committed step until this move finishes.`;}})),
+  render(i,{stage}){committed=i;if(!mounted){stage.append(source,readout,foot,explore);mounted=true;}
+   const s=STATES[i];explore.hidden=!s.free;if(s.free){const k=D.table.findIndex(t=>t.betaText===s.beta);slider.value=String(k+1);slider.setAttribute('aria-valuetext',`β = ${s.beta}`);}
+   commitValues(s.beta);root.dataset.lessonState=root.dataset.endpoint=String(i);delete root.dataset.pending;},
+  transition({from,to,onFrame}){root.dataset.pending=String(to);const a=STATES[from].beta,b=STATES[to].beta;
+   onFrame(p=>{if(b==null)paint(null);else if(a==null||beta==null)paint(ROW[b].beta,p);else paint(ROW[a].beta+(ROW[b].beta-ROW[a].beta)*p,1,p<1?b:null);root.dataset.animationProgress=String(p);});}
+ });
+ return player;
+};})();
