@@ -62,7 +62,7 @@ The AI factories unveiled in Berlin will employ specialists across energy system
 
 ## Continuing the Conversation
 
-If you teach, study, or hire in this field, selecting one of the options in the quick poll below records your preference in a single click, and the confirmation page includes an optional box if you would like to add a brief note:
+If you teach, study, or hire in this field, selecting one of the options in the quick poll below records your preference in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
 {{ survey.essay_07_pulse }}
 

@@ -20,27 +20,27 @@ Let me get personal for a moment. It has been a while since my last newsletter. 
 
 Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch.
 
-True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. To keep myself honest on both fronts, I plan to send a new issue of this newsletter each time I complete another train stop around the lake.
+True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. As the blue line at the bottom of the map shows, I have reached the southern tip of the lake. My next leg crosses to the other side of Lake Zürich, and I plan to send the next issue of this newsletter as soon as I make that crossing. Wish me luck!
 
 ![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
 
-**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore. Each new train stop will bring the next issue of this newsletter.
+**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore. The next issue will go out once I cross to the other side of the lake.
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
-One advantage of being based in Zürich is how easily you can reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC, joining a long morning line of engineers, researchers, and founders that stretched beneath the steel railway bridge outside the venue well before the keynote doors opened.
+Between runs around the lake, being based in Zürich makes it easy to reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC, joining a long morning line of engineers, researchers, and founders that stretched beneath the steel railway bridge outside the venue well before the keynote doors opened.
 
 ![Morning crowd lined up outside NVIDIA GTC Berlin and Jensen Huang on stage.](figures/gtc-berlin-line-and-jensen.jpg)
 
 **On the ground in Berlin.** The morning line stretching past badge pickup beneath the railway bridge outside the venue (left), and Jensen Huang taking the keynote stage (right). Photographs from my visit.
 
-Walking the floor in Berlin brought me back to an observation from the first essay in this series ([The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html)): if AI is the new electricity, our universities have been training almost everyone to use the appliances while very few people learn how to build and operate the power plants.
+Walking the floor in Berlin brought me back to an observation from the first essay in this series, [The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html). If AI is the new electricity, our universities have been training almost everyone to use the appliances, while very few people learn how to build and operate the power plants.
 
 In Berlin, that comparison ceased to be a metaphor. Across the keynote and technical sessions, Jensen Huang framed the current moment as a new Industrial Revolution centered on the **AI factory**, a specialized manufacturing plant whose commodity output is **tokens**. A traditional cloud data center stores files and runs thousands of independent software services for different tenants. An AI factory takes electrical power and data as raw inputs and manufactures a continuous stream of tokens: floating-point representations of intelligence that translate into words, software code, molecular structures, video frames, or robot control actions.
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across OpenRouter showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
-When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. I am asking a curriculum question: if industry is building this infrastructure, what is the underlying body of AI systems knowledge required to engineer it, and how do we teach that discipline to the next generation.
+When I sit in an industry keynote as an academic and textbook author, I am not looking at these announcements the way a market analyst does. Instead, I am asking a curriculum question about what underlying body of AI systems knowledge is required to engineer this infrastructure, and how we teach that discipline to the next generation.
 
 Every past industrial transition faced that same human bottleneck. In the first Industrial Revolution, James Watt's steam engine converted coal into mechanical force, yet early steam plants wasted most of their fuel or failed under pressure until thermodynamics and mechanical engineering emerged to govern boilers, heat transfer, and control governors. A century later, electrical power grids forced electrical engineering to split from physics, and Henry Ford's moving assembly lines required a new discipline of industrial systems engineering.
 
@@ -58,7 +58,7 @@ In Berlin, NVIDIA [introduced DSX POD](https://nvidianews.nvidia.com/news/nvidia
 
 **A token factory inside a shipping container.** The NVIDIA DSX POD reference design pre-integrates Vera Rubin racks, networking cabling, power distribution, and liquid cooling manifolds on the factory floor before transport. (Image: NVIDIA)
 
-A single container is only one module inside a much larger machine. Across a full-scale warehouse under the DSX platform, seven distinct rack architectures drop into the facility together: Vera Rubin NVL72 compute nodes, NVLink 6 and Spectrum-6 switches, BlueField-4 compute and storage racks, and Groq 3 LPX inference racks, all paired with CUDA-X libraries, platform runtimes, and open models.
+A single container is only one module inside a much larger machine. Across a full-scale warehouse under the DSX platform, seven distinct rack architectures drop into the facility together, spanning Vera Rubin NVL72 compute nodes, NVLink 6 and Spectrum-6 switches, BlueField-4 compute and storage racks, and Groq 3 LPX inference racks, all paired with CUDA-X libraries, platform runtimes, and open models.
 
 ![The NVIDIA DSX Full-Stack AI Factory Platform slide from the GTC Berlin keynote.](figures/gtc-berlin-dsx-warehouse.jpg)
 
@@ -118,11 +118,11 @@ Over the next two essays, we will follow this thread from the factory floor into
 
 ## Continuing the Conversation
 
-I write this newsletter to connect what is happening at the industrial frontier of AI systems to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note:
+I write this newsletter to connect what is happening at the industrial frontier of AI systems to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
 {{ survey.gtc_berlin_pulse }}
 
-You can also reply directly to this email to share where raw token throughput stops being the bottleneck in the systems your team builds or teaches, and which layer of the stack actually limits useful work. I read every reply, and the cases you send will inform the examples we examine in the next two essays.
+You can also reply directly to this email to share where raw token throughput stops being the bottleneck in the systems your team builds or teaches, and which layer of the stack actually limits useful work. I read every reply, and the cases you send will inform the next essay once I cross to the other side of Lake Zürich.
 
 Vijay
 

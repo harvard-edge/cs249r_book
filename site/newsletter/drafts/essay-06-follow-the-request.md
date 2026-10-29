@@ -68,7 +68,7 @@ Inside an AI factory, this habit governs how megawatts of installed computing ca
 
 ## Continuing the Conversation
 
-Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to share a note on what you observe when profiling your own services:
+Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to share a note on what you observe when profiling your own services.
 
 {{ survey.essay_06_pulse }}
 
