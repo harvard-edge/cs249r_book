@@ -16,11 +16,11 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 ## Hello 👋 from Zürich
 
-Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
+Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Switzerland for my academic sabbatical from Harvard at ETH Zürich, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
 
 Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch.
 
-True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. As the blue line at the bottom of the map shows, I have reached the southern tip of the lake. My next leg crosses to the other side of Lake Zürich, and I plan to send the next issue of this newsletter as soon as I make that crossing. Wish me luck!
+True to form for a systems person, I broke the loop around the lake into 28 lakeside train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the S-Bahn down to meet me at the finish stop. As the blue line at the bottom of the map shows, I have reached the southern tip of the lake. My next leg crosses the causeway to Rapperswil on the other side of Lake Zürich, and I plan to send the next issue of this newsletter as soon as I make that crossing. Wish me luck!
 
 ![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
 
@@ -28,11 +28,11 @@ True to form for a systems person, I broke the loop around the lake into 28 trai
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
-Between runs around the lake, being based in Zürich makes it easy to reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC, joining a long morning line of engineers, researchers, and founders that stretched beneath the steel railway bridge outside the venue well before the keynote doors opened.
+Between runs around the lake, being based in Zürich makes it easy to reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC at STATION Berlin, a historic railway depot where a long morning line of engineers, researchers, and founders stretched beneath the elevated steel viaduct well before the keynote doors opened.
 
 ![Morning crowd lined up outside NVIDIA GTC Berlin and Jensen Huang on stage.](figures/gtc-berlin-line-and-jensen.jpg)
 
-**On the ground in Berlin.** The morning line stretching past badge pickup beneath the railway bridge outside the venue (left), and Jensen Huang taking the keynote stage (right). Photographs from my visit.
+**On the ground in Berlin.** The morning line stretching past badge pickup beneath the railway viaduct outside STATION Berlin (left), and Jensen Huang taking the keynote stage (right). Photographs from my visit.
 
 Walking the floor in Berlin brought me back to an observation from the first essay in this series, [The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html). If AI is the new electricity, our universities have been training almost everyone to use the appliances, while very few people learn how to build and operate the power plants.
 
@@ -48,7 +48,7 @@ Before Ford, skilled artisans built one carriage at a time on a workbench. Once 
 
 ![Keynote slides from GTC Berlin showing the AI factory industrial ecosystem and the 34-fold surge in weekly agentic token consumption across OpenRouter.](figures/gtc-berlin-ai-factory.jpg)
 
-**The AI factory and the token surge driving it.** The GTC Berlin keynote framed AI infrastructure as a token factory powering industrial applications (left), driven by a 34-fold increase in weekly agentic token consumption from 3.9 trillion to 132.6 trillion tokens between February and October (right). Photographs from my visit.
+**The AI factory and the token surge driving it.** The GTC Berlin keynote framed AI infrastructure as a token factory powering European industrial partners including Siemens, Mercedes-Benz, Roche, and Deutsche Telekom (left), driven by a 34-fold increase in weekly agentic token consumption from 3.9 trillion to 132.6 trillion tokens between February and October (right). Photographs from my visit.
 
 ## What Arrives When a Token Factory Ships in a Container
 
@@ -112,7 +112,7 @@ To make that shared structure explicit for our book and curriculum, we recently 
 
 Preparing engineers for this environment does not require placing a shipping-container cluster on every university campus. The physical laws that govern a gigawatt token factory are the same laws that govern a laptop or a thirty-dollar microcontroller, scaled across orders of magnitude. Memory capacity still determines whether weights and working state fit on the device. Memory bandwidth relative to arithmetic throughput still determines whether a processor spends its cycles computing or waiting on data movement. Queueing and scheduling still determine how shared hardware translates into individual response times.
 
-That continuity is the foundation of our [Machine Learning Systems](https://mlsysbook.ai) textbook. In our courses, students calculate analytical bottlenecks, build framework components from scratch, and deploy models onto constrained microcontroller kits. Across all of those settings, we train the same engineering habit: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
+That continuity is the foundation of our [Machine Learning Systems](https://mlsysbook.ai) textbook, forthcoming from MIT Press. In our courses, students calculate analytical bottlenecks, build framework components from scratch, and deploy models onto constrained microcontroller kits. Across all of those settings, we train the same engineering habit: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
 
 Over the next two essays, we will follow this thread from the factory floor into daily engineering practice and classroom design. The next essay traces a single request through an AI service to show where waiting and execution accumulate across the stack, and the third examines how we can teach and grade the decisions an AI systems engineer must defend.
 
