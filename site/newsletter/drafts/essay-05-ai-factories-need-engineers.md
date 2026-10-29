@@ -118,11 +118,11 @@ Over the next two essays, we will follow this thread from the factory floor into
 
 ## Continuing the Conversation
 
-I want this newsletter to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click.
+I want this newsletter to be a two-way exchange with the engineers, researchers, students, and educators who read it. As we build out these open materials, we are trying to understand what the market looks like on the ground and what candidates and hiring teams are facing in technical interviews. Selecting one of the options below records your response in a single click:
 
-{{ survey.gtc_berlin_ai_engineering_poll }}
+{{ survey.gtc_berlin_interview_poll }}
 
-If you have a minute, reply directly to this email with a concrete example from your work or classroom: a time when a model looked fine in isolation, but failed or slowed down once it was deployed as part of a larger system. I read every reply, and the cases you share will help shape the next issue once I cross to the other side of Lake Zürich.
+If you have a minute, reply directly to this email and share what you are seeing in interviews or on the job: what is the one systems question that separates someone who can only run a model in a notebook from someone who can engineer it in production? I read every reply, and your examples will help shape the next issue once I cross to the other side of Lake Zürich.
 
 Vijay
 
