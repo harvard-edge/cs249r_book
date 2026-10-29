@@ -64,7 +64,7 @@ The AI factories unveiled in Berlin will employ specialists across energy system
 
 If you teach, study, or hire in this field, selecting one of the options in the quick poll below records your preference in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
-{{ survey.essay_07_pulse }}
+{{ survey.essay_07_poll }}
 
 You can also reply directly to this email to share the single systems trade-off you want every graduate or engineering candidate to be able to diagnose and defend with evidence.
 

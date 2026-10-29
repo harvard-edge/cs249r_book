@@ -14,7 +14,7 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 ---
 
-## From Boston to Zürich
+## Hello 👋 from Zürich
 
 Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
 
@@ -120,7 +120,7 @@ Over the next two essays, we will follow this thread from the factory floor into
 
 I write this newsletter to connect what is happening at the industrial frontier of AI systems to the curriculum we are building in the book, and I want it to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
 
-{{ survey.gtc_berlin_pulse }}
+{{ survey.gtc_berlin_poll }}
 
 You can also reply directly to this email to share where raw token throughput stops being the bottleneck in the systems your team builds or teaches, and which layer of the stack actually limits useful work. I read every reply, and the cases you send will inform the next essay once I cross to the other side of Lake Zürich.
 
