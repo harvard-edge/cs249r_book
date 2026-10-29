@@ -138,6 +138,8 @@ def load_taxonomy(root: Path, field: dict) -> dict | None:
         resolved_collections.append({**collection, "members": members})
     if assigned != families:
         _fail("collections must cover every field family exactly once")
+    from .taxonomy_schema import validate_linkml
+    validate_linkml(model, "TaxonomyHierarchyModel", root, "taxonomy")
     if any(node.get("family") not in assigned for node in field_nodes.values()):
         _fail("collections drop field concepts with unknown families")
     return {**model, "collections": resolved_collections,

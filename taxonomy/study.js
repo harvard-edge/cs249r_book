@@ -2,11 +2,11 @@
 // ATT&CK/ATLAS, SFIA, ESCO): the whole taxonomy as one matrix, and an entry
 // page per area, subject, and concept with a sidebar tree, a facts box, and
 // tables. Concept pages carry a local concept map. Every page has a hash:
-//   #                         matrix          #area=<id>          area page
+//   #                         concept map     #area=<id>          area page
 //   #subject=<id>             subject page    #concept=<id>[&to=] concept page
-//   #view=concept             concept map     #view=glossary[&term=<id>]
+//   #view=matrix              matrix          #view=glossary[&term=<id>]
 //   #view=guides[&role=|&symptom=|&path=<id>]  roles, production symptoms, learning paths
-// Older hashes (#row=, #view=graph…, #view=map, #view=index) still resolve.
+// Older hashes (#row=, #view=concept, #view=graph…, #view=map, #view=index) still resolve.
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -24,7 +24,7 @@
 
   let data, groups, areas, rows, concepts, homeOf, areaOf, outgoing, incoming, secondaryOf, linksOf, gapsOf, relations, neighbors, lenses;
   const state = {
-    view: 'home', area: null, subject: null, concept: null, to: null, term: null, guide: null,
+    view: 'landing', area: null, subject: null, concept: null, to: null, term: null, guide: null,
     lens: null, overlay: null, pathStep: 0, showConcepts: false,
     couplingMode: 'wheel', couplingFamily: 'all', couplingSel: null,
     activeRole: null, activeAreaRole: null, activeSymptom: null, activeDiagNode: null,
@@ -122,7 +122,7 @@
     if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
       + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
       + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
-    $('bok-method').textContent = `Version ${fw.version}. Generated from taxonomy/ml-systems-framework.yml and ml-systems-field.yml.`;
+    $('bok-method').textContent = `Version ${fw.version}. Validated against taxonomy/schema/mlsys-taxonomy.linkml.yml (LinkML) and generated from taxonomy/ml-systems-framework.yml, ml-systems-field.yml, and ml-systems-guides.yml.`;
   }
 
   // -------------------------------------------------------------------- matrix
@@ -321,7 +321,7 @@
   }
 
   function crumbs(parts) {
-    $('bok-crumbs').innerHTML = [`<a href="#">Matrix</a>`, ...parts].join('<span aria-hidden="true">›</span>');
+    $('bok-crumbs').innerHTML = [`<a href="#view=matrix">Matrix</a>`, ...parts].join('<span aria-hidden="true">›</span>');
   }
 
   const facts = (items) => `<div class="bok-facts" role="group" aria-label="Facts">${items.filter(([, v]) => v).map(([k, v]) => `<p><span class="bok-facts-label">${esc(k)}</span>${v}</p>`).join('')}</div>`;
@@ -2084,7 +2084,7 @@
     if (p.get('overlay')) {
       state.overlay = p.get('overlay');
       state.pathStep = 0;
-    } else if (location.hash) {
+    } else if (location.hash && view !== 'matrix') {
       state.overlay = null;
       state.pathStep = 0;
     }
@@ -2098,10 +2098,11 @@
     if (view === 'guides') state.view = 'guides';
     else if (view === 'glossary' || view === 'index') state.view = 'glossary';
     else if (concept) state.view = 'concept';
+    else if (view === 'matrix' || p.get('overlay')) state.view = 'home';
     else if (view === 'concept' || view === 'graph') state.view = 'landing';
     else if (subject) state.view = 'subject';
     else if (area) state.view = 'area';
-    else state.view = 'home';
+    else state.view = 'landing';
     render();
   }
 
@@ -2164,10 +2165,12 @@
     $('bok-home').hidden = v !== 'home';
     $('bok-entry').hidden = !entry;
     $('bok-tree').hidden = v === 'landing';
+    $('bok-crumbs').hidden = v === 'landing';
     $('bok-entry').classList.toggle('is-full', v === 'landing');
     $('bok-glossary').hidden = v !== 'glossary';
     $('bok-guides').hidden = v !== 'guides';
-    for (const [tab, views] of [['bok-tab-home', ['home', 'area', 'subject']], ['bok-tab-concept', ['concept', 'landing']], ['bok-tab-guides', ['guides']], ['bok-tab-glossary', ['glossary']]]) {
+    if ($('bok-release')) $('bok-release').hidden = !['landing', 'home'].includes(v);
+    for (const [tab, views] of [['bok-tab-concept', ['concept', 'landing']], ['bok-tab-home', ['home', 'area', 'subject']], ['bok-tab-guides', ['guides']], ['bok-tab-glossary', ['glossary']]]) {
       if (views.includes(v)) $(tab).setAttribute('aria-current', 'page');
       else $(tab).removeAttribute('aria-current');
     }
@@ -2292,12 +2295,15 @@
     window.addEventListener('hashchange', restore);
     document.querySelectorAll('[data-try-lens]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
-      if (location.hash) location.hash = '';
+      if (location.hash !== '#view=matrix') {
+        history.pushState(null, '', location.pathname + location.search + '#view=matrix');
+        restore();
+      }
       const b = document.querySelector(`#bok-lenses [data-lens="${a.dataset.tryLens}"]`);
       if (b && b.getAttribute('aria-pressed') !== 'true') b.click();
       $('bok-matrix').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
-    $('bok-tab-home').addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', location.pathname + location.search); restore(); });
+    $('bok-tab-concept').addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', location.pathname + location.search); restore(); });
     $('bok-lenses').addEventListener('click', (e) => {
       const button = e.target.closest('button[data-lens]');
       if (!button) return;
@@ -2314,7 +2320,7 @@
       if (e.target.closest('[data-clear-overlay]')) {
         state.overlay = null;
         state.pathStep = 0;
-        if (location.hash.startsWith('#overlay=')) history.pushState(null, '', location.pathname + location.search);
+        if (location.hash.startsWith('#overlay=')) history.pushState(null, '', location.pathname + location.search + '#view=matrix');
         renderMatrix();
         return;
       }

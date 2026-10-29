@@ -91,6 +91,7 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
             raise ConceptGraphError(f"field model: unknown scope {family['scope']}")
         _references(family, sources, family["id"])
     concepts = _index(model.get("concepts"), "concept")
+    concept_own_refs = set()
     for node in concepts.values():
         _text(node, ("label", "definition", "family", "status"), node["id"],
               {"id", "label", "definition", "family", "status", "aliases", "scope", "references"})
@@ -101,8 +102,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         aliases = node.get("aliases", [])
         if not isinstance(aliases, list) or any(not isinstance(a, str) or not a.strip() for a in aliases):
             raise ConceptGraphError(f"field model: invalid aliases {node['id']}")
+        if "references" in node:
+            concept_own_refs.add(node["id"])
         node.setdefault("scope", families[node["family"]]["scope"])
-        node["reading_scope"] = "concept" if "references" in node else "family"
         node.setdefault("references", list(families[node["family"]]["references"]))
         if node["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown concept scope {node['id']}")
@@ -166,6 +168,11 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
             raise ConceptGraphError(f"field model: invalid view members {view['id']}")
     if set(views["all"]["concepts"]) != set(concepts):
         raise ConceptGraphError("field model: all view must retain every authored concept")
+    from .taxonomy_schema import validate_field_semantics, validate_linkml
+    validate_linkml(model, "FieldModel", root, "field model")
+    validate_field_semantics(model)
+    for node in concepts.values():
+        node["reading_scope"] = "concept" if node["id"] in concept_own_refs else "family"
 
     alignment_path = path.with_name("mlsysbook-alignment.yml")
     alignment = yaml.safe_load(alignment_path.read_text()) if alignment_path.exists() else {"schema_version": 1, "links": []}
@@ -192,6 +199,8 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
                       "source": chapter["source"].relative_to(root).as_posix(),
                       "source_hash": digest(chapter["sections"][node["section"]])})
         seen.add(key)
+    if alignment_path.exists():
+        validate_linkml(alignment, "BookAlignmentModel", root, "field model")
     from .taxonomy import load_taxonomy
     taxonomy = load_taxonomy(root, model)
     from .framework import load_framework

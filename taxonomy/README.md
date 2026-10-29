@@ -4,10 +4,11 @@ Status: editorial draft, version `0.3-draft`. This document specifies a proposal
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
-## Five connected records
+## Six connected records
 
 | Record | Question it answers | Authoritative source |
 |---|---|---|
+| LinkML metamodel | What are the formal classes, slots, controlled enums, and URI mappings (`skos:`, `dct:`, `owl:`) governing the taxonomy? | `taxonomy/schema/mlsys-taxonomy.linkml.yml` |
 | Subject framework | What belongs in this engineering field, and where can I find it? | `taxonomy/ml-systems-framework.yml` |
 | Concept vocabulary and relationships | What does an idea mean, and how does it affect other ideas under stated conditions? | `taxonomy/ml-systems-field.yml` |
 | Reader guides | Which subjects and concepts matter for a given role, production symptom, or learning path? | `taxonomy/ml-systems-guides.yml` |
@@ -83,14 +84,14 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 
 `taxonomy/index.qmd` follows the presentation conventions of established taxonomies (MITRE ATT&CK and ATLAS, SFIA, ESCO, CS2023) and of concept maps (Novak's labeled propositions), in the neutral mlsysbook.ai style. Color carries no category; crimson marks interaction only.
 
-- **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
+- **Concept map (home).** Opens first with the field-wide coupling figure—a hierarchical circular bundle across the 5 groups, 20 areas, and 101 subjects plus a 20 × 20 cross-area design structure matrix (DSM)—and the most connected concepts. Each individual concept page also carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
+- **Matrix.** The whole taxonomy on one screen (`#view=matrix`): one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal), and an *Overlay* picker annotates cells by role, learning path, or volume. Below the concept map and matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
-- **Concept map.** Each concept page carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
 - **Guides.** Ways in for people who arrive with a job rather than a concept (`taxonomy/ml-systems-guides.yml`): eleven role profiles with core and working subjects, eighteen production symptoms with their likely causes, what to check, and what to change, and six learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
 - **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
 - **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
-State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#view=glossary`, `#view=guides&role=…|symptom=…|path=…`); earlier hash formats still resolve.
+State is kept in the URL hash (`#view=matrix`, `#subject=…`, `#concept=…`, `#area=…`, `#view=glossary`, `#view=guides&role=…|symptom=…|path=…`); earlier hash formats still resolve.
 
 ## Relationships
 
@@ -107,6 +108,8 @@ Every group, area, and subject carries a readable code: a group letter (F, S, P,
 | `mlsys-taxonomy-subjects.csv` | CSV | One row per subject: code, group, area, definition, concepts, chapters |
 | `mlsys-taxonomy-concepts.csv` | CSV | One row per concept: identity, term, aliases, definition, home code, background flag, book chapters |
 | `mlsys-taxonomy.json` | JSON | The full outline, concepts (with candidate book passages), relation vocabulary, typed relationships, declared gaps, and retired identities |
+| `mlsys-taxonomy.linkml.yml` | LinkML (YAML) | Formal LinkML metamodel defining classes, slots, controlled enums, and W3C `skos:` / `dct:` / `owl:` URI mappings |
+| `mlsys-taxonomy.schema.json` | JSON Schema | Compiled JSON Schema generated from `mlsys-taxonomy.linkml.yml` for IDE and CI validation |
 | `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes; concepts as `skos:Concept`; relationships as properties under `skos:related` |
 | `mlsys-concept-graph.graphml` | GraphML | The concept graph for Gephi, yEd, Cytoscape, or a graph database |
 | `mlsys-taxonomy.bib` | BibTeX | Citation for the current version |
@@ -118,7 +121,7 @@ The page's *Print / PDF* action prints the expanded outline. The taxonomy releas
 The taxonomy is meant to be complete enough to rely on and cheap to keep current. Each update follows the same loop:
 
 1. **Add or edit.** A new concept is one record in `ml-systems-field.yml` (identity, label, definition, family, optional aliases) plus at least two relationships using the controlled relations, and its identity added to one subject's `concepts` in `ml-systems-framework.yml`. Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
-2. **Build.** `./binder/binder concepts build` validates homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
+2. **Build.** `./binder/binder concepts build` validates every YAML file against `taxonomy/schema/mlsys-taxonomy.linkml.yml` (via `linkml`), enforces ontological DAG acyclicity on hierarchical relations (`specializes`, `part-of`, `requires`), verb–predicate polarity consistency, symptom bucket disjointness, 100% subject role coverage, homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
 3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `taxonomy/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
 4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `taxonomy/CHANGELOG.md`, and retire rather than delete any withdrawn identity.
 
@@ -128,9 +131,9 @@ A label or alias may name only one concept; the compiler rejects a name shared b
 
 ## Authoring and illustration tools
 
-The authoring system and student interface serve different users. [VocBench](https://vocbench.uniroma2.it/) supports collaborative management of SKOS vocabularies and OWL ontologies. [Protégé](https://protege.stanford.edu/) supports OWL ontology development and reasoning. Both are credible options if external editors need a dedicated semantic authoring environment. They do not determine the ML systems categories or make an ontology accurate automatically.
+The authoring system and student interface serve different users. [LinkML](https://linkml.io/) (`taxonomy/schema/mlsys-taxonomy.linkml.yml`) defines the formal YAML metamodel for the taxonomy, mapping classes and slots to W3C `skos:`, `dct:`, and `owl:` URIs and compiling directly to JSON Schema (`mlsys-taxonomy.schema.json`). [VocBench](https://vocbench.uniroma2.it/) supports collaborative management of SKOS vocabularies and OWL ontologies. [Protégé](https://protege.stanford.edu/) supports OWL ontology development and reasoning.
 
-For this repository, reviewed YAML plus schema validation keeps the framework beside the book contracts and makes revisions inspectable. The existing SKOS export remains restricted to explicitly authored hierarchy assertions. A future editor integration should import/export through that contract, rather than create a second independently edited truth. Adopting OWL would require an actual need for formal classes, properties, constraints, and reasoning; drawing a connected diagram alone does not establish that need.
+For this repository, LinkML-validated YAML (`binder/cli/core/taxonomy_schema.py`) plus ontological graph checks in `binder concepts check` keeps the framework beside the book contracts and makes revisions inspectable in Git. The existing SKOS export remains restricted to explicitly authored hierarchy assertions. A future editor integration should import/export through that LinkML and SKOS contract, rather than create a second independently edited truth.
 
 The student illustrations use native HTML/SVG and generated, focused Graphviz relationship drawings. This supports readable typography, in-place selection, keyboard controls, deterministic static exports, and the same source data without a dependency on an external visualization service. Cytoscape remains available for graph interactions where it improves the learning task.
 
