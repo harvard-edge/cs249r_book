@@ -23,7 +23,12 @@
   const MAP_LIMIT = 6;
 
   let data, groups, areas, rows, concepts, homeOf, areaOf, outgoing, incoming, secondaryOf, linksOf, gapsOf, relations, neighbors, lenses;
-  const state = { view: 'home', area: null, subject: null, concept: null, to: null, term: null, guide: null, lens: null, showConcepts: false };
+  const state = {
+    view: 'home', area: null, subject: null, concept: null, to: null, term: null, guide: null,
+    lens: null, overlay: null, pathStep: 0, showConcepts: false,
+    couplingMode: 'wheel', couplingFamily: 'all', couplingSel: null,
+    activeRole: null, activeAreaRole: null, activeSymptom: null, activeDiagNode: null,
+  };
   const visited = [];
 
   async function load() {
@@ -38,6 +43,7 @@
     index();
     renderMeta();
     renderLenses();
+    renderOverlays();
     renderMatrix();
     renderRelease();
     renderGlossary();
@@ -120,7 +126,136 @@
       `<button type="button" data-lens="${esc(id)}" aria-pressed="false">${esc(label)}</button>`).join('');
   }
 
+  function renderOverlays() {
+    const el = $('bok-overlays');
+    if (!el) return;
+    const g = data.framework.guides || { roles: [], learning_paths: [] };
+    const roleOpts = (g.roles || []).map((r) => `<option value="role:${esc(r.id)}">Role: ${esc(r.label)}</option>`).join('');
+    const pathOpts = (g.learning_paths || []).map((p) => `<option value="path:${esc(p.id)}">Path: ${esc(p.label)}</option>`).join('');
+    const volOpts = Object.entries(VOLUME).map(([k, v]) => `<option value="vol:${esc(k)}">Book: ${esc(v)}</option>`).join('');
+    el.innerHTML = `<span class="bok-filter-label">Overlay</span><select id="bok-overlay-select" aria-label="Annotate matrix with a role, learning path, or volume">
+      <option value="">None</option>
+      ${roleOpts ? `<optgroup label="By role (● Core · ○ Working)">${roleOpts}</optgroup>` : ''}
+      ${pathOpts ? `<optgroup label="Learning paths (Steps 1..N)">${pathOpts}</optgroup>` : ''}
+      <optgroup label="MLSysBook volume">${volOpts}</optgroup>
+    </select>`;
+  }
+
+  function overlayCellState(row) {
+    if (!state.overlay) return { hit: true, active: false, badge: '' };
+    const g = data.framework.guides || { roles: [], learning_paths: [] };
+    const [kind, id] = state.overlay.split(':');
+    if (kind === 'role') {
+      const role = (g.roles || []).find((r) => r.id === id);
+      if (!role) return { hit: true, active: false, badge: '' };
+      if ((role.core || []).includes(row.id)) {
+        return { hit: true, active: false, badge: '<span class="bok-cell-mark-core" title="Core subject for this role" aria-label="Core subject"></span>' };
+      }
+      if ((role.working || []).includes(row.id)) {
+        return { hit: true, active: false, badge: '<span class="bok-cell-mark-working" title="Working knowledge for this role" aria-label="Working subject"></span>' };
+      }
+      return { hit: false, active: false, badge: '' };
+    }
+    if (kind === 'path') {
+      const lp = (g.learning_paths || []).find((p) => p.id === id);
+      if (!lp) return { hit: true, active: false, badge: '' };
+      const idx = (lp.steps || []).findIndex((s) => s.subject === row.id);
+      if (idx === -1) return { hit: false, active: false, badge: '' };
+      const isActive = idx === state.pathStep;
+      return {
+        hit: true,
+        active: isActive,
+        badge: `<span class="bok-cell-step" title="Step ${idx + 1} of ${lp.steps.length}">${idx + 1}</span>`,
+      };
+    }
+    if (kind === 'vol') {
+      const hasVol = (row.book_volumes || []).includes(id);
+      const shortVol = id.replace('vol', 'V');
+      return {
+        hit: hasVol,
+        active: false,
+        badge: hasVol ? `<span class="bok-cell-vol">${esc(shortVol)}</span>` : '',
+      };
+    }
+    return { hit: true, active: false, badge: '' };
+  }
+
+  function renderOverlayBanner() {
+    const banner = $('bok-overlay-banner');
+    if (!banner) return;
+    const sel = $('bok-overlay-select');
+    if (sel) {
+      sel.value = state.overlay || '';
+      sel.classList.toggle('is-active', Boolean(state.overlay));
+    }
+    if (!state.overlay) {
+      banner.hidden = true;
+      banner.innerHTML = '';
+      return;
+    }
+    const g = data.framework.guides || { roles: [], learning_paths: [] };
+    const [kind, id] = state.overlay.split(':');
+    if (kind === 'role') {
+      const role = (g.roles || []).find((r) => r.id === id);
+      if (!role) { banner.hidden = true; return; }
+      banner.hidden = false;
+      banner.innerHTML = `<div class="bok-overlay-head">
+        <div><span class="bok-overlay-title">${esc(role.label)}</span><span class="bok-overlay-desc">${esc(role.summary || '')}</span></div>
+        <div class="bok-overlay-meta">
+          <span><span class="bok-legend-dot"></span>Core (${(role.core || []).length})</span>
+          <span><span class="bok-legend-ring"></span>Working (${(role.working || []).length})</span>
+          <a href="#view=guides&amp;role=${esc(role.id)}">Open in Guides &rarr;</a>
+          <button type="button" class="bok-overlay-btn" data-clear-overlay="1">Clear</button>
+        </div>
+      </div>`;
+      return;
+    }
+    if (kind === 'path') {
+      const lp = (g.learning_paths || []).find((p) => p.id === id);
+      if (!lp || !lp.steps?.length) { banner.hidden = true; return; }
+      const stepIdx = Math.max(0, Math.min(lp.steps.length - 1, state.pathStep || 0));
+      state.pathStep = stepIdx;
+      const cur = lp.steps[stepIdx];
+      const curRow = rows.get(cur.subject);
+      const strip = lp.steps.map((st, i) => {
+        const r = rows.get(st.subject);
+        return `<button type="button" class="bok-step-node${i === stepIdx ? ' is-active' : ''}" data-path-step="${i}" title="Step ${i + 1}: ${esc(r?.label || st.subject)}">
+          <span class="bok-step-circle">${i + 1}</span>
+          <span class="bok-step-code">${esc(r?.code || st.subject)}</span>
+        </button>`;
+      }).join('');
+      banner.hidden = false;
+      banner.innerHTML = `<div class="bok-overlay-head">
+        <div><span class="bok-overlay-title">Learning path: ${esc(lp.label)}</span><span class="bok-overlay-desc">${esc(lp.audience || '')}</span></div>
+        <div class="bok-overlay-meta">
+          <a href="#view=guides&amp;path=${esc(lp.id)}">Open in Guides &rarr;</a>
+          <button type="button" class="bok-overlay-btn" data-clear-overlay="1">Clear</button>
+        </div>
+      </div>
+      <div class="bok-step-strip" role="tablist" aria-label="Steps in ${esc(lp.label)}">${strip}</div>
+      <div class="bok-step-detail">
+        <div><strong>Step ${stepIdx + 1} of ${lp.steps.length}:</strong> ${curRow ? subjectLink(curRow) : esc(cur.subject)} — <span class="bok-muted">${esc(cur.why || '')}</span></div>
+        <div class="bok-step-detail-nav">
+          <button type="button" class="bok-overlay-btn" data-step-delta="-1"${stepIdx === 0 ? ' disabled' : ''}>&larr; Prev</button>
+          <button type="button" class="bok-overlay-btn" data-step-delta="1"${stepIdx === lp.steps.length - 1 ? ' disabled' : ''}>Next &rarr;</button>
+        </div>
+      </div>`;
+      return;
+    }
+    if (kind === 'vol') {
+      const label = VOLUME[id] || id;
+      let count = 0;
+      for (const r of rows.values()) if ((r.book_volumes || []).includes(id)) count++;
+      banner.hidden = false;
+      banner.innerHTML = `<div class="bok-overlay-head">
+        <div><span class="bok-overlay-title">MLSysBook ${esc(label)}</span><span class="bok-overlay-desc">${count} of ${rows.size} subjects have linked chapters in ${esc(label)}.</span></div>
+        <div class="bok-overlay-meta"><button type="button" class="bok-overlay-btn" data-clear-overlay="1">Clear</button></div>
+      </div>`;
+    }
+  }
+
   function renderMatrix() {
+    renderOverlayBanner();
     const bands = bandOrder().map((id) => {
       const group = groups.find((g) => g.id === id);
       const members = areas.filter((a) => a.group === id);
@@ -128,9 +263,11 @@
           <a class="bok-col-head" href="#area=${esc(area.id)}">${code(area.code)}<span>${esc(area.display_label || area.label)}</span></a>
           <p class="bok-col-count">${area.rows.length} subjects</p>
           <ul>${area.rows.map((row) => {
-            const hit = !state.lens || (row.contexts || []).includes(state.lens);
+            const lensHit = !state.lens || (row.contexts || []).includes(state.lens);
+            const ov = overlayCellState(row);
+            const classes = ['bok-cell', !lensHit ? 'is-dim' : '', state.overlay && !ov.hit ? 'is-overlay-dim' : '', ov.active ? 'is-overlay-active' : ''].filter(Boolean).join(' ');
             const list = state.showConcepts ? `<span class="bok-cell-concepts">${row.concepts.map((cid) => esc(concepts.get(cid)?.label)).join(' · ')}</span>` : '';
-            return `<li><a class="bok-cell${hit ? '' : ' is-dim'}" href="${subjectHref(row)}" title="${esc(row.definition)}">${code(row.code)}<span class="bok-cell-label">${esc(row.display_label || row.label)}</span>${list}</a></li>`;
+            return `<li><a class="${classes}" href="${subjectHref(row)}" title="${esc(row.definition)}"><span class="bok-cell-head">${code(row.code)}${ov.badge}</span><span class="bok-cell-label">${esc(row.display_label || row.label)}</span>${list}</a></li>`;
           }).join('')}</ul></div>`).join('');
       return `<section class="bok-band" aria-labelledby="band-${esc(id)}">
         <h3 class="bok-band-head" id="band-${esc(id)}">${code(group.code)}${esc(group.label)}<span>${esc(group.question)}</span></h3>
@@ -409,11 +546,53 @@
       g.rels.map((rel, i) => `<tr${i === 0 ? ' class="bok-group-start"' : ''}><td>${name(rel.source)} <span class="bok-verb">${esc(relations.get(rel.relation)?.forward || rel.predicate)}</span> ${name(rel.target)}</td><td>${esc(rel.conditions || '')}</td></tr>`).join('')).join('')}</tbody></table>`;
   }
 
+  function renderPathChainSvg(steps) {
+    if (!steps || !steps.length) return '';
+    const nodes = [steps[0].from, ...steps.map((s) => s.to)];
+    const n = nodes.length;
+    const boxW = 148;
+    const gapW = 104;
+    const padX = 16;
+    const totalW = Math.max(520, padX * 2 + n * boxW + (n - 1) * gapW);
+    const h = 64;
+    const cy = 34;
+    let svg = `<div class="bok-path-chain"><svg width="${totalW}" height="${h}" viewBox="0 0 ${totalW} ${h}" role="img" aria-label="Relationship chain of ${steps.length} steps">`;
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      const x1 = padX + i * (boxW + gapW) + boxW;
+      const x2 = x1 + gapW;
+      const mx = (x1 + x2) / 2;
+      const dirOut = s.rel.source === s.from;
+      const vText = verb(s.rel, dirOut ? 'out' : 'in');
+      svg += `<line x1="${x1}" y1="${cy}" x2="${x2}" y2="${cy}" stroke="var(--bok-ink)" stroke-width="1.25" stroke-opacity="0.55"/>`;
+      const arrowX = dirOut ? x2 - 5 : x1 + 5;
+      const arrowPath = dirOut ? `M${arrowX - 4},${cy - 3.5} L${arrowX},${cy} L${arrowX - 4},${cy + 3.5}` : `M${arrowX + 4},${cy - 3.5} L${arrowX},${cy} L${arrowX + 4},${cy + 3.5}`;
+      svg += `<path d="${arrowPath}" fill="none" stroke="var(--bok-accent)" stroke-width="1.5" stroke-linecap="round"/>`;
+      svg += `<text x="${mx}" y="${cy - 7}" text-anchor="middle" font-size="9.5" font-style="italic" fill="var(--bok-muted)">${esc(vText.length > 20 ? vText.slice(0, 19) + '…' : vText)}</text>`;
+    }
+    for (let i = 0; i < n; i++) {
+      const cid = nodes[i];
+      const c = concepts.get(cid);
+      const r = homeOf.get(cid);
+      const x = padX + i * (boxW + gapW);
+      const isEndpoint = i === 0 || i === n - 1;
+      const label = c?.label || cid;
+      const shortLbl = label.length > 19 ? label.slice(0, 18) + '…' : label;
+      svg += `<a href="${conceptHref(cid)}"><g class="viz-interactive" transform="translate(${x},${cy - 18})">
+        <rect width="${boxW}" height="36" rx="2" fill="var(--bok-surface)" stroke="${isEndpoint ? 'var(--bok-accent)' : 'var(--bok-line-strong)'}" stroke-width="${isEndpoint ? '1.5' : '1'}"/>
+        <text x="8" y="13" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">${esc(r?.code || '')}</text>
+        <text x="8" y="27" class="bok-svg-label" style="font-size:10.5px;font-weight:${isEndpoint ? '600' : '500'}">${esc(shortLbl)}</text>
+      </g></a>`;
+    }
+    svg += '</svg></div>';
+    return svg;
+  }
+
   function relateHtml(id) {
     let result = '';
     if (state.to && state.to !== id) {
       const found = paths(id, state.to);
-      result = found.length ? found.map((p, i) => `<div class="bok-path"><p class="bok-text-label">${i ? 'Another route' : 'Shortest chain'} · ${p.steps.length} step${p.steps.length > 1 ? 's' : ''}</p><ol>${p.steps.map((s) =>
+      result = found.length ? found.map((p, i) => `<div class="bok-path"><p class="bok-text-label">${i ? 'Another route' : 'Shortest chain'} · ${p.steps.length} step${p.steps.length > 1 ? 's' : ''}</p>${i === 0 ? renderPathChainSvg(p.steps) : ''}<ol>${p.steps.map((s) =>
         `<li>${conceptLink(s.from)} <span class="bok-verb">${esc(verb(s.rel, s.rel.source === s.from ? 'out' : 'in'))}</span> ${conceptLink(s.to)}<p class="bok-cond">${esc(s.rel.conditions || '')}</p></li>`).join('')}</ol></div>`).join('')
         : '<p class="bok-text">No chain of relationships links these concepts yet.</p>';
     }
@@ -430,8 +609,8 @@
     const area = row && areaOf.get(row.id);
     if (visited[visited.length - 1] !== id) visited.push(id);
     renderTree(area?.id, row?.id);
-    crumbs(area ? [`<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(row.label)}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
-      : [`<span aria-current="page">${esc(c.label)}</span>`]);
+    crumbs(area ? [`<a href="#view=concept">Concept map</a>`, `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(row.label)}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
+      : [`<a href="#view=concept">Concept map</a>`, `<span aria-current="page">${esc(c.label)}</span>`]);
     const also = (secondaryOf.get(id) || []).map((r) => subjectLink(r)).join('<br>');
     const passages = (linksOf.get(id) || []).map((l) => `<tr><td>${esc(VOLUME[l.volume] || l.volume)}</td><td><a href="${esc(l.url)}">${esc(l.chapter_title)}</a></td><td>${esc(l.label)}</td></tr>`).join('');
     const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(row.label)}</td></tr>`).join('');
@@ -445,7 +624,7 @@
           ['Also part of', also], ['Relationships', String(links)]])}
       </div>
       <figure class="bok-mapbox"><div class="bok-canvas" id="bok-canvas" role="img" aria-label="Concept map of ${esc(c.label)}; the relationships table lists the same links as text"></div>
-        <figcaption>What acts on ${esc(c.label)} (left) and what it acts on (right). Select a concept to move to it.</figcaption></figure>
+        <figcaption>What acts on ${esc(c.label)} (left) and what it acts on (right). Select a concept to move to it, or open the <a href="#view=concept" style="text-decoration:underline">full field coupling map</a>.</figcaption></figure>
       ${relationshipTable(id)}
       ${passages || chapters ? `<h3 class="bok-section">In the books</h3><table class="bok-table"><thead><tr><th>Volume</th><th>Chapter</th><th>${passages ? 'Passage' : 'Scope'}</th></tr></thead><tbody>${passages || chapters}</tbody></table>` : ''}
       ${relateHtml(id)}
@@ -455,14 +634,582 @@
     drawMap(id, $('bok-canvas'));
   }
 
+  // --------------------------------------------- field coupling visualizations
+  const REL_FAMILIES = [
+    ['all', 'All relationships'],
+    ['limits', 'Bottlenecks & limits'],
+    ['levers', 'Levers & mitigations'],
+    ['structure', 'Dependencies & structure'],
+    ['eval', 'Verification & trade-offs'],
+  ];
+
+  function relInFamily(rel, fam) {
+    if (!fam || fam === 'all') return true;
+    const r = rel.relation;
+    if (fam === 'limits') return ['limits', 'causes', 'increases'].includes(r);
+    if (fam === 'levers') return ['reduces', 'mitigates', 'enables'].includes(r);
+    if (fam === 'structure') return ['requires', 'determines', 'uses', 'part-of', 'specializes', 'implements'].includes(r);
+    if (fam === 'eval') return ['measures', 'detects', 'trades-off', 'alternative-to', 'produces'].includes(r);
+    return true;
+  }
+
+  function filteredRelationships() {
+    return (data.relationships || []).filter((r) => relInFamily(r, state.couplingFamily));
+  }
+
+  // Uniform cubic B-spline through control points with clamped endpoints.
+  function bsplinePath(pts) {
+    if (pts.length < 2) return '';
+    if (pts.length === 2) return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}L${pts[1][0].toFixed(1)},${pts[1][1].toFixed(1)}`;
+    const p = [pts[0], pts[0], pts[0], ...pts.slice(1, -1), pts[pts.length - 1], pts[pts.length - 1], pts[pts.length - 1]];
+    let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < p.length - 3; i++) {
+      const p0 = p[i], p1 = p[i + 1], p2 = p[i + 2], p3 = p[i + 3];
+      const c1x = (2 * p1[0] + p2[0]) / 3;
+      const c1y = (2 * p1[1] + p2[1]) / 3;
+      const c2x = (p1[0] + 2 * p2[0]) / 3;
+      const c2y = (p1[1] + 2 * p2[1]) / 3;
+      const ex = (p1[0] + 4 * p2[0] + p3[0]) / 6;
+      const ey = (p1[1] + 4 * p2[1] + p3[1]) / 6;
+      d += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`;
+    }
+    return d;
+  }
+
+  function bundleCurve(uPt, uAreaPt, uGrpPt, rootPt, vGrpPt, vAreaPt, vPt, sameArea, sameGroup, beta = 0.85) {
+    let raw;
+    if (sameArea) raw = [uPt, uAreaPt, vPt];
+    else if (sameGroup) raw = [uPt, uAreaPt, uGrpPt, vAreaPt, vPt];
+    else raw = [uPt, uAreaPt, uGrpPt, rootPt, vGrpPt, vAreaPt, vPt];
+    const k = raw.length - 1;
+    const bundled = raw.map((pt, i) => {
+      if (i === 0 || i === k) return pt;
+      const t = i / k;
+      const lx = uPt[0] + t * (vPt[0] - uPt[0]);
+      const ly = uPt[1] + t * (vPt[1] - uPt[1]);
+      return [beta * pt[0] + (1 - beta) * lx, beta * pt[1] + (1 - beta) * ly];
+    });
+    return bsplinePath(bundled);
+  }
+
+  function polar(cx, cy, r, a) {
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+
+  function svgArc(cx, cy, r, a0, a1, ccw = false) {
+    const [x0, y0] = polar(cx, cy, r, ccw ? a1 : a0);
+    const [x1, y1] = polar(cx, cy, r, ccw ? a0 : a1);
+    const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+    const sweep = ccw ? 0 : 1;
+    return `M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 ${large} ${sweep} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  }
+
+  function canonicalOrder() {
+    const orderedGroups = bandOrder().map((gid) => groups.find((g) => g.id === gid)).filter(Boolean);
+    const orderedAreas = [];
+    const orderedSubjects = [];
+    for (const g of orderedGroups) {
+      for (const a of areas.filter((ar) => ar.group === g.id)) {
+        orderedAreas.push(a);
+        for (const r of a.rows) orderedSubjects.push(r);
+      }
+    }
+    return { orderedGroups, orderedAreas, orderedSubjects };
+  }
+
+  function drawCouplingWheel(stageEl) {
+    const { orderedGroups, orderedAreas, orderedSubjects } = canonicalOrder();
+    const W = 880, H = 860, cx = 440, cy = 430;
+    const R_node = 204;
+    const R_area = 216;
+    const R_area_lbl = 228;
+    const R_group = 242;
+    const R_group_lbl = 251;
+    const R_subj_lbl = 265;
+
+    // Assign angles around circle with gaps between areas and groups.
+    const groupGap = 3.0;
+    const areaGap = 0.85;
+    let totalUnits = 0;
+    let prevG = null, prevA = null;
+    for (const s of orderedSubjects) {
+      const a = areaOf.get(s.id);
+      if (prevG !== null && a.group !== prevG) totalUnits += groupGap;
+      else if (prevA !== null && a.id !== prevA) totalUnits += areaGap;
+      totalUnits += 1;
+      prevG = a.group;
+      prevA = a.id;
+    }
+
+    const subjAngle = new Map();
+    const areaAngles = new Map();
+    const groupAngles = new Map();
+    let cursor = 0;
+    prevG = null;
+    prevA = null;
+    for (const s of orderedSubjects) {
+      const a = areaOf.get(s.id);
+      if (prevG !== null && a.group !== prevG) cursor += groupGap;
+      else if (prevA !== null && a.id !== prevA) cursor += areaGap;
+      const ang = -Math.PI / 2 + ((cursor + 0.5) / totalUnits) * 2 * Math.PI;
+      subjAngle.set(s.id, ang);
+      push(areaAngles, a.id, ang);
+      push(groupAngles, a.group, ang);
+      cursor += 1;
+      prevG = a.group;
+      prevA = a.id;
+    }
+
+    const subjPt = new Map();
+    const areaPt = new Map();
+    const groupPt = new Map();
+    const rootPt = [cx, cy];
+    for (const s of orderedSubjects) subjPt.set(s.id, polar(cx, cy, R_node, subjAngle.get(s.id)));
+    for (const a of orderedAreas) {
+      const angs = areaAngles.get(a.id);
+      const mid = (angs[0] + angs[angs.length - 1]) / 2;
+      areaPt.set(a.id, polar(cx, cy, R_node * 0.62, mid));
+    }
+    for (const g of orderedGroups) {
+      const angs = groupAngles.get(g.id);
+      const mid = (angs[0] + angs[angs.length - 1]) / 2;
+      groupPt.set(g.id, polar(cx, cy, R_node * 0.28, mid));
+    }
+
+    // Aggregate cross-subject edges.
+    const rels = filteredRelationships();
+    const pairMap = new Map();
+    for (const rel of rels) {
+      const u = homeOf.get(rel.source);
+      const v = homeOf.get(rel.target);
+      if (!u || !v || u.id === v.id) continue;
+      const key = `${u.id}__${v.id}`;
+      if (!pairMap.has(key)) pairMap.set(key, { u, v, count: 0, rels: [] });
+      const entry = pairMap.get(key);
+      entry.count++;
+      entry.rels.push(rel);
+    }
+
+    // Determine active selection set.
+    const sel = state.couplingSel;
+    let activeSubjects = null;
+    if (sel?.kind === 'subject' && rows.has(sel.id)) activeSubjects = new Set([sel.id]);
+    else if (sel?.kind === 'area') {
+      const ar = areas.find((a) => a.id === sel.id);
+      if (ar) activeSubjects = new Set(ar.rows.map((r) => r.id));
+    } else if (sel?.kind === 'pair') {
+      const a1 = areas.find((a) => a.id === sel.fromArea);
+      if (a1) activeSubjects = new Set(a1.rows.map((r) => r.id));
+    }
+
+    const neighborSubjects = new Set();
+    const restEdges = [];
+    const activeEdges = [];
+
+    for (const edge of pairMap.values()) {
+      const uId = edge.u.id, vId = edge.v.id;
+      const uArea = areaOf.get(uId), vArea = areaOf.get(vId);
+      const d = bundleCurve(
+        subjPt.get(uId), areaPt.get(uArea.id), groupPt.get(uArea.group), rootPt,
+        groupPt.get(vArea.group), areaPt.get(vArea.id), subjPt.get(vId),
+        uArea.id === vArea.id, uArea.group === vArea.group, 0.85
+      );
+      const w = Math.min(2.6, 0.55 + Math.sqrt(edge.count) * 0.52).toFixed(2);
+      let cls = 'viz-bundle-edge';
+      let isHigh = false;
+      if (activeSubjects) {
+        const uIn = activeSubjects.has(uId);
+        const vIn = activeSubjects.has(vId);
+        if (sel?.kind === 'pair') {
+          const targetArea = areas.find((a) => a.id === sel.toArea);
+          const vTarget = targetArea && targetArea.rows.some((r) => r.id === vId);
+          if (uIn && vTarget) { cls += ' is-out'; isHigh = true; neighborSubjects.add(uId); neighborSubjects.add(vId); }
+          else cls += ' is-dim';
+        } else if (uIn) {
+          cls += ' is-out'; isHigh = true; neighborSubjects.add(vId);
+        } else if (vIn) {
+          cls += ' is-in'; isHigh = true; neighborSubjects.add(uId);
+        } else {
+          cls += ' is-dim';
+        }
+      }
+      const pathHtml = `<path class="${cls}" d="${d}" stroke-width="${isHigh ? Math.max(1.3, Number(w) * 1.15).toFixed(2) : w}" data-u="${esc(uId)}" data-v="${esc(vId)}"/>`;
+      if (isHigh) activeEdges.push(pathHtml);
+      else restEdges.push(pathHtml);
+    }
+
+    // Group & area arcs.
+    let defs = '';
+    let arcsHtml = '';
+    const halfStep = (Math.PI / totalUnits) * 0.72;
+    for (const g of orderedGroups) {
+      const angs = groupAngles.get(g.id);
+      const a0 = angs[0] - halfStep;
+      const a1 = angs[angs.length - 1] + halfStep;
+      const mid = (a0 + a1) / 2;
+      const bottom = Math.sin(mid) > 0.25;
+      const arcId = `bok-grp-arc-${g.id}`;
+      defs += `<path id="${arcId}" d="${svgArc(cx, cy, bottom ? R_group_lbl + 5 : R_group_lbl, a0, a1, bottom)}" fill="none"/>`;
+      arcsHtml += `<path d="${svgArc(cx, cy, R_group, a0, a1)}" fill="none" stroke="var(--bok-ink)" stroke-width="2"/>`;
+      arcsHtml += `<text class="bok-svg-group-label"><textPath href="#${arcId}" startOffset="50%" text-anchor="middle">${esc(g.label)}</textPath></text>`;
+    }
+
+    for (const a of orderedAreas) {
+      const angs = areaAngles.get(a.id);
+      const a0 = angs[0] - halfStep * 0.85;
+      const a1 = angs[angs.length - 1] + halfStep * 0.85;
+      const mid = (a0 + a1) / 2;
+      const [lx, ly] = polar(cx, cy, R_area_lbl, mid);
+      const isAreaSel = sel?.kind === 'area' && sel.id === a.id;
+      arcsHtml += `<g class="viz-interactive" data-wheel-area="${esc(a.id)}" role="button" tabindex="0" aria-label="Select area ${esc(a.code)} ${esc(a.label)}">
+        <path d="${svgArc(cx, cy, R_area, a0, a1)}" fill="none" stroke="${isAreaSel ? 'var(--bok-accent)' : 'var(--bok-line-strong)'}" stroke-width="${isAreaSel ? '3.5' : '2.5'}"/>
+        <text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" class="bok-svg-mono" style="font-size:9px;font-weight:700;fill:${isAreaSel ? 'var(--bok-accent)' : 'var(--bok-muted)'}">${esc(a.code)}</text>
+      </g>`;
+    }
+
+    // Subject dots and radial labels.
+    let nodesHtml = '';
+    for (const s of orderedSubjects) {
+      const ang = subjAngle.get(s.id);
+      const [nx, ny] = subjPt.get(s.id);
+      const [tx0, ty0] = polar(cx, cy, R_node + 3, ang);
+      const [tx1, ty1] = polar(cx, cy, R_area - 2, ang);
+      const [lx, ly] = polar(cx, cy, R_subj_lbl, ang);
+      const deg = (ang * 180) / Math.PI;
+      const leftHalf = Math.cos(ang) < 0;
+      const rot = leftHalf ? deg + 180 : deg;
+      const anchor = leftHalf ? 'end' : 'start';
+      const nameStr = s.display_label || s.label;
+      const isSelected = activeSubjects?.has(s.id);
+      const isNeighbor = neighborSubjects.has(s.id);
+      const isDim = activeSubjects && !isSelected && !isNeighbor;
+      const cls = ['viz-subj-group', isSelected ? 'is-selected' : '', isNeighbor ? 'is-neighbor' : '', isDim ? 'is-dim' : ''].filter(Boolean).join(' ');
+      const labelBody = leftHalf
+        ? `<tspan class="viz-subj-name">${esc(nameStr)} </tspan><tspan>${esc(s.code)}</tspan>`
+        : `<tspan>${esc(s.code)} </tspan><tspan class="viz-subj-name">${esc(nameStr)}</tspan>`;
+      nodesHtml += `<g class="${cls}" data-wheel-subj="${esc(s.id)}" role="button" tabindex="0" aria-label="${esc(s.code)} ${esc(s.label)}">
+        <line x1="${tx0.toFixed(1)}" y1="${ty0.toFixed(1)}" x2="${tx1.toFixed(1)}" y2="${ty1.toFixed(1)}" stroke="var(--bok-line)" stroke-width="0.75"/>
+        <circle class="viz-subj-node" cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="${isSelected ? '3.5' : '2.3'}"/>
+        <text class="viz-subj-label" transform="translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${rot.toFixed(2)})" dy="0.32em" text-anchor="${anchor}">${labelBody}</text>
+      </g>`;
+    }
+
+    const legendHtml = `<g transform="translate(16, 18)" aria-hidden="true">
+      <line x1="0" y1="0" x2="18" y2="0" stroke="var(--bok-accent)" stroke-width="2"/>
+      <text x="24" y="3" class="bok-svg-label" style="font-size:10px;fill:var(--bok-muted)">Outgoing (acts on)</text>
+      <line x1="0" y1="15" x2="18" y2="15" stroke="var(--bok-ink)" stroke-width="1.6" stroke-opacity="0.72"/>
+      <text x="24" y="18" class="bok-svg-label" style="font-size:10px;fill:var(--bok-muted)">Incoming (acted on by)</text>
+    </g>`;
+
+    stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="wheel-title wheel-desc">
+      <title id="wheel-title">Hierarchical edge-bundling map of the 101 ML systems subjects</title>
+      <desc id="wheel-desc">Subjects are grouped into 20 areas and 5 groups around the circle; bundled splines show ${rels.length} directed propositions across subjects.</desc>
+      <defs>${defs}</defs>
+      <g class="viz-layer-edges">${restEdges.join('')}${activeEdges.join('')}</g>
+      <g class="viz-layer-arcs">${arcsHtml}</g>
+      <g class="viz-layer-nodes">${nodesHtml}</g>
+      ${legendHtml}
+    </svg>`;
+  }
+
+  function drawCouplingDsm(stageEl) {
+    const { orderedGroups, orderedAreas } = canonicalOrder();
+    const rels = filteredRelationships();
+    const counts = new Map();
+    const rowTotals = new Map();
+    const colTotals = new Map();
+    for (const a of orderedAreas) { rowTotals.set(a.id, 0); colTotals.set(a.id, 0); }
+
+    for (const rel of rels) {
+      const u = homeOf.get(rel.source);
+      const v = homeOf.get(rel.target);
+      if (!u || !v) continue;
+      const ua = areaOf.get(u.id), va = areaOf.get(v.id);
+      if (!ua || !va) continue;
+      const k = `${ua.id}__${va.id}`;
+      counts.set(k, (counts.get(k) || 0) + 1);
+      if (ua.id !== va.id) {
+        rowTotals.set(ua.id, (rowTotals.get(ua.id) || 0) + 1);
+        colTotals.set(va.id, (colTotals.get(va.id) || 0) + 1);
+      }
+    }
+
+    const offDiag = [];
+    for (const [k, c] of counts.entries()) {
+      const [u, v] = k.split('__');
+      if (u !== v && c > 0) offDiag.push(c);
+    }
+    const maxOff = Math.max(1, ...offDiag);
+    const maxMarginal = Math.max(1, ...rowTotals.values(), ...colTotals.values());
+    const binOpacities = [0.11, 0.22, 0.36, 0.54, 0.74];
+    const binFor = (c) => {
+      if (!c) return 0;
+      const ratio = Math.log(c + 1) / Math.log(maxOff + 1);
+      return Math.min(4, Math.floor(ratio * 4.99));
+    };
+
+    const cell = 22;
+    const grpGap = 4;
+    const x0 = 192, y0 = 152;
+    const pos = [];
+    let curOffset = 0;
+    let prevG = null;
+    const groupBounds = [];
+    for (let i = 0; i < orderedAreas.length; i++) {
+      const a = orderedAreas[i];
+      if (prevG !== null && a.group !== prevG) {
+        groupBounds.push(curOffset + grpGap / 2);
+        curOffset += grpGap;
+      }
+      pos.push(curOffset);
+      curOffset += cell;
+      prevG = a.group;
+    }
+    const gridSpan = curOffset;
+    const W = x0 + gridSpan + 92;
+    const H = y0 + gridSpan + 84;
+
+    const sel = state.couplingSel;
+    let cellsHtml = '';
+    for (let r = 0; r < orderedAreas.length; r++) {
+      const ar = orderedAreas[r];
+      const ry = y0 + pos[r];
+      for (let c = 0; c < orderedAreas.length; c++) {
+        const ac = orderedAreas[c];
+        const cx = x0 + pos[c];
+        const cnt = counts.get(`${ar.id}__${ac.id}`) || 0;
+        const isDiag = r === c;
+        const isSelected = sel?.kind === 'pair' && sel.fromArea === ar.id && sel.toArea === ac.id;
+        const bIdx = !isDiag && cnt > 0 ? binFor(cnt) : -1;
+        const fill = isDiag ? 'url(#bok-dsm-hatch)' : (cnt > 0 ? 'var(--bok-ink)' : 'var(--bok-band)');
+        const fillOp = isDiag ? '1' : (cnt > 0 ? String(binOpacities[bIdx]) : '0.45');
+        const showNum = cnt > 0 || isSelected;
+        const textFill = !isDiag && bIdx >= 3 ? 'var(--bok-surface)' : 'var(--bok-ink)';
+        cellsHtml += `<g class="viz-dsm-cell${isSelected ? ' is-selected' : ''}" data-dsm-from="${esc(ar.id)}" data-dsm-to="${esc(ac.id)}" role="button" tabindex="0" aria-label="${esc(ar.code)} to ${esc(ac.code)}: ${cnt} propositions">
+          <title>${esc(ar.code)} (${esc(ar.display_label || ar.label)}) → ${esc(ac.code)} (${esc(ac.display_label || ac.label)}): ${cnt} propositions</title>
+          <rect class="viz-dsm-bg" x="${cx}" y="${ry}" width="${cell - 1}" height="${cell - 1}" fill="${fill}" fill-opacity="${fillOp}" stroke="${isSelected ? 'var(--bok-accent)' : 'none'}"/>
+          ${showNum ? `<text x="${cx + (cell - 1) / 2}" y="${ry + 14}" text-anchor="middle" class="bok-svg-mono" style="font-size:8.5px;fill:${textFill};font-weight:${isSelected ? '700' : '500'}">${cnt}</text>` : ''}
+        </g>`;
+      }
+    }
+
+    // Group rules.
+    let rulesHtml = '';
+    for (const b of groupBounds) {
+      rulesHtml += `<line x1="${x0 - 178}" y1="${y0 + b - 0.5}" x2="${x0 + gridSpan + 52}" y2="${y0 + b - 0.5}" stroke="var(--bok-line-strong)" stroke-width="1"/>`;
+      rulesHtml += `<line x1="${x0 + b - 0.5}" y1="${y0 - 132}" x2="${x0 + b - 0.5}" y2="${y0 + gridSpan + 48}" stroke="var(--bok-line-strong)" stroke-width="1"/>`;
+    }
+
+    // Row and column headers + marginal bars.
+    let headersHtml = '';
+    for (let i = 0; i < orderedAreas.length; i++) {
+      const a = orderedAreas[i];
+      const p = pos[i];
+      const fullLbl = a.display_label || a.label;
+      const isRowSel = (sel?.kind === 'pair' && sel.fromArea === a.id) || (sel?.kind === 'area' && sel.id === a.id);
+      const isColSel = (sel?.kind === 'pair' && sel.toArea === a.id) || (sel?.kind === 'area' && sel.id === a.id);
+      const rTot = rowTotals.get(a.id) || 0;
+      const cTot = colTotals.get(a.id) || 0;
+      const rBarW = Math.round((rTot / maxMarginal) * 38);
+      const cBarH = Math.round((cTot / maxMarginal) * 28);
+
+      headersHtml += `<g class="viz-dsm-label${isRowSel ? ' is-selected' : ''}" data-dsm-area="${esc(a.id)}">
+        <text x="${x0 - 8}" y="${y0 + p + 14}" text-anchor="end"><tspan style="font-weight:700">${esc(a.code)}</tspan> <tspan style="font-family:Inter,sans-serif;font-size:9px;fill:var(--bok-muted)">${esc(fullLbl)}</tspan></text>
+      </g>`;
+      headersHtml += `<g class="viz-dsm-label${isColSel ? ' is-selected' : ''}" data-dsm-area="${esc(a.id)}" transform="translate(${x0 + p + 14},${y0 - 8}) rotate(-90)">
+        <text x="0" y="0" text-anchor="start"><tspan style="font-weight:700">${esc(a.code)}</tspan> <tspan style="font-family:Inter,sans-serif;font-size:8.5px;fill:var(--bok-muted)">${esc(fullLbl)}</tspan></text>
+      </g>`;
+      // Marginal bars: right (outgoing cross-area) and bottom (incoming cross-area)
+      headersHtml += `<rect x="${x0 + gridSpan + 8}" y="${y0 + p + 6}" width="${rBarW}" height="8" fill="var(--bok-ink)" fill-opacity="0.32"><title>${esc(a.code)} outgoing to other areas: ${rTot}</title></rect>`;
+      headersHtml += `<text x="${x0 + gridSpan + 12 + rBarW}" y="${y0 + p + 13.5}" class="bok-svg-mono" style="font-size:8px;fill:var(--bok-faint)">${rTot}</text>`;
+      headersHtml += `<rect x="${x0 + p + 6}" y="${y0 + gridSpan + 8}" width="8" height="${cBarH}" fill="var(--bok-ink)" fill-opacity="0.32"><title>${esc(a.code)} incoming from other areas: ${cTot}</title></rect>`;
+      headersHtml += `<text x="${x0 + p + 10}" y="${y0 + gridSpan + 18 + cBarH}" text-anchor="middle" class="bok-svg-mono" style="font-size:7.5px;fill:var(--bok-faint)">${cTot}</text>`;
+    }
+
+    stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="dsm-title dsm-desc">
+      <title id="dsm-title">20 by 20 Area Design Structure Matrix</title>
+      <desc id="dsm-desc">Rows represent source areas and columns represent target areas across ${rels.length} propositions.</desc>
+      <defs>
+        <pattern id="bok-dsm-hatch" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="var(--bok-ink)" stroke-width="1" stroke-opacity="0.22"/>
+        </pattern>
+      </defs>
+      <text x="${x0 - 8}" y="${y0 - 10}" text-anchor="end" class="bok-svg-mono" style="font-size:9px;fill:var(--bok-faint)">row → col</text>
+      <text x="${x0 + gridSpan + 8}" y="${y0 - 10}" text-anchor="start" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">Out</text>
+      <text x="${x0 - 8}" y="${y0 + gridSpan + 18}" text-anchor="end" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">In</text>
+      <g>${rulesHtml}</g>
+      <g>${cellsHtml}</g>
+      <g>${headersHtml}</g>
+    </svg>`;
+  }
+
+  function renderCouplingPanel(panelEl) {
+    const rels = filteredRelationships();
+    const sel = state.couplingSel;
+    const famLabel = REL_FAMILIES.find(([k]) => k === state.couplingFamily)?.[1] || 'All relationships';
+
+    const formatProp = (rel) => {
+      const uSubj = homeOf.get(rel.source);
+      const vSubj = homeOf.get(rel.target);
+      const vText = relations.get(rel.relation)?.forward || rel.predicate;
+      return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(vText)}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
+    };
+
+    if (!sel) {
+      // Compute top cross-area couplings for default overview.
+      const areaPairs = new Map();
+      let crossAreaTotal = 0, intraAreaTotal = 0;
+      for (const rel of rels) {
+        const u = homeOf.get(rel.source), v = homeOf.get(rel.target);
+        if (!u || !v) continue;
+        const ua = areaOf.get(u.id), va = areaOf.get(v.id);
+        if (!ua || !va) continue;
+        if (ua.id === va.id) intraAreaTotal++;
+        else {
+          crossAreaTotal++;
+          const k = `${ua.id}__${va.id}`;
+          areaPairs.set(k, (areaPairs.get(k) || 0) + 1);
+        }
+      }
+      const topPairs = [...areaPairs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+      panelEl.innerHTML = `<div class="bok-viz-panel-head">
+        <div>
+          <div class="bok-viz-panel-title">${esc(famLabel)}</div>
+          <p class="bok-viz-panel-sub">${rels.length} propositions · ${crossAreaTotal} cross-area · ${intraAreaTotal} within-area</p>
+        </div>
+      </div>
+      <div class="bok-viz-prop-group">
+        <p class="bok-viz-prop-label">Strongest cross-area couplings (select to inspect)</p>
+        <div>${topPairs.map(([k, cnt]) => {
+          const [a1Id, a2Id] = k.split('__');
+          const a1 = areas.find((a) => a.id === a1Id), a2 = areas.find((a) => a.id === a2Id);
+          return `<button type="button" class="bok-viz-pair-btn" data-select-pair="${esc(k)}">
+            <span><span class="bok-code">${esc(a1?.code)} → ${esc(a2?.code)}</span>${esc(a1?.display_label || a1?.label)} → ${esc(a2?.display_label || a2?.label)}</span>
+            <span class="bok-mono">${cnt}</span>
+          </button>`;
+        }).join('')}</div>
+      </div>`;
+      return;
+    }
+
+    if (sel.kind === 'pair') {
+      const a1 = areas.find((a) => a.id === sel.fromArea);
+      const a2 = areas.find((a) => a.id === sel.toArea);
+      const forward = [];
+      const reverse = [];
+      for (const rel of rels) {
+        const u = homeOf.get(rel.source), v = homeOf.get(rel.target);
+        if (!u || !v) continue;
+        const ua = areaOf.get(u.id), va = areaOf.get(v.id);
+        if (ua?.id === a1?.id && va?.id === a2?.id) forward.push(rel);
+        if (a1?.id !== a2?.id && ua?.id === a2?.id && va?.id === a1?.id) reverse.push(rel);
+      }
+      panelEl.innerHTML = `<div class="bok-viz-panel-head">
+        <div>
+          <div class="bok-viz-panel-title">${esc(a1?.code)} → ${esc(a2?.code)} · ${esc(a1?.display_label || a1?.label)} → ${esc(a2?.display_label || a2?.label)}</div>
+          <p class="bok-viz-panel-sub">${a1?.id === a2?.id ? `${forward.length} within-area propositions` : `${esc(a1?.code)} → ${esc(a2?.code)}: ${forward.length} · ${esc(a2?.code)} → ${esc(a1?.code)}: ${reverse.length}`}</p>
+        </div>
+        <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
+      </div>
+      ${a1?.id !== a2?.id && reverse.length ? `<p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-select-pair="${esc(a2.id)}__${esc(a1.id)}">Flip direction to ${esc(a2.code)} → ${esc(a1.code)} (${reverse.length})</button></p>` : ''}
+      <div class="bok-viz-prop-group">
+        <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Propositions (${forward.length})</p>
+        ${forward.length ? `<ul class="bok-viz-prop-list">${forward.slice(0, 40).map(formatProp).join('')}</ul>` : '<p class="bok-muted" style="margin-top:4px !important">No propositions in this direction for the current filter.</p>'}
+      </div>`;
+      return;
+    }
+
+    // Subject or Area selection.
+    const isSubj = sel.kind === 'subject';
+    const targetRow = isSubj ? rows.get(sel.id) : null;
+    const targetArea = isSubj ? areaOf.get(sel.id) : areas.find((a) => a.id === sel.id);
+    const subjSet = isSubj ? new Set([sel.id]) : new Set((targetArea?.rows || []).map((r) => r.id));
+    const outProps = [];
+    const inProps = [];
+    for (const rel of rels) {
+      const u = homeOf.get(rel.source), v = homeOf.get(rel.target);
+      if (!u || !v || u.id === v.id) continue;
+      const uIn = subjSet.has(u.id), vIn = subjSet.has(v.id);
+      if (uIn && !vIn) outProps.push(rel);
+      else if (!uIn && vIn) inProps.push(rel);
+    }
+
+    const title = isSubj ? `${targetRow?.code} ${targetRow?.label}` : `${targetArea?.code} ${targetArea?.label}`;
+    const openHref = isSubj ? subjectHref(targetRow) : `#area=${encodeURIComponent(targetArea?.id || '')}`;
+
+    panelEl.innerHTML = `<div class="bok-viz-panel-head">
+      <div>
+        <div class="bok-viz-panel-title">${esc(title)}</div>
+        <p class="bok-viz-panel-sub">${outProps.length} outgoing · ${inProps.length} incoming · <a href="${openHref}" style="text-decoration:underline;font-weight:600">Open page &rarr;</a></p>
+      </div>
+      <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
+    </div>
+    <div class="bok-viz-prop-group">
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Outgoing (${outProps.length}) — acts on other subjects</p>
+      ${outProps.length ? `<ul class="bok-viz-prop-list">${outProps.slice(0, 25).map(formatProp).join('')}</ul>` : '<p class="bok-muted">None in current filter.</p>'}
+    </div>
+    <div class="bok-viz-prop-group">
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-in"></span>Incoming (${inProps.length}) — acted on by other subjects</p>
+      ${inProps.length ? `<ul class="bok-viz-prop-list">${inProps.slice(0, 25).map(formatProp).join('')}</ul>` : '<p class="bok-muted">None in current filter.</p>'}
+    </div>`;
+  }
+
+  function refreshCouplingFigure() {
+    const stageEl = $('bok-coupling-stage');
+    const panelEl = $('bok-coupling-panel');
+    const capEl = $('bok-coupling-caption');
+    if (!stageEl || !panelEl) return;
+    for (const b of document.querySelectorAll('[data-coupling-mode]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.couplingMode === state.couplingMode));
+    }
+    for (const b of document.querySelectorAll('[data-coupling-fam]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.couplingFam === state.couplingFamily));
+    }
+    if (state.couplingMode === 'dsm') {
+      drawCouplingDsm(stageEl);
+      if (capEl) capEl.innerHTML = '<strong>Figure 1b. Cross-area design structure matrix (row = source area, column = target area).</strong> Off-diagonal cell opacity encodes the number of propositions from concepts in the row area to concepts in the column area across five logarithmic bins; diagonal cells (hatched) count propositions within the same area. Marginal bars show total cross-area outgoing (right) and incoming (bottom) couplings. Select any cell to inspect its propositions and directional asymmetry.';
+    } else {
+      drawCouplingWheel(stageEl);
+      if (capEl) capEl.innerHTML = '<strong>Figure 1a. Hierarchical edge bundling of cross-subject relationships across the 5 groups, 20 areas, and 101 subjects (β = 0.85).</strong> Curve width encodes the square root of the proposition count between two subjects. Select any subject or area arc to isolate its outgoing couplings (crimson) and incoming couplings (ink), and read the exact propositions in the panel.';
+    }
+    renderCouplingPanel(panelEl);
+  }
+
   function renderConceptLanding() {
     renderTree(null, null);
     crumbs(['<span aria-current="page">Concept map</span>']);
     const central = [...concepts.keys()].filter((id) => concepts.get(id).scope !== 'background')
       .sort((a, b) => (neighbors.get(b)?.length || 0) - (neighbors.get(a)?.length || 0)).slice(0, 15);
+    const lastVisited = visited.length ? visited[visited.length - 1] : null;
+    const famBtns = REL_FAMILIES.map(([k, lbl]) =>
+      `<button type="button" data-coupling-fam="${esc(k)}" aria-pressed="${String(state.couplingFamily === k)}">${esc(lbl)}</button>`).join('');
+
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head"><div><h2>Concept map</h2>
-      <p class="bok-lead">Every concept has its own page with a map of what acts on it and what it acts on, each link labeled and qualified. Search above, open a concept from any subject, or start with one of the most connected concepts.</p></div></div>
+      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the field coupling figure below to see how the 20 areas and 101 subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
+      ${lastVisited && concepts.has(lastVisited) ? `<p class="bok-text" style="margin-top:0.4rem !important">Recently viewed: ${conceptLink(lastVisited)} &rarr;</p>` : ''}
+      </div></div>
+      <figure class="bok-viz-figure" id="bok-coupling-figure">
+        <div class="bok-viz-bar">
+          <div class="bok-viz-controls">
+            <span class="bok-filter-label">View</span>
+            <div class="bok-viz-seg" role="group" aria-label="Coupling diagram type">
+              <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular bundle (101 subjects)</button>
+              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (20 × 20 DSM)</button>
+            </div>
+          </div>
+          <div class="bok-viz-controls">
+            <span class="bok-filter-label">Relations</span>
+            <div class="bok-viz-seg" role="group" aria-label="Filter by relationship family">${famBtns}</div>
+          </div>
+        </div>
+        <div class="bok-viz-split">
+          <div class="bok-viz-stage" id="bok-coupling-stage"></div>
+          <div class="bok-viz-panel" id="bok-coupling-panel" role="region" aria-label="Selected coupling propositions" aria-live="polite"></div>
+        </div>
+        <figcaption class="bok-viz-caption" id="bok-coupling-caption"></figcaption>
+      </figure>
       ${conceptTable(central, 'Most connected concepts')}`;
+    refreshCouplingFigure();
   }
 
   // ------------------------------------------------------------------ glossary
@@ -489,25 +1236,540 @@
       }).join('')}</tbody>`).join('')}</table>`;
   }
 
+  // ------------------------------------------------ guides & flow diagrams
+  function sankeyRibbon(x0, y0, x1, y1, h0, h1) {
+    const mx = (x0 + x1) / 2;
+    return `M${x0.toFixed(1)},${y0.toFixed(1)} C${mx.toFixed(1)},${y0.toFixed(1)} ${mx.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)} L${x1.toFixed(1)},${(y1 + h1).toFixed(1)} C${mx.toFixed(1)},${(y1 + h1).toFixed(1)} ${mx.toFixed(1)},${(y0 + h0).toFixed(1)} ${x0.toFixed(1)},${(y0 + h0).toFixed(1)} Z`;
+  }
+
+  function drawRoleSankey() {
+    const stage = $('bok-role-sankey-stage');
+    const bar = $('bok-role-sankey-status');
+    if (!stage) return;
+    const g = data.framework.guides || { roles: [] };
+    const { orderedGroups, orderedAreas } = canonicalOrder();
+    const areaIndex = new Map(orderedAreas.map((a, i) => [a.id, i]));
+
+    // Order roles by weighted barycenter across areas (Core = 2, Working = 1).
+    const rolesOrdered = [...(g.roles || [])].map((r) => {
+      let wSum = 0, idxSum = 0;
+      for (const sid of r.core || []) {
+        const a = areaOf.get(sid);
+        if (a && areaIndex.has(a.id)) { wSum += 2; idxSum += 2 * areaIndex.get(a.id); }
+      }
+      for (const sid of r.working || []) {
+        const a = areaOf.get(sid);
+        if (a && areaIndex.has(a.id)) { wSum += 1; idxSum += 1 * areaIndex.get(a.id); }
+      }
+      return { role: r, totalW: wSum || 1, bary: wSum ? idxSum / wSum : 0 };
+    }).sort((a, b) => a.bary - b.bary);
+
+    // Compute weights for Role -> Group and Group -> Area.
+    const rgLinks = [];
+    const gaMap = new Map();
+    const groupW = new Map(orderedGroups.map((gr) => [gr.id, 0]));
+    const areaW = new Map(orderedAreas.map((ar) => [ar.id, 0]));
+
+    for (const { role } of rolesOrdered) {
+      const byGrp = new Map();
+      const addSubj = (sid, kind, w) => {
+        const a = areaOf.get(sid);
+        if (!a) return;
+        groupW.set(a.group, (groupW.get(a.group) || 0) + w);
+        areaW.set(a.id, (areaW.get(a.id) || 0) + w);
+        const gk = `${a.group}__${kind}`;
+        byGrp.set(gk, (byGrp.get(gk) || 0) + w);
+        const gak = `${role.id}__${a.group}__${a.id}__${kind}`;
+        gaMap.set(gak, (gaMap.get(gak) || 0) + w);
+      };
+      for (const sid of role.core || []) addSubj(sid, 'core', 2);
+      for (const sid of role.working || []) addSubj(sid, 'working', 1);
+      for (const gr of orderedGroups) {
+        for (const kind of ['core', 'working']) {
+          const w = byGrp.get(`${gr.id}__${kind}`) || 0;
+          if (w > 0) rgLinks.push({ roleId: role.id, groupId: gr.id, kind, w });
+        }
+      }
+    }
+
+    const totalWeight = [...groupW.values()].reduce((a, b) => a + b, 0) || 1;
+    const W = 920, H = 620;
+    const topY = 22, botY = H - 18;
+    const availH = botY - topY;
+    const xRole = 238, xGrp = 472, xArea = 700;
+    const barW = 3;
+
+    const layoutCol = (items, getW, pad, minH = 5) => {
+      const n = items.length;
+      const totPad = pad * (n - 1);
+      const rawHeights = items.map((it) => Math.max(minH, getW(it) * ((availH - totPad) / totalWeight)));
+      const rawSum = rawHeights.reduce((a, b) => a + b, 0) || 1;
+      const factor = (availH - totPad) / rawSum;
+      let y = topY;
+      const boxes = new Map();
+      items.forEach((it, idx) => {
+        const h = Math.max(minH, rawHeights[idx] * factor);
+        boxes.set(it.id, { y, h, inY: y, outY: y, item: it });
+        y += h + pad;
+      });
+      return { boxes };
+    };
+
+    const roleCol = layoutCol(rolesOrdered.map((x) => ({ id: x.role.id, label: x.role.label, w: x.totalW, role: x.role })), (x) => x.w, 10, 9);
+    const grpCol = layoutCol(orderedGroups.map((gr) => ({ id: gr.id, label: gr.label, code: gr.code, w: groupW.get(gr.id) || 1 })), (x) => x.w, 20, 14);
+    const areaCol = layoutCol(orderedAreas.map((ar) => ({ id: ar.id, label: ar.display_label || ar.label, code: ar.code, w: areaW.get(ar.id) || 1 })), (x) => x.w, 8, 8);
+
+    const activeRole = state.activeRole;
+    const activeArea = state.activeAreaRole;
+
+    // Build Role -> Group ribbons.
+    let ribbonsHtml = '';
+    for (const lnk of rgLinks) {
+      const rBox = roleCol.boxes.get(lnk.roleId);
+      const gBox = grpCol.boxes.get(lnk.groupId);
+      const h0 = (lnk.w / rBox.item.w) * rBox.h;
+      const h1 = (lnk.w / gBox.item.w) * gBox.h;
+      const d = sankeyRibbon(xRole + barW, rBox.outY, xGrp, gBox.inY, h0, h1);
+      rBox.outY += h0;
+      gBox.inY += h1;
+      let cls = `viz-ribbon${lnk.kind === 'working' ? ' is-working' : ''}`;
+      if (activeRole) cls += lnk.roleId === activeRole ? ' is-active' : ' is-dim';
+      else if (activeArea) {
+        const hasAreaLink = (gaMap.get(`${lnk.roleId}__${lnk.groupId}__${activeArea}__${lnk.kind}`) || 0) > 0;
+        cls += hasAreaLink ? ' is-active' : ' is-dim';
+      }
+      ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+    }
+
+    // Build Group -> Area ribbons (stacked by canonical area order, then role order).
+    for (const gr of orderedGroups) {
+      const gBox = grpCol.boxes.get(gr.id);
+      for (const ar of orderedAreas.filter((a) => a.group === gr.id)) {
+        const aBox = areaCol.boxes.get(ar.id);
+        for (const { role } of rolesOrdered) {
+          for (const kind of ['core', 'working']) {
+            const w = gaMap.get(`${role.id}__${gr.id}__${ar.id}__${kind}`) || 0;
+            if (!w) continue;
+            const h0 = (w / gBox.item.w) * gBox.h;
+            const h1 = (w / aBox.item.w) * aBox.h;
+            const d = sankeyRibbon(xGrp + barW, gBox.outY, xArea, aBox.inY, h0, h1);
+            gBox.outY += h0;
+            aBox.inY += h1;
+            let cls = `viz-ribbon${kind === 'working' ? ' is-working' : ''}`;
+            if (activeRole) cls += role.id === activeRole ? ' is-active' : ' is-dim';
+            else if (activeArea) cls += ar.id === activeArea ? ' is-active' : ' is-dim';
+            ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(role.id)}" data-sankey-area="${esc(ar.id)}"/>`;
+          }
+        }
+      }
+    }
+
+    let nodesHtml = `<text x="${xRole}" y="12" text-anchor="end" class="bok-svg-group-label">Roles (11)</text>
+      <text x="${xGrp + 1.5}" y="12" text-anchor="middle" class="bok-svg-group-label">Groups (5)</text>
+      <text x="${xArea + barW}" y="12" text-anchor="start" class="bok-svg-group-label">Taxonomy Areas (20)</text>`;
+
+    for (const [id, b] of roleCol.boxes) {
+      const isSel = activeRole === id;
+      const cy = b.y + b.h / 2;
+      nodesHtml += `<g class="viz-interactive" data-sankey-role="${esc(id)}" role="button" tabindex="0" aria-label="Role ${esc(b.item.label)}">
+        <rect x="${xRole}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
+        <text x="${xRole - 8}" y="${(cy + 3.5).toFixed(1)}" text-anchor="end" class="bok-svg-label" style="font-weight:${isSel ? '700' : '500'};fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">${esc(b.item.label)}</text>
+      </g>`;
+    }
+    for (const [, b] of grpCol.boxes) {
+      const cy = b.y + b.h / 2;
+      nodesHtml += `<g>
+        <rect x="${xGrp}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="var(--bok-ink)"/>
+        <text x="${xGrp - 7}" y="${(cy + 3.5).toFixed(1)}" text-anchor="end" class="bok-svg-group-label" style="fill:var(--bok-ink);paint-order:stroke;stroke:var(--bok-surface);stroke-width:4px;stroke-linejoin:round">${esc(b.item.label)}</text>
+      </g>`;
+    }
+    for (const [id, b] of areaCol.boxes) {
+      const isSel = activeArea === id;
+      const cy = b.y + b.h / 2;
+      nodesHtml += `<g class="viz-interactive" data-sankey-area="${esc(id)}" role="button" tabindex="0" aria-label="Area ${esc(b.item.code)} ${esc(b.item.label)}">
+        <rect x="${xArea}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
+        <text x="${xArea + barW + 7}" y="${(cy + 3.2).toFixed(1)}" text-anchor="start" class="bok-svg-label" style="font-size:10px;font-weight:${isSel ? '700' : '400'};fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">
+          <tspan class="bok-svg-mono" style="font-weight:700;fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">${esc(b.item.code)}</tspan> ${esc(b.item.label)}
+        </text>
+      </g>`;
+    }
+
+    stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="sankey-title sankey-desc">
+      <title id="sankey-title">Alluvial diagram mapping 11 ML systems roles across 5 groups and 20 areas</title>
+      <desc id="sankey-desc">Shows how core (weight 2) and working (weight 1) subject requirements distribute across the taxonomy for each role.</desc>
+      <g>${ribbonsHtml}</g>
+      <g>${nodesHtml}</g>
+    </svg>`;
+
+    if (bar) {
+      if (activeRole) {
+        const r = (g.roles || []).find((x) => x.id === activeRole);
+        bar.innerHTML = `<span>Selected role: <strong>${esc(r?.label || activeRole)}</strong> (${(r?.core || []).length} core, ${(r?.working || []).length} working subjects)</span>
+          <span><a href="#overlay=role:${esc(activeRole)}" class="bok-viz-clear" style="margin-right:12px">Highlight on Matrix &nearr;</a><button type="button" class="bok-viz-clear" data-clear-sankey="1">Clear selection</button></span>`;
+      } else if (activeArea) {
+        const a = areas.find((x) => x.id === activeArea);
+        bar.innerHTML = `<span>Selected area: <strong>${esc(a?.code)} ${esc(a?.label)}</strong> — highlighting roles that require subjects in this area</span>
+          <button type="button" class="bok-viz-clear" data-clear-sankey="1">Clear selection</button>`;
+      } else {
+        bar.innerHTML = `<span>Select any <strong>role</strong> on the left or <strong>area</strong> on the right to isolate its footprint across the taxonomy.</span>`;
+      }
+    }
+  }
+
+  function drawSymptomFlow() {
+    const stage = $('bok-symptom-stage');
+    const detailEl = $('bok-symptom-detail');
+    if (!stage) return;
+    const g = data.framework.guides || { symptoms: [] };
+    const symptoms = g.symptoms || [];
+    if (!symptoms.length) return;
+    const symId = state.activeSymptom || symptoms[0].id;
+    state.activeSymptom = symId;
+    const sym = symptoms.find((s) => s.id === symId) || symptoms[0];
+
+    const selEl = $('bok-symptom-select');
+    if (selEl && selEl.value !== sym.id) selEl.value = sym.id;
+    for (const b of document.querySelectorAll('[data-symptom-pick]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.symptomPick === sym.id));
+    }
+
+    const kList = [...(sym.checks || [])];
+    const cList = [...(sym.causes || [])];
+    const lList = [...(sym.levers || [])];
+    const kSet = new Set(kList), cSet = new Set(cList), lSet = new Set(lList);
+    const allSet = new Set([...kList, ...cList, ...lList]);
+
+    const directEdges = (data.relationships || []).filter((r) => allSet.has(r.source) && allSet.has(r.target));
+
+    // Order Causes by connectivity, then order Checks and Levers by barycenter against Causes.
+    const cPos = new Map(cList.map((id, i) => [id, i]));
+    const orderByCauses = (list) => [...list].sort((a, b) => {
+      const bary = (id) => {
+        const hits = directEdges.filter((r) => (r.source === id && cSet.has(r.target)) || (r.target === id && cSet.has(r.source)));
+        if (!hits.length) return 99;
+        return hits.reduce((acc, r) => acc + (cPos.get(cSet.has(r.source) ? r.source : r.target) ?? 0), 0) / hits.length;
+      };
+      return bary(a) - bary(b);
+    });
+    const orderedK = orderByCauses(kList);
+    const orderedC = cList;
+    const orderedL = orderByCauses(lList);
+
+    const maxRows = Math.max(orderedK.length, orderedC.length, orderedL.length, 3);
+    const rowStep = 46;
+    const topPad = 46;
+    const H = Math.max(250, topPad + maxRows * rowStep + 22);
+    const W = 920;
+
+    const colX = { K: 22, C: 338, L: 654 };
+    const colW = 244;
+    const nodeCoords = new Map();
+
+    const placeCol = (items, colKey) => {
+      const startY = topPad + 14;
+      items.forEach((id, i) => {
+        nodeCoords.set(id, { x: colX[colKey], y: startY + i * rowStep, col: colKey, idx: i });
+      });
+    };
+    placeCol(orderedK, 'K');
+    placeCol(orderedC, 'C');
+    placeCol(orderedL, 'L');
+
+    // Identify which nodes in Column C are measured directly by a Check (symptom metric vs root cause).
+    const measuredByCheck = new Set();
+    for (const r of directEdges) {
+      if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
+      if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
+    }
+
+    // Determine active node and its connected component within this symptom.
+    const activeNode = state.activeDiagNode && allSet.has(state.activeDiagNode) ? state.activeDiagNode : null;
+    const activeEdges = [];
+    const activeNeighbors = new Set();
+    if (activeNode) {
+      activeNeighbors.add(activeNode);
+      // 2-hop reachability across the symptom graph so clicking a Check traces through Cause to Lever!
+      for (const r1 of directEdges) {
+        if (r1.source === activeNode || r1.target === activeNode) {
+          const mid = r1.source === activeNode ? r1.target : r1.source;
+          activeNeighbors.add(mid);
+          for (const r2 of directEdges) {
+            if (r2.source === mid || r2.target === mid) {
+              activeNeighbors.add(r2.source);
+              activeNeighbors.add(r2.target);
+            }
+          }
+        }
+      }
+    }
+
+    // Compute per-port vertical offsets so multiple curves at the same box side fan out cleanly.
+    const portSlots = new Map();
+    for (const rel of directEdges) {
+      const u = nodeCoords.get(rel.source), v = nodeCoords.get(rel.target);
+      if (!u || !v || u.col === v.col) continue;
+      const uSide = u.x < v.x ? 'R' : 'L';
+      const vSide = u.x < v.x ? 'L' : 'R';
+      push(portSlots, `${rel.source}__${uSide}`, { rel, otherY: v.y });
+      push(portSlots, `${rel.target}__${vSide}`, { rel, otherY: u.y });
+    }
+    const portOffset = new Map();
+    for (const [pk, list] of portSlots) {
+      list.sort((a, b) => a.otherY - b.otherY);
+      list.forEach((item, idx) => {
+        const off = (idx - (list.length - 1) / 2) * 4.2;
+        portOffset.set(`${pk}__${item.rel.source}__${item.rel.target}__${item.rel.relation}`, off);
+      });
+    }
+
+    let edgesHtml = '';
+    let verbLabelsHtml = '';
+    const placedVerbs = [];
+    const activeVerbGroups = new Map();
+    for (const rel of directEdges) {
+      const u = nodeCoords.get(rel.source);
+      const v = nodeCoords.get(rel.target);
+      if (!u || !v) continue;
+      const isEdgeActive = activeNode && activeNeighbors.has(rel.source) && activeNeighbors.has(rel.target) &&
+        (rel.source === activeNode || rel.target === activeNode || cSet.has(rel.source) || cSet.has(rel.target));
+      if (isEdgeActive) activeEdges.push(rel);
+
+      const isLeverEdge = lSet.has(rel.source) || lSet.has(rel.target);
+      const sameCol = u.col === v.col;
+      let d = '';
+      let vx = 0, vy = 0;
+      if (sameCol) {
+        const sideX = u.col === 'L' ? u.x + colW + 22 : u.x - 22;
+        const anchorX = u.col === 'L' ? u.x + colW : u.x;
+        vx = sideX;
+        vy = (u.y + v.y) / 2;
+        d = `M${anchorX},${u.y} Q${sideX},${vy} ${anchorX},${v.y}`;
+      } else {
+        const leftFirst = u.x < v.x;
+        const uSide = leftFirst ? 'R' : 'L';
+        const vSide = leftFirst ? 'L' : 'R';
+        const uOff = portOffset.get(`${rel.source}__${uSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
+        const vOff = portOffset.get(`${rel.target}__${vSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
+        const x1 = leftFirst ? u.x + colW : u.x;
+        const y1 = u.y + uOff;
+        const x2 = leftFirst ? v.x : v.x + colW;
+        const y2 = v.y + vOff;
+        const mx = (x1 + x2) / 2;
+        d = `M${x1.toFixed(1)},${y1.toFixed(1)} C${mx.toFixed(1)},${y1.toFixed(1)} ${mx.toFixed(1)},${y2.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`;
+        vx = mx;
+        vy = (y1 + y2) / 2 - 2;
+      }
+      const cls = [
+        'viz-diag-edge',
+        isLeverEdge ? 'is-lever' : '',
+        sameCol ? 'is-causal' : '',
+        activeNode ? (isEdgeActive ? 'is-active' : 'is-dim') : '',
+      ].filter(Boolean).join(' ');
+      const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+      edgesHtml += `<path class="${cls}" d="${d}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
+      if (isEdgeActive && !sameCol) {
+        // Group identical verbs sharing the same column pair & hub node so a 7-edge fan gets 1 clean label at its median curve.
+        const hubId = cSet.has(rel.source) ? rel.source : rel.target;
+        const gk = `${u.col}__${v.col}__${hubId}__${vStr}`;
+        push(activeVerbGroups, gk, { vx, vy, vStr });
+      }
+    }
+    for (const grp of activeVerbGroups.values()) {
+      grp.sort((a, b) => a.vy - b.vy);
+      const mid = grp[Math.floor(grp.length / 2)];
+      const labelStr = grp.length > 1 ? `${mid.vStr} (×${grp.length})` : mid.vStr;
+      let vx = mid.vx, vy = mid.vy;
+      while (placedVerbs.some((p) => Math.abs(p.x - vx) < 64 && Math.abs(p.y - vy) < 14)) {
+        vy += 14;
+      }
+      placedVerbs.push({ x: vx, y: vy });
+      const boxW = Math.max(52, labelStr.length * 5.3 + 10);
+      verbLabelsHtml += `<g transform="translate(${vx.toFixed(1)},${vy.toFixed(1)})">
+        <rect x="${(-boxW / 2).toFixed(1)}" y="-9" width="${boxW.toFixed(1)}" height="12" rx="2" fill="var(--bok-surface)" fill-opacity="0.94"/>
+        <text x="0" y="0" text-anchor="middle" font-size="9" font-style="italic" fill="var(--bok-accent)" font-weight="600">${esc(labelStr)}</text>
+      </g>`;
+    }
+
+    let nodesHtml = `
+      <text x="${colX.K}" y="18" class="bok-svg-group-label">1. What to check (${orderedK.length})</text>
+      <text x="${colX.C}" y="18" class="bok-svg-group-label">2. Symptom metric &amp; likely causes (${orderedC.length})</text>
+      <text x="${colX.L}" y="18" class="bok-svg-group-label">3. What to change (${orderedL.length})</text>
+      <g transform="translate(${colX.L}, 33)" aria-hidden="true">
+        <line x1="0" y1="-3" x2="16" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4"/>
+        <text x="20" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">measures / causes</text>
+        <line x1="108" y1="-3" x2="124" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4" stroke-dasharray="4 2.5"/>
+        <text x="128" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">reduces / mitigates</text>
+      </g>`;
+
+    for (const [id, pt] of nodeCoords) {
+      const c = concepts.get(id);
+      const r = homeOf.get(id);
+      const lbl = c?.label || id;
+      const shortLbl = lbl.length > 32 ? lbl.slice(0, 31) + '…' : lbl;
+      const subjShort = r?.display_label || r?.label || '';
+      const metricTag = pt.col === 'C' && measuredByCheck.has(id) && orderedC.indexOf(id) === 0 ? ' · Metric' : '';
+      const isAct = activeNode === id;
+      const isNbr = activeNeighbors.has(id);
+      const isDim = activeNode && !isNbr;
+      const cls = ['viz-diag-node', isAct || isNbr ? 'is-active' : '', isDim ? 'is-dim' : ''].filter(Boolean).join(' ');
+      nodesHtml += `<g class="${cls}" data-diag-node="${esc(id)}" transform="translate(${pt.x},${pt.y - 16})" role="button" tabindex="0" aria-label="${esc(lbl)}">
+        <rect x="0" y="0" width="${colW}" height="32" rx="2" fill="var(--bok-surface)" stroke="${isAct ? 'var(--bok-accent)' : 'var(--bok-line)'}" stroke-width="${isAct ? '1.5' : '1'}"/>
+        <rect class="viz-diag-tick" x="0" y="0" width="3" height="32" fill="${isAct || isNbr ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
+        <text x="10" y="12" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">${esc(r?.code || '')} · ${esc(subjShort)}${esc(metricTag)}</text>
+        <text class="viz-diag-title bok-svg-label" x="10" y="25" style="font-size:10.5px;font-weight:${isAct ? '700' : '500'}">${esc(shortLbl)}</text>
+      </g>`;
+    }
+
+    stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="diag-title diag-desc">
+      <title id="diag-title">Diagnostic triage graph for ${esc(sym.label)}</title>
+      <desc id="diag-desc">Connects ${orderedK.length} diagnostic checks, ${orderedC.length} likely causes, and ${orderedL.length} mitigation levers via ${directEdges.length} graph propositions.</desc>
+      <g>${edgesHtml}</g>
+      <g>${nodesHtml}</g>
+      <g>${verbLabelsHtml}</g>
+    </svg>`;
+
+    if (detailEl) {
+      const shownEdges = activeNode ? activeEdges : directEdges;
+      const headerText = activeNode
+        ? `<span>Showing chain for <strong>${conceptLink(activeNode)}</strong> (${shownEdges.length} propositions)</span><button type="button" class="bok-viz-clear" data-clear-diag="1">Show all ${directEdges.length} propositions</button>`
+        : `<span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} graph propositions connecting checks, causes, and levers — select any box above to trace its chain)</span>`;
+      detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">${headerText}</div>
+        <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px;margin-top:6px !important">${shownEdges.map((rel) => {
+          const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+          return `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
+        }).join('')}</ul>`;
+    }
+  }
+
+  function buildPathArcHtml(lp) {
+    const steps = lp.steps || [];
+    const n = steps.length;
+    if (!n) return '';
+    const stepIndex = new Map(steps.map((st, i) => [st.subject, i]));
+    const pairMap = new Map();
+
+    for (const rel of data.relationships || []) {
+      const u = homeOf.get(rel.source);
+      const v = homeOf.get(rel.target);
+      if (!u || !v || u.id === v.id) continue;
+      if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
+      const iu = stepIndex.get(u.id), iv = stepIndex.get(v.id);
+      const a = Math.min(iu, iv), b = Math.max(iu, iv);
+      const key = `${a}__${b}`;
+      if (!pairMap.has(key)) pairMap.set(key, { a, b, count: 0, rels: [] });
+      const entry = pairMap.get(key);
+      entry.count++;
+      entry.rels.push(rel);
+    }
+
+    const W = 920, H = 196;
+    const padX = 48;
+    const baseY = 118;
+    const stepX = (i) => padX + (n > 1 ? (i / (n - 1)) * (W - padX * 2) : (W - padX * 2) / 2);
+
+    let arcsHtml = '';
+    const totalProps = [...pairMap.values()].reduce((s, x) => s + x.count, 0);
+    for (const arc of pairMap.values()) {
+      const x1 = stepX(arc.a), x2 = stepX(arc.b);
+      const span = arc.b - arc.a;
+      const archH = 18 + (span / Math.max(1, n - 1)) * 86;
+      const xm = (x1 + x2) / 2;
+      const ym = baseY - archH * 1.65;
+      const w = Math.min(2.3, 0.75 + Math.sqrt(arc.count) * 0.45).toFixed(2);
+      arcsHtml += `<path class="viz-path-arc" d="M${x1.toFixed(1)},${baseY - 7} Q${xm.toFixed(1)},${ym.toFixed(1)} ${x2.toFixed(1)},${baseY - 7}" stroke-width="${w}" data-arc-a="${arc.a}" data-arc-b="${arc.b}" data-arc-count="${arc.count}"/>`;
+    }
+
+    let stationsHtml = `<line x1="${padX}" y1="${baseY}" x2="${W - padX}" y2="${baseY}" stroke="var(--bok-ink)" stroke-width="1.5"/>`;
+    for (let i = 0; i < n; i++) {
+      const st = steps[i];
+      const r = rows.get(st.subject);
+      const x = stepX(i);
+      const stagger = i % 2 === 1;
+      const lblY = stagger ? baseY + 42 : baseY + 22;
+      const shortName = r?.display_label || r?.label || st.subject;
+      stationsHtml += `<g class="viz-path-station" data-path-id="${esc(lp.id)}" data-station-idx="${i}" role="button" tabindex="0" aria-label="Step ${i + 1}: ${esc(r?.code || '')} ${esc(r?.label || st.subject)}">
+        <line x1="${x.toFixed(1)}" y1="${baseY + 7}" x2="${x.toFixed(1)}" y2="${lblY - 9}" stroke="var(--bok-line-strong)" stroke-width="0.8"/>
+        <circle cx="${x.toFixed(1)}" cy="${baseY}" r="7"/>
+        <text x="${x.toFixed(1)}" y="${baseY + 3}" text-anchor="middle" class="viz-station-num bok-svg-mono" style="font-size:8px;font-weight:700">${i + 1}</text>
+        <text x="${x.toFixed(1)}" y="${lblY}" text-anchor="middle" class="viz-station-code bok-svg-mono" style="font-size:9px;font-weight:700">${esc(r?.code || '')}</text>
+        <text x="${x.toFixed(1)}" y="${lblY + 11}" text-anchor="middle" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-muted)">${esc(shortName)}</text>
+      </g>`;
+    }
+
+    return `<div class="bok-path-viz" data-path-viz="${esc(lp.id)}">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Dependency arc roadmap for ${esc(lp.label)}">
+        <g class="viz-layer-arcs">${arcsHtml}</g>
+        <g class="viz-layer-stations">${stationsHtml}</g>
+      </svg>
+      <p class="bok-path-viz-status" id="path-status-${esc(lp.id)}">
+        <span><strong>Figure.</strong> ${n} ordered subjects connected by ${pairMap.size} cross-step dependency arcs (${totalProps} propositions). Hover or select a station to inspect how earlier steps feed later steps.</span>
+      </p>
+    </div>`;
+  }
+
   // Guides: ways in for a role, a production symptom, or a learning goal. Every
   // entry links to the subject and concept pages; nothing here is a new claim.
   function renderGuides() {
     const g = data.framework.guides || { roles: [], symptoms: [], learning_paths: [] };
+    if (!state.activeSymptom && g.symptoms?.length) state.activeSymptom = g.symptoms[0].id;
     const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
     const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
-    const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span></td>
+    const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span>
+        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
         <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
-    const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span></td>
+    const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span>
+        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span></td>
         <td>${list(s.causes, conceptLink)}</td><td>${list(s.checks, conceptLink)}</td><td>${list(s.levers, conceptLink)}</td></tr>`).join('');
-    const paths = g.learning_paths.map((lp) => `<section class="bok-guide-path" id="guide-path-${esc(lp.id)}"><h4>${esc(lp.label)}</h4><p class="bok-lead">${esc(lp.audience)}</p>
-        <ol>${lp.steps.map((st) => `<li>${subj(st.subject)} <span class="bok-muted">${esc(st.why)}</span></li>`).join('')}</ol></section>`).join('');
+    const paths = g.learning_paths.map((lp) => `<section class="bok-guide-path" id="guide-path-${esc(lp.id)}">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px">
+          <h4>${esc(lp.label)}</h4>
+          <a href="#overlay=path:${esc(lp.id)}" class="bok-viz-clear">Highlight path on Matrix &nearr;</a>
+        </div>
+        <p class="bok-lead">${esc(lp.audience)}</p>
+        ${buildPathArcHtml(lp)}
+        <ol>${lp.steps.map((st, idx) => `<li data-path-step-item="${esc(lp.id)}:${idx}">${subj(st.subject)} <span class="bok-muted">${esc(st.why)}</span></li>`).join('')}</ol></section>`).join('');
+
+    const quickSymptomTabs = [
+      ['ttft-spike', 'TTFT under load'],
+      ['training-oom', 'Training OOM'],
+      ['low-utilization', 'Low GPU utilization'],
+      ['loss-spikes', 'Loss spikes / NaNs'],
+      ['slow-decode', 'Slow token decode'],
+      ['quality-drop', 'Quality drop'],
+      ['runaway-agent', 'Runaway agent'],
+    ].filter(([id]) => g.symptoms.some((s) => s.id === id));
+
     $('bok-guides').innerHTML = `<div class="bok-entry-head"><div><h2>Guides</h2><p class="bok-lead">Ways into the taxonomy for a role, a production symptom, or a learning goal. Each entry links to the subject and concept pages.</p></div></div>
       <nav class="bok-jump" aria-label="Jump to guide"><a href="#view=guides&amp;section=roles">By role</a><a href="#view=guides&amp;section=symptoms">By symptom</a><a href="#view=guides&amp;section=paths">Learning paths</a></nav>
       <h3 id="guide-section-roles">By role</h3><p class="bok-lead">${esc(g.roles_note || '')}</p>
+      <figure class="bok-viz-figure" id="bok-role-sankey-fig">
+        <div class="bok-viz-bar" id="bok-role-sankey-status" style="font-size:0.82rem;color:var(--bok-muted)"></div>
+        <div class="bok-viz-stage" id="bok-role-sankey-stage"></div>
+        <figcaption class="bok-viz-caption"><strong>Figure 2. Role → group → area alluvial distribution.</strong> Core subjects count double and are drawn darker; working-knowledge subjects are lighter. Roles are ordered by vertical barycenter to minimize crossings; areas follow canonical matrix order.</figcaption>
+      </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Role</th><th>Core subjects</th><th>Working knowledge</th></tr></thead><tbody>${roles}</tbody></table>
       <h3 id="guide-section-symptoms">By symptom</h3><p class="bok-lead">${esc(g.symptoms_note || '')}</p>
+      <figure class="bok-viz-figure" id="bok-symptom-flow-fig">
+        <div class="bok-viz-bar">
+          <div class="bok-viz-controls">
+            <label for="bok-symptom-select" class="bok-filter-label">Symptom</label>
+            <select id="bok-symptom-select" style="height:28px;padding:0 10px;border:1px solid var(--bok-line-strong);border-radius:4px;background:var(--bok-surface);color:var(--bok-ink);font:inherit;font-size:0.82rem">
+              ${g.symptoms.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="bok-viz-seg" role="group" aria-label="Common production symptoms">
+            ${quickSymptomTabs.map(([id, tabLbl]) => `<button type="button" data-symptom-pick="${esc(id)}" aria-pressed="${String(state.activeSymptom === id)}">${esc(tabLbl)}</button>`).join('')}
+          </div>
+        </div>
+        <div class="bok-viz-stage" id="bok-symptom-stage"></div>
+        <div id="bok-symptom-detail" class="bok-viz-panel" style="margin-top:10px"></div>
+        <figcaption class="bok-viz-caption"><strong>Figure 3. Three-stage diagnostic triage flow (What to check → Symptom metric &amp; likely causes ← What to change).</strong> Solid curves represent diagnostic measurement or detection relationships; dashed curves represent engineering mitigations and levers. Select any concept box to isolate its action chain.</figcaption>
+      </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Symptom</th><th>Likely causes</th><th>Check</th><th>Change</th></tr></thead><tbody>${symptoms}</tbody></table>
       <h3 id="guide-section-paths">Learning paths</h3><p class="bok-lead">${esc(g.paths_note || '')}</p>${paths}`;
+
+    drawRoleSankey();
+    drawSymptomFlow();
   }
 
   function filterGlossary() {
@@ -601,12 +1863,20 @@
   function restore() {
     const p = new URLSearchParams(location.hash.slice(1));
     const view = p.get('view');
-    // Retired identities redirect to their replacement, so old links keep working.
     const replaced = (data.retired || []).find((r) => r.id === p.get('concept'))?.replaced_by;
     const concept = concepts.has(p.get('concept')) ? p.get('concept') : replaced || null;
     const subject = [p.get('subject'), p.get('row')].find((id) => rows.has(id)) || null;
     const area = areas.some((a) => a.id === p.get('area')) ? p.get('area') : null;
     Object.assign(state, { area, subject, concept, to: concepts.has(p.get('to')) ? p.get('to') : null, term: concepts.has(p.get('term')) ? p.get('term') : null });
+    if (p.get('overlay')) {
+      state.overlay = p.get('overlay');
+      state.pathStep = 0;
+    }
+    if (p.get('role')) state.activeRole = p.get('role');
+    if (p.get('symptom')) {
+      state.activeSymptom = p.get('symptom');
+      state.activeDiagNode = null;
+    }
     const guide = ['role', 'symptom', 'path', 'section'].map((k) => p.get(k) && `${k}-${p.get(k)}`).find(Boolean) || null;
     state.guide = guide;
     if (view === 'guides') state.view = 'guides';
@@ -624,18 +1894,24 @@
     const entry = ['area', 'subject', 'concept', 'landing'].includes(v);
     $('bok-home').hidden = v !== 'home';
     $('bok-entry').hidden = !entry;
+    $('bok-tree').hidden = v === 'landing';
+    $('bok-entry').classList.toggle('is-full', v === 'landing');
     $('bok-glossary').hidden = v !== 'glossary';
     $('bok-guides').hidden = v !== 'guides';
     for (const [tab, views] of [['bok-tab-home', ['home', 'area', 'subject']], ['bok-tab-concept', ['concept', 'landing']], ['bok-tab-guides', ['guides']], ['bok-tab-glossary', ['glossary']]]) {
       if (views.includes(v)) $(tab).setAttribute('aria-current', 'page');
       else $(tab).removeAttribute('aria-current');
     }
-    if (v === 'area') renderArea();
+    if (v === 'home') renderMatrix();
+    else if (v === 'area') renderArea();
     else if (v === 'subject') renderSubject();
     else if (v === 'concept') renderConcept();
     else if (v === 'landing') renderConceptLanding();
     else if (v === 'glossary') filterGlossary();
-    else if (v === 'guides' && !$('bok-guides').innerHTML) renderGuides();
+    else if (v === 'guides') {
+      if (!$('bok-guides').innerHTML) renderGuides();
+      else { drawRoleSankey(); drawSymptomFlow(); }
+    }
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
       : v === 'guides' && state.guide ? document.getElementById(state.guide.startsWith('section-') ? `guide-${state.guide}` : `guide-${state.guide}`) : null;
     if (target) {
@@ -654,9 +1930,46 @@
     document.body.classList.remove('bok-printing');
   }
 
+  function highlightPathStation(pathId, stationIdx) {
+    const container = document.querySelector(`[data-path-viz="${pathId}"]`);
+    if (!container) return;
+    const g = data.framework.guides || { learning_paths: [] };
+    const lp = (g.learning_paths || []).find((p) => p.id === pathId);
+    if (!lp) return;
+
+    for (const stEl of container.querySelectorAll('.viz-path-station')) {
+      stEl.classList.toggle('is-active', Number(stEl.dataset.stationIdx) === stationIdx);
+    }
+    let inCount = 0, outCount = 0;
+    const inCodes = [], outCodes = [];
+    for (const arcEl of container.querySelectorAll('.viz-path-arc')) {
+      const a = Number(arcEl.dataset.arcA), b = Number(arcEl.dataset.arcB), cnt = Number(arcEl.dataset.arcCount);
+      arcEl.classList.remove('is-in', 'is-out', 'is-dim');
+      if (stationIdx === null) continue;
+      if (b === stationIdx) {
+        arcEl.classList.add('is-in');
+        inCount += cnt;
+        inCodes.push(rows.get(lp.steps[a]?.subject)?.code || `Step ${a + 1}`);
+      } else if (a === stationIdx) {
+        arcEl.classList.add('is-out');
+        outCount += cnt;
+        outCodes.push(rows.get(lp.steps[b]?.subject)?.code || `Step ${b + 1}`);
+      } else {
+        arcEl.classList.add('is-dim');
+      }
+    }
+    const statusEl = $(`path-status-${pathId}`);
+    if (statusEl && stationIdx !== null) {
+      const st = lp.steps[stationIdx];
+      const r = rows.get(st?.subject);
+      const inStr = inCodes.length ? `builds on ${inCodes.join(', ')} (${inCount} propositions)` : 'entry point (no earlier step dependencies)';
+      const outStr = outCodes.length ? `feeds ${outCodes.join(', ')} (${outCount} propositions)` : 'terminal step in path';
+      statusEl.innerHTML = `<span><strong>Step ${stationIdx + 1} (${esc(r?.code || '')} ${esc(r?.display_label || r?.label || '')}):</strong> ${esc(inStr)} · ${esc(outStr)}</span>`;
+    }
+  }
+
   function bind() {
     window.addEventListener('hashchange', restore);
-    // "Ways to use it": a lens example turns that highlight on in the matrix.
     document.querySelectorAll('[data-try-lens]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       if (location.hash) location.hash = '';
@@ -665,16 +1978,37 @@
       $('bok-matrix').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
     $('bok-tab-home').addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', location.pathname + location.search); restore(); });
-    $('bok-tab-concept').addEventListener('click', (e) => {
-      if (!visited.length) return;
-      e.preventDefault();
-      location.hash = conceptHref(visited[visited.length - 1]);
-    });
     $('bok-lenses').addEventListener('click', (e) => {
       const button = e.target.closest('button[data-lens]');
       if (!button) return;
       state.lens = state.lens === button.dataset.lens ? null : button.dataset.lens;
       renderMatrix();
+    });
+    $('bok-overlays')?.addEventListener('change', (e) => {
+      if (e.target.id !== 'bok-overlay-select') return;
+      state.overlay = e.target.value || null;
+      state.pathStep = 0;
+      renderMatrix();
+    });
+    $('bok-overlay-banner')?.addEventListener('click', (e) => {
+      if (e.target.closest('[data-clear-overlay]')) {
+        state.overlay = null;
+        state.pathStep = 0;
+        if (location.hash.startsWith('#overlay=')) history.pushState(null, '', location.pathname + location.search);
+        renderMatrix();
+        return;
+      }
+      const stepBtn = e.target.closest('[data-path-step]');
+      if (stepBtn) {
+        state.pathStep = Number(stepBtn.dataset.pathStep);
+        renderMatrix();
+        return;
+      }
+      const deltaBtn = e.target.closest('[data-step-delta]');
+      if (deltaBtn) {
+        state.pathStep = Math.max(0, state.pathStep + Number(deltaBtn.dataset.stepDelta));
+        renderMatrix();
+      }
     });
     $('bok-show-concepts').addEventListener('click', () => { state.showConcepts = !state.showConcepts; renderMatrix(); });
     $('bok-gloss-filter').addEventListener('input', filterGlossary);
@@ -682,9 +2016,133 @@
     $('bok-print').addEventListener('click', (e) => { e.preventDefault(); printOutline(); });
     document.addEventListener('click', (e) => {
       const letter = e.target.closest('a[data-letter]');
-      if (!letter) return;
-      e.preventDefault();
-      document.getElementById(`letter-${letter.dataset.letter}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (letter) {
+        e.preventDefault();
+        document.getElementById(`letter-${letter.dataset.letter}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+      }
+      // Coupling figure interactions
+      const modeBtn = e.target.closest('[data-coupling-mode]');
+      if (modeBtn) {
+        state.couplingMode = modeBtn.dataset.couplingMode;
+        refreshCouplingFigure();
+        return;
+      }
+      const famBtn = e.target.closest('[data-coupling-fam]');
+      if (famBtn) {
+        state.couplingFamily = famBtn.dataset.couplingFam;
+        refreshCouplingFigure();
+        return;
+      }
+      if (e.target.closest('[data-clear-coupling]')) {
+        state.couplingSel = null;
+        refreshCouplingFigure();
+        return;
+      }
+      const pairBtn = e.target.closest('[data-select-pair]');
+      if (pairBtn) {
+        const [fromArea, toArea] = pairBtn.dataset.selectPair.split('__');
+        state.couplingSel = { kind: 'pair', fromArea, toArea };
+        refreshCouplingFigure();
+        return;
+      }
+      const wheelSubj = e.target.closest('[data-wheel-subj]');
+      if (wheelSubj) {
+        const id = wheelSubj.dataset.wheelSubj;
+        state.couplingSel = state.couplingSel?.kind === 'subject' && state.couplingSel.id === id ? null : { kind: 'subject', id };
+        refreshCouplingFigure();
+        return;
+      }
+      const wheelArea = e.target.closest('[data-wheel-area]');
+      if (wheelArea) {
+        const id = wheelArea.dataset.wheelArea;
+        state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
+        refreshCouplingFigure();
+        return;
+      }
+      const dsmCell = e.target.closest('[data-dsm-from]');
+      if (dsmCell) {
+        const fromArea = dsmCell.dataset.dsmFrom, toArea = dsmCell.dataset.dsmTo;
+        state.couplingSel = state.couplingSel?.kind === 'pair' && state.couplingSel.fromArea === fromArea && state.couplingSel.toArea === toArea
+          ? null : { kind: 'pair', fromArea, toArea };
+        refreshCouplingFigure();
+        return;
+      }
+      const dsmArea = e.target.closest('[data-dsm-area]');
+      if (dsmArea) {
+        const id = dsmArea.dataset.dsmArea;
+        state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
+        refreshCouplingFigure();
+        return;
+      }
+      // Guides: Role Sankey interactions
+      const sankeyRole = e.target.closest('[data-sankey-role]');
+      if (sankeyRole) {
+        const id = sankeyRole.dataset.sankeyRole;
+        state.activeRole = state.activeRole === id ? null : id;
+        state.activeAreaRole = null;
+        drawRoleSankey();
+        return;
+      }
+      const pickRole = e.target.closest('[data-pick-role]');
+      if (pickRole) {
+        state.activeRole = pickRole.dataset.pickRole;
+        state.activeAreaRole = null;
+        drawRoleSankey();
+        $('bok-role-sankey-fig')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      const sankeyArea = e.target.closest('[data-sankey-area]');
+      if (sankeyArea && !e.target.closest('[data-sankey-role]')) {
+        const id = sankeyArea.dataset.sankeyArea;
+        state.activeAreaRole = state.activeAreaRole === id ? null : id;
+        state.activeRole = null;
+        drawRoleSankey();
+        return;
+      }
+      if (e.target.closest('[data-clear-sankey]')) {
+        state.activeRole = null;
+        state.activeAreaRole = null;
+        drawRoleSankey();
+        return;
+      }
+      // Guides: Symptom triage flow interactions
+      const symPick = e.target.closest('[data-symptom-pick]');
+      if (symPick) {
+        state.activeSymptom = symPick.dataset.symptomPick;
+        state.activeDiagNode = null;
+        drawSymptomFlow();
+        if (symPick.closest('table')) $('bok-symptom-flow-fig')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const diagNode = e.target.closest('[data-diag-node]');
+      if (diagNode) {
+        const id = diagNode.dataset.diagNode;
+        state.activeDiagNode = state.activeDiagNode === id ? null : id;
+        drawSymptomFlow();
+        return;
+      }
+      if (e.target.closest('[data-clear-diag]')) {
+        state.activeDiagNode = null;
+        drawSymptomFlow();
+        return;
+      }
+      // Guides: Learning path station interactions
+      const pathStation = e.target.closest('[data-station-idx]');
+      if (pathStation) {
+        highlightPathStation(pathStation.dataset.pathId, Number(pathStation.dataset.stationIdx));
+      }
+    });
+    document.addEventListener('change', (e) => {
+      if (e.target.id === 'bok-symptom-select') {
+        state.activeSymptom = e.target.value;
+        state.activeDiagNode = null;
+        drawSymptomFlow();
+      }
+    });
+    document.addEventListener('mouseover', (e) => {
+      const pathStation = e.target.closest('[data-station-idx]');
+      if (pathStation) highlightPathStation(pathStation.dataset.pathId, Number(pathStation.dataset.stationIdx));
     });
     wirePicker('bok-search', 'bok-results', choose);
     document.addEventListener('keydown', (e) => {
@@ -692,6 +2150,20 @@
         e.preventDefault();
         $('bok-search').focus();
         $('bok-search').select();
+      } else if (e.key === 'Escape') {
+        if (state.view === 'landing' && state.couplingSel) {
+          state.couplingSel = null;
+          refreshCouplingFigure();
+        } else if (state.view === 'guides' && (state.activeRole || state.activeAreaRole || state.activeDiagNode)) {
+          state.activeRole = null;
+          state.activeAreaRole = null;
+          state.activeDiagNode = null;
+          drawRoleSankey();
+          drawSymptomFlow();
+        }
+      } else if (state.view === 'home' && state.overlay?.startsWith('path:') && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
+        if (e.key === 'ArrowRight') { state.pathStep++; renderMatrix(); }
+        else if (e.key === 'ArrowLeft') { state.pathStep = Math.max(0, state.pathStep - 1); renderMatrix(); }
       }
     });
     let width = window.innerWidth;
