@@ -14,9 +14,17 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 ---
 
-It has been a few months since my last essay here. Moving to Zürich for my academic sabbatical kept me away from this desk, and last week I traveled from Zürich to NVIDIA GTC Berlin.
+## From Boston to Zürich
 
-## From Steam Engines to Token Factories
+Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
+
+## NVIDIA GTC Berlin: From Steam Engines to Token Factories
+
+One advantage of being based in Zürich is how easily you can reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC, joining a long morning line of engineers, researchers, and founders that stretched beneath the steel railway bridge outside the venue well before the keynote doors opened.
+
+![Morning crowd lined up outside NVIDIA GTC Berlin and Jensen Huang on stage.](figures/gtc-berlin-line-and-jensen.jpg)
+
+**On the ground in Berlin.** The morning line stretching past badge pickup beneath the railway bridge outside the venue (left), and Jensen Huang taking the keynote stage (right). Photographs from my visit.
 
 Walking the floor in Berlin brought me back to an observation from the first essay in this series ([The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html)): if AI is the new electricity, our universities have been training almost everyone to use the appliances while very few people learn how to build and operate the power plants.
 
@@ -77,6 +85,10 @@ Consider an engineering assistant that retrieves maintenance manuals and answers
 To diagnose that slowdown, an engineer has to look past aggregate token throughput and trace each request across four stages: waiting in an admission queue, retrieving documents, processing the prompt during prefill, and generating output tokens step by step during decoding. Longer retrieved passages and multi-step reasoning chains enlarge the key-value (KV) cache that each active request holds in high-bandwidth memory. Once high-bandwidth memory fills with KV-cache state, the serving runtime must restrict batch concurrency, which lowers arithmetic utilization on the accelerators and lengthens the queue of users waiting outside them.
 
 Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The machine manufactures tokens. The AI systems engineer measures these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
+
+![Architectural diagram showing how raw token capacity passes through admission queueing, context retrieval, prompt prefill, and decode KV cache to become useful work.](figures/essay-05-token-factory-to-useful-work.png)
+
+**From raw token capacity to useful engineering work.** A token factory measures output in tokens per second per megawatt, whereas an application succeeds only when accurate answers clear admission, retrieval, prefill, and decoding within the response deadline.
 
 ## The Builder's Gap Inside the Factory
 
