@@ -20,11 +20,11 @@ Let me get personal for a moment. It has been a while since my last newsletter. 
 
 Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch.
 
-True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. I am now up to 22 kilometers along the southwest shore, and to keep myself honest on both fronts, I plan to send a new issue of this newsletter each time I reach another train stop around the lake.
+True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. To keep myself honest on both fronts, I plan to send a new issue of this newsletter each time I complete another train stop around the lake.
 
-![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the 22 km of completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
+![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
 
-**One station at a time around Lake Zürich (22 km and counting).** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the first 22 kilometers of completed legs marked in blue along the southwest shore. Each new train stop will bring the next issue of this newsletter.
+**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore. Each new train stop will bring the next issue of this newsletter.
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
