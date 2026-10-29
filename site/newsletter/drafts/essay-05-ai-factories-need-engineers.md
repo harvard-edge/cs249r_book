@@ -24,7 +24,7 @@ True to form for a systems person, I broke the loop into 28 train-station checkp
 
 ![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
 
-**One station at a time around Lake Zürich.** My running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore.
+**One station at a time around Lake Zürich.** My running map around the Zürichsee, broken into 28 train-station checkpoints, with completed stops traced in blue along the southwest shore and upcoming stops marked by red pins.
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
@@ -36,7 +36,7 @@ Between runs around the lake, being based in Zürich makes it easy to reach the 
 
 Walking the floor in Berlin brought me back to an observation from the first essay in this series, [The Shift Toward AI Engineering](https://mlsysbook.ai/newsletter/posts/2026/2026-01-27_the-shift-toward-ai-engineering.html). If AI is the new electricity, we have been training almost everyone to use the appliances, while very few people learn how to build and operate the power plants.
 
-In Berlin, that comparison ceased to be a metaphor. Across the keynote and technical sessions, Jensen Huang framed the current moment as a new Industrial Revolution centered on the **AI factory**, a specialized manufacturing plant whose commodity output is **tokens**. A traditional cloud data center stores files and runs thousands of independent software services for different tenants. An AI factory takes electrical power and data as raw inputs and manufactures a continuous stream of tokens: floating-point representations of intelligence that translate into words, software code, molecular structures, video frames, or robot control actions.
+In Berlin, that comparison ceased to be a metaphor. Across the keynote and technical sessions, Jensen Huang framed the current moment as a new Industrial Revolution centered on the **AI factory**, a specialized manufacturing plant whose commodity output is **tokens**. A traditional cloud data center stores files and runs thousands of independent software services for different tenants. An AI factory takes electrical power and data as raw inputs and manufactures a continuous stream of tokens: discrete units of intelligence, produced through dense floating-point computation, that translate into words, software code, molecular structures, video frames, or robot control actions.
 
 Just as electrical utilities came to measure and price their output in kilowatt-hours, AI factories measure output in tokens generated per megawatt and per dollar. As reasoning models and agentic workflows generate hundreds or thousands of intermediate tokens before returning a single answer, token demand has surged. One keynote chart tracking agentic traffic across [OpenRouter](https://openrouter.ai/rankings) showed weekly token consumption rising 34-fold since the start of February, climbing from 3.9 trillion to 132.6 trillion tokens per week by early October. Token generation has become a heavy industrial production problem.
 
@@ -58,9 +58,9 @@ In Berlin, NVIDIA [introduced DSX POD](https://nvidianews.nvidia.com/news/nvidia
 
 **A token factory inside a shipping container.** The NVIDIA DSX POD reference design pre-integrates Vera Rubin racks, networking cabling, power distribution, and liquid cooling manifolds on the factory floor before transport. (Image: NVIDIA)
 
-Pre-integrating those modules is an economic decision. A gigawatt-scale facility represents tens of billions of dollars in capital, and it earns a return only once it begins generating tokens. Every month spent pulling cables on site leaves that capital idle.
+Pre-integrating each container on the manufacturing floor is an economic decision. A gigawatt-scale facility represents tens of billions of dollars in capital, and it earns a return only once it begins generating tokens. Every month spent pulling cables on site leaves that capital idle.
 
-A single container is only one module inside a much larger machine. Across a full-scale warehouse under the DSX platform, seven distinct rack architectures drop into the facility together, spanning [Vera Rubin NVL72](https://www.nvidia.com/en-us/data-center/vera-rubin-nvl72/) compute nodes, [NVLink 6](https://www.nvidia.com/en-us/data-center/nvlink/) and [Spectrum-6](https://www.nvidia.com/en-us/networking/products/ethernet/) switches, [BlueField-4](https://developer.nvidia.com/blog/nvidia-bluefield-4-powers-new-scale-in-network-infrastructure-for-agentic-ai-factories/) compute and storage racks, and [Groq 3 LPX](https://www.nvidia.com/en-us/data-center/lpx/) inference racks, all paired with [CUDA-X libraries](https://www.nvidia.com/en-us/technologies/cuda-x/), platform runtimes, and open models.
+A single container is only one module inside a much larger machine. Across a full-scale warehouse under the DSX platform, seven distinct rack architectures drop into the facility together, spanning [Vera Rubin NVL72](https://www.nvidia.com/en-us/data-center/vera-rubin-nvl72/) and Vera RTX compute racks, [NVLink 6](https://www.nvidia.com/en-us/data-center/nvlink/) and [Spectrum-6](https://www.nvidia.com/en-us/networking/products/ethernet/) switches, [BlueField-4](https://developer.nvidia.com/blog/nvidia-bluefield-4-powers-new-scale-in-network-infrastructure-for-agentic-ai-factories/) compute and storage racks, and [Groq 3 LPX](https://www.nvidia.com/en-us/data-center/lpx/) inference racks, all paired with [CUDA-X libraries](https://www.nvidia.com/en-us/technologies/cuda-x/), platform runtimes, and open models.
 
 ![The NVIDIA DSX Full-Stack AI Factory Platform slide from the GTC Berlin keynote.](figures/gtc-berlin-dsx-warehouse.jpg)
 
@@ -106,7 +106,7 @@ As we saw in [The Model Is Not the Product](https://mlsysbook.ai/newsletter/post
 
 No individual engineer needs to design every subsystem from the transformer architecture down to the heat exchangers. A functioning engineering organization, however, needs a shared systems vocabulary so specialists can connect the evidence each role sees.
 
-Historically, courses in this field have split between a compute-stack tradition and an operational MLOps tradition, leaving out data center infrastructure, energy, safety assurance, and physical AI. The [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) brings those traditions together into an open map of 101 subjects and 735 concepts across foundations, the system stack, the lifecycle, system qualities, and system types.
+Historically, courses in this field have rarely provided that full vocabulary, splitting instead between a compute-stack tradition and an operational MLOps tradition while leaving out data center infrastructure, energy, safety assurance, and physical AI. The [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) brings those pieces together into an open map of 101 subjects and 735 concepts across foundations, the system stack, the lifecycle, system qualities, and system types.
 
 ## Teaching the Physics Behind the Factory
 
@@ -118,7 +118,7 @@ Over the next two essays, we will follow this thread from the factory floor into
 
 ## Continuing the Conversation
 
-I want this newsletter to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click, and the confirmation page includes an optional box if you would like to add a brief note.
+I want this newsletter to be a two-way exchange with the engineers, researchers, and educators who read it. Selecting one of the options in the quick poll below records your response in a single click.
 
 {{ survey.gtc_berlin_ai_engineering_poll }}
 
