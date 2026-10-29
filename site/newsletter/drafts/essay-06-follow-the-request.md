@@ -64,7 +64,7 @@ Alternatively, the team might separate short interactive queries from long diagn
 
 Tracing a request from arrival to final token builds a core habit of AI systems engineering: connect the user-visible symptom to a physical mechanism before changing the system. A slow response is a symptom. KV-cache exhaustion or head-of-line queue blocking is a mechanism that an engineer can model, measure, and fix.
 
-Inside an AI factory, this habit governs how megawatts of installed computing capacity translate into responsive applications. Learners and educators can practice the exact same reasoning on a laptop or a single workstation. Readers who want to see how KV-cache fragmentation and batch scheduling interact can try *KV Cache Packer* and *Cluster Commander* in the [MLSysBook Playground](https://mlsysbook.ai/games/), or use the analytical models in [MLSys·im](https://mlsysbook.ai/mlsysim/) to predict where the first wall will appear. The third essay in this series examines how we structure university courses and hands-on assignments around these decisions so that students learn to defend a systems trade-off with evidence.
+Inside an AI factory, this habit governs how megawatts of installed computing capacity translate into responsive applications. Learners and educators can practice the exact same reasoning on a laptop or a single workstation, using the analytical models in [MLSys·im](https://mlsysbook.ai/mlsysim/) to predict where the first wall will appear before running an experiment. The third essay in this series examines how we structure university courses and hands-on assignments around these decisions so that students learn to defend a systems trade-off with evidence.
 
 ## Continuing the Conversation
 
@@ -78,4 +78,4 @@ Vijay
 
 ---
 
-[MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [Playground](https://mlsysbook.ai/games/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
+[MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
