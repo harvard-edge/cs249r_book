@@ -28,7 +28,13 @@
     lens: null, overlay: null, pathStep: 0, showConcepts: false,
     couplingMode: 'wheel', couplingFamily: 'all', couplingSel: null,
     activeRole: null, activeAreaRole: null, activeSymptom: null, activeDiagNode: null,
+    vizFull: null,
   };
+  const ICON_EXPAND = 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4';
+  const ICON_EXIT = 'M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4';
+  const expandBtn = (figId) => `<button type="button" class="bok-viz-expand" data-viz-expand="${esc(figId)}" aria-pressed="false">
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="${ICON_EXPAND}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="bok-viz-expand-label">Expand to full screen</span></button>`;
   const visited = [];
 
   async function load() {
@@ -657,6 +663,32 @@
     return (data.relationships || []).filter((r) => relInFamily(r, state.couplingFamily));
   }
 
+  // Shared classifier so the wheel, DSM, and coupling panel always agree on counts.
+  function couplingScope(sel) {
+    if (!sel) return null;
+    const areaRows = (id) => new Set((areas.find((a) => a.id === id)?.rows || []).map((r) => r.id));
+    if (sel.kind === 'subject' && rows.has(sel.id)) return { kind: 'subject', from: new Set([sel.id]) };
+    if (sel.kind === 'area') return { kind: 'area', from: areaRows(sel.id) };
+    if (sel.kind === 'pair') return { kind: 'pair', from: areaRows(sel.fromArea), to: areaRows(sel.toArea), diagonal: sel.fromArea === sel.toArea };
+    return null;
+  }
+
+  // Returns 'out' | 'in' | 'between' (between two subjects of the selection) | 'inside' (within one subject) | null
+  function classifyRel(rel, scope) {
+    if (!scope) return null;
+    const u = homeOf.get(rel.source)?.id;
+    const v = homeOf.get(rel.target)?.id;
+    if (!u || !v) return null;
+    const uIn = scope.from.has(u);
+    const vIn = scope.from.has(v);
+    if (scope.to) {
+      if (!uIn || !scope.to.has(v)) return null;
+      return scope.diagonal ? (u === v ? 'inside' : 'between') : 'out';
+    }
+    if (uIn && vIn) return u === v ? 'inside' : 'between';
+    return uIn ? 'out' : vIn ? 'in' : null;
+  }
+
   // Uniform cubic B-spline through control points with clamped endpoints.
   function bsplinePath(pts) {
     if (pts.length < 2) return '';
@@ -779,10 +811,12 @@
     // Aggregate cross-subject edges.
     const rels = filteredRelationships();
     const pairMap = new Map();
+    let crossSubjTotal = 0;
     for (const rel of rels) {
       const u = homeOf.get(rel.source);
       const v = homeOf.get(rel.target);
       if (!u || !v || u.id === v.id) continue;
+      crossSubjTotal++;
       const key = `${u.id}__${v.id}`;
       if (!pairMap.has(key)) pairMap.set(key, { u, v, count: 0, rels: [] });
       const entry = pairMap.get(key);
@@ -790,51 +824,55 @@
       entry.rels.push(rel);
     }
 
-    // Determine active selection set.
+    // Determine active selection scope via shared classifier.
     const sel = state.couplingSel;
-    let activeSubjects = null;
-    if (sel?.kind === 'subject' && rows.has(sel.id)) activeSubjects = new Set([sel.id]);
-    else if (sel?.kind === 'area') {
-      const ar = areas.find((a) => a.id === sel.id);
-      if (ar) activeSubjects = new Set(ar.rows.map((r) => r.id));
-    } else if (sel?.kind === 'pair') {
-      const a1 = areas.find((a) => a.id === sel.fromArea);
-      if (a1) activeSubjects = new Set(a1.rows.map((r) => r.id));
-    }
+    const scope = couplingScope(sel);
+    const activeSubjects = scope ? scope.from : null;
 
     const neighborSubjects = new Set();
     const restEdges = [];
-    const activeEdges = [];
+    const activeInternalEdges = [];
+    const activeInEdges = [];
+    const activeOutEdges = [];
 
     for (const edge of pairMap.values()) {
       const uId = edge.u.id, vId = edge.v.id;
       const uArea = areaOf.get(uId), vArea = areaOf.get(vId);
+      const role = scope ? classifyRel(edge.rels[0], scope) : null;
+      // Separate bidirectional curves when selected by using beta = 0.78 for incoming vs 0.85 for outgoing.
+      const beta = role === 'in' ? 0.78 : 0.85;
       const d = bundleCurve(
         subjPt.get(uId), areaPt.get(uArea.id), groupPt.get(uArea.group), rootPt,
         groupPt.get(vArea.group), areaPt.get(vArea.id), subjPt.get(vId),
-        uArea.id === vArea.id, uArea.group === vArea.group, 0.85
+        uArea.id === vArea.id, uArea.group === vArea.group, beta
       );
       const w = Math.min(2.6, 0.55 + Math.sqrt(edge.count) * 0.52).toFixed(2);
       let cls = 'viz-bundle-edge';
       let isHigh = false;
-      if (activeSubjects) {
-        const uIn = activeSubjects.has(uId);
-        const vIn = activeSubjects.has(vId);
-        if (sel?.kind === 'pair') {
-          const targetArea = areas.find((a) => a.id === sel.toArea);
-          const vTarget = targetArea && targetArea.rows.some((r) => r.id === vId);
-          if (uIn && vTarget) { cls += ' is-out'; isHigh = true; neighborSubjects.add(uId); neighborSubjects.add(vId); }
-          else cls += ' is-dim';
-        } else if (uIn) {
-          cls += ' is-out'; isHigh = true; neighborSubjects.add(vId);
-        } else if (vIn) {
-          cls += ' is-in'; isHigh = true; neighborSubjects.add(uId);
+      if (scope) {
+        if (role === 'out') {
+          cls += ' is-out';
+          isHigh = true;
+          neighborSubjects.add(uId);
+          neighborSubjects.add(vId);
+        } else if (role === 'in') {
+          cls += ' is-in';
+          isHigh = true;
+          neighborSubjects.add(uId);
+          neighborSubjects.add(vId);
+        } else if (role === 'between') {
+          cls += ' is-internal';
+          isHigh = true;
+          neighborSubjects.add(uId);
+          neighborSubjects.add(vId);
         } else {
           cls += ' is-dim';
         }
       }
       const pathHtml = `<path class="${cls}" d="${d}" stroke-width="${isHigh ? Math.max(1.3, Number(w) * 1.15).toFixed(2) : w}" data-u="${esc(uId)}" data-v="${esc(vId)}"/>`;
-      if (isHigh) activeEdges.push(pathHtml);
+      if (role === 'out') activeOutEdges.push(pathHtml);
+      else if (role === 'in') activeInEdges.push(pathHtml);
+      else if (role === 'between') activeInternalEdges.push(pathHtml);
       else restEdges.push(pathHtml);
     }
 
@@ -894,18 +932,21 @@
       </g>`;
     }
 
+    const showInternalLegend = sel?.kind === 'area' || (sel?.kind === 'pair' && sel.fromArea === sel.toArea);
     const legendHtml = `<g transform="translate(16, 18)" aria-hidden="true">
       <line x1="0" y1="0" x2="18" y2="0" stroke="var(--bok-accent)" stroke-width="2"/>
       <text x="24" y="3" class="bok-svg-label" style="font-size:10px;fill:var(--bok-muted)">Outgoing (acts on)</text>
       <line x1="0" y1="15" x2="18" y2="15" stroke="var(--bok-ink)" stroke-width="1.6" stroke-opacity="0.72"/>
       <text x="24" y="18" class="bok-svg-label" style="font-size:10px;fill:var(--bok-muted)">Incoming (acted on by)</text>
+      ${showInternalLegend ? `<line x1="0" y1="30" x2="18" y2="30" stroke="var(--bok-ink)" stroke-width="1.5" stroke-dasharray="4 2.5" stroke-opacity="0.62"/>
+      <text x="24" y="33" class="bok-svg-label" style="font-size:10px;fill:var(--bok-muted)">Between subjects in area</text>` : ''}
     </g>`;
 
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="wheel-title wheel-desc">
       <title id="wheel-title">Hierarchical edge-bundling map of the 101 ML systems subjects</title>
-      <desc id="wheel-desc">Subjects are grouped into 20 areas and 5 groups around the circle; bundled splines show ${rels.length} directed propositions across subjects.</desc>
+      <desc id="wheel-desc">Subjects are grouped into 20 areas and 5 groups around the circle; bundled splines show ${crossSubjTotal} cross-subject propositions across ${pairMap.size} directed subject pairs.</desc>
       <defs>${defs}</defs>
-      <g class="viz-layer-edges">${restEdges.join('')}${activeEdges.join('')}</g>
+      <g class="viz-layer-edges">${restEdges.join('')}${activeInternalEdges.join('')}${activeInEdges.join('')}${activeOutEdges.join('')}</g>
       <g class="viz-layer-arcs">${arcsHtml}</g>
       <g class="viz-layer-nodes">${nodesHtml}</g>
       ${legendHtml}
@@ -1048,34 +1089,53 @@
     const sel = state.couplingSel;
     const famLabel = REL_FAMILIES.find(([k]) => k === state.couplingFamily)?.[1] || 'All relationships';
 
+    const PREVIEW = 25;
     const formatProp = (rel) => {
       const uSubj = homeOf.get(rel.source);
       const vSubj = homeOf.get(rel.target);
       const vText = relations.get(rel.relation)?.forward || rel.predicate;
       return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(vText)}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
     };
+    const propList = (list) => !list.length
+      ? '<p class="bok-muted" style="margin-top:4px !important">None in current filter.</p>'
+      : `<ul class="bok-viz-prop-list">${list.slice(0, PREVIEW).map(formatProp).join('')}</ul>` +
+        (list.length > PREVIEW
+          ? `<details class="bok-viz-more"><summary>Show the other ${list.length - PREVIEW} of ${list.length} propositions</summary><ul class="bok-viz-prop-list">${list.slice(PREVIEW).map(formatProp).join('')}</ul></details>`
+          : '');
 
     if (!sel) {
-      // Compute top cross-area couplings for default overview.
+      // Compute exact 3-way decomposition and top cross-area couplings for default overview.
       const areaPairs = new Map();
-      let crossAreaTotal = 0, intraAreaTotal = 0;
+      const subjPairs = new Set();
+      let crossAreaTotal = 0, betweenSubjSameArea = 0, sameSubjTotal = 0;
       for (const rel of rels) {
         const u = homeOf.get(rel.source), v = homeOf.get(rel.target);
         if (!u || !v) continue;
         const ua = areaOf.get(u.id), va = areaOf.get(v.id);
         if (!ua || !va) continue;
-        if (ua.id === va.id) intraAreaTotal++;
-        else {
-          crossAreaTotal++;
-          const k = `${ua.id}__${va.id}`;
-          areaPairs.set(k, (areaPairs.get(k) || 0) + 1);
+        if (u.id === v.id) {
+          sameSubjTotal++;
+        } else {
+          subjPairs.add(`${u.id}__${v.id}`);
+          if (ua.id === va.id) betweenSubjSameArea++;
+          else {
+            crossAreaTotal++;
+            const k = `${ua.id}__${va.id}`;
+            areaPairs.set(k, (areaPairs.get(k) || 0) + 1);
+          }
         }
       }
+      const crossSubjTotal = crossAreaTotal + betweenSubjSameArea;
+      const intraAreaTotal = betweenSubjSameArea + sameSubjTotal;
+      const modeNote = state.couplingMode === 'dsm'
+        ? `Matrix cells show ${crossAreaTotal} off-diagonal (cross-area) and ${intraAreaTotal} diagonal (within-area) propositions.`
+        : `Circular bundle draws the ${crossSubjTotal} cross-subject propositions (${subjPairs.size} directed chords); ${sameSubjTotal} are within a single subject.`;
       const topPairs = [...areaPairs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
       panelEl.innerHTML = `<div class="bok-viz-panel-head">
         <div>
           <div class="bok-viz-panel-title">${esc(famLabel)}</div>
-          <p class="bok-viz-panel-sub">${rels.length} propositions · ${crossAreaTotal} cross-area · ${intraAreaTotal} within-area</p>
+          <p class="bok-viz-panel-sub">${rels.length} propositions = ${crossAreaTotal} cross-area + ${betweenSubjSameArea} between subjects in same area + ${sameSubjTotal} within one subject</p>
+          <p class="bok-viz-panel-sub" style="margin-top:2px !important">${esc(modeNote)}</p>
         </div>
       </div>
       <div class="bok-viz-prop-group">
@@ -1092,9 +1152,37 @@
       return;
     }
 
+    const scope = couplingScope(sel);
     if (sel.kind === 'pair') {
       const a1 = areas.find((a) => a.id === sel.fromArea);
       const a2 = areas.find((a) => a.id === sel.toArea);
+      if (scope.diagonal) {
+        const betweenProps = [];
+        const insideProps = [];
+        for (const rel of rels) {
+          const role = classifyRel(rel, scope);
+          if (role === 'between') betweenProps.push(rel);
+          else if (role === 'inside') insideProps.push(rel);
+        }
+        const tot = betweenProps.length + insideProps.length;
+        panelEl.innerHTML = `<div class="bok-viz-panel-head">
+          <div>
+            <div class="bok-viz-panel-title">${esc(a1?.code)} → ${esc(a1?.code)} · Within ${esc(a1?.display_label || a1?.label)}</div>
+            <p class="bok-viz-panel-sub">${tot} within-area propositions (${betweenProps.length} between subjects · ${insideProps.length} within a single subject)</p>
+          </div>
+          <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
+        </div>
+        <p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-dsm-area="${esc(a1.id)}">Select ${esc(a1.code)} as full area (outgoing, incoming &amp; within)</button></p>
+        <div class="bok-viz-prop-group">
+          <p class="bok-viz-prop-label"><span class="bok-viz-swatch-internal"></span>Between subjects in ${esc(a1?.code)} (${betweenProps.length})</p>
+          ${propList(betweenProps)}
+        </div>
+        <div class="bok-viz-prop-group">
+          <p class="bok-viz-prop-label">Within a single subject in ${esc(a1?.code)} (${insideProps.length})</p>
+          ${propList(insideProps)}
+        </div>`;
+        return;
+      }
       const forward = [];
       const reverse = [];
       for (const rel of rels) {
@@ -1102,56 +1190,68 @@
         if (!u || !v) continue;
         const ua = areaOf.get(u.id), va = areaOf.get(v.id);
         if (ua?.id === a1?.id && va?.id === a2?.id) forward.push(rel);
-        if (a1?.id !== a2?.id && ua?.id === a2?.id && va?.id === a1?.id) reverse.push(rel);
+        if (ua?.id === a2?.id && va?.id === a1?.id) reverse.push(rel);
       }
       panelEl.innerHTML = `<div class="bok-viz-panel-head">
         <div>
           <div class="bok-viz-panel-title">${esc(a1?.code)} → ${esc(a2?.code)} · ${esc(a1?.display_label || a1?.label)} → ${esc(a2?.display_label || a2?.label)}</div>
-          <p class="bok-viz-panel-sub">${a1?.id === a2?.id ? `${forward.length} within-area propositions` : `${esc(a1?.code)} → ${esc(a2?.code)}: ${forward.length} · ${esc(a2?.code)} → ${esc(a1?.code)}: ${reverse.length}`}</p>
+          <p class="bok-viz-panel-sub">${esc(a1?.code)} → ${esc(a2?.code)}: ${forward.length} · ${esc(a2?.code)} → ${esc(a1?.code)}: ${reverse.length}</p>
         </div>
         <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
       </div>
-      ${a1?.id !== a2?.id && reverse.length ? `<p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-select-pair="${esc(a2.id)}__${esc(a1.id)}">Flip direction to ${esc(a2.code)} → ${esc(a1.code)} (${reverse.length})</button></p>` : ''}
+      ${reverse.length ? `<p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-select-pair="${esc(a2.id)}__${esc(a1.id)}">Flip direction to ${esc(a2.code)} → ${esc(a1.code)} (${reverse.length})</button></p>` : ''}
       <div class="bok-viz-prop-group">
         <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Propositions (${forward.length})</p>
-        ${forward.length ? `<ul class="bok-viz-prop-list">${forward.slice(0, 40).map(formatProp).join('')}</ul>` : '<p class="bok-muted" style="margin-top:4px !important">No propositions in this direction for the current filter.</p>'}
+        ${propList(forward)}
       </div>`;
       return;
     }
 
-    // Subject or Area selection.
+    // Subject or Area selection via shared classifier.
     const isSubj = sel.kind === 'subject';
     const targetRow = isSubj ? rows.get(sel.id) : null;
     const targetArea = isSubj ? areaOf.get(sel.id) : areas.find((a) => a.id === sel.id);
-    const subjSet = isSubj ? new Set([sel.id]) : new Set((targetArea?.rows || []).map((r) => r.id));
     const outProps = [];
     const inProps = [];
+    const betweenProps = [];
+    const insideProps = [];
     for (const rel of rels) {
-      const u = homeOf.get(rel.source), v = homeOf.get(rel.target);
-      if (!u || !v || u.id === v.id) continue;
-      const uIn = subjSet.has(u.id), vIn = subjSet.has(v.id);
-      if (uIn && !vIn) outProps.push(rel);
-      else if (!uIn && vIn) inProps.push(rel);
+      const role = classifyRel(rel, scope);
+      if (role === 'out') outProps.push(rel);
+      else if (role === 'in') inProps.push(rel);
+      else if (role === 'between') betweenProps.push(rel);
+      else if (role === 'inside') insideProps.push(rel);
     }
 
     const title = isSubj ? `${targetRow?.code} ${targetRow?.label}` : `${targetArea?.code} ${targetArea?.label}`;
     const openHref = isSubj ? subjectHref(targetRow) : `#area=${encodeURIComponent(targetArea?.id || '')}`;
+    const subSummary = isSubj
+      ? `${outProps.length} outgoing · ${inProps.length} incoming · ${insideProps.length} within ${targetRow?.code || 'subject'}`
+      : `${outProps.length} outgoing · ${inProps.length} incoming · ${betweenProps.length + insideProps.length} within ${targetArea?.code} (${betweenProps.length} between subjects · ${insideProps.length} inside one subject)`;
 
     panelEl.innerHTML = `<div class="bok-viz-panel-head">
       <div>
         <div class="bok-viz-panel-title">${esc(title)}</div>
-        <p class="bok-viz-panel-sub">${outProps.length} outgoing · ${inProps.length} incoming · <a href="${openHref}" style="text-decoration:underline;font-weight:600">Open page &rarr;</a></p>
+        <p class="bok-viz-panel-sub">${esc(subSummary)} · <a href="${openHref}" style="text-decoration:underline;font-weight:600">Open page &rarr;</a></p>
       </div>
       <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
     </div>
     <div class="bok-viz-prop-group">
-      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Outgoing (${outProps.length}) — acts on other subjects</p>
-      ${outProps.length ? `<ul class="bok-viz-prop-list">${outProps.slice(0, 25).map(formatProp).join('')}</ul>` : '<p class="bok-muted">None in current filter.</p>'}
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Outgoing (${outProps.length}) — acts on other ${isSubj ? 'subjects' : 'areas/subjects'}</p>
+      ${propList(outProps)}
     </div>
     <div class="bok-viz-prop-group">
-      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-in"></span>Incoming (${inProps.length}) — acted on by other subjects</p>
-      ${inProps.length ? `<ul class="bok-viz-prop-list">${inProps.slice(0, 25).map(formatProp).join('')}</ul>` : '<p class="bok-muted">None in current filter.</p>'}
-    </div>`;
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-in"></span>Incoming (${inProps.length}) — acted on by other ${isSubj ? 'subjects' : 'areas/subjects'}</p>
+      ${propList(inProps)}
+    </div>
+    ${!isSubj ? `<div class="bok-viz-prop-group">
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-internal"></span>Between subjects in ${esc(targetArea?.code)} (${betweenProps.length})</p>
+      ${propList(betweenProps)}
+    </div>` : ''}
+    ${insideProps.length ? `<div class="bok-viz-prop-group">
+      <p class="bok-viz-prop-label">Within ${isSubj ? esc(targetRow?.code) : 'a single subject'} (${insideProps.length})</p>
+      ${propList(insideProps)}
+    </div>` : ''}`;
   }
 
   function refreshCouplingFigure() {
@@ -1201,6 +1301,7 @@
             <span class="bok-filter-label">Relations</span>
             <div class="bok-viz-seg" role="group" aria-label="Filter by relationship family">${famBtns}</div>
           </div>
+          ${expandBtn('bok-coupling-figure')}
         </div>
         <div class="bok-viz-split">
           <div class="bok-viz-stage" id="bok-coupling-stage"></div>
@@ -1321,6 +1422,14 @@
 
     const activeRole = state.activeRole;
     const activeArea = state.activeAreaRole;
+    const areaShare = new Map();
+    if (activeArea) {
+      for (const { role } of rolesOrdered) {
+        const core = (role.core || []).filter((s) => areaOf.get(s)?.id === activeArea).length;
+        const working = (role.working || []).filter((s) => areaOf.get(s)?.id === activeArea).length;
+        if (core || working) areaShare.set(role.id, { core, working });
+      }
+    }
 
     // Build Role -> Group ribbons.
     let ribbonsHtml = '';
@@ -1329,16 +1438,24 @@
       const gBox = grpCol.boxes.get(lnk.groupId);
       const h0 = (lnk.w / rBox.item.w) * rBox.h;
       const h1 = (lnk.w / gBox.item.w) * gBox.h;
-      const d = sankeyRibbon(xRole + barW, rBox.outY, xGrp, gBox.inY, h0, h1);
+      const y0 = rBox.outY, y1 = gBox.inY;
+      const d = sankeyRibbon(xRole + barW, y0, xGrp, y1, h0, h1);
       rBox.outY += h0;
       gBox.inY += h1;
       let cls = `viz-ribbon${lnk.kind === 'working' ? ' is-working' : ''}`;
-      if (activeRole) cls += lnk.roleId === activeRole ? ' is-active' : ' is-dim';
-      else if (activeArea) {
-        const hasAreaLink = (gaMap.get(`${lnk.roleId}__${lnk.groupId}__${activeArea}__${lnk.kind}`) || 0) > 0;
-        cls += hasAreaLink ? ' is-active' : ' is-dim';
+      if (activeRole) {
+        cls += lnk.roleId === activeRole ? ' is-active' : ' is-dim';
+        ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+      } else if (activeArea) {
+        ribbonsHtml += `<path class="${cls} is-dim" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+        const wA = gaMap.get(`${lnk.roleId}__${lnk.groupId}__${activeArea}__${lnk.kind}`) || 0;
+        if (wA > 0) {
+          const dSub = sankeyRibbon(xRole + barW, y0, xGrp, y1, (h0 * wA) / lnk.w, (h1 * wA) / lnk.w);
+          ribbonsHtml += `<path class="viz-ribbon is-active${lnk.kind === 'working' ? ' is-working' : ''}" d="${dSub}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+        }
+      } else {
+        ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
       }
-      ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
     }
 
     // Build Group -> Area ribbons (stacked by canonical area order, then role order).
@@ -1364,23 +1481,26 @@
       }
     }
 
-    let nodesHtml = `<text x="${xRole}" y="12" text-anchor="end" class="bok-svg-group-label">Roles (11)</text>
-      <text x="${xGrp + 1.5}" y="12" text-anchor="middle" class="bok-svg-group-label">Groups (5)</text>
-      <text x="${xArea + barW}" y="12" text-anchor="start" class="bok-svg-group-label">Taxonomy Areas (20)</text>`;
+    let nodesHtml = `<text x="${xRole}" y="12" text-anchor="end" class="bok-svg-group-label">Roles (${rolesOrdered.length})</text>
+      <text x="${xGrp + 1.5}" y="12" text-anchor="middle" class="bok-svg-group-label">Groups (${orderedGroups.length})</text>
+      <text x="${xArea + barW}" y="12" text-anchor="start" class="bok-svg-group-label">Taxonomy Areas (${orderedAreas.length})</text>`;
 
     for (const [id, b] of roleCol.boxes) {
-      const isSel = activeRole === id;
+      const isSel = activeRole === id || (activeArea && areaShare.has(id));
+      const isDim = (activeRole && activeRole !== id) || (activeArea && !areaShare.has(id));
       const cy = b.y + b.h / 2;
-      nodesHtml += `<g class="viz-interactive" data-sankey-role="${esc(id)}" role="button" tabindex="0" aria-label="Role ${esc(b.item.label)}">
+      nodesHtml += `<g class="viz-interactive" data-sankey-role="${esc(id)}" role="button" tabindex="0" aria-label="Role ${esc(b.item.label)}" style="${isDim ? 'opacity:0.36' : ''}">
         <rect x="${xRole}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
         <text x="${xRole - 8}" y="${(cy + 3.5).toFixed(1)}" text-anchor="end" class="bok-svg-label" style="font-weight:${isSel ? '700' : '500'};fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">${esc(b.item.label)}</text>
       </g>`;
     }
     for (const [, b] of grpCol.boxes) {
       const cy = b.y + b.h / 2;
+      const pillW = b.item.label.length * 6.2 + 10;
       nodesHtml += `<g>
         <rect x="${xGrp}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="var(--bok-ink)"/>
-        <text x="${xGrp - 7}" y="${(cy + 3.5).toFixed(1)}" text-anchor="end" class="bok-svg-group-label" style="fill:var(--bok-ink);paint-order:stroke;stroke:var(--bok-surface);stroke-width:4px;stroke-linejoin:round">${esc(b.item.label)}</text>
+        <rect x="${(xGrp - pillW - 5).toFixed(1)}" y="${(cy - 6.5).toFixed(1)}" width="${pillW.toFixed(1)}" height="13" rx="2" fill="var(--bok-surface)" fill-opacity="0.92"/>
+        <text x="${xGrp - 9}" y="${(cy + 3.2).toFixed(1)}" text-anchor="end" class="bok-svg-group-label" style="fill:var(--bok-ink)">${esc(b.item.label)}</text>
       </g>`;
     }
     for (const [id, b] of areaCol.boxes) {
@@ -1395,7 +1515,7 @@
     }
 
     stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="sankey-title sankey-desc">
-      <title id="sankey-title">Alluvial diagram mapping 11 ML systems roles across 5 groups and 20 areas</title>
+      <title id="sankey-title">Alluvial diagram mapping ${rolesOrdered.length} ML systems roles across ${orderedGroups.length} groups and ${orderedAreas.length} areas</title>
       <desc id="sankey-desc">Shows how core (weight 2) and working (weight 1) subject requirements distribute across the taxonomy for each role.</desc>
       <g>${ribbonsHtml}</g>
       <g>${nodesHtml}</g>
@@ -1408,7 +1528,11 @@
           <span><a href="#overlay=role:${esc(activeRole)}" class="bok-viz-clear" style="margin-right:12px">Highlight on Matrix &nearr;</a><button type="button" class="bok-viz-clear" data-clear-sankey="1">Clear selection</button></span>`;
       } else if (activeArea) {
         const a = areas.find((x) => x.id === activeArea);
-        bar.innerHTML = `<span>Selected area: <strong>${esc(a?.code)} ${esc(a?.label)}</strong> — highlighting roles that require subjects in this area</span>
+        const coreRoles = [...areaShare.values()].filter((v) => v.core > 0).length;
+        const workRoles = [...areaShare.values()].filter((v) => v.working > 0).length;
+        const bothRoles = [...areaShare.values()].filter((v) => v.core > 0 && v.working > 0).length;
+        const detail = `${coreRoles} core, ${workRoles} working${bothRoles ? `; ${bothRoles} with both` : ''}`;
+        bar.innerHTML = `<span>Selected area: <strong>${esc(a?.code)} ${esc(a?.label)}</strong> — required by ${areaShare.size} of ${rolesOrdered.length} roles (${detail})</span>
           <button type="button" class="bok-viz-clear" data-clear-sankey="1">Clear selection</button>`;
       } else {
         bar.innerHTML = `<span>Select any <strong>role</strong> on the left or <strong>area</strong> on the right to isolate its footprint across the taxonomy.</span>`;
@@ -1465,36 +1589,70 @@
     const colW = 244;
     const nodeCoords = new Map();
 
+    // Key by `${colKey}:${id}` so a concept listed in two columns renders in both without overwriting.
     const placeCol = (items, colKey) => {
       const startY = topPad + 14;
       items.forEach((id, i) => {
-        nodeCoords.set(id, { x: colX[colKey], y: startY + i * rowStep, col: colKey, idx: i });
+        nodeCoords.set(`${colKey}:${id}`, { id, x: colX[colKey], y: startY + i * rowStep, col: colKey, idx: i });
       });
     };
     placeCol(orderedK, 'K');
     placeCol(orderedC, 'C');
     placeCol(orderedL, 'L');
 
-    // Identify which nodes in Column C are measured directly by a Check (symptom metric vs root cause).
+    // Resolve each relationship to the best (sourceCol, targetCol) endpoint pair.
+    const resolveEndpoints = (rel) => {
+      const uCols = ['K', 'C', 'L'].filter((c) => nodeCoords.has(`${c}:${rel.source}`));
+      const vCols = ['K', 'C', 'L'].filter((c) => nodeCoords.has(`${c}:${rel.target}`));
+      let best = null, bestScore = 99;
+      for (const uc of uCols) {
+        for (const vc of vCols) {
+          // Prefer cross-column through C (score 1), then same-column (score 2), then K<->L (score 3).
+          const score = (uc !== vc && (uc === 'C' || vc === 'C')) ? 1 : (uc === vc ? 2 : 3);
+          if (score < bestScore) { bestScore = score; best = [nodeCoords.get(`${uc}:${rel.source}`), nodeCoords.get(`${vc}:${rel.target}`)]; }
+        }
+      }
+      return best;
+    };
+
+    // Identify which nodes in Column C are directly measured or detected by a Check.
     const measuredByCheck = new Set();
     for (const r of directEdges) {
-      if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
-      if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
+      if (['measures', 'detects'].includes(r.relation)) {
+        if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
+        if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
+      }
     }
 
-    // Determine active node and its connected component within this symptom.
+    // Determine active node and its truthful chain (direct edges + 1-hop onward across C to opposite outer column).
     const activeNode = state.activeDiagNode && allSet.has(state.activeDiagNode) ? state.activeDiagNode : null;
-    const activeEdges = [];
+    const directSet = new Set();
+    const viaSet = new Set();
+    const viaMap = new Map();
     const activeNeighbors = new Set();
+
     if (activeNode) {
       activeNeighbors.add(activeNode);
-      // 2-hop reachability across the symptom graph so clicking a Check traces through Cause to Lever!
-      for (const r1 of directEdges) {
-        if (r1.source === activeNode || r1.target === activeNode) {
-          const mid = r1.source === activeNode ? r1.target : r1.source;
-          activeNeighbors.add(mid);
-          for (const r2 of directEdges) {
-            if (r2.source === mid || r2.target === mid) {
+      const isCauseOnly = cSet.has(activeNode) && !kSet.has(activeNode) && !lSet.has(activeNode);
+      const touches = (r, id) => r.source === id || r.target === id;
+      const other = (r, id) => (r.source === id ? r.target : r.source);
+      const directList = directEdges.filter((r) => touches(r, activeNode));
+      for (const r of directList) {
+        directSet.add(r);
+        activeNeighbors.add(r.source);
+        activeNeighbors.add(r.target);
+      }
+      if (!isCauseOnly) {
+        const wantLever = kSet.has(activeNode);
+        const oppSet = wantLever ? lSet : kSet;
+        for (const r1 of directList) {
+          const mid = other(r1, activeNode);
+          if (!cSet.has(mid)) continue;
+          const onward = directEdges.filter((r2) => r2 !== r1 && !directSet.has(r2) && touches(r2, mid) && oppSet.has(other(r2, mid)));
+          if (onward.length) {
+            viaMap.set(mid, onward);
+            for (const r2 of onward) {
+              viaSet.add(r2);
               activeNeighbors.add(r2.source);
               activeNeighbors.add(r2.target);
             }
@@ -1506,12 +1664,14 @@
     // Compute per-port vertical offsets so multiple curves at the same box side fan out cleanly.
     const portSlots = new Map();
     for (const rel of directEdges) {
-      const u = nodeCoords.get(rel.source), v = nodeCoords.get(rel.target);
-      if (!u || !v || u.col === v.col) continue;
+      const pts = resolveEndpoints(rel);
+      if (!pts) continue;
+      const [u, v] = pts;
+      if (u.col === v.col) continue;
       const uSide = u.x < v.x ? 'R' : 'L';
       const vSide = u.x < v.x ? 'L' : 'R';
-      push(portSlots, `${rel.source}__${uSide}`, { rel, otherY: v.y });
-      push(portSlots, `${rel.target}__${vSide}`, { rel, otherY: u.y });
+      push(portSlots, `${u.col}:${rel.source}__${uSide}`, { rel, otherY: v.y });
+      push(portSlots, `${v.col}:${rel.target}__${vSide}`, { rel, otherY: u.y });
     }
     const portOffset = new Map();
     for (const [pk, list] of portSlots) {
@@ -1526,16 +1686,18 @@
     let verbLabelsHtml = '';
     const placedVerbs = [];
     const activeVerbGroups = new Map();
+    const LEVER_RELS = new Set(['reduces', 'mitigates', 'enables', 'implements', 'uses', 'specializes', 'alternative-to']);
     for (const rel of directEdges) {
-      const u = nodeCoords.get(rel.source);
-      const v = nodeCoords.get(rel.target);
-      if (!u || !v) continue;
-      const isEdgeActive = activeNode && activeNeighbors.has(rel.source) && activeNeighbors.has(rel.target) &&
-        (rel.source === activeNode || rel.target === activeNode || cSet.has(rel.source) || cSet.has(rel.target));
-      if (isEdgeActive) activeEdges.push(rel);
+      const pts = resolveEndpoints(rel);
+      if (!pts) continue;
+      const [u, v] = pts;
+      const isDirect = directSet.has(rel);
+      const isVia = viaSet.has(rel);
+      const isEdgeActive = isDirect || isVia;
 
-      const isLeverEdge = lSet.has(rel.source) || lSet.has(rel.target);
+      const isLeverEdge = LEVER_RELS.has(rel.relation);
       const sameCol = u.col === v.col;
+      const skipMiddle = !sameCol && u.col !== 'C' && v.col !== 'C';
       let d = '';
       let vx = 0, vy = 0;
       if (sameCol) {
@@ -1544,12 +1706,21 @@
         vx = sideX;
         vy = (u.y + v.y) / 2;
         d = `M${anchorX},${u.y} Q${sideX},${vy} ${anchorX},${v.y}`;
+      } else if (skipMiddle) {
+        const leftFirst = u.x < v.x;
+        const x1 = leftFirst ? u.x + colW : u.x;
+        const x2 = leftFirst ? v.x : v.x + colW;
+        const xm = (x1 + x2) / 2;
+        const ym = topPad - 16;
+        vx = xm;
+        vy = (u.y + v.y) / 4 + ym / 2;
+        d = `M${x1.toFixed(1)},${u.y.toFixed(1)} Q${xm.toFixed(1)},${ym.toFixed(1)} ${x2.toFixed(1)},${v.y.toFixed(1)}`;
       } else {
         const leftFirst = u.x < v.x;
         const uSide = leftFirst ? 'R' : 'L';
         const vSide = leftFirst ? 'L' : 'R';
-        const uOff = portOffset.get(`${rel.source}__${uSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
-        const vOff = portOffset.get(`${rel.target}__${vSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
+        const uOff = portOffset.get(`${u.col}:${rel.source}__${uSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
+        const vOff = portOffset.get(`${v.col}:${rel.target}__${vSide}__${rel.source}__${rel.target}__${rel.relation}`) || 0;
         const x1 = leftFirst ? u.x + colW : u.x;
         const y1 = u.y + uOff;
         const x2 = leftFirst ? v.x : v.x + colW;
@@ -1563,12 +1734,12 @@
         'viz-diag-edge',
         isLeverEdge ? 'is-lever' : '',
         sameCol ? 'is-causal' : '',
-        activeNode ? (isEdgeActive ? 'is-active' : 'is-dim') : '',
+        activeNode ? (isDirect ? 'is-active' : (isVia ? 'is-active is-via' : 'is-dim')) : '',
       ].filter(Boolean).join(' ');
+      const markerUrl = isEdgeActive ? 'url(#bok-diag-arrow-on)' : 'url(#bok-diag-arrow)';
       const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-      edgesHtml += `<path class="${cls}" d="${d}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
+      edgesHtml += `<path class="${cls}" d="${d}" marker-end="${markerUrl}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
       if (isEdgeActive && !sameCol) {
-        // Group identical verbs sharing the same column pair & hub node so a 7-edge fan gets 1 clean label at its median curve.
         const hubId = cSet.has(rel.source) ? rel.source : rel.target;
         const gk = `${u.col}__${v.col}__${hubId}__${vStr}`;
         push(activeVerbGroups, gk, { vx, vy, vStr });
@@ -1594,20 +1765,23 @@
       <text x="${colX.K}" y="18" class="bok-svg-group-label">1. What to check (${orderedK.length})</text>
       <text x="${colX.C}" y="18" class="bok-svg-group-label">2. Symptom metric &amp; likely causes (${orderedC.length})</text>
       <text x="${colX.L}" y="18" class="bok-svg-group-label">3. What to change (${orderedL.length})</text>
-      <g transform="translate(${colX.L}, 33)" aria-hidden="true">
-        <line x1="0" y1="-3" x2="16" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4"/>
-        <text x="20" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">measures / causes</text>
-        <line x1="108" y1="-3" x2="124" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4" stroke-dasharray="4 2.5"/>
-        <text x="128" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">reduces / mitigates</text>
+      <g transform="translate(${colX.L - 36}, 33)" aria-hidden="true">
+        <line x1="0" y1="-3" x2="15" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4"/>
+        <text x="19" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">measures / limits</text>
+        <line x1="98" y1="-3" x2="113" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4" stroke-dasharray="4 2.5"/>
+        <text x="117" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">reduces / mitigates</text>
+        <line x1="204" y1="-3" x2="219" y2="-3" stroke="var(--bok-ink)" stroke-width="1.4" stroke-dasharray="1.5 2"/>
+        <text x="223" y="0" class="bok-svg-label" style="font-size:8.5px;fill:var(--bok-faint)">same-stage</text>
       </g>`;
 
-    for (const [id, pt] of nodeCoords) {
+    for (const [, pt] of nodeCoords) {
+      const id = pt.id;
       const c = concepts.get(id);
       const r = homeOf.get(id);
       const lbl = c?.label || id;
       const shortLbl = lbl.length > 32 ? lbl.slice(0, 31) + '…' : lbl;
       const subjShort = r?.display_label || r?.label || '';
-      const metricTag = pt.col === 'C' && measuredByCheck.has(id) && orderedC.indexOf(id) === 0 ? ' · Metric' : '';
+      const metricTag = pt.col === 'C' && measuredByCheck.has(id) ? ' · Metric' : '';
       const isAct = activeNode === id;
       const isNbr = activeNeighbors.has(id);
       const isDim = activeNode && !isNbr;
@@ -1623,21 +1797,45 @@
     stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="diag-title diag-desc">
       <title id="diag-title">Diagnostic triage graph for ${esc(sym.label)}</title>
       <desc id="diag-desc">Connects ${orderedK.length} diagnostic checks, ${orderedC.length} likely causes, and ${orderedL.length} mitigation levers via ${directEdges.length} graph propositions.</desc>
+      <defs>
+        <marker id="bok-diag-arrow" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="6.5" markerHeight="6.5" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M0,1.2 L7.5,4 L0,6.8 Z" fill="var(--bok-ink)" fill-opacity="0.65"/>
+        </marker>
+        <marker id="bok-diag-arrow-on" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="6.5" markerHeight="6.5" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M0,1.2 L7.5,4 L0,6.8 Z" fill="var(--bok-accent)"/>
+        </marker>
+      </defs>
       <g>${edgesHtml}</g>
       <g>${nodesHtml}</g>
       <g>${verbLabelsHtml}</g>
     </svg>`;
 
     if (detailEl) {
-      const shownEdges = activeNode ? activeEdges : directEdges;
-      const headerText = activeNode
-        ? `<span>Showing chain for <strong>${conceptLink(activeNode)}</strong> (${shownEdges.length} propositions)</span><button type="button" class="bok-viz-clear" data-clear-diag="1">Show all ${directEdges.length} propositions</button>`
-        : `<span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} graph propositions connecting checks, causes, and levers — select any box above to trace its chain)</span>`;
-      detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">${headerText}</div>
-        <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px;margin-top:6px !important">${shownEdges.map((rel) => {
-          const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-          return `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
-        }).join('')}</ul>`;
+      const renderRelItem = (rel) => {
+        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+        return `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
+      };
+      if (!activeNode) {
+        detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">
+          <span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} graph propositions connecting checks, causes, and levers — select any box above to trace its chain)</span>
+        </div>
+        <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px;margin-top:6px !important">${directEdges.map(renderRelItem).join('')}</ul>`;
+      } else {
+        const directArr = [...directSet];
+        const viaGroupsHtml = [...viaMap.entries()].map(([midId, list]) => `<div class="bok-viz-prop-group">
+          <p class="bok-viz-prop-label">Connected via ${esc(concepts.get(midId)?.label || midId)} (${list.length})</p>
+          <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px">${list.map(renderRelItem).join('')}</ul>
+        </div>`).join('');
+        detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">
+          <span>Showing chain for <strong>${conceptLink(activeNode)}</strong> (${directArr.length} direct${viaSet.size ? ` · ${viaSet.size} via connected cause` : ''})</span>
+          <button type="button" class="bok-viz-clear" data-clear-diag="1">Show all ${directEdges.length} propositions</button>
+        </div>
+        <div class="bok-viz-prop-group">
+          <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Direct propositions (${directArr.length})</p>
+          ${directArr.length ? `<ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px">${directArr.map(renderRelItem).join('')}</ul>` : '<p class="bok-muted">No direct edges within this symptom subset — open the concept page for its full neighborhood.</p>'}
+        </div>
+        ${viaGroupsHtml}`;
+      }
     }
   }
 
@@ -1654,9 +1852,8 @@
       if (!u || !v || u.id === v.id) continue;
       if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
       const iu = stepIndex.get(u.id), iv = stepIndex.get(v.id);
-      const a = Math.min(iu, iv), b = Math.max(iu, iv);
-      const key = `${a}__${b}`;
-      if (!pairMap.has(key)) pairMap.set(key, { a, b, count: 0, rels: [] });
+      const key = `${iu}__${iv}`;
+      if (!pairMap.has(key)) pairMap.set(key, { uIdx: iu, vIdx: iv, count: 0, rels: [] });
       const entry = pairMap.get(key);
       entry.count++;
       entry.rels.push(rel);
@@ -1670,13 +1867,17 @@
     let arcsHtml = '';
     const totalProps = [...pairMap.values()].reduce((s, x) => s + x.count, 0);
     for (const arc of pairMap.values()) {
-      const x1 = stepX(arc.a), x2 = stepX(arc.b);
-      const span = arc.b - arc.a;
-      const archH = 18 + (span / Math.max(1, n - 1)) * 86;
+      const a = Math.min(arc.uIdx, arc.vIdx);
+      const b = Math.max(arc.uIdx, arc.vIdx);
+      const isFwd = arc.uIdx < arc.vIdx;
+      const x1 = stepX(arc.uIdx), x2 = stepX(arc.vIdx);
+      const span = b - a;
+      const archBase = 18 + (span / Math.max(1, n - 1)) * 86;
+      const archH = isFwd ? archBase : archBase * 0.82;
       const xm = (x1 + x2) / 2;
       const ym = baseY - archH * 1.65;
       const w = Math.min(2.3, 0.75 + Math.sqrt(arc.count) * 0.45).toFixed(2);
-      arcsHtml += `<path class="viz-path-arc" d="M${x1.toFixed(1)},${baseY - 7} Q${xm.toFixed(1)},${ym.toFixed(1)} ${x2.toFixed(1)},${baseY - 7}" stroke-width="${w}" data-arc-a="${arc.a}" data-arc-b="${arc.b}" data-arc-count="${arc.count}"/>`;
+      arcsHtml += `<path class="viz-path-arc" d="M${x1.toFixed(1)},${baseY - 7} Q${xm.toFixed(1)},${ym.toFixed(1)} ${x2.toFixed(1)},${baseY - 7}" stroke-width="${w}" data-arc-u="${arc.uIdx}" data-arc-v="${arc.vIdx}" data-arc-count="${arc.count}"/>`;
     }
 
     let stationsHtml = `<line x1="${padX}" y1="${baseY}" x2="${W - padX}" y2="${baseY}" stroke="var(--bok-ink)" stroke-width="1.5"/>`;
@@ -1697,13 +1898,13 @@
     }
 
     return `<div class="bok-path-viz" data-path-viz="${esc(lp.id)}">
-      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Dependency arc roadmap for ${esc(lp.label)}">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Cross-step relationship arc diagram for ${esc(lp.label)}">
         <g class="viz-layer-arcs">${arcsHtml}</g>
         <g class="viz-layer-stations">${stationsHtml}</g>
       </svg>
-      <p class="bok-path-viz-status" id="path-status-${esc(lp.id)}">
-        <span><strong>Figure.</strong> ${n} ordered subjects connected by ${pairMap.size} cross-step dependency arcs (${totalProps} propositions). Hover or select a station to inspect how earlier steps feed later steps.</span>
-      </p>
+      <div class="bok-path-viz-status" id="path-status-${esc(lp.id)}">
+        <span><strong>Figure.</strong> ${n} ordered subjects connected by ${pairMap.size} directed cross-step arcs (${totalProps} propositions). Hover or select a station to inspect its outgoing (crimson) and incoming (ink) relationships along the path.</span>
+      </div>
     </div>`;
   }
 
@@ -1743,7 +1944,10 @@
       <nav class="bok-jump" aria-label="Jump to guide"><a href="#view=guides&amp;section=roles">By role</a><a href="#view=guides&amp;section=symptoms">By symptom</a><a href="#view=guides&amp;section=paths">Learning paths</a></nav>
       <h3 id="guide-section-roles">By role</h3><p class="bok-lead">${esc(g.roles_note || '')}</p>
       <figure class="bok-viz-figure" id="bok-role-sankey-fig">
-        <div class="bok-viz-bar" id="bok-role-sankey-status" style="font-size:0.82rem;color:var(--bok-muted)"></div>
+        <div class="bok-viz-bar">
+          <div id="bok-role-sankey-status" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:0.82rem;color:var(--bok-muted)"></div>
+          ${expandBtn('bok-role-sankey-fig')}
+        </div>
         <div class="bok-viz-stage" id="bok-role-sankey-stage"></div>
         <figcaption class="bok-viz-caption"><strong>Figure 2. Role → group → area alluvial distribution.</strong> Core subjects count double and are drawn darker; working-knowledge subjects are lighter. Roles are ordered by vertical barycenter to minimize crossings; areas follow canonical matrix order.</figcaption>
       </figure>
@@ -1760,10 +1964,13 @@
           <div class="bok-viz-seg" role="group" aria-label="Common production symptoms">
             ${quickSymptomTabs.map(([id, tabLbl]) => `<button type="button" data-symptom-pick="${esc(id)}" aria-pressed="${String(state.activeSymptom === id)}">${esc(tabLbl)}</button>`).join('')}
           </div>
+          ${expandBtn('bok-symptom-flow-fig')}
         </div>
-        <div class="bok-viz-stage" id="bok-symptom-stage"></div>
-        <div id="bok-symptom-detail" class="bok-viz-panel" style="margin-top:10px"></div>
-        <figcaption class="bok-viz-caption"><strong>Figure 3. Three-stage diagnostic triage flow (What to check → Symptom metric &amp; likely causes ← What to change).</strong> Solid curves represent diagnostic measurement or detection relationships; dashed curves represent engineering mitigations and levers. Select any concept box to isolate its action chain.</figcaption>
+        <div class="bok-viz-body">
+          <div class="bok-viz-stage" id="bok-symptom-stage"></div>
+          <div id="bok-symptom-detail" class="bok-viz-panel"></div>
+        </div>
+        <figcaption class="bok-viz-caption"><strong>Figure 3. Three-stage diagnostic triage flow (What to check → Symptom metric &amp; likely causes ← What to change).</strong> Solid curves represent diagnostic measurement, limit, or causal relationships; dashed curves represent engineering mitigations and levers; dotted curves link concepts within the same stage. Select any concept box to isolate its action chain.</figcaption>
       </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Symptom</th><th>Likely causes</th><th>Check</th><th>Change</th></tr></thead><tbody>${symptoms}</tbody></table>
       <h3 id="guide-section-paths">Learning paths</h3><p class="bok-lead">${esc(g.paths_note || '')}</p>${paths}`;
@@ -1889,6 +2096,55 @@
     render();
   }
 
+  function markFull(fig, on) {
+    fig.classList.toggle('is-full', on);
+    if (on) {
+      fig.setAttribute('role', 'dialog');
+      fig.setAttribute('aria-modal', 'true');
+      fig.setAttribute('aria-label', fig.querySelector('figcaption strong')?.textContent || 'Expanded figure');
+    } else {
+      ['role', 'aria-modal', 'aria-label'].forEach((a) => fig.removeAttribute(a));
+    }
+    const btn = fig.querySelector('[data-viz-expand]');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(on));
+    btn.querySelector('path')?.setAttribute('d', on ? ICON_EXIT : ICON_EXPAND);
+    const lbl = btn.querySelector('.bok-viz-expand-label');
+    if (lbl) lbl.textContent = on ? 'Exit full screen (Esc)' : 'Expand to full screen';
+  }
+
+  function syncFull() {
+    const fig = state.vizFull && document.getElementById(state.vizFull);
+    const live = !!fig && !fig.closest('[hidden]');
+    if (!live) state.vizFull = null;
+    for (const f of document.querySelectorAll('.bok-viz-figure.is-full')) {
+      if (f !== fig || !live) markFull(f, false);
+    }
+    if (live) markFull(fig, true);
+    document.documentElement.classList.toggle('bok-viz-locked', live);
+  }
+
+  function clearVizSelection(figId) {
+    const any = !figId;
+    if ((any ? state.view === 'landing' : figId === 'bok-coupling-figure') && state.couplingSel) {
+      state.couplingSel = null;
+      refreshCouplingFigure();
+      return true;
+    }
+    if ((any ? state.view === 'guides' : figId === 'bok-role-sankey-fig') && (state.activeRole || state.activeAreaRole)) {
+      state.activeRole = null;
+      state.activeAreaRole = null;
+      drawRoleSankey();
+      return true;
+    }
+    if ((any ? state.view === 'guides' : figId === 'bok-symptom-flow-fig') && state.activeDiagNode) {
+      state.activeDiagNode = null;
+      drawSymptomFlow();
+      return true;
+    }
+    return false;
+  }
+
   function render() {
     const v = state.view;
     const entry = ['area', 'subject', 'concept', 'landing'].includes(v);
@@ -1912,13 +2168,14 @@
       if (!$('bok-guides').innerHTML) renderGuides();
       else { drawRoleSankey(); drawSymptomFlow(); }
     }
+    syncFull();
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
       : v === 'guides' && state.guide ? document.getElementById(state.guide.startsWith('section-') ? `guide-${state.guide}` : `guide-${state.guide}`) : null;
     if (target) {
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target.classList.add('is-focus');
       setTimeout(() => target.classList.remove('is-focus'), 1600);
-    } else {
+    } else if (!state.vizFull) {
       const top = document.querySelector('.bok-toolbar');
       if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: 'start' });
     }
@@ -1940,31 +2197,67 @@
     for (const stEl of container.querySelectorAll('.viz-path-station')) {
       stEl.classList.toggle('is-active', Number(stEl.dataset.stationIdx) === stationIdx);
     }
-    let inCount = 0, outCount = 0;
-    const inCodes = [], outCodes = [];
+    const stepIndex = new Map((lp.steps || []).map((st, i) => [st.subject, i]));
+    let earlToThis = 0, thisToEarl = 0, thisToLate = 0, lateToThis = 0;
+    const earlSet = new Set(), lateSet = new Set();
+    const stationProps = [];
+
     for (const arcEl of container.querySelectorAll('.viz-path-arc')) {
-      const a = Number(arcEl.dataset.arcA), b = Number(arcEl.dataset.arcB), cnt = Number(arcEl.dataset.arcCount);
+      const u = Number(arcEl.dataset.arcU), v = Number(arcEl.dataset.arcV);
       arcEl.classList.remove('is-in', 'is-out', 'is-dim');
       if (stationIdx === null) continue;
-      if (b === stationIdx) {
-        arcEl.classList.add('is-in');
-        inCount += cnt;
-        inCodes.push(rows.get(lp.steps[a]?.subject)?.code || `Step ${a + 1}`);
-      } else if (a === stationIdx) {
+      if (u === stationIdx) {
         arcEl.classList.add('is-out');
-        outCount += cnt;
-        outCodes.push(rows.get(lp.steps[b]?.subject)?.code || `Step ${b + 1}`);
+      } else if (v === stationIdx) {
+        arcEl.classList.add('is-in');
       } else {
         arcEl.classList.add('is-dim');
       }
     }
+
+    if (stationIdx !== null) {
+      for (const rel of data.relationships || []) {
+        const uRow = homeOf.get(rel.source), vRow = homeOf.get(rel.target);
+        if (!uRow || !vRow || uRow.id === vRow.id) continue;
+        if (!stepIndex.has(uRow.id) || !stepIndex.has(vRow.id)) continue;
+        const iu = stepIndex.get(uRow.id), iv = stepIndex.get(vRow.id);
+        if (iu !== stationIdx && iv !== stationIdx) continue;
+        stationProps.push(rel);
+        const otherIdx = iu === stationIdx ? iv : iu;
+        const otherCode = rows.get(lp.steps[otherIdx]?.subject)?.code || `Step ${otherIdx + 1}`;
+        if (otherIdx < stationIdx) {
+          earlSet.add(otherCode);
+          if (iu < stationIdx) earlToThis++;
+          else thisToEarl++;
+        } else {
+          lateSet.add(otherCode);
+          if (iu === stationIdx) thisToLate++;
+          else lateToThis++;
+        }
+      }
+    }
+
     const statusEl = $(`path-status-${pathId}`);
     if (statusEl && stationIdx !== null) {
       const st = lp.steps[stationIdx];
       const r = rows.get(st?.subject);
-      const inStr = inCodes.length ? `builds on ${inCodes.join(', ')} (${inCount} propositions)` : 'entry point (no earlier step dependencies)';
-      const outStr = outCodes.length ? `feeds ${outCodes.join(', ')} (${outCount} propositions)` : 'terminal step in path';
-      statusEl.innerHTML = `<span><strong>Step ${stationIdx + 1} (${esc(r?.code || '')} ${esc(r?.display_label || r?.label || '')}):</strong> ${esc(inStr)} · ${esc(outStr)}</span>`;
+      const earlTot = earlToThis + thisToEarl;
+      const lateTot = thisToLate + lateToThis;
+      const earlStr = earlTot
+        ? `earlier steps (${[...earlSet].join(', ')}): ${earlTot} (${thisToEarl} outgoing · ${earlToThis} incoming)`
+        : 'earlier steps: 0';
+      const lateStr = lateTot
+        ? `later steps (${[...lateSet].join(', ')}): ${lateTot} (${thisToLate} outgoing · ${lateToThis} incoming)`
+        : 'later steps: 0';
+      const propItems = stationProps.map((rel) => {
+        const uS = homeOf.get(rel.source), vS = homeOf.get(rel.target);
+        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+        return `<li>${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uS?.code || '')})</span> <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vS?.code || '')})</span></li>`;
+      }).join('');
+      statusEl.innerHTML = `<div style="width:100%">
+        <span><strong>Step ${stationIdx + 1} (${esc(r?.code || '')} ${esc(r?.display_label || r?.label || '')}):</strong> ${esc(earlStr)} · ${esc(lateStr)}</span>
+        ${stationProps.length ? `<details class="bok-viz-more"><summary>Show the ${stationProps.length} cross-step propositions for Step ${stationIdx + 1}</summary><ul class="bok-viz-prop-list" style="columns:2 300px;column-gap:20px;margin-top:4px !important">${propItems}</ul></details>` : ''}
+      </div>`;
     }
   }
 
@@ -2015,6 +2308,15 @@
     $('bok-gloss-area').addEventListener('input', filterGlossary);
     $('bok-print').addEventListener('click', (e) => { e.preventDefault(); printOutline(); });
     document.addEventListener('click', (e) => {
+      const expandTrigger = e.target.closest('[data-viz-expand]');
+      if (expandTrigger) {
+        const figId = expandTrigger.dataset.vizExpand;
+        state.vizFull = state.vizFull === figId ? null : figId;
+        syncFull();
+        expandTrigger.focus({ preventScroll: true });
+        if (!state.vizFull) expandTrigger.closest('figure')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
       const letter = e.target.closest('a[data-letter]');
       if (letter) {
         e.preventDefault();
@@ -2151,15 +2453,12 @@
         $('bok-search').focus();
         $('bok-search').select();
       } else if (e.key === 'Escape') {
-        if (state.view === 'landing' && state.couplingSel) {
-          state.couplingSel = null;
-          refreshCouplingFigure();
-        } else if (state.view === 'guides' && (state.activeRole || state.activeAreaRole || state.activeDiagNode)) {
-          state.activeRole = null;
-          state.activeAreaRole = null;
-          state.activeDiagNode = null;
-          drawRoleSankey();
-          drawSymptomFlow();
+        if (clearVizSelection(state.vizFull)) return;
+        if (state.vizFull) {
+          const btn = document.querySelector(`[data-viz-expand="${state.vizFull}"]`);
+          state.vizFull = null;
+          syncFull();
+          btn?.focus({ preventScroll: true });
         }
       } else if (state.view === 'home' && state.overlay?.startsWith('path:') && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
         if (e.key === 'ArrowRight') { state.pathStep++; renderMatrix(); }
