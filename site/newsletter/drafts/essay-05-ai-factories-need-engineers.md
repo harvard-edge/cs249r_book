@@ -18,6 +18,12 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
 
+Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch. True to form for a systems person, I broke the loop around the lake into train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop.
+
+![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
+
+**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore.
+
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
 One advantage of being based in Zürich is how easily you can reach the rest of Europe. Last week I traveled north to Berlin for NVIDIA GTC, joining a long morning line of engineers, researchers, and founders that stretched beneath the steel railway bridge outside the venue well before the keynote doors opened.
