@@ -301,8 +301,10 @@ def load_framework(root: Path, field: dict) -> dict | None:
             _fail("gaps require candidate status, not a verified absence claim")
         if gap["id"] in identities or gap["id"] in row_ids:
             _fail(f"gap identity overlaps another source {gap['id']}")
+    from .taxonomy_schema import validate_linkml
+    validate_linkml(model, "FrameworkModel", root, "framework")
     links = field.get("book_links", [])
-    guides = _guides(root, rows_by_id, field)
+    guides = _guides(root, rows_by_id, field, version=model.get("version"))
     return {**deepcopy(model), "guides": guides, "dimensions": {name: dimensions.get(name, []) for name in DIMENSIONS}, "areas": resolved_areas, "gaps": resolved_gaps,
             "summary": {"groups": len(groups), "areas": len(areas), "rows": len(row_ids), "concepts": len(concepts),
                         "book_links": len(links), "linked_concepts": len({link["concept"] for link in links}),
@@ -310,7 +312,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
                         "learning_paths": len(guides["learning_paths"])}}
 
 
-def _guides(root: Path, rows_by_id: dict, field: dict) -> dict:
+def _guides(root: Path, rows_by_id: dict, field: dict, version: str | None = None) -> dict:
     """Load the reader guides (roles, symptoms, learning paths) and derive symptom levers.
 
     Every reference must name an existing subject or concept, and every symptom check or lever must
@@ -357,6 +359,9 @@ def _guides(root: Path, rows_by_id: dict, field: dict) -> dict:
                 _fail(f"{lp['id']} step names unknown subject {step['subject']}")
         if len({step["subject"] for step in lp["steps"]}) != len(lp["steps"]):
             _fail(f"{lp['id']} repeats a subject")
+    from .taxonomy_schema import validate_guides_semantics, validate_linkml
+    validate_linkml(model, "GuidesModel", root, "framework: guides")
+    validate_guides_semantics(model, rows_by_id, version=version)
     return {"roles_note": model.get("roles_note", ""), "roles": deepcopy(roles),
             "symptoms_note": model.get("symptoms_note", ""), "symptoms": deepcopy(symptoms),
             "paths_note": model.get("paths_note", ""), "learning_paths": deepcopy(paths)}

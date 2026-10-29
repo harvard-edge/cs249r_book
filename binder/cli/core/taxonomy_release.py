@@ -161,9 +161,17 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
            f"  author = {{{AUTHOR}}},\n  title = {{{NAME}}},\n  version = {{{version}}},\n  year = {{{YEAR}}},\n"
            f"  howpublished = {{\\url{{{PAGE}}}}},\n  note = {{Editorial draft. Licensed {LICENSE['name']}}}\n}}\n")
 
-    return {out / "mlsys-taxonomy.json": (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode(),
-            out / "mlsys-taxonomy-subjects.csv": subjects.getvalue().encode(),
-            out / "mlsys-taxonomy-concepts.csv": glossary.getvalue().encode(),
-            out / "mlsys-taxonomy.ttl": ("\n".join(ttl) + "\n").encode(),
-            out / "mlsys-concept-graph.graphml": ("\n".join(graph) + "\n").encode(),
-            out / "mlsys-taxonomy.bib": bib.encode()}
+    result = {out / "mlsys-taxonomy.json": (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode(),
+              out / "mlsys-taxonomy-subjects.csv": subjects.getvalue().encode(),
+              out / "mlsys-taxonomy-concepts.csv": glossary.getvalue().encode(),
+              out / "mlsys-taxonomy.ttl": ("\n".join(ttl) + "\n").encode(),
+              out / "mlsys-concept-graph.graphml": ("\n".join(graph) + "\n").encode(),
+              out / "mlsys-taxonomy.bib": bib.encode()}
+    linkml_src = root / "taxonomy/schema/mlsys-taxonomy.linkml.yml"
+    if linkml_src.exists():
+        from .taxonomy_schema import compile_json_schema
+        result[out / "mlsys-taxonomy.linkml.yml"] = linkml_src.read_bytes()
+        result[out / "mlsys-taxonomy.schema.json"] = (
+            json.dumps(compile_json_schema(root), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        ).encode()
+    return result
