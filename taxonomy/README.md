@@ -4,12 +4,13 @@ Status: editorial draft, version `0.3-draft`. This document specifies a proposal
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
-## Four connected records
+## Five connected records
 
 | Record | Question it answers | Authoritative source |
 |---|---|---|
 | Subject framework | What belongs in this engineering field, and where can I find it? | `taxonomy/ml-systems-framework.yml` |
 | Concept vocabulary and relationships | What does an idea mean, and how does it affect other ideas under stated conditions? | `taxonomy/ml-systems-field.yml` |
+| Reader guides | Which subjects and concepts matter for a given role, production symptom, or learning path? | `taxonomy/ml-systems-guides.yml` |
 | Book alignment | Where does MLSysBook discuss an idea? | `taxonomy/mlsysbook-alignment.yml` |
 | Competency specification, proposed | What can a learner demonstrate under a stated task, context, and evidence requirement? | Separate task records, not yet adopted |
 
@@ -17,7 +18,7 @@ The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy
 
 ## Organizing frame
 
-An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.3-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups, with 805 concepts:
+An ML system is a **stack**, run through a **lifecycle**, judged by **qualities**, built on shared **foundations**. Two **system types**, agentic and embodied, add engineering that has no general home. Version `0.3-draft` arranges 20 subject areas and 101 subjects (rows) under those five groups, with 807 concepts:
 
 | Group | Areas |
 |---|---|
@@ -29,7 +30,7 @@ An ML system is a **stack**, run through a **lifecycle**, judged by **qualities*
 
 The groups correspond to the layer, activity, concern, and context facets. A single tree necessarily flattens that faceted space, so each concept's one home exists for maintenance and browsing, while facets and secondary links carry the other legitimate placements. The placement rules are recorded in the framework `rationale`:
 
-- **Home rule.** A mechanism that implements a layer of the stack or a stage of the lifecycle lives in that Stack or Lifecycle subject, even when it exists for speed or cost. A mechanism whose only purpose is one quality, and which applies across layers, lives in that Quality, beside the measurement of that quality. Measurement and trade-off reasoning live in Qualities, except metrics defined by one lifecycle stage (serving latency targets), which live with that stage. Worked examples (`placement_examples`, also shown on the page):
+- **Home rule.** A mechanism that implements a layer of the stack or a stage of the lifecycle lives in that Stack or Lifecycle subject, even when it exists for speed or cost. A mechanism whose only purpose is one quality, and which applies across layers, lives in that Quality, beside the measurement of that quality. General quantitative system models live in Foundations, while measurement of a specific quality lives in that Quality, except metrics defined by one lifecycle stage (serving latency targets), which live with that stage. Worked examples (`placement_examples`, also shown on the page):
 
   | Concept | Home | Why |
   |---|---|---|
@@ -85,7 +86,7 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 - **Matrix (home).** The whole taxonomy on one screen: one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, and a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal). Below the matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
 - **Concept map.** Each concept page carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
-- **Guides.** Ways in for people who arrive with a job rather than a concept (`taxonomy/ml-systems-guides.yml`): eleven role profiles with core and working subjects, seventeen production symptoms with their likely causes, what to check, and what to change, and five learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
+- **Guides.** Ways in for people who arrive with a job rather than a concept (`taxonomy/ml-systems-guides.yml`): eleven role profiles with core and working subjects, eighteen production symptoms with their likely causes, what to check, and what to change, and six learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
 - **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
 - **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
@@ -93,7 +94,7 @@ State is kept in the URL hash (`#subject=…`, `#concept=…`, `#area=…`, `#vi
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,697 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,719 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
 
 ## Codes, downloads, and citation
 

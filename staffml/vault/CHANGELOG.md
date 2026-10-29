@@ -14,9 +14,10 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ### ML Systems Taxonomy 0.3-draft
 
-The taxonomy gained 63 concepts and moved two (no identity was retired or
-renamed), so every existing tag still validates. `app/src/data/mlsys-taxonomy.json`
-was regenerated with the new labels and homes.
+The taxonomy gained 72 concepts and moved two (807 concepts and 1,719
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates. `app/src/data/mlsys-taxonomy.json` was regenerated with
+the new labels and homes.
 
 The 25 questions tagged with a moved concept were re-reviewed under the
 published tagging rules. Seven had taken their subject from the concept's old
@@ -56,7 +57,7 @@ and a course topic can be found and compared by the same concept.
   (one to three concept identities, most central first), both optional.
   The model checks their format; the structural tier (`vault check
   --strict`, check #20) checks that they name a subject or concept in
-  `shared/concepts/`.
+  `taxonomy/` (formerly `shared/concepts/`).
 - **`CANON_VERSION` 2 → 3**: both fields join the content-hash whitelist,
   so retagging changes `release_hash` like any reclassification.
 - **SQLite / D1**: `questions.taxonomy_subject` column and a
