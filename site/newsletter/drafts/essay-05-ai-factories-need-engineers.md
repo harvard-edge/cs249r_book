@@ -1,5 +1,5 @@
 ---
-title: "NVIDIA GTC Berlin: AI Factories Will Need AI Engineers"
+title: "NVIDIA GTC Berlin: AI Factories Need AI Engineers"
 date: "2026-10-29"
 author: "Vijay Janapa Reddi"
 categories: ["essay"]
@@ -96,7 +96,7 @@ To diagnose that slowdown, an engineer has to look past aggregate token throughp
 
 **From raw token capacity to useful engineering work.** A token factory measures output in tokens per second per megawatt, whereas an application succeeds only when accurate answers clear admission, retrieval, prefill, and decoding within the response deadline.
 
-Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The factory manufactures raw tokens, while the AI systems engineer balances these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
+Every candidate fix trades one system requirement against another. Shortening the retrieved context frees memory and reduces time to first token, but it can cut the passage the model needs to give a correct maintenance instruction. Quantizing weights or KV-cache entries from 16 bits to 8 bits fits more concurrent requests into memory, provided the hardware executes the lower-precision format natively and answer quality holds on edge cases. The factory manufactures raw tokens, while the AI engineer balances these competing effects across model, runtime, and hardware to turn token capacity into dependable work.
 
 ## The Builder's Gap Inside the Factory
 
@@ -114,7 +114,7 @@ Training AI engineers for this environment does not require placing a shipping-c
 
 That continuity is the foundation of [Machine Learning Systems](https://mlsysbook.ai). Any student, developer, or practicing engineer can calculate analytical bottlenecks, build framework components from scratch, and deploy models onto constrained microcontroller kits without access to a billion-dollar cluster. Across all of those settings, the engineering habit is the same: predict the physical limit, measure the system at its boundaries, explain the gap between prediction and observation, and defend the resulting trade-off.
 
-Over the next two essays, we will follow this thread from the factory floor into daily engineering practice and classroom design. The next essay traces a single request through an AI service to show where waiting and execution accumulate across the stack, and the third examines how we can teach and grade the decisions an AI systems engineer must defend.
+Industry can now pre-integrate an AI factory into a container and bolt it onto a warehouse floor in two weeks. What cannot be shipped in a container is the person who understands how power, hardware, runtimes, and models interact inside it. AI factories are here, and they need AI engineers. Over the next two essays, we will follow that work into daily practice, first by tracing a single request through a live AI service, and then by examining how we teach and evaluate the decisions an AI engineer must defend.
 
 ## Continuing the Conversation
 
