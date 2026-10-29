@@ -46,9 +46,9 @@ Every past industrial transition faced that same human bottleneck. In the first 
 
 Before Ford, skilled artisans built one carriage at a time on a workbench. Once production moved to an integrated assembly line, a bottleneck or tolerance error at a single station stalled the entire plant. Machine learning today sits in that exact transition. Most university courses still train students like artisans at a workbench, tuning a single model inside a notebook, while industry is bolting down continuous token factories.
 
-![An AI factory illustration displayed during the GTC Berlin keynote.](figures/gtc-berlin-ai-factory.jpg)
+![Keynote slides from GTC Berlin showing the AI factory industrial ecosystem and the 34-fold surge in weekly agentic token consumption across OpenRouter.](figures/gtc-berlin-ai-factory.jpg)
 
-**The AI factory as an industrial system.** Jensen Huang on stage at GTC Berlin, framing AI infrastructure as a token factory alongside European industrial partners. Photograph from my visit.
+**The AI factory and the token surge driving it.** The GTC Berlin keynote framed AI infrastructure as a token factory powering industrial applications (left), driven by a 34-fold increase in weekly agentic token consumption from 3.9 trillion to 132.6 trillion tokens between February and October (right). Photographs from my visit.
 
 ## What Arrives When a Token Factory Ships in a Container
 
