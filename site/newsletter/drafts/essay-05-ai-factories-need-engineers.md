@@ -18,11 +18,13 @@ image: "figures/gtc-berlin-jensen-closeup.jpg"
 
 Let me get personal for a moment. It has been a while since my last newsletter. Earlier this year, my family and I moved from Boston to Zürich for my academic sabbatical, and relocating a household across the Atlantic took time. Now that we have settled into life in Zürich, I am finally getting back into a regular rhythm at this desk.
 
-Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch. True to form for a systems person, I broke the loop around the lake into train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop.
+Outside of work, I set myself a personal project for the sabbatical: running all the way around Lake Zürich before our year here ends. I am not a runner, which is the point. Our kids are 7 and 11, and I wanted to show them in a concrete way that we do hard things even when we are starting from scratch.
 
-![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
+True to form for a systems person, I broke the loop around the lake into 28 train-station checkpoints. Every week or two I run the next leg along the shore, and the kids ride the train down to meet me at the finish stop. I am now up to 22 kilometers along the southwest shore, and to keep myself honest on both fronts, I plan to send a new issue of this newsletter each time I reach another train stop around the lake.
 
-**One station at a time around Lake Zürich.** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the completed legs marked in blue along the southwest shore.
+![Map of Lake Zürich showing the 28 lakeside train-station checkpoints and the 22 km of completed running segments along the southwest shore.](figures/zurichsee-run-map.jpg)
+
+**One station at a time around Lake Zürich (22 km and counting).** My sabbatical running map around the Zürichsee, broken into 28 train-station checkpoints (red pins) with the first 22 kilometers of completed legs marked in blue along the southwest shore. Each new train stop will bring the next issue of this newsletter.
 
 ## NVIDIA GTC Berlin: From Steam Engines to Token Factories
 
