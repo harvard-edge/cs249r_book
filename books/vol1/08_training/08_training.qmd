@@ -940,7 +940,7 @@ Momentum methods\index{Momentum!optimization physics}\index{Momentum!memory over
 
 ##### Adaptive learning rate methods {#sec-model-training-adaptive-learning-rate-methods-1328}
 
-While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop\index{RMSprop!adaptive step sizes}[^fn-rmsprop-hinton-optimizer] solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. Adapting step sizes per parameter requires maintaining a running average of squared gradients $\RmspropSquaredGradientAverage_t$, imposing a $2\times$ static memory overhead equivalent to momentum. Furthermore, computing this running average introduces elementwise square and square-root kernels during each parameter update.
+While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop\index{RMSprop!adaptive step sizes}[^fn-rmsprop-hinton-optimizer] solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. Adapting step sizes per parameter requires maintaining a running average of squared gradients $\RmspropSquaredGradientAverage_t$, imposing a $2\times$ static memory overhead equivalent to momentum. Computing this running average also introduces elementwise square and square-root kernels during each parameter update.
 
 [^fn-rmsprop-hinton-optimizer]: **RMSprop**\index{RMSprop!origin and Adam inheritance}: Proposed by Geoffrey Hinton in Lecture 6e of his 2012 Coursera course and never published in a peer-reviewed paper. Its per-parameter squared-gradient average is what Adam inherits as its second moment $\AdamSecondMoment_t$, directly contributing to Adam's 3$\times$ memory overhead described in @sec-model-training-optimization-algorithm-system-implications-f9f2.
 
@@ -1054,7 +1054,7 @@ Auxiliary state memory increases progressively from SGD (zero auxiliary state) t
 
 Three multipliers for Adam's memory appear in this chapter, and they differ only in what they count and what they divide by. The table's 3$\times$ counts FP32 weights plus two FP32 moments against the FP32 weights alone, 12 bytes per parameter against 4. Adding FP32 gradients gives the 16 bytes per parameter of plain FP32 Adam. The standard mixed-precision recipe also lands at 16 bytes (2 for FP16 weights, 2 for FP16 gradients, 4 for FP32 master weights, 8 for the moments). Measured against the 2 bytes of FP16 inference weights, that same 16 bytes is what the definition of training systems reports as `{python} TrainingScenarios.adam_training_memory_mult_str`.
 
-The costs quantified in @tbl-optimizer-properties create a design tension. Adam's two moment buffers may improve optimization for a given workload, but their memory can reduce the model size or batch size that fits on an accelerator. AdamW\index{AdamW!decoupled weight decay}[^fn-adamw-decoupled-decay] [@loshchilov2019adamw] decouples weight decay from Adam's adaptive gradient update without adding another per-parameter state tensor.
+The costs quantified in @tbl-optimizer-properties create a design tension. Adam's two moment buffers may improve optimization for a given workload, but their memory can reduce the model size or batch size that fits on an accelerator. AdamW\index{AdamW!decoupled weight decay}[^fn-adamw-decoupled-decay] [@loshchilov2019adamw] leaves the memory side of that tension unchanged, because it decouples weight decay from Adam's adaptive gradient update without adding another per-parameter state tensor.
 
 [^fn-adamw-decoupled-decay]: **AdamW (Adam with decoupled weight decay)**\index{AdamW!decoupled weight decay}: Standard $\ell_2$ regularization enters the gradient and is therefore rescaled by Adam's adaptive update. AdamW applies weight decay as a separate parameter update, restoring the intended distinction between adaptive gradient scaling and decay [@loshchilov2019adamw]. It uses the same moment-buffer structure as Adam, though its effect on model quality remains workload dependent.
 
@@ -1415,7 +1415,7 @@ class GPT2ActivationMemory:
 # Note: Use GPT2ActivationMemory.total_act_gb_str directly.
 ```
 
-The three-layer MNIST classifier (784 → 128 → 64 → 10) of @sec-neural-computation needed only kilobytes of activation storage. GPT-2 processing a single batch of `{python} GPT2ActivationMemory.batch_size_str` sequences of `{python} GPT2ActivationMemory.seq_len_str` tokens requires approximately `{python} GPT2ActivationMemory.total_act_gb_str` of saved activations. Adding parameters, gradients, master weights, and optimizer state raises the estimated training footprint to `{python} GPT2ActivationMemory.peak_gb_str`, about `{python} GPT2ActivationMemory.over_ratio_mult_str` the H100's `{python} GPT2ActivationMemory.h100_mem_capacity_gb_str` before temporary workspace is counted. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e puts a number on each term of the full training memory equation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$) for GPT-2. Modern ML frameworks automate gradient evaluation through automatic differentiation, but managing the resulting memory footprint and arithmetic schedule remains an unavoidable systems engineering responsibility.
+The three-layer MNIST classifier (784 → 128 → 64 → 10) of @sec-neural-computation needed only kilobytes of activation storage, whereas GPT-2 processing a single batch of `{python} GPT2ActivationMemory.batch_size_str` sequences of `{python} GPT2ActivationMemory.seq_len_str` tokens requires approximately `{python} GPT2ActivationMemory.total_act_gb_str` of saved activations. Adding parameters, gradients, master weights, and optimizer state raises the estimated training footprint to `{python} GPT2ActivationMemory.peak_gb_str`, about `{python} GPT2ActivationMemory.over_ratio_mult_str` the H100's `{python} GPT2ActivationMemory.h100_mem_capacity_gb_str` before temporary workspace is counted. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e puts a number on each term of the full training memory equation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$) for GPT-2. Modern ML frameworks automate gradient evaluation through automatic differentiation, but managing the resulting memory footprint and arithmetic schedule remains an unavoidable systems engineering responsibility.
 
 #### Activation memory requirements {#sec-model-training-activation-memory-requirements-f44c}
 
@@ -2183,11 +2183,11 @@ This execution loop repeats across batches and epochs\index{Epoch!training cycle
 
 ### Data pipeline {#sec-model-training-data-pipeline-8e71}
 
-Keeping an accelerator's arithmetic units saturated requires streaming training examples from persistent storage into device memory at or above the model's consumption rate. Data engineering posed this as the feeding problem (@sec-data-engineering-feeding-problem) and measured the throughput lost when a slow storage path cannot keep up; training is where that loss is paid on every step. ResNet-50 is the chapter's input-pipeline case, because its images are far heavier for the host to prepare than GPT-2's token IDs. The stage trace below starts with GPT-2 XL under a scenario assumption, on-the-fly single-core tokenization (production runs usually pre-tokenize), and the system implications then turn to ResNet-50. Upstream data engineering prepares and partitions datasets on storage media, while the runtime data pipeline executes concurrently with model computation on the host CPU.
+Keeping an accelerator's arithmetic units saturated requires streaming training examples from persistent storage into device memory at or above the model's consumption rate. Data engineering posed this as the feeding problem (@sec-data-engineering-feeding-problem) and measured the throughput lost when a slow storage path cannot keep up; training is where that loss is paid on every step. Upstream data engineering prepares and partitions datasets on storage media, while the runtime data pipeline executes concurrently with model computation on the host CPU. ResNet-50 is the chapter's input-pipeline case, because its images are far heavier for the host to prepare than GPT-2's token IDs. The stage trace below starts with GPT-2 XL under a scenario assumption, on-the-fly single-core tokenization (production runs usually pre-tokenize), and the system implications then turn to ResNet-50.
 
 The data pipeline bridges raw storage and accelerator execution across the machine boundary. @Fig-data-pipeline partitions this data movement across three physical zones: staging raw files from persistent storage into host memory, formatting and augmenting tensors across CPU worker threads, and streaming batched inputs over the interconnect to parallel GPU accelerators.
 
-::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Training data transitions through storage, CPU preprocessing, and GPU execution zones. Each stage represents a potential throughput gate; disk read bandwidth, transformation latency, and PCIe host-to-device transfers must collectively sustain the GPU consumption rate to keep accelerators at peak utilization." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
+::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Training data transitions through storage, CPU preprocessing, and GPU execution zones. Each stage represents a potential throughput bottleneck; disk read bandwidth, transformation latency, and PCIe host-to-device transfers must collectively sustain the GPU consumption rate to keep accelerators at peak utilization." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily, >=stealth]
@@ -4322,7 +4322,7 @@ The choice between formats depends on model characteristics and hardware support
 
 :::
 
-Modern accelerator architectures pair dense matrix execution units with reduced-precision numerical formats to maximize arithmetic throughput. NVIDIA introduced Tensor Cores for FP16 operations in the Volta architecture [@nvidia_tensors_fp16_2017] and added native BF16 execution in Ampere [@NVIDIA2020], matching the native BF16 support Google developed for Tensor Processing Units [@google_bfloat16]. These specialized functional units execute low-precision matrix multiply-accumulate operations at roughly one order of magnitude or more above the rate of standard 32-bit floating-point ALUs (@fig-precision-ladder).
+The cycle pays off because modern accelerator architectures pair dense matrix execution units with reduced-precision numerical formats to maximize arithmetic throughput. NVIDIA introduced Tensor Cores for FP16 operations in the Volta architecture [@nvidia_tensors_fp16_2017] and added native BF16 execution in Ampere [@NVIDIA2020], matching the native BF16 support Google developed for Tensor Processing Units [@google_bfloat16]. These specialized functional units execute low-precision matrix multiply-accumulate operations at roughly one order of magnitude or more above the rate of standard 32-bit floating-point ALUs (@fig-precision-ladder).
 
 Mixed-precision training turns those hardware capabilities into a split numerical policy. Eligible matrix multiplications and convolutions execute in FP16 or BF16 on tensor units, while reductions, accumulations, and parameter updates retain higher precision. The performance gain comes from both arithmetic throughput and data movement: lower-precision units pack more multiply-accumulates into each cycle and each unit of silicon area, while narrower tensors halve data transfer volumes across caches and high-bandwidth memory. Higher precision remains necessary where wide reductions, small parameter updates, or sensitive normalizations can accumulate rounding error. Framework autocast policies enforce this split dynamically, selecting lower-precision execution for compute-intensive matrix multiplications while preserving FP32 for numerically fragile operations.
 
@@ -4539,13 +4539,13 @@ class MixedPrecisionThroughputCost:
 - TF32: about `{python} MixedPrecisionThroughputCost.t_tf32_str`, `{python} MixedPrecisionThroughputCost.cost_tf32_str`
 - BF16: about `{python} MixedPrecisionThroughputCost.t_bf16_str`, `{python} MixedPrecisionThroughputCost.cost_bf16_str`
 
-**Quality gate**: The comparison is valid only if a controlled validation run shows that the BF16 recipe meets the same acceptance criteria as the 32-bit baseline. The scenario does not assume a particular perplexity difference.
+**Quality check**: The comparison is valid only if a controlled validation run shows that the BF16 recipe meets the same acceptance criteria as the 32-bit baseline. The scenario does not assume a particular perplexity difference.
 
 **Systems insight**: The peak ratios, `{python} MixedPrecisionThroughputCost.bf16_over_tf32_mult_str` over TF32 and `{python} MixedPrecisionThroughputCost.bf16_over_fp32_mult_str` over FP32, bound the gain rather than predict it. Holding utilization fixed assumes that every part of the step speeds up with the matrix units, but elementwise kernels, optimizer updates, and input waits do not run on Tensor Cores, so by Amdahl's law the measured speedup is smaller. A real decision requires measured throughput, billing, and quality validation for the target workload.
 
 :::
 
-Realizing these speedups requires empirical profiling rather than assuming automatic acceleration. For small models or memory-bound workloads not dominated by large matrix multiplications, data type casting and kernel launch overheads can offset the arithmetic throughput advantage. Furthermore, whether an accelerator supports native BF16 or requires FP16 loss scaling depends on the underlying microarchitecture.
+Realizing these speedups requires empirical profiling rather than assuming automatic acceleration. For small models or memory-bound workloads not dominated by large matrix multiplications, data type casting and kernel launch overheads can offset the arithmetic throughput advantage. Whether an accelerator supports native BF16 or requires FP16 loss scaling also depends on the underlying microarchitecture.
 
 ```{python}
 #| echo: false
@@ -5347,7 +5347,7 @@ Not all operations are equally expensive to recompute, which motivates selective
 
 #### Memory and computational benefits {#sec-model-training-memory-computational-benefits-9372}
 
-Both techniques reduce activation-memory requirements without adding hardware, though each targets a different dimension of the activation footprint. Gradient accumulation produces an effective batch larger than the resident micro-batch without storing all of its activations simultaneously. A larger effective batch reduces sampling variance, but it does not by itself guarantee faster convergence or better generalization. Conversely, activation checkpointing reduces the per-layer memory footprint of intermediate activations by discarding and recomputing them as needed, freeing capacity for deeper models, additional layers, or higher-resolution inputs. For lighthouse \ref{lhs-training-lighthouse-example-training-gpt-2}, accumulation provides a direct way to reach a chosen effective batch size while keeping the resident micro-batch within one H100's memory.
+Both techniques reduce activation-memory requirements without adding hardware, though each targets a different dimension of the activation footprint. Gradient accumulation produces an effective batch larger than the resident micro-batch without storing all of its activations simultaneously. A larger effective batch reduces sampling variance, but it does not by itself guarantee faster convergence or better generalization. Activation checkpointing instead reduces the per-layer memory footprint of intermediate activations by discarding and recomputing them as needed, freeing capacity for deeper models, additional layers, or higher-resolution inputs. For lighthouse \ref{lhs-training-lighthouse-example-training-gpt-2}, accumulation provides a direct way to reach a chosen effective batch size while keeping the resident micro-batch within one H100's memory.
 
 ```{python}
 #| echo: false
@@ -5485,7 +5485,7 @@ Accumulated configuration:
 - Hourly cost: `{python} GradientAccumulation.accum_hourly_usd_str`
 - Hourly reduction: `{python} GradientAccumulation.hourly_burn_reduction_str`, or `{python} GradientAccumulation.hourly_burn_reduction_pct_str`
 
-**Quality gate**
+**Quality check**
 
 - Match the examples and their order, loss normalization, optimizer state and step schedule, and stochastic-layer behavior.
 - Compare held-out loss or perplexity and the optimization trajectory across repeated runs rather than assuming that the effective batch alone guarantees equivalent quality.
@@ -5710,7 +5710,7 @@ The walkthrough combines memory calculations with a modeled execution profile. U
 
 - [ ] **Evidence**: Which walkthrough values are calculated from tensor sizes, which follow from assumed utilization or tokenization rates, and which require measurement on the target system?
 - [ ] **Capacity and throughput**: Why does fitting the tensor budget establish neither peak runtime memory nor efficient execution, and what must be measured next on hardware?
-- [ ] **Quality gate**: Before accepting the composed optimizations, how does an engineer verify that the revised precision and effective batch preserve progress toward the same validation target?
+- [ ] **Quality check**: Before accepting the composed optimizations, how does an engineer verify that the revised precision and effective batch preserve progress toward the same validation target?
 
 :::
 
