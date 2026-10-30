@@ -44,10 +44,10 @@ def _records(model, name):
     return values
 
 
-def load_taxonomy(root: Path, field: dict) -> dict | None:
+def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    from .field_graph import TAXONOMY_FILE, load_unified_taxonomy
-    unified = load_unified_taxonomy(root)
+    from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+    unified = _bundle if _bundle is not None else load_unified_taxonomy(root)
     if unified is not None:
         model = unified["skos"]
         if model is None:
@@ -56,7 +56,7 @@ def load_taxonomy(root: Path, field: dict) -> dict | None:
         path = root / TAXONOMY_FILE
         if not path.exists():
             return None
-        model = yaml.safe_load(path.read_text())
+        model = load_taxonomy_yaml(path)
         if not isinstance(model, dict) or ("concepts" in model or "areas" in model or "dimensions" in model or "roles" in model):
             return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:

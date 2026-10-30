@@ -1,7 +1,11 @@
 "use client";
 
 import { Network } from "lucide-react";
-import taxonomy from "@/data/mlsys-taxonomy.json";
+import {
+  TAXONOMY_EXPLORER,
+  getConceptLabel,
+  getSubjectLabelMeta,
+} from "@/lib/mlsys-taxonomy";
 
 interface TaxonomyTagsProps {
   /** Subject identity (Question.taxonomy_subject). */
@@ -10,14 +14,6 @@ interface TaxonomyTagsProps {
   concepts?: string[];
 }
 
-type Labels = {
-  explorer: string;
-  subjects: Record<string, { code: string; label: string; area: string }>;
-  concepts: Record<string, { label: string; subject: string }>;
-};
-
-const labels = taxonomy as Labels;
-
 /**
  * "Concepts tested" affordance, rendered AFTER the attempt beside the textbook
  * pointer. Names the ML Systems Taxonomy subject and concepts the question was
@@ -25,9 +21,9 @@ const labels = taxonomy as Labels;
  * nothing for an untagged question or an identity the labels file lacks.
  */
 export default function TaxonomyTags({ subject, concepts }: TaxonomyTagsProps) {
-  const s = subject ? labels.subjects[subject] : undefined;
+  const s = subject ? getSubjectLabelMeta(subject) : undefined;
   if (!s) return null;
-  const known = (concepts ?? []).filter((c) => labels.concepts[c]);
+  const known = (concepts ?? []).filter((c) => Boolean(getConceptLabel(c)));
 
   return (
     <div className="mt-3 rounded-lg border border-borderSubtle bg-surface p-4">
@@ -37,7 +33,7 @@ export default function TaxonomyTags({ subject, concepts }: TaxonomyTagsProps) {
       </span>
 
       <a
-        href={`${labels.explorer}#subject=${encodeURIComponent(subject!)}`}
+        href={`${TAXONOMY_EXPLORER}#subject=${encodeURIComponent(subject!)}`}
         target="_blank"
         rel="noopener noreferrer"
         className="text-sm font-medium text-textPrimary hover:underline underline-offset-2"
@@ -51,12 +47,12 @@ export default function TaxonomyTags({ subject, concepts }: TaxonomyTagsProps) {
           {known.map((c) => (
             <a
               key={c}
-              href={`${labels.explorer}#concept=${encodeURIComponent(c)}`}
+              href={`${TAXONOMY_EXPLORER}#concept=${encodeURIComponent(c)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="px-2 py-0.5 rounded-md border border-borderSubtle text-textSecondary hover:text-textPrimary hover:border-borderHighlight transition-colors"
             >
-              {labels.concepts[c].label}
+              {getConceptLabel(c)}
             </a>
           ))}
         </div>

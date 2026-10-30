@@ -18,25 +18,33 @@ from pathlib import Path
 import yaml
 
 
-from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml
-from .taxonomy_schema import get_enum_values
+from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+from .taxonomy_schema import get_class_slots, get_enum_values
 
 
 STATUSES = get_enum_values("ChecklistStatusEnum")
-CHECKLIST_KEYS = {"schema_version", "id", "title", "basis", "held_out", "topics"}
-TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
+CHECKLIST_KEYS = set(get_class_slots("CoverageChecklistModel"))
+TOPIC_KEYS = set(get_class_slots("CoverageChecklistTopic"))
 
 
 def _vocabulary(root: Path):
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        field = unified["field"]
+        framework = unified["framework"]
+        concepts = {c["id"] for c in field["concepts"]}
+        subjects = {}
+        homes = {}
+        for area in framework["areas"]:
+            for row in area["rows"]:
+                subjects[row["id"]] = row
+                for cid in row.get("concepts", []):
+                    homes[cid] = row["id"]
+        return concepts, subjects, homes
     raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
     concepts = {c["id"] for c in raw["concepts"]}
     homes = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}
-    subjects = {}
-    for area in raw["areas"]:
-        for row in area["rows"]:
-            subjects[row["id"]] = row
-            if row.get("code"):
-                subjects[row["code"]] = row
+    subjects = {row["id"]: row for area in raw["areas"] for row in area["rows"]}
     return concepts, subjects, homes
 
 

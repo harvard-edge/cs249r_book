@@ -418,7 +418,8 @@ function PracticePage() {
     const trackParam = searchParams.get('track');
     const areaParam = searchParams.get('area');
     if (trackParam && getTracks().includes(trackParam)) setSelectedTrack(trackParam);
-    if (areaParam && getTaxAreaById(areaParam)) setSelectedArea(areaParam);
+    const resolvedArea = areaParam ? getTaxAreaById(areaParam) : undefined;
+    if (resolvedArea) setSelectedArea(resolvedArea.id);
     else if (areaParam && getCompetencyAreas().includes(areaParam)) setLegacyArea(areaParam);
 
     // Compute weakest area from progress
