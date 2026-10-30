@@ -102,12 +102,18 @@ def _summary(topics: list[dict]) -> dict:
 
 
 def coverage_report(root: Path) -> dict:
+    from .concept_graph import ConceptGraphError
+    from .taxonomy_schema import validate_linkml
     folder = root / "taxonomy/coverage"
     concepts, subjects, homes = _vocabulary(root)
     checklists, errors = [], []
     for path in sorted(folder.glob("*.yml")):
         checklist = load_taxonomy_yaml(path)
         errors += _check(checklist, concepts, subjects, homes, path.name)
+        try:
+            validate_linkml(checklist, "CoverageChecklistModel", root, path.name)
+        except ConceptGraphError as exc:
+            errors.append(str(exc))
         if isinstance(checklist.get("topics"), list):
             checklists.append({"id": checklist.get("id"), "title": checklist.get("title"), "basis": checklist.get("basis"),
                                "held_out": checklist.get("held_out"), "file": path.name,

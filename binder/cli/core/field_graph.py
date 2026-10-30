@@ -168,9 +168,10 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
             raise ConceptGraphError(f"field model: invalid view members {view['id']}")
     if set(views["all"]["concepts"]) != set(concepts):
         raise ConceptGraphError("field model: all view must retain every authored concept")
-    from .taxonomy_schema import validate_field_semantics, validate_linkml
+    from .taxonomy_schema import validate_field_semantics, validate_linkml, validate_schema_sync
     validate_linkml(model, "FieldModel", root, "field model")
     validate_field_semantics(model)
+    validate_schema_sync(root, model)
     for node in concepts.values():
         node["reading_scope"] = "concept" if node["id"] in concept_own_refs else "family"
 
