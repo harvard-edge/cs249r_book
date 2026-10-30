@@ -4,18 +4,16 @@ Status: editorial draft, version `0.3-draft`. This document specifies a proposal
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
-## Six connected records
+## Authoritative records
 
 | Record | Question it answers | Authoritative source |
 |---|---|---|
-| LinkML metamodel | What are the formal classes, slots, controlled enums, and URI mappings (`skos:`, `dct:`, `owl:`) governing the taxonomy? | `taxonomy/schema/mlsys-taxonomy.linkml.yml` |
-| Subject framework | What belongs in this engineering field, and where can I find it? | `taxonomy/ml-systems-framework.yml` |
-| Concept vocabulary and relationships | What does an idea mean, and how does it affect other ideas under stated conditions? | `taxonomy/ml-systems-field.yml` |
-| Reader guides | Which subjects and concepts matter for a given role, production symptom, or learning path? | `taxonomy/ml-systems-guides.yml` |
+| LinkML metamodel | What are the formal classes, slots, controlled enums, and URI mappings (`skos:`, `dct:`, `owl:`) governing the taxonomy? | `taxonomy/schema/mlsys-taxonomy.linkml.yml` (`UnifiedTaxonomyModel`) |
+| Canonical taxonomy (single source of truth) | What belongs in this engineering field, what does each concept mean, where is its home subject, how does it affect other ideas under stated conditions, and which subjects and concepts matter for a given role, production symptom, or learning path? | `taxonomy/ml-systems-taxonomy.yml` |
 | Book alignment | Where does MLSysBook discuss an idea? | `taxonomy/mlsysbook-alignment.yml` |
 | Competency specification, proposed | What can a learner demonstrate under a stated task, context, and evidence requirement? | Separate task records, not yet adopted |
 
-The existing `ml-systems-taxonomy.yml` contains a small, explicit SKOS hierarchy pilot. It does not silently acquire broader/narrower assertions from the new subject collections. A predictable browsing location is useful without asserting that every collection is a semantic superclass.
+`taxonomy/ml-systems-taxonomy.yml` is the single canonical authored source for the taxonomy: it unifies the 5 subject groups, 20 areas, and 101 subjects (`areas`), the 807 concepts with their `home` subject (`concepts`), the 17 controlled relation verbs (`relations`) and 1,719 conditional propositions (`relationships`), the practitioner guides (`guides`: roles, symptoms, and learning paths), and the explicit SKOS hierarchy pilot (`skos_hierarchy`). Subject concept lists and the `all` view are derived automatically by the compiler from `Concept.home` and `concepts`.
 
 ## Organizing frame
 
@@ -52,7 +50,7 @@ Using ML to optimize systems is an adjacent field and out of scope. Chapter poin
 
 ## Tagging with the taxonomy
 
-Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with the same vocabulary, so a competency is a concept or subject paired with a depth. The rules (`tagging_rules` in `ml-systems-framework.yml`, also shipped in the JSON download and shown on the page):
+Chapters, quizzes, StaffML questions, slides, labs, and courses are tagged with the same vocabulary, so a competency is a concept or subject paired with a depth. The rules (`tagging_rules` in `ml-systems-taxonomy.yml`, also shipped in the JSON download and shown on the page):
 
 - Tag the concepts an item centrally teaches or tests, preferring one and adding a second or third only when the item cannot be answered without it; never prerequisites or passing mentions.
 - A subject alone is a valid, complete tag when the item is broad or no concept is specific enough.
@@ -87,7 +85,7 @@ The same rules then tagged all 10,716 StaffML questions (`staffml/vault/data/tax
 - **Concept map (home).** Opens first with the field-wide coupling figure—a hierarchical circular bundle across the 5 groups, 20 areas, and 101 subjects plus a 20 × 20 cross-area design structure matrix (DSM)—and the most connected concepts. Each individual concept page also carries a local map: concepts as text chips, what acts on the concept on the left and what it acts on on the right, under relation headings, at full text size; selecting a chip opens that concept. The relationships table gives every link with the condition under which it holds, and "How does this relate to…" returns chains of relationships to another concept as sentences.
 - **Matrix.** The whole taxonomy on one screen (`#view=matrix`): one band per group, each area a column, each subject a cell with its code. A *Show concepts* toggle lists concepts in each cell, a *Highlight* filter dims subjects that do not apply to a kind of system (generative, agentic, physical, edge, distributed, recommendation, multimodal), and an *Overlay* picker annotates cells by role, learning path, or volume. Below the concept map and matrix: *Download & cite*.
 - **Entry pages.** Area, subject, and concept pages share one layout: a sidebar tree of the taxonomy with the current entry marked, a breadcrumb, the code and title, a plain definition, a facts box, and tables (subjects of an area; concepts of a subject; a concept's relationships and book passages).
-- **Guides.** Ways in for people who arrive with a job rather than a concept (`taxonomy/ml-systems-guides.yml`): eleven role profiles with core and working subjects, eighteen production symptoms with their likely causes, what to check, and what to change, and six learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
+- **Guides.** Ways in for people who arrive with a job rather than a concept (`guides` in `taxonomy/ml-systems-taxonomy.yml`): eleven role profiles with core and working subjects, eighteen production symptoms with their likely causes, what to check, and what to change, and six learning paths through the subjects. The compiler rejects any unknown subject or concept and any symptom check or lever that shares no relationship with one of the symptom's causes, so the guides stay tied to the graph. The same guides ship in the JSON download.
 - **Glossary.** A table of every concept with its definition, aliases, and subject code, filterable by text and area.
 - **Print.** *Printable outline* prints the full outline (groups, areas, subjects with definitions and concepts).
 
@@ -95,7 +93,7 @@ State is kept in the URL hash (`#view=matrix`, `#subject=…`, `#concept=…`, `
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-field.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,719 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-taxonomy.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. In version `0.3-draft` the graph has 1,719 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 was read the same way by three independent reviewers before it was accepted.
 
 ## Codes, downloads, and citation
 
@@ -120,10 +118,10 @@ The page's *Print / PDF* action prints the expanded outline. The taxonomy releas
 
 The taxonomy is meant to be complete enough to rely on and cheap to keep current. Each update follows the same loop:
 
-1. **Add or edit.** A new concept is one record in `ml-systems-field.yml` (identity, label, definition, family, optional aliases) plus at least two relationships using the controlled relations, and its identity added to one subject's `concepts` in `ml-systems-framework.yml`. Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
-2. **Build.** `./binder/binder concepts build` validates every YAML file against `taxonomy/schema/mlsys-taxonomy.linkml.yml` (via `linkml`), enforces ontological DAG acyclicity on hierarchical relations (`specializes`, `part-of`, `requires`), verb–predicate polarity consistency, symptom bucket disjointness, 100% subject role coverage, homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data and downloads.
+1. **Add or edit.** A new concept is a single record in `taxonomy/ml-systems-taxonomy.yml` (`id`, `label`, `home`, `family`, `definition`, optional `aliases`) plus at least two relationships in `relationships` using the controlled relations; subject concept lists and the `all` view derive automatically from `home` (and the order of concepts within each subject row follows their order in `concepts:`). Read every new relationship as a plain sentence ("Source verb Target") before keeping it.
+2. **Build.** `./binder/binder concepts build` validates every YAML file against `taxonomy/schema/mlsys-taxonomy.linkml.yml` (via `linkml`), enforces ontological DAG acyclicity on hierarchical relations (`specializes`, `part-of`, `requires`), verb–predicate polarity consistency, symptom bucket disjointness, 100% subject role coverage, homes, codes, references, relation vocabulary, duplicate pairs, and retired identities, then regenerates the page data, public downloads, and StaffML taxonomy labels (`staffml/app/src/data/mlsys-taxonomy.json`).
 3. **Measure.** `./binder/binder concepts coverage --check` recomputes coverage against every recorded checklist and fails if a judgment cites a concept or subject that no longer exists. Add a new checklist (for example, a new year of conference papers) as another file in `taxonomy/coverage/`, marked `held_out: true` when it did not inform the design. `./binder/binder concepts agreement --check` does the same for recorded tagging-agreement runs; add a fresh sample as a new record rather than retagging an old one.
-4. **Record.** Bump `version` in `ml-systems-framework.yml`, add an entry to `taxonomy/CHANGELOG.md`, and retire rather than delete any withdrawn identity.
+4. **Record.** Bump `version` in `taxonomy/ml-systems-taxonomy.yml` and `taxonomy/schema/mlsys-taxonomy.linkml.yml`, add an entry to `taxonomy/CHANGELOG.md`, and retire rather than delete any withdrawn identity.
 
 A label or alias may name only one concept; the compiler rejects a name shared by two, so a glossary search or a tagger always lands on one entry.
 

@@ -46,10 +46,17 @@ def _records(model, name):
 
 def load_taxonomy(root: Path, field: dict) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    path = root / "taxonomy/ml-systems-taxonomy.yml"
-    if not path.exists():
-        return None
-    model = yaml.safe_load(path.read_text())
+    from .field_graph import load_unified_taxonomy
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["skos"]
+        if model is None:
+            return None
+    else:
+        path = root / "taxonomy/ml-systems-taxonomy.yml"
+        if not path.exists():
+            return None
+        model = yaml.safe_load(path.read_text())
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")

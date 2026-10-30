@@ -44,8 +44,30 @@ class Taxonomy:
 def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
     """Return the repo's taxonomy, or None in a vault-only checkout."""
     root = vault_dir.parent.parent / "taxonomy"
-    framework_path, field_path = root / "ml-systems-framework.yml", root / "ml-systems-field.yml"
-    if not (framework_path.exists() and field_path.exists()):
+    unified_path = root / "ml-systems-taxonomy.yml"
+    if not unified_path.exists():
         return None
-    return Taxonomy(yaml.safe_load(framework_path.read_text(encoding="utf-8")),
-                    yaml.safe_load(field_path.read_text(encoding="utf-8")))
+    raw = yaml.safe_load(unified_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "areas" not in raw or "concepts" not in raw:
+        raise ValueError(f"{unified_path}: malformed taxonomy file (requires 'areas' and 'concepts')")
+    by_home: dict[str, list[str]] = {}
+    field_concepts: list[dict[str, Any]] = []
+    for c in raw.get("concepts", []):
+        if isinstance(c, dict):
+            if c.get("id") and c.get("home"):
+                by_home.setdefault(c["home"], []).append(c["id"])
+            field_concepts.append({k: v for k, v in c.items() if k != "home"})
+    resolved_areas = []
+    for area in raw.get("areas", []):
+        rows = []
+        for row in area.get("rows", []):
+            if "concepts" in row:
+                raise ValueError(f"{unified_path}: subject row {row.get('id')} must not hand-list concepts")
+            rows.append({**row, "concepts": list(by_home.get(row.get("id", ""), []))})
+        resolved_areas.append({**area, "rows": rows})
+    framework = {**raw, "areas": resolved_areas}
+    field = {
+        "concepts": field_concepts,
+        "retired": raw.get("retired", []),
+    }
+    return Taxonomy(framework, field)
