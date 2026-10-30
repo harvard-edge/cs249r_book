@@ -14,8 +14,10 @@ import yaml
 
 from core.concept_graph import ConceptGraphError
 from core.field_graph import load_taxonomy_yaml
+from core.taxonomy_release import staffml_labels_payload
 from core.taxonomy_schema import (
     compile_json_schema,
+    get_enum_values,
     get_schema_view,
     resolve_schema_path,
     validate_field_semantics,
@@ -25,6 +27,23 @@ from core.taxonomy_schema import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+AUTHORED_MODEL_CASES = [
+    ("taxonomy/ml-systems-field.yml", "FieldModel"),
+    ("taxonomy/ml-systems-framework.yml", "FrameworkModel"),
+    ("taxonomy/ml-systems-guides.yml", "GuidesModel"),
+    ("taxonomy/mlsysbook-alignment.yml", "BookAlignmentModel"),
+    ("taxonomy/ml-systems-taxonomy.yml", "TaxonomyHierarchyModel"),
+    ("taxonomy/coverage-ledger.yml", "CoverageLedgerModel"),
+    *[
+        (p.relative_to(REPO_ROOT).as_posix(), "CoverageChecklistModel")
+        for p in sorted((REPO_ROOT / "taxonomy/coverage").glob("*.yml"))
+    ],
+    *[
+        (p.relative_to(REPO_ROOT).as_posix(), "AgreementRecordModel")
+        for p in sorted((REPO_ROOT / "taxonomy/agreement").glob("*.yml"))
+    ],
+]
 
 
 def test_linkml_schema_compiles_to_valid_json_schema():
@@ -45,28 +64,12 @@ def test_linkml_schema_compiles_to_valid_json_schema():
         "AgreementRecordModel",
         "AgreementItemTag",
         "TaxonomyReleaseDocument",
+        "StaffMLLabelsDocument",
     ):
         assert cls_name in compiled["$defs"]
 
 
-@pytest.mark.parametrize(
-    "rel_path,target_class",
-    [
-        ("taxonomy/ml-systems-field.yml", "FieldModel"),
-        ("taxonomy/ml-systems-framework.yml", "FrameworkModel"),
-        ("taxonomy/ml-systems-guides.yml", "GuidesModel"),
-        ("taxonomy/mlsysbook-alignment.yml", "BookAlignmentModel"),
-        ("taxonomy/ml-systems-taxonomy.yml", "TaxonomyHierarchyModel"),
-        ("taxonomy/coverage-ledger.yml", "CoverageLedgerModel"),
-        ("taxonomy/coverage/courses-and-standards-2026.yml", "CoverageChecklistModel"),
-        ("taxonomy/coverage/mlsys-papers-2025-2026.yml", "CoverageChecklistModel"),
-        ("taxonomy/coverage/mlsysbook-vol1-vol2-primary.yml", "CoverageChecklistModel"),
-        ("taxonomy/coverage/mlsysbook-vol3-vol4-primary.yml", "CoverageChecklistModel"),
-        ("taxonomy/coverage/systems-venues-2025.yml", "CoverageChecklistModel"),
-        ("taxonomy/agreement/staffml-300-2026-10.yml", "AgreementRecordModel"),
-        ("taxonomy/agreement/staffml-300-heldout-2026-10.yml", "AgreementRecordModel"),
-    ],
-)
+@pytest.mark.parametrize("rel_path,target_class", AUTHORED_MODEL_CASES)
 def test_authored_taxonomy_yamls_conform_to_linkml_metamodel(rel_path: str, target_class: str):
     path = REPO_ROOT / rel_path
     instance = load_taxonomy_yaml(path)
@@ -78,24 +81,36 @@ def test_authored_taxonomy_yamls_conform_to_linkml_metamodel(rel_path: str, targ
             ],
         }
     validate_linkml(instance, target_class, REPO_ROOT, rel_path)
-    if target_class == "AgreementRecordModel":
-        for run in instance.get("runs", []):
-            for tagger, tags in (run.get("taggers") or {}).items():
-                for t in tags:
-                    validate_linkml(t, "AgreementItemTag", REPO_ROOT, f"{rel_path}:{tagger}")
 
 
 def test_linkml_rejects_malformed_concept_id_and_unknown_slot():
     field = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-field.yml")
     bad = deepcopy(field)
     bad["concepts"][0]["id"] = "Invalid_ID"
-    with pytest.raises(ConceptGraphError, match="LinkML FieldModel validation failed"):
+    with pytest.raises(ConceptGraphError, match=r"concepts\[0:Invalid_ID\]\.id"):
         validate_linkml(bad, "FieldModel", REPO_ROOT, "field model")
 
     bad_slot = deepcopy(field)
     bad_slot["unexpected_top_slot"] = "not in LinkML"
     with pytest.raises(ConceptGraphError, match="LinkML FieldModel validation failed"):
         validate_linkml(bad_slot, "FieldModel", REPO_ROOT, "field model")
+
+    bad_agreement = {
+        "id": "test-sample",
+        "title": "Test sample",
+        "basis": "Protocol",
+        "items": [{"n": 1}],
+        "runs": [
+            {
+                "id": "r1",
+                "held_out": True,
+                "taggers": {"t1": [{"n": 0, "subject": "llm-inference", "concepts": ["bad_id"]}]},
+            }
+        ],
+    }
+    with pytest.raises(ConceptGraphError, match="LinkML AgreementRecordModel validation failed"):
+        validate_linkml(bad_agreement, "AgreementRecordModel", REPO_ROOT, "agreement")
+    assert "0.3-draft" in get_enum_values("FrameworkVersionEnum", REPO_ROOT)
 
 
 @pytest.mark.parametrize("rel_name", ["specializes", "part-of", "requires"])
@@ -163,8 +178,20 @@ def test_guides_semantics_rejects_overlapping_symptom_buckets_and_unassigned_sub
 def test_staffml_taxonomy_json_stays_synced_with_compiled_release():
     staffml_json = REPO_ROOT / "staffml/app/src/data/mlsys-taxonomy.json"
     release_json = REPO_ROOT / "taxonomy/downloads/mlsys-taxonomy.json"
-    if staffml_json.exists() and release_json.exists():
-        assert json.loads(staffml_json.read_text()) == json.loads(release_json.read_text())
+    if not staffml_json.exists() or not release_json.exists():
+        pytest.skip("staffml or downloads not present")
+    staffml = json.loads(staffml_json.read_text())
+    release = json.loads(release_json.read_text())
+    field = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-field.yml")
+    framework = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-framework.yml")
+    expected_staffml = staffml_labels_payload(framework, field)
+    validate_linkml(staffml, "StaffMLLabelsDocument", REPO_ROOT, "staffml taxonomy labels")
+    assert staffml == expected_staffml
+    assert staffml["version"] == release["version"]
+    assert set(staffml["concepts"]) == {c["id"] for c in release["concepts"]}
+    assert set(staffml["subjects"]) == {
+        s["id"] for g in release["groups"] for a in g["areas"] for s in a["subjects"]
+    }
 
 
 def test_schema_enums_stay_synced_with_compiler_and_field_relations():

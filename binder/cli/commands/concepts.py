@@ -91,6 +91,20 @@ def run(root: Path, args: list[str]) -> bool:
             if field:
                 summary = field["summary"]
                 print(f"Field reference draft valid: {summary['concepts']} concepts, {summary['relationships']} relationships, {summary['book_links']} candidate book links")
+            if (root / "taxonomy/coverage").is_dir():
+                from cli.core.taxonomy_coverage import coverage_report
+                cov = coverage_report(root)
+                if cov["errors"]:
+                    for err in cov["errors"]:
+                        print(f"  invalid coverage: {err}")
+                    return False
+            if (root / "taxonomy/agreement").is_dir():
+                from cli.core.taxonomy_agreement import agreement_report
+                agr = agreement_report(root)
+                if agr["errors"]:
+                    for err in agr["errors"]:
+                        print(f"  invalid agreement: {err}")
+                    return False
             return True
         result = build(root, volumes, check=options.check)
         print(

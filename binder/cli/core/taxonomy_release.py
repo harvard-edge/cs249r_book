@@ -43,6 +43,55 @@ def _outline(framework: dict, field: dict) -> dict:
             "concepts": concepts}
 
 
+def staffml_labels_payload(framework: dict, field: dict) -> dict:
+    """Build the compact StaffML taxonomy labels payload (`staffml/app/src/data/mlsys-taxonomy.json`)."""
+    subjects_with_area = {
+        row["id"]: (row, area)
+        for area in framework.get("areas", [])
+        for row in area.get("rows", [])
+    }
+    home = {
+        c: rid
+        for rid, (row, _) in subjects_with_area.items()
+        for c in row.get("concepts", [])
+    }
+    subjects = {
+        rid: {
+            "code": row.get("code", ""),
+            "label": row["label"],
+            "short": row.get("display_label") or row["label"],
+            "area": area["label"],
+            "area_id": area.get("code", ""),
+            "definition": row.get("definition", ""),
+        }
+        for rid, (row, area) in subjects_with_area.items()
+    }
+    concepts = {
+        c["id"]: {"label": c["label"], "subject": home.get(c["id"], "")}
+        for c in field.get("concepts", [])
+    }
+    groups = {g["id"]: g for g in framework.get("groups", [])}
+    areas = [
+        {
+            "id": a.get("code", ""),
+            "label": a["label"],
+            "short": a.get("display_label") or a["label"],
+            "group": groups.get(a.get("group"), {}).get("label", ""),
+            "group_code": groups.get(a.get("group"), {}).get("code", ""),
+            "question": a.get("question", ""),
+            "subjects": [r["id"] for r in a.get("rows", [])],
+        }
+        for a in framework.get("areas", [])
+    ]
+    return {
+        "version": framework.get("version", ""),
+        "explorer": PAGE,
+        "areas": areas,
+        "subjects": subjects,
+        "concepts": concepts,
+    }
+
+
 def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, bytes]:
     out = root / SITE_DIR / "downloads"
     version = framework["version"]
@@ -111,23 +160,28 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
         return f"<{BASE}{kind}/{ident}>"
 
     ttl = ["@prefix skos: <http://www.w3.org/2004/02/skos/core#> .", "@prefix dct: <http://purl.org/dc/terms/> .",
+           "@prefix dcterms: <http://purl.org/dc/terms/> .", "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
            "@prefix owl: <http://www.w3.org/2002/07/owl#> .", f"@prefix mlsys: <{BASE}relation/> .", "",
            f"<{BASE}scheme> a skos:ConceptScheme ;", f"  dct:title {lit(NAME)} ;", f'  owl:versionInfo "{version}" ;',
            f"  dct:creator {lit(AUTHOR)} ;", f"  dct:license <{LICENSE['url']}> ;", f"  dct:description {lit(meta['note'])} .", ""]
     for r in relations:
         ttl += [f"mlsys:{r['id']} a owl:ObjectProperty ;", "  owl:subPropertyOf skos:related ;",
+                f"  rdfs:isDefinedBy <{BASE}scheme> ;",
                 f"  skos:prefLabel {lit(r['forward'])} ;", f"  skos:definition {lit(r['meaning'])} .", ""]
     for group in outline["groups"]:
-        ttl += [f"{iri('group', group['id'])} a skos:Collection ;", f"  skos:prefLabel {lit(group['label'])} ;",
+        ttl += [f"{iri('group', group['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+                f"  skos:prefLabel {lit(group['label'])} ;",
                 f'  skos:notation "{group.get("code", "")}" ;',
                 "  skos:member " + ", ".join(iri("area", a["id"]) for a in group["areas"]) + " .", ""]
         for area in group["areas"]:
-            ttl += [f"{iri('area', area['id'])} a skos:Collection ;", f"  skos:prefLabel {lit(area['label'])} ;",
+            ttl += [f"{iri('area', area['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+                    f"  skos:prefLabel {lit(area['label'])} ;",
                     f'  skos:notation "{area["code"]}" ;', f"  skos:scopeNote {lit(area['scope'])} ;",
                     "  skos:member " + ", ".join(iri("subject", s["id"]) for s in area["subjects"]) + " .", ""]
             for s in area["subjects"]:
                 members = ", ".join(iri("concept", c) for c in s["concepts"])
-                ttl += [f"{iri('subject', s['id'])} a skos:Collection ;", f"  skos:prefLabel {lit(s['label'])} ;",
+                ttl += [f"{iri('subject', s['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+                        f"  skos:prefLabel {lit(s['label'])} ;",
                         f'  skos:notation "{s["code"]}" ;', f"  skos:definition {lit(s['definition'])}" + (" ;" if members else " ."),
                         *([f"  skos:member {members} ."] if members else []), ""]
     for c in field["concepts"]:
@@ -175,4 +229,11 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
         result[out / "mlsys-taxonomy.schema.json"] = (
             json.dumps(compile_json_schema(root, "TaxonomyReleaseDocument"), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         ).encode()
+        staffml_data_dir = root / "staffml/app/src/data"
+        if staffml_data_dir.is_dir():
+            staffml_payload = staffml_labels_payload(framework, field)
+            validate_linkml(staffml_payload, "StaffMLLabelsDocument", root, "staffml taxonomy labels")
+            result[staffml_data_dir / "mlsys-taxonomy.json"] = (
+                json.dumps(staffml_payload, indent=1, ensure_ascii=False) + "\n"
+            ).encode()
     return result

@@ -19,9 +19,10 @@ import yaml
 
 
 from .field_graph import load_taxonomy_yaml
+from .taxonomy_schema import get_enum_values
 
 
-STATUSES = ("covered", "partial", "missing", "out-of-scope")
+STATUSES = get_enum_values("ChecklistStatusEnum")
 CHECKLIST_KEYS = {"schema_version", "id", "title", "basis", "held_out", "topics"}
 TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
 
