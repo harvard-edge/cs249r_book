@@ -582,11 +582,57 @@ The chapter descends the optimization stack one tier at a time (@tbl-model-compr
 
 ## Structural Optimization: Changing What the Model Computes {#sec-model-compression-structural-optimization-ee93}
 
+```{python}
+#| echo: false
+#| label: efficientnet-pareto-span
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EFFICIENTNET B0-TO-B7 PARETO SPAN
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Footnote fn-pareto-frontier-compression,
+# │          @sec-model-compression-structural-optimization-ee93
+# │
+# │ Goal:    Quantify how steep the accuracy-compute trade-off is at the edge
+# │          of the EfficientNet frontier.
+# │ Show:    B0 and B7 top-1 and FLOPs, the ~95x compute ratio, and the
+# │          ~7.2 percentage-point accuracy gain.
+# │ How:     FLOPs from Models.Vision (1 MAC = 2 FLOPs); top-1 from
+# │          Literature.Benchmarks (Tan and Le 2019, Table 2, arXiv v5).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Literature
+from mlsysim.core.units import flop
+from mlsysim.fmt import fmt_count, fmt_multiple, fmt_percent, fmt_pp, check
+
+class EfficientNetParetoSpan:
+    """Compute and accuracy span from EfficientNet-B0 to EfficientNet-B7."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    b0_flops = Models.Vision.EfficientNetB0.inference_flops
+    b7_flops = Models.Vision.EfficientNetB7.inference_flops
+    b0_top1 = float(Literature.Benchmarks.EfficientNetB0ImageNetTop1)
+    b7_top1 = float(Literature.Benchmarks.EfficientNetB7ImageNetTop1)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    compute_ratio = (b7_flops / b0_flops).to("").magnitude
+    top1_gain_pp = (b7_top1 - b0_top1) * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(94.5 < compute_ratio < 95.5, f"Footnote says 95x compute, got {compute_ratio:.2f}x")
+    check(abs(top1_gain_pp - 7.2) < 0.01, f"Footnote says 7.2 percentage points, got {top1_gain_pp:.2f}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    b0_top1_pct_str = fmt_percent(b0_top1, precision=1, style="prose")
+    b7_top1_pct_str = fmt_percent(b7_top1, precision=1, style="prose")
+    b0_flops_str = fmt_count(b0_flops.to(flop).magnitude, scale="M", scale_style="word")
+    b7_flops_str = fmt_count(b7_flops.to(flop).magnitude, scale="B", scale_style="word")
+    compute_ratio_mult_str = fmt_multiple(round(compute_ratio), precision=0)
+    top1_gain_pp_str = fmt_pp(top1_gain_pp, precision=1)
+```
+
 At the top of the optimization stack, **efficient model representation**\index{Model compression!efficient model representation} modifies *what* the model computes because trained networks routinely carry far more parameters than inference requires.[^fn-overparameterization-compute-scale] A standard ResNet-50 trained on ImageNet, for example, contains over 25 million parameters, yet careful magnitude pruning and retraining can remove about 80 percent of its weights for roughly a one-point loss in top-1 accuracy [@gale2019state]. Although that extra capacity aids gradient optimization during training, parameters that do not improve the deployed predictions still consume memory capacity, bandwidth, arithmetic, and energy on every query. The structural design task is to strip away capacity the task does not need while preserving what it does, and operating along the Pareto frontier[^fn-pareto-frontier-compression] means deciding where the conservation-of-complexity heuristic sends the cost, whether into training-time discovery, runtime sparse indexing, or student-model capacity.
 
 [^fn-overparameterization-compute-scale]: **Overparameterization**\index{Overparameterization!compression rationale}: @zhang2017rethinking demonstrated that networks large enough to fit ImageNet can also memorize completely random labels, showing that training capacity can exceed the structure needed for natural labels. Pruning studies then show the deployment consequence, that trained models often contain many parameters that can be removed or sparsified with modest task loss when pruning and fine-tuning are done carefully [@gale2019state; @blalock2020state]. The redundancy is not a universal 10$\times$ constant; it depends on architecture, dataset, sparsity pattern, and runtime support.
 
-[^fn-pareto-frontier-compression]: **Pareto frontier in compression**\index{Pareto frontier!compression trade-off}: EfficientNet traces the frontier concretely, from B0 (77.1 percent accuracy, 390 million FLOPs) to B7 (84.4 percent, 37 billion FLOPs), a 95$\times$ compute increase for 7.3 percentage points of accuracy, quantifying how steep the trade-off becomes at the frontier's edge [@tan2019efficientnet].
+[^fn-pareto-frontier-compression]: **Pareto frontier in compression**\index{Pareto frontier!compression trade-off}: EfficientNet traces the frontier concretely, from B0 (`{python} EfficientNetParetoSpan.b0_top1_pct_str` accuracy, `{python} EfficientNetParetoSpan.b0_flops_str` FLOPs) to B7 (`{python} EfficientNetParetoSpan.b7_top1_pct_str`, `{python} EfficientNetParetoSpan.b7_flops_str` FLOPs), a `{python} EfficientNetParetoSpan.compute_ratio_mult_str` compute increase for `{python} EfficientNetParetoSpan.top1_gain_pp_str` of accuracy, quantifying how steep the trade-off becomes at the frontier's edge [@tan2019efficientnet].
 
 The structural techniques strip that surplus through complementary mechanisms. Pruning eliminates redundant parameters from an existing network, and low-rank factorization stores an existing weight matrix as a product of two thin ones. Knowledge distillation transfers learned behavior into an independently designed compact network, efficient architecture design and neural architecture search build a network that is efficient on the target by construction [@hutter2019automl], and adaptive computation decides for each input how much of the network runs. In production pipelines, these techniques frequently compose, as when a NAS-discovered architecture, supervised by a distilled teacher, is pruned before final quantization.
 
@@ -7834,8 +7880,8 @@ A team deploying GPT-2 XL on a phone might find that an uncalibrated 4-bit quant
 # │ How: Pre-compute stats for bit-width degradation and dequantization overhead.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
-from mlsysim.core.units import MB
+from mlsysim import Models, Scenarios
+from mlsysim.core.units import BYTES_FP32, MB
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -7850,7 +7896,8 @@ class FallaciesAnalysis:
     expected_bits = 32
     target_bits = 8
     overhead_pct = 15  # hypothetical conversion overhead
-    bert_fp32_size = 440 * MB  # scenario assumption: BERT-style FP32 artifact
+    # BERT-Base FP32 artifact: registry parameter count x 4 bytes (110M x 4 B = 440 MB).
+    bert_fp32_size = Models.Language.BERT_Base.size_in_bytes(BYTES_FP32)
 
     # Combined pruning + quantization scenario (Pitfall 5): 50% structured sparsity
     # and the chapter's realized outcome, as in TheoryPracticeSpeedup
@@ -7876,6 +7923,7 @@ class FallaciesAnalysis:
         f"Realized fraction should match the chapter's 1.5x-of-8x scenario, got {realized_fraction_pct:.1f}%.",
     )
     check(abs(prune_share - 0.5) < 1e-9, f"Prose says 50 percent pruning, got {prune_share:.3f}.")
+    check(abs(bert_fp32_size.to(MB).magnitude - 440) < 1e-9, f"Prose says 440 MB in FP32, got {bert_fp32_size}.")
     check(abs(bert_int8_size.to(MB).magnitude - 110) < 1e-9, f"Prose says 110 MB in INT8, got {bert_int8_size}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
