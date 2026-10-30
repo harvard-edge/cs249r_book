@@ -95,6 +95,9 @@ class DataGravity:
     t_1pb_10g_str = fmt_time(round(t_1pb_10g.to(day)), day, precision=0, commas=False, style="word")
     t_1pb_100g_str = fmt_time(t_1pb_100g, hour, precision=1, commas=False, style="word")
     truck_1pb_str = fmt_time(truck_total_time, day, precision=0, commas=False, style="word")
+    truck_load_str = fmt_time(truck_load_time, hour, precision=0, commas=False, style="word")
+    truck_transit_str = fmt_time(truck_transit_time, hour, precision=0, commas=False, style="word")
+    truck_unload_str = fmt_time(truck_unload_time, hour, precision=0, commas=False, style="word")
 ```
 
 The first half of the appendix, Moving and Storing Data, serves the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527. The second half, Probability and Statistics, provides the tests that decide whether a measured number can be trusted for the evaluations in @sec-benchmarking-statistical-methodological-issues-7aa5 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
@@ -117,7 +120,7 @@ The ideal line-rate transfer time is $\DatasetTransferTime= \DataVolume/\Bandwid
 | **100 TB**      | `{python} DataGravity.t_100tb_1g_str` | `{python} DataGravity.t_100tb_10g_str` | `{python} DataGravity.t_100tb_100g_str` |                 N/A                  |
 | **1 PB**        |  `{python} DataGravity.t_1pb_1g_str`  |  `{python} DataGravity.t_1pb_10g_str`  |  `{python} DataGravity.t_1pb_100g_str`  | `{python} DataGravity.truck_1pb_str` |
 
-: **The Cost of Inertia**: These transfer times explain why we often "ship compute to data" rather than "ship data to compute." Network columns are lower bounds at sustained line rate. The truck entry is an illustrative elapsed-time model for 1 PB: 8 hours to load, 32 hours in transit, and 8 hours to unload, excluding scheduling and provisioning overhead. {#tbl-data-gravity tbl-colwidths="[23,20,20,20,17]"}
+: **The Cost of Inertia**: These transfer times explain why we often "ship compute to data" rather than "ship data to compute." Network columns are lower bounds at sustained line rate. The truck entry is an illustrative elapsed-time model for 1 PB: `{python} DataGravity.truck_load_str` to load, `{python} DataGravity.truck_transit_str` in transit, and `{python} DataGravity.truck_unload_str` to unload, excluding scheduling and provisioning overhead. {#tbl-data-gravity tbl-colwidths="[23,20,20,20,17]"}
 
 ### Serialization cost {#sec-appdx-data-foundations-cost-serialization-b921}
 
@@ -353,7 +356,7 @@ Once records arrive at the model, summary averages can still mislead an engineer
 # │ How:     Scalar multiplication.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_count, check
+from mlsysim.fmt import fmt_count, fmt_percent, check
 
 class LongTailScale:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -369,11 +372,12 @@ class LongTailScale:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     n_users_str = fmt_count(n_users, scale="M", commas=False)
     n_unhappy_str = fmt_count(n_unhappy, label="user")
+    p99_ratio_pct_str = fmt_percent(p99_ratio, precision=0, commas=False, style="prose")
 ```
 
 ### Distributions and the long tail {#sec-appdx-data-foundations-distributions-long-tail-901f}
 
-A service whose "p99" (99th percentile) latency is 500 ms leaves at most 1 percent of individual requests slower than 500 ms, yet at scale (`{python} LongTailScale.n_users_str` users) even a 1 percent affected-user rate degrades the experience of `{python} LongTailScale.n_unhappy_str`, and multi-request sessions push the fraction of users who see at least one slow response much higher. Because latency distributions are long-tailed\index{Tail latency!appendix refresher}, user-visible services are governed by high-percentile behavior rather than by the mean response time [@dean2013].
+A service whose "p99" (99th percentile) latency is 500 ms leaves at most 1 percent of individual requests slower than 500 ms, yet at scale (`{python} LongTailScale.n_users_str` users) even a `{python} LongTailScale.p99_ratio_pct_str` affected-user rate degrades the experience of `{python} LongTailScale.n_unhappy_str`, and multi-request sessions push the fraction of users who see at least one slow response much higher. Because latency distributions are long-tailed\index{Tail latency!appendix refresher}, user-visible services are governed by high-percentile behavior rather than by the mean response time [@dean2013].
 
 ```{python}
 #| echo: false
@@ -396,13 +400,15 @@ class TailLatency:
     n_requests = 100
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    p_slow_each = 1 - p_fast
     p_all_fast = p_fast**n_requests
     p_slow = 1 - p_all_fast
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
     check(round(p_slow * 100, 1) == 63.4, f"Expected ~63.4% slow probability, got {p_slow * 100:.2f}%")
-
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    n_requests_str = fmt(n_requests, precision=0, commas=False)
+    p_slow_each_str = fmt(p_slow_each, precision=2, commas=False)
     p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
     p_slow_pct_str = fmt_percent(p_slow, precision=1, commas=False, style='prose')
     p_slow_pct_value_str = fmt_percent(p_slow, precision=1, commas=False, style='number')
@@ -411,9 +417,9 @@ class TailLatency:
 
 ::: {#nbk-appendix-data-median-experience .callout-notebook title="The median experience"}
 
-For $\SessionRequestCount= 100$ independent requests, each with a 0.01 chance of being slow, the probability of at least one p99-tail event is `{python} TailLatency.p_slow_math`.
+For $\SessionRequestCount=$ `{python} TailLatency.n_requests_str` independent requests, each with a `{python} TailLatency.p_slow_each_str` chance of being slow, the probability of at least one p99-tail event is `{python} TailLatency.p_slow_math`.
 
-**Systems insight**: With independent requests, a 100-request session is more likely than not to include an event beyond p99. Correlated slowdowns can change this probability [@dean2013].
+**Systems insight**: With independent requests, a `{python} TailLatency.n_requests_str`-request session is more likely than not to include an event beyond p99. Correlated slowdowns can change this probability [@dean2013].
 
 :::
 

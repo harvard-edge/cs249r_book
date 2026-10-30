@@ -685,15 +685,55 @@ $$ \text{Work}_{\text{Backward}}(\nabla \ScalarGraphFunction) \le 4 \cdot \Eleme
 Adding the forward pass work $\ElementaryOperationCount(\ScalarGraphFunction)$ yields the total work bound:
 $$ \text{Work}_{\text{Reverse}}(\ScalarGraphFunction, \nabla \ScalarGraphFunction) = \ElementaryOperationCount(\ScalarGraphFunction) + \text{Work}_{\text{Backward}}(\nabla \ScalarGraphFunction) \le 5 \cdot \ElementaryOperationCount(\ScalarGraphFunction) \qquad\blacksquare$$
 
+```{python}
+#| echo: false
+#| label: forward-mode-gradient-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FORWARD-MODE GRADIENT COST AT 175B PARAMETERS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Why 175B-parameter large language models can be trained",
+# │          @sec-appdx-algorithm-foundations-derivations-4b1d
+# │
+# │ Goal:    Price a forward-mode gradient for a GPT-3-scale parameter count.
+# │ Show:    P = 175 x 10^9 and 2P^2 ~ 6.1 x 10^22 FLOPs per token.
+# │ How:     Parameter count from the registry (GPT-3); P forward passes of
+# │          2P FLOPs each.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Literature
+from mlsysim.core.units import param
+from mlsysim.fmt import fmt_math, sci_latex, check
+
+class ForwardModeGradientCost:
+    """Forward-mode gradient cost (P passes of 2P FLOPs) at 175B parameters."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params = Models.Language.GPT3.parameters.to(param).magnitude
+    fwd_flops_per_param = int(Literature.Chinchilla.DecodeConstant)  # 2P forward FLOPs per token
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    params_e9 = params / 1e9
+    forward_mode_flops = fwd_flops_per_param * params**2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(params == 175e9, f"Prose assumes P = 175 x 10^9, got {params:.3g}")
+    check(6.0e22 < forward_mode_flops < 6.2e22, f"Prose says about 6.1 x 10^22 FLOPs, got {forward_mode_flops:.3g}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    params_math = fmt_math(rf"\Parameters= {params_e9:.0f} \times 10^9")
+    forward_mode_flops_math = fmt_math(
+        rf"{fwd_flops_per_param} \times ({params_e9:.0f} \times 10^9)^2 \approx {sci_latex(forward_mode_flops, precision=1)}"
+    )
+```
+
 ::: {#psp-appendix-algorithm-baur-strassen-llm-scaling .callout-perspective title="Why 175B-parameter large language models can be trained"}
 
-The independence of $\ReverseModeWorkConstant\le 5$ from input dimension $\FunctionInputDimension$ is the mathematical reason deep learning works. Consider training a transformer model with $\Parameters= 175 \times 10^9$ parameters:
+The independence of $\ReverseModeWorkConstant\le 5$ from input dimension $\FunctionInputDimension$ is the mathematical reason deep learning works. Consider training a transformer model with `{python} ForwardModeGradientCost.params_math` parameters:
 
 * **Forward pass**: Matrix multiplications $\LayerOutputMatrix= \LayerInputMatrix\WeightMatrix$ require $2\Parameters$ FLOPs per token.
 * **Reverse-mode backward pass**: Computes both weight gradients $\frac{\partial \LossFunction}{\partial \WeightMatrix} = \LayerInputMatrix^T \frac{\partial \LossFunction}{\partial \LayerOutputMatrix}$ ($2\Parameters$ FLOPs) and input activation gradients $\frac{\partial \LossFunction}{\partial \LayerInputMatrix} = \frac{\partial \LossFunction}{\partial \LayerOutputMatrix} \WeightMatrix^T$ ($2\Parameters$ FLOPs), totaling $4\Parameters$ FLOPs per token.
 * **Total training work**: $2\Parameters(\text{fwd}) + 4\Parameters(\text{bwd}) = 6\Parameters$ FLOPs per token. The backward compute factor is exactly $\frac{4\Parameters}{2\Parameters} = 2$, so forward plus backward costs three times the forward pass, within both the bound of $\ReverseModeWorkConstant\le 5$ proved here and Baur and Strassen's sharper constant of four.
 
-If we instead used forward-mode automatic differentiation (AD) or finite differences to compute $\nabla \ScalarGraphFunction\in \mathbb{R}^\Parameters$, evaluating each partial derivative separately would require $\Parameters$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla \ScalarGraphFunction) = \mathcal{O}(\Parameters\cdot \ElementaryOperationCount) = \mathcal{O}(\Parameters^2)$ FLOPs. For $\Parameters= 175 \times 10^9$, that method would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token, $\Parameters$ times the forward-pass work and therefore prohibitive at this scale. Reverse-mode AD replaces this $\mathcal{O}(\Parameters)$ factor with a constant multiplier of 2 for the dense-layer accounting above.
+If we instead used forward-mode automatic differentiation (AD) or finite differences to compute $\nabla \ScalarGraphFunction\in \mathbb{R}^\Parameters$, evaluating each partial derivative separately would require $\Parameters$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla \ScalarGraphFunction) = \mathcal{O}(\Parameters\cdot \ElementaryOperationCount) = \mathcal{O}(\Parameters^2)$ FLOPs. For `{python} ForwardModeGradientCost.params_math`, that method would require `{python} ForwardModeGradientCost.forward_mode_flops_math` FLOPs per token, $\Parameters$ times the forward-pass work and therefore prohibitive at this scale. Reverse-mode AD replaces this $\mathcal{O}(\Parameters)$ factor with a constant multiplier of 2 for the dense-layer accounting above.
 
 :::
 
@@ -717,7 +757,42 @@ Standard GPU implementations execute this in three discrete kernel launches:
 2. Read $\AttentionScoreMatrix$ from HBM, compute row max $\SoftmaxRowMaximum$ and row sum $\SoftmaxNormalizer$, compute $\AttentionWeightMatrix= \text{softmax}(\AttentionScoreMatrix)$, write $\AttentionWeightMatrix\in \mathbb{R}^{\SequenceLength\times \SequenceLength}$ to HBM ($\AsymptoticTightBound(\SequenceLength^2)$ reads + writes).
 3. Read $\AttentionWeightMatrix$ and $\AttentionValuesMatrix$ from HBM, compute $\AttentionHeadOutput= \AttentionWeightMatrix\AttentionValuesMatrix$, write $\AttentionHeadOutput\in \mathbb{R}^{\SequenceLength\times \AttentionHeadDimension}$ to HBM ($\AsymptoticTightBound(\SequenceLength^2 + \SequenceLength\AttentionHeadDimension)$ reads + writes).
 
-Total HBM memory traffic is $\AsymptoticTightBound(\SequenceLength^2 + \SequenceLength\AttentionHeadDimension)$ elements. For $\SequenceLength= 8192$, $\AttentionHeadDimension = 128$ in FP16, $\AttentionScoreMatrix$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs have high compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\AttentionScoreMatrix$ and $\AttentionWeightMatrix$ leaves GPU execution units memory-bound.
+```{python}
+#| echo: false
+#| label: attention-score-matrix-bytes
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION SCORE MATRIX FOOTPRINT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-algorithm-flash-attention-hbm-bottleneck
+# │
+# │ Goal:    Size the S x S FP16 score matrix that standard attention writes.
+# │ Show:    S = 8192 and 8192^2 x 2 B = 134 MB per head per layer.
+# │ How:     Scenario sequence length; FP16 byte width from the registry.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BYTES_FP16, byte, MB
+from mlsysim.fmt import fmt, fmt_math, check
+
+class AttentionScoreBytes:
+    """FP16 attention score matrix size for one head of one layer."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    seq_len = 8192  # scenario assumption: sequence length
+    elem_bytes = BYTES_FP16
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    score_bytes = (seq_len**2 * elem_bytes).to(MB)
+    elem_bytes_value = int(elem_bytes.to(byte).magnitude)
+    score_mb_value = round(score_bytes.magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(score_mb_value == 134, f"Prose says 134 MB per head per layer, got {score_bytes}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    seq_len_str = fmt(seq_len, precision=0, commas=False)
+    score_bytes_math = fmt_math(rf"{seq_len}^2 \times {elem_bytes_value} \text{{ B}} = {score_mb_value} \text{{ MB}}")
+```
+
+Total HBM memory traffic is $\AsymptoticTightBound(\SequenceLength^2 + \SequenceLength\AttentionHeadDimension)$ elements. For $\SequenceLength=$ `{python} AttentionScoreBytes.seq_len_str`, $\AttentionHeadDimension = 128$ in FP16, $\AttentionScoreMatrix$ requires `{python} AttentionScoreBytes.score_bytes_math` per head per layer. Because modern GPUs have high compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\AttentionScoreMatrix$ and $\AttentionWeightMatrix$ leaves GPU execution units memory-bound.
 
 #### Online softmax recurrence {#sec-appdx-algorithm-flash-attention-online-softmax-proof}
 
@@ -859,11 +934,47 @@ $$ \Parameters^*(\Operations) \propto \Operations^{0.45}, \qquad \DatasetSize^*(
 
 The paper's two direct empirical approaches report near-balanced exponents of $(0.50, 0.50)$ and $(0.49, 0.51)$, which motivate the common square-root shorthand. Under the parametric fit, however, $\DatasetSize^*/\Parameters^*$ grows slowly with compute rather than remaining strictly constant. Across the regime studied, roughly 20 training tokens per parameter is a useful Chinchilla heuristic, not a universal invariant.
 
+```{python}
+#| echo: false
+#| label: kaplan-gpt3-token-ratio
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 TOKENS PER PARAMETER
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Kaplan vs. Chinchilla scaling",
+# │          @sec-appdx-algorithm-chinchilla-derivation
+# │
+# │ Goal:    Show how far below the Chinchilla ratio the Kaplan-era GPT-3 run sat.
+# │ Show:    175B parameters, 300B tokens, D/P = 1.71.
+# │ How:     Parameter and training-token counts from the registry (GPT-3).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import param, count
+from mlsysim.fmt import fmt_params, fmt_tokens, fmt_ratio, check
+
+class KaplanGpt3TokenRatio:
+    """GPT-3's training tokens per parameter under Kaplan-era scaling."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params = Models.Language.GPT3.parameters
+    tokens = Models.Language.GPT3.training_tokens
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tokens_per_param = tokens.to(count).magnitude / params.to(param).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(tokens_per_param - 1.71) < 0.005, f"Prose says D/P = 1.71, got {tokens_per_param:.3f}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    params_str = fmt_params(params, scale="B")
+    tokens_str = fmt_tokens(tokens, scale="B")
+    tokens_per_param_str = fmt_ratio(tokens_per_param, precision=2)
+```
+
 ::: {#psp-appendix-algorithm-kaplan-vs-chinchilla .callout-perspective title="Kaplan vs. Chinchilla scaling"}
 
 The difference between @kaplan2020scaling and @hoffmann2022chinchilla shows how the training schedule used in empirical fits can alter system design conclusions:
 
-* **Kaplan scaling model**: @kaplan2020scaling fit a different loss form with its own exponents and reported compute-optimal growth of $\Parameters\propto \Operations^{0.73}$ and $\DatasetSize\propto \Operations^{0.27}$. This split does not follow from substituting exponents into the two-term surface above. Kaplan's split led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 175B trained on 300B tokens, giving $\DatasetSize/\Parameters= 1.71$).
+* **Kaplan scaling model**: @kaplan2020scaling fit a different loss form with its own exponents and reported compute-optimal growth of $\Parameters\propto \Operations^{0.73}$ and $\DatasetSize\propto \Operations^{0.27}$. This split does not follow from substituting exponents into the two-term surface above. Kaplan's split led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 `{python} KaplanGpt3TokenRatio.params_str` trained on `{python} KaplanGpt3TokenRatio.tokens_str` tokens, giving $\DatasetSize/\Parameters=$ `{python} KaplanGpt3TokenRatio.tokens_per_param_str`).
 * **Methodological divergence**: @kaplan2020scaling used a fixed token budget and learning-rate schedule across models. @hoffmann2022chinchilla matched the schedule to each training horizon and found that the earlier setup understated the value of training smaller models on more data.
 * **Chinchilla revision**: @hoffmann2022chinchilla found near-balanced parameter and token scaling: its three approaches report exponent pairs of $(0.50, 0.50)$, $(0.49, 0.51)$, and $(0.46, 0.54)$ rather than one exact universal ratio.
 * **Practical impact**: Chinchilla (70B parameters trained on 1.4T tokens, $\DatasetSize/\Parameters= 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference (inference cost scales with parameter count) and $2.5\times$ lower weight memory at the same precision [@hoffmann2022chinchilla].
