@@ -1841,7 +1841,11 @@ TAN_EFFICIENTNET_2019 = _lit(
     "Tan & Le (2019), EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks",
     url="https://arxiv.org/abs/1905.11946",
     verified=_V,
-    notes="EfficientNet-B4: 19M parameters, 4.2B FLOPS (paper counts multiply-adds), 82.9% ImageNet top-1 (Table 2).",
+    notes=(
+        "Table 2 of arXiv v5 (paper FLOPS count multiply-adds): B0 5.3M parameters, 0.39B FLOPS, "
+        "77.1% ImageNet top-1; B4 19M, 4.2B, 82.9%; B7 66M, 37B, 84.3%. The ICML 2019 version "
+        "(v1-v3) printed 76.3% (B0), 82.6% (B4), and 84.4% (B7)."
+    ),
 )
 HOWARD_MOBILENETV3_2019 = _lit(
     "prov:howard-mobilenetv3-2019",
