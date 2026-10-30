@@ -113,11 +113,6 @@ def agreement_report(root: Path) -> dict:
         errors += _check(record, concepts, rows, path.name)
         try:
             validate_linkml(record, "AgreementRecordModel", root, path.name)
-            for run in record.get("runs", []):
-                for tagger, tags in (run.get("taggers") or {}).items():
-                    if isinstance(tags, list):
-                        for t in tags:
-                            validate_linkml(t, "AgreementItemTag", root, f"{path.name} run {run.get('id')} tagger {tagger}")
         except ConceptGraphError as exc:
             errors.append(str(exc))
         runs = []

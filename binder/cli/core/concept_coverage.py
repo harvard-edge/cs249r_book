@@ -12,12 +12,13 @@ import yaml
 
 from .concept_graph import ConceptGraphError, digest, load_graph
 from .field_graph import load_field
+from .taxonomy_schema import get_enum_values
 
 
 DECISION_KEYS = {"inventory_id", "chapter", "label", "role", "disposition", "field_concepts", "rationale", "reviewer", "reviewer_kind", "reviewed_on", "source_hash", "field_hash", "evidence"}
 
 
-DISPOSITIONS = {"mapped-to", "narrower-than", "broader-than", "candidate-new", "out-of-scope"}
+DISPOSITIONS = set(get_enum_values("LedgerDispositionEnum"))
 TARGETED = {"mapped-to", "narrower-than", "broader-than"}
 
 

@@ -61,7 +61,9 @@ def _text(record, keys, context, allowed=None):
 def _references(record, sources, context):
     refs = record.get("references", [])
     if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or x not in sources for x in refs):
-        raise ConceptGraphError(f"field model: {context} requires known reading references")
+        unknown = [str(x) for x in (refs if isinstance(refs, list) else []) if x not in sources]
+        detail = f": {', '.join(unknown)}" if unknown else ""
+        raise ConceptGraphError(f"field model: {context} requires known reading references{detail}")
 
 
 def load_field(root: Path, book_graph: dict) -> dict | None:
@@ -84,7 +86,14 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if url.scheme != "https" or not url.netloc:
             raise ConceptGraphError(f"field model: unsafe reading URL {ref['id']}")
     families = _index(model.get("families"), "family")
-    scopes = {"core", "background", "model-extension", "generative-extension", "agent-extension", "physical-extension", "specialist"}
+    from .taxonomy_schema import (
+        get_enum_values,
+        validate_field_semantics,
+        validate_linkml,
+        validate_schema_sync,
+    )
+    scopes = set(get_enum_values("ConceptScopeEnum", root))
+    relation_kinds = set(get_enum_values("RelationKindEnum", root))
     for family in families.values():
         _text(family, ("label", "scope", "question"), family["id"], {"id", "label", "scope", "question", "references"})
         if family["scope"] not in scopes:
@@ -127,7 +136,7 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     for relation in relations.values():
         _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"],
               {"id", "forward", "inverse", "kind", "meaning"})
-        if relation["kind"] not in {"mechanism", "constraint", "tradeoff", "evaluation", "dependency", "failure", "composition"}:
+        if relation["kind"] not in relation_kinds:
             raise ConceptGraphError(f"field model: invalid relation kind {relation['id']}")
     # Concept identities are permanent: a retired identity is never reused and
     # names its replacement, so links and tags elsewhere keep resolving.
@@ -139,6 +148,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     edges = _index(model.get("relationships"), "relationship")
     pairs = set()
     for edge in edges.values():
+        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"],
+              {"id", "source", "target", "relation", "kind", "predicate", "conditions", "references",
+               "basis", "status", "reference_role"})
         if relations:
             if edge.get("relation") not in relations:
                 raise ConceptGraphError(f"field model: relationship needs a controlled relation {edge['id']}")
@@ -148,14 +160,11 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         if pair in pairs:
             raise ConceptGraphError(f"field model: duplicate concept pair {edge['id']}")
         pairs.add(pair)
-        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"],
-              {"id", "source", "target", "relation", "kind", "predicate", "conditions", "references",
-               "basis", "status", "reference_role"})
         if edge["source"] not in concepts or edge["target"] not in concepts or edge["source"] == edge["target"]:
             raise ConceptGraphError(f"field model: missing or identical endpoints {edge['id']}")
         if edge["basis"] != "editorial-synthesis" or edge["status"] != "draft":
             raise ConceptGraphError("field model: draft synthesis must not masquerade as independently verified evidence")
-        if edge["kind"] not in {"mechanism", "constraint", "tradeoff", "evaluation", "dependency", "failure", "composition"}:
+        if edge["kind"] not in relation_kinds:
             raise ConceptGraphError(f"field model: invalid relationship kind {edge['id']}")
         _references(edge, sources, edge["id"])
     views = _index(model.get("views"), "view")
@@ -165,15 +174,22 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         _text(view, ("title",), view["id"], {"id", "title", "concepts"})
         members = view.get("concepts", [])
         if not isinstance(members, list) or not members or len(set(members)) != len(members) or any(x not in concepts for x in members):
-            raise ConceptGraphError(f"field model: invalid view members {view['id']}")
+            unknown_v = [str(x) for x in (members if isinstance(members, list) else []) if x not in concepts]
+            detail = f" (unknown: {', '.join(unknown_v[:5])})" if unknown_v else ""
+            raise ConceptGraphError(f"field model: invalid view members {view['id']}{detail}")
     if set(views["all"]["concepts"]) != set(concepts):
-        raise ConceptGraphError("field model: all view must retain every authored concept")
-    from .taxonomy_schema import validate_field_semantics, validate_linkml, validate_schema_sync
+        missing_all = sorted(set(concepts) - set(views["all"]["concepts"]))
+        extra_all = sorted(set(views["all"]["concepts"]) - set(concepts))
+        raise ConceptGraphError(
+            f"field model: all view must retain every authored concept (missing: {missing_all[:5]}; extra: {extra_all[:5]})"
+        )
     validate_linkml(model, "FieldModel", root, "field model")
     validate_field_semantics(model)
     validate_schema_sync(root, model)
-    for node in concepts.values():
-        node["reading_scope"] = "concept" if node["id"] in concept_own_refs else "family"
+    enriched_concepts = [
+        {**node, "reading_scope": "concept" if node["id"] in concept_own_refs else "family"}
+        for node in concepts.values()
+    ]
 
     alignment_path = path.with_name("mlsysbook-alignment.yml")
     alignment = yaml.safe_load(alignment_path.read_text()) if alignment_path.exists() else {"schema_version": 1, "links": []}
@@ -205,9 +221,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     from .taxonomy import load_taxonomy
     taxonomy = load_taxonomy(root, model)
     from .framework import load_framework
-    framework = load_framework(root, {**model, "book_links": links})
+    framework = load_framework(root, {**model, "concepts": enriched_concepts, "book_links": links})
     degree = Counter(endpoint for edge in edges.values() for endpoint in (edge["source"], edge["target"]))
-    return {**model, "book_links": links, "taxonomy": taxonomy, "framework": framework,
+    return {**model, "concepts": enriched_concepts, "book_links": links, "taxonomy": taxonomy, "framework": framework,
             "summary": {"concepts": len(concepts), "relationships": len(edges), "book_links": len(links),
                         "linked_concepts": len({x["concept"] for x in links}),
                         "unconnected_concepts": [x for x in concepts if not degree[x]],

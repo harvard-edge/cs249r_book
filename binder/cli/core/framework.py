@@ -20,6 +20,7 @@ import yaml
 from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
 from .field_graph import load_taxonomy_yaml
 from .taxonomy_release import release_artifacts
+from .taxonomy_schema import get_enum_values
 
 
 DIMENSIONS = ("activities", "layers", "concerns", "contexts")
@@ -27,7 +28,7 @@ DIMENSIONS = ("activities", "layers", "concerns", "contexts")
 # relabeled row cannot leave a stale pointer behind.
 SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
 REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
-SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft", "0.3-draft")
+SUPPORTED_VERSIONS = get_enum_values("FrameworkVersionEnum")
 
 
 def _fail(message):
@@ -67,9 +68,11 @@ def _members(values, known, context, nonempty=True):
     if any(not isinstance(value, str) for value in values):
         _fail(f"{context} requires string IDs")
     if len(set(values)) != len(values):
-        _fail(f"duplicate {context} value")
+        dups = sorted({v for v in values if values.count(v) > 1})
+        _fail(f"duplicate {context} value: {', '.join(dups)}")
     if any(value not in known for value in values):
-        _fail(f"unknown {context} value")
+        unknown = [v for v in values if v not in known]
+        _fail(f"unknown {context} value: {', '.join(unknown)}")
 
 
 def _scope_notes(record, source_ids, context):

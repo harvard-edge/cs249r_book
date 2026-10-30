@@ -21,6 +21,7 @@ SKIP = {
     "coverage-ledger.yml",
     "coverage",
     "agreement",
+    "schema",
 }
 
 
