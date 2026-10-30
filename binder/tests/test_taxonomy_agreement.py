@@ -9,11 +9,18 @@ from core.taxonomy_agreement import agreement_report, write_report
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "agreement").mkdir(parents=True)
-    (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": c} for c in ("mlsys.kv-cache", "mlsys.batching", "mlsys.quantization")]}))
-    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [
-        {"code": "P4", "rows": [{"id": "llm-inference", "code": "P4.5", "concepts": ["mlsys.kv-cache"]},
-                                {"id": "request-scheduling", "code": "P4.4", "concepts": ["mlsys.batching"]}]},
-        {"code": "Q1", "rows": [{"id": "model-compression", "code": "Q1.3", "concepts": ["mlsys.quantization"]}]}]}))
+    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({
+        "concepts": [
+            {"id": "mlsys.kv-cache", "home": "llm-inference"},
+            {"id": "mlsys.batching", "home": "request-scheduling"},
+            {"id": "mlsys.quantization", "home": "model-compression"},
+        ],
+        "areas": [
+            {"code": "P4", "rows": [{"id": "llm-inference", "code": "P4.5"},
+                                    {"id": "request-scheduling", "code": "P4.4"}]},
+            {"code": "Q1", "rows": [{"id": "model-compression", "code": "Q1.3"}]},
+        ],
+    }))
     return tmp_path
 
 

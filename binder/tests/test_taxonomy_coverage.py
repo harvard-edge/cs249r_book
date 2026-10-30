@@ -9,11 +9,16 @@ from core.taxonomy_coverage import coverage_report, write_report
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "coverage").mkdir(parents=True)
-    (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": "mlsys.kv-cache"}, {"id": "mlsys.batching"}]}))
-    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [
-        {"id": "llm-inference", "code": "L4.4", "concepts": ["mlsys.kv-cache"]},
-        {"id": "request-scheduling", "code": "L4.3", "concepts": ["mlsys.batching"]},
-    ]}]}))
+    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({
+        "concepts": [
+            {"id": "mlsys.kv-cache", "home": "llm-inference"},
+            {"id": "mlsys.batching", "home": "request-scheduling"},
+        ],
+        "areas": [{"rows": [
+            {"id": "llm-inference", "code": "L4.4"},
+            {"id": "request-scheduling", "code": "L4.3"},
+        ]}],
+    }))
     return tmp_path
 
 

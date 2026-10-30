@@ -1,10 +1,12 @@
-"""Public downloads of the ML systems taxonomy in standard formats.
+"""Public downloads and StaffML export derived from `taxonomy/ml-systems-taxonomy.yml`.
 
-Every file is generated from the same compiled framework and field records, so
-the outline, the concept list, the SKOS vocabulary, and the graph cannot
-disagree. Groups, areas, and subjects are SKOS collections (browsing places,
-not broader concepts); concepts are SKOS concepts linked to their home subject
-by membership and to each other by the controlled relations.
+Every release artifact (CSV, JSON, SKOS Turtle, GraphML, BibTeX, and the StaffML
+`mlsys-taxonomy.json` bundle) is generated from the same compiled framework and field
+records projected from `taxonomy/ml-systems-taxonomy.yml`, so the outline, the concept
+list, the SKOS vocabulary, the graph, and the StaffML app cannot disagree. Groups, areas,
+and subjects are SKOS collections (browsing places, not broader concepts); concepts are
+SKOS concepts linked to their home subject by membership and to each other by the
+controlled relations.
 """
 from __future__ import annotations
 

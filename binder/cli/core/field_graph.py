@@ -1,8 +1,20 @@
-"""Compile a field reference model and an independent book-link overlay.
+"""Compile the ML systems taxonomy from its single source of truth (`taxonomy/ml-systems-taxonomy.yml`).
+
+`taxonomy/ml-systems-taxonomy.yml` is the sole authored taxonomy file in the repository,
+validated against `UnifiedTaxonomyModel` in `taxonomy/schema/mlsys-taxonomy.linkml.yml`.
+`load_unified_taxonomy(root)` parses and validates that file once (cached by path and mtime)
+and deterministically projects the four aspect models consumed by the compiler pipeline:
+- `field`: concept inventory (`concepts`), `families`, `relations`, `edges`, `views` (with `views[id=all]`
+  automatically derived from `[c["id"] for c in concepts]`).
+- `framework`: subject `groups`, `areas`, `rows` (with each row's primary `concepts` list
+  automatically derived in concept order from `concept["home"]`), multi-dimensional `dimensions`,
+  and `gaps`.
+- `guides`: practitioner `roles`, production `symptoms`, and `learning_paths`.
+- `skos`: the optional polyhierarchical SKOS `schemes`, `collections`, and `narrower` slice.
 
 Field identities never depend on chapter order or book ownership. External
-reading references, editorial propositions, and book links have distinct roles;
-none is automatically promoted into reviewed coverage or a prerequisite.
+reading references, editorial propositions, and book links (`taxonomy/mlsysbook-alignment.yml`)
+have distinct roles; none is automatically promoted into reviewed coverage or a prerequisite.
 """
 
 from __future__ import annotations
@@ -34,6 +46,8 @@ def load_taxonomy_yaml(path: Path) -> object:
     return yaml.safe_load(text)
 
 
+TAXONOMY_FILE = "taxonomy/ml-systems-taxonomy.yml"
+
 _FRAMEWORK_KEYS = (
     "schema_version", "id", "title", "version", "status", "scope", "rationale", "row_rule",
     "secondary_policy", "relationship_semantics", "context_policy", "book_mapping_policy",
@@ -46,15 +60,16 @@ _FRAMEWORK_KEYS = (
 def _cached_unified_taxonomy(
     path_str: str, mtime_ns: int, schema_mtime_ns: int, root_str: str
 ) -> dict[str, dict | None] | None:
+    """Parse, validate, and project the single-source taxonomy/ml-systems-taxonomy.yml."""
     path = Path(path_str)
     root = Path(root_str)
     raw = load_taxonomy_yaml(path)
-    if not isinstance(raw, dict) or ("concepts" not in raw and "areas" not in raw):
+    if not isinstance(raw, dict) or not ("concepts" in raw and "areas" in raw):
         return None
     if raw.get("schema_version") != 1:
         raise ConceptGraphError("taxonomy: unsupported schema")
     from .taxonomy_schema import validate_linkml
-    validate_linkml(raw, "UnifiedTaxonomyModel", root, "taxonomy/ml-systems-taxonomy.yml")
+    validate_linkml(raw, "UnifiedTaxonomyModel", root, TAXONOMY_FILE)
 
     by_home: dict[str, list[str]] = {}
     field_concepts: list[dict] = []
@@ -123,7 +138,7 @@ def _cached_unified_taxonomy(
 
 def load_unified_taxonomy(root: Path) -> dict[str, dict | None] | None:
     """Load the canonical single-source taxonomy/ml-systems-taxonomy.yml if present."""
-    path = root / "taxonomy/ml-systems-taxonomy.yml"
+    path = root / TAXONOMY_FILE
     if not path.exists():
         return None
     from .taxonomy_schema import resolve_schema_path
@@ -173,10 +188,12 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     if unified is not None:
         model = unified["field"]
     else:
-        path = root / "taxonomy/ml-systems-field.yml"
+        path = root / TAXONOMY_FILE
         if not path.exists():
             return None
         model = load_taxonomy_yaml(path)
+        if not isinstance(model, dict) or ("areas" in model or "topics" in model or "roles" in model):
+            return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata",

@@ -1,4 +1,10 @@
-"""Compile the optional candidate subject framework and its explicit book links.
+"""Compile the subject framework and practitioner guides projected from `taxonomy/ml-systems-taxonomy.yml`.
+
+All subject groups, areas (`P1`–`X12`), rows (`P1.1`–`X12.4`), facet dimensions, and practitioner
+guides (roles, symptom triage entries, and learning paths) are authored in the single canonical
+file `taxonomy/ml-systems-taxonomy.yml`. Each concept declares its primary maintenance home via
+`home: <subject-row-id>` on the concept record; row `concepts` lists are derived automatically
+by `load_unified_taxonomy` and never hand-duplicated on the row.
 
 A single candidate home is an editorial maintenance rule, not an assertion of
 exclusive membership, a SKOS broader relation, completeness, or competence.
@@ -18,7 +24,7 @@ from urllib.parse import urlparse
 import yaml
 
 from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
-from .field_graph import load_taxonomy_yaml, load_unified_taxonomy
+from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
 from .taxonomy_release import release_artifacts
 from .taxonomy_schema import get_enum_values
 
@@ -130,10 +136,12 @@ def load_framework(root: Path, field: dict) -> dict | None:
     if unified is not None:
         model = unified["framework"]
     else:
-        path = root / "taxonomy/ml-systems-framework.yml"
+        path = root / TAXONOMY_FILE
         if not path.exists():
             return None
         model = load_taxonomy_yaml(path)
+        if not isinstance(model, dict) or ("concepts" in model or "topics" in model or "roles" in model):
+            return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata",
@@ -331,10 +339,16 @@ def _guides(root: Path, rows_by_id: dict, field: dict, version: str | None = Non
         if model is None:
             return {"roles": [], "symptoms": [], "learning_paths": []}
     else:
-        path = root / "taxonomy/ml-systems-guides.yml"
+        path = root / TAXONOMY_FILE
         if not path.exists():
             return {"roles": [], "symptoms": [], "learning_paths": []}
-        model = load_taxonomy_yaml(path)
+        raw = load_taxonomy_yaml(path)
+        if isinstance(raw, dict) and "guides" in raw:
+            model = {"schema_version": raw.get("schema_version", 1), **raw["guides"]}
+        elif isinstance(raw, dict) and ("roles" in raw or "symptoms" in raw or "learning_paths" in raw) and "areas" not in raw and "concepts" not in raw:
+            model = raw
+        else:
+            return {"roles": [], "symptoms": [], "learning_paths": []}
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("guides: unsupported schema")
     _text(model, (), "guides", {"schema_version", "roles_note", "roles", "symptoms_note", "symptoms", "paths_note", "learning_paths"})
@@ -413,11 +427,6 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
 
     def note(value):
         return _md(SCOPE_REF.sub(lambda match: titles[match[1]], value))
-    source_file = (
-        "taxonomy/ml-systems-framework.yml"
-        if (root / "taxonomy/ml-systems-framework.yml").exists()
-        else "taxonomy/ml-systems-taxonomy.yml"
-    )
     current_group = None
     for area in framework["areas"]:
         group = groups.get(area.get("group"))
@@ -428,7 +437,7 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
         lines.extend(['', f'{heading} {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
         for row in area["rows"]:
             writer.writerow({"framework_id": framework["id"], "framework_title": framework["title"], "framework_scope": framework["scope"],
-                             "version": framework["version"], "status": framework["status"], "source_file": source_file,
+                             "version": framework["version"], "status": framework["status"], "source_file": TAXONOMY_FILE,
                              "group_id": area.get("group", ""), "group_label": group["label"] if group else "",
                              "area_id": area["id"], "area_label": area["label"], "area_display_label": area.get("display_label", ""),
                              "area_question": area["question"], "area_scope": area["scope"],

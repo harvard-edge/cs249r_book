@@ -33,10 +33,8 @@ This section supersedes counts and interface details below where they differ.
 | Source | Responsibility |
 |---|---|
 | `books/vol*/*/*_concepts.yml` | Chapter-owned primary/secondary concepts, teaching claims, learner graphs, and cross-chapter explorer propositions |
-| `taxonomy/ml-systems-field.yml` | Independent field vocabulary, definitions, aliases, conditional typed relationships, and reading references |
-| `taxonomy/ml-systems-framework.yml` | Candidate subject areas and rows, boundaries, display labels, facets, and investigation proposals |
+| `taxonomy/ml-systems-taxonomy.yml` | Single source of truth for the ML Systems Taxonomy: subject areas (`P1`–`X12`) and rows (`P1.1`–`X12.4`), concepts (`mlsys.*` with required `home:` subject pointers), typed conditional relationships, practitioner guides (roles, symptoms, learning paths), and the SKOS hierarchy slice |
 | `taxonomy/mlsysbook-alignment.yml` | Explicit candidate links from field concepts to section-backed book concepts |
-| `taxonomy/ml-systems-taxonomy.yml` | Small explicit SKOS hierarchy pilot; not the entire subject framework |
 | `taxonomy/coverage-ledger.yml` | Authored reconciliation decisions, reviewer attribution, manuscript quotations, and dependency fingerprints |
 
 The current field vocabulary has 175 concepts and 195 relationships. The organizing framework has 12 areas and 56 subject rows. There are 102 candidate passage links involving 86 distinct field concepts. These are inventory counts, not coverage scores. Empty subject rows are proposals awaiting an inventory, not proof that a book omits their subject.

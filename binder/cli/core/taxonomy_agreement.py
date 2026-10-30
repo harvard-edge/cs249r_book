@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 
-from .field_graph import load_taxonomy_yaml, load_unified_taxonomy
+from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml
 
 
 RECORD_KEYS = {"schema_version", "id", "title", "basis", "items", "runs"}
@@ -26,16 +26,10 @@ TAG_KEYS = {"n", "subject", "concepts", "proposed", "reason"}
 
 
 def _vocabulary(root: Path):
-    unified = load_unified_taxonomy(root)
-    if unified is not None:
-        field = unified["field"]
-        framework = unified["framework"]
-    else:
-        field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
-        framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
-    rows = {row["id"]: (row, area) for area in framework["areas"] for row in area["rows"]}
-    home = {c: rid for rid, (row, _) in rows.items() for c in row.get("concepts", [])}
-    return {c["id"] for c in field["concepts"]}, rows, home
+    raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
+    rows = {row["id"]: (row, area) for area in raw["areas"] for row in area["rows"]}
+    home = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}
+    return {c["id"] for c in raw["concepts"]}, rows, home
 
 
 def _pct(part: int, whole: int) -> float:
