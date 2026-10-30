@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 
-from .field_graph import load_taxonomy_yaml
+from .field_graph import load_taxonomy_yaml, load_unified_taxonomy
 
 
 RECORD_KEYS = {"schema_version", "id", "title", "basis", "items", "runs"}
@@ -26,8 +26,13 @@ TAG_KEYS = {"n", "subject", "concepts", "proposed", "reason"}
 
 
 def _vocabulary(root: Path):
-    field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        field = unified["field"]
+        framework = unified["framework"]
+    else:
+        field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
+        framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
     rows = {row["id"]: (row, area) for area in framework["areas"] for row in area["rows"]}
     home = {c: rid for rid, (row, _) in rows.items() for c in row.get("concepts", [])}
     return {c["id"] for c in field["concepts"]}, rows, home

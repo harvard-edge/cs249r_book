@@ -8,6 +8,8 @@ none is automatically promoted into reviewed coverage or a prerequisite.
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
+import functools
 import html
 import json
 from pathlib import Path
@@ -30,6 +32,105 @@ def load_taxonomy_yaml(path: Path) -> object:
     if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text, Loader=yaml.SafeLoader)):
         raise ConceptGraphError(f"{path.name}: YAML anchors/aliases are not allowed; write each value out in full")
     return yaml.safe_load(text)
+
+
+_FRAMEWORK_KEYS = (
+    "schema_version", "id", "title", "version", "status", "scope", "rationale", "row_rule",
+    "secondary_policy", "relationship_semantics", "context_policy", "book_mapping_policy",
+    "warrant_policy", "competency_policy", "tagging_rules", "placement_examples",
+    "sources", "dimensions", "groups", "areas", "gaps",
+)
+
+
+@functools.lru_cache(maxsize=4)
+def _cached_unified_taxonomy(
+    path_str: str, mtime_ns: int, schema_mtime_ns: int, root_str: str
+) -> dict[str, dict | None] | None:
+    path = Path(path_str)
+    root = Path(root_str)
+    raw = load_taxonomy_yaml(path)
+    if not isinstance(raw, dict) or ("concepts" not in raw and "areas" not in raw):
+        return None
+    if raw.get("schema_version") != 1:
+        raise ConceptGraphError("taxonomy: unsupported schema")
+    from .taxonomy_schema import validate_linkml
+    validate_linkml(raw, "UnifiedTaxonomyModel", root, "taxonomy/ml-systems-taxonomy.yml")
+
+    by_home: dict[str, list[str]] = {}
+    field_concepts: list[dict] = []
+    for c in raw.get("concepts", []):
+        if isinstance(c, dict):
+            cid = c.get("id")
+            home = c.get("home")
+            if isinstance(cid, str) and isinstance(home, str):
+                by_home.setdefault(home, []).append(cid)
+            field_concepts.append({k: v for k, v in c.items() if k != "home"})
+        else:
+            field_concepts.append(c)
+
+    known_rows = {
+        row["id"]
+        for area in raw.get("areas", []) if isinstance(area, dict)
+        for row in area.get("rows", []) if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    unknown_homes = sorted(set(by_home) - known_rows)
+    if unknown_homes:
+        raise ConceptGraphError(f"framework: concept home names unknown subject row: {', '.join(unknown_homes)}")
+
+    views = deepcopy(raw.get("views", []))
+    if isinstance(views, list):
+        if any(isinstance(v, dict) and v.get("id") == "all" for v in views):
+            raise ConceptGraphError("taxonomy: views must not hand-list 'all'; it is derived automatically from concepts")
+        views.append({
+            "id": "all",
+            "title": "The field landscape",
+            "concepts": [c["id"] for c in field_concepts if isinstance(c, dict) and isinstance(c.get("id"), str)],
+        })
+
+    field_dict: dict = {
+        "schema_version": raw.get("schema_version"),
+        "id": raw.get("field_id", raw.get("id")),
+        "title": raw.get("field_title", raw.get("title")),
+        "scope": raw.get("field_scope", raw.get("scope")),
+        "status": raw.get("status"),
+        "sources": raw.get("field_sources", []),
+        "families": raw.get("families", []),
+        "concepts": field_concepts,
+        "relationships": raw.get("relationships", []),
+        "views": views,
+    }
+    for opt in ("background_boundary", "limitations", "learning_paths", "relations", "retired"):
+        if opt in raw:
+            field_dict[opt] = raw[opt]
+
+    framework_dict: dict = {k: deepcopy(raw[k]) for k in _FRAMEWORK_KEYS if k in raw}
+    for area in framework_dict.get("areas", []):
+        if isinstance(area, dict):
+            for row in area.get("rows", []):
+                if isinstance(row, dict):
+                    if "concepts" in row:
+                        raise ConceptGraphError(
+                            f"taxonomy: subject row {row.get('id')} must not hand-list concepts; declare home on each concept"
+                        )
+                    row["concepts"] = list(by_home.get(row.get("id", ""), []))
+
+    guides_raw = raw.get("guides")
+    guides_dict = {"schema_version": raw["schema_version"], **deepcopy(guides_raw)} if isinstance(guides_raw, dict) else None
+    skos_raw = raw.get("skos_hierarchy")
+    skos_dict = {"schema_version": raw["schema_version"], **deepcopy(skos_raw)} if isinstance(skos_raw, dict) else None
+    return {"field": field_dict, "framework": framework_dict, "guides": guides_dict, "skos": skos_dict}
+
+
+def load_unified_taxonomy(root: Path) -> dict[str, dict | None] | None:
+    """Load the canonical single-source taxonomy/ml-systems-taxonomy.yml if present."""
+    path = root / "taxonomy/ml-systems-taxonomy.yml"
+    if not path.exists():
+        return None
+    from .taxonomy_schema import resolve_schema_path
+    schema_path = resolve_schema_path(root)
+    schema_mtime = schema_path.stat().st_mtime_ns if schema_path.exists() else 0
+    bundle = _cached_unified_taxonomy(str(path.resolve()), path.stat().st_mtime_ns, schema_mtime, str(root.resolve()))
+    return deepcopy(bundle) if bundle is not None else None
 
 
 def _index(records, name):
@@ -68,10 +169,14 @@ def _references(record, sources, context):
 
 def load_field(root: Path, book_graph: dict) -> dict | None:
     """Validate authored identities and resolve only explicitly recorded links."""
-    path = root / "taxonomy/ml-systems-field.yml"
-    if not path.exists():
-        return None
-    model = load_taxonomy_yaml(path)
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["field"]
+    else:
+        path = root / "taxonomy/ml-systems-field.yml"
+        if not path.exists():
+            return None
+        model = load_taxonomy_yaml(path)
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata",
@@ -191,7 +296,7 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         for node in concepts.values()
     ]
 
-    alignment_path = path.with_name("mlsysbook-alignment.yml")
+    alignment_path = root / "taxonomy/mlsysbook-alignment.yml"
     alignment = yaml.safe_load(alignment_path.read_text()) if alignment_path.exists() else {"schema_version": 1, "links": []}
     if not isinstance(alignment, dict) or alignment.get("schema_version") != 1 or not isinstance(alignment.get("links"), list):
         raise ConceptGraphError("field model: unsupported book-alignment schema")

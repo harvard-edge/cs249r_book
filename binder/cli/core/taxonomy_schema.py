@@ -346,7 +346,7 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
         rel_ids = {r["id"] for r in field_model["relations"]}
         if enums.get("RelationIdEnum", set()) != rel_ids:
             raise ConceptGraphError(
-                "schema sync: LinkML RelationIdEnum disagrees with ml-systems-field.yml relations"
+                "schema sync: LinkML RelationIdEnum disagrees with ml-systems-taxonomy.yml relations"
             )
 
 

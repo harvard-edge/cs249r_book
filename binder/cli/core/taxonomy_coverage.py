@@ -18,7 +18,7 @@ from pathlib import Path
 import yaml
 
 
-from .field_graph import load_taxonomy_yaml
+from .field_graph import load_taxonomy_yaml, load_unified_taxonomy
 from .taxonomy_schema import get_enum_values
 
 
@@ -28,8 +28,13 @@ TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
 
 
 def _vocabulary(root: Path):
-    field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        field = unified["field"]
+        framework = unified["framework"]
+    else:
+        field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
+        framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
     concepts = {c["id"] for c in field["concepts"]}
     subjects, homes = {}, {}
     for area in framework["areas"]:

@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from core.concept_graph import ConceptGraphError
-from core.field_graph import load_taxonomy_yaml
+from core.field_graph import load_taxonomy_yaml, load_unified_taxonomy
 from core.taxonomy_release import staffml_labels_payload
 from core.taxonomy_schema import (
     compile_json_schema,
@@ -29,11 +29,8 @@ from core.taxonomy_schema import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 AUTHORED_MODEL_CASES = [
-    ("taxonomy/ml-systems-field.yml", "FieldModel"),
-    ("taxonomy/ml-systems-framework.yml", "FrameworkModel"),
-    ("taxonomy/ml-systems-guides.yml", "GuidesModel"),
+    ("taxonomy/ml-systems-taxonomy.yml", "UnifiedTaxonomyModel"),
     ("taxonomy/mlsysbook-alignment.yml", "BookAlignmentModel"),
-    ("taxonomy/ml-systems-taxonomy.yml", "TaxonomyHierarchyModel"),
     ("taxonomy/coverage-ledger.yml", "CoverageLedgerModel"),
     *[
         (p.relative_to(REPO_ROOT).as_posix(), "CoverageChecklistModel")
@@ -54,6 +51,7 @@ def test_linkml_schema_compiles_to_valid_json_schema():
     compiled = compile_json_schema(REPO_ROOT)
     assert "$defs" in compiled
     for cls_name in (
+        "UnifiedTaxonomyModel",
         "FieldModel",
         "FrameworkModel",
         "GuidesModel",
@@ -83,8 +81,39 @@ def test_authored_taxonomy_yamls_conform_to_linkml_metamodel(rel_path: str, targ
     validate_linkml(instance, target_class, REPO_ROOT, rel_path)
 
 
+def test_unified_taxonomy_projections_conform_to_aspect_models(tmp_path: Path):
+    bundle = load_unified_taxonomy(REPO_ROOT)
+    assert bundle is not None
+    validate_linkml(bundle["field"], "FieldModel", REPO_ROOT, "projected field")
+    validate_linkml(bundle["framework"], "FrameworkModel", REPO_ROOT, "projected framework")
+    validate_linkml(bundle["guides"], "GuidesModel", REPO_ROOT, "projected guides")
+    validate_linkml(bundle["skos"], "TaxonomyHierarchyModel", REPO_ROOT, "projected skos")
+
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    no_home = deepcopy(raw)
+    no_home["concepts"][0].pop("home")
+    with pytest.raises(ConceptGraphError, match=r"home.*required"):
+        validate_linkml(no_home, "UnifiedTaxonomyModel", REPO_ROOT, "taxonomy/ml-systems-taxonomy.yml")
+
+    tax_dir = tmp_path / "taxonomy"
+    tax_dir.mkdir(parents=True)
+    with_row_concepts = deepcopy(raw)
+    with_row_concepts["areas"][0]["rows"][0]["concepts"] = ["mlsys.requirements"]
+    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_row_concepts, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="must not hand-list concepts"):
+        load_unified_taxonomy(tmp_path)
+
+    with_all_view = deepcopy(raw)
+    with_all_view["views"].append({"id": "all", "title": "All", "concepts": ["mlsys.requirements"]})
+    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_all_view, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="must not hand-list 'all'"):
+        load_unified_taxonomy(tmp_path)
+
+
 def test_linkml_rejects_malformed_concept_id_and_unknown_slot():
-    field = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-field.yml")
+    bundle = load_unified_taxonomy(REPO_ROOT)
+    assert bundle is not None
+    field = bundle["field"]
     bad = deepcopy(field)
     bad["concepts"][0]["id"] = "Invalid_ID"
     with pytest.raises(ConceptGraphError, match=r"concepts\[0:Invalid_ID\]\.id"):
@@ -182,9 +211,9 @@ def test_staffml_taxonomy_json_stays_synced_with_compiled_release():
         pytest.skip("staffml or downloads not present")
     staffml = json.loads(staffml_json.read_text())
     release = json.loads(release_json.read_text())
-    field = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-framework.yml")
-    expected_staffml = staffml_labels_payload(framework, field)
+    bundle = load_unified_taxonomy(REPO_ROOT)
+    assert bundle is not None
+    expected_staffml = staffml_labels_payload(bundle["framework"], bundle["field"])
     validate_linkml(staffml, "StaffMLLabelsDocument", REPO_ROOT, "staffml taxonomy labels")
     assert staffml == expected_staffml
     assert staffml["version"] == release["version"]
@@ -195,7 +224,9 @@ def test_staffml_taxonomy_json_stays_synced_with_compiled_release():
 
 
 def test_schema_enums_stay_synced_with_compiler_and_field_relations():
-    field = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-field.yml")
+    bundle = load_unified_taxonomy(REPO_ROOT)
+    assert bundle is not None
+    field = bundle["field"]
     validate_schema_sync(REPO_ROOT, field)
     bad = deepcopy(field)
     bad["relations"].append(
