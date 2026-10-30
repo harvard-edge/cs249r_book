@@ -94,6 +94,8 @@ def _compile_linkml_fallback(schema_path_str: str, target_class: str | None) -> 
                 item_schema = {"type": "boolean"}
             elif rng in enums:
                 item_schema = {"$ref": f"#/$defs/{rng}"}
+            elif rng == "AnyValue":
+                item_schema = {"type": "object"}
             elif rng in classes and inlined:
                 item_schema = {"$ref": f"#/$defs/{rng}"}
             else:
@@ -106,13 +108,16 @@ def _compile_linkml_fallback(schema_path_str: str, target_class: str | None) -> 
                 props[sname] = item_schema if sdef.get("required") else {"anyOf": [item_schema, {"type": "null"}]}
             if sdef.get("required"):
                 req.append(sname)
-        defs[cname] = {
-            "type": "object",
-            "properties": props,
-            "required": req,
-            "additionalProperties": False,
-        }
-    top = target_class or "FieldModel"
+        if cdef.get("class_uri") == "linkml:Any":
+            defs[cname] = {}
+        else:
+            defs[cname] = {
+                "type": "object",
+                "properties": props,
+                "required": req,
+                "additionalProperties": False,
+            }
+    top = target_class or "TaxonomyReleaseDocument"
     return {
         "$schema": "https://json-schema.org/draft/2019-09/schema",
         "$id": raw.get("id", "https://mlsysbook.ai/taxonomy/schema"),
@@ -125,18 +130,19 @@ def _compile_linkml_fallback(schema_path_str: str, target_class: str | None) -> 
 @lru_cache(maxsize=32)
 def _cached_json_schema(schema_path_str: str, mtime_ns: int, target_class: str | None) -> tuple[dict, object]:
     del mtime_ns
+    effective_top = target_class or "TaxonomyReleaseDocument"
     if HAS_LINKML and JsonSchemaGenerator is not None:
-        gen = JsonSchemaGenerator(schema_path_str, top_class=target_class, not_closed=False)
+        gen = JsonSchemaGenerator(schema_path_str, top_class=effective_top, not_closed=False)
         schema_dict = json.loads(gen.serialize())
     else:
-        schema_dict = _compile_linkml_fallback(schema_path_str, target_class)
+        schema_dict = _compile_linkml_fallback(schema_path_str, effective_top)
     validator_cls = jsonschema.validators.validator_for(schema_dict)
     validator_cls.check_schema(schema_dict)
     return schema_dict, validator_cls(schema_dict)
 
 
-def compile_json_schema(root: Path, target_class: str | None = None) -> dict:
-    """Compile the LinkML metamodel (or a specific root class) to a JSON Schema dict."""
+def compile_json_schema(root: Path, target_class: str | None = "TaxonomyReleaseDocument") -> dict:
+    """Compile the LinkML metamodel (defaulting root to TaxonomyReleaseDocument) to a JSON Schema dict."""
     path = resolve_schema_path(root)
     schema_dict, _ = _cached_json_schema(str(path), path.stat().st_mtime_ns, target_class)
     return schema_dict
@@ -204,6 +210,43 @@ def validate_field_semantics(model: dict) -> None:
         if rel in ("reduces", "mitigates") and INCREASING_VERBS.search(predicate) and not DECREASING_VERBS.search(predicate):
             raise ConceptGraphError(
                 f"field model: relationship {edge['id']} predicate '{predicate}' contradicts relation '{rel}'"
+            )
+
+
+def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
+    """Verify that LinkML enums stay synchronized with Python compiler constants and field relations."""
+    path = resolve_schema_path(root)
+    raw = yaml.safe_load(path.read_text())
+    enums = {
+        name: set((edef.get("permissible_values") or {}).keys())
+        for name, edef in (raw.get("enums") or {}).items()
+    }
+    from .framework import SUPPORTED_VERSIONS
+    from .taxonomy_coverage import STATUSES
+
+    expected = {
+        "ConceptScopeEnum": {
+            "core", "background", "model-extension", "generative-extension",
+            "agent-extension", "physical-extension", "specialist",
+        },
+        "RelationKindEnum": {
+            "mechanism", "constraint", "tradeoff", "evaluation",
+            "dependency", "failure", "composition",
+        },
+        "FrameworkVersionEnum": set(SUPPORTED_VERSIONS),
+        "ChecklistStatusEnum": set(STATUSES),
+    }
+    for enum_name, exp_values in expected.items():
+        actual = enums.get(enum_name, set())
+        if actual != exp_values:
+            raise ConceptGraphError(
+                f"schema sync: LinkML {enum_name} {sorted(actual)} disagrees with compiler {sorted(exp_values)}"
+            )
+    if field_model and len(field_model.get("relations", [])) >= 17:
+        rel_ids = {r["id"] for r in field_model["relations"]}
+        if enums.get("RelationIdEnum", set()) != rel_ids:
+            raise ConceptGraphError(
+                f"schema sync: LinkML RelationIdEnum disagrees with ml-systems-field.yml relations"
             )
 
 
