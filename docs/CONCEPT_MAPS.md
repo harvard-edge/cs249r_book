@@ -408,10 +408,11 @@ steps in the repeatable workflow.
 
 ## Field reference model and book alignment
 
-The field landscape is independent of the book-derived volume maps. Its source
-is `taxonomy/ml-systems-field.yml`: stable `mlsys.*` identities,
+The field landscape is independent of the book-derived volume maps. Its single
+source of truth is `taxonomy/ml-systems-taxonomy.yml`: subject areas and rows,
+stable `mlsys.*` identities (each with a primary `home:` subject pointer),
 definitions, navigation families, per-concept applicability, external reading
-references, conditioned propositions, and selected views. A global concept has
+references, conditioned propositions, practitioner guides, and selected views. A global concept has
 no chapter owner. The chapter YAML contracts remain authoritative for what the
 books teach; they are not definitions of the field's boundary.
 

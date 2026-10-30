@@ -1,4 +1,4 @@
-"""Validate an authored topic taxonomy and export its explicitly stated meaning.
+"""Validate and export the SKOS hierarchy slice projected from `taxonomy/ml-systems-taxonomy.yml`.
 
 Collections are navigation sets, not broader/narrower claims. Technical field
 relationships and book links never become taxonomy or prerequisite statements.
@@ -46,17 +46,19 @@ def _records(model, name):
 
 def load_taxonomy(root: Path, field: dict) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    from .field_graph import load_unified_taxonomy
+    from .field_graph import TAXONOMY_FILE, load_unified_taxonomy
     unified = load_unified_taxonomy(root)
     if unified is not None:
         model = unified["skos"]
         if model is None:
             return None
     else:
-        path = root / "taxonomy/ml-systems-taxonomy.yml"
+        path = root / TAXONOMY_FILE
         if not path.exists():
             return None
         model = yaml.safe_load(path.read_text())
+        if not isinstance(model, dict) or ("concepts" in model or "areas" in model or "dimensions" in model or "roles" in model):
+            return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")
