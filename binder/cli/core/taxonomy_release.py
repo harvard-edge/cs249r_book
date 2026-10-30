@@ -169,9 +169,10 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
               out / "mlsys-taxonomy.bib": bib.encode()}
     linkml_src = root / "taxonomy/schema/mlsys-taxonomy.linkml.yml"
     if linkml_src.exists():
-        from .taxonomy_schema import compile_json_schema
+        from .taxonomy_schema import compile_json_schema, validate_linkml
+        validate_linkml(document, "TaxonomyReleaseDocument", root, "taxonomy release")
         result[out / "mlsys-taxonomy.linkml.yml"] = linkml_src.read_bytes()
         result[out / "mlsys-taxonomy.schema.json"] = (
-            json.dumps(compile_json_schema(root), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+            json.dumps(compile_json_schema(root, "TaxonomyReleaseDocument"), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         ).encode()
     return result
