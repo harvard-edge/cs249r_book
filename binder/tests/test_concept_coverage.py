@@ -30,10 +30,15 @@ def decision(root):
     return d
 
 
+class _NoAliasDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
+
+
 def write(root, decisions):
     path = root / "taxonomy/coverage-ledger.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(dict(schema_version=1, decisions=decisions)))
+    path.write_text(yaml.dump(dict(schema_version=1, decisions=decisions), Dumper=_NoAliasDumper))
 
 
 def test_suggestions_are_not_decisions_and_all_declarations_are_counted(inventory):

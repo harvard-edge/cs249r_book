@@ -64,6 +64,7 @@ def staffml_labels_payload(framework: dict, field: dict) -> dict:
             "short": row.get("display_label") or row["label"],
             "area": area["label"],
             "area_id": area.get("code", ""),
+            "area_slug": area["id"],
             "definition": row.get("definition", ""),
         }
         for rid, (row, area) in subjects_with_area.items()
@@ -76,9 +77,11 @@ def staffml_labels_payload(framework: dict, field: dict) -> dict:
     areas = [
         {
             "id": a.get("code", ""),
+            "slug": a["id"],
             "label": a["label"],
             "short": a.get("display_label") or a["label"],
             "group": groups.get(a.get("group"), {}).get("label", ""),
+            "group_id": a.get("group", ""),
             "group_code": groups.get(a.get("group"), {}).get("code", ""),
             "question": a.get("question", ""),
             "subjects": [r["id"] for r in a.get("rows", [])],
@@ -167,7 +170,7 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
            f"<{BASE}scheme> a skos:ConceptScheme ;", f"  dct:title {lit(NAME)} ;", f'  owl:versionInfo "{version}" ;',
            f"  dct:creator {lit(AUTHOR)} ;", f"  dct:license <{LICENSE['url']}> ;", f"  dct:description {lit(meta['note'])} .", ""]
     for r in relations:
-        ttl += [f"mlsys:{r['id']} a owl:ObjectProperty ;", "  owl:subPropertyOf skos:related ;",
+        ttl += [f"mlsys:{r['id']} a owl:ObjectProperty ;", "  rdfs:subPropertyOf skos:related ;",
                 f"  rdfs:isDefinedBy <{BASE}scheme> ;",
                 f"  skos:prefLabel {lit(r['forward'])} ;", f"  skos:definition {lit(r['meaning'])} .", ""]
     for group in outline["groups"]:

@@ -19,14 +19,17 @@ import type { AreaStyle, CompetencyArea, QuestionSummary, Topic } from "./taxono
  */
 
 interface LabelArea {
-  id: string; label: string; short: string; group: string; group_code: string;
+  id: string; slug: string; label: string; short: string; group: string; group_id: string; group_code: string;
   question: string; subjects: string[];
+}
+export interface LabelSubjectMeta {
+  code: string; label: string; short: string; area: string; area_id: string; area_slug: string; definition: string;
 }
 interface Labels {
   version: string;
   explorer: string;
   areas: LabelArea[];
-  subjects: Record<string, { code: string; label: string; short: string; area: string; area_id: string; definition: string }>;
+  subjects: Record<string, LabelSubjectMeta>;
   concepts: Record<string, { label: string; subject: string }>;
 }
 
@@ -44,14 +47,17 @@ export interface SubjectConcept {
 /** A taxonomy subject in the Vault's `Topic` shape, plus taxonomy fields. */
 export interface Subject extends Topic {
   code: string;
+  areaSlug: string;
   fullLabel: string;
   concepts: SubjectConcept[];
 }
 
 /** A taxonomy area in the Vault's `CompetencyArea` shape. */
 export interface TaxArea extends CompetencyArea {
+  slug: string;
   topics: Subject[];
   group: string;
+  groupId: string;
   groupCode: string;
   question: string;
 }
@@ -101,6 +107,7 @@ function buildSubject(id: string, qs: RawQuestion[]): Subject {
     code: meta.code,
     description: meta.definition,
     area: meta.area_id,
+    areaSlug: meta.area_slug ?? meta.area_id,
     prerequisites: [],
     questionCount: qs.length,
     levels, zones, tracks: Array.from(trackSet).sort(), questionsByLevel,
@@ -123,6 +130,7 @@ const _areas: TaxArea[] = labels.areas
     }
     return {
       id: a.id,
+      slug: a.slug,
       name: a.short,
       code: a.id,
       questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
@@ -130,6 +138,7 @@ const _areas: TaxArea[] = labels.areas
       topics,
       levels, zones,
       group: a.group,
+      groupId: a.group_id,
       groupCode: a.group_code,
       question: a.question,
     };
@@ -137,6 +146,12 @@ const _areas: TaxArea[] = labels.areas
   .filter((a) => a.topicCount > 0);
 
 const _subjects = new Map(_areas.flatMap((a) => a.topics.map((t) => [t.id, t] as const)));
+const _areaGroupCode = new Map(
+  labels.areas.flatMap((a) => [
+    [a.id, a.group_code] as const,
+    ...(a.slug ? [[a.slug, a.group_code] as const] : []),
+  ]),
+);
 
 // One hue per group, so the 20 areas read as five families.
 const GROUP_STYLES: Record<string, { primary: string; icon: LucideIcon }> = {
@@ -150,15 +165,18 @@ const GROUP_STYLES: Record<string, { primary: string; icon: LucideIcon }> = {
 // ─── Public API ────────────────────────────────────────────────
 
 export function getTaxAreas(): TaxArea[] { return _areas; }
-export function getTaxAreaById(id: string): TaxArea | undefined { return _areas.find((a) => a.id === id); }
+export function getTaxAreaById(id: string): TaxArea | undefined {
+  return _areas.find((a) => a.id === id || a.slug === id);
+}
 export function getSubjectById(id: string): Subject | undefined { return _subjects.get(id); }
 export function getTaxAreaForSubject(subjectId: string): TaxArea | undefined {
   const s = _subjects.get(subjectId);
-  return s ? _areas.find((a) => a.id === s.area) : undefined;
+  return s ? _areas.find((a) => a.id === s.area || a.slug === s.area) : undefined;
 }
 
 export function getTaxAreaStyle(areaId: string): AreaStyle {
-  const style = GROUP_STYLES[areaId.charAt(0)];
+  const groupCode = _areaGroupCode.get(areaId) ?? getTaxAreaById(areaId)?.groupCode ?? areaId.charAt(0);
+  const style = GROUP_STYLES[groupCode];
   if (!style) return { primary: "#6b7280", bg: "#6b728012", border: "#6b728030", icon: Boxes };
   return { primary: style.primary, bg: `${style.primary}12`, border: `${style.primary}30`, icon: style.icon };
 }
@@ -175,6 +193,9 @@ export function getConceptLabel(conceptId: string): string | undefined {
 }
 export function getSubjectLabel(subjectId: string): string | undefined {
   return labels.subjects[subjectId]?.label;
+}
+export function getSubjectLabelMeta(subjectId: string): LabelSubjectMeta | undefined {
+  return labels.subjects[subjectId];
 }
 
 /** Subjects whose label, code, definition, or concepts match the query. */

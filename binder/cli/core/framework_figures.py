@@ -148,7 +148,7 @@ def _layers(framework: dict) -> bytes:
     band_height = 70 + rows * 64
     height = margin * 2 + len(layers) * band_height + (len(layers) - 1) * 30
     parts = _start(width, height, 'ML systems candidate framework: systems layer lens',
-                   'Five equal bands show authored relevance to systems layers. Each area '
+                   f'{len(layers)} equal bands show authored relevance to systems layers. Each area '
                    'appears in every layer touched by one of its subject rows. References '
                    'within each tile name the relevant numbered subject rows from the atlas '
                    'and matrix. Repeated placements express overlap, not exclusive ownership. '

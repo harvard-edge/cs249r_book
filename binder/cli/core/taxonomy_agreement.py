@@ -17,15 +17,28 @@ from pathlib import Path
 import yaml
 
 
-from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml
+from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+from .taxonomy_schema import get_class_slots
 
 
-RECORD_KEYS = {"schema_version", "id", "title", "basis", "items", "runs"}
-RUN_KEYS = {"id", "held_out", "note", "taggers"}
-TAG_KEYS = {"n", "subject", "concepts", "proposed", "reason"}
+RECORD_KEYS = set(get_class_slots("AgreementRecordModel"))
+RUN_KEYS = set(get_class_slots("AgreementRun"))
+TAG_KEYS = set(get_class_slots("AgreementItemTag"))
 
 
 def _vocabulary(root: Path):
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        field = unified["field"]
+        framework = unified["framework"]
+        rows = {}
+        home = {}
+        for area in framework["areas"]:
+            for row in area["rows"]:
+                rows[row["id"]] = (row, area)
+                for cid in row.get("concepts", []):
+                    home[cid] = row["id"]
+        return {c["id"] for c in field["concepts"]}, rows, home
     raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
     rows = {row["id"]: (row, area) for area in raw["areas"] for row in area["rows"]}
     home = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}

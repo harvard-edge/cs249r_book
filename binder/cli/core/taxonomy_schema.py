@@ -31,8 +31,6 @@ from .concept_graph import ConceptGraphError
 SCHEMA_REL_PATH = Path("taxonomy/schema/mlsys-taxonomy.linkml.yml")
 REPO_SCHEMA_PATH = Path(__file__).resolve().parents[3] / SCHEMA_REL_PATH
 
-HIERARCHICAL_RELATIONS = ("specializes", "part-of", "requires")
-
 DECREASING_VERBS = re.compile(
     r"\b(shrink|shrinks|shrinking|lower|lowers|lowering|reduce|reduces|reducing|decrease|decreases|decreasing|curb|curbs|curbing|cut|cuts|cutting|eliminate|eliminates|eliminating|minimize|minimizes|minimizing|compress|compresses|compressing)\b",
     re.IGNORECASE,
@@ -42,26 +40,32 @@ INCREASING_VERBS = re.compile(
     re.IGNORECASE,
 )
 
-# Typed dynamic-key dictionary slots whose values must conform to specific LinkML classes.
-_TYPED_DICT_SLOTS: dict[tuple[str, str], dict] = {
-    ("AgreementRun", "taggers"): {
-        "type": "object",
-        "additionalProperties": {
-            "type": "array",
-            "items": {"$ref": "#/$defs/AgreementItemTag"},
-        },
-    },
-    ("StaffMLLabelsDocument", "subjects"): {
-        "type": "object",
-        "propertyNames": {"pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]*$"},
-        "additionalProperties": {"$ref": "#/$defs/StaffMLLabelSubject"},
-    },
-    ("StaffMLLabelsDocument", "concepts"): {
-        "type": "object",
-        "propertyNames": {"pattern": r"^mlsys\.[a-z0-9-]+$"},
-        "additionalProperties": {"$ref": "#/$defs/StaffMLLabelConcept"},
-    },
-}
+# LinkML slot attribute keys supported by the deterministic Draft 2019-09 JSON Schema compiler.
+# Any unknown attribute key in mlsys-taxonomy.linkml.yml raises ConceptGraphError so new LinkML
+# constraints can never be silently ignored when linkml-runtime is absent.
+_ALLOWED_SLOT_KEYS = frozenset({
+    "annotations",
+    "description",
+    "equals_number",
+    "equals_string",
+    "identifier",
+    "inlined",
+    "inlined_as_list",
+    "maximum_cardinality",
+    "maximum_value",
+    "minimum_cardinality",
+    "minimum_value",
+    "multivalued",
+    "pattern",
+    "range",
+    "required",
+    "slot_uri",
+})
+_ALLOWED_ANNOTATION_KEYS = frozenset({
+    "dict_key_pattern",
+    "dict_value_array_ref",
+    "dict_value_ref",
+})
 
 
 def resolve_schema_path(root: Path | None = None) -> Path:
@@ -101,14 +105,46 @@ def get_enum_values(enum_name: str, root: Path | None = None) -> tuple[str, ...]
     return tuple((enum_def.get("permissible_values") or {}).keys())
 
 
+def get_class_slots(class_name: str, root: Path | None = None) -> tuple[str, ...]:
+    """Return the ordered tuple of attribute slot names declared on `class_name` in the LinkML schema."""
+    path = resolve_schema_path(root)
+    raw = _cached_raw_schema(str(path), path.stat().st_mtime_ns)
+    cls_def = (raw.get("classes") or {}).get(class_name)
+    if not cls_def:
+        raise ConceptGraphError(f"Unknown LinkML class: {class_name}")
+    return tuple((cls_def.get("attributes") or {}).keys())
+
+
+def get_required_class_slots(class_name: str, root: Path | None = None) -> tuple[str, ...]:
+    """Return the ordered tuple of required attribute slot names declared on `class_name`."""
+    path = resolve_schema_path(root)
+    raw = _cached_raw_schema(str(path), path.stat().st_mtime_ns)
+    cls_def = (raw.get("classes") or {}).get(class_name)
+    if not cls_def:
+        raise ConceptGraphError(f"Unknown LinkML class: {class_name}")
+    attrs = cls_def.get("attributes") or {}
+    return tuple(name for name, sdef in attrs.items() if isinstance(sdef, dict) and sdef.get("required"))
+
+
+def get_hierarchical_relations(root: Path | None = None) -> tuple[str, ...]:
+    """Return the tuple of RelationIdEnum values annotated with `hierarchical_dag: true` in the LinkML schema."""
+    path = resolve_schema_path(root)
+    raw = _cached_raw_schema(str(path), path.stat().st_mtime_ns)
+    pvs = ((raw.get("enums") or {}).get("RelationIdEnum") or {}).get("permissible_values") or {}
+    return tuple(
+        rel_id
+        for rel_id, pv in pvs.items()
+        if isinstance(pv, dict) and isinstance(pv.get("annotations"), dict) and pv["annotations"].get("hierarchical_dag") is True
+    )
+
+
+HIERARCHICAL_RELATIONS = get_hierarchical_relations()
+
+
 @lru_cache(maxsize=8)
 def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
     """Compile the LinkML metamodel into a canonical Draft 2019-09 JSON Schema `$defs` bundle once per file mtime."""
     raw = _cached_raw_schema(schema_path_str, mtime_ns)
-    if HAS_LINKML and SchemaView is not None:
-        # Validate the LinkML metamodel itself when linkml-runtime is installed.
-        _cached_schema_view(schema_path_str, mtime_ns)
-
     enums = raw.get("enums") or {}
     classes = raw.get("classes") or {}
     defs: dict[str, dict] = {}
@@ -134,10 +170,52 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
         req: list[str] = []
         for sname, sdef in (cdef.get("attributes") or {}).items():
             sdef = sdef or {}
+            unknown_keys = set(sdef) - _ALLOWED_SLOT_KEYS
+            if unknown_keys:
+                raise ConceptGraphError(
+                    f"Unsupported LinkML slot keys on {cname}.{sname}: {', '.join(sorted(unknown_keys))}"
+                )
+            annotations = sdef.get("annotations") or {}
+            if not isinstance(annotations, dict) or (set(annotations) - _ALLOWED_ANNOTATION_KEYS):
+                bad_ann = sorted(set(annotations) - _ALLOWED_ANNOTATION_KEYS) if isinstance(annotations, dict) else [str(annotations)]
+                raise ConceptGraphError(
+                    f"Unsupported LinkML slot annotations on {cname}.{sname}: {', '.join(bad_ann)}"
+                )
             rng = sdef.get("range", "string")
             inlined = bool(sdef.get("inlined") or sdef.get("inlined_as_list"))
-            if (cname, sname) in _TYPED_DICT_SLOTS:
-                item_schema = dict(_TYPED_DICT_SLOTS[(cname, sname)])
+            if rng not in enums and rng not in classes and rng not in ("string", "integer", "boolean"):
+                raise ConceptGraphError(f"Unknown LinkML slot range '{rng}' on {cname}.{sname}")
+            is_string_like = (not annotations) and (
+                rng == "string" or rng in enums or (rng in classes and not inlined and rng != "AnyValue")
+            )
+            is_integer = (not annotations) and rng == "integer"
+            if inlined and (annotations or rng not in classes or rng == "AnyValue"):
+                raise ConceptGraphError(f"inlined/inlined_as_list on non-class slot {cname}.{sname} is not allowed")
+            for num_key in ("equals_number", "minimum_value", "maximum_value"):
+                if num_key in sdef:
+                    if not is_integer or not isinstance(sdef[num_key], int) or isinstance(sdef[num_key], bool):
+                        raise ConceptGraphError(f"{num_key} on non-integer slot {cname}.{sname} is not allowed")
+            for str_key in ("equals_string", "pattern"):
+                if str_key in sdef:
+                    if not is_string_like or not isinstance(sdef[str_key], str):
+                        raise ConceptGraphError(f"{str_key} on non-string slot {cname}.{sname} is not allowed")
+            if annotations:
+                item_schema: dict = {"type": "object"}
+                if "dict_key_pattern" in annotations:
+                    item_schema["propertyNames"] = {"pattern": annotations["dict_key_pattern"]}
+                if "dict_value_ref" in annotations:
+                    ref_cls = annotations["dict_value_ref"]
+                    if ref_cls not in classes:
+                        raise ConceptGraphError(f"Unknown dict_value_ref class {ref_cls} on {cname}.{sname}")
+                    item_schema["additionalProperties"] = {"$ref": f"#/$defs/{ref_cls}"}
+                elif "dict_value_array_ref" in annotations:
+                    ref_cls = annotations["dict_value_array_ref"]
+                    if ref_cls not in classes:
+                        raise ConceptGraphError(f"Unknown dict_value_array_ref class {ref_cls} on {cname}.{sname}")
+                    item_schema["additionalProperties"] = {
+                        "type": "array",
+                        "items": {"$ref": f"#/$defs/{ref_cls}"},
+                    }
             elif rng == "integer":
                 item_schema = {"type": "integer"}
                 if "equals_number" in sdef:
@@ -149,7 +227,20 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
             elif rng == "boolean":
                 item_schema = {"type": "boolean"}
             elif rng in enums:
-                item_schema = {"$ref": f"#/$defs/{rng}"}
+                if "equals_string" in sdef or "pattern" in sdef:
+                    pvs = (enums[rng] or {}).get("permissible_values") or {}
+                    if "equals_string" in sdef and sdef["equals_string"] not in pvs:
+                        raise ConceptGraphError(
+                            f"equals_string '{sdef['equals_string']}' on {cname}.{sname} is not in enum {rng}"
+                        )
+                    sub: dict = {}
+                    if "equals_string" in sdef:
+                        sub["const"] = sdef["equals_string"]
+                    if "pattern" in sdef:
+                        sub["pattern"] = sdef["pattern"]
+                    item_schema = {"allOf": [{"$ref": f"#/$defs/{rng}"}, sub]}
+                else:
+                    item_schema = {"$ref": f"#/$defs/{rng}"}
             elif rng == "AnyValue":
                 item_schema = {"type": "object"}
             elif rng in classes and inlined:
@@ -158,15 +249,23 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
                 item_schema = {"type": "string"}
                 if "equals_string" in sdef:
                     item_schema["const"] = sdef["equals_string"]
-            if "pattern" in sdef:
-                item_schema["pattern"] = sdef["pattern"]
+                if "pattern" in sdef:
+                    item_schema["pattern"] = sdef["pattern"]
             if sdef.get("multivalued"):
                 prop_schema: dict = (
                     {"type": "array", "items": item_schema}
                     if sdef.get("required")
                     else {"type": ["array", "null"], "items": item_schema}
                 )
+                if "minimum_cardinality" in sdef:
+                    prop_schema["minItems"] = sdef["minimum_cardinality"]
+                if "maximum_cardinality" in sdef:
+                    prop_schema["maxItems"] = sdef["maximum_cardinality"]
             else:
+                if "minimum_cardinality" in sdef or "maximum_cardinality" in sdef:
+                    raise ConceptGraphError(
+                        f"Cardinality bounds on non-multivalued slot {cname}.{sname} are not allowed"
+                    )
                 prop_schema = (
                     dict(item_schema)
                     if sdef.get("required")
@@ -187,6 +286,10 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
             cls_schema["description"] = cdef["description"]
         defs[cname] = cls_schema
 
+    if HAS_LINKML and SchemaView is not None:
+        # Validate the LinkML metamodel itself when linkml-runtime is installed.
+        _cached_schema_view(schema_path_str, mtime_ns)
+
     return {
         "$schema": "https://json-schema.org/draft/2019-09/schema",
         "$id": raw.get("id", "https://mlsysbook.ai/taxonomy/schema"),
@@ -200,7 +303,9 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
 def _cached_json_schema(schema_path_str: str, mtime_ns: int, target_class: str | None) -> tuple[dict, object]:
     base = _cached_base_schema(schema_path_str, mtime_ns)
     effective_top = target_class or "TaxonomyReleaseDocument"
-    top_def = base["$defs"].get(effective_top, {"type": "object"})
+    if effective_top not in base["$defs"]:
+        raise ConceptGraphError(f"Unknown LinkML target class: {effective_top}")
+    top_def = base["$defs"][effective_top]
     schema_dict = {
         "$schema": base["$schema"],
         "$id": base["$id"],
@@ -265,8 +370,29 @@ def validate_linkml(instance: object, target_class: str, root: Path, context: st
 
 
 def validate_field_semantics(model: dict) -> None:
-    """Enforce ontological DAG acyclicity and verb-predicate polarity on field relationships."""
+    """Enforce referential integrity, ontological DAG acyclicity, and verb-predicate polarity on field relationships."""
     edges = model.get("relationships", [])
+    concepts_list = model.get("concepts")
+    families_list = model.get("families")
+    if isinstance(concepts_list, list):
+        concept_ids = {c["id"] for c in concepts_list if isinstance(c, dict) and isinstance(c.get("id"), str)}
+        if isinstance(families_list, list) and families_list:
+            family_ids = {f["id"] for f in families_list if isinstance(f, dict) and isinstance(f.get("id"), str)}
+            for c in concepts_list:
+                if isinstance(c, dict) and "family" in c and c.get("family") not in family_ids:
+                    raise ConceptGraphError(f"field model: invalid concept identity or family {c.get('id')}")
+        for edge in edges:
+            if isinstance(edge, dict):
+                src = edge.get("source")
+                tgt = edge.get("target")
+                if src not in concept_ids or tgt not in concept_ids or src == tgt:
+                    raise ConceptGraphError(f"field model: missing or identical endpoints {edge.get('id')}")
+        for record in model.get("retired", []) or []:
+            if isinstance(record, dict):
+                if record.get("id") in concept_ids or record.get("replaced_by") not in concept_ids:
+                    raise ConceptGraphError(
+                        f"field model: retired identity {record.get('id')} must be unused and name a current replacement"
+                    )
 
     # 1. Ontological DAG acyclicity on hierarchical relations (specializes, part-of, requires).
     for rel_name in HIERARCHICAL_RELATIONS:
@@ -315,19 +441,18 @@ def validate_field_semantics(model: dict) -> None:
 
 
 def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
-    """Verify that LinkML enums and version stay synchronized with Python compiler constants and field relations."""
+    """Verify that LinkML enums, relation metadata, version, and workflow briefs stay synchronized."""
     path = resolve_schema_path(root)
     raw = _cached_raw_schema(str(path), path.stat().st_mtime_ns)
+    raw_enums = raw.get("enums") or {}
     enums = {
         name: set((edef.get("permissible_values") or {}).keys())
-        for name, edef in (raw.get("enums") or {}).items()
+        for name, edef in raw_enums.items()
     }
     from .framework import SUPPORTED_VERSIONS
     from .taxonomy_coverage import STATUSES
 
     expected = {
-        "ConceptScopeEnum": set(get_enum_values("ConceptScopeEnum", root)),
-        "RelationKindEnum": set(get_enum_values("RelationKindEnum", root)),
         "FrameworkVersionEnum": set(SUPPORTED_VERSIONS),
         "ChecklistStatusEnum": set(STATUSES),
     }
@@ -342,11 +467,59 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
         raise ConceptGraphError(
             f"schema sync: LinkML top-level version '{schema_ver}' disagrees with latest FrameworkVersionEnum '{SUPPORTED_VERSIONS[-1]}'"
         )
-    if field_model and len(field_model.get("relations", [])) >= 17:
-        rel_ids = {r["id"] for r in field_model["relations"]}
-        if enums.get("RelationIdEnum", set()) != rel_ids:
+
+    rel_pvs = (raw_enums.get("RelationIdEnum") or {}).get("permissible_values") or {}
+    if field_model and "relations" in field_model and field_model.get("id") != "example":
+        relations = field_model.get("relations") or []
+        rel_ids = {r["id"] for r in relations if isinstance(r, dict) and "id" in r}
+        if set(rel_pvs.keys()) != rel_ids or len(relations) != len(rel_pvs):
             raise ConceptGraphError(
                 "schema sync: LinkML RelationIdEnum disagrees with ml-systems-taxonomy.yml relations"
+            )
+        for rel in relations:
+            rid = rel["id"]
+            pv = rel_pvs.get(rid) or {}
+            ann = pv.get("annotations") or {}
+            if rel.get("meaning") != pv.get("description"):
+                raise ConceptGraphError(
+                    f"schema sync: RelationIdEnum.{rid} description disagrees with ml-systems-taxonomy.yml meaning"
+                )
+            for field_key in ("kind", "forward", "inverse"):
+                if rel.get(field_key) != ann.get(field_key):
+                    raise ConceptGraphError(
+                        f"schema sync: RelationIdEnum.{rid} annotation '{field_key}' disagrees with ml-systems-taxonomy.yml"
+                    )
+
+    brief_path = root / ".claude/workflows/taxonomy-refresh/briefs/common.md"
+    if brief_path.exists():
+        brief_text = brief_path.read_text()
+        match = re.search(
+            r"Relation vocabulary \(use only these (\d+)\):\s*([a-z0-9,\s-]+)\.",
+            brief_text,
+        )
+        if not match:
+            raise ConceptGraphError("schema sync: common.md is missing the Relation vocabulary declaration")
+        declared_count = int(match.group(1))
+        declared_verbs = [v.strip() for v in match.group(2).replace("\n", " ").split(",") if v.strip()]
+        if declared_count != len(rel_pvs) or set(declared_verbs) != set(rel_pvs.keys()):
+            raise ConceptGraphError(
+                "schema sync: .claude/workflows/taxonomy-refresh/briefs/common.md relation vocabulary disagrees with RelationIdEnum"
+            )
+
+    readme_path = root / "taxonomy/README.md"
+    if (
+        readme_path.exists()
+        and field_model
+        and field_model.get("id") == "ml-systems-field"
+        and "concepts" in field_model
+        and "relationships" in field_model
+    ):
+        readme_text = readme_path.read_text()
+        n_concepts = len(field_model["concepts"])
+        n_rels = f"{len(field_model['relationships']):,}"
+        if f"the {n_concepts} concepts" not in readme_text or f"has {n_rels} relationships" not in readme_text:
+            raise ConceptGraphError(
+                f"schema sync: taxonomy/README.md counts disagree with ml-systems-taxonomy.yml ({n_concepts} concepts, {n_rels} relationships)"
             )
 
 
