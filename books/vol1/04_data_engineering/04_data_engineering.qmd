@@ -846,7 +846,7 @@ Turning that brief exchange into an engineering specification requires targets t
 # │ How: Calculate total monthly detection windows and required accuracy per window.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_rate, fmt_time, sci_latex
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_percent, fmt_rate, fmt_time, sci_latex
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FalsePositiveTarget:
@@ -862,14 +862,17 @@ class FalsePositiveTarget:
     tolerance_per_month = budget.budget
 
     days_month = budget.horizon.to(day).magnitude
+    margin_rejection = 0.99999  # illustrative per-window rejection in the margin note (scenario assumption)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     windows_per_month = budget.windows
     target_fpr = budget.target_false_positive_rate
     rejection_pct = budget.rejection_needed * 100
+    margin_false_wakes = windows_per_month * (1 - margin_rejection)  # expected false wakes per month
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rejection_pct >= 99.999, f"Rejection target ({rejection_pct:.4f}%) is too lenient. Should be > 99.999%.")
+    check(round(margin_false_wakes) == 26, f"Margin note says 26 false wakes a month, got {margin_false_wakes:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     hr_duty_str = fmt_time(duty_cycle_hours, "hour", precision=0, commas=False, style="word", per="day")
@@ -878,6 +881,8 @@ class FalsePositiveTarget:
     fpr_math = fmt_math(sci_latex(target_fpr, precision=1))
     tolerance_str = fmt(tolerance_per_month, precision=0, commas=False)
     rejection_pct_str = fmt_percent(rejection_pct / 100, precision=5, commas=False, style='prose')
+    margin_rejection_pct_str = fmt_percent(margin_rejection, precision=3, commas=False, style='prose')
+    margin_false_wakes_str = fmt_int(round(margin_false_wakes), commas=False)
 ```
 
 ::: {#nbk-data-engineering-false-positive-targets .callout-notebook title="False positive targets"}
@@ -908,7 +913,7 @@ class FalsePositiveTarget:
 ::: {.column-margin}
 ![](images/svg/vol1_data_engineering_margin_001.svg){width="100%" fig-alt="Two red horizontal bars on a log scale show expected monthly false wakes: 2,592 at 99.9 percent per-window rejection and 26 at 99.999 percent; a red dashed limit line marks 1 wake per month, and both bars extend past it."}
 
-*Even 99.999 percent per-window rejection multiplies into 26 false wakes a month.*
+*Even `{python} FalsePositiveTarget.margin_rejection_pct_str` per-window rejection multiplies into `{python} FalsePositiveTarget.margin_false_wakes_str` false wakes a month.*
 :::
 
 Evaluation therefore reports the two rates together, as a detection/error trade-off curve that plots false accepts per hour against false rejection rate on streaming audio representative of deployment [@nayak2022]. The detection target is read off that curve at the false-wake budget, and operational metrics complete the contract by bounding response time from the end of the keyword to the system's reaction alongside the average power drawn while listening.
@@ -923,9 +928,47 @@ Data quality and diversity determine whether these targets can be met inside tho
 
 Doubling the sampling rate of a wake-word recording from 8 kHz to 16 kHz captures sharper consonant sounds and raises the detection rate, but it also doubles the raw-audio window and the input-processing work on the device. Every data engineering choice for the keyword spotter pulls detection rate, false-wake tolerance, latency, energy, and memory against one another, and @tbl-kws-design-space prices those trade-offs. Each row is a D·A·M coupling of the kind drawn in @fig-dam-axis-triad-intro, because a data choice such as sampling rate or coefficient count changes what the algorithm receives and what the machine must hold in always-on memory.
 
-One row of the table uses mel-frequency cepstral coefficients (MFCCs)\index{MFCC!audio features}[^fn-mfcc-audio-features] [@davis1980comparison], which reduce each frame of roughly 25 ms of audio to 13 to 40 numbers that emphasize the frequencies speech uses. The coefficient count sets the size of the model's input and how much acoustic detail it keeps; @sec-data-engineering-systematic-data-processing-aebc shows how they are extracted.
+```{python}
+#| echo: false
+#| label: mfcc-frame-samples
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MFCC FRAME SAMPLE COUNT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: MFCC paragraph in the KWS design space and its footnote
+# │          (fn-mfcc-audio-features).
+# │
+# │ Goal: Show how many raw samples one MFCC frame summarizes.
+# │ Show: A 25 ms frame at 16 kHz holds 400 samples.
+# │ How: Multiply the candidate sampling rate by the frame length.
+# │
+# │ Note: The 25 ms frame is the conventional speech-analysis window, a
+# │       chapter scenario assumption (no registry entry).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_frequency, fmt_time
 
-[^fn-mfcc-audio-features]: **MFCC (mel-frequency cepstral coefficients)**\index{MFCC!dimensionality reduction}: Mel-scale filtering gives this representation its compactness and noise resistance by emphasizing the frequencies humans use to distinguish speech. It reduces the hundreds of raw samples in a short window (400 samples in 25 ms at 16 kHz) to 13–40 coefficients, so each frame fits inside an always-on, kilobyte-scale memory budget. A parameter mismatch between training and serving creates feature skew and can degrade accuracy.
+# ┌── LEGO ───────────────────────────────────────────────
+class MfccFrameSamples:
+    """Raw samples per MFCC analysis frame for the 16 kHz candidate."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    sample_rate = Scenarios.KeywordSpotterSampleRateChoice.alternative * kHz  # 16 kHz candidate
+    frame_length = 25 * ms  # conventional MFCC analysis window (scenario assumption)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    samples_per_frame = (sample_rate * frame_length).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(samples_per_frame - 400) < 1e-9, f"Expected 400 samples per 25 ms frame at 16 kHz, got {samples_per_frame}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    frame_length_ms_str = fmt_time(frame_length, "millisecond", precision=0, commas=False)
+    sample_rate_khz_str = fmt_frequency(sample_rate, unit=kHz, precision=0)
+    samples_per_frame_str = fmt_count(round(samples_per_frame), label="sample", commas=False)
+```
+
+One row of the table uses mel-frequency cepstral coefficients (MFCCs)\index{MFCC!audio features}[^fn-mfcc-audio-features] [@davis1980comparison], which reduce each frame of roughly `{python} MfccFrameSamples.frame_length_ms_str` of audio to 13 to 40 numbers that emphasize the frequencies speech uses. The coefficient count sets the size of the model's input and how much acoustic detail it keeps; @sec-data-engineering-systematic-data-processing-aebc shows how they are extracted.
+
+[^fn-mfcc-audio-features]: **MFCC (mel-frequency cepstral coefficients)**\index{MFCC!dimensionality reduction}: Mel-scale filtering gives this representation its compactness and noise resistance by emphasizing the frequencies humans use to distinguish speech. It reduces the hundreds of raw samples in a short window (`{python} MfccFrameSamples.samples_per_frame_str` in `{python} MfccFrameSamples.frame_length_ms_str` at `{python} MfccFrameSamples.sample_rate_khz_str`) to 13–40 coefficients, so each frame fits inside an always-on, kilobyte-scale memory budget. A parameter mismatch between training and serving creates feature skew and can degrade accuracy.
 
 ```{python}
 #| echo: false
@@ -1078,6 +1121,7 @@ class BudgetAllocation:
     governance_k_usd_str = fmt_usd(governance_budget, precision=1, commas=False, scale="K")
     effective_cost_str = fmt_usd(effective_cost, precision=2, commas=False, per="label")
     labeled_k_str = fmt_count(labeled_examples, scale='K', commas=False)
+    labeled_m_str = fmt_count(labeled_examples, scale='M', precision=2, commas=False)
     labeling_pct_str = fmt_percent(labeling_pct, precision=0, commas=False, style='prose')
     storage_pct_str = fmt_percent(storage_pct, precision=0, commas=False, style='prose')
     governance_pct_str = fmt_percent(governance_pct, precision=0, commas=False, style='prose')
@@ -1158,14 +1202,14 @@ Labeling is priced at a scenario rate per crowdsourced example, set above the im
 
 At `{python} BudgetAllocation.cost_per_label_str` with `{python} BudgetAllocation.review_overhead_pct_str` review overhead: `{python} BudgetAllocation.labeling_k_usd_str` ÷ `{python} BudgetAllocation.effective_cost_str` = `{python} BudgetAllocation.labeled_k_str` labeled examples
 
-This yields roughly 0.75M labeled examples, just below the 1M anchor in the design space. The 1M-to-10M row in @tbl-kws-design-space should therefore be read as a scaling reference rather than a direct interpolation: the real-label budget alone does not buy the full data-volume gain. Counting examples also hides what limits a wake-word model in practice, which is the number of distinct speakers and the hours of ordinary, non-keyword audio available to measure false wakes; @sec-data-engineering-accepting-the-kws-pipeline prices that listening time.
+This yields roughly `{python} BudgetAllocation.labeled_m_str` labeled examples, just below the 1M anchor in the design space. The 1M-to-10M row in @tbl-kws-design-space should therefore be read as a scaling reference rather than a direct interpolation: the real-label budget alone does not buy the full data-volume gain. Counting examples also hides what limits a wake-word model in practice, which is the number of distinct speakers and the hours of ordinary, non-keyword audio available to measure false wakes; @sec-data-engineering-accepting-the-kws-pipeline prices that listening time.
 
 **Step 3**: Identify candidate quality improvements.
 
 The quality plan has three components:
 
 - An illustrative base-model detection rate of ~`{python} KWSDesignConstraints.kws_base_model_acc_str`
-- Partial data-volume gain from 750K real examples
+- Partial data-volume gain from `{python} BudgetAllocation.labeled_k_str` real examples
 - A gap to the `{python} KWSDesignConstraints.kws_accuracy_target_str` target that the options below must close
 
 Three options from the design space are candidates for closing the gap; their collection, storage, processing, and deployed-footprint costs must be checked against the allocations. Their listed gains cannot simply be added to the base detection rate, because they overlap (noisy data and synthetic augmentation both buy robustness to acoustic conditions). The plan is therefore a candidate whose combined effect must be measured on the trained system:
@@ -1176,7 +1220,7 @@ Three options from the design space are candidates for closing the gap; their co
 
 **Step 4**: Final configuration.
 
-The scenario combines these choices with 13 MFCCs and the computed 750K real-label budget in @tbl-data-engineering-kws-configuration. The quality effects can overlap, so the table records a candidate configuration rather than a solved optimum.
+The scenario combines these choices with 13 MFCCs and the computed `{python} BudgetAllocation.labeled_k_str` real-label budget in @tbl-data-engineering-kws-configuration. The quality effects can overlap, so the table records a candidate configuration rather than a solved optimum.
 
 **Result**: The budget buys approximately `{python} BudgetAllocation.labeled_k_str` human-labeled examples, 13 MFCCs, local inference, and a noisy slice plus synthetic augmentation to close the quality gap. Whether that configuration reaches the `{python} KWSDesignConstraints.kws_accuracy_target_str` detection target inside the `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` model limit is what acceptance decides.
 
@@ -1191,14 +1235,14 @@ The scenario combines these choices with 13 MFCCs and the computed 750K real-lab
 \renewcommand{\arraystretch}{1.35}
 ```
 
-| **Choice**            | **Selection**                                   | **Rationale**                                                                                                                                                                                                                                                                             |
-|:----------------------|:------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Sampling rate**     | 16 kHz                                          | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` detection rate for `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` raw-audio storage, subject to cost validation; on device only the raw-sample window grows, since each MFCC frame keeps 13 coefficients |
-| **MFCC coefficients** | 13                                              | One-third the feature buffer and model input of 40 coefficients in always-on SRAM; test whether improved data coverage recovers the quality gap                                                                                                                                           |
-| **Training examples** | 750K real + illustrative synthetic augmentation | Human-label count follows from the budget; synthetic volume is a scenario choice                                                                                                                                                                                                          |
-| **Data diversity**    | Noisy + clean mix                               | Critical for real-world deployment                                                                                                                                                                                                                                                        |
-| **Inference**         | Local, reduced precision                        | Reduced precision can lower footprint; the final `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` fit requires the quantization analysis in @sec-model-compression-quantization-precision-cd46                                                                              |
-| **Augmentation**      | Heavy synthetic                                 | Illustrative `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` per-example cost advantage; total generation and review costs require validation                                                                                                                          |
+| **Choice**            | **Selection**                                                                        | **Rationale**                                                                                                                                                                                                                                                                             |
+|:----------------------|:-------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Sampling rate**     | 16 kHz                                                                               | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` detection rate for `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` raw-audio storage, subject to cost validation; on device only the raw-sample window grows, since each MFCC frame keeps 13 coefficients |
+| **MFCC coefficients** | 13                                                                                   | One-third the feature buffer and model input of 40 coefficients in always-on SRAM; test whether improved data coverage recovers the quality gap                                                                                                                                           |
+| **Training examples** | `{python} BudgetAllocation.labeled_k_str` real + illustrative synthetic augmentation | Human-label count follows from the budget; synthetic volume is a scenario choice                                                                                                                                                                                                          |
+| **Data diversity**    | Noisy + clean mix                                                                    | Critical for real-world deployment                                                                                                                                                                                                                                                        |
+| **Inference**         | Local, reduced precision                                                             | Reduced precision can lower footprint; the final `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` fit requires the quantization analysis in @sec-model-compression-quantization-precision-cd46                                                                              |
+| **Augmentation**      | Heavy synthetic                                                                      | Illustrative `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` per-example cost advantage; total generation and review costs require validation                                                                                                                          |
 
 : **KWS Candidate Configuration**: This scenario uses the computed real-label budget and records the remaining sampling, augmentation, and deployment choices for measurement against the quality and memory targets. {#tbl-data-engineering-kws-configuration tbl-colwidths="[16,20,64]"}
 
@@ -2539,7 +2583,42 @@ class EtlEltCost:
 
 ELT looks expensive here only because this accounting gives it its own raw copy, and raw retention rather than compute dominates the bill. A lakehouse, which runs warehouse queries directly over the stored files, can query the retained logs in place, removing that copy and reversing the comparison.
 
-Production ML systems rarely use one pattern exclusively. Structured tables often flow through ETL for efficiency and compliance, while unstructured data pushes the ELT preference further. For deep learning workloads processing images, audio, or text, the "Transform" step often executes inside the ML framework's data loader rather than in the warehouse at all, applying random crops, spectrogram generation, or text tokenization on-the-fly during each training epoch. Materializing ten augmented variants upstream would increase a 50,000-image dataset to 500,000 stored copies, so ELT's "load raw, transform late" principle extends naturally to the training loop itself.
+```{python}
+#| echo: false
+#| label: augmented-variants-storage
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MATERIALIZED AUGMENTATION STORAGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: ETL/ELT paragraph on transforming inside the data loader.
+# │
+# │ Goal: Show why augmentation is applied on the fly rather than stored.
+# │ Show: Ten stored variants turn 50,000 images into 500,000 stored copies.
+# │ How: Multiply the dataset size by the number of materialized variants.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AugmentedVariantsStorage:
+    """Stored-copy count when augmented variants are materialized upstream."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset_images = 50_000  # scenario assumption
+    variants = 10  # "ten augmented variants" in prose (scenario assumption)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    stored_copies = dataset_images * variants
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(variants == 10, "Prose spells out ten augmented variants.")
+    check(stored_copies == 500_000, f"Expected 500,000 stored copies, got {stored_copies}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_images_str = fmt_count(dataset_images)
+    stored_copies_str = fmt_count(stored_copies)
+```
+
+Production ML systems rarely use one pattern exclusively. Structured tables often flow through ETL for efficiency and compliance, while unstructured data pushes the ELT preference further. For deep learning workloads processing images, audio, or text, the "Transform" step often executes inside the ML framework's data loader rather than in the warehouse at all, applying random crops, spectrogram generation, or text tokenization on-the-fly during each training epoch. Materializing ten augmented variants upstream would increase a `{python} AugmentedVariantsStorage.dataset_images_str`-image dataset to `{python} AugmentedVariantsStorage.stored_copies_str` stored copies, so ELT's "load raw, transform late" principle extends naturally to the training loop itself.
 
 Whichever pattern lands the records, integrating diverse sources remains the core ingestion challenge. Data may originate from databases, APIs, file systems, and IoT devices, each with its own format (relational rows, JavaScript Object Notation (JSON)[^fn-json-ml-overhead] documents, binary streams), access protocol, and update frequency. The systems principle is to standardize at the ingestion boundary: normalize formats, validate schemas, and present a consistent interface to downstream processing regardless of source. This boundary standardization separates the complexity of source diversity from the complexity of feature engineering, allowing each to evolve independently.
 
@@ -3080,13 +3159,22 @@ class CohensKappaChance:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     chance_agreement = annotators.chance_agreement
+    majority_chance = majority_probability**2  # both annotators pick the majority class
+    minority_chance = minority_probability**2  # both annotators pick the minority class
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
+    check(abs(majority_chance + minority_chance - chance_agreement) < 1e-12, "Class terms must sum to chance agreement.")
+    check(abs(majority_chance - 0.81) < 1e-9 and abs(minority_chance - 0.01) < 1e-9, "Footnote states 81 and 1 percent.")
     check(drift.later_kappa < drift.baseline_kappa, "The campaign's agreement must fall.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
+    majority_share_pct_str = fmt_percent(majority_probability, precision=0, commas=False, style='prose')
+    majority_chance_pct_str = fmt_percent(majority_chance, precision=0, commas=False, style='prose')
+    minority_chance_pct_str = fmt_percent(minority_chance, precision=0, commas=False, style='prose')
+    majority_square_math = fmt_math(f"{fmt(majority_probability, precision=2, commas=False)}^2")
+    minority_square_math = fmt_math(f"{fmt(minority_probability, precision=2, commas=False)}^2")
     kappa_baseline_math = fmt_math(rf"\InterAnnotatorAgreement = {fmt(drift.baseline_kappa, precision=2, commas=False)}")
     kappa_later_math = fmt_math(rf"\InterAnnotatorAgreement = {fmt(drift.later_kappa, precision=2, commas=False)}")
 ```
@@ -3096,7 +3184,7 @@ $$
 \InterAnnotatorAgreement = \frac{\ObservedAnnotatorAgreement - \ChanceAnnotatorAgreement}{1 - \ChanceAnnotatorAgreement}
 $$ {#eq-cohens-kappa}
 
-[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, they agree by chance on "not spam" 81 percent of the time ($0.90^2$) and on "spam" 1 percent of the time ($0.10^2$). Their total expected chance agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\InterAnnotatorAgreement$, and interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
+[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label `{python} CohensKappaChance.majority_share_pct_str` of images as "not spam" in a binary task, they agree by chance on "not spam" `{python} CohensKappaChance.majority_chance_pct_str` of the time (`{python} CohensKappaChance.majority_square_math`) and on "spam" `{python} CohensKappaChance.minority_chance_pct_str` of the time (`{python} CohensKappaChance.minority_square_math`). Their total expected chance agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\InterAnnotatorAgreement$, and interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
 
 The numerator $\ObservedAnnotatorAgreement - \ChanceAnnotatorAgreement$ measures the agreement achieved beyond chance, and the denominator $1 - \ChanceAnnotatorAgreement$ normalizes by the maximum agreement possible beyond chance, so $\InterAnnotatorAgreement = 0$ indicates chance-level agreement and $\InterAnnotatorAgreement = 1$ indicates complete agreement. Fleiss' kappa\index{Fleiss' kappa!inter-annotator agreement} generalizes the statistic from two raters to any number of annotators [@fleiss1971measuring]. Kappa summarizes agreement across a collection of rated examples rather than supplying a confidence score for an individual label, so routing items to expert review relies on per-example disagreement and failed gold-standard checks. Agreement is also not correctness, because annotators can agree on the same systematic error. Landis-Koch bands are therefore operational heuristics for interpreting aggregate agreement, not correctness guarantees [@landis1977measurement], and independent gold-standard checks and expert audits assess correctness.
 
@@ -3396,6 +3484,7 @@ class KWSAutomatedLabelingScale:
         label="sample",
     )
     label_hours_str = fmt_time(label_hours, unit=hour, precision=0, commas=True, style="word")
+    label_seconds_str = fmt_time(label_seconds_per_example, "second", precision=0, commas=False, style="word")
     label_years_str = fmt_count(label_years, precision=1, commas=False, label="person-year", plural_label="person-years", allow_fractional=True)
     languages_count_str = fmt_count(languages, label="language", commas=False)
     keywords_count_str = fmt_count(keywords, label="keyword", commas=True)
@@ -3405,7 +3494,7 @@ class KWSAutomatedLabelingScale:
 
 Keyword spotting sits at the automated end of that escalation. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond manual and crowdsourced workflows. MSWC, the reference corpus the acquisition strategy started from, shows how automated labeling\index{Keyword spotting!automated labeling} resolves this throughput bottleneck: it was built by programmatically extracting over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str` from continuous speech corpora.
 
-At even 10 seconds per label, manual annotation of that many examples would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort, which makes it impractical. The pipeline staged in @fig-mswc circumvents this manual annotation bottleneck, using forced alignment\index{Forced alignment!speech labeling}\index{Speech recognition!forced alignment} [@mcauliffe2017montreal] over paired sentence audio and transcriptions to estimate word boundaries before slicing individual one-second keyword windows for classifier training.
+At even `{python} KWSAutomatedLabelingScale.label_seconds_str` per label, manual annotation of that many examples would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort, which makes it impractical. The pipeline staged in @fig-mswc circumvents this manual annotation bottleneck, using forced alignment\index{Forced alignment!speech labeling}\index{Speech recognition!forced alignment} [@mcauliffe2017montreal] over paired sentence audio and transcriptions to estimate word boundaries before slicing individual one-second keyword windows for classifier training.
 
 ::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_count_str`. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available read-speech resources such as Common Voice. Source: [@mazumder2021tinyml]." fig-alt="Flowchart illustrating multilingual speech data preparation: raw audio and text transcripts undergo forced alignment and word segmentation to produce labeled one-second audio clips for model training."}
 
@@ -3604,7 +3693,43 @@ A single server with 256 GB of RAM can process datasets of several terabytes whe
 
 [^fn-parquet-columnar-io]: **Parquet**\index{Parquet!I/O reduction}: A columnar storage format that organizes data by column, not by row. Where a CSV reader must parse every row in full to reach a few columns, a Parquet reader loads only the columns a computation needs. The resulting I/O reduction depends on the selected columns, encoding, compression, and workload.
 
-Within a single machine, parallelizing data ingestion across host CPU workers yields diminishing throughput returns whenever unpartitionable stages, such as sequential decompression or central database lock acquisition, limit concurrency. Amdahl's law caps how much speeding up one part of a pipeline can improve the whole. Applied to host worker count, it means that even when 90 percent of a feature extraction pipeline parallelizes across workers, the speedup cannot exceed 10$\times$. The serial stages keep their full duration however many workers share the rest, so eliminating serial I/O and single-threaded stages takes precedence over launching more worker processes.
+```{python}
+#| echo: false
+#| label: loader-amdahl-cap
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL CAP ON HOST LOADER WORKERS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Single-machine processing paragraph (Amdahl's law applied to
+# │          host worker count).
+# │
+# │ Goal: Bound the speedup from adding host workers to a partly serial pipeline.
+# │ Show: A 90 percent parallel fraction caps the speedup at 10x.
+# │ How: Amdahl's law with an unbounded speedup on the parallel fraction.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.physics import calc_amdahls_speedup
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class LoaderAmdahlCap:
+    """Upper bound on loader speedup when part of the pipeline stays serial."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    parallel_fraction = 0.90  # scenario assumption: share of the pipeline that parallelizes
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    speedup_cap = calc_amdahls_speedup(parallel_fraction, math.inf)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(speedup_cap - 10) < 1e-9, f"Expected a 10x Amdahl cap, got {speedup_cap:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    parallel_fraction_pct_str = fmt_percent(parallel_fraction, precision=0, commas=False, style="prose")
+    speedup_cap_mult_str = fmt_multiple(round(speedup_cap), precision=0, commas=False)
+```
+
+Within a single machine, parallelizing data ingestion across host CPU workers yields diminishing throughput returns whenever unpartitionable stages, such as sequential decompression or central database lock acquisition, limit concurrency. Amdahl's law caps how much speeding up one part of a pipeline can improve the whole. Applied to host worker count, it means that even when `{python} LoaderAmdahlCap.parallel_fraction_pct_str` of a feature extraction pipeline parallelizes across workers, the speedup cannot exceed `{python} LoaderAmdahlCap.speedup_cap_mult_str`. The serial stages keep their full duration however many workers share the rest, so eliminating serial I/O and single-threaded stages takes precedence over launching more worker processes.
 
 ::: {.column-margin .margin-pointer}
 ↪ Amdahl's law, the ceiling that untouched work places on any speedup, is developed in @sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28.
@@ -3815,6 +3940,7 @@ class DataGravity:
     move = Scenarios.PetabyteCrossRegionMove
     dataset = move.payload
     network_bw = move.links["100 Gb/s"]
+    slow_link_bw = move.links["10 Gb/s"]
     egress_rate = move.egress_rate.to(USD / GB)  # AWS inter-region transfer rate (scenario assumption)
     tpu_rate = move.compute_price
 
@@ -3847,10 +3973,11 @@ class DataGravity:
     dataset_gb_str = fmt_memory(dataset, unit=GB, precision=0, commas=True)
     dataset_pb_str = fmt_memory(dataset, unit=PB, precision=0, commas=False)
     network_gbit_per_s_str = fmt_bandwidth(network_bw, unit=Gbps, precision=0, commas=False)
+    slow_link_gbit_per_s_str = fmt_bandwidth(slow_link_bw, unit=Gbps, precision=0, commas=False)
     egress_cost_per_gb_str = fmt_usd(egress_rate, precision=2, commas=False, per="GB")
 ```
 
-Transferring a petabyte dataset across a 10 Gbps link requires days of continuous transmission (`{python} DataGravity.transfer_time_10g_math`), and even across a dedicated 100 Gbps link, transfer latency and egress tariffs remain substantial enough to govern system design. That physical and economic cost is what the data-gravity principle (\ref{pri-data-gravity}) names: data gravity\index{Data gravity!physics} scales directly with data volume $(\DataVolume)$ and inversely with network bandwidth $(\Bandwidth)$. Because migrating `{python} DataGravity.dataset_pb_str` across network boundaries is both slow and expensive, system designers colocate compute with the storage substrate rather than moving large datasets across remote networks. This physical constraint underlies lakehouse storage architectures[^fn-lakehouse-data-gravity] [@zaharia2021lakehouse], where query and preprocessing engines execute directly against shared object storage rather than repeatedly copying raw data across network fabrics.
+Transferring a petabyte dataset across a `{python} DataGravity.slow_link_gbit_per_s_str` link requires days of continuous transmission (`{python} DataGravity.transfer_time_10g_math`), and even across a dedicated `{python} DataGravity.network_gbit_per_s_str` link, transfer latency and egress tariffs remain substantial enough to govern system design. That physical and economic cost is what the data-gravity principle (\ref{pri-data-gravity}) names: data gravity\index{Data gravity!physics} scales directly with data volume $(\DataVolume)$ and inversely with network bandwidth $(\Bandwidth)$. Because migrating `{python} DataGravity.dataset_pb_str` across network boundaries is both slow and expensive, system designers colocate compute with the storage substrate rather than moving large datasets across remote networks. This physical constraint underlies lakehouse storage architectures[^fn-lakehouse-data-gravity] [@zaharia2021lakehouse], where query and preprocessing engines execute directly against shared object storage rather than repeatedly copying raw data across network fabrics.
 
 ::: {.column-margin .margin-pointer}
 ↩ The data-gravity principle, which weighs shipping a dataset against shipping the computation to it, is established in @sec-ml-systems-cloud-infrastructure-scale-f0b1.
@@ -4096,7 +4223,42 @@ Data lakes\index{Data lake!unstructured storage}\index{Data lake!schema flexibil
 
 : **Storage System Characteristics**: Each storage architecture favors a different access pattern and ML workflow stage. Databases support the high-IOPS random access needed for real-time feature serving; data warehouses provide sequential throughput for batch training and feature engineering; and data lakes provide schema flexibility and cost efficiency for large-scale raw data retention. A poor match between system and workload can impose substantial performance penalties. {#tbl-storage tbl-colwidths="[16,28,30,26]"}
 
-Each lifecycle stage also reads the same data in its own way:\index{Machine learning lifecycle!storage requirements} exploratory analysis samples it at random, training streams it sequentially at high throughput, and production serving issues low-latency point lookups. During initial development, iteration velocity and schema flexibility dominate raw throughput. The primary systems challenge is managing experiment revisions without exploding storage capacity: ten exploratory runs on a 100 GB dataset naively generate 1 TB of redundant copies. The metadata-pointer approach of @sec-data-engineering-data-versioning-ml-reproducibility-16d0 avoids this by decoupling version tracking from file storage. Governance policies reinforce this tiering by granting broad access to anonymized development datasets while restricting sensitive production data to encrypted, auditable access tiers.
+```{python}
+#| echo: false
+#| label: exploratory-copy-storage
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXPLORATORY-RUN COPY STORAGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Lifecycle storage paragraph (development-stage revisions).
+# │
+# │ Goal: Show how naive per-run copies inflate development storage.
+# │ Show: Ten runs on a 100 GB dataset produce 1 TB of copies.
+# │ How: Multiply the dataset size by the number of exploratory runs.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ExploratoryCopyStorage:
+    """Storage consumed when every exploratory run copies the dataset."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset_size = 100 * GB  # scenario assumption
+    runs = 10  # "ten exploratory runs" in prose (scenario assumption)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    copies_size = dataset_size * runs
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(runs == 10, "Prose spells out ten exploratory runs.")
+    check(abs(copies_size.to(TB).magnitude - 1) < 1e-9, f"Expected 1 TB of copies, got {copies_size.to(TB)}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_size_gb_str = fmt_memory(dataset_size, unit=GB, precision=0, commas=False)
+    copies_size_tb_str = fmt_memory(copies_size, unit=TB, precision=0, commas=False)
+```
+
+Each lifecycle stage also reads the same data in its own way:\index{Machine learning lifecycle!storage requirements} exploratory analysis samples it at random, training streams it sequentially at high throughput, and production serving issues low-latency point lookups. During initial development, iteration velocity and schema flexibility dominate raw throughput. The primary systems challenge is managing experiment revisions without exploding storage capacity: ten exploratory runs on a `{python} ExploratoryCopyStorage.dataset_size_gb_str` dataset naively generate `{python} ExploratoryCopyStorage.copies_size_tb_str` of redundant copies. The metadata-pointer approach of @sec-data-engineering-data-versioning-ml-reproducibility-16d0 avoids this by decoupling version tracking from file storage. Governance policies reinforce this tiering by granting broad access to anonymized development datasets while restricting sensitive production data to encrypted, auditable access tiers.
 
 ```{python}
 #| echo: false
@@ -4444,7 +4606,42 @@ Beyond input datasets, storage must hold what training produces: model parameter
 ↪ Quantization, which shrinks these weight footprints by storing parameters at lower precision, is developed in @sec-model-compression-quantization-precision-cd46.
 :::
 
-Tracking these artifacts introduces versioning challenges\index{Model versioning!requirements}. Git's incremental text diffs fail on multi-gigabyte binaries, where a single weight update produces an entirely new file and ten historical checkpoints of a 10 GB model occupy 100 GB. Production workflows therefore keep lightweight content hashes in Git and the binaries in content-addressed object storage, the same decoupling that @sec-data-engineering-data-versioning-ml-reproducibility-16d0 applies to datasets.
+```{python}
+#| echo: false
+#| label: checkpoint-history-storage
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT HISTORY STORAGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Model-versioning paragraph (why Git cannot hold weight binaries).
+# │
+# │ Goal: Show how full-file checkpoint history grows linearly with versions.
+# │ Show: Ten checkpoints of a 10 GB model occupy 100 GB.
+# │ How: Multiply the checkpoint size by the number of retained checkpoints.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CheckpointHistoryStorage:
+    """Storage for retained full checkpoints of one model."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    checkpoint_size = 10 * GB  # scenario assumption
+    checkpoints = 10  # "ten historical checkpoints" in prose (scenario assumption)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    history_size = checkpoint_size * checkpoints
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(checkpoints == 10, "Prose spells out ten historical checkpoints.")
+    check(abs(history_size.to(GB).magnitude - 100) < 1e-9, f"Expected 100 GB of checkpoints, got {history_size.to(GB)}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    checkpoint_size_gb_str = fmt_memory(checkpoint_size, unit=GB, precision=0, commas=False)
+    history_size_gb_str = fmt_memory(history_size, unit=GB, precision=0, commas=False)
+```
+
+Tracking these artifacts introduces versioning challenges\index{Model versioning!requirements}. Git's incremental text diffs fail on multi-gigabyte binaries, where a single weight update produces an entirely new file and ten historical checkpoints of a `{python} CheckpointHistoryStorage.checkpoint_size_gb_str` model occupy `{python} CheckpointHistoryStorage.history_size_gb_str`. Production workflows therefore keep lightweight content hashes in Git and the binaries in content-addressed object storage, the same decoupling that @sec-data-engineering-data-versioning-ml-reproducibility-16d0 applies to datasets.
 
 Multi-accelerator training compounds storage pressure through concurrent I/O. When a training job spans multiple accelerators, every rank reads training batches concurrently, and the job periodically writes checkpoints of model and optimizer state, often from a single rank, in bursts that compete with those reads. Storage must absorb reads that scale with the worker count and checkpoint bursts on top of them, preventing I/O serialization that leaves expensive accelerators idle.
 
@@ -4878,19 +5075,25 @@ class ListeningHours:
     hours_needed = evidence.exposure_needed.to(hour).magnitude
     months_needed = evidence.horizons_needed
     audio_bytes = evidence.recording_size.to(byte).magnitude
+    zero_event_probability = math.exp(-round(events_bound))  # P(0 events) when the true count is three
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.9 < events_bound < 3.1, f"Zero-event 95% bound should be about 3 events, got {events_bound:.2f}.")
+    check(abs(zero_event_probability - 0.05) < 0.001, f"Prose says e^-3 is about 5 percent, got {zero_event_probability:.4f}.")
+    check(hours_per_month == 720, f"Prose says a 720-hour month, got {hours_per_month}.")
+    check(2.9 < months_needed < 3.1, f"Prose says three full months of listening, got {months_needed:.2f}.")
     check(2000 < hours_needed < 2300, f"Expected about 2,160 listening hours, got {hours_needed:.0f}.")
     check(200e9 < audio_bytes < 300e9, f"Expected about 250 GB of audio, got {audio_bytes / 1e9:.0f} GB.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     confidence_pct_str = fmt_percent(confidence, precision=0, commas=False, style='prose')
+    zero_event_pct_str = fmt_percent(round(zero_event_probability * 100) / 100, precision=0, commas=False, style='prose')
+    hours_per_month_str = fmt(hours_per_month, precision=0, commas=False)
     hours_needed_str = fmt_time(round(hours_needed, -1), 'hour', precision=0, commas=True, style="word")
     audio_gb_str = fmt_memory(round(audio_bytes / 1e9) * GB, unit=GB, precision=0, commas=False)
 ```
 
-The false-wake target is a data requirement in its own right. Under a Poisson arrival model, if the true rate were three false wakes across the test window, the probability of observing zero false wakes by chance would be $e^{-3}$, or about 5 percent. When no false wake is observed, the upper `{python} ListeningHours.confidence_pct_str` confidence bound on the true rate is therefore about three events divided by the hours listened, known as the zero-event rule of three [@hanley1983nothing]. Keeping that upper bound at or below one false wake per 720-hour month requires listening for three full months with zero false wakes, which takes about `{python} ListeningHours.hours_needed_str` of representative non-keyword audio, or about `{python} ListeningHours.audio_gb_str` of recordings at 16 kHz. That requirement is as concrete as the label count. The allocation in Notebook \ref{nbk-data-engineering-optimizing-kws-design-space} never costed it, so the team must add an evaluation-collection line, because no amount of training data can stand in for these hours.
+The false-wake target is a data requirement in its own right. Under a Poisson arrival model, if the true rate were three false wakes across the test window, the probability of observing zero false wakes by chance would be $e^{-3}$, or about `{python} ListeningHours.zero_event_pct_str`. When no false wake is observed, the upper `{python} ListeningHours.confidence_pct_str` confidence bound on the true rate is therefore about three events divided by the hours listened, known as the zero-event rule of three [@hanley1983nothing]. Keeping that upper bound at or below one false wake per `{python} ListeningHours.hours_per_month_str`-hour month requires listening for three full months with zero false wakes, which takes about `{python} ListeningHours.hours_needed_str` of representative non-keyword audio, or about `{python} ListeningHours.audio_gb_str` of recordings at 16 kHz. That requirement is as concrete as the label count. The allocation in Notebook \ref{nbk-data-engineering-optimizing-kws-design-space} never costed it, so the team must add an evaluation-collection line, because no amount of training data can stand in for these hours.
 
 To test the choice of 13 rather than 40 MFCC coefficients, both candidates use the same versioned speaker-separated data splits, label budget, and recorded training procedure. Each candidate packages its own fitted preprocessing state with its model. Validation data selects the detection threshold; a separate, untouched evaluation set then measures keyword recognition and false rejection, while representative nonkeyword streams measure false accepts per hour through the deployed detection path. The team fixes the required statistical confidence and listening duration before evaluation and accepts the false-wake claim only when the upper uncertainty bound, expressed over the same listening duration as the target, meets that target. Insufficient listening time leaves the claim unestablished even if no false wake occurs. Replaying fixed audio through the training and device preprocessing paths checks feature parity, and measurements on the target device establish peak memory, latency, and power.
 
@@ -5414,6 +5617,7 @@ class StorageLoadingRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     tiers = Scenarios.MswcCorpusStorageTiers
     nvme_bw = tiers.read_bandwidths["NVMe"]
+    obj_bw = tiers.read_bandwidths["object store"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nvme_load = tiers.load_time("NVMe")
@@ -5426,6 +5630,7 @@ class StorageLoadingRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     load_speedup_mult_str = fmt_multiple(round(load_speedup), precision=0, commas=False)
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
+    obj_bw_mb_per_s_str = fmt_bandwidth(obj_bw, unit=MB / second, precision=0, commas=False)
 ```
 
 ::: {.callout-takeaways title="Data is the source code"}
@@ -5435,7 +5640,7 @@ class StorageLoadingRecap:
 * **Pipeline architecture choices have large cost implications**: The chapter's provisioning scenario costs streaming above batch, while its matched-retention example trades ETL storage savings against schema-change overhead. Actual costs depend on provisioning, retention, replay, and required freshness. Select ingestion patterns by the value of latency, not the appeal of real time.
 * **Labeling can dominate cost and requires substantial resource allocation**: Labeling can cost thousands of times one optimized training run; in the reference calculation in @sec-data-engineering-labeling-economics-3e91, the ratio is `{python} DataEngineeringSummaryRecap.ratio_low_mult_str` to `{python} DataEngineeringSummaryRecap.ratio_high_mult_str`. Labeling can remain a costly scheduling bottleneck even when annotation work is parallelized.
 * **Training-serving consistency is nonnegotiable**: Feature transformations shared by training and serving must have equivalent semantics and reuse the same learned state, such as normalization constants and vocabulary mappings.
-* **Storage hierarchy sets input-loading time**: The `{python} StorageLoadingRecap.load_speedup_mult_str` throughput gap between local NVMe (`{python} StorageLoadingRecap.nvme_bw_gb_per_s_str`) and one cloud object-storage connection (100 MB/s) changes input-loading time under the stated bandwidth assumptions. Total iteration time also includes transformation and model execution, so the loading ratio is not an end-to-end speedup.
+* **Storage hierarchy sets input-loading time**: The `{python} StorageLoadingRecap.load_speedup_mult_str` throughput gap between local NVMe (`{python} StorageLoadingRecap.nvme_bw_gb_per_s_str`) and one cloud object-storage connection (`{python} StorageLoadingRecap.obj_bw_mb_per_s_str`) changes input-loading time under the stated bandwidth assumptions. Total iteration time also includes transformation and model execution, so the loading ratio is not an end-to-end speedup.
 * **The degradation equation becomes actionable through drift and outcome monitoring**: Divergence metrics such as KL measure changes between $\CurrentDistribution$ and $\TrainingDistribution$, while labeled outcomes or validated proxies determine whether those changes correspond to model degradation.
 
 :::
