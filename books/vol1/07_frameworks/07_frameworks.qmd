@@ -505,7 +505,42 @@ This bottleneck stems from the memory wall\index{Memory wall!execution strategy 
 ↩ The memory wall and the growth-rate ratio behind it are established in @sec-ml-systems-deployment-spectrum-71be.
 :::
 
-Kernel fusion\index{Kernel fusion!definition}\index{Kernel fusion!optimizing memory-bound ops} (also called operator fusion) fixes memory-bound chains by combining them into a single kernel that avoids intermediate HBM traffic. Instead of three round-trips to HBM, a fused kernel loads inputs from HBM once, evaluates normalization, dropout, and ReLU entirely within on-chip registers and SRAM, and writes only the final output tensor back to HBM, cutting memory traffic by roughly 3$\times$. In general, for $\TensorElementCount$ elements of $\ElementStorageSize$ bytes each, fusing a chain of $\ChainedOperationCount$ elementwise operations into one kernel reduces idealized read-and-write traffic from $2\ChainedOperationCount \TensorElementCount\ElementStorageSize$ to $2\TensorElementCount\ElementStorageSize$ bytes, a derivation worked in @sec-appdx-algorithm-foundations-operator-fusion-5d73. Fusion also removes all but one of the chain's kernel launches.
+```{python}
+#| echo: false
+#| label: fused-chain-traffic
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FUSED ELEMENTWISE CHAIN: TRAFFIC REDUCTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8,
+# │          kernel-fusion paragraph immediately below.
+# │
+# │ Goal:    Derive the traffic cut from fusing the LayerNorm, Dropout, ReLU chain.
+# │ Show:    The roughly 3x idealized memory-traffic reduction.
+# │ How:     The KernelFusionScenario traffic rule (2kNb unfused vs. 2Nb fused)
+# │          applied to the three-operation chain named in the prose.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt_multiple
+
+class FusedChainTraffic:
+    """Idealized HBM traffic ratio for a three-operation fused elementwise chain."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    chain_ops = 3  # scenario assumption: LayerNorm -> Dropout -> ReLU ("three" in prose)
+    chain = Scenarios.ElementwisePairFusion.model_copy(update={"chain_length": chain_ops})
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    traffic_ratio = chain.traffic_ratio
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(chain.unfused_launches == 3, "Prose says three separate kernels and three round-trips.")
+    check(abs(traffic_ratio - 3) < 1e-9, f"Prose says roughly 3x less traffic, got {traffic_ratio}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    traffic_ratio_mult_str = fmt_multiple(traffic_ratio, precision=0, commas=False)
+```
+
+Kernel fusion\index{Kernel fusion!definition}\index{Kernel fusion!optimizing memory-bound ops} (also called operator fusion) fixes memory-bound chains by combining them into a single kernel that avoids intermediate HBM traffic. Instead of three round-trips to HBM, a fused kernel loads inputs from HBM once, evaluates normalization, dropout, and ReLU entirely within on-chip registers and SRAM, and writes only the final output tensor back to HBM, cutting memory traffic by roughly `{python} FusedChainTraffic.traffic_ratio_mult_str`. In general, for $\TensorElementCount$ elements of $\ElementStorageSize$ bytes each, fusing a chain of $\ChainedOperationCount$ elementwise operations into one kernel reduces idealized read-and-write traffic from $2\ChainedOperationCount \TensorElementCount\ElementStorageSize$ to $2\TensorElementCount\ElementStorageSize$ bytes, a derivation worked in @sec-appdx-algorithm-foundations-operator-fusion-5d73. Fusion also removes all but one of the chain's kernel launches.
 
 Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale. Instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM accesses by up to 9$\times$, and produce workload-specific speedups from 15 percent to 3$\times$ [@dao2022].
 
@@ -1671,6 +1706,7 @@ from mlsysim import Scenarios
 from mlsysim.fmt import (
     check,
     fmt_count,
+    fmt_count_range,
     fmt_multiple,
     fmt_multiple_range,
     fmt_percent,
@@ -1725,6 +1761,24 @@ class CompilationBenchmark:
     prototype_compiles_per_hour_str = fmt_count(prototype_compiles_per_hour, precision=0, commas=False)
     prototype_lost_min_str = fmt_time(prototype_lost_min, 'minute', precision=0, commas=False)
     resnet_breakeven_images_str = fmt_count(resnet_breakeven_images_rounded, commas=True, label="image")
+
+    # Table rows of @tbl-training-benchmark (the inputs behind the caption's ranges).
+    tbl_resnet_eager_str = fmt_count(resnet["eager"], precision=0, commas=True)
+    tbl_resnet_compile_str = fmt_count(resnet["compile"], precision=0, commas=True)
+    tbl_resnet_trt_str = fmt_count(resnet["tensorrt"], precision=0, commas=True)
+    tbl_resnet_setup_str = fmt_count_range(resnet["compile_min_s"], resnet["compile_max_s"], precision=0)
+    tbl_bert_eager_str = fmt_count(throughput["BERT-Base"]["eager"], precision=0, commas=True)
+    tbl_bert_compile_str = fmt_count(throughput["BERT-Base"]["compile"], precision=0, commas=True)
+    tbl_bert_trt_str = fmt_count(throughput["BERT-Base"]["tensorrt"], precision=0, commas=True)
+    tbl_bert_setup_str = fmt_count_range(throughput["BERT-Base"]["compile_min_s"], throughput["BERT-Base"]["compile_max_s"], precision=0)
+    tbl_vit_eager_str = fmt_count(throughput["ViT-B/16"]["eager"], precision=0, commas=True)
+    tbl_vit_compile_str = fmt_count(throughput["ViT-B/16"]["compile"], precision=0, commas=True)
+    tbl_vit_trt_str = fmt_count(throughput["ViT-B/16"]["tensorrt"], precision=0, commas=True)
+    tbl_vit_setup_str = fmt_count_range(throughput["ViT-B/16"]["compile_min_s"], throughput["ViT-B/16"]["compile_max_s"], precision=0)
+    tbl_gpt2_eager_str = fmt_count(throughput["GPT-2 (124M)"]["eager"], precision=0, commas=True)
+    tbl_gpt2_compile_str = fmt_count(throughput["GPT-2 (124M)"]["compile"], precision=0, commas=True)
+    tbl_gpt2_trt_str = fmt_count(throughput["GPT-2 (124M)"]["tensorrt"], precision=0, commas=True)
+    tbl_gpt2_setup_str = fmt_count_range(throughput["GPT-2 (124M)"]["compile_min_s"], throughput["GPT-2 (124M)"]["compile_max_s"], precision=0)
 ```
 
 @Tbl-training-benchmark applies that decision rule to hypothetical throughputs and compilation times across execution modes and model architectures:
@@ -1734,12 +1788,12 @@ class CompilationBenchmark:
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Model**        | **Eager** **(examples/sec)** | **torch.compile** **(examples/sec)** | **TensorRT** **(examples/sec)** | **JIT Setup** **(seconds)** |
-|:-----------------|:----------------------------:|:------------------------------------:|:-------------------------------:|:---------------------------:|
-| **ResNet-50**    |            1,450             |                2,150                 |              3,800              |            15--30           |
-| **BERT-Base**    |             380              |                 520                  |               890               |            30--60           |
-| **ViT-B/16**     |             620              |                 950                  |              1,650              |            25--45           |
-| **GPT-2 (124M)** |             180              |                 260                  |               420               |            45--90           |
+| **Model**        |             **Eager** **(examples/sec)**             |          **torch.compile** **(examples/sec)**          |          **TensorRT** **(examples/sec)**           |             **JIT Setup** **(seconds)**              |
+|:-----------------|:----------------------------------------------------:|:------------------------------------------------------:|:--------------------------------------------------:|:----------------------------------------------------:|
+| **ResNet-50**    | `{python} CompilationBenchmark.tbl_resnet_eager_str` | `{python} CompilationBenchmark.tbl_resnet_compile_str` | `{python} CompilationBenchmark.tbl_resnet_trt_str` | `{python} CompilationBenchmark.tbl_resnet_setup_str` |
+| **BERT-Base**    |  `{python} CompilationBenchmark.tbl_bert_eager_str`  |  `{python} CompilationBenchmark.tbl_bert_compile_str`  |  `{python} CompilationBenchmark.tbl_bert_trt_str`  |  `{python} CompilationBenchmark.tbl_bert_setup_str`  |
+| **ViT-B/16**     |  `{python} CompilationBenchmark.tbl_vit_eager_str`   |  `{python} CompilationBenchmark.tbl_vit_compile_str`   |  `{python} CompilationBenchmark.tbl_vit_trt_str`   |  `{python} CompilationBenchmark.tbl_vit_setup_str`   |
+| **GPT-2 (124M)** |  `{python} CompilationBenchmark.tbl_gpt2_eager_str`  |  `{python} CompilationBenchmark.tbl_gpt2_compile_str`  |  `{python} CompilationBenchmark.tbl_gpt2_trt_str`  |  `{python} CompilationBenchmark.tbl_gpt2_setup_str`  |
 
 : **Illustrative Inference Throughput**: The values are hypothetical inference throughputs on a data-center accelerator at batch size 32, assuming matching input shapes, precision, and numerical requirements across each row; they are assumptions, not benchmark measurements. Within this scenario, the table implies torch.compile speedups of `{python} CompilationBenchmark.torch_compile_speedup_range_mult_str` over eager mode and TensorRT (NVIDIA's ahead-of-time inference compiler, @sec-model-serving-inference-runtime-selection-5eef) speedups of `{python} CompilationBenchmark.tensorrt_speedup_range_mult_str`. The setup column applies to torch.compile; TensorRT build costs require a separate measurement. {#tbl-training-benchmark tbl-colwidths="[20,20,20,20,20]"}
 
@@ -2268,9 +2322,45 @@ For the concrete function in @lst-auto_diff_intro evaluated at $\FunctionInputVa
 
 This single backward traversal computes $\partial \WorkedTraceProduct/\partial \FunctionInputVariable$ regardless of how many fan-out paths connect $\FunctionInputVariable$ to $\WorkedTraceProduct$. In a deep neural network, every weight tensor influences the scalar loss through thousands of divergent paths across successive layers; reverse mode aggregates all incoming adjoints in one reverse sweep. That one sweep, rather than one pass per parameter, is what keeps training a `{python} GPT3ReverseModeParams.gpt3_params_b_str`-parameter model such as GPT-3 computationally tractable.
 
+```{python}
+#| echo: false
+#| label: gradient-accumulation-peak
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRADIENT ACCUMULATION: ACTIVATION-PEAK REDUCTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Footnote fn-gradient-accumulation-batch, cited by the paragraph
+# │          immediately below.
+# │
+# │ Goal:    Derive the activation-peak cut from splitting a logical batch.
+# │ Show:    4,096 samples in 64-sample micro-batches, up to a 64x reduction.
+# │ How:     Logical batch / micro-batch, assuming activations scale linearly
+# │          with batch size (as the footnote states).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_multiple
+
+class GradientAccumulationPeak:
+    """Upper bound on the batch-dependent activation-peak cut from gradient accumulation."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    logical_batch = 4096  # scenario assumption: samples per optimizer update
+    micro_batch = 64  # scenario assumption: samples per micro-batch
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    peak_reduction = logical_batch / micro_batch
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(logical_batch % micro_batch == 0, "Micro-batches must tile the logical batch.")
+    check(peak_reduction == 64, f"Footnote says up to 64x, got {peak_reduction}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    logical_batch_str = fmt_count(logical_batch, precision=0, commas=True)
+    micro_batch_str = fmt_count(micro_batch, precision=0, commas=False)
+    peak_reduction_mult_str = fmt_multiple(peak_reduction, precision=0, commas=False)
+```
+
 Executing this traversal in hardware exposes a physical constraint: evaluating local derivatives during the backward pass requires the operating point established during forward execution. The framework must therefore determine which forward tensors to persist in device memory, when to allocate them, and when to free them. The recorded graph answers the "when to free" question, because each saved tensor can be released as soon as the last backward rule that reads it has run. The peak itself is bounded separately, by splitting a large batch into micro-batches whose saved activations are freed before the next one starts while their gradients sum into the same buffers (gradient accumulation).[^fn-gradient-accumulation-batch]
 
-[^fn-gradient-accumulation-batch]: **Gradient accumulation**\index{Gradient accumulation!memory trade-off}: The framework processes a large logical batch as smaller micro-batches, freeing each micro-batch's saved activations after backward while accumulating parameter-sized gradients. Processing 4,096 samples in 64-sample micro-batches can reduce the batch-dependent activation peak by up to 64$\times$ when activation memory scales linearly with batch size; weights, gradients, optimizer state, and other fixed costs do not shrink. The trade-off is more sequential work before each optimizer update.
+[^fn-gradient-accumulation-batch]: **Gradient accumulation**\index{Gradient accumulation!memory trade-off}: The framework processes a large logical batch as smaller micro-batches, freeing each micro-batch's saved activations after backward while accumulating parameter-sized gradients. Processing `{python} GradientAccumulationPeak.logical_batch_str` samples in `{python} GradientAccumulationPeak.micro_batch_str`-sample micro-batches can reduce the batch-dependent activation peak by up to `{python} GradientAccumulationPeak.peak_reduction_mult_str` when activation memory scales linearly with batch size; weights, gradients, optimizer state, and other fixed costs do not shrink. The trade-off is more sequential work before each optimizer update.
 
 A two-layer network makes these requirements concrete (@lst-reverse_simple_nn). Tracing both passes explicitly shows which forward activations must survive until the reverse sweep consumes them.
 
@@ -2555,6 +2645,7 @@ class ResNetMemory:
     resnet_training_min_gb_str = fmt_memory(training_min, unit=GB, precision=1, commas=False)
     resnet_training_max_gb_str = fmt_memory(training_max, unit=GB, precision=1, commas=False)
     resnet_training_ratio_range_mult_str = fmt_multiple_range(training_ratio_min, training_ratio_max, precision=1, commas=False)
+    resnet_batch_str = fmt_count(low.batch_size, precision=0, commas=False)
 ```
 
 ::: {.column-margin}
@@ -2563,7 +2654,7 @@ class ResNetMemory:
 *The training memory sum dwarfs FP32 weight storage alone.*
 :::
 
-Consider an illustrative ResNet-50\index{ResNet-50!training memory footprint} training scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size 64, and $224{\times}224$ images. With `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations, gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and two Adaptive Moment Estimation (Adam) FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. Summing those four components gives an `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario, roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. This is a capacity-planning sum; actual peak memory depends on which components are live together. Inference requires no optimizer states, gradients, or saved backward buffers, but still has live activations and runtime workspace.
+Consider an illustrative ResNet-50\index{ResNet-50!training memory footprint} training scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size `{python} ResNetMemory.resnet_batch_str`, and $224{\times}224$ images. With `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations, gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and two Adaptive Moment Estimation (Adam) FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. Summing those four components gives an `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario, roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. This is a capacity-planning sum; actual peak memory depends on which components are live together. Inference requires no optimizer states, gradients, or saved backward buffers, but still has live activations and runtime workspace.
 
 Parameter count alone therefore does not tell an engineer whether training fits. Total training memory obeys the four-component formulation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$) plus allocator overhead, as stated in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
 
@@ -3045,6 +3136,7 @@ class DeviceBandwidthHierarchy:
     nvlink_tensor_us_str = fmt_time(nvlink_tensor, microsecond, precision=1, commas=False)  # 8.9 μs
     hbm_tensor_us_str = fmt_time(hbm_tensor, microsecond, precision=1, commas=False)  # 1.2 μs
     pcie_1gb_ms_str = fmt_time(pcie_1gb, millisecond, precision=1, commas=False)  # 15.6 ms
+    transfer_1gb_str = fmt_memory(transfer_bytes_1gb, unit=GB, precision=0, commas=False)  # 1 GB
     pcie_to_hbm_gap_mult_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)  # 52.3×
     nvlink_to_pcie_mult_str = fmt_multiple(nvlink_to_pcie_bidir, precision=1, commas=False)  # 7.0×
 ```
@@ -3081,7 +3173,7 @@ Three principles govern device and memory management: respect the bandwidth hier
 
 : **Device Transfer Overhead**: A `{python} DeviceBandwidthHierarchy.tensor_mb_str` tensor takes far longer to cross a host link than to move within device memory. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth; the NVLink row lists both its per-direction and bidirectional rates. These transfer costs can dominate lightweight operations, making device placement critical. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
 
-These numbers connect directly to the iron law of ML systems. Every cross-device transfer contributes to $(\DataVolume/\Bandwidth)$ at a fraction of on-device bandwidth. Dividing 1 GB by the stated `{python} DeviceBandwidthHierarchy.pcie_name_str` peak gives `{python} DeviceBandwidthHierarchy.pcie_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
+These numbers connect directly to the iron law of ML systems. Every cross-device transfer contributes to $(\DataVolume/\Bandwidth)$ at a fraction of on-device bandwidth. Dividing `{python} DeviceBandwidthHierarchy.transfer_1gb_str` by the stated `{python} DeviceBandwidthHierarchy.pcie_name_str` peak gives `{python} DeviceBandwidthHierarchy.pcie_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
 
 Device placement discipline protects the bandwidth hierarchy from accidental PCIe traffic. Every tensor carries a device attribute, and frameworks enforce a strict invariant: operations can only combine tensors on the same device, raising a `RuntimeError` when `cuda:0` and `cuda:1` tensors mix so that cross-device transfers remain explicit. Calling `.to()` on a tensor returns the original tensor when its data type and device already match the request (unless `copy=True` forces a copy) and otherwise returns a converted copy; in contrast, `nn.Module.to()` modifies registered parameters and buffers in place and returns the module.
 
@@ -3624,7 +3716,7 @@ Hierarchical composition mirrors the hardware memory hierarchy in a systems-rele
 # │ Goal: 7-billion-parameter FP16 checkpoint size for state_dict prose below.
 from mlsysim.physics import model_memory
 from mlsysim import Models, BYTES_FP16, GB
-from mlsysim.fmt import check, fmt_memory
+from mlsysim.fmt import check, fmt_count, fmt_memory
 
 class Module7bCheckpointSize:
     """7-billion-parameter FP16 checkpoint size for state_dict serialization prose."""
@@ -3640,9 +3732,10 @@ class Module7bCheckpointSize:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_memory(model_7b_fp16, unit=GB, precision=0, commas=False)
+    model_7b_params_str = fmt_count(model_7b_params.magnitude, scale="B", precision=0, scale_style="word")  # 7 billion
 ```
 
-The `state_dict()` method produces an ordered mapping whose dotted keys (for example, `blocks.0.conv1.weight`) encode locations in the module hierarchy. A checkpoint for 7 billion FP16 parameters contains approximately `{python} Module7bCheckpointSize.model_7b_fp16_gb_str` of weight payload before metadata or additional state, but the file format and storage path determine how those bytes are serialized. Resuming training needs more than the model's state: optimizers expose their moment buffers and step counts through their own `state_dict()`, and a training checkpoint saves both so that the run continues with the same optimizer state. `load_state_dict()` copies matching parameter and buffer values into an already-constructed module and reports missing or unexpected keys according to its strictness setting; it does not reconstruct the module hierarchy. Cross-framework exchange requires a compatible graph and operator representation in addition to weights.
+The `state_dict()` method produces an ordered mapping whose dotted keys (for example, `blocks.0.conv1.weight`) encode locations in the module hierarchy. A checkpoint for `{python} Module7bCheckpointSize.model_7b_params_str` FP16 parameters contains approximately `{python} Module7bCheckpointSize.model_7b_fp16_gb_str` of weight payload before metadata or additional state, but the file format and storage path determine how those bytes are serialized. Resuming training needs more than the model's state: optimizers expose their moment buffers and step counts through their own `state_dict()`, and a training checkpoint saves both so that the run continues with the same optimizer state. `load_state_dict()` copies matching parameter and buffer values into an already-constructed module and reports missing or unexpected keys according to its strictness setting; it does not reconstruct the module hierarchy. Cross-framework exchange requires a compatible graph and operator representation in addition to weights.
 
 The hierarchical structure also enables module-level traversal for systematic operations. Methods such as `.named_modules()` iterate the entire tree, supporting bulk transformations such as replacing all BatchNorm layers with GroupNorm or applying Xavier initialization to every Linear layer. These traversal operations depend on the same tree structure that enables parameter discovery, illustrating how a single design decision propagates benefits across multiple use cases.
 
@@ -3941,11 +4034,12 @@ class TrainingStepCalc:
     train_pointwise_bwd_mem_kb_str = fmt_memory(pointwise_bwd_mem, unit=KB, precision=1, commas=False)
     train_pointwise_bwd_ai_str = fmt_arithmetic_intensity(pointwise_bwd_flops / pointwise_bwd_mem, unit=flop / byte, precision=3, commas=False)
     train_dense_ratio_mult_str = fmt_multiple(dense_training_ratio, precision=3, commas=False)
+    train_value_bytes_str = fmt_count(TrainingStepDims.step.bytes_per_value.to(byte).magnitude, precision=0, commas=False, label="byte")  # 4 bytes
 ```
 
-The traffic model assumes FP32 values occupying 4 bytes each. For `x @ W1`, it counts one read of the input matrix with shape `(32, 784)`, one read of the weight matrix with shape `(784, 128)`, and one write of the result with shape `(32, 128)`. Multiplying each shape's dimensions, summing the three element counts, and multiplying by the element width gives the table's `{python} TrainingStepCalc.train_mm1_mem_mb_str`. The second matrix multiplication uses the same operand rule with its own shapes.
+The traffic model assumes FP32 values occupying `{python} TrainingStepCalc.train_value_bytes_str` each. For `x @ W1`, it counts one read of the input matrix with shape `(32, 784)`, one read of the weight matrix with shape `(784, 128)`, and one write of the result with shape `(32, 128)`. Multiplying each shape's dimensions, summing the three element counts, and multiplying by the element width gives the table's `{python} TrainingStepCalc.train_mm1_mem_mb_str`. The second matrix multiplication uses the same operand rule with its own shapes.
 
-ReLU instead reads and writes each element of its `(32, 128)` tensor once, so its modeled traffic is twice that tensor's element count times 4 bytes, yielding `{python} TrainingStepCalc.train_relu_mem_kb_str`. These counts describe the modeled operator-buffer boundary. They assume full operand reuse within each matrix multiplication and exclude extra layout copies, workspace, and repeated tile loads; cached operands can also reduce actual HBM reads. Saving a reference for backward does not itself copy a tensor. A physical layout conversion, when required, adds its own read and write traffic to these counts.
+ReLU instead reads and writes each element of its `(32, 128)` tensor once, so its modeled traffic is twice that tensor's element count times `{python} TrainingStepCalc.train_value_bytes_str`, yielding `{python} TrainingStepCalc.train_relu_mem_kb_str`. These counts describe the modeled operator-buffer boundary. They assume full operand reuse within each matrix multiplication and exclude extra layout copies, workspace, and repeated tile loads; cached operands can also reduce actual HBM reads. Saving a reference for backward does not itself copy a tensor. A physical layout conversion, when required, adds its own read and write traffic to these counts.
 
 The backward products use the same read/read/write rule. The weight gradient `h.T @ dlogits` multiplies `(128, 32)` by `(32, 10)`; the hidden gradient `dlogits @ W2.T` multiplies `(32, 10)` by `(10, 128)`; and `x.T @ dz1` multiplies `(784, 32)` by `(32, 128)`. The first two each cost as much arithmetic as the second forward GEMM, while the third matches the first forward GEMM. No `(32, 128)` by `(128, 784)` product is needed because the raw input requests no gradient. The total dense matrix work is therefore `{python} TrainingStepCalc.train_dense_ratio_mult_str` the forward dense work. This applies the input-gradient exception derived in @sec-neural-computation-derivative-calculation-process-edaa to this two-layer network.
 
@@ -4007,12 +4101,14 @@ class MnistTrainingStepCalc:
     # Excluded optimizer step: FP32 Adam reads p, g, m, v and writes p, m, v (7 x 4 bytes per parameter).
     n_params = step.parameters
     adam_step_bytes = step.optimizer_step_bytes
+    adam_bytes_per_param = (adam_step_bytes / n_params).to(byte).magnitude
     ridge_fp32 = (peak_flops / mem_bw).to(flop / byte).magnitude
     relu_below_ridge = ridge_fp32 / (TrainingStepCalc.relu_flops / TrainingStepCalc.relu_mem).to(flop / byte).magnitude
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(python_entries == 5 and driver_launches == 9, "Selected operator set must have five Python entries and nine modeled launches.")
     check(t_overhead > 10 * max(t_compute, t_memory), "Illustrative host costs should exceed ideal device-time bounds.")
     check(n_params == 101_770, f"784-128-10 MLP should have 101,770 parameters, got {n_params}.")
+    check(adam_bytes_per_param == 28, f"Prose says 28 bytes per parameter (7 values x 4 bytes), got {adam_bytes_per_param}.")
     check(adam_step_bytes > mem_traffic, "The prose says the Adam step moves more bytes than the modeled step.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -4025,6 +4121,7 @@ class MnistTrainingStepCalc:
     relu_below_ridge_mult_str = fmt_multiple(relu_below_ridge, precision=0, commas=False)
     mnist_n_params_str = fmt_count(n_params, precision=0, commas=True)
     mnist_adam_step_mb_str = fmt_memory(adam_step_bytes, unit=MB, precision=2, commas=False)
+    mnist_adam_bytes_per_param_str = fmt_count(adam_bytes_per_param, precision=0, commas=False, label="byte")  # 28 bytes
     mnist_forward_ops_str = fmt_count(forward_ops, precision=0, commas=False)
     mnist_backward_ops_str = fmt_count(backward_ops, precision=0, commas=False)
     mnist_python_entries_str = fmt_count(python_entries, precision=0, commas=False)
@@ -4040,7 +4137,7 @@ The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_s
 - $\IronLawComputeTime \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.h100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
 - $\IronLawMemoryTime \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.h100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
 - Under a one-kernel-per-modeled-operator assumption, the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` selected forward operators and `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward operators require `{python} MnistTrainingStepCalc.mnist_driver_launches_str` driver launches. Python dispatches each of the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` forward operations individually, whereas `backward()` enters the C++ autograd engine once and launches all `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward kernels without returning to the Python interpreter between them, giving `{python} MnistTrainingStepCalc.mnist_python_entries_str` Python entries in total. The illustrative host cost is therefore `{python} MnistTrainingStepCalc.mnist_python_entries_str` $\times$ `{python} MnistTrainingStepCalc.mnist_python_cost_str` plus `{python} MnistTrainingStepCalc.mnist_driver_launches_str` $\times$ `{python} MnistTrainingStepCalc.mnist_launch_cost_str`, or `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`.
-- The excluded optimizer step is not small. An FP32 Adam update reads each parameter, its gradient, and two moments and writes three of them, 28 bytes per parameter, so the `{python} MnistTrainingStepCalc.mnist_n_params_str` parameters of this network move about `{python} MnistTrainingStepCalc.mnist_adam_step_mb_str`, more than the whole modeled forward and backward traffic. Counting its launches and the omitted Python calls only raises the host cost above this lower bound.
+- The excluded optimizer step is not small. An FP32 Adam update reads each parameter, its gradient, and two moments and writes three of them, `{python} MnistTrainingStepCalc.mnist_adam_bytes_per_param_str` per parameter, so the `{python} MnistTrainingStepCalc.mnist_n_params_str` parameters of this network move about `{python} MnistTrainingStepCalc.mnist_adam_step_mb_str`, more than the whole modeled forward and backward traffic. Counting its launches and the omitted Python calls only raises the host cost above this lower bound.
 
 This dispatch model excludes autograd traversal overhead, allocation, and the operations omitted from the table. A profile must still establish the actual launch count, particularly for loss kernels. Host costs are added without overlap here. In this model, $\HostSoftwareTime$ exceeds the ideal lower bounds $\IronLawComputeTime$ and $\IronLawMemoryTime$ by more than an order of magnitude, so the overhead ratio of @eq-dispatch-overhead sits far above 1 and the step is overhead-bound\index{Overhead-bound!small model training} under these assumptions. This is the small multilayer perceptron (MLP) regime of notebook \ref{nbk-frameworks-dispatch-tax}, now reached from a real training loop. Profiling has a specific job here, which is to confirm that measured kernel times, achieved bandwidth, and host-device overlap match the model before acting on it.
 
@@ -4432,6 +4529,7 @@ class BatchActivationScaling:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     batch_mid_str = fmt_count(batch_mid, precision=0, commas=False)
     batch_big_str = fmt_count(batch_big, precision=0, commas=False)
+    base_batch_str = fmt_count(base_batch, precision=0, commas=False)
     mid_min_gb_str = fmt_memory(mid_min, unit=GB, precision=0, commas=False)
     mid_max_gb_str = fmt_memory(mid_max, unit=GB, precision=0, commas=False)
     big_min_gb_str = fmt_memory(big_min, unit=GB, precision=0, commas=False)
@@ -4443,7 +4541,7 @@ class BatchActivationScaling:
 
 **Pitfall**: *Increasing batch size without modeling activation memory.*
 
-Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches amortize fixed dispatch overhead, but they also scale the activation memory that must stay live until the backward pass consumes it. In the illustrative ResNet-50 scenario of @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, batch 64 already holds `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations. Batch `{python} BatchActivationScaling.batch_mid_str` holds `{python} BatchActivationScaling.mid_min_gb_str`--`{python} BatchActivationScaling.mid_max_gb_str`, and batch `{python} BatchActivationScaling.batch_big_str` holds `{python} BatchActivationScaling.big_min_gb_str`--`{python} BatchActivationScaling.big_max_gb_str`, which on an `{python} BatchActivationScaling.h100_mem_gb_str` H100 forces activation checkpointing. Recomputation then adds roughly one extra forward pass per step, which can cost more throughput than the larger batch gained, and materialized attention scores make the effect sharper for transformers because they grow with the square of sequence length. Teams that blindly maximize batch size can achieve lower throughput than smaller batches that avoid recomputation.
+Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches amortize fixed dispatch overhead, but they also scale the activation memory that must stay live until the backward pass consumes it. In the illustrative ResNet-50 scenario of @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, batch `{python} BatchActivationScaling.base_batch_str` already holds `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations. Batch `{python} BatchActivationScaling.batch_mid_str` holds `{python} BatchActivationScaling.mid_min_gb_str`--`{python} BatchActivationScaling.mid_max_gb_str`, and batch `{python} BatchActivationScaling.batch_big_str` holds `{python} BatchActivationScaling.big_min_gb_str`--`{python} BatchActivationScaling.big_max_gb_str`, which on an `{python} BatchActivationScaling.h100_mem_gb_str` H100 forces activation checkpointing. Recomputation then adds roughly one extra forward pass per step, which can cost more throughput than the larger batch gained, and materialized attention scores make the effect sharper for transformers because they grow with the square of sequence length. Teams that blindly maximize batch size can achieve lower throughput than smaller batches that avoid recomputation.
 
 :::
 

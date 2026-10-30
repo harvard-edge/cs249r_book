@@ -1939,6 +1939,16 @@ LITHOGRAPHY_RETICLE_FIELD = _conv(
     "Standard 26 mm x 33 mm full-field exposure of 4x-reduction steppers/scanners (DUV and 0.33-NA EUV)",
     notes="Area 858 mm^2 is derived (26 x 33). Sets the maximum single-die size without stitching.",
 )
+PANASONIC_CR2032_DATASHEET = _ds(
+    "prov:panasonic-cr2032-datasheet",
+    "Panasonic Energy Co., Ltd., CR2032 CR Coin-type Lithium Battery, product datasheet (as of February 2026)",
+    "https://energy.panasonic.com/dam/master/pdf/en/datasheet/lithium/CR2032_Datasheet_EN.pdf",
+    verified="2026-10-30",
+    notes=("Read 2026-10-30: nominal voltage 3 V; nominal capacity 225 mAh; continuous drain 0.2 mA; "
+           "diameter (max.) 20.0 mm, height (max.) 3.2 mm; weight approx. 2.8 g; operating temperature "
+           "-30 to +85 C. Lithium manganese dioxide chemistry. Some distributor listings round to "
+           "220 mAh; the manufacturer rating is 225 mAh."),
+)
 ST_STM32F407_DATASHEET = _ds(
     "prov:st-stm32f407-datasheet",
     "STMicroelectronics STM32F405xx/STM32F407xx datasheet (DS8626)",

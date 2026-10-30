@@ -1564,9 +1564,56 @@ At the center, all three questions must be answered together. Data selection and
 
 ## When ML Systems Fail Silently {#sec-introduction-ml-vs-traditional-software-e19a}
 
-That vulnerability on the data axis governs the first half of the dual mandate: keeping learned behavior trustworthy after deployment. In an automotive driver-assistance system, diagnostic trouble codes and hardware watchdog timers expose hardware or communication faults, yet they do not measure how often a perception model detects pedestrians. When seasonal conditions introduce low-angle winter sunlight, heavy precipitation, or bulky clothing underrepresented in training, pedestrian recall can decline from 95 percent to 85 percent even while the accelerator processes images at full frame rate without raising a hardware fault.
+```{python}
+#| echo: false
+#| label: pedestrian-recall-drift
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PEDESTRIAN RECALL DRIFT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Opening of "When ML Systems Fail Silently" and the pitfall
+# │          "Treating ML systems as traditional software"
+# │
+# │ Goal: Keep the recall drop and the miss-rate comparison consistent.
+# │ Show: Recall 95 → 85 percent means misses go from 1 in 20 to 3 in 20.
+# │ How: Miss rate = 1 − recall, expressed per 20 frames (1 / baseline miss).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_int, check
 
-In this example, the miss rate triples, from 1 in 20 pedestrian frames to 3 in 20. That is a substantial change in detection quality, but it does not imply a tripling of vehicle-level safety risk, because temporal filtering, sensor fusion, and downstream control affect how missed detections influence a driving decision. Correct execution and predictive quality are separate properties, and an ML system must be engineered and monitored for both.
+# ┌── LEGO ───────────────────────────────────────────────
+class PedestrianRecallDrift:
+    """Illustrative seasonal drift in a driver-assistance pedestrian detector."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    recall_before = 0.95  # scenario assumption: recall under training conditions
+    recall_after = 0.85  # scenario assumption: recall under winter conditions
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    miss_before = 1 - recall_before
+    miss_after = 1 - recall_after
+    frames_per_window = round(1 / miss_before)  # window holding one baseline miss
+    misses_before = miss_before * frames_per_window
+    misses_after = miss_after * frames_per_window
+    miss_ratio = miss_after / miss_before
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(frames_per_window == 20, f"Baseline window should be 20 frames, got {frames_per_window}.")
+    check(abs(misses_before - 1) < 1e-9, "Baseline should be one miss per window.")
+    check(abs(misses_after - 3) < 1e-9, "Drifted rate should be three misses per window.")
+    check(abs(miss_ratio - 3) < 1e-9, "Prose says the miss rate 'triples'.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    recall_before_pct_str = fmt_percent(recall_before, precision=0, commas=False, style='prose')
+    recall_before_str = fmt_int(round(recall_before * 100), commas=False)
+    recall_after_pct_str = fmt_percent(recall_after, precision=0, commas=False, style='prose')
+    misses_before_str = fmt_int(round(misses_before), commas=False)
+    misses_after_str = fmt_int(round(misses_after), commas=False)
+    frames_per_window_str = fmt_int(frames_per_window, commas=False)
+```
+
+That vulnerability on the data axis governs the first half of the dual mandate: keeping learned behavior trustworthy after deployment. In an automotive driver-assistance system, diagnostic trouble codes and hardware watchdog timers expose hardware or communication faults, yet they do not measure how often a perception model detects pedestrians. When seasonal conditions introduce low-angle winter sunlight, heavy precipitation, or bulky clothing underrepresented in training, pedestrian recall can decline from `{python} PedestrianRecallDrift.recall_before_pct_str` to `{python} PedestrianRecallDrift.recall_after_pct_str` even while the accelerator processes images at full frame rate without raising a hardware fault.
+
+In this example, the miss rate triples, from `{python} PedestrianRecallDrift.misses_before_str` in `{python} PedestrianRecallDrift.frames_per_window_str` pedestrian frames to `{python} PedestrianRecallDrift.misses_after_str` in `{python} PedestrianRecallDrift.frames_per_window_str`. That is a substantial change in detection quality, but it does not imply a tripling of vehicle-level safety risk, because temporal filtering, sensor fusion, and downstream control affect how missed detections influence a driving decision. Correct execution and predictive quality are separate properties, and an ML system must be engineered and monitored for both.
 
 Crashes, unhandled exceptions, and failed health checks make some software defects directly observable, though conventional software can also produce silent numerical errors or logic bugs. Machine learning adds another route to **silent degradation**\index{Silent degradation!definition}: learned behavior loses predictive quality as the operating population changes, even while the runtime executes instructions without error, memory allocations succeed, and inference servers return predictions well within latency service level agreements (SLAs).
 
@@ -1655,6 +1702,7 @@ class IntroTimeBudget:
     check(total == 11 * second, f"Expected 11 seconds, got {total}.")
     check(improved_total == 7 * second, f"Expected 7 seconds, got {improved_total}.")
     check(improved_total > total / speedup, "Total time must fall by less than half.")
+    check(speedup == 2, "Prose says 'Doubling the arithmetic rate'.")
 
     # ┌── 4. OUTPUT (Formatting) ────────────────────────────────────────────
     movement_str = fmt_time(movement, unit=second, precision=0, style="word")
@@ -1731,6 +1779,7 @@ class LocalExecution:
     check(abs((upgraded_movement - compute).to(ms).magnitude) < 1e-9, "Bandwidth upgrade must balance the stages.")
     check(abs(upgraded_sequential.to(ms).magnitude - 25) < 1e-9, "Upgraded sequential estimate must be 25 ms.")
     check(abs(upgraded_bound.to(ms).magnitude - 15) < 1e-9, "Upgraded overlap bound must be 15 ms.")
+    check(abs((faster_bandwidth / bandwidth).to('').magnitude - 2) < 1e-9, "Prose says 'doubling bandwidth'.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     data_gb_str = fmt_memory(data, unit=GB, precision=0)
@@ -1873,19 +1922,14 @@ Every term of the iron law is measured in seconds, but time is not the only phys
 Let $\DataVolume$ be the total data volume moved (bytes), $\EnergyPerByteMoved$ the energy per byte moved, $\Operations$ the total operation count, and $\EnergyPerOperation$ the energy per operation. @Eq-energy-cost formalizes this relationship, following the hardware-energy observation that data movement can dominate arithmetic energy [@horowitz2014]:
 $$ \TotalEnergy \approx \underbrace{ \DataVolume \times \EnergyPerByteMoved }_{\text{Movement Term}} + \underbrace{ \Operations \times \EnergyPerOperation }_{\text{Compute Term}} $$ {#eq-energy-cost}
 
-::: {.column-margin}
-![](images/svg/introduction_energy_hierarchy.svg){width="100%" fig-alt="Vertical ladder of three orange bars on a log scale, longest at top: DRAM (Dynamic Random-Access Memory) 160 pJ towers far above FP16 1.1 pJ and INT8 (8-bit integer) 0.2 pJ, showing data movement costs orders of magnitude more energy than arithmetic."}
-
-*Moving a byte from DRAM costs about 145 times the energy of a 16-bit floating-point multiply, so data movement, not arithmetic, dominates the energy cost.*
-:::
-
 ```{python}
 #| echo: false
 #| label: energy-movement-ratios
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DATA MOVEMENT ENERGY RATIOS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Energy Tax paragraph in the Iron Law section
+# │ Context: Energy Tax paragraph in the Iron Law section and the energy-ladder
+# │          margin caption just above it
 # │
 # │ Goal: Keep the data-movement-vs-arithmetic comparison executable.
 # │ Show: DRAM byte movement is about 145× FP16 arithmetic and 800× INT8 arithmetic.
@@ -1917,7 +1961,14 @@ class EnergyMovementRatios:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     fp16_ratio_mult_str = fmt_multiple(round(fp16_ratio), commas=False, precision=0)
     int8_ratio_mult_str = fmt_multiple(round(int8_ratio), precision=0, commas=False)
+    fp16_ratio_str = fmt_int(round(fp16_ratio), commas=False)  # margin caption: "about N times"
 ```
+
+::: {.column-margin}
+![](images/svg/introduction_energy_hierarchy.svg){width="100%" fig-alt="Vertical ladder of three orange bars on a log scale, longest at top: DRAM (Dynamic Random-Access Memory) 160 pJ towers far above FP16 1.1 pJ and INT8 (8-bit integer) 0.2 pJ, showing data movement costs orders of magnitude more energy than arithmetic."}
+
+*Moving a byte from DRAM costs about `{python} EnergyMovementRatios.fp16_ratio_str` times the energy of a 16-bit floating-point multiply, so data movement, not arithmetic, dominates the energy cost.*
+:::
 
 The energy comparison depends on the transfer size and arithmetic operation being counted. Under the energy constants used in this text, moving one byte from off-chip DRAM consumes roughly `{python} EnergyMovementRatios.fp16_ratio_mult_str` the energy of a 16-bit floating-point (FP16) multiply and `{python} EnergyMovementRatios.int8_ratio_mult_str` that of an INT8 (8-bit integer) multiply [@horowitz2014]. Whether movement dominates a complete workload also depends on the number and width of transfers relative to its operation count. The physical reason for the per-access gap is that data movement requires charging and discharging wires over longer distances, while arithmetic occurs locally within a processing unit's circuits. Minimizing avoidable data movement $(\DataVolume)$ can therefore improve both speed and energy efficiency.
 
@@ -2885,13 +2936,49 @@ class DeploymentSystems:
     compute_span_math = fmt_math(f"10^{{{round(math.log10(compute_scaling))}}}")
 ```
 
+```{python}
+#| echo: false
+#| label: edge-latency-distance
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DISTANCE TRAVELED PER MILLISECOND OF DELAY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Footnote [^fn-latency-edge-constraint] (deployment context subsection)
+# │
+# │ Goal: Make "every millisecond is distance" executable.
+# │ Show: A vehicle at 30 m/s moves 3 cm during each millisecond of delay.
+# │ How: distance = speed × delay, with delay = 1 ms.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_qty, check
+from mlsysim.core.units import meter, second, ms, cm
+
+# ┌── LEGO ───────────────────────────────────────────────
+class EdgeLatencyDistance:
+    """Distance a moving vehicle covers per millisecond of decision delay."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    vehicle_speed = 30 * meter / second  # scenario assumption: highway-scale speed
+    delay = 1 * ms  # prose: "each millisecond of delay"
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    distance_per_delay = (vehicle_speed * delay).to(cm)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(delay.to(ms).magnitude - 1) < 1e-12, "Prose says 'each millisecond'; delay must be 1 ms.")
+    check(abs(distance_per_delay.to(cm).magnitude - 3) < 1e-9, f"Expected 3 cm per ms, got {distance_per_delay}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    vehicle_speed_str = fmt_qty(vehicle_speed, unit=meter / second, precision=0)
+    distance_per_ms_str = fmt_qty(distance_per_delay, unit=cm, precision=0)
+```
+
 From cloud to TinyML, the endpoints differ by roughly `{python} DeploymentSystems.mem_span_math` in memory and `{python} DeploymentSystems.compute_span_math` in compute. Because a cloud model cannot fit directly on a microcontroller, moving down that scale requires compression, a smaller architecture, or a narrower task. At the upper end, cloud ML systems\index{Cloud ML} offer large computing budgets alongside capacity limits, operational complexity, and substantial infrastructure bills. At the lower end, TinyML systems\index{TinyML} on microcontrollers make memory and energy feasibility an immediate concern, as a sensor may need to detect anomalies on a single battery for years. Between these poles, placement determines where work and resource demands fall. Edge ML systems\index{Edge ML!latency and bandwidth} move computation toward data sources to reduce latency[^fn-latency-edge-constraint] and network traffic. Mobile ML systems\index{Mobile ML!resource constraints} share memory, thermal headroom, and battery power with foreground applications. Hybrid systems split work across tiers to balance latency, privacy, bandwidth, and update control.
 
 ::: {.column-margin .margin-pointer}
 ↪ The light barrier, power wall, and memory wall that shape these operating envelopes are developed in @sec-ml-systems-deployment-spectrum-71be.
 :::
 
-[^fn-latency-edge-constraint]: [offset=-42mm] **Latency at the edge**\index{Latency!edge deployment}: Every millisecond of delay is distance traveled before a decision takes effect. A vehicle traveling at 30 m/s moves 3 cm during each millisecond of delay. Sensing, communication, computation, and actuation all contribute to the time before braking can begin, so reducing network delay addresses only part of the response budget.
+[^fn-latency-edge-constraint]: [offset=-42mm] **Latency at the edge**\index{Latency!edge deployment}: Every millisecond of delay is distance traveled before a decision takes effect. A vehicle traveling at `{python} EdgeLatencyDistance.vehicle_speed_str` moves `{python} EdgeLatencyDistance.distance_per_ms_str` during each millisecond of delay. Sensing, communication, computation, and actuation all contribute to the time before braking can begin, so reducing network delay addresses only part of the response budget.
 
 Tight response deadlines or unreliable connectivity can require local execution, as in vehicle control. Fraud detection, in contrast, can run on cloud infrastructure whenever network and service latency fit the decision budget. Large language-model services rely on centralized clusters to accommodate their memory and compute footprint. In turn, cloud capacity and cost govern how often models are retrained, what historical data is retained, and how inference load is distributed, while edge and mobile limits constrain model size and update frequency.
 
@@ -2938,7 +3025,7 @@ A more accurate spam classifier can still be a worse production choice if it nee
 
 **Pitfall**: *Treating ML systems as traditional software that happens to include a model.*
 
-Established testing and deployment practices remain necessary for ML systems, but code-level checks alone cannot validate learned behavior (@sec-introduction-ml-vs-traditional-software-e19a). Both conventional and ML software can fail silently. In the driver-assistance example, pedestrian recall can fall from 95 to 85 percent while the accelerator keeps its full frame rate and raises no fault. ML systems additionally require outcome monitoring to detect declining predictive quality, watched over enough time and enough examples to detect a drop for each group of users the system serves. Teams deploying ML with only continuous integration and continuous deployment (CI/CD) pipelines risk silent failures, in which test suites and health checks report green while user-facing prediction quality degrades.
+Established testing and deployment practices remain necessary for ML systems, but code-level checks alone cannot validate learned behavior (@sec-introduction-ml-vs-traditional-software-e19a). Both conventional and ML software can fail silently. In the driver-assistance example, pedestrian recall can fall from `{python} PedestrianRecallDrift.recall_before_str` to `{python} PedestrianRecallDrift.recall_after_pct_str` while the accelerator keeps its full frame rate and raises no fault. ML systems additionally require outcome monitoring to detect declining predictive quality, watched over enough time and enough examples to detect a drop for each group of users the system serves. Teams deploying ML with only continuous integration and continuous deployment (CI/CD) pipelines risk silent failures, in which test suites and health checks report green while user-facing prediction quality degrades.
 
 :::
 
@@ -2997,6 +3084,7 @@ class AmdahlsPitfall:
 
     check(overall_speedup <= 1.5, f"System speedup ({overall_speedup:.2f}x) is too high for a 'Pitfall'.")
     check((improvement_pct / naive_pct) <= 0.5, "The discrepancy between naive and actual improvement is too small.")
+    check(s_inf == 3, "Margin caption says 'three times faster'.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     from mlsysim.fmt import fmt_int, fmt, fmt_percent

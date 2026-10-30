@@ -309,11 +309,14 @@ class RankingDriftScenario:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.001 < gamma < 0.005, f"A six-point slide over four weeks is a slow drift, got gamma={gamma:.4f}/day.")
+    check(round((acc_initial - acc_week4) * 100) == 6, f"Prose says accuracy slides six points, got {(acc_initial - acc_week4) * 100:.1f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     acc_initial_pct_str = fmt_percent(acc_initial, precision=0, commas=False, style='prose')
     acc_initial_num_str = fmt(acc_initial * 100, precision=0, commas=False)
     acc_week4_pct_str = fmt_percent(acc_week4, precision=0, commas=False, style='prose')
+    acc_week4_str = fmt(acc_week4, precision=2, commas=False)
+    slide_points_str = fmt((acc_initial - acc_week4) * 100, precision=0, commas=False)
 ```
 
 The week-two problem takes concrete shape on the ranking service in an illustrative scenario. Initial measurements show `{python} RankingDriftScenario.acc_initial_pct_str` click-prediction accuracy, p99 latency inside the service's budget, and strong performance across test segments. By week four, accuracy has dropped to `{python} RankingDriftScenario.acc_week4_pct_str`, but the infrastructure metrics show nothing wrong. By week eight, a product manager notices that recommended items convert poorly; investigation reveals the model has not adapted to a competitor's new promotion that shifted what users click. The model needed investigation six weeks ago, but no system was watching for this degradation. MLOps provides the framework to detect such changes, assess whether retraining addresses them, and validate replacement models while limiting the impact on users.
@@ -1662,6 +1665,8 @@ class ReleaseControlFootprint:
     check(accels_two_copies == 4, f"Prose says two copies need four H100s, got {accels_two_copies}.")
     check(resnet_two_copy_fraction < 0.01, "Two FP16 ResNet-50 copies should be a negligible fraction of one H100.")
     check(2 * kws_bank < flash, "Both KWS flash banks must fit the device's flash.")
+    check(accels_two_copies == 2 * accels_per_copy, "Prose says a canary doubles the accelerators that hold tables.")
+    check(abs(1 / canary_share - 20) < 1e-9, f"Prose says the canary carries a twentieth of the requests, got 1/{1 / canary_share:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     copy_gb_str = fmt_memory(copy_bytes, unit=GB, precision=0, commas=False)
@@ -1675,7 +1680,7 @@ class ReleaseControlFootprint:
     flash_mb_str = fmt_memory_capacity(flash, unit=MiB, precision=0, commas=False)
 ```
 
-Every control in this section keeps a second version of the model alive, and for a capacity-bound model that second version, not the extra arithmetic, is the dominant cost (@tbl-ml-ops-release-control-footprint). A shadow deployment scores every request twice. A canary, an A/B test, and a blue-green switch divert traffic rather than adding work, yet each must hold the candidate's full embedding tables in accelerator memory whatever share of traffic it serves. A hot standby for immediate rollback holds the previous version for the same reason. The ranking service's `{python} ReleaseControlFootprint.canary_pct_str` canary therefore doubles the accelerators that hold tables, from two to four, while it carries a twentieth of the requests. A compute-bound ResNet-50 service pays the opposite way. Its `{python} ReleaseControlFootprint.resnet_mb_str` of FP16 weights fit beside the serving copy on one accelerator, so its canary costs almost no memory and only its share of compute. The keyword spotter's dual-bank update costs flash instead of accelerator memory, a second `{python} ReleaseControlFootprint.kws_bank_kb_str` bank that brings the model's share of the device's `{python} ReleaseControlFootprint.flash_mb_str` to `{python} ReleaseControlFootprint.two_banks_kb_str`.
+Every control in this section keeps a second version of the model alive, and for a capacity-bound model that second version, not the extra arithmetic, is the dominant cost (@tbl-ml-ops-release-control-footprint). A shadow deployment scores every request twice. A canary, an A/B test, and a blue-green switch divert traffic rather than adding work, yet each must hold the candidate's full embedding tables in accelerator memory whatever share of traffic it serves. A hot standby for immediate rollback holds the previous version for the same reason. The ranking service's `{python} ReleaseControlFootprint.canary_pct_str` canary therefore doubles the accelerators that hold tables, from `{python} ReleaseControlFootprint.accels_per_copy_str` to `{python} ReleaseControlFootprint.accels_two_copies_str`, while it carries a twentieth of the requests. A compute-bound ResNet-50 service pays the opposite way. Its `{python} ReleaseControlFootprint.resnet_mb_str` of FP16 weights fit beside the serving copy on one accelerator, so its canary costs almost no memory and only its share of compute. The keyword spotter's dual-bank update costs flash instead of accelerator memory, a second `{python} ReleaseControlFootprint.kws_bank_kb_str` bank that brings the model's share of the device's `{python} ReleaseControlFootprint.flash_mb_str` to `{python} ReleaseControlFootprint.two_banks_kb_str`.
 
 | **Release control**                                                           | **Extra resident memory**                                                                                                                                                                                       | **Extra inference work**                         | **What it buys**                                    |
 |:------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------|:----------------------------------------------------|
@@ -2069,7 +2074,7 @@ The ranking service monitors user age as an input feature, and a shift toward ol
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import Ops, Scenarios
-from mlsysim.fmt import fmt, fmt_count, fmt_percent, check, MarkdownStr
+from mlsysim.fmt import fmt, fmt_count, fmt_math, fmt_percent, fmt_pp, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class PSIAgeExample:
@@ -2086,6 +2091,7 @@ class PSIAgeExample:
     differences = [actual - expected for expected, actual in zip(training, serving)]
     log_ratios = [math.log(actual / expected) for expected, actual in zip(training, serving)]
     contributions = age.terms
+    max_shift = max(abs(d) for d in differences)  # largest per-bin share shift
     total_psi = age.psi
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2093,6 +2099,8 @@ class PSIAgeExample:
     check(abs(sum(serving) - 1.0) < 1e-12, "Serving proportions must sum to 1.")
     check(abs(total_psi - 0.0293) < 0.0001, f"Expected PSI about 0.0293, got {total_psi:.4f}.")
     check(total_psi < warning_threshold, f"PSI should be below warning threshold, got {total_psi:.4f}.")
+    check(abs(max_shift - 0.03) < 1e-9, f"Prose says several bins shifted by 3 percentage points, got {max_shift:.4f}.")
+    check([round(abs(d), 6) for d in differences].count(round(max_shift, 6)) >= 2, "Prose says several bins shifted by the largest amount.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     training_pct_str = [fmt_percent(value, precision=0, commas=False, style='symbol') for value in training]
@@ -2102,6 +2110,9 @@ class PSIAgeExample:
     contribution_str = [fmt(value, precision=4, commas=False) for value in contributions]
     total_psi_str = fmt(total_psi, precision=3, commas=False)
     warning_threshold_str = fmt(warning_threshold, precision=1, commas=False)
+    max_shift_pp_str = fmt_pp(max_shift * 100, precision=0)
+    max_shift_pp_attr_str = fmt_pp(max_shift * 100, precision=0, attributive=True)
+    max_shift_math = fmt_math(f"\\pm {max_shift:.2f}")
 ```
 
 ```{=latex}
@@ -2118,13 +2129,13 @@ class PSIAgeExample:
 |  **56–65**  | `{python} PSIAgeExample.training_pct_str[4]` | `{python} PSIAgeExample.serving_pct_str[4]` | `{python} PSIAgeExample.difference_str[4]` | `{python} PSIAgeExample.log_ratio_str[4]` | `{python} PSIAgeExample.contribution_str[4]` |
 |   **66+**   | `{python} PSIAgeExample.training_pct_str[5]` | `{python} PSIAgeExample.serving_pct_str[5]` | `{python} PSIAgeExample.difference_str[5]` | `{python} PSIAgeExample.log_ratio_str[5]` | `{python} PSIAgeExample.contribution_str[5]` |
 
-: **PSI Worked Example**: User age distribution drift from training to serving, decomposed across six age bins. The total PSI is `{python} PSIAgeExample.total_psi_str`, well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold, even though several bins shifted by 3 percentage points. Aggregate PSI summarizes movement across bins; action depends on a calibrated threshold, sample size, and business cost. {#tbl-psi-age-example tbl-colwidths="[13,15,15,16,24,17]"}
+: **PSI Worked Example**: User age distribution drift from training to serving, decomposed across six age bins. The total PSI is `{python} PSIAgeExample.total_psi_str`, well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold, even though several bins shifted by `{python} PSIAgeExample.max_shift_pp_str`. Aggregate PSI summarizes movement across bins; action depends on a calibrated threshold, sample size, and business cost. {#tbl-psi-age-example tbl-colwidths="[13,15,15,16,24,17]"}
 
 ```{=latex}
 \endgroup
 ```
 
-Summing the six bin contributions yields a total PSI of `{python} PSIAgeExample.total_psi_str`. The difference column is in proportion units, so a 3 percentage-point shift appears as $\pm 0.03$. Whenever a bin's serving share falls below its training share, both the difference and the log-ratio are negative, so their product remains positive and opposite shifts across age bins cannot cancel each other out. Even with 3 percentage-point shifts in several bins, the aggregate drift is well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold. Operational action depends on a calibrated threshold, sample size, and business cost.
+Summing the six bin contributions yields a total PSI of `{python} PSIAgeExample.total_psi_str`. The difference column is in proportion units, so a `{python} PSIAgeExample.max_shift_pp_attr_str` shift appears as `{python} PSIAgeExample.max_shift_math`. Whenever a bin's serving share falls below its training share, both the difference and the log-ratio are negative, so their product remains positive and opposite shifts across age bins cannot cancel each other out. Even with `{python} PSIAgeExample.max_shift_pp_attr_str` shifts in several bins, the aggregate drift is well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold. Operational action depends on a calibrated threshold, sample size, and business cost.
 
 ::: {.column-margin .margin-pointer}
 ↪ KL divergence, its asymmetry, and a worked drift example that computes both KL divergence and PSI are collected for reference in @sec-appdx-data-foundations-measuring-drift-divergence-a6dd.
@@ -2288,6 +2299,7 @@ class MonitoringBudget:
     n_dashboards = 2  # model health + infra
     n_users = 3  # team size
     queries_per_hr = 12  # 5-minute refresh
+    refresh_interval_min = MINUTES_PER_HOUR / queries_per_hr  # dashboard refresh interval
     work_hours = 8
     work_days = 22
     query_cost_per = Infrastructure.Pricing.Monitoring.QueryPerRequest.rate.to(USD).magnitude
@@ -2305,6 +2317,8 @@ class MonitoringBudget:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(datapoints_mo_m) == 26, f"Expected about 26M monthly datapoints, got {datapoints_mo_m:.2f}M.")
     check(round(total_cost) == 261, f"Expected total monitoring cost about $261/month, got ${total_cost:.2f}.")
+    check(refresh_interval_min == 5, f"Prose says a five-minute refresh, got {refresh_interval_min} minutes.")
+    check(sample_interval_s == 15, f"Prose says 15-second metrics, got {sample_interval_s} seconds.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_variants_str = fmt(n_variants, precision=0, commas=False)
@@ -2313,6 +2327,8 @@ class MonitoringBudget:
     hours_per_day_str = fmt(hours_per_day, precision=0, commas=False)
     samples_per_min_str = fmt_rate(samples_per_min, "samples/min", precision=0, commas=False)
     sample_interval_s_str = fmt_time(sample_interval_s, "second", precision=0, commas=False, style="word")
+    sample_interval_attr_str = fmt_time(sample_interval_s, "second", precision=0, commas=False, style="word", attributive=True)
+    refresh_interval_attr_str = fmt_time(refresh_interval_min, "minute", precision=0, commas=False, style="word", attributive=True)
     days_str = fmt_time(days, "day", precision=0, commas=False, style="word")
     ingestion_cost_per_m_str = fmt_usd(ingestion_cost_per_m, precision=2, commas=False, per="million")
     bytes_per_point_value_str = fmt(bytes_per_point, precision=0, commas=False)
@@ -2341,7 +2357,7 @@ class MonitoringBudget:
 - one model with `{python} MonitoringBudget.n_variants_str` deployment variants (production, canary, staging), each emitting `{python} MonitoringBudget.metrics_per_variant_str` metrics
 - Metrics sampled every `{python} MonitoringBudget.sample_interval_s_str`
 - Retention requirement: `{python} MonitoringBudget.days_str`
-- `{python} MonitoringBudget.n_dashboards_str` dashboards (model health, infrastructure), `{python} MonitoringBudget.n_users_str` team members, five-minute refresh
+- `{python} MonitoringBudget.n_dashboards_str` dashboards (model health, infrastructure), `{python} MonitoringBudget.n_users_str` team members, `{python} MonitoringBudget.refresh_interval_attr_str` refresh
 
 **Metric ingestion**:
 
@@ -2366,7 +2382,7 @@ class MonitoringBudget:
 
 #### Cost optimization strategies {.unnumbered}
 
-Each cost component in @eq-monitoring-cost maps to a distinct engineering fix. The primary driver of $\MonitoringIngestionCost$ and $\MonitoringStorageCost$ is metric cardinality. High-cardinality labels such as `user_id` or `request_id` multiply the number of series in time-series indexes, and that growth outweighs raw compute costs. Dropping unnecessary labels or aggregating them into a bounded set of buckets reduces cardinality. Hashing each identifier to another distinct identifier alone does not reduce the number of series. The second driver of storage cost is temporal resolution. Retaining raw 15-second metrics across 30 days is rarely justified. A tiered retention policy (high-resolution telemetry for recent incident debugging, downsampled rollups for historical trend analysis) preserves diagnostic fidelity while reducing retained volume. For $\MonitoringComputeCost$, dashboard query overhead accumulates through auto-refresh loops across dozens of unattended user sessions; setting conservative refresh intervals and auto-pausing inactive sessions bounds query load. Finally, $\MonitoringAlertCost$ scales with evaluation frequency. Consolidating overlapping threshold checks into composite multi-condition rules can reduce redundant evaluation and notifications; thresholds, ownership, and actionability still determine alert fatigue.
+Each cost component in @eq-monitoring-cost maps to a distinct engineering fix. The primary driver of $\MonitoringIngestionCost$ and $\MonitoringStorageCost$ is metric cardinality. High-cardinality labels such as `user_id` or `request_id` multiply the number of series in time-series indexes, and that growth outweighs raw compute costs. Dropping unnecessary labels or aggregating them into a bounded set of buckets reduces cardinality. Hashing each identifier to another distinct identifier alone does not reduce the number of series. The second driver of storage cost is temporal resolution. Retaining raw `{python} MonitoringBudget.sample_interval_attr_str` metrics across `{python} MonitoringBudget.days_str` is rarely justified. A tiered retention policy (high-resolution telemetry for recent incident debugging, downsampled rollups for historical trend analysis) preserves diagnostic fidelity while reducing retained volume. For $\MonitoringComputeCost$, dashboard query overhead accumulates through auto-refresh loops across dozens of unattended user sessions; setting conservative refresh intervals and auto-pausing inactive sessions bounds query load. Finally, $\MonitoringAlertCost$ scales with evaluation frequency. Consolidating overlapping threshold checks into composite multi-condition rules can reduce redundant evaluation and notifications; thresholds, ownership, and actionability still determine alert fatigue.
 
 #### Cost-benefit framework {.unnumbered}
 
@@ -2442,7 +2458,7 @@ Layered monitoring converts silent degradation into signals. Infrastructure tele
 
 ## Retraining Decisions {#sec-ml-operations-retraining-decisions-7d3a}
 
-A team that retrains the ranking model on every minor PSI spike burns thousands of dollars in accelerator time and risks training on corrupted upstream logs, while a team that waits blindly for a quarterly calendar tick lets accuracy slide six points before anyone acts. Retraining is the most expensive response the operations loop can choose, and the easiest to automate badly. Monitoring supplies two kinds of evidence, a divergence that a label-free monitor measures continuously and outcome metrics that arrive later, and the retraining decision turns them into one of three actions: retrain, roll back, or wait. The decision has three parts, taken in turn below: the candidate strategies and a test of whether a run is worth its cost now, a cadence that sets how often runs should happen, and a policy comparison between a fixed schedule and an evidence trigger. On the ranking service every run is also paid in accelerator-hours on hardware that serves live traffic.
+A team that retrains the ranking model on every minor PSI spike burns thousands of dollars in accelerator time and risks training on corrupted upstream logs, while a team that waits blindly for a quarterly calendar tick lets accuracy slide `{python} RankingDriftScenario.slide_points_str` points before anyone acts. Retraining is the most expensive response the operations loop can choose, and the easiest to automate badly. Monitoring supplies two kinds of evidence, a divergence that a label-free monitor measures continuously and outcome metrics that arrive later, and the retraining decision turns them into one of three actions: retrain, roll back, or wait. The decision has three parts, taken in turn below: the candidate strategies and a test of whether a run is worth its cost now, a cadence that sets how often runs should happen, and a policy comparison between a fixed schedule and an evidence trigger. On the ranking service every run is also paid in accelerator-hours on hardware that serves live traffic.
 
 The degradation equation\index{Statistical drift risk!degradation equation} of @eq-degradation turns divergence into a forecast of accuracy when outcome evidence supports one:
 $$\AccuracyAfterDeployment(\DeploymentAge) \approx \InitialAccuracy - \FittedSensitivity\cdot \DivergenceMeasure(\CurrentDistribution \lVert \TrainingDistribution)$$
@@ -2522,7 +2538,7 @@ To turn the trigger rule of @lst-ops-triggered-retraining into a concrete schedu
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_usd, check, MarkdownStr
+from mlsysim.fmt import fmt, fmt_int, fmt_math, fmt_multiple, fmt_percent, fmt_time, fmt_usd, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RetrainingInterval:
@@ -2548,6 +2564,13 @@ class RetrainingInterval:
     # fig-alt hand-type the rounded T*; the check above guards them.
     T_star_4q = Scenarios.RankingRetrainingIntervalFourfoldTraffic.optimal_interval.to("day").magnitude
     check(1.0 <= T_star_4q <= 2.0, f"Fourfold traffic should land near daily, got {T_star_4q:.2f} days.")
+    value_per_point = V / 100  # dollars per query for one percentage point of accuracy
+    sens_factor = (Scenarios.RankingRetrainingIntervalFourfoldTraffic.query_rate / interval.query_rate).to("").magnitude
+    sens_effect = sens_factor**0.5  # square-root law: interval moves by the root of the input change
+    scheduled_days = interval.scheduled_interval.to("day").magnitude
+    check(sens_factor == 4, f"Prose says four times the traffic (a fourfold change), got {sens_factor}.")
+    check(abs(T_star / T_star_4q - sens_effect) < 0.01, f"Fourfold traffic should shorten T* twofold, got {T_star / T_star_4q:.3f}.")
+    check(sens_effect == 2, f"Prose says a fourfold change moves the interval twofold, got {sens_effect}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     retrain_cost_str = fmt_usd(retrain_cost, precision=0, commas=True)
@@ -2559,6 +2582,11 @@ class RetrainingInterval:
     gamma_pct_prose_str = fmt_percent(gamma, precision=2, commas=False, style='prose')
     T_star_days_str = fmt_int(round(T_star))
     T_star_4q_days_str = fmt(T_star_4q, precision=1, commas=False)
+    V_math = fmt_math(f"\\AccuracyPayoffPerQuery= \\${V:.2f}")
+    value_per_point_usd_str = fmt_usd(value_per_point, precision=3, commas=False)
+    sens_factor_mult_str = fmt_multiple(sens_factor, precision=0, commas=False)
+    sens_effect_mult_str = fmt_multiple(sens_effect, precision=0, commas=False)
+    scheduled_interval_attr_str = fmt_time(scheduled_days, "day", precision=0, commas=False, style="word", attributive=True)
     # Display math (uses $$...$$) — wrap in MarkdownStr to preserve _math semantics.
     # Digit groups inside math use {,} so LaTeX does not set "5, 000".
     _retrain_cost_grp = format(int(retrain_cost), ',').replace(',', '{,}')
@@ -2620,7 +2648,7 @@ An exact optimum requires minimizing @eq-optimal-interval without the expansion.
 **Physics**: In this fitted scenario, model accuracy $\AccuracyAfterDeployment(\DeploymentAge)$ decays exponentially at rate $\AccuracyDecayRate$. Each successful update is assumed to restore initial accuracy with negligible training and rollout delay; traffic and value remain constant.
 
 *   $\DailyQueryVolume$: Daily Query Volume (Traffic).
-*   $\AccuracyPayoffPerQuery$: Financial value per query for a unit change in accuracy fraction. With this convention, $\AccuracyPayoffPerQuery= \$0.50$ means 1 percentage point of accuracy is worth $\$0.005$ per query. The Value per Point of @eq-retrain-decision is the same quantity accumulated over a decision horizon, $\AccuracyPayoffPerQuery/100$ per query multiplied by the number of queries in that horizon.
+*   $\AccuracyPayoffPerQuery$: Financial value per query for a unit change in accuracy fraction. With this convention, `{python} RetrainingInterval.V_math` means 1 percentage point of accuracy is worth `{python} RetrainingInterval.value_per_point_usd_str` per query. The Value per Point of @eq-retrain-decision is the same quantity accumulated over a decision horizon, $\AccuracyPayoffPerQuery/100$ per query multiplied by the number of queries in that horizon.
 *   $\RetrainingRunCost$: Fixed cost of a retraining run, including compute and operational overhead.
 
 **Formula**: @Eq-optimal-retrain gives the interval $\RetrainingInterval^*$ that minimizes the sum of staleness losses and training costs per unit time.
@@ -2658,11 +2686,11 @@ With the parameters collected in @tbl-retraining-parameters, the approximation p
 
 Under the square-root approximation, $\RetrainingInterval^*$ scales with the square root of these parameters. @Tbl-retraining-sensitivity shows that a fourfold change in retraining cost, query volume, or decay rate moves the approximated interval twofold.
 
-| **Change**                    | **Effect on $\RetrainingInterval^*$** |
-|:------------------------------|--------------------------------------:|
-| **4$\times$ retraining cost** |             2$\times$ longer interval |
-| **4$\times$ query volume**    |            2$\times$ shorter interval |
-| **4$\times$ decay rate**      |            2$\times$ shorter interval |
+| **Change**                                                             |                               **Effect on $\RetrainingInterval^*$** |
+|:-----------------------------------------------------------------------|--------------------------------------------------------------------:|
+| **`{python} RetrainingInterval.sens_factor_mult_str` retraining cost** |  `{python} RetrainingInterval.sens_effect_mult_str` longer interval |
+| **`{python} RetrainingInterval.sens_factor_mult_str` query volume**    | `{python} RetrainingInterval.sens_effect_mult_str` shorter interval |
+| **`{python} RetrainingInterval.sens_factor_mult_str` decay rate**      | `{python} RetrainingInterval.sens_effect_mult_str` shorter interval |
 
 : **Retraining Interval Sensitivity**: Under the square-root approximation a fourfold change in an input moves the interval only twofold, and the directions differ. More expensive retraining lengthens the interval, while higher query volume or a faster decay rate shortens it. {#tbl-retraining-sensitivity}
 
@@ -2713,6 +2741,9 @@ class RetrainContention:
     check(accel_hours.to(hour).magnitude == 24, "Prose says twenty-four accelerator-hours.")
     check(compute_share < 0.05, f"Prose says compute is a small share of the run cost, got {compute_share:.3f}.")
     check(free_accels == ReleaseControlFootprint.accels_per_copy, "Prose says the run leaves room for exactly one more copy of the tables.")
+    check(node_accels == 8, f"Prose says an eight-accelerator node, got {node_accels}.")
+    check(serving_accels == 2, f"Prose says the serving copy holds two accelerators, got {serving_accels}.")
+    check(retrain_accels == 4, f"Prose says the run holds four more accelerators, got {retrain_accels}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     compute_cost_str = fmt_usd(compute_cost, precision=0)
@@ -2720,10 +2751,11 @@ class RetrainContention:
     run_cost_str = fmt_usd(run_cost, precision=0, commas=True)
     retrain_accels_str = fmt_int(retrain_accels, commas=False)
     retrain_time_str = fmt_time(retrain_time, 'hour', precision=0, commas=False)
+    retrain_time_word_str = fmt_time(retrain_time, 'hour', precision=0, commas=False, style='word')
     accel_hours_str = fmt_int(round(accel_hours.to(hour).magnitude), commas=False)
 ```
 
-The run cost $\RetrainingRunCost$ bundles the four terms of @eq-retrain-cost, and on the ranking service the accelerator term is the smallest of them. In an illustrative scenario, a run that retrains on the logs gathered since the previous run occupies four H100s for six hours. Those twenty-four accelerator-hours cost `{python} RetrainContention.compute_cost_str` at the registry's training rate, about `{python} RetrainContention.compute_share_pct_str` of the `{python} RetrainContention.run_cost_str` run. Validation, deployment, and rollout risk make up the rest, which is why automating the validation path (@sec-ml-operations-model-validation-a891) shortens the economic interval more than faster training would.
+The run cost $\RetrainingRunCost$ bundles the four terms of @eq-retrain-cost, and on the ranking service the accelerator term is the smallest of them. In an illustrative scenario, a run that retrains on the logs gathered since the previous run occupies `{python} RetrainContention.retrain_accels_str` H100s for `{python} RetrainContention.retrain_time_word_str`. Those `{python} RetrainContention.accel_hours_str` accelerator-hours cost `{python} RetrainContention.compute_cost_str` at the registry's training rate, about `{python} RetrainContention.compute_share_pct_str` of the `{python} RetrainContention.run_cost_str` run. Validation, deployment, and rollout risk make up the rest, which is why automating the validation path (@sec-ml-operations-model-validation-a891) shortens the economic interval more than faster training would.
 
 The accelerator-hours matter instead as contention. The serving copy of the tables already holds two accelerators. On an eight-accelerator node, a run that holds its own copy and training state on four more leaves room for exactly one further copy of the tables while it executes (@fig-ml-ops-dlrm-node-day). That copy can be a canary, a shadow, or the hot standby of @tbl-ml-ops-release-control-footprint, but not more than one of them. A team that releases and retrains on the same node must therefore schedule the two so that a retraining run never evicts the copy that makes rollback immediate.
 
@@ -2827,7 +2859,7 @@ This closed-form framework provides a first-order approximation for operational 
 
 ### Scheduled versus triggered retraining {#sec-ml-operations-scheduled-triggered-retraining-b51e}
 
-The interval derived in @eq-optimal-retrain fixes a calendar schedule from average drift, whereas the decision rule of @sec-ml-operations-retraining-decision-framework-e33d lets observed evidence decide when to run. Over a 365-day deployment on the ranking service, the two policies trace different sawtooths against a drift threshold of 0.88 accuracy (@fig-rotting-asset-curve)\index{Rotting asset curve!accuracy decay}. Under a scheduled policy (orange sawtooth), the model retrains at rigid 90-day intervals, repeatedly dipping below the quality floor before each reset. In contrast, a triggered policy (green sawtooth) initiates retraining the moment monitored accuracy touches the threshold, illustrating an idealized instantaneous reset; in practice the trigger is often a divergence or proxy signal calibrated against accuracy. Both curves are drawn from the temporal decay model of @eq-accuracy-decay. In deployment, sample collection, label arrival, training, validation, and rollout delays can carry accuracy below the trigger before recovery; the policy does not guarantee a performance floor.
+The interval derived in @eq-optimal-retrain fixes a calendar schedule from average drift, whereas the decision rule of @sec-ml-operations-retraining-decision-framework-e33d lets observed evidence decide when to run. Over a 365-day deployment on the ranking service, the two policies trace different sawtooths against a drift threshold of `{python} RankingDriftScenario.acc_week4_str` accuracy (@fig-rotting-asset-curve)\index{Rotting asset curve!accuracy decay}. Under a scheduled policy (orange sawtooth), the model retrains at rigid `{python} RetrainingInterval.scheduled_interval_attr_str` intervals, repeatedly dipping below the quality floor before each reset. In contrast, a triggered policy (green sawtooth) initiates retraining the moment monitored accuracy touches the threshold, illustrating an idealized instantaneous reset; in practice the trigger is often a divergence or proxy signal calibrated against accuracy. Both curves are drawn from the temporal decay model of @eq-accuracy-decay. In deployment, sample collection, label arrival, training, validation, and rollout delays can carry accuracy below the trigger before recovery; the policy does not guarantee a performance floor.
 
 ::: {#fig-rotting-asset-curve fig-env="figure" fig-pos="htb" fig-cap="**The Rotting Asset Curve**: An illustrative exponential accuracy decay under two maintenance policies, both drawn as sawtooths. The scheduled policy resets every 90 days regardless of accuracy and dips below the drift threshold before each reset, while the triggered policy resets on crossing that threshold and holds a higher floor in this zero-delay model. Real response delays and update quality must be measured; neither cadence is universal." fig-alt="Line chart of model accuracy vs. days since deployment. An orange scheduled-retraining sawtooth resets every 90 days, a green trigger-based sawtooth resets when it crosses a red dashed drift-threshold line, and both begin at 0.94 accuracy, the ranking service at launch."}
 
@@ -3119,7 +3151,61 @@ While cross-functional handoffs govern internal engineering execution, stakehold
 
 A frequent communication failure is the unconstrained request to "make the model more accurate." Model accuracy cannot be scaled independently of system costs. Boosting validation accuracy by two percentage points often requires moving to a significantly larger model architecture, incurring higher FLOP counts per sample, increasing memory bandwidth demands, and violating strict inference latency SLOs. Grounding improvement discussions in the Pareto frontier (principle \ref{pri-pareto-frontier}) forces explicit decisions among model accuracy, inference latency budgets, training compute costs, and dataset acquisition expenses.
 
-Translating statistical metrics into operational impact requires mapping errors to their consequences, which are rarely symmetric. Accuracy, ROC-AUC, and F1 treat errors symmetrically. The ranking service's errors differ in cost only mildly, so a separate illustrative case with a sharper asymmetry carries the argument. In an automated fraud detection pipeline, a false positive creates friction at checkout while a false negative allows unrecoverable theft. With missed fraud (\$500 per incident) five times as costly as a blocked legitimate user (\$100), the total cost across classification thresholds reaches its minimum near 0.34, well left of the symmetric 0.50 baseline (@fig-business-cost-curve).
+```{python}
+#| echo: false
+#| label: business-cost-curve-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BUSINESS COST CURVE OPTIMUM
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Stakeholder-communication paragraph that cites
+# │          @fig-business-cost-curve.
+# │
+# │ Goal:    Derive the cost ratio and the cost-minimizing threshold the prose
+# │          states, from the same error-rate model the figure draws.
+# │ Show:    Missed fraud at $500 is five times a blocked user at $100; the
+# │          total cost bottoms out near 0.34, against 0.50 with equal costs.
+# │ How:     Sigmoid error rates on the figure's 200-point threshold grid;
+# │          argmin of the weighted sum.
+# │
+# │ Note:    The figure cell below keeps its own copy of these parameters
+# │          (figure code is not edited in this pass); the guard pins both to
+# │          0.34.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim.fmt import check, fmt, fmt_usd
+
+# ┌── LEGO ───────────────────────────────────────────────
+class BusinessCostCurve:
+    """Cost-minimizing fraud threshold under asymmetric error costs."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    fp_cost = 100  # scenario assumption: dollars per blocked legitimate user
+    fn_cost = 500  # scenario assumption: dollars per missed fraud
+    steepness = 8  # scenario assumption: sigmoid steepness of both error rates
+    fp_center = 0.3  # scenario assumption: threshold where FP rate is one half
+    fn_center = 0.7  # scenario assumption: threshold where FN rate is one half
+    thresholds = np.linspace(0.01, 0.99, 200)  # the figure's threshold grid
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp_rate = 1 / (1 + np.exp(steepness * (thresholds - fp_center)))
+    fn_rate = 1 / (1 + np.exp(-steepness * (thresholds - fn_center)))
+    cost_ratio = fn_cost / fp_cost
+    opt_threshold = float(thresholds[np.argmin(fp_rate * fp_cost + fn_rate * fn_cost)])
+    equal_threshold = float(thresholds[np.argmin(fp_rate * fp_cost + fn_rate * fp_cost)])
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cost_ratio == 5, f"Prose says missed fraud is five times as costly, got {cost_ratio}.")
+    check(round(opt_threshold, 2) == 0.34, f"Prose says the optimum sits near 0.34, got {opt_threshold:.3f}.")
+    check(round(equal_threshold, 2) == 0.50, f"Prose says equal costs put the optimum at 0.50, got {equal_threshold:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    fp_cost_str = fmt_usd(fp_cost, precision=0, commas=False)
+    fn_cost_str = fmt_usd(fn_cost, precision=0, commas=False)
+    opt_threshold_str = fmt(opt_threshold, precision=2, commas=False)
+    equal_threshold_str = fmt(equal_threshold, precision=2, commas=False)
+```
+
+Translating statistical metrics into operational impact requires mapping errors to their consequences, which are rarely symmetric. Accuracy, ROC-AUC, and F1 treat errors symmetrically. The ranking service's errors differ in cost only mildly, so a separate illustrative case with a sharper asymmetry carries the argument. In an automated fraud detection pipeline, a false positive creates friction at checkout while a false negative allows unrecoverable theft. With missed fraud (`{python} BusinessCostCurve.fn_cost_str` per incident) five times as costly as a blocked legitimate user (`{python} BusinessCostCurve.fp_cost_str`), the total cost across classification thresholds reaches its minimum near `{python} BusinessCostCurve.opt_threshold_str`, well left of the symmetric `{python} BusinessCostCurve.equal_threshold_str` baseline (@fig-business-cost-curve).
 
 ::: {#fig-business-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Business Cost Curve**: An equal-class-weighted illustrative cost index vs. classification threshold. Technical metrics like ROC curves hide the economic reality: errors have different costs. Here, a false negative (missed fraud) costs \$500, while a false positive (blocked user) costs \$100. The system flags a transaction as fraud when its score exceeds the threshold, so a lower threshold flags more transactions. Because missing fraud is $5\times$ more costly, the optimal threshold shifts left of center, making the system more aggressive at flagging suspicious transactions and accepting more false positives to minimize expensive misses. With equal costs the optimum would sit at threshold = 0.50; the asymmetry pulls it toward threshold $\approx 0.34$. A population expected cost would also weight each term by class prevalence. MLOps tunes thresholds as costs and prevalence change." fig-alt="Line chart showing an equal-class-weighted illustrative cost index vs. classification threshold from 0 to 1. Three curves are plotted: false positive cost index (dashed blue) decreasing sigmoidally from left to right, false negative cost index (dashed red) increasing sigmoidally from left to right, and total cost index (solid violet) as their sum forming a U-shape. The optimal threshold is marked with a green dot left of center where the total index is minimized."}
 
@@ -3269,7 +3355,42 @@ An organization deploying its initial ML model might rely on a hand-run Jupyter 
 
 ### ML test score {#sec-ml-operations-assessing-technical-debt-ml-test-score-0099}
 
-Auditing the debt patterns of @tbl-technical-debt-summary and the controls built to pay them down requires a formal technical debt assessment rubric\index{Technical debt!assessment rubric} that turns subjective readiness debates into measurable engineering criteria. Without a balanced rubric, a team can spend months perfecting offline hyperparameter sweeps and model unit tests while leaving production monitoring and schema checks unbuilt, only to suffer a multi-week silent outage on the first upstream database change. The ML Test Score\index{ML test score!production readiness} [@breck2017] structures this evaluation across data, model, infrastructure, and monitoring test suites, with seven tests in each of the four categories (28 in total). A documented manual test whose results are distributed receives 0.5 points, an automated test run repeatedly receives 1 point, and an unperformed test receives 0. Rather than averaging across suites, the rubric sets the composite score to the weakest category,
+```{python}
+#| echo: false
+#| label: ml-test-score-size-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ML TEST SCORE RUBRIC SIZE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-ml-operations-assessing-technical-debt-ml-test-score-0099
+# │          opening paragraph and the @tbl-ml-test-score caption.
+# │
+# │ Goal:    Derive the rubric's total test count from its structure.
+# │ Show:    Seven tests in each of four categories, 28 in total.
+# │ How:     Categories times tests per category, per @breck2017.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MLTestScoreSize:
+    """Total test count of the ML Test Score rubric (Breck et al., 2017)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    categories = 4  # data, model, infrastructure, monitoring (breck2017)
+    tests_per_category = 7  # tests per category in the published rubric (breck2017)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    total_tests = categories * tests_per_category
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(categories == 4, "Prose says four categories.")
+    check(tests_per_category == 7, "Prose says seven tests in each category.")
+    check(total_tests == 28, f"Prose says 28 tests in total, got {total_tests}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    total_tests_str = fmt_int(total_tests, commas=False)
+```
+
+Auditing the debt patterns of @tbl-technical-debt-summary and the controls built to pay them down requires a formal technical debt assessment rubric\index{Technical debt!assessment rubric} that turns subjective readiness debates into measurable engineering criteria. Without a balanced rubric, a team can spend months perfecting offline hyperparameter sweeps and model unit tests while leaving production monitoring and schema checks unbuilt, only to suffer a multi-week silent outage on the first upstream database change. The ML Test Score\index{ML test score!production readiness} [@breck2017] structures this evaluation across data, model, infrastructure, and monitoring test suites, with seven tests in each of the four categories (`{python} MLTestScoreSize.total_tests_str` in total). A documented manual test whose results are distributed receives 0.5 points, an automated test run repeatedly receives 1 point, and an unperformed test receives 0. Rather than averaging across suites, the rubric sets the composite score to the weakest category,
 $$\text{ML Test Score} = \min(\text{Score}_{\text{data}}, \text{Score}_{\text{model}}, \text{Score}_{\text{infra}}, \text{Score}_{\text{mon}})$$
 where each category score $\text{Score}_{\text{cat}} \in [0, 7]$. A deployment with exhaustive offline model validation ($\text{Score}_{\text{model}} = 7$) but absent production telemetry ($\text{Score}_{\text{mon}} = 0$) receives an overall score of 0. The min operator is deliberate, because an unmonitored serving path can deliver corrupted predictions despite strong offline benchmark accuracy.
 
@@ -3299,7 +3420,7 @@ Three of the four suites partition production risk along the D·A·M axes\index{
 |                          | Training and serving features are not skewed               | Training-serving skew detection                  |
 |                          | Model staleness is monitored                               | Alerts and evidence-based retraining review      |
 
-: **ML Test Score Checklist**: Representative production-readiness tests from the ML Test Score rubric. The original rubric contains 28 tests grouped into four sections of seven tests each; section scores expose whether production risk comes from data validation, model validation, infrastructure, or monitoring rather than hiding the weakness in a single total. Based on @breck2017. {#tbl-ml-test-score tbl-colwidths="[17,42,41]"}
+: **ML Test Score Checklist**: Representative production-readiness tests from the ML Test Score rubric. The original rubric contains `{python} MLTestScoreSize.total_tests_str` tests grouped into four sections of seven tests each; section scores expose whether production risk comes from data validation, model validation, infrastructure, or monitoring rather than hiding the weakness in a single total. Based on @breck2017. {#tbl-ml-test-score tbl-colwidths="[17,42,41]"}
 
 ```{=latex}
 \endgroup

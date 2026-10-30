@@ -86,6 +86,7 @@ from mlsysim.fmt import (
     fmt_carbon_intensity,
     fmt_compute_efficiency,
     fmt_multiple_range,
+    fmt_qty_range,
 )
 
 class HwAccelSetup:
@@ -105,6 +106,7 @@ class HwAccelSetup:
     # OUTPUT
     h100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     cpu_gap_range_mult_str = fmt_multiple_range(round(cpu_gap_min, -1), round(cpu_gap_max, -1), precision=0, commas=False)
+    cpu_baseline_range_str = fmt_qty_range(gap.baseline_low, gap.baseline_high, TFLOP / second, precision=0, commas=False)
 ```
 
 ::: {.column-margin}
@@ -123,7 +125,7 @@ GPT-2 XL decoding one token at a time supplies the single contrast. It carries t
 
 ***Hardware acceleration***\index{Hardware acceleration!definition} is the practice of mapping work from general-purpose execution onto specialized processors or functional units optimized for a narrower operation class. For ML workloads, that specialization commonly trades some programmability for the compute density $(\PeakRate)$ and performance-per-watt gains that regular tensor operations can exploit.
 
-1.  **Significance**: An H100 GPU delivers `{python} HwAccelSetup.h100_fp16_tflop_per_s_str` for dense FP16/BF16 matrix multiplication; against this chapter's illustrative 1–2 TFLOP/s reference-CPU baseline, this is a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap. Its 80 billion transistors devote far more silicon to parallel arithmetic than to branch prediction, out-of-order scheduling, and large caches [@choquette2023].
+1.  **Significance**: An H100 GPU delivers `{python} HwAccelSetup.h100_fp16_tflop_per_s_str` for dense FP16/BF16 matrix multiplication; against this chapter's illustrative `{python} HwAccelSetup.cpu_baseline_range_str` reference-CPU baseline, this is a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap. Its 80 billion transistors devote far more silicon to parallel arithmetic than to branch prediction, out-of-order scheduling, and large caches [@choquette2023].
 2.  **Distinction**: A general-purpose CPU is designed for flexible execution, low-latency control, and varied workloads. An accelerator instead concentrates resources on a narrower operation class, so it achieves its gains only when the workload exposes the supported operations and enough parallel work to keep its arithmetic units busy.
 3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is bounded above by the lower of the compute ceiling and what memory bandwidth can feed (the roofline constraint, developed later in this chapter). A low-arithmetic-intensity kernel can therefore sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
 
@@ -736,7 +738,7 @@ The pressure to specialize has grown because model demand has outrun single-devi
 # │ How: Compute delivered GFLOP/s at the upper end of an assumed utilization range.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_flop_rate, fmt_ops_rate
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_flop_rate, fmt_ops_rate, fmt_multiple
 
 class CpuMlInefficiency:
     """CPU vs accelerator efficiency gap for ML workloads."""
@@ -748,9 +750,12 @@ class CpuMlInefficiency:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cpu_delivered_flops = cpu_peak_flops * (cpu_utilization_max_value / 100)
+    p100_fp16_peak = Hardware.Cloud.P100.compute.precision_flops["fp16"]
+    v100_over_p100_fp16 = (Hardware.Cloud.V100.compute.peak_flops / p100_fp16_peak).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(cpu_delivered_flops.to(GFLOP / second).magnitude) == 100, f"Delivered CPU GFLOP/s mismatch: {cpu_delivered_flops}")
+    check(round(v100_over_p100_fp16) == 6, f"Footnote calls the P100-to-V100 FP16 step roughly 6x, got {v100_over_p100_fp16:.2f}x")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cpu_utilization_min_str = fmt_percent(round(cpu_utilization_min_value / 100, 2), precision=0, commas=False, style='prose')
@@ -760,6 +765,8 @@ class CpuMlInefficiency:
     # A100/V100/Mobile specs for footnote comparison
     a100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     v100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.V100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    p100_fp16_peak_str = fmt(p100_fp16_peak.to(TFLOP / second).magnitude, precision=1, commas=False)
+    v100_over_p100_fp16_mult_str = fmt_multiple(round(v100_over_p100_fp16), precision=0, commas=False)
     a100_tf32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.precision_flops['tf32'], unit=TFLOP / second, precision=0, commas=False)
     mobile_tops_str = fmt_ops_rate(Hardware.Mobile.iPhone15Pro.compute.peak_flops, unit=TOPS, precision=0, commas=False)
 ```
@@ -807,7 +814,7 @@ class MlAcceleratorCallout:
     hbm_vs_host_dram_mult_str = fmt_multiple(hbm_vs_host_dram, precision=1, commas=False)
 ```
 
-The fleet projection exposed how little of a CPU's rated throughput survives on dense tensor layers. Take the chapter's reference CPU, the low end of the 1–2 TFLOP/s baseline used in the definition of hardware acceleration, and assume it sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload. The upper endpoint then delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). CPUs optimize for single-thread performance and irregular memory access, whereas neural networks require extensive parallelism and predictable data streams, and a single layer that touches gigabytes of parameters overwhelms cache hierarchies designed for smaller working sets.
+The fleet projection exposed how little of a CPU's rated throughput survives on dense tensor layers. Take the chapter's reference CPU, the low end of the `{python} HwAccelSetup.cpu_baseline_range_str` baseline used in the definition of hardware acceleration, and assume it sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload. The upper endpoint then delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). CPUs optimize for single-thread performance and irregular memory access, whereas neural networks require extensive parallelism and predictable data streams, and a single layer that touches gigabytes of parameters overwhelms cache hierarchies designed for smaller working sets.
 
 ```{python}
 #| echo: false
@@ -832,20 +839,29 @@ class EnergyGapAnchor:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     dram_access = Hardware.Tech.Memory.DRAM.energy_per_access
     fp32_mul = Hardware.Tech.Op.FlopFp32.energy
+    dram_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+    fp16_op = Hardware.Tech.Op.FlopFp16.energy
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dram_vs_fp32 = dram_access.to(pJ).magnitude / fp32_mul.to(pJ / flop).magnitude
+    # The iron-law comparison: one DRAM byte (a quarter of the 32-bit access) vs. one FP16 operation
+    dram_byte_vs_fp16 = dram_byte.to(pJ / byte).magnitude / fp16_op.to(pJ / flop).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(100 < dram_vs_fp32 < 1000, "Prose calls the gap roughly two orders of magnitude.")
+    check(
+        abs(dram_byte.to(pJ / byte).magnitude * 4 - dram_access.to(pJ).magnitude) < 1e-6, "Prose calls one DRAM byte a quarter of the 32-bit access."
+    )
+    check(round(dram_byte_vs_fp16) == 145, f"Iron-law byte-vs-FP16 gap should be 145-fold, got {dram_byte_vs_fp16:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     dram_pj_str = fmt_energy(dram_access, unit=pJ, precision=0, commas=False)
     fp32_mul_pj_str = fmt_energy(fp32_mul * flop, unit=pJ, precision=1, commas=False)
     dram_vs_fp32_mult_str = fmt_multiple(round(dram_vs_fp32), precision=0, commas=False)
+    dram_byte_vs_fp16_str = fmt_int(round(dram_byte_vs_fp16), commas=False)
 ```
 
-The deeper mismatch is energy\index{Energy!data movement cost}. Per event, accessing a 32-bit value from DRAM costs about `{python} EnergyGapAnchor.dram_pj_str` in the 45 nm estimates of @horowitz2014, roughly `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the `{python} EnergyGapAnchor.fp32_mul_pj_str` of one FP32 multiply, the same ratio @tbl-energy-movement-cost reported for the data pipeline. The roughly 145-fold gap quoted with the iron law in @sec-introduction-iron-law-ml-systems-c32a comes from the same table but compared one DRAM byte, a quarter of this 32-bit access, with one FP16 operation. Exact values vary by technology node and design, but a gap of two orders of magnitude, the energy-movement principle (\ref{pri-energy-movement}), makes data movement a primary optimization target [@sze2017]. Purpose-built accelerators such as TPUs sustain high utilization on dense kernels because systolic arrays and similar structures maximize data reuse while minimizing movement.
+The deeper mismatch is energy\index{Energy!data movement cost}. Per event, accessing a 32-bit value from DRAM costs about `{python} EnergyGapAnchor.dram_pj_str` in the 45 nm estimates of @horowitz2014, roughly `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the `{python} EnergyGapAnchor.fp32_mul_pj_str` of one FP32 multiply, the same ratio @tbl-energy-movement-cost reported for the data pipeline. The roughly `{python} EnergyGapAnchor.dram_byte_vs_fp16_str`-fold gap quoted with the iron law in @sec-introduction-iron-law-ml-systems-c32a comes from the same table but compared one DRAM byte, a quarter of this 32-bit access, with one FP16 operation. Exact values vary by technology node and design, but a gap of two orders of magnitude, the energy-movement principle (\ref{pri-energy-movement}), makes data movement a primary optimization target [@sze2017]. Purpose-built accelerators such as TPUs sustain high utilization on dense kernels because systolic arrays and similar structures maximize data reuse while minimizing movement.
 
 Data access can dominate the energy budget of a memory-intensive kernel.[^fn-von-neumann-bottleneck] On a logarithmic scale, representative 45 nm operation energies span more than four orders of magnitude, from an INT8 addition ($0.03\text{ pJ}$) and an FP32 multiply ($3.7\text{ pJ}$) to an off-chip DRAM fetch ($640\text{ pJ}$) (@fig-energy-hierarchy). This ladder is the chapter's single reference for what moving a value costs; later sections cite it rather than restate it.
 
@@ -1472,7 +1488,7 @@ For a single transformer attention head over a `{python} AttentionHeadTensorCore
 
 Assume, for illustration, that the Tensor Cores of a single streaming multiprocessor complete that `{python} AttentionHeadTensorCoreCalc.seq_len_str`-token attention head in `{python} AttentionHeadTensorCoreCalc.tensor_core_ms_str`, an implied rate of about `{python} AttentionHeadTensorCoreCalc.tensor_rate_str` and a small slice of a full GPU's tensor peak. The tiled path is then roughly `{python} AttentionHeadTensorCoreCalc.tensor_speedup_mult_str` faster than the scalar baseline, and that speedup comes not from a higher clock frequency but from hardwiring tile-level data reuse into the execution datapath. Whether a workload reaches that rate depends on tile reuse, matrix shape, numeric precision, and memory delivery.
 
-[^fn-dally-gpu-precision]: **Reduced-precision ML**\index{Precision!reduced, architectural trade-off}: Halving operand width halves the bytes per stored element and can support denser arithmetic, although realized throughput depends on the available datapath and kernel [@dally2021; @dally2023]. NVIDIA's transition from Pascal P100 vector arithmetic to mixed-precision Tensor Cores in Volta V100 increased advertised peak FP16 throughput from about 21.2 to `{python} CpuMlInefficiency.v100_fp16_tflop_per_s_str`, roughly 6$\times$ across those products [@nvidia_tensors_fp16_2017]. Precision selection must preserve numerical behavior and use an efficient supported path; the smallest format is not automatically the best one.
+[^fn-dally-gpu-precision]: **Reduced-precision ML**\index{Precision!reduced, architectural trade-off}: Halving operand width halves the bytes per stored element and can support denser arithmetic, although realized throughput depends on the available datapath and kernel [@dally2021; @dally2023]. NVIDIA's transition from Pascal P100 vector arithmetic to mixed-precision Tensor Cores in Volta V100 increased advertised peak FP16 throughput from about `{python} CpuMlInefficiency.p100_fp16_peak_str` to `{python} CpuMlInefficiency.v100_fp16_tflop_per_s_str`, roughly `{python} CpuMlInefficiency.v100_over_p100_fp16_mult_str` across those products [@nvidia_tensors_fp16_2017]. Precision selection must preserve numerical behavior and use an efficient supported path; the smallest format is not automatically the best one.
 
 [^fn-tensor-core-alignment]: **Tensor Core dimension alignment**\index{Tensor Core!dimension alignment}: NVIDIA Tensor Cores are most efficient when matrix dimensions are aligned to precision- and architecture-specific multiples, such as multiples of 8 or 16 for common FP16/BF16/INT8 paths. Modern cuBLAS and cuDNN can still use Tensor Cores for many nonaligned dimensions, but poorly aligned shapes may trigger less efficient kernels, require padding, or reduce effective throughput [@nvidia_cublas; @nvidia2021cudnn]. This is why model architects often choose embedding and channel dimensions such as 512 rather than 500 and why batch-size-1 inference may fail to reach peak Tensor Core utilization: alignment and arithmetic intensity jointly determine whether the hardware's matrix engines stay full.
 
@@ -3037,6 +3053,8 @@ class InterconnectHierarchy:
     # Chip-to-Chip
     nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
     nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_a100_per_dir = Hardware.Cloud.A100.nvlink.bandwidth_per_direction
+    nvlink_h100_per_dir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
 
     # Host-to-Device
     pcie_gen4 = Hardware.Cloud.A100.interconnect.bandwidth
@@ -3058,10 +3076,17 @@ class InterconnectHierarchy:
     check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_bw, "Bandwidth hierarchy violated. HBM > NVLink > PCIe > Network")
     check(taper_hbm > taper_nvlink > taper_pcie > taper_net, "bandwidth taper HBM > NVLink > PCIe > Network must hold")
     check(taper_pcie / taper_net < 2, "PCIe and the NIC are comparable, so the equation uses > rather than >> for that step")
+    check(
+        abs((2 * nvlink_a100_per_dir / nvlink_a100).to("").magnitude - 1) < 1e-6
+        and abs((2 * nvlink_h100_per_dir / nvlink_h100).to("").magnitude - 1) < 1e-6,
+        "NVLink footnote: per-direction bandwidth is half the bidirectional aggregate",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink_a100, unit=GB / second, precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
+    nvlink_bidir_range_str = fmt_qty_range(nvlink_a100, nvlink_h100, GB / second, precision=0, commas=False)
+    nvlink_per_dir_range_str = fmt_qty_range(nvlink_a100_per_dir, nvlink_h100_per_dir, GB / second, precision=0, commas=False)
 
     # Bandwidth-taper equation — one consistent chip (H100-class) so HBM, NVLink,
     # PCIe (Gen5), and the NDR network link cannot mix incompatible generations.
@@ -3081,7 +3106,7 @@ Within a multi-accelerator server node, two interconnect tiers define this bandw
 1. **Device-device interconnect (NVLink/Infinity Fabric)**: Modern multi-GPU nodes use specialized high-speed bridges like NVLink[^fn-nvlink-interconnect-bandwidth]\index{NVLink!GPU interconnect}\index{GPU Interconnect!switching fabric}\index{Infinity Fabric!AMD interconnect} to connect accelerators directly, bypassing the host CPU. Bandwidth ranges from `{python} InterconnectHierarchy.nvlink_a100_gb_per_s_str` to `{python} InterconnectHierarchy.nvlink_h100_gb_per_s_str` per GPU [@NVIDIA2020nvlink; @choquette2023]. This link matters whenever tensors must move between accelerators within one server, including model partitioning, activation exchange, and gradient synchronization during training. The architectural principle is the boundary: traffic that stays on the accelerator fabric is far cheaper than traffic that falls back through the host.
 2. **Host-device interconnect (PCIe)**: The link between the CPU and the accelerator. Bandwidth ranges from 32 to 64 GB/s (PCIe Gen4/Gen5)\index{PCIe!host-device interconnect}\index{PCIe!bandwidth generations}. Host-staged training data can bottleneck here, although resident data, direct storage or network I/O, and coherent accelerator links can use other paths. Multi-GPU servers may also provide multiple PCIe links rather than a single shared 64 GB/s path.
 
-[^fn-nvlink-interconnect-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect exists to keep accelerator-to-accelerator traffic off PCIe when tensors must move inside a server. Its 600--900 GB/s aggregate bidirectional bandwidth is roughly 300--450 GB/s per direction under balanced full-duplex traffic, several times the directional bandwidth of a standard PCIe link, so workloads with frequent cross-device tensor movement can remain in the fast part of the bandwidth taper [@NVIDIA2020nvlink; @choquette2023]. Training algorithms determine how much tensor traffic must cross this link; the hardware fact needed here is the bandwidth gap. \index{NVLink!training scaling}
+[^fn-nvlink-interconnect-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect exists to keep accelerator-to-accelerator traffic off PCIe when tensors must move inside a server. Its `{python} InterconnectHierarchy.nvlink_bidir_range_str` aggregate bidirectional bandwidth is roughly `{python} InterconnectHierarchy.nvlink_per_dir_range_str` per direction under balanced full-duplex traffic, several times the directional bandwidth of a standard PCIe link, so workloads with frequent cross-device tensor movement can remain in the fast part of the bandwidth taper [@NVIDIA2020nvlink; @choquette2023]. Training algorithms determine how much tensor traffic must cross this link; the hardware fact needed here is the bandwidth gap. \index{NVLink!training scaling}
 
 A third tier, the network link from one server to others, continues the taper beyond the node (@sec-hardware-acceleration-multichip-scaling-c649). Together the levels produce a characteristic bandwidth taper:
 
@@ -3830,6 +3855,8 @@ class ResNet50Int8Crossing:
 
     # One read of input and weights, one write of output, at batch 32
     s3_fp16 = stage3.traffic_intensity
+    s3_activation_bytes = stage3.batch_input_bytes + stage3.batch_output_bytes
+    s3_weight_bytes = stage3.weight_bytes
     s3_int8 = Scenarios.ResNet50Stage3ConvBatch32Int8.traffic_intensity
     s3_mixed = Scenarios.ResNet50Stage3ConvBatch32Int8Weights.traffic_intensity
     s2_fp16 = Scenarios.ResNet50Stage2ConvBatch32.traffic_intensity
@@ -3847,6 +3874,13 @@ class ResNet50Int8Crossing:
     check(s3_mixed < r8, "Stage-3 3x3 conv fed FP16 activations must fall below the INT8 ridge.")
     check(0.9 * r16 < s2_fp16 < r16 and 0.9 * r8 < s2_int8 < r8, "Stage-2 3x3 conv must sit just below both ridges.")
     check(p2_int8 < 0.25 * r8, "Stage-2 1x1 expansion must sit far below both ridges.")
+    check(
+        abs(s3_activation_bytes.to(MB).magnitude - 12.8) < 0.05,
+        f"Stage-3 activation traffic should be about 12.8 MB, got {s3_activation_bytes.to(MB).magnitude:.2f}",
+    )
+    check(
+        abs(s3_weight_bytes.to(MB).magnitude - 0.3) < 0.05, f"Stage-3 FP16 weights should be about 0.3 MB, got {s3_weight_bytes.to(MB).magnitude:.2f}"
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     ridge_fp16_str = fmt_arithmetic_intensity(ridge_fp16, unit=flop / byte, commas=False)
@@ -3860,6 +3894,8 @@ class ResNet50Int8Crossing:
     s2_int8_str = fmt_int(round(s2_int8), commas=False)
     p2_fp16_str = fmt_int(round(p2_fp16), commas=False)
     p2_int8_str = fmt_int(round(p2_int8), commas=False)
+    s3_activation_mb_str = fmt_memory(s3_activation_bytes, unit=MB, precision=1, commas=False)
+    s3_weight_mb_str = fmt_memory(s3_weight_bytes, unit=MB, precision=1, commas=False)
 ```
 
 ::: {#nbk-hw-acceleration-int8-ridge-crossing .callout-notebook title="When INT8 moves a layer below the ridge"}
@@ -3870,7 +3906,7 @@ class ResNet50Int8Crossing:
 
 **Three layers at batch `{python} ResNet50Int8Crossing.batch_str`** (operations per byte, one read of input and weights and one write of the output):
 
-- **Stage-3 $3{\times}3$ convolution** (the layer of notebook \ref{nbk-conv-analysis}): `{python} ResNet50Int8Crossing.s3_fp16_str` at FP16, above the FP16 ridge. With INT8 activations it reaches `{python} ResNet50Int8Crossing.s3_int8_str`, above the INT8 ridge. If its activations stay FP16 between layers, as when the kernel reads and writes 16-bit tensors for FP16 neighbors, its intensity rises only to `{python} ResNet50Int8Crossing.s3_mixed_str`, well below the INT8 ridge. At batch `{python} ResNet50Int8Crossing.batch_str`, the input and output activation tensors together account for roughly 12.8 MB of traffic while the shared $3{\times}3$ weight tensor is only about 0.3 MB in FP16, so halving weight bytes alone barely changes total memory traffic.
+- **Stage-3 $3{\times}3$ convolution** (the layer of notebook \ref{nbk-conv-analysis}): `{python} ResNet50Int8Crossing.s3_fp16_str` at FP16, above the FP16 ridge. With INT8 activations it reaches `{python} ResNet50Int8Crossing.s3_int8_str`, above the INT8 ridge. If its activations stay FP16 between layers, as when the kernel reads and writes 16-bit tensors for FP16 neighbors, its intensity rises only to `{python} ResNet50Int8Crossing.s3_mixed_str`, well below the INT8 ridge. At batch `{python} ResNet50Int8Crossing.batch_str`, the input and output activation tensors together account for roughly `{python} ResNet50Int8Crossing.s3_activation_mb_str` of traffic while the shared $3{\times}3$ weight tensor is only about `{python} ResNet50Int8Crossing.s3_weight_mb_str` in FP16, so halving weight bytes alone barely changes total memory traffic.
 - **Stage-2 $3{\times}3$ convolution** ($56{\times}56$ positions, 64 channels in and out): `{python} ResNet50Int8Crossing.s2_fp16_str` at FP16 and `{python} ResNet50Int8Crossing.s2_int8_str` at INT8, just below the ridge in both precisions.
 - **Stage-2 $1{\times}1$ expansion** ($56{\times}56$ positions, 64 channels in and 256 out): `{python} ResNet50Int8Crossing.p2_fp16_str` at FP16 and `{python} ResNet50Int8Crossing.p2_int8_str` at INT8, far below the ridge in both.
 
@@ -3937,6 +3973,9 @@ class DenseLayerAnalysisCalc:
     dense_util_pct_str = fmt_percent(dense_util_pct / 100, precision=1, commas=False, style='prose')
     h100_bw_gb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=GB / second, precision=0, commas=True)
     h100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.H100.ridge_point(), unit=flop / byte, commas=False)
+    dense_in_str = fmt_int(dense_in)
+    dense_out_str = fmt_int(dense_out)
+    dense_batch_str = fmt_int(dense_batch)
     # Calc-line LHS products pinned to cell constants (inline {python} cannot
     # evaluate inside $...$): each renders the explicit derivation expression.
     dense_matmul_dims_math = fmt_math(f"({dense_batch} \\times {dense_in}) \\times ({dense_in} \\times {dense_out})")
@@ -3948,7 +3987,7 @@ class DenseLayerAnalysisCalc:
 
 ::: {#nbk-hw-acceleration-dense-layer-analysis .callout-notebook title="Dense layer analysis"}
 
-Consider ResNet-50's final fully connected layer\index{Dense Layer!roofline analysis}\index{Roofline Analysis!dense layer}, which maps 2,048 pooled features to 1,000 class scores for a batch of 32 images on the same H100:
+Consider ResNet-50's final fully connected layer\index{Dense Layer!roofline analysis}\index{Roofline Analysis!dense layer}, which maps `{python} DenseLayerAnalysisCalc.dense_in_str` pooled features to `{python} DenseLayerAnalysisCalc.dense_out_str` class scores for a batch of `{python} DenseLayerAnalysisCalc.dense_batch_str` images on the same H100:
 
 **Computational requirements**:
 
@@ -3974,11 +4013,11 @@ $\ArithmeticIntensity$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str`
 This intensity sits below the H100's ridge point of `{python} DenseLayerAnalysisCalc.h100_ridge_str`, making this operation memory bound under the stated traffic model. Attainable performance:
 $\AttainableComputeRate$ = `{python} DenseLayerAnalysisCalc.h100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str` = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
 
-**Systems insight**: Attainable throughput is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, so at batch 32 the memory wall caps this layer long before the Tensor Cores do.
+**Systems insight**: Attainable throughput is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, so at batch `{python} DenseLayerAnalysisCalc.dense_batch_str` the memory wall caps this layer long before the Tensor Cores do.
 
 :::
 
-The dense layer's lower arithmetic intensity stems from limited parameter reuse. While a convolutional kernel is reused across every spatial location in an activation map, a dense weight matrix is reused only across the batch dimension. At a batch size of 32, each fetched weight contributes to 32 sample products in this operation. When the weights stream from HBM on each invocation, as modeled, the bandwidth ceiling caps throughput at `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capacity. The fraction is a bound rather than a measured stall count, and a layer whose weights stay cached between invocations would do better. The same arithmetic explains why transformer inference at low batch sizes is governed by memory bandwidth rather than arithmetic capability, a regime the throughput-ceiling notebook below quantifies for GPT-2.
+The dense layer's lower arithmetic intensity stems from limited parameter reuse. While a convolutional kernel is reused across every spatial location in an activation map, a dense weight matrix is reused only across the batch dimension. At a batch size of `{python} DenseLayerAnalysisCalc.dense_batch_str`, each fetched weight contributes to `{python} DenseLayerAnalysisCalc.dense_batch_str` sample products in this operation. When the weights stream from HBM on each invocation, as modeled, the bandwidth ceiling caps throughput at `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capacity. The fraction is a bound rather than a measured stall count, and a layer whose weights stay cached between invocations would do better. The same arithmetic explains why transformer inference at low batch sizes is governed by memory bandwidth rather than arithmetic capability, a regime the throughput-ceiling notebook below quantifies for GPT-2.
 
 While small-batch matrix multiplications suffer from restricted parameter reuse, elementwise and reduction operators represent an even more acute memory bottleneck. Operations such as layer normalization, activation functions, and residual additions perform only a few arithmetic operations per element loaded from memory, driving arithmetic intensity to its physical floor:
 
@@ -4039,6 +4078,7 @@ class LayernormAnalysisCalc:
     ln_output_mb_str = fmt_memory(ln_output_memory, unit=MB, precision=1, commas=False)
     ln_total_mb_str = fmt_memory(ln_total_memory, unit=MB, precision=1, commas=False)
     ln_ai_str = fmt(ln_ai, precision=1, commas=False)
+    ln_ai_rounded_str = fmt_arithmetic_intensity(round(ln_ai) * flop / byte, unit=flop / byte, precision=0, commas=False)
     ln_ridge_gap_mult_str = fmt_multiple(round(ln_ridge_gap), commas=False, precision=0)
     ln_attainable_tflop_per_s_str = fmt_flop_rate(ln_attainable, unit=TFLOP / second, precision=1, commas=False)
     h100_bw_gb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=GB / second, precision=0, commas=True)
@@ -4084,7 +4124,7 @@ $\AttainableComputeRate$ = `{python} LayernormAnalysisCalc.h100_bw_gb_per_s_str`
 
 :::
 
-Standalone normalization performs minimal arithmetic relative to the memory traffic it generates, as the LayerNorm\index{Roofline Analysis!layer normalization} analysis demonstrates. Under the modeled unfused HBM read/write boundary, the implementation performs approximately 2 FLOP/byte, giving a low bandwidth ceiling relative to the tensor peak. Reaching that ceiling still requires enough parallel work and an efficient reduction. Cache residency changes the physical HBM byte count and can shift the relevant bound to another memory interface. In the D·A·M framework, when the machine constraint is a memory bandwidth wall, the algorithmic response is kernel fusion, which collapses adjacent projections, bias additions, normalization, and activations into one kernel so that intermediate values stay in registers or SRAM. Fusion pays off when the grouping preserves numerical behavior and fits the local register and SRAM budget, and profiling confirms that the saved traffic outweighs any loss of occupancy.
+Standalone normalization performs minimal arithmetic relative to the memory traffic it generates, as the LayerNorm\index{Roofline Analysis!layer normalization} analysis demonstrates. Under the modeled unfused HBM read/write boundary, the implementation performs approximately `{python} LayernormAnalysisCalc.ln_ai_rounded_str`, giving a low bandwidth ceiling relative to the tensor peak. Reaching that ceiling still requires enough parallel work and an efficient reduction. Cache residency changes the physical HBM byte count and can shift the relevant bound to another memory interface. In the D·A·M framework, when the machine constraint is a memory bandwidth wall, the algorithmic response is kernel fusion, which collapses adjacent projections, bias additions, normalization, and activations into one kernel so that intermediate values stay in registers or SRAM. Fusion pays off when the grouping preserves numerical behavior and fits the local register and SRAM budget, and profiling confirms that the saved traffic outweighs any loss of occupancy.
 
 ### Optimization by intensity regime {#sec-hardware-acceleration-optimization-intensity-regime-cb3a}
 
@@ -4535,7 +4575,42 @@ $$
 $$
 where $\ParallelLoopCount$ is the number of loops selected for parallel execution; three of six loops already give $6!/3! = 120$ candidates, each with different demands on synchronization, interconnect bandwidth, and PE utilization.
 
-Memory placement is the third dimension, and physical capacity bounds it. In a toy model where five tensor structures can each be assigned to one of four storage handling choices at a single hierarchy level, a single level already yields $4^5 = 1{,}024$ placement combinations, and choosing independently across three memory levels expands the unconstrained count to $(4^5)^3 = 4^{15}$ placements. Because an off-chip DRAM fetch costs roughly 128$\times$ more energy than a read from an 8 KB SRAM array (@fig-energy-hierarchy), where each tensor resides directly dictates the achieved arithmetic intensity. Yet an operand tile can remain in on-chip SRAM only if its working set fits the allocated buffer. Larger resident tiles raise reuse but consume scarce capacity and register pressure, potentially reducing thread concurrency or forcing spills to slower tiers.
+```{python}
+#| echo: false
+#| label: placement-energy-gap-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DRAM VS. SRAM ACCESS ENERGY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Memory-placement paragraph in the mapping search-space discussion
+# │          (cites @fig-energy-hierarchy).
+# │
+# │ Goal: Keep the DRAM-fetch vs. 8 KB SRAM-read energy ratio executable.
+# │ Show: An off-chip DRAM access costs roughly 128× an 8 KB SRAM read.
+# │ How: Divide the registry per-access energies (Horowitz 45 nm).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import pJ
+from mlsysim.fmt import check, fmt_multiple
+
+class PlacementEnergyGap:
+    """DRAM access vs. 8 KB SRAM read energy, the same pair @fig-energy-hierarchy annotates."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dram_access = Hardware.Tech.Memory.DRAM.energy_per_access
+    sram_8kb_read = Hardware.Tech.Memory.SRAM_8KB.energy_per_access
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dram_vs_sram = (dram_access / sram_8kb_read).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(dram_vs_sram) == 128, f"Prose and figure call the DRAM/SRAM gap roughly 128x, got {dram_vs_sram:.1f}x")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dram_vs_sram_mult_str = fmt_multiple(round(dram_vs_sram), precision=0, commas=False)
+```
+
+Memory placement is the third dimension, and physical capacity bounds it. In a toy model where five tensor structures can each be assigned to one of four storage handling choices at a single hierarchy level, a single level already yields $4^5 = 1{,}024$ placement combinations, and choosing independently across three memory levels expands the unconstrained count to $(4^5)^3 = 4^{15}$ placements. Because an off-chip DRAM fetch costs roughly `{python} PlacementEnergyGap.dram_vs_sram_mult_str` more energy than a read from an 8 KB SRAM array (@fig-energy-hierarchy), where each tensor resides directly dictates the achieved arithmetic intensity. Yet an operand tile can remain in on-chip SRAM only if its working set fits the allocated buffer. Larger resident tiles raise reuse but consume scarce capacity and register pressure, potentially reducing thread concurrency or forcing spills to slower tiers.
 
 ::: {.column-margin}
 ![](images/svg/vol1_hw_acceleration_margin_003.svg){width="100%" fig-alt="Three gray bars on a log scale from 1, each counting choices at a single memory level using the section's separate toy examples: memory placement at 4 to the 5th, or 1,024; loop ordering at 7 factorial, or 5,040; and parallelization at 6 factorial over 3 factorial, or 120."}
@@ -4670,9 +4745,19 @@ class TilingPrinciple:
     # Step 2: Each tile of weights is loaded once and used for 'layer_dim' MACs
     reuse_factor = array_dim
 
+    # Step 3: Fringe penalty when one dimension overshoots the tile by one element
+    fringe_dim = array_dim + 1  # one column past the tile width
+    fringe_idle_units = 2 * array_dim - fringe_dim  # idle lanes in the second tile
+    fringe_util_1d = fringe_dim / (2 * array_dim)  # one misaligned axis
+    fringe_util_2d = fringe_util_1d**2  # two misaligned axes
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(output_tiles == 1024, f"Output tiles for 4096/128 should be 1024. Got {output_tiles:.0f}")
     check(tile_products == 32768, f"Tile products for 4096/128 should be 32768. Got {tile_products:.0f}")
+    # The fringe paragraph writes $129/256$ and $129 \times 129$ in math, so pin the tile width
+    check(array_dim == 128, f"Fringe-penalty math assumes a 128-wide tile. Got {array_dim}")
+    check(round(fringe_util_1d * 100) == 50, f"One-axis fringe utilization should be about 50 percent, got {fringe_util_1d:.3f}")
+    check(round(fringe_util_2d * 100) == 25, f"Two-axis fringe utilization should be about 25 percent, got {fringe_util_2d:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     layer_dim_str = fmt(layer_dim, precision=0)
@@ -4681,6 +4766,10 @@ class TilingPrinciple:
     tile_product_count_str = fmt_int(tile_products)
     reuse_factor_mult_str = fmt_multiple(reuse_factor, precision=0, commas=False)
     tiles_per_dim_str = fmt_int(tiles_per_dim)
+    fringe_dim_str = fmt_int(fringe_dim, commas=False)
+    fringe_idle_units_str = fmt_int(fringe_idle_units, commas=False)
+    fringe_util_1d_pct_str = fmt_percent(round(fringe_util_1d, 2), precision=0, style="prose")
+    fringe_util_2d_pct_str = fmt_percent(round(fringe_util_2d, 2), precision=0, style="prose")
 ```
 
 A stationary dataflow decides which operand stays local; tiling decides how large a block of it local storage can hold. Blocks are needed at all because of a mismatch between the *computational graph* (which sees a single `{python} TilingPrinciple.layer_dim_str` $\times$ `{python} TilingPrinciple.layer_dim_str` matrix multiplication) and the *physical silicon* (which possesses a fixed `{python} TilingPrinciple.array_dim_str` $\times$ `{python} TilingPrinciple.array_dim_str` systolic array). Bridging this gap requires **tiling**\index{Tiling!definition}, which partitions a large tensor operation into tiles that fit exactly into the hardware's fast local memory (SRAM or scratchpad memory), so that each tile is reused many times before it is evicted.
@@ -4699,7 +4788,7 @@ To process the `{python} TilingPrinciple.layer_dim_str`-wide worked-example laye
 
 Tile dimensions balance on-chip capacity against arithmetic intensity. A larger tile reuses each loaded byte across more multiply-accumulate operations, raising operational intensity toward the compute-bound regime of the roofline model. The capacity ceiling is how much of $\GemmLeftOperand$, $\GemmRightOperand$, and $\GemmOutputMatrix$ fits simultaneously in fast on-chip memory. Tiling sustains high hardware efficiency $(\EfficiencyHw)$ by ensuring that for every byte loaded from main memory, the data is reused `{python} TilingPrinciple.reuse_factor_mult_str` within the systolic grid.
 
-When a layer dimension is not an exact multiple of the hardware tile size, the accelerator pays a *fringe penalty* in idle silicon. Consider a layer where only one output dimension expands from 128 to 129 while the other dimensions remain perfectly aligned to the 128-element tile. Processing that single extra column requires scheduling a second 128-wide tile across the systolic array, leaving 127 execution units idle during the fringe pass. Two tiles execute where one nearly sufficed, so the utilization factor along that dimension falls to $129/256$, or approximately 50 percent, creating the efficiency cliff illustrated in the margin figure. When multiple dimensions misalign simultaneously, these padding losses multiply across the tiled axes: a $129 \times 129$ output block partitioned into four $128 \times 128$ physical tiles yields a useful-area efficiency of $(129/256)^2$, or barely 25 percent. @Algo-tiled-gemm formalizes the resulting loop nest emitted by the compiler to orchestrate this on-chip staging and accumulation.
+When a layer dimension is not an exact multiple of the hardware tile size, the accelerator pays a *fringe penalty* in idle silicon. Consider a layer where only one output dimension expands from `{python} TilingPrinciple.array_dim_str` to `{python} TilingPrinciple.fringe_dim_str` while the other dimensions remain perfectly aligned to the `{python} TilingPrinciple.array_dim_str`-element tile. Processing that single extra column requires scheduling a second `{python} TilingPrinciple.array_dim_str`-wide tile across the systolic array, leaving `{python} TilingPrinciple.fringe_idle_units_str` execution units idle during the fringe pass. Two tiles execute where one nearly sufficed, so the utilization factor along that dimension falls to $129/256$, or approximately `{python} TilingPrinciple.fringe_util_1d_pct_str`, creating the efficiency cliff illustrated in the margin figure. When multiple dimensions misalign simultaneously, these padding losses multiply across the tiled axes: a $129 \times 129$ output block partitioned into four $128 \times 128$ physical tiles yields a useful-area efficiency of $(129/256)^2$, or barely `{python} TilingPrinciple.fringe_util_2d_pct_str`. @Algo-tiled-gemm formalizes the resulting loop nest emitted by the compiler to orchestrate this on-chip staging and accumulation.
 
 ```pseudocode
 #| label: algo-tiled-gemm
@@ -5704,13 +5793,15 @@ class FpMultigpuScalingCalc:
     fp_sync_overhead_str = fmt_percent(sync_overhead_pct / 100, precision=1, commas=False, style='prose')
     fp_no_overlap_speedup_mult_str = fmt_multiple(no_overlap_speedup, precision=1, commas=False)
     fp_no_overlap_efficiency_str = fmt_percent(no_overlap_efficiency_pct / 100, precision=1, commas=False, style='prose')
+    fp_gradient_gb_str = fmt_memory(gradient_size, unit=GB, precision=0, commas=False)
+    fp_step_time_ms_str = fmt_time(step_time, 'millisecond', precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Hardware acceleration benefits scale linearly with additional accelerators.*
 
-Distributed training need not deliver $8\times$ throughput on eight accelerators because exposed inter-chip communication can reduce parallel efficiency. Synchronizing gradients across ranks via ring AllReduce makes each rank send and receive about twice the gradient payload (@eq-training-ring-allreduce), or `{python} FpMultigpuScalingCalc.fp_ring_transfer_mult_str` payloads across eight devices. With an interconnect such as NVLink providing `{python} FpMultigpuScalingCalc.fp_nvlink_bw_gb_per_s_str` bidirectional bandwidth (half that per direction), transmitting a 1 GB gradient payload consumes `{python} FpMultigpuScalingCalc.fp_sync_time_ms_str`. For a model with a 50 ms compute step, this data exchange adds `{python} FpMultigpuScalingCalc.fp_sync_overhead_str` communication overhead before counting software collective latency. Without compute-communication pipelining, an eight-accelerator node reaches only `{python} FpMultigpuScalingCalc.fp_no_overlap_speedup_mult_str` speedup (`{python} FpMultigpuScalingCalc.fp_no_overlap_efficiency_str` parallel efficiency). Stragglers, barrier synchronizations, and collective protocol overhead widen the gap between linear expectations and physical cluster scaling.
+Distributed training need not deliver $8\times$ throughput on eight accelerators because exposed inter-chip communication can reduce parallel efficiency. Synchronizing gradients across ranks via ring AllReduce makes each rank send and receive about twice the gradient payload (@eq-training-ring-allreduce), or `{python} FpMultigpuScalingCalc.fp_ring_transfer_mult_str` payloads across eight devices. With an interconnect such as NVLink providing `{python} FpMultigpuScalingCalc.fp_nvlink_bw_gb_per_s_str` bidirectional bandwidth (half that per direction), transmitting a `{python} FpMultigpuScalingCalc.fp_gradient_gb_str` gradient payload consumes `{python} FpMultigpuScalingCalc.fp_sync_time_ms_str`. For a model with a `{python} FpMultigpuScalingCalc.fp_step_time_ms_str` compute step, this data exchange adds `{python} FpMultigpuScalingCalc.fp_sync_overhead_str` communication overhead before counting software collective latency. Without compute-communication pipelining, an eight-accelerator node reaches only `{python} FpMultigpuScalingCalc.fp_no_overlap_speedup_mult_str` speedup (`{python} FpMultigpuScalingCalc.fp_no_overlap_efficiency_str` parallel efficiency). Stragglers, barrier synchronizations, and collective protocol overhead widen the gap between linear expectations and physical cluster scaling.
 
 :::
 

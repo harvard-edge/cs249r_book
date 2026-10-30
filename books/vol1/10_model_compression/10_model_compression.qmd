@@ -1064,7 +1064,45 @@ architecture to adjust \\ to the changes};
 
 Channel and layer pruning place different demands on accelerator hardware. Channel pruning contracts the inner dimensions of dense general matrix multiply (GEMM) operations, because eliminating output channels in layer $\ell$ reduces the input channel dimension in layer $\ell+1$. The tensors remain dense and avoid sparse pointer lookups, but their dimensions still decide how well single instruction, multiple data (SIMD) lanes and Tensor Core tiles fill.
 
-Pruning a 256-channel layer to 250 channels, for example, removes about 2 percent of the work yet can leave a matrix unit that processes channels in groups of 8 running a partly empty final tile, so the layer may run no faster. Pruning to 248 keeps every tile full. The camera pipeline's MobileNetV2 shows the same rule in its design, since its reference implementation rounds every channel count to a multiple of 8, and a pruning policy for the phone keeps the pruned counts on that grid. The preferred multiple depends on the kernel and numerical format, and because it counts elements rather than bytes, it is a different constraint from cache-line or memory-transaction alignment.
+```{python}
+#| echo: false
+#| label: channel-tile-alignment-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHANNEL PRUNING AND TILE ALIGNMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Channel-pruning tile-alignment paragraph immediately below.
+# │
+# │ Goal: Show that a small channel cut can leave the last hardware tile partly empty.
+# │ Show: The share of work a 256-to-250 channel cut removes and the aligned count.
+# │ How: Work scales with channel count; round down to a multiple of the tile width.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class ChannelTileAlignment:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    channels_before = 256  # scenario assumption: original layer width
+    channels_after = 250  # scenario assumption: unaligned pruned width
+    tile_channels = 8  # scenario assumption: matrix-unit channel group
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    work_removed = (channels_before - channels_after) / channels_before
+    aligned_channels = (channels_after // tile_channels) * tile_channels
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(work_removed - 0.0234) < 0.001, f"Prose says about 2 percent of the work, got {work_removed:.4f}.")
+    check(channels_after % tile_channels != 0, "The pruned width must leave a partly empty final tile.")
+    check(aligned_channels == 248, f"Prose says pruning to 248 keeps every tile full, got {aligned_channels}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    channels_before_str = fmt_int(channels_before, commas=False)
+    channels_after_str = fmt_int(channels_after, commas=False)
+    tile_channels_str = fmt_int(tile_channels, commas=False)
+    aligned_channels_str = fmt_int(aligned_channels, commas=False)
+    work_removed_pct_str = fmt_percent(round(work_removed, 2), precision=0, commas=False, style='prose')
+```
+
+Pruning a `{python} ChannelTileAlignment.channels_before_str`-channel layer to `{python} ChannelTileAlignment.channels_after_str` channels, for example, removes about `{python} ChannelTileAlignment.work_removed_pct_str` of the work yet can leave a matrix unit that processes channels in groups of `{python} ChannelTileAlignment.tile_channels_str` running a partly empty final tile, so the layer may run no faster. Pruning to `{python} ChannelTileAlignment.aligned_channels_str` keeps every tile full. The camera pipeline's MobileNetV2 shows the same rule in its design, since its reference implementation rounds every channel count to a multiple of 8, and a pruning policy for the phone keeps the pruned counts on that grid. The preferred multiple depends on the kernel and numerical format, and because it counts elements rather than bytes, it is a different constraint from cache-line or memory-transaction alignment.
 
 Layer pruning removes full computational stages and their associated launches and intermediates, but the rewritten graph must still satisfy shape, residual-connection, and kernel-layout requirements. Both approaches require quality validation, and both trade away the per-weight freedom of masking individual connections.
 
@@ -1483,13 +1521,68 @@ minimum width=27mm,minimum height=29mm,
 
 :::
 
-In the illustrative workflow, a convolutional network loses six channels with recovery between successive cuts. Rather than removing all six channels in a single pass, the pipeline removes two channels per cycle across three iterations, fine-tuning the remaining parameters after each cut. The initial cut drops accuracy from 0.995 to 0.971, but brief fine-tuning restores performance to 0.992. Two subsequent prune-and-tune cycles produce a final model at 0.991 accuracy, a 0.4 percent degradation despite a 27 percent reduction in channel count. Staging structural surgery across multiple retraining intervals allows surviving weights to adjust their representations along the loss landscape.
+```{python}
+#| echo: false
+#| label: pruning-schedule-accuracy-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ILLUSTRATIVE PRUNING SCHEDULE ACCURACY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Iterative-pruning paragraph below and the one-shot pruning
+# │          paragraph that follows @fig-iterative-pruning and
+# │          @fig-oneshot-pruning.
+# │
+# │ Goal: Derive the channel share and accuracy losses the two figures illustrate.
+# │ Show: 27 percent of channels removed; 0.4 percent (iterative) versus about
+# │       5 percent (one-shot) relative accuracy loss.
+# │ How: Illustrative accuracies drawn in the two figures; losses relative to
+# │      the unpruned accuracy.
+# │
+# │ Note: The TikZ figures and their YAML captions carry the same values by hand.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class PruningScheduleAccuracy:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Illustrative values drawn in @fig-iterative-pruning and @fig-oneshot-pruning.
+    total_channels = 22  # scenario assumption: channels before pruning
+    removed_channels = 6  # scenario assumption: channels removed in all
+    acc_base = 0.995  # scenario assumption: unpruned accuracy
+    acc_iter_first_cut = 0.971  # scenario assumption: after the first prune
+    acc_iter_first_tune = 0.992  # scenario assumption: after the first fine-tune
+    acc_iter_final = 0.991  # scenario assumption: after three cycles
+    acc_oneshot_cut = 0.914  # scenario assumption: after the one-shot prune
+    acc_oneshot_final = 0.943  # scenario assumption: after one-shot fine-tuning
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    channel_cut = removed_channels / total_channels
+    iter_loss = (acc_base - acc_iter_final) / acc_base
+    oneshot_loss = (acc_base - acc_oneshot_final) / acc_base
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(channel_cut - 0.2727) < 0.001, f"Prose says 27 percent of channels, got {channel_cut:.4f}.")
+    check(abs(iter_loss - 0.0040) < 0.0002, f"Prose says a 0.4 percent iterative loss, got {iter_loss:.4f}.")
+    check(abs(oneshot_loss - 0.0523) < 0.001, f"Prose says about a 5 percent one-shot loss, got {oneshot_loss:.4f}.")
+    check(oneshot_loss > iter_loss, "One-shot pruning must end below the iterative schedule.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    acc_base_str = fmt(acc_base, precision=3, commas=False)
+    acc_iter_first_cut_str = fmt(acc_iter_first_cut, precision=3, commas=False)
+    acc_iter_first_tune_str = fmt(acc_iter_first_tune, precision=3, commas=False)
+    acc_iter_final_str = fmt(acc_iter_final, precision=3, commas=False)
+    acc_oneshot_cut_str = fmt(acc_oneshot_cut, precision=3, commas=False)
+    acc_oneshot_final_str = fmt(acc_oneshot_final, precision=3, commas=False)
+    channel_cut_pct_str = fmt_percent(round(channel_cut, 2), precision=0, commas=False, style='prose')
+    iter_loss_pct_str = fmt_percent(round(iter_loss, 3), precision=1, commas=False, style='prose')
+    oneshot_loss_pct_str = fmt_percent(round(oneshot_loss, 2), precision=0, commas=False, style='prose')
+```
+
+In the illustrative workflow, a convolutional network loses six channels with recovery between successive cuts. Rather than removing all six channels in a single pass, the pipeline removes two channels per cycle across three iterations, fine-tuning the remaining parameters after each cut. The initial cut drops accuracy from `{python} PruningScheduleAccuracy.acc_base_str` to `{python} PruningScheduleAccuracy.acc_iter_first_cut_str`, but brief fine-tuning restores performance to `{python} PruningScheduleAccuracy.acc_iter_first_tune_str`. Two subsequent prune-and-tune cycles produce a final model at `{python} PruningScheduleAccuracy.acc_iter_final_str` accuracy, a `{python} PruningScheduleAccuracy.iter_loss_pct_str` degradation despite a `{python} PruningScheduleAccuracy.channel_cut_pct_str` reduction in channel count. Staging structural surgery across multiple retraining intervals allows surviving weights to adjust their representations along the loss landscape.
 
 ##### One-shot pruning {#sec-model-compression-oneshot-pruning-12a1}
 
 **One-shot pruning**\index{One-shot pruning!definition} removes multiple architectural components in a single step, followed by an extensive fine-tuning phase to recover model accuracy. This aggressive approach compresses the model quickly but risks greater accuracy degradation, as the network must adapt to significant structural changes simultaneously.
 
-Applying one-shot pruning to the same network illustrates the hazard of aggressive structural truncation. Removing all six highlighted channels at once (@fig-oneshot-pruning) causes a sharp accuracy drop from 0.995 to 0.914, from which fine-tuning recovers only partially to 0.943, leaving about a 5 percent quality penalty under the recovery procedure shown. The two figures illustrate a mechanism, not a controlled result. Both runs end with the same tensor geometry, but the iterative run also received three rounds of fine-tuning, so its better final accuracy mixes the benefit of smaller cuts with the benefit of more recovery training. A fair comparison holds the final structure and the total recovery budget fixed.
+Applying one-shot pruning to the same network illustrates the hazard of aggressive structural truncation. Removing all six highlighted channels at once (@fig-oneshot-pruning) causes a sharp accuracy drop from `{python} PruningScheduleAccuracy.acc_base_str` to `{python} PruningScheduleAccuracy.acc_oneshot_cut_str`, from which fine-tuning recovers only partially to `{python} PruningScheduleAccuracy.acc_oneshot_final_str`, leaving about a `{python} PruningScheduleAccuracy.oneshot_loss_pct_str` quality penalty under the recovery procedure shown. The two figures illustrate a mechanism, not a controlled result. Both runs end with the same tensor geometry, but the iterative run also received three rounds of fine-tuning, so its better final accuracy mixes the benefit of smaller cuts with the benefit of more recovery training. A fair comparison holds the final structure and the total recovery budget fixed.
 
 ::: {#fig-oneshot-pruning fig-env="figure" fig-pos="htb" fig-cap="**Illustrative One-Shot Pruning Impact**: All six channels (27 percent) are removed simultaneously, causing accuracy to drop from 0.995 to 0.914. Fine-tuning recovers only to 0.943, a 5 percent degradation from the original accuracy." fig-alt="Single-row workflow showing one-shot pruning. CNN with six red-highlighted channels to prune, followed by accuracy drop from 0.995 to 0.914, fine-tuning gears, and partial recovery to 0.943."}
 
@@ -1958,15 +2051,14 @@ In practice, BERT-style transformers[^fn-bert-pruning-scale] have been pruned by
 
 ### Low-rank factorization {#sec-model-compression-structured-approximations-4798}
 
-When a layer's weights concentrate their variation along a small number of directions, replacing the full matrix with a product of two thin factors removes parameters without introducing irregular sparse indices. Consider a $4096 \times 4096$ weight block whose singular values decay rapidly enough that a rank-128 subspace captures nearly all of the layer's output variance: fetching and multiplying the full dense block from DRAM spends 93.75 percent of its memory traffic and arithmetic on directions that barely affect the result. **Structured approximation**\index{Structured approximation!definition} exploits this algebraic redundancy by decomposing dense $\WeightMatrixRowCount \times \WeightMatrixColumnCount$ weight tensors into low-rank matrix or tensor factors that store only a fraction of the original parameters (6.25 percent in the rank-128 case). In the camera pipeline, the natural candidates are MobileNetV2's pointwise $1{\times}1$ convolutions, which act as dense matrix multiplications across channels; factoring one trades fewer multiply-accumulates against an extra kernel launch and an intermediate activation tensor.
-
 ```{python}
 #| echo: false
 #| label: lowrank-bandwidth-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ LOW-RANK BANDWIDTH CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: SVD footnote and "The Bandwidth-Compute Trade-off" callout
+# │ Context: Low-rank factorization opener paragraph, SVD footnote, and
+# │          "The Bandwidth-Compute Trade-off" callout
 # │
 # │ Goal: Demonstrate memory savings from low-rank factorization.
 # │ Show: The 16× storage reduction achieved by rank-128 SVD on a 4096×4096 matrix.
@@ -1974,7 +2066,7 @@ When a layer's weights concentrate their variation along a small number of direc
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
-from mlsysim.fmt import fmt, check, fmt_memory
+from mlsysim.fmt import fmt, check, fmt_memory, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LowRankFactorization:
@@ -2000,8 +2092,14 @@ class LowRankFactorization:
 
     data_reduction = lowrank.compression
 
+    # Step 3: Share of stored values kept by the factors, and the share the
+    # dense block spends on directions outside the rank-K subspace.
+    kept_share = factored_params / full_params
+    discarded_share = 1 - kept_share
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(data_reduction > 10, f"Low-rank reduction ({data_reduction:.1f}x) is too low for K=128.")
+    check(abs(kept_share - 0.0625) < 1e-9, f"Prose says the factors keep 6.25 percent, got {kept_share:.4f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mat_dim_str = fmt(mat_dim, precision=0, commas=False)
@@ -2009,7 +2107,11 @@ class LowRankFactorization:
     full_mb_str = fmt_memory(full, unit=MB, precision=1, commas=False)
     factored_mb_str = fmt_memory(factored, unit=MB, precision=1, commas=False)
     data_reduction_mult_str = fmt_multiple(round(data_reduction), precision=0, commas=False)
+    kept_share_pct_str = fmt_percent(kept_share, precision=2, commas=False, style='prose')
+    discarded_share_pct_str = fmt_percent(discarded_share, precision=2, commas=False, style='prose')
 ```
+
+When a layer's weights concentrate their variation along a small number of directions, replacing the full matrix with a product of two thin factors removes parameters without introducing irregular sparse indices. Consider a $4096 \times 4096$ weight block whose singular values decay rapidly enough that a rank-`{python} LowRankFactorization.rank_k_value_str` subspace captures nearly all of the layer's output variance: fetching and multiplying the full dense block from DRAM spends `{python} LowRankFactorization.discarded_share_pct_str` of its memory traffic and arithmetic on directions that barely affect the result. **Structured approximation**\index{Structured approximation!definition} exploits this algebraic redundancy by decomposing dense $\WeightMatrixRowCount \times \WeightMatrixColumnCount$ weight tensors into low-rank matrix or tensor factors that store only a fraction of the original parameters (`{python} LowRankFactorization.kept_share_pct_str` in the rank-`{python} LowRankFactorization.rank_k_value_str` case). In the camera pipeline, the natural candidates are MobileNetV2's pointwise $1{\times}1$ convolutions, which act as dense matrix multiplications across channels; factoring one trades fewer multiply-accumulates against an extra kernel launch and an intermediate activation tensor.
 
 #### Matrix factorization {#sec-model-compression-lowrank-factorization-955e}
 
@@ -5228,7 +5330,39 @@ class GPT2DecodeQuantization:
 
 :::
 
-Vision networks show the same split between bytes and time. Across three of them (Inception v3, MobileNet v1, and ResNet v2), INT8 conversion contracts weight storage by exactly $4\times$ (135 MB to 33.75 MB for the illustrative Inception bar), while the latency change varies with the architecture and its kernels (@fig-quantization-impact).
+```{python}
+#| echo: false
+#| label: illustrative-int8-storage-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ILLUSTRATIVE INT8 WEIGHT STORAGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Lead-in paragraph to @fig-quantization-impact.
+# │
+# │ Goal: Show the exact fourfold storage cut for the illustrative Inception bar.
+# │ Show: 135 MB of FP32 weights shrinking to 33.75 MB in INT8.
+# │ How: Scale the illustrative FP32 storage by the INT8-to-FP32 byte ratio.
+# │
+# │ Note: The TikZ bars in @fig-quantization-impact carry the same values by hand.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import MB, BYTES_FP32, BYTES_INT8
+from mlsysim.fmt import check, fmt_memory
+
+class IllustrativeInt8Storage:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    inception_fp32 = 135 * MB  # scenario assumption: illustrative FP32 bar in the figure
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    inception_int8 = inception_fp32 * (BYTES_INT8 / BYTES_FP32).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(inception_int8.to(MB).magnitude - 33.75) < 1e-9, f"Prose says 33.75 MB in INT8, got {inception_int8}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    inception_fp32_mb_str = fmt_memory(inception_fp32, unit=MB, precision=0, commas=False)
+    inception_int8_mb_str = fmt_memory(inception_int8, unit=MB, precision=2, commas=False)
+```
+
+Vision networks show the same split between bytes and time. Across three of them (Inception v3, MobileNet v1, and ResNet v2), INT8 conversion contracts weight storage by exactly $4\times$ (`{python} IllustrativeInt8Storage.inception_fp32_mb_str` to `{python} IllustrativeInt8Storage.inception_int8_mb_str` for the illustrative Inception bar), while the latency change varies with the architecture and its kernels (@fig-quantization-impact).
 
 ::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Scenario**: Paired bars separate FP32 and INT8 alternatives. The right panel shows illustrative weight storage, where reducing each weight from 32 to 8 bits produces an exact fourfold decrease; the left panel shows illustrative, architecture-dependent latency changes." fig-alt="Two paired bar charts compare FP32 and INT8. The left chart shows illustrative inference time in milliseconds for Inception v3, MobileNet v1, and ResNet v2. The right chart shows raw weight storage in megabytes, with every INT8 bar one quarter the FP32 bar."}
 
@@ -5527,6 +5661,7 @@ class FusionCalc:
     check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    conv_channels_str = fmt_int(conv_channels, commas=False)
     feat_map_kb_str = fmt_memory(feat_map, unit=KB, precision=1, commas=False)
     weights_mb_str = fmt_memory(weights, unit=MB, precision=1, commas=False)
     bn_params_kb_str = fmt_memory(round(bn_params.to(KB).magnitude) * KB, unit=KB, precision=0, commas=False)
@@ -5541,7 +5676,7 @@ class FusionCalc:
     fusion_speedup_mult_str = fmt_multiple(fusion_speedup, precision=2, commas=False)
 ```
 
-A ResNet-50 layer with 256 channels and a $28{\times}28$ spatial size puts numbers on this. Its feature map occupies `{python} FusionCalc.feat_map_kb_str`, so the four intermediate transfers that fusion removes amount to `{python} ConvFusionCalc.conv_bn_relu_mem_math` per layer. The full accounting also counts weights and parameters. Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`, a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction.
+A ResNet-50 layer with `{python} FusionCalc.conv_channels_str` channels and a $28{\times}28$ spatial size puts numbers on this. Its feature map occupies `{python} FusionCalc.feat_map_kb_str`, so the four intermediate transfers that fusion removes amount to `{python} ConvFusionCalc.conv_bn_relu_mem_math` per layer. The full accounting also counts weights and parameters. Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`, a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction.
 
 ```{python}
 #| echo: false
@@ -5617,12 +5752,14 @@ The runtime benefit depends entirely on whether the latency eliminated by skippi
 # │
 # │ Goal: Show an unstructured-pruning target that fits only if the surviving
 # │       values cost nothing to locate.
-# │ Show: MobileNetV2's FP32 weights, the 2 MB flash budget, and the share of
-# │       weights that must be removed to reach it.
+# │ Show: MobileNetV2's FP32 weights, the 2 MB flash budget, the share of
+# │       weights that must be removed to reach it, and the 50 percent
+# │       break-even sparsity for an FP16 value with a 16-bit index.
 # │ How: Registry FP32 weight bytes; scenario flash budget and pruned size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Scenarios
+from mlsysim.core.units import BYTES_FP16, BYTES_INT16
 from mlsysim.fmt import fmt, check, fmt_memory, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5639,9 +5776,13 @@ class MobileNetCompressionAnchor:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pruning_pct = wearable.pruned_share * 100
+    # Break-even paragraph: an FP16 value stored beside a 16-bit column index.
+    fp16_indexed_bytes = BYTES_FP16 + BYTES_INT16
+    fp16_break_even_sparsity = (1 - BYTES_FP16 / fp16_indexed_bytes).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(80 <= pruning_pct <= 90, "MobileNet pruning anchor should be near 85%.")
+    check(abs(fp16_break_even_sparsity - 0.5) < 1e-9, "Prose says a 16-bit index doubles a 16-bit value, so break-even is 50 percent.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     # Typed formatters own the percent and memory-unit display policy.
@@ -5649,11 +5790,12 @@ class MobileNetCompressionAnchor:
     original_size_mb_str = fmt_memory(original_size, unit=MB, commas=False)
     pruned_size_mb_str = fmt_memory(pruned_size, unit=MB, precision=0, commas=False)
     flash_budget_mb_str = fmt_memory(flash_budget, unit=MB, precision=0, commas=False)
+    fp16_break_even_pct_str = fmt_percent(fp16_break_even_sparsity, precision=0, commas=False, style='prose')
 ```
 
 A variant of the running case makes the byte side concrete. Suppose the camera team must also ship its MobileNetV2 to a wearable companion device whose microcontroller offers only `{python} MobileNetCompressionAnchor.flash_budget_mb_str` of flash memory, against the model's `{python} MobileNetCompressionAnchor.original_size_mb_str` of FP32 weights. Retraining a smaller architecture from scratch would require weeks of data collection and validation that the product schedule does not allow. Suppose profiling shows that about `{python} MobileNetCompressionAnchor.pruning_pct_str` of the model's weights are near zero and contribute little on the validation set. Removing those weights and fine-tuning the remainder for a few epochs leaves surviving weight values that total `{python} MobileNetCompressionAnchor.pruned_size_mb_str` with an acceptable accuracy loss. Whether the stored artifact also fits in `{python} MobileNetCompressionAnchor.flash_budget_mb_str` depends on how the surviving weights are stored. The numbers are a labeled scenario that anchors the engineering trade-off, not a universal MobileNet benchmark.
 
-Storing only the surviving values requires an indexed sparse encoding such as **Compressed Sparse Row (CSR)**\index{Compressed sparse row!definition} or coordinate list (COO). Because these formats must store positional metadata (such as column indices and row pointers) alongside the nonzero values, metadata overhead offsets savings at low sparsity. For example, storing a 16-bit floating-point weight with a 16-bit column index doubles the per-element byte footprint, requiring over 50 percent sparsity just to break even on artifact size ($\DataVolume$). Storing a dense tensor with zeroed entries saves zero memory.
+Storing only the surviving values requires an indexed sparse encoding such as **Compressed Sparse Row (CSR)**\index{Compressed sparse row!definition} or coordinate list (COO). Because these formats must store positional metadata (such as column indices and row pointers) alongside the nonzero values, metadata overhead offsets savings at low sparsity. For example, storing a 16-bit floating-point weight with a 16-bit column index doubles the per-element byte footprint, requiring over `{python} MobileNetCompressionAnchor.fp16_break_even_pct_str` sparsity just to break even on artifact size ($\DataVolume$). Storing a dense tensor with zeroed entries saves zero memory.
 
 The wearable variant shows the consequence of that metadata. Its surviving weights total `{python} MobileNetCompressionAnchor.pruned_size_mb_str` only if they cost nothing to locate. A 16-bit index beside each value adds half again to 32-bit values and doubles 16-bit ones, so the stored artifact misses the `{python} MobileNetCompressionAnchor.flash_budget_mb_str` flash budget. A denser position encoding, such as a bitmap, reduces the metadata overhead but cannot fit unchanged values that already consume the entire budget. Fitting requires further pruning or lower-precision values with room reserved for metadata, or structured removal of whole channels so that the remaining tensors can be stored without per-value indices.
 
@@ -6932,7 +7074,7 @@ class AmdahlCompression:
 ::: {.column-margin}
 ![](images/svg/vol1_model_compression_margin_004.svg){width="100%" fig-alt="A horizontal stacked bar has a narrow orange segment at the left, labeled Model 20% above it, and a wide slate-gray segment labeled Other 80% filling the rest."}
 
-*Non-model work dominates latency, so compression caps speedup at 1.25$\times$.*
+*Non-model work dominates latency, so compression caps speedup at `{python} AmdahlCompression.max_speedup_mult_str`.*
 :::
 
 Translating layer-level profiling metrics into end-to-end system speedup requires accounting for the complete serving pipeline. In production serving systems, model execution frequently represents only a fraction of total latency, with the remainder consumed by image decoding, tokenization, RPC deserialization, or network transfer. Optimizing the model in isolation encounters an Amdahl ceiling whenever non-model stages dominate the latency budget, a ceiling that @sec-benchmarking-endtoend-vs-component-latency-9952 measures end to end.
@@ -7708,6 +7850,7 @@ class FallaciesAnalysis:
     expected_bits = 32
     target_bits = 8
     overhead_pct = 15  # hypothetical conversion overhead
+    bert_fp32_size = 440 * MB  # scenario assumption: BERT-style FP32 artifact
 
     # Combined pruning + quantization scenario (Pitfall 5): 50% structured sparsity
     # and the chapter's realized outcome, as in TheoryPracticeSpeedup
@@ -7723,6 +7866,8 @@ class FallaciesAnalysis:
     combined_expected = quant_speedup * prune_speedup  # 8× theoretical
     quant_after_overhead = quant_speedup * (1 - overhead_pct / 100)  # scenario quant-only value
     realized_fraction_pct = measured_speedup / combined_expected * 100
+    prune_share = 1 - 1 / prune_speedup  # weights removed for the pruning factor
+    bert_int8_size = bert_fp32_size * target_bits / expected_bits
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(quant_after_overhead < quant_speedup, "Actual speedup should be less than theoretical due to overhead.")
@@ -7730,12 +7875,15 @@ class FallaciesAnalysis:
         abs(realized_fraction_pct - 18.75) < 0.01,
         f"Realized fraction should match the chapter's 1.5x-of-8x scenario, got {realized_fraction_pct:.1f}%.",
     )
+    check(abs(prune_share - 0.5) < 1e-9, f"Prose says 50 percent pruning, got {prune_share:.3f}.")
+    check(abs(bert_int8_size.to(MB).magnitude - 110) < 1e-9, f"Prose says 110 MB in INT8, got {bert_int8_size}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     int8_size_reduction_mult_str = fmt_multiple(round(quant_speedup), commas=False, precision=0)
     expected_speedup_mult_str = fmt_multiple(round(combined_expected), precision=0, commas=False)
-    bert_fp32_mb_str = fmt_memory(440 * MB, unit=MB, precision=0, commas=False)
-    bert_int8_mb_str = fmt_memory(110 * MB, unit=MB, precision=0, commas=False)
+    bert_fp32_mb_str = fmt_memory(bert_fp32_size, unit=MB, precision=0, commas=False)
+    bert_int8_mb_str = fmt_memory(bert_int8_size, unit=MB, precision=0, commas=False)
+    prune_share_pct_str = fmt_percent(prune_share, precision=0, commas=False, style='prose')
     pruning_target_str = fmt_percent(0.70, precision=0, commas=False, style='prose')
     param_removal_str = fmt(trace.work_reduction * 100, precision=0, commas=False)
     latency_reduction_str = fmt(trace.latency_reduction * 100, precision=0, commas=False)
@@ -7745,7 +7893,7 @@ class FallaciesAnalysis:
 
 **Fallacy**: *Optimization techniques can be applied independently without considering their interactions.*
 
-Engineers assume optimization strategies compose additively: 50 percent pruning plus `{python} FallaciesAnalysis.int8_size_reduction_mult_str` quantization yields combined benefits. In reality, techniques interact nonlinearly and compound losses. In a representative BERT-style compression scenario, pruning to `{python} FallaciesAnalysis.pruning_target_str` sparsity may preserve most task performance, but applying INT8 quantization afterward can lose more accuracy than QAT on the pruned model. Knowledge distillation from heavily pruned teachers can also transfer degenerate attention patterns that reduce student accuracy compared with distilling from dense teachers. As @sec-model-compression-optimization-strategies-f2f6 demonstrates, successful optimization requires coordinated application where techniques are sequenced together.
+Engineers assume optimization strategies compose additively: `{python} FallaciesAnalysis.prune_share_pct_str` pruning plus `{python} FallaciesAnalysis.int8_size_reduction_mult_str` quantization yields combined benefits. In reality, techniques interact nonlinearly and compound losses. In a representative BERT-style compression scenario, pruning to `{python} FallaciesAnalysis.pruning_target_str` sparsity may preserve most task performance, but applying INT8 quantization afterward can lose more accuracy than QAT on the pruned model. Knowledge distillation from heavily pruned teachers can also transfer degenerate attention patterns that reduce student accuracy compared with distilling from dense teachers. As @sec-model-compression-optimization-strategies-f2f6 demonstrates, successful optimization requires coordinated application where techniques are sequenced together.
 
 :::
 
@@ -7753,7 +7901,7 @@ Engineers assume optimization strategies compose additively: 50 percent pruning 
 
 **Pitfall**: *Assuming theoretical metrics or compression ratios translate directly into proportional deployment speedup.*
 
-Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a `{python} FallaciesAnalysis.latency_reduction_str` percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining 50 percent structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
+Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a `{python} FallaciesAnalysis.latency_reduction_str` percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining `{python} FallaciesAnalysis.prune_share_pct_str` structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
 
 :::
 
@@ -7781,11 +7929,58 @@ Teams often begin with post-training quantization (PTQ) because it avoids retrai
 
 :::
 
+```{python}
+#| echo: false
+#| label: sparse-format-break-even-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPARSE FORMAT BREAK-EVEN (32-BIT VALUES AND INDICES)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fallacy "Sparse matrix representations always save memory"
+# │          immediately below.
+# │
+# │ Goal: Show how coordinate metadata raises the sparsity needed to save memory.
+# │ Show: COO at 12 bytes per nonzero (3x dense, 66.7 percent break-even) and
+# │       CSR at 8 bytes per nonzero (2x dense, 50 percent break-even).
+# │ How: FP32 value plus 32-bit indices per nonzero; break-even sparsity is
+# │      1 minus dense bytes over sparse bytes (CSR row pointers amortized).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import byte, BYTES_FP32, BYTES_INT32
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple, fmt_percent
+
+class SparseFormatBreakEven:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    value_bytes = BYTES_FP32  # one dense FP32 entry
+    index_bytes = BYTES_INT32  # one 32-bit coordinate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    coo_bytes = value_bytes + 2 * index_bytes  # (row_idx, col_idx, value)
+    csr_bytes = value_bytes + index_bytes  # value + col_idx
+    coo_ratio = (coo_bytes / value_bytes).to("").magnitude
+    csr_ratio = (csr_bytes / value_bytes).to("").magnitude
+    coo_break_even = 1 - 1 / coo_ratio
+    csr_break_even = 1 - 1 / csr_ratio
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(coo_bytes.to(byte).magnitude == 12 and csr_bytes.to(byte).magnitude == 8, "Prose says 12 bytes (COO) and 8 bytes (CSR).")
+    check(abs(coo_break_even - 2 / 3) < 1e-9, f"Prose says 66.7 percent COO break-even, got {coo_break_even:.4f}.")
+    check(abs(csr_break_even - 0.5) < 1e-9, f"Prose says 50 percent CSR break-even, got {csr_break_even:.4f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    value_bytes_str = fmt_int(value_bytes.to(byte).magnitude, commas=False)
+    coo_bytes_str = fmt_memory(coo_bytes, unit=byte, precision=0, commas=False)
+    csr_bytes_str = fmt_memory(csr_bytes, unit=byte, precision=0, commas=False)
+    coo_ratio_mult_str = fmt_multiple(round(coo_ratio), precision=0, commas=False)
+    csr_ratio_mult_str = fmt_multiple(round(csr_ratio), precision=0, commas=False)
+    coo_break_even_pct_str = fmt_percent(round(coo_break_even, 3), precision=1, commas=False, style='prose')
+    csr_break_even_pct_str = fmt_percent(csr_break_even, precision=0, commas=False, style='prose')
+```
+
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Sparse matrix representations always save memory and accelerate inference.*
 
-Sparse formats introduce coordinate metadata that erodes storage savings at moderate densities, as the 16-bit case of @sec-model-compression-sparse-break-even-7e4a showed; 32-bit indices make the penalty larger. To represent $\NonzeroCount$ nonzero values across $\SparseMatrixRowCount$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes 12 bytes ($3\times$ a dense 4-byte FP32 entry), requiring greater than 66.7 percent sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($\NonzeroCount \times 4\text{ B}$), `col_indices` ($\NonzeroCount \times 4\text{ B}$), and `row_pointers` ($(\SparseMatrixRowCount+1) \times 4\text{ B}$). Each nonzero entry costs 8 bytes ($2\times$ a dense FP32 entry), requiring over 50 percent sparsity before the sparse structure consumes less memory than the original dense tensor; below 50 percent sparsity, CSR metadata expands the model's memory footprint.
+Sparse formats introduce coordinate metadata that erodes storage savings at moderate densities, as the 16-bit case of @sec-model-compression-sparse-break-even-7e4a showed; 32-bit indices make the penalty larger. To represent $\NonzeroCount$ nonzero values across $\SparseMatrixRowCount$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes `{python} SparseFormatBreakEven.coo_bytes_str` (`{python} SparseFormatBreakEven.coo_ratio_mult_str` a dense `{python} SparseFormatBreakEven.value_bytes_str`-byte FP32 entry), requiring greater than `{python} SparseFormatBreakEven.coo_break_even_pct_str` sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($\NonzeroCount \times 4\text{ B}$), `col_indices` ($\NonzeroCount \times 4\text{ B}$), and `row_pointers` ($(\SparseMatrixRowCount+1) \times 4\text{ B}$). Each nonzero entry costs `{python} SparseFormatBreakEven.csr_bytes_str` (`{python} SparseFormatBreakEven.csr_ratio_mult_str` a dense FP32 entry), requiring over `{python} SparseFormatBreakEven.csr_break_even_pct_str` sparsity before the sparse structure consumes less memory than the original dense tensor; below `{python} SparseFormatBreakEven.csr_break_even_pct_str` sparsity, CSR metadata expands the model's memory footprint.
 
 Execution faces similar break-even constraints. Converting tensors to sparse storage as soon as pruning creates zeros degrades latency if metadata decoding, irregular gather operations, and poor cache locality outweigh the saved arithmetic. No universal sparsity threshold exists, because tensor dimensions, sparse format, runtime kernel, batch size, and hardware architecture jointly govern whether sparse execution outperforms dense execution. Specialized formats such as 2:4 structured sparsity eliminate index arrays in favor of fixed 2-bit multiplexer metadata, providing an accelerator datapath that nearly halves weight traffic with minimal indexing overhead (@sec-model-compression-structured-pruning-9692). Production workflows must therefore measure realized density and commit to a sparse representation only after verifying that the operational break-even threshold has been crossed on target hardware.
 

@@ -217,13 +217,15 @@ class EarlySystemsClaims:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(gradient_scale < 1e-12, f"20 sigmoid layers should nearly zero gradients; got {gradient_scale:.2e}")
+    check(sigmoid_peak_derivative == 0.25, f"Sigmoid peak slope should be 0.25, got {sigmoid_peak_derivative}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     sigmoid_depth_str = fmt(sigmoid_depth, precision=0, commas=False)
+    slope_power_math = fmt_math(f"{sigmoid_peak_derivative:.2f}^{{{sigmoid_depth}}}")
     gradient_scale_math = fmt_math(sci_latex(gradient_scale, precision=1))
 ```
 
-[^fn-gradient-instabilities-depth]: **Gradient instabilities**\index{Gradient instabilities!training failure}: In a simplified `{python} EarlySystemsClaims.sigmoid_depth_str`-layer path through sigmoid (S-shaped) activations, the activation-derivative factors alone are bounded above by $0.25^{20}$, or `{python} EarlySystemsClaims.gradient_scale_math`. The complete gradient also includes weights and other operations, but repeated saturated derivatives can still make early-layer updates negligible. Plateaus or not-a-number (NaN) values can reveal the symptom without identifying the cause; rectified linear unit (ReLU) activations and careful initialization (both taught later in this chapter), together with normalization, better optimizers, and residual connections, all helped make deep networks trainable, and @sec-network-architectures-evolution-dense-spatial-processing-2761 treats residual connections in detail.
+[^fn-gradient-instabilities-depth]: **Gradient instabilities**\index{Gradient instabilities!training failure}: In a simplified `{python} EarlySystemsClaims.sigmoid_depth_str`-layer path through sigmoid (S-shaped) activations, the activation-derivative factors alone are bounded above by `{python} EarlySystemsClaims.slope_power_math`, or `{python} EarlySystemsClaims.gradient_scale_math`. The complete gradient also includes weights and other operations, but repeated saturated derivatives can still make early-layer updates negligible. Plateaus or not-a-number (NaN) values can reveal the symptom without identifying the cause; rectified linear unit (ReLU) activations and careful initialization (both taught later in this chapter), together with normalization, better optimizers, and residual connections, all helped make deep networks trainable, and @sec-network-architectures-evolution-dense-spatial-processing-2761 treats residual connections in detail.
 
 ## Computing with Patterns {#sec-neural-computation-evolution-ml-paradigms-ec9c}
 
@@ -261,6 +263,7 @@ class ParadigmSystemsCost:
     hog_bins = paradigms.feature_bins
     hog_ops_approx = paradigms.feature_operations
     mnist_dims = paradigms.network.layer_widths
+    image_side = Datasets.MNIST.image_width  # MNIST images are square
     training_examples = Datasets.MNIST.training_examples.to(count).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -274,9 +277,16 @@ class ParadigmSystemsCost:
     dl_weight = dl_counts.parameter_bytes
     dl_weight_kb = dl_weight.to(KB).magnitude
     dl_ops_ratio = paradigms.network_to_rule_ratio
+    hog_cell_px = image_side // hog_grid_dim  # pixels per HOG cell side
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(dl_total_macs == 109_184, f"Expected 109,184 MNIST MACs, got {dl_total_macs}")
+    check(image_side % hog_grid_dim == 0, "HOG grid should tile the image exactly.")
+    check(hog_cell_px == 4, f"Expected 4-pixel HOG cells on a 28-pixel side, got {hog_cell_px}")
+    # Section-opening words: "roughly one hundred", "several thousand", "more than one hundred thousand"
+    check(rb_ops == 100, f"Expected ~100 rule comparisons, got {rb_ops}")
+    check(2_000 < hog_ops_approx < 10_000, f"Expected several thousand HOG operations, got {hog_ops_approx}")
+    check(100_000 < dl_total_macs < 1_000_000, f"Expected more than 100K MNIST MACs, got {dl_total_macs}")
     check(hog_ops_ratio == 80, f"Expected HOG/rule-based ops ratio of 80x, got {hog_ops_ratio:.1f}x")
     check(round(dl_ops_ratio) == 1092, f"Expected ~1,092x ops ratio, got {dl_ops_ratio:.1f}x")
     check(round(dl_weight_kb) == 438, f"Expected ~438 KB FP32 weight footprint, got {dl_weight_kb:.1f} KB")
@@ -285,6 +295,7 @@ class ParadigmSystemsCost:
     rb_comparisons_str = fmt_count(rb_ops, precision=0, commas=False, label="comparison")
     rb_mem_bytes_str = fmt_memory(rb_mem, unit=byte, precision=0, commas=True)
     hog_grid_str = fmt_int(hog_grid_dim, commas=False)
+    hog_cell_px_str = fmt_int(hog_cell_px, commas=False)
     hog_bins_str = fmt(hog_bins, precision=0, commas=False)
     hog_features_str = fmt(hog_features, precision=0, commas=True)
     hog_ops_approx_str = fmt_count(hog_ops_approx, precision=0, commas=True, label="operation")
@@ -345,7 +356,7 @@ Feature engineering transformed raw data into representations that expose patter
 
 [^fn-hog-feature-descriptor]: **Histogram of oriented gradients (HOG)**\index{HOG!fixed vs. learned features}: An influential handcrafted descriptor for pedestrian detection before deep learning [@dalal2005hog]. One common configuration computes gradient orientations in $8{\times}8$ pixel cells, with cell size and other choices tuned for the task. HOG's fixed computation graph can run efficiently on CPUs with predictable latency, while learned features can reduce descriptor redesign but do not automatically transfer across domains and often benefit from accelerators only as model and batch scale grow.
 
-Feature engineering raises the digit's cost while keeping it CPU friendly. For the same $28{\times}28$ digit, an illustrative HOG implementation divides the image into a `{python} ParadigmSystemsCost.hog_grid_str` by `{python} ParadigmSystemsCost.hog_grid_str` grid of 4 by 4 cells and computes gradient magnitudes and orientations. It bins them into `{python} ParadigmSystemsCost.hog_bins_str` orientation histograms per cell (the diagram draws eight directions; the bin count, like the cell size, is a tuning choice) and produces a `{python} ParadigmSystemsCost.hog_features_str`-element feature vector. A linear support vector machine (SVM) classifier then performs ten dot products over that vector. The result is roughly `{python} ParadigmSystemsCost.hog_ops_approx_str` and about `{python} ParadigmSystemsCost.hog_mem_kb_str` of working memory, about `{python} ParadigmSystemsCost.hog_ops_ratio_mult_str` the work of the toy rule-based baseline. The work is still structured and well served by CPU vector units using **single instruction, multiple data (SIMD)**\index{SIMD!definition}. Descriptor size, class count, and implementation all change this cost.
+Feature engineering raises the digit's cost while keeping it CPU friendly. For the same $28{\times}28$ digit, an illustrative HOG implementation divides the image into a `{python} ParadigmSystemsCost.hog_grid_str` by `{python} ParadigmSystemsCost.hog_grid_str` grid of `{python} ParadigmSystemsCost.hog_cell_px_str` by `{python} ParadigmSystemsCost.hog_cell_px_str` cells and computes gradient magnitudes and orientations. It bins them into `{python} ParadigmSystemsCost.hog_bins_str` orientation histograms per cell (the diagram draws eight directions; the bin count, like the cell size, is a tuning choice) and produces a `{python} ParadigmSystemsCost.hog_features_str`-element feature vector. A linear support vector machine (SVM) classifier then performs ten dot products over that vector. The result is roughly `{python} ParadigmSystemsCost.hog_ops_approx_str` and about `{python} ParadigmSystemsCost.hog_mem_kb_str` of working memory, about `{python} ParadigmSystemsCost.hog_ops_ratio_mult_str` the work of the toy rule-based baseline. The work is still structured and well served by CPU vector units using **single instruction, multiple data (SIMD)**\index{SIMD!definition}. Descriptor size, class count, and implementation all change this cost.
 
 These descriptors carried face and pedestrian detection through the 2000s, but every new problem needed an expert to design a new extractor, and the resulting features missed whatever patterns their designers had not anticipated. Human expertise, not computation, set the ceiling on how much real-world visual variation a system could absorb.
 
@@ -1790,6 +1801,7 @@ class MnistScaleComparison:
     mnist_small_mem = mnist_small_params * BYTES_FP32
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mnist_small_l1 == mnist_small_l2 and mnist_large_l1 == mnist_large_l2, "Prose widens both hidden layers equally.")
     check(mnist_large_params > mnist_small_params, "Large MLP parameters must exceed small MLP")
     check(mnist_large_mem > mnist_small_mem, "Large MLP memory must exceed small MLP")
 
@@ -1798,9 +1810,11 @@ class MnistScaleComparison:
     mnist_large_mem_mb_str = fmt_qty_int(mnist_large_mem, MB, commas=False)
     mnist_small_params_k_str = fmt_count(mnist_small_params, scale='K', precision=1, commas=False)
     mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
+    mnist_small_width_str = fmt(mnist_small_l1, precision=0, commas=False)
+    mnist_large_width_str = fmt(mnist_large_l1, precision=0, commas=False)
 ```
 
-Widening both hidden layers from 100 to 1000 neurons, comparing a $784 \to 100 \to 100 \to 10$ network with a $784 \to 1000 \to 1000 \to 10$ network, increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32). Whether the wider network improves accuracy requires training and evaluation; the storage increase alone already matters for mobile deployment budgets.
+Widening both hidden layers from `{python} MnistScaleComparison.mnist_small_width_str` to `{python} MnistScaleComparison.mnist_large_width_str` neurons, comparing a $784 \to 100 \to 100 \to 10$ network with a $784 \to 1000 \to 1000 \to 10$ network, increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32). Whether the wider network improves accuracy requires training and evaluation; the storage increase alone already matters for mobile deployment budgets.
 
 ::: {#fig-mnist-topology-1 fig-env="figure" fig-pos="htb" fig-cap="**MNIST Network Topology**: Both panels draw the same network; only the form of the input changes, from a two-dimensional image in panel (a) to the flattened vector the input layer actually receives in panel (b)." fig-alt="Two panels showing MNIST digit recognition. Panel a: a digit 7 image labeled 28 px by 28 px beside a column of input-layer circles fully connected to 10 output nodes, one marked 1 and the rest marked 0. Panel b: the same network with the image flattened into a 784-element pixel vector that an arrow feeds into the input layer."}
 
@@ -2297,7 +2311,7 @@ Network architecture, neurons, and parameters are now in place, but nothing yet 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, fmt_count
+from mlsysim.fmt import fmt, fmt_count, fmt_percent, check
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST TRAINING INTRO RECAP
@@ -2314,17 +2328,29 @@ class MnistTrainingIntroRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     total_params = Scenarios.MnistDenseNetwork.result.parameters
     training_examples = Datasets.MNIST.training_examples.to(count).magnitude
+    num_classes = Datasets.MNIST.num_classes
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    chance_accuracy = 1 / num_classes  # uniform guessing among the classes
+    one_hot_zero_share = 1 - 1 / num_classes  # one-hot label entries that are zero ([^fn-one-hot-encoding])
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(num_classes == 10, f"Expected 10 MNIST classes, got {num_classes}")
+    check(abs(chance_accuracy - 0.10) < 1e-12 and abs(one_hot_zero_share - 0.90) < 1e-12, "Expected 10 / 90 percent")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     total_params_str = fmt_count(total_params, label="parameter")
     training_examples_str = fmt(training_examples, precision=0, commas=True)
+    num_classes_str = fmt(num_classes, precision=0, commas=False)
+    chance_accuracy_pct_str = fmt_percent(chance_accuracy, precision=0, commas=False, style="prose")
+    one_hot_zero_share_pct_str = fmt_percent(one_hot_zero_share, precision=0, commas=False, style="prose")
 ```
 
 The MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` set to random values, numbers that encode no knowledge at all. Learning turns them into a working classifier by repeating one short cycle of computation millions of times, and that repetition multiplies every cost the previous sections counted for a single forward pass.
 
 ### Supervised learning from labeled examples {#sec-neural-computation-supervised-learning-labeled-examples-5e6d}
 
-At that starting point the network classifies digits no better than guessing among ten classes (about 10 percent accuracy). Transforming it into a 95 percent-accurate classifier requires supervised learning\index{Supervised learning!labeled examples}\index{Training!supervised learning}: showing the network labeled examples and adjusting its weights based on the errors it makes. For the MNIST digit recognition task, the dataset contains `{python} MnistTrainingIntroRecap.training_examples_str` training images, each a $28{\times}28$ pixel grayscale image paired with its correct digit label. To close that accuracy gap, training runs as a loop. Each iteration processes a subset of training examples called a batch\index{Batch!training iteration} through four operations: forward computation through the network layers generates predictions, a loss function measures prediction error under the chosen objective, backpropagation computes parameter gradients, and an optimizer uses those gradients to update the weights.
+At that starting point the network classifies digits no better than guessing among ten classes (about `{python} MnistTrainingIntroRecap.chance_accuracy_pct_str` accuracy). Transforming it into a 95 percent-accurate classifier requires supervised learning\index{Supervised learning!labeled examples}\index{Training!supervised learning}: showing the network labeled examples and adjusting its weights based on the errors it makes. For the MNIST digit recognition task, the dataset contains `{python} MnistTrainingIntroRecap.training_examples_str` training images, each a $28{\times}28$ pixel grayscale image paired with its correct digit label. To close that accuracy gap, training runs as a loop. Each iteration processes a subset of training examples called a batch\index{Batch!training iteration} through four operations: forward computation through the network layers generates predictions, a loss function measures prediction error under the chosen objective, backpropagation computes parameter gradients, and an optimizer uses those gradients to update the weights.
 
 ::: {#dfn-nn-computation-mini-batch .callout-definition title="Mini-batch"}
 
@@ -2504,6 +2530,48 @@ $$ \text{Input} \rightarrow \text{Linear Transform} \rightarrow \text{Activation
 
 The batch form is what the machine executes. Every one of the $\BatchSize$ rows of $\ActivationMatrix^{(\LayerIndex-1)}$ meets the same $\WeightMatrix^{(\LayerIndex)}$, so a single read of the weights serves the whole batch, the reuse that @fig-neuron-to-machine drew. For the digit classifier, the first such product turns the 784-dimensional input into 128 hidden values, and two more produce the ten class scores.
 
+```{python}
+#| echo: false
+#| label: matmul-flop-share
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MATRIX-MULTIPLY SHARE OF FORWARD-PASS FLOPs
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Margin caption beside @eq-forward-composition, the GEMM paragraph,
+# │          notebook \ref{nbk-nn-computation-counting-ops-forward-pass},
+# │          @tbl-nn-computation-mnist-flops caption, and the chapter takeaways.
+# │
+# │ Goal: Back the "over 99 percent" / "under 1 percent" claims with the count.
+# │ Show: Matrix multiplication is over 99 percent of the running network's
+# │       forward FLOPs; bias and activation work is under 1 percent.
+# │ How: Matmul and element-wise shares from the running network's counts,
+# │      reported as whole-percent bounds (floor and ceiling).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt_percent, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MatmulFlopShare:
+    """Whole-percent bounds on the matmul and element-wise shares of forward FLOPs."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    counts = Scenarios.MnistDenseNetwork.result  # 784→128→64→10, batch 32
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    matmul_share = counts.matmul_share
+    elementwise_share = counts.elementwise_share
+    matmul_floor = math.floor(matmul_share * 100) / 100  # "over N percent"
+    elementwise_ceiling = math.ceil(elementwise_share * 100) / 100  # "under N percent"
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(matmul_share + elementwise_share - 1) < 1e-9, "Matmul and element-wise shares should sum to 1.")
+    check(matmul_floor == 0.99, f"Expected matmul share over 99 percent, got {matmul_share:.4f}")
+    check(elementwise_ceiling == 0.01, f"Expected element-wise share under 1 percent, got {elementwise_share:.4f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    matmul_floor_pct_str = fmt_percent(matmul_floor, precision=0, commas=False, style="prose")
+    elementwise_ceiling_pct_str = fmt_percent(elementwise_ceiling, precision=0, commas=False, style="prose")
+```
+
 #### Matrix multiplication formulation {#sec-neural-computation-matrix-multiplication-formulation-417c}
 
 For a network with $\LayerCount$ layers, the complete forward propagation process can be expressed as a composition of layer transformations\index{Matrix multiplication!forward propagation}\index{Forward propagation!matrix operations} (@eq-forward-composition):
@@ -2512,7 +2580,7 @@ $$ \ActivationMatrix^{(\LayerCount)} = \ActivationFunction^{(\LayerCount)}\!\Big
 ::: {.column-margin}
 ![](images/svg/nn_computation_matmul_dominance.svg){width="100%" fig-alt="Horizontal bar of the forward-pass floating-point budget. An orange segment labeled MatMul over 99 percent fills nearly the entire bar; a hairline gray sliver at the right end, marked by a leader, is labeled element-wise under 1 percent."}
 
-*Matrix multiplication is over 99 percent of this network's forward-pass FLOPs.*
+*Matrix multiplication is over `{python} MatmulFlopShare.matmul_floor_pct_str` of this network's forward-pass FLOPs.*
 :::
 
 The nested expression unfolds layer by layer, each step consuming the previous layer's activations:
@@ -2556,14 +2624,49 @@ Of the two kinds of operation in that chain, the matrix multiplications dominate
 
 :::
 
-Tiled dense matrix multiplication reuses each loaded value many times, whereas an unfused element-wise operation does little work per byte it moves. Writing $\ElementStorageSize$ for the bytes needed to store one value (4 bytes in FP32), @tbl-nn-computation-arith-intensity-gap compares their idealized intensities on $\SquareGemmDimension{\times}\SquareGemmDimension$ tensors. Multiplying two $\SquareGemmDimension{\times}\SquareGemmDimension$ matrices reads two input matrices and writes one output matrix, moving $3\SquareGemmDimension^2\ElementStorageSize$ bytes in total, yet reuses each loaded entry across $\SquareGemmDimension$ multiply-accumulates to perform $2\SquareGemmDimension^3$ FLOPs, so its ratio of work to bytes grows linearly with $\SquareGemmDimension$. An unfused ReLU reads one $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix and writes one back ($2\SquareGemmDimension^2\ElementStorageSize$ bytes) to perform just $\SquareGemmDimension^2$ comparisons, so the tensor size $\SquareGemmDimension^2$ cancels out of the ratio and leaves a constant $1/(2\ElementStorageSize)$ FLOP/byte regardless of how large the matrix grows.
+```{python}
+#| echo: false
+#| label: elementwise-intensity-fp32
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ELEMENT-WISE ARITHMETIC INTENSITY IN FP32
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph and @tbl-nn-computation-arith-intensity-gap caption below.
+# │
+# │ Goal: Evaluate the constant 1/(2·S) FLOP/byte of an unfused ReLU in FP32.
+# │ Show: S = 4 bytes per FP32 value gives 0.125 FLOP/byte.
+# │ How: One comparison per element over one read and one write of S bytes each.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BYTES_FP32
+from mlsysim.fmt import fmt, fmt_arithmetic_intensity, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ElementwiseIntensityFp32:
+    """Idealized arithmetic intensity of an unfused element-wise op in FP32."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    bytes_per_value = BYTES_FP32
+    flops_per_element = 1 * flop  # one comparison per element
+    transfers_per_element = 2  # read once, write once
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    intensity = flops_per_element / (transfers_per_element * bytes_per_value)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(intensity.to(flop / byte).magnitude - 0.125) < 1e-12, f"Expected 0.125 FLOP/byte, got {intensity}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    bytes_fp32_str = fmt(bytes_per_value.to(byte).magnitude, precision=0, commas=False)
+    intensity_str = fmt_arithmetic_intensity(intensity, unit=flop / byte, precision=3, commas=False)
+```
+
+Tiled dense matrix multiplication reuses each loaded value many times, whereas an unfused element-wise operation does little work per byte it moves. Writing $\ElementStorageSize$ for the bytes needed to store one value (`{python} ElementwiseIntensityFp32.bytes_fp32_str` bytes in FP32), @tbl-nn-computation-arith-intensity-gap compares their idealized intensities on $\SquareGemmDimension{\times}\SquareGemmDimension$ tensors. Multiplying two $\SquareGemmDimension{\times}\SquareGemmDimension$ matrices reads two input matrices and writes one output matrix, moving $3\SquareGemmDimension^2\ElementStorageSize$ bytes in total, yet reuses each loaded entry across $\SquareGemmDimension$ multiply-accumulates to perform $2\SquareGemmDimension^3$ FLOPs, so its ratio of work to bytes grows linearly with $\SquareGemmDimension$. An unfused ReLU reads one $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix and writes one back ($2\SquareGemmDimension^2\ElementStorageSize$ bytes) to perform just $\SquareGemmDimension^2$ comparisons, so the tensor size $\SquareGemmDimension^2$ cancels out of the ratio and leaves a constant $1/(2\ElementStorageSize)$ FLOP/byte regardless of how large the matrix grows.
 
 | **Operation**                                                       | **Operation Count ($\Operations$)** |              **Minimum Data Movement**              |                 **Idealized Intensity**                 | **Typical Optimization** |
 |:--------------------------------------------------------------------|:-----------------------------------:|:---------------------------------------------------:|:-------------------------------------------------------:|:------------------------:|
 | **Matrix Mul $(\SquareGemmDimension{\times}\SquareGemmDimension)$** |      $2\SquareGemmDimension^3$      | $3\SquareGemmDimension^2 \ElementStorageSize$ bytes | $\approx 2\SquareGemmDimension/(3 \ElementStorageSize)$ |  Tiling on CPU/GPU/TPU   |
 | **Element-wise (ReLU)**                                             |       $\SquareGemmDimension^2$      | $2\SquareGemmDimension^2 \ElementStorageSize$ bytes |               $1/(2 \ElementStorageSize)$               | Vectorization and fusion |
 
-: **Idealized Arithmetic Intensity of Matrix Multiply vs. Element-Wise ReLU**: A tiled dense $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix multiplication performs $2\SquareGemmDimension^3$ operations while moving at least about $3\SquareGemmDimension^2 \ElementStorageSize$ bytes for $\ElementStorageSize$ bytes per value, so potential reuse grows with $\SquareGemmDimension$. A standalone element-wise activation remains at $1/(2 \ElementStorageSize)$ FLOP/byte (0.125 FLOP/byte for FP32); implementations often fuse it with a neighboring kernel to avoid a separate memory round trip. {#tbl-nn-computation-arith-intensity-gap tbl-colwidths="[20,19,21,19,21]"}
+: **Idealized Arithmetic Intensity of Matrix Multiply vs. Element-Wise ReLU**: A tiled dense $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix multiplication performs $2\SquareGemmDimension^3$ operations while moving at least about $3\SquareGemmDimension^2 \ElementStorageSize$ bytes for $\ElementStorageSize$ bytes per value, so potential reuse grows with $\SquareGemmDimension$. A standalone element-wise activation remains at $1/(2 \ElementStorageSize)$ FLOP/byte (`{python} ElementwiseIntensityFp32.intensity_str` for FP32); implementations often fuse it with a neighboring kernel to avoid a separate memory round trip. {#tbl-nn-computation-arith-intensity-gap tbl-colwidths="[20,19,21,19,21]"}
 
 ```{=latex}
 \vspace*{-1ex}
@@ -2573,7 +2676,7 @@ Tiled dense matrix multiplication reuses each loaded value many times, whereas a
 
 Modern accelerators have large compute arrays relative to off-chip memory bandwidth. They approach peak arithmetic throughput only when operations expose enough reuse and parallel work. Dense and convolutional layers map well to optimized kernels; custom element-wise sequences are often fused so that their intermediate values remain on chip. How accelerators organize their compute arrays around matrix multiplication is developed in @sec-hardware-acceleration-ai-compute-primitives-2c99.
 
-For a single sample, the layer operation $\InputFeatureVector\WeightMatrix$ is a **general matrix-vector multiply (GEMV)**\index{GEMV!definition}. Batching multiple samples turns this into $\LayerInputMatrix\WeightMatrix$, a **general matrix multiply (GEMM)**\index{GEMM!definition}\index{Matrix multiplication!GEMM optimization}. Accelerators pack wide parallel units and high-bandwidth memory hierarchies optimized for 2D matrix transformations. Because hardware vendors invest the bulk of their silicon area and compiler optimizations in GEMM throughput, almost every neural network layer is structured to execute as matrix multiplication. @Sec-network-architectures-evolution-perceptron-multilayer-networks-d06e shows how the convolution and attention layers of later chapters lower to that shared primitive. Matrix operations account for over 99 percent of the floating-point operations in this chapter's dense network and dominate modern neural workloads. Model architectures are therefore shaped around the operations that matrix engines execute efficiently, which is the core of hardware-software co-design. The tiling that gives these kernels their data reuse is developed in @sec-hardware-acceleration-tiling-principle, and how GEMM arithmetic intensity grows with matrix dimension is collected for reference in @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d.
+For a single sample, the layer operation $\InputFeatureVector\WeightMatrix$ is a **general matrix-vector multiply (GEMV)**\index{GEMV!definition}. Batching multiple samples turns this into $\LayerInputMatrix\WeightMatrix$, a **general matrix multiply (GEMM)**\index{GEMM!definition}\index{Matrix multiplication!GEMM optimization}. Accelerators pack wide parallel units and high-bandwidth memory hierarchies optimized for 2D matrix transformations. Because hardware vendors invest the bulk of their silicon area and compiler optimizations in GEMM throughput, almost every neural network layer is structured to execute as matrix multiplication. @Sec-network-architectures-evolution-perceptron-multilayer-networks-d06e shows how the convolution and attention layers of later chapters lower to that shared primitive. Matrix operations account for over `{python} MatmulFlopShare.matmul_floor_pct_str` of the floating-point operations in this chapter's dense network and dominate modern neural workloads. Model architectures are therefore shaped around the operations that matrix engines execute efficiently, which is the core of hardware-software co-design. The tiling that gives these kernels their data reuse is developed in @sec-hardware-acceleration-tiling-principle, and how GEMM arithmetic intensity grows with matrix dimension is collected for reference in @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d.
 
 :::
 
@@ -2655,8 +2758,10 @@ class MnistFlopsCalc:
     double_total_flops_value = wider.result.forward_flops
     double_total_mops_value = (double_total_flops_value * flop).to(MFLOPs).magnitude
     double_ratio_value = double_total_mops_value / total_mops_value
+    doubled_batch_size = 2 * batch_size  # "doubling the batch" in the implementation paragraph
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(batch_size == 32, f"Expected running batch size 32, got {batch_size}")
     check(round(total_mops_value, 1) == 7.0, f"Expected ~7.0 MFLOPs, got {total_mops_value:.1f}")
     check(round(per_image_kops) == 219, f"Expected ~219 KOp per image, got {per_image_kops:.1f}")
     check(inf_act_elements == 986, f"Expected 986 inference activation values, got {inf_act_elements}")
@@ -2696,20 +2801,22 @@ class MnistFlopsCalc:
     total_params_str = fmt_count(total_params, label="parameter")
     double_total_mops_str = fmt_int(double_total_mops_value, commas=False)
     double_ratio_mult_str = fmt_multiple(double_ratio_value, precision=1, commas=False)
+    batch_size_str = fmt(batch_size, precision=0, commas=False)
+    doubled_batch_size_str = fmt(doubled_batch_size, precision=0, commas=False)
 ```
 
 ::: {#nbk-nn-computation-counting-ops-forward-pass .callout-notebook title="Counting operations in forward pass"}
 
-**Problem**: Determine the total arithmetic operation count ($\Operations$) for one forward pass through the MNIST network (784 → 128 → 64 → 10) with batch size 32.
+**Problem**: Determine the total arithmetic operation count ($\Operations$) for one forward pass through the MNIST network (784 → 128 → 64 → 10) with batch size `{python} MnistFlopsCalc.batch_size_str`.
 
 **Background**: A matrix multiplication of dimensions $(\GemmRowDimension{\times}\GemmInnerDimension) \times (\GemmInnerDimension{\times}\GemmColumnDimension)$ requires $2 \times \GemmRowDimension\times \GemmInnerDimension\times \GemmColumnDimension$ FLOPs (one multiply and one add per output element, summed over $\GemmInnerDimension$ terms). Bias addition adds $\GemmRowDimension\times \GemmColumnDimension$ floating-point additions. ReLU activation adds $\GemmRowDimension\times \GemmColumnDimension$ comparisons, so the table reports total operation-equivalent work rather than pure FLOPs for activation rows.
 
-**Solution**: @Tbl-nn-computation-mnist-flops breaks down the operation count layer by layer. The total comes to ~`{python} MnistFlopsCalc.total_mops_str` MOp, or `{python} MnistFlopsCalc.total_mops_str` MOp ÷ 32 = ~`{python} MnistFlopsCalc.per_image_kops_str` KOp per image. This per-image figure reconciles with the count at the start of the chapter. The three matrix-multiplication rows contribute `{python} MNISTInference.total_flops_str` per image, exactly two FLOPs for each of the `{python} MNISTInference.total_macs_str`, and the bias and activation rows add less than 1 percent on top.
+**Solution**: @Tbl-nn-computation-mnist-flops breaks down the operation count layer by layer. The total comes to ~`{python} MnistFlopsCalc.total_mops_str` MOp, or `{python} MnistFlopsCalc.total_mops_str` MOp ÷ `{python} MnistFlopsCalc.batch_size_str` = ~`{python} MnistFlopsCalc.per_image_kops_str` KOp per image. This per-image figure reconciles with the count at the start of the chapter. The three matrix-multiplication rows contribute `{python} MNISTInference.total_flops_str` per image, exactly two FLOPs for each of the `{python} MNISTInference.total_macs_str`, and the bias and activation rows add less than `{python} MatmulFlopShare.elementwise_ceiling_pct_str` on top.
 
 **Systems insight**:
 
 1. Layer 1 dominates: The first layer accounts for `{python} MnistFlopsCalc.layer1_pct_str` of all operations because it processes the largest input (784 dimensions). Shrinking the input or the first hidden width is therefore the largest single lever on this network's arithmetic.
-2. Compute vs. memory: At batch 1, `{python} MnistFlopsCalc.per_image_kops_str` KOp must amortize a parameter read for only one image, giving an arithmetic intensity of ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` under this traffic model. At batch 32, one parameter read, one input read, one final-output write, and a write followed by a read for each hidden tensor move ~`{python} MnistFlopsCalc.batch_inference_traffic_kb_str` KB and raise the intensity to ~`{python} MnistFlopsCalc.batch_arith_intensity_str`. This idealized FP32 model treats each dense layer as a separate kernel with fused bias and activation, and counts transfers across a memory boundary at which no operands remain resident between kernels or batches. A hidden activation contributes twice because its producer writes it and its consumer reads it. Cache residency or cross-layer fusion can reduce traffic at that boundary; extra transfers can increase it. The comparison shows why batching improves reuse, but memory- or compute-bound behavior still depends on the machine's ridge point, the balance $\PeakRate/\Bandwidth$ introduced with the iron law, which the roofline model in @sec-hardware-acceleration-roofline-model-42ff develops.
+2. Compute vs. memory: At batch 1, `{python} MnistFlopsCalc.per_image_kops_str` KOp must amortize a parameter read for only one image, giving an arithmetic intensity of ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` under this traffic model. At batch `{python} MnistFlopsCalc.batch_size_str`, one parameter read, one input read, one final-output write, and a write followed by a read for each hidden tensor move ~`{python} MnistFlopsCalc.batch_inference_traffic_kb_str` KB and raise the intensity to ~`{python} MnistFlopsCalc.batch_arith_intensity_str`. This idealized FP32 model treats each dense layer as a separate kernel with fused bias and activation, and counts transfers across a memory boundary at which no operands remain resident between kernels or batches. A hidden activation contributes twice because its producer writes it and its consumer reads it. Cache residency or cross-layer fusion can reduce traffic at that boundary; extra transfers can increase it. The comparison shows why batching improves reuse, but memory- or compute-bound behavior still depends on the machine's ridge point, the balance $\PeakRate/\Bandwidth$ introduced with the iron law, which the roofline model in @sec-hardware-acceleration-roofline-model-42ff develops.
 3. Scaling intuition: Doubling the hidden layer widths (784 → 256 → 128 → 10) increases the operation count by about `{python} MnistFlopsCalc.double_ratio_mult_str` to about `{python} MnistFlopsCalc.double_total_mops_str` MOp. This comes from recomputing each layer: layers 1 and 3 double, layer 2 quadruples, so the total roughly doubles rather than quadrupling.
 
 :::
@@ -2729,7 +2836,7 @@ class MnistFlopsCalc:
 | **Layer 3** | Bias + Softmax |                 $32{\times}10$                |              ~`{python} MnistFlopsCalc.l3_bias_str` (simplified)               |
 | **Total**   |                |                                               |               **~`{python} MnistFlopsCalc.total_mops_str` MOp**                |
 
-: **MNIST Forward Pass Operation Count by Layer**: Operation-equivalent breakdown for a single forward pass through the 784-128-64-10 network at batch size 32. Matrix multiplication rows are FLOPs; bias, ReLU, and softmax rows are elementwise operations included to show their negligible contribution. Layer 1's matrix multiply dominates because it multiplies the 784-dimensional input against the widest weight matrix; bias and activation operations contribute under 1 percent of the total. {#tbl-nn-computation-mnist-flops tbl-colwidths="[14,20,27,39]"}
+: **MNIST Forward Pass Operation Count by Layer**: Operation-equivalent breakdown for a single forward pass through the 784-128-64-10 network at batch size 32. Matrix multiplication rows are FLOPs; bias, ReLU, and softmax rows are elementwise operations included to show their negligible contribution. Layer 1's matrix multiply dominates because it multiplies the 784-dimensional input against the widest weight matrix; bias and activation operations contribute under `{python} MatmulFlopShare.elementwise_ceiling_pct_str` of the total. {#tbl-nn-computation-mnist-flops tbl-colwidths="[14,20,27,39]"}
 
 ```{=latex}
 \endgroup
@@ -2737,9 +2844,9 @@ class MnistFlopsCalc:
 
 #### Implementation and optimization considerations {#sec-neural-computation-implementation-optimization-considerations-f2ca}
 
-Forward propagation is easy to state mathematically, but its implementation is constrained by activation storage, batch size, memory layout, and hardware fit. During training, each layer's activations must stay in memory until the backward pass consumes them. For the MNIST network at batch size 32, the input holds $32{\times}784$ = `{python} MnistFlopsCalc.batch_in_str` values, the hidden layers hold `{python} MnistFlopsCalc.batch_h1_str` and `{python} MnistFlopsCalc.batch_h2_str`, and the output holds `{python} MnistFlopsCalc.batch_out_str`. In total, that is `{python} MnistFlopsCalc.batch_act_total_str` values per batch, which @sec-neural-computation-memory-training-vs-inference converts into bytes alongside the other training-state terms. Every one of these counts scales linearly with batch size, so doubling the batch to 64 doubles activation storage.
+Forward propagation is easy to state mathematically, but its implementation is constrained by activation storage, batch size, memory layout, and hardware fit. During training, each layer's activations must stay in memory until the backward pass consumes them. For the MNIST network at batch size `{python} MnistFlopsCalc.batch_size_str`, the input holds $32{\times}784$ = `{python} MnistFlopsCalc.batch_in_str` values, the hidden layers hold `{python} MnistFlopsCalc.batch_h1_str` and `{python} MnistFlopsCalc.batch_h2_str`, and the output holds `{python} MnistFlopsCalc.batch_out_str`. In total, that is `{python} MnistFlopsCalc.batch_act_total_str` values per batch, which @sec-neural-computation-memory-training-vs-inference converts into bytes alongside the other training-state terms. Every one of these counts scales linearly with batch size, so doubling the batch to `{python} MnistFlopsCalc.doubled_batch_size_str` doubles activation storage.
 
-The same batch size sets the other side of the trade. Notebook \ref{nbk-nn-computation-counting-ops-forward-pass} estimated arithmetic intensity rising from ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` at batch 1 to ~`{python} MnistFlopsCalc.batch_arith_intensity_str` at batch 32, because one read of each weight now serves 32 images. Batching therefore trades memory for reuse. Memory capacity bounds how far that trade can go, while gradient noise and per-request latency bound it from other directions.
+The same batch size sets the other side of the trade. Notebook \ref{nbk-nn-computation-counting-ops-forward-pass} estimated arithmetic intensity rising from ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` at batch 1 to ~`{python} MnistFlopsCalc.batch_arith_intensity_str` at batch `{python} MnistFlopsCalc.batch_size_str`, because one read of each weight now serves `{python} MnistFlopsCalc.batch_size_str` images. Batching therefore trades memory for reuse. Memory capacity bounds how far that trade can go, while gradient noise and per-request latency bound it from other directions.
 
 Memory layout and optimized linear-algebra libraries decide how much of that reuse an implementation actually captures. This is why parallel processors\index{GPU!parallel computation}\index{Parallel processing!neural networks} that can be fed from on-chip storage run large dense matrix operations substantially faster than CPUs\index{CPU!neural network execution}\index{Central processing unit|see{CPU}}, and why specialized accelerators add reduced-precision arithmetic and dataflows tailored to these patterns. Energy follows the same logic\index{Energy consumption!hardware platforms}\index{Throughput!accelerator parallelism}. Power alone does not determine energy per inference; the relevant quantity is power integrated over execution time for the same workload and quality target, and memory hierarchy and data movement often explain most of the difference between platforms.
 
@@ -2827,7 +2934,7 @@ For classification tasks like MNIST digit recognition, **cross-entropy loss**\in
 
 For a single digit image, the network outputs a probability distribution over the 10 possible digits. Ground truth is represented as a one-hot vector[^fn-one-hot-encoding]\index{One-hot encoding!classification labels} where all entries are 0 except for a one at the correct digit's position. For instance, if the true digit is "seven," the label is $\LabelVector= \big[0, 0, 0, 0, 0, 0, 0, 1, 0, 0\big]$.
 
-[^fn-one-hot-encoding]: **One-hot encoding**\index{One-hot encoding!sparsity scaling}: Representing each class as a binary vector with one entry per class, exactly one of which is 1. The encoding is sparse by construction, and for MNIST's 10 classes, 90 percent of each label vector is zeros. Implementations commonly store an integer class index instead of materializing that vector. For very large output spaces, methods such as sampled softmax\index{Sampled softmax!compute efficiency} can also reduce the output computation.
+[^fn-one-hot-encoding]: **One-hot encoding**\index{One-hot encoding!sparsity scaling}: Representing each class as a binary vector with one entry per class, exactly one of which is 1. The encoding is sparse by construction, and for MNIST's `{python} MnistTrainingIntroRecap.num_classes_str` classes, `{python} MnistTrainingIntroRecap.one_hot_zero_share_pct_str` of each label vector is zeros. Implementations commonly store an integer class index instead of materializing that vector. For very large output spaces, methods such as sampled softmax\index{Sampled softmax!compute efficiency} can also reduce the output computation.
 
 The cross-entropy loss for this example is defined in @eq-cross-entropy:
 $$ \LossFunction(\PredictedOutput, \LabelVector) = -\sum_{j=1}^{10} \TrueLabelComponent_j \log(\PredictedOutputComponent_j) $$ {#eq-cross-entropy}
@@ -2849,7 +2956,7 @@ where $\CorrectClassIndex$ is the index of the correct class. The loss therefore
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CrossEntropyExample:
@@ -2863,13 +2970,17 @@ class CrossEntropyExample:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     loss = examples.loss("correct")
     loss_confident = examples.loss("confident")
+    num_classes = Datasets.MNIST.num_classes
+    uniform_loss = math.log(num_classes)  # loss of a uniform guess, -log(1/K)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(loss > loss_confident, "Higher confidence should lower the loss.")
+    check(abs(uniform_loss - 2.3) < 0.05, f"Expected uniform-guess loss ~2.3, got {uniform_loss:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     loss_08_str = fmt(loss, precision=3, commas=False)
     loss_09_str = fmt(loss_confident, precision=3, commas=False)
+    uniform_loss_math = fmt_math(f"\\log({num_classes}) \\approx {uniform_loss:.1f}")
 ```
 
 For example, suppose the network assigns the probabilities in the left panel of @fig-cross-entropy-loss to an image of a "seven." The prediction is a distribution over all ten digits, while the label is a single one at the correct class and zero everywhere else.
@@ -2970,7 +3081,7 @@ $$ \LossFunction= -(\CorrectClassLogit-\MaximumLogit) + \log\!\sum_j \exp(\Neuro
 
 #### Impact on learning dynamics {#sec-neural-computation-impact-learning-dynamics-fb35}
 
-With a batch size of 32 and 10 output classes, each training step processes 32 sets of 10 scores, computes a loss for each example, and averages them into one batch loss. During training, that value serves two roles: its gradient supplies the update direction, and its trend helps diagnose whether optimization is progressing, stalling, or diverging. For the MNIST classifier, training loss often begins near $\log(10) \approx 2.3$ when class probabilities are close to uniform, falls rapidly during early optimization, and then improves more slowly. Because a low training loss reflects confidence on the training examples rather than proof of generalization, task accuracy, calibration, and validation loss must still be measured separately on held-out data.
+With a batch size of 32 and 10 output classes, each training step processes 32 sets of 10 scores, computes a loss for each example, and averages them into one batch loss. During training, that value serves two roles: its gradient supplies the update direction, and its trend helps diagnose whether optimization is progressing, stalling, or diverging. For the MNIST classifier, training loss often begins near `{python} CrossEntropyExample.uniform_loss_math` when class probabilities are close to uniform, falls rapidly during early optimization, and then improves more slowly. Because a low training loss reflects confidence on the training examples rather than proof of generalization, task accuracy, calibration, and validation loss must still be measured separately on held-out data.
 
 The loss function's gradients with respect to the network's output logits provide the initial error signal that drives backpropagation. For one example, when softmax and cross-entropy are combined, each logit gradient has a particularly simple form: the difference between the predicted and target probabilities, $\PredictedOutputComponent_j - \TrueLabelComponent_j$ for logit $\NeuronPreactivation_j$. This property makes cross-entropy loss especially suitable for classification, because it provides strong gradients even when predictions are far from the target. The same cancellation is the main reason runtimes fuse softmax and cross-entropy into a single operator, which collapses the backward step to the subtraction $\PredictedOutput - \LabelVector$, saves a separate kernel and its memory round trip, and avoids an underflow-prone probability tensor.
 
@@ -3156,9 +3267,61 @@ That multiplicative cascade fails before learning even begins if the initial wei
 
 [^fn-glorot-init-variance]: **Xavier/Glorot initialization**\index{Initialization!Glorot, variance scaling}: For a layer with $\LayerInputWidth$ inputs and $\LayerOutputWidth$ outputs, a common Glorot choice uses weight variance $2/(\LayerInputWidth+\LayerOutputWidth)$ to balance forward activations and backward gradients [@glorot2010xavier]. The fix costs zero additional FLOPs; it is purely a matter of setting the random distribution at startup.
 
-Initialization sets the starting scale, but the backward cascade still multiplies it layer after layer. As gradients flow backward through many layers, they can vanish or explode\index{Exploding gradient problem!training instability}\index{Gradient!vanishing and exploding}. Vanishing also has a numeric form, because each floating-point format has a smallest magnitude it can store at full precision. That magnitude is $1.18 \times 10^{-38}$ in FP32 and $6.10 \times 10^{-5}$ in FP16, the 2-byte half-precision format that halves memory and traffic relative to 4-byte FP32.[^fn-fp32-precision-format] Below it, values enter the *subnormal*\index{Subnormal numbers!gradient underflow} range, where the format gives up precision bits to represent ever-smaller magnitudes. Some accelerator modes skip that range for speed and flush such values straight to zero, and values smaller still underflow to zero on any hardware. A gradient that reaches zero this way stops updating its weight entirely. At the other extreme, values beyond the representable maximum can overflow to `Inf` and propagate `NaN`, destabilizing training.
+```{python}
+#| echo: false
+#| label: float-format-limits
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLOAT FORMAT LIMITS—FP32 AND FP16
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Numerical-range paragraph and [^fn-fp32-precision-format] in
+# │          @sec-neural-computation-parameter-initialization-5d1a; reused in
+# │          @sec-neural-computation-deep-learning-ai-triad-09cb.
+# │
+# │ Goal: Derive the smallest normal and largest finite values from the bit layout.
+# │ Show: FP32 smallest normal 1.18e-38; FP16 smallest normal 6.10e-5 and
+# │       largest finite 65,504; FP32 is 1 + 8 + 23 = 32 bits.
+# │ How: IEEE 754 range formulas in mlsysim.physics.calc_float_range over the
+# │      (exponent, fraction) bit counts in FLOAT_FORMAT_BITS.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import FLOAT_FORMAT_BITS
+from mlsysim.physics import calc_float_range
+from mlsysim.fmt import fmt, fmt_math, sci_latex, check
 
-[^fn-fp32-precision-format]: **FP32 and reduced-precision formats**\index{FP32!numerical precision}\index{BF16!reduced-precision format}\index{FP16!half precision}: The IEEE 754 binary32 format uses 32 bits (1 sign bit, 8 exponent bits, 23 fraction bits), whereas 16-bit alternatives split exponent and fraction differently: IEEE 754 FP16 allocates 5 exponent and 10 fraction bits, providing high precision but a narrow dynamic range ($6.1 \times 10^{-5}$ to $65{,}504$), so FP16 training multiplies the loss by a scale factor before the backward pass to keep small gradients representable (dynamic loss scaling). Brain Floating Point (BF16) allocates 8 exponent bits matching FP32's normal exponent range to reduce underflow risk relative to FP16; sufficiently small values can still underflow. The loss-scaling recipe belongs to the mixed-precision training of @sec-model-training-mixedprecision-training-9218; the formats are collected for reference in @sec-appdx-machine-foundations-numerical-representations-c889.
+# ┌── LEGO ───────────────────────────────────────────────
+class FloatFormatLimits:
+    """Range limits of FP32 and FP16, computed from their bit layouts."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    sign_bits = 1
+    fp32_exp_bits, fp32_frac_bits = FLOAT_FORMAT_BITS["fp32"]
+    fp16_exp_bits, fp16_frac_bits = FLOAT_FORMAT_BITS["fp16"]
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32_total_bits = sign_bits + fp32_exp_bits + fp32_frac_bits
+    _, fp32_min_normal, _ = calc_float_range(fp32_exp_bits, fp32_frac_bits)
+    fp16_max, fp16_min_normal, _ = calc_float_range(fp16_exp_bits, fp16_frac_bits)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(fp32_total_bits == 32, f"FP32 should be 32 bits, got {fp32_total_bits}")
+    check(abs(fp32_min_normal / 1.18e-38 - 1) < 0.01, f"Expected FP32 smallest normal ~1.18e-38, got {fp32_min_normal:.3e}")
+    check(abs(fp16_min_normal / 6.10e-5 - 1) < 0.01, f"Expected FP16 smallest normal ~6.10e-5, got {fp16_min_normal:.3e}")
+    check(fp16_max == 65_504, f"Expected FP16 largest finite 65,504, got {fp16_max}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    fp32_total_bits_str = fmt(fp32_total_bits, precision=0, commas=False)
+    fp32_exp_bits_str = fmt(fp32_exp_bits, precision=0, commas=False)
+    fp32_frac_bits_str = fmt(fp32_frac_bits, precision=0, commas=False)
+    fp16_exp_bits_str = fmt(fp16_exp_bits, precision=0, commas=False)
+    fp16_frac_bits_str = fmt(fp16_frac_bits, precision=0, commas=False)
+    fp32_min_normal_math = fmt_math(sci_latex(fp32_min_normal, precision=2))
+    fp16_min_normal_math = fmt_math(sci_latex(fp16_min_normal, precision=2))
+    fp16_min_normal_short_math = fmt_math(sci_latex(fp16_min_normal, precision=1))
+    fp16_max_math = fmt_math(format(int(fp16_max), ",").replace(",", "{,}"))
+```
+
+Initialization sets the starting scale, but the backward cascade still multiplies it layer after layer. As gradients flow backward through many layers, they can vanish or explode\index{Exploding gradient problem!training instability}\index{Gradient!vanishing and exploding}. Vanishing also has a numeric form, because each floating-point format has a smallest magnitude it can store at full precision. That magnitude is `{python} FloatFormatLimits.fp32_min_normal_math` in FP32 and `{python} FloatFormatLimits.fp16_min_normal_math` in FP16, the 2-byte half-precision format that halves memory and traffic relative to 4-byte FP32.[^fn-fp32-precision-format] Below it, values enter the *subnormal*\index{Subnormal numbers!gradient underflow} range, where the format gives up precision bits to represent ever-smaller magnitudes. Some accelerator modes skip that range for speed and flush such values straight to zero, and values smaller still underflow to zero on any hardware. A gradient that reaches zero this way stops updating its weight entirely. At the other extreme, values beyond the representable maximum can overflow to `Inf` and propagate `NaN`, destabilizing training.
+
+[^fn-fp32-precision-format]: **FP32 and reduced-precision formats**\index{FP32!numerical precision}\index{BF16!reduced-precision format}\index{FP16!half precision}: The IEEE 754 binary32 format uses `{python} FloatFormatLimits.fp32_total_bits_str` bits (1 sign bit, `{python} FloatFormatLimits.fp32_exp_bits_str` exponent bits, `{python} FloatFormatLimits.fp32_frac_bits_str` fraction bits), whereas 16-bit alternatives split exponent and fraction differently: IEEE 754 FP16 allocates `{python} FloatFormatLimits.fp16_exp_bits_str` exponent and `{python} FloatFormatLimits.fp16_frac_bits_str` fraction bits, providing high precision but a narrow dynamic range (`{python} FloatFormatLimits.fp16_min_normal_short_math` to `{python} FloatFormatLimits.fp16_max_math`), so FP16 training multiplies the loss by a scale factor before the backward pass to keep small gradients representable (dynamic loss scaling). Brain Floating Point (BF16) allocates 8 exponent bits matching FP32's normal exponent range to reduce underflow risk relative to FP16; sufficiently small values can still underflow. The loss-scaling recipe belongs to the mixed-precision training of @sec-model-training-mixedprecision-training-9218; the formats are collected for reference in @sec-appdx-machine-foundations-numerical-representations-c889.
 
 Arithmetic without branches is not arithmetic without risk, and the danger of an unhandled overflow is not unique to machine learning. Safety-critical systems have failed catastrophically when a numerical invariant was violated.
 
@@ -3283,11 +3446,14 @@ class SevenThreeTrace:
     w3_grads_str = fmt(w3_grads, precision=0, commas=True)
     w2_grads_str = fmt(w2_grads, precision=0, commas=True)
     w1_grads_str = fmt(w1_grads, precision=0, commas=True)
+    input_dim_str = fmt(dims[0], precision=0, commas=False)
+    h1_dim_str = fmt(dims[1], precision=0, commas=False)
+    h2_dim_str = fmt(dims[2], precision=0, commas=False)
 ```
 
 The running confusion makes these equations concrete. Suppose that, for an image of a seven, the network assigns probability `{python} SevenThreeTrace.p_three_str` to "three" and only `{python} SevenThreeTrace.p_seven_str` to "seven," so the cross-entropy loss, the negative log of the correct-class probability, is about `{python} SevenThreeTrace.loss_str`. The combined softmax and cross-entropy gradient at each logit is the predicted probability minus the target. The "three" logit therefore receives `{python} SevenThreeTrace.grad_three_math`, a push downward, the "seven" logit receives `{python} SevenThreeTrace.grad_seven_math`, a push upward, and the other eight logits receive their small predicted probabilities.
 
-That ten-value error signal first meets the output layer. @Eq-weight-gradient multiplies it by the saved 64-value activation of the second hidden layer to produce all `{python} SevenThreeTrace.w3_grads_str` output-weight gradients, and @eq-activation-gradient multiplies it by the transposed output weights to send a 64-value signal back to that hidden layer. The ReLU mask then zeroes the entries of units that were inactive for this image. The same two products repeat, yielding `{python} SevenThreeTrace.w2_grads_str` weight gradients and a 128-value signal for the first hidden layer, and finally `{python} SevenThreeTrace.w1_grads_str` first-layer weight gradients computed from the saved 784 pixel values. No gradient is needed for the pixels themselves. Every step consumed a value saved during the forward pass, which is why training must keep each activation until this trace reaches its layer.
+That ten-value error signal first meets the output layer. @Eq-weight-gradient multiplies it by the saved `{python} SevenThreeTrace.h2_dim_str`-value activation of the second hidden layer to produce all `{python} SevenThreeTrace.w3_grads_str` output-weight gradients, and @eq-activation-gradient multiplies it by the transposed output weights to send a `{python} SevenThreeTrace.h2_dim_str`-value signal back to that hidden layer. The ReLU mask then zeroes the entries of units that were inactive for this image. The same two products repeat, yielding `{python} SevenThreeTrace.w2_grads_str` weight gradients and a `{python} SevenThreeTrace.h1_dim_str`-value signal for the first hidden layer, and finally `{python} SevenThreeTrace.w1_grads_str` first-layer weight gradients computed from the saved `{python} SevenThreeTrace.input_dim_str` pixel values. No gradient is needed for the pixels themselves. Every step consumed a value saved during the forward pass, which is why training must keep each activation until this trace reaches its layer.
 
 ::: {#psp-nn-computation-memory-cost-backprop .callout-perspective title="The memory cost of backprop"}
 
@@ -3415,9 +3581,18 @@ class MnistTrainingMemoryCalc:
     inference_total = inference_total_kb * KB
     training_total = training_total_kb * KB
     training_ratio = training_total_kb / inference_total_kb
+    state_bytes_per_param = ((param_mem + grad_mem + opt_mem) / total_params).to(byte).magnitude  # weight, gradient, two Adam moments
+    large_batch_size = Scenarios.MnistDenseNetworkLargeBatch.batch_size  # right panel of @fig-training-step-memory
+    batch_growth = large_batch_size / batch_size
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(3.0 <= training_ratio <= 3.5, f"Expected ~3.3× training/inference ratio, got {training_ratio:.1f}")
+    check(abs(state_bytes_per_param - 16) < 1e-9, f"Expected 16 bytes of FP32 Adam training state per parameter, got {state_bytes_per_param}")
+    check(large_batch_size == 1_024 and batch_growth == 32, f"Expected batch 32 → 1,024 (32×), got {large_batch_size} ({batch_growth}×)")
+    check(
+        batch_size < min(layers_dims[:-1]) and large_batch_size > max(layers_dims),
+        "Batch 32 must sit below, and batch 1,024 above, the layer widths.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bytes_fp32_value_str = fmt(bytes_per_param, precision=0, commas=False)
@@ -3438,6 +3613,10 @@ class MnistTrainingMemoryCalc:
     total_train_mb_str = fmt_memory(training_total, unit=MB, precision=1, commas=False)
     total_infer_kb_str = fmt_qty_int(inference_total, KB, commas=False)
     training_ratio_mult_str = fmt_multiple(training_ratio, commas=False)
+    batch_size_str = fmt(batch_size, precision=0, commas=False)
+    large_batch_size_str = fmt(large_batch_size, precision=0, commas=True)
+    batch_growth_str = fmt(batch_growth, precision=0, commas=False)
+    state_bytes_per_param_str = fmt(state_bytes_per_param, precision=0, commas=False)
 ```
 
 The four terms of @eq-training-memory can now be evaluated for the running network. A single forward pass through the `{python} MnistModelSizeLocal.mnist_arch_str` network costs `{python} MnistModelSizeLocal.dl_total_macs_str`, but the memory a training step holds is set by stored state rather than by that arithmetic. At batch size 32 in 32-bit (4-byte) floating-point precision, each of the four terms can be counted in turn.
@@ -3479,7 +3658,7 @@ Training adds two memory contributions that inference never pays. Gradients occu
 
 @Fig-training-step-memory follows the same memory through one training step. As backpropagation steps from the output layer back to the first layer (B3 to B1), each layer frees its saved activations, which scale with the batch size, while materializing its weight and bias gradients, which scale with the layer widths. At batch 32, the batch size is smaller than the preceding layer widths, so each newly allocated gradient tensor is larger than the activation buffer it replaces, and live memory climbs through the backward pass until B1, where weights, gradients, and Adam buffers dominate.
 
-Multiplying the batch by 32 to 1,024 leaves the parameter state untouched and multiplies the activation layer by 32. Because the batch size now exceeds every layer width, each backward step frees more activation bytes than it adds in gradient bytes, and the memory peak moves to F3 at the moment the forward pass ends. The same network and the same arithmetic per example can therefore be parameter-bound or activation-bound in memory, and the batch size decides which.
+Multiplying the batch by `{python} MnistTrainingMemoryCalc.batch_growth_str` to `{python} MnistTrainingMemoryCalc.large_batch_size_str` leaves the parameter state untouched and multiplies the activation layer by `{python} MnistTrainingMemoryCalc.batch_growth_str`. Because the batch size now exceeds every layer width, each backward step frees more activation bytes than it adds in gradient bytes, and the memory peak moves to F3 at the moment the forward pass ends. The same network and the same arithmetic per example can therefore be parameter-bound or activation-bound in memory, and the batch size decides which.
 
 ::: {#fig-training-step-memory data-explore="original-v1-training-step-memory" data-explore-key="vol1:fig-training-step-memory" fig-env="figure" fig-pos="htb" fig-cap="**Memory Over One Training Step**: Live FP32 memory of the running 784-128-64-10 network at each event of a training step, with weights and the two Adam buffers resident throughout. The forward pass (F1 to F3) keeps every layer's output, the backward pass (B3 to B1) releases them as it consumes them while gradients accumulate, and the update leaves only parameter state. The left panel runs batch 32 and the right panel batch 1,024. The dashed line is inference: weights plus the largest pair of adjacent activation buffers." fig-alt="Two panels of stacked bars over eight events: load batch, F1, F2, F3, B3, B2, B1, update. Bars stack weights, Adam state, gradients, and saved activations in kilobytes. Left, batch 32: bars near 1,400 KB rising to about 1,850 KB at B1 as gradients appear, with an inference line near 550 KB. Right, batch 1,024: activation layer dominates, bars rise to about 5,300 KB at F3 and fall to about 1,750 KB at update, with an inference line near 4,150 KB."}
 
@@ -3572,7 +3751,7 @@ plt.close()
 
 :::
 
-Scale drives the systems lesson. At batch size 32, training requires `{python} MnistTrainingMemoryCalc.training_ratio_mult_str` the inference memory in this simplified estimate; the inference column follows from the buffer-lifetime rule of @sec-neural-computation-memory-computational-resources-d02b. The absolute gap grows with parameter and activation storage; the ratio depends on their balance and on implementation choices such as recomputing some activations instead of storing them, numerical precision, and workspace reuse.
+Scale drives the systems lesson. At batch size `{python} MnistTrainingMemoryCalc.batch_size_str`, training requires `{python} MnistTrainingMemoryCalc.training_ratio_mult_str` the inference memory in this simplified estimate; the inference column follows from the buffer-lifetime rule of @sec-neural-computation-memory-computational-resources-d02b. The absolute gap grows with parameter and activation storage; the ratio depends on their balance and on implementation choices such as recomputing some activations instead of storing them, numerical precision, and workspace reuse.
 
 #### Scaling beyond MNIST {#sec-neural-computation-computational-implementation-details-1ecc}
 
@@ -3737,7 +3916,7 @@ plt.close()
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Models
-from mlsysim.fmt import fmt_count, check, fmt_memory
+from mlsysim.fmt import fmt_count, check, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemoryOverhead:
@@ -3747,20 +3926,24 @@ class AdamMemoryOverhead:
     params = Models.Language.Llama2_7B.parameters
     bytes_per_param = 4
     adam_state_tensors = 2
+    mnist_params = Scenarios.MnistDenseNetwork.result.parameters  # running 784→128→64→10 network
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     state = memory_from_params(params, bytes_per_param * byte / param) * adam_state_tensors
     state_gb = state.to(GB)
+    mnist_params_1sf = float(f"{mnist_params:.1g}")  # one significant figure for the footnote's scale label
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(state_gb.magnitude == 56, f"Expected 56 GB Adam state, got {state_gb.magnitude:g}")
+    check(mnist_params_1sf == 100_000, f"Expected the running network to round to 100K parameters, got {mnist_params_1sf:,.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     params_b_str = fmt_count(params, scale="billion", commas=False, attributive=True)
     state_gb_str = fmt_memory(state, unit=GB, precision=0, commas=False)
+    mnist_params_k_str = fmt_params(mnist_params_1sf * param, scale="K", precision=0, commas=False)
 ```
 
-[^fn-adam-memory-overhead]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: Maintains per-parameter first- and second-moment estimates of the gradient, requiring 2$\times$ additional FP32 memory beyond the parameters themselves [@kingma2014adam]. For a 100K-parameter MNIST model this overhead is negligible, but for a `{python} AdamMemoryOverhead.params_b_str` parameter model it adds ~`{python} AdamMemoryOverhead.state_gb_str`, often the difference between fitting on one GPU or requiring partitioning. Adam is widely used because its adaptive updates work robustly across many tasks, but learning rate, schedule, regularization, and memory strategy still require validation.
+[^fn-adam-memory-overhead]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: Maintains per-parameter first- and second-moment estimates of the gradient, requiring 2$\times$ additional FP32 memory beyond the parameters themselves [@kingma2014adam]. For a `{python} AdamMemoryOverhead.mnist_params_k_str`-parameter MNIST model this overhead is negligible, but for a `{python} AdamMemoryOverhead.params_b_str` parameter model it adds ~`{python} AdamMemoryOverhead.state_gb_str`, often the difference between fitting on one GPU or requiring partitioning. Adam is widely used because its adaptive updates work robustly across many tasks, but learning rate, schedule, regularization, and memory strategy still require validation.
 
 The MNIST network's memory is small, but each of its terms grows with network width and batch size, as @eq-depth-width-cost showed. Every training step must also move that state, reading parameters, producing gradients, and retaining or recomputing the forward-pass values each layer's backward calculation needs. For modest networks like the MNIST example, this traffic remains manageable. As models grow, memory bandwidth and activation storage can become limiting constraints. These constraints motivate high-bandwidth memory, narrower number formats for some tensors (mixed precision), partitioning state across devices, and activation recomputation, which discards selected saved activations and recomputes them during the backward pass. @Sec-model-training-mixedprecision-training-9218 develops mixed precision, and @sec-model-training-gradient-accumulation-checkpointing-0c47 develops recomputation.
 
@@ -3846,7 +4029,7 @@ The MNIST running example and the GPT-2 lighthouse show how model scale changes 
 @Fig-model-bytes-tiers sets the three footprints against the memory that would hold them. Each step to the right is a step down the memory hierarchy, from a microcontroller's on-chip SRAM through an accelerator's L2 cache to its high-bandwidth memory (HBM), toward storage that is larger, farther from the arithmetic, and slower to read.
 
 ::: {.column-margin .margin-pointer}
-↪ Why weights, gradients, and two Adam moments come to 16 bytes per parameter, in plain FP32 and in the mixed-precision recipe alike, is developed in @sec-model-training-optimization-algorithm-system-implications-f9f2.
+↪ Why weights, gradients, and two Adam moments come to `{python} MnistTrainingMemoryCalc.state_bytes_per_param_str` bytes per parameter, in plain FP32 and in the mixed-precision recipe alike, is developed in @sec-model-training-optimization-algorithm-system-implications-f9f2.
 :::
 
 ::: {#fig-model-bytes-tiers fig-env="figure" fig-pos="htb" fig-cap="**Where the Bytes Live**: FP32 footprints of the MNIST network and the ResNet-50 and GPT-2 lighthouses on a log scale, for weights alone (inference) and for weights plus gradients plus two Adam buffers (training, before activations). Dashed lines mark the capacity of a microcontroller's on-chip SRAM, an accelerator's L2 cache, and its high-bandwidth device memory. MNIST's training state crosses a tier boundary that its weights do not; ResNet-50 and GPT-2 sit in device memory either way, and what changes is how much of it they claim." fig-alt="Horizontal log-scale bar chart from 10 KB to 1 TB. For MNIST MLP, ResNet-50, and GPT-2, a blue weights-only bar and a longer orange training-state bar. Dashed red vertical lines labeled microcontroller SRAM (ESP32-S3) near 0.5 MB, accelerator L2 cache (H100) near 50 MB, and accelerator HBM (H100) near 80 GB. MNIST weights fall left of the SRAM line, ResNet-50 weights just past the L2 line, GPT-2 training state below the HBM line."}
@@ -4109,9 +4292,9 @@ class EpochTimeEnergy:
 
 **Problem**: How long does one training epoch of the running network take on a desktop CPU and on a data-center accelerator, which term of the iron law sets that time, and where does the energy go?
 
-**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch 32 the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step runs at the bandwidth-limited rate. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across roughly `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
+**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step runs at the bandwidth-limited rate. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across roughly `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
 
-**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch 32, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1.
+**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1.
 
 **Systems insight**: At this scale the third term of the iron law, fixed overhead, decides the run, and the accelerator's bandwidth advantage disappears behind it; a network this small trains at least as fast on a CPU. Larger models, larger batches, and fewer, fused operations shift the balance back toward the work terms, which is how frameworks gain their speed (@sec-ml-frameworks). The energy result anticipates why reuse, batching, and narrower formats matter as much to power as to time (@sec-introduction-iron-law-ml-systems-c32a).
 
@@ -4407,9 +4590,10 @@ class GpuSpecsFootnote:
     jetson_orin_tdp_low_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_min, unit=watt, precision=0, commas=False)
     jetson_orin_tdp_high_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_max, unit=watt, precision=0, commas=False)
     edge_throughput_ratio_mult_str = fmt_multiple(edge_throughput_ratio, precision=1, commas=False)
+    mobile_inference_tdp_high_w_str = fmt_power(ReferenceStats.MobilePower.MobileNpuPeak, unit=watt, precision=0, commas=False)
 ```
 
-[^fn-training-gpu-power]: **Training GPU power budget**\index{GPU!training, power budget}: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "dedicated data-center cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a 4 W mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget.
+[^fn-training-gpu-power]: **Training GPU power budget**\index{GPU!training, power budget}: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "dedicated data-center cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a `{python} GpuSpecsFootnote.mobile_inference_tdp_high_w_str` mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget.
 
 [^fn-edge-tpu-efficiency]: **Edge inference accelerators**\index{Edge inference!power tiers}: Google's edge Tensor Processing Unit (TPU), the Edge TPU (Google Coral)\index{Edge TPU!inference efficiency}, operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` through an INT8 datapath. Edge servers sit in a different tier: Jetson AGX Orin\index{Jetson AGX Orin!edge inference} reaches `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but with wired-power assumptions.
 
@@ -4523,7 +4707,7 @@ For the running network at batch size `{python} MnistInferenceResourceLocal.batc
 
 Serving one request at a time ($\BatchSize=1$) turns every fully connected layer into a matrix-vector product. That product reads each weight from memory only to use it in a single multiply-accumulate ($\NeuronPreactivation_j \leftarrow \NeuronPreactivation_j + \LayerInputComponent_i \WeightMatrixEntry$), leaving arithmetic intensity at about `{python} MnistFlopsCalc.single_image_arith_intensity_str` (notebook \ref{nbk-nn-computation-counting-ops-forward-pass}). Because inference freezes parameters and eliminates backward state\index{Inference!optimization techniques}\index{Optimization!performance, inference}, runtime engines can plan batching, memory layout, operator scheduling, and numerical precision against the physical limits of the target processor.
 
-Input batching trades per-request latency against hardware efficiency\index{Batch size!inference trade-off}\index{Inference!batch size selection}. Aggregating requests into a batch turns that matrix-vector product into a matrix-matrix product that reuses each loaded weight across all $\BatchSize$ inputs, raising the MNIST network's intensity to about `{python} MnistFlopsCalc.batch_arith_intensity_str` at batch 32. Weight reuse matters most when parameters stream from off-chip memory and the workload sits below the machine's ridge point; a model as small as MNIST can instead keep its weights in cache from one request to the next.
+Input batching trades per-request latency against hardware efficiency\index{Batch size!inference trade-off}\index{Inference!batch size selection}. Aggregating requests into a batch turns that matrix-vector product into a matrix-matrix product that reuses each loaded weight across all $\BatchSize$ inputs, raising the MNIST network's intensity to about `{python} MnistFlopsCalc.batch_arith_intensity_str` at batch `{python} MnistFlopsCalc.batch_size_str`. Weight reuse matters most when parameters stream from off-chip memory and the workload sits below the machine's ridge point; a model as small as MNIST can instead keep its weights in cache from one request to the next.
 
 Batching also increases the activation values produced: the MNIST network produces `{python} MnistInferenceResourceLocal.inf_output_act_str` layer-output values per image (`{python} MnistInferenceResourceLocal.total_inf_act_str` values including the input), or `{python} MnistInferenceResourceLocal.batch_output_act_str` layer-output values for a batch of `{python} MnistInferenceResourceLocal.batch_size_str`. These are cumulative counts across layers; simultaneous storage follows the rolling-buffer rule of @sec-neural-computation-memory-computational-resources-d02b. Production systems serving interactive traffic must also limit the wait to accumulate inputs according to their service-level latency budget.
 
@@ -5039,13 +5223,14 @@ class DamMnistDataAxis:
     w1_str = fmt(w1, precision=0, commas=True)
     w1_doubled_str = fmt(w1_doubled, precision=0, commas=True)
     w1_share_str = fmt_percent(w1_share, precision=1, commas=False, style='prose')
+    input_dim_str = fmt(side * side, precision=0, commas=False)
 ```
 
-In the D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!alignment of components}, each axis fixes one of the running network's headline numbers, and the data axis fixed the largest weight matrix before any design choice was made. A $28{\times}28$ image flattens to 784 inputs, so the first layer holds `{python} DamMnistDataAxis.w1_str` weights and performs `{python} DamMnistDataAxis.w1_share_str` of the network's arithmetic. The same digits scanned at $56{\times}56$ would quadruple that matrix to `{python} DamMnistDataAxis.w1_doubled_str` weights without changing the model's depth or the task. Data also decides whether those weights are worth learning. USPS ZIP images, MNIST digits, and check images share digit semantics but come from different scanners, thresholds, and layouts, and no preprocessing step can synthesize handwriting styles that the training set never contained.
+In the D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!alignment of components}, each axis fixes one of the running network's headline numbers, and the data axis fixed the largest weight matrix before any design choice was made. A $28{\times}28$ image flattens to `{python} DamMnistDataAxis.input_dim_str` inputs, so the first layer holds `{python} DamMnistDataAxis.w1_str` weights and performs `{python} DamMnistDataAxis.w1_share_str` of the network's arithmetic. The same digits scanned at $56{\times}56$ would quadruple that matrix to `{python} DamMnistDataAxis.w1_doubled_str` weights without changing the model's depth or the task. Data also decides whether those weights are worth learning. USPS ZIP images, MNIST digits, and check images share digit semantics but come from different scanners, thresholds, and layouts, and no preprocessing step can synthesize handwriting styles that the training set never contained.
 
-The algorithm axis set how that matrix meets the machine. Batch size is an algorithmic choice, and it moved the forward pass's arithmetic intensity from about `{python} MnistFlopsCalc.single_image_arith_intensity_str` at batch 1 to about `{python} MnistFlopsCalc.batch_arith_intensity_str` at batch 32, because one read of each weight now serves 32 images. The same choice multiplied the activations that training must keep, which is why training holds `{python} MnistInferenceResourceLocal.training_ratio_mult_str` the memory of inference at matched batch size.
+The algorithm axis set how that matrix meets the machine. Batch size is an algorithmic choice, and it moved the forward pass's arithmetic intensity from about `{python} MnistFlopsCalc.single_image_arith_intensity_str` at batch 1 to about `{python} MnistFlopsCalc.batch_arith_intensity_str` at batch `{python} MnistFlopsCalc.batch_size_str`, because one read of each weight now serves `{python} MnistFlopsCalc.batch_size_str` images. The same choice multiplied the activations that training must keep, which is why training holds `{python} MnistInferenceResourceLocal.training_ratio_mult_str` the memory of inference at matched batch size.
 
-The machine axis decided whether learning survives at all. A gradient smaller than its format's smallest normal value, $6.10 \times 10^{-5}$ in FP16 against $1.18 \times 10^{-38}$ in FP32, loses precision or flushes to zero and stops updating its weight, and a value beyond the format's maximum overflows to `Inf`. Narrower formats halve or quarter memory traffic and unlock faster matrix units, but only while gradients and activations still fit the format's range.
+The machine axis decided whether learning survives at all. A gradient smaller than its format's smallest normal value, `{python} FloatFormatLimits.fp16_min_normal_math` in FP16 against `{python} FloatFormatLimits.fp32_min_normal_math` in FP32, loses precision or flushes to zero and stops updating its weight, and a value beyond the format's maximum overflows to `Inf`. Narrower formats halve or quarter memory traffic and unlock faster matrix units, but only while gradients and activations still fit the format's range.
 
 No axis can be tuned alone. A larger input improves fidelity but grows the first weight matrix, a larger batch improves reuse but grows training memory, and a narrower format speeds the machine but endangers the gradients. Diagnosing an accuracy shortfall, a latency violation, or an out-of-memory fault therefore starts with a hypothesis on each axis and ends with a measurement of the quantity that sets the limit. An intervention on one axis routinely moves the limiting constraint to another. Teams that skip that measurement tend to fall into a small set of recurring traps.
 
@@ -5127,6 +5312,7 @@ class FallacyQuantExamples:
     imbalance_majority_acc_str = fmt_percent(round(imbalance_majority_acc / 100, 2), precision=0, commas=False, style='prose')
     mnist_arith_intensity_str = fmt_arithmetic_intensity(mnist_arith_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
     training_ratio_mult_str = fmt_multiple(training_ratio, commas=False)
+    mnist_batch_size_str = fmt(mnist_batch_size, precision=0, commas=False)
 ```
 
 Statistical learning adds failure modes that line-by-line code inspection alone cannot reveal. Each of the recurring mistakes below treats a property of the data, the optimization, or the machine as if the model's source code alone decided it.
@@ -5175,7 +5361,7 @@ Production adds constraints absent from research: latency budgets (50–100 ms e
 
 **Fallacy**: *More compute automatically means faster training.*
 
-Teams purchase expensive GPUs expecting proportional speedups, but memory traffic or launch overhead may limit performance instead. Arithmetic intensity\index{Arithmetic intensity!GPU utilization} tests that hypothesis (@fig-mnist-roofline). The MNIST forward pass in @tbl-nn-computation-mnist-flops reaches only about `{python} FallacyQuantExamples.mnist_arith_intensity_str` at batch 32 (notebook \ref{nbk-nn-computation-counting-ops-forward-pass}) and less at batch 1. The ridge point\index{Ridge point!machine balance ratio} $\PeakRate/\Bandwidth$, the intensity a workload needs before peak compute becomes the limit, sits above it on both machines at FP32 and far higher at the reduced-precision peak rates of data-center accelerators. A faster chip therefore leaves this workload waiting on memory, or on kernels too small to fill the machine. The roofline model in @sec-hardware-acceleration-roofline-model-42ff makes the condition precise, and measured speedup remains the final test.
+Teams purchase expensive GPUs expecting proportional speedups, but memory traffic or launch overhead may limit performance instead. Arithmetic intensity\index{Arithmetic intensity!GPU utilization} tests that hypothesis (@fig-mnist-roofline). The MNIST forward pass in @tbl-nn-computation-mnist-flops reaches only about `{python} FallacyQuantExamples.mnist_arith_intensity_str` at batch `{python} FallacyQuantExamples.mnist_batch_size_str` (notebook \ref{nbk-nn-computation-counting-ops-forward-pass}) and less at batch 1. The ridge point\index{Ridge point!machine balance ratio} $\PeakRate/\Bandwidth$, the intensity a workload needs before peak compute becomes the limit, sits above it on both machines at FP32 and far higher at the reduced-precision peak rates of data-center accelerators. A faster chip therefore leaves this workload waiting on memory, or on kernels too small to fill the machine. The roofline model in @sec-hardware-acceleration-roofline-model-42ff makes the condition precise, and measured speedup remains the final test.
 :::
 
 ::: {.fallacy-pitfall}
@@ -5192,7 +5378,7 @@ These fallacies and pitfalls share a common root: treating statistical behavior 
 
 Neural computation turns layer equations into physical work on a processor. Linear algebra and calculus determine operation cost under the iron law of ML systems ($\Time = \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency$). Forward propagation establishes the computational work $\Operations$, often dominated by matrix multiplications, while the complete training step adds backward computation and optimizer updates. Backpropagation needs saved or recomputed forward values and gradient storage; the optimizer may add persistent state. Architecture, batch size, precision, optimizer, and recomputation strategy determine the state footprint. Residency, reuse, and execution then determine the bytes transferred, $\DataVolume$, which need not equal that footprint. These mechanics make memory footprints, arithmetic intensities, and latency limits estimable before deployment. @Tbl-nn-computation-stage-costs, from the chapter's opening, now reads as a summary of where each stage spends them, and every row has been derived for the running network.
 
-Replacing hand-written decision rules with parameters learned from data turns feature engineering into matrix arithmetic. Layered compositions of weighted sums, nonlinear activations, and gradient updates form hierarchical representations that convert raw inputs into predictions. Training adjusts connection weights through iterative optimization, while inference applies fixed parameters to incoming data. The two phases make different demands on the machine. In this chapter's FP32 estimate, a batch-32 training step requires ~`{python} FallacyQuantExamples.training_ratio_mult_str` the memory of batch-32 inference because training retains saved activations and gradients alongside the optimizer's additional buffers. In production, as the document-recognition case study demonstrated, these mathematical kernels do not run in isolation; preprocessing, neural inference, rejection, and postprocessing must jointly satisfy a single end-to-end latency and reliability budget.
+Replacing hand-written decision rules with parameters learned from data turns feature engineering into matrix arithmetic. Layered compositions of weighted sums, nonlinear activations, and gradient updates form hierarchical representations that convert raw inputs into predictions. Training adjusts connection weights through iterative optimization, while inference applies fixed parameters to incoming data. The two phases make different demands on the machine. In this chapter's FP32 estimate, a batch-`{python} FallacyQuantExamples.mnist_batch_size_str` training step requires ~`{python} FallacyQuantExamples.training_ratio_mult_str` the memory of batch-`{python} FallacyQuantExamples.mnist_batch_size_str` inference because training retains saved activations and gradients alongside the optimizer's additional buffers. In production, as the document-recognition case study demonstrated, these mathematical kernels do not run in isolation; preprocessing, neural inference, rejection, and postprocessing must jointly satisfy a single end-to-end latency and reliability budget.
 
 ```{python}
 #| echo: false
@@ -5243,7 +5429,7 @@ class SummaryParadigmCostRecap:
 * **The loss is cheap but seeds every update**: Cross-entropy costs a few operations per class score, yet its gradient, the predicted probability minus the target, is the error signal from which every gradient update descends. What the system must protect is the loss's numerical range, which is why runtimes fuse softmax with cross-entropy.
 * **Training and inference often emphasize different objectives**: Training commonly favors efficient throughput across repeated updates, while online inference commonly favors per-request latency; offline inference may favor throughput instead. Batch size links utilization, memory, throughput, latency, and statistical behavior across these regimes.
 * **Activations are math and hardware**: ReLU is generally cheaper to implement than sigmoid or tanh, and its unit gradient for positive inputs avoids activation saturation on that branch. Its practical advantage combines implementation cost with optimization behavior.
-* **Forward propagation often centers on matrix work**: Dense matrix kernels exceed 99 percent of FLOPs in this chapter's dense-network example and dominate many important neural workloads, which is why specialized matrix hardware can substantially outperform general-purpose execution for those operations.
+* **Forward propagation often centers on matrix work**: Dense matrix kernels exceed `{python} MatmulFlopShare.matmul_floor_pct_str` of FLOPs in this chapter's dense-network example and dominate many important neural workloads, which is why specialized matrix hardware can substantially outperform general-purpose execution for those operations.
 * **Backpropagation needs the path**: Solving credit assignment requires retaining or recomputing the values used by the backward pass, so memory cost often determines whether a model can be trained on a given device and motivates techniques that reduce, recompute, or partition training state.
 * **The complete ML pipeline determines end-to-end performance**: Preprocessing, neural computation, and postprocessing all contribute to latency and reliability. The document-recognition examples demonstrated that production success depends on the entire pipeline operating within real-world constraints, not on model accuracy on a test set alone.
 

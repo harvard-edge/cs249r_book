@@ -98,6 +98,7 @@ from mlsysim.fmt import (
     fmt_memory,
     fmt_params,
     fmt_usd,
+    fmt_multiple,
 )
 
 class TrainingScenarios:
@@ -114,9 +115,11 @@ class TrainingScenarios:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     adam_training_memory_multiplier = adam_example.copies
+    cost_anchor_ratio = (gpt4_cost_est / gpt2_cost_2019).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(adam_training_memory_multiplier == 8, "Mixed-precision Adam training state should be 8x FP16 inference weights")
+    check(1_500 <= cost_anchor_ratio < 2_500, f"Footnote says the two cost anchors differ by roughly 2,000x, got {cost_anchor_ratio:.0f}x")
     # Prose says "over a hundred billion such passes" at ~3x the forward cost
     # each; keep the stated total budget consistent with that narrative
     # (2026-06-07: budget was 1e19, contradicting both the pass count and the
@@ -131,6 +134,7 @@ class TrainingScenarios:
     gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
     gpt2_implied_passes_billion_str = fmt_int(implied_passes / BILLION, commas=False)
     adam_training_memory_mult_str = fmt_multiple(adam_training_memory_multiplier, precision=0, commas=False)
+    cost_anchor_ratio_mult_str = fmt_multiple(round(cost_anchor_ratio, -3), precision=0, commas=True)
 
     # Hardware spec used in the pipeline-stages narrative
     nvlink_h100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
@@ -192,6 +196,7 @@ class StepToRunScale:
     mlp_params_str = fmt_count(mlp_params.to(param).magnitude, commas=True)
     mlp_step_mflop_str = fmt_flops(mlp_step, unit=MFLOPs, precision=1, commas=False)
     mlp_state_mb_str = fmt_memory(mlp_state, unit=MB, precision=1, commas=False)
+    mlp_batch_str = fmt_count(mlp_batch, commas=False)
     gpt2_batch_str = fmt_count(gpt2_batch, commas=False)
     gpt2_seq_len_str = fmt_count(gpt2_seq_len, commas=True)
     gpt2_step_tflop_str = fmt_flops(round(gpt2_step.to(TFLOPs).magnitude) * TFLOPs, unit=TFLOPs, precision=0, commas=False)
@@ -199,13 +204,13 @@ class StepToRunScale:
     flop_ratio_m_str = fmt_count(round(flop_ratio, -6), scale="million", precision=0, commas=False)
 ```
 
-A training run is one training step repeated millions of times, so every byte a step holds and every millisecond it spends is multiplied by the length of the run. Each step reads a batch of examples, computes a forward pass and a loss, propagates gradients backward, and updates every parameter, and the run repeats that sequence until the model reaches its quality target. The anatomy of a training step in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 traced one such step for a two-layer MNIST classifier, a smaller sibling of the three-layer network of @sec-neural-computation. The classifier has `{python} StepToRunScale.mlp_params_str` parameters and costs about `{python} StepToRunScale.mlp_step_mflop_str` per batch of 32 images by the dense-training rule (less in that chapter's exact trace, which skips the gradient of the raw input). Its weights, gradients, and optimizer state occupy `{python} StepToRunScale.mlp_state_mb_str`.
+A training run is one training step repeated millions of times, so every byte a step holds and every millisecond it spends is multiplied by the length of the run. Each step reads a batch of examples, computes a forward pass and a loss, propagates gradients backward, and updates every parameter, and the run repeats that sequence until the model reaches its quality target. The anatomy of a training step in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 traced one such step for a two-layer MNIST classifier, a smaller sibling of the three-layer network of @sec-neural-computation. The classifier has `{python} StepToRunScale.mlp_params_str` parameters and costs about `{python} StepToRunScale.mlp_step_mflop_str` per batch of `{python} StepToRunScale.mlp_batch_str` images by the dense-training rule (less in that chapter's exact trace, which skips the gradient of the raw input). Its weights, gradients, and optimizer state occupy `{python} StepToRunScale.mlp_state_mb_str`.
 
 A language model turns the same step into a different engineering problem. One step of GPT-2 XL over `{python} StepToRunScale.gpt2_batch_str` sequences of `{python} StepToRunScale.gpt2_seq_len_str` tokens costs about `{python} StepToRunScale.gpt2_step_tflop_str`, roughly `{python} StepToRunScale.flop_ratio_m_str` times the classifier's arithmetic, and its weights, gradients, and optimizer state occupy `{python} StepToRunScale.gpt2_state_gb_str` before a single activation is stored. The framework mechanisms that made the small step possible leave every decision about the large run open: which intermediate activations to keep when high-bandwidth memory (HBM) runs out, how large a batch the memory permits, how to keep the accelerator supplied with data, and when one accelerator stops being enough.
 
 Repeating that step across an entire training corpus creates the **training cost asymmetry**\index{Training cost asymmetry!definition}\index{Training!cost asymmetry}\index{Training!inference vs. training}, the gap between answering one query with a trained model and running the forward-backward-update loop over billions of tokens. By the standard transformer count, one forward pass of GPT-2 over a single token costs about `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations [@radford2019language]. Pretraining the full model on its WebText corpus took `{python} TrainingScenarios.gpt2_total_flops_str` in total, the work of about `{python} TrainingScenarios.gpt2_implied_passes_billion_str` billion tokens, each carried through a forward and a backward pass. In 2019 that budget cost about `{python} TrainingScenarios.gpt2_training_cost_2019_str` in compute, while pretraining a frontier model such as GPT-4 cost an estimated `{python} TrainingScenarios.gpt4_training_cost_est_str`.[^fn-training-cost-scaling] Neither figure is an audited disclosure, but the jump of more than three orders of magnitude between them shows how quickly parameter counts, token budgets, and fleet sizes compound.
 
-[^fn-training-cost-scaling]: [offset=8mm] **Training cost scaling**\index{Training cost!scaling trajectory}: The roughly 2,000$\times$ ratio between this chapter's two cost anchors illustrates how parameter counts, training-token budgets, hardware generations, and accelerator fleets can compound; it is not a controlled comparison of disclosed training bills. OpenAI's GPT-2 report documents the model and training setup but does not disclose training cost [@radford2019language]. Exact GPT-4 training details were also not disclosed, so the GPT-4-class figure is explicitly an industry estimate supported by public reporting and independent infrastructure analysis [@knight2023giantmodels; @semianalysisGPT4].
+[^fn-training-cost-scaling]: [offset=8mm] **Training cost scaling**\index{Training cost!scaling trajectory}: The roughly `{python} TrainingScenarios.cost_anchor_ratio_mult_str` ratio between this chapter's two cost anchors illustrates how parameter counts, training-token budgets, hardware generations, and accelerator fleets can compound; it is not a controlled comparison of disclosed training bills. OpenAI's GPT-2 report documents the model and training setup but does not disclose training cost [@radford2019language]. Exact GPT-4 training details were also not disclosed, so the GPT-4-class figure is explicitly an industry estimate supported by public reporting and independent infrastructure analysis [@knight2023giantmodels; @semianalysisGPT4].
 
 ```{=latex}
 \vspace*{-1ex}
@@ -514,7 +519,7 @@ class GPT2RunTimeEnergy:
     step_energy_j_str = fmt_energy(round(step_energy.to(joule).magnitude) * joule, unit=joule, precision=0, commas=False)
 ```
 
-For GPT-2 XL on the reference H100, the law becomes a schedule. At the accelerator's `{python} ReferenceMachine.h100_peak_str` dense 16-bit peak and a utilization $\EfficiencyHw$ of `{python} GPT2RunTimeEnergy.eta_pct_str`, a round figure at the high end of what large training runs sustain [@chowdhery2022palm], the run takes about `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator. That is about `{python} GPT2RunTimeEnergy.steps_m_str` steps of `{python} GPT2RunTimeEnergy.step_time_s_str` each over 32 sequences of 1,024 tokens. Time converts directly into energy. Energy is power integrated over time, $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power, so at the H100's `{python} GPT2RunTimeEnergy.tdp_w_str` thermal design power the run draws about `{python} GPT2RunTimeEnergy.run_energy_kwh_str` at the accelerator alone, about `{python} GPT2RunTimeEnergy.step_energy_j_str` per step. Every technique that shortens the run at constant power removes energy in the same proportion, which is why the utilization factor matters to an energy budget as much as to a schedule.
+For GPT-2 XL on the reference H100, the law becomes a schedule. At the accelerator's `{python} ReferenceMachine.h100_peak_str` dense 16-bit peak and a utilization $\EfficiencyHw$ of `{python} GPT2RunTimeEnergy.eta_pct_str`, a round figure at the high end of what large training runs sustain [@chowdhery2022palm], the run takes about `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator. That is about `{python} GPT2RunTimeEnergy.steps_m_str` steps of `{python} GPT2RunTimeEnergy.step_time_s_str` each over `{python} StepToRunScale.gpt2_batch_str` sequences of `{python} StepToRunScale.gpt2_seq_len_str` tokens. Time converts directly into energy. Energy is power integrated over time, $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power, so at the H100's `{python} GPT2RunTimeEnergy.tdp_w_str` thermal design power the run draws about `{python} GPT2RunTimeEnergy.run_energy_kwh_str` at the accelerator alone, about `{python} GPT2RunTimeEnergy.step_energy_j_str` per step. Every technique that shortens the run at constant power removes energy in the same proportion, which is why the utilization factor matters to an energy budget as much as to a schedule.
 
 ::: {.column-margin .margin-pointer}
 ↩ The iron law's first estimate of a training run, the same operation-count-to-days conversion applied to a GPT-3-class model on an accelerator cluster, is established in @sec-introduction-iron-law-ml-systems-c32a.
@@ -658,7 +663,7 @@ This dense computational workload motivates blocked algorithms that parallelize 
 import math
 from mlsysim import Hardware, Models, Literature, Scenarios
 from mlsysim.core.units import millisecond
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_ratio, check, fmt_time, fmt_flops, fmt_flop_rate
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_ratio, check, fmt_time, fmt_flops, fmt_flop_rate, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Compute:
@@ -760,6 +765,9 @@ class GPT2Compute:
     target_step_ms_str = fmt_time(target_step, millisecond, precision=0, commas=False)
     practical_lo_str = fmt(practical_lo, precision=0, commas=False)
     practical_hi_str = fmt(practical_hi, precision=0, commas=False)
+    # Utilization range quoted beside the accelerator counts it produces
+    mfu_low_num_str = fmt_percent(Literature.Training.MfuLow, precision=0, commas=False, style="number")
+    mfu_high_pct_str = fmt_percent(Literature.Training.MfuHigh, precision=0, commas=False, style="prose")
 
     # Context exports
     batch_str = fmt(batch, precision=0, commas=False)
@@ -826,7 +834,7 @@ class TrainingHardware:
     h100_fp32_tflop_per_s_str = fmt_flop_rate(h100.compute.precision_flops["fp32"], unit=TFLOP / second, precision=0, commas=False)
 ```
 
-**Systems insight**: The reference H100\index{H100} (`{python} TrainingHardware.h100_fp16_tflop_per_s_str` dense peak with Tensor Cores, `{python} TrainingHardware.h100_fp32_tflop_per_s_str` without) would require `{python} GPT2Compute.h100_time_s_str` for the modeled attention-plus-FFN training step at 100 percent utilization. If the target is a step of about `{python} GPT2Compute.target_step_ms_str`, ideal arithmetic alone needs about two accelerators, and at the 30 to 50 percent utilization large runs sustain the requirement grows to `{python} GPT2Compute.practical_lo_str` to `{python} GPT2Compute.practical_hi_str` before communication and pipeline overhead are counted.
+**Systems insight**: The reference H100\index{H100} (`{python} TrainingHardware.h100_fp16_tflop_per_s_str` dense peak with Tensor Cores, `{python} TrainingHardware.h100_fp32_tflop_per_s_str` without) would require `{python} GPT2Compute.h100_time_s_str` for the modeled attention-plus-FFN training step at 100 percent utilization. If the target is a step of about `{python} GPT2Compute.target_step_ms_str`, ideal arithmetic alone needs about two accelerators, and at the `{python} GPT2Compute.mfu_low_num_str` to `{python} GPT2Compute.mfu_high_pct_str` utilization large runs sustain the requirement grows to `{python} GPT2Compute.practical_lo_str` to `{python} GPT2Compute.practical_hi_str` before communication and pipeline overhead are counted.
 
 :::
 
@@ -918,7 +926,7 @@ $$
 \text{Memory Required} = \WeightMemory + \GradientMemory + \ActivationMemory, \qquad \ActivationMemory \propto \BatchSize
 $$ {#eq-batch-memory-decomposition}
 
-Because the activation term scales with $\BatchSize$ while parameter and gradient memory stay fixed, doubling the batch doubles the activation working set. A model that fits comfortably at a small batch can exhaust the 80 GB of HBM on the reference H100 once the batch grows. @Sec-model-training-memory-management-c1ec works through an illustrative ResNet-50 budget.
+Because the activation term scales with $\BatchSize$ while parameter and gradient memory stay fixed, doubling the batch doubles the activation working set. A model that fits comfortably at a small batch can exhaust the `{python} ReferenceMachine.h100_mem_str` of HBM on the reference H100 once the batch grows. @Sec-model-training-memory-management-c1ec works through an illustrative ResNet-50 budget.
 
 Sharing each loaded weight across the batch lets a larger batch move dense feedforward and attention projections toward the compute-bound regime; shape and the hardware ridge point determine whether compute throughput becomes limiting. Throughput and convergence follow separate curves, however. @goyal2017accurate trained ResNet-50 on ImageNet at $\BatchSize=8{,}192$ by scaling the learning rate linearly with batch size and adding a warmup period, a configuration-specific recipe rather than evidence of a universal critical batch size\index{Critical batch size!throughput-convergence limit}. Its useful range depends on the model, data, optimizer, and target accuracy.
 
@@ -972,7 +980,7 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla \LossFunction(\ModelParameters_t)
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_memory, check
+from mlsysim.fmt import fmt_memory, fmt_params, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemory:
@@ -994,11 +1002,12 @@ class AdamMemory:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     adam_overhead_mb_str = fmt_memory(overhead, unit=MB, precision=0, commas=False)
+    params_str = fmt_params(params, precision=0)
 
 # Note: Use AdamMemory.adam_overhead_mb_str directly.
 ```
 
-Maintaining both moment buffers triples the parameter-plus-optimizer-state footprint: the training system must allocate two persistent state tensors ($\AdamFirstMoment_t$ and $\AdamSecondMoment_t$) alongside the parameter tensors. For a 100M-parameter model, those auxiliary vectors alone add `{python} AdamMemory.adam_overhead_mb_str` beyond weight storage.
+Maintaining both moment buffers triples the parameter-plus-optimizer-state footprint: the training system must allocate two persistent state tensors ($\AdamFirstMoment_t$ and $\AdamSecondMoment_t$) alongside the parameter tensors. For a `{python} AdamMemory.params_str`-parameter model, those auxiliary vectors alone add `{python} AdamMemory.adam_overhead_mb_str` beyond weight storage.
 
 ```{python}
 #| echo: false
@@ -1015,16 +1024,20 @@ class OptimizerScenarios:
     adam_7b_params = adam_7b.workload.parameters
 
     adam_7b_state = adam_7b.total
+    # Adam's two FP32 moment tensors alone (first and second moment)
+    adam_7b_moments = memory_from_params(adam_7b_params, 2 * BYTES_FP32 / param)
 
     adam_7b_state_value = adam_7b_state.to(GB).magnitude
     check(adam_7b_state_value == 112, f"7-billion-parameter mixed-precision Adam state should be 112 GB, got {adam_7b_state_value}")
+    check(abs(adam_7b_moments.to(GB).magnitude - 56) < 0.5, f"Footnote says the FP32 moments alone are 56 GB, got {adam_7b_moments.to(GB)}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     adam_7b_params_str = fmt_params(adam_7b_params, precision=0)
     adam_7b_state_gb_str = fmt_memory(adam_7b_state, unit=GB, precision=0, commas=False)
+    adam_7b_moments_gb_str = fmt_memory(adam_7b_moments, unit=GB, precision=0, commas=False)
 ```
 
-[^fn-adam-optimizer-memory]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. For a `{python} OptimizerScenarios.adam_7b_params_str` model, Adam's FP32 moment tensors alone consume 56 GB; the full standard mixed-precision training state before activations is `{python} OptimizerScenarios.adam_7b_state_gb_str` once FP16 weights, FP16 gradients, FP32 master weights, and Adam moments are counted together.
+[^fn-adam-optimizer-memory]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. For a `{python} OptimizerScenarios.adam_7b_params_str` model, Adam's FP32 moment tensors alone consume `{python} OptimizerScenarios.adam_7b_moments_gb_str`; the full standard mixed-precision training state before activations is `{python} OptimizerScenarios.adam_7b_state_gb_str` once FP16 weights, FP16 gradients, FP32 master weights, and Adam moments are counted together.
 
 #### System cost of optimizer state {#sec-model-training-optimization-algorithm-system-implications-f9f2}
 
@@ -2569,6 +2582,7 @@ class GPT2DataPipeline:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
     batch_size_seq_str = fmt_count(batch_size, label="sequence", commas=False)
+    batch_size_str = fmt_count(batch_size, commas=False)
     seq_len_token_str = fmt_count(seq_len, label="token", commas=True)
     b_assign_math = fmt_math(f"\\BatchSize={batch_size}")
     s_assign_math = fmt_math(f"\\SequenceLength={seq_len}")
@@ -2608,7 +2622,7 @@ class StorageBandwidthNvme:
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
 
-**Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying one H100 training GPT-2 XL at batch 32. The device service interval is the step time the training-time law gives at the chapter's utilization, about `{python} GPT2DataPipeline.accelerator_step_ms_str` per batch; fitting that batch in memory requires the techniques of @sec-model-training-pipeline-optimizations-cd9d, but the input path does not depend on which ones are used.
+**Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying one H100 training GPT-2 XL at batch `{python} GPT2DataPipeline.batch_size_str`. The device service interval is the step time the training-time law gives at the chapter's utilization, about `{python} GPT2DataPipeline.accelerator_step_ms_str` per batch; fitting that batch in memory requires the techniques of @sec-model-training-pipeline-optimizations-cd9d, but the input path does not depend on which ones are used.
 
 **Stage trace**:
 
@@ -2781,7 +2795,43 @@ class StorageBandwidthPractical:
 Sustaining that stage overlap across the storage-to-HBM gap is harder in practice because an NVMe\index{NVMe!storage bandwidth} drive rated at `{python} StorageBandwidthPractical.nvme_bw_gb_per_s_str` sustains only `{python} StorageBandwidthPractical.nvme_bw_sustained_gb_per_s_str` at half of peak, and small random reads during dataset shuffling degrade throughput further depending on access size, queue depth, file layout, and caching. To keep accelerators fed despite this bandwidth reduction, pipeline architectures maintain multiple data buffers simultaneously: prefetch buffers loading future batches, processing buffers holding data under transformation, and transfer buffers staging data for accelerator consumption. The total host memory required scales with the per-batch memory footprint $\BatchBufferMemory$ according to @eq-buffer-memory:
 $$\PipelineBufferMemory= (\PrefetchBufferCount+ \ProcessingBufferCount+ \TransferBufferCount) \times \BatchBufferMemory$$ {#eq-buffer-memory}
 
-To avoid starving the accelerator, the average preprocessing service time per batch across all workers must not exceed the compute time per batch ($\PreprocessingServiceTime\leq \IronLawComputeTime$), which restates the preprocessing term of @eq-training-bottleneck in time. If preprocessing takes 40 ms per batch on one worker while the accelerator consumes a batch every 10 ms, ideal scaling requires at least four workers. Actual worker requirements depend on storage throughput, CPU contention, and transformation cost, which @sec-model-training-data-prefetching-pipeline-overlapping-e984 examines through prefetching and parallel workers.
+```{python}
+#| echo: false
+#| label: preprocessing-worker-count-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREPROCESSING WORKER COUNT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Worker-sizing sentence in
+# │          @sec-model-training-practical-architectures-d54d.
+# │
+# │ Goal:    Size the preprocessing worker pool so supply keeps pace with demand.
+# │ Show:    Per-worker preprocessing time, accelerator batch interval, and the
+# │          minimum worker count (stated in words as "four").
+# │ How:     Workers = ceil(preprocessing time / accelerator batch interval).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.core.units import millisecond
+from mlsysim.fmt import check, fmt_time
+
+class PreprocessingWorkerCount:
+    """Minimum workers for one-worker preprocessing to keep pace with the accelerator."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    prep_time = 40 * millisecond  # scenario assumption: preprocessing per batch on one worker
+    accel_time = 10 * millisecond  # scenario assumption: accelerator time per batch
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    workers = math.ceil((prep_time / accel_time).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(workers == 4, f"Prose says at least four workers, got {workers}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    prep_time_ms_str = fmt_time(prep_time, millisecond, precision=0, commas=False)
+    accel_time_ms_str = fmt_time(accel_time, millisecond, precision=0, commas=False)
+```
+
+To avoid starving the accelerator, the average preprocessing service time per batch across all workers must not exceed the compute time per batch ($\PreprocessingServiceTime\leq \IronLawComputeTime$), which restates the preprocessing term of @eq-training-bottleneck in time. If preprocessing takes `{python} PreprocessingWorkerCount.prep_time_ms_str` per batch on one worker while the accelerator consumes a batch every `{python} PreprocessingWorkerCount.accel_time_ms_str`, ideal scaling requires at least four workers. Actual worker requirements depend on storage throughput, CPU contention, and transformation cost, which @sec-model-training-data-prefetching-pipeline-overlapping-e984 examines through prefetching and parallel workers.
 
 ```{python}
 #| echo: false
@@ -3358,7 +3408,45 @@ Checkpoint cadence decides how much work a failure discards. Because every updat
 
 PaLM's recoveries kept 6,144 chips busy on steps that were later thrown away, so the cluster's time was spent without the run advancing. In the training-time law that discarded work appears as a lower utilization factor $\EfficiencyHw$, which makes checkpoint cadence a throughput decision as well as a reliability one. Frequent saves stall the run for the write time above, while sparse saves lengthen the replay after each failure.
 
-Decomposing the training pipeline exposes the mechanics of data loading, forward and backward execution, parameter updates, and saved training state, while the computation and memory costs in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth each phase demands. Yet knowing how stages execute does not reveal where a specific training workload stalls. A pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes 120 ms and computation takes 100 ms, a 20 percent faster kernel saves nothing, because the step still takes 120 ms. Before applying optimization techniques, systems engineers must profile the execution timeline to determine whether compute, memory bandwidth, storage I/O, or network synchronization limits performance.
+```{python}
+#| echo: false
+#| label: slowest-stage-bound-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SLOWEST-STAGE BOUND
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Slowest-stage example in the paragraph that motivates profiling,
+# │          after the PaLM loss-spike war story.
+# │
+# │ Goal:    Show that speeding up a non-bottleneck stage leaves the step unchanged.
+# │ Show:    Data-loading and compute times, the kernel speedup, and the step time.
+# │ How:     Overlapped step time = max(load time, compute time x (1 - speedup)).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import millisecond
+from mlsysim.fmt import check, fmt_percent, fmt_time
+
+class SlowestStageBound:
+    """Overlapped pipeline: a faster kernel behind a slower loader saves nothing."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    load_time = 120 * millisecond  # scenario assumption: data loading per step
+    compute_time = 100 * millisecond  # scenario assumption: computation per step
+    kernel_speedup = 0.20  # scenario assumption: fraction of compute time removed
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    faster_compute = compute_time * (1 - kernel_speedup)
+    step_time = max(load_time, faster_compute)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(step_time == load_time, "Prose says the faster kernel saves nothing: the loader still sets the step.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    load_time_ms_str = fmt_time(load_time, millisecond, precision=0, commas=False)
+    compute_time_ms_str = fmt_time(compute_time, millisecond, precision=0, commas=False)
+    kernel_speedup_pct_str = fmt_percent(kernel_speedup, precision=0, commas=False, style="prose")
+    step_time_ms_str = fmt_time(step_time, millisecond, precision=0, commas=False)
+```
+
+Decomposing the training pipeline exposes the mechanics of data loading, forward and backward execution, parameter updates, and saved training state, while the computation and memory costs in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth each phase demands. Yet knowing how stages execute does not reveal where a specific training workload stalls. A pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes `{python} SlowestStageBound.load_time_ms_str` and computation takes `{python} SlowestStageBound.compute_time_ms_str`, a `{python} SlowestStageBound.kernel_speedup_pct_str` faster kernel saves nothing, because the step still takes `{python} SlowestStageBound.step_time_ms_str`. Before applying optimization techniques, systems engineers must profile the execution timeline to determine whether compute, memory bandwidth, storage I/O, or network synchronization limits performance.
 
 ::: {#chk-training-memory-compute-trade-off .callout-checkpoint title="Costing a step and building its pipeline"}
 
@@ -4094,10 +4182,13 @@ Running a modern training job entirely in 32-bit floating point (FP32) leaves th
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: FP16/FP32 byte widths and 1B-parameter weight memory.
 from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt, check, fmt_memory, fmt_multiple, fmt_percent
+import math
+from mlsysim.fmt import fmt, check, fmt_math, fmt_memory, fmt_multiple, fmt_percent
 
 class MixedPrecisionIntro:
     model_params = 1 * Bparam
+    model_params_exp = round(math.log10(model_params.to(param).magnitude))
+    check(10**model_params_exp == model_params.to(param).magnitude, "Example model size must be a power of ten for the 10^n prose form")
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
     model_1b_fp32 = memory_from_params(model_params, BYTES_FP32 / param)
@@ -4113,9 +4204,10 @@ class MixedPrecisionIntro:
     bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
     model_1b_fp32_gb_str = fmt_memory(model_1b_fp32, unit=GB, precision=0, commas=False)
     model_1b_fp16_gb_str = fmt_memory(model_1b_fp16, unit=GB, precision=0, commas=False)
+    model_params_math = fmt_math(f"10^{model_params_exp}")
 ```
 
-A neural network's stored FP32 weights require `{python} MixedPrecisionIntro.bytes_fp32_value_str` bytes per parameter, while FP16 and BF16 weights use `{python} MixedPrecisionIntro.bytes_fp16_value_str` bytes. For a model with $10^9$ parameters, the working copy of the weights shrinks from `{python} MixedPrecisionIntro.model_1b_fp32_gb_str` to `{python} MixedPrecisionIntro.model_1b_fp16_gb_str`. That saving does not carry over to the static training state. The common FP16 recipe keeps FP32 master weights and FP32 Adam moments. Per parameter, it spends 2 + 2 + 4 + 8 = 16 bytes on weights, gradients, master copy, and moments, exactly what FP32 Adam spends on its 4 + 4 + 8. Mixed precision's memory benefit therefore comes from the tensors stored in 16 bits, above all the activations, together with the halved bytes moved for every 16-bit read, write, and gradient exchange.
+A neural network's stored FP32 weights require `{python} MixedPrecisionIntro.bytes_fp32_value_str` bytes per parameter, while FP16 and BF16 weights use `{python} MixedPrecisionIntro.bytes_fp16_value_str` bytes. For a model with `{python} MixedPrecisionIntro.model_params_math` parameters, the working copy of the weights shrinks from `{python} MixedPrecisionIntro.model_1b_fp32_gb_str` to `{python} MixedPrecisionIntro.model_1b_fp16_gb_str`. That saving does not carry over to the static training state. The common FP16 recipe keeps FP32 master weights and FP32 Adam moments. Per parameter, it spends 2 + 2 + 4 + 8 = 16 bytes on weights, gradients, master copy, and moments, exactly what FP32 Adam spends on its 4 + 4 + 8. Mixed precision's memory benefit therefore comes from the tensors stored in 16 bits, above all the activations, together with the halved bytes moved for every 16-bit read, write, and gradient exchange.
 
 ```{python}
 #| echo: false
@@ -4715,7 +4807,7 @@ class GPT2FlashAttentionMemory:
     excess_gb_str = fmt_memory(round((excess).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 
-The same quadratic term dominates GPT-2 XL's memory. At batch 32 and 1,024 tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's `{python} GPT2FlashAttentionMemory.capacity_label_str` (`{python} GPT2FlashAttentionMemory.capacity_gb_str` in decimal units). Removing attention's traffic is therefore necessary but not sufficient.
+The same quadratic term dominates GPT-2 XL's memory. At batch `{python} StepToRunScale.gpt2_batch_str` and `{python} StepToRunScale.gpt2_seq_len_str` tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's `{python} GPT2FlashAttentionMemory.capacity_label_str` (`{python} GPT2FlashAttentionMemory.capacity_gb_str` in decimal units). Removing attention's traffic is therefore necessary but not sufficient.
 
 FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!memory bandwidth optimization}\index{Out-of-memory error!training constraint}\index{FlashAttention!origin and engineering insight} [@dao2022] addresses this bandwidth bottleneck by treating attention as an IO problem. Processing attention in SRAM-sized tiles avoids materializing the full $\SequenceLength{\times}\SequenceLength$ matrix in HBM and reduces traffic without changing the mathematical output, which is how the roofline preview moved attention rightward toward, and for favorable shapes past, the ridge.
 
@@ -4743,7 +4835,7 @@ Here, $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatri
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
-from mlsysim.fmt import check, fmt, fmt_count, MarkdownStr, fmt_memory
+from mlsysim.fmt import check, fmt, fmt_count, fmt_math, MarkdownStr, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionMemoryCalc:
@@ -4762,6 +4854,7 @@ class AttentionMemoryCalc:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(attn_matrix.to(MB).magnitude, 1) == 67.1, f"Attention matrix MB mismatch: {attn_matrix}")
     check(round(total_attn.to(GB).magnitude, 1) == 1.1, f"Total attention GB mismatch: {total_attn}")
+    check(round(tiles.tile_bytes.to(KB).magnitude, 1) == 65.5, f"128 x 128 FP32 tile should be 65.5 KB, got {tiles.tile_bytes}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fa_seq_len_str = fmt(seq_len, precision=0)
@@ -4773,6 +4866,10 @@ class AttentionMemoryCalc:
     # (2026-06-07: was the closed "4 B" string, rendering "4 B$ bytes").
     bytes_fp32_scalar_str = fmt(BYTES_FP32.to(byte).magnitude, precision=0, commas=False)
     attn_bytes_formula_str = fmt_math(f"{fa_seq_len_str.replace(',', '{,}')}^2 \\times {bytes_fp32_scalar_str}")
+    # One SRAM tile against the full matrix (FlashAttention tiling sentence)
+    tile_kb_str = fmt_memory(tiles.tile_bytes, unit=KB, precision=1, commas=False)
+    tile_dim_math = fmt_math(f"{tiles.tile}{{\\times}}{tiles.tile}")
+    matrix_dim_math = fmt_math(f"{seq_len}{{\\times}}{seq_len}")
 ```
 
 The memory bottleneck emerges from materializing the $\SequenceLength{\times}\SequenceLength$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` with head dimension $\AttentionHeadDimension =$ `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} AttentionMemoryCalc.attn_bytes_formula_str` bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` in FP32. This section counts FP32 scores throughout, since autocast policies commonly keep softmax in FP32; at FP16 every figure halves, as in the roofline estimate, while the quadratic growth stays the same. With `{python} AttentionMemoryCalc.fa_n_heads_str`, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` for the intermediate attention matrices alone, not including the keys, queries, values, or output tensors.
@@ -4798,7 +4895,7 @@ The key algorithmic insight relies on the structure of @eq-attention. Softmax no
 *FlashAttention swaps the full attention matrix for small SRAM tiles.*
 :::
 
-No full $\SequenceLength{\times}\SequenceLength$ score or probability matrix is written to HBM. A $128{\times}128$ FP32 score tile, for example, occupies 65.5 KB compared with 67.1 MB for a $4096{\times}4096$ matrix. Other inputs, outputs, and running statistics remain, so the tile is not necessarily the largest tensor in the entire kernel.
+No full $\SequenceLength{\times}\SequenceLength$ score or probability matrix is written to HBM. A `{python} AttentionMemoryCalc.tile_dim_math` FP32 score tile, for example, occupies `{python} AttentionMemoryCalc.tile_kb_str` compared with `{python} AttentionMemoryCalc.attn_matrix_mb_str` for a `{python} AttentionMemoryCalc.matrix_dim_math` matrix. Other inputs, outputs, and running statistics remain, so the tile is not necessarily the largest tensor in the entire kernel.
 
 The storage boundary distinguishes the tiled algorithm from the materialized implementation. @Fig-training-attention-storage follows the same inputs and output through both paths; only the materialized path writes the full intermediate matrices to HBM.
 
@@ -4882,7 +4979,7 @@ FlashAttention improves both activation memory and memory IO\index{FlashAttentio
 # │ How: Compare S×S matrix size to 3×S×d input tensor size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_multiple, fmt_memory
+from mlsysim.fmt import check, fmt_math, fmt_multiple, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionCalc:
@@ -4907,11 +5004,21 @@ class FlashAttentionCalc:
     check(round(fa_standard.to(MB).magnitude, 1) == 67.1, f"Standard attention memory mismatch: {fa_standard}")
     check(round(fa_flash.to(MB).magnitude, 1) == 3.1, f"FlashAttention memory mismatch: {fa_flash}")
     check(round(fa_reduction, 1) == 21.3, f"Reduction factor mismatch: {fa_reduction}")
+    check(
+        abs(fa_flash.to(byte).magnitude - 3 * fa_n * fa_d * tiles.bytes_per_value.to(byte).magnitude) < 1,
+        "Q, K, V inputs must be 3 x S x d FP32 values, as the prose formula shows",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fa_standard_mb_str = fmt_memory(fa_standard, unit=MB, precision=1, commas=False)
     fa_flash_mb_str = fmt_memory(fa_flash, unit=MB, precision=1, commas=False)
     fa_reduction_mult_str = fmt_multiple(fa_reduction, precision=1, commas=False)
+    # Inputs of the per-head comparison, written as the math the sentence shows
+    _fp32_bytes = int(tiles.bytes_per_value.to(byte).magnitude)
+    s_assign_math = fmt_math(f"\\SequenceLength = {fa_n}")
+    d_assign_math = fmt_math(f"\\AttentionHeadDimension = {fa_d}")
+    score_bytes_formula_math = fmt_math(f"{fa_n}^2 \\times {_fp32_bytes}")
+    qkv_bytes_formula_math = fmt_math(f"(3 \\times {fa_n}{{\\times}}{fa_d}) \\times {_fp32_bytes}")
 ```
 
 ```{python}
@@ -4947,7 +5054,7 @@ class FlashAttentionTotal:
     ratio_mult_str = fmt_multiple(ratio, precision=1, commas=False)
 ```
 
-For $\SequenceLength = 4096$, $\AttentionHeadDimension = 64$, one materialized FP32 score matrix occupies $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. The three FP32 input tensors occupy $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a component-size ratio of `{python} FlashAttentionCalc.fa_reduction_mult_str` between one quadratic intermediate and the inputs. The comparison that decides memory is the whole per-head footprint each algorithm keeps for the backward pass. The conventional baseline assumed here stores the inputs, the output, and both the score and probability matrices, about `{python} FlashAttentionTotal.standard_total_mb_str`. FlashAttention stores the inputs, the output, and two numbers per row (the running maximum and sum), about `{python} FlashAttentionTotal.flash_total_mb_str`, roughly `{python} FlashAttentionTotal.ratio_mult_str` smaller, and the gap widens as $\SequenceLength$ grows because only the standard footprint is quadratic.
+For `{python} FlashAttentionCalc.s_assign_math`, `{python} FlashAttentionCalc.d_assign_math`, one materialized FP32 score matrix occupies `{python} FlashAttentionCalc.score_bytes_formula_math` bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. The three FP32 input tensors occupy `{python} FlashAttentionCalc.qkv_bytes_formula_math` bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a component-size ratio of `{python} FlashAttentionCalc.fa_reduction_mult_str` between one quadratic intermediate and the inputs. The comparison that decides memory is the whole per-head footprint each algorithm keeps for the backward pass. The conventional baseline assumed here stores the inputs, the output, and both the score and probability matrices, about `{python} FlashAttentionTotal.standard_total_mb_str`. FlashAttention stores the inputs, the output, and two numbers per row (the running maximum and sum), about `{python} FlashAttentionTotal.flash_total_mb_str`, roughly `{python} FlashAttentionTotal.ratio_mult_str` smaller, and the gap widens as $\SequenceLength$ grows because only the standard footprint is quadratic.
 
 These stored-tensor totals exclude gradient buffers, temporary workspace, and the live SRAM tile, so they are not estimates of peak training memory. Implementations may also retain fewer quadratic intermediates than the conventional baseline assumed here.
 
@@ -5170,7 +5277,7 @@ Activation checkpointing\index{Activation checkpointing!memory-compute trade-off
 \end{algorithm}
 ```
 
-In this segment schedule, recomputed intermediate values remain available until their backward consumers finish; recomputing a segment afresh for each layer would add more work. For layers with comparable activation sizes and forward costs, spacing checkpoints uniformly every $\sqrt{\LayerCount}$ layers reduces peak activation memory from $\mathcal{O}(\LayerCount)$ to $\mathcal{O}(\sqrt{\LayerCount})$ at the cost of one additional forward pass of arithmetic per training step [@chen2016training]. This increases executed step computation from roughly $3\times$ to $4\times$ the forward-pass FLOPs, trading extra arithmetic operations for a substantially reduced activation footprint. The useful model FLOP count $\Operations$ is unchanged, so the additional work enters the training-time law through effective utilization $\EfficiencyHw$. Actual fit and wall-clock overhead still depend on the full memory budget and execution profile. @Sec-model-training-optimal-checkpoint-placement-strategy-4a0d derives why $\sqrt{\LayerCount}$ spacing minimizes this footprint and works out its cost for GPT-2's 48 layers.
+In this segment schedule, recomputed intermediate values remain available until their backward consumers finish; recomputing a segment afresh for each layer would add more work. For layers with comparable activation sizes and forward costs, spacing checkpoints uniformly every $\sqrt{\LayerCount}$ layers reduces peak activation memory from $\mathcal{O}(\LayerCount)$ to $\mathcal{O}(\sqrt{\LayerCount})$ at the cost of one additional forward pass of arithmetic per training step [@chen2016training]. This increases executed step computation from roughly $3\times$ to $4\times$ the forward-pass FLOPs, trading extra arithmetic operations for a substantially reduced activation footprint. The useful model FLOP count $\Operations$ is unchanged, so the additional work enters the training-time law through effective utilization $\EfficiencyHw$. Actual fit and wall-clock overhead still depend on the full memory budget and execution profile. @Sec-model-training-optimal-checkpoint-placement-strategy-4a0d derives why $\sqrt{\LayerCount}$ spacing minimizes this footprint and works out its cost for GPT-2's `{python} GPT2Compute.n_layers_gpt2_str` layers.
 
 ::: {#fig-activation-checkpointing data-explore="original-activation-checkpointing" data-explore-key="vol1:fig-activation-checkpointing" fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 
@@ -5245,7 +5352,59 @@ The two techniques address different terms. Gradient accumulation bounds the act
 
 The memory column counts two things, the stored checkpoints and the one segment that must be rematerialized at a time during backward, which holds $\LayerCount/\ActivationCheckpointCount$ layers of activations. The one-checkpoint row shows why both terms matter. With a single checkpoint the only segment spans the whole network, so backward rebuilds all $\LayerCount$ layers of activations at once and the peak is no lower than storing everything. Checkpoints pay off only when they are spread out so that each recomputed segment is short. The recompute column counts layer forwards. Every layer that is not itself a checkpoint is run forward once more, $(\LayerCount - \ActivationCheckpointCount)$ layer forwards in all, which is nearly one full forward pass when $\ActivationCheckpointCount$ is much smaller than $\LayerCount$.
 
-Setting the derivative of total memory cost $(\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount) \times \ActivationMemory^{(\ell)})$ with respect to the checkpoint count $\ActivationCheckpointCount$ to zero yields the analytical optimum at $\ActivationCheckpointCount= \sqrt{\LayerCount}$. In the standard $\sqrt{\LayerCount}$ checkpointing scheme, this costs roughly one extra forward pass, about one-third more total step compute, in exchange for minimizing activation footprint under this analytical model. For GPT-2 with forty-eight transformer layers, the operational difference is substantial. Uncheckpointed training requires $48 \times \ActivationMemory^{(\ell)}$ in full activation storage. Uniform checkpointing ($\sqrt{48} \approx 7$ checkpoints) requires $7 \times \ActivationMemory^{(\ell)} + (48/7) \times \ActivationMemory^{(\ell)} \approx 14 \times \ActivationMemory^{(\ell)}$, which saves 71 percent of activation memory for approximately 33 percent additional total step computation (by recomputing one forward pass over the uncheckpointed layers during backpropagation).
+```{python}
+#| echo: false
+#| label: gpt2-sqrt-checkpoint-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ UNIFORM SQRT(L) CHECKPOINTING FOR GPT-2 XL
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 worked example in
+# │          @sec-model-training-optimal-checkpoint-placement-strategy-4a0d
+# │          (@tbl-checkpoint-tradeoffs memory column).
+# │
+# │ Goal:    Evaluate the k = sqrt(L) schedule on GPT-2 XL's layer count.
+# │ Show:    sqrt(L) rounded to k, the memory k + L/k in layer units, the
+# │          fraction of activation memory saved, and the extra step compute.
+# │ How:     L from the GPT-2 registry entry; memory = k + L/k layer
+# │          activations; one extra forward pass on a three-forward-pass step.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Models
+from mlsysim.fmt import check, fmt_math, fmt_percent
+
+class GPT2SqrtCheckpoint:
+    """Uniform sqrt(L) checkpoint placement on GPT-2 XL's transformer layers."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layers = Models.Language.GPT2.layers
+    step_forward_passes = 3  # forward 1 + backward 2, in forward-pass units
+    extra_forward_passes = 1  # recomputation adds about one forward pass
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    checkpoints = round(math.sqrt(layers))
+    memory_layers = checkpoints + layers / checkpoints  # in units of one layer's activations
+    memory_saved = 1 - memory_layers / layers
+    extra_compute = extra_forward_passes / step_forward_passes
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(layers == 48, f"Prose says forty-eight transformer layers, got {layers}.")
+    check(checkpoints == 7, f"sqrt(48) rounds to 7 checkpoints, got {checkpoints}.")
+    check(round(memory_layers) == 14, f"Prose says about 14 layers of activations, got {memory_layers:.2f}.")
+    check(round(memory_saved, 2) == 0.71, f"Prose says 71 percent saved, got {memory_saved:.3f}.")
+    check(round(extra_compute, 2) == 0.33, f"Prose says about 33 percent more step compute, got {extra_compute:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    full_memory_math = fmt_math(f"{layers} \\times \\ActivationMemory^{{(\\ell)}}")
+    sqrt_layers_math = fmt_math(f"\\sqrt{{{layers}}} \\approx {checkpoints}")
+    ckpt_memory_math = fmt_math(
+        f"{checkpoints} \\times \\ActivationMemory^{{(\\ell)}} + ({layers}/{checkpoints}) \\times \\ActivationMemory^{{(\\ell)}}"
+        f" \\approx {round(memory_layers)} \\times \\ActivationMemory^{{(\\ell)}}"
+    )
+    memory_saved_pct_str = fmt_percent(round(memory_saved, 2), precision=0, commas=False, style="prose")
+    extra_compute_pct_str = fmt_percent(round(extra_compute, 2), precision=0, commas=False, style="prose")
+```
+
+Setting the derivative of total memory cost $(\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount) \times \ActivationMemory^{(\ell)})$ with respect to the checkpoint count $\ActivationCheckpointCount$ to zero yields the analytical optimum at $\ActivationCheckpointCount= \sqrt{\LayerCount}$. In the standard $\sqrt{\LayerCount}$ checkpointing scheme, this costs roughly one extra forward pass, about one-third more total step compute, in exchange for minimizing activation footprint under this analytical model. For GPT-2 with forty-eight transformer layers, the operational difference is substantial. Uncheckpointed training requires `{python} GPT2SqrtCheckpoint.full_memory_math` in full activation storage. Uniform checkpointing (`{python} GPT2SqrtCheckpoint.sqrt_layers_math` checkpoints) requires `{python} GPT2SqrtCheckpoint.ckpt_memory_math`, which saves `{python} GPT2SqrtCheckpoint.memory_saved_pct_str` of activation memory for approximately `{python} GPT2SqrtCheckpoint.extra_compute_pct_str` additional total step computation (by recomputing one forward pass over the uncheckpointed layers during backpropagation).
 
 The GPT-2 notebook below uses eight equal segments of six layers. It applies the same boundary-plus-live-segment accounting with unequal storage costs: a segment input contains only the hidden tensor, whereas the reconstructed layer state also includes attention and feed-forward intermediates. The equal-state optimum above is therefore a useful baseline, not an optimality claim for that transformer schedule. Counting the two components separately produces the candidate memory budget without assuming a reduction factor.
 
@@ -5616,6 +5775,8 @@ class GPT2WalkthroughCalc:
     check(20 <= max_resident_batch < 32, f"Prose says the resident limit falls between 16 and 32, got {max_resident_batch}.")
     check(6.5 < fp32_over < 7.5, f"Prose says the FP32 baseline is about 7x the H100, got {fp32_over:.1f}.")
     check(0.4 < busy_before < 0.55, f"Prose says the serial pipeline keeps the device busy about half the time, got {busy_before:.2f}.")
+    check(batch_size == 2 * micro_batch, f"Prose says two micro-batches make up the batch, got {batch_size} / {micro_batch}.")
+    check(GPT2DataPipeline.workers == 8, f"Prose says eight worker processes, got {GPT2DataPipeline.workers}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     capacity_gb_str = fmt_memory(capacity, unit=GB, precision=1, commas=False)
@@ -5632,6 +5793,9 @@ class GPT2WalkthroughCalc:
     total_ckpt_gb_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
     fp32_over_mult_str = fmt_multiple(round(fp32_over), precision=0, commas=False)
     max_resident_batch_str = fmt(max_resident_batch, precision=0, commas=False)
+    batch_size_str = fmt(batch_size, precision=0, commas=False)
+    micro_batch_str = fmt(micro_batch, precision=0, commas=False)
+    seq_len_str = fmt(seq_len, precision=0, commas=True)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
     recompute_overhead_pct_str = fmt_percent(round(recompute_overhead, 2), precision=0, commas=False, style="prose")
     busy_before_pct_str = fmt_percent(round(busy_before, 2), precision=0, commas=False, style="prose")
@@ -5650,7 +5814,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL at batch 32 and sequence length 1,024, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str` in decimal units). The run fails the machine constraint before throughput matters.
+The trace starts with GPT-2 XL at batch `{python} GPT2WalkthroughCalc.batch_size_str` and sequence length `{python} GPT2WalkthroughCalc.seq_len_str`, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str` in decimal units). The run fails the machine constraint before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5658,11 +5822,11 @@ The first intervention targets memory feasibility rather than speed. Mixed preci
 
 **Step 3**: Replace standard attention with FlashAttention.
 
-Never storing the quadratic score matrices removes most of the remaining activations and brings the step to `{python} GPT2WalkthroughCalc.total_flash_gb_str`, still above capacity. With this kernel, the largest batch that stays resident is about `{python} GPT2WalkthroughCalc.max_resident_batch_str` sequences, so the configuration overflows somewhere between batch 16 and batch 32.
+Never storing the quadratic score matrices removes most of the remaining activations and brings the step to `{python} GPT2WalkthroughCalc.total_flash_gb_str`, still above capacity. With this kernel, the largest batch that stays resident is about `{python} GPT2WalkthroughCalc.max_resident_batch_str` sequences, so the configuration overflows somewhere between batch `{python} GPT2WalkthroughCalc.micro_batch_str` and batch `{python} GPT2WalkthroughCalc.batch_size_str`.
 
 **Step 4**: Fit the batch.
 
-Two techniques close the gap. Accumulating two micro-batches of 16 keeps the same arithmetic per update and needs `{python} GPT2WalkthroughCalc.total_accum_gb_str`. Segment checkpointing (notebook \ref{nbk-training-gpt-2-segment-checkpointing}) keeps all 32 sequences resident in `{python} GPT2WalkthroughCalc.total_ckpt_gb_str` but adds about `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` more arithmetic per step. The walkthrough takes accumulation, because the batch it needs fits without recomputation; checkpointing is the choice when a larger resident micro-batch matters more than arithmetic. Runtime measurement must still verify that backward workspaces, output and loss buffers, and allocator overhead fit in the remaining capacity.
+Two techniques close the gap. Accumulating two micro-batches of `{python} GPT2WalkthroughCalc.micro_batch_str` keeps the same arithmetic per update and needs `{python} GPT2WalkthroughCalc.total_accum_gb_str`. Segment checkpointing (notebook \ref{nbk-training-gpt-2-segment-checkpointing}) keeps all `{python} GPT2WalkthroughCalc.batch_size_str` sequences resident in `{python} GPT2WalkthroughCalc.total_ckpt_gb_str` but adds about `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` more arithmetic per step. The walkthrough takes accumulation, because the batch it needs fits without recomputation; checkpointing is the choice when a larger resident micro-batch matters more than arithmetic. Runtime measurement must still verify that backward workspaces, output and loss buffers, and allocator overhead fit in the remaining capacity.
 
 **Step 5**: Read the profile.
 
@@ -5682,7 +5846,7 @@ Eight worker processes, page-locked (pinned) host memory for asynchronous DMA tr
 | **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                                                       |
 |:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:------------------------------------------------------------------------------------------------------------|
 | **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                                                         |
-| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of 16                                                               |
+| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of `{python} GPT2WalkthroughCalc.micro_batch_str`                   |
 | **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller                                            |
 | **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str`) |
 | **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                                                                  |
@@ -6096,7 +6260,7 @@ Modern systems commonly use PyTorch's `DistributedDataParallel` (DDP); TensorFlo
 # │          bytes / intra-node bandwidth (bandwidth term only); compute time
 # │          from the training-time law at the chapter's utilization.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems, Literature, BYTES_FP16
+from mlsysim import Hardware, Models, Systems, Literature, Scenarios, BYTES_FP16
 from mlsysim.core.units import GB, byte, param, second, millisecond, flop
 from mlsysim.physics import calc_ring_allreduce_data_factor
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_percent, fmt_ratio, fmt_time
@@ -6113,10 +6277,10 @@ class GPT2NodeAllReduce:
     eta = Literature.Training.MfuHigh
     n = node.accelerators_per_node
     link_bw = node.intra_node_bw  # per-accelerator bandwidth in one direction
-    seq_len = 1024
+    seq_len = Scenarios.Gpt2XlBatch32Block.context_tokens
     # Per-accelerator batches: the full batch 32 on every replica, or batch 32 split eight ways
-    batch_full = 32
-    batch_split = 4
+    batch_full = Scenarios.Gpt2XlBatch32Block.batch_size
+    batch_split = batch_full // n
     # Mixed-precision Adam bytes per parameter: FP16 weights, FP16 gradients,
     # and 12 bytes of FP32 master weights plus moments (the "K = 12" of ZeRO)
     w_bytes, g_bytes, k_bytes = 2, 2, 12
@@ -6142,6 +6306,7 @@ class GPT2NodeAllReduce:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ring_factor - 1.75) < 1e-9, f"Ring factor for eight accelerators should be 1.75, got {ring_factor}.")
+    check(n == 8 and batch_split * n == batch_full, f"Prose splits batch {batch_full} eight ways; got {n} accelerators, {batch_split} per replica.")
     check(10 < allreduce_time.magnitude < 13, f"Prose says about 12 ms per AllReduce, got {allreduce_time:.1f}.")
     check(
         share_full < 0.03 and 0.12 < share_split < 0.2,
@@ -6151,6 +6316,7 @@ class GPT2NodeAllReduce:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_str = fmt(n, precision=0, commas=False)
+    batch_full_str = fmt(batch_full, precision=0, commas=False)
     grad_gb_str = fmt_memory(round((grad_bytes).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     ring_factor_str = fmt_ratio(ring_factor, precision=2, commas=False)
     sent_gb_str = fmt_memory(sent_bytes, unit=GB, precision=2, commas=False)
@@ -6171,7 +6337,7 @@ Synchronizing gradients is the step that data parallelism adds, and for GPT-2 XL
 
 $$ \CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth} $$ {#eq-training-ring-allreduce}
 
-For `{python} GPT2NodeAllReduce.n_str` H100s the factor is `{python} GPT2NodeAllReduce.ring_factor_str`, so each accelerator sends `{python} GPT2NodeAllReduce.sent_gb_str` per step, which takes about `{python} GPT2NodeAllReduce.allreduce_ms_str` at `{python} GPT2NodeAllReduce.link_bw_str` per direction over NVLink. Against a `{python} GPT2NodeAllReduce.compute_full_ms_str` step when each replica processes the full batch of 32 sequences, synchronization is about `{python} GPT2NodeAllReduce.share_full_pct_str` of the step even without overlap. Splitting a fixed batch of 32 eight ways shrinks each replica's compute to `{python} GPT2NodeAllReduce.compute_split_ms_str` while the gradient bytes stay the same, raising the unhidden share to about `{python} GPT2NodeAllReduce.share_split_pct_str`. Data parallelism inside one server is cheap for GPT-2 XL as long as each replica keeps enough work to amortize a synchronization whose size depends only on the parameter count. Frameworks hide most of what remains by launching bucketed AllReduce calls while the backward pass is still computing earlier layers' gradients.
+For `{python} GPT2NodeAllReduce.n_str` H100s the factor is `{python} GPT2NodeAllReduce.ring_factor_str`, so each accelerator sends `{python} GPT2NodeAllReduce.sent_gb_str` per step, which takes about `{python} GPT2NodeAllReduce.allreduce_ms_str` at `{python} GPT2NodeAllReduce.link_bw_str` per direction over NVLink. Against a `{python} GPT2NodeAllReduce.compute_full_ms_str` step when each replica processes the full batch of `{python} GPT2NodeAllReduce.batch_full_str` sequences, synchronization is about `{python} GPT2NodeAllReduce.share_full_pct_str` of the step even without overlap. Splitting a fixed batch of `{python} GPT2NodeAllReduce.batch_full_str` eight ways shrinks each replica's compute to `{python} GPT2NodeAllReduce.compute_split_ms_str` while the gradient bytes stay the same, raising the unhidden share to about `{python} GPT2NodeAllReduce.share_split_pct_str`. Data parallelism inside one server is cheap for GPT-2 XL as long as each replica keeps enough work to amortize a synchronization whose size depends only on the parameter count. Frameworks hide most of what remains by launching bucketed AllReduce calls while the backward pass is still computing earlier layers' gradients.
 
 Unsharded data parallelism has a hard constraint. Every accelerator holds a complete model replica and its full training state, 16 bytes per parameter in the mixed-precision Adam recipe, or `{python} GPT2NodeAllReduce.zero0_gb_str` for GPT-2 XL on each of the `{python} GPT2NodeAllReduce.n_str` accelerators. The Zero Redundancy Optimizer (ZeRO)\index{ZeRO!sharded data parallelism} [@rajbhandari2020] removes that redundancy by sharding training state across the data-parallel replicas in three stages. ZeRO-1 shards the 12 bytes of FP32 master weights and Adam moments, leaving `{python} GPT2NodeAllReduce.zero1_gb_str` per accelerator for GPT-2 XL. ZeRO-2 also shards the gradients, leaving `{python} GPT2NodeAllReduce.zero2_gb_str`. ZeRO-3, which fully sharded data parallelism (FSDP) [@zhao2023] implements, also shards the FP16 parameters, leaving `{python} GPT2NodeAllReduce.zero3_gb_str`. The same arithmetic brings the Llama 3 8B full fine-tune that overflowed one accelerator in @sec-model-training-finetuning-memory-one-accelerator-7c2e down to about `{python} GPT2NodeAllReduce.llama_zero3_gb_str` of static state per accelerator.
 
@@ -6593,7 +6759,49 @@ Because crossing device and node boundaries adds communication traffic, synchron
 
 A measured single-device baseline guides scaling decisions, while a decisive capacity or compute-time lower bound can establish the need for additional resources before every local optimization is attempted. Once local tuning is exhausted or ruled out by lower bounds, resource expansion must match the specific physical limit that has been reached.
 
-Memory capacity is the first such limit, reached when model weights, gradients, optimizer states, and activations exceed the memory of a single accelerator. A 70-billion-parameter model requires about `{python} GPT2SummaryScalingRecap.large_fp16_gb_str` in FP16 for weights alone, exceeding the reference H100's capacity and leaving little or no headroom on higher-capacity variants once training state is included. Training wall-clock time\index{Training!wall-clock time limit} becomes the limit when the estimated duration on one device exceeds the project's deadline, as in a $10^{24}$-FLOP workload that would take roughly 32 years at $10^{15}$ FLOP/s sustained. Input throughput limits the run when the host pipeline cannot sustain the aggregate accelerator consumption rate, which calls for more input-service capacity rather than more training accelerators. Dataset size alone does not determine this limit, because reuse, compression, locality, transformation cost, and storage bandwidth govern delivery rate.
+```{python}
+#| echo: false
+#| label: single-device-wall-clock-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SINGLE-DEVICE WALL-CLOCK CEILING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Wall-clock limit sentence in
+# │          @sec-model-training-scale-physical-ceiling-e06c.
+# │
+# │ Goal:    Show that a frontier-scale operation count cannot finish on one device.
+# │ Show:    The workload in FLOPs, the sustained rate, and the run time in years.
+# │ How:     T = O / R_sustained (the training-time law with eta folded into R).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.core.units import flop, second
+from mlsysim.fmt import check, fmt_math, fmt_time
+
+class SingleDeviceWallClock:
+    """A 10^24-FLOP workload at a sustained 10^15 FLOP/s on one device."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    workload = 1e24 * flop  # scenario assumption: frontier-scale operation count
+    sustained_rate = 1e15 * flop / second  # scenario assumption: one device, sustained
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    run_time = (workload / sustained_rate).to("year")
+    workload_exp = round(math.log10(workload.to(flop).magnitude))
+    rate_exp = round(math.log10(sustained_rate.to(flop / second).magnitude))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(31 < run_time.magnitude < 33, f"Prose says roughly 32 years, got {run_time:.1f}.")
+    check(
+        math.isclose(10.0**workload_exp, workload.to(flop).magnitude) and math.isclose(10.0**rate_exp, sustained_rate.to(flop / second).magnitude),
+        "Inputs must be powers of ten for the 10^n prose form.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    workload_math = fmt_math(f"10^{{{workload_exp}}}")
+    rate_math = fmt_math(f"10^{{{rate_exp}}}")
+    run_years_str = fmt_time(round(run_time.magnitude), "year", precision=0, commas=False, style="word")
+```
+
+Memory capacity is the first such limit, reached when model weights, gradients, optimizer states, and activations exceed the memory of a single accelerator. A 70-billion-parameter model requires about `{python} GPT2SummaryScalingRecap.large_fp16_gb_str` in FP16 for weights alone, exceeding the reference H100's capacity and leaving little or no headroom on higher-capacity variants once training state is included. Training wall-clock time\index{Training!wall-clock time limit} becomes the limit when the estimated duration on one device exceeds the project's deadline, as in a `{python} SingleDeviceWallClock.workload_math`-FLOP workload that would take roughly `{python} SingleDeviceWallClock.run_years_str` at `{python} SingleDeviceWallClock.rate_math` FLOP/s sustained. Input throughput limits the run when the host pipeline cannot sustain the aggregate accelerator consumption rate, which calls for more input-service capacity rather than more training accelerators. Dataset size alone does not determine this limit, because reuse, compression, locality, transformation cost, and storage bandwidth govern delivery rate.
 
 Data parallelism also meets a statistical ceiling. Each added replica enlarges the global batch, and beyond the critical batch size met in the discussion of batch size and parameter updates (@sec-model-training-batch-size-parameter-updates-4d0b), larger batches stop reducing the number of updates needed to reach a target loss [@mccandlish2018empirical]. Past that point, more replicas raise throughput in samples per second without shortening the time to target quality, so a scaling decision needs both the hardware ceiling and the batch at which the recipe's convergence flattens.
 
@@ -6895,7 +7103,7 @@ Teams sometimes treat scale as a monotonic lever: if a 7B-parameter model works 
 
 **Pitfall**: *Assuming distributed training automatically accelerates development.*
 
-More accelerators do not guarantee faster training because communication, smaller local batches, input limits, and imbalance can consume the gain. The chapter's own derivation shows the mechanism: splitting GPT-2 XL's batch of 32 across eight H100s shrinks each replica's compute while the gradient bytes stay fixed, so unoverlapped synchronization grows to about `{python} GPT2NodeAllReduce.share_split_pct_str` of the step. In a hypothetical `{python} FallaciesPitfallsSetup.fp_gpu_count_str` scenario, the same effect lets synchronization occupy `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of step time, so speedup reaches only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_mult_str` rather than the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_mult_str`. The decision requires measured end-to-end time and scaling efficiency.
+More accelerators do not guarantee faster training because communication, smaller local batches, input limits, and imbalance can consume the gain. The chapter's own derivation shows the mechanism: splitting GPT-2 XL's batch of `{python} GPT2NodeAllReduce.batch_full_str` across eight H100s shrinks each replica's compute while the gradient bytes stay fixed, so unoverlapped synchronization grows to about `{python} GPT2NodeAllReduce.share_split_pct_str` of the step. In a hypothetical `{python} FallaciesPitfallsSetup.fp_gpu_count_str` scenario, the same effect lets synchronization occupy `{python} FallaciesPitfallsSetup.fp_sync_overhead_range_str` of step time, so speedup reaches only `{python} FallaciesPitfallsSetup.fp_actual_speedup_range_mult_str` rather than the ideal `{python} FallaciesPitfallsSetup.fp_gpu_ideal_speedup_mult_str`. The decision requires measured end-to-end time and scaling efficiency.
 
 :::
 

@@ -81,10 +81,10 @@ class NumbersToKnow:
     LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
     sizing_model_params = Models.Language.Llama3_8B.parameters
     sizing_training_tokens = 1 * TRILLION  # scenario assumption: token budget for the training-FLOPs example
-    fp16_bytes_per_param = 2
-    int8_bytes_per_param = 1
-    fp32_bytes_per_param = 4
-    adam_state_bytes_per_param = 8
+    fp16_bytes_per_param = int(BYTES_FP16.to(byte).magnitude)
+    int8_bytes_per_param = int(BYTES_INT8.to(byte).magnitude)
+    fp32_bytes_per_param = int(BYTES_FP32.to(byte).magnitude)
+    adam_state_bytes_per_param = int(BYTES_ADAM_STATE.to(byte).magnitude)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Physics constants (eternal)
@@ -127,9 +127,11 @@ class NumbersToKnow:
     gpu_bw_vs_pcie_ratio_mult_str = fmt_multiple(gpu_bw_vs_pcie, precision=0, commas=False)
 
     fp16_bytes_per_param_str = fmt_count(fp16_bytes_per_param, label="byte")
+    int8_bytes_per_param_str = fmt_count(int8_bytes_per_param, label="byte")
     fp32_bytes_per_param_str = fmt_count(fp32_bytes_per_param, label="byte")
     adam_state_bytes_per_param_str = fmt_count(adam_state_bytes_per_param, label="byte")
     training_state_bytes_per_param_str = fmt_count(training_state_bytes_per_param, label="byte")
+    training_state_bytes_mult_str = fmt_multiple(training_state_bytes_per_param, precision=0, commas=False)
     sizing_model_params_b_str = fmt_params(sizing_model_params, scale="B", precision=2, commas=False)
     sizing_training_tokens_t_str = fmt_tokens(sizing_training_tokens, scale="T", precision=0)
     training_state_footprint_gb_str = fmt_memory(training_state_footprint, unit=GB, precision=1, commas=False)
@@ -185,19 +187,19 @@ Moving data across wires costs far more energy than computing on it once it arri
 
 #### Scaling rules {.unnumbered}
 
-Memory and compute requirements for training and inference follow from a few arithmetic relationships (@tbl-scaling-rules-ref).[^fn-training-memory-footprint] The examples use Llama 3 8B. @Sec-model-training-optimization-algorithm-system-implications-f9f2 derives the 16 bytes per parameter of training state and why switching to 16-bit arithmetic does not shrink it.
+Memory and compute requirements for training and inference follow from a few arithmetic relationships (@tbl-scaling-rules-ref).[^fn-training-memory-footprint] The examples use Llama 3 8B. @Sec-model-training-optimization-algorithm-system-implications-f9f2 derives the `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter of training state and why switching to 16-bit arithmetic does not shrink it.
 
-| **Rule**                          |             **Formula**              |                                              **Example (Llama 3 8B)**                                              |
-|:----------------------------------|:------------------------------------:|:------------------------------------------------------------------------------------------------------------------:|
-| **Inference memory (FP16)**       |      2 bytes$\times$ parameters      |                              `{python} NumbersToKnow.inference_fp16_footprint_gb_str`                              |
-| **Inference memory (INT8)**       |      1 byte$\times$ parameters       |                              `{python} NumbersToKnow.inference_int8_footprint_gb_str`                              |
-| **Training memory (Adam)**        |     16 bytes$\times$ parameters      |                              `{python} NumbersToKnow.training_state_footprint_gb_str`                              |
-| **Inference FLOPs (transformer)** |   ~2$\times$ parameters per token    |                      `{python} NumbersToKnow.inference_flops_per_token_gflops_str` per token                       |
-| **Training FLOPs**                | ~6$\times$ parameters$\times$ tokens | `{python} NumbersToKnow.training_flops_math` FLOPs on `{python} NumbersToKnow.sizing_training_tokens_t_str` tokens |
+| **Rule**                          |                                  **Formula**                                   |                                              **Example (Llama 3 8B)**                                              |
+|:----------------------------------|:------------------------------------------------------------------------------:|:------------------------------------------------------------------------------------------------------------------:|
+| **Inference memory (FP16)**       |      `{python} NumbersToKnow.fp16_bytes_per_param_str`$\times$ parameters      |                              `{python} NumbersToKnow.inference_fp16_footprint_gb_str`                              |
+| **Inference memory (INT8)**       |      `{python} NumbersToKnow.int8_bytes_per_param_str`$\times$ parameters      |                              `{python} NumbersToKnow.inference_int8_footprint_gb_str`                              |
+| **Training memory (Adam)**        | `{python} NumbersToKnow.training_state_bytes_per_param_str`$\times$ parameters |                              `{python} NumbersToKnow.training_state_footprint_gb_str`                              |
+| **Inference FLOPs (transformer)** |                        ~2$\times$ parameters per token                         |                      `{python} NumbersToKnow.inference_flops_per_token_gflops_str` per token                       |
+| **Training FLOPs**                |                      ~6$\times$ parameters$\times$ tokens                      | `{python} NumbersToKnow.training_flops_math` FLOPs on `{python} NumbersToKnow.sizing_training_tokens_t_str` tokens |
 
-: **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[34,33,33]"}
+: **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (`{python} NumbersToKnow.fp16_bytes_per_param_str`), FP16 gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str`), FP32 master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str`), and Adam optimizer states (`{python} NumbersToKnow.adam_state_bytes_per_param_str` for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[34,33,33]"}
 
-[^fn-training-memory-footprint]: **Training memory (Adam)**\index{Training memory!Adam storage model}: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
+[^fn-training-memory-footprint]: **Training memory (Adam)**\index{Training memory!Adam storage model}: The `{python} NumbersToKnow.training_state_bytes_per_param_str`/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~`{python} NumbersToKnow.training_state_bytes_mult_str` parameters.
 
 ### The latency hierarchy {#sec-appdx-machine-foundations-latencies-every-programmer-know-e89f}
 
@@ -454,8 +456,8 @@ Doubling $\BatchSize$ doubles FLOPs while weight traffic stays nearly constant w
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.core.units import flop, byte, second, TFLOPs, TB, TOPS
-from mlsysim.fmt import fmt, fmt_int, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth, fmt_ops_rate, fmt_percent, check
+from mlsysim.core.units import flop, byte, second, TFLOPs, TB, TOPS, BYTES_FP16
+from mlsysim.fmt import fmt, fmt_int, fmt_count, fmt_math, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth, fmt_ops_rate, fmt_percent, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class H100RooflineExample:
@@ -464,9 +466,13 @@ class H100RooflineExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100 = Hardware.Cloud.H100
     n_gemm = 4096  # scenario assumption: square GEMM dimension
-    relu_intensity = 0.25 * (flop / byte)  # scenario assumption: elementwise ReLU arithmetic intensity
+    relu_ops = 1 * flop  # one comparison per element
+    relu_read_bytes = BYTES_FP16  # read one FP16 element
+    relu_write_bytes = BYTES_FP16  # write one FP16 element
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    relu_bytes = relu_read_bytes + relu_write_bytes
+    relu_intensity = (relu_ops / relu_bytes).to(flop / byte)
     h100_fp16 = h100.compute.peak_flops
     h100_int8 = h100.compute.precision_flops["int8"]
     h100_bw = h100.memory.bandwidth
@@ -479,6 +485,7 @@ class H100RooflineExample:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(gemm_intensity > ridge_point, "GEMM must be compute-bound on H100")
     check(relu_intensity < ridge_point, "ReLU must be memory-bound on H100")
+    check(abs(relu_intensity.magnitude - 0.25) < 1e-9, f"Prose says ReLU intensity is 1/4 FLOP/byte, got {relu_intensity}")
     check(0.0005 < relu_utilization < 0.001, f"Expected ReLU near 0.08% of peak, got {relu_utilization:.5f}")
     check(1.9 < (int8_ridge / ridge_point).to("").magnitude < 2.1, "INT8 should double the H100 ridge point")
 
@@ -491,12 +498,16 @@ class H100RooflineExample:
     int8_ridge_value_str = fmt_int(round(int8_ridge.to(flop / byte).magnitude), commas=False)
     gemm_intensity_str = fmt_arithmetic_intensity(gemm_intensity, commas=True)
     relu_intensity_str = fmt_arithmetic_intensity(relu_intensity, precision=2, commas=False)
+    relu_read_bytes_str = fmt_count(int(relu_read_bytes.to(byte).magnitude), label="byte")
+    relu_write_bytes_str = fmt_count(int(relu_write_bytes.to(byte).magnitude), label="byte")
+    relu_bytes_str = fmt_count(int(relu_bytes.to(byte).magnitude), label="byte")
+    relu_intensity_frac_math = fmt_math(f"{int(relu_ops.magnitude)}/{int(relu_bytes.to(byte).magnitude)} =")
     relu_util_str = fmt_percent(relu_utilization, precision=2, commas=False, style='prose')
 ```
 
 Consider an NVIDIA H100\index{H100!roofline analysis}, the book's reference machine, with dense FP16 Tensor Core performance of `{python} H100RooflineExample.h100_fp16_tflop_per_s_str` and HBM3 bandwidth of `{python} H100RooflineExample.h100_bw_tb_per_s_str`. The ridge point is `{python} H100RooflineExample.h100_fp16_tflop_per_s_str`/`{python} H100RooflineExample.h100_bw_tb_per_s_str` = `{python} H100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
-Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} H100RooflineExample.n_gemm_str` by `{python} H100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} H100RooflineExample.gemm_intensity_str`, so `{python} H100RooflineExample.gemm_intensity_str` > `{python} H100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading 2 bytes and writing 2 bytes (4 bytes total), yielding an arithmetic intensity of only $1/4 =$ `{python} H100RooflineExample.relu_intensity_str`. Because `{python} H100RooflineExample.relu_intensity_str` $\ll$ `{python} H100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely bandwidth-bound, achieving only about `{python} H100RooflineExample.relu_util_str` of peak FLOP/s. This contrast is why frameworks fuse an element-wise operation into the preceding matrix multiply, so the intermediate result never makes a round trip through memory. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 develops fusion and the launch overhead it removes.
+Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} H100RooflineExample.n_gemm_str` by `{python} H100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} H100RooflineExample.gemm_intensity_str`, so `{python} H100RooflineExample.gemm_intensity_str` > `{python} H100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading `{python} H100RooflineExample.relu_read_bytes_str` and writing `{python} H100RooflineExample.relu_write_bytes_str` (`{python} H100RooflineExample.relu_bytes_str` total), yielding an arithmetic intensity of only `{python} H100RooflineExample.relu_intensity_frac_math` `{python} H100RooflineExample.relu_intensity_str`. Because `{python} H100RooflineExample.relu_intensity_str` $\ll$ `{python} H100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely bandwidth-bound, achieving only about `{python} H100RooflineExample.relu_util_str` of peak FLOP/s. This contrast is why frameworks fuse an element-wise operation into the preceding matrix multiply, so the intermediate result never makes a round trip through memory. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 develops fusion and the launch overhead it removes.
 
 Precision moves the ridge. At INT8 the H100's peak rate doubles to `{python} H100RooflineExample.h100_int8_tops_str` while its memory bandwidth stays fixed, so the ridge rises to about `{python} H100RooflineExample.int8_ridge_value_str` operations per byte. A convolution layer that sits above the FP16 ridge can fall below the INT8 ridge, which is why quantized ResNet-50 inference can turn bandwidth bound on the same chip (@sec-hardware-acceleration-hardware-balance).
 
