@@ -868,7 +868,51 @@ Tiling changes how many bytes cross the memory boundary for a fixed model. The l
 
 ### Compute-optimal scaling laws {#sec-appdx-algorithm-chinchilla-derivation}
 
-Spending a fixed FLOP budget $\Operations$ on a 175-billion-parameter model trained on 300 billion tokens leaves the model undertrained compared with a 70-billion-parameter model trained on 1.4 trillion tokens at the same compute cost. Minimizing parametric training loss under a fixed $\Operations = 6\Parameters\DatasetSize$ constraint via Lagrange multipliers explains why, and it separates the earlier fit of @kaplan2020scaling from the compute-optimal scaling of @hoffmann2022chinchilla. @Sec-data-selection-computeoptimal-frontier-24ba uses the resulting frontier to test whether a training run is starved of data or of compute.
+```{python}
+#| echo: false
+#| label: chinchilla-gpt3-budget-pair
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 VS. CHINCHILLA AT A MATCHED BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Opening paragraph of @sec-appdx-algorithm-chinchilla-derivation
+# │
+# │ Goal:    Name the two training runs the compute-optimal derivation explains.
+# │ Show:    175-billion-parameter GPT-3 on 300 billion tokens vs. 70-billion-
+# │          parameter Chinchilla on 1.4 trillion tokens.
+# │ How:     Parameter and training-token counts from the registry
+# │          (Models.Language.GPT3, Models.Language.Chinchilla_70B).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import param, count
+from mlsysim.fmt import fmt_params, fmt_tokens, check
+
+class ChinchillaGpt3BudgetPair:
+    """The undertrained GPT-3 run and the compute-optimal Chinchilla run."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gpt3_params = Models.Language.GPT3.parameters
+    gpt3_tokens = Models.Language.GPT3.training_tokens
+    chin_params = Models.Language.Chinchilla_70B.parameters
+    chin_tokens = Models.Language.Chinchilla_70B.training_tokens
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    gpt3_tokens_per_param = gpt3_tokens.to(count).magnitude / gpt3_params.to(param).magnitude
+    chin_tokens_per_param = chin_tokens.to(count).magnitude / chin_params.to(param).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    # Prose: GPT-3 is the larger model on fewer tokens, i.e. undertrained
+    # relative to Chinchilla.
+    check(gpt3_params > chin_params, "Prose says GPT-3 is the larger model.")
+    check(gpt3_tokens_per_param < chin_tokens_per_param, "Prose says GPT-3 is undertrained relative to Chinchilla.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpt3_params_str = fmt_params(gpt3_params, scale="B", scale_style="word", attributive=True)
+    gpt3_tokens_str = fmt_tokens(gpt3_tokens, scale="B", scale_style="word")
+    chin_params_str = fmt_params(chin_params, scale="B", scale_style="word", attributive=True)
+    chin_tokens_str = fmt_tokens(chin_tokens, scale="T", scale_style="word", precision=1)
+```
+
+Spending a fixed FLOP budget $\Operations$ on a `{python} ChinchillaGpt3BudgetPair.gpt3_params_str`-parameter model trained on `{python} ChinchillaGpt3BudgetPair.gpt3_tokens_str` tokens leaves the model undertrained compared with a `{python} ChinchillaGpt3BudgetPair.chin_params_str`-parameter model trained on `{python} ChinchillaGpt3BudgetPair.chin_tokens_str` tokens at the same compute cost. Minimizing parametric training loss under a fixed $\Operations = 6\Parameters\DatasetSize$ constraint via Lagrange multipliers explains why, and it separates the earlier fit of @kaplan2020scaling from the compute-optimal scaling of @hoffmann2022chinchilla. @Sec-data-selection-computeoptimal-frontier-24ba uses the resulting frontier to test whether a training run is starved of data or of compute.
 
 To match the rest of the book, the derivation writes model parameters as $\Parameters$, dataset size in tokens as $\DatasetSize$, and the training compute budget as $\Operations$ total FLOPs, whereas Kaplan et al. [-@kaplan2020scaling] and Hoffmann et al. [-@hoffmann2022chinchilla] write $\Glyph{N}$ for parameters and $\Glyph{C}$ for compute. The fitted constants $\ChinchillaIrreducibleLoss$, $\ParameterScaleCoefficient$, $\DataScaleCoefficient$, $\ParameterScalingExponent$, and $\DataScalingExponent$ and the Lagrange multiplier $\ComputeConstraintMultiplier$ keep the papers' letters and are local to this section, so $\ChinchillaIrreducibleLoss$ is a loss rather than an energy and $\DataScaleCoefficient$ is a fitted constant rather than batch size.
 
@@ -936,48 +980,67 @@ The paper's two direct empirical approaches report near-balanced exponents of $(
 
 ```{python}
 #| echo: false
-#| label: kaplan-gpt3-token-ratio
+#| label: kaplan-chinchilla-comparison
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-3 TOKENS PER PARAMETER
+# │ KAPLAN-ERA GPT-3 VS. CHINCHILLA
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Callout "Kaplan vs. Chinchilla scaling",
 # │          @sec-appdx-algorithm-chinchilla-derivation
 # │
-# │ Goal:    Show how far below the Chinchilla ratio the Kaplan-era GPT-3 run sat.
-# │ Show:    175B parameters, 300B tokens, D/P = 1.71.
-# │ How:     Parameter and training-token counts from the registry (GPT-3).
+# │ Goal:    Show how far below the Chinchilla ratio the Kaplan-era GPT-3 run
+# │          sat, and what the smaller compute-optimal model saves at inference.
+# │ Show:    GPT-3 175B on 300B tokens (D/P = 1.71); Chinchilla 70B on 1.4T
+# │          tokens (D/P = 20); 2.5x less inference compute and 2.5x less
+# │          weight memory.
+# │ How:     Parameters, training tokens, and per-token inference FLOPs from the
+# │          registry (GPT-3, Chinchilla_70B); weight bytes at one precision.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.core.units import param, count
-from mlsysim.fmt import fmt_params, fmt_tokens, fmt_ratio, check
+from mlsysim.core.units import param, count, BYTES_FP16
+from mlsysim.fmt import fmt_params, fmt_tokens, fmt_ratio, fmt_multiple, check
 
-class KaplanGpt3TokenRatio:
-    """GPT-3's training tokens per parameter under Kaplan-era scaling."""
+class KaplanChinchillaComparison:
+    """GPT-3's Kaplan-era token ratio against the compute-optimal Chinchilla run."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters
-    tokens = Models.Language.GPT3.training_tokens
+    gpt3 = Models.Language.GPT3
+    chin = Models.Language.Chinchilla_70B
+    params = gpt3.parameters
+    tokens = gpt3.training_tokens
+    chin_params = chin.parameters
+    chin_tokens = chin.training_tokens
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tokens_per_param = tokens.to(count).magnitude / params.to(param).magnitude
+    chin_tokens_per_param = chin_tokens.to(count).magnitude / chin_params.to(param).magnitude
+    inference_compute_ratio = (gpt3.inference_flops / chin.inference_flops).to("").magnitude
+    weight_memory_ratio = (gpt3.size_in_bytes(BYTES_FP16) / chin.size_in_bytes(BYTES_FP16)).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tokens_per_param - 1.71) < 0.005, f"Prose says D/P = 1.71, got {tokens_per_param:.3f}")
+    check(abs(chin_tokens_per_param - 20) < 1e-9, f"Prose says Chinchilla D/P = 20, got {chin_tokens_per_param:.3f}")
+    check(abs(inference_compute_ratio - 2.5) < 1e-9, f"Prose says 2.5x less inference compute, got {inference_compute_ratio:.3f}")
+    check(abs(weight_memory_ratio - 2.5) < 1e-9, f"Prose says 2.5x lower weight memory, got {weight_memory_ratio:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     params_str = fmt_params(params, scale="B")
     tokens_str = fmt_tokens(tokens, scale="B")
     tokens_per_param_str = fmt_ratio(tokens_per_param, precision=2)
+    chin_params_str = fmt_params(chin_params, scale="B")
+    chin_tokens_str = fmt_tokens(chin_tokens, scale="T", precision=1)
+    chin_tokens_per_param_str = fmt_ratio(chin_tokens_per_param, precision=0)
+    inference_compute_mult_str = fmt_multiple(inference_compute_ratio, precision=1)
+    weight_memory_mult_str = fmt_multiple(weight_memory_ratio, precision=1)
 ```
 
 ::: {#psp-appendix-algorithm-kaplan-vs-chinchilla .callout-perspective title="Kaplan vs. Chinchilla scaling"}
 
 The difference between @kaplan2020scaling and @hoffmann2022chinchilla shows how the training schedule used in empirical fits can alter system design conclusions:
 
-* **Kaplan scaling model**: @kaplan2020scaling fit a different loss form with its own exponents and reported compute-optimal growth of $\Parameters\propto \Operations^{0.73}$ and $\DatasetSize\propto \Operations^{0.27}$. This split does not follow from substituting exponents into the two-term surface above. Kaplan's split led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 `{python} KaplanGpt3TokenRatio.params_str` trained on `{python} KaplanGpt3TokenRatio.tokens_str` tokens, giving $\DatasetSize/\Parameters=$ `{python} KaplanGpt3TokenRatio.tokens_per_param_str`).
+* **Kaplan scaling model**: @kaplan2020scaling fit a different loss form with its own exponents and reported compute-optimal growth of $\Parameters\propto \Operations^{0.73}$ and $\DatasetSize\propto \Operations^{0.27}$. This split does not follow from substituting exponents into the two-term surface above. Kaplan's split led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 `{python} KaplanChinchillaComparison.params_str` trained on `{python} KaplanChinchillaComparison.tokens_str` tokens, giving $\DatasetSize/\Parameters=$ `{python} KaplanChinchillaComparison.tokens_per_param_str`).
 * **Methodological divergence**: @kaplan2020scaling used a fixed token budget and learning-rate schedule across models. @hoffmann2022chinchilla matched the schedule to each training horizon and found that the earlier setup understated the value of training smaller models on more data.
 * **Chinchilla revision**: @hoffmann2022chinchilla found near-balanced parameter and token scaling: its three approaches report exponent pairs of $(0.50, 0.50)$, $(0.49, 0.51)$, and $(0.46, 0.54)$ rather than one exact universal ratio.
-* **Practical impact**: Chinchilla (70B parameters trained on 1.4T tokens, $\DatasetSize/\Parameters= 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference (inference cost scales with parameter count) and $2.5\times$ lower weight memory at the same precision [@hoffmann2022chinchilla].
+* **Practical impact**: Chinchilla (`{python} KaplanChinchillaComparison.chin_params_str` parameters trained on `{python} KaplanChinchillaComparison.chin_tokens_str` tokens, $\DatasetSize/\Parameters=$ `{python} KaplanChinchillaComparison.chin_tokens_per_param_str`) outperformed GPT-3 (`{python} KaplanChinchillaComparison.params_str` parameters trained on `{python} KaplanChinchillaComparison.tokens_str` tokens) across downstream benchmarks while requiring `{python} KaplanChinchillaComparison.inference_compute_mult_str` less compute during inference (inference cost scales with parameter count) and `{python} KaplanChinchillaComparison.weight_memory_mult_str` lower weight memory at the same precision [@hoffmann2022chinchilla].
 
 :::
 
