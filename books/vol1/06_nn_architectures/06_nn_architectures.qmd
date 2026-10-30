@@ -534,7 +534,7 @@ This distinction resolves the apparent paradox between universal approximation a
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST PARAMETER COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "MNIST: Representation vs Learnability"
+# │ Context: Callout "MNIST: Representation vs Learnability"; @fig-mlp caption
 # │
 # │ Goal: Contrast parameter efficiency between dense and convolutional layers.
 # │ Scope: chapter-anchor — MNIST comparison callout and later CNN callback share exports.
@@ -563,6 +563,8 @@ class MLPvsCNN:
     # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
     cnn = Scenarios.MnistSmallCnn
     c1_out = first.out_channels
+    # The 784 -> 128 first dense layer drawn in @fig-mlp.
+    mlp_first_layer = Scenarios.MnistMlpFirstLayer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: First layer at equal feature count (c1_out features)
@@ -576,7 +578,11 @@ class MLPvsCNN:
     cnn_p = cnn.weights
     cnn_head_share = cnn.dense_share
 
+    # Step 3: MACs per sample of the first dense layer (@fig-mlp)
+    mlp_first_layer_macs = mlp_first_layer.macs_per_example
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mlp_first_layer_macs == 100_352, f"Expected 784 x 128 = 100,352 MACs in the first dense layer, got {mlp_first_layer_macs}.")
     check(ratio >= 10, f"Dense first layer ({dense_first_w}) is not significantly larger than conv ({conv_first_w}). Ratio: {ratio:.1f}x")
     check(mlp_p < cnn_p, f"Expected the 784-128-64-10 MLP ({mlp_p}) to have fewer weights than the CNN ({cnn_p}).")
     check(cnn_head_share > 0.9, f"Expected the CNN's dense head to hold >90% of its weights, got {cnn_head_share:.2f}.")
@@ -591,6 +597,7 @@ class MLPvsCNN:
     cnn_params_str = fmt_count(cnn_p)
     cnn_head_pct_str = fmt_percent(round(cnn_head_share * 100) / 100, precision=0, commas=False, style='prose')
     param_ratio_mult_str = fmt_multiple(round(ratio), precision=0, commas=False)
+    mlp_first_layer_macs_str = fmt_int(mlp_first_layer_macs)
 ```
 
 ::: {#exmp-nn-architectures-mnist-representation-vs-learnability .callout-example title="MNIST: Representation vs. learnability"}
@@ -623,7 +630,7 @@ Letting every input feature interact with every output unit requires complete co
 ↩ The matrix multiplication formulation of a dense layer's forward pass is established in @sec-neural-computation-matrix-multiplication-formulation-417c.
 :::
 
-::: {#fig-mlp fig-env="figure" fig-pos="htb" fig-cap="**Multilayer Perceptron Architecture**: A three-layer network in which every neuron connects to all neurons in adjacent layers. The highlighted neuron receives weighted contributions from all inputs, illustrating the dense $\mathcal{O}(\LayerInputWidth \times \LayerOutputWidth)$ connectivity pattern implemented through matrix multiplications. For MNIST classification, a 784-dimensional input ($\LayerInputWidth = 784$) connects to 128 hidden neurons ($\LayerOutputWidth = 128$) through a $784{\times}128$ weight matrix, requiring 100,352 multiply-accumulate operations per sample. Adapted from @reagen2017." fig-alt="Three-layer neural network with four input nodes, five hidden nodes, and two output nodes. Lines connect every node to all nodes in adjacent layers. One highlighted node shows weighted connections from all inputs. On the right, the same network is drawn as a 4-element input vector times a 4-by-5 weight matrix with one highlighted column, giving a 5-element hidden vector with one highlighted cell, then times a 5-by-2 matrix, giving a 2-element output."}
+::: {#fig-mlp fig-env="figure" fig-pos="htb" fig-cap="**Multilayer Perceptron Architecture**: A three-layer network in which every neuron connects to all neurons in adjacent layers. The highlighted neuron receives weighted contributions from all inputs, illustrating the dense $\mathcal{O}(\LayerInputWidth \times \LayerOutputWidth)$ connectivity pattern implemented through matrix multiplications. For MNIST classification, a 784-dimensional input ($\LayerInputWidth = 784$) connects to 128 hidden neurons ($\LayerOutputWidth = 128$) through a $784{\times}128$ weight matrix, requiring `{python} MLPvsCNN.mlp_first_layer_macs_str` multiply-accumulate operations per sample. Adapted from @reagen2017." fig-alt="Three-layer neural network with four input nodes, five hidden nodes, and two output nodes. Lines connect every node to all nodes in adjacent layers. One highlighted node shows weighted connections from all inputs. On the right, the same network is drawn as a 4-element input vector times a 4-by-5 weight matrix with one highlighted column, giving a 5-element hidden vector with one highlighted cell, then times a 5-by-2 matrix, giving a 2-element output."}
 
 ```{.tikz}
  \begin{tikzpicture}[line join=round,font=\sffamily]
@@ -932,7 +939,7 @@ class MacEnergyFootnote:
 
 [^fn-mac-energy-cost]: **MAC (multiply-accumulate)**\index{MAC!definition}: The atomic operation of neural networks: multiply two values and add to a running sum. In Horowitz's 45 nm reference, an FP32 multiply plus add costs about `{python} MacEnergyFootnote.e_mac_pj_str` pJ, while a 32-bit off-chip DRAM access costs about `{python} MacEnergyFootnote.e_dram_word_pj_str` pJ [@horowitz2014]. These technology-specific values illustrate why data movement can dominate arithmetic energy; they are not universal constants for current hardware. \index{MAC!energy cost}
 
-::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(\BatchSize \times \LayerOutputWidth \times \LayerInputWidth)$ complexity where each output neuron requires num_inputs multiply-accumulate operations, so the reference MNIST input layer requires 100,352 MACs per sample."}
+::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(\BatchSize \times \LayerOutputWidth \times \LayerInputWidth)$ complexity where each output neuron requires num_inputs multiply-accumulate operations, so the reference MNIST input layer requires `{python} MLPLayerStats.mnist_mlp_macs_str` per sample."}
 
 ```{.python}
 def mlp_layer_compute(X, W, b):
@@ -1086,11 +1093,49 @@ CNNs\index{CNN}[^fn-convolution-etymology-locality] build that remedy into the n
 
 This spatial inductive bias translates into two structural constraints on the computation graph. Parameter sharing applies the same small filter weights across every spatial position, reducing parameter storage from millions of distinct weights to a compact kernel that fits within on-chip caches. Local connectivity limits each neuron's receptive field to a spatially adjacent neighborhood, eliminating computation on distant, uncorrelated pixels. Together, these constraints define the convolutional family.
 
+```{python}
+#| echo: false
+#| label: cnn-definition-sharing
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN DEFINITION WEIGHT-SHARING RATIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: CNN definition callout, Significance item
+# │
+# │ Goal: Compute the dense-vs.-convolution parameter ratio the definition quotes.
+# │ Show: A 3x3, 64-to-64 convolution (~37,000 weights) against a dense layer from
+# │       a 224x224x64 input to 64 outputs (~205 million weights), ~5,575x apart.
+# │ How: Load the reference 64-channel ImageNet convolution; take its sharing ratio.
+# │
+# │ Note: The ~37,000 and ~205 million operands sit inside the callout's inline
+# │       math, so they stay literal there; the GUARD pins both.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_multiple, check
+
+class CNNDefinitionSharing:
+    """Dense-vs.-convolution weight ratio for the CNN definition callout."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layer = Scenarios.ImageNet64ChannelConv  # 3x3, 64 -> 64, 224x224 input
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    conv_weights = layer.weights  # 3 x 3 x 64 x 64
+    dense_weights = layer.dense_weights  # 224^2 x 64 x 64
+    sharing_ratio = layer.sharing_ratio
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(conv_weights - 37_000) < 500, f"Expected ~37,000 conv weights, got {conv_weights}.")
+    check(abs(dense_weights - 205e6) < 1e6, f"Expected ~205 million dense weights, got {dense_weights}.")
+    check(round(sharing_ratio) == 5_575, f"Expected a ~5,575x ratio, got {sharing_ratio:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    sharing_ratio_mult_str = fmt_multiple(round(sharing_ratio), precision=0, commas=True)
+```
+
 :::: {#dfn-nn-architectures-convolutional-neural-networks .callout-definition title="Convolutional neural networks"}
 
 ***Convolutional neural networks (CNNs)***\index{CNN!definition} are architectures that exploit translation equivariance and spatial locality to share learned filters across all spatial positions, decoupling parameter count from input resolution.
 
-1.  **Significance**: Weight sharing\index{Weight sharing} produces dramatic parameter reduction. A $3{\times}3$ convolutional layer with 64 input and 64 output channels requires $3 \times 3 \times 64 \times 64 \approx 37{,}000$ parameters regardless of whether the input image is $224{\times}224$ or $1024{\times}1024$. A fully connected layer mapping a $224{\times}224{\times}64$ input to 64 scalar outputs would require $224^2 \times 64 \times 64 \approx 205$ million parameters, a roughly 5,575$\times$ difference. These output shapes differ: convolution reuses its 64 detectors across a spatial feature map, while the dense layer produces 64 scalars. Weight sharing keeps the filter budget constant as resolution grows, although feature-map storage still grows with image area.
+1.  **Significance**: Weight sharing\index{Weight sharing} produces dramatic parameter reduction. A $3{\times}3$ convolutional layer with 64 input and 64 output channels requires $3 \times 3 \times 64 \times 64 \approx 37{,}000$ parameters regardless of whether the input image is $224{\times}224$ or $1024{\times}1024$. A fully connected layer mapping a $224{\times}224{\times}64$ input to 64 scalar outputs would require $224^2 \times 64 \times 64 \approx 205$ million parameters, a roughly `{python} CNNDefinitionSharing.sharing_ratio_mult_str` difference. These output shapes differ: convolution reuses its 64 detectors across a spatial feature map, while the dense layer produces 64 scalars. Weight sharing keeps the filter budget constant as resolution grows, although feature-map storage still grows with image area.
 2.  **Distinction**: Unlike MLPs, which connect every input element to every output element (global connectivity), CNNs restrict each output to a local spatial neighborhood, encoding the assumption that nearby pixels are more relevant than distant ones. This restriction eliminates entire hypothesis classes at architecture design time rather than penalizing them during training.
 3.  **Common pitfall**: A frequent misconception is that CNNs are vision-only models. The convolution operation applies to any data with a grid-like topology\index{Symmetry-aware architecture}: 1D convolutions process audio waveforms and time series, 2D convolutions process images and spectrograms, and 3D convolutions process video and volumetric data.
 
@@ -2295,7 +2340,46 @@ $$
 $$ {#eq-rnn}
 where $\RecurrentHiddenState_t$ denotes the hidden state at time $\TimeStepIndex$, $\LayerInputVector_t$ denotes the input at time $\TimeStepIndex$, $\RecurrentStateWeights$ contains the recurrent weights, $\RecurrentInputWeights$ contains the input weights, $\RecurrentHiddenBias$ is the hidden-state bias vector, and $\LayerNonlinearity$ is the activation function. The equation uses column vectors; the later listings use row-major batched tensors, so their weight multiplications appear on the right. Unrolled across time (@fig-rnn, right), the loop becomes a chain of transitions $\RecurrentHiddenState_{t-1} \to \RecurrentHiddenState_t \to \RecurrentHiddenState_{t+1}$ in which every link reuses the same recurrent weight matrix $\RecurrentStateWeights$, so no step can begin until the one before it has finished.
 
-::: {#fig-rnn data-explore="original-v1-rnn-state-lifetime" data-explore-key="vol1:fig-rnn" fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: The compact recurrent loop (left) unfolds into one copy of the cell per time step (right). Three weight matrices are shared across all steps: $\RecurrentInputWeights$ (input-to-hidden), $\RecurrentStateWeights$ (hidden-to-hidden), and $\RecurrentOutputWeights$ (hidden-to-output). These matrices are reused at every step, so the parameter count is independent of sequence length. For a 128-dimensional hidden state and a 100-dimensional input, each time step requires 16,384 MACs for recurrent connections plus 12,800 for input projection." fig-alt="Left: single green hidden node with a hidden-to-hidden self-loop. Right: unfolded across three time steps showing purple inputs, green hidden states, and orange outputs. Arrows show shared input-to-hidden, hidden-to-hidden, and hidden-to-output weights across all steps."}
+```{python}
+#| echo: false
+#| label: rnn-unfolding-step-costs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RNN UNFOLDING STEP COSTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-rnn caption
+# │
+# │ Goal: Size one recurrent step of the unfolded network in the figure.
+# │ Show: Recurrent and input-projection MACs for a 128-wide state, 100-wide input.
+# │ How: Load the plain recurrent layer scenario; read its per-step MAC counts.
+# │
+# │ Note: @lst-rnn_layer_step reuses the same scenario through RNNCompute below.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class RNNUnfoldingStep:
+    """Per-step MACs of the plain recurrent layer drawn in @fig-rnn."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
+    hidden_dim = step.hidden_dim
+    input_dim = step.input_dim
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    recurrent_macs = step.recurrent_macs  # hidden x hidden
+    input_macs = step.input_macs  # input x hidden
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(recurrent_macs == 16_384, f"Expected 128 x 128 = 16,384 recurrent MACs, got {recurrent_macs}.")
+    check(input_macs == 12_800, f"Expected 100 x 128 = 12,800 input MACs, got {input_macs}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    input_dim_str = fmt(input_dim, precision=0, commas=False)
+    recurrent_macs_str = fmt(recurrent_macs, precision=0, commas=True)
+    input_macs_str = fmt(input_macs, precision=0, commas=True)
+```
+
+::: {#fig-rnn data-explore="original-v1-rnn-state-lifetime" data-explore-key="vol1:fig-rnn" fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: The compact recurrent loop (left) unfolds into one copy of the cell per time step (right). Three weight matrices are shared across all steps: $\RecurrentInputWeights$ (input-to-hidden), $\RecurrentStateWeights$ (hidden-to-hidden), and $\RecurrentOutputWeights$ (hidden-to-output). These matrices are reused at every step, so the parameter count is independent of sequence length. For a `{python} RNNUnfoldingStep.hidden_dim_str`-dimensional hidden state and a `{python} RNNUnfoldingStep.input_dim_str`-dimensional input, each time step requires `{python} RNNUnfoldingStep.recurrent_macs_str` MACs for recurrent connections plus `{python} RNNUnfoldingStep.input_macs_str` for input projection." fig-alt="Left: single green hidden node with a hidden-to-hidden self-loop. Right: unfolded across three time steps showing purple inputs, green hidden states, and orange outputs. Arrows show shared input-to-hidden, hidden-to-hidden, and hidden-to-output weights across all steps."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\sffamily]
@@ -2422,6 +2506,8 @@ class RNNCompute:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
+    hidden_dim = step.hidden_dim
+    input_dim = step.input_dim
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Recurrent: h_prev x W_hh (H x H)
@@ -2439,11 +2525,13 @@ class RNNCompute:
     recurrent_str = fmt(macs_recurrent, precision=0, commas=True)
     input_str = fmt(macs_input, precision=0, commas=True)
     total_str = fmt(macs_total, precision=0, commas=True)
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    input_dim_str = fmt(input_dim, precision=0, commas=False)
 ```
 
 @Lst-rnn_layer_step demonstrates the single-time-step mechanism using framework-level matrix operations: combine the previous hidden state with the current input, add the bias, and apply the activation to produce the next hidden state. The code is intentionally local to one step because the systems cost is not the step itself, but the dependency chain that prevents parallel execution across time.
 
-::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\RecurrentHiddenState_{t-1}\RecurrentStateWeights$ and $\LayerInputVector_t\RecurrentInputWeights$, per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
+::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\RecurrentHiddenState_{t-1}\RecurrentStateWeights$ and $\LayerInputVector_t\RecurrentInputWeights$, per time step. For `{python} RNNCompute.hidden_dim_str`-dimensional hidden state and `{python} RNNCompute.input_dim_str`-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 
 ```{.python}
 def rnn_layer_step(x_t, h_prev, W_hh, W_hx, b):
@@ -2833,16 +2921,22 @@ class QKVProjectionCosts:
     tokens = projection.tokens
     d_model = projection.width
     qkv_dim = projection.packed_width
+    heads = projection.workload.heads  # GPT-2 Small attention heads
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     qkv_macs = projection.macs
     qkv_macs_m = qkv_macs / MILLION
+    head_dim = d_model // heads  # per-head width for @lst-self_attention_layer
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(qkv_macs == 10_616_832, f"QKV projection MAC count should be 10,616,832, got {qkv_macs}.")
+    check(head_dim * heads == d_model and head_dim == 64, f"GPT-2 Small heads should be 64 wide, got {head_dim}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     qkv_macs_str = fmt_count(qkv_macs, scale="million", scale_style="word", precision=1, commas=False, label="MAC")
+    d_model_str = fmt(d_model, precision=0, commas=False)
+    heads_str = fmt(heads, precision=0, commas=False)
+    head_dim_str = fmt(head_dim, precision=0, commas=False)
 ```
 
 ::: {#fig-attention-weightcalc fig-env="figure" fig-pos="htb" fig-cap="**QKV Projection Computation**: The embedding matrix ($6{\times}768$) multiplies with QKV weight matrices ($768{\times}2304$) plus bias to produce combined projections ($6{\times}2304$). The 2304 output columns hold the query, key, and value projections side by side, 768 each, colored as in @fig-attention; only the first token's output row is drawn. This single batched matrix multiplication, requiring $6{\times}768{\times}2304$ = `{python} QKVProjectionCosts.qkv_macs_str`, replaces three separate projection operations for efficiency. Adapted from Transformer Explainer [@cho2025]." fig-alt="Diagram of a 6-by-768 embedding matrix multiplied by a 768-by-2304 QKV weight matrix, with a 2304-element bias added to produce a 6-by-2304 output. Token labels are Data, visualization, em, powers, users, and to; the weight matrix and the first output row are split into cyan query, red key, and green value thirds, and the bias is gray."}
@@ -3482,7 +3576,7 @@ Generation splits into two phases with different machine profiles, drawn in @fig
 
 In code, self-attention is three projections of the same input followed by the attention operator, and multi-head attention runs several smaller copies side by side before a final projection (@lst-self_attention_layer). Writing both layers side by side shows how the multi-head variant partitions the hidden dimension across heads without changing the per-head attention kernel.
 
-::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
+::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 (`{python} QKVProjectionCosts.d_model_str`-dim, `{python} QKVProjectionCosts.heads_str` heads), each head operates on `{python} QKVProjectionCosts.head_dim_str` dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
 
 ```{.python}
 def self_attention_layer(X, W_Q, W_K, W_V, d_head):
@@ -3982,7 +4076,8 @@ Yet dense, spatial, and sequence models do not cover the full spectrum of produc
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_int, fmt, fmt_memory, fmt_memory_capacity, check
+import math
+from mlsysim.fmt import fmt_int, fmt, fmt_memory, fmt_memory_capacity, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DLRMEmbedding:
@@ -4001,18 +4096,22 @@ class DLRMEmbedding:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     table_memory = table.table_bytes
     row_memory = table.row_bytes
+    users_exponent = round(math.log10(num_users))  # rows as a power of ten for the inline product
+    bytes_value_int = round(bytes_per_param.to(byte).magnitude)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         table_memory >= a100_capacity,
         f"DLRM table ({table_memory.to(GB).magnitude:.1f} GB) fits on an A100. It must be larger to illustrate the capacity wall.",
     )
+    check(num_users == 10**users_exponent == 10**9, f"Prose says one billion users; got {num_users}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     embed_table_gb_str = fmt_memory(table_memory, unit=GB, precision=0, commas=False)
     embed_dim_str = fmt_int(embed_dim)
     row_bytes_str = fmt_memory(row_memory, unit=byte, precision=0, commas=False)
     a100_mem_gb_str = fmt_memory_capacity(a100_capacity, unit=GiB, precision=0, commas=False)
+    table_product_math = fmt_math(rf"10^{{{users_exponent}}} \times {embed_dim} \times {bytes_value_int}")
 
 # Note: Use DLRMEmbedding.embed_table_gb_str directly.
 ```
@@ -4031,7 +4130,7 @@ Recommendation models solve the representation problem by mapping each discrete 
 
 The DLRM\index{DLRM} architecture [@naumov2019deep] organizes this computation into a four-stage pipeline split between dense and sparse paths. Continuous features such as user age or time of day first flow through a bottom MLP, a compute-intensive but memory-light stage dominated by dense matrix multiplications. The bottom MLP projects the raw continuous inputs into a single dense vector with the same dimension as each embedding table row (such as 128 elements), placing continuous and categorical features in a common vector space. In parallel, categorical IDs index into dedicated embedding tables\index{Embedding!table}, which is where the memory capacity wall appears.
 
-For example, an embedding table for one billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx$ `{python} DLRMEmbedding.embed_table_gb_str` of memory. This stage is memory-intensive but compute-light because each lookup is a memory copy with zero arithmetic reuse. Because the bottom MLP output and every gathered embedding row now share the same vector length, the interaction layer\index{DLRM!interaction layer} can combine the dense activations from the bottom MLP with the gathered sparse embedding vectors through pairwise dot products that capture user-item correlations. Finally, a top MLP processes the concatenated interaction representations through feedforward layers to predict a target probability such as click-through rate. Each of the four stages stresses a different part of the machine (@fig-dlrm-pipeline), and @sec-network-architectures-computational-mapping-b346 quantifies the capacity-bound profile that results.
+For example, an embedding table for one billion users with `{python} DLRMEmbedding.embed_dim_str`-dimensional vectors requires `{python} DLRMEmbedding.table_product_math` bytes $\approx$ `{python} DLRMEmbedding.embed_table_gb_str` of memory. This stage is memory-intensive but compute-light because each lookup is a memory copy with zero arithmetic reuse. Because the bottom MLP output and every gathered embedding row now share the same vector length, the interaction layer\index{DLRM!interaction layer} can combine the dense activations from the bottom MLP with the gathered sparse embedding vectors through pairwise dot products that capture user-item correlations. Finally, a top MLP processes the concatenated interaction representations through feedforward layers to predict a target probability such as click-through rate. Each of the four stages stresses a different part of the machine (@fig-dlrm-pipeline), and @sec-network-architectures-computational-mapping-b346 quantifies the capacity-bound profile that results.
 
 ::: {#fig-dlrm-pipeline fig-env="figure" fig-pos="htb" fig-cap="**DLRM Pipeline**: Dense features pass through a bottom MLP of small weight matrices, while each categorical ID selects one row of a large embedding table. The gathers are random reads with almost no arithmetic, and the tables can exceed one device's memory. An interaction stage takes pairwise dot products among the dense output and the gathered vectors, and a top MLP turns the result into a click probability." fig-alt="Two paths feed an interaction box. Left: dense features go up into a blue bottom MLP. Right: categorical IDs enter three tall orange embedding tables; one highlighted row from each is copied into a small vector. Labels note random reads with almost no arithmetic and tables of gigabytes to terabytes that may span devices. The interaction output feeds a top MLP that produces a click probability."}
 
@@ -4933,7 +5032,7 @@ class ThroughputCeilingCalc:
 5.  **ResNet-50 headroom**: `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str` $\div$ `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str` = `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str`.
 6.  **Detection-model check**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` = `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str`, leaving `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom at the lower effective-throughput estimate.
 
-**Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves `{python} ThroughputCeilingCalc.tc_util_range_str` utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. The headroom assumes the GPU stays busy; a single 30 FPS stream runs at batch one, where kernel launches and small matrices usually hold utilization well below this planning figure.
+**Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves `{python} ThroughputCeilingCalc.tc_util_range_str` utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. The headroom assumes the GPU stays busy; a single `{python} ThroughputCeilingCalc.tc_fps_str` stream runs at batch one, where kernel launches and small matrices usually hold utilization well below this planning figure.
 
 :::
 
@@ -5218,7 +5317,7 @@ class A100ClusterMemory:
     # ┌── 1. LOAD (Registry) ───────────────────────────────────────────────
     a100 = Hardware.Cloud.A100
     edge_device = Hardware.Edge.JetsonOrinNX
-    n_gpus = 8
+    n_gpus = 8  # scenario assumption: one 8-GPU node
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_8x_mem = a100.memory.capacity * n_gpus
@@ -5236,13 +5335,14 @@ class A100ClusterMemory:
     edge_device_name_str = MarkdownStr(edge_device.name)
     edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
+    n_gpus_mult_str = fmt_multiple(n_gpus, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Architecture wins on training hardware transfer directly to deployment hardware.*
 
-Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy unchanged to a representative edge node such as the `{python} A100ClusterMemory.edge_device_name_str` (`{python} A100ClusterMemory.edge_mem_gb_str` system memory). As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack because storage, latency, and power budgets vary by deployment target.
+Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting `{python} A100ClusterMemory.n_gpus_mult_str` A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy unchanged to a representative edge node such as the `{python} A100ClusterMemory.edge_device_name_str` (`{python} A100ClusterMemory.edge_mem_gb_str` system memory). As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack because storage, latency, and power budgets vary by deployment target.
 
 :::
 
@@ -5262,7 +5362,7 @@ Teams design for high-end GPU clusters, then discover deployment failures on tar
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, fmt_qty_int, check
+from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, fmt_qty_int, fmt_range, check
 from mlsysim.core.units import GB, BYTES_FP16, byte
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5278,11 +5378,12 @@ class KVCacheServingPitfall:
     seq_len = request.tokens
     head_dim = request.workload.head_width
     bytes_per_elem = request.bytes_per_value.to(byte).magnitude
+    users_low, users_high = 2, 4  # scenario assumption: concurrent users
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     per_request_memory = request.total
-    concurrent_2_memory = per_request_memory * 2
-    concurrent_4_memory = per_request_memory * 4
+    concurrent_2_memory = per_request_memory * users_low
+    concurrent_4_memory = per_request_memory * users_high
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
@@ -5299,13 +5400,14 @@ class KVCacheServingPitfall:
     concurrent_2_gb_str = fmt_qty_int(concurrent_2_memory, GB, commas=False)
     concurrent_4_gb_str = fmt_qty_int(concurrent_4_memory, GB, commas=False)
     device_memory_gb_str = fmt_memory_capacity(device_memory, unit=GiB, precision=0, commas=False)
+    users_range_str = fmt_range(users_low, users_high, precision=0)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Ignoring KV cache growth when estimating transformer serving costs.*
 
-Teams budget transformer deployment based on model weight memory alone, overlooking the key-value (KV) cache used during autoregressive generation [@pope2023efficiently; @kwon2023]. The cache grows linearly with concurrent sequences, layers, heads, and sequence length, so at long contexts or high concurrency it can become the limiting serving constraint. The KV-cache footnote in @sec-network-architectures-inference-memory-bandwidth-wall-98d1 works through the chapter's `{python} KVCacheServingPitfall.layers_str`-layer, `{python} KVCacheServingPitfall.heads_str`-head example. With `{python} KVCacheServingPitfall.head_dim_str`-dimensional heads, `{python} KVCacheServingPitfall.seq_len_str`-token sequences, and FP16 storage, each concurrent request holds $\approx$ `{python} KVCacheServingPitfall.per_request_gb_str` of KV cache. At 2--4 users, the cache alone consumes `{python} KVCacheServingPitfall.concurrent_2_gb_str`--`{python} KVCacheServingPitfall.concurrent_4_gb_str` before allocator, activation, and workspace overhead. Those values consume part of the post-weight headroom of an `{python} KVCacheServingPitfall.device_memory_gb_str` device and grow linearly with context and concurrency. Capacity planning must therefore budget weights, cache, and runtime buffers together, then reduce concurrency, context, or cache footprint, or add memory capacity, when the combined total approaches device memory.
+Teams budget transformer deployment based on model weight memory alone, overlooking the key-value (KV) cache used during autoregressive generation [@pope2023efficiently; @kwon2023]. The cache grows linearly with concurrent sequences, layers, heads, and sequence length, so at long contexts or high concurrency it can become the limiting serving constraint. The KV-cache footnote in @sec-network-architectures-inference-memory-bandwidth-wall-98d1 works through the chapter's `{python} KVCacheServingPitfall.layers_str`-layer, `{python} KVCacheServingPitfall.heads_str`-head example. With `{python} KVCacheServingPitfall.head_dim_str`-dimensional heads, `{python} KVCacheServingPitfall.seq_len_str`-token sequences, and FP16 storage, each concurrent request holds $\approx$ `{python} KVCacheServingPitfall.per_request_gb_str` of KV cache. At `{python} KVCacheServingPitfall.users_range_str` users, the cache alone consumes `{python} KVCacheServingPitfall.concurrent_2_gb_str`--`{python} KVCacheServingPitfall.concurrent_4_gb_str` before allocator, activation, and workspace overhead. Those values consume part of the post-weight headroom of an `{python} KVCacheServingPitfall.device_memory_gb_str` device and grow linearly with context and concurrency. Capacity planning must therefore budget weights, cache, and runtime buffers together, then reduce concurrency, context, or cache footprint, or add memory capacity, when the combined total approaches device memory.
 
 :::
 
