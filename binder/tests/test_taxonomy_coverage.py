@@ -33,7 +33,7 @@ def save(root, data):
 def test_numbers_are_computed_and_weighted_by_sources(repo):
     save(repo, checklist([
         {"topic": "KV caching", "sources": ["a", "b", "c"], "status": "covered", "concepts": ["mlsys.kv-cache"]},
-        {"topic": "Paged attention", "sources": ["a"], "status": "partial", "subject": "L4.4"},
+        {"topic": "Paged attention", "sources": ["a"], "status": "partial", "subject": "llm-inference"},
         {"topic": "Visualization", "status": "missing"},
         {"topic": "ML for systems", "status": "out-of-scope"},
     ]))
@@ -52,6 +52,7 @@ def test_numbers_are_computed_and_weighted_by_sources(repo):
     ({"topic": "No concept", "status": "covered"}, "covered requires at least one concept"),
     ({"topic": "No subject", "status": "partial"}, "partial requires a subject"),
     ({"topic": "Bad subject", "status": "partial", "subject": "Z9.9"}, "unknown subject Z9.9"),
+    ({"topic": "Mutable code rejected", "status": "partial", "subject": "L4.4"}, "unknown subject L4.4"),
     ({"topic": "Stale subject", "status": "covered", "concepts": ["mlsys.kv-cache"], "subject": "request-scheduling"}, "disagrees with concept homes"),
     ({"topic": "Missing with concept", "status": "missing", "concepts": ["mlsys.kv-cache"]}, "missing must not cite concepts"),
     ({"topic": "Bad key", "status": "missing", "extra": None}, "unknown topic keys: extra"),

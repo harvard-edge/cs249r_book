@@ -68,8 +68,6 @@ def run(root: Path, args: list[str]) -> bool:
             print("Report: books/_build/concepts/taxonomy-agreement.json")
             return not (options.check and report["errors"])
         if options.action == "refresh":
-            if options.check:
-                parser.error("--check is only supported with build and audit")
             report = refresh(root, volumes)
             print(
                 f"Concept review: {len(report['candidates'])} concept candidates, "
@@ -91,6 +89,32 @@ def run(root: Path, args: list[str]) -> bool:
             if field:
                 summary = field["summary"]
                 print(f"Field reference draft valid: {summary['concepts']} concepts, {summary['relationships']} relationships, {summary['book_links']} candidate book links")
+                if field.get("framework") and field["framework"].get("version") not in (None, "0.1-draft"):
+                    from cli.core.taxonomy_release import release_artifacts
+                    rel_artifacts = release_artifacts(root, field["framework"], field)
+                    staffml_json = root / "staffml/app/src/data/mlsys-taxonomy.json"
+                    if staffml_json in rel_artifacts:
+                        if not staffml_json.exists() or staffml_json.read_bytes() != rel_artifacts[staffml_json]:
+                            raise ConceptGraphError(
+                                "staffml/app/src/data/mlsys-taxonomy.json is missing or out of sync with taxonomy/ml-systems-taxonomy.yml; run './binder/binder concepts build'"
+                            )
+            if (root / "taxonomy/coverage-ledger.yml").exists() and not volumes:
+                from cli.core.concept_coverage import coverage_report as ledger_coverage_report
+                ledger_rep = ledger_coverage_report(root)
+                if ledger_rep.get("orphaned_decisions"):
+                    raise ConceptGraphError(
+                        f"coverage: orphaned decisions in coverage-ledger.yml: {', '.join(ledger_rep['orphaned_decisions'])}"
+                    )
+                broken_ledger = [
+                    item["inventory_id"]
+                    for item in ledger_rep.get("inventory", [])
+                    if "field-target-removed" in item.get("stale_reasons", [])
+                    or "declaration-mismatch" in item.get("stale_reasons", [])
+                ]
+                if broken_ledger:
+                    raise ConceptGraphError(
+                        f"coverage: broken references in coverage-ledger.yml: {', '.join(broken_ledger)}"
+                    )
             if (root / "taxonomy/coverage").is_dir():
                 from cli.core.taxonomy_coverage import coverage_report
                 cov = coverage_report(root)

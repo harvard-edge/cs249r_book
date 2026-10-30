@@ -10,7 +10,7 @@ and deterministically projects the four aspect models consumed by the compiler p
   automatically derived in concept order from `concept["home"]`), multi-dimensional `dimensions`,
   and `gaps`.
 - `guides`: practitioner `roles`, production `symptoms`, and `learning_paths`.
-- `skos`: the optional polyhierarchical SKOS `schemes`, `collections`, and `narrower` slice.
+- `skos`: the optional polyhierarchical SKOS `topics`, `top_concepts`, `hierarchy`, and `collections` slice (authored under `skos_hierarchy:`).
 
 Field identities never depend on chapter order or book ownership. External
 reading references, editorial propositions, and book links (`taxonomy/mlsysbook-alignment.yml`)
@@ -33,27 +33,44 @@ import yaml
 from .concept_graph import SITE_DIR, ConceptGraphError, digest, svg_map
 
 
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    """YAML SafeLoader that rejects duplicate keys in any mapping."""
+
+
+def _construct_unique_mapping(loader: _UniqueKeySafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    loader.flatten_mapping(node)
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ConceptGraphError(f"duplicate YAML mapping key: {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
 def load_taxonomy_yaml(path: Path) -> object:
-    """Load a taxonomy file, refusing YAML anchors and aliases.
+    """Load a taxonomy file, refusing YAML anchors/aliases and duplicate mapping keys.
 
     Other tools (StaffML's hardened loader) reject aliases, and a merge script
-    that reuses a list object silently emits them (2026-10-22), so an alias
-    here fails the build instead of breaking a downstream reader.
+    that reuses a list object silently emits them (2026-10-22), so an alias or
+    duplicate mapping key here fails the build instead of breaking a downstream reader.
     """
     text = path.read_text()
     if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text, Loader=yaml.SafeLoader)):
         raise ConceptGraphError(f"{path.name}: YAML anchors/aliases are not allowed; write each value out in full")
-    return yaml.safe_load(text)
+    try:
+        return yaml.load(text, Loader=_UniqueKeySafeLoader)
+    except ConceptGraphError as exc:
+        raise ConceptGraphError(f"{path.name}: {exc}") from exc
 
 
 TAXONOMY_FILE = "taxonomy/ml-systems-taxonomy.yml"
-
-_FRAMEWORK_KEYS = (
-    "schema_version", "id", "title", "version", "status", "scope", "rationale", "row_rule",
-    "secondary_policy", "relationship_semantics", "context_policy", "book_mapping_policy",
-    "warrant_policy", "competency_policy", "tagging_rules", "placement_examples",
-    "sources", "dimensions", "groups", "areas", "gaps",
-)
 
 
 @functools.lru_cache(maxsize=4)
@@ -64,33 +81,69 @@ def _cached_unified_taxonomy(
     path = Path(path_str)
     root = Path(root_str)
     raw = load_taxonomy_yaml(path)
-    if not isinstance(raw, dict) or not ("concepts" in raw and "areas" in raw):
+    if not isinstance(raw, dict) or not ("areas" in raw and "concepts" in raw):
         return None
     if raw.get("schema_version") != 1:
         raise ConceptGraphError("taxonomy: unsupported schema")
-    from .taxonomy_schema import validate_linkml
+    from .taxonomy_schema import (
+        _cached_raw_schema,
+        get_class_slots,
+        resolve_schema_path,
+        validate_field_semantics,
+        validate_guides_semantics,
+        validate_linkml,
+        validate_schema_sync,
+    )
     validate_linkml(raw, "UnifiedTaxonomyModel", root, TAXONOMY_FILE)
+    schema_path = resolve_schema_path(root)
+    schema_raw = _cached_raw_schema(str(schema_path), schema_path.stat().st_mtime_ns)
+    if str(raw.get("version", "")) != str(schema_raw.get("version", "")):
+        raise ConceptGraphError(
+            f"schema sync: taxonomy version '{raw.get('version')}' disagrees with LinkML schema version '{schema_raw.get('version')}'"
+        )
+    framework_keys = get_class_slots("FrameworkModel", root)
 
     by_home: dict[str, list[str]] = {}
+    concept_home: dict[str, str] = {}
     field_concepts: list[dict] = []
     for c in raw.get("concepts", []):
         if isinstance(c, dict):
             cid = c.get("id")
             home = c.get("home")
-            if isinstance(cid, str) and isinstance(home, str):
-                by_home.setdefault(home, []).append(cid)
+            if isinstance(cid, str):
+                if cid in concept_home:
+                    raise ConceptGraphError(f"field model: duplicate concepts ID {cid}")
+                if isinstance(home, str):
+                    concept_home[cid] = home
+                    by_home.setdefault(home, []).append(cid)
             field_concepts.append({k: v for k, v in c.items() if k != "home"})
         else:
             field_concepts.append(c)
 
-    known_rows = {
-        row["id"]
-        for area in raw.get("areas", []) if isinstance(area, dict)
-        for row in area.get("rows", []) if isinstance(row, dict) and isinstance(row.get("id"), str)
-    }
+    rows_by_id: dict[str, dict] = {}
+    for area in raw.get("areas", []):
+        if isinstance(area, dict):
+            for row in area.get("rows", []):
+                if isinstance(row, dict) and isinstance(row.get("id"), str):
+                    rid = row["id"]
+                    if rid in rows_by_id:
+                        raise ConceptGraphError(f"framework: duplicate or overlapping row identity {rid}")
+                    rows_by_id[rid] = row
+    known_rows = set(rows_by_id)
     unknown_homes = sorted(set(by_home) - known_rows)
     if unknown_homes:
         raise ConceptGraphError(f"framework: concept home names unknown subject row: {', '.join(unknown_homes)}")
+
+    for ex in raw.get("placement_examples", []) or []:
+        if isinstance(ex, dict):
+            if ex.get("concept") not in concept_home:
+                raise ConceptGraphError(f"framework: placement example names unknown concept {ex.get('concept')}")
+            if ex.get("home") not in known_rows:
+                raise ConceptGraphError(f"framework: placement example names unknown home row {ex.get('home')}")
+            if concept_home.get(ex["concept"]) != ex.get("home"):
+                raise ConceptGraphError(
+                    f"framework: placement example for {ex['concept']} claims home {ex['home']} instead of {concept_home.get(ex['concept'])}"
+                )
 
     views = deepcopy(raw.get("views", []))
     if isinstance(views, list):
@@ -118,7 +171,7 @@ def _cached_unified_taxonomy(
         if opt in raw:
             field_dict[opt] = raw[opt]
 
-    framework_dict: dict = {k: deepcopy(raw[k]) for k in _FRAMEWORK_KEYS if k in raw}
+    framework_dict: dict = {k: deepcopy(raw[k]) for k in framework_keys if k in raw}
     for area in framework_dict.get("areas", []):
         if isinstance(area, dict):
             for row in area.get("rows", []):
@@ -133,7 +186,17 @@ def _cached_unified_taxonomy(
     guides_dict = {"schema_version": raw["schema_version"], **deepcopy(guides_raw)} if isinstance(guides_raw, dict) else None
     skos_raw = raw.get("skos_hierarchy")
     skos_dict = {"schema_version": raw["schema_version"], **deepcopy(skos_raw)} if isinstance(skos_raw, dict) else None
-    return {"field": field_dict, "framework": framework_dict, "guides": guides_dict, "skos": skos_dict}
+    validate_schema_sync(root, field_dict)
+    validate_field_semantics(field_dict)
+    if guides_dict is not None:
+        validate_guides_semantics(guides_dict, rows_by_id, version=raw.get("version"))
+    bundle = {"field": field_dict, "framework": framework_dict, "guides": guides_dict, "skos": skos_dict}
+    enriched_concepts, _, _ = _validate_field_model(root, deepcopy(field_dict))
+    from .framework import load_framework
+    load_framework(root, {**field_dict, "concepts": enriched_concepts, "book_links": []}, _bundle=bundle)
+    from .taxonomy import load_taxonomy
+    load_taxonomy(root, {**field_dict, "concepts": enriched_concepts}, _bundle=bundle)
+    return bundle
 
 
 def load_unified_taxonomy(root: Path) -> dict[str, dict | None] | None:
@@ -182,51 +245,41 @@ def _references(record, sources, context):
         raise ConceptGraphError(f"field model: {context} requires known reading references{detail}")
 
 
-def load_field(root: Path, book_graph: dict) -> dict | None:
-    """Validate authored identities and resolve only explicitly recorded links."""
-    unified = load_unified_taxonomy(root)
-    if unified is not None:
-        model = unified["field"]
-    else:
-        path = root / TAXONOMY_FILE
-        if not path.exists():
-            return None
-        model = load_taxonomy_yaml(path)
-        if not isinstance(model, dict) or ("areas" in model or "topics" in model or "roles" in model):
-            return None
+def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, dict]:
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
-    _text(model, ("id", "title", "scope", "status"), "metadata",
-          {"schema_version", "id", "title", "scope", "status", "background_boundary", "limitations",
-           "sources", "families", "concepts", "relations", "retired", "relationships", "views", "learning_paths"})
-    if model["status"] != "editorial-draft":
-        raise ConceptGraphError("field model: only editorial-draft is supported before review provenance exists")
-    sources = _index(model.get("sources"), "source")
-    for ref in sources.values():
-        _text(ref, ("title", "url", "kind", "scope"), ref["id"], {"id", "title", "url", "kind", "scope"})
-        url = urlparse(ref["url"])
-        if url.scheme != "https" or not url.netloc:
-            raise ConceptGraphError(f"field model: unsafe reading URL {ref['id']}")
-    families = _index(model.get("families"), "family")
     from .taxonomy_schema import (
+        get_class_slots,
         get_enum_values,
         validate_field_semantics,
         validate_linkml,
         validate_schema_sync,
     )
+    _text(model, ("id", "title", "scope", "status"), "metadata", set(get_class_slots("FieldModel", root)))
+    if model["status"] != "editorial-draft":
+        raise ConceptGraphError("field model: only editorial-draft is supported before review provenance exists")
+    sources = _index(model.get("sources"), "source")
+    source_slots = set(get_class_slots("FieldSource", root))
+    for ref in sources.values():
+        _text(ref, ("title", "url", "kind", "scope"), ref["id"], source_slots)
+        url = urlparse(ref["url"])
+        if url.scheme != "https" or not url.netloc:
+            raise ConceptGraphError(f"field model: unsafe reading URL {ref['id']}")
+    families = _index(model.get("families"), "family")
     scopes = set(get_enum_values("ConceptScopeEnum", root))
     relation_kinds = set(get_enum_values("RelationKindEnum", root))
+    family_slots = set(get_class_slots("ConceptFamily", root))
     for family in families.values():
-        _text(family, ("label", "scope", "question"), family["id"], {"id", "label", "scope", "question", "references"})
+        _text(family, ("label", "scope", "question"), family["id"], family_slots)
         if family["scope"] not in scopes:
             raise ConceptGraphError(f"field model: unknown scope {family['scope']}")
         _references(family, sources, family["id"])
     concepts = _index(model.get("concepts"), "concept")
     concept_own_refs = set()
+    concept_slots = set(get_class_slots("Concept", root)) - {"home"}
     for node in concepts.values():
-        _text(node, ("label", "definition", "family", "status"), node["id"],
-              {"id", "label", "definition", "family", "status", "aliases", "scope", "references"})
-        if not re.fullmatch(r"mlsys\.[a-z0-9-]+", node["id"]) or node["family"] not in families:
+        _text(node, ("label", "definition", "family", "status"), node["id"], concept_slots)
+        if not re.fullmatch(r"mlsys\.[a-z0-9]+(-[a-z0-9]+)*", node["id"]) or node["family"] not in families:
             raise ConceptGraphError(f"field model: invalid concept identity or family {node['id']}")
         if node["status"] != "draft":
             raise ConceptGraphError("field model: a review label requires a future version-bound review contract")
@@ -255,25 +308,24 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     # forward and inverse phrase, so readers can ask "what reduces X?". When the
     # vocabulary exists, every edge must use it and its kind must agree.
     relations = _index(model["relations"], "relation") if "relations" in model else {}
+    relation_slots = set(get_class_slots("ControlledRelation", root))
     for relation in relations.values():
-        _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"],
-              {"id", "forward", "inverse", "kind", "meaning"})
+        _text(relation, ("forward", "inverse", "kind", "meaning"), relation["id"], relation_slots)
         if relation["kind"] not in relation_kinds:
             raise ConceptGraphError(f"field model: invalid relation kind {relation['id']}")
     # Concept identities are permanent: a retired identity is never reused and
     # names its replacement, so links and tags elsewhere keep resolving.
+    retired_slots = set(get_class_slots("RetiredConcept", root))
     for record in model.get("retired", []):
-        _text(record, ("id", "replaced_by", "version", "reason"), "retired concept",
-              {"id", "replaced_by", "version", "reason"})
+        _text(record, ("id", "replaced_by", "version", "reason"), "retired concept", retired_slots)
         if record["id"] in concepts or record["replaced_by"] not in concepts:
             raise ConceptGraphError(f"field model: retired identity {record['id']} must be unused and name a current replacement")
     edges = _index(model.get("relationships"), "relationship")
     pairs = set()
+    edge_slots = set(get_class_slots("Relationship", root))
     for edge in edges.values():
-        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"],
-              {"id", "source", "target", "relation", "kind", "predicate", "conditions", "references",
-               "basis", "status", "reference_role"})
-        if relations:
+        _text(edge, ("source", "target", "predicate", "conditions", "basis", "status", "kind"), edge["id"], edge_slots)
+        if "relations" in model:
             if edge.get("relation") not in relations:
                 raise ConceptGraphError(f"field model: relationship needs a controlled relation {edge['id']}")
             if edge["kind"] != relations[edge["relation"]]["kind"]:
@@ -292,8 +344,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     views = _index(model.get("views"), "view")
     if "overview" not in views or "all" not in views:
         raise ConceptGraphError("field model: overview and all views are required")
+    view_slots = set(get_class_slots("FieldView", root))
     for view in views.values():
-        _text(view, ("title",), view["id"], {"id", "title", "concepts"})
+        _text(view, ("title",), view["id"], view_slots)
         members = view.get("concepts", [])
         if not isinstance(members, list) or not members or len(set(members)) != len(members) or any(x not in concepts for x in members):
             unknown_v = [str(x) for x in (members if isinstance(members, list) else []) if x not in concepts]
@@ -312,15 +365,32 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
         {**node, "reading_scope": "concept" if node["id"] in concept_own_refs else "family"}
         for node in concepts.values()
     ]
+    return enriched_concepts, concepts, edges
+
+
+def load_field(root: Path, book_graph: dict) -> dict | None:
+    """Validate authored identities and resolve only explicitly recorded links."""
+    unified = load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["field"]
+    else:
+        path = root / TAXONOMY_FILE
+        if not path.exists():
+            return None
+        model = load_taxonomy_yaml(path)
+        if not isinstance(model, dict) or ("areas" in model or "topics" in model or "roles" in model):
+            return None
+    from .taxonomy_schema import get_class_slots, validate_linkml
+    enriched_concepts, concepts, edges = _validate_field_model(root, model)
 
     alignment_path = root / "taxonomy/mlsysbook-alignment.yml"
-    alignment = yaml.safe_load(alignment_path.read_text()) if alignment_path.exists() else {"schema_version": 1, "links": []}
+    alignment = load_taxonomy_yaml(alignment_path) if alignment_path.exists() else {"schema_version": 1, "links": []}
     if not isinstance(alignment, dict) or alignment.get("schema_version") != 1 or not isinstance(alignment.get("links"), list):
         raise ConceptGraphError("field model: unsupported book-alignment schema")
     links, seen = [], set()
+    link_slots = set(get_class_slots("BookAlignmentLink", root))
     for record in alignment["links"]:
-        _text(record, ("concept", "book_concept", "status", "depth"), "book link",
-              {"concept", "book_concept", "status", "depth", "relation"})
+        _text(record, ("concept", "book_concept", "status", "depth"), "book link", link_slots)
         key = (record["concept"], record["book_concept"])
         if key in seen or key[0] not in concepts or key[1] not in book_graph["nodes"]:
             raise ConceptGraphError(f"field model: duplicate or unresolved book link {key}")

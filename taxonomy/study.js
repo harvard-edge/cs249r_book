@@ -15,11 +15,22 @@
   const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
   const VOLUME = { vol1: 'Vol I', vol2: 'Vol II', vol3: 'Vol III', vol4: 'Vol IV' };
   const BAND_ORDER = ['lifecycle', 'stack', 'qualities', 'foundations', 'system-types'];
-  // The kinds of system a reader can highlight in the matrix (context facets).
-  const LENSES = [['generative', 'Generative'], ['agentic', 'Agentic'], ['physical', 'Physical'], ['edge', 'Edge'],
-    ['distributed', 'Distributed'], ['recommendation', 'Recommendation'], ['multimodal', 'Multimodal']];
-  // Incoming relations a practitioner pulls on: "what reduces / limits X?"
-  const LEVERS = ['reduces', 'increases', 'limits', 'determines', 'mitigates', 'causes'];
+  // Short pill labels for context facets from data.framework.dimensions.contexts.
+  const LENS_SHORT_LABELS = {
+    generative: 'Generative',
+    agentic: 'Agentic',
+    physical: 'Physical',
+    edge: 'Edge',
+    distributed: 'Distributed',
+    recommendation: 'Recommendation',
+    multimodal: 'Multimodal',
+    'cloud-datacenter': 'Cloud / DC',
+    'on-device': 'On-device',
+    'safety-critical': 'Safety-critical',
+    regulated: 'Regulated',
+    'multi-tenant': 'Multi-tenant',
+    scientific: 'Scientific',
+  };
   const MAP_LIMIT = 6;
 
   let data, groups, areas, rows, concepts, homeOf, areaOf, outgoing, incoming, secondaryOf, linksOf, gapsOf, relations, neighbors, lenses;
@@ -90,7 +101,16 @@
     gapsOf = new Map();
     for (const gap of fw.gaps || []) if (gap.subject_row) push(gapsOf, gap.subject_row, gap);
     const used = new Set(areas.flatMap((a) => a.rows.flatMap((r) => r.contexts || [])));
-    lenses = LENSES.filter(([id]) => used.has(id));
+    const rawContexts = fw.dimensions?.contexts || [];
+    const primaryOrder = Object.keys(LENS_SHORT_LABELS);
+    lenses = rawContexts
+      .filter((c) => used.has(c.id))
+      .sort((a, b) => {
+        const ia = primaryOrder.indexOf(a.id);
+        const ib = primaryOrder.indexOf(b.id);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      })
+      .map((c) => [c.id, LENS_SHORT_LABELS[c.id] || c.label.replace(/\s+(?:systems|services|settings)$/i, '')]);
   }
 
   const groupOf = (area) => groups.find((g) => g.id === area.group);
@@ -445,10 +465,14 @@
     const box = container.closest('.bok-mapbox');
     box.hidden = false;
     if (container.clientWidth < 640) { box.hidden = true; return; }
+    const isActionableKind = (relId) => {
+      const k = relations.get(relId)?.kind;
+      return k === 'constraint' || k === 'failure' || k === 'mechanism';
+    };
     const blocksFor = (list, direction) => {
       const byRelation = new Map();
       for (const rel of list) push(byRelation, rel.relation || rel.predicate, rel);
-      return [...byRelation.entries()].sort((a, b) => (LEVERS.includes(b[0]) - LEVERS.includes(a[0])) || b[1].length - a[1].length)
+      return [...byRelation.entries()].sort((a, b) => (isActionableKind(b[0]) - isActionableKind(a[0])) || b[1].length - a[1].length)
         .map(([relation, rels]) => ({ title: relation, rels, direction }));
     };
     const els = [];
@@ -540,7 +564,7 @@
     for (const [direction, list, bucket] of [['in', incoming.get(id) || [], groupsIn], ['out', outgoing.get(id) || [], groupsOut]]) {
       const byRelation = new Map();
       for (const rel of list) push(byRelation, rel.relation || rel.predicate, rel);
-      for (const [relation, rels] of byRelation) bucket.push({ relation, rels, direction, lever: direction === 'in' && LEVERS.includes(relation) });
+      for (const [relation, rels] of byRelation) bucket.push({ relation, rels, direction, lever: direction === 'in' && ['mechanism', 'failure'].includes(relations.get(relation)?.kind) });
     }
     const ordered = [...groupsIn.filter((g) => g.lever), ...groupsIn.filter((g) => !g.lever), ...groupsOut];
     if (!ordered.length) return '';
@@ -654,10 +678,11 @@
   function relInFamily(rel, fam) {
     if (!fam || fam === 'all') return true;
     const r = rel.relation;
-    if (fam === 'limits') return ['limits', 'causes', 'increases'].includes(r);
-    if (fam === 'levers') return ['reduces', 'mitigates', 'enables'].includes(r);
-    if (fam === 'structure') return ['requires', 'determines', 'uses', 'part-of', 'specializes', 'implements'].includes(r);
-    if (fam === 'eval') return ['measures', 'detects', 'trades-off', 'alternative-to', 'produces'].includes(r);
+    const kind = relations.get(r)?.kind || rel.kind;
+    if (fam === 'limits') return kind === 'constraint' || kind === 'failure';
+    if (fam === 'levers') return kind === 'mechanism';
+    if (fam === 'structure') return kind === 'dependency' || kind === 'composition';
+    if (fam === 'eval') return kind === 'evaluation' || kind === 'tradeoff';
     return true;
   }
 
@@ -945,8 +970,8 @@
     </g>`;
 
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="wheel-title wheel-desc">
-      <title id="wheel-title">Hierarchical edge-bundling map of the 101 ML systems subjects</title>
-      <desc id="wheel-desc">Subjects are grouped into 20 areas and 5 groups around the circle; bundled splines show ${crossSubjTotal} cross-subject propositions across ${pairMap.size} directed subject pairs.</desc>
+      <title id="wheel-title">Hierarchical edge-bundling map of the ${orderedSubjects.length} ML systems subjects</title>
+      <desc id="wheel-desc">Subjects are grouped into ${orderedAreas.length} areas and ${orderedGroups.length} groups around the circle; bundled splines show ${crossSubjTotal} cross-subject propositions across ${pairMap.size} directed subject pairs.</desc>
       <defs>${defs}</defs>
       <g class="viz-layer-edges">${restEdges.join('')}${activeInternalEdges.join('')}${activeInEdges.join('')}${activeOutEdges.join('')}</g>
       <g class="viz-layer-arcs">${arcsHtml}</g>
@@ -1070,7 +1095,7 @@
     }
 
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="dsm-title dsm-desc">
-      <title id="dsm-title">20 by 20 Area Design Structure Matrix</title>
+      <title id="dsm-title">${orderedAreas.length} by ${orderedAreas.length} Area Design Structure Matrix</title>
       <desc id="dsm-desc">Rows represent source areas and columns represent target areas across ${rels.length} propositions.</desc>
       <defs>
         <pattern id="bok-dsm-hatch" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
@@ -1272,7 +1297,7 @@
       if (capEl) capEl.innerHTML = '<strong>Figure 1b. Cross-area design structure matrix (row = source area, column = target area).</strong> Off-diagonal cell opacity encodes the number of propositions from concepts in the row area to concepts in the column area across five logarithmic bins; diagonal cells (hatched) count propositions within the same area. Marginal bars show total cross-area outgoing (right) and incoming (bottom) couplings. Select any cell to inspect its propositions and directional asymmetry.';
     } else {
       drawCouplingWheel(stageEl);
-      if (capEl) capEl.innerHTML = '<strong>Figure 1a. Hierarchical edge bundling of cross-subject relationships across the 5 groups, 20 areas, and 101 subjects (β = 0.85).</strong> Curve width encodes the square root of the proposition count between two subjects. Select any subject or area arc to isolate its outgoing couplings (crimson) and incoming couplings (ink), and read the exact propositions in the panel.';
+      if (capEl) capEl.innerHTML = `<strong>Figure 1a. Hierarchical edge bundling of cross-subject relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects (β = 0.85).</strong> Curve width encodes the square root of the proposition count between two subjects. Select any subject or area arc to isolate its outgoing couplings (crimson) and incoming couplings (ink), and read the exact propositions in the panel.`;
     }
     renderCouplingPanel(panelEl);
   }
@@ -1287,7 +1312,7 @@
       `<button type="button" data-coupling-fam="${esc(k)}" aria-pressed="${String(state.couplingFamily === k)}">${esc(lbl)}</button>`).join('');
 
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head"><div><h2>Concept map</h2>
-      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the field coupling figure below to see how the 20 areas and 101 subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
+      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the field coupling figure below to see how the ${areas.length} areas and ${rows.size} subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
       ${lastVisited && concepts.has(lastVisited) ? `<p class="bok-text" style="margin-top:0.4rem !important">Recently viewed: ${conceptLink(lastVisited)} &rarr;</p>` : ''}
       </div></div>
       <figure class="bok-viz-figure" id="bok-coupling-figure">
@@ -1295,8 +1320,8 @@
           <div class="bok-viz-controls">
             <span class="bok-filter-label">View</span>
             <div class="bok-viz-seg" role="group" aria-label="Coupling diagram type">
-              <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular bundle (101 subjects)</button>
-              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (20 × 20 DSM)</button>
+              <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular bundle (${rows.size} subjects)</button>
+              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (${areas.length} × ${areas.length} DSM)</button>
             </div>
           </div>
           <div class="bok-viz-controls">
@@ -1620,7 +1645,7 @@
     // Identify which nodes in Column C are directly measured or detected by a Check.
     const measuredByCheck = new Set();
     for (const r of directEdges) {
-      if (['measures', 'detects'].includes(r.relation)) {
+      if ((relations.get(r.relation)?.kind || r.kind) === 'evaluation') {
         if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
         if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
       }
@@ -1689,7 +1714,6 @@
     let verbLabelsHtml = '';
     const placedVerbs = [];
     const activeVerbGroups = new Map();
-    const LEVER_RELS = new Set(['reduces', 'mitigates', 'enables', 'implements', 'uses', 'specializes', 'alternative-to']);
     for (const rel of directEdges) {
       const pts = resolveEndpoints(rel);
       if (!pts) continue;
@@ -1698,7 +1722,7 @@
       const isVia = viaSet.has(rel);
       const isEdgeActive = isDirect || isVia;
 
-      const isLeverEdge = LEVER_RELS.has(rel.relation);
+      const isLeverEdge = u.col === 'L' || v.col === 'L' || relInFamily(rel, 'levers');
       const sameCol = u.col === v.col;
       const skipMiddle = !sameCol && u.col !== 'C' && v.col !== 'C';
       let d = '';
@@ -1935,15 +1959,19 @@
         ${buildPathArcHtml(lp)}
         <ol>${lp.steps.map((st, idx) => `<li data-path-step-item="${esc(lp.id)}:${idx}">${subj(st.subject)} <span class="bok-muted">${esc(st.why)}</span></li>`).join('')}</ol></section>`).join('');
 
-    const quickSymptomTabs = [
-      ['ttft-spike', 'TTFT under load'],
-      ['training-oom', 'Training OOM'],
-      ['low-utilization', 'Low GPU utilization'],
-      ['loss-spikes', 'Loss spikes / NaNs'],
-      ['slow-decode', 'Slow token decode'],
-      ['quality-drop', 'Quality drop'],
-      ['runaway-agent', 'Runaway agent'],
-    ].filter(([id]) => g.symptoms.some((s) => s.id === id));
+    const SYMPTOM_SHORT_LABELS = {
+      'ttft-spike': 'TTFT under load',
+      'training-oom': 'Training OOM',
+      'low-utilization': 'Low GPU utilization',
+      'loss-spikes': 'Loss spikes / NaNs',
+      'slow-decode': 'Slow token decode',
+      'quality-drop': 'Quality drop',
+      'runaway-agent': 'Runaway agent',
+    };
+    const quickSymptomTabs = g.symptoms.slice(0, 7).map((s) => [
+      s.id,
+      SYMPTOM_SHORT_LABELS[s.id] || (s.label.length > 22 ? s.label.slice(0, 20) + '…' : s.label),
+    ]);
 
     $('bok-guides').innerHTML = `<div class="bok-entry-head"><div><h2>Guides</h2><p class="bok-lead">Ways into the taxonomy for a role, a production symptom, or a learning goal. Each entry links to the subject and concept pages.</p></div></div>
       <nav class="bok-jump" aria-label="Jump to guide"><a href="#view=guides&amp;section=roles">By role</a><a href="#view=guides&amp;section=symptoms">By symptom</a><a href="#view=guides&amp;section=paths">Learning paths</a></nav>
