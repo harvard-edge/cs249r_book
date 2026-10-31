@@ -1,0 +1,222 @@
+name: '🧭 Taxonomy · ✅ Validate (Dev)'
+
+# =============================================================================
+# ML Systems Taxonomy — Content & Build Validation
+# =============================================================================
+#
+# Validates the taxonomy (LinkML schema, graph, coverage, tagging agreement,
+# StaffML label bundle) and proves the taxonomy subsite renders and stages
+# cleanly, before the preview/publish workflows ever touch it.
+#
+# Flow:
+#   1. VALIDATE_TAXONOMY — LinkML + graph + coverage + agreement + pytest
+#   2. BUILD_TAXONOMY    — Quarto render of taxonomy/ only + staged-tree check
+#   3. CHECK_LINKS       — Lychee external-link reachability (Tier 2, non-blocking)
+#   4. SUMMARY           — Aggregate results
+#
+# Why this exists:
+#   taxonomy-publish-live.yml must be gated by its own validate run, so a
+#   taxonomy-only publish never depends on (or waits for) the landing-site
+#   validation. site-validate-dev.yml still renders the whole unified site,
+#   which includes taxonomy/, so the two stay in agreement.
+#
+# Triggers:
+#   - push: dev branch, taxonomy-related paths
+#   - pull_request: taxonomy-related paths
+#   - workflow_call: taxonomy-preview-dev.yml gates its deploy on this
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - taxonomy-preview-dev.yml  — Dev preview deploy (gates on this passing)
+#   - taxonomy-publish-live.yml — Production deploy (gates on this passing)
+#   - site-validate-dev.yml     — Validates the unified landing site
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  # Reusable: taxonomy-preview-dev.yml calls this via `uses:` so the deploy
+  # job can `needs:` a green validate. Standalone push/PR triggers stay so the
+  # publish guard still sees direct runs on dev.
+  workflow_call:
+  pull_request:
+    paths:
+      - 'taxonomy/**'
+      - 'binder/cli/**'
+      - 'binder/tests/**'
+      - 'staffml/app/src/data/mlsys-taxonomy.json'
+      - 'site/scripts/build_concept_explorer.py'
+      - 'shared/**'
+      - '.github/workflows/taxonomy-validate-dev.yml'
+      - '.github/workflows/taxonomy-preview-dev.yml'
+      - '.github/workflows/taxonomy-publish-live.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'taxonomy/**'
+      - 'binder/cli/**'
+      - 'binder/tests/**'
+      - 'staffml/app/src/data/mlsys-taxonomy.json'
+      - 'site/scripts/build_concept_explorer.py'
+      - 'shared/**'
+      - '.github/workflows/taxonomy-validate-dev.yml'
+      - '.github/workflows/taxonomy-preview-dev.yml'
+      - '.github/workflows/taxonomy-publish-live.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  # `head_ref || run_id` keeps PR cancel-on-amend behavior while making
+  # push and workflow_call runs unique per-run, so a push to dev that
+  # triggers both this workflow standalone AND Preview's `uses:` call
+  # doesn't collide on a shared group. See staffml-validate-dev.yml.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Taxonomy source validation
+  # ===========================================================================
+  validate-taxonomy:
+    name: '🧭 Validate Taxonomy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Install taxonomy & concept map dependencies
+        run: |
+          python3 -m pip install -r taxonomy/requirements.txt pytest
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: 🧭 Validate LinkML schema, graph, coverage, and agreement
+        run: |
+          ./binder/binder concepts check
+          ./binder/binder concepts coverage --check
+          ./binder/binder concepts agreement --check
+
+      - name: 🧪 Taxonomy unit tests
+        run: |
+          python3 -m pytest \
+            binder/tests/test_linkml_schema.py \
+            binder/tests/test_framework.py \
+            binder/tests/test_field_concept_graph.py \
+            binder/tests/test_taxonomy_coverage.py \
+            binder/tests/test_taxonomy_agreement.py -q
+
+  # ===========================================================================
+  # Stage 2: Taxonomy-only Quarto build
+  # ===========================================================================
+  build-taxonomy:
+    name: '🔨 Build Taxonomy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Install taxonomy & concept map dependencies
+        run: |
+          python3 -m pip install -r taxonomy/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Taxonomy subsite (HTML)
+        working-directory: site
+        run: |
+          python3 scripts/build_concept_explorer.py
+          TAXONOMY_ONLY=1 TAXONOMY_PRESTAGED=1 quarto render taxonomy
+          QUARTO_PROJECT_RENDER_ALL=1 python3 scripts/build_concept_explorer.py --clean
+
+      - name: 🔍 Validate build output
+        run: |
+          python3 site/scripts/build_concept_explorer.py --check-staged
+          MISSING=0
+          for artifact in \
+            taxonomy/index.html \
+            taxonomy/field.html \
+            taxonomy/volume-maps.html \
+            taxonomy/framework-data.json \
+            taxonomy/downloads/mlsys-taxonomy.json \
+            taxonomy/downloads/mlsys-taxonomy.linkml.yml \
+            taxonomy/downloads/mlsys-taxonomy.schema.json \
+            taxonomy/downloads/mlsys-taxonomy.ttl; do
+            if [ ! -f "site/_build/$artifact" ]; then
+              echo "❌ MISSING: $artifact"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ $MISSING critical taxonomy artifacts missing from build."
+            exit 1
+          fi
+          echo "✅ Taxonomy built successfully"
+          echo "📊 Build size: $(du -sh site/_build/taxonomy | cut -f1)"
+          echo "📄 Pages: $(find site/_build/taxonomy -maxdepth 1 -name '*.html' | wc -l)"
+
+  # ===========================================================================
+  # Stage 3: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This Lychee pass adds external
+  # reachability as a warning. Flip fail_on_broken=true once baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './taxonomy/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-taxonomy, build-taxonomy, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🧭 Taxonomy Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧭 Taxonomy Validation | ${{ needs.validate-taxonomy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Taxonomy Build (HTML) | ${{ needs.build-taxonomy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-taxonomy.result }}" = "failure" ] || \
+             [ "${{ needs.build-taxonomy.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"
