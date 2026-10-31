@@ -75,13 +75,6 @@ def test_linkml_schema_compiles_to_valid_json_schema():
 def test_authored_taxonomy_yamls_conform_to_linkml_metamodel(rel_path: str, target_class: str):
     path = REPO_ROOT / rel_path
     instance = load_taxonomy_yaml(path)
-    if target_class == "CoverageLedgerModel":
-        instance = {
-            **instance,
-            "decisions": [
-                {**d, "reviewed_on": str(d["reviewed_on"])} for d in instance.get("decisions", [])
-            ],
-        }
     validate_linkml(instance, target_class, REPO_ROOT, rel_path)
 
 
@@ -403,5 +396,42 @@ def test_public_release_downloads_validate_end_to_end():
     assert ttl_text.count("rdfs:subPropertyOf skos:related ;") == len(release["relations"])
     assert "owl:subPropertyOf" not in ttl_text
     assert ttl_text.count("a skos:Concept ;") == len(release["concepts"])
+
+
+def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Path):
+    # Mutating returned schema dict must never poison the cached schema.
+    first = compile_json_schema(REPO_ROOT)
+    first["$defs"].clear()
+    second = compile_json_schema(REPO_ROOT)
+    assert "UnifiedTaxonomyModel" in second["$defs"]
+    # Non-inlined class reference inherits target class identifier pattern.
+    fam_prop = second["$defs"]["UnifiedConcept"]["properties"]["family"]
+    assert fam_prop.get("pattern") == "^[a-z0-9]+(-[a-z0-9]+)*$"
+    # Relationship.relation enforces RelationIdEnum at JSON Schema level.
+    rel_prop = second["$defs"]["Relationship"]["properties"]["relation"]
+    assert rel_prop == {"anyOf": [{"$ref": "#/$defs/RelationIdEnum"}, {"type": "null"}], "description": rel_prop["description"]}
+
+    schema_dir = tmp_path / "taxonomy/schema"
+    schema_dir.mkdir(parents=True)
+    raw_schema = yaml.safe_load(resolve_schema_path(REPO_ROOT).read_text())
+
+    bad_top = deepcopy(raw_schema)
+    bad_top["slots"] = {"foo": {}}
+    (schema_dir / "mlsys-taxonomy.linkml.yml").write_text(yaml.safe_dump(bad_top, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="Unsupported LinkML top-level keys: slots"):
+        compile_json_schema(tmp_path)
+
+    bad_cls = deepcopy(raw_schema)
+    bad_cls["classes"]["FieldModel"]["is_a"] = "SomeParent"
+    (schema_dir / "mlsys-taxonomy.linkml.yml").write_text(yaml.safe_dump(bad_cls, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="Unsupported LinkML class keys on FieldModel: is_a"):
+        compile_json_schema(tmp_path)
+
+    bad_enum = deepcopy(raw_schema)
+    bad_enum["enums"]["RelationIdEnum"]["inherits"] = ["OtherEnum"]
+    (schema_dir / "mlsys-taxonomy.linkml.yml").write_text(yaml.safe_dump(bad_enum, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="Unsupported LinkML enum keys on RelationIdEnum: inherits"):
+        compile_json_schema(tmp_path)
+
 
 

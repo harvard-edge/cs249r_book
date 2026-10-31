@@ -105,9 +105,8 @@ def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
         if len({(e["section"], e["quote"]) for e in evidence}) != len(evidence):
             raise ConceptGraphError(f"coverage: duplicate evidence {ident}")
         decisions[ident] = decision
-    if decisions:
-        from .taxonomy_schema import validate_linkml
-        validate_linkml({"schema_version": 1, "decisions": list(decisions.values())}, "CoverageLedgerModel", root, "coverage")
+    from .taxonomy_schema import validate_linkml
+    validate_linkml({**ledger, "decisions": list(decisions.values())}, "CoverageLedgerModel", root, "coverage")
     aliases = {}
     for concept in field["concepts"]:
         for label in [concept["label"], *concept.get("aliases", [])]:

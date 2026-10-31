@@ -20,6 +20,7 @@ LINKML = REPO / "vault" / "schema" / "question_schema.yaml"
 ENUMS_PY = REPO / "vault" / "schema" / "enums.py"
 TAXONOMY_DATA = REPO / "vault" / "schema" / "taxonomy_data.yaml"
 MODELS_PY = REPO / "vault-cli" / "src" / "vault_cli" / "models.py"
+ML_TAXONOMY_PY = REPO / "vault-cli" / "src" / "vault_cli" / "ml_systems_taxonomy.py"
 ROOT_LINKML = REPO.parent / "taxonomy" / "schema" / "mlsys-taxonomy.linkml.yml"
 
 # Map LinkML enum name -> Python constant name in enums.py.
@@ -120,6 +121,19 @@ def main() -> int:
             drift = True
             print(
                 f"[drift] models.py taxonomy regexes ({m_subj_pat}, {m_conc_pat}) disagree with question_schema.yaml ({q_subj_pat}, {q_conc_pat})"
+            )
+
+    if ML_TAXONOMY_PY.exists():
+        import re as _re
+        tax_text = ML_TAXONOMY_PY.read_text()
+        slug_match = _re.search(r'_SLUG_RE\s*=\s*re\.compile\(r"([^"]+)"\)', tax_text)
+        conc_match = _re.search(r'_CONCEPT_RE\s*=\s*re\.compile\(r"([^"]+)"\)', tax_text)
+        t_subj_pat = slug_match.group(1) if slug_match else None
+        t_conc_pat = conc_match.group(1) if conc_match else None
+        if t_subj_pat != q_subj_pat or t_conc_pat != q_conc_pat:
+            drift = True
+            print(
+                f"[drift] ml_systems_taxonomy.py regexes ({t_subj_pat}, {t_conc_pat}) disagree with question_schema.yaml ({q_subj_pat}, {q_conc_pat})"
             )
 
     if drift:

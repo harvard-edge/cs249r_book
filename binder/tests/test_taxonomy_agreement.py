@@ -1,26 +1,19 @@
 """Agreement numbers are recomputed from recorded tags that must stay valid."""
+from pathlib import Path
 import pytest
 import yaml
 
 from core.taxonomy_agreement import agreement_report, write_report
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "agreement").mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({
-        "concepts": [
-            {"id": "mlsys.kv-cache", "home": "llm-inference"},
-            {"id": "mlsys.batching", "home": "request-scheduling"},
-            {"id": "mlsys.quantization", "home": "model-compression"},
-        ],
-        "areas": [
-            {"code": "P4", "rows": [{"id": "llm-inference", "code": "P4.5"},
-                                    {"id": "request-scheduling", "code": "P4.4"}]},
-            {"code": "Q1", "rows": [{"id": "model-compression", "code": "Q1.3"}]},
-        ],
-    }))
+    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (tmp_path / "books").symlink_to(REPO_ROOT / "books")
     return tmp_path
 
 
