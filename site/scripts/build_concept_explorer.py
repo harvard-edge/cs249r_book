@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -100,10 +101,14 @@ def stage_site_taxonomy() -> None:
             shutil.copy2(item, dest)
 
 
-def verify_staged_site_taxonomy() -> None:
+def verify_staged_site_taxonomy(require_built: bool = False) -> None:
     """Verify staged site/taxonomy/ (or post-render site/_build/taxonomy/ when cleaned) against taxonomy/."""
     allowed_diagrams = _expected_field_diagram_names()
-    if SITE_TAXONOMY_DIR.is_dir():
+    if require_built and SITE_TAXONOMY_DIR.exists():
+        raise RuntimeError(
+            "Staged directory site/taxonomy/ still exists; run 'build_concept_explorer.py --clean' before '--check-staged'"
+        )
+    if not require_built and SITE_TAXONOMY_DIR.is_dir():
         for item in sorted(SITE_TAXONOMY_DIR.iterdir()):
             if item.name in INTERNAL_ONLY or not _is_publishable(item.name, allowed_diagrams):
                 raise RuntimeError(f"Forbidden or unclassified item staged in site/taxonomy/: {item.name}")
@@ -163,7 +168,12 @@ def verify_staged_site_taxonomy() -> None:
                 expected_build_files.add(rel)
                 if src.suffix == ".md" and not src.name.startswith("_"):
                     expected_html_files.add(rel.with_suffix(".html"))
-                if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+                if not dst.is_file():
+                    raise RuntimeError(f"Missing rendered file: site/_build/taxonomy/{rel}")
+                dst_bytes = dst.read_bytes()
+                if src.suffix == ".html":
+                    dst_bytes = re.sub(rb"\?v=[0-9a-f]{8}(?=[\"'])", b"", dst_bytes)
+                if dst_bytes != src.read_bytes():
                     raise RuntimeError(f"Rendered file out of sync: site/_build/taxonomy/{rel}")
         allowed_root_html = {p.name for p in expected_html_files if len(p.parts) == 1}
         for item in sorted(SITE_BUILD_TAXONOMY_DIR.iterdir()):
@@ -222,10 +232,10 @@ if __name__ == "__main__":
             clean_site_taxonomy()
         raise SystemExit(0)
     if "--check-staged" in sys.argv[1:]:
-        verify_staged_site_taxonomy()
+        verify_staged_site_taxonomy(require_built=True)
         raise SystemExit(0)
     if os.environ.get("TAXONOMY_PRESTAGED") == "1" and SITE_TAXONOMY_DIR.is_dir():
-        verify_staged_site_taxonomy()
+        verify_staged_site_taxonomy(require_built=False)
         raise SystemExit(0)
     sys.path.insert(0, str(ROOT / "binder"))
     from cli.commands.concepts import run

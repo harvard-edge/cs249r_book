@@ -110,12 +110,6 @@ def _chapters(root: Path, codes, context):
         if not match:
             _fail(f"{context} has malformed chapter code {code}")
         volume = f"vol{match[1]}"
-        if not (root / "books").exists() and (root / "taxonomy/ml-systems-taxonomy.yml").exists():
-            raw_head = (root / "taxonomy/ml-systems-taxonomy.yml").read_text(encoding="utf-8")[:256]
-            if "field_id:" in raw_head:
-                resolved.append({"code": f"{volume}/{match[2]}", "volume": volume, "chapter": f"{volume}/{match[2]}",
-                                 "title": f"{volume}/{match[2]}", "url": f"{SITE_URL}/{volume}/"})
-                continue
         # A chapter folder holds its own QMD; leftover build-output folders do not.
         folders = sorted(
             folder for folder in (root / "books" / volume).glob(f"{match[2]}_*/")

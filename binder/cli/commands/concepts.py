@@ -108,8 +108,11 @@ def run(root: Path, args: list[str]) -> bool:
                 broken_ledger = [
                     item["inventory_id"]
                     for item in ledger_rep.get("inventory", [])
-                    if "field-target-removed" in item.get("stale_reasons", [])
-                    or "declaration-mismatch" in item.get("stale_reasons", [])
+                    if any(
+                        r in ("field-target-removed", "declaration-mismatch")
+                        or r.startswith("manuscript-evidence-changed:")
+                        for r in item.get("stale_reasons", [])
+                    )
                 ]
                 if broken_ledger:
                     raise ConceptGraphError(

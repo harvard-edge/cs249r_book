@@ -1642,12 +1642,11 @@
       return best;
     };
 
-    // Identify which nodes in Column C are directly measured or detected by a Check.
+    // Identify which nodes in Column C are directly measured by a Check (`measures` relation).
     const measuredByCheck = new Set();
     for (const r of directEdges) {
-      if ((relations.get(r.relation)?.kind || r.kind) === 'evaluation') {
-        if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
-        if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
+      if (r.relation === 'measures' && kSet.has(r.source) && cSet.has(r.target)) {
+        measuredByCheck.add(r.target);
       }
     }
 

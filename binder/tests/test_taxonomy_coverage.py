@@ -1,24 +1,19 @@
 """Coverage numbers are computed from recorded judgments that must stay valid."""
+from pathlib import Path
 import pytest
 import yaml
 
 from core.taxonomy_coverage import coverage_report, write_report
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "coverage").mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({
-        "concepts": [
-            {"id": "mlsys.kv-cache", "home": "llm-inference"},
-            {"id": "mlsys.batching", "home": "request-scheduling"},
-        ],
-        "areas": [{"rows": [
-            {"id": "llm-inference", "code": "L4.4"},
-            {"id": "request-scheduling", "code": "L4.3"},
-        ]}],
-    }))
+    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (tmp_path / "books").symlink_to(REPO_ROOT / "books")
     return tmp_path
 
 

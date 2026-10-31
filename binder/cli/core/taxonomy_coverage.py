@@ -28,23 +28,20 @@ TOPIC_KEYS = set(get_class_slots("CoverageChecklistTopic"))
 
 
 def _vocabulary(root: Path):
+    from .concept_graph import ConceptGraphError
     unified = load_unified_taxonomy(root)
-    if unified is not None:
-        field = unified["field"]
-        framework = unified["framework"]
-        concepts = {c["id"] for c in field["concepts"]}
-        subjects = {}
-        homes = {}
-        for area in framework["areas"]:
-            for row in area["rows"]:
-                subjects[row["id"]] = row
-                for cid in row.get("concepts", []):
-                    homes[cid] = row["id"]
-        return concepts, subjects, homes
-    raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
-    concepts = {c["id"] for c in raw["concepts"]}
-    homes = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}
-    subjects = {row["id"]: row for area in raw["areas"] for row in area["rows"]}
+    if unified is None:
+        raise ConceptGraphError("coverage: unified taxonomy model is required")
+    field = unified["field"]
+    framework = unified["framework"]
+    concepts = {c["id"] for c in field["concepts"]}
+    subjects = {}
+    homes = {}
+    for area in framework["areas"]:
+        for row in area["rows"]:
+            subjects[row["id"]] = row
+            for cid in row.get("concepts", []):
+                homes[cid] = row["id"]
     return concepts, subjects, homes
 
 
