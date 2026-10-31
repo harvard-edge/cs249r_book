@@ -157,9 +157,12 @@ def verify_staged_site_taxonomy() -> None:
                 if not dst.is_dir():
                     raise RuntimeError(f"Missing rendered taxonomy directory: site/_build/taxonomy/{rel}")
             elif src.is_file() and src.suffix == ".qmd":
-                expected_html_files.add(rel.with_suffix(".html"))
+                if not src.name.startswith("_"):
+                    expected_html_files.add(rel.with_suffix(".html"))
             elif src.is_file() and src.suffix != ".qmd":
                 expected_build_files.add(rel)
+                if src.suffix == ".md" and not src.name.startswith("_"):
+                    expected_html_files.add(rel.with_suffix(".html"))
                 if not dst.is_file() or dst.read_bytes() != src.read_bytes():
                     raise RuntimeError(f"Rendered file out of sync: site/_build/taxonomy/{rel}")
         allowed_root_html = {p.name for p in expected_html_files if len(p.parts) == 1}
@@ -172,8 +175,9 @@ def verify_staged_site_taxonomy() -> None:
                 and not _is_publishable(item.name, allowed_diagrams)
             ):
                 raise RuntimeError(f"Forbidden or unclassified item in site/_build/taxonomy/: {item.name}")
-        if not (SITE_BUILD_TAXONOMY_DIR / "index.html").is_file():
-            raise RuntimeError("Missing rendered site/_build/taxonomy/index.html")
+        for html_rel in sorted(expected_html_files):
+            if not (SITE_BUILD_TAXONOMY_DIR / html_rel).is_file():
+                raise RuntimeError(f"Missing rendered site/_build/taxonomy/{html_rel}")
         allowed_all_files = expected_build_files | expected_html_files
         for dst in sorted(SITE_BUILD_TAXONOMY_DIR.rglob("*")):
             rel = dst.relative_to(SITE_BUILD_TAXONOMY_DIR)
@@ -202,7 +206,7 @@ def clean_site_taxonomy() -> None:
             dst = SITE_BUILD_TAXONOMY_DIR / rel
             if src.is_dir():
                 dst.mkdir(parents=True, exist_ok=True)
-            elif src.is_file() and src.suffix != ".qmd" and not dst.exists():
+            elif src.is_file() and src.suffix != ".qmd":
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
     if SITE_TAXONOMY_DIR.exists():
@@ -218,6 +222,9 @@ if __name__ == "__main__":
             clean_site_taxonomy()
         raise SystemExit(0)
     if "--check-staged" in sys.argv[1:]:
+        verify_staged_site_taxonomy()
+        raise SystemExit(0)
+    if os.environ.get("TAXONOMY_PRESTAGED") == "1" and SITE_TAXONOMY_DIR.is_dir():
         verify_staged_site_taxonomy()
         raise SystemExit(0)
     sys.path.insert(0, str(ROOT / "binder"))

@@ -1,0 +1,202 @@
+name: '🧭 Taxonomy · 🚀 Publish (Live)'
+
+# =============================================================================
+# ML Systems Taxonomy — Standalone Production Deploy
+# =============================================================================
+#
+# Builds and deploys ONLY the ML Systems Taxonomy (`mlsysbook.ai/taxonomy/`)
+# to the live production site on GitHub Pages without touching the landing
+# page, about, community, newsletter, courses, or any other subsite.
+#
+# Flow:
+#   1. GUARD       — Require latest site-validate-dev.yml run on dev to be green
+#   2. VALIDATE    — LinkML schema, coverage checklists, and tagging agreement
+#   3. BUILD       — Compile taxonomy release artifacts + Quarto render taxonomy/
+#   4. CHECK       — Verify staged/rendered parity (build_concept_explorer.py --check-staged)
+#   5. DEPLOY      — Replace gh-pages:/taxonomy/ only (preserving all other subsites)
+#
+# Triggers:
+#   - workflow_dispatch: Manual trigger (requires confirm == "PUBLISH")
+#   - workflow_call:     Callable from orchestrator workflows
+#
+# Deploys to: gh-pages → https://mlsysbook.ai/taxonomy/
+# Secrets:    GITHUB_TOKEN
+#
+# Related:
+#   - site-validate-dev.yml  — Content, LinkML schema, & build validation
+#   - site-preview-dev.yml   — Dev preview deploy
+#   - site-publish-live.yml  — Full unified landing site deploy
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Taxonomy updates and improvements]'
+        required: false
+        default: 'Taxonomy updates and improvements'
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'Taxonomy updates and improvements'
+      confirm:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+# NB: gh-pages-deploy concurrency is declared on the build-and-deploy job
+# only. The guard runs without holding the lock.
+
+jobs:
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: site-validate-dev.yml
+
+  build-and-deploy:
+    name: '🧭 Build & Deploy Taxonomy'
+    needs: [guard]
+    if: inputs.confirm == 'PUBLISH'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Install taxonomy & concept map dependencies
+        run: |
+          python3 -m pip install -r taxonomy/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: 🧭 Validate taxonomy LinkML schema, coverage, and agreement
+        run: |
+          ./binder/binder concepts check
+          ./binder/binder concepts coverage --check
+          ./binder/binder concepts agreement --check
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build & render Taxonomy subsite only
+        working-directory: site
+        run: |
+          python3 scripts/build_concept_explorer.py
+          TAXONOMY_ONLY=1 TAXONOMY_PRESTAGED=1 quarto render taxonomy
+          QUARTO_PROJECT_RENDER_ALL=1 python3 scripts/build_concept_explorer.py --clean
+          python3 scripts/build_concept_explorer.py --check-staged
+          echo "✅ Taxonomy rendered: $(find _build/taxonomy -name '*.html' | wc -l) HTML pages"
+
+      - name: 🔍 Validate rendered taxonomy artifacts
+        run: |
+          for artifact in \
+            taxonomy/index.html \
+            taxonomy/field.html \
+            taxonomy/volume-maps.html \
+            taxonomy/framework-data.json \
+            taxonomy/downloads/mlsys-taxonomy.json \
+            taxonomy/downloads/mlsys-taxonomy.linkml.yml \
+            taxonomy/downloads/mlsys-taxonomy.schema.json \
+            taxonomy/downloads/mlsys-taxonomy.ttl; do
+            if [ ! -f "site/_build/$artifact" ]; then
+              echo "❌ CRITICAL: site/_build/$artifact missing from build. Aborting."
+              exit 1
+            fi
+          done
+          echo "✅ All critical taxonomy artifacts verified"
+
+      - name: 🚀 Deploy Taxonomy to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_DESC: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"
+          git clone --depth=1 --branch=gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            "$WORK/gh-pages"
+
+          cd "$WORK/gh-pages"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BUILD_DIR="${{ github.workspace }}/site/_build"
+
+          before=$(find taxonomy -type f 2>/dev/null | wc -l | tr -d ' ')
+          rm -rf taxonomy
+          mkdir -p taxonomy
+          cp -a "$BUILD_DIR/taxonomy/." taxonomy/
+
+          # Ensure shared Quarto theme/navbar assets referenced via ../site_libs/
+          # are present at root without removing assets used by other pages.
+          if [ -d "$BUILD_DIR/site_libs" ]; then
+            mkdir -p site_libs
+            cp -a "$BUILD_DIR/site_libs/." site_libs/
+          fi
+          touch .nojekyll
+
+          after=$(find taxonomy -type f | wc -l | tr -d ' ')
+          echo "📦 taxonomy: $before file(s) before, $after after"
+
+          [ -f "taxonomy/index.html" ] || { echo "❌ CRITICAL: taxonomy/index.html missing."; exit 1; }
+
+          git add -A taxonomy site_libs .nojekyll
+          if git diff --cached --quiet; then
+            echo "🟡 Nothing changed in taxonomy/"
+            exit 0
+          fi
+          git commit -q -m "🧭 Deploy Taxonomy live (${PUBLISH_DESC}) - ${{ github.sha }}"
+
+          for attempt in 1 2 3; do
+            if git push origin gh-pages; then
+              echo "✅ Deployed taxonomy/ to mlsysbook.ai/taxonomy/ (attempt $attempt)"
+              exit 0
+            fi
+            echo "⚠️ Push failed (attempt $attempt/3); rebasing onto latest gh-pages..."
+            git fetch --depth=50 origin gh-pages
+            git rebase origin/gh-pages || { echo "❌ Rebase failed"; exit 1; }
+          done
+          echo "❌ Push failed after 3 attempts."
+          exit 1
+
+      - name: 📊 Summary
+        env:
+          PUBLISH_DESC: ${{ inputs.description }}
+        run: |
+          {
+            echo "## 🧭 Taxonomy Live Publish Complete"
+            echo ""
+            echo "**Description**: ${PUBLISH_DESC}"
+            echo "**Commit**: \`${{ github.sha }}\`"
+            echo ""
+            echo "| Artifact / View | Live URL |"
+            echo "|-----------------|----------|"
+            echo "| 🧭 Taxonomy Explorer | https://mlsysbook.ai/taxonomy/ |"
+            echo "| 🔎 Concept Browser | https://mlsysbook.ai/taxonomy/field.html |"
+            echo "| 🗺️ Volume Concept Maps | https://mlsysbook.ai/taxonomy/volume-maps.html |"
+            echo "| 📦 Complete Taxonomy (JSON) | https://mlsysbook.ai/taxonomy/downloads/mlsys-taxonomy.json |"
+            echo "| 📐 LinkML Schema (YAML) | https://mlsysbook.ai/taxonomy/downloads/mlsys-taxonomy.linkml.yml |"
+            echo "| 📜 JSON Schema | https://mlsysbook.ai/taxonomy/downloads/mlsys-taxonomy.schema.json |"
+            echo "| 🔗 SKOS Vocabulary (Turtle) | https://mlsysbook.ai/taxonomy/downloads/mlsys-taxonomy.ttl |"
+          } >> "$GITHUB_STEP_SUMMARY"
