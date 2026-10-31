@@ -2,13 +2,17 @@
 """Build course websites into the unified site's deployment artifact."""
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
+import sys
 
 SITE = Path(__file__).resolve().parents[1]
 COURSES = SITE.parent / "courses"
 
 if __name__ == "__main__":
+    if os.environ.get("TAXONOMY_ONLY") == "1":
+        sys.exit(0)
     subprocess.run(["quarto", "render"], cwd=COURSES, check=True)
     destination = SITE / "_build/courses"
     # This is generated output owned by this build, never a source checkout.
