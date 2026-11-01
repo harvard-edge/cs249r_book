@@ -17,9 +17,8 @@ from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
 from .concept_graph import PAGE_URL, SITE_DIR
+from .taxonomy_schema import SCHEMA_REL_PATH
 
-BASE = PAGE_URL
-PAGE = PAGE_URL
 NAME = "ML Systems Taxonomy"
 AUTHOR = "Vijay Janapa Reddi"
 # The taxonomy release (identifiers, labels, definitions, relationships, guides) is CC BY 4.0 so courses and
@@ -90,7 +89,7 @@ def staffml_labels_payload(framework: dict, field: dict) -> dict:
     ]
     return {
         "version": framework.get("version", ""),
-        "explorer": PAGE,
+        "explorer": PAGE_URL,
         "areas": areas,
         "subjects": subjects,
         "concepts": concepts,
@@ -98,6 +97,11 @@ def staffml_labels_payload(framework: dict, field: dict) -> dict:
 
 
 def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, bytes]:
+    """Generate the public release downloads (`taxonomy/downloads/*`) and StaffML labels bundle (`staffml/app/src/data/mlsys-taxonomy.json`).
+
+    Validates both compiled JSON documents (`TaxonomyReleaseDocument` and `StaffMLLabelsDocument`)
+    against `taxonomy/schema/mlsys-taxonomy.linkml.yml`.
+    """
     out = root / SITE_DIR / "downloads"
     version = framework["version"]
     outline = _outline(framework, field)
@@ -116,8 +120,8 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
             {"volume": link.get("volume", ""), "chapter": link.get("chapter_title", ""), "url": link.get("url", "")})
     relationships = field.get("relationships", [])
     relations = field.get("relations", [])
-    citation = (f"{AUTHOR}. {NAME}, version {version}. Machine Learning Systems, {YEAR}. {PAGE}")
-    meta = {"name": NAME, "version": version, "status": framework["status"], "url": PAGE, "license": LICENSE,
+    citation = (f"{AUTHOR}. {NAME}, version {version}. Machine Learning Systems, {YEAR}. {PAGE_URL}")
+    meta = {"name": NAME, "version": version, "status": framework["status"], "url": PAGE_URL, "license": LICENSE,
             "citation": citation, "note": "Editorial draft for expert review; not a claim of completeness or consensus."}
 
     # JSON: the whole outline plus concepts and typed relationships.
@@ -162,35 +166,35 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
         return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"@en'
 
     def iri(kind, ident):
-        return f"<{BASE}{kind}/{ident}>"
+        return f"<{PAGE_URL}{kind}/{ident}>"
 
     ttl = ["@prefix skos: <http://www.w3.org/2004/02/skos/core#> .", "@prefix dct: <http://purl.org/dc/terms/> .",
            "@prefix dcterms: <http://purl.org/dc/terms/> .", "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
-           "@prefix owl: <http://www.w3.org/2002/07/owl#> .", f"@prefix mlsys: <{BASE}relation/> .", "",
-           f"<{BASE}scheme> a skos:ConceptScheme ;", f"  dct:title {lit(NAME)} ;", f'  owl:versionInfo "{version}" ;',
+           "@prefix owl: <http://www.w3.org/2002/07/owl#> .", f"@prefix mlsys: <{PAGE_URL}relation/> .", "",
+           f"<{PAGE_URL}scheme> a skos:ConceptScheme ;", f"  dct:title {lit(NAME)} ;", f'  owl:versionInfo "{version}" ;',
            f"  dct:creator {lit(AUTHOR)} ;", f"  dct:license <{LICENSE['url']}> ;", f"  dct:description {lit(meta['note'])} .", ""]
     for r in relations:
         ttl += [f"mlsys:{r['id']} a owl:ObjectProperty ;", "  rdfs:subPropertyOf skos:related ;",
-                f"  rdfs:isDefinedBy <{BASE}scheme> ;",
+                f"  rdfs:isDefinedBy <{PAGE_URL}scheme> ;",
                 f"  skos:prefLabel {lit(r['forward'])} ;", f"  skos:definition {lit(r['meaning'])} .", ""]
     for group in outline["groups"]:
-        ttl += [f"{iri('group', group['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+        ttl += [f"{iri('group', group['id'])} a skos:Collection ;", f"  skos:inScheme <{PAGE_URL}scheme> ;",
                 f"  skos:prefLabel {lit(group['label'])} ;",
                 f'  skos:notation "{group.get("code", "")}" ;',
                 "  skos:member " + ", ".join(iri("area", a["id"]) for a in group["areas"]) + " .", ""]
         for area in group["areas"]:
-            ttl += [f"{iri('area', area['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+            ttl += [f"{iri('area', area['id'])} a skos:Collection ;", f"  skos:inScheme <{PAGE_URL}scheme> ;",
                     f"  skos:prefLabel {lit(area['label'])} ;",
                     f'  skos:notation "{area["code"]}" ;', f"  skos:scopeNote {lit(area['scope'])} ;",
                     "  skos:member " + ", ".join(iri("subject", s["id"]) for s in area["subjects"]) + " .", ""]
             for s in area["subjects"]:
                 members = ", ".join(iri("concept", c) for c in s["concepts"])
-                ttl += [f"{iri('subject', s['id'])} a skos:Collection ;", f"  skos:inScheme <{BASE}scheme> ;",
+                ttl += [f"{iri('subject', s['id'])} a skos:Collection ;", f"  skos:inScheme <{PAGE_URL}scheme> ;",
                         f"  skos:prefLabel {lit(s['label'])} ;",
                         f'  skos:notation "{s["code"]}" ;', f"  skos:definition {lit(s['definition'])}" + (" ;" if members else " ."),
                         *([f"  skos:member {members} ."] if members else []), ""]
     for c in field["concepts"]:
-        lines = [f"{iri('concept', c['id'])} a skos:Concept ;", f"  skos:inScheme <{BASE}scheme> ;",
+        lines = [f"{iri('concept', c['id'])} a skos:Concept ;", f"  skos:inScheme <{PAGE_URL}scheme> ;",
                  f"  skos:prefLabel {lit(c['label'])} ;", *[f"  skos:altLabel {lit(a)} ;" for a in c.get("aliases", [])],
                  f"  skos:definition {lit(c['definition'])}"]
         for r in relationships:
@@ -218,7 +222,7 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
 
     bib = (f"@misc{{mlsys_taxonomy_{version.replace('.', '_').replace('-', '_')},\n"
            f"  author = {{{AUTHOR}}},\n  title = {{{NAME}}},\n  version = {{{version}}},\n  year = {{{YEAR}}},\n"
-           f"  howpublished = {{\\url{{{PAGE}}}}},\n  note = {{Editorial draft. Licensed {LICENSE['name']}}}\n}}\n")
+           f"  howpublished = {{\\url{{{PAGE_URL}}}}},\n  note = {{Editorial draft. Licensed {LICENSE['name']}}}\n}}\n")
 
     result = {out / "mlsys-taxonomy.json": (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode(),
               out / "mlsys-taxonomy-subjects.csv": subjects.getvalue().encode(),
@@ -226,7 +230,7 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
               out / "mlsys-taxonomy.ttl": ("\n".join(ttl) + "\n").encode(),
               out / "mlsys-concept-graph.graphml": ("\n".join(graph) + "\n").encode(),
               out / "mlsys-taxonomy.bib": bib.encode()}
-    linkml_src = root / "taxonomy/schema/mlsys-taxonomy.linkml.yml"
+    linkml_src = root / SCHEMA_REL_PATH
     if linkml_src.exists():
         from .taxonomy_schema import compile_json_schema, validate_linkml
         validate_linkml(document, "TaxonomyReleaseDocument", root, "taxonomy release")

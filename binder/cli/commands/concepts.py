@@ -1,4 +1,8 @@
-"""Repeatable chapter concept-map builds and local discovery inventories."""
+"""CLI entrypoint for `binder concepts` (`build`, `check`, `refresh`, `audit`, `coverage`, `agreement`).
+
+Compiles and validates the ML Systems Taxonomy (`taxonomy/ml-systems-taxonomy.yml`) and
+chapter concept maps against the LinkML metamodel (`taxonomy/schema/mlsys-taxonomy.linkml.yml`).
+"""
 
 import argparse
 import yaml
@@ -8,6 +12,7 @@ from cli.core.concept_graph import ConceptGraphError, build, refresh
 
 
 def run(root: Path, args: list[str]) -> bool:
+    """Execute a `binder concepts` subcommand and return `True` if all checks pass."""
     parser = argparse.ArgumentParser(prog="binder concepts", description=__doc__)
     parser.add_argument("action", choices=("build", "check", "refresh", "audit", "coverage", "agreement"))
     group = parser.add_mutually_exclusive_group()
@@ -100,7 +105,7 @@ def run(root: Path, args: list[str]) -> bool:
                             )
             if (root / "taxonomy/coverage-ledger.yml").exists() and not volumes:
                 from cli.core.concept_coverage import coverage_report as ledger_coverage_report
-                ledger_rep = ledger_coverage_report(root)
+                ledger_rep = ledger_coverage_report(root, graph=graph, field=field)
                 if ledger_rep.get("orphaned_decisions"):
                     raise ConceptGraphError(
                         f"coverage: orphaned decisions in coverage-ledger.yml: {', '.join(ledger_rep['orphaned_decisions'])}"

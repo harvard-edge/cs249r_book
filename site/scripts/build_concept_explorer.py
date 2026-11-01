@@ -82,7 +82,22 @@ def _is_publishable(name: str, allowed_field_diagrams: set[str] | None = None) -
     return name in diagrams
 
 
+def _iter_publishable_taxonomy_paths(allowed_diagrams: set[str]):
+    """Yield `(src_path, rel_path)` for all publishable files and directories in `taxonomy/`."""
+    for src in sorted(TAXONOMY_DIR.rglob("*")):
+        rel = src.relative_to(TAXONOMY_DIR)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        top = rel.parts[0]
+        if top in INTERNAL_ONLY:
+            continue
+        if not _is_publishable(top, allowed_diagrams):
+            raise RuntimeError(f"Unclassified item in taxonomy/: {top}")
+        yield src, rel
+
+
 def stage_site_taxonomy() -> None:
+    """Copy the publishable taxonomy allow-list from `taxonomy/` into `site/taxonomy/`."""
     allowed_diagrams = _expected_field_diagram_names()
     if SITE_TAXONOMY_DIR.exists():
         shutil.rmtree(SITE_TAXONOMY_DIR)
@@ -114,15 +129,7 @@ def verify_staged_site_taxonomy(require_built: bool = False) -> None:
                 raise RuntimeError(f"Forbidden or unclassified item staged in site/taxonomy/: {item.name}")
         expected_rel_files: set[Path] = set()
         expected_rel_dirs: set[Path] = set()
-        for src in sorted(TAXONOMY_DIR.rglob("*")):
-            rel = src.relative_to(TAXONOMY_DIR)
-            if any(part.startswith(".") for part in rel.parts):
-                continue
-            top = rel.parts[0]
-            if top in INTERNAL_ONLY:
-                continue
-            if not _is_publishable(top, allowed_diagrams):
-                raise RuntimeError(f"Unclassified item in taxonomy/: {top}")
+        for src, rel in _iter_publishable_taxonomy_paths(allowed_diagrams):
             dst = SITE_TAXONOMY_DIR / rel
             if src.is_dir():
                 expected_rel_dirs.add(rel)
@@ -147,15 +154,7 @@ def verify_staged_site_taxonomy(require_built: bool = False) -> None:
         expected_build_files: set[Path] = set()
         expected_html_files: set[Path] = {Path("index.html")}
         expected_build_dirs: set[Path] = set()
-        for src in sorted(TAXONOMY_DIR.rglob("*")):
-            rel = src.relative_to(TAXONOMY_DIR)
-            if any(part.startswith(".") for part in rel.parts):
-                continue
-            top = rel.parts[0]
-            if top in INTERNAL_ONLY:
-                continue
-            if not _is_publishable(top, allowed_diagrams):
-                raise RuntimeError(f"Unclassified item in taxonomy/: {top}")
+        for src, rel in _iter_publishable_taxonomy_paths(allowed_diagrams):
             dst = SITE_BUILD_TAXONOMY_DIR / rel
             if src.is_dir():
                 expected_build_dirs.add(rel)
@@ -205,14 +204,10 @@ def verify_staged_site_taxonomy(require_built: bool = False) -> None:
 
 
 def clean_site_taxonomy() -> None:
+    """Restore raw non-QMD publishable assets into `site/_build/taxonomy/` and remove `site/taxonomy/`."""
     if SITE_BUILD_TAXONOMY_DIR.is_dir():
         allowed_diagrams = _expected_field_diagram_names()
-        for src in sorted(TAXONOMY_DIR.rglob("*")):
-            rel = src.relative_to(TAXONOMY_DIR)
-            if any(part.startswith(".") for part in rel.parts) or rel.parts[0] in INTERNAL_ONLY:
-                continue
-            if not _is_publishable(rel.parts[0], allowed_diagrams):
-                continue
+        for src, rel in _iter_publishable_taxonomy_paths(allowed_diagrams):
             dst = SITE_BUILD_TAXONOMY_DIR / rel
             if src.is_dir():
                 dst.mkdir(parents=True, exist_ok=True)
