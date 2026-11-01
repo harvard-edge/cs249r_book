@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from urllib.parse import quote, urlparse
-
-import yaml
+from urllib.parse import quote
 
 from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
+from .taxonomy_schema import validate_https_url
 
 
 PREFIX = PAGE_URL
@@ -67,10 +66,7 @@ def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict 
     sources = _records(model, "sources")
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"])
-        parsed = urlparse(source["url"])
-        if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
-                or re.search(r'[\s<>"{}|\\^`]', source["url"])):
-            _fail(f"unsafe source URL {source['id']}")
+        validate_https_url(source["url"], f"taxonomy: unsafe source URL {source['id']}")
     topics = _records(model, "topics")
     field_nodes = {n["id"]: n for n in field["concepts"]}
     topic_nodes = {n["id"]: n for n in topics}

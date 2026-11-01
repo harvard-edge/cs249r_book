@@ -14,16 +14,15 @@ from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 
 import jsonschema
 import yaml
 
 try:
-    from linkml.generators.jsonschemagen import JsonSchemaGenerator
     from linkml_runtime.utils.schemaview import SchemaView
     HAS_LINKML = True
 except ModuleNotFoundError:  # pragma: no cover
-    JsonSchemaGenerator = None
     SchemaView = None
     HAS_LINKML = False
 
@@ -31,6 +30,10 @@ from .concept_graph import ConceptGraphError
 
 SCHEMA_REL_PATH = Path("taxonomy/schema/mlsys-taxonomy.linkml.yml")
 REPO_SCHEMA_PATH = Path(__file__).resolve().parents[3] / SCHEMA_REL_PATH
+
+CONCEPT_ID_RE = re.compile(r"^mlsys\.[a-z0-9]+(-[a-z0-9]+)*$")
+SCOPE_REF_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+_UNSAFE_URL_CHARS = re.compile(r'[\s<>"{}|\\^`]')
 
 DECREASING_VERBS = re.compile(
     r"\b(shrink|shrinks|shrinking|lower|lowers|lowering|reduce|reduces|reducing|decrease|decreases|decreasing|curb|curbs|curbing|cut|cuts|cutting|eliminate|eliminates|eliminating|minimize|minimizes|minimizing|compress|compresses|compressing|invalidate|invalidates|invalidating)\b",
@@ -40,6 +43,41 @@ INCREASING_VERBS = re.compile(
     r"\b(increase|increases|increasing|raise|raises|raising|grow|grows|growing|inflate|inflates|inflating|amplify|amplifies|amplifying|worsen|worsens|worsening|exacerbate|exacerbates|exacerbating|multiply|multiplies|multiplying)\b",
     re.IGNORECASE,
 )
+
+
+def require_text(
+    record: dict,
+    keys: tuple[str, ...],
+    context: str,
+    allowed: set[str] | None = None,
+) -> dict[str, str]:
+    """Validate that `record` is a mapping with non-empty strings for `keys` and no unknown keys."""
+    if not isinstance(record, dict):
+        raise ConceptGraphError(f"{context} must be a mapping")
+    extra = set(record) - (allowed or set(keys))
+    if extra:
+        raise ConceptGraphError(f"{context} has unknown keys: {', '.join(sorted(extra))}")
+    out: dict[str, str] = {}
+    for key in keys:
+        value = record.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConceptGraphError(f"{context}.{key} must be a non-empty string")
+        out[key] = value.strip()
+    return out
+
+
+def validate_https_url(url: str, error_message: str) -> str:
+    """Validate that `url` is a clean HTTPS URL without credentials or unsafe characters."""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or _UNSAFE_URL_CHARS.search(url)
+    ):
+        raise ConceptGraphError(error_message)
+    return url
 
 # LinkML keys supported by the deterministic Draft 2019-09 JSON Schema compiler.
 # Any unknown key at top-level, class-level, enum-level, or slot-level raises ConceptGraphError
@@ -114,10 +152,9 @@ def _cached_raw_schema(schema_path_str: str, mtime_ns: int) -> dict:
 
 @lru_cache(maxsize=8)
 def _cached_schema_view(schema_path_str: str, mtime_ns: int):
-    del mtime_ns
     if HAS_LINKML and SchemaView is not None:
         return SchemaView(schema_path_str)
-    return _cached_raw_schema(schema_path_str, Path(schema_path_str).stat().st_mtime_ns)
+    return _cached_raw_schema(schema_path_str, mtime_ns)
 
 
 def get_schema_view(root: Path | None = None):

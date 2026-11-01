@@ -25,8 +25,6 @@ import functools
 import html
 import json
 from pathlib import Path
-import re
-from urllib.parse import urlparse
 
 import yaml
 
@@ -89,14 +87,11 @@ def _cached_unified_taxonomy(
         _cached_raw_schema,
         get_class_slots,
         resolve_schema_path,
-        validate_field_semantics,
-        validate_guides_semantics,
         validate_linkml,
-        validate_schema_sync,
     )
     validate_linkml(raw, "UnifiedTaxonomyModel", root, TAXONOMY_FILE)
     schema_path = resolve_schema_path(root)
-    schema_raw = _cached_raw_schema(str(schema_path), schema_path.stat().st_mtime_ns)
+    schema_raw = _cached_raw_schema(str(schema_path), schema_mtime_ns or schema_path.stat().st_mtime_ns)
     if str(raw.get("version", "")) != str(schema_raw.get("version", "")):
         raise ConceptGraphError(
             f"schema sync: taxonomy version '{raw.get('version')}' disagrees with LinkML schema version '{schema_raw.get('version')}'"
@@ -133,17 +128,6 @@ def _cached_unified_taxonomy(
     unknown_homes = sorted(set(by_home) - known_rows)
     if unknown_homes:
         raise ConceptGraphError(f"framework: concept home names unknown subject row: {', '.join(unknown_homes)}")
-
-    for ex in raw.get("placement_examples", []) or []:
-        if isinstance(ex, dict):
-            if ex.get("concept") not in concept_home:
-                raise ConceptGraphError(f"framework: placement example names unknown concept {ex.get('concept')}")
-            if ex.get("home") not in known_rows:
-                raise ConceptGraphError(f"framework: placement example names unknown home row {ex.get('home')}")
-            if concept_home.get(ex["concept"]) != ex.get("home"):
-                raise ConceptGraphError(
-                    f"framework: placement example for {ex['concept']} claims home {ex['home']} instead of {concept_home.get(ex['concept'])}"
-                )
 
     views = deepcopy(raw.get("views", []))
     if isinstance(views, list):
@@ -186,10 +170,6 @@ def _cached_unified_taxonomy(
     guides_dict = {"schema_version": raw["schema_version"], **deepcopy(guides_raw)} if isinstance(guides_raw, dict) else None
     skos_raw = raw.get("skos_hierarchy")
     skos_dict = {"schema_version": raw["schema_version"], **deepcopy(skos_raw)} if isinstance(skos_raw, dict) else None
-    validate_schema_sync(root, field_dict)
-    validate_field_semantics(field_dict)
-    if guides_dict is not None:
-        validate_guides_semantics(guides_dict, rows_by_id, version=raw.get("version"))
     bundle = {"field": field_dict, "framework": framework_dict, "guides": guides_dict, "skos": skos_dict}
     enriched_concepts, _, _ = _validate_field_model(root, deepcopy(field_dict))
     from .framework import load_framework
@@ -209,6 +189,29 @@ def load_unified_taxonomy(root: Path) -> dict[str, dict | None] | None:
     schema_mtime = schema_path.stat().st_mtime_ns if schema_path.exists() else 0
     bundle = _cached_unified_taxonomy(str(path.resolve()), path.stat().st_mtime_ns, schema_mtime, str(root.resolve()))
     return deepcopy(bundle) if bundle is not None else None
+
+
+def load_vocabulary(root: Path, context: str) -> tuple[set[str], dict[str, tuple[dict, dict]], dict[str, str]]:
+    """Return `(concept_ids, rows_with_area, homes_by_concept)` from the unified taxonomy."""
+    unified = load_unified_taxonomy(root)
+    if unified is None:
+        raise ConceptGraphError(f"{context}: unified taxonomy model is required")
+    field = unified["field"]
+    framework = unified["framework"]
+    concepts = {c["id"] for c in field["concepts"]}
+    rows: dict[str, tuple[dict, dict]] = {}
+    homes: dict[str, str] = {}
+    for area in framework["areas"]:
+        for row in area["rows"]:
+            rows[row["id"]] = (row, area)
+            for cid in row.get("concepts", []):
+                homes[cid] = row["id"]
+    return concepts, rows, homes
+
+
+def pct(part: int, whole: int) -> float:
+    """Return `100 * part / whole` rounded to one decimal place (or `0.0` when `whole == 0`)."""
+    return round(100 * part / whole, 1) if whole else 0.0
 
 
 def _index(records, name):
@@ -249,9 +252,11 @@ def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, di
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         raise ConceptGraphError("field model: unsupported schema")
     from .taxonomy_schema import (
+        CONCEPT_ID_RE,
         get_class_slots,
-        get_enum_values,
+         get_enum_values,
         validate_field_semantics,
+        validate_https_url,
         validate_linkml,
         validate_schema_sync,
     )
@@ -262,9 +267,7 @@ def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, di
     source_slots = set(get_class_slots("FieldSource", root))
     for ref in sources.values():
         _text(ref, ("title", "url", "kind", "scope"), ref["id"], source_slots)
-        url = urlparse(ref["url"])
-        if url.scheme != "https" or not url.netloc:
-            raise ConceptGraphError(f"field model: unsafe reading URL {ref['id']}")
+        validate_https_url(ref["url"], f"field model: unsafe reading URL {ref['id']}")
     families = _index(model.get("families"), "family")
     scopes = set(get_enum_values("ConceptScopeEnum", root))
     relation_kinds = set(get_enum_values("RelationKindEnum", root))
@@ -279,7 +282,7 @@ def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, di
     concept_slots = set(get_class_slots("Concept", root)) - {"home"}
     for node in concepts.values():
         _text(node, ("label", "definition", "family", "status"), node["id"], concept_slots)
-        if not re.fullmatch(r"mlsys\.[a-z0-9]+(-[a-z0-9]+)*", node["id"]) or node["family"] not in families:
+        if not CONCEPT_ID_RE.fullmatch(node["id"]) or node["family"] not in families:
             raise ConceptGraphError(f"field model: invalid concept identity or family {node['id']}")
         if node["status"] != "draft":
             raise ConceptGraphError("field model: a review label requires a future version-bound review contract")
@@ -411,9 +414,9 @@ def load_field(root: Path, book_graph: dict) -> dict | None:
     if alignment_path.exists():
         validate_linkml(alignment, "BookAlignmentModel", root, "field model")
     from .taxonomy import load_taxonomy
-    taxonomy = load_taxonomy(root, model)
+    taxonomy = load_taxonomy(root, model, _bundle=unified)
     from .framework import load_framework
-    framework = load_framework(root, {**model, "concepts": enriched_concepts, "book_links": links})
+    framework = load_framework(root, {**model, "concepts": enriched_concepts, "book_links": links}, _bundle=unified)
     degree = Counter(endpoint for edge in edges.values() for endpoint in (edge["source"], edge["target"]))
     return {**model, "concepts": enriched_concepts, "book_links": links, "taxonomy": taxonomy, "framework": framework,
             "summary": {"concepts": len(concepts), "relationships": len(edges), "book_links": len(links),

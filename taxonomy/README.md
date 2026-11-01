@@ -103,9 +103,9 @@ Every group, area, and subject carries a readable code: a group letter (F, S, P,
 
 | File | Format | Contents |
 |---|---|---|
-| `mlsys-taxonomy-subjects.csv` | CSV | One row per subject (`code, id, group_code, group, area_code, area, subject, definition, concept_count, concepts, book_chapters`) |
+| `mlsys-taxonomy-subjects.csv` | CSV | One row per subject (`code, group, area, subject, definition, concepts, concept_ids, taught_in`) |
 | `mlsys-taxonomy-concepts.csv` | CSV | One row per concept (`id, term, aliases, definition, subject_code, subject, area, group, background, taught_in`) |
-| `mlsys-taxonomy.json` | JSON | The full outline, concepts (with candidate book passages), relation vocabulary, typed relationships, declared gaps, and retired identities |
+| `mlsys-taxonomy.json` | JSON | The full outline, concepts (with candidate book passages), relation vocabulary, typed relationships, tagging rules, placement examples, guides (roles, symptoms, learning paths), declared gaps, and retired identities |
 | `mlsys-taxonomy.linkml.yml` | LinkML (YAML) | Formal LinkML metamodel defining classes, slots, controlled enums, and W3C `skos:` / `dct:` / `owl:` URI mappings |
 | `mlsys-taxonomy.schema.json` | JSON Schema | Compiled JSON Schema generated from `mlsys-taxonomy.linkml.yml` for IDE and CI validation |
 | `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes; concepts as `skos:Concept`; relationships as properties under `skos:related` |
@@ -157,7 +157,7 @@ These are proposed assessment designs, not claims that existing chapters assess 
 
 ## Repeatable build and review
 
-Run `./binder/binder concepts build` after editing the authored sources. Run `./binder/binder concepts check` and `./binder/binder concepts build --check` to validate identities, assignments, references, section-backed passage links, and generated-artifact freshness. The build exports `framework-data.json`, `framework-table.csv`, and `framework-reference.md`. The figures and website use that same framework. Existing chapter concept contracts continue to supply the book graph.
+Run `./binder/binder concepts build` after editing the authored sources. Run `./binder/binder concepts check` and `./binder/binder concepts build --check` to validate identities, assignments, references, section-backed passage links, and generated-artifact freshness. The build exports `framework-data.json`, `framework-table.csv`, `framework-reference.md`, `field-data.json`, `taxonomy.ttl`, `taxonomy-reference.md`, all eight release files in `taxonomy/downloads/`, and the StaffML taxonomy bundle (`staffml/app/src/data/mlsys-taxonomy.json`). The figures, website, and StaffML app use that same compiled source. Existing chapter concept contracts continue to supply the book graph.
 
 Adding a field concept requires a candidate home decision; the compiler rejects unresolved or duplicate homes. Secondary placements do not inflate the inventory. Passage links resolve against actual chapter sections and remain related-passage links with unassessed teaching depth. The pipeline deliberately avoids inferring relationships from embedding proximity. Embeddings can later propose candidates for review, while accepted definitions, placements, and relationships remain explicit versioned records.
 

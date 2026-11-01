@@ -20,6 +20,7 @@ import yaml
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _CONCEPT_RE = re.compile(r"^mlsys\.[a-z0-9]+(-[a-z0-9]+)*$")
+_SCOPE_REF_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
 _INCREASING_VERBS = re.compile(
     r"\b(increase|increases|increasing|raise|raises|raising|grow|grows|growing|inflate|inflates|inflating|amplify|amplifies|amplifying|worsen|worsens|worsening|exacerbate|exacerbates|exacerbating|multiply|multiplies|multiplying)\b",
     re.IGNORECASE,
@@ -53,6 +54,8 @@ _UniqueKeySafeLoader.add_constructor(
 
 @dataclass(frozen=True)
 class Taxonomy:
+    """Validated projection of the ML Systems Taxonomy (`framework` and `field` aspects)."""
+
     framework: dict[str, Any]
     field: dict[str, Any]
 
@@ -63,6 +66,7 @@ class Taxonomy:
 
     @property
     def concepts(self) -> dict[str, dict[str, Any]]:
+        """Concept id → concept record."""
         return {c["id"]: c for c in self.field.get("concepts", [])}
 
     @property
@@ -188,32 +192,55 @@ def _validate_fallback_linkml(raw: dict[str, Any], schema_doc: dict[str, Any], u
             raise ValueError(f"{unified_path}: LinkML schema validation failed: {errors[0].message}")
 
 
-def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
-    """Return the repo's validated taxonomy, or None in a vault-only checkout."""
-    repo_root = vault_dir.parent.parent
-    unified_path = repo_root / "taxonomy" / "ml-systems-taxonomy.yml"
-    if not unified_path.exists():
-        return None
+def _find_cycle(adj: dict[str, list[str]]) -> str | None:
+    """Return a node participating in a directed cycle in `adj`, or `None` if `adj` is a DAG."""
+    state: dict[str, int] = {}
+    for start in list(adj):
+        if state.get(start, 0) != 0:
+            continue
+        stack: list[tuple[str, int]] = [(start, 0)]
+        state[start] = 1
+        while stack:
+            node, idx = stack[-1]
+            children = adj.get(node, [])
+            if idx < len(children):
+                stack[-1] = (node, idx + 1)
+                nxt = children[idx]
+                if state.get(nxt, 0) == 1:
+                    return nxt
+                if state.get(nxt, 0) == 0:
+                    state[nxt] = 1
+                    stack.append((nxt, 0))
+            else:
+                state[node] = 2
+                stack.pop()
+    return None
 
+
+def _load_standalone_taxonomy(repo_root: Path, unified_path: Path) -> Taxonomy:
+    """Validate and project `taxonomy/ml-systems-taxonomy.yml` when `binder/cli` is not available."""
     text = unified_path.read_text(encoding="utf-8")
     if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text, Loader=yaml.SafeLoader)):
         raise ValueError(f"{unified_path.name}: YAML anchors/aliases are not allowed")
     raw = yaml.load(text, Loader=_UniqueKeySafeLoader)
     if not isinstance(raw, dict) or "areas" not in raw or "concepts" not in raw:
         raise ValueError(f"{unified_path}: malformed taxonomy file (requires 'areas' and 'concepts')")
-
-    binder_core = _import_binder_core(repo_root)
-    if binder_core is not None:
-        load_unified_taxonomy, _, concept_graph_error_cls = binder_core
-        try:
-            bundle = load_unified_taxonomy(repo_root)
-        except concept_graph_error_cls as exc:
-            raise ValueError(str(exc)) from exc
-        if bundle is not None and bundle.get("framework") and bundle.get("field"):
-            return Taxonomy(bundle["framework"], bundle["field"])
-
     if raw.get("schema_version", 1) != 1:
         raise ValueError(f"{unified_path}: unsupported schema_version {raw.get('schema_version')}")
+
+    schema_path = repo_root / "taxonomy" / "schema" / "mlsys-taxonomy.linkml.yml"
+    schema_doc: dict[str, Any] = (
+        yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+        if schema_path.exists()
+        else {}
+    )
+    rel_pvs = ((schema_doc.get("enums") or {}).get("RelationIdEnum") or {}).get("permissible_values") or {}
+    hierarchical_rels = tuple(
+        rel_id
+        for rel_id, pv in rel_pvs.items()
+        if isinstance(pv, dict) and isinstance(pv.get("annotations"), dict) and pv["annotations"].get("hierarchical_dag") is True
+    ) or ("specializes", "part-of", "requires")
+
     known_rows: set[str] = set()
     for area in raw.get("areas", []):
         if isinstance(area, dict):
@@ -314,31 +341,13 @@ def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
                     queue_c.append(nxt_c)
         if len(visited_c) != len(concept_home):
             raise ValueError(f"{unified_path}: concept relationship graph is disconnected")
-    for rel_name in ("specializes", "part-of", "requires"):
+    for rel_name in hierarchical_rels:
         adj: dict[str, list[str]] = {}
         for edge in edges:
             if edge.get("relation") == rel_name:
                 adj.setdefault(edge["source"], []).append(edge["target"])
-        state: dict[str, int] = {}
-        for start in list(adj):
-            if state.get(start, 0) != 0:
-                continue
-            stack: list[tuple[str, int]] = [(start, 0)]
-            state[start] = 1
-            while stack:
-                node, idx = stack[-1]
-                children = adj.get(node, [])
-                if idx < len(children):
-                    stack[-1] = (node, idx + 1)
-                    nxt = children[idx]
-                    if state.get(nxt, 0) == 1:
-                        raise ValueError(f"{unified_path}: ontological cycle in {rel_name!r}")
-                    if state.get(nxt, 0) == 0:
-                        state[nxt] = 1
-                        stack.append((nxt, 0))
-                else:
-                    state[node] = 2
-                    stack.pop()
+        if _find_cycle(adj) is not None:
+            raise ValueError(f"{unified_path}: ontological cycle in {rel_name!r}")
     guides_raw = raw.get("guides") or {}
     if isinstance(guides_raw, dict):
         neighbors: dict[str, set[str]] = {cid: set() for cid in concept_home}
@@ -389,7 +398,7 @@ def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
                             raise ValueError(f"{unified_path}: invalid secondary_concepts {sec_c!r} on {row.get('id')}")
                     for scope_line in [*(row.get("includes") or []), *(row.get("excludes") or [])]:
                         if isinstance(scope_line, str):
-                            for ref_id in re.findall(r"\[\[([^\]]+)\]\]", scope_line):
+                            for ref_id in _SCOPE_REF_RE.findall(scope_line):
                                 if ref_id not in known_area_and_row_ids:
                                     raise ValueError(f"{unified_path}: row {row.get('id')} cites unknown row or area {ref_id}")
     if any(isinstance(a, dict) and "code" in a for a in raw.get("areas", [])):
@@ -443,16 +452,9 @@ def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
                     raise ValueError(f"{unified_path}: invalid skos_hierarchy assertion {pair!r}")
                 seen_hier.add((n_id, b_id))
                 b_adj.setdefault(b_id, []).append(n_id)
-        for start in list(b_adj):
-            seen_b: set[str] = set()
-            stack_b = list(b_adj.get(start, []))
-            while stack_b:
-                cur = stack_b.pop()
-                if cur == start:
-                    raise ValueError(f"{unified_path}: cycle in skos_hierarchy at {start}")
-                if cur not in seen_b:
-                    seen_b.add(cur)
-                    stack_b.extend(b_adj.get(cur, []))
+        cyc_node = _find_cycle(b_adj)
+        if cyc_node is not None:
+            raise ValueError(f"{unified_path}: cycle in skos_hierarchy at {cyc_node}")
         col_families = [
             col.get("family")
             for col in (skos_raw.get("collections") or [])
@@ -460,30 +462,10 @@ def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
         ]
         if families and (set(col_families) != families or len(col_families) != len(families)):
             raise ValueError(f"{unified_path}: skos_hierarchy collections must cover every family once")
-    schema_path = repo_root / "taxonomy" / "schema" / "mlsys-taxonomy.linkml.yml"
-    if schema_path.exists():
-        schema_doc = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
+    if schema_doc:
         _validate_fallback_linkml(raw, schema_doc, unified_path)
-        classes_doc = schema_doc.get("classes") or {}
-        unified_attrs = ((classes_doc.get("UnifiedTaxonomyModel") or {}).get("attributes")) or {}
-        if unified_attrs and (set(raw) - set(unified_attrs)):
-            extra = sorted(set(raw) - set(unified_attrs))
-            raise ValueError(f"{unified_path}: unknown top-level taxonomy keys: {', '.join(extra)}")
-        for cls_name, records in (
-            ("SubjectArea", raw.get("areas") or []),
-            ("SubjectRow", [r for a in (raw.get("areas") or []) if isinstance(a, dict) for r in (a.get("rows") or [])]),
-            ("UnifiedConcept", raw.get("concepts") or []),
-            ("Relationship", raw.get("relationships") or []),
-        ):
-            allowed = set(((classes_doc.get(cls_name) or {}).get("attributes")) or {})
-            if allowed:
-                for rec in records:
-                    if isinstance(rec, dict) and (set(rec) - allowed):
-                        extra = sorted(set(rec) - allowed)
-                        raise ValueError(f"{unified_path}: unknown {cls_name} keys: {', '.join(extra)}")
         if str(raw.get("version", "")) != str(schema_doc.get("version", "")):
             raise ValueError(f"{unified_path}: taxonomy version disagrees with LinkML schema version")
-        rel_pvs = ((schema_doc.get("enums") or {}).get("RelationIdEnum") or {}).get("permissible_values") or {}
         rels = raw.get("relations") or []
         if {r.get("id") for r in rels if isinstance(r, dict)} != set(rel_pvs.keys()) or len(rels) != len(rel_pvs):
             raise ValueError(f"{unified_path}: relations disagree with RelationIdEnum")
@@ -506,6 +488,27 @@ def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
         "retired": raw.get("retired", []),
     }
     return Taxonomy(framework, field)
+
+
+def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
+    """Return the repo's validated taxonomy, or None in a vault-only checkout."""
+    repo_root = vault_dir.parent.parent
+    unified_path = repo_root / "taxonomy" / "ml-systems-taxonomy.yml"
+    if not unified_path.exists():
+        return None
+
+    binder_core = _import_binder_core(repo_root)
+    if binder_core is not None:
+        load_unified_taxonomy, _, concept_graph_error_cls = binder_core
+        try:
+            bundle = load_unified_taxonomy(repo_root)
+        except concept_graph_error_cls as exc:
+            raise ValueError(str(exc)) from exc
+        if bundle is None or not bundle.get("framework") or not bundle.get("field"):
+            raise ValueError(f"{unified_path}: malformed taxonomy file (requires 'areas' and 'concepts')")
+        return Taxonomy(bundle["framework"], bundle["field"])
+
+    return _load_standalone_taxonomy(repo_root, unified_path)
 
 
 def build_staffml_labels_payload(vault_dir: Path, taxonomy: Taxonomy) -> dict[str, Any]:
