@@ -131,3 +131,85 @@ def test_models_scale_by_domain_agrees_with_vla_and_token_series():
     assert toks["DeepSeek-V3"] == notable_ds["DeepSeek-V3"] == Models.Language.DeepSeek_V3.training_tokens.to("count").magnitude
     assert toks["Qwen3"] == notable_ds["Qwen3-235B-A22B"]
 
+
+def test_epoch_training_energy_series_agrees_with_runs_and_registries():
+    from mlsysim import Hardware, viz
+    from mlsysim.core.units import MWh, hour, watt
+
+    e_series = viz.load_series("vol2/15_sustainable_ai/data/notable_model_training_energy.csv")
+    for prefix in ("# Source:", "# URL:", "# Verified:", "# Notes:"):
+        assert any(c.startswith(prefix) for c in e_series.provenance_comments), prefix
+
+    entries = e_series.entries
+    assert len(entries) == 122
+    assert len([r for r in entries if r["frontier"] == 1]) == 23
+    assert len({r["model"] for r in entries}) == len(entries)
+    assert "GPT-4 (Jun 2023)" not in {r["model"] for r in entries}
+    assert "OpenAI Five" not in {r["model"] for r in entries}
+    assert all(r["date"] >= "2016-01-01" for r in entries)
+    assert all(r["training_power_draw_w"] > 0 and r["training_time_hours"] > 0 for r in entries)
+
+    runs_by_model = {
+        r["model"]: r
+        for r in viz.load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries
+    }
+    for row in entries:
+        run = runs_by_model[row["model"]]
+        assert row["date"] == run["date"]
+        assert row["frontier"] == run["frontier"]
+        assert row["hardware_quantity"] == run["hardware_quantity"]
+        assert abs(row["training_time_hours"] - run["training_time_hours"]) / run["training_time_hours"] < 1e-6
+
+    energies = {
+        r["model"]: (r["training_power_draw_w"] * watt * (r["training_time_hours"] * hour)).to(MWh)
+        for r in entries
+    }
+    gpt3_reported = Models.Language.GPT3.training_energy_mwh
+    llama31_accel = (float(RUNS.Llama31_405B_TrainingGpuHours) * hour * Hardware.Cloud.H100.tdp).to(MWh)
+    assert energies["GPT-3 175B (davinci)"] > gpt3_reported
+    assert energies["Llama 3.1-405B"] > llama31_accel
+
+
+def test_epoch_sustainability_provenance_headers_and_manifest_receipt():
+    import hashlib
+    import json
+    from pathlib import Path
+    from mlsysim import viz
+
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "binder" / "tools" / "audits" / "epoch_sustainability_manifest.json"
+    assert manifest_path.is_file(), f"Missing extraction receipt: {manifest_path}"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    upstream_sha = manifest["inputs"]["epoch_raw_csv"]["sha256"]
+    assert len(upstream_sha) == 64
+
+    required_keys = {
+        "source",
+        "url",
+        "verified",
+        "epistemic",
+        "generator",
+        "upstream_sha256",
+        "computation",
+        "notes",
+    }
+    for out_key, series_rel in (
+        ("notable_model_training_runs_csv", "vol2/01_introduction/data/notable_model_training_runs.csv"),
+        ("notable_model_training_energy_csv", "vol2/15_sustainable_ai/data/notable_model_training_energy.csv"),
+    ):
+        series = viz.load_series(series_rel)
+        assert required_keys <= set(series.provenance), (series_rel, set(series.provenance))
+        assert series.provenance["upstream_sha256"] == upstream_sha
+        assert series.provenance["verified"] == manifest["inputs"]["epoch_raw_csv"]["snapshot_date"]
+
+        out_meta = manifest["outputs"][out_key]
+        csv_file = repo_root / out_meta["repo_relative_path"]
+        live_sha = hashlib.sha256(csv_file.read_bytes()).hexdigest()
+        assert live_sha == out_meta["sha256"], (
+            f"{csv_file} drifted from {manifest_path.name}; rerun extract_epoch_sustainability_data.py"
+        )
+        assert len(series.entries) == out_meta["rows"]
+
+
+

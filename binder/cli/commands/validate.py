@@ -632,6 +632,10 @@ class ValidateCommand:
             # and book-check-figure-print-scale-all when the style changes.
             Scope("print-scale", "_run_figure_print_scale", default=False,
                   note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
+            Scope("data-provenance", "_run_figure_data_provenance",
+                  note="Tier-2 data/*.csv and load_series() provenance and computation headers"),
+            Scope("cell-provenance", "_run_figure_cell_provenance", default=False,
+                  note="matplotlib #fig-* cell header Provenance: lineage block"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -1320,7 +1324,11 @@ class ValidateCommand:
                 results.append(method(root, ns))
             elif method_name == "_run_sources":
                 results.append(method(root, ns))
-            elif method_name == "_run_figure_print_scale":
+            elif method_name in (
+                "_run_figure_print_scale",
+                "_run_figure_data_provenance",
+                "_run_figure_cell_provenance",
+            ):
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -13589,6 +13597,68 @@ class ValidateCommand:
             name="figure-print-scale",
             description="Matplotlib print scale and font floor (limits from mlsysim.viz.style)",
             files_checked=len(qmds), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_figure_data_provenance(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
+        """figures --scope data-provenance: Tier-2 CSV and load_series() provenance headers."""
+        try:
+            from cli.checks import figure_data_provenance as fdp
+        except ImportError:
+            from binder.cli.checks import figure_data_provenance as fdp
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "files", None):
+            resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
+            csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file()]
+            checked, violations = fdp.collect_data_provenance(
+                qmds, scan_root=Path("/nonexistent"), repo_root=repo_root
+            )
+            bib_cache: dict = {}
+            for csv_path in csvs:
+                checked += 1
+                violations.extend(fdp.check_csv_file(csv_path, repo_root=repo_root, bib_cache=bib_cache))
+        else:
+            qmds = self._qmd_files(root)
+            scan_root = root.parent if (root.is_file() and root.suffix == ".qmd") else root
+            checked, violations = fdp.collect_data_provenance(qmds, scan_root=scan_root, repo_root=repo_root)
+
+        issues = [ValidationIssue(**v.to_issue_kwargs()) for v in violations]
+        return ValidationRunResult(
+            name="figure-data-provenance",
+            description="Tier-2 data/*.csv and load_series() provenance and computation headers",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_figure_cell_provenance(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
+        """figures --scope cell-provenance: #fig-* Python cell header Provenance: block."""
+        try:
+            from cli.checks import figure_data_provenance as fdp
+        except ImportError:
+            from binder.cli.checks import figure_data_provenance as fdp
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "files", None):
+            resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
+        else:
+            qmds = self._qmd_files(root)
+        checked, violations = fdp.collect_cell_provenance(qmds, repo_root=repo_root)
+        issues = [ValidationIssue(**v.to_issue_kwargs()) for v in violations]
+        return ValidationRunResult(
+            name="figure-cell-provenance",
+            description="Matplotlib #fig-* cell header Provenance: lineage block",
+            files_checked=checked,
+            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
