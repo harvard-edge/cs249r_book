@@ -1,157 +1,138 @@
 # Synthesized Candidate Method for the ML Systems Taxonomy
 
-This specification synthesizes the top-ranked elements from the blind three-family method study (`Method-A` by `gpt-6-astra`, `Method-B` by `claude-opus-5-5`, and audited components of `Method-C` by `gemini-4-argon-high`) into a single operational methodology for constructing, validating, and maintaining the ML Systems Taxonomy.
+> **Authoritative enactment status (`2026-11-02`):** `taxonomy/METHOD.md` and the refresh workflow (`.claude/workflows/taxonomy-refresh.md`, enforced mechanically by `reconcile.py`, `apply.py`, `stage_reviewer_workspace.py`, and `./binder/binder concepts check`) constitute the **authoritative enacted specification** for `0.4-draft` and periodic refreshes. This document records how the top-ranked mechanisms from the blind three-family method competition (`Method-A` by `gpt-6-astra`, `Method-B` by `claude-opus-5-5`, and audited scale-stratification elements of `Method-C` by `gemini-4-argon-high`) were synthesized into that enacted protocol, and flags prospective `1.0` schema/governance items where noted.
 
-Every adopted mechanism below cites the blind proposal from which it was drawn, the rubric dimension (`D1`–`D8` in `taxonomy/method-study/rubric.yaml`) on which that proposal scored highest, and whether the threshold or rule is derived from a published standard or a project-calibrated parameter (`[P]`).
+Every mechanism below cites the blind proposal from which it was drawn, its exact computed cross-family mean score (`dim_means_cross`, with all-judge mean `dim_means_all` in parentheses from `study-receipts-summary.json`) on rubric dimensions `D1`–`D8` (`taxonomy/method-study/rubric.yaml`), and whether each quantitative rule comes from a published standard or a project-calibrated parameter (`[P]`). *Citation provenance note:* ANSI/NISO Z39.19-2005 (R2010) and W3C SKOS (2009) are publicly verifiable; ISO 25964-1:2011 / 25964-2:2013 clause references were screened from model reference knowledge without opening the paywalled ISO text (`METHOD.md`).
 
 ---
 
-## 1. End-to-End Construction Pipeline
+## 1. End-to-End Construction and Refresh Pipeline (`Stage 1`–`Stage 10`)
 
-**Source provenance**: Synthesized from `Method-B` §1 (14-step DAG with explicit input/output artifacts, stopping rules, and failure recovery, scored 5.0/5.0 on `D1`) and `Method-A` §1 (8-stage pipeline with split discipline and pre-registration gates, scored 4.5–5.0/5.0 on `D1`).
+**Source provenance**: Synthesized from `Method-B` §1 (14-step DAG with explicit input/output artifacts, stopping rules, and failure recovery; `D1` cross-family mean `4.75/5.0`, all-judge `4.667/5.0`) and `Method-A` §1 (8-stage pipeline with split discipline and pre-registration gates; `D1` cross-family mean `4.00/5.0`, all-judge `4.333/5.0`). Stage identifiers use `Stage 1`–`Stage 10` to avoid colliding with Stack area codes (`S1`–`S4`) or sampling-frame strata (`S1`–`S5`).
 
-| Stage | Name | Inputs | Outputs | Stopping Condition & Recovery |
+| Stage | Name | Inputs | Enacted Outputs / Artifacts | Stopping Condition & Recovery |
 | :--- | :--- | :--- | :--- | :--- |
-| **S0** | Charter, Scope & Pre-registration | Domain boundary, downstream application requirements, frozen rubric | `charter.yaml`, `preregistration.yaml` | Scope exclusion tests defined; evaluation splits frozen before candidate harvesting begins. |
-| **S1** | Stratified Corpus Frame & Split Allocation | Enumerated source frame across 5 strata (`S1`–`S5`) | `corpus_manifest.json` with `dev`, `cal`, `test`, and `reserve` cluster assignments | Every stratum represented; provenance-family clusters (`cluster_id`) isolated across splits (`Method-A` §3.3). |
-| **S2** | Multi-Extractor Candidate Harvesting | `dev` split documents only | `candidate_mentions.jsonl` with exact source locators and verbatim evidence spans | Extractors run in isolated sessions without access to `cal` or `test` splits or existing vocabulary concepts (`Method-A` §1, `Method-B` §1 Step 3). |
-| **S3** | Lexical Normalization & Cluster Deduplication | `candidate_mentions.jsonl` | `candidate_clusters.json` | Z39.19 Clauses 6–7 normalization (singular count nouns vs. mass nouns, parenthetical qualifiers for homographs); lexical/synonym grouping. |
-| **S4** | Warrant Verification & Provenance Independence | `candidate_clusters.json`, `corpus_manifest.json` | `warranted_candidates.json`, `unwarranted_backlog.json` | Candidate passes the two-source provenance-family independence gate (§2.1); single-source items route to backlog. |
-| **S5** | Concept-vs-Alias & Post-Coordination Adjudication | `warranted_candidates.json` | `admitted_concepts.yaml`, `uf_aliases.yaml`, `split_recipes.yaml` | Each candidate evaluated against the 4-part Concept-vs-Alias and Compound Splitting Protocol (§2.3–2.4). |
-| **S6** | Primary Backbone Placement & Typed Relations | `admitted_concepts.yaml` | `backbone_tree.yaml`, `relations.yaml` | Every concept receives one home subject (`home_subject_id`), optional `specializes` (`BTG`/`BTP`/`BTI` tested), and constrained associative relations with justification templates (`Method-A` §4.1–4.3, `Method-B` §4.1–4.3). |
-| **S7** | Scope Note Authoring (Genus-Differentia + Boundary) | `admitted_concepts.yaml`, `relations.yaml` | Concept records with `description` / `scope_note` | Every scope note states the immediate genus, distinguishing system mechanism, and explicit boundary exclusions (`Method-B` §1 Step 9). |
-| **S8** | Automated Structural & Schema Gate | Concept, subject, relation, and overlay files | `check_report.json` | Zero errors across all compiled structural invariants (§4.4). |
-| **S9** | Double-Judged Blind Coverage & Indexing Calibration | Frozen vocabulary, `cal` / `test` split | `coverage_report.json`, `agreement_report.json` | Two-pass blind coverage + seeded-gap sensitivity check (§5.1) and multi-rater agreement ($\kappa$, $\alpha_{\text{MASI}}$, Hooper, Rolling, $hF_1$) coupled with specificity counter-metrics (§5.2). |
+| **Stage 1** | Charter, Scope & Stratified Split Allocation | Domain boundary, enumerated 5-stratum source frame (`S1`–`S5`) | `taxonomy/METHOD.md`, `<campaign>/sampling-manifest.json` (`dev`, `held_out_test`, `reserve` by `provenance_family_id`) | Scope exclusions fixed; `reconcile.py` fails closed if any `provenance_family_id` crosses splits (`Method-A` §3.3). |
+| **Stage 2** | Cross-Area Lookup & Candidate Discovery | Staged read-only `dev` workspace (`stage_reviewer_workspace.py`) | `codex-r1.yaml`, `gemini-r1.yaml`, `claude-r1.yaml` with `dev` locators (`workspace-isolation-receipt.json`) | **Incremental refresh (`METHOD.md` Gate 1, `Z39.19 §11.1.1`)**: search all `20` areas in `mlsys-taxonomy-concepts.csv` before proposing new concepts; zero `held_out: true` or `reserve` files staged. *(Blank-slate rebuild mode, tested on Phase 4 `Vocab-X`, masks existing concepts during extraction.)* |
+| **Stage 3** | Warrant & Provenance-Lineage Gate | Candidate clusters, `sampling-manifest.json` | Structured `warrant_sources` on warranted items; single-lineage items routed to `gaps:` | Passes enacted Gate 2 (§2.1: $\ge 2$ distinct `dev` `provenance_family_id` lineages across `S1`–`S5`, $\ge 1$ `origin: external`, $\ge 1$ `source_type: prose`; `0` single-source exceptions). |
+| **Stage 4** | Product, Benchmark & SKU Exclusion Gate | Warranted candidates & proposed aliases | Filtered candidate set | Passes enacted Gate 3 (§2.2: excludes products, multi-mechanism serving engines, benchmark suites, and SKUs from concepts and multi-mechanism suites from aliases). |
+| **Stage 5** | Compound Factoring & `metric × workload` Gate | Multi-word candidates | Pre-coordinated mechanisms vs. post-coordination / rejected `metric × workload` splits | Passes enacted Gate 4 (§2.4: institutionalization across $\ge 2$ `dev` lineages; stage-metric allowlist enforced). |
+| **Stage 6** | 4-Part Differential Indexing Witness & Equivalence Gate | Surviving candidates & entry-term proposals | `concepts_add` (`witness_justification`), `add_aliases` (`alias_metadata`), or `gaps:` | Passes enacted Gate 5 (§2.3: 6-key `witness_justification` for concepts; manifest-verified `checked_dev_units` + `scope_note` for `upward-posting` and `quasi-synonym` aliases; unwarranted distinct mechanisms route to `gaps:`, never `aliases`). |
+| **Stage 7** | Single Primary Home, Definitions & Typed Relations | Admitted concepts & updates | `patch.yaml` (`home`, non-circular genus-differentia `definition`, `edge_impact_note`, 17-verb `relationships`) | One `home` subject (`home_rule`), `specializes` passes 3-step `all-and-some` (`BTG`) test, `part-of` under `skos:related` (`Z39.19 §8.3.3.2`), $\ge 2$ true relationships per concept. |
+| **Stage 8** | 3-Family Cross-Check, Reconciliation & Provenance Sidecar | `patch.yaml`, three `*-r2.yaml` reviews, optional `overrides.yaml` | `final.yaml`, `reconcile-receipt.json` (`schema_version: 3`), `ml-systems-taxonomy.yml`, `taxonomy/term-provenance.yml` | `reconcile.py` enforces $\ge 2$-family reject veto, per-field fix satisfaction, and non-overridable `check_red_flags()`; `apply.py` re-verifies in-process and binds `taxonomy_sha256` in `term-provenance.yml`; 3-family publishability audit (`briefs/audit.md`) passes with `0` blockers. |
+| **Stage 9** | Sealed Blind Coverage, Seeded-Gap & Indexing Evaluation | Frozen compiled release, unexposed external `held_out_test` clusters | Coverage & agreement reports (`taxonomy-coverage.json`, `taxonomy-agreement.json`, study receipts) | Two-judge blind coverage + seeded-gap sensitivity audit (§5.1) and dual-tagger agreement ($\kappa$, Hooper, Rolling, $\alpha_{\text{MASI}}$) coupled with leaf-specificity and $p_{\max}$ counter-metrics (§5.2); inspected test clusters are burned globally to `dev`. |
+| **Stage 10** | Compiler Verification, Changelog & Release | Compiled artifacts, `mlsysbook-alignment.yml`, `staffml` consumer JSON | Downloadable CSV/JSON/JSON Schema/GraphML/SKOS `.ttl`, `CHANGELOG.md` | `./binder/binder concepts build && check && build --check`, `coverage --check`, `agreement --check`, `pytest`, and `vault check --strict` all exit `0`. |
 
 ---
 
 ## 2. Concept Admission, Warrant, and Boundary Rules
 
-**Source provenance**: Synthesized from `Method-A` §2 (`D2` = 4.5–5.0) and `Method-B` §2 (`D2` = 4.5–5.0).
+**Source provenance**: Synthesized from `Method-B` §2 (`D2` cross-family mean `4.50/5.0`, all-judge `4.333/5.0`) and `Method-A` §2 (`D2` cross-family mean `4.50/5.0`, all-judge `4.667/5.0`).
 
-### 2.1 Multi-Type Warrant with Provenance-Family Independence
-Following ANSI/NISO Z39.19-2005 Clause 5.3.5 and ISO 25964-1:2011 Clause 6, admission requires explicit warrant:
-1. **Two-Source Provenance-Family Rule**: A regular concept requires documented literary warrant in **at least two independent external sources** (`provenance_family_id` must differ). Two sources share a `provenance_family_id` (and count as a single source) if:
-   - Their author sets overlap by $\ge 50\%$ (`Method-A` §2.1, `[P]`),
-   - One document is a textbook, lecture slide deck, or blog adaptation authored by the creators of the other, or
-   - One is a benchmark specification and the other is the paper introducing that benchmark (`Method-B` §2.2).
-2. **External vs. Project-Internal Warrant**: Project-internal application corpora (such as internal question banks or assessment items) provide **organizational/user warrant leads**, not independent external literary warrant. A term appearing only in an internal question bank + one external source must either secure a second independent external source or be explicitly marked as a single-source curriculum-anchored exception (`Method-B` §2.1).
-3. **Foundational Single-Source Exception**: Permitted only when a concept is the primary subject of a dedicated section in the governing textbook or an authoritative national/international standard (e.g., NIST AI 600-1, ISO/IEC 42001, IEEE 7000), recorded with an explicit `warrant_exception_reason`.
+### 2.1 Multi-Lineage Warrant and Heading-Only Ban (Enacted Gate 2)
+Following ANSI/NISO Z39.19-2005 §5.3.5 (and conceptually aligned with ISO 25964-1 concept warrant):
+1. **Two-Lineage `dev` Warrant Rule (`0` single-source exceptions)**: Every new concept in `concepts_add` requires structured `warrant_sources` from **at least two distinct `provenance_family_id` clusters** in the `dev` split across `S1`–`S5`, including **at least one `origin: external` lineage** (non-`MLSysBook`, non-`Harvard CS249r`, non-`StaffML`) and **at least one `source_type: prose` unit** containing explanatory text defining the mechanism (`reconcile.py`). While `Method-B` §2.1 explored a single-source curriculum/standard exception, the enacted protocol (`METHOD.md` Gate 2) allows **zero single-source concept admissions**: single-lineage mechanisms are recorded in `gaps:` until a second independent lineage appears.
+2. **Authorship & Derivation Clustering**: Two sources merge into a single `provenance_family_id` cluster (counting as one lineage, whereas distinct lineages have `< 50%` overlap) when:
+   - Their first/senior author sets overlap by $\ge 50\%$ (`|A_i \cap A_j| / \min(|A_i|, |A_j|) \ge 0.50`, transitive closure; `Method-A` §2.1, `[P]`),
+   - One work is a companion repository, documentation site, lecture adaptation, or tutorial authored by the creators of the other, or
+   - Both belong to project-internal corpora (`pf_mlsysbook_*`, `pf_harvard_cs249r_*`, `pf_staffml_*` — all tagged `origin: internal`, plus single-lab Editor-primary/senior papers in prospective refreshes).
+3. **Heading-Only Warrant Ban**: A syllabus or venue-checklist topic title (`source_type: heading`) may serve as the corroborating second lineage when paired with a `source_type: prose` source that defines the mechanism, but bare headings alone (`0` prose sources) cannot mint a concept or justify extrapolated mechanisms.
 
-### 2.2 Named Entity & Product Exclusion Gate (Z39.19 Clause 6.3.3)
-Named commercial products, specific software packages, hardware SKUs, model releases, and benchmark suites (`vLLM`, `TensorRT-LLM`, `DeepSpeed`, `NVIDIA H100`, `Llama-3`) are **excluded as general taxonomy concepts** (`Method-A` §2.2, `Method-B` §2.4).
-- **Abstraction rule**: Extract the underlying architectural pattern, algorithm, or system mechanism (e.g., `vLLM` $\rightarrow$ *paged attention* and *continuous batching*; `ZeRO` $\rightarrow$ *sharded optimizer state partitioning*).
-- **Alias rule**: Do not map a product name as an exact synonym (`alt_label`) of a general mechanism if the product implements multiple mechanisms (`Method-B` §2.4).
-- **Instance exception**: A named standard or protocol is admissible only when it functions as an open architectural interface standard across independent implementations (e.g., `OpenTelemetry` or `ONNX` when scoped to the open interchange specification, tested via `BTI`).
+### 2.2 Named Entity, Product, Benchmark, and SKU Exclusion Gate (Enacted Gate 3)
+Commercial products, multi-mechanism serving engines/frameworks, hardware SKUs, model releases, and benchmark suites (`vLLM`, `TensorRT-LLM`, `SGLang`, `DeepSpeed`, `PyTorch`, `H100`, `B200`, `MI300X`, `MLPerf`, `benchmark suite`) are **excluded as concepts** (`Z39.19 §6.3.3` project scope policy; `Method-A` §2.2, `Method-B` §2.4):
+- **Mechanism extraction**: Extract the underlying architectural mechanism (`vLLM` $\rightarrow$ `mlsys.paged-kv` and `mlsys.continuous-batching`; `ZeRO` $\rightarrow$ `mlsys.zero-sharding`).
+- **Alias restriction**: Only a named algorithm or single-mechanism implementation that is 1-to-1 synonymous with one mechanism (`PagedAttention` on `mlsys.paged-kv`, `ZeRO` and `FSDP` on `mlsys.zero-sharding`, `CUDA Graphs` on `mlsys.graph-capture-replay`) may be added as an `alias`. Multi-mechanism frameworks and benchmark suites (`vLLM`, `TensorRT-LLM`, `SGLang`, `MLPerf`, `benchmark suite`) are excluded from both concepts and aliases (`MULTI_MECHANISM_SUITE_ALIASES` in `reconcile.py`).
+- **No `BTI` (`instance-of`) relation**: Individual named standards or open interchange formats enter only as general architectural mechanisms when warranted across $\ge 2$ lineages; `BTI` is excluded from the relation schema.
 
-### 2.3 Operational 4-Part Concept-vs-Alias Decision Protocol
-To replace subjective editorial judgment on whether two terms $X$ and $Y$ are synonyms (`alt_label` / `UF`) or distinct concepts (`Method-A` §2.3, `Method-B` §1 Step 10 Test A & §2.5), editors apply four sequential tests:
-1. **Extension & Failure-Mode Identity Test**: Do $X$ and $Y$ denote the same set of system mechanisms, architectural components, or failure modes across the target corpus?
-2. **Differential Indexing Test**: Can the proposer cite at least one concrete syllabus unit, paper section, or diagnostic scenario where indexing with $X$ is informative and indexing with $Y$ would be inaccurate or misleading?
-3. **Operational Distinction Test**: Do $X$ and $Y$ differ in at least one conserved system property (e.g., online vs. offline execution, hardware layer, asymptotic memory/compute trade-off, or control-plane vs. data-plane placement)?
-4. **Warrant Floor on Both Sides**: Do both $X$ and $Y$ independently satisfy the two-source warrant rule?
+### 2.3 Operational 4-Part Concept-vs-Alias Witness & `Z39.19 §8.2` Equivalence Gate (Enacted Gate 5)
+To decide whether candidate $C$ is a separate `Concept`, a typed `alias` on existing concept $P$, or a `gaps:` entry (`Method-A` §2.3, `Method-B` §1 Step 10 & §2.5, enacted in `METHOD.md` Gate 5):
+1. **Criterion (a) — Distinct System Invariant / Envelope**: Does $C$ introduce a distinct system invariant, resource envelope, failure boundary, analytical causal model, or measurement semantics not already fixed by $P$?
+2. **Criterion (b) — Independent Decision Consequence / Trade-Off**: Does $C$ carry an independent failure mode, trade-off, or engineering decision consequence not identical to $P$?
+3. **Criterion (c) — Taxonomic / Causal Profile**: Is $C$ either a valid `all-and-some` (`specializes`) child of $P$ with its own differentiating properties or an endpoint of a causal/associative edge not inherited from $P$?
+4. **Criterion (d) — Structured Differential Indexing Witness & Two-Lineage Warrant**: Can the proposer supply a 6-key `witness_justification` (`compared_concept`, `criterion_a`/`b`/`c`, and distinct `scenario_a` and `scenario_b`) **and** $\ge 2$-lineage `dev` warrant (`Gate 2`)?
 
-**Decision rule**: $X$ and $Y$ are admitted as **separate concepts** if and only if Tests 2, 3, and 4 all hold. Otherwise, the lower-frequency or less standard surface form is recorded as an `alt_label` (`UF`) on the preferred concept.
+**Enacted three-way decision & tiebreak rule**:
+- **Separate `Concept`**: Admitted when Criteria (a)–(d) and Gate 2 ($\ge 2$ `dev` lineages) all hold.
+- **Unwarranted distinct mechanism $\rightarrow$ `gaps:` (never `aliases`)**: When a candidate denotes a substantively distinct mechanism or methodology under Criteria (a)–(c) (for example, `adaptive stress testing`) **but lacks two-lineage `dev` warrant**, it routes to `gaps:`, **never** to `aliases`. Likewise, constituent execution phases (`prefill phase` vs. `decode phase`), distinct analytical methodologies (`FMEA`, `FTA`, `STPA` under `Hazard analysis`), planning artifacts (`preregistered analysis plan`), and method-produced artifacts (`unsafe control action` under `STPA`) are never aliased onto a parent.
+- **Typed `alias` (`synonym`, `quasi-synonym`, `acronym`, or `< 2`-lineage `upward-posting`)**: Permitted only when the surface term is verbatim-attested, qualified against cross-area homographs (`Z39.19 §5.3.1, §6.3.2`, e.g., `dynamic request batching` on `mlsys.batching`), and either denotes the same mechanism (`synonym` / `acronym` / `Z39.19 §8.2.3` `quasi-synonym` such as `selective abstention` on `mlsys.selective-prediction`) or is a strict `all-and-some` narrower variant (`Z39.19 §8.2.4` `upward-posting` such as `grammar-constrained decoding` on `mlsys.constrained-decoding`) with **`dev_lineages_requiring_separation` $\in \{0, 1\}$ (`< 2` `dev` lineages)**. Both `upward-posting` and `quasi-synonym` require manifest-verified `checked_dev_units` and `scope_note` in `reconcile.py`.
 
-### 2.4 Compound Term Splitting vs. Pre-Coordination (Z39.19 Clause 7, ISO 25964-1 Clause 7.3)
-A multi-word compound term $C$ (e.g., *quantized KV-cache offloading*) is retained as a single pre-coordinated concept **only if** at least one of the following holds (`Method-A` §2.3, `Method-B` §2.5):
-1. **Non-compositional semantics**: The meaning of $C$ is not the intersection of its constituent concepts.
-2. **Lexicalized mechanism with distinct trade-offs**: $C$ names a specific algorithm, protocol, or system mechanism with its own failure modes and literature identity (e.g., *speculative decoding*, *continuous batching*, *activation checkpointing*).
-3. **High co-occurrence utility**: $C$ appears as an atomic unit across $\ge 3$ independent provenance families (`[P]`) and splitting it would lose the specific engineering relationship between the modifiers.
+### 2.4 Compound Term Factoring vs. Pre-Coordination (Enacted Gate 4, `Z39.19 §7`)
+A multi-word compound term $C$ is admitted as a pre-coordinated concept only when (`Method-A` §2.3, `Method-B` §2.5):
+1. It names a lexicalized algorithm, protocol, or system mechanism with non-compositional behavior or its own failure mode/trade-off (`speculative decoding`, `continuous batching`, `activation checkpointing`), **and**
+2. It is institutionalized as a unit across **$\ge 2$ distinct `provenance_family_id` lineages** in `dev` (`[P]`, aligned with Gate 2 in `METHOD.md`; `Method-A` originally proposed $\ge 3$ before calibration to $\ge 2$).
 
-Otherwise, $C$ is factored into existing atomic concepts (`USE A + B` post-coordination recipe). In particular, **metric $\times$ workload** combinations (e.g., *serving P99 latency*, *training throughput*) and **mechanism $\times$ generic modifier** combinations are factored rather than admitted as distinct concepts.
+Generic **`metric × workload`** combinations (`inference throughput`, `inference energy cost`, `training power`) are factored into post-coordination rather than admitted, except for the explicit stage-specific structural metric allowlist (`TTFT`, `TPOT`, `inter-token latency`, `goodput`, `MFU`, `model bandwidth utilization`, `request throughput`, `latency percentiles`).
 
 ---
 
 ## 3. Enumerated Sampling Frame & Split Hygiene
 
-**Source provenance**: Synthesized from `Method-A` §3 (`D3` = 5.0) and `Method-B` §3 (`D3` = 4.0–4.5). Full operational details are in `taxonomy/method-study/sampling-frame.md`.
+**Source provenance**: Synthesized from `Method-B` §3 (`D3` cross-family mean `4.75/5.0`, all-judge `4.667/5.0`), `Method-A` §3 (`D3` cross-family mean `4.50/5.0`, all-judge `4.667/5.0`), and `Method-C` §3.2 (`D3` cross-family mean `3.75/5.0`, all-judge `4.00/5.0` — scale representation across cloud, enterprise/workstation, and edge/TinyML). Full details live in `taxonomy/method-study/sampling-frame.md`.
 
-1. **Five Stratified Source Populations**:
-   - `S1` — Textbooks & Reference Monographs (curriculum and conceptual backbone warrant)
-   - `S2` — Graduate & Advanced Undergraduate University Courses (pedagogical syllabus warrant)
-   - `S3` — Peer-Reviewed Systems & ML Venues (MLSys, OSDI, SOSP, NSDI, ASPLOS, ISCA, NeurIPS/ICML/ICLR systems tracks; literary warrant)
-   - `S4` — Practitioner Artifacts, Postmortems, Engineering Design Docs & Role Archetypes (operational and diagnostic warrant)
-   - `S5` — Standards, Regulatory Frameworks & Benchmark Specifications (normative and assurance warrant: NIST, ISO/IEC, IEEE, OWASP, MLPerf)
-2. **Cluster-Level Split Allocation**:
-   - Every source unit is assigned a `provenance_family_id` (`cluster_id`) before random splitting.
-   - Splits (`dev` for concept discovery, `held_out_test` for blind coverage and agreement evaluation, and `reserve` for replacing burned test slices) are drawn at the **cluster level** using a fixed PRNG seed recorded in `preregistration.yaml` (`Method-A` §3.3).
-3. **Burned-Split Rule**:
-   - Once a `held_out_test` slice is inspected to diagnose specific missing concepts and those concepts are added to the taxonomy, that slice is marked **burned** for measuring generalizable coverage of the resulting patch (`Method-A` §3.3, `Method-B` §3.4).
+1. **Five Stratified Source Populations (`S1`–`S5`)**: `S1` Textbooks & Reference Monographs, `S2` University Courses, `S3` Peer-Reviewed Systems & ML Venues, `S4` Practitioner Artifacts & Diagnostic Scenarios, and `S5` Standards, Assurance Guidance & Benchmark Specifications.
+2. **Whole-Cluster Split Partition (`<campaign>/sampling-manifest.json`)**:
+   - Every unit declares `unit_id`, `provenance_family_id`, `stratum` (`S1`–`S5`), `split` (`dev`, `held_out_test`, `reserve`), `origin` (`external` | `internal`), and `source_type` (`prose` | `heading`).
+   - Prospective refreshes target `60%` `dev`, `25%` `held_out_test`, and `15%` `reserve` at the whole-cluster level (`0` cross-split clusters; diagnostic pre-checks use separate one-off slices burned to `dev` upon inspection per `taxonomy-refresh.md` Step 1b).
+3. **Global Cluster-Level Burn Rule**:
+   - Once any unit in a `held_out_test` slice is inspected to diagnose gaps or compare vocabularies, **every unit sharing its `provenance_family_id` cluster across all areas** is promoted to `dev` (`held_out: false` on venue checklists) and may never again be cited as an unexposed held-out test.
 
 ---
 
 ## 4. Structural Invariants, Relationships, and Lifecycle Governance
 
-**Source provenance**: Synthesized from `Method-A` §4 (`D4` = 4.5–5.0) and `Method-B` §4 (`D4` = 4.5).
+**Source provenance**: Synthesized from `Method-B` §4 (`D4` cross-family mean `4.50/5.0`, all-judge `4.667/5.0`) and `Method-A` §4 (`D4` cross-family mean `4.25/5.0`, all-judge `4.50/5.0`).
 
-### 4.1 Polyhierarchy with Single Primary Backbone (`home_subject_id`)
-- Every concept belongs to exactly one primary subject (`home_subject_id`) forming a spanning tree for navigation, rollups, and ownership (`Method-A` §4.1, `Method-B` §4.2).
-- Cross-cutting subjects link existing concepts via `secondary_concepts` rather than minting duplicate concept IDs.
-- Concept-to-concept `specializes` (`skos:broader`) forms a cycle-free DAG that must pass the **generic (`BTG`) all-and-some is-a test** ("Every instance of $C$ is an instance of $P$ in all contexts", Z39.19 Clause 8.3.1); while `Method-A`/`Method-B` also discussed `BTP`, in `ml-systems-taxonomy.yml` system components participate in multiple assemblies so `part-of` is exported as an associative relation under `skos:related` per Z39.19 Clause 8.3.3.2 (`METHOD.md`).
+### 4.1 Polyhierarchy with Single Primary Home (`home`)
+- Every concept declares exactly one primary subject row (`home`), forming a clean partition across `101` subjects in `20` areas (`Method-A` §4.1, `Method-B` §4.2). Cross-area relevance uses `secondary_concepts` with an explicit `rationale` (`reconcile.py`).
+- Concept-to-concept `specializes` (`rdfs:subPropertyOf skos:broader`) forms a cycle-free DAG verified by the 3-step **generic (`BTG`) `all-and-some` test** (`Z39.19 §8.3.1`). Because ML system components participate in multiple assemblies, `part-of` is modeled as a cycle-checked associative relation exported under `skos:related` (`Z39.19 §8.3.3.2`), and `BTI` is not used.
 
-### 4.2 Constrained Associative Relations (`related` / `RT`)
-To prevent "everything-is-related-to-everything" graph drift (`Method-A` §4.3, `Method-B` §4.3; implemented in `ml-systems-taxonomy.yml` via the 16 non-hierarchical LinkML relation verbs plus explicit `conditions` sentences):
-- Every associative relation edge (`skos:related`) must be disjoint from the transitive closure of `specializes` (`SKOS S27` / Z39.19 Clause 8.4).
-- Every associative edge requires an explicit rationale/condition sentence matching one of five typed semantic patterns (realized via the 16 controlled verbs in `ml-systems-taxonomy.yml`):
-  1. `producer_consumer` ($A$ produces artifact consumed by $B$)
-  2. `tradeoff_dual` ($A$ and $B$ trade off on a shared resource bound)
-  3. `mitigates_failure_of` ($A$ detects or mitigates a failure mode of $B$)
-  4. `co_deployed_in_pipeline` ($A$ and $B$ are coupled stages in the same runtime pipeline)
-  5. `evaluates_or_verifies` ($A$ measures or bounds property $B$)
+### 4.2 Controlled 17-Verb Relationships & Incident-Edge Preservation
+- Relationships use the closed 17-verb LinkML vocabulary (`specializes` + 16 associative/causal/evaluation/composition verbs under `skos:related`), disjoint from `specializes` transitive closure (`SKOS S27` / `Z39.19 §8.4`), with mandatory `predicate` and `conditions` strings verified in both forward and inverse literal readings.
+- Redefining an existing concept requires an explicit `edge_impact_note` (`reconcile.py` & `term-provenance.yml`) verifying that every incident relationship remains literally true without narrowing or shifting extension.
 
-### 4.3 Concept Scope Notes (`description`)
-Every concept scope note follows a two-part **Genus–Differentia + Boundary** structure (`Method-B` §1 Step 9):
-- **Clause 1 (Genus + Mechanism)**: States what kind of concept it is (algorithm, runtime mechanism, hardware structure, failure mode, assurance artifact, metric) and how it operates.
-- **Clause 2 (Boundary / Contrast)**: Where potential overlap exists with a sibling or neighbor, states what the concept excludes or how it differs.
+### 4.3 Non-Circular Genus–Differentia Definitions & Compiler Gates
+- Every concept `definition` is a single non-circular genus-differentia sentence stating what kind of mechanism, structure, failure mode, or metric it is and what it changes in the system (`Z39.19 §6.2.2`; post-patch `(effective_label, effective_defn)` circularity enforced by `reconcile.py`).
+- `./binder/binder concepts check` enforces LinkML schema conformance, `SKOS S14` (`prefLabel` cardinality) plus global case-folded preferred/entry-term uniqueness across active and retired concepts (`Z39.19 §5.3.1`), `SKOS S13` (`prefLabel`/`altLabel` disjointness), hierarchical DAG acyclicity, polarity consistency, and `taxonomy/term-provenance.yml` SHA-256 binding (`pytest`).
 
-### 4.4 Automated Structural Gate (`binder concepts check`)
-All existing structural invariants (`S14` preferred label uniqueness within scope, `alt_label` disjointness, `specializes` DAG acyclicity, home-rule disjointness, dangling reference zero-tolerance, single-child warning/justification) remain hard CI gates.
-
-### 4.5 Lifecycle Operations & Typed Forward-Resolution Classes
-Concept IDs (`mlsys.*`) are permanent and never reused (`Method-A` §4.6, `Method-B` §4.7–4.8):
-- **Label refinement** (same meaning/extension): Update `label`, move old label to `alt_label`.
-- **Meaning-changing scope shift**: If a proposed change alters which items are indexed by $>20\%$ (`[P]`), retire the old ID and mint a new ID rather than silently mutating historical tags.
-- **Typed retirement resolution (`resolution_class`)**:
-  - `auto` (1-to-1 exact replacement): Downstream tags can be migrated automatically to `replaced_by`.
-  - `broaden` (N-to-1 merge into broader parent): Downstream tags migrate with a loss-of-specificity notice.
-  - `review` (1-to-N split into narrower children): Downstream tags are flagged for human/automated re-indexing across the new children (`split_into`) rather than silently assigned to only one child.
+### 4.4 Permanent Identities, Split Consistency, and Retirement Schema
+Concept IDs (`mlsys.*`) are permanent and never reused (`Method-A` §4.6, `Method-B` §4.7–4.8, `METHOD.md`):
+- **Label refinement (unchanged extension)**: Update `label` and retain the former label in `aliases`.
+- **1-to-N concept split rule (unified with `METHOD.md`)**: When a coarse concept is split into narrower mechanisms and one mechanism clearly retains the dominant share of existing book/question references without contradicting historical tags, retain the existing `mlsys.*` ID on that dominant half and mint new `mlsys.*` ID(s) for the split-off mechanism(s), re-auditing downstream tags. When a split alters extension symmetrically ($>20\%$ bilateral shift `[P]`) such that neither child preserves existing tags cleanly, retire the old ID (`concepts_retire`) pointing `replaced_by` to the primary replacement and re-tag downstream consumers explicitly.
+- **Enacted `0.4-draft` `RetiredConcept` vs. prospective `1.0` fields**: In `0.4-draft` (`mlsys-taxonomy.linkml.yml` and `apply.py`), `RetiredConcept` persists `id`, former `label`, former `aliases`, transitive-resolved active `replaced_by`, `version`, and `reason`. Adding machine-typed `resolution_class` (`auto`, `broaden`, `review`) and multivalued `split_into` slots is recorded as a **prospective `1.0` LinkML schema extension** for external board review (`candidate-experts.md`).
 
 ---
 
-## 5. Evaluation Protocol, Metrics, and Anti-Gaming Controls
+## 5. Evaluation Protocol, Empirical Calibration Findings, and Anti-Gaming Controls
 
-**Source provenance**: Synthesized from `Method-A` §5–6 (`D5` = 5.0, `D6` = 4.5–5.0) and `Method-B` §5–6 (`D5` = 4.5, `D6` = 4.5–5.0).
+**Source provenance**: Synthesized from `Method-B` §5–6 (`D5` cross-family mean `4.75/5.0` [all-judge `4.667`], `D6` `4.75/5.0` [`4.667`], `D7` `4.75/5.0` [`4.667`]) and `Method-A` §5–6 (`D5` `4.00/5.0` [`4.167`], `D6` `4.25/5.0` [`4.333`], `D7` `4.00/5.0` [`4.167`]).
 
-### 5.1 Two-Pass Blind Coverage Protocol with Seeded-Gap Sensitivity
-To eliminate single-judge confirmation bias when measuring coverage on held-out syllabi, papers, and standards (`Method-A` §5.6, `Method-B` §5.3):
-- **Pass 1 (Vocabulary-Blind Topic Extraction)**: An extractor agent with no access to the taxonomy extracts the atomic technical topics ($u_1, \dots, u_m$) taught or specified in each held-out unit, with verbatim quotes.
-- **Pass 2 (Double-Judged Expressibility Matching)**: Two independent read-only judges map each extracted topic $u_j$ against the candidate taxonomy into three grades:
-  - `Exact` ($1.0$): Directly represented by a single concept or alias.
-  - `Post-coord` ($0.5$): Expressible as a conjunction of $\le 2$ existing concepts (`Method-B` §5.3; operationalized as 2–3 existing concepts in `score_phase6.py` and `METHOD.md`) without loss of technical specificity.
-  - `Missing` ($0.0$): Requires either a broad ancestor catch-all or exceeds the post-coordination bound, or is absent.
-- **Seeded-Gap Sensitivity Audit (`Method-A` §5.6)**: Before trusting coverage scores, create a shadow copy of the vocabulary with $k$ randomly removed concepts (`seed` recorded) and run Pass 2 on units known to require those concepts. The evaluation protocol is valid only if it flags $\ge 85\%$ of the seeded removals as `Missing` or degraded (`[P]`).
+### 5.1 Two-Pass Blind Coverage & Phase 6 Seeded-Gap Sensitivity Finding
+To test vocabulary completeness on unexposed `origin: external` `held_out_test` clusters (`Method-A` §5.6, `Method-B` §5.3):
+- **Pass 1 (Vocabulary-Blind Topic Extraction)**: Extract central mechanisms from external held-out units in an isolated directory with no access to the taxonomy.
+- **Pass 2 (Two-Family Expressibility Scoring)**: Two distinct model families score each unit (`Exact = 1.0` single concept/alias, `Post-coord = 0.5` conjunction of `2`–`3` concepts without specificity loss, `Missing = 0.0`), reporting both `any-judge` and conservative `consensus` (`both == 1.0`) binary coverage, binary coverage $\kappa$, and `10,000`-resample cluster-bootstrap 95% CIs by `provenance_family_id`.
+- **Seeded-Gap Sensitivity Audit & Empirical Phase 6 Limitation (`Method-A` §5.6)**: `Method-A` proposed removing $k$ concepts (`k = 10` in Phase 6) and requiring Pass 2 to degrade $\ge 85\%$ (`[P]`) of baseline-covered judgments citing those concepts. **Empirical Phase 6 result (`study-receipts-summary.json`):** unrestricted LLM judges degraded only **`24 / 40 = 60.0%`** of affected judgments on `Vocab-Y` and **`16 / 29 = 55.2%`** on `Vocab-X` — **failing the $\ge 85\%$ sensitivity target** because judges compensated for deleted leaf concepts by substituting broader parent/neighbor concepts or post-coordination (`0.5`). Consequently, `METHOD.md` and `taxonomy-refresh.md` Step 5b treat unpinned LLM binary coverage as over-inclusive on fine-grained deletions, rely on conservative two-judge `Exact` (`1.0`) consensus plus pinned concept-ID verification, and mandate reporting seeded-gap sensitivity alongside every held-out coverage run.
 
 ### 5.2 Multi-Rater Indexing Agreement + Specificity Counter-Metrics
-On a stratified sample of held-out artifacts indexed independently by two blind indexers:
-1. **Subject-level agreement**: Cohen's $\kappa$ on primary subject assignment (`target >= 0.70`).
-2. **Concept-set overlap**: Hooper's (1965) indexing consistency $H(A,B) = \frac{|A \cap B|}{|A \cup B|}$ and Rolling's (1981) consistency $R(A,B) = \frac{2|A \cap B|}{|A| + |B|}$ (`target H >= 0.40`, `R >= 0.57`).
-3. **Chance-corrected multi-label set agreement**: Krippendorff's $\alpha_{\text{MASI}}$ using Passonneau's (2006) *Measuring Agreement on Set-valued Items* (MASI) distance $d_{\text{MASI}}(A,B) = 1 - J(A,B) \cdot M(A,B)$ without double-squaring (`Method-A` §5.4).
-4. **Anti-Gaming Specificity Coupling (`Method-B` §6.7, `Method-C` §6.4)**: Because $\kappa$, Hooper, and Rolling can be artificially inflated by collapsing specific concepts into coarse parents or over-applying root concepts, agreement is valid only when accompanied by:
-   - **Leaf/Specific-Concept Ratio**: Fraction of assigned tags that are leaf concepts or depth $\ge 2$ (`must not drop`).
-   - **Max Single-Concept Concentration ($p_{\max}$)**: No single concept may account for $>15\%$ of assignments in an area (`Method-B` §6.1).
-   - **Effective Vocabulary Utilization**: Fraction of area concepts used at least once on the evaluation corpus.
+On held-out scenarios indexed independently by two blind taggers (`1` primary subject, `0`–`3` concepts):
+1. **Primary subject agreement**: Cohen's $\kappa$ (`release floor >= 0.70` LLM, `>= 0.65` 12-human pre-`1.0` study).
+2. **Concept-set consistency**: Both conditional (`both non-empty`) and all-item ($J(\emptyset,\emptyset)=1$, $J(A,\emptyset)=0$) **Hooper (1965)** and **Rolling (1981)** overlap (`LLM floors >= 40% / >= 57%` conditional, `>= 35% / >= 50%` all-item), paired with empty-assignment rate ($\le 20\%$).
+3. **Chance-corrected set agreement**: **Krippendorff's $\alpha_{\text{MASI}}$** using Passonneau's (2006) MASI distance $d_{\text{MASI}}(A,B) = 1 - J(A,B)\cdot M(A,B)$ (`LLM floor >= 0.40`).
+4. **Anti-Gaming Specificity Counter-Metrics (`Method-B` §6.7, `Method-C` §6.4)**:
+   - **Leaf-concept specificity ratio**: Share of assigned concept tags whose concept has `0` incoming `specializes` children (in Phase 6 `IDX`, `Vocab-Y` = `148 / 183 = 80.9%`, `Vocab-X` = `186 / 216 = 86.1%`).
+   - **Max single-concept share ($p_{\max}$)**: $\le 15.0\%$ (`Vocab-Y` = `9.84%`, `Vocab-X` = `6.94%`).
+   - **Effective vocabulary utilization**: Distinct concepts assigned divided by active area concepts (`Vocab-Y` = `44 / 125 = 35.2%`, `Vocab-X` = `55 / 111 = 49.5%`).
 
 ---
 
-## 6. Traceability Matrix: Synthesized Method vs. Current `taxonomy/METHOD.md`
+## 6. Traceability Matrix: Pre-Study Baseline vs. Synthesized Design vs. Enacted `METHOD.md`
 
-| Mechanism | Current `taxonomy/METHOD.md` (v0.4-draft) | Synthesized Method | Source Proposal & Rubric Basis |
+*Rubric scores below are exact cross-family means (`dim_means_cross`, excluding self-ratings; all-judge means in `study-receipts-summary.json`: `Method-B` `37.25/40` cross / `37.00/40` all, `Method-A` `34.00/40` cross / `35.33/40` all, `Method-C` `25.75/40` cross / `29.83/40` all).*
+
+| Mechanism | Pre-study `0.4-draft` `METHOD.md` (before Phase 7) | Enacted Post-Study `METHOD.md` & `reconcile.py` | Blind Proposal & Exact Cross-Family Score |
 | :--- | :--- | :--- | :--- |
-| **1. Sampling frame & split hygiene** | Ad-hoc syllabus/benchmark checklist; no formal `dev`/`test` split or cluster deduplication | 5-stratum enumerated frame (`S1`–`S5`), `provenance_family_id` cluster split (`dev`/`test`/`reserve`), burned-split rule | `Method-A` §3 (`D3`=5.0), `Method-B` §3 (`D3`=4.25) |
-| **2. Two-source warrant independence** | Counts two sources without authorship/derivation deduplication; treats StaffML on par with external warrant | Requires 2 distinct `provenance_family_id` clusters ($\le 50\%$ author overlap, non-derivative); internal questions are leads requiring external corroboration | `Method-A` §2.1 (`D2`=4.75), `Method-B` §2.1–2.2 (`D2`=4.75) |
-| **3. Concept-vs-alias & compound splitting** | Editorial judgment (`README.md` notes it is not an operational rule) | Operational 4-part Concept-vs-Alias test + 3-criterion Compound Term Splitting gate + metric$\times$workload factoring | `Method-B` §1 Step 10 & §2.5 (`D2`=4.75), `Method-A` §2.3 (`D2`=4.75) |
-| **4. Associative relation discipline** | `related` / `contrasts_with` / `prerequisite` checked for symmetry/acyclicity only | Requires disjointness from `specializes` closure (`S27`) + 1 of 5 typed justification templates | `Method-A` §4.3 (`D4`=4.75), `Method-B` §4.3 (`D4`=4.5) |
-| **5. Coverage evaluation** | Single judge; no vocabulary-blind extraction pass; no sensitivity check | Two-pass protocol (Pass 1 blind topic extraction, Pass 2 double-judged matching) + seeded-gap sensitivity audit | `Method-A` §5.6 (`D5`=5.0, `D6`=4.75), `Method-B` §5.3 (`D5`=4.5) |
-| **6. Agreement & anti-gaming** | Subject $\kappa$ and conditional Hooper/Rolling on the 300-question StaffML samples | Adds $\alpha_{\text{MASI}}$ (Passonneau 2006), all-item Hooper/Rolling, and empty-set accounting + couples agreement with leaf-specificity ratio and max concentration ($p_{\max}$) | `Method-A` §5.4 (`D5`=5.0), `Method-B` §5.2 & §6.7 (`D6`=4.75) |
-| **7. Retirement resolution** | Untyped `replaced_by` list | Typed `resolution_class` (`auto`, `broaden`, `review`) + $>20\%$ extension-shift rule | `Method-A` §4.6 (`D4`=4.75), `Method-B` §4.7–4.8 (`D4`=4.5) |
+| **1. Sampling frame & split hygiene** | Checklist-level `held_out` flag only; no `provenance_family_id` clustering or `reserve` pool | 5-stratum frame (`S1`–`S5`), whole-cluster `dev`/`held_out_test`/`reserve` in `sampling-manifest.json`, `stage_reviewer_workspace.py` `dev` isolation, global cluster burn | `Method-B` §3 (`D3 = 4.75`), `Method-A` §3 (`D3 = 4.50`), `Method-C` §3.2 (`D3 = 3.75`) |
+| **2. Two-lineage warrant & prose check** | Two sources without authorship clustering or internal/external separation | $\ge 2$ distinct `dev` `provenance_family_id` clusters (`< 50%` author overlap), $\ge 1$ `origin: external`, $\ge 1$ `source_type: prose`, `0` single-source exceptions | `Method-A` §2.1 (`D2 = 4.50`), `Method-B` §2.1–2.2 (`D2 = 4.50`) |
+| **3. Concept-vs-alias & compound gates** | Unstructured editorial judgment; `MLPerf` / `benchmark suite` / `preregistered analysis plan` leaked into aliases | 6-key `witness_justification`, manifest-checked `alias_metadata` (`upward-posting` `< 2` `dev` lineages & `quasi-synonym`), $\ge 2$-lineage compound gate, unwarranted concepts $\rightarrow$ `gaps:` | `Method-B` §1 & §2.5 (`D2 = 4.50`), `Method-A` §2.3 (`D2 = 4.50`) |
+| **4. Structural & provenance gates** | 17 LinkML verbs + `SKOS S27`; no committed provenance sidecar binding `ml-systems-taxonomy.yml` | Adds `edge_impact_note`, `remove_aliases_rationale`, former `label`/`aliases` on `RetiredConcept`, in-process `verify_campaign` in `apply.py`, and SHA-256-bound `taxonomy/term-provenance.yml` (`resolution_class`/`split_into` queued for `1.0`) | `Method-B` §4 (`D4 = 4.50`), `Method-A` §4.3 & §4.6 (`D4 = 4.25`) |
+| **5. Coverage & seeded-gap audit** | Single-judge checklist status without seeded-gap sensitivity calibration | Two-family blind scoring + cluster-bootstrap CIs + mandatory seeded-gap sensitivity audit (disclosing Phase 6 `60.0%` / `55.2%` shortfall vs. `>= 85%` target) | `Method-B` §5.3 (`D5 = 4.75`, `D6 = 4.75`), `Method-A` §5.6 (`D5 = 4.00`, `D6 = 4.25`) |
+| **6. Agreement & specificity coupling** | Subject $\kappa$ and conditional Hooper/Rolling on `0.2-draft` StaffML samples | Adds all-item Hooper/Rolling, $\alpha_{\text{MASI}}$, empty-set ceiling ($\le 20\%$), leaf-concept ratio (`0` `specializes` children), $p_{\max} \le 15\%$, and `240`-item / `40`-anchor 12-human `1.0` protocol | `Method-B` §5.2 & §6.7 (`D5 = 4.75`, `D6 = 4.75`), `Method-A` §5.4 (`D5 = 4.00`), `Method-C` §6.4 (`D6 = 3.00`) |

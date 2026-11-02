@@ -436,4 +436,61 @@ def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Pa
         compile_json_schema(tmp_path)
 
 
+def test_term_provenance_sidecar_binds_taxonomy_and_active_records():
+    import hashlib
+
+    tax_path = REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml"
+    prov_path = REPO_ROOT / "taxonomy/term-provenance.yml"
+    assert prov_path.exists(), "taxonomy/term-provenance.yml must exist (written by taxonomy-refresh/apply.py)"
+    prov_text = prov_path.read_text()
+    assert "/" + "Users/" not in prov_text and "/" + "home/" not in prov_text
+
+    prov = load_taxonomy_yaml(prov_path)
+    assert isinstance(prov, dict)
+    assert prov.get("schema_version") == 1
+
+    raw_tax = load_taxonomy_yaml(tax_path)
+    assert isinstance(raw_tax, dict)
+    expected_sha = hashlib.sha256(tax_path.read_bytes()).hexdigest()
+    assert prov.get("taxonomy_sha256") == expected_sha, (
+        "taxonomy/ml-systems-taxonomy.yml was modified outside apply.py; "
+        "re-run reconcile.py and apply.py so taxonomy/term-provenance.yml stays bound"
+    )
+    assert prov.get("taxonomy_version") == str(raw_tax.get("version"))
+
+    rec = prov.get("last_reconcile_receipt")
+    assert isinstance(rec, dict)
+    assert rec.get("receipt_schema_version") == 3
+    assert rec.get("mode") == "full-3family-reconcile"
+    r2_shas = rec.get("r2_reviews_sha256")
+    assert isinstance(r2_shas, dict) and set(r2_shas.keys()) == {"claude-r2.yaml", "codex-r2.yaml", "gemini-r2.yaml"}
+
+    concepts_by_id = {c["id"]: c for c in raw_tax.get("concepts", [])}
+    rows_by_id = {r["id"]: r for a in raw_tax.get("areas", []) for r in a.get("rows", [])}
+
+    for cid, cprov in (prov.get("concepts") or {}).items():
+        assert cid in concepts_by_id, f"term-provenance concept {cid} is not active in ml-systems-taxonomy.yml"
+        active_aliases = set(concepts_by_id[cid].get("aliases") or [])
+        for ak, ameta in (cprov.get("alias_metadata") or {}).items():
+            assert ak in active_aliases, f"term-provenance alias {ak!r} on {cid} missing from active aliases"
+            assert isinstance(ameta, dict) and ameta.get("type") in {
+                "synonym",
+                "quasi-synonym",
+                "acronym",
+                "upward-posting",
+            }
+        for rk, rrat in (cprov.get("removed_aliases") or {}).items():
+            assert rk not in active_aliases, f"removed alias {rk!r} is still present on {cid}"
+            assert isinstance(rrat, str) and len(rrat) >= 15
+
+    for rid, sprov in (prov.get("subjects") or {}).items():
+        assert rid in rows_by_id, f"term-provenance subject {rid} is not in ml-systems-taxonomy.yml"
+        active_sec = set(rows_by_id[rid].get("secondary_concepts") or [])
+        for scid, srat in (sprov.get("secondary_concepts_rationale") or {}).items():
+            assert scid in active_sec, f"term-provenance secondary concept {scid} missing from {rid}"
+            assert scid in concepts_by_id
+            assert isinstance(srat, str) and len(srat) >= 15
+
+
+
 
