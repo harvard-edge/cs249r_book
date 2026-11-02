@@ -24,6 +24,7 @@ INTERNAL_ONLY = {
     "coverage",
     "agreement",
     "schema",
+    "METHOD.md",
 }
 
 # Explicit allow-list of published Quarto pages, scripts, styles, and compiled outputs staged into site/taxonomy/.
@@ -33,6 +34,8 @@ PUBLISH_ITEMS = {
     "atlas.js",
     "atlas.yml",
     "catalog.json",
+    "concept",
+    "dataset",
     "downloads",
     "explorer.css",
     "explorer.js",
@@ -50,6 +53,8 @@ PUBLISH_ITEMS = {
     "framework-table.csv",
     "index.qmd",
     "maps",
+    "relation",
+    "scheme",
     "study.css",
     "study.js",
     "taxonomy-reference.md",

@@ -52,6 +52,8 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
     areas = [(rows[x][1]["code"], rows[y][1]["code"]) for x, y in subjects if x in rows and y in rows]
     both = [n for n in items if a[n].get("concepts") and b[n].get("concepts")]
     jaccard = [len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / len(set(a[n]["concepts"]) | set(b[n]["concepts"])) for n in both]
+    # Rolling (1981): 2c / (A + B). Hooper (1965) is c / (A + B - c), which is the Jaccard index above.
+    rolling = [2 * len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / (len(set(a[n]["concepts"])) + len(set(b[n]["concepts"]))) for n in both]
 
     def compatible(n):
         x, y = a[n], b[n]
@@ -66,6 +68,8 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
             "any_shared_concept_pct": pct(sum(j > 0 for j in jaccard), len(both)),
             "same_concept_set_pct": pct(sum(j == 1 for j in jaccard), len(both)),
             "mean_jaccard": round(sum(jaccard) / len(jaccard), 3) if jaccard else 0.0,
+            "hooper_consistency_pct": round(100 * sum(jaccard) / len(jaccard), 1) if jaccard else 0.0,
+            "rolling_consistency_pct": round(100 * sum(rolling) / len(rolling), 1) if rolling else 0.0,
             "compatible_pct": pct(sum(compatible(n) for n in items), len(items))}
 
 

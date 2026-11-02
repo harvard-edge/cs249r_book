@@ -61,3 +61,13 @@ def test_retired_identities_and_missing_items_are_errors(repo):
     assert any("every sample item exactly once" in e for e in errors)
     assert any("duplicate concept tags" in e for e in errors)
     assert any("held_out true or false" in e for e in errors)
+
+
+def test_hooper_and_rolling_follow_their_formulas():
+    from core.taxonomy_agreement import score_run
+    rows = {"s": ({}, {"code": "F1"})}
+    a = {1: {"subject": "s", "concepts": ["x", "y"]}}
+    b = {1: {"subject": "s", "concepts": ["y", "z"]}}
+    scores = score_run(a, b, rows, {})
+    assert scores["hooper_consistency_pct"] == pytest.approx(100 / 3, abs=0.1)  # c / (A + B - c)
+    assert scores["rolling_consistency_pct"] == 50.0  # 2c / (A + B)
