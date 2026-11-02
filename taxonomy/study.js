@@ -321,7 +321,7 @@
     const fw = data.framework;
     const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
     $('bok-cite-text').textContent = citation;
-    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review`;
+    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review · <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml">Suggest a change on GitHub</a>`;
     $('bok-copy-cite').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(citation); $('bok-copy-cite').textContent = 'Copied'; } catch { $('bok-copy-cite').textContent = 'Select the text to copy'; }
       setTimeout(() => { $('bok-copy-cite').textContent = 'Copy citation'; }, 1800);
