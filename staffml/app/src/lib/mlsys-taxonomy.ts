@@ -117,14 +117,15 @@ function buildSubject(id: string, qs: RawQuestion[]): Subject {
   };
 }
 
-const _areas: TaxArea[] = labels.areas
+const _allAreas: TaxArea[] = labels.areas
   .map((a) => {
-    const topics = a.subjects
-      .filter((sid) => bySubject.has(sid))
-      .map((sid) => buildSubject(sid, bySubject.get(sid)!));
+    const allTopics = a.subjects
+      .filter((sid) => Boolean(labels.subjects[sid]))
+      .map((sid) => buildSubject(sid, bySubject.get(sid) ?? []));
+    const activeTopics = allTopics.filter((t) => t.questionCount > 0);
     const levels: Record<string, number> = {};
     const zones: Record<string, number> = {};
-    for (const t of topics) {
+    for (const t of activeTopics) {
       for (const [k, n] of Object.entries(t.levels)) levels[k] = (levels[k] || 0) + n;
       for (const [k, n] of Object.entries(t.zones)) zones[k] = (zones[k] || 0) + n;
     }
@@ -133,19 +134,22 @@ const _areas: TaxArea[] = labels.areas
       slug: a.slug,
       name: a.short,
       code: a.id,
-      questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
-      topicCount: topics.length,
-      topics,
+      questionCount: activeTopics.reduce((s, t) => s + t.questionCount, 0),
+      topicCount: activeTopics.length,
+      topics: activeTopics,
       levels, zones,
       group: a.group,
       groupId: a.group_id,
       groupCode: a.group_code,
       question: a.question,
     };
-  })
-  .filter((a) => a.topicCount > 0);
+  });
 
-const _subjects = new Map(_areas.flatMap((a) => a.topics.map((t) => [t.id, t] as const)));
+const _areas: TaxArea[] = _allAreas.filter((a) => a.topicCount > 0);
+
+const _subjects = new Map(
+  Object.keys(labels.subjects).map((sid) => [sid, buildSubject(sid, bySubject.get(sid) ?? [])] as const),
+);
 const _areaGroupCode = new Map(
   labels.areas.flatMap((a) => [
     [a.id, a.group_code] as const,
@@ -166,12 +170,12 @@ const GROUP_STYLES: Record<string, { primary: string; icon: LucideIcon }> = {
 
 export function getTaxAreas(): TaxArea[] { return _areas; }
 export function getTaxAreaById(id: string): TaxArea | undefined {
-  return _areas.find((a) => a.id === id || a.slug === id);
+  return _allAreas.find((a) => a.id === id || a.slug === id);
 }
 export function getSubjectById(id: string): Subject | undefined { return _subjects.get(id); }
 export function getTaxAreaForSubject(subjectId: string): TaxArea | undefined {
   const s = _subjects.get(subjectId);
-  return s ? _areas.find((a) => a.id === s.area || a.slug === s.area) : undefined;
+  return s ? _allAreas.find((a) => a.id === s.area || a.slug === s.area) : undefined;
 }
 
 export function getTaxAreaStyle(areaId: string): AreaStyle {
@@ -213,8 +217,11 @@ export function searchSubjects(query: string): Subject[] {
 export function getTaxonomyStats() {
   return {
     areas: _areas.length,
-    subjects: _subjects.size,
+    subjects: bySubject.size,
     concepts: new Set(Array.from(conceptsOfQuestion.values()).flat()).size,
     taggedQuestions: subjectOfQuestion.size,
+    totalAreas: labels.areas.length,
+    totalSubjects: Object.keys(labels.subjects).length,
+    totalConcepts: Object.keys(labels.concepts).length,
   };
 }

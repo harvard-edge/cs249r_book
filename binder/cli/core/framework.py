@@ -19,20 +19,20 @@ import io
 import json
 from pathlib import Path
 import re
-from urllib.parse import urlparse
-
-import yaml
 
 from .concept_graph import PAGE_URL, SITE_DIR, SITE_URL, ConceptGraphError
 from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
 from .taxonomy_release import release_artifacts
-from .taxonomy_schema import get_class_slots, get_enum_values, get_required_class_slots
+from .taxonomy_schema import (
+    SCOPE_REF_RE as SCOPE_REF,
+    get_class_slots,
+    get_enum_values,
+    get_required_class_slots,
+    validate_https_url,
+)
 
 
 DIMENSIONS = get_class_slots("DimensionSet")
-# Scope notes cite the row or area that owns a topic as [[identity]], so a
-# relabeled row cannot leave a stale pointer behind.
-SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
 REQUIRED_DIMENSIONS = set(get_required_class_slots("DimensionSet"))
 SUPPORTED_VERSIONS = get_enum_values("FrameworkVersionEnum")
 
@@ -110,12 +110,6 @@ def _chapters(root: Path, codes, context):
         if not match:
             _fail(f"{context} has malformed chapter code {code}")
         volume = f"vol{match[1]}"
-        if not (root / "books").exists() and (root / "taxonomy/ml-systems-taxonomy.yml").exists():
-            raw_head = (root / "taxonomy/ml-systems-taxonomy.yml").read_text(encoding="utf-8")[:256]
-            if "field_id:" in raw_head:
-                resolved.append({"code": f"{volume}/{match[2]}", "volume": volume, "chapter": f"{volume}/{match[2]}",
-                                 "title": f"{volume}/{match[2]}", "url": f"{SITE_URL}/{volume}/"})
-                continue
         # A chapter folder holds its own QMD; leftover build-output folders do not.
         folders = sorted(
             folder for folder in (root / "books" / volume).glob(f"{match[2]}_*/")
@@ -133,7 +127,7 @@ def _chapters(root: Path, codes, context):
 
 
 def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
-    """Validate optional authored rows; resolve only existing passage links.
+    """Validate the `framework` and `guides` projections of `taxonomy/ml-systems-taxonomy.yml` against `FrameworkModel` and `GuidesModel` and resolve chapter/passage links.
 
     New field identities deliberately block compilation until their candidate
     home is considered. No classification or additional book link is guessed.
@@ -142,6 +136,7 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
     if unified is not None:
         model = unified["framework"]
     else:
+        # Fallback for isolated unit-test fixtures that construct a standalone FrameworkModel YAML.
         path = root / TAXONOMY_FILE
         if not path.exists():
             return None
@@ -158,10 +153,7 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
     source_slots = set(get_class_slots("FrameworkSource", root))
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"], source_slots)
-        url = urlparse(source["url"])
-        if (url.scheme != "https" or not url.netloc or url.username or url.password
-                or re.search(r'[\s<>"{}|\\^`]', source["url"])):
-            _fail(f"unsafe source URL {source['id']}")
+        validate_https_url(source["url"], f"framework: unsafe source URL {source['id']}")
     if len({s["title"].strip().casefold() for s in sources}) != len(sources):
         _fail("duplicate source title")
     dimensions = model.get("dimensions")
@@ -348,7 +340,7 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
 
 
 def _guides(root: Path, rows_by_id: dict, field: dict, version: str | None = None, _bundle: dict | None = None) -> dict:
-    """Load the reader guides (roles, symptoms, learning paths) and derive symptom levers.
+    """Load and validate the reader guides (roles, symptoms, learning paths) against `GuidesModel` and the relationship graph.
 
     Every reference must name an existing subject or concept, and every symptom check or lever must
     share a relationship with one of the symptom's causes, so the guide stays tied to the graph (2026-10-28).

@@ -14,10 +14,7 @@ from collections import Counter
 import json
 from pathlib import Path
 
-import yaml
-
-
-from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+from .field_graph import load_taxonomy_yaml, load_vocabulary, pct
 from .taxonomy_schema import get_class_slots
 
 
@@ -26,31 +23,22 @@ RUN_KEYS = set(get_class_slots("AgreementRun"))
 TAG_KEYS = set(get_class_slots("AgreementItemTag"))
 
 
-def _vocabulary(root: Path):
-    unified = load_unified_taxonomy(root)
-    if unified is not None:
-        field = unified["field"]
-        framework = unified["framework"]
-        rows = {}
-        home = {}
-        for area in framework["areas"]:
-            for row in area["rows"]:
-                rows[row["id"]] = (row, area)
-                for cid in row.get("concepts", []):
-                    home[cid] = row["id"]
-        return {c["id"] for c in field["concepts"]}, rows, home
-    raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
-    rows = {row["id"]: (row, area) for area in raw["areas"] for row in area["rows"]}
-    home = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}
-    return {c["id"] for c in raw["concepts"]}, rows, home
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _pct(part: int, whole: int) -> float:
-    return round(100 * part / whole, 1) if whole else 0.0
+def _index_valid_tags(tags: list, rows: dict) -> dict[int, dict]:
+    return {
+        t["n"]: t
+        for t in tags
+        if isinstance(t, dict) and _is_int(t.get("n")) and t.get("subject") in rows
+    }
 
 
 def _kappa(pairs: list[tuple[str, str]]) -> float:
     n = len(pairs)
+    if n == 0:
+        return 0.0
     observed = sum(a == b for a, b in pairs) / n
     left, right = Counter(a for a, _ in pairs), Counter(b for _, b in pairs)
     expected = sum(left[k] * right[k] for k in left) / (n * n)
@@ -72,13 +60,13 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
                 or any(home.get(c) == y["subject"] for c in cx) or any(home.get(c) == x["subject"] for c in cy))
 
     return {"items": len(items),
-            "subject_pct": _pct(sum(x == y for x, y in subjects), len(subjects)), "subject_kappa": _kappa(subjects),
-            "area_pct": _pct(sum(x == y for x, y in areas), len(areas)), "area_kappa": _kappa(areas),
-            "primary_concept_pct": _pct(sum(a[n]["concepts"][0] == b[n]["concepts"][0] for n in both), len(both)),
-            "any_shared_concept_pct": _pct(sum(j > 0 for j in jaccard), len(both)),
-            "same_concept_set_pct": _pct(sum(j == 1 for j in jaccard), len(both)),
+            "subject_pct": pct(sum(x == y for x, y in subjects), len(subjects)), "subject_kappa": _kappa(subjects),
+            "area_pct": pct(sum(x == y for x, y in areas), len(areas)), "area_kappa": _kappa(areas),
+            "primary_concept_pct": pct(sum(a[n]["concepts"][0] == b[n]["concepts"][0] for n in both), len(both)),
+            "any_shared_concept_pct": pct(sum(j > 0 for j in jaccard), len(both)),
+            "same_concept_set_pct": pct(sum(j == 1 for j in jaccard), len(both)),
             "mean_jaccard": round(sum(jaccard) / len(jaccard), 3) if jaccard else 0.0,
-            "compatible_pct": _pct(sum(compatible(n) for n in items), len(items))}
+            "compatible_pct": pct(sum(compatible(n) for n in items), len(items))}
 
 
 def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
@@ -86,22 +74,41 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
     if set(record) - RECORD_KEYS:
         errors.append(f"{name}: unknown record keys: {', '.join(sorted(set(record) - RECORD_KEYS))}")
     items = record.get("items", [])
-    numbers = {item["n"] for item in items}
+    if not isinstance(items, list):
+        return errors + [f"{name}: items must be a list"]
+    numbers = {item["n"] for item in items if isinstance(item, dict) and _is_int(item.get("n"))}
     if len(numbers) != len(items) or not numbers:
         errors.append(f"{name}: items must have distinct sample numbers")
-    for run in record.get("runs", []):
+    runs_list = record.get("runs", [])
+    if not isinstance(runs_list, list):
+        return errors + [f"{name}: runs must be a list"]
+    for run in runs_list:
+        if not isinstance(run, dict):
+            errors.append(f"{name}: run must be a mapping")
+            continue
         if set(run) - RUN_KEYS:
             errors.append(f"{name} run {run.get('id')}: unknown run keys: {', '.join(sorted(set(run) - RUN_KEYS))}")
         if not isinstance(run.get("held_out"), bool):
             errors.append(f"{name} run {run.get('id')}: requires held_out true or false")
         taggers = run.get("taggers", {})
-        if len(taggers) != 2:
+        if not isinstance(taggers, dict) or len(taggers) != 2:
             errors.append(f"{name} run {run.get('id')}: requires exactly two taggers")
+            continue
         for tagger, tags in taggers.items():
             where = f"{name} run {run.get('id')} tagger {tagger}"
-            if len(tags) != len(numbers) or {t["n"] for t in tags} != numbers:
+            if not isinstance(tags, list):
+                errors.append(f"{where}: tags must be a list")
+                continue
+            valid_tags = [
+                t for t in tags
+                if isinstance(t, dict) and _is_int(t.get("n")) and isinstance(t.get("subject"), str)
+            ]
+            if len(valid_tags) != len(tags):
+                errors.append(f"{where}: every tag requires integer n and string subject")
+                continue
+            if len(valid_tags) != len(numbers) or {t["n"] for t in valid_tags} != numbers:
                 errors.append(f"{where}: does not tag every sample item exactly once")
-            for t in tags:
+            for t in valid_tags:
                 if set(t) - TAG_KEYS:
                     errors.append(f"{where} item {t.get('n')}: unknown tag keys: {', '.join(sorted(set(t) - TAG_KEYS))}")
                 if t["subject"] not in rows:
@@ -116,9 +123,10 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
 
 
 def agreement_report(root: Path) -> dict:
+    """Validate all tagging-agreement records under `taxonomy/agreement/` and compute inter-tagger scores."""
     from .concept_graph import ConceptGraphError
     from .taxonomy_schema import validate_linkml
-    concepts, rows, home = _vocabulary(root)
+    concepts, rows, home = load_vocabulary(root, "agreement")
     records, errors = [], []
     for path in sorted((root / "taxonomy/agreement").glob("*.yml")):
         record = load_taxonomy_yaml(path)
@@ -128,16 +136,23 @@ def agreement_report(root: Path) -> dict:
         except ConceptGraphError as exc:
             errors.append(str(exc))
         runs = []
-        for run in record.get("runs", []):
-            (name_a, tags_a), (name_b, tags_b) = list(run["taggers"].items())[:2]
-            index = lambda tags: {t["n"]: t for t in tags if t["subject"] in rows}
-            runs.append({"id": run["id"], "held_out": run.get("held_out"), "note": run.get("note", ""), "taggers": [name_a, name_b],
-                         "scores": score_run(index(tags_a), index(tags_b), rows, home)})
-        records.append({"id": record["id"], "title": record["title"], "basis": record["basis"], "file": path.name, "runs": runs})
+        for run in record.get("runs", []) if isinstance(record.get("runs"), list) else []:
+            if not isinstance(run, dict):
+                continue
+            taggers = run.get("taggers")
+            if not isinstance(taggers, dict) or len(taggers) != 2:
+                continue
+            (name_a, tags_a), (name_b, tags_b) = list(taggers.items())
+            if not isinstance(tags_a, list) or not isinstance(tags_b, list):
+                continue
+            runs.append({"id": run.get("id", "?"), "held_out": run.get("held_out"), "note": run.get("note", ""), "taggers": [name_a, name_b],
+                         "scores": score_run(_index_valid_tags(tags_a, rows), _index_valid_tags(tags_b, rows), rows, home)})
+        records.append({"id": record.get("id", "?"), "title": record.get("title", ""), "basis": record.get("basis", ""), "file": path.name, "runs": runs})
     return {"records": records, "errors": errors}
 
 
 def write_report(root: Path) -> dict:
+    """Compute the tagging-agreement report and write `books/_build/concepts/taxonomy-agreement.json`."""
     report = agreement_report(root)
     out = root / "books/_build/concepts"
     out.mkdir(parents=True, exist_ok=True)

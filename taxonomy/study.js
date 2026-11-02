@@ -1,12 +1,13 @@
 // ML Systems Taxonomy, presented the way established taxonomies are (MITRE
-// ATT&CK/ATLAS, SFIA, ESCO): the whole taxonomy as one matrix, and an entry
-// page per area, subject, and concept with a sidebar tree, a facts box, and
-// tables. Concept pages carry a local concept map. Every page has a hash:
-//   #                         concept map     #area=<id>          area page
+// ATT&CK/ATLAS, SFIA, ESCO): a concept-map landing view, the whole taxonomy as
+// one matrix (#view=matrix), and an entry page per area, subject, and concept
+// with a sidebar tree, a facts box, and tables. Every view has a stable hash:
+//   # / #view=map             concept map     #area=<id>          area page
 //   #subject=<id>             subject page    #concept=<id>[&to=] concept page
-//   #view=matrix              matrix          #view=glossary[&term=<id>]
-//   #view=guides[&role=|&symptom=|&path=<id>]  roles, production symptoms, learning paths
-// Older hashes (#row=, #view=concept, #view=graph…, #view=map, #view=index) still resolve.
+//   #view=matrix              matrix          #overlay=role:<id>|path:<id>|vol:<id>
+//   #view=glossary[&term=<id>]                #bok-how-to-use / #bok-release
+//   #view=guides[&role=|&symptom=|&path=|&section=<id>]  roles, symptoms, learning paths
+// Older hashes (#row=, #view=concept, #view=graph…, #view=index) still resolve.
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -120,9 +121,20 @@
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
   const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(row.label)}</a>`;
-  const verb = (rel, direction) => {
+  const verb = (rel, direction = 'out') => {
     const r = relations.get(rel.relation);
     return r ? (direction === 'out' ? r.forward : r.inverse) : rel.predicate;
+  };
+  const crossStepRelationships = (stepIndex) => {
+    const matches = [];
+    for (const rel of data.relationships || []) {
+      const u = homeOf.get(rel.source);
+      const v = homeOf.get(rel.target);
+      if (!u || !v || u.id === v.id) continue;
+      if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
+      matches.push({ rel, iu: stepIndex.get(u.id), iv: stepIndex.get(v.id) });
+    }
+    return matches;
   };
   const bandOrder = () => [...BAND_ORDER.filter((id) => groups.some((g) => g.id === id)), ...groups.map((g) => g.id).filter((id) => !BAND_ORDER.includes(id))];
 
@@ -498,7 +510,7 @@
           // The outer segment runs from the concept to the spine; the verb sits on it.
           const segment = COLUMN - w / 2 - SPINE;
           els.push({ group: 'edges', classes: into ? 'into' : 'from', data: { id: rel.id, source: rel.source, target: rel.target,
-            label: relations.get(rel.relation)?.forward || rel.predicate, offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
+            label: verb(rel), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
           y += 44;
         }
         if (block.rels.length > MAP_LIMIT) {
@@ -573,7 +585,7 @@
     const self = `<b>${esc(concepts.get(id).label)}</b>`;
     const name = (other) => (other === id ? self : conceptLink(other));
     return `<h3 class="bok-section">Relationships</h3><table class="bok-table bok-rels"><thead><tr><th>Relationship</th><th>Holds when</th></tr></thead><tbody>${ordered.map((g) =>
-      g.rels.map((rel, i) => `<tr${i === 0 ? ' class="bok-group-start"' : ''}><td>${name(rel.source)} <span class="bok-verb">${esc(relations.get(rel.relation)?.forward || rel.predicate)}</span> ${name(rel.target)}</td><td>${esc(rel.conditions || '')}</td></tr>`).join('')).join('')}</tbody></table>`;
+      g.rels.map((rel, i) => `<tr${i === 0 ? ' class="bok-group-start"' : ''}><td>${name(rel.source)} <span class="bok-verb">${esc(verb(rel))}</span> ${name(rel.target)}</td><td>${esc(rel.conditions || '')}</td></tr>`).join('')).join('')}</tbody></table>`;
   }
 
   function renderPathChainSvg(steps) {
@@ -1120,8 +1132,7 @@
     const formatProp = (rel) => {
       const uSubj = homeOf.get(rel.source);
       const vSubj = homeOf.get(rel.target);
-      const vText = relations.get(rel.relation)?.forward || rel.predicate;
-      return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(vText)}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
+      return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(verb(rel))}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
     };
     const propList = (list) => !list.length
       ? '<p class="bok-muted" style="margin-top:4px !important">None in current filter.</p>'
@@ -1642,12 +1653,11 @@
       return best;
     };
 
-    // Identify which nodes in Column C are directly measured or detected by a Check.
+    // Identify which nodes in Column C are directly measured by a Check (`measures` relation).
     const measuredByCheck = new Set();
     for (const r of directEdges) {
-      if ((relations.get(r.relation)?.kind || r.kind) === 'evaluation') {
-        if (kSet.has(r.source) && cSet.has(r.target)) measuredByCheck.add(r.target);
-        if (kSet.has(r.target) && cSet.has(r.source)) measuredByCheck.add(r.source);
+      if (r.relation === 'measures' && kSet.has(r.source) && cSet.has(r.target)) {
+        measuredByCheck.add(r.target);
       }
     }
 
@@ -1765,7 +1775,7 @@
         activeNode ? (isDirect ? 'is-active' : (isVia ? 'is-active is-via' : 'is-dim')) : '',
       ].filter(Boolean).join(' ');
       const markerUrl = isEdgeActive ? 'url(#bok-diag-arrow-on)' : 'url(#bok-diag-arrow)';
-      const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+      const vStr = verb(rel);
       edgesHtml += `<path class="${cls}" d="${d}" marker-end="${markerUrl}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
       if (isEdgeActive && !sameCol) {
         const hubId = cSet.has(rel.source) ? rel.source : rel.target;
@@ -1839,10 +1849,7 @@
     </svg>`;
 
     if (detailEl) {
-      const renderRelItem = (rel) => {
-        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-        return `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
-      };
+      const renderRelItem = (rel) => `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(verb(rel))}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
       if (!activeNode) {
         detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">
           <span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} graph propositions connecting checks, causes, and levers — select any box above to trace its chain)</span>
@@ -1874,12 +1881,7 @@
     const stepIndex = new Map(steps.map((st, i) => [st.subject, i]));
     const pairMap = new Map();
 
-    for (const rel of data.relationships || []) {
-      const u = homeOf.get(rel.source);
-      const v = homeOf.get(rel.target);
-      if (!u || !v || u.id === v.id) continue;
-      if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
-      const iu = stepIndex.get(u.id), iv = stepIndex.get(v.id);
+    for (const { rel, iu, iv } of crossStepRelationships(stepIndex)) {
       const key = `${iu}__${iv}`;
       if (!pairMap.has(key)) pairMap.set(key, { uIdx: iu, vIdx: iv, count: 0, rels: [] });
       const entry = pairMap.get(key);
@@ -2102,7 +2104,24 @@
   // ---------------------------------------------------------------- navigation
   function restore() {
     state.vizFull = null;
-    const p = new URLSearchParams(location.hash.slice(1));
+    const rawHash = location.hash.slice(1);
+    if (rawHash === 'bok-how-to-use') {
+      state.view = 'landing';
+      render();
+      const howTo = $('bok-how-to-use');
+      if (howTo) {
+        howTo.open = true;
+        howTo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    if (rawHash === 'bok-release') {
+      if (!['landing', 'home'].includes(state.view)) state.view = 'landing';
+      render();
+      $('bok-release')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const p = new URLSearchParams(rawHash);
     const view = p.get('view');
     const replaced = (data.retired || []).find((r) => r.id === p.get('concept'))?.replaced_by;
     const concept = concepts.has(p.get('concept')) ? p.get('concept') : replaced || null;
@@ -2127,7 +2146,7 @@
     else if (view === 'glossary' || view === 'index') state.view = 'glossary';
     else if (concept) state.view = 'concept';
     else if (view === 'matrix' || p.get('overlay')) state.view = 'home';
-    else if (view === 'concept' || view === 'graph') state.view = 'landing';
+    else if (view === 'concept' || view === 'graph' || view === 'map') state.view = 'landing';
     else if (subject) state.view = 'subject';
     else if (area) state.view = 'area';
     else state.view = 'landing';
@@ -2214,14 +2233,19 @@
     }
     syncFull();
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
-      : v === 'guides' && state.guide ? document.getElementById(state.guide.startsWith('section-') ? `guide-${state.guide}` : `guide-${state.guide}`) : null;
+      : v === 'guides' && state.guide ? document.getElementById(`guide-${state.guide}`) : null;
     if (target) {
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target.classList.add('is-focus');
       setTimeout(() => target.classList.remove('is-focus'), 1600);
     } else if (!state.vizFull) {
       const top = document.querySelector('.bok-toolbar');
-      if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: 'start' });
+      if (top) {
+        const rect = top.getBoundingClientRect();
+        if (rect.top < 0 || (location.hash && rect.top > window.innerHeight * 0.55)) {
+          top.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }
+      }
     }
   }
 
@@ -2260,11 +2284,7 @@
     }
 
     if (stationIdx !== null) {
-      for (const rel of data.relationships || []) {
-        const uRow = homeOf.get(rel.source), vRow = homeOf.get(rel.target);
-        if (!uRow || !vRow || uRow.id === vRow.id) continue;
-        if (!stepIndex.has(uRow.id) || !stepIndex.has(vRow.id)) continue;
-        const iu = stepIndex.get(uRow.id), iv = stepIndex.get(vRow.id);
+      for (const { rel, iu, iv } of crossStepRelationships(stepIndex)) {
         if (iu !== stationIdx && iv !== stationIdx) continue;
         stationProps.push(rel);
         const otherIdx = iu === stationIdx ? iv : iu;
@@ -2306,8 +2326,7 @@
         : 'later steps: 0';
       const propItems = stationProps.map((rel) => {
         const uS = homeOf.get(rel.source), vS = homeOf.get(rel.target);
-        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-        return `<li>${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uS?.code || '')})</span> <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vS?.code || '')})</span></li>`;
+        return `<li>${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uS?.code || '')})</span> <span class="bok-verb">${esc(verb(rel))}</span> ${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vS?.code || '')})</span></li>`;
       }).join('');
       statusEl.innerHTML = `<div style="width:100%">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
@@ -2369,6 +2388,11 @@
     $('bok-gloss-area').addEventListener('input', filterGlossary);
     $('bok-print').addEventListener('click', (e) => { e.preventDefault(); printOutline(); });
     document.addEventListener('click', (e) => {
+      if (e.target.closest('[data-print-outline]')) {
+        e.preventDefault();
+        printOutline();
+        return;
+      }
       const expandTrigger = e.target.closest('[data-viz-expand]');
       if (expandTrigger) {
         const figId = expandTrigger.dataset.vizExpand;
@@ -2416,9 +2440,9 @@
         refreshCouplingFigure();
         return;
       }
-      const wheelArea = e.target.closest('[data-wheel-area]');
-      if (wheelArea) {
-        const id = wheelArea.dataset.wheelArea;
+      const areaTrigger = e.target.closest('[data-wheel-area], [data-dsm-area]');
+      if (areaTrigger) {
+        const id = areaTrigger.dataset.wheelArea || areaTrigger.dataset.dsmArea;
         state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
         refreshCouplingFigure();
         return;
@@ -2428,13 +2452,6 @@
         const fromArea = dsmCell.dataset.dsmFrom, toArea = dsmCell.dataset.dsmTo;
         state.couplingSel = state.couplingSel?.kind === 'pair' && state.couplingSel.fromArea === fromArea && state.couplingSel.toArea === toArea
           ? null : { kind: 'pair', fromArea, toArea };
-        refreshCouplingFigure();
-        return;
-      }
-      const dsmArea = e.target.closest('[data-dsm-area]');
-      if (dsmArea) {
-        const id = dsmArea.dataset.dsmArea;
-        state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
         refreshCouplingFigure();
         return;
       }
@@ -2529,6 +2546,16 @@
         const container = document.querySelector(`[data-path-viz="${pid}"]`);
         if (container && container.dataset.pinnedStation !== undefined) return;
         highlightPathStation(pid, Number(pathStation.dataset.stationIdx));
+      }
+    });
+    document.addEventListener('mouseout', (e) => {
+      const pathStation = e.target.closest('[data-station-idx]');
+      if (pathStation && !pathStation.contains(e.relatedTarget)) {
+        const pid = pathStation.dataset.pathId;
+        const container = document.querySelector(`[data-path-viz="${pid}"]`);
+        if (container && container.dataset.pinnedStation === undefined) {
+          highlightPathStation(pid, null);
+        }
       }
     });
     wirePicker('bok-search', 'bok-results', choose);

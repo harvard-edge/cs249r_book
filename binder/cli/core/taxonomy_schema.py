@@ -10,19 +10,19 @@ with `binder concepts check` and `binder concepts build`. It enforces both:
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 
 import jsonschema
 import yaml
 
 try:
-    from linkml.generators.jsonschemagen import JsonSchemaGenerator
     from linkml_runtime.utils.schemaview import SchemaView
     HAS_LINKML = True
 except ModuleNotFoundError:  # pragma: no cover
-    JsonSchemaGenerator = None
     SchemaView = None
     HAS_LINKML = False
 
@@ -31,8 +31,12 @@ from .concept_graph import ConceptGraphError
 SCHEMA_REL_PATH = Path("taxonomy/schema/mlsys-taxonomy.linkml.yml")
 REPO_SCHEMA_PATH = Path(__file__).resolve().parents[3] / SCHEMA_REL_PATH
 
+CONCEPT_ID_RE = re.compile(r"^mlsys\.[a-z0-9]+(-[a-z0-9]+)*$")
+SCOPE_REF_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+_UNSAFE_URL_CHARS = re.compile(r'[\s<>"{}|\\^`]')
+
 DECREASING_VERBS = re.compile(
-    r"\b(shrink|shrinks|shrinking|lower|lowers|lowering|reduce|reduces|reducing|decrease|decreases|decreasing|curb|curbs|curbing|cut|cuts|cutting|eliminate|eliminates|eliminating|minimize|minimizes|minimizing|compress|compresses|compressing)\b",
+    r"\b(shrink|shrinks|shrinking|lower|lowers|lowering|reduce|reduces|reducing|decrease|decreases|decreasing|curb|curbs|curbing|cut|cuts|cutting|eliminate|eliminates|eliminating|minimize|minimizes|minimizing|compress|compresses|compressing|invalidate|invalidates|invalidating)\b",
     re.IGNORECASE,
 )
 INCREASING_VERBS = re.compile(
@@ -40,9 +44,72 @@ INCREASING_VERBS = re.compile(
     re.IGNORECASE,
 )
 
-# LinkML slot attribute keys supported by the deterministic Draft 2019-09 JSON Schema compiler.
-# Any unknown attribute key in mlsys-taxonomy.linkml.yml raises ConceptGraphError so new LinkML
-# constraints can never be silently ignored when linkml-runtime is absent.
+
+def require_text(
+    record: dict,
+    keys: tuple[str, ...],
+    context: str,
+    allowed: set[str] | None = None,
+) -> dict[str, str]:
+    """Validate that `record` is a mapping with non-empty strings for `keys` and no unknown keys."""
+    if not isinstance(record, dict):
+        raise ConceptGraphError(f"{context} must be a mapping")
+    extra = set(record) - (allowed or set(keys))
+    if extra:
+        raise ConceptGraphError(f"{context} has unknown keys: {', '.join(sorted(extra))}")
+    out: dict[str, str] = {}
+    for key in keys:
+        value = record.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConceptGraphError(f"{context}.{key} must be a non-empty string")
+        out[key] = value.strip()
+    return out
+
+
+def validate_https_url(url: str, error_message: str) -> str:
+    """Validate that `url` is a clean HTTPS URL without credentials or unsafe characters."""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or _UNSAFE_URL_CHARS.search(url)
+    ):
+        raise ConceptGraphError(error_message)
+    return url
+
+# LinkML keys supported by the deterministic Draft 2019-09 JSON Schema compiler.
+# Any unknown key at top-level, class-level, enum-level, or slot-level raises ConceptGraphError
+# so unsupported LinkML directives (is_a, mixins, rules, slot_usage, etc.) fail closed.
+_ALLOWED_TOP_KEYS = frozenset({
+    "classes",
+    "default_prefix",
+    "default_range",
+    "description",
+    "enums",
+    "id",
+    "imports",
+    "license",
+    "name",
+    "prefixes",
+    "title",
+    "version",
+})
+_ALLOWED_CLASS_KEYS = frozenset({
+    "attributes",
+    "class_uri",
+    "description",
+    "tree_root",
+})
+_ALLOWED_ENUM_KEYS = frozenset({
+    "description",
+    "permissible_values",
+})
+_ALLOWED_PV_KEYS = frozenset({
+    "annotations",
+    "description",
+})
 _ALLOWED_SLOT_KEYS = frozenset({
     "annotations",
     "description",
@@ -85,16 +152,16 @@ def _cached_raw_schema(schema_path_str: str, mtime_ns: int) -> dict:
 
 @lru_cache(maxsize=8)
 def _cached_schema_view(schema_path_str: str, mtime_ns: int):
-    del mtime_ns
     if HAS_LINKML and SchemaView is not None:
         return SchemaView(schema_path_str)
-    return _cached_raw_schema(schema_path_str, Path(schema_path_str).stat().st_mtime_ns)
+    return _cached_raw_schema(schema_path_str, mtime_ns)
 
 
 def get_schema_view(root: Path | None = None):
     """Load and cache the LinkML SchemaView for the taxonomy metamodel."""
     path = resolve_schema_path(root)
-    return _cached_schema_view(str(path), path.stat().st_mtime_ns)
+    view = _cached_schema_view(str(path), path.stat().st_mtime_ns)
+    return deepcopy(view) if isinstance(view, dict) else view
 
 
 def get_enum_values(enum_name: str, root: Path | None = None) -> tuple[str, ...]:
@@ -145,14 +212,34 @@ HIERARCHICAL_RELATIONS = get_hierarchical_relations()
 def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
     """Compile the LinkML metamodel into a canonical Draft 2019-09 JSON Schema `$defs` bundle once per file mtime."""
     raw = _cached_raw_schema(schema_path_str, mtime_ns)
+    if not isinstance(raw, dict):
+        raise ConceptGraphError("LinkML schema root must be a mapping")
+    unknown_top = set(raw) - _ALLOWED_TOP_KEYS
+    if unknown_top:
+        raise ConceptGraphError(f"Unsupported LinkML top-level keys: {', '.join(sorted(unknown_top))}")
+    if raw.get("default_range", "string") != "string":
+        raise ConceptGraphError(f"Unsupported LinkML default_range: {raw.get('default_range')}")
     enums = raw.get("enums") or {}
     classes = raw.get("classes") or {}
     defs: dict[str, dict] = {}
     for ename, edef in enums.items():
         edef = edef or {}
+        unknown_enum_keys = set(edef) - _ALLOWED_ENUM_KEYS
+        if unknown_enum_keys:
+            raise ConceptGraphError(
+                f"Unsupported LinkML enum keys on {ename}: {', '.join(sorted(unknown_enum_keys))}"
+            )
+        pvs = edef.get("permissible_values") or {}
+        for pv_name, pv_def in pvs.items():
+            if isinstance(pv_def, dict):
+                unknown_pv_keys = set(pv_def) - _ALLOWED_PV_KEYS
+                if unknown_pv_keys:
+                    raise ConceptGraphError(
+                        f"Unsupported LinkML permissible_value keys on {ename}.{pv_name}: {', '.join(sorted(unknown_pv_keys))}"
+                    )
         entry: dict = {
             "type": "string",
-            "enum": list((edef.get("permissible_values") or {}).keys()),
+            "enum": list(pvs.keys()),
         }
         if edef.get("description"):
             entry["description"] = edef["description"]
@@ -160,6 +247,11 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
 
     for cname, cdef in classes.items():
         cdef = cdef or {}
+        unknown_class_keys = set(cdef) - _ALLOWED_CLASS_KEYS
+        if unknown_class_keys:
+            raise ConceptGraphError(
+                f"Unsupported LinkML class keys on {cname}: {', '.join(sorted(unknown_class_keys))}"
+            )
         if cdef.get("class_uri") == "linkml:Any":
             defs[cname] = {
                 "description": cdef.get("description", "Arbitrary mapping value."),
@@ -247,6 +339,12 @@ def _cached_base_schema(schema_path_str: str, mtime_ns: int) -> dict:
                 item_schema = {"$ref": f"#/$defs/{rng}"}
             else:
                 item_schema = {"type": "string"}
+                if rng in classes:
+                    target_attrs = (classes[rng] or {}).get("attributes") or {}
+                    for tsdef in target_attrs.values():
+                        if isinstance(tsdef, dict) and tsdef.get("identifier") and isinstance(tsdef.get("pattern"), str):
+                            item_schema["pattern"] = tsdef["pattern"]
+                            break
                 if "equals_string" in sdef:
                     item_schema["const"] = sdef["equals_string"]
                 if "pattern" in sdef:
@@ -322,7 +420,7 @@ def compile_json_schema(root: Path, target_class: str | None = "TaxonomyReleaseD
     """Compile the LinkML metamodel (defaulting root to TaxonomyReleaseDocument) to a deterministic JSON Schema dict."""
     path = resolve_schema_path(root)
     schema_dict, _ = _cached_json_schema(str(path), path.stat().st_mtime_ns, target_class)
-    return schema_dict
+    return deepcopy(schema_dict)
 
 
 def _format_error_path(instance: object, path_steps: list) -> str:
@@ -374,19 +472,43 @@ def validate_field_semantics(model: dict) -> None:
     edges = model.get("relationships", [])
     concepts_list = model.get("concepts")
     families_list = model.get("families")
+    sources_list = model.get("sources")
+    source_ids = (
+        {s["id"] for s in sources_list if isinstance(s, dict) and isinstance(s.get("id"), str)}
+        if isinstance(sources_list, list) and sources_list
+        else None
+    )
+    if "concepts" in model and not isinstance(concepts_list, list):
+        raise ConceptGraphError("field model: concepts must be a list")
     if isinstance(concepts_list, list):
         concept_ids = {c["id"] for c in concepts_list if isinstance(c, dict) and isinstance(c.get("id"), str)}
         if isinstance(families_list, list) and families_list:
             family_ids = {f["id"] for f in families_list if isinstance(f, dict) and isinstance(f.get("id"), str)}
+            if source_ids is not None:
+                for f in families_list:
+                    if isinstance(f, dict):
+                        refs = f.get("references") or []
+                        if not isinstance(refs, list) or not refs or any(r not in source_ids for r in refs):
+                            raise ConceptGraphError(f"field model: {f.get('id')} requires known reading references")
             for c in concepts_list:
                 if isinstance(c, dict) and "family" in c and c.get("family") not in family_ids:
                     raise ConceptGraphError(f"field model: invalid concept identity or family {c.get('id')}")
+        if source_ids is not None:
+            for c in concepts_list:
+                if isinstance(c, dict) and "references" in c:
+                    refs = c.get("references") or []
+                    if not isinstance(refs, list) or not refs or any(r not in source_ids for r in refs):
+                        raise ConceptGraphError(f"field model: {c.get('id')} requires known reading references")
         for edge in edges:
             if isinstance(edge, dict):
                 src = edge.get("source")
                 tgt = edge.get("target")
                 if src not in concept_ids or tgt not in concept_ids or src == tgt:
                     raise ConceptGraphError(f"field model: missing or identical endpoints {edge.get('id')}")
+                if source_ids is not None and "references" in edge:
+                    refs = edge.get("references") or []
+                    if not isinstance(refs, list) or not refs or any(r not in source_ids for r in refs):
+                        raise ConceptGraphError(f"field model: {edge.get('id')} requires known reading references")
         for record in model.get("retired", []) or []:
             if isinstance(record, dict):
                 if record.get("id") in concept_ids or record.get("replaced_by") not in concept_ids:
@@ -434,7 +556,7 @@ def validate_field_semantics(model: dict) -> None:
             raise ConceptGraphError(
                 f"field model: relationship {edge['id']} predicate '{predicate}' contradicts relation 'increases'"
             )
-        if rel in ("reduces", "mitigates") and INCREASING_VERBS.search(predicate) and not DECREASING_VERBS.search(predicate):
+        if rel in ("reduces", "mitigates", "limits") and INCREASING_VERBS.search(predicate) and not DECREASING_VERBS.search(predicate):
             raise ConceptGraphError(
                 f"field model: relationship {edge['id']} predicate '{predicate}' contradicts relation '{rel}'"
             )
@@ -469,7 +591,7 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
         )
 
     rel_pvs = (raw_enums.get("RelationIdEnum") or {}).get("permissible_values") or {}
-    if field_model and "relations" in field_model and field_model.get("id") != "example":
+    if field_model and "relations" in field_model:
         relations = field_model.get("relations") or []
         rel_ids = {r["id"] for r in relations if isinstance(r, dict) and "id" in r}
         if set(rel_pvs.keys()) != rel_ids or len(relations) != len(rel_pvs):
@@ -547,7 +669,7 @@ def validate_guides_semantics(guides: dict, rows_by_id: dict, version: str | Non
             )
 
     roles = guides.get("roles", [])
-    if version not in (None, "0.1-draft", "0.2-draft") and len(rows_by_id) >= 20 and roles:
+    if version not in (None, "0.1-draft", "0.2-draft") and rows_by_id and roles:
         covered = {
             subj
             for role in roles

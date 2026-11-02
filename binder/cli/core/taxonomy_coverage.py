@@ -15,37 +15,13 @@ from collections import Counter
 import json
 from pathlib import Path
 
-import yaml
-
-
-from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+from .field_graph import load_taxonomy_yaml, load_vocabulary, pct
 from .taxonomy_schema import get_class_slots, get_enum_values
 
 
 STATUSES = get_enum_values("ChecklistStatusEnum")
 CHECKLIST_KEYS = set(get_class_slots("CoverageChecklistModel"))
 TOPIC_KEYS = set(get_class_slots("CoverageChecklistTopic"))
-
-
-def _vocabulary(root: Path):
-    unified = load_unified_taxonomy(root)
-    if unified is not None:
-        field = unified["field"]
-        framework = unified["framework"]
-        concepts = {c["id"] for c in field["concepts"]}
-        subjects = {}
-        homes = {}
-        for area in framework["areas"]:
-            for row in area["rows"]:
-                subjects[row["id"]] = row
-                for cid in row.get("concepts", []):
-                    homes[cid] = row["id"]
-        return concepts, subjects, homes
-    raw = load_taxonomy_yaml(root / TAXONOMY_FILE)
-    concepts = {c["id"] for c in raw["concepts"]}
-    homes = {c["id"]: c["home"] for c in raw["concepts"] if c.get("home")}
-    subjects = {row["id"]: row for area in raw["areas"] for row in area["rows"]}
-    return concepts, subjects, homes
 
 
 def _check(checklist: dict, concepts: set, subjects: dict, homes: dict, name: str) -> list[str]:
@@ -81,7 +57,7 @@ def _check(checklist: dict, concepts: set, subjects: dict, homes: dict, name: st
         # must match the home of at least one cited concept.
         if status == "covered" and item.get("subject") in subjects:
             concept_homes = {homes[c] for c in item.get("concepts", []) if c in homes}
-            if concept_homes and subjects[item["subject"]]["id"] not in concept_homes:
+            if concept_homes and item["subject"] not in concept_homes:
                 errors.append(f"{where}: subject {item['subject']} disagrees with concept homes {sorted(concept_homes)}")
         if status == "partial" and not item.get("subject"):
             errors.append(f"{where}: partial requires a subject")
@@ -98,21 +74,19 @@ def _summary(topics: list[dict]) -> dict:
     in_scope = len(topics) - counts["out-of-scope"]
     weight_in_scope = sum(weights.values()) - weights["out-of-scope"]
 
-    def share(part, whole):
-        return round(100 * part / whole, 1) if whole else 0.0
-
     return {"topics": len(topics), "in_scope": in_scope, "counts": {s: counts[s] for s in STATUSES},
-            "covered_pct": share(counts["covered"], in_scope),
-            "homed_pct": share(counts["covered"] + counts["partial"], in_scope),
-            "weighted_covered_pct": share(weights["covered"], weight_in_scope),
-            "weighted_homed_pct": share(weights["covered"] + weights["partial"], weight_in_scope)}
+            "covered_pct": pct(counts["covered"], in_scope),
+            "homed_pct": pct(counts["covered"] + counts["partial"], in_scope),
+            "weighted_covered_pct": pct(weights["covered"], weight_in_scope),
+            "weighted_homed_pct": pct(weights["covered"] + weights["partial"], weight_in_scope)}
 
 
 def coverage_report(root: Path) -> dict:
+    """Validate all external coverage checklists under `taxonomy/coverage/` and compute summary metrics."""
     from .concept_graph import ConceptGraphError
     from .taxonomy_schema import validate_linkml
     folder = root / "taxonomy/coverage"
-    concepts, subjects, homes = _vocabulary(root)
+    concepts, subjects, homes = load_vocabulary(root, "coverage")
     checklists, errors = [], []
     for path in sorted(folder.glob("*.yml")):
         checklist = load_taxonomy_yaml(path)
@@ -130,6 +104,7 @@ def coverage_report(root: Path) -> dict:
 
 
 def write_report(root: Path) -> dict:
+    """Compute the external checklist coverage report and write markdown and JSON summaries to `books/_build/concepts/`."""
     report = coverage_report(root)
     out = root / "books/_build/concepts"
     out.mkdir(parents=True, exist_ok=True)

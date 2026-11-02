@@ -125,7 +125,9 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
     site = root / "taxonomy"
-    # Three internal files plus six public downloads.
+    # Three internal files plus six core downloads when taxonomy/schema/ is absent from tmp_path;
+    # full 11-artifact release (with mlsys-taxonomy.linkml.yml and mlsys-taxonomy.schema.json)
+    # is verified against the 0.3-draft taxonomy in test_linkml_schema.py.
     assert len(artifacts) == 9
     data = json.loads(artifacts[site / "framework-data.json"])
     assert data["concepts"] == field["concepts"]
@@ -354,7 +356,7 @@ def _guide_field():
             "relationships": [{"source": "mlsys.lever", "relation": "reduces", "target": "mlsys.state"}]}
 
 
-def _write_guides(root, symptom_levers, role_core=("row-state",)):
+def _write_guides(root, symptom_levers, role_core=("row-state", "row-b", "row-c")):
     guides = {"schema_version": 1,
               "roles": [{"id": "r", "label": "Role", "summary": "Does things.", "core": list(role_core)}],
               "symptoms": [{"id": "s", "label": "Symptom", "signal": "Something is slow.", "causes": ["mlsys.state"],
@@ -375,7 +377,7 @@ def test_guides_compile_and_reach_the_release(tmp_path):
 
 
 @pytest.mark.parametrize("levers, core, error", [
-    (["mlsys.capacity"], ("row-state",), "shares no relationship"),
+    (["mlsys.capacity"], ("row-state", "row-b", "row-c"), "shares no relationship"),
     (["mlsys.lever"], ("row-missing",), "unknown r core value"),
 ])
 def test_guides_reject_ungrounded_entries(tmp_path, levers, core, error):
