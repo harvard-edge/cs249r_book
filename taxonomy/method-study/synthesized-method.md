@@ -86,14 +86,14 @@ Otherwise, $C$ is factored into existing atomic concepts (`USE A + B` post-coord
 **Source provenance**: Synthesized from `Method-A` §4 (`D4` = 4.5–5.0) and `Method-B` §4 (`D4` = 4.5).
 
 ### 4.1 Polyhierarchy with Single Primary Backbone (`home_subject_id`)
-- Every concept belongs to exactly one primary subject (`home_subject_id`) forming a strict spanning tree for navigation, rollups, and ownership (`Method-A` §4.1, `Method-B` §4.2).
+- Every concept belongs to exactly one primary subject (`home_subject_id`) forming a spanning tree for navigation, rollups, and ownership (`Method-A` §4.1, `Method-B` §4.2).
 - Cross-cutting subjects link existing concepts via `secondary_concepts` rather than minting duplicate concept IDs.
-- Concept-to-concept `specializes` (`skos:broader`) forms a cycle-free DAG that must pass either the **generic (`BTG`) all-some is-a test** ("Every instance of $C$ is an instance of $P$ in all contexts") or the **partitive (`BTP`) inherent structural part test** (Z39.19 Clause 8.3).
+- Concept-to-concept `specializes` (`skos:broader`) forms a cycle-free DAG that must pass the **generic (`BTG`) all-and-some is-a test** ("Every instance of $C$ is an instance of $P$ in all contexts", Z39.19 Clause 8.3.1); while `Method-A`/`Method-B` also discussed `BTP`, in `ml-systems-taxonomy.yml` system components participate in multiple assemblies so `part-of` is exported as an associative relation under `skos:related` per Z39.19 Clause 8.3.3.2 (`METHOD.md`).
 
 ### 4.2 Constrained Associative Relations (`related` / `RT`)
-To prevent "everything-is-related-to-everything" graph drift (`Method-A` §4.3, `Method-B` §4.3):
-- Every `prerequisite`, `contrasts_with`, and `related` edge must be disjoint from the transitive closure of `specializes` (`S27` / Z39.19 Clause 8.4).
-- Every associative edge requires an explicit rationale sentence matching one of five typed templates:
+To prevent "everything-is-related-to-everything" graph drift (`Method-A` §4.3, `Method-B` §4.3; implemented in `ml-systems-taxonomy.yml` via the 16 non-hierarchical LinkML relation verbs plus explicit `conditions` sentences):
+- Every associative relation edge (`skos:related`) must be disjoint from the transitive closure of `specializes` (`SKOS S27` / Z39.19 Clause 8.4).
+- Every associative edge requires an explicit rationale/condition sentence matching one of five typed semantic patterns (realized via the 16 controlled verbs in `ml-systems-taxonomy.yml`):
   1. `producer_consumer` ($A$ produces artifact consumed by $B$)
   2. `tradeoff_dual` ($A$ and $B$ trade off on a shared resource bound)
   3. `mitigates_failure_of` ($A$ detects or mitigates a failure mode of $B$)
@@ -128,8 +128,8 @@ To eliminate single-judge confirmation bias when measuring coverage on held-out 
 - **Pass 1 (Vocabulary-Blind Topic Extraction)**: An extractor agent with no access to the taxonomy extracts the atomic technical topics ($u_1, \dots, u_m$) taught or specified in each held-out unit, with verbatim quotes.
 - **Pass 2 (Double-Judged Expressibility Matching)**: Two independent read-only judges map each extracted topic $u_j$ against the candidate taxonomy into three grades:
   - `Exact` ($1.0$): Directly represented by a single concept or alias.
-  - `Post-coord` ($0.5$): Expressible as a conjunction of $\le 2$ existing concepts (`Method-B` §5.3) without loss of technical specificity.
-  - `Missing` ($0.0$): Requires either a broad ancestor catch-all or $>2$ concepts, or is absent.
+  - `Post-coord` ($0.5$): Expressible as a conjunction of $\le 2$ existing concepts (`Method-B` §5.3; operationalized as 2–3 existing concepts in `score_phase6.py` and `METHOD.md`) without loss of technical specificity.
+  - `Missing` ($0.0$): Requires either a broad ancestor catch-all or exceeds the post-coordination bound, or is absent.
 - **Seeded-Gap Sensitivity Audit (`Method-A` §5.6)**: Before trusting coverage scores, create a shadow copy of the vocabulary with $k$ randomly removed concepts (`seed` recorded) and run Pass 2 on units known to require those concepts. The evaluation protocol is valid only if it flags $\ge 85\%$ of the seeded removals as `Missing` or degraded (`[P]`).
 
 ### 5.2 Multi-Rater Indexing Agreement + Specificity Counter-Metrics
@@ -153,5 +153,5 @@ On a stratified sample of held-out artifacts indexed independently by two blind 
 | **3. Concept-vs-alias & compound splitting** | Editorial judgment (`README.md` notes it is not an operational rule) | Operational 4-part Concept-vs-Alias test + 3-criterion Compound Term Splitting gate + metric$\times$workload factoring | `Method-B` §1 Step 10 & §2.5 (`D2`=4.75), `Method-A` §2.3 (`D2`=4.75) |
 | **4. Associative relation discipline** | `related` / `contrasts_with` / `prerequisite` checked for symmetry/acyclicity only | Requires disjointness from `specializes` closure (`S27`) + 1 of 5 typed justification templates | `Method-A` §4.3 (`D4`=4.75), `Method-B` §4.3 (`D4`=4.5) |
 | **5. Coverage evaluation** | Single judge; no vocabulary-blind extraction pass; no sensitivity check | Two-pass protocol (Pass 1 blind topic extraction, Pass 2 double-judged matching) + seeded-gap sensitivity audit | `Method-A` §5.6 (`D5`=5.0, `D6`=4.75), `Method-B` §5.3 (`D5`=4.5) |
-| **6. Agreement & anti-gaming** | Subject $\kappa$, Hooper, Rolling on 28 questions | Adds $\alpha_{\text{MASI}}$ (Passonneau 2006) + couples agreement with leaf-specificity ratio and max concentration ($p_{\max}$) | `Method-A` §5.4 (`D5`=5.0), `Method-B` §5.2 & §6.7 (`D6`=4.75) |
+| **6. Agreement & anti-gaming** | Subject $\kappa$ and conditional Hooper/Rolling on the 300-question StaffML samples | Adds $\alpha_{\text{MASI}}$ (Passonneau 2006), all-item Hooper/Rolling, and empty-set accounting + couples agreement with leaf-specificity ratio and max concentration ($p_{\max}$) | `Method-A` §5.4 (`D5`=5.0), `Method-B` §5.2 & §6.7 (`D6`=4.75) |
 | **7. Retirement resolution** | Untyped `replaced_by` list | Typed `resolution_class` (`auto`, `broaden`, `review`) + $>20\%$ extension-shift rule | `Method-A` §4.6 (`D4`=4.75), `Method-B` §4.7–4.8 (`D4`=4.5) |
