@@ -28,6 +28,7 @@ from core.taxonomy_schema import (
     validate_guides_semantics,
     validate_linkml,
     validate_schema_sync,
+    validate_term_provenance_sidecar,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -436,60 +437,71 @@ def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Pa
         compile_json_schema(tmp_path)
 
 
-def test_term_provenance_sidecar_binds_taxonomy_and_active_records():
+def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Path):
     import hashlib
+    import re
+    import shutil
+
+    # 1. Verify post-1.0 patch version pattern (e.g. 1.0.1) in LinkML added_in regex.
+    raw_schema = yaml.safe_load(resolve_schema_path(REPO_ROOT).read_text())
+    for cls_name in ("Concept", "UnifiedConcept", "ReleaseConcept"):
+        pat = raw_schema["classes"][cls_name]["attributes"]["added_in"]["pattern"]
+        assert re.match(pat, "0.4-draft")
+        assert re.match(pat, "1.0")
+        assert re.match(pat, "1.0.1")
+        assert re.match(pat, "1.2.3-rc1")
+    for cls_name in ("Concept", "ReleaseConcept"):
+        desc = raw_schema["classes"][cls_name]["attributes"]["aliases"]["description"]
+        assert "named system exemplars" not in desc
+
+    # 2. Verify live repository provenance sidecar passes full schema_version=2 validation.
+    validate_term_provenance_sidecar(REPO_ROOT)
 
     tax_path = REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml"
     prov_path = REPO_ROOT / "taxonomy/term-provenance.yml"
-    assert prov_path.exists(), "taxonomy/term-provenance.yml must exist (written by taxonomy-refresh/apply.py)"
-    prov_text = prov_path.read_text()
-    assert "/" + "Users/" not in prov_text and "/" + "home/" not in prov_text
-
     prov = load_taxonomy_yaml(prov_path)
-    assert isinstance(prov, dict)
-    assert prov.get("schema_version") == 1
+    assert isinstance(prov, dict) and prov.get("schema_version") == 2
 
-    raw_tax = load_taxonomy_yaml(tax_path)
-    assert isinstance(raw_tax, dict)
-    expected_sha = hashlib.sha256(tax_path.read_bytes()).hexdigest()
-    assert prov.get("taxonomy_sha256") == expected_sha, (
-        "taxonomy/ml-systems-taxonomy.yml was modified outside apply.py; "
-        "re-run reconcile.py and apply.py so taxonomy/term-provenance.yml stays bound"
-    )
-    assert prov.get("taxonomy_version") == str(raw_tax.get("version"))
+    # 3. Verify negative tamper checks fail closed via validate_term_provenance_sidecar.
+    tdir = tmp_path / "taxonomy"
+    tdir.mkdir(parents=True)
+    shutil.copy2(tax_path, tdir / "ml-systems-taxonomy.yml")
 
-    rec = prov.get("last_reconcile_receipt")
-    assert isinstance(rec, dict)
-    assert rec.get("receipt_schema_version") == 3
-    assert rec.get("mode") == "full-3family-reconcile"
-    r2_shas = rec.get("r2_reviews_sha256")
-    assert isinstance(r2_shas, dict) and set(r2_shas.keys()) == {"claude-r2.yaml", "codex-r2.yaml", "gemini-r2.yaml"}
+    # 3a. Missing sidecar fails closed.
+    with pytest.raises(ConceptGraphError, match="term-provenance.yml is missing"):
+        validate_term_provenance_sidecar(tmp_path)
 
-    concepts_by_id = {c["id"]: c for c in raw_tax.get("concepts", [])}
-    rows_by_id = {r["id"]: r for a in raw_tax.get("areas", []) for r in a.get("rows", [])}
+    # 3b. Hand-editing taxonomy_sha256 without updating sidecar_content_sha256 or applied_campaigns fails closed.
+    shutil.copy2(prov_path, tdir / "term-provenance.yml")
+    (tdir / "ml-systems-taxonomy.yml").write_text(tax_path.read_text() + "\n")
+    new_sha = hashlib.sha256((tdir / "ml-systems-taxonomy.yml").read_bytes()).hexdigest()
+    tampered = deepcopy(prov)
+    tampered["taxonomy_sha256"] = new_sha
+    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(tampered, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="sidecar_content_sha256 mismatch"):
+        validate_term_provenance_sidecar(tmp_path)
 
-    for cid, cprov in (prov.get("concepts") or {}).items():
-        assert cid in concepts_by_id, f"term-provenance concept {cid} is not active in ml-systems-taxonomy.yml"
-        active_aliases = set(concepts_by_id[cid].get("aliases") or [])
-        for ak, ameta in (cprov.get("alias_metadata") or {}).items():
-            assert ak in active_aliases, f"term-provenance alias {ak!r} on {cid} missing from active aliases"
-            assert isinstance(ameta, dict) and ameta.get("type") in {
-                "synonym",
-                "quasi-synonym",
-                "acronym",
-                "upward-posting",
-            }
-        for rk, rrat in (cprov.get("removed_aliases") or {}).items():
-            assert rk not in active_aliases, f"removed alias {rk!r} is still present on {cid}"
-            assert isinstance(rrat, str) and len(rrat) >= 15
+    # 3c. Even recomputing sidecar_content_sha256 without updating applied_campaigns post_apply_taxonomy_sha256 fails closed.
+    body_no_self = {k: v for k, v in tampered.items() if k != "sidecar_content_sha256"}
+    tampered["sidecar_content_sha256"] = hashlib.sha256(
+        json.dumps(body_no_self, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(tampered, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="post_apply_taxonomy_sha256 disagrees"):
+        validate_term_provenance_sidecar(tmp_path)
 
-    for rid, sprov in (prov.get("subjects") or {}).items():
-        assert rid in rows_by_id, f"term-provenance subject {rid} is not in ml-systems-taxonomy.yml"
-        active_sec = set(rows_by_id[rid].get("secondary_concepts") or [])
-        for scid, srat in (sprov.get("secondary_concepts_rationale") or {}).items():
-            assert scid in active_sec, f"term-provenance secondary concept {scid} missing from {rid}"
-            assert scid in concepts_by_id
-            assert isinstance(srat, str) and len(srat) >= 15
+    # 3d. Emptying concepts mapping while operations_applied lists governed concept updates fails closed.
+    shutil.copy2(tax_path, tdir / "ml-systems-taxonomy.yml")
+    empty_concepts = deepcopy(prov)
+    empty_concepts["concepts"] = {}
+    body2 = {k: v for k, v in empty_concepts.items() if k != "sidecar_content_sha256"}
+    empty_concepts["sidecar_content_sha256"] = hashlib.sha256(
+        json.dumps(body2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(empty_concepts, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="missing provenance record"):
+        validate_term_provenance_sidecar(tmp_path)
+
 
 
 
