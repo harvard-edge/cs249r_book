@@ -57,6 +57,9 @@ jobs:
     name: '🔨 Build & Deploy Landing Site'
     runs-on: ubuntu-latest
     needs: [validate]
+    concurrency:
+      group: cs249r-book-dev-deploy
+      cancel-in-progress: false
 
     steps:
       - name: 📥 Checkout
@@ -79,7 +82,7 @@ jobs:
 
       - name: Install concept map generator dependencies
         run: |
-          python3 -m pip install -r site/explore/requirements.txt
+          python3 -m pip install -r taxonomy/requirements.txt
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends graphviz
 
@@ -88,32 +91,34 @@ jobs:
 
       - name: 🔨 Build unified site
         working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           quarto render
+          python3 scripts/build_concept_explorer.py --check-staged
           touch _build/.nojekyll
           echo "✅ Site rendered: $(find _build -name '*.html' | wc -l) pages"
 
       - name: 🔗 Rewrite URLs for dev site
         run: |
           # Rewrite each subsite directory with correct relative prefix
-          for subsite in about community newsletter courses; do
+          for subsite in about community newsletter courses taxonomy; do
             bash .github/scripts/rewrite-dev-urls.sh "$subsite" "site/_build/$subsite"
           done
           # Rewrite root-level files (landing page) — shallow to avoid re-processing subdirs
           bash .github/scripts/rewrite-dev-urls.sh root site/_build --shallow
 
-          # Fix root-absolute assets in 404.html so GitHub Pages subpath resolves CSS/JS correctly
+          # Fix root-absolute assets in HTML files so GitHub Pages subpath resolves CSS/JS correctly
           DEV_REPO_NAME=$(basename "${{ vars.DEV_REPO_URL || 'cs249r_book_dev' }}" .git)
-          if [ -f "site/_build/404.html" ]; then
-            sed -i.bak "s|/site_libs/|/${DEV_REPO_NAME}/site_libs/|g" site/_build/404.html
-            sed -i.bak "s|/assets/|/${DEV_REPO_NAME}/assets/|g" site/_build/404.html
-            rm -f site/_build/404.html.bak
-            echo "✅ 404.html assets rewritten for dev repo subpath: /${DEV_REPO_NAME}/"
-          fi
+          while IFS= read -r -d '' html_file; do
+            sed -i.bak "s|\"/site_libs/|\"/${DEV_REPO_NAME}/site_libs/|g; s|'/site_libs/|'/${DEV_REPO_NAME}/site_libs/|g; s|\"/assets/|\"/${DEV_REPO_NAME}/assets/|g; s|'/assets/|'/${DEV_REPO_NAME}/assets/|g" "$html_file"
+            rm -f "${html_file}.bak"
+          done < <(find site/_build -name '*.html' -print0)
+          echo "✅ Root-absolute /site_libs/ and /assets/ rewritten for dev repo subpath: /${DEV_REPO_NAME}/"
 
       - name: 🔍 Validate build
         run: |
-          for page in index.html about/index.html community/index.html newsletter/index.html courses/index.html courses/physical-ai/eth-spring-2027/index.html courses/tinyml/index.html; do
+          for page in index.html about/index.html community/index.html newsletter/index.html courses/index.html courses/physical-ai/eth-spring-2027/index.html courses/tinyml/index.html taxonomy/index.html; do
             if [ ! -f "site/_build/$page" ]; then
               echo "❌ CRITICAL: $page missing from build. Aborting."
               exit 1
@@ -153,21 +158,20 @@ jobs:
 
           BUILD_DIR="${{ github.workspace }}/site/_build"
 
-          # Copy build output, preserving directories managed by other workflows
-          for item in "$BUILD_DIR"/*; do
-            basename="$(basename "$item")"
-            # Skip Quarto's site_libs (handled separately below)
-            [[ "$basename" == "site_libs" ]] && continue
-            # Skip directories managed by other workflows
-            if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|staffml)$ ]]; then
-              continue
-            fi
-            cp -r "$item" .
-          done
+          stage_site() {
+            for item in "$BUILD_DIR"/*; do
+              basename="$(basename "$item")"
+              [[ "$basename" == "site_libs" ]] && continue
+              if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|staffml)$ ]]; then
+                continue
+              fi
+              cp -r "$item" .
+            done
+            cp -r "$BUILD_DIR/site_libs" . 2>/dev/null || true
+            touch .nojekyll
+          }
 
-          # Copy shared site_libs for CSS/JS
-          cp -r "$BUILD_DIR/site_libs" . 2>/dev/null || true
-          touch .nojekyll
+          stage_site
 
           [ -f "index.html" ] || { echo "❌ CRITICAL: Landing index.html missing."; exit 1; }
 
@@ -182,8 +186,12 @@ jobs:
               PUSHED=true
               break
             fi
-            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
-            git pull --rebase origin main || true
+            echo "⚠️ Push failed (attempt $i/3), resetting to latest origin/main and re-staging..."
+            git fetch origin main
+            git reset --hard origin/main
+            stage_site
+            git add .
+            git commit -m "🌐 Deploy site dev preview from ${{ github.sha }}" --allow-empty || true
           done
           if [ "$PUSHED" != "true" ]; then
             echo "❌ Push failed after 3 attempts."

@@ -1,16 +1,19 @@
 """Coverage numbers are computed from recorded judgments that must stay valid."""
+from pathlib import Path
 import pytest
 import yaml
 
 from core.taxonomy_coverage import coverage_report, write_report
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture
 def repo(tmp_path):
-    concepts = tmp_path / "shared/concepts"
+    concepts = tmp_path / "taxonomy"
     (concepts / "coverage").mkdir(parents=True)
-    (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": "mlsys.kv-cache"}, {"id": "mlsys.batching"}]}))
-    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [{"rows": [{"id": "llm-inference", "code": "L4.4"}]}]}))
+    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (tmp_path / "books").symlink_to(REPO_ROOT / "books")
     return tmp_path
 
 
@@ -19,13 +22,13 @@ def checklist(topics, held_out=True):
 
 
 def save(root, data):
-    (root / "shared/concepts/coverage/test.yml").write_text(yaml.safe_dump(data))
+    (root / "taxonomy/coverage/test.yml").write_text(yaml.safe_dump(data))
 
 
 def test_numbers_are_computed_and_weighted_by_sources(repo):
     save(repo, checklist([
         {"topic": "KV caching", "sources": ["a", "b", "c"], "status": "covered", "concepts": ["mlsys.kv-cache"]},
-        {"topic": "Paged attention", "sources": ["a"], "status": "partial", "subject": "L4.4"},
+        {"topic": "Paged attention", "sources": ["a"], "status": "partial", "subject": "llm-inference"},
         {"topic": "Visualization", "status": "missing"},
         {"topic": "ML for systems", "status": "out-of-scope"},
     ]))
@@ -44,6 +47,10 @@ def test_numbers_are_computed_and_weighted_by_sources(repo):
     ({"topic": "No concept", "status": "covered"}, "covered requires at least one concept"),
     ({"topic": "No subject", "status": "partial"}, "partial requires a subject"),
     ({"topic": "Bad subject", "status": "partial", "subject": "Z9.9"}, "unknown subject Z9.9"),
+    ({"topic": "Mutable code rejected", "status": "partial", "subject": "L4.4"}, "unknown subject L4.4"),
+    ({"topic": "Stale subject", "status": "covered", "concepts": ["mlsys.kv-cache"], "subject": "request-scheduling"}, "disagrees with concept homes"),
+    ({"topic": "Missing with concept", "status": "missing", "concepts": ["mlsys.kv-cache"]}, "missing must not cite concepts"),
+    ({"topic": "Bad key", "status": "missing", "extra": None}, "unknown topic keys: extra"),
     ({"topic": "Bad status", "status": "kind of"}, "unknown status"),
 ])
 def test_stale_or_malformed_judgments_are_reported(repo, topic, error):

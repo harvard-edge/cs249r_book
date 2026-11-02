@@ -1,19 +1,19 @@
 """Agreement numbers are recomputed from recorded tags that must stay valid."""
+from pathlib import Path
 import pytest
 import yaml
 
 from core.taxonomy_agreement import agreement_report, write_report
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture
 def repo(tmp_path):
-    concepts = tmp_path / "shared/concepts"
+    concepts = tmp_path / "taxonomy"
     (concepts / "agreement").mkdir(parents=True)
-    (concepts / "ml-systems-field.yml").write_text(yaml.safe_dump({"concepts": [{"id": c} for c in ("mlsys.kv-cache", "mlsys.batching", "mlsys.quantization")]}))
-    (concepts / "ml-systems-framework.yml").write_text(yaml.safe_dump({"areas": [
-        {"code": "P4", "rows": [{"id": "llm-inference", "code": "P4.5", "concepts": ["mlsys.kv-cache"]},
-                                {"id": "request-scheduling", "code": "P4.4", "concepts": ["mlsys.batching"]}]},
-        {"code": "Q1", "rows": [{"id": "model-compression", "code": "Q1.3", "concepts": ["mlsys.quantization"]}]}]}))
+    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (tmp_path / "books").symlink_to(REPO_ROOT / "books")
     return tmp_path
 
 
@@ -24,7 +24,7 @@ def record(tags_a, tags_b):
 
 
 def save(root, data):
-    (root / "shared/concepts/agreement/test.yml").write_text(yaml.safe_dump(data))
+    (root / "taxonomy/agreement/test.yml").write_text(yaml.safe_dump(data))
 
 
 def test_scores_are_computed_from_tags(repo):
@@ -49,10 +49,25 @@ def test_scores_are_computed_from_tags(repo):
 
 
 def test_retired_identities_and_missing_items_are_errors(repo):
-    a = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.retired"]}, {"n": 2, "subject": "gone-subject", "concepts": []}]
+    a = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.retired"]},
+         {"n": 2, "subject": "gone-subject", "concepts": ["mlsys.kv-cache", "mlsys.kv-cache"]}]
     b = [{"n": 1, "subject": "llm-inference", "concepts": ["mlsys.kv-cache"]}]
-    save(repo, record(a, b))
+    data = record(a, b)
+    del data["runs"][0]["held_out"]
+    save(repo, data)
     errors = agreement_report(repo)["errors"]
     assert any("no longer exist" in e for e in errors)
     assert any("unknown subject gone-subject" in e for e in errors)
     assert any("every sample item exactly once" in e for e in errors)
+    assert any("duplicate concept tags" in e for e in errors)
+    assert any("held_out true or false" in e for e in errors)
+
+
+def test_hooper_and_rolling_follow_their_formulas():
+    from core.taxonomy_agreement import score_run
+    rows = {"s": ({}, {"code": "F1"})}
+    a = {1: {"subject": "s", "concepts": ["x", "y"]}}
+    b = {1: {"subject": "s", "concepts": ["y", "z"]}}
+    scores = score_run(a, b, rows, {})
+    assert scores["hooper_consistency_pct"] == pytest.approx(100 / 3, abs=0.1)  # c / (A + B - c)
+    assert scores["rolling_consistency_pct"] == 50.0  # 2c / (A + B)

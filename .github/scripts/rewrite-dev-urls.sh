@@ -53,6 +53,7 @@ SUBSITES=(
   slides
   instructors
   courses
+  taxonomy
   interviews
   staffml
   newsletter

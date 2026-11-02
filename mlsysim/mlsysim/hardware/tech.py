@@ -190,6 +190,36 @@ class MovementEnergy(BaseModel):
     metadata: Metadata = Field(default_factory=Metadata)
 
 
+class BatteryCell(BaseModel):
+    """Standard primary-cell format (technology-class): nominal charge capacity and
+    nominal voltage of a cell designation such as CR2032.
+
+    Added 2026-10-30. A standard designation fixes chemistry and size, so capacity
+    and voltage are ~constant across parts of that format; the cited datasheet pins
+    one manufacturer's rating. ``energy`` is derived (capacity x voltage)."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    capacity: Quantity           # nominal charge capacity (mAh)
+    voltage: Quantity            # nominal voltage (V)
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("capacity", mode="after")
+    @classmethod
+    def _validate_capacity(cls, v):
+        return require_dimensionality(v, ureg.ampere * ureg.hour, "capacity")
+
+    @field_validator("voltage", mode="after")
+    @classmethod
+    def _validate_voltage(cls, v):
+        return require_dimensionality(v, ureg.volt, "voltage")
+
+    @property
+    def energy(self) -> Quantity:
+        """Derived nominal stored energy (capacity x voltage)."""
+        return (self.capacity * self.voltage).to(ureg.mWh)
+
+
 _DATA = Path(__file__).parent / "data" / "tech"
 
 Memory = load_collection(
@@ -222,6 +252,11 @@ Lithography = load_collection(
     doc="Lithography technology limits (exposure-field / reticle size).",
 )
 
+Battery = load_collection(
+    _DATA / "battery.yaml", BatteryCell, name="Battery",
+    doc="Standard primary-cell formats (nominal capacity + nominal voltage).",
+)
+
 
 class Tech(Registry):
     """Technology-class reference facts: latency / energy / generic bandwidth."""
@@ -233,6 +268,7 @@ class Tech(Registry):
     Movement = Movement
     Interconnect = Interconnect
     Lithography = Lithography
+    Battery = Battery
 
 
 def resolve_latency(instance_latency, tech_default):

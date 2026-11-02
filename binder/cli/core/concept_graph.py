@@ -1,7 +1,7 @@
 """Compile chapter-owned learner graphs into maps and curriculum catalogs.
 
 Book records live in chapter *_concepts.yml files. The independent field model
-and book-link overlay live in shared/concepts. Published JSON, DOT, SVG, chapter
+and book-link overlay live in taxonomy. Published JSON, DOT, SVG, chapter
 viewers, and the catalog are deterministic build artifacts.
 """
 
@@ -19,6 +19,12 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote as urlquote
 
 import yaml
+
+
+# The ML Systems Taxonomy page: its source folder and its public address.
+SITE_URL = "https://mlsysbook.ai"
+SITE_DIR = "taxonomy"
+PAGE_URL = f"{SITE_URL}/{SITE_DIR}/"
 
 
 class ConceptGraphError(ValueError):
@@ -635,7 +641,7 @@ def build(root: Path, volumes: tuple[str, ...] = (), check: bool = False) -> dic
     """Compile first, then publish artifacts; invalid authoring never overwrites outputs."""
     # Shared catalogs/maps always cover the series; volume flags scope chapter viewers.
     graph = load_graph(root)
-    site = root / "site/explore"
+    site = root / SITE_DIR
     navigation_path = site / "atlas.yml"
     navigation = (
         yaml.safe_load(navigation_path.read_text()) if navigation_path.exists() else {}
@@ -770,17 +776,32 @@ def build(root: Path, volumes: tuple[str, ...] = (), check: bool = False) -> dic
     # The field reference model has independent identities; book links are an overlay.
     from .field_graph import field_artifacts
     artifacts.update(field_artifacts(root, graph))
+    orphaned: list[Path] = []
+    if not volumes:
+        for managed_dir in (site / "downloads", site / "field-focus", site / "maps", site / "volumes"):
+            if managed_dir.is_dir():
+                for existing in sorted(managed_dir.rglob("*")):
+                    if existing.is_file() and existing not in artifacts:
+                        orphaned.append(existing)
+        for pattern in ("field-*.svg", "field-*.dot"):
+            for existing in sorted(site.glob(pattern)):
+                if existing.is_file() and existing not in artifacts:
+                    orphaned.append(existing)
     stale = [
         str(p.relative_to(root))
         for p, data in artifacts.items()
         if not p.exists() or p.read_bytes() != data
-    ]
+    ] + [f"{p.relative_to(root)} (orphaned)" for p in orphaned]
     if not check:
         for path, data in artifacts.items():
             if path.exists() and path.read_bytes() == data:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+        for orphan in orphaned:
+            orphan.unlink(missing_ok=True)
+            if orphan.parent != site and orphan.parent.is_dir() and not any(orphan.parent.iterdir()):
+                orphan.parent.rmdir()
     field_payload = artifacts.get(site / "field-data.json")
     return dict(
         chapters=len(graph["chapters"]),

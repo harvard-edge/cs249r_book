@@ -1,6 +1,6 @@
 # Chapter concept reconciliation
 
-Run `./binder/binder concepts audit` to generate JSON and Markdown reports in `books/_build/concepts/coverage-audit.*`. Add `--vol1`, `--vol2`, `--vol3`, or `--vol4` to restrict the reported scope. Reports are derived artifacts; decisions belong in `shared/concepts/coverage-ledger.yml`.
+Run `./binder/binder concepts audit` to generate JSON and Markdown reports in `books/_build/concepts/coverage-audit.*`. Add `--vol1`, `--vol2`, `--vol3`, or `--vol4` to restrict the reported scope. Reports are derived artifacts; decisions belong in `taxonomy/coverage-ledger.yml`.
 
 The audit inventories every declared primary and secondary concept in the chapter concept YAML files. It does not establish that those inventories exhaust the manuscripts, that relationships are correct, or that the field vocabulary is complete. Repeated concepts in separate chapters remain separate declarations.
 

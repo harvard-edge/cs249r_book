@@ -86,7 +86,7 @@ def capture():
     durations=[age,da,lease,tick,bus,act];names=['Observation to dispatch','Allocated admission','Chunk lease','Next permission tick','Fieldbus delivery','Actuator onset'];ends=[0]
     for d in durations:ends.append(ends[-1]+d)
     objects=[lanes('timeline','Serial capture-to-onset path',['Perception','Proposal','Permission','Drive'],0,260,[0,50,100,150,200,250],0,'Time since exposure midpoint, ms'),line('travel','Base travel before braking, mm',0,350,[0,100,200,300],1),line('budget','Total stop plus fixed allowances, mm',0,1200,[0,600,1100,1200],2)]
-    rows=[0,1,2,2,2,3];latest=n(B.capture_to_onset_max,'ms');suffix=n(B.c2_aisle,'mm')+n(B.delta_loc+B.delta_margin+B.eps_track,'mm');clear=n(B.d_clear,'mm')
+    rows=[0,1,2,2,2,3];latest=n(B.capture_to_onset_max,'ms');suffix=n(NS['calc_scurve_stop_distance'](B.v_aisle,B.a_brake,B.j_brake),'mm')+n(B.delta_loc+B.delta_margin+B.eps_track,'mm');clear=n(B.d_clear,'mm')
     steps=[]
     ids=['capture','dispatch','admission','expiry','tick','bus','onset']
     for i,t in enumerate(ends):

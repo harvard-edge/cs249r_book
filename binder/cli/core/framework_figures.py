@@ -9,6 +9,8 @@ from html import escape
 from pathlib import Path
 import textwrap
 
+from .concept_graph import SITE_DIR
+
 _FONT = 'Helvetica Neue, Helvetica, Arial, sans-serif'
 _INK = '#333333'
 _MUTED = '#666666'
@@ -146,7 +148,7 @@ def _layers(framework: dict) -> bytes:
     band_height = 70 + rows * 64
     height = margin * 2 + len(layers) * band_height + (len(layers) - 1) * 30
     parts = _start(width, height, 'ML systems candidate framework: systems layer lens',
-                   'Five equal bands show authored relevance to systems layers. Each area '
+                   f'{len(layers)} equal bands show authored relevance to systems layers. Each area '
                    'appears in every layer touched by one of its subject rows. References '
                    'within each tile name the relevant numbered subject rows from the atlas '
                    'and matrix. Repeated placements express overlap, not exclusive ownership. '
@@ -174,7 +176,7 @@ def _layers(framework: dict) -> bytes:
 
 def framework_figures(root: Path, framework: dict) -> dict[Path, bytes]:
     """Return three reproducible SVG exports without modifying the filesystem."""
-    output = root / 'site' / 'explore'
+    output = root / SITE_DIR
     return {output / 'framework-atlas.svg': _atlas(framework),
             output / 'framework-matrix.svg': _matrix(framework),
             output / 'framework-layers.svg': _layers(framework)}

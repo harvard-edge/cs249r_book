@@ -452,7 +452,7 @@ function translateLegacyQuizFormat(legacyParams) {
   
   return {
     messages: [{ role: 'user', content: fullPrompt }],
-    model: 'llama-3.3-70b-versatile', // Default to Groq model
+    model: 'openai/gpt-oss-120b', // Default to Groq model
     temperature: 0.7,
     // Preserve original metadata for potential use
     metadata: {
@@ -624,7 +624,7 @@ async function callCloudflareWithLegacyFormat(legacyParams, provider = 'groq', i
   
   // Set the appropriate model for the provider
   const providerModels = {
-    groq: 'llama-3.1-8b-instant',
+    groq: 'openai/gpt-oss-20b',
     gemini: 'gemini-2.5-flash', 
     cerebras: 'gpt-oss-120b',
     sambanova: 'gpt-oss-120b',

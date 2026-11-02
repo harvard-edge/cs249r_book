@@ -58,7 +58,7 @@ Selecting a neural network architecture is both a modeling decision and a contra
 - Distinguish how MLPs, CNNs, RNNs, transformers, and DLRM-style recommenders lower onto matrix multiplication and which operations remain memory bound
 - Explain why skip connections and normalization make deep networks trainable and what each costs the machine
 - Calculate the weights, multiply-accumulates, and memory of dense, convolutional, recurrent, attention, and embedding layers
-- Analyze which iron-law term binds a workload, including transformer prefill and decode, from its arithmetic intensity
+- Analyze which iron-law term limits a workload, including transformer prefill and decode, from its arithmetic intensity
 - Apply the architecture selection framework to a deployment's data, memory, latency, and power budgets
 - Critique architecture-selection fallacies about operation counts, context length, and training-versus-serving bottlenecks
 
@@ -143,9 +143,11 @@ Choosing an architectural backbone sets the primary memory layout and compute pa
 | **Transformers** | Relational (language)         | Dynamic attention              | Quadratic score compute; optional $\SequenceLength^2$ storage |
 | **DLRM**         | Categorical (recommendations) | Embedding tables               | Capacity when tables exceed device memory                     |
 
-: **Neural Architecture Families**: Each family targets a data structure and exposes characteristic resource demands. The bottleneck column names representative regimes: streamed dense weights stress bandwidth, convolutional reuse raises arithmetic intensity, recurrence creates serial dependencies, dense attention computes quadratic score interactions, and large embedding tables stress capacity. Batch size, precision, kernel implementation, and the target machine determine which demand binds in a deployment. {#tbl-architecture-families}
+: **Neural Architecture Families**: Each family targets a data structure and exposes characteristic resource demands. The bottleneck column names representative regimes: streamed dense weights stress bandwidth, convolutional reuse raises arithmetic intensity, recurrence creates serial dependencies, dense attention computes quadratic score interactions, and large embedding tables stress capacity. Batch size, precision, kernel implementation, and the target machine determine which demand sets the limit in a deployment. {#tbl-architecture-families}
 
-The five lighthouse models introduced with the iron law return here with their architectures exposed: ResNet-50 for compute throughput, GPT-2 for memory bandwidth, DLRM for memory capacity, MobileNetV2 for compute within a mobile power envelope, and keyword spotting (KWS) for an always-on power envelope. Earlier chapters used them as named workloads and mapped them onto workload archetypes (@sec-ml-systems-workload-archetypes-fd10), such as the compute-bound and bandwidth-bound archetypes. This chapter opens each one up inside the family that builds it, to show which architectural choice puts it in its archetype. MobileNetV2 sits on the empirical Pareto frontier\index{Pareto frontier} plotted in @fig-efficiency-frontier, the set of models that no other plotted model beats on both accuracy and compute at once, while ResNet-50 sits well below it. The frontier bounds ImageNet[^fn-imagenet-scale-nn] top-1 accuracy against logarithmic compute cost, measured in GMACs (billions of multiply-accumulate operations) per image. The other three lighthouses sit off this plot because they were chosen for the bottlenecks they isolate rather than for image-classification accuracy.
+The five lighthouse models introduced with the iron law return here with their architectures exposed: ResNet-50 for compute throughput, GPT-2 for memory bandwidth, DLRM for memory capacity, MobileNetV2 for compute within a mobile power envelope, and keyword spotting (KWS) for an always-on power envelope. Earlier chapters used them as named workloads and mapped them onto workload archetypes (@sec-ml-systems-workload-archetypes-fd10), such as the compute-bound and bandwidth-bound archetypes. This chapter opens each one up inside the family that builds it, to show which architectural choice puts it in its archetype.
+
+MobileNetV2 sits on the empirical Pareto frontier\index{Pareto frontier} plotted in @fig-efficiency-frontier, the set of models that no other plotted model beats on both accuracy and compute at once, while ResNet-50 sits well below it. The frontier bounds ImageNet[^fn-imagenet-scale-nn] top-1 accuracy against logarithmic compute cost, measured in GMACs (billions of multiply-accumulate operations) per image. The other three lighthouses sit off this plot because they were chosen for the bottlenecks they isolate rather than for image-classification accuracy.
 
 ```{python}
 #| echo: false
@@ -532,7 +534,7 @@ This distinction resolves the apparent paradox between universal approximation a
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST PARAMETER COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "MNIST: Representation vs Learnability"
+# │ Context: Callout "MNIST: Representation vs Learnability"; @fig-mlp caption
 # │
 # │ Goal: Contrast parameter efficiency between dense and convolutional layers.
 # │ Scope: chapter-anchor — MNIST comparison callout and later CNN callback share exports.
@@ -561,6 +563,8 @@ class MLPvsCNN:
     # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
     cnn = Scenarios.MnistSmallCnn
     c1_out = first.out_channels
+    # The 784 -> 128 first dense layer drawn in @fig-mlp.
+    mlp_first_layer = Scenarios.MnistMlpFirstLayer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: First layer at equal feature count (c1_out features)
@@ -574,7 +578,11 @@ class MLPvsCNN:
     cnn_p = cnn.weights
     cnn_head_share = cnn.dense_share
 
+    # Step 3: MACs per sample of the first dense layer (@fig-mlp)
+    mlp_first_layer_macs = mlp_first_layer.macs_per_example
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mlp_first_layer_macs == 100_352, f"Expected 784 x 128 = 100,352 MACs in the first dense layer, got {mlp_first_layer_macs}.")
     check(ratio >= 10, f"Dense first layer ({dense_first_w}) is not significantly larger than conv ({conv_first_w}). Ratio: {ratio:.1f}x")
     check(mlp_p < cnn_p, f"Expected the 784-128-64-10 MLP ({mlp_p}) to have fewer weights than the CNN ({cnn_p}).")
     check(cnn_head_share > 0.9, f"Expected the CNN's dense head to hold >90% of its weights, got {cnn_head_share:.2f}.")
@@ -589,6 +597,7 @@ class MLPvsCNN:
     cnn_params_str = fmt_count(cnn_p)
     cnn_head_pct_str = fmt_percent(round(cnn_head_share * 100) / 100, precision=0, commas=False, style='prose')
     param_ratio_mult_str = fmt_multiple(round(ratio), precision=0, commas=False)
+    mlp_first_layer_macs_str = fmt_int(mlp_first_layer_macs)
 ```
 
 ::: {#exmp-nn-architectures-mnist-representation-vs-learnability .callout-example title="MNIST: Representation vs. learnability"}
@@ -621,7 +630,7 @@ Letting every input feature interact with every output unit requires complete co
 ↩ The matrix multiplication formulation of a dense layer's forward pass is established in @sec-neural-computation-matrix-multiplication-formulation-417c.
 :::
 
-::: {#fig-mlp fig-env="figure" fig-pos="htb" fig-cap="**Multilayer Perceptron Architecture**: A three-layer network in which every neuron connects to all neurons in adjacent layers. The highlighted neuron receives weighted contributions from all inputs, illustrating the dense $\mathcal{O}(\LayerInputWidth \times \LayerOutputWidth)$ connectivity pattern implemented through matrix multiplications. For MNIST classification, a 784-dimensional input ($\LayerInputWidth = 784$) connects to 128 hidden neurons ($\LayerOutputWidth = 128$) through a $784{\times}128$ weight matrix, requiring 100,352 multiply-accumulate operations per sample. Adapted from @reagen2017." fig-alt="Three-layer neural network with four input nodes, five hidden nodes, and two output nodes. Lines connect every node to all nodes in adjacent layers. One highlighted node shows weighted connections from all inputs. On the right, the same network is drawn as a 4-element input vector times a 4-by-5 weight matrix with one highlighted column, giving a 5-element hidden vector with one highlighted cell, then times a 5-by-2 matrix, giving a 2-element output."}
+::: {#fig-mlp fig-env="figure" fig-pos="htb" fig-cap="**Multilayer Perceptron Architecture**: A three-layer network in which every neuron connects to all neurons in adjacent layers. The highlighted neuron receives weighted contributions from all inputs, illustrating the dense $\mathcal{O}(\LayerInputWidth \times \LayerOutputWidth)$ connectivity pattern implemented through matrix multiplications. For MNIST classification, a 784-dimensional input ($\LayerInputWidth = 784$) connects to 128 hidden neurons ($\LayerOutputWidth = 128$) through a $784{\times}128$ weight matrix, requiring `{python} MLPvsCNN.mlp_first_layer_macs_str` multiply-accumulate operations per sample. Adapted from @reagen2017." fig-alt="Three-layer neural network with four input nodes, five hidden nodes, and two output nodes. Lines connect every node to all nodes in adjacent layers. One highlighted node shows weighted connections from all inputs. On the right, the same network is drawn as a 4-element input vector times a 4-by-5 weight matrix with one highlighted column, giving a 5-element hidden vector with one highlighted cell, then times a 5-by-2 matrix, giving a 2-element output."}
 
 ```{.tikz}
  \begin{tikzpicture}[line join=round,font=\sffamily]
@@ -930,7 +939,7 @@ class MacEnergyFootnote:
 
 [^fn-mac-energy-cost]: **MAC (multiply-accumulate)**\index{MAC!definition}: The atomic operation of neural networks: multiply two values and add to a running sum. In Horowitz's 45 nm reference, an FP32 multiply plus add costs about `{python} MacEnergyFootnote.e_mac_pj_str` pJ, while a 32-bit off-chip DRAM access costs about `{python} MacEnergyFootnote.e_dram_word_pj_str` pJ [@horowitz2014]. These technology-specific values illustrate why data movement can dominate arithmetic energy; they are not universal constants for current hardware. \index{MAC!energy cost}
 
-::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(\BatchSize \times \LayerOutputWidth \times \LayerInputWidth)$ complexity where each output neuron requires num_inputs multiply-accumulate operations, so the reference MNIST input layer requires 100,352 MACs per sample."}
+::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(\BatchSize \times \LayerOutputWidth \times \LayerInputWidth)$ complexity where each output neuron requires num_inputs multiply-accumulate operations, so the reference MNIST input layer requires `{python} MLPLayerStats.mnist_mlp_macs_str` per sample."}
 
 ```{.python}
 def mlp_layer_compute(X, W, b):
@@ -1008,7 +1017,7 @@ class LargeMLP:
 
 While the reference MNIST layer $(784{\times}128)$ needs only `{python} MLPLayerStats.mnist_mlp_params_str`, a single dense layer connecting `{python} LargeMLP.dim_str` inputs to `{python} LargeMLP.dim_str` outputs requires `{python} LargeMLP.params_str` (`{python} LargeMLP.mem_mb_str` at FP32), and evaluating one sample uses each weight only once. Because every input connects to every output, $\mathcal{O}(\LayerInputWidth \times \LayerOutputWidth)$ weight storage dominates the memory footprint, and when those weights exceed on-chip cache and stream from DRAM on every request, memory bandwidth becomes the bottleneck. Dense layers therefore concentrate hardware pressure across three dimensions: memory capacity for weight storage, compute throughput on matrix engines, and memory bandwidth for weight movement.
 
-The core computation is a dense matrix-vector product (GEMV), or a matrix-matrix product (GEMM) when batched. This computation is regular and parallelizable, but the arithmetic intensity (FLOP/byte) is low for small batches. A larger batch size\index{Batch size} amortizes weight-loading cost over more computations. Modern processors optimize dense layers with single instruction, multiple data (SIMD) units such as AVX-512 on CPUs. GPUs use dense matrix engines such as Tensor Cores, and Tensor Processing Units (TPUs) use systolic arrays\index{Systolic array!CNN data reuse}[^fn-systolic-array-architecture] [@jouppi2017]. Each of these designs amortizes control overhead over large blocks of parallel arithmetic.
+The core computation is a dense matrix-vector product (GEMV), or a matrix-matrix product (GEMM) when batched. This computation is regular and parallelizable, so modern processors optimize dense layers with single instruction, multiple data (SIMD) units such as AVX-512 on CPUs. GPUs use dense matrix engines such as Tensor Cores, and Tensor Processing Units (TPUs) use systolic arrays\index{Systolic array!CNN data reuse}[^fn-systolic-array-architecture] [@jouppi2017]. Each of these designs amortizes control overhead over large blocks of parallel arithmetic. Regular structure does not guarantee reuse, however. The arithmetic intensity (FLOP/byte) of a dense layer is low for small batches, and a larger batch size\index{Batch size} amortizes weight-loading cost over more computations.
 
 @Sec-neural-computation-implementation-optimization-considerations-f2ca measured this weight-loading cost on the running network, where at batch one each weight read serves a single multiply-accumulate. For the reference layer, which reads $784{\times}128$ weights to compute `{python} MLPLayerStats.hidden_dim_str` hidden values, a weight-only model that counts one FP32 read per weight and omits input, output, bias, and cache traffic gives roughly `{python} MLPLayerStats.dense_batch1_intensity_str` at batch one. @Eq-dense-intensity restates that ratio, where $\LayerInputWidth$ and $\LayerOutputWidth$ are the input and output widths. The memory tier serving those reads determines the relevant bandwidth.
 $$
@@ -1084,11 +1093,49 @@ CNNs\index{CNN}[^fn-convolution-etymology-locality] build that remedy into the n
 
 This spatial inductive bias translates into two structural constraints on the computation graph. Parameter sharing applies the same small filter weights across every spatial position, reducing parameter storage from millions of distinct weights to a compact kernel that fits within on-chip caches. Local connectivity limits each neuron's receptive field to a spatially adjacent neighborhood, eliminating computation on distant, uncorrelated pixels. Together, these constraints define the convolutional family.
 
+```{python}
+#| echo: false
+#| label: cnn-definition-sharing
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN DEFINITION WEIGHT-SHARING RATIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: CNN definition callout, Significance item
+# │
+# │ Goal: Compute the dense-vs.-convolution parameter ratio the definition quotes.
+# │ Show: A 3x3, 64-to-64 convolution (~37,000 weights) against a dense layer from
+# │       a 224x224x64 input to 64 outputs (~205 million weights), ~5,575x apart.
+# │ How: Load the reference 64-channel ImageNet convolution; take its sharing ratio.
+# │
+# │ Note: The ~37,000 and ~205 million operands sit inside the callout's inline
+# │       math, so they stay literal there; the GUARD pins both.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_multiple, check
+
+class CNNDefinitionSharing:
+    """Dense-vs.-convolution weight ratio for the CNN definition callout."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layer = Scenarios.ImageNet64ChannelConv  # 3x3, 64 -> 64, 224x224 input
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    conv_weights = layer.weights  # 3 x 3 x 64 x 64
+    dense_weights = layer.dense_weights  # 224^2 x 64 x 64
+    sharing_ratio = layer.sharing_ratio
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(conv_weights - 37_000) < 500, f"Expected ~37,000 conv weights, got {conv_weights}.")
+    check(abs(dense_weights - 205e6) < 1e6, f"Expected ~205 million dense weights, got {dense_weights}.")
+    check(round(sharing_ratio) == 5_575, f"Expected a ~5,575x ratio, got {sharing_ratio:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    sharing_ratio_mult_str = fmt_multiple(round(sharing_ratio), precision=0, commas=True)
+```
+
 :::: {#dfn-nn-architectures-convolutional-neural-networks .callout-definition title="Convolutional neural networks"}
 
 ***Convolutional neural networks (CNNs)***\index{CNN!definition} are architectures that exploit translation equivariance and spatial locality to share learned filters across all spatial positions, decoupling parameter count from input resolution.
 
-1.  **Significance**: Weight sharing\index{Weight sharing} produces dramatic parameter reduction. A $3{\times}3$ convolutional layer with 64 input and 64 output channels requires $3 \times 3 \times 64 \times 64 \approx 37{,}000$ parameters regardless of whether the input image is $224{\times}224$ or $1024{\times}1024$. A fully connected layer mapping a $224{\times}224{\times}64$ input to 64 scalar outputs would require $224^2 \times 64 \times 64 \approx 205$ million parameters, a roughly 5,575$\times$ difference. These output shapes differ: convolution reuses its 64 detectors across a spatial feature map, while the dense layer produces 64 scalars. Weight sharing keeps the filter budget constant as resolution grows, although feature-map storage still grows with image area.
+1.  **Significance**: Weight sharing\index{Weight sharing} produces dramatic parameter reduction. A $3{\times}3$ convolutional layer with 64 input and 64 output channels requires $3 \times 3 \times 64 \times 64 \approx 37{,}000$ parameters regardless of whether the input image is $224{\times}224$ or $1024{\times}1024$. A fully connected layer mapping a $224{\times}224{\times}64$ input to 64 scalar outputs would require $224^2 \times 64 \times 64 \approx 205$ million parameters, a roughly `{python} CNNDefinitionSharing.sharing_ratio_mult_str` difference. These output shapes differ: convolution reuses its 64 detectors across a spatial feature map, while the dense layer produces 64 scalars. Weight sharing keeps the filter budget constant as resolution grows, although feature-map storage still grows with image area.
 2.  **Distinction**: Unlike MLPs, which connect every input element to every output element (global connectivity), CNNs restrict each output to a local spatial neighborhood, encoding the assumption that nearby pixels are more relevant than distant ones. This restriction eliminates entire hypothesis classes at architecture design time rather than penalizing them during training.
 3.  **Common pitfall**: A frequent misconception is that CNNs are vision-only models. The convolution operation applies to any data with a grid-like topology\index{Symmetry-aware architecture}: 1D convolutions process audio waveforms and time series, 2D convolutions process images and spectrograms, and 3D convolutions process video and volumetric data.
 
@@ -1414,7 +1461,9 @@ Convolutional layers typically use small spatial kernels ($3{\times}3$ or $5{\ti
 
 :::
 
-Applying a CNN to $28{\times}28$ MNIST images demonstrates the difference in state representation. Rather than flattening the image into a 784-element vector that destroys spatial adjacency, each convolutional layer applies a bank of filters\index{Convolution!kernel} (for example, 32 filters of size $3{\times}3$) directly to the 2D grid. The *stride*\index{Convolution!stride} is how many positions the filter moves between evaluations, and *padding*\index{Convolution!padding} adds a border of zeros so that a filter centered on an edge pixel still has a full window. With unit stride and padding to preserve border dimensions, the layer outputs a $28{\times}28{\times}32$ activation tensor preserving the spatial grid. Each coordinate holds 32 distinct feature measurements extracted from its immediate neighborhood. Between groups of convolutional layers, a *pooling*\index{Pooling!downsampling} layer summarizes each small window, typically $2{\times}2$, by its maximum or average. This shrinks the grid by a factor of four in area while keeping the channels, so later layers see a coarser map that covers more of the image at a quarter of the activation memory.
+Applying a CNN to $28{\times}28$ MNIST images demonstrates the difference in state representation. Rather than flattening the image into a 784-element vector that destroys spatial adjacency, each convolutional layer applies a bank of filters\index{Convolution!kernel} (for example, 32 filters of size $3{\times}3$) directly to the 2D grid. The *stride*\index{Convolution!stride} is how many positions the filter moves between evaluations, and *padding*\index{Convolution!padding} adds a border of zeros so that a filter centered on an edge pixel still has a full window. With unit stride and padding to preserve border dimensions, the layer outputs a $28{\times}28{\times}32$ activation tensor preserving the spatial grid. Each coordinate holds 32 distinct feature measurements extracted from its immediate neighborhood.
+
+Between groups of convolutional layers, a *pooling*\index{Pooling!downsampling} layer summarizes each small window, typically $2{\times}2$, by its maximum or average. This shrinks the grid by a factor of four in area while keeping the channels, so later layers see a coarser map that covers more of the image at a quarter of the activation memory.
 
 Preserving spatial topology changes how execution units access memory. Instead of loading an unshared weight matrix once per sample as in an MLP, a convolutional layer streams input feature maps through hardware registers while keeping compact filter weights pinned in fast on-chip SRAM or register files. This arithmetic pattern drives the memory-hierarchy optimizations of AI accelerators, where loop tiling (splitting the loops into blocks whose data fits on chip, developed under data movement below) and parallel channel reduction relieve high-bandwidth memory (HBM) traffic.
 
@@ -1812,7 +1861,7 @@ class CNNSysImpl:
 
 #### Memory requirements {#sec-network-architectures-memory-requirements-a1a1}
 
-On a $224{\times}224$ ImageNet input, a convolutional layer with 64 filters of size $3{\times}3$ needs only `{python} CNNSysImpl.weights_single_ch_str` weights per input channel, or `{python} CNNSysImpl.weights_full_str` weights (`{python} CNNSysImpl.weights_full_kb_str` in FP32) across 64 input channels. These weights fit comfortably in on-chip L1 or L2 cache, yet the layer produces `{python} CNNSysImpl.activations_str` output activation values (about `{python} CNNSysImpl.activations_fp32_mb_str` in FP32 per sample in the batch). Memory consumption in convolutional layers splits sharply between these compact, static filter weights and large, transient feature maps. During training, those feature maps must stay live in memory until backpropagation computes the layer's gradients, making activation memory, not weight capacity, the binding memory constraint for deep CNNs on accelerators.
+On a $224{\times}224$ ImageNet input, a convolutional layer with 64 filters of size $3{\times}3$ needs only `{python} CNNSysImpl.weights_single_ch_str` weights per input channel, or `{python} CNNSysImpl.weights_full_str` weights (`{python} CNNSysImpl.weights_full_kb_str` in FP32) across 64 input channels. These weights fit comfortably in on-chip L1 or L2 cache, yet the layer produces `{python} CNNSysImpl.activations_str` output activation values (about `{python} CNNSysImpl.activations_fp32_mb_str` in FP32 per sample in the batch). Memory consumption in convolutional layers splits sharply between these compact, static filter weights and large, transient feature maps. During training, those feature maps must stay live in memory until backpropagation computes the layer's gradients, making activation memory, not weight capacity, the limiting memory constraint for deep CNNs on accelerators.
 
 Accelerators exploit this footprint disparity through hierarchical caching. CPUs retain compact filter weights in L2/L3 caches while streaming activation tensors. GPUs stage filter weights and input tiles in on-chip scratchpad SRAM (shared memory) and register files, reusing loaded weights across thousands of spatial coordinates and eliminating redundant round-trips to off-chip HBM.
 
@@ -1830,7 +1879,7 @@ This computational regularity provides rich opportunities for hardware paralleli
 
 #### Data movement {#sec-network-architectures-data-movement-36f6}
 
-Data movement in a convolutional layer has an arithmetic intensity profile different from that of an MLP. In a fully connected layer at batch size one, each loaded weight is used exactly once, yielding an arithmetic intensity bounded below 1 FLOP/byte. In a 2D convolution, each $3{\times}3$ filter weight is reused across all `{python} CNNSysImpl.spatial_positions_str` positions of the $224{\times}224$ feature map. This weight reuse increases operational intensity, shifting computation from the memory-bandwidth-bound regime toward the compute-bound ceiling.
+Data movement in a convolutional layer has an arithmetic intensity profile different from that of an MLP. In a fully connected layer at batch size one, each loaded weight is used exactly once, yielding an arithmetic intensity bounded below 1 FLOP/byte. In a 2D convolution, each $3{\times}3$ filter weight is reused across all `{python} CNNSysImpl.spatial_positions_str` positions of the $224{\times}224$ feature map. This weight reuse increases arithmetic intensity, shifting computation from the memory-bandwidth-bound regime toward the compute-bound ceiling.
 
 The systems challenge shifts from loading weights to staging activations. Because adjacent spatial receptive fields overlap, a naive memory access pattern would re-fetch each input pixel from memory up to $\KernelSize^2 = 9$ times. Runtimes avoid this redundant memory traffic by tiling computation into 2D spatial blocks sized to fit inside accelerator SRAM, the technique that @sec-hardware-acceleration-tiling-principle develops for the accelerator's memory hierarchy. Once an input tile is loaded into shared memory, all overlapping filter dot products for that tile execute in place, amortizing the DRAM/HBM transfer and maximizing the `{python} CNNSysImpl.spatial_positions_str` reuses of each filter weight. Reuse also moves the energy. Each filter weight fetched from off-chip memory feeds tens of thousands of multiply-accumulates. Once filters and input tiles stay on chip, a convolutional layer spends its energy on arithmetic and on-chip SRAM rather than on DRAM reads, the reverse of the batch-one dense layer.
 
@@ -1934,7 +1983,9 @@ These memory, compute, and data-movement patterns converge in ResNet-50 [@he2016
 
 ### Depthwise separable convolutions {#sec-network-architectures-efficient-architectures-keyword-spotting-0625}
 
-ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center accelerator. Standard convolutions scale as $\mathcal{O}(\SpatialPositionCount\times \KernelSize^2 \times \InputChannelCount\times \OutputChannelCount)$, a compute volume that exceeds the strict energy budgets of always-on edge devices. To bridge this gap, efficient architectures like **depthwise separable CNNs (DS-CNN)**\index{Depthwise separable convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two distinct operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], decouples spatial filtering from cross-channel combination. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($\KernelSize\times \KernelSize\times \InputChannelCount$ parameters), while the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times \InputChannelCount\times \OutputChannelCount$ parameters). Per output position, a standard layer performs $\KernelSize^2 \InputChannelCount \OutputChannelCount$ multiply-accumulates, while the factorized pair performs $\KernelSize^2 \InputChannelCount+ \InputChannelCount \OutputChannelCount$. Dividing the two shows that the decomposition reduces parameter count and FLOPs to roughly $\frac{1}{\OutputChannelCount} + \frac{1}{\KernelSize^2}$ of standard convolution, a reduction factor approaching $\KernelSize^2$, or about 8--9$\times$ for $3{\times}3$ filters with large $\OutputChannelCount$. That reduction makes real-time execution feasible on resource-constrained microcontrollers.
+ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center accelerator. Standard convolutions scale as $\mathcal{O}(\SpatialPositionCount\times \KernelSize^2 \times \InputChannelCount\times \OutputChannelCount)$, a compute volume that exceeds the strict energy budgets of always-on edge devices. To bridge this gap, efficient architectures like **depthwise separable CNNs (DS-CNN)**\index{Depthwise separable convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two distinct operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], decouples spatial filtering from cross-channel combination. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($\KernelSize\times \KernelSize\times \InputChannelCount$ parameters), while the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times \InputChannelCount\times \OutputChannelCount$ parameters).
+
+Per output position, a standard layer performs $\KernelSize^2 \InputChannelCount \OutputChannelCount$ multiply-accumulates, while the factorized pair performs $\KernelSize^2 \InputChannelCount+ \InputChannelCount \OutputChannelCount$. Dividing the two shows that the decomposition reduces parameter count and FLOPs to roughly $\frac{1}{\OutputChannelCount} + \frac{1}{\KernelSize^2}$ of standard convolution, a reduction factor approaching $\KernelSize^2$, or about 8--9$\times$ for $3{\times}3$ filters with large $\OutputChannelCount$. That reduction makes real-time execution feasible on resource-constrained microcontrollers.
 
 The channel paths in @fig-depthwise-pointwise-channels show where the arithmetic reduction comes from. The depthwise stage produces one intermediate value per input channel at each output position, and the pointwise stage combines those values across channels.
 
@@ -2054,7 +2105,7 @@ When plain convolutional networks are stacked beyond roughly 20 layers, adding m
 
 ### Skip connections and gradient flow {#sec-network-architectures-evolution-dense-spatial-processing-2761}
 
-Why gradients vanish or explode across depth\index{Network depth!training difficulty}, and why additive identity shortcuts (skip connections\index{Skip connection!cross-architecture portability}) resolve that barrier, follows directly from the chain rule, whose layer-by-layer Jacobian form appears in @sec-neural-computation-error-signal-propagation-9eeb. For a deep network with layers $\LayerFunction_1, \LayerFunction_2, \ldots, \FinalLayerFunction$, the gradient of the loss $\LossFunction$ with respect to the weights in layer 1 is:
+The chain rule, whose layer-by-layer Jacobian form appears in @sec-neural-computation-error-signal-propagation-9eeb, explains both why gradients vanish or explode across depth\index{Network depth!training difficulty} and why additive identity shortcuts (skip connections\index{Skip connection!cross-architecture portability}) resolve that barrier. For a deep network with layers $\LayerFunction_1, \LayerFunction_2, \ldots, \FinalLayerFunction$, the gradient of the loss $\LossFunction$ with respect to the weights in layer 1 is:
 $$
 \frac{\partial \LossFunction}{\partial \WeightMatrix^{(1)}} = \frac{\partial \LossFunction}{\partial \ActivationVector^{(\LayerCount)}} \cdot \frac{\partial \ActivationVector^{(\LayerCount)}}{\partial \PreactivationVector^{(\LayerCount)}} \cdot \frac{\partial \PreactivationVector^{(\LayerCount)}}{\partial \ActivationVector^{(\LayerCount-1)}} \cdot \ldots \cdot \frac{\partial \PreactivationVector^{(2)}}{\partial \ActivationVector^{(1)}} \cdot \frac{\partial \ActivationVector^{(1)}}{\partial \PreactivationVector^{(1)}} \cdot \frac{\partial \PreactivationVector^{(1)}}{\partial \WeightMatrix^{(1)}}
 $$
@@ -2289,7 +2340,46 @@ $$
 $$ {#eq-rnn}
 where $\RecurrentHiddenState_t$ denotes the hidden state at time $\TimeStepIndex$, $\LayerInputVector_t$ denotes the input at time $\TimeStepIndex$, $\RecurrentStateWeights$ contains the recurrent weights, $\RecurrentInputWeights$ contains the input weights, $\RecurrentHiddenBias$ is the hidden-state bias vector, and $\LayerNonlinearity$ is the activation function. The equation uses column vectors; the later listings use row-major batched tensors, so their weight multiplications appear on the right. Unrolled across time (@fig-rnn, right), the loop becomes a chain of transitions $\RecurrentHiddenState_{t-1} \to \RecurrentHiddenState_t \to \RecurrentHiddenState_{t+1}$ in which every link reuses the same recurrent weight matrix $\RecurrentStateWeights$, so no step can begin until the one before it has finished.
 
-::: {#fig-rnn fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: The compact recurrent loop (left) unfolds into one copy of the cell per time step (right). Three weight matrices are shared across all steps: $\RecurrentInputWeights$ (input-to-hidden), $\RecurrentStateWeights$ (hidden-to-hidden), and $\RecurrentOutputWeights$ (hidden-to-output). These matrices are reused at every step, so the parameter count is independent of sequence length. For a 128-dimensional hidden state and a 100-dimensional input, each time step requires 16,384 MACs for recurrent connections plus 12,800 for input projection." fig-alt="Left: single green hidden node with a hidden-to-hidden self-loop. Right: unfolded across three time steps showing purple inputs, green hidden states, and orange outputs. Arrows show shared input-to-hidden, hidden-to-hidden, and hidden-to-output weights across all steps."}
+```{python}
+#| echo: false
+#| label: rnn-unfolding-step-costs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RNN UNFOLDING STEP COSTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-rnn caption
+# │
+# │ Goal: Size one recurrent step of the unfolded network in the figure.
+# │ Show: Recurrent and input-projection MACs for a 128-wide state, 100-wide input.
+# │ How: Load the plain recurrent layer scenario; read its per-step MAC counts.
+# │
+# │ Note: @lst-rnn_layer_step reuses the same scenario through RNNCompute below.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class RNNUnfoldingStep:
+    """Per-step MACs of the plain recurrent layer drawn in @fig-rnn."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
+    hidden_dim = step.hidden_dim
+    input_dim = step.input_dim
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    recurrent_macs = step.recurrent_macs  # hidden x hidden
+    input_macs = step.input_macs  # input x hidden
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(recurrent_macs == 16_384, f"Expected 128 x 128 = 16,384 recurrent MACs, got {recurrent_macs}.")
+    check(input_macs == 12_800, f"Expected 100 x 128 = 12,800 input MACs, got {input_macs}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    input_dim_str = fmt(input_dim, precision=0, commas=False)
+    recurrent_macs_str = fmt(recurrent_macs, precision=0, commas=True)
+    input_macs_str = fmt(input_macs, precision=0, commas=True)
+```
+
+::: {#fig-rnn data-explore="original-v1-rnn-state-lifetime" data-explore-key="vol1:fig-rnn" fig-env="figure" fig-pos="htb" fig-cap="**Recurrent Neural Network Unfolding**: The compact recurrent loop (left) unfolds into one copy of the cell per time step (right). Three weight matrices are shared across all steps: $\RecurrentInputWeights$ (input-to-hidden), $\RecurrentStateWeights$ (hidden-to-hidden), and $\RecurrentOutputWeights$ (hidden-to-output). These matrices are reused at every step, so the parameter count is independent of sequence length. For a `{python} RNNUnfoldingStep.hidden_dim_str`-dimensional hidden state and a `{python} RNNUnfoldingStep.input_dim_str`-dimensional input, each time step requires `{python} RNNUnfoldingStep.recurrent_macs_str` MACs for recurrent connections plus `{python} RNNUnfoldingStep.input_macs_str` for input projection." fig-alt="Left: single green hidden node with a hidden-to-hidden self-loop. Right: unfolded across three time steps showing purple inputs, green hidden states, and orange outputs. Arrows show shared input-to-hidden, hidden-to-hidden, and hidden-to-output weights across all steps."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\sffamily]
@@ -2378,7 +2468,9 @@ Ordinary BPTT retains the intermediate activations $\RecurrentHiddenState_1, \Re
 
 ### Gated recurrence {#sec-network-architectures-evolution-sequence-processing-d809}
 
-Gated recurrent architectures prevent long-horizon gradients from vanishing by replacing the unconditional state overwrite of @eq-rnn with learned **gates**\index{Gating mechanism}\index{Gating mechanism!definition}\index{Gating mechanism!sequence models}, elementwise valves that decide at each step how much of the stored state to keep, overwrite, or expose. Each gate applies a sigmoid to a learned projection of the current input and previous state, producing values between zero and one that multiply the quantity it controls: a value near one passes that quantity through, and a value near zero blocks it. LSTMs[^fn-lstm-gating-mechanism] [@hochreiter1997] maintain a separate cell state beside the hidden state and govern it with input, forget, and output gates plus a candidate update. When the forget gate stays near one, the cell state passes from step to step almost unchanged, giving gradients a path across long horizons without being multiplied by $\RecurrentStateWeights$ at every transition. GRUs[^fn-gru-gated-recurrence] [@cho2014] merge the same mechanism into two gates. For the machine, an LSTM step computes four affine transformations of the input and previous state instead of one, so it holds four times the recurrent weights, performs four times the multiply-accumulates per step, and carries twice the state (hidden and cell). Runtimes fuse the four projections into one matrix multiply four times as wide, which raises its arithmetic intensity without shortening the serial chain of steps.
+Gated recurrent architectures prevent long-horizon gradients from vanishing by replacing the unconditional state overwrite of @eq-rnn with learned **gates**\index{Gating mechanism}\index{Gating mechanism!definition}\index{Gating mechanism!sequence models}, elementwise valves that decide at each step how much of the stored state to keep, overwrite, or expose. Each gate applies a sigmoid to a learned projection of the current input and previous state, producing values between zero and one that multiply the quantity it controls: a value near one passes that quantity through, and a value near zero blocks it. LSTMs[^fn-lstm-gating-mechanism] [@hochreiter1997] maintain a separate cell state beside the hidden state and govern it with input, forget, and output gates plus a candidate update. When the forget gate stays near one, the cell state passes from step to step almost unchanged, giving gradients a path across long horizons without being multiplied by $\RecurrentStateWeights$ at every transition. GRUs[^fn-gru-gated-recurrence] [@cho2014] merge the same mechanism into two gates.
+
+For the machine, an LSTM step computes four affine transformations of the input and previous state instead of one, so it holds four times the recurrent weights, performs four times the multiply-accumulates per step, and carries twice the state (hidden and cell). Runtimes fuse the four projections into one matrix multiply four times as wide, which raises its arithmetic intensity without shortening the serial chain of steps.
 
 [^fn-lstm-gating-mechanism]: **LSTM (long short-term memory)**\index{LSTM!gating mechanism}: Invented by Hochreiter\index{Hochreiter, Sepp} and Schmidhuber\index{Schmidhuber, Jürgen} in 1997, LSTMs introduced a "Constant Error Carousel," a gated cell state that protects error signals from exponential decay during backpropagation through time. The systems cost is that a standard LSTM computes input, forget, and output gates plus a candidate cell update, giving roughly four affine transformations per time step vs. one in a vanilla RNN. Transformers replaced LSTMs in many large-scale language workloads not because attention costs less arithmetic, since it costs more, but because it parallelizes across sequence positions where a recurrence cannot. \index{LSTM!compute overhead}
 
@@ -2414,6 +2506,8 @@ class RNNCompute:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     step = Scenarios.ElmanRnnStep  # 100 inputs, 128-wide state
+    hidden_dim = step.hidden_dim
+    input_dim = step.input_dim
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Recurrent: h_prev x W_hh (H x H)
@@ -2431,11 +2525,13 @@ class RNNCompute:
     recurrent_str = fmt(macs_recurrent, precision=0, commas=True)
     input_str = fmt(macs_input, precision=0, commas=True)
     total_str = fmt(macs_total, precision=0, commas=True)
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    input_dim_str = fmt(input_dim, precision=0, commas=False)
 ```
 
 @Lst-rnn_layer_step demonstrates the single-time-step mechanism using framework-level matrix operations: combine the previous hidden state with the current input, add the bias, and apply the activation to produce the next hidden state. The code is intentionally local to one step because the systems cost is not the step itself, but the dependency chain that prevents parallel execution across time.
 
-::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\RecurrentHiddenState_{t-1}\RecurrentStateWeights$ and $\LayerInputVector_t\RecurrentInputWeights$, per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
+::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\RecurrentHiddenState_{t-1}\RecurrentStateWeights$ and $\LayerInputVector_t\RecurrentInputWeights$, per time step. For `{python} RNNCompute.hidden_dim_str`-dimensional hidden state and `{python} RNNCompute.input_dim_str`-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 
 ```{.python}
 def rnn_layer_step(x_t, h_prev, W_hh, W_hx, b):
@@ -2521,7 +2617,7 @@ class RecurrentStateSize:
 
 During inference, recurrent networks need little state memory. Because the recurrent state compresses history into a fixed-size vector $\RecurrentHiddenState_t$, inference state memory scales as $\mathcal{O}(\HiddenDimension)$ (for example, `{python} RecurrentStateSize.state_kb_str` for a `{python} RecurrentStateSize.hidden_dim_str`-dimensional FP32 state), remaining completely flat whether sequence length $\SequenceLength$ is 10 or 10,000 tokens. This constant memory footprint contrasts sharply with attention mechanisms (@sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df), whose stored context grows with every token generated, an $\mathcal{O}(\SequenceLength\cdot \HiddenDimension)$ store that the transformer section sizes. For streaming deployments on memory-constrained edge hardware, such as microcontrollers, an RNN's $\mathcal{O}(1)$ runtime state avoids the growing context store that limits attention-based models.
 
-Recurrent execution splits the memory hierarchy between two behaviors: high temporal locality for parameters, and low operational intensity under standard framework dispatch. Weight matrices $\RecurrentStateWeights$ and $\RecurrentInputWeights$ are reused at every time step, residing comfortably in SRAM or L2 cache if the model fits on-chip. However, naively launching separate kernels for input projection, recurrent projection, bias addition, and activation at each time step incurs severe kernel-launch overhead and forces intermediate tensors back and forth across HBM. To mitigate this memory-bandwidth bottleneck, production recurrent runtimes fuse the projections, bias addition, and activation into a single monolithic kernel that maintains $\RecurrentHiddenState_t$ within GPU registers and shared memory throughout the sequence execution. At batch one, each recurrent step is the dense layer's matrix-vector product again, with the same energy profile. Unless the recurrent weights stay on chip from step to step, every step pays DRAM energy for every weight, about `{python} DenseLayerEnergy.move_vs_arith_mult_str` the energy of its arithmetic, which is a second reason streaming runtimes keep those weights resident.
+Recurrent execution splits the memory hierarchy between two behaviors: high temporal locality for parameters, and low arithmetic intensity under standard framework dispatch. Weight matrices $\RecurrentStateWeights$ and $\RecurrentInputWeights$ are reused at every time step, residing comfortably in SRAM or L2 cache if the model fits on-chip. However, naively launching separate kernels for input projection, recurrent projection, bias addition, and activation at each time step incurs severe kernel-launch overhead and forces intermediate tensors back and forth across HBM. To mitigate this memory-bandwidth bottleneck, production recurrent runtimes fuse the projections, bias addition, and activation into a single monolithic kernel that maintains $\RecurrentHiddenState_t$ within GPU registers and shared memory throughout the sequence execution. At batch one, each recurrent step is the dense layer's matrix-vector product again, with the same energy profile. Unless the recurrent weights stay on chip from step to step, every step pays DRAM energy for every weight, about `{python} DenseLayerEnergy.move_vs_arith_mult_str` the energy of its arithmetic, which is a second reason streaming runtimes keep those weights resident.
 
 ::: {.column-margin .margin-pointer}
 ↪ What a fused kernel that holds its state in registers and shared memory costs in on-chip capacity and occupancy is developed in @sec-hardware-acceleration-kernel-fusion-7faf.
@@ -2653,7 +2749,7 @@ In "the trophy did not fit in the suitcase because it was too big," the word "it
 
 The bipartite connection lines in @fig-transformer-attention-visualized illustrate how the pronoun "they" could receive information from "student" and "finish." The hypothetical weights demonstrate a direct routing path, not a measured coreference result. Pairwise connections can be evaluated in parallel, allowing a single layer to connect these positions without propagating intermediate state across intervening tokens.
 
-Input-dependent processing extends well beyond language. In protein structure prediction, amino-acid interactions depend on chemical properties and spatial arrangement, not only chain position; in document analysis, connections between sections depend on semantic content rather than proximity. Graph convolutional networks (GCNs) [@kipf2016semi] share attention's input-dependent routing but gather features along the sparse edges of each input graph, producing irregular memory access that can bind execution on memory bandwidth and cache misses rather than compute throughput.
+Input-dependent processing extends well beyond language. In protein structure prediction, amino-acid interactions depend on chemical properties and spatial arrangement, not only chain position; in document analysis, connections between sections depend on semantic content rather than proximity. Graph convolutional networks (GCNs) [@kipf2016semi] share attention's input-dependent routing but gather features along the sparse edges of each input graph, producing irregular memory access that can leave execution limited by memory bandwidth and cache misses rather than compute throughput.
 
 Input dependence does not imply all-to-all connectivity. Dense attention scores every pair of sequence elements, whereas a GCN restricts aggregation to edges in the observed graph. The common systems challenge is that the computation or memory-access pattern responds to the input rather than following a fixed stencil. Even when tensor dimensions stay fixed, content-dependent scores determine which information is emphasized. Attention provides one mechanism for learning such relationships, and dense self-attention forms the foundation of the transformer architecture.
 
@@ -2825,16 +2921,22 @@ class QKVProjectionCosts:
     tokens = projection.tokens
     d_model = projection.width
     qkv_dim = projection.packed_width
+    heads = projection.workload.heads  # GPT-2 Small attention heads
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     qkv_macs = projection.macs
     qkv_macs_m = qkv_macs / MILLION
+    head_dim = d_model // heads  # per-head width for @lst-self_attention_layer
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(qkv_macs == 10_616_832, f"QKV projection MAC count should be 10,616,832, got {qkv_macs}.")
+    check(head_dim * heads == d_model and head_dim == 64, f"GPT-2 Small heads should be 64 wide, got {head_dim}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     qkv_macs_str = fmt_count(qkv_macs, scale="million", scale_style="word", precision=1, commas=False, label="MAC")
+    d_model_str = fmt(d_model, precision=0, commas=False)
+    heads_str = fmt(heads, precision=0, commas=False)
+    head_dim_str = fmt(head_dim, precision=0, commas=False)
 ```
 
 ::: {#fig-attention-weightcalc fig-env="figure" fig-pos="htb" fig-cap="**QKV Projection Computation**: The embedding matrix ($6{\times}768$) multiplies with QKV weight matrices ($768{\times}2304$) plus bias to produce combined projections ($6{\times}2304$). The 2304 output columns hold the query, key, and value projections side by side, 768 each, colored as in @fig-attention; only the first token's output row is drawn. This single batched matrix multiplication, requiring $6{\times}768{\times}2304$ = `{python} QKVProjectionCosts.qkv_macs_str`, replaces three separate projection operations for efficiency. Adapted from Transformer Explainer [@cho2025]." fig-alt="Diagram of a 6-by-768 embedding matrix multiplied by a 768-by-2304 QKV weight matrix, with a 2304-element bias added to produce a 6-by-2304 output. Token labels are Data, visualization, em, powers, users, and to; the weight matrix and the first output row are split into cyan query, red key, and green value thirds, and the bias is gray."}
@@ -3232,7 +3334,7 @@ Attention replaces the serialized hidden-state bottleneck of recurrent models wi
 
 ## Transformers: Parallel Sequence Processing {#sec-network-architectures-transformers-attentiononly-architecture-1b56}
 
-Attention provides the computational primitive of dynamic, content-dependent routing between positions, yet it was originally layered on top of recurrent architectures, inheriting their sequential bottleneck. The transformer architecture\index{Transformer!recurrence removed} removes recurrence and makes attention the operation that mixes information between positions in every layer. This enables parallel computation across sequence positions during full-sequence processing while retaining dynamic connectivity. This architectural shift introduces distinct physical costs: quadratic attention-score cost over long inputs, a store of per-token state that grows while the model generates text, and memory-bandwidth pressure when it generates one token at a time.
+Attention provides the computational primitive of dynamic, content-dependent routing between positions, yet it was originally layered on top of recurrent architectures, inheriting their sequential bottleneck. The transformer architecture\index{Transformer!recurrence removed} removes recurrence and makes attention the operation that mixes information between positions in every layer, which enables parallel computation across sequence positions during full-sequence processing while retaining dynamic connectivity. Removing recurrence also introduces distinct physical costs: quadratic attention-score cost over long inputs, a store of per-token state that grows while the model generates text, and memory-bandwidth pressure when it generates one token at a time.
 
 ::: {#dfn-nn-architectures-transformers .callout-definition title="Transformers"}
 
@@ -3246,7 +3348,7 @@ Attention provides the computational primitive of dynamic, content-dependent rou
 
 ### Pattern processing needs {#sec-network-architectures-pattern-processing-needs-9daf}
 
-The recurrent sequence-to-sequence hybrids that first carried attention [@sutskever2014sequence; @bahdanau2015neural] fixed the single-vector information bottleneck of @sec-network-architectures-system-implications-18c3, yet step $\TimeStepIndex$ still waited on step $\TimeStepIndex-1$: a 1,000-token input still paid 1,000 ordered state updates no matter how many matrix units the accelerator offered. Dropping the recurrent loop so all 1,000 tokens can be processed at once places three pattern-processing demands on the replacement block. It must link any two positions within the same sequence in a single parallel pass; it must inject sequence order explicitly, because without step-by-step state updates an all-to-all operation cannot tell whether one word came before or after another; and it must apply nonlinear feature transformations within each position after routing information between them. The transformer architecture [@vaswani2017] meets those three requirements by pairing self-attention with positional encodings and position-wise feed-forward networks, trading the spatial parameter efficiency of CNNs and the bounded $\mathcal{O}(1)$ step state of RNNs for unconstrained sequence parallelism during training and prompt processing.
+The recurrent sequence-to-sequence hybrids that first carried attention [@sutskever2014sequence; @bahdanau2015neural] fixed the single-vector information bottleneck of @sec-network-architectures-system-implications-18c3, yet step $\TimeStepIndex$ still waited on step $\TimeStepIndex-1$: a 1,000-token input still paid 1,000 ordered state updates no matter how many matrix units the accelerator offered. Dropping the recurrent loop so all 1,000 tokens can be processed at once places three pattern-processing demands on the replacement block. It must link any two positions within the same sequence in a single parallel pass. It must inject sequence order explicitly, because without step-by-step state updates an all-to-all operation cannot tell whether one word came before or after another. It must also apply nonlinear feature transformations within each position after routing information between them. The transformer architecture [@vaswani2017] meets those three requirements by pairing self-attention with positional encodings and position-wise feed-forward networks, trading the spatial parameter efficiency of CNNs and the bounded $\mathcal{O}(1)$ step state of RNNs for unconstrained sequence parallelism during training and prompt processing.
 
 ### Algorithmic structure {#sec-network-architectures-algorithmic-structure-60ef}
 
@@ -3273,7 +3375,9 @@ $$
 
 Although individual attention heads often specialize in distinct syntactic or semantic patterns [@clark2019], adapting the effective connectivity graph to each input sequence, empirical analyses reveal substantial head redundancy and acute numerical sensitivity in reduced-precision formats. These hardware-relevant behaviors motivate structural pruning, low-rank factorization, sparse attention patterns, and specialized quantization strategies.
 
-To build deep networks from these dynamic projections, the transformer places self-attention inside a repeating block (@fig-transformer). Each block wraps multi-head attention and position-wise feed-forward sublayers with residual connections\index{Residual connection!Transformer} and layer normalization\index{Layer normalization!Transformer}. Sinusoidal positional encodings combine with token embeddings at the base of both towers, feeding repeated multi-head attention and feed-forward stages before terminating in linear and softmax output heads. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training. A decoder-only model such as GPT-2 keeps only the right-hand tower of this figure, without the attention that reads an encoder's output. Tokens enter as embedding vectors, pass through the stack of blocks, and leave as a probability distribution over the vocabulary for the next token. The residual paths and normalization layers in this stack are shared building blocks rather than transformer inventions; @sec-network-architectures-evolution-dense-spatial-processing-2761 and @sec-network-architectures-normalization-layers-mathematical-foundations-0fb7 explain why they make deep stacks trainable and what each costs the machine.
+To build deep networks from these dynamic projections, the transformer places self-attention inside a repeating block (@fig-transformer). Each block wraps multi-head attention and position-wise feed-forward sublayers with residual connections\index{Residual connection!Transformer} and layer normalization\index{Layer normalization!Transformer}. Sinusoidal positional encodings combine with token embeddings at the base of both towers, feeding repeated multi-head attention and feed-forward stages before terminating in linear and softmax output heads. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training.
+
+A decoder-only model such as GPT-2 keeps only the right-hand tower of this figure, without the attention that reads an encoder's output. Tokens enter as embedding vectors, pass through the stack of blocks, and leave as a probability distribution over the vocabulary for the next token. The residual paths and normalization layers in this stack are shared building blocks rather than transformer inventions; @sec-network-architectures-evolution-dense-spatial-processing-2761 and @sec-network-architectures-normalization-layers-mathematical-foundations-0fb7 explain why they make deep stacks trainable and what each costs the machine.
 
 ::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: The encoder (left, repeated $\LayerCount$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during training and autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-equivariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Adapted from @vaswani2017." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated N_L times. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
 
@@ -3472,7 +3576,7 @@ Generation splits into two phases with different machine profiles, drawn in @fig
 
 In code, self-attention is three projections of the same input followed by the attention operator, and multi-head attention runs several smaller copies side by side before a final projection (@lst-self_attention_layer). Writing both layers side by side shows how the multi-head variant partitions the hidden dimension across heads without changing the per-head attention kernel.
 
-::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
+::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 (`{python} QKVProjectionCosts.d_model_str`-dim, `{python} QKVProjectionCosts.heads_str` heads), each head operates on `{python} QKVProjectionCosts.head_dim_str` dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
 
 ```{.python}
 def self_attention_layer(X, W_Q, W_K, W_V, d_head):
@@ -3556,7 +3660,7 @@ class AttentionCrossover:
 
 That wall arrives later than its name suggests. By the block account of @sec-network-architectures-computational-mapping-aea3, with a feed-forward width four times the model width, a block's projections and feed-forward network cost $12\SequenceLength\HiddenDimension^2$ multiply-accumulates against $2\SequenceLength^2\HiddenDimension$ for the attention products. Attention's arithmetic therefore dominates only once the sequence passes about six times the model width, near `{python} AttentionCrossover.crossover_str` tokens for GPT-2 XL. Shorter training sequences are bound by the ordinary dense matrix multiplies, and the quadratic wall is a long-context phenomenon.
 
-Expanding sequence length $\SequenceLength$ challenges accelerator memory hierarchies because full-sequence self-attention cost grows with context length. Product context windows grew from 2K tokens to beyond 128K and into the 1M-token range within a few years [@openai2023devday; @anthropic2023claude21; @google2024gemini15], and the decoding discussion below sizes what that growth demands of memory. Longer context windows shift complexity from external retrieval and document chunking pipelines into accelerator memory capacity and bandwidth budgets. Exact tiling changes how much attention state is stored; sparse attention instead reduces the interactions computed (@sec-network-architectures-memory-requirements-72c3).
+Deployed models, however, now operate well inside that long-context regime. Product context windows grew from 2K tokens to beyond 128K and into the 1M-token range within a few years [@openai2023devday; @anthropic2023claude21; @google2024gemini15], and the decoding discussion below sizes what that growth demands of memory. Longer context windows shift complexity from external retrieval and document chunking pipelines into accelerator memory capacity and bandwidth budgets. Exact tiling changes how much attention state is stored; sparse attention instead reduces the interactions computed (@sec-network-architectures-memory-requirements-72c3).
 
 ::: {#exmp-nn-architectures-quadratic-wall .callout-example title="The quadratic wall"}
 
@@ -3874,7 +3978,9 @@ class GPT2ModernContext:
     weight_read_ms_str = fmt_time(weight_read, unit="millisecond", precision=1, commas=False)
 ```
 
-GPT-2 [@radford2019language]\index{GPT-2} anchors the chapter's bandwidth-bound language lighthouse. It is a decoder-only transformer, the same design as today's large language models\index{LLM} such as Llama, yet small enough that every weight and every byte of its decoding traffic can be counted by hand. Unlike BERT, an encoder-style transformer that reads its whole context in both directions, GPT-2 generates text one token at a time\index{Autoregressive generation}, so batch-one decoding reads every weight for every token it produces. Two differences from current decoders matter for the machine. GPT-2 gives every attention head its own keys and values, so it stores `{python} GPT2ModernContext.kv_kb_per_token_str` of KV cache per token in FP16, while newer models share keys and values across groups of heads [@ainslie2023] and store several times less per parameter. Batching also amortizes weights across requests but not caches, because each sequence keeps its own, which is why serving at scale binds on KV bytes as well as weight bytes. At GPT-2 XL's size, one decoding step reads its weights in about `{python} GPT2ModernContext.weight_read_ms_str` on a data-center accelerator, a few times shorter than the time to launch the step's many small kernels (@sec-ml-frameworks). Bandwidth therefore dominates cleanly only as models grow toward tens of billions of parameters.
+GPT-2 [@radford2019language]\index{GPT-2} anchors the chapter's bandwidth-bound language lighthouse. It is a decoder-only transformer, the same design as today's large language models\index{LLM} such as Llama, yet small enough that every weight and every byte of its decoding traffic can be counted by hand. Unlike BERT, an encoder-style transformer that reads its whole context in both directions, GPT-2 generates text one token at a time\index{Autoregressive generation}, so batch-one decoding reads every weight for every token it produces.
+
+Two differences from current decoders matter for the machine. GPT-2 gives every attention head its own keys and values, so it stores `{python} GPT2ModernContext.kv_kb_per_token_str` of KV cache per token in FP16, while newer models share keys and values across groups of heads [@ainslie2023] and store several times less per parameter. Batching also amortizes weights across requests but not caches, because each sequence keeps its own, which is why serving at scale is limited by KV bytes as well as weight bytes. At GPT-2 XL's size, one decoding step reads its weights in about `{python} GPT2ModernContext.weight_read_ms_str` on a data-center accelerator, a few times shorter than the time to launch the step's many small kernels (@sec-ml-frameworks). Bandwidth therefore dominates cleanly only as models grow toward tens of billions of parameters.
 
 ```{python}
 #| echo: false
@@ -3944,7 +4050,7 @@ Across training and inference, transformers expose different opportunities for r
 
 ::: {#chk-nn-architectures-prefill-decode .callout-checkpoint title="Prefill and decode"}
 
-- [ ] **Two regimes**: why does the same transformer bind on arithmetic during prefill but on memory bandwidth during batch-one decoding?
+- [ ] **Two regimes**: why is the same transformer limited by arithmetic during prefill but by memory bandwidth during batch-one decoding?
 - [ ] **KV cache**: what does serving keep for every earlier token, why can it discard earlier queries, and how does the cache grow with context length and concurrency?
 - [ ] **Long context**: in the memory-against-context figure, which of the three curves sets the limit first, and what does tiled attention change?
 
@@ -3970,7 +4076,8 @@ Yet dense, spatial, and sequence models do not cover the full spectrum of produc
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_int, fmt, fmt_memory, fmt_memory_capacity, check
+import math
+from mlsysim.fmt import fmt_int, fmt, fmt_memory, fmt_memory_capacity, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DLRMEmbedding:
@@ -3989,18 +4096,22 @@ class DLRMEmbedding:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     table_memory = table.table_bytes
     row_memory = table.row_bytes
+    users_exponent = round(math.log10(num_users))  # rows as a power of ten for the inline product
+    bytes_value_int = round(bytes_per_param.to(byte).magnitude)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         table_memory >= a100_capacity,
         f"DLRM table ({table_memory.to(GB).magnitude:.1f} GB) fits on an A100. It must be larger to illustrate the capacity wall.",
     )
+    check(num_users == 10**users_exponent == 10**9, f"Prose says one billion users; got {num_users}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     embed_table_gb_str = fmt_memory(table_memory, unit=GB, precision=0, commas=False)
     embed_dim_str = fmt_int(embed_dim)
     row_bytes_str = fmt_memory(row_memory, unit=byte, precision=0, commas=False)
     a100_mem_gb_str = fmt_memory_capacity(a100_capacity, unit=GiB, precision=0, commas=False)
+    table_product_math = fmt_math(rf"10^{{{users_exponent}}} \times {embed_dim} \times {bytes_value_int}")
 
 # Note: Use DLRMEmbedding.embed_table_gb_str directly.
 ```
@@ -4011,7 +4122,7 @@ Coupling sparse lookups with dense interaction layers is the defining pattern of
 
 A recommendation model must process user IDs across billions of accounts and item IDs across millions of products, yet raw integer IDs carry no inherent distance. User 1042 is no closer to user 1043 than to user 9,000,000, so a dense network cannot infer relationships from the numbers themselves. A single request also carries many such categorical features\index{Categorical feature} at once (the items a user recently viewed, the categories they follow), so one prediction can require dozens of separate ID lookups.
 
-Embeddings solve the representation problem by mapping each discrete ID to a dense vector called an **embedding**\index{Embedding!definition}[^fn-embedding-table-lookups] [@mikolov2013efficient]. The vectors are ordinary learned parameters. Each row of an embedding table is a weight vector that gradient descent updates whenever its ID appears in a training example, so users and items with similar behavior end up near one another. The dot product of a user vector with an item vector becomes a learned score for how well they match. The system cost is that every lookup becomes an irregular read into a table spanning tens or hundreds of gigabytes. Recommendation models therefore encounter a capacity wall and a memory-bandwidth bottleneck before the first dense feedforward layer executes.
+Recommendation models solve the representation problem by mapping each discrete ID to a dense vector called an **embedding**\index{Embedding!definition}[^fn-embedding-table-lookups] [@mikolov2013efficient]. The vectors are ordinary learned parameters. Each row of an embedding table is a weight vector that gradient descent updates whenever its ID appears in a training example, so users and items with similar behavior end up near one another. The dot product of a user vector with an item vector becomes a learned score for how well they match. The system cost is that every lookup becomes an irregular read into a table spanning tens or hundreds of gigabytes. Recommendation models therefore encounter a capacity wall and a memory-bandwidth bottleneck before the first dense feedforward layer executes.
 
 [^fn-embedding-table-lookups]: **Embedding**\index{Embedding!etymology}: Deriving from the mathematical embedding of one space into another, neural embeddings map discrete tokens (such as user IDs or vocabulary words) into continuous vector spaces where geometric proximity captures semantic similarity. Word2vec popularized neural word embeddings in 2013. For systems, embedding tables create a distinctive memory access pattern: each lookup is an irregular read into a potentially terabyte-scale table, producing a sparse, bandwidth-bound workload that makes DLRM different from compute-bound architectures like ResNet.\index{Embedding!memory access pattern}
 
@@ -4019,7 +4130,7 @@ Embeddings solve the representation problem by mapping each discrete ID to a den
 
 The DLRM\index{DLRM} architecture [@naumov2019deep] organizes this computation into a four-stage pipeline split between dense and sparse paths. Continuous features such as user age or time of day first flow through a bottom MLP, a compute-intensive but memory-light stage dominated by dense matrix multiplications. The bottom MLP projects the raw continuous inputs into a single dense vector with the same dimension as each embedding table row (such as 128 elements), placing continuous and categorical features in a common vector space. In parallel, categorical IDs index into dedicated embedding tables\index{Embedding!table}, which is where the memory capacity wall appears.
 
-For example, an embedding table for one billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx$ `{python} DLRMEmbedding.embed_table_gb_str` of memory. This stage is memory-intensive but compute-light because each lookup is a memory copy with zero arithmetic reuse. Because the bottom MLP output and every gathered embedding row now share the same vector length, the interaction layer\index{DLRM!interaction layer} can combine the dense activations from the bottom MLP with the gathered sparse embedding vectors through pairwise dot products that capture user-item correlations. Finally, a top MLP processes the concatenated interaction representations through feedforward layers to predict a target probability such as click-through rate. Each of the four stages stresses a different part of the machine (@fig-dlrm-pipeline), and @sec-network-architectures-computational-mapping-b346 quantifies the capacity-bound profile that results.
+For example, an embedding table for one billion users with `{python} DLRMEmbedding.embed_dim_str`-dimensional vectors requires `{python} DLRMEmbedding.table_product_math` bytes $\approx$ `{python} DLRMEmbedding.embed_table_gb_str` of memory. This stage is memory-intensive but compute-light because each lookup is a memory copy with zero arithmetic reuse. Because the bottom MLP output and every gathered embedding row now share the same vector length, the interaction layer\index{DLRM!interaction layer} can combine the dense activations from the bottom MLP with the gathered sparse embedding vectors through pairwise dot products that capture user-item correlations. Finally, a top MLP processes the concatenated interaction representations through feedforward layers to predict a target probability such as click-through rate. Each of the four stages stresses a different part of the machine (@fig-dlrm-pipeline), and @sec-network-architectures-computational-mapping-b346 quantifies the capacity-bound profile that results.
 
 ::: {#fig-dlrm-pipeline fig-env="figure" fig-pos="htb" fig-cap="**DLRM Pipeline**: Dense features pass through a bottom MLP of small weight matrices, while each categorical ID selects one row of a large embedding table. The gathers are random reads with almost no arithmetic, and the tables can exceed one device's memory. An interaction stage takes pairwise dot products among the dense output and the gathered vectors, and a top MLP turns the result into a click probability." fig-alt="Two paths feed an interaction box. Left: dense features go up into a blue bottom MLP. Right: categorical IDs enter three tall orange embedding tables; one highlighted row from each is copied into a small vector. Labels note random reads with almost no arithmetic and tables of gigabytes to terabytes that may span devices. The interaction output feeds a top MLP that produces a click probability."}
 
@@ -4066,7 +4177,9 @@ For example, an embedding table for one billion users with 128-dimensional vecto
 
 ### Computational mapping and system implications {#sec-network-architectures-computational-mapping-b346}
 
-DLRM's computational mapping splits into two regimes that stress different hardware subsystems. The dense MLPs execute standard GEMM operations, identical to the MLP computational mapping discussed in @sec-network-architectures-computational-mapping-cf30 and handled efficiently by Tensor Cores. The sparse embedding lookups, however, are qualitatively different. They are index-based memory gathers that copy parameter data with zero arithmetic reuse. An isolated lookup is bound by memory access latency. When a batch executes hundreds of lookups across features and samples, however, aggregate throughput becomes memory-bandwidth bound as concurrent requests saturate the memory bus. This operational throughput limit is distinct from the capacity constraint: total table size dictates whether parameters fit in accelerator memory or must spill across PCIe to host DRAM, whereas available bandwidth governs how fast gathered rows arrive. Within each selected row, an embedding vector is contiguous (for instance, `{python} DLRMEmbedding.embed_dim_str` FP32 elements spanning `{python} DLRMEmbedding.row_bytes_str`), allowing the downstream pooling loop to consume every transferred byte. Across rows, however, data-dependent categorical IDs lack predictable spatial locality, defeating hardware prefetchers between row accesses. Access popularity remains heavily skewed: a small set of hot rows (popular items, frequent users) shows strong temporal locality in on-chip caches, while the long tail of rarely touched rows misses to main memory. @Lst-embedding_bag_compute writes this sparse stage as a loop nest parallel to those of the other families.
+DLRM's computational mapping splits into two regimes that stress different hardware subsystems. The dense MLPs execute standard GEMM operations, identical to the MLP computational mapping discussed in @sec-network-architectures-computational-mapping-cf30 and handled efficiently by Tensor Cores. The sparse embedding lookups, however, are qualitatively different. They are index-based memory gathers that copy parameter data with zero arithmetic reuse. An isolated lookup is bound by memory access latency. When a batch executes hundreds of lookups across features and samples, however, aggregate throughput becomes memory-bandwidth bound as concurrent requests saturate the memory bus. This operational throughput limit is distinct from the capacity constraint: total table size dictates whether parameters fit in accelerator memory or must spill across PCIe to host DRAM, whereas available bandwidth governs how fast gathered rows arrive.
+
+Within each selected row, an embedding vector is contiguous (for instance, `{python} DLRMEmbedding.embed_dim_str` FP32 elements spanning `{python} DLRMEmbedding.row_bytes_str`), allowing the downstream pooling loop to consume every transferred byte. Across rows, however, data-dependent categorical IDs lack predictable spatial locality, defeating hardware prefetchers between row accesses. Access popularity remains heavily skewed: a small set of hot rows (popular items, frequent users) shows strong temporal locality in on-chip caches, while the long tail of rarely touched rows misses to main memory. @Lst-embedding_bag_compute writes this sparse stage as a loop nest parallel to those of the other families.
 
 ::: {#lst-embedding_bag_compute lst-cap="**Embedding-Bag Gather**: Four nested loops expose DLRM's sparse stage. Loops 1 and 2 parallelize across samples and features, but Loop 3 takes its addresses from the input IDs, so hardware cannot predict them, and Loop 4 performs one addition per 4-byte FP32 value loaded. Batching raises that intensity only when samples share hot rows."}
 
@@ -4259,7 +4372,7 @@ Once the tables no longer fit on one device, sparse lookups cross memory and int
 
 Recommendation systems stress a different part of the machine than CNNs or transformers.
 
-- [ ] **Capacity-bound**: Can you explain why embedding tables push DLRM into a memory capacity regime where "FLOPs" is not the binding constraint?
+- [ ] **Capacity-bound**: Can you explain why embedding tables push DLRM into a memory capacity regime where "FLOPs" is not the limiting constraint?
 - [ ] **Sparse access**: Can you explain why embedding lookups defeat prefetching, and why popularity skew still lets a cache capture the hot rows?
 - [ ] **Placement logic**: If a single embedding table does not fit in fast device memory, can you describe which state must move, shrink, or be partitioned?
 - [ ] **Data-movement bottleneck**: Can you explain why sparse embedding lookups can dominate even when the dense MLP has modest FLOP cost?
@@ -4272,7 +4385,7 @@ With DLRM, the roster of five families is complete, and each has been analyzed o
 
 The three requests that opened this chapter can now be costed in numbers. A single ResNet-50 frame performs about `{python} LighthouseSpecs.resnet_gflop_str` of arithmetic against `{python} LighthouseSpecs.resnet_fp32_mb_str` of FP32 weights, and each convolutional filter is reused across its feature map, creating opportunities to keep arithmetic units busy. A single GPT-2 token at batch size one performs about `{python} LighthouseSpecs.gpt2_gflop_per_token_str` against `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of FP16 weights. Streaming those weights once gives a weight-only arithmetic intensity of roughly `{python} AutoregressiveInferenceCost.intensity_fp16_str`, making bandwidth a likely limit. A DLRM request gathers a handful of embedding rows from tables totaling `{python} LighthouseSpecs.dlrm_model_size_gb_str`, more than the accelerator's `{python} CapacityWall.a100_mem_gb_str` of memory, so before any question of speed arises the system must decide where those tables live.
 
-The silicon is identical in all three cases, but the demands differ. Convolutional reuse favors arithmetic throughput, streamed token projections stress bandwidth, and oversized embedding tables impose a capacity constraint that decides which bandwidth their lookups pay. The iron law (@sec-introduction-iron-law-ml-systems-c32a) then predicts which term binds, given the execution conditions and machine balance.
+The silicon is identical in all three cases, but the demands differ. Convolutional reuse favors arithmetic throughput, streamed token projections stress bandwidth, and oversized embedding tables impose a capacity constraint that decides which bandwidth their lookups pay. The iron law (@sec-introduction-iron-law-ml-systems-c32a) then predicts which term dominates, given the execution conditions and machine balance.
 
 Each of those costs comes from a counting rule derived in its family's section. @Tbl-nn-architectures-cost-formulas collects the rules in exact form, so that a new model can be estimated on paper in the same order: count the weights, count the multiply-accumulates, count the bytes that must move or stay resident, then compare those counts with the machine.
 
@@ -4374,7 +4487,7 @@ Architecture selection is ultimately an engineering trade-off between math $(\Op
 
 Match the architectural choice to its systems implication:
 
-- [ ] **One accelerator, three requests**: can you say which iron-law term binds a batched ResNet-50 frame, a batch-one GPT-2 token, and a DLRM lookup, and name one change that would move each?
+- [ ] **One accelerator, three requests**: can you say which iron-law term limits a batched ResNet-50 frame, a batch-one GPT-2 token, and a DLRM lookup, and name one change that would move each?
 - [ ] **Batching**: why does batching move the dense-layer and decode workloads toward the machine's balance point while leaving the embedding gather's bottleneck in place?
 
 :::
@@ -4385,13 +4498,13 @@ Comparing this spectrum with the target machine's balance helps determine whethe
 ↪ The roofline model's analytical treatment, from the memory-bound slope to the ridge point, is developed in @sec-hardware-acceleration-roofline-model-42ff.
 :::
 
-Intensity is one column of a fuller profile. Persistent state, per-request state, the axis along which the work parallelizes, and the iron-law term that binds complete the comparison.
+Intensity is one column of a fuller profile. Persistent state, per-request state, the axis along which the work parallelizes, and the iron-law term that dominates complete the comparison.
 
 ### Workload profiles {#sec-network-architectures-machine-demand-profile}
 
 An architecture's bottleneck depends on how a request exercises its state and parallelism as much as on its layer equations, which is why the transformer occupies two rows in @tbl-nn-architectures-machine-demands: prompt prefill and autoregressive decode reuse the exact same weights in different regimes (@sec-network-architectures-inference-memory-bandwidth-wall-98d1). Each row of the table pairs a family in a representative execution regime with the workload archetypes of @sec-ml-systems-workload-archetypes-fd10. The compute-bound rows assume sufficient reuse to exceed the machine's balance, the bandwidth-bound rows assume streamed operands, and the capacity-bound row assumes oversized tables. Reading across the columns follows a request through the machine: persistent state, per-request state, arithmetic intensity, parallel axes, and the likely limiting term under those assumptions.
 
-| **Family**                | **Parameters**                                                                                           | **Activations**                                                                                                                    | **Intensity**                                               | **Parallel Axis**                                    | **Binding Term**                                                                     | **Lighthouse**                 |
+| **Family**                | **Parameters**                                                                                           | **Activations**                                                                                                                    | **Intensity**                                               | **Parallel Axis**                                    | **Limiting Term**                                                                    | **Lighthouse**                 |
 |:--------------------------|:---------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|:-----------------------------------------------------|:-------------------------------------------------------------------------------------|:-------------------------------|
 | **MLP**                   | $\mathcal{O}(\LayerInputWidth \LayerOutputWidth)$ per layer                                              | $\mathcal{O}(\BatchSize\, \LayerOutputWidth)$                                                                                      | Low at batch one (GEMV); high when batched (GEMM)           | Batch                                                | $\DataVolume/\Bandwidth$ at small batch                                              | None (DLRM's dense MLPs)       |
 | **CNN**                   | $\mathcal{O}(\KernelSize^2 \InputChannelCount \OutputChannelCount)$ per layer, independent of image size | $\mathcal{O}(\BatchSize\, \FeatureMapHeight \FeatureMapWidth \OutputChannelCount)$                                                 | High (filters reused across positions); lower for depthwise | Batch and spatial positions                          | $\Operations/(\PeakRate\,\EfficiencyHw)$                                             | ResNet-50; MobileNetV2 and KWS |
@@ -4400,7 +4513,7 @@ An architecture's bottleneck depends on how a request exercises its state and pa
 | **Transformer (decode)**  | Same weights, reread for every token                                                                     | KV cache, $\mathcal{O}(\BatchSize \SequenceLength \HiddenDimension)$ per layer                                                     | Low (GEMV per token at small batch)                         | Batch only; tokens are serial                        | $\DataVolume/\Bandwidth$ (weights and KV cache)                                      | GPT-2 (generation)             |
 | **DLRM**                  | Embedding tables, one row per category, dominate; dense MLPs are small                                   | Pooled embedding vectors per feature                                                                                               | Very low (gathers with little arithmetic)                   | Batch; tables sharded across devices                 | Capacity first, then $\DataVolume/\Bandwidth$                                        | DLRM                           |
 
-: **Architecture Workload Profiles**: State, per-request activations, intensity regime, parallel axis, and binding iron-law term for each family in its common execution regime. Symbols follow the family sections: $\BatchSize$ is batch size, $\SequenceLength$ sequence length, $\HiddenDimension$ the hidden dimension, $\LayerInputWidth$ and $\LayerOutputWidth$ a layer's input and output widths, $\FeedForwardWidth$ the feed-forward width, $\KernelSize$ kernel size, $\InputChannelCount$ and $\OutputChannelCount$ input and output channels, and $\FeatureMapHeight\times \FeatureMapWidth$ the feature-map size. Intensity regimes are qualitative; @tbl-lighthouse-comparison gives weight-only proxies for the lighthouses. The $\mathcal{O}(\BatchSize \SequenceLength^2)$ prefill term assumes materialized attention scores (@sec-network-architectures-memory-requirements-72c3). {#tbl-nn-architectures-machine-demands tbl-colwidths="[12,17,17,16,13,15,10]"}
+: **Architecture Workload Profiles**: State, per-request activations, intensity regime, parallel axis, and limiting iron-law term for each family in its common execution regime. Symbols follow the family sections: $\BatchSize$ is batch size, $\SequenceLength$ sequence length, $\HiddenDimension$ the hidden dimension, $\LayerInputWidth$ and $\LayerOutputWidth$ a layer's input and output widths, $\FeedForwardWidth$ the feed-forward width, $\KernelSize$ kernel size, $\InputChannelCount$ and $\OutputChannelCount$ input and output channels, and $\FeatureMapHeight\times \FeatureMapWidth$ the feature-map size. Intensity regimes are qualitative; @tbl-lighthouse-comparison gives weight-only proxies for the lighthouses. The $\mathcal{O}(\BatchSize \SequenceLength^2)$ prefill term assumes materialized attention scores (@sec-network-architectures-memory-requirements-72c3). {#tbl-nn-architectures-machine-demands tbl-colwidths="[12,17,17,16,13,15,10]"}
 
 ```{python}
 #| echo: false
@@ -4489,7 +4602,9 @@ class LighthouseMemory:
 
 : **Lighthouse Memory**: Bytes for each lighthouse's parameters at serving and training precision. Training state counts FP32 weights, gradients, and the two Adam moments, and excludes saved activations, which add to it with batch size; the fit column compares that state with one 80 GB accelerator. The last column names the per-request state that sits on top of the weights. {#tbl-nn-architectures-lighthouse-memory tbl-colwidths="[14,13,13,16,14,30]"}
 
-The parameter and activation columns of @tbl-nn-architectures-machine-demands decide how data reaches the arithmetic units, and the pattern of access matters as much as the volume. Three patterns cover the table. Sequential access\index{Memory access!sequential}, the streaming of contiguous weight rows in an MLP layer or a transformer projection, lets DRAM deliver long bursts and lets hardware prefetchers run ahead, so it approaches the interface's peak bandwidth. Strided access\index{Memory access!strided}, which a convolution produces when its window steps across a layout that does not keep the window contiguous, fetches whole cache lines to use a fraction of each. The im2col lowering (@sec-network-architectures-computational-mapping-824c) moves that gather into a separate copy pass so the matrix multiply itself reads sequentially, at the cost of up to $\KernelSize^2$-fold duplication (because overlapping sliding windows copy the same input pixels into multiple rows). Random access\index{Memory access!random} characterizes the DLRM row. Sparse IDs index arbitrary rows across multi-gigabyte tables. While each selected embedding vector is contiguous and fully consumed by pooling, row selection lacks predictable spatial locality between rows, which defeats hardware prefetchers and leaves sparse lookups exposed to memory latency unless many concurrent requests are in flight. Achieved bandwidth depends on vector width, alignment, and request concurrency, which is why caching popular rows is critical to reduce off-chip traffic. Attention is not random access despite its content-dependent weights, because its queries, keys, and values sit in contiguous tensors that tiled kernels stream through on-chip SRAM.
+The parameter and activation columns of @tbl-nn-architectures-machine-demands decide how data reaches the arithmetic units, and the pattern of access matters as much as the volume. Three patterns cover the table. Sequential access\index{Memory access!sequential}, the streaming of contiguous weight rows in an MLP layer or a transformer projection, lets DRAM deliver long bursts and lets hardware prefetchers run ahead, so it approaches the interface's peak bandwidth. Strided access\index{Memory access!strided}, which a convolution produces when its window steps across a layout that does not keep the window contiguous, fetches whole cache lines to use a fraction of each. The im2col lowering (@sec-network-architectures-computational-mapping-824c) moves that gather into a separate copy pass so the matrix multiply itself reads sequentially, at the cost of up to $\KernelSize^2$-fold duplication (because overlapping sliding windows copy the same input pixels into multiple rows).
+
+Random access\index{Memory access!random}, the third pattern, characterizes the DLRM row. Sparse IDs index arbitrary rows across multi-gigabyte tables. While each selected embedding vector is contiguous and fully consumed by pooling, row selection lacks predictable spatial locality between rows, which defeats hardware prefetchers and leaves sparse lookups exposed to memory latency unless many concurrent requests are in flight. Achieved bandwidth depends on vector width, alignment, and request concurrency, which is why caching popular rows is critical to reduce off-chip traffic. Attention is not random access despite its content-dependent weights, because its queries, keys, and values sit in contiguous tensors that tiled kernels stream through on-chip SRAM.
 
 Whether an access incurs DRAM traffic at all depends on the working set\index{Working set size}, the data the execution units need at once. Small layers, such as the $784{\times}128$ reference layer at `{python} MLPLayerStats.weight_kb_str` in FP32, fit in on-chip SRAM. Production-width layers of tens of megabytes do not, which is why unbatched MLP inference and transformer decode stream their weights from off-chip memory on every request. Accelerators answer both ends of the table with memory hierarchy rather than arithmetic. HBM\index{HBM!streaming weights} stacks DRAM dies beside the processor to supply the streaming rows at more than an order of magnitude above standard DDR channels. Multi-megabyte on-chip SRAM, often an explicitly managed scratchpad\index{Scratchpad memory!explicit control}, lets compilers stage tiles so that reuse happens on chip. The intensity column measures how much a family can profit from that staging, and it doubles as an energy column.
 
@@ -4505,7 +4620,9 @@ Moving a 32-bit value from DRAM costs far more energy than one arithmetic operat
 
 :::
 
-The parallel-axis column determines how data must move among processing elements once the work is spread out. Four data movement patterns (broadcast, scatter, gather, and reduction; @fig-collective-comm) govern how tensors travel among processing elements, whether those are units on one chip or several accelerators in one server. Batch parallelism in MLPs, CNNs, and prefill broadcasts\index{Data movement!broadcast} stationary weight tiles to many units, each working on a different example or position, and compilers tile loops\index{Matrix tiling} to reuse each broadcast value as often as possible. Spatial and model partitioning scatter\index{Data movement!scatter} a tensor across tiles or devices. Mixture-of-experts models, which route each token to a few of many feedforward subnetworks, make the scatter input-dependent, so a popular expert can overload one accelerator while others idle. DLRM gathers\index{Data movement!gather} embedding rows from wherever the sharded tables live, and each attention query gathers keys and values from every position in its sequence. Reductions\index{Data movement!reduction} combine values through sums or maxima (softmax denominators, normalization statistics, and the summing of gradients across accelerators that each trained on a different slice of the batch). Tree-structured reduction hardware finishes a reduction over $\ReductionInputCount$ values in $\mathcal{O}(\log \ReductionInputCount)$ stages rather than $\mathcal{O}(\ReductionInputCount)$. The rows with a serial axis, RNNs and decode, are the rows these collectives cannot rescue, because no amount of broadcast or reduction bandwidth shortens a dependency chain.
+The parallel-axis column determines how data must move among processing elements once the work is spread out. Four data movement patterns (broadcast, scatter, gather, and reduction; @fig-collective-comm) govern how tensors travel among processing elements, whether those are units on one chip or several accelerators in one server. Batch parallelism in MLPs, CNNs, and prefill broadcasts\index{Data movement!broadcast} stationary weight tiles to many units, each working on a different example or position, and compilers tile loops\index{Matrix tiling} to reuse each broadcast value as often as possible. Spatial and model partitioning scatter\index{Data movement!scatter} a tensor across tiles or devices. Mixture-of-experts models, which route each token to a few of many feedforward subnetworks, make the scatter input-dependent, so a popular expert can overload one accelerator while others idle.
+
+Gathers and reductions collect what broadcast and scatter spread out. DLRM gathers\index{Data movement!gather} embedding rows from wherever the sharded tables live, and each attention query gathers keys and values from every position in its sequence. Reductions\index{Data movement!reduction} combine values through sums or maxima (softmax denominators, normalization statistics, and the summing of gradients across accelerators that each trained on a different slice of the batch). Tree-structured reduction hardware finishes a reduction over $\ReductionInputCount$ values in $\mathcal{O}(\log \ReductionInputCount)$ stages rather than $\mathcal{O}(\ReductionInputCount)$. The rows with a serial axis, RNNs and decode, are the rows these collectives cannot rescue, because no amount of broadcast or reduction bandwidth shortens a dependency chain.
 
 ::: {#fig-collective-comm fig-env="figure" fig-pos="htb" fig-cap="**Data Movement Primitives**: Four fundamental patterns govern information flow in neural network computation. Broadcast (top-left) replicates a single value to all destinations, used when sharing weights across batch elements. Scatter (top-right) distributes distinct elements to different destinations, enabling work partitioning. Gather (bottom-left) collects distributed values to a single location, as in attention pooling. Reduction (bottom-right) combines multiple values through aggregation (sum, max), appearing in gradient synchronization and attention scoring. Because moving data costs more than computing on it, these patterns are primary optimization targets." fig-alt="Four diagrams with nodes and arrows. Broadcast: one red square to four nodes. Scatter: four colored squares to four nodes. Gather: four nodes with colored squares to one. Reduction: four nodes labeled 1, 3, 5, and 7 combine into one node labeled 16."}
 ```{.tikz}
@@ -4685,7 +4802,9 @@ local bounding box=B4,shift={($(0,0)+(11,-4.75)$)}]
 
 :::
 
-The last column applies the iron law under each row's execution assumptions. When effective intensity exceeds the machine's balance and parallel work is sufficient (batched CNNs, prefill), the compute term $\Operations/(\PeakRate\,\EfficiencyHw)$ binds. Below that balance (streamed small-batch MLPs, decode), the data term $\DataVolume/\Bandwidth$ binds, favoring fewer transferred bytes, more reuse, or higher bandwidth. RNNs add a serial chain of state updates: faster arithmetic, memory, and reduced launch overhead $(\Latency)$ can shorten each step without removing the dependency. DLRM adds a constraint that sits in front of the equation. Capacity decides where the tables live and thus which bandwidth the data term pays. ResNet-50, GPT-2, and DLRM isolate these representative regimes. MobileNetV2 and KWS share the CNN row, with depthwise layers pulling their intensity down; they stand for latency and power, deployment budgets that bound the whole execution rather than one term. No lighthouse occupies the RNN row, whose serial chain the recurrent family section analyzes directly.
+The last column applies the iron law under each row's execution assumptions. When effective intensity exceeds the machine's balance and parallel work is sufficient (batched CNNs, prefill), the compute term $\Operations/(\PeakRate\,\EfficiencyHw)$ dominates. Below that balance (streamed small-batch MLPs, decode), the data term $\DataVolume/\Bandwidth$ dominates, favoring fewer transferred bytes, more reuse, or higher bandwidth. RNNs add a serial chain of state updates: faster arithmetic, memory, and reduced launch overhead $(\Latency)$ can shorten each step without removing the dependency. DLRM adds a constraint that sits in front of the equation. Capacity decides where the tables live and thus which bandwidth the data term pays.
+
+ResNet-50, GPT-2, and DLRM isolate the compute, data, and capacity regimes. MobileNetV2 and KWS share the CNN row, with depthwise layers pulling their intensity down; they stand for latency and power, deployment budgets that bound the whole execution rather than one term. No lighthouse occupies the RNN row, whose serial chain the recurrent family section analyzes directly.
 
 ### Shared building blocks {#sec-network-architectures-core-computational-primitives-b853}
 
@@ -4712,7 +4831,9 @@ The rows of @tbl-nn-architectures-machine-demands differ, but the operators insi
 
 #### Dense projections {#sec-network-architectures-evolution-perceptron-multilayer-networks-d06e}
 
-General matrix multiplication is the one primitive every row of the profile shares. It is the feedforward layer inside every transformer block, the $1{\times}1$ pointwise convolution in MobileNets, the input and recurrent projections inside every RNN cell, and the bottom and top MLPs of DLRM. Convolution reaches the same path through the im2col patch unfolding of @fig-im2col-diagram, and dedicated matrix engines, such as GPU Tensor Cores and the systolic arrays of TPUs, exist because this one primitive dominates the operation count of nearly every workload. Its hardware cost depends on shape rather than on the family that invokes it. Batching therefore acts on every family that reaches this path as it acts on the dense layer measured in @sec-neural-computation-implementation-optimization-considerations-f2ca, converting a matrix-vector product into a matrix-matrix product with greater reuse. The higher intensity can cross the target machine's balance point, which is why batch size changes the modeled regime of three rows of the table.
+General matrix multiplication is the one primitive every row of the profile shares. It is the feedforward layer inside every transformer block, the $1{\times}1$ pointwise convolution in MobileNets, the input and recurrent projections inside every RNN cell, and the bottom and top MLPs of DLRM. Convolution reaches the same path through the im2col patch unfolding of @fig-im2col-diagram, and dedicated matrix engines, such as GPU Tensor Cores and the systolic arrays of TPUs, exist because this one primitive dominates the operation count of nearly every workload.
+
+The hardware cost of matrix multiplication depends on shape rather than on the family that invokes it. Batching therefore acts on every family that reaches this path as it acts on the dense layer measured in @sec-neural-computation-implementation-optimization-considerations-f2ca, converting a matrix-vector product into a matrix-matrix product with greater reuse. The higher intensity can cross the target machine's balance point, which is why batch size changes the modeled regime of three rows of the table.
 
 [^fn-systolic-array-architecture]: **Systolic array**\index{Systolic array!etymology}\index{Systolic array!TPU}: Named for the heart's rhythmic contraction [@kung1982], the array's lockstep "pulse" of data through a grid of multiply-accumulate processors directly implements the data reuse that matrix multiplication and convolution require. By passing input values between neighboring processors, an expensive round-trip to off-chip DRAM is avoided for every single multiplication. This is critical for efficiency, because an off-chip memory access costs far more energy than the arithmetic it feeds.
 
@@ -4742,7 +4863,9 @@ Turning those family profiles into a selection procedure starts with a hard syst
 *Architecture selection turns on the algorithm axis, bridging data to machine.*
 :::
 
-Selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}, matching the symmetries of the input to an operator family. The useful strength of an inductive bias\index{Inductive bias!hierarchy} depends on the task (@sec-network-architectures-architectural-principles-engineering-tradeoffs-362e). CNNs impose local connectivity, weight sharing, and translation equivariance, reducing parameter volume and exposing reuse for grid-like data. RNNs impose temporal recurrence, bounding inference state across sequence lengths at the cost of serialization. Transformers use content-based attention, gaining flexible interactions while paying for dense quadratic score computation. MLPs impose no specific spatial or temporal connectivity pattern, leaving those relationships to be learned. Ordered by the strength of their assumptions, the families therefore run from CNNs through RNNs and transformers to MLPs; the margin figure beside the inductive-bias definition draws the same ordering for CNNs, transformers, and MLPs. The stronger the prior, the fewer samples and the less computation a matching task needs, and the more a mismatched task loses, because a strong prior can exclude useful solutions as easily as it excludes useless ones. Model selection must test both predictive fit and the resulting machine costs, and the history of the Netflix Prize shows what happens when only the first test is run.
+Selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}, matching the symmetries of the input to an operator family. The useful strength of an inductive bias\index{Inductive bias!hierarchy} depends on the task (@sec-network-architectures-architectural-principles-engineering-tradeoffs-362e). CNNs impose local connectivity, weight sharing, and translation equivariance, reducing parameter volume and exposing reuse for grid-like data. RNNs impose temporal recurrence, bounding inference state across sequence lengths at the cost of serialization. Transformers use content-based attention, gaining flexible interactions while paying for dense quadratic score computation. MLPs impose no specific spatial or temporal connectivity pattern, leaving those relationships to be learned.
+
+Ordered by the strength of their assumptions, the families therefore run from CNNs through RNNs and transformers to MLPs; the margin figure beside the inductive-bias definition draws the same ordering for CNNs, transformers, and MLPs. The stronger the prior, the fewer samples and the less computation a matching task needs, and the more a mismatched task loses, because a strong prior can exclude useful solutions as easily as it excludes useless ones. Model selection must test both predictive fit and the resulting machine costs, and the history of the Netflix Prize shows what happens when only the first test is run.
 
 ::: {#ws-nn-architectures-netflix-prize-2009 .callout-war-story title="The ensemble Netflix did not ship (2009)"}
 
@@ -4758,7 +4881,7 @@ Selection begins with data-to-architecture mapping\index{Architecture!data-to-ar
 
 :::
 
-@Fig-dnn-fm-framework formalizes this selection pipeline as a multi-stage triage tree. Candidate architectures route first by input data structure (text, sequences, spatial grids, or tabular features) and then pass through sequential screening gates for memory capacity, compute budget, inference latency, accuracy targets, and hardware deployment readiness. High-cardinality recommendation workloads sit outside this dense flowchart and route to the sparse embedding family (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) before applying the same memory, compute, speed, accuracy, and deployment checks. If any constraint fails, the decision loop routes execution back to scale the model down, increase its capacity when accuracy falls short, or substitute an alternative architecture family.
+@Fig-dnn-fm-framework formalizes this selection pipeline as a multi-stage triage tree. Candidate architectures route first by input data structure (text, sequences, spatial grids, or tabular features) and then pass through a sequence of checks for memory capacity, compute budget, inference latency, accuracy targets, and hardware deployment readiness. High-cardinality recommendation workloads sit outside this dense flowchart and route to the sparse embedding family (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) before applying the same memory, compute, speed, accuracy, and deployment checks. If any constraint fails, the decision loop routes execution back to scale the model down, increase its capacity when accuracy falls short, or substitute an alternative architecture family.
 
 ::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. The process begins by identifying the data type (text, sequences, images, or tabular features) to select initial candidates (transformers, RNNs, CNNs, or MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility. High-cardinality recommendation workloads are handled separately by the sparse-embedding family, DLRM (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19), then re-enter the same constraint checks." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes passes to the next check, and the final Yes reaches Architecture Selected."}
 
@@ -4836,7 +4959,7 @@ The framework executes in three ordered phases, with model compression as the sy
 2.  **Progressive physical constraint filtering ($\text{A} \times \text{M}$)**: Filter candidate models against hardware budgets: static parameter storage in flash/DRAM, peak dynamic activation footprint in SRAM/HBM, arithmetic intensity against the hardware roofline, and tail latency deadlines. A violation requires scaling down model width or depth, applying quantization and compression, or switching to a lower-overhead architecture family.
 3.  **Empirical capacity and deployment validation**: Verify that candidate capacity meets target accuracy on representative evaluation distributions. If predictive accuracy falls short, scale model capacity and re-evaluate physical hardware constraints. If target accelerator hardware cannot sustain the required arithmetic throughput or memory bandwidth, select an alternative architecture rather than relying on marginal hyperparameter adjustments.
 
-Kernel-level choices refine this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) change realized traffic and utilization, and can shift which iron-law term binds; @sec-ml-frameworks and @sec-hardware-acceleration develop them. Architectural dependencies still matter. Batching independent recurrent sequences or fusing their operations reduces per-step cost, while the ordered state transitions remain. Candidate selection and kernel measurements therefore inform each other.
+Kernel-level choices refine this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) change realized traffic and utilization, and can shift which iron-law term dominates; @sec-ml-frameworks and @sec-hardware-acceleration develop them. Architectural dependencies still matter. Batching independent recurrent sequences or fusing their operations reduces per-step cost, while the ordered state transitions remain. Candidate selection and kernel measurements therefore inform each other.
 
 ### Architecture selection in practice {#sec-network-architectures-putting-together-architecture-selection-practice-052f}
 
@@ -4909,7 +5032,7 @@ class ThroughputCeilingCalc:
 5.  **ResNet-50 headroom**: `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str` $\div$ `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str` = `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str`.
 6.  **Detection-model check**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` = `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str`, leaving `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom at the lower effective-throughput estimate.
 
-**Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves `{python} ThroughputCeilingCalc.tc_util_range_str` utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. The headroom assumes the GPU stays busy; a single 30 FPS stream runs at batch one, where kernel launches and small matrices usually hold utilization well below this planning figure.
+**Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves `{python} ThroughputCeilingCalc.tc_util_range_str` utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. The headroom assumes the GPU stays busy; a single `{python} ThroughputCeilingCalc.tc_fps_str` stream runs at batch one, where kernel launches and small matrices usually hold utilization well below this planning figure.
 
 :::
 
@@ -5072,7 +5195,7 @@ The fourth step, hardware sizing, checks the candidate against physical platform
 For the candidate system-on-chip (SoC), an ARM Cortex-A53 at 1.2 GHz with NEON SIMD, this planning calculation assumes sustained throughput of ~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8:
 `{python} WildlifeModelSizing.compute_check_math`
 
-Active power represents the final physical gate. At an estimated active inference draw of ~`{python} WildlifeModelSizing.inference_power_mw_str` over `{python} WildlifeModelSizing.compute_latency_ms_str`, each classification consumes `{python} WildlifeModelSizing.energy_mj_str`. For a trigger-based rate of `{python} WildlifeModelSizing.inferences_per_day_str`, model execution consumes `{python} WildlifeModelSizing.energy_j_str`/day. Full-system energy must also include image capture, sleep current, storage, and peripherals. Battery capacity, conversion losses, trigger frequency, and seasonal solar yield determine whether that daily budget supports six months of operation.
+Active power is the last physical budget to check. At an estimated active inference draw of ~`{python} WildlifeModelSizing.inference_power_mw_str` over `{python} WildlifeModelSizing.compute_latency_ms_str`, each classification consumes `{python} WildlifeModelSizing.energy_mj_str`. For a trigger-based rate of `{python} WildlifeModelSizing.inferences_per_day_str`, model execution consumes `{python} WildlifeModelSizing.energy_j_str`/day. Full-system energy must also include image capture, sleep current, storage, and peripherals. Battery capacity, conversion losses, trigger frequency, and seasonal solar yield determine whether that daily budget supports six months of operation.
 
 The fifth step assesses operational risks in the field. @Tbl-nn-architectures-wildlife-risks pairs the primary accuracy, thermal, and coverage failure modes with corresponding systems engineering mitigations:
 
@@ -5156,7 +5279,7 @@ Practitioners choose architectures from papers reporting top-line accuracy, igno
 
 **Fallacy**: *An architecture has one dominant bottleneck across training and inference.*
 
-The same computation graph can occupy different systems regimes. Transformer training and prefill process many positions together and may bind on dense attention compute; small-batch autoregressive decoding repeatedly streams weights and KV-cache state and may bind on memory bandwidth. Batching, sequence length, precision, and cache layout can shift that boundary. A benchmark from one regime therefore cannot establish another's bottleneck; measure each against the iron law.
+The same computation graph can occupy different systems regimes. Transformer training and prefill process many positions together and may be limited by dense attention compute; small-batch autoregressive decoding repeatedly streams weights and KV-cache state and may be limited by memory bandwidth. Batching, sequence length, precision, and cache layout can shift that boundary. A benchmark from one regime therefore cannot establish another's bottleneck; measure each against the iron law.
 
 :::
 
@@ -5194,7 +5317,7 @@ class A100ClusterMemory:
     # ┌── 1. LOAD (Registry) ───────────────────────────────────────────────
     a100 = Hardware.Cloud.A100
     edge_device = Hardware.Edge.JetsonOrinNX
-    n_gpus = 8
+    n_gpus = 8  # scenario assumption: one 8-GPU node
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_8x_mem = a100.memory.capacity * n_gpus
@@ -5212,13 +5335,14 @@ class A100ClusterMemory:
     edge_device_name_str = MarkdownStr(edge_device.name)
     edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
+    n_gpus_mult_str = fmt_multiple(n_gpus, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Architecture wins on training hardware transfer directly to deployment hardware.*
 
-Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy unchanged to a representative edge node such as the `{python} A100ClusterMemory.edge_device_name_str` (`{python} A100ClusterMemory.edge_mem_gb_str` system memory). As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack because storage, latency, and power budgets vary by deployment target.
+Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting `{python} A100ClusterMemory.n_gpus_mult_str` A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_gb_str` total memory) cannot deploy unchanged to a representative edge node such as the `{python} A100ClusterMemory.edge_device_name_str` (`{python} A100ClusterMemory.edge_mem_gb_str` system memory). As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack because storage, latency, and power budgets vary by deployment target.
 
 :::
 
@@ -5238,7 +5362,7 @@ Teams design for high-end GPU clusters, then discover deployment failures on tar
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, fmt_qty_int, check
+from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, fmt_qty_int, fmt_range, check
 from mlsysim.core.units import GB, BYTES_FP16, byte
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5254,11 +5378,12 @@ class KVCacheServingPitfall:
     seq_len = request.tokens
     head_dim = request.workload.head_width
     bytes_per_elem = request.bytes_per_value.to(byte).magnitude
+    users_low, users_high = 2, 4  # scenario assumption: concurrent users
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     per_request_memory = request.total
-    concurrent_2_memory = per_request_memory * 2
-    concurrent_4_memory = per_request_memory * 4
+    concurrent_2_memory = per_request_memory * users_low
+    concurrent_4_memory = per_request_memory * users_high
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
@@ -5275,26 +5400,27 @@ class KVCacheServingPitfall:
     concurrent_2_gb_str = fmt_qty_int(concurrent_2_memory, GB, commas=False)
     concurrent_4_gb_str = fmt_qty_int(concurrent_4_memory, GB, commas=False)
     device_memory_gb_str = fmt_memory_capacity(device_memory, unit=GiB, precision=0, commas=False)
+    users_range_str = fmt_range(users_low, users_high, precision=0)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Ignoring KV cache growth when estimating transformer serving costs.*
 
-Teams budget transformer deployment based on model weight memory alone, overlooking the key-value (KV) cache used during autoregressive generation [@pope2023efficiently; @kwon2023]. The cache grows linearly with concurrent sequences, layers, heads, and sequence length, so at long contexts or high concurrency it can become a binding serving constraint. The KV-cache footnote in @sec-network-architectures-inference-memory-bandwidth-wall-98d1 works through the chapter's `{python} KVCacheServingPitfall.layers_str`-layer, `{python} KVCacheServingPitfall.heads_str`-head example. With `{python} KVCacheServingPitfall.head_dim_str`-dimensional heads, `{python} KVCacheServingPitfall.seq_len_str`-token sequences, and FP16 storage, each concurrent request holds $\approx$ `{python} KVCacheServingPitfall.per_request_gb_str` of KV cache. At 2--4 users, the cache alone consumes `{python} KVCacheServingPitfall.concurrent_2_gb_str`--`{python} KVCacheServingPitfall.concurrent_4_gb_str` before allocator, activation, and workspace overhead. Those values consume part of the post-weight headroom of an `{python} KVCacheServingPitfall.device_memory_gb_str` device and grow linearly with context and concurrency. Capacity planning must therefore budget weights, cache, and runtime buffers together, then reduce concurrency, context, or cache footprint, or add memory capacity, when the combined total approaches device memory.
+Teams budget transformer deployment based on model weight memory alone, overlooking the key-value (KV) cache used during autoregressive generation [@pope2023efficiently; @kwon2023]. The cache grows linearly with concurrent sequences, layers, heads, and sequence length, so at long contexts or high concurrency it can become the limiting serving constraint. The KV-cache footnote in @sec-network-architectures-inference-memory-bandwidth-wall-98d1 works through the chapter's `{python} KVCacheServingPitfall.layers_str`-layer, `{python} KVCacheServingPitfall.heads_str`-head example. With `{python} KVCacheServingPitfall.head_dim_str`-dimensional heads, `{python} KVCacheServingPitfall.seq_len_str`-token sequences, and FP16 storage, each concurrent request holds $\approx$ `{python} KVCacheServingPitfall.per_request_gb_str` of KV cache. At `{python} KVCacheServingPitfall.users_range_str` users, the cache alone consumes `{python} KVCacheServingPitfall.concurrent_2_gb_str`--`{python} KVCacheServingPitfall.concurrent_4_gb_str` before allocator, activation, and workspace overhead. Those values consume part of the post-weight headroom of an `{python} KVCacheServingPitfall.device_memory_gb_str` device and grow linearly with context and concurrency. Capacity planning must therefore budget weights, cache, and runtime buffers together, then reduce concurrency, context, or cache footprint, or add memory capacity, when the combined total approaches device memory.
 
 :::
 
 ## Summary {#sec-network-architectures-summary-e642}
 
-*Architecture is infrastructure.* Choosing among MLPs, CNNs, RNNs, transformers, and recommendation models (DLRM) shapes the physical terms in the serialized form of the iron law of ML systems ($\Time= \DataVolume/\Bandwidth + \Operations / (\PeakRate \cdot \EfficiencyHw) + \Latency$). Examining each architecture through the four-part lens (pattern processing needs, algorithmic structure, computational mapping, and system implications) connects mathematical inductive bias to work, state, and dependencies. Execution conditions and the target machine then determine which term binds hardware performance.
+*Architecture is infrastructure.* Choosing among MLPs, CNNs, RNNs, transformers, and recommendation models (DLRM) shapes the physical terms in the serialized form of the iron law of ML systems ($\Time= \DataVolume/\Bandwidth + \Operations / (\PeakRate \cdot \EfficiencyHw) + \Latency$). Examining each architecture through the four-part lens (pattern processing needs, algorithmic structure, computational mapping, and system implications) connects mathematical inductive bias to work, state, and dependencies. Execution conditions and the target machine then determine which term limits hardware performance.
 
 The durable tool is arithmetic intensity read against the machine's balance. Reuse raises $\ArithmeticIntensity = \Operations/\DataVolume$ and pushes a workload toward the compute term, as ResNet-50 does when batched; streamed weights lower it and expose the data term, as GPT-2 decoding does at small batch. Two families escape that single axis. A recurrent dependency chain sets a floor of $\SequenceLength$ ordered updates that neither term removes, and an oversized embedding table imposes a capacity decision that fixes which bandwidth the data term pays before any arithmetic begins. Low FLOP counts, as MobileNetV2 and KWS show, help only when the resulting operation shapes still keep the hardware's functional units busy.
 
 ::: {.callout-takeaways title="Architecture is infrastructure"}
 
 * **Inductive bias is the unifying concept**: Every architecture encodes structural assumptions, such as locality for CNNs, sequence for RNNs, and global context for transformers. These biases trade generality for sample efficiency and determine which problems an architecture can solve efficiently.
-* **Intensity against balance names the bottleneck**: A workload's arithmetic intensity, set against the machine's balance, predicts whether compute or bandwidth binds. One transformer sits on both sides: prefill reuses every weight across the prompt, while batch-one decode re-reads every weight and a growing KV cache for each token.
+* **Intensity against balance names the bottleneck**: A workload's arithmetic intensity, set against the machine's balance, predicts whether compute or bandwidth sets the limit. One transformer sits on both sides: prefill reuses every weight across the prompt, while batch-one decode re-reads every weight and a growing KV cache for each token.
 * **Quadratic costs are permanent constraints**: Dense transformer attention computes $\mathcal{O}(\SequenceLength^2)$ score interactions. Naive implementations also use quadratic score storage; tiled exact attention removes that storage cost but not the dense computation.
 * **Lighthouse models isolate distinct bottlenecks**: ResNet-50 (compute), GPT-2 (bandwidth), DLRM (capacity), MobileNetV2 (compute-bound in its efficient regime, under an edge latency budget), KWS (power-bound). Each isolates one regime, and together they diagnose which physical constraint dominates a given system.
 * **Depth benefits from architectural support**: Skip connections and normalization improve optimization in deep networks rather than acting as universal prerequisites beyond a fixed depth. These building blocks, illustrated here through CNNs, transfer to many deep architectures, including transformers.
@@ -5303,7 +5429,7 @@ The durable tool is arithmetic intensity read against the machine's balance. Reu
 
 :::
 
-Architecture selection signs the silicon contract (principle \ref{pri-silicon-contract}) with hardware. A CNN commits to spatial locality and weight reuse; dense attention commits to $\mathcal{O}(\SequenceLength^2)$ score computation; and an RNN commits to serial time-step dependencies. These topological choices constrain operations $\Operations$, opportunities for reducing transferred data $\DataVolume$, and dependency order. Realized memory footprint, bandwidth demand, and parallel efficiency also depend on the implementation. Pipelining consecutive stages across execution units overlaps work without removing the serial time-step path. Systems engineers can therefore anticipate likely bottleneck shifts before implementation by matching model inductive bias and data geometry to silicon physics.
+Architecture selection signs the silicon contract (principle \ref{pri-silicon-contract}) with hardware. A CNN commits to spatial locality and weight reuse; dense attention commits to $\mathcal{O}(\SequenceLength^2)$ score computation; and an RNN commits to serial time-step dependencies. These topological choices constrain operations $\Operations$, opportunities for reducing transferred data $\DataVolume$, and dependency order. Realized memory footprint, bandwidth demand, and parallel efficiency also depend on the implementation. Pipelining consecutive stages across execution units, for example, overlaps work without removing the serial time-step path. Systems engineers can therefore anticipate likely bottleneck shifts before implementation by matching model inductive bias and data geometry to silicon physics.
 
 ::: {.callout-chapter-connection title="From blueprints to construction"}
 

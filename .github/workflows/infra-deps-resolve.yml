@@ -1,0 +1,86 @@
+name: '🔒 Infra · Dependencies Resolve'
+
+# =============================================================================
+# Python dependency resolvability guard
+# =============================================================================
+#
+# binder/tools/dependencies/requirements.txt feeds two very different places:
+#   - CI jobs and developer machines, on Python 3.11 and 3.12
+#   - the Linux build container, which installs the exact pins in
+#     requirements.lock.txt with the Python its Ubuntu base ships
+#
+# A dependency bump can resolve on one and not the other. Pillow 13 and
+# filelock 4.2 require Python 3.11, so a Dependabot lock that pinned them
+# could not install in the Python 3.10 container; and gradio's Pillow cap
+# made the CI install fail outright. Both passed review unnoticed because
+# the CI install step continues on error.
+#
+# This workflow resolves the lock for the container's Python and the
+# requirements for each CI Python, without installing anything, and fails
+# with the resolver's explanation when any of them has no solution.
+#
+# The container's Python comes from the Dockerfile's base image, so moving
+# the container to a newer Ubuntu only needs the map below updated.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'binder/tools/dependencies/requirements.txt'
+      - 'binder/tools/dependencies/requirements.lock.txt'
+      - 'binder/docker/linux/Dockerfile'
+      - '.github/workflows/infra-deps-resolve.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'binder/tools/dependencies/requirements.txt'
+      - 'binder/tools/dependencies/requirements.lock.txt'
+      - 'binder/docker/linux/Dockerfile'
+      - '.github/workflows/infra-deps-resolve.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+
+      - name: Resolve for the build container and CI Pythons
+        run: |
+          set -u
+          deps=binder/tools/dependencies
+          base=$(awk '/^FROM /{print $2; exit}' binder/docker/linux/Dockerfile)
+          case "$base" in
+            ubuntu:22.04) container_py=3.10 ;;
+            ubuntu:24.04) container_py=3.12 ;;
+            *) echo "::error::Unknown container base '$base'. Add its Python version to infra-deps-resolve.yml."; exit 1 ;;
+          esac
+          echo "Container base $base ships Python $container_py"
+
+          failed=0
+          check() {
+            local file=$1 py=$2 label=$3
+            if uv pip compile "$file" --python-version "$py" \
+                --python-platform x86_64-unknown-linux-gnu \
+                --no-header --quiet -o "$RUNNER_TEMP/resolved.txt" 2> "$RUNNER_TEMP/err.txt"; then
+              echo "✅ $label (Python $py)"
+            else
+              echo "::error::$label does not resolve on Python $py"
+              cat "$RUNNER_TEMP/err.txt"
+              failed=1
+            fi
+          }
+
+          check "$deps/requirements.lock.txt" "$container_py" "Build container lock"
+          check "$deps/requirements.txt" "$container_py" "Requirements for the build container"
+          for py in 3.11 3.12; do
+            check "$deps/requirements.txt" "$py" "Requirements for CI"
+          done
+          exit $failed

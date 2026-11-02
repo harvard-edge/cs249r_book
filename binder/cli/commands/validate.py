@@ -1570,7 +1570,7 @@ class ValidateCommand:
             unique_bibs = []
             seen_targets = set()
             for b in bibs:
-                if b.name.endswith("inbox.bib") or "inbox" in b.stem:
+                if "_build" in b.parts or b.name.endswith("inbox.bib") or "inbox" in b.stem:
                     continue
                 try:
                     resolved = b.resolve()

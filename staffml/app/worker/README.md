@@ -1,13 +1,13 @@
 # StaffML Interviewer Worker
 
-Cloudflare Worker that powers the **Ask Interviewer** panel in StaffML's Mock Interview mode. Adapter pattern over many LLM providers, server-side Socratic system prompt enforcement, KV-backed rate limiter, paid-tier waitlist.
+Cloudflare Worker that powers StaffML's **Ask Interviewer** panel (Practice and Gauntlet) and the conversational **Mock Interview**. Adapter pattern over many LLM providers, server-side Socratic system prompt enforcement, KV-backed rate limiter, paid-tier waitlist.
 
 See [`../WORKER_DEPLOY.md`](../WORKER_DEPLOY.md) for the full deploy guide.
 
 ## At a glance
 
-- **Single file**: [`src/index.ts`](src/index.ts) (~750 lines)
-- **Default provider**: Cloudflare Workers AI (Llama 3.1 8B), no API key required, free
+- **Single file**: [`src/index.ts`](src/index.ts) (~1,300 lines)
+- **Providers in production**: Groq (GPT-OSS 120B) first, with Cloudflare Workers AI (Llama 3.3 70B) as the always-available floor; the floor needs no API key
 - **Built-in providers**: Groq, OpenAI, Anthropic, Gemini, OpenRouter, Cloudflare Workers AI
 - **Drop-in providers** (any OpenAI-compatible API): Together AI, DeepSeek, Fireworks, Cerebras, Mistral La Plateforme, xAI Grok, Perplexity, vLLM, Ollama, LiteLLM — see [Adding a provider](#adding-a-provider) below
 - **Rate limit**: 10/IP/hour, 60/IP/day, 8000/global/day (all configurable via env vars)
@@ -17,7 +17,8 @@ See [`../WORKER_DEPLOY.md`](../WORKER_DEPLOY.md) for the full deploy guide.
 
 ## Endpoints
 
-- `POST /ask` — `{ question, context?, history? }` → `{ answer, provider, vendorLabel, modelLabel, privacyNote }`
+- `POST /ask` — `{ question, context?, history?, mode?, canonicalAnswer?, napkinMath? }` → `{ answer, provider, vendorLabel, modelLabel, privacyNote }`. `mode` is `"interview"` (default; Socratic clarifier that only receives the Assumptions section of `napkinMath`) or `"study"` (tutor that receives the canonical answer and the full verified napkin math).
+- `POST /interview` — conversational mock interview; the client sends the transcript and a `conductorContext` for the current question → `{ message, meta, provider, ... }`
 - `POST /waitlist` — `{ email, wouldPay, need? }` → `{ ok: true }` (captures paid-tier interest to `WAITLIST_KV`)
 - `GET /health` — `{ ok: true, providers: [...], waitlist: true|false }`
 

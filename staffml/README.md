@@ -52,7 +52,7 @@ StaffML is a free, open-source interview prep platform for ML systems engineers.
 > [!TIP]
 > If StaffML helps your prep, **[give us a star](https://github.com/harvard-edge/cs249r_book)**. Stars help others find this resource.
 
-**Data:** question YAMLs in [`vault/questions/`](vault/questions/), tagged with the [ML Systems Taxonomy](https://mlsysbook.ai/explore/) (`taxonomy_subject`, `taxonomy_concepts`) · **App source:** [`app/`](app/)
+**Data:** question YAMLs in [`vault/questions/`](vault/questions/), tagged with the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) (`taxonomy_subject`, `taxonomy_concepts`) · **App source:** [`app/`](app/)
 
 ---
 
@@ -379,6 +379,7 @@ Thanks to these wonderful people who have helped build StaffML!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/pelinbalci"><img src="https://avatars.githubusercontent.com/u/26349040?v=4?v=4?s=80" width="80px;" alt="Pelin Balcı"/><br /><sub><b>Pelin Balcı</b></sub></a><br />🎨 🧠 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/torrresagus"><img src="https://avatars.githubusercontent.com/u/69726650?v=4?v=4?s=80" width="80px;" alt="Agustin Torres"/><br /><sub><b>Agustin Torres</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/DIYA73"><img src="https://avatars.githubusercontent.com/u/174887077?v=4?v=4?s=80" width="80px;" alt="didi"/><br /><sub><b>didi</b></sub></a><br />🧑‍💻 🎨</td>
     </tr>
   </tbody>
