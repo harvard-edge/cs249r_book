@@ -392,10 +392,12 @@ def test_public_release_downloads_validate_end_to_end():
     # 4. SKOS Turtle (.ttl) contains all prefixes, 17 object properties, collections, and concepts.
     ttl_text = rel_map["mlsys-taxonomy.ttl"]
     assert "@prefix skos: <http://www.w3.org/2004/02/skos/core#> ." in ttl_text
-    assert ttl_text.count("a owl:ObjectProperty ;") == len(release["relations"])
-    assert ttl_text.count("rdfs:subPropertyOf skos:related ;") == len(release["relations"])
+    relations_text = rel_map["mlsys-taxonomy-relations.ttl"]
+    assert relations_text.count("a owl:ObjectProperty") == len(release["relations"])
+    assert relations_text.count("rdfs:subPropertyOf skos:broader ;") == 1  # only `specializes`; see Z39.19 8.3.3.2
+    assert relations_text.count("rdfs:subPropertyOf skos:related ;") == len(release["relations"]) - 1
     assert "owl:subPropertyOf" not in ttl_text
-    assert ttl_text.count("a skos:Concept ;") == len(release["concepts"])
+    assert ttl_text.count("a skos:Concept ;") == len(release["concepts"]) + len(release["retired"])
 
 
 def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Path):

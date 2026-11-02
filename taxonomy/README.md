@@ -4,6 +4,10 @@ Status: editorial draft, version `0.4-draft`. This document specifies a proposal
 
 The framework organizes the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems. Its scope includes conventional prediction, generative services, agents, and learned components in physical systems. Its organizing question is: **what bodies of knowledge does an engineer need to reason about the behavior of an ML system?** Using ML to optimize other systems is an adjacent research direction, not the organizing scope here.
 
+## How this taxonomy is built
+
+The taxonomy adopts published standards rather than a method of its own, and conformance is partial and itemized. Construction follows [ANSI/NISO Z39.19-2005 (R2010)](https://groups.niso.org/higherlogic/ws/public/download/6484/Guidelines%20for%20the%20Construction,%20Format,%20and%20Management%20of%20Monolingual%20Controlled%20Vocabularies.pdf), representation follows [W3C SKOS](https://www.w3.org/TR/skos-reference/) with a declared OWL extension for typed relations, publication metadata follows DCTERMS and DCAT 3, and consistency is reported with Hooper's and Rolling's inter-indexer measures beside kappa. `METHOD.md` lists every applicable clause as met, partial, or open, including the departures: no expert committee or human indexing trial yet, and language models took on work the standard assumes people do.
+
 ## Authoritative records
 
 | Record | Question it answers | Authoritative source |
@@ -13,7 +17,7 @@ The framework organizes the engineering knowledge needed to construct, evaluate,
 | Book alignment | Where does MLSysBook discuss an idea? | `taxonomy/mlsysbook-alignment.yml` |
 | Competency specification, proposed | What can a learner demonstrate under a stated task, context, and evidence requirement? | Separate task records, not yet adopted |
 
-`taxonomy/ml-systems-taxonomy.yml` is the single canonical authored source for the taxonomy: it unifies the 5 subject groups, 20 areas, and 101 subjects (`areas`), the 878 concepts with their `home` subject (`concepts`), the 17 controlled relation verbs (`relations`) and 2,020 conditional propositions (`relationships`), the practitioner guides (`guides`: roles, symptoms, and learning paths), and the explicit SKOS hierarchy pilot (`skos_hierarchy`). Subject concept lists and the `all` view are derived automatically by the compiler from `Concept.home` and `concepts`.
+`taxonomy/ml-systems-taxonomy.yml` is the single canonical authored source for the taxonomy: it unifies the 5 subject groups, 20 areas, and 101 subjects (`areas`), the 878 concepts with their `home` subject (`concepts`), the 17 controlled relation verbs (`relations`) and 2,016 conditional propositions (`relationships`), the practitioner guides (`guides`: roles, symptoms, and learning paths), and the explicit SKOS hierarchy pilot (`skos_hierarchy`). Subject concept lists and the `all` view are derived automatically by the compiler from `Concept.home` and `concepts`.
 
 ## Organizing frame
 
@@ -93,7 +97,7 @@ State is kept in the URL hash (`#view=matrix`, `#subject=…`, `#concept=…`, `
 
 ## Relationships
 
-Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-taxonomy.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. Each relationship's `references` name the reading basis of the source concept's family, not a citation that proves the proposition; the field `reference_role` records that. In version `0.4-draft` the graph has 2,020 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 and 0.4 was read the same way by independent reviewers in other model families before it was accepted, and the 0.4 refresh added three independent audits and a blind held-out test after the merge (see the changelog).
+Relationships use a controlled vocabulary of 17 relations (`relations` in `ml-systems-taxonomy.yml`), each with a forward and an inverse phrase so incoming links read naturally ("is reduced by"). The compiler requires every relationship to name one, requires its `kind` to agree with the relation, and rejects two relationships between the same pair of concepts. The specific `predicate` wording and the `conditions` sentence remain the detail. Each relationship's `references` name the reading basis of the source concept's family, not a citation that proves the proposition; the field `reference_role` records that. In version `0.4-draft` the graph has 2,016 relationships; every concept has at least two, the graph is connected, and the mean shortest path between concepts is about five links. A literal-reading audit of every relationship in 0.2 corrected or removed 76 that read false or backwards; every relationship added in 0.3 and 0.4 was read the same way by independent reviewers in other model families before it was accepted, and the 0.4 refresh added three independent audits and a blind held-out test after the merge (see the changelog).
 
 ## Codes, downloads, and citation
 
@@ -104,11 +108,14 @@ Every group, area, and subject carries a readable code: a group letter (F, S, P,
 | File | Format | Contents |
 |---|---|---|
 | `mlsys-taxonomy-subjects.csv` | CSV | One row per subject (`code, group, area, subject, definition, concepts, concept_ids, taught_in`) |
-| `mlsys-taxonomy-concepts.csv` | CSV | One row per concept (`id, term, aliases, definition, subject_code, subject, area, group, background, taught_in`) |
+| `mlsys-taxonomy-concepts.csv` | CSV | One row per concept (`id, term, aliases, definition, subject_code, subject, area, group, background, taught_in, added_in, literary_warrant, corpus_chapters, organizational_warrant, user_warrant_proxy`) |
 | `mlsys-taxonomy.json` | JSON | The full outline, concepts (with candidate book passages), relation vocabulary, typed relationships, tagging rules, placement examples, guides (roles, symptoms, learning paths), declared gaps, and retired identities |
 | `mlsys-taxonomy.linkml.yml` | LinkML (YAML) | Formal LinkML metamodel defining classes, slots, controlled enums, and W3C `skos:` / `dct:` / `owl:` URI mappings |
 | `mlsys-taxonomy.schema.json` | JSON Schema | Compiled JSON Schema generated from `mlsys-taxonomy.linkml.yml` for IDE and CI validation |
-| `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes; concepts as `skos:Concept`; relationships as properties under `skos:related` |
+| `mlsys-taxonomy.ttl` | SKOS (RDF Turtle) | Groups, areas, and subjects as `skos:Collection` with `skos:notation` codes and scope notes; concepts as `skos:Concept` with history notes; `specializes` as `skos:broader`; retired identities marked deprecated |
+| `mlsys-taxonomy-relations.ttl` | OWL (RDF Turtle) | The extension vocabulary: 17 relation properties under `skos:broader` or `skos:related` |
+| `mlsys-taxonomy.dcat.ttl` | DCAT (RDF Turtle) | Dataset and distribution metadata |
+| `CITATION.cff` | Citation File Format | Citation metadata for the current version |
 | `mlsys-concept-graph.graphml` | GraphML | The concept graph for Gephi, yEd, Cytoscape, or a graph database |
 | `mlsys-taxonomy.bib` | BibTeX | Citation for the current version |
 
@@ -132,7 +139,7 @@ A label or alias may name only one concept; the compiler rejects a name shared b
 
 The authoring system and student interface serve different users. [LinkML](https://linkml.io/) (`taxonomy/schema/mlsys-taxonomy.linkml.yml`) defines the formal YAML metamodel for the taxonomy, mapping classes and slots to W3C `skos:`, `dct:`, and `owl:` URIs and compiling directly to JSON Schema (`mlsys-taxonomy.schema.json`). [VocBench](https://vocbench.uniroma2.it/) supports collaborative management of SKOS vocabularies and OWL ontologies. [Protégé](https://protege.stanford.edu/) supports OWL ontology development and reasoning.
 
-For this repository, LinkML-validated YAML (`binder/cli/core/taxonomy_schema.py`) plus ontological graph checks in `binder concepts check` keeps the framework beside the book contracts and makes revisions inspectable in Git. The existing SKOS export remains restricted to explicitly authored hierarchy assertions. A future editor integration should import/export through that LinkML and SKOS contract, rather than create a second independently edited truth.
+For this repository, LinkML-validated YAML (`binder/cli/core/taxonomy_schema.py`) plus ontological graph checks in `binder concepts check` keeps the framework beside the book contracts and makes revisions inspectable in Git. The SKOS hierarchy comes only from `specializes` edges, audited with the Z39.19 all-and-some test; subjects stay collections and never become broader terms. A future editor integration should import/export through that LinkML and SKOS contract, rather than create a second independently edited truth.
 
 The student illustrations use native HTML/SVG and generated, focused Graphviz relationship drawings. This supports readable typography, in-place selection, keyboard controls, deterministic static exports, and the same source data without a dependency on an external visualization service. Cytoscape remains available for graph interactions where it improves the learning task.
 

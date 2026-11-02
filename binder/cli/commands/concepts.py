@@ -67,7 +67,7 @@ def run(root: Path, args: list[str]) -> bool:
                     tag = "held out" if run["held_out"] else "rules revised on this sample"
                     print(f"{record['title']} {run['id']} [{tag}]: subject {s['subject_pct']}% (kappa {s['subject_kappa']}), "
                           f"area {s['area_pct']}% (kappa {s['area_kappa']}), primary concept {s['primary_concept_pct']}%, "
-                          f"same concept set {s['same_concept_set_pct']}%, compatible {s['compatible_pct']}% of {s['items']}")
+                          f"same concept set {s['same_concept_set_pct']}%, Hooper {s['hooper_consistency_pct']}%, Rolling {s['rolling_consistency_pct']}%, compatible {s['compatible_pct']}% of {s['items']}")
             for error in report["errors"]:
                 print(f"  invalid: {error}")
             print("Report: books/_build/concepts/taxonomy-agreement.json")
