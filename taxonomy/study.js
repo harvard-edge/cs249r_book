@@ -1,12 +1,13 @@
 // ML Systems Taxonomy, presented the way established taxonomies are (MITRE
-// ATT&CK/ATLAS, SFIA, ESCO): the whole taxonomy as one matrix, and an entry
-// page per area, subject, and concept with a sidebar tree, a facts box, and
-// tables. Concept pages carry a local concept map. Every page has a hash:
-//   #                         concept map     #area=<id>          area page
+// ATT&CK/ATLAS, SFIA, ESCO): a concept-map landing view, the whole taxonomy as
+// one matrix (#view=matrix), and an entry page per area, subject, and concept
+// with a sidebar tree, a facts box, and tables. Every view has a stable hash:
+//   # / #view=map             concept map     #area=<id>          area page
 //   #subject=<id>             subject page    #concept=<id>[&to=] concept page
-//   #view=matrix              matrix          #view=glossary[&term=<id>]
-//   #view=guides[&role=|&symptom=|&path=<id>]  roles, production symptoms, learning paths
-// Older hashes (#row=, #view=concept, #view=graph…, #view=map, #view=index) still resolve.
+//   #view=matrix              matrix          #overlay=role:<id>|path:<id>|vol:<id>
+//   #view=glossary[&term=<id>]                #bok-how-to-use / #bok-release
+//   #view=guides[&role=|&symptom=|&path=|&section=<id>]  roles, symptoms, learning paths
+// Older hashes (#row=, #view=concept, #view=graph…, #view=index) still resolve.
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -120,9 +121,20 @@
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
   const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(row.label)}</a>`;
-  const verb = (rel, direction) => {
+  const verb = (rel, direction = 'out') => {
     const r = relations.get(rel.relation);
     return r ? (direction === 'out' ? r.forward : r.inverse) : rel.predicate;
+  };
+  const crossStepRelationships = (stepIndex) => {
+    const matches = [];
+    for (const rel of data.relationships || []) {
+      const u = homeOf.get(rel.source);
+      const v = homeOf.get(rel.target);
+      if (!u || !v || u.id === v.id) continue;
+      if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
+      matches.push({ rel, iu: stepIndex.get(u.id), iv: stepIndex.get(v.id) });
+    }
+    return matches;
   };
   const bandOrder = () => [...BAND_ORDER.filter((id) => groups.some((g) => g.id === id)), ...groups.map((g) => g.id).filter((id) => !BAND_ORDER.includes(id))];
 
@@ -142,7 +154,7 @@
     if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
       + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
       + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
-    $('bok-method').textContent = `Version ${fw.version}. Validated against taxonomy/schema/mlsys-taxonomy.linkml.yml (LinkML) and generated from the single canonical source taxonomy/ml-systems-taxonomy.yml.`;
+    $('bok-method').textContent = `Version ${fw.version}. Built from the single source file taxonomy/ml-systems-taxonomy.yml and checked against taxonomy/schema/mlsys-taxonomy.linkml.yml.`;
   }
 
   // -------------------------------------------------------------------- matrix
@@ -260,7 +272,7 @@
       </div>
       <div class="bok-step-strip" role="tablist" aria-label="Steps in ${esc(lp.label)}">${strip}</div>
       <div class="bok-step-detail">
-        <div><strong>Step ${stepIdx + 1} of ${lp.steps.length}:</strong> ${curRow ? subjectLink(curRow) : esc(cur.subject)} — <span class="bok-muted">${esc(cur.why || '')}</span></div>
+        <div><strong>Step ${stepIdx + 1} of ${lp.steps.length}:</strong> ${curRow ? subjectLink(curRow) : esc(cur.subject)} · <span class="bok-muted">${esc(cur.why || '')}</span></div>
         <div class="bok-step-detail-nav">
           <button type="button" class="bok-overlay-btn" data-step-delta="-1"${stepIdx === 0 ? ' disabled' : ''}>&larr; Prev</button>
           <button type="button" class="bok-overlay-btn" data-step-delta="1"${stepIdx === lp.steps.length - 1 ? ' disabled' : ''}>Next &rarr;</button>
@@ -309,7 +321,7 @@
     const fw = data.framework;
     const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
     $('bok-cite-text').textContent = citation;
-    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review`;
+    $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review · <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml">Suggest a change on GitHub</a>`;
     $('bok-copy-cite').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(citation); $('bok-copy-cite').textContent = 'Copied'; } catch { $('bok-copy-cite').textContent = 'Select the text to copy'; }
       setTimeout(() => { $('bok-copy-cite').textContent = 'Copy citation'; }, 1800);
@@ -498,7 +510,7 @@
           // The outer segment runs from the concept to the spine; the verb sits on it.
           const segment = COLUMN - w / 2 - SPINE;
           els.push({ group: 'edges', classes: into ? 'into' : 'from', data: { id: rel.id, source: rel.source, target: rel.target,
-            label: relations.get(rel.relation)?.forward || rel.predicate, offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
+            label: verb(rel), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
           y += 44;
         }
         if (block.rels.length > MAP_LIMIT) {
@@ -573,7 +585,7 @@
     const self = `<b>${esc(concepts.get(id).label)}</b>`;
     const name = (other) => (other === id ? self : conceptLink(other));
     return `<h3 class="bok-section">Relationships</h3><table class="bok-table bok-rels"><thead><tr><th>Relationship</th><th>Holds when</th></tr></thead><tbody>${ordered.map((g) =>
-      g.rels.map((rel, i) => `<tr${i === 0 ? ' class="bok-group-start"' : ''}><td>${name(rel.source)} <span class="bok-verb">${esc(relations.get(rel.relation)?.forward || rel.predicate)}</span> ${name(rel.target)}</td><td>${esc(rel.conditions || '')}</td></tr>`).join('')).join('')}</tbody></table>`;
+      g.rels.map((rel, i) => `<tr${i === 0 ? ' class="bok-group-start"' : ''}><td>${name(rel.source)} <span class="bok-verb">${esc(verb(rel))}</span> ${name(rel.target)}</td><td>${esc(rel.conditions || '')}</td></tr>`).join('')).join('')}</tbody></table>`;
   }
 
   function renderPathChainSvg(steps) {
@@ -970,8 +982,8 @@
     </g>`;
 
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="wheel-title wheel-desc">
-      <title id="wheel-title">Hierarchical edge-bundling map of the ${orderedSubjects.length} ML systems subjects</title>
-      <desc id="wheel-desc">Subjects are grouped into ${orderedAreas.length} areas and ${orderedGroups.length} groups around the circle; bundled splines show ${crossSubjTotal} cross-subject propositions across ${pairMap.size} directed subject pairs.</desc>
+      <title id="wheel-title">Circular map of relationships across the ${orderedSubjects.length} ML systems subjects</title>
+      <desc id="wheel-desc">Subjects are grouped into ${orderedAreas.length} areas and ${orderedGroups.length} groups around the circle; curves show ${crossSubjTotal} relationships across ${pairMap.size} subject pairs.</desc>
       <defs>${defs}</defs>
       <g class="viz-layer-edges">${restEdges.join('')}${activeInternalEdges.join('')}${activeInEdges.join('')}${activeOutEdges.join('')}</g>
       <g class="viz-layer-arcs">${arcsHtml}</g>
@@ -1053,8 +1065,8 @@
         const fillOp = isDiag ? '1' : (cnt > 0 ? String(binOpacities[bIdx]) : '0.45');
         const showNum = cnt > 0 || isSelected;
         const textFill = !isDiag && bIdx >= 3 ? 'var(--bok-surface)' : 'var(--bok-ink)';
-        cellsHtml += `<g class="viz-dsm-cell${isSelected ? ' is-selected' : ''}" data-dsm-from="${esc(ar.id)}" data-dsm-to="${esc(ac.id)}" role="button" tabindex="0" aria-label="${esc(ar.code)} to ${esc(ac.code)}: ${cnt} propositions">
-          <title>${esc(ar.code)} (${esc(ar.display_label || ar.label)}) → ${esc(ac.code)} (${esc(ac.display_label || ac.label)}): ${cnt} propositions</title>
+        cellsHtml += `<g class="viz-dsm-cell${isSelected ? ' is-selected' : ''}" data-dsm-from="${esc(ar.id)}" data-dsm-to="${esc(ac.id)}" role="button" tabindex="0" aria-label="${esc(ar.code)} to ${esc(ac.code)}: ${cnt} relationships">
+          <title>${esc(ar.code)} (${esc(ar.display_label || ar.label)}) → ${esc(ac.code)} (${esc(ac.display_label || ac.label)}): ${cnt} relationships</title>
           <rect class="viz-dsm-bg" x="${cx}" y="${ry}" width="${cell - 1}" height="${cell - 1}" fill="${fill}" fill-opacity="${fillOp}" stroke="${isSelected ? 'var(--bok-accent)' : 'none'}"/>
           ${showNum ? `<text x="${cx + (cell - 1) / 2}" y="${ry + 14}" text-anchor="middle" class="bok-svg-mono" style="font-size:8.5px;fill:${textFill};font-weight:${isSelected ? '700' : '500'}">${cnt}</text>` : ''}
         </g>`;
@@ -1095,8 +1107,8 @@
     }
 
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="dsm-title dsm-desc">
-      <title id="dsm-title">${orderedAreas.length} by ${orderedAreas.length} Area Design Structure Matrix</title>
-      <desc id="dsm-desc">Rows represent source areas and columns represent target areas across ${rels.length} propositions.</desc>
+      <title id="dsm-title">Relationships between the ${orderedAreas.length} areas</title>
+      <desc id="dsm-desc">Rows are source areas and columns are target areas across ${rels.length} relationships.</desc>
       <defs>
         <pattern id="bok-dsm-hatch" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
           <line x1="0" y1="0" x2="0" y2="5" stroke="var(--bok-ink)" stroke-width="1" stroke-opacity="0.22"/>
@@ -1120,14 +1132,13 @@
     const formatProp = (rel) => {
       const uSubj = homeOf.get(rel.source);
       const vSubj = homeOf.get(rel.target);
-      const vText = relations.get(rel.relation)?.forward || rel.predicate;
-      return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(vText)}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
+      return `<li><span style="white-space:nowrap">${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uSubj?.code || '')})</span></span> <span class="bok-verb">${esc(verb(rel))}</span> <span style="white-space:nowrap">${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vSubj?.code || '')})</span></span>${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
     };
     const propList = (list) => !list.length
       ? '<p class="bok-muted" style="margin-top:4px !important">None in current filter.</p>'
       : `<ul class="bok-viz-prop-list">${list.slice(0, PREVIEW).map(formatProp).join('')}</ul>` +
         (list.length > PREVIEW
-          ? `<details class="bok-viz-more"><summary>Show the other ${list.length - PREVIEW} of ${list.length} propositions</summary><ul class="bok-viz-prop-list">${list.slice(PREVIEW).map(formatProp).join('')}</ul></details>`
+          ? `<details class="bok-viz-more"><summary>Show the other ${list.length - PREVIEW} of ${list.length} relationships</summary><ul class="bok-viz-prop-list">${list.slice(PREVIEW).map(formatProp).join('')}</ul></details>`
           : '');
 
     if (!sel) {
@@ -1155,18 +1166,18 @@
       const crossSubjTotal = crossAreaTotal + betweenSubjSameArea;
       const intraAreaTotal = betweenSubjSameArea + sameSubjTotal;
       const modeNote = state.couplingMode === 'dsm'
-        ? `Matrix cells show ${crossAreaTotal} off-diagonal (cross-area) and ${intraAreaTotal} diagonal (within-area) propositions.`
-        : `Circular bundle draws the ${crossSubjTotal} cross-subject propositions (${subjPairs.size} directed chords); ${sameSubjTotal} are within a single subject.`;
+        ? `Off-diagonal cells count ${crossAreaTotal} relationships between areas; diagonal cells count ${intraAreaTotal} within the same area.`
+        : `The circle draws the ${crossSubjTotal} relationships between subjects (${subjPairs.size} subject pairs); ${sameSubjTotal} stay within one subject.`;
       const topPairs = [...areaPairs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
       panelEl.innerHTML = `<div class="bok-viz-panel-head">
         <div>
           <div class="bok-viz-panel-title">${esc(famLabel)}</div>
-          <p class="bok-viz-panel-sub">${rels.length} propositions = ${crossAreaTotal} cross-area + ${betweenSubjSameArea} between subjects in same area + ${sameSubjTotal} within one subject</p>
+          <p class="bok-viz-panel-sub">${rels.length} relationships: ${crossAreaTotal} across areas · ${betweenSubjSameArea} between subjects in one area · ${sameSubjTotal} within one subject</p>
           <p class="bok-viz-panel-sub" style="margin-top:2px !important">${esc(modeNote)}</p>
         </div>
       </div>
       <div class="bok-viz-prop-group">
-        <p class="bok-viz-prop-label">Strongest cross-area couplings (select to inspect)</p>
+        <p class="bok-viz-prop-label">Most connected area pairs (select to inspect)</p>
         <div>${topPairs.map(([k, cnt]) => {
           const [a1Id, a2Id] = k.split('__');
           const a1 = areas.find((a) => a.id === a1Id), a2 = areas.find((a) => a.id === a2Id);
@@ -1195,17 +1206,17 @@
         panelEl.innerHTML = `<div class="bok-viz-panel-head">
           <div>
             <div class="bok-viz-panel-title">${esc(a1?.code)} → ${esc(a1?.code)} · Within ${esc(a1?.display_label || a1?.label)}</div>
-            <p class="bok-viz-panel-sub">${tot} within-area propositions (${betweenProps.length} between subjects · ${insideProps.length} within a single subject)</p>
+            <p class="bok-viz-panel-sub">${tot} relationships within this area (${betweenProps.length} between subjects · ${insideProps.length} within one subject)</p>
           </div>
           <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
         </div>
-        <p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-dsm-area="${esc(a1.id)}">Select ${esc(a1.code)} as full area (outgoing, incoming &amp; within)</button></p>
+        <p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-dsm-area="${esc(a1.id)}">Select ${esc(a1.code)} as full area (outgoing, incoming, and within)</button></p>
         <div class="bok-viz-prop-group">
           <p class="bok-viz-prop-label"><span class="bok-viz-swatch-internal"></span>Between subjects in ${esc(a1?.code)} (${betweenProps.length})</p>
           ${propList(betweenProps)}
         </div>
         <div class="bok-viz-prop-group">
-          <p class="bok-viz-prop-label">Within a single subject in ${esc(a1?.code)} (${insideProps.length})</p>
+          <p class="bok-viz-prop-label">Within one subject in ${esc(a1?.code)} (${insideProps.length})</p>
           ${propList(insideProps)}
         </div>`;
         return;
@@ -1226,9 +1237,9 @@
         </div>
         <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
       </div>
-      ${reverse.length ? `<p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-select-pair="${esc(a2.id)}__${esc(a1.id)}">Flip direction to ${esc(a2.code)} → ${esc(a1.code)} (${reverse.length})</button></p>` : ''}
+      ${reverse.length ? `<p style="margin-top:6px !important;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-select-pair="${esc(a2.id)}__${esc(a1.id)}">Switch to ${esc(a2.code)} → ${esc(a1.code)} (${reverse.length})</button></p>` : ''}
       <div class="bok-viz-prop-group">
-        <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Propositions (${forward.length})</p>
+        <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Relationships (${forward.length})</p>
         ${propList(forward)}
       </div>`;
       return;
@@ -1264,11 +1275,11 @@
       <button type="button" class="bok-viz-clear" data-clear-coupling="1">Clear (Esc)</button>
     </div>
     <div class="bok-viz-prop-group">
-      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Outgoing (${outProps.length}) — acts on other ${isSubj ? 'subjects' : 'areas/subjects'}</p>
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Outgoing (${outProps.length}): acts on other ${isSubj ? 'subjects' : 'areas and subjects'}</p>
       ${propList(outProps)}
     </div>
     <div class="bok-viz-prop-group">
-      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-in"></span>Incoming (${inProps.length}) — acted on by other ${isSubj ? 'subjects' : 'areas/subjects'}</p>
+      <p class="bok-viz-prop-label"><span class="bok-viz-swatch-in"></span>Incoming (${inProps.length}): acted on by other ${isSubj ? 'subjects' : 'areas and subjects'}</p>
       ${propList(inProps)}
     </div>
     ${!isSubj ? `<div class="bok-viz-prop-group">
@@ -1276,7 +1287,7 @@
       ${propList(betweenProps)}
     </div>` : ''}
     ${insideProps.length ? `<div class="bok-viz-prop-group">
-      <p class="bok-viz-prop-label">Within ${isSubj ? esc(targetRow?.code) : 'a single subject'} (${insideProps.length})</p>
+      <p class="bok-viz-prop-label">Within ${isSubj ? esc(targetRow?.code) : 'one subject'} (${insideProps.length})</p>
       ${propList(insideProps)}
     </div>` : ''}`;
   }
@@ -1294,10 +1305,10 @@
     }
     if (state.couplingMode === 'dsm') {
       drawCouplingDsm(stageEl);
-      if (capEl) capEl.innerHTML = '<strong>Figure 1b. Cross-area design structure matrix (row = source area, column = target area).</strong> Off-diagonal cell opacity encodes the number of propositions from concepts in the row area to concepts in the column area across five logarithmic bins; diagonal cells (hatched) count propositions within the same area. Marginal bars show total cross-area outgoing (right) and incoming (bottom) couplings. Select any cell to inspect its propositions and directional asymmetry.';
+      if (capEl) capEl.innerHTML = `<strong>Relationships between the ${areas.length} areas (row acts on column).</strong> Each cell counts relationships from concepts in the row area to concepts in the column area; hatched diagonal cells count relationships within the same area. Bars on the right and bottom show each area's total outgoing and incoming links with other areas. Select any cell or area label to read the relationships on the right.`;
     } else {
       drawCouplingWheel(stageEl);
-      if (capEl) capEl.innerHTML = `<strong>Figure 1a. Hierarchical edge bundling of cross-subject relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects (β = 0.85).</strong> Curve width encodes the square root of the proposition count between two subjects. Select any subject or area arc to isolate its outgoing couplings (crimson) and incoming couplings (ink), and read the exact propositions in the panel.`;
+      if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list the relationships on the right.`;
     }
     renderCouplingPanel(panelEl);
   }
@@ -1312,7 +1323,7 @@
       `<button type="button" data-coupling-fam="${esc(k)}" aria-pressed="${String(state.couplingFamily === k)}">${esc(lbl)}</button>`).join('');
 
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head"><div><h2>Concept map</h2>
-      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the field coupling figure below to see how the ${areas.length} areas and ${rows.size} subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
+      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the figure below to see how the ${areas.length} areas and ${rows.size} subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
       ${lastVisited && concepts.has(lastVisited) ? `<p class="bok-text" style="margin-top:0.4rem !important">Recently viewed: ${conceptLink(lastVisited)} &rarr;</p>` : ''}
       </div></div>
       <figure class="bok-viz-figure" id="bok-coupling-figure">
@@ -1320,8 +1331,8 @@
           <div class="bok-viz-controls">
             <span class="bok-filter-label">View</span>
             <div class="bok-viz-seg" role="group" aria-label="Coupling diagram type">
-              <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular bundle (${rows.size} subjects)</button>
-              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (${areas.length} × ${areas.length} DSM)</button>
+              <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular map (${rows.size} subjects)</button>
+              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (${areas.length} × ${areas.length})</button>
             </div>
           </div>
           <div class="bok-viz-controls">
@@ -1332,7 +1343,7 @@
         </div>
         <div class="bok-viz-split">
           <div class="bok-viz-stage" id="bok-coupling-stage"></div>
-          <div class="bok-viz-panel" id="bok-coupling-panel" role="region" aria-label="Selected coupling propositions" aria-live="polite"></div>
+          <div class="bok-viz-panel" id="bok-coupling-panel" role="region" aria-label="Selected relationships" aria-live="polite"></div>
         </div>
         <figcaption class="bok-viz-caption" id="bok-coupling-caption"></figcaption>
       </figure>
@@ -1542,8 +1553,8 @@
     }
 
     stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="sankey-title sankey-desc">
-      <title id="sankey-title">Alluvial diagram mapping ${rolesOrdered.length} ML systems roles across ${orderedGroups.length} groups and ${orderedAreas.length} areas</title>
-      <desc id="sankey-desc">Shows how core (weight 2) and working (weight 1) subject requirements distribute across the taxonomy for each role.</desc>
+      <title id="sankey-title">How ${rolesOrdered.length} ML systems roles draw on the ${orderedGroups.length} groups and ${orderedAreas.length} areas</title>
+      <desc id="sankey-desc">Shows how core and working-knowledge subjects for each role are distributed across the taxonomy.</desc>
       <g>${ribbonsHtml}</g>
       <g>${nodesHtml}</g>
     </svg>`;
@@ -1559,10 +1570,10 @@
         const workRoles = [...areaShare.values()].filter((v) => v.working > 0).length;
         const bothRoles = [...areaShare.values()].filter((v) => v.core > 0 && v.working > 0).length;
         const detail = `${coreRoles} core, ${workRoles} working${bothRoles ? `; ${bothRoles} with both` : ''}`;
-        bar.innerHTML = `<span>Selected area: <strong>${esc(a?.code)} ${esc(a?.label)}</strong> — required by ${areaShare.size} of ${rolesOrdered.length} roles (${detail})</span>
+        bar.innerHTML = `<span>Selected area: <strong>${esc(a?.code)} ${esc(a?.label)}</strong> · drawn on by ${areaShare.size} of ${rolesOrdered.length} roles (${detail})</span>
           <button type="button" class="bok-viz-clear" data-clear-sankey="1">Clear selection</button>`;
       } else {
-        bar.innerHTML = `<span>Select any <strong>role</strong> on the left or <strong>area</strong> on the right to isolate its footprint across the taxonomy.</span>`;
+        bar.innerHTML = `<span>Select a <strong>role</strong> on the left or an <strong>area</strong> on the right to highlight its connections across the taxonomy.</span>`;
       }
     }
   }
@@ -1585,7 +1596,7 @@
     }
 
     const kList = [...(sym.checks || [])];
-    const cList = [...(sym.causes || [])];
+    const cList = [...(sym.quantities || []), ...(sym.causes || [])];  // the measured quantity sits with the causes in the middle column
     const lList = [...(sym.levers || [])];
     const kSet = new Set(kList), cSet = new Set(cList), lSet = new Set(lList);
     const allSet = new Set([...kList, ...cList, ...lList]);
@@ -1764,7 +1775,7 @@
         activeNode ? (isDirect ? 'is-active' : (isVia ? 'is-active is-via' : 'is-dim')) : '',
       ].filter(Boolean).join(' ');
       const markerUrl = isEdgeActive ? 'url(#bok-diag-arrow-on)' : 'url(#bok-diag-arrow)';
-      const vStr = relations.get(rel.relation)?.forward || rel.predicate;
+      const vStr = verb(rel);
       edgesHtml += `<path class="${cls}" d="${d}" marker-end="${markerUrl}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
       if (isEdgeActive && !sameCol) {
         const hubId = cSet.has(rel.source) ? rel.source : rel.target;
@@ -1822,8 +1833,8 @@
     }
 
     stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="diag-title diag-desc">
-      <title id="diag-title">Diagnostic triage graph for ${esc(sym.label)}</title>
-      <desc id="diag-desc">Connects ${orderedK.length} diagnostic checks, ${orderedC.length} likely causes, and ${orderedL.length} mitigation levers via ${directEdges.length} graph propositions.</desc>
+      <title id="diag-title">Diagnostic diagram for ${esc(sym.label)}</title>
+      <desc id="diag-desc">Connects ${orderedK.length} checks, ${orderedC.length} likely causes, and ${orderedL.length} changes across ${directEdges.length} relationships.</desc>
       <defs>
         <marker id="bok-diag-arrow" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="6.5" markerHeight="6.5" markerUnits="userSpaceOnUse" orient="auto">
           <path d="M0,1.2 L7.5,4 L0,6.8 Z" fill="var(--bok-ink)" fill-opacity="0.65"/>
@@ -1838,28 +1849,25 @@
     </svg>`;
 
     if (detailEl) {
-      const renderRelItem = (rel) => {
-        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-        return `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
-      };
+      const renderRelItem = (rel) => `<li style="break-inside:avoid">${conceptLink(rel.source)} <span class="bok-verb">${esc(verb(rel))}</span> ${conceptLink(rel.target)}${rel.conditions ? `<p class="bok-cond">${esc(rel.conditions)}</p>` : ''}</li>`;
       if (!activeNode) {
         detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">
-          <span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} graph propositions connecting checks, causes, and levers — select any box above to trace its chain)</span>
+          <span><strong>${esc(sym.label)}:</strong> ${esc(sym.signal)} (${directEdges.length} relationships connecting checks, causes, and changes; select any box above to trace its connections)</span>
         </div>
         <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px;margin-top:6px !important">${directEdges.map(renderRelItem).join('')}</ul>`;
       } else {
         const directArr = [...directSet];
         const viaGroupsHtml = [...viaMap.entries()].map(([midId, list]) => `<div class="bok-viz-prop-group">
-          <p class="bok-viz-prop-label">Connected via ${esc(concepts.get(midId)?.label || midId)} (${list.length})</p>
+          <p class="bok-viz-prop-label">Connected through ${esc(concepts.get(midId)?.label || midId)} (${list.length})</p>
           <ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px">${list.map(renderRelItem).join('')}</ul>
         </div>`).join('');
         detailEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--bok-line);font-size:0.82rem">
-          <span>Showing chain for <strong>${conceptLink(activeNode)}</strong> (${directArr.length} direct${viaSet.size ? ` · ${viaSet.size} via connected cause` : ''})</span>
-          <button type="button" class="bok-viz-clear" data-clear-diag="1">Show all ${directEdges.length} propositions</button>
+          <span>Showing connections for <strong>${conceptLink(activeNode)}</strong> (${directArr.length} direct${viaSet.size ? ` · ${viaSet.size} through a connected cause` : ''})</span>
+          <button type="button" class="bok-viz-clear" data-clear-diag="1">Show all ${directEdges.length} relationships</button>
         </div>
         <div class="bok-viz-prop-group">
-          <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Direct propositions (${directArr.length})</p>
-          ${directArr.length ? `<ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px">${directArr.map(renderRelItem).join('')}</ul>` : '<p class="bok-muted">No direct edges within this symptom subset — open the concept page for its full neighborhood.</p>'}
+          <p class="bok-viz-prop-label"><span class="bok-viz-swatch-out"></span>Direct relationships (${directArr.length})</p>
+          ${directArr.length ? `<ul class="bok-viz-prop-list" style="columns:2 320px;column-gap:24px">${directArr.map(renderRelItem).join('')}</ul>` : '<p class="bok-muted">No direct links within this symptom view; open the concept page for its full neighborhood.</p>'}
         </div>
         ${viaGroupsHtml}`;
       }
@@ -1873,12 +1881,7 @@
     const stepIndex = new Map(steps.map((st, i) => [st.subject, i]));
     const pairMap = new Map();
 
-    for (const rel of data.relationships || []) {
-      const u = homeOf.get(rel.source);
-      const v = homeOf.get(rel.target);
-      if (!u || !v || u.id === v.id) continue;
-      if (!stepIndex.has(u.id) || !stepIndex.has(v.id)) continue;
-      const iu = stepIndex.get(u.id), iv = stepIndex.get(v.id);
+    for (const { rel, iu, iv } of crossStepRelationships(stepIndex)) {
       const key = `${iu}__${iv}`;
       if (!pairMap.has(key)) pairMap.set(key, { uIdx: iu, vIdx: iv, count: 0, rels: [] });
       const entry = pairMap.get(key);
@@ -1924,9 +1927,9 @@
       </g>`;
     }
 
-    const defaultSummary = `<strong>Figure.</strong> ${n} ordered subjects connected by ${pairMap.size} directed cross-step arcs (${totalProps} propositions). Hover or select a station to inspect its outgoing (crimson) and incoming (ink) relationships along the path.`;
+    const defaultSummary = `${n} subjects in order, linked by ${totalProps} relationships across ${pairMap.size} subject pairs. Select any step to see what it acts on (crimson) and what acts on it (ink) along the path.`;
     return `<div class="bok-path-viz" data-path-viz="${esc(lp.id)}" data-default-summary="${esc(defaultSummary)}">
-      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-label="Cross-step relationship arc diagram for ${esc(lp.label)}">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-label="Relationships between steps in ${esc(lp.label)}">
         <g class="viz-layer-arcs">${arcsHtml}</g>
         <g class="viz-layer-stations">${stationsHtml}</g>
       </svg>
@@ -1947,7 +1950,8 @@
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
         <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
     const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span>
-        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span></td>
+        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span>
+        ${s.quantities && s.quantities.length ? `<span class="bok-alias" style="display:block;margin-top:4px">Measured by: ${s.quantities.map((id) => conceptLink(id)).join(', ')}</span>` : ''}</td>
         <td>${list(s.causes, conceptLink)}</td><td>${list(s.checks, conceptLink)}</td><td>${list(s.levers, conceptLink)}</td></tr>`).join('');
     const paths = g.learning_paths.map((lp) => `<section class="bok-guide-path" id="guide-path-${esc(lp.id)}">
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px">
@@ -1981,7 +1985,7 @@
           ${expandBtn('bok-role-sankey-fig')}
         </div>
         <div class="bok-viz-stage" id="bok-role-sankey-stage"></div>
-        <figcaption class="bok-viz-caption"><strong>Figure 2. Role → group → area alluvial distribution.</strong> Core subjects count double and are drawn darker; working-knowledge subjects are lighter. Roles are ordered by vertical barycenter to minimize crossings; areas follow canonical matrix order.</figcaption>
+        <figcaption class="bok-viz-caption"><strong>How each role draws on the groups and areas of the taxonomy.</strong> Darker ribbons show core subjects for a role, and lighter ribbons show working knowledge. Select a role on the left or an area on the right to highlight its connections.</figcaption>
       </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Role</th><th>Core subjects</th><th>Working knowledge</th></tr></thead><tbody>${roles}</tbody></table>
       <h3 id="guide-section-symptoms">By symptom</h3><p class="bok-lead">${esc(g.symptoms_note || '')}</p>
@@ -2002,7 +2006,7 @@
           <div class="bok-viz-stage" id="bok-symptom-stage"></div>
           <div id="bok-symptom-detail" class="bok-viz-panel"></div>
         </div>
-        <figcaption class="bok-viz-caption"><strong>Figure 3. Three-stage diagnostic triage flow (What to check → Symptom metric &amp; likely causes ← What to change).</strong> Solid curves represent diagnostic measurement, limit, or causal relationships; dashed curves represent engineering mitigations and levers; dotted curves link concepts within the same stage. Select any concept box to isolate its action chain.</figcaption>
+        <figcaption class="bok-viz-caption"><strong>From symptom to cause and fix.</strong> Solid lines show what a check measures or what a cause limits; dashed lines show what a change reduces or mitigates; dotted lines connect concepts in the same column. Select any concept to trace its connections.</figcaption>
       </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Symptom</th><th>Likely causes</th><th>Check</th><th>Change</th></tr></thead><tbody>${symptoms}</tbody></table>
       <h3 id="guide-section-paths">Learning paths</h3><p class="bok-lead">${esc(g.paths_note || '')}</p>${paths}`;
@@ -2101,7 +2105,24 @@
   // ---------------------------------------------------------------- navigation
   function restore() {
     state.vizFull = null;
-    const p = new URLSearchParams(location.hash.slice(1));
+    const rawHash = location.hash.slice(1);
+    if (rawHash === 'bok-how-to-use') {
+      state.view = 'landing';
+      render();
+      const howTo = $('bok-how-to-use');
+      if (howTo) {
+        howTo.open = true;
+        howTo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    if (rawHash === 'bok-release') {
+      if (!['landing', 'home'].includes(state.view)) state.view = 'landing';
+      render();
+      $('bok-release')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const p = new URLSearchParams(rawHash);
     const view = p.get('view');
     const replaced = (data.retired || []).find((r) => r.id === p.get('concept'))?.replaced_by;
     const concept = concepts.has(p.get('concept')) ? p.get('concept') : replaced || null;
@@ -2126,7 +2147,7 @@
     else if (view === 'glossary' || view === 'index') state.view = 'glossary';
     else if (concept) state.view = 'concept';
     else if (view === 'matrix' || p.get('overlay')) state.view = 'home';
-    else if (view === 'concept' || view === 'graph') state.view = 'landing';
+    else if (view === 'concept' || view === 'graph' || view === 'map') state.view = 'landing';
     else if (subject) state.view = 'subject';
     else if (area) state.view = 'area';
     else state.view = 'landing';
@@ -2213,14 +2234,19 @@
     }
     syncFull();
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
-      : v === 'guides' && state.guide ? document.getElementById(state.guide.startsWith('section-') ? `guide-${state.guide}` : `guide-${state.guide}`) : null;
+      : v === 'guides' && state.guide ? document.getElementById(`guide-${state.guide}`) : null;
     if (target) {
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target.classList.add('is-focus');
       setTimeout(() => target.classList.remove('is-focus'), 1600);
     } else if (!state.vizFull) {
       const top = document.querySelector('.bok-toolbar');
-      if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: 'start' });
+      if (top) {
+        const rect = top.getBoundingClientRect();
+        if (rect.top < 0 || (location.hash && rect.top > window.innerHeight * 0.55)) {
+          top.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }
+      }
     }
   }
 
@@ -2259,11 +2285,7 @@
     }
 
     if (stationIdx !== null) {
-      for (const rel of data.relationships || []) {
-        const uRow = homeOf.get(rel.source), vRow = homeOf.get(rel.target);
-        if (!uRow || !vRow || uRow.id === vRow.id) continue;
-        if (!stepIndex.has(uRow.id) || !stepIndex.has(vRow.id)) continue;
-        const iu = stepIndex.get(uRow.id), iv = stepIndex.get(vRow.id);
+      for (const { rel, iu, iv } of crossStepRelationships(stepIndex)) {
         if (iu !== stationIdx && iv !== stationIdx) continue;
         stationProps.push(rel);
         const otherIdx = iu === stationIdx ? iv : iu;
@@ -2305,15 +2327,14 @@
         : 'later steps: 0';
       const propItems = stationProps.map((rel) => {
         const uS = homeOf.get(rel.source), vS = homeOf.get(rel.target);
-        const vStr = relations.get(rel.relation)?.forward || rel.predicate;
-        return `<li>${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uS?.code || '')})</span> <span class="bok-verb">${esc(vStr)}</span> ${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vS?.code || '')})</span></li>`;
+        return `<li>${conceptLink(rel.source)} <span class="bok-mono" style="font-size:0.72rem">(${esc(uS?.code || '')})</span> <span class="bok-verb">${esc(verb(rel))}</span> ${conceptLink(rel.target)} <span class="bok-mono" style="font-size:0.72rem">(${esc(vS?.code || '')})</span></li>`;
       }).join('');
       statusEl.innerHTML = `<div style="width:100%">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
           <span><strong>Step ${stationIdx + 1} (${esc(r?.code || '')} ${esc(r?.display_label || r?.label || '')}):</strong> ${esc(earlStr)} · ${esc(lateStr)}</span>
           <button type="button" class="bok-viz-clear" data-clear-station="${esc(pathId)}">Clear</button>
         </div>
-        ${stationProps.length ? `<details class="bok-viz-more"><summary>Show the ${stationProps.length} cross-step propositions for Step ${stationIdx + 1}</summary><ul class="bok-viz-prop-list" style="columns:2 300px;column-gap:20px;margin-top:4px !important">${propItems}</ul></details>` : ''}
+        ${stationProps.length ? `<details class="bok-viz-more"><summary>Show the ${stationProps.length} relationships between Step ${stationIdx + 1} and other steps</summary><ul class="bok-viz-prop-list" style="columns:2 300px;column-gap:20px;margin-top:4px !important">${propItems}</ul></details>` : ''}
       </div>`;
     }
   }
@@ -2368,6 +2389,11 @@
     $('bok-gloss-area').addEventListener('input', filterGlossary);
     $('bok-print').addEventListener('click', (e) => { e.preventDefault(); printOutline(); });
     document.addEventListener('click', (e) => {
+      if (e.target.closest('[data-print-outline]')) {
+        e.preventDefault();
+        printOutline();
+        return;
+      }
       const expandTrigger = e.target.closest('[data-viz-expand]');
       if (expandTrigger) {
         const figId = expandTrigger.dataset.vizExpand;
@@ -2415,9 +2441,9 @@
         refreshCouplingFigure();
         return;
       }
-      const wheelArea = e.target.closest('[data-wheel-area]');
-      if (wheelArea) {
-        const id = wheelArea.dataset.wheelArea;
+      const areaTrigger = e.target.closest('[data-wheel-area], [data-dsm-area]');
+      if (areaTrigger) {
+        const id = areaTrigger.dataset.wheelArea || areaTrigger.dataset.dsmArea;
         state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
         refreshCouplingFigure();
         return;
@@ -2427,13 +2453,6 @@
         const fromArea = dsmCell.dataset.dsmFrom, toArea = dsmCell.dataset.dsmTo;
         state.couplingSel = state.couplingSel?.kind === 'pair' && state.couplingSel.fromArea === fromArea && state.couplingSel.toArea === toArea
           ? null : { kind: 'pair', fromArea, toArea };
-        refreshCouplingFigure();
-        return;
-      }
-      const dsmArea = e.target.closest('[data-dsm-area]');
-      if (dsmArea) {
-        const id = dsmArea.dataset.dsmArea;
-        state.couplingSel = state.couplingSel?.kind === 'area' && state.couplingSel.id === id ? null : { kind: 'area', id };
         refreshCouplingFigure();
         return;
       }
@@ -2528,6 +2547,16 @@
         const container = document.querySelector(`[data-path-viz="${pid}"]`);
         if (container && container.dataset.pinnedStation !== undefined) return;
         highlightPathStation(pid, Number(pathStation.dataset.stationIdx));
+      }
+    });
+    document.addEventListener('mouseout', (e) => {
+      const pathStation = e.target.closest('[data-station-idx]');
+      if (pathStation && !pathStation.contains(e.relatedTarget)) {
+        const pid = pathStation.dataset.pathId;
+        const container = document.querySelector(`[data-path-viz="${pid}"]`);
+        if (container && container.dataset.pinnedStation === undefined) {
+          highlightPathStation(pid, null);
+        }
       }
     });
     wirePicker('bok-search', 'bok-results', choose);

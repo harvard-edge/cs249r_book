@@ -125,8 +125,11 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
     site = root / "taxonomy"
-    # Three internal files plus six public downloads.
-    assert len(artifacts) == 9
+    # Three internal files plus nine core downloads when taxonomy/schema/ is absent from tmp_path, apart from the
+    # generated identifier pages; the full release (with mlsys-taxonomy.linkml.yml and mlsys-taxonomy.schema.json)
+    # is verified against the live taxonomy in test_linkml_schema.py.
+    assert len([p for p in artifacts if p.name != "index.html"]) == 12
+    assert site / "concept" / field["concepts"][0]["id"] / "index.html" in artifacts
     data = json.loads(artifacts[site / "framework-data.json"])
     assert data["concepts"] == field["concepts"]
     assert data["relationships"] == field["relationships"]
@@ -307,7 +310,7 @@ def test_readable_codes_must_nest_and_reach_every_download(candidate):
                                 "reason": "Investigate the boundary."}]
     state = next(c for c in outline["concepts"] if c["id"] == "mlsys.state")
     assert state["book_passages"] == [{"volume": "vol1", "chapter": "Execution", "url": "https://mlsysbook.ai/state"}]
-    assert artifacts["mlsys-taxonomy-concepts.csv"].splitlines()[0].endswith(",background,taught_in")
+    assert artifacts["mlsys-taxonomy-concepts.csv"].splitlines()[0].endswith(",background,taught_in,added_in,literary_warrant,corpus_chapters,organizational_warrant,user_warrant_proxy")
 
 
 @pytest.mark.parametrize("edit,error", [

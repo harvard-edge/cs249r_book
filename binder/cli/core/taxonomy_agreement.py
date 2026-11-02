@@ -14,10 +14,7 @@ from collections import Counter
 import json
 from pathlib import Path
 
-import yaml
-
-
-from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+from .field_graph import load_taxonomy_yaml, load_vocabulary, pct
 from .taxonomy_schema import get_class_slots
 
 
@@ -26,25 +23,16 @@ RUN_KEYS = set(get_class_slots("AgreementRun"))
 TAG_KEYS = set(get_class_slots("AgreementItemTag"))
 
 
-def _vocabulary(root: Path):
-    from .concept_graph import ConceptGraphError
-    unified = load_unified_taxonomy(root)
-    if unified is None:
-        raise ConceptGraphError("agreement: unified taxonomy model is required")
-    field = unified["field"]
-    framework = unified["framework"]
-    rows = {}
-    home = {}
-    for area in framework["areas"]:
-        for row in area["rows"]:
-            rows[row["id"]] = (row, area)
-            for cid in row.get("concepts", []):
-                home[cid] = row["id"]
-    return {c["id"] for c in field["concepts"]}, rows, home
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _pct(part: int, whole: int) -> float:
-    return round(100 * part / whole, 1) if whole else 0.0
+def _index_valid_tags(tags: list, rows: dict) -> dict[int, dict]:
+    return {
+        t["n"]: t
+        for t in tags
+        if isinstance(t, dict) and _is_int(t.get("n")) and t.get("subject") in rows
+    }
 
 
 def _kappa(pairs: list[tuple[str, str]]) -> float:
@@ -64,6 +52,8 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
     areas = [(rows[x][1]["code"], rows[y][1]["code"]) for x, y in subjects if x in rows and y in rows]
     both = [n for n in items if a[n].get("concepts") and b[n].get("concepts")]
     jaccard = [len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / len(set(a[n]["concepts"]) | set(b[n]["concepts"])) for n in both]
+    # Rolling (1981): 2c / (A + B). Hooper (1965) is c / (A + B - c), which is the Jaccard index above.
+    rolling = [2 * len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / (len(set(a[n]["concepts"])) + len(set(b[n]["concepts"]))) for n in both]
 
     def compatible(n):
         x, y = a[n], b[n]
@@ -72,13 +62,15 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
                 or any(home.get(c) == y["subject"] for c in cx) or any(home.get(c) == x["subject"] for c in cy))
 
     return {"items": len(items),
-            "subject_pct": _pct(sum(x == y for x, y in subjects), len(subjects)), "subject_kappa": _kappa(subjects),
-            "area_pct": _pct(sum(x == y for x, y in areas), len(areas)), "area_kappa": _kappa(areas),
-            "primary_concept_pct": _pct(sum(a[n]["concepts"][0] == b[n]["concepts"][0] for n in both), len(both)),
-            "any_shared_concept_pct": _pct(sum(j > 0 for j in jaccard), len(both)),
-            "same_concept_set_pct": _pct(sum(j == 1 for j in jaccard), len(both)),
+            "subject_pct": pct(sum(x == y for x, y in subjects), len(subjects)), "subject_kappa": _kappa(subjects),
+            "area_pct": pct(sum(x == y for x, y in areas), len(areas)), "area_kappa": _kappa(areas),
+            "primary_concept_pct": pct(sum(a[n]["concepts"][0] == b[n]["concepts"][0] for n in both), len(both)),
+            "any_shared_concept_pct": pct(sum(j > 0 for j in jaccard), len(both)),
+            "same_concept_set_pct": pct(sum(j == 1 for j in jaccard), len(both)),
             "mean_jaccard": round(sum(jaccard) / len(jaccard), 3) if jaccard else 0.0,
-            "compatible_pct": _pct(sum(compatible(n) for n in items), len(items))}
+            "hooper_consistency_pct": round(100 * sum(jaccard) / len(jaccard), 1) if jaccard else 0.0,
+            "rolling_consistency_pct": round(100 * sum(rolling) / len(rolling), 1) if rolling else 0.0,
+            "compatible_pct": pct(sum(compatible(n) for n in items), len(items))}
 
 
 def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
@@ -88,7 +80,7 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
     items = record.get("items", [])
     if not isinstance(items, list):
         return errors + [f"{name}: items must be a list"]
-    numbers = {item["n"] for item in items if isinstance(item, dict) and isinstance(item.get("n"), int) and not isinstance(item.get("n"), bool)}
+    numbers = {item["n"] for item in items if isinstance(item, dict) and _is_int(item.get("n"))}
     if len(numbers) != len(items) or not numbers:
         errors.append(f"{name}: items must have distinct sample numbers")
     runs_list = record.get("runs", [])
@@ -113,7 +105,7 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
                 continue
             valid_tags = [
                 t for t in tags
-                if isinstance(t, dict) and isinstance(t.get("n"), int) and not isinstance(t.get("n"), bool) and isinstance(t.get("subject"), str)
+                if isinstance(t, dict) and _is_int(t.get("n")) and isinstance(t.get("subject"), str)
             ]
             if len(valid_tags) != len(tags):
                 errors.append(f"{where}: every tag requires integer n and string subject")
@@ -135,9 +127,10 @@ def _check(record: dict, concepts: set, rows: dict, name: str) -> list[str]:
 
 
 def agreement_report(root: Path) -> dict:
+    """Validate all tagging-agreement records under `taxonomy/agreement/` and compute inter-tagger scores."""
     from .concept_graph import ConceptGraphError
     from .taxonomy_schema import validate_linkml
-    concepts, rows, home = _vocabulary(root)
+    concepts, rows, home = load_vocabulary(root, "agreement")
     records, errors = [], []
     for path in sorted((root / "taxonomy/agreement").glob("*.yml")):
         record = load_taxonomy_yaml(path)
@@ -156,18 +149,14 @@ def agreement_report(root: Path) -> dict:
             (name_a, tags_a), (name_b, tags_b) = list(taggers.items())
             if not isinstance(tags_a, list) or not isinstance(tags_b, list):
                 continue
-            index = lambda tags: {
-                t["n"]: t
-                for t in tags
-                if isinstance(t, dict) and isinstance(t.get("n"), int) and not isinstance(t.get("n"), bool) and t.get("subject") in rows
-            }
             runs.append({"id": run.get("id", "?"), "held_out": run.get("held_out"), "note": run.get("note", ""), "taggers": [name_a, name_b],
-                         "scores": score_run(index(tags_a), index(tags_b), rows, home)})
+                         "scores": score_run(_index_valid_tags(tags_a, rows), _index_valid_tags(tags_b, rows), rows, home)})
         records.append({"id": record.get("id", "?"), "title": record.get("title", ""), "basis": record.get("basis", ""), "file": path.name, "runs": runs})
     return {"records": records, "errors": errors}
 
 
 def write_report(root: Path) -> dict:
+    """Compute the tagging-agreement report and write `books/_build/concepts/taxonomy-agreement.json`."""
     report = agreement_report(root)
     out = root / "books/_build/concepts"
     out.mkdir(parents=True, exist_ok=True)

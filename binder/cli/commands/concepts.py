@@ -1,4 +1,8 @@
-"""Repeatable chapter concept-map builds and local discovery inventories."""
+"""CLI entrypoint for `binder concepts` (`build`, `check`, `refresh`, `audit`, `coverage`, `agreement`).
+
+Compiles and validates the ML Systems Taxonomy (`taxonomy/ml-systems-taxonomy.yml`) and
+chapter concept maps against the LinkML metamodel (`taxonomy/schema/mlsys-taxonomy.linkml.yml`).
+"""
 
 import argparse
 import yaml
@@ -8,6 +12,7 @@ from cli.core.concept_graph import ConceptGraphError, build, refresh
 
 
 def run(root: Path, args: list[str]) -> bool:
+    """Execute a `binder concepts` subcommand and return `True` if all checks pass."""
     parser = argparse.ArgumentParser(prog="binder concepts", description=__doc__)
     parser.add_argument("action", choices=("build", "check", "refresh", "audit", "coverage", "agreement"))
     group = parser.add_mutually_exclusive_group()
@@ -62,7 +67,7 @@ def run(root: Path, args: list[str]) -> bool:
                     tag = "held out" if run["held_out"] else "rules revised on this sample"
                     print(f"{record['title']} {run['id']} [{tag}]: subject {s['subject_pct']}% (kappa {s['subject_kappa']}), "
                           f"area {s['area_pct']}% (kappa {s['area_kappa']}), primary concept {s['primary_concept_pct']}%, "
-                          f"same concept set {s['same_concept_set_pct']}%, compatible {s['compatible_pct']}% of {s['items']}")
+                          f"same concept set {s['same_concept_set_pct']}%, Hooper {s['hooper_consistency_pct']}%, Rolling {s['rolling_consistency_pct']}%, compatible {s['compatible_pct']}% of {s['items']}")
             for error in report["errors"]:
                 print(f"  invalid: {error}")
             print("Report: books/_build/concepts/taxonomy-agreement.json")
@@ -100,7 +105,7 @@ def run(root: Path, args: list[str]) -> bool:
                             )
             if (root / "taxonomy/coverage-ledger.yml").exists() and not volumes:
                 from cli.core.concept_coverage import coverage_report as ledger_coverage_report
-                ledger_rep = ledger_coverage_report(root)
+                ledger_rep = ledger_coverage_report(root, graph=graph, field=field)
                 if ledger_rep.get("orphaned_decisions"):
                     raise ConceptGraphError(
                         f"coverage: orphaned decisions in coverage-ledger.yml: {', '.join(ledger_rep['orphaned_decisions'])}"
