@@ -512,6 +512,11 @@ class NetworkEnergy(Registry):
         name="NVLink energy per bit", description="Representative midpoint of a 5--10 pJ/bit NVLink transfer envelope.")
     InfiniBandEnergyPerBit = sourced_qty(35 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
         name="InfiniBand energy per bit", description="Representative midpoint of a 20--50 pJ/bit switched-network transfer envelope.")
+    # Added 2026-10-20: short-range radio transmit envelope for the edge-versus-radio comparison.
+    RadioBitLow = sourced_qty(100_000 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="Short-range radio energy per bit (low)", description="Low end of an order-of-magnitude Bluetooth/Wi-Fi transmit envelope per bit.")
+    RadioBitHigh = sourced_qty(500_000 * pJ / bit, pc.NETWORK_ENERGY_ANCHORS,
+        name="Short-range radio energy per bit (high)", description="High end of an order-of-magnitude Bluetooth/Wi-Fi transmit envelope per bit.")
 
 
 class Storage(Registry):

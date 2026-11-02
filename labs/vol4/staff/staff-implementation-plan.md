@@ -5,7 +5,7 @@
 **Course Lead:** Prof. Vijay Janapa Reddi
 **Target Semester:** Spring 2027 Studio Launch
 **Target Platform:** Arduino UNO Q ("Unikue" Qualcomm QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 Arm · Hugging Face LeRobot · SmolVLA & ACT
-**Core Reference Architecture:** [Master Landing Page](../README.md) · [Course Syllabus](../curriculum/syllabus.md) · [Pre-Flight Guide](feasibility-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md)
+**Core Reference Architecture:** [Course Homepage](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/) · [Course Syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html) · [Pre-Flight Guide](feasibility-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md)
 
 ---
 
@@ -84,7 +84,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 #### Week 1 (Sep 21 – Sep 25, 2026): Master Plan Alignment & Bench Preparation
 * **Primary Objective:** Finalize the master execution plan, complete the BOM inventory, allocate the physical workbench, and verify laboratory power systems.
 * **Tasks:**
-  - [ ] Review master curriculum architecture: [Master Landing Page](../README.md), [Course Syllabus](../curriculum/syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [6 Lab Briefs](../README.md#3-the-14-week-lab-schedule), and [Capstone Studio](../labs/lab-capstone-studio.md).
+  - [ ] Review master curriculum architecture: [Course Homepage](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/), [Course Syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html), [Pre-Flight Guide](feasibility-plan.md), [6 Lab Briefs](../README.md#lab-instructions), and [Capstone Studio](../labs/lab-capstone-studio.md).
   - [ ] Inventory delivered hardware packages: Seeed Studio SO-101 Pro arm kit, Arduino UNO Q (4GB RAM), 45W USB-PD power supply, USB 3.0 powered hub, Logitech C270 camera, 7.4V/5A DC motor power supply, UART level-shifter, and wiring harnesses.
   - [ ] Dedicate a clean $120 \times 80\text{ cm}$ workbench at ETH Zurich with rigid table-edge clamping surface, overhead camera mount fixture, and anti-static mat.
   - [ ] Bench-test the regulated 7.4V DC motor supply and 45W USB-PD adapter with a digital multimeter to confirm clean voltage levels and common star-ground reference.

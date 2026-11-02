@@ -52,47 +52,20 @@ jobs:
       - name: 📊 Install stats dependencies
         run: pip install -r site/scripts/requirements.txt
 
-      - name: 🔢 Gather stats
+      - name: 🔢 Refresh shared site data
+        # One entry point gathers metrics and institution data and exports the
+        # two shared payloads consumed by all pages. No site rebuild is needed.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
           GA4_SERVICE_ACCOUNT_JSON: ${{ secrets.GA4_SERVICE_ACCOUNT_JSON }}
-          # This job publishes stats.json without committing its cache, so the
-          # committed file can be days behind the page. Reading the live figures
-          # back gives the high-water check in build_stats.py a baseline that is
-          # actually what visitors are seeing.
-          PUBLISHED_STATS_URL: https://mlsysbook.ai/stats.json
-        run: python3 site/scripts/build_stats.py
-
-      - name: 🎓 Gather adopters
-        # Reader schools (stargazer affiliations, plus GA4 referrers when the
-        # key is present), self-reported courses from "[Course]" issues, and
-        # strong-evidence course repos found on GitHub. Listed without a PR or
-        # commit; `hidden:` in adopters.yml keeps anything off the site. Code
-        # search needs DISCOVERY_TOKEN (read-only public access); without it
-        # discovery uses repository search and forks only. Each source fails
-        # soft and keeps the previous run's result.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DISCOVERY_TOKEN: ${{ secrets.DISCOVERY_TOKEN }}
-          GA4_SERVICE_ACCOUNT_JSON: ${{ secrets.GA4_SERVICE_ACCOUNT_JSON }}
-        run: |
-          python3 site/scripts/build_adopters.py gather
-          python3 site/scripts/build_adopters.py json adopters.json
+          PUBLISHED_STATS_URL: https://mlsysbook.ai/stats.json
+        run: python3 site/scripts/refresh_site_data.py
 
-      - name: 🚀 Publish stats.json to gh-pages
+      - name: 🚀 Publish shared data to gh-pages
         run: |
           set -euo pipefail
-
-          python3 - <<'PY'
-          import json, pathlib
-          cache = json.loads(pathlib.Path("site/config/stats-cache.json").read_text())
-          pathlib.Path("stats.json").write_text(
-              json.dumps({"generated": cache.get("generated", ""),
-                          "display": cache.get("display", {})},
-                         indent=2, sort_keys=True) + "\n")
-          print(f"prepared stats.json with {len(cache.get('display', {}))} values")
-          PY
 
           git clone --depth=1 --branch=gh-pages \
             https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \

@@ -113,7 +113,7 @@ staffml/
 │   │   ├── staffml_taxonomy.yaml       ← LinkML (existing)
 │   │   ├── question_schema.yaml        ← Per-question schema (NEW)
 │   │   └── zones.yaml                  ← 11 ikigai zones (ported from zones.py)
-│   ├── taxonomy.yaml                   ← 87 topics + 131 edges
+│   ├── schema/taxonomy_data.yaml       ← 87 topics + their edges
 │   ├── chains.yaml                     ← Chain definitions (cross-cutting)
 │   ├── release-policy.yaml             ← "What counts as published" (NEW)
 │   ├── id-registry.yaml                ← Ever-assigned ID ledger (NEW)
@@ -187,7 +187,7 @@ staffml/
 schema_version: 1
 id: cloud-l4-diagnosis-kv-cache-bandwidth-7f3a9c-0001  # immutable, URL-safe, content-addressed
 title: "KV Cache Memory Bandwidth Bottleneck"
-topic: kv-cache-management              # must exist in taxonomy.yaml
+topic: kv-cache-management              # must exist in schema/taxonomy_data.yaml
 chain:                                  # structured form — see H-4
   id: kv-cache-depth
   position: 2
@@ -617,7 +617,7 @@ Every `vault build` and `vault check` runs these. Grouped by speed tier. The fas
 2. Unique IDs across all questions and drafts (checked against `id-registry.yaml`).
 3. Path-field consistency (no stray `track:`/`level:`/`zone:` fields in YAML).
 4. **All path components are lowercase** (fixes H-9).
-5. **Each path component is enum-valid** against `taxonomy.yaml`/level-enum/`zones.yaml`.
+5. **Each path component is enum-valid** against `schema/taxonomy_data.yaml`/level-enum/`zones.yaml`.
 6. Filename format conforms to `<topic-kebab>-<6-hex>-<4-digit>.yaml` (fixes C-5).
 7. ID format URL-safe and matches filesystem path prefix recorded in `id-registry.yaml`.
 8. Required fields present.
@@ -633,7 +633,7 @@ Every `vault build` and `vault check` runs these. Grouped by speed tier. The fas
     - `details.resources[].url`: scheme must match `^https://`; `name` non-empty.
 
 ### Structural (CI, runs in <30s for 10K files — parallelized)
-11. Every `topic` exists in `taxonomy.yaml`. **(Fixes the 87/79 bug.)**
+11. Every `topic` exists in `schema/taxonomy_data.yaml`. **(Fixes the 87/79 bug.)**
 12. Every `chain` reference exists in `chains.yaml`; structured form required (no legacy `@` strings on `main`).
 13. Chain positions form a contiguous sequence `[1..N]`, no holes.
 14. Taxonomy prerequisite graph is a DAG.

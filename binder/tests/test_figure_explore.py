@@ -15,6 +15,8 @@ def render(tmp_path, target, figure='fig-tensor-memory-layout', lesson='tensor-m
     source = tmp_path / 'figure.qmd'
     enrollment = f'data-explore="{lesson}"' if lesson is not None else ''
     source.write_text(f'''---
+metadata-files:
+  - {(ROOT/'books/config/shared/html/figure-explore.yml').as_posix()}
 filters:
   - {FILTER.as_posix()}
 ---

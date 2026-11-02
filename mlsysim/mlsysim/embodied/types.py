@@ -485,6 +485,11 @@ class MobileManipulatorPlatform(BaseModel):
         return (2 * self.permission_rail_load * self.permission_rail_holdup
                 / (self.control_rail_battery_low**2 - self.control_rail_dropout**2)).to(ureg.farad)
 
+    @property
+    def permission_rail_holdup_energy(self):
+        """Energy the hold-up store delivers between its lowest charge and dropout: P t (added 2026-10-20)."""
+        return (self.permission_rail_load * self.permission_rail_holdup).to(ureg.joule)
+
 
 class EmbodiedSiteScenario(BaseModel):
     """Budget terms for one embodied machine at one site. Illustrative unless a field is sourced."""
@@ -505,6 +510,10 @@ class EmbodiedSiteScenario(BaseModel):
     t_isp: Quantity
     t_backbone: Quantity
     t_ipc: Quantity
+    # Added 2026-10-20: the base's yaw rate turning into the aisle, and the bound
+    # on converting a capture time into the safety MCU's clock.
+    yaw_rate_turn: Quantity
+    clock_conversion_bound: Quantity
     # permission-path liveness and enforcer timing
     heartbeat_rate: Quantity
     heartbeat_timeout: Quantity
@@ -594,7 +603,7 @@ class EmbodiedSiteScenario(BaseModel):
         "t_takeover_driving_p50", "t_takeover_driving_mean", "t_takeover_driving_p90",
         "t_takeover_driving_p99", "t_video_glass_to_glass", "t_handshake_request",
         "t_handshake_acknowledge", "t_handshake_confirm",
-        "t_chunk_deserialize", "t_plan_validate", "t_plan_activate",
+        "t_chunk_deserialize", "t_plan_validate", "t_plan_activate", "clock_conversion_bound",
         mode="after",
     )
     @classmethod
@@ -673,6 +682,16 @@ class EmbodiedSiteScenario(BaseModel):
         cam = self.machine.nav_camera
         return (cam.exposure_time / 2 + cam.readout_time + self.t_transport + self.t_dma
                 + self.t_isp + self.t_backbone + self.t_ipc).to(ureg.millisecond)
+
+    @property
+    def dispatch_age_limit(self):
+        """Oldest observation the producer may dispatch: observation age plus the clock-conversion bound (added 2026-10-20)."""
+        return (self.perception_age + self.clock_conversion_bound).to(ureg.millisecond)
+
+    @field_validator("yaw_rate_turn", mode="after")
+    @classmethod
+    def _validate_yaw_rate(cls, v, info):
+        return require_dimensionality(v, ureg.radian / ureg.second, info.field_name)
 
     @property
     def tau_delay(self):
@@ -829,3 +848,16 @@ class EmbodiedSiteScenario(BaseModel):
     def fixed_overhead(self):
         """Localization bound, protective clearance, and tracking bound."""
         return (self.delta_loc + self.delta_margin + self.eps_track).to(ureg.meter)
+
+    @property
+    def j_brake(self):
+        """Stop jerk bound: the peak jerk of the reference C2 polynomial stop from the drive limit.
+
+        Stipulated, not measured: the resident S-curve stop takes its jerk bound
+        from the reference polynomial at the machine's drive limit and the
+        credible deceleration (calc_c2_stop_suffix).
+        """
+        from ..physics.robotics import calc_c2_stop_suffix
+
+        return calc_c2_stop_suffix(self.machine.base.max_velocity,
+                                   self.a_brake)["peak_jerk"].to(ureg.meter / ureg.second**3)

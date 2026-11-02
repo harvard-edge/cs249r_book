@@ -16,7 +16,7 @@ The stack has six layers, bottom to top, each one teaching part (numeral in the 
 | `stack_trajectory` | Trajectory bar lit, every layer dimmed | `layer=trajectory`: Lectures 1 and 20, which span the stack; also any slide on the trajectory as the unit of engineering |
 | `stack_build1` to `stack_build7` | The stack built one layer per step from Model up; step 7 adds the Trajectory bar | Lecture 0, "What is an agentic system made of?" (`\mlsyssteps{\mlsyskit/stack_build}{7}`) |
 | `stack_roadmap` | Every lecture number on its layer; L1 and L20 under the bar | Lecture 0, "Where does each lecture sit?"; a course-map recap in Lecture 20 |
-| `course_order` | All twenty lectures as cards in columns by part, each with its layer | Lecture 0 course slide; Lecture 20 retrospective |
+| `course_order` | All twenty lectures in three columns by part, one line per lecture ("L10 Agent Harness"), drawn for a 15 by 6.2 cm slot so titles land near 9.5 pt; each part is one layer, so the part header names it and cards carry no layer tag | Lecture 0 course slide; Lecture 20 retrospective |
 | `machine_step1` to `machine_step4` | One accelerator node built up: compute, SRAM, HBM, host and link | Where a lecture needs the hardware under the model: Lecture 2 (decode is memory bound), Lecture 5 (KV cache residency in HBM) |
 | `machine_hl_compute`, `_sram`, `_hbm`, `_link`, `_host` | The node with one component outlined | Same lectures; `machine_hl_hbm` for KV footprint, `machine_hl_link` for host offload |
 

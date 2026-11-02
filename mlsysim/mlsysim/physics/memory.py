@@ -63,6 +63,20 @@ def model_memory(params, bytes_per_param, unit=MB):
     return total_bytes.to(unit).magnitude
 
 
+# Korthikanti et al. (2023), Table 2: bytes one transformer layer saves for the
+# backward pass, per token and per unit of width (s*b*h), in 16-bit storage.
+# The score term saves three copies of every attention entry: the softmax
+# probabilities (2 B), the dropout mask (1 B), and the probabilities after
+# dropout (2 B), 5 B per entry, so it is 5*a*s^2*b. Full recomputation keeps
+# only each layer's 16-bit input, 2 B per element. (Named 2026-10-20.)
+KORTHIKANTI_PER_TOKEN_BYTES = 34
+SCORE_SOFTMAX_BYTES = 2
+SCORE_DROPOUT_MASK_BYTES = 1
+SCORE_DROPPED_BYTES = 2
+KORTHIKANTI_SCORE_BYTES = SCORE_SOFTMAX_BYTES + SCORE_DROPOUT_MASK_BYTES + SCORE_DROPPED_BYTES
+KORTHIKANTI_LAYER_INPUT_BYTES = 2
+
+
 def calc_activation_memory(
     n_layers,
     seq_len,
@@ -123,9 +137,9 @@ def calc_activation_memory(
     s, b, h = seq_len, batch_size, hidden_dim
     precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
-        bytes_per_layer = 2 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_LAYER_INPUT_BYTES * s * b * h * precision_scale
     elif strategy == "selective":
-        bytes_per_layer = 34 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_PER_TOKEN_BYTES * s * b * h * precision_scale
     elif strategy == "none":
         if n_heads is None:
             raise ValueError(
@@ -133,13 +147,28 @@ def calc_activation_memory(
                 "attention term scales with the head count (Korthikanti et al. "
                 "2023, Sec. 4.1)."
             )
-        bytes_per_layer = (34 * s * b * h + 5 * n_heads * s * s * b) * precision_scale
+        bytes_per_layer = (KORTHIKANTI_PER_TOKEN_BYTES * s * b * h
+                           + KORTHIKANTI_SCORE_BYTES * n_heads * s * s * b) * precision_scale
     else:
         raise ValueError(
             f"Unknown activation strategy {strategy!r}; expected 'none', "
             "'selective', or 'full'."
         )
     return (n_layers * bytes_per_layer) * ureg.byte
+
+
+def calc_checkpoint_memory_units(n_layers: int, checkpoints: int) -> float:
+    """
+    Activation memory of evenly spaced checkpointing, in units of one layer's activations.
+
+    With ``k`` checkpoints over ``L`` equal layers, the forward pass keeps the
+    ``k`` checkpoint activations and the backward pass rebuilds one segment of
+    ``L/k`` layers at a time: ``k + L/k``, smallest near ``k = sqrt(L)``
+    (Chen et al. 2016). (Added 2026-10-20.)
+    """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(checkpoints, 1, "checkpoints")
+    return checkpoints + n_layers / checkpoints
 
 
 def calc_checkpoint_size(n_params, bytes_per_param=14):
@@ -435,3 +464,177 @@ def calc_expected_paged_kv_tokens(mean_request_tokens, max_seq_len, page_size_to
     internal_frag = max(0.0, 1.0 - mean_request_tokens / allocated_tokens)
     return allocated_tokens, internal_frag
 
+
+
+# --- Decoder weight matrices (added 2026-10-20) ------------------------------
+
+def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
+    """
+    Weights in the matrix multiplies of a GPT-style decoder, by kind.
+
+    Each block has four weight matrices: the fused query-key-value projection
+    (d x 3d), the attention output projection (d x d), and the two MLP
+    matrices (d x r d and r d x d). The output layer projects d to the
+    vocabulary (d x V). Biases, layer norms, and position embeddings are not
+    matrix multiplies and are left out.
+
+    Returns
+    -------
+    dict
+        ``block`` (weights in all blocks), ``block_matrices`` (count of block
+        weight matrices), and ``output`` (output-layer weights).
+    """
+    d = hidden_dim
+    per_block = d * 3 * d + d * d + 2 * d * mlp_ratio * d
+    return {"block": layers * per_block, "block_matrices": 4 * layers, "output": vocab_size * d}
+
+
+# --- KV cache residency: fit, blocks, sharing (added 2026-10-20) -------------
+
+def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
+    """
+    The attention design a model's KV geometry implies: "MLA", "GQA", or "MHA".
+
+    Multi-head latent attention (MLA) caches one compressed latent per token
+    per layer (``kv_lora_rank`` set). Grouped-query attention (GQA) stores
+    fewer key-value heads than query heads. Multi-head attention (MHA) stores
+    one key-value head per query head.
+    """
+    if kv_lora_rank:
+        return "MLA"
+    if kv_heads and heads and kv_heads < heads:
+        return "GQA"
+    return "MHA"
+
+
+def calc_kv_resident_fit(pool, bytes_per_sequence) -> int:
+    """
+    Whole sequences of ``bytes_per_sequence`` that fit in ``pool``.
+
+        B = floor(M_pool / (S * m_token))
+
+    Both arguments are byte quantities. The count is a memory-only bound: it
+    ignores block rounding, headroom, and promised output growth unless the
+    caller has folded them into ``bytes_per_sequence``.
+    """
+    return int((pool / bytes_per_sequence).to("").magnitude)
+
+
+def calc_kv_block_count(tokens: int, block_tokens: int) -> int:
+    """Blocks of ``block_tokens`` a sequence of ``tokens`` occupies: ceil(S / b)."""
+    validate_at_least(block_tokens, 1, "block_tokens")
+    return math.ceil(tokens / block_tokens)
+
+
+def calc_shared_prefix_fit(pool_blocks: int, shared_blocks: int, private_blocks: int) -> int:
+    """
+    Requests that fit when ``shared_blocks`` are stored once for all of them.
+
+        B_shared = floor((N_blocks - N_common) / N_private)
+
+    Each request adds only its ``private_blocks``; the common prefix is
+    counted once, as unique physical blocks.
+    """
+    return (pool_blocks - shared_blocks) // private_blocks
+
+
+def calc_sharing_gain_limit(shared_fraction: float) -> float:
+    """
+    Large-pool limit of the resident-fit gain from sharing: 1 / (1 - f).
+
+    ``f`` is the shared fraction of each request's blocks. As the pool grows,
+    the one stored copy of the prefix becomes negligible and every request
+    costs only its private share.
+    """
+    if not 0 <= shared_fraction < 1:
+        raise ValueError("shared_fraction must be in [0, 1)")
+    return 1 / (1 - shared_fraction)
+
+
+# --- On-device training: update traffic and parameter-efficient updates (added 2026-10-20) ---
+
+def calc_update_step_traffic(weights, gradients, optimizer_state, activations):
+    """
+    DRAM traffic of one full-update training step, one crossing per tensor use.
+
+    With no cache reuse, the forward pass reads the weights and writes the
+    saved activations; the backward pass reads the activations and the
+    weights and writes the gradients; an Adam-style optimizer reads the
+    weights, the gradients, and its state, then writes the weights and its
+    state back:
+
+        V_step = (W + A) + (A + W + G) + (W + G + S) + (W + S)
+
+    Returns ``(step_traffic, weight_reads)``: the total bytes moved and the
+    bytes of the three weight reads (forward, backward, optimizer).
+    """
+    forward = weights + activations
+    backward = activations + weights + gradients
+    optimizer = (weights + gradients + optimizer_state) + (weights + optimizer_state)
+    return forward + backward + optimizer, 3 * weights
+
+
+def calc_low_rank_update_params(in_dim: int, out_dim: int, rank: int) -> int:
+    """
+    Trainable parameters of a rank-``rank`` update to an ``out_dim`` by ``in_dim`` weight.
+
+        P_LoRA = r (d_in + d_out)
+
+    The update is the product of a down-projection (r by d_in) and an
+    up-projection (d_out by r); the frozen weight itself holds d_in d_out.
+    """
+    validate_at_least(rank, 1, "rank")
+    return rank * (in_dim + out_dim)
+
+
+def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
+    """
+    Parameters of one residual bottleneck adapter, weights and biases.
+
+        P_adapter = 2 d r + r + d
+
+    A down-projection from width d to bottleneck r and an up-projection back
+    to d, each with a bias.
+    """
+    validate_at_least(bottleneck, 1, "bottleneck")
+    return 2 * width * bottleneck + bottleneck + width
+
+
+# --- Sparse storage formats (added 2026-10-20) --------------------------------
+
+def calc_sparse_bytes_per_nonzero(value_bytes, index_bytes, indices: int = 1):
+    """
+    Bytes one stored nonzero costs in an index-based sparse format.
+
+        b_nz = b_value + k b_index
+
+    CSR keeps one column index per value (k = 1; its row pointers are one per
+    row, not per value); COO keeps a row and a column index (k = 2).
+    """
+    validate_at_least(indices, 0, "indices")
+    return value_bytes + indices * index_bytes
+
+
+def calc_sparse_breakeven_zero_share(dense_bytes_per_value, bytes_per_nonzero) -> float:
+    """
+    Share of zeros above which a sparse format stores fewer bytes than dense.
+
+        z* = 1 - b_dense / b_nz
+
+    A dense tensor pays b_dense per entry, zero or not; a sparse one pays b_nz
+    per survivor, so it wins only when fewer than b_dense / b_nz survive.
+    Per-row overheads (CSR row pointers) are excluded.
+    """
+    return 1 - float(dense_bytes_per_value / bytes_per_nonzero)
+
+
+def calc_csr_bytes(nonzeros: int, rows: int, value_bytes, index_bytes):
+    """
+    Bytes of a matrix in compressed sparse row (CSR) form.
+
+        B_CSR = nnz (b_value + b_index) + (rows + 1) b_index
+
+    Values and column indices are one each per nonzero; row pointers are one
+    per row boundary, rows + 1 in all.
+    """
+    return nonzeros * (value_bytes + index_bytes) + (rows + 1) * index_bytes

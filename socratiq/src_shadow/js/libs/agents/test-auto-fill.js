@@ -30,7 +30,7 @@ export class AutoFillTester {
       },
       'groq': {
         endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-        model: 'llama-3.1-8b-instant'
+        model: 'openai/gpt-oss-20b'
       },
       'anthropic': {
         endpoint: 'https://api.anthropic.com/v1/messages',
@@ -71,7 +71,7 @@ export class AutoFillTester {
       },
       'groq': {
         endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-        model: 'llama-3.1-8b-instant'
+        model: 'openai/gpt-oss-20b'
       },
       'anthropic': {
         endpoint: 'https://api.anthropic.com/v1/messages',

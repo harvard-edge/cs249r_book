@@ -33,6 +33,7 @@ from cli.commands.debug import DebugCommand
 from cli.commands.validate import ValidateCommand
 from cli.commands.formatting import FormatCommand
 from cli.commands.info import InfoCommand
+from cli.commands.concepts import run as run_concepts
 from cli.commands.bib import BibCommand
 from cli.commands.render import RenderCommand
 from cli.commands.newsletter import NewsletterCommand
@@ -160,6 +161,7 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("release [--vol1|--vol2]"), "Run release gate and emit structured report", _cmd("./binder/binder release --dry-run --json"))
         quality_table.add_row(_cmd("fix <topic> <action>"), "Fix/manage content", _cmd("./binder/binder fix headers add"))
         quality_table.add_row(_cmd("format <target>"), "Auto-format content", _cmd("./binder/binder format tables"))
+        quality_table.add_row(_cmd("concepts build|check|refresh"), "Generate and validate chapter concept maps", _cmd("./binder/binder concepts build --vol1"))
         quality_table.add_row(_cmd("info stats [--by-chapter]"), "Book statistics (words, figs, ...)", _cmd("./binder/binder info stats --vol1"))
         quality_table.add_row(_cmd("info figures [--format csv]"), "Extract figure list", _cmd("./binder/binder info figures --vol1"))
         quality_table.add_row(_cmd("info concepts|headers|acronyms"), "Extract concepts, headers, acronyms", _cmd("./binder/binder info concepts --vol1"))
@@ -1240,6 +1242,7 @@ class MLSysBookCLI:
             "fix": self.handle_fix_command,
             "format": self.handle_format_command,
             "info": self.handle_info_command,
+            "concepts": lambda args: run_concepts(self.config_manager.root_dir, args),
             "bib": self.handle_bib_command,
             "headings": self.handle_headings_command,
             "notation": self.handle_notation_command,

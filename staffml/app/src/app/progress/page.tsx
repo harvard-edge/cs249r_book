@@ -5,8 +5,9 @@ import { motion } from "framer-motion";
 import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target, AlertTriangle, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
-import { getCompetencyAreas, getTracks, getTopics, getQuestions } from "@/lib/corpus";
-import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt, getTopicProgressMap, type AreaProgress } from "@/lib/progress";
+import { getCompetencyAreas, getTracks, getQuestions } from "@/lib/corpus";
+import { getTaxonomyStats } from "@/lib/mlsys-taxonomy";
+import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt, getSubjectProgressMap, type AreaProgress } from "@/lib/progress";
 import { useToast } from "@/components/Toast";
 import { track } from "@/lib/analytics";
 import AreaProgressSection from "@/components/progress/AreaProgressSection";
@@ -43,7 +44,7 @@ export default function ProgressPage() {
 
   const tracks = getTracks().filter(t => t !== "global");
   const areas = getCompetencyAreas();
-  const totalTopics = getTopics().length;
+  const totalTopics = getTaxonomyStats().subjects;
   const totalCorpus = getQuestions().length;
 
   useEffect(() => {
@@ -74,7 +75,7 @@ export default function ProgressPage() {
     });
 
     setHeatData(data);
-    setAreaProgress(getTopicProgressMap());
+    setAreaProgress(getSubjectProgressMap());
   };
 
   const handleClear = () => {
@@ -153,7 +154,7 @@ export default function ProgressPage() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-[10px] text-textTertiary">Topics</div>
+              <div className="text-[10px] text-textTertiary">Subjects</div>
               <div className="text-lg font-bold font-mono text-textPrimary">
                 {areaProgress.reduce((s, a) => s + a.topics.filter(t => t.attempted > 0).length, 0)}/{totalTopics}
               </div>
@@ -314,10 +315,10 @@ export default function ProgressPage() {
           </motion.div>
         ) : (
           <>
-            {/* Topic progress by area (NeetCode-style) */}
+            {/* Progress by taxonomy area → subject (NeetCode-style) */}
             {areaProgress.length > 0 && (
               <div className="space-y-2 mb-8">
-                <h2 className="text-sm font-bold text-textPrimary mb-3">Progress by Topic</h2>
+                <h2 className="text-sm font-bold text-textPrimary mb-3">Progress by subject</h2>
                 {areaProgress
                   .sort((a, b) => {
                     const aPct = a.totalQuestions > 0 ? a.correct / a.totalQuestions : 0;

@@ -176,6 +176,10 @@ class TransformerWorkload(Workload):
     hidden_dim: Optional[int] = None
     heads: Optional[int] = None
     kv_heads: Optional[int] = None
+    # Attention head width when it is not hidden_dim // heads (added 2026-10-20):
+    # PaLM uses heads of 256 with d_model 18,432 and 48 heads (Chowdhery et al.
+    # 2022, Table 1). None keeps the hidden_dim // heads convention.
+    head_dim: Optional[int] = None
     # Multi-Head Latent Attention (DeepSeek-V2/V3). When both are present the
     # model caches one compressed latent per token per layer instead of a K and
     # a V tensor per key-value head, so KV sizing takes the MLA path below.
@@ -259,9 +263,24 @@ class TransformerWorkload(Workload):
 
         h_dim = self.hidden_dim or 4096
         n_heads = self.heads or 32
-        head_dim = h_dim // n_heads
+        head_dim = self.head_dim or h_dim // n_heads
         n_kv_heads = self.kv_heads or n_heads
         return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=prec_qty)
+
+    @property
+    def head_width(self) -> int:
+        """Width of one attention head: ``head_dim`` when stated, else hidden_dim // heads (added 2026-10-20)."""
+        return self.head_dim or self.hidden_dim // self.heads
+
+    @property
+    def kv_width(self) -> int:
+        """Key (or value) width cached per layer per token: key-value heads x head width (added 2026-10-20)."""
+        return (self.kv_heads or self.heads) * self.head_width
+
+    @property
+    def queries_per_kv_head(self) -> int:
+        """Query heads that share one key-value head (one for multi-head attention; added 2026-10-20)."""
+        return self.heads // (self.kv_heads or self.heads)
 
     def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
         """
@@ -380,6 +399,9 @@ class CNNWorkload(Workload):
     parameters: Quantity
     inference_flops: Quantity
     layers: Optional[int] = None
+    # Optional (added 2026-10-20): the channel-width multiplier of a scalable
+    # family (MobileNet's alpha), relative to the family's base network.
+    width_multiplier: Optional[float] = None
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         weights = self.size_in_bytes(precision)

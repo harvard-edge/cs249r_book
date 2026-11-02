@@ -1,5 +1,9 @@
-// Hardware constants from mlsysim/core/constants.py — single source of truth
-// Used as a reference card during drill/gauntlet napkin math
+// Hardware, interconnect, latency, and model numbers for the reference card,
+// napkin calculator, roofline, and simulator. Every value comes from the
+// MLSysIM registries through src/data/mlsysim.json, which
+// scripts/export_mlsysim_data.py regenerates before every CI build. Do not
+// type numbers here; change MLSysIM and rerun the export.
+import mlsysim from '../data/mlsysim.json';
 
 export interface HardwareSpec {
   name: string;
@@ -11,40 +15,19 @@ export interface HardwareSpec {
   memory_type: string;
   tdp_w: number;
   year: number;
+  mlsysim: string; // registry entry this row was exported from
 }
 
-export const HARDWARE_SPECS: HardwareSpec[] = [
-  // Cloud GPUs
-  { name: 'NVIDIA H100 SXM', tier: 'cloud', compute_tflops: 989, compute_unit: 'FP16', bandwidth_tbs: 3.35, memory_gb: 80, memory_type: 'HBM3', tdp_w: 700, year: 2022 },
-  { name: 'NVIDIA H200', tier: 'cloud', compute_tflops: 989, compute_unit: 'FP16', bandwidth_tbs: 4.8, memory_gb: 141, memory_type: 'HBM3e', tdp_w: 700, year: 2023 },
-  { name: 'NVIDIA B200', tier: 'cloud', compute_tflops: 2250, compute_unit: 'FP16', bandwidth_tbs: 8.0, memory_gb: 192, memory_type: 'HBM3e', tdp_w: 1000, year: 2024 },
-  { name: 'NVIDIA A100 80GB', tier: 'cloud', compute_tflops: 312, compute_unit: 'FP16', bandwidth_tbs: 2.039, memory_gb: 80, memory_type: 'HBM2e', tdp_w: 400, year: 2020 },
-  { name: 'AMD MI300X', tier: 'cloud', compute_tflops: 1307, compute_unit: 'FP16', bandwidth_tbs: 5.3, memory_gb: 192, memory_type: 'HBM3', tdp_w: 750, year: 2023 },
-  { name: 'Google TPU v5p', tier: 'cloud', compute_tflops: 459, compute_unit: 'BF16', bandwidth_tbs: 2.76, memory_gb: 95, memory_type: 'HBM', tdp_w: 300, year: 2024 },
-  // Edge
-  { name: 'Jetson Orin NX', tier: 'edge', compute_tflops: 25, compute_unit: 'INT8', bandwidth_tbs: 0.102, memory_gb: 16, memory_type: 'LPDDR5', tdp_w: 25, year: 2022 },
-  { name: 'Google Coral Edge TPU', tier: 'edge', compute_tflops: 4, compute_unit: 'INT8', bandwidth_tbs: 0.008, memory_gb: 1, memory_type: 'DRAM', tdp_w: 2, year: 2019 },
-  // Mobile
-  { name: 'Apple A17 Pro', tier: 'mobile', compute_tflops: 35, compute_unit: 'FP16', bandwidth_tbs: 0.1, memory_gb: 8, memory_type: 'LPDDR5', tdp_w: 5, year: 2023 },
-  { name: 'Snapdragon 8 Gen 3', tier: 'mobile', compute_tflops: 45, compute_unit: 'INT8', bandwidth_tbs: 0.077, memory_gb: 12, memory_type: 'LPDDR5X', tdp_w: 5, year: 2023 },
-  // TinyML
-  { name: 'ESP32-S3', tier: 'tinyml', compute_tflops: 0.0005, compute_unit: 'INT8', bandwidth_tbs: 0.0002, memory_gb: 0.000512, memory_type: 'SRAM', tdp_w: 1.2, year: 2021 },
-];
+export const HARDWARE_SPECS = mlsysim.hardware as HardwareSpec[];
 
 export interface InterconnectSpec {
   name: string;
-  bandwidth_gbs: number; // GB/s (unidirectional)
+  bandwidth_gbs: number; // GB/s, as MLSysIM records the link
   latency_us: number;
+  mlsysim: string;
 }
 
-export const INTERCONNECTS: InterconnectSpec[] = [
-  { name: 'NVLink H100', bandwidth_gbs: 900, latency_us: 0.5 },
-  { name: 'NVLink B200', bandwidth_gbs: 1800, latency_us: 0.3 },
-  { name: 'PCIe Gen5 x16', bandwidth_gbs: 64, latency_us: 1.0 },
-  { name: 'InfiniBand NDR', bandwidth_gbs: 50, latency_us: 5.0 },
-  { name: 'InfiniBand XDR', bandwidth_gbs: 100, latency_us: 3.0 },
-  { name: 'Ethernet 100GbE', bandwidth_gbs: 12.5, latency_us: 10.0 },
-];
+export const INTERCONNECTS: InterconnectSpec[] = mlsysim.interconnects;
 
 export interface LatencyRef {
   operation: string;
@@ -52,16 +35,24 @@ export interface LatencyRef {
   human_scale: string;
 }
 
+/** Scale a latency so 1 ns reads as 1 second, the classic way to feel the gaps. */
+export function humanScale(latencyNs: number): string {
+  const seconds = latencyNs;
+  const units: [string, number][] = [['year', 365 * 86400], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+  const [unit, size] = units.find(([, s]) => seconds >= s) ?? units[units.length - 1];
+  const value = Number((seconds / size).toPrecision(2));
+  return `${value} ${unit}${value === 1 ? '' : 's'}`;
+}
+
+// MLSysIM has the speed of light in fiber but no coast-to-coast route length,
+// so this one row is not from the registry. Add a route distance to MLSysIM
+// to bring it in.
+const CROSS_US_FIBER_NS = 40_000_000;
+
 export const LATENCY_HIERARCHY: LatencyRef[] = [
-  { operation: 'L1 Cache / Register', latency_ns: 1, human_scale: '1 second' },
-  { operation: 'L2 Cache', latency_ns: 4, human_scale: '4 seconds' },
-  { operation: 'HBM3 Access', latency_ns: 300, human_scale: '5 minutes' },
-  { operation: 'NVLink Transfer', latency_ns: 500, human_scale: '8 minutes' },
-  { operation: 'PCIe Gen5', latency_ns: 1000, human_scale: '16 minutes' },
-  { operation: 'InfiniBand NDR', latency_ns: 5000, human_scale: '1.4 hours' },
-  { operation: 'NVMe SSD Read', latency_ns: 100000, human_scale: '1.1 days' },
-  { operation: 'Cross-US Fiber', latency_ns: 40000000, human_scale: '1.2 years' },
-];
+  ...mlsysim.latency.map(({ operation, latency_ns }) => ({ operation, latency_ns })),
+  { operation: 'Cross-US Fiber', latency_ns: CROSS_US_FIBER_NS },
+].map(l => ({ ...l, human_scale: humanScale(l.latency_ns) }));
 
 // Key formulas for napkin math
 export const FORMULAS = {
@@ -107,13 +98,8 @@ export interface ModelConfig {
   layers: number;
   hidden_dim: number;
   heads: number;
-  flops_per_token: number; // approximate FLOPs per token (forward)
+  flops_per_token: number; // training FLOPs per token, 6 x parameters (forward + backward)
+  mlsysim: string;
 }
 
-export const MODEL_CONFIGS: ModelConfig[] = [
-  { name: 'GPT-2 (1.5B)', params_b: 1.5, layers: 48, hidden_dim: 1600, heads: 25, flops_per_token: 9e9 },
-  { name: 'Llama-2-7B', params_b: 7, layers: 32, hidden_dim: 4096, heads: 32, flops_per_token: 42e9 },
-  { name: 'Llama-2-70B', params_b: 70, layers: 80, hidden_dim: 8192, heads: 64, flops_per_token: 420e9 },
-  { name: 'Llama-3.1-405B', params_b: 405, layers: 126, hidden_dim: 16384, heads: 128, flops_per_token: 2430e9 },
-  { name: 'BERT-Large (340M)', params_b: 0.34, layers: 24, hidden_dim: 1024, heads: 16, flops_per_token: 2e9 },
-];
+export const MODEL_CONFIGS: ModelConfig[] = mlsysim.models;

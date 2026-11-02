@@ -36,7 +36,9 @@ HERE = Path(__file__).parent
 DATA = HERE / "data"
 N = 30          # runs per envelope for the startup timing
 N_DOCKER = 15   # docker runs are slower; fewer samples
-BASE_GB = 2.4   # Agent Sandboxes, Napkin Math 8.2: pinned base
+
+# Agent Sandboxes, Napkin Math 8.2: the pinned base the clone run copies
+BASE_GB = 2.4
 
 
 def run(cmd, **kw):

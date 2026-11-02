@@ -353,3 +353,19 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     pf = _ensure_unit(peak_flops, ureg.flop / ureg.second, "peak_flops")
     validate_positive(pf, "peak_flops")
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
+
+
+def calc_pareto_frontier(points):
+    """
+    Indices of the points no other point beats on both axes.
+
+    ``points`` is a sequence of (cost, value) pairs, lower cost and higher
+    value better (latency and accuracy, for example). A point is dominated
+    when another is at least as good on both axes and strictly better on one.
+    Added 2026-10-20.
+    """
+    keep = []
+    for i, (c, v) in enumerate(points):
+        if not any((c2 <= c and v2 >= v) and (c2 < c or v2 > v) for c2, v2 in points):
+            keep.append(i)
+    return keep

@@ -8,12 +8,12 @@ from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 
 # --- Facility cooling tiers (PUE / WUE anchors for appendices) ---
-PUE_LIQUID_COOLED = sourced(1.06, pc.UPTIME_PUE_2022, name="PUE (Liquid-Cooled)", description="Best-in-class liquid-cooled AI datacenter PUE.")
-PUE_BEST_AIR = sourced(1.12, pc.UPTIME_PUE_2022, name="PUE (Best Air-Cooled)", description="Best-in-class air-cooled hyperscale datacenter PUE.")
-PUE_TYPICAL = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Global average annual data center PUE reported by the Uptime Institute 2022 survey.")
-PUE_SIMPLE_AIR = sourced(1.50, pc.UPTIME_PUE_2022, name="PUE (Simple Air)", description="Simple air-cooled datacenter PUE tier.")
-PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2022, name="PUE (Legacy Air-Cooled)", description="Older enterprise datacenter PUE tier.")
-PUE_STATE_OF_ART = sourced(1.10, pc.UPTIME_PUE_2022, name="PUE (state of art)", description="Highly optimized modern datacenter PUE benchmark.")
+PUE_LIQUID_COOLED = sourced(1.06, pc.NREL_ESIF_PUE, name="PUE (Liquid-Cooled)", description="Annual average PUE of a warm-water liquid-cooled, chiller-less HPC data center (NREL ESIF).")
+PUE_BEST_AIR = sourced(1.12, pc.MICROSOFT_DESIGN_PUE_2022, name="PUE (Best Air-Cooled)", description="Design PUE of a newest-generation hyperscale datacenter (Microsoft, 2022).")
+PUE_TYPICAL = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Industry Average, 2022)", description="Global average annual data center PUE reported by the Uptime Institute 2022 survey.")
+PUE_SIMPLE_AIR = sourced(1.5, pc.LBNL_SMALL_SERVER_ROOMS_2013, name="PUE (Simple Air)", description="Measured PUE of a small server room cooled by window-mounted air-conditioning units (LBNL 2013, Table 4).")
+PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2023, name="PUE (Industry Average, 2023)", description="Industry average data center PUE for 2023 reported by the Uptime Institute.")
+PUE_STATE_OF_ART = sourced(1.10, pc.GOOGLE_FLEET_PUE, name="PUE (state of art)", description="Google fleet-wide trailing twelve-month PUE at Q4 2023.")
 WUE_AIR_COOLED = sourced(0.5, pc.WUE_ANCHORS, name="WUE (air-cooled)", description="Water usage effectiveness for air-cooled facilities.")
 WUE_EVAPORATIVE = sourced(1.8, pc.WUE_ANCHORS, name="WUE (evaporative)", description="Water usage effectiveness for evaporative cooling.")
 WUE_LIQUID = sourced(0.0, pc.WUE_ANCHORS, name="WUE (liquid-cooled)", description="Closed-loop liquid cooling (near-zero WUE).")
@@ -28,27 +28,27 @@ class FacilityCooling(Registry):
     """Datacenter cooling efficiency tiers (not regional grids)."""
     LiquidCooled = CoolingProfile(
         name="Liquid-Cooled", pue=PUE_LIQUID_COOLED, wue=WUE_LIQUID,
-        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Best-in-class liquid-cooled AI datacenter cooling profile (PUE 1.06, WUE 0.0)."),
+        metadata=Metadata(provenance=pc.NREL_ESIF_PUE, description="Warm-water liquid-cooled data center cooling profile (PUE 1.06, WUE 0.0)."),
     )
     BestAir = CoolingProfile(
         name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Best-in-class air-cooled hyperscale datacenter cooling profile (PUE 1.12, WUE 1.8)."),
+        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale datacenter design cooling profile (PUE 1.12, WUE 1.8)."),
     )
     Typical = CoolingProfile(
-        name="Industry Average", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE,
+        name="Industry Average (2022)", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE,
         metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Global industry average datacenter cooling profile from Uptime Institute 2022 survey (PUE 1.55, WUE 1.8)."),
     )
     SimpleAir = CoolingProfile(
         name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Simple air-cooled enterprise datacenter cooling profile (PUE 1.50, WUE 1.8)."),
+        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 1.8)."),
     )
     Legacy = CoolingProfile(
-        name="Legacy Air-Cooled", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Legacy enterprise air-cooled datacenter cooling profile (PUE 1.58, WUE 1.8)."),
+        name="Industry Average (2023)", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE,
+        metadata=Metadata(provenance=pc.UPTIME_PUE_2023, description="Global industry average datacenter cooling profile from Uptime Institute 2023 data (PUE 1.58, WUE 1.8)."),
     )
     StateOfArt = CoolingProfile(
         name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="State-of-the-art modern optimized datacenter cooling profile (PUE 1.10, WUE 1.8)."),
+        metadata=Metadata(provenance=pc.GOOGLE_FLEET_PUE, description="Hyperscale fleet cooling profile at Google's Q4 2023 fleet TTM PUE (PUE 1.10, WUE 1.8)."),
     )
 
 

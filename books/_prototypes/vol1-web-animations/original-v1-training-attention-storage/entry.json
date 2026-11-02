@@ -1,0 +1,55 @@
+{
+  "key": "vol1:fig-training-attention-storage",
+  "implementation": {
+    "name": "original-v1-training-attention-storage",
+    "script": "original-v1-training-attention-storage.js",
+    "stylesheet": "original-v1-training-attention-storage.css",
+    "shared_player": true,
+    "scope": "Same two forward paths and memory boundary as the original. A declared one-query/four-key, two-block toy row (scores 0, 0, ln 2, ln 2; values 2, 4, 6, 8) keeps running row statistics and partial output; the original matrix boxes stand for the full intermediates of this row trace, not a quadratic-capacity measurement; all backward/optimizer memory is omitted. Tiled execution is a separate alternative to the materialized path.",
+    "question": "Which intermediates cross into HBM?"
+  },
+  "purpose": "Which intermediates cross into HBM?",
+  "storyboard": [
+    {
+      "label": "Inputs retained in HBM",
+      "description": "Both alternatives begin with queries, keys, and values. No attention output exists yet."
+    },
+    {
+      "label": "Materialized: compute and write scores",
+      "description": "The first kernel writes the full score matrix into HBM for the softmax consumer."
+    },
+    {
+      "label": "Materialized: write probabilities",
+      "description": "Softmax reads scores and writes the full probability matrix in HBM. Scores are no longer required by this forward trace."
+    },
+    {
+      "label": "Materialized: write output",
+      "description": "The value-weighting kernel reads probabilities and values, then writes output. No claim about saved backward tensors is made."
+    },
+    {
+      "label": "Start tiled alternative",
+      "description": "Reset the alternative. Inputs remain in HBM; there is no full score or probability matrix there."
+    },
+    {
+      "label": "Load first K/V block",
+      "description": "SRAM receives one working block and the query tile. Running state begins for the output rows."
+    },
+    {
+      "label": "Consume first score/probability tile",
+      "description": "The first tile contributes to the running maximum, normalizer, and partial output. Its temporary scores/probabilities can be replaced afterward."
+    },
+    {
+      "label": "Replace with second block",
+      "description": "The second block occupies the same temporary workspace. Running state from block 1 survives this replacement."
+    },
+    {
+      "label": "Merge second block contribution",
+      "description": "Online softmax rescales prior accumulated state if the row maximum changes, then incorporates the new block. Normalization is still pending."
+    },
+    {
+      "label": "Normalize and write output tile",
+      "description": "After the final block, normalization completes the output tile and writes it to HBM. Inputs/output remain; full quadratic intermediates were never written."
+    }
+  ],
+  "guard": "Forward lifetime only; neither path represents total training memory. Online-softmax statistics survive tile replacement and output normalizes only after final tile."
+}

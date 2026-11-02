@@ -18,7 +18,7 @@ __all__ = [
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
-    "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
+    "BYTES_FP32", "BYTES_INT32", "BYTES_INT64", "BYTES_INT16", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
     "BYTES_ADAM_STATE", "BYTES_ADAM_MOMENTS", "BYTES_ADAM_TOTAL", "BYTES_TRAINING_STATE_MIXED_PRECISION",
     # Interconnect standards
     "NVLINK3_BANDWIDTH_UNIDIRECTIONAL", "NVLINK3_BANDWIDTH_BIDIRECTIONAL",
@@ -26,6 +26,8 @@ __all__ = [
     "NVLINK5_BANDWIDTH_UNIDIRECTIONAL", "NVLINK5_BANDWIDTH_BIDIRECTIONAL",
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
+    "FLOAT_FORMAT_BITS", "INT16_BITS",  # number-format layouts (added 2026-10-20)
+    "FP8_FORMAT_BITS", "INT4_BITS",  # quantization formats (added 2026-10-20)
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
     "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
@@ -111,6 +113,8 @@ PB = ureg.PB
 # Common precision sizes
 BYTES_FP32 = 4 * byte
 BYTES_INT32 = 4 * byte
+BYTES_INT64 = 8 * byte  # integer class labels, indices (added 2026-10-20)
+BYTES_INT16 = 2 * byte  # 16-bit sparse-format indices (added 2026-10-20)
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
@@ -135,6 +139,26 @@ NVLINK5_BANDWIDTH_BIDIRECTIONAL = 1800 * GB / second
 FP32_BITS = 32
 INT8_BITS = 8
 SIMD_REGISTER_BITS = 512
+INT16_BITS = 16
+
+# Binary floating-point layouts, (exponent bits, fraction bits): IEEE 754-2019
+# binary32 and binary16, and bfloat16 (FP32's exponent with a 7-bit fraction).
+# physics.numerics.calc_float_range derives each format's range from these.
+# (added 2026-10-20)
+FLOAT_FORMAT_BITS = {
+    "fp32": (8, 23),
+    "bf16": (8, 7),
+    "fp16": (5, 10),
+}
+# FP8 layouts (Micikevicius et al. 2022, Table 1). E5M2 follows IEEE 754
+# conventions; E4M3 keeps its top exponent for normal values (one NaN pattern,
+# no infinities), so its values come from
+# physics.numerics.calc_float_values(4, 3, ieee=False) (added 2026-10-20).
+FP8_FORMAT_BITS = {
+    "e4m3": (4, 3),
+    "e5m2": (5, 2),
+}
+INT4_BITS = 4  # (added 2026-10-20)
 
 # Precision string -> byte width. Shared by Engine, ServingModel, SynthesisSolver.
 PRECISION_MAP = {

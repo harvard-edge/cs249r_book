@@ -44,6 +44,10 @@ on:
     branches: [dev]
     paths:
       - 'staffml/app/**'
+      - 'mlsysim/mlsysim/hardware/**'
+      - 'mlsysim/mlsysim/models/**'
+      - 'mlsysim/mlsysim/systems/**'
+      - 'mlsysim/mlsysim/core/**'
       # Also redeploy when YAMLs or chains change — the build job
       # regenerates corpus.json + corpus-summary.json from YAMLs before
       # building, so the dev site always reflects current vault state.
@@ -64,6 +68,8 @@ on:
       # lands. That happened: PR #1879 sorted vault-cli imports and validate-vault
       # went green, but preview-dev never re-ran, so the badge stayed red.
       - 'staffml/vault-cli/**'
+      - 'taxonomy/**'
+      - 'binder/cli/**'
 
 # NOTE on the README badge and cancel-in-progress (below):
 # The badge reads the *latest* run for branch=dev&event=push, and shields.io
@@ -153,6 +159,12 @@ jobs:
         # Guarantees the built site reflects current vault state even if
         # the committed JSON artifacts drift from YAMLs.
         run: vault build --vault-dir "$VAULT_DIR" --release-id preview-dev --local-json
+
+      # 2026-10-27: export StaffML's numbers from the current MLSysIM registries.
+      - name: 🧮 Export MLSysIM data for StaffML
+        run: |
+          python3 -m pip install --quiet $(python3 "$GITHUB_WORKSPACE/staffml/app/scripts/export_mlsysim_data.py" --print-deps)
+          python3 "$GITHUB_WORKSPACE/staffml/app/scripts/export_mlsysim_data.py"
 
       - name: 🔨 Build StaffML
         working-directory: ${{ env.STAFFML_ROOT }}
@@ -295,14 +307,26 @@ jobs:
           git add .
           git commit -m "🎯 Deploy StaffML dev to /staffml/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
-          # Retry push with rebase to handle concurrent deploys
+          # Retry push with reset + re-copy to handle concurrent deploys
+          PUSHED=false
           for i in 1 2 3; do
             if git push origin main 2>/dev/null; then
               echo "✅ Push succeeded on attempt $i"
+              PUSHED=true
               break
             fi
-            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
-            git pull --rebase origin main || true
+            echo "⚠️ Push failed (attempt $i/3), resetting to latest origin/main and re-staging..."
+            git fetch origin main
+            git reset --hard origin/main
+            rm -rf staffml
+            mkdir -p staffml
+            cp -r "${{ github.workspace }}/staffml-out/." staffml/
+            git add .
+            git commit -m "🎯 Deploy StaffML dev to /staffml/ from ${{ github.sha }}" --allow-empty || true
           done
+          if [ "$PUSHED" != "true" ]; then
+            echo "❌ Push failed after 3 attempts."
+            exit 1
+          fi
 
           echo "✅ StaffML deployed to dev preview"

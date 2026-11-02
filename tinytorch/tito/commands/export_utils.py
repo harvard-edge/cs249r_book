@@ -222,16 +222,14 @@ def convert_py_to_notebook(
     console.print("[dim]🔄 Overwriting existing notebook (Python file is source of truth)[/dim]" if notebook_file.exists() else "[dim]✨ Creating new notebook from Python file[/dim]")
 
     try:
-        import sys
-        from ..core.virtual_env_manager import get_venv_bin_dir
+        from ..core.virtual_env_manager import resolve_venv_tool
         jupytext_path = "jupytext"
-        venv_bin_dir = get_venv_bin_dir(venv_path)
-        venv_jupytext = venv_bin_dir / ("jupytext.exe" if sys.platform == "win32" else "jupytext")
+        venv_jupytext = resolve_venv_tool("jupytext", venv_path)
 
-        if venv_jupytext.exists():
-            test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if venv_jupytext != "jupytext":
+            test_result = subprocess.run([venv_jupytext, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if test_result.returncode == 0:
-                jupytext_path = str(venv_jupytext)
+                jupytext_path = venv_jupytext
                 console.print(f"[dim]🔧 Using venv jupytext: {venv_jupytext}[/dim]")
             else:
                 console.print("[dim]⚠️  Venv jupytext has issues, falling back to system[/dim]")

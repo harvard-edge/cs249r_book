@@ -153,6 +153,11 @@ PY_ASSET
 done <<< "${mapfile_compat_routes}"
 
 echo "WASM export summary: ${exported}/${expected} notebooks exported"
+
+# marimo writes its stock AI-assistant notes (CLAUDE.md) into every export.
+# They are not part of a lab and must not be published.
+find "${LABS_DIR}/_wasm_build" -name CLAUDE.md -delete
+
 if [ -n "${failed}" ]; then
   echo "ERROR: Failed exports:${failed}" >&2
   exit 1

@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🗺️ The AI Engineering Blueprint: Instructor Site</h1>
+  <h1>🗺️ MLSysBook Instructor Hub</h1>
 </div>
 
 <!-- EARLY-RELEASE-CALLOUT:START -->
@@ -15,7 +15,7 @@
 
 ## 📖 What This Is
 
-"The AI Engineering Blueprint" is the instructor-facing companion site for the [Machine Learning Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI engineering as a university course.
+The Instructor Hub is the instructor-facing companion site for the [Machine Learning Systems textbook](https://mlsysbook.ai). It holds the syllabi, shared materials, and teaching guidance for every course built on the book. Course descriptions and community offerings live in the separate [course catalog](https://mlsysbook.ai/courses/) (`../courses/`).
 
 <table width="100%" style="width:100%">
   <thead>
@@ -27,27 +27,7 @@
   <tbody>
     <tr>
       <td width="15%" align="center"><b>📅 Syllabi</b></td>
-      <td><b>Week-by-week syllabi</b> for two semesters (Foundations + Scale).</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>⚖️ Assessment</b></td>
-      <td><b>Assessment rubrics</b> with sample student work.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>🧠 Pedagogy</b></td>
-      <td><b>Pedagogy guide</b> with learning science and facilitation strategies.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>👨‍🏫 TA Guide</b></td>
-      <td><b>TA training guide</b> with grading workflows and common student struggles.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>⚙️ Config</b></td>
-      <td><b>Customization guide</b> for quarters, seminars, and different emphases.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>❓ FAQ</b></td>
-      <td><b>FAQ</b> for adopting instructors.</td>
+      <td><b>One-page syllabi</b> for every course: introductory, scaling, TinyML, Edge AI, Physical AI, and Agentic AI.</td>
     </tr>
   </tbody>
 </table>
@@ -68,32 +48,24 @@ Requires [Quarto](https://quarto.org/) 1.4+.
 ```text
 instructors/
 ├── _quarto.yml              # Site configuration
-├── index.qmd                # Landing page (hero + overview)
-├── getting-started.qmd      # 8-step adoption checklist
-├── course-map.qmd           # Integration matrix + SVG diagrams
-├── foundations-syllabus.qmd # Semester 1: 16-week schedule
-├── scale-syllabus.qmd       # Semester 2: 16-week schedule
-├── vol4/README.md          # Volume IV project seminar working draft (GitHub only)
-├── pedagogy.qmd             # Learning science + facilitation
-├── assessment.qmd           # Rubrics + sample work
-├── ta-guide.qmd             # TA training + grading workflows
-├── customization.qmd        # Quarter/seminar/emphasis variants
-├── faq.qmd                  # Common instructor questions
-└── assets/                  # Styles and SVGs
+├── index.qmd                # Hub page: one kit per course
+├── foundations-syllabus.qmd # Introduction course syllabus
+├── scale-syllabus.qmd       # Scaling course syllabus
+├── tinyml-syllabus.qmd      # TinyML course syllabus
+├── edge-ai-syllabus.qmd     # Edge AI reading list
+├── agentic-syllabus.qmd     # Agentic AI reading list
+├── vol4/                    # Physical AI syllabus (index.qmd) and forwarding stub
+└── assets/                  # Styles and images
 ```
 
 ---
 
 ## 🎨 Style Conventions
 
-This site follows the MLSysBook ecosystem design system:
-
-*   **Accent color**: Indigo (`#6366f1` light, `#818cf8` dark)
-*   **Callout geometry**: 5px left border, 0.5rem radius, 8% opacity backgrounds
-*   **Typography**: Inter (body), Outfit (headings), JetBrains Mono (code)
-*   **Navbar**: Dark background (`#0a0a0f`), matching book sites
-
-See `assets/styles/style.scss` for full details.
+This site uses the shared ecosystem theme (`shared/styles/style-site.scss` and
+`shared/styles/dark-mode-site.scss`), the same as the main site and the course
+pages. Do not add site-specific styles; change the shared theme instead so every
+page keeps one layout.
 
 ---
 

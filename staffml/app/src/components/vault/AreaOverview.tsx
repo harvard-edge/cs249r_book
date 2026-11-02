@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import type { CompetencyArea, Topic } from "@/lib/taxonomy";
-import { getAreaStyle } from "@/lib/taxonomy";
+import { getTaxAreaStyle as getAreaStyle } from "@/lib/mlsys-taxonomy";
 import { LEVELS as LEVEL_DEFS } from "@/lib/levels";
 import TopicCard from "./TopicCard";
 
@@ -26,10 +26,13 @@ export default function AreaOverview({ areas, onExpand, onSelectTopic, selectedI
                 <Icon className="w-5 h-5" style={{ color: style.primary }} />
               </div>
               <div className="flex-1 min-w-0">
-                <h2 className="text-[16px] font-bold text-textPrimary">{area.name}</h2>
+                <h2 className="text-[16px] font-bold text-textPrimary">
+                  {area.code && <span className="font-mono text-[13px] text-textTertiary mr-1.5">{area.code}</span>}
+                  {area.name}
+                </h2>
                 <p className="text-[13px] text-textSecondary mt-0.5">
                   <span className="font-mono">{area.questionCount}</span> questions &middot;{" "}
-                  <span className="font-mono">{area.topicCount}</span> topics
+                  <span className="font-mono">{area.topicCount}</span> subjects
                 </p>
               </div>
               {/* Level histogram */}

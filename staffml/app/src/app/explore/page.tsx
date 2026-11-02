@@ -15,7 +15,28 @@ import {
   X,
 } from "lucide-react";
 import { getQuestions, getTracks, type Question } from "@/lib/corpus";
-import { getAreas, getAreaStyle } from "@/lib/taxonomy";
+import {
+  getTaxAreaStyle as getAreaStyle, getTaxAreaById, getSubjectById,
+} from "@/lib/mlsys-taxonomy";
+
+// Explore groups questions by the ML Systems Taxonomy: a question's area is
+// its subject's area (F1 … T2) and its leaf is the subject. The Focus kinds
+// keep their historical names ("topic" = the leaf level).
+const UNCLASSIFIED = "unclassified";
+function areaOf(question: Question): string {
+  return getSubjectById(question.taxonomy_subject ?? "")?.area ?? UNCLASSIFIED;
+}
+function subjectOf(question: Question): string {
+  return question.taxonomy_subject && getSubjectById(question.taxonomy_subject) ? question.taxonomy_subject : UNCLASSIFIED;
+}
+function areaLabel(id: string): string {
+  const area = getTaxAreaById(id);
+  return area ? `${area.id} ${area.name}` : titleCase(id);
+}
+function subjectLabel(id: string): string {
+  const subject = getSubjectById(id);
+  return subject ? `${subject.code} ${subject.name}` : titleCase(id);
+}
 import { LEVELS } from "@/lib/levels";
 
 const SIZE = 620;
@@ -63,6 +84,7 @@ function questionMatches(question: Question, query: string): boolean {
     question.topic,
     question.zone,
     question.competency_area,
+    subjectLabel(subjectOf(question)),
     question.track,
     question.level,
   ].join(" ").toLowerCase();
@@ -126,8 +148,8 @@ function buildLevelBuckets(questions: Question[]): LevelBucket[] {
 function focusLabel(focus: Focus) {
   if (focus.kind === "root") return "StaffML Vault";
   if (focus.kind === "track") return formatTrack(focus.track);
-  if (focus.kind === "area") return titleCase(focus.area);
-  return titleCase(focus.topic);
+  if (focus.kind === "area") return areaLabel(focus.area);
+  return subjectLabel(focus.topic);
 }
 
 function focusParent(focus: Focus): Focus | null {
@@ -143,11 +165,11 @@ function focusBreadcrumb(focus: Focus) {
     items.push({ label: formatTrack(focus.track), focus });
   } else if (focus.kind === "area") {
     items.push({ label: formatTrack(focus.track), focus: { kind: "track", track: focus.track } });
-    items.push({ label: titleCase(focus.area), focus });
+    items.push({ label: areaLabel(focus.area), focus });
   } else if (focus.kind === "topic") {
     items.push({ label: formatTrack(focus.track), focus: { kind: "track", track: focus.track } });
-    items.push({ label: titleCase(focus.area), focus: { kind: "area", track: focus.track, area: focus.area } });
-    items.push({ label: titleCase(focus.topic), focus });
+    items.push({ label: areaLabel(focus.area), focus: { kind: "area", track: focus.track, area: focus.area } });
+    items.push({ label: subjectLabel(focus.topic), focus });
   }
   return items;
 }
@@ -167,8 +189,6 @@ export default function ExplorePage() {
 
   const questions = useMemo(() => getQuestions(), []);
   const tracks = useMemo(() => getTracks(), []);
-  const areas = useMemo(() => getAreas(), []);
-  const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
 
   const filteredQuestions = useMemo(() => {
     return questions.filter((question) => {
@@ -192,9 +212,9 @@ export default function ExplorePage() {
       if (focus.kind === "root") return true;
       if (question.track !== focus.track) return false;
       if (focus.kind === "track") return true;
-      if (question.competency_area !== focus.area) return false;
+      if (areaOf(question) !== focus.area) return false;
       if (focus.kind === "area") return true;
-      return question.topic === focus.topic;
+      return subjectOf(question) === focus.topic;
     });
   }, [filteredQuestions, focus]);
 
@@ -220,17 +240,17 @@ export default function ExplorePage() {
       const areaIds = new Set(
         filteredQuestions
           .filter((question) => question.track === focus.track)
-          .map((question) => question.competency_area),
+          .map((question) => areaOf(question)),
       );
       return Array.from(areaIds)
         .map((areaId) => {
           const count = filteredQuestions.filter(
-            (question) => question.track === focus.track && question.competency_area === areaId,
+            (question) => question.track === focus.track && areaOf(question) === areaId,
           ).length;
           const style = getAreaStyle(areaId);
           return {
             id: areaId,
-            label: areaById.get(areaId)?.name ?? titleCase(areaId),
+            label: areaLabel(areaId),
             subtitle: "area",
             count,
             color: style.primary,
@@ -245,8 +265,8 @@ export default function ExplorePage() {
     const area = focus.area;
     const topicIds = new Set(
       filteredQuestions
-        .filter((question) => question.track === track && question.competency_area === area)
-        .map((question) => question.topic),
+        .filter((question) => question.track === track && areaOf(question) === area)
+        .map((question) => subjectOf(question)),
     );
     const areaColor = getAreaStyle(area).primary;
     return Array.from(topicIds)
@@ -254,13 +274,13 @@ export default function ExplorePage() {
         const count = filteredQuestions.filter(
           (question) =>
             question.track === track &&
-            question.competency_area === area &&
-            question.topic === topic,
+            areaOf(question) === area &&
+            subjectOf(question) === topic,
         ).length;
         return {
           id: topic,
-          label: titleCase(topic),
-          subtitle: "topic",
+          label: subjectLabel(topic),
+          subtitle: "subject",
           count,
           color: areaColor,
           focus: { kind: "topic", track, area, topic } as Focus,
@@ -269,7 +289,7 @@ export default function ExplorePage() {
       .filter((segment) => segment.count > 0)
       .sort(byCountThenName)
       .slice(0, 36);
-  }, [areaById, filteredQuestions, focus, tracks]);
+  }, [filteredQuestions, focus, tracks]);
 
   const levelBuckets = useMemo(() => buildLevelBuckets(focusQuestions), [focusQuestions]);
   const selectedQuestion = selectedQuestionId
@@ -323,7 +343,7 @@ export default function ExplorePage() {
                   Explore the StaffML Vault
                 </h1>
                 <p className="text-sm text-textSecondary mt-1 max-w-2xl leading-relaxed">
-                  Drill from track to area to topic, then choose a question path. The radial view
+                  Drill from track to area to subject, then choose a question path. The radial view
                   shows where the corpus is dense; the side panel keeps the exact questions readable.
                 </p>
               </div>
@@ -507,7 +527,7 @@ export default function ExplorePage() {
             {selectedQuestion ? (
               <QuestionPanel
                 question={selectedQuestion}
-                areaName={areaById.get(selectedQuestion.competency_area)?.name ?? titleCase(selectedQuestion.competency_area)}
+                areaName={areaLabel(areaOf(selectedQuestion))}
                 related={relatedQuestions(selectedQuestion, questions)}
                 onSelect={(id) => setSelectedQuestionId(id)}
                 onClose={() => setSelectedQuestionId(null)}
@@ -546,7 +566,7 @@ function relatedQuestions(question: Question, all: Question[]) {
     .filter((candidate) => {
       if (candidate.id === question.id) return false;
       const sharesChain = question.chain_ids?.some((id) => candidate.chain_ids?.includes(id));
-      return sharesChain || candidate.topic === question.topic;
+      return sharesChain || subjectOf(candidate) === subjectOf(question);
     })
     .sort((a, b) => {
       const chainId = question.chain_ids?.find((id) => a.chain_ids?.includes(id) || b.chain_ids?.includes(id));
@@ -722,7 +742,7 @@ function ExplorerPanel({
       <h2 className="text-lg font-bold text-textPrimary mb-2">Radial question explorer</h2>
       <p className="text-sm text-textSecondary leading-relaxed mb-5">
         Click a ring segment to zoom in. Start with a deployment track, drill into an area,
-        then choose a topic and question level.
+        then choose a subject and question level.
       </p>
 
       {segments.length > 0 && focus.kind !== "topic" && (
@@ -811,8 +831,8 @@ function ExplorerPanel({
         <section className="rounded-xl border border-accentBlue/20 bg-accentBlue/5 p-4">
           <h3 className="text-sm font-bold text-textPrimary mb-3">How to use this</h3>
           <HowToStep step="1" title="Pick a track" text="Cloud, Edge, Mobile, TinyML, and Global are the highest-level slices." />
-          <HowToStep step="2" title="Zoom into an area" text="The next ring shows the skills inside that track: memory, deployment, latency, and more." />
-          <HowToStep step="3" title="Choose a topic path" text="Topic and level views lead to concrete questions you can practice immediately." />
+          <HowToStep step="2" title="Zoom into an area" text="The next ring shows the ML Systems Taxonomy areas inside that track, such as hardware, serving, and reliability." />
+          <HowToStep step="3" title="Choose a subject" text="Subject and level views lead to concrete questions you can practice immediately." />
         </section>
       )}
     </div>
@@ -829,7 +849,7 @@ function QuestionButton({ question, onClick }: { question: Question; onClick: ()
       <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase text-textTertiary">
         <span>{question.level}</span>
         <span>{question.track}</span>
-        <span>{titleCase(question.competency_area)}</span>
+        <span>{getSubjectById(question.taxonomy_subject ?? "")?.code ?? titleCase(question.competency_area)}</span>
         {(question.chain_ids?.length ?? 0) > 0 && <span className="text-accentAmber">chain</span>}
       </div>
       <p className="text-sm font-semibold text-textPrimary leading-snug">{question.title}</p>
@@ -880,7 +900,7 @@ function QuestionPanel({
     : [];
   const chainIds = new Set(chainPath.map((item) => item.id));
   const topicNeighbors = related
-    .filter((item) => item.topic === question.topic && !chainIds.has(item.id))
+    .filter((item) => subjectOf(item) === subjectOf(question) && !chainIds.has(item.id))
     .slice(0, 8);
 
   return (
@@ -914,7 +934,7 @@ function QuestionPanel({
 
       <div className="grid grid-cols-2 gap-2 mb-5">
         <InfoTile icon={<Layers className="w-3.5 h-3.5" />} label="Area" value={areaName} />
-        <InfoTile icon={<Route className="w-3.5 h-3.5" />} label="Topic" value={titleCase(question.topic)} />
+        <InfoTile icon={<Route className="w-3.5 h-3.5" />} label="Subject" value={subjectLabel(subjectOf(question))} />
         <InfoTile icon={<Sparkles className="w-3.5 h-3.5" />} label="Zone" value={titleCase(question.zone)} />
         <InfoTile icon={<BookOpen className="w-3.5 h-3.5" />} label="Phase" value={question.phase ?? "mixed"} />
       </div>
@@ -932,8 +952,8 @@ function QuestionPanel({
           Why these are nearby
         </h3>
         <p className="text-[12px] text-textSecondary leading-relaxed mb-4">
-          StaffML links questions by chain first, then by topic. Use chains as a learning path;
-          use topic neighbors to move sideways within the same concept.
+          StaffML links questions by chain first, then by subject. Use chains as a learning path;
+          use subject neighbors to move sideways within the same part of the ML Systems Taxonomy.
         </p>
 
         {chainPath.length > 1 ? (
@@ -975,7 +995,7 @@ function QuestionPanel({
         {topicNeighbors.length > 0 ? (
           <div>
             <h4 className="text-[10px] font-mono uppercase tracking-wide text-textTertiary mb-2">
-              Same topic: {titleCase(question.topic)}
+              Same subject: {subjectLabel(subjectOf(question))}
             </h4>
             <div className="space-y-2">
               {topicNeighbors.map((item) => (
@@ -985,7 +1005,7 @@ function QuestionPanel({
           </div>
         ) : chainPath.length > 1 ? null : (
           <p className="text-sm text-textTertiary">
-            No chain or same-topic neighbors are visible for this question yet.
+            No chain or same-subject neighbors are visible for this question yet.
           </p>
         )}
       </section>

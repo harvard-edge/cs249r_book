@@ -5,7 +5,7 @@ from ..core.types import Metadata
 from ..core.units import ureg
 from ..core import provenance_catalog as pc
 from ..core.provenance import sourced_qty
-from .types import ActuatorJoint, WheelHubMotor, FramelessMotor
+from .types import ActuatorJoint, WheelHubMotor, FramelessMotor, SafetyRelay
 
 
 class HarmonicDrives(Registry):
@@ -80,6 +80,7 @@ class FramelessMotors(Registry):
         rotor_inertia=0.321e-4 * (ureg.kg * ureg.meter**2),   # 0.321 kg cm^2
         pole_pairs=10,
         mass=0.330 * ureg.kg,
+        no_load_speed=2110.0 * ureg.revolution / ureg.minute,  # star-serial at U_r, theoretical (Rev. 0414; added 2026-10-20)
         metadata=Metadata(
             provenance=pc.TQ_ROBODRIVE_ILM,
             description="TQ-RoboDrive ILM 70x18 frameless brushless servo kit (star-serial winding, 1.25 N·m rated torque).",
@@ -204,6 +205,20 @@ class Servos(Registry):
     )
 
 
+class SafetyRelays(Registry):
+    """Safety relays that remove drive torque enables in hardware (added 2026-10-20)."""
+
+    Pilz_PNOZ_s4 = SafetyRelay(
+        name="Pilz PNOZ s4",
+        estop_release_typical=10.0 * ureg.millisecond,
+        estop_release_max=20.0 * ureg.millisecond,
+        metadata=Metadata(
+            provenance=pc.PILZ_PNOZ_S4,
+            description="Pilz PNOZ s4 dual-channel E-stop safety relay with force-guided contacts.",
+        ),
+    )
+
+
 class Actuators(Registry):
     """Authoritative registry of robotic actuators and joint transmissions."""
 
@@ -213,3 +228,4 @@ class Actuators(Registry):
     FramelessMotor = FramelessMotors
     PandaClassJoint = PandaClassJoints
     HubMotor = HubMotors
+    SafetyRelay = SafetyRelays

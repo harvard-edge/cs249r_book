@@ -179,6 +179,12 @@ jobs:
         # or bundle the local-dev corpus.json fallback.
         run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}" --site-bundle
 
+      # 2026-10-27: export StaffML's numbers from the current MLSysIM registries.
+      - name: 🧮 Export MLSysIM data for StaffML
+        run: |
+          python3 -m pip install --quiet $(python3 "$GITHUB_WORKSPACE/staffml/app/scripts/export_mlsysim_data.py" --print-deps)
+          python3 "$GITHUB_WORKSPACE/staffml/app/scripts/export_mlsysim_data.py"
+
       - name: 🔍 Type check
         working-directory: ${{ env.STAFFML_ROOT }}
         run: npx tsc --noEmit
@@ -333,6 +339,17 @@ jobs:
           assert len(taxonomy.get("concepts", [])) >= 70
           print(f"OK taxonomy: {len(taxonomy['concepts'])} topics")
 
+          # ML Systems Taxonomy (2026-10): the site groups and filters by it,
+          # so every published question needs a known subject and known concepts.
+          with open(ROOT / "src/data/mlsys-taxonomy.json") as f:
+              mlsys = json.load(f)
+          for q in corpus:
+              assert q.get("taxonomy_subject") in mlsys["subjects"], \
+                  f"{q['id']} has no known taxonomy_subject ({q.get('taxonomy_subject')!r})"
+              unknown = [c for c in q.get("taxonomy_concepts", []) if c not in mlsys["concepts"]]
+              assert not unknown, f"{q['id']} cites unknown taxonomy concepts {unknown}"
+          print(f"OK ML Systems Taxonomy: every question tagged; {len(mlsys['areas'])} areas, {len(mlsys['subjects'])} subjects")
+
           with open(ROOT / "src/data/vault-manifest.json") as f:
               manifest = json.load(f)
           assert manifest["questionCount"] == len(corpus)
@@ -444,7 +461,8 @@ jobs:
 
           git add \
             "$STAFFML_ROOT/src/data/corpus-summary.json" \
-            "$STAFFML_ROOT/src/data/vault-manifest.json"
+            "$STAFFML_ROOT/src/data/vault-manifest.json" \
+            "$STAFFML_ROOT/src/data/mlsys-taxonomy.json"
 
           if git diff --cached --quiet; then
             echo "✅ StaffML release artifacts already match v${NEW_RELEASE_ID}."

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Topic, CompetencyArea } from "@/lib/taxonomy";
-import { getAreaForTopic, getAreaStyle } from "@/lib/taxonomy";
+import { getTaxAreaForSubject as getAreaForTopic, getTaxAreaStyle as getAreaStyle } from "@/lib/mlsys-taxonomy";
 import TopicCard from "./TopicCard";
 
 export default function SearchResults({ results, query, selectedId, onSelect }: {
@@ -20,7 +20,7 @@ export default function SearchResults({ results, query, selectedId, onSelect }: 
   return (
     <div>
       <p className="text-[14px] text-textSecondary mb-5">
-        {results.length} topic{results.length !== 1 ? "s" : ""} matching &ldquo;{query}&rdquo;
+        {results.length} subject{results.length !== 1 ? "s" : ""} matching &ldquo;{query}&rdquo;
       </p>
       {grouped.map(({ area, topics }) => {
         const style = getAreaStyle(area.id);

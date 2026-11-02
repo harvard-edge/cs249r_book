@@ -19,7 +19,7 @@ graph TD
     subgraph "1. Source of Truth (Git)"
         YAML["10,711 Structured YAMLs<br/>staffml/vault/questions/"]
         CHAINS["843 Socratic Chains<br/>staffml/vault/chains.json"]
-        TAXONOMY["87 Topics & 13 Areas<br/>staffml/vault/taxonomy.yaml"]
+        TAXONOMY["87 Topics & 13 Areas<br/>staffml/vault/schema/taxonomy_data.yaml"]
         REGISTRY["Append-Only ID Registry<br/>staffml/vault/id-registry.yaml"]
     end
 
@@ -291,7 +291,7 @@ At each Socratic turn, the AI interviewer appends structured metadata:
 
 | Path | Purpose |
 | :--- | :--- |
-| **`staffml/vault/`** | The question corpus source of truth: 10,711 YAML files, `chains.json`, `taxonomy.yaml`, `id-registry.yaml`. |
+| **`staffml/vault/`** | The question corpus source of truth: 10,711 YAML files, `chains.json`, `schema/taxonomy_data.yaml`, `id-registry.yaml`. |
 | **`staffml/vault/schema/`** | LinkML v1.0 schema definitions (`question_schema.yaml`, `enums.py`). |
 | **`staffml/vault/visuals/`** | 144 source SVG architectural and memory diagrams. |
 | **`staffml/vault-cli/`** | Python CLI toolchain (`vault` command) for authoring, invariant checking, building, and publishing. |

@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import type { AreaProgress } from "@/lib/progress";
 import { getAreaStyle } from "@/lib/taxonomy";
+import { getTaxAreaStyle } from "@/lib/mlsys-taxonomy";
 import TopicProgressBar from "./TopicProgressBar";
 
 interface AreaProgressSectionProps {
@@ -14,7 +15,8 @@ interface AreaProgressSectionProps {
 
 export default function AreaProgressSection({ area, defaultOpen = false }: AreaProgressSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
-  const style = getAreaStyle(area.area);
+  // Taxonomy areas (labelled) take the taxonomy's group colors.
+  const style = area.areaLabel ? getTaxAreaStyle(area.area) : getAreaStyle(area.area);
   const Icon = style.icon;
   const pct = area.totalQuestions > 0
     ? Math.round((area.correct / area.totalQuestions) * 100)
@@ -29,11 +31,11 @@ export default function AreaProgressSection({ area, defaultOpen = false }: AreaP
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface/50 transition-colors"
       >
         <Icon className="w-4 h-4 shrink-0" style={{ color: style.primary }} />
-        <span className="text-sm font-semibold text-textPrimary capitalize flex-1 text-left">
-          {area.area.replace(/-/g, " ")}
+        <span className={clsx("text-sm font-semibold text-textPrimary flex-1 text-left", !area.areaLabel && "capitalize")}>
+          {area.areaLabel ?? area.area.replace(/-/g, " ")}
         </span>
         <span className="text-[10px] text-textTertiary font-mono mr-2">
-          {topicsTouched}/{area.topics.length} topics
+          {topicsTouched}/{area.topics.length} {area.unit ?? "topics"}
         </span>
         <div className="w-24 h-1.5 bg-border/50 rounded-full overflow-hidden mr-2">
           {pct > 0 && (

@@ -10,6 +10,112 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ---
 
+## [Unreleased] — 2026-11-02
+
+### ML Systems Taxonomy 0.4-draft
+
+The taxonomy gained 71 concepts net and moved six (878 concepts and 2,020
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates and `vault check --strict` passes.
+`app/src/data/mlsys-taxonomy.json` was regenerated with the new labels and
+homes, and the loader now accepts the symptom field `quantities` beside
+causes, checks, and levers.
+
+- Moved concepts: 23 questions tagged with Local SGD, Embedding cache, or
+  Datacenter demand response were re-read; 10 changed `taxonomy_subject` to
+  the new home (3, 6, and 1), 13 kept the old subject because the question
+  is about that subject and the concept is a supporting tag.
+- New concepts offered to subject-only questions: the 185 questions without
+  `taxonomy_concepts` whose subject gained a concept were tagged by two
+  independent taggers (claude-fable-5-1 and gpt-6.1-sol) from the subject's
+  own concept list; tag-or-not agreement was 149 of 185 (80.5%), and the 44
+  questions where both chose the same concept received it. 141 questions stay
+  subject-only, which remains a valid tag.
+
+## [Unreleased] — 2026-10-27
+
+### ML Systems Taxonomy 0.3-draft
+
+The taxonomy gained 72 concepts and moved two (807 concepts and 1,719
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates. `app/src/data/mlsys-taxonomy.json` was regenerated with
+the new labels and homes.
+
+The 25 questions tagged with a moved concept were re-reviewed under the
+published tagging rules. Seven had taken their subject from the concept's old
+home and were retagged; the other 18 are tagged by what they test (serving,
+batching, guardrails, capacity) and keep their subject.
+
+- `mlsys.pii-deidentification` moved from Data contracts & lineage to Privacy:
+  cloud-4232, tinyml-1203, edge-1821 `data-lineage` → `privacy-dp`.
+- `mlsys.inference-compute-estimate` moved from Scaling laws to Workload
+  characterization: edge-1187, mobile-0353, mobile-1312, cloud-3129
+  `scaling-laws` → `workload-characterization`.
+
+The 445 questions tagged with a subject only were then offered the new concepts
+(and their own subject's concepts) by two independent taggers, `gpt-6.1-sol` and
+`claude-opus-5-5`, under the published tagging rules. They agreed on whether a
+question gets a concept for 76.6% of questions. A concept was written only where
+both chose it: 106 questions gained concepts, most often advanced packaging,
+telemetry sampling, forward error correction, recovery objectives, and DMA cache
+maintenance. After seven more concepts closed gaps found by the held-out test, the
+remaining subject-only questions were offered those seven the same way; both
+taggers chose expert offloading for the same six MoE questions and nothing else.
+333 questions remain subject-only.
+
+---
+
+## [Unreleased] — 2026-10-22
+
+### Summary
+
+Every question is tagged with the ML Systems Taxonomy (version 0.2-draft),
+the vocabulary shared with the MLSysBook textbooks, so a question, a chapter,
+and a course topic can be found and compared by the same concept.
+
+### Schema changes (additive, no migration)
+
+- **`taxonomy_subject`** (subject identity) and **`taxonomy_concepts`**
+  (one to three concept identities, most central first), both optional.
+  The model checks their format; the structural tier (`vault check
+  --strict`, check #20) checks that they name a subject or concept in
+  `taxonomy/` (formerly `shared/concepts/`).
+- **`CANON_VERSION` 2 → 3**: both fields join the content-hash whitelist,
+  so retagging changes `release_hash` like any reclassification.
+- **SQLite / D1**: `questions.taxonomy_subject` column and a
+  `question_concepts(question_id, concept_id, position)` table.
+- **Site**: the corpus carries both fields; `vault build` writes
+  `app/src/data/mlsys-taxonomy.json` (labels and codes), and the practice
+  page shows a "Concepts tested" card after an attempt.
+
+### Tagging
+
+- The whole bank was tagged by one model (`gpt-6.1-sol`) under the
+  taxonomy's published tagging rules. Two 300-question samples were tagged
+  independently by a second model (`claude-opus-5-5`); subject agreement is
+  recorded in `staffml/vault/data/taxonomy-tagging-2026-10.yaml`, and the
+  items where the two disagree form that file's review queue.
+- `topic` and `competency_area` are unchanged and still required.
+
+### Site: browse by the ML Systems Taxonomy
+
+- The Vault, Explore, Progress, Dashboard radar, command palette, and the
+  practice sidebar group questions by taxonomy area → subject (20 areas,
+  coded F1 … T2), and a subject's drawer lists the concepts its questions
+  test. New practice links: `?subject=<id>` and `?concept=<mlsys.id>`;
+  `/?subject=<id>` opens a subject. `?topic=`, `?area=`, and `?q=` links
+  keep working.
+- Saved progress is unchanged: a question's subject is looked up from its
+  id, so no migration is needed. Chains, the interviewer, plans, the
+  heat map, and textbook pointers still use `topic` / `competency_area`.
+- Analytics events and issue reports carry `subject` beside `topic`; the
+  analytics worker allowlists it (redeploy the worker to keep the field).
+- Publishing fails if a question lacks a known `taxonomy_subject`.
+- Removed `vault/taxonomy.json` (an unused 825-concept graph superseded by
+  the ML Systems Taxonomy) and `scripts/vault_invariants.py`, which read a
+  `vault/corpus.json` that no longer exists; `vault check` covers its
+  checks. `scripts/scorecard.py` now reports taxonomy coverage.
+
 ## [0.1.2-dev] — 2026-04-25
 
 ### Summary

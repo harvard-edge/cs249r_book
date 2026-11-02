@@ -294,10 +294,9 @@ export function getStreakMilestone(streak: number): string | null {
   return null;
 }
 
-// ─── Topic-Level Progress (NeetCode-style) ──────
+// ─── Subject-level progress (NeetCode-style) ──────
 
-import { getTopicsByArea, getCompetencyAreas, getQuestionsByFilter, getQuestions } from "./corpus";
-import { getTopicById } from "./taxonomy";
+import { getTaxAreas, getSubjectIdForQuestion } from "./mlsys-taxonomy";
 
 export interface TopicProgress {
   topicId: string;
@@ -312,6 +311,10 @@ export interface TopicProgress {
 
 export interface AreaProgress {
   area: string;
+  /** Display label; set for ML Systems Taxonomy areas (e.g. "P4 Deployment & serving"). */
+  areaLabel?: string;
+  /** What the rows are called in the UI ("subjects" for the taxonomy, "topics" for legacy). */
+  unit?: string;
   totalQuestions: number;
   attempted: number;
   correct: number;
@@ -320,93 +323,52 @@ export interface AreaProgress {
 
 const LEVEL_ORDER = ["L1", "L2", "L3", "L4", "L5", "L6+"];
 
-export function getTopicProgressMap(): AreaProgress[] {
+/**
+ * Progress grouped by the ML Systems Taxonomy: area → subject. A question's
+ * subject is looked up from its id, so stored attempts need no migration.
+ */
+export function getSubjectProgressMap(): AreaProgress[] {
   const attempts = getAttempts();
-  const areas = getCompetencyAreas();
-
-  const attemptsByQuestion: Record<string, { level: string; best: number }> = {};
+  const attempted = new Set<string>();
+  const correct = new Set<string>();
+  const correctLevels: Record<string, Set<string>> = {};
   for (const a of attempts) {
-    const prev = attemptsByQuestion[a.questionId];
-    if (!prev || a.selfScore > prev.best) {
-      attemptsByQuestion[a.questionId] = { level: a.level, best: a.selfScore };
-    }
-  }
-
-  const attemptedByTopic: Record<string, Set<string>> = {};
-  const correctByTopic: Record<string, Set<string>> = {};
-  const correctByTopicLevel: Record<string, Record<string, Set<string>>> = {};
-
-  for (const a of attempts) {
-    const topic = getTopicForQuestion(a.questionId);
-    if (!topic) continue;
-    if (!attemptedByTopic[topic]) attemptedByTopic[topic] = new Set();
-    attemptedByTopic[topic].add(a.questionId);
+    attempted.add(a.questionId);
     if (a.selfScore >= 2) {
-      if (!correctByTopic[topic]) correctByTopic[topic] = new Set();
-      correctByTopic[topic].add(a.questionId);
-      if (!correctByTopicLevel[topic]) correctByTopicLevel[topic] = {};
-      if (!correctByTopicLevel[topic][a.level]) correctByTopicLevel[topic][a.level] = new Set();
-      correctByTopicLevel[topic][a.level].add(a.questionId);
+      correct.add(a.questionId);
+      const subject = getSubjectIdForQuestion(a.questionId);
+      if (subject) (correctLevels[subject] ??= new Set()).add(a.level);
     }
   }
-
-  return areas.map((area) => {
-    const topics = getTopicsByArea(area);
-    const topicProgresses: TopicProgress[] = topics.map((topicId) => {
-      const topicDef = getTopicById(topicId);
-      const topicName = topicDef?.name || topicId;
-
+  return getTaxAreas().map((area) => {
+    const topics: TopicProgress[] = area.topics.map((subject) => {
       const levelBreakdown: Record<string, { total: number; attempted: number; correct: number }> = {};
-      let totalQuestions = 0;
+      let total = 0, tried = 0, right = 0;
       for (const level of LEVEL_ORDER) {
-        const qs = getQuestionsByFilter({ competency_area: area, topic: topicId, level });
-        const total = qs.length;
-        const attemptedSet = new Set<string>();
-        const correctSet = new Set<string>();
-        for (const q of qs) {
-          if (attemptedByTopic[topicId]?.has(q.id)) attemptedSet.add(q.id);
-          if (correctByTopic[topicId]?.has(q.id)) correctSet.add(q.id);
-        }
-        levelBreakdown[level] = { total, attempted: attemptedSet.size, correct: correctSet.size };
-        totalQuestions += total;
+        const qs = subject.questionsByLevel[level] ?? [];
+        const t = qs.filter((q) => attempted.has(q.id)).length;
+        const c = qs.filter((q) => correct.has(q.id)).length;
+        levelBreakdown[level] = { total: qs.length, attempted: t, correct: c };
+        total += qs.length; tried += t; right += c;
       }
-
-      const attempted = attemptedByTopic[topicId]?.size || 0;
-      const correct = correctByTopic[topicId]?.size || 0;
-
-      let highestLevel: string | null = null;
-      for (let i = LEVEL_ORDER.length - 1; i >= 0; i--) {
-        const lvl = LEVEL_ORDER[i];
-        if ((correctByTopicLevel[topicId]?.[lvl]?.size || 0) > 0) {
-          highestLevel = lvl;
-          break;
-        }
-      }
-
-      return { topicId, topicName, area, totalQuestions, attempted, correct, highestLevel, levelBreakdown };
+      const highestLevel = [...LEVEL_ORDER].reverse().find((l) => correctLevels[subject.id]?.has(l)) ?? null;
+      return {
+        topicId: subject.id, topicName: `${subject.code} ${subject.name}`, area: area.id,
+        totalQuestions: total, attempted: tried, correct: right, highestLevel, levelBreakdown,
+      };
     });
-
-    const totalQuestions = topicProgresses.reduce((s, t) => s + t.totalQuestions, 0);
-    const attempted = topicProgresses.reduce((s, t) => s + t.attempted, 0);
-    const correct = topicProgresses.reduce((s, t) => s + t.correct, 0);
-
-    return { area, totalQuestions, attempted, correct, topics: topicProgresses };
+    return {
+      area: area.id,
+      areaLabel: `${area.id} ${area.name}`,
+      unit: "subjects",
+      totalQuestions: topics.reduce((s, t) => s + t.totalQuestions, 0),
+      attempted: topics.reduce((s, t) => s + t.attempted, 0),
+      correct: topics.reduce((s, t) => s + t.correct, 0),
+      topics,
+    };
   });
 }
 
-let _topicLookup: Record<string, string> | null = null;
-function buildTopicLookup(): Record<string, string> {
-  if (!_topicLookup) {
-    _topicLookup = {};
-    for (const q of getQuestions()) {
-      _topicLookup[q.id] = q.topic;
-    }
-  }
-  return _topicLookup;
-}
-function getTopicForQuestion(questionId: string): string | null {
-  return buildTopicLookup()[questionId] || null;
-}
 
 // ─── Export / Import ─────────────────────────────
 

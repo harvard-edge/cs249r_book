@@ -130,30 +130,38 @@ from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_memory_capacity, fmt_par
 
 class KvGeometry:
     # ┌── 1. LOAD ─────────────────────────────────
-    _model = Models.Language.Llama3_70B
+    _short = Scenarios.Llama3_70BShortContextAdmissionDgxH100
+    _agent = Scenarios.Llama3_70BAgentContextAdmissionDgxH100
+    _long = Scenarios.Llama3_70BLongContextAdmissionDgxH100
+    _model = _agent.workload
     _node = Systems.Nodes.DGX_H100
     n_layers = _model.layers
     n_kv_heads = _model.kv_heads
-    d_head = _model.hidden_dim // _model.heads
-    element_size = BYTES_FP16
-    n_acc = _node.accelerators_per_node
-    runtime_reserve = 20 * GB  # scenario: activations and runtime buffers
-    ctx_short, ctx_agent, ctx_long = 8_192, 32_768, 131_072  # scenario token counts
+    element_size = _agent.kv_bytes_per_elem
+    n_acc = _agent.accelerators
+    runtime_reserve = _agent.reserve  # scenario: activations and runtime buffers
+    ctx_short, ctx_agent, ctx_long = _short.context_tokens, _agent.context_tokens, _long.context_tokens  # scenario token counts
 
     # ┌── 2. EXECUTE ──────────────────────────────
-    bytes_per_token = calc_kv_cache_size(n_layers, n_kv_heads, d_head, 1, 1, element_size)
-    kv_short = bytes_per_token * ctx_short
-    kv_agent = bytes_per_token * ctx_agent
-    kv_long = bytes_per_token * ctx_long
-    node_hbm = n_acc * _node.accelerator.memory.capacity
-    weights = _model.size_in_bytes(BYTES_FP16)
-    kv_pool = node_hbm - weights - runtime_reserve
-    conc_short = int((kv_pool / kv_short).to("").magnitude)
-    conc_agent = int((kv_pool / kv_agent).to("").magnitude)
-    conc_long = int((kv_pool / kv_long).to("").magnitude)
+    _rs, _ra, _rl = _short.result, _agent.result, _long.result
+    d_head = _ra.head_dim
+    bytes_per_token = _ra.kv_per_token
+    kv_short = _rs.kv_per_request
+    kv_agent = _ra.kv_per_request
+    kv_long = _rl.kv_per_request
+    node_hbm = _ra.hbm_total
+    weights = _ra.weights
+    kv_pool = _ra.kv_budget
+    conc_short = _rs.max_requests
+    conc_agent = _ra.max_requests
+    conc_long = _rl.max_requests
 
     # ┌── 3. GUARD ────────────────────────────────
     check(bytes_per_token.to(byte).magnitude == 327_680, "Registry KV geometry changed")
+    check(
+        _agent.hbm_per_accelerator == _node.accelerator.memory.capacity and n_acc == _node.accelerators_per_node,
+        "Scenario replica must be the registry DGX H100 node",
+    )
     check(525.9 < kv_pool.to(GB).magnitude < 526.1, "Expected canonical decimal-GB pool")
     check((conc_short, conc_agent, conc_long) == (195, 48, 12), "Resident-fit bounds changed")
     check(conc_agent * kv_agent <= kv_pool < (conc_agent + 1) * kv_agent, "Floor bound must bracket pool")
@@ -235,23 +243,23 @@ Because model weights incur a one-time memory cost amortized across all concurre
 # │ How:  Models.Language.*.get_kv_cache_size (eq-mem-token; MLA path for
 # │       kv_lora_rank models), 16-bit elements.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware
-from mlsysim.core.units import BYTES_FP16, GB, KB
+from mlsysim import Scenarios
+from mlsysim.core.units import GB, KB
 from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple
 
 class KvFootprintByArchitecture:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _L = Models.Language
-    mha, gqa, mla = _L.GPT3, _L.Llama3_70B, _L.DeepSeek_V3
-    session_tokens = 131_072  # the long regime of the worked estimate
+    _scenario = Scenarios.KvBytesPerTokenByAttentionDesign
+    mha, gqa, mla = _scenario.mha, _scenario.gqa, _scenario.mla
+    session_tokens = _scenario.session_tokens  # the long regime of the worked estimate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    per_tok = lambda m: m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16)
-    mha_tok, gqa_tok, mla_tok = per_tok(mha), per_tok(gqa), per_tok(mla)
-    mha_over_mla = round((mha_tok / mla_tok).to("").magnitude)  # whole multiple in prose
-    gqa_over_mla = (gqa_tok / mla_tok).to("").magnitude
-    gqa_session = gqa_tok * session_tokens
-    mla_session = mla_tok * session_tokens
+    _r = _scenario.result
+    mha_tok, gqa_tok, mla_tok = _r.per_token[mha.name], _r.per_token[gqa.name], _r.per_token[mla.name]
+    mha_over_mla = round(_r.mha_over_mla)  # whole multiple in prose
+    gqa_over_mla = _r.gqa_over_mla
+    gqa_session = _r.gqa_session
+    mla_session = _r.mla_session
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gqa_tok.to("byte").magnitude == 327_680, "Must agree with KvGeometry's Llama 3 70B per-token payload")
@@ -269,7 +277,7 @@ class KvFootprintByArchitecture:
     mla_session_str = fmt_memory(mla_session, unit=GB, precision=1)
 ```
 
-:::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
+::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
 
 ```{python}
 #| echo: false
@@ -287,57 +295,84 @@ import numpy as np
 from matplotlib.patches import Patch
 from mlsysim import Models, Hardware
 from mlsysim.core.units import BYTES_FP16
+from mlsysim.physics.memory import calc_kv_attention_design
 from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 plt = book_style.plt
 COLORS = book_style.COLORS
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw=dict(width_ratios=[1, 1.3]))
+fig, (a1, a2) = plt.subplots(2, 1, figsize=(6.2, 5.8), gridspec_kw=dict(height_ratios=[1, 1.25]))
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
 L = Models.Language
 models = [L.DeepSeek_V3, L.Llama3_70B, L.Llama2_70B, L.Llama3_405B, L.Mixtral_8x7B, L.GPT3]
-design = lambda m: "MLA" if m.kv_lora_rank else ("GQA" if m.kv_heads and m.kv_heads < m.heads else "MHA")
+design = lambda m: calc_kv_attention_design(m.heads, m.kv_heads, m.kv_lora_rank)
 color = {"MHA": COLORS["secondary"], "GQA": COLORS["BlueLine"], "MLA": COLORS["GreenLine"]}
 kb = [m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("kilobyte").magnitude for m in models]
 
 # ┌── 2. PANEL A ──────────────────────────────────────────────────────────────
-a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models])
+a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models], height=0.68)
 for y, v in enumerate(kb):
-    a1.text(v * 1.08, y, f"{v:,.0f}" if v >= 100 else f"{v:.1f}", va="center", fontsize=8)
+    a1.text(v * 1.08, y, f"{v:,.0f} KB" if v >= 100 else f"{v:.1f} KB", va="center", fontsize=9, color=COLORS["primary"])
 a1.set_xscale("log")
-a1.set_xlim(30, 20000)
+a1.set_xlim(30, 28000)
 a1.set_xlabel("KV cache per token (KB)")
-a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5)
+a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5, fontweight="bold")
 a1.grid(axis="y", visible=False)
-a1.legend(handles=[Patch(color=c, label=k) for k, c in color.items()], frameon=False, fontsize=8, loc="lower right")
+a1.legend(
+    handles=[Patch(color=c, label=k) for k, c in color.items()],
+    loc="lower right",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.5,
+)
 
 # ┌── 3. PANEL B ──────────────────────────────────────────────────────────────
 n = np.logspace(np.log10(1024), np.log10(131_072), 120)
 for m, ls in ((L.GPT3, "-"), (L.Llama3_70B, "-"), (L.DeepSeek_V3, "-")):
     per = m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("GB").magnitude
     trained = n <= (m.context_length or n[-1])
-    a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=1.8, label=f"{m.name} ({design(m)})")
-    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.2, ls=":")
-for acc in (Hardware.Cloud.H100, Hardware.Cloud.B200):
+    a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=2.0, label=f"{m.name} ({design(m)})")
+    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.4, ls=":")
+for acc, dy in ((Hardware.Cloud.H100, 0.72), (Hardware.Cloud.B200, 1.18)):
     cap = acc.memory.capacity.to("GB").magnitude
-    a2.axhline(cap, color=COLORS["primary"], lw=0.8, ls=":")
-    a2.text(1100, cap * 1.12, f"one {acc.name.replace('NVIDIA ', '')}: {acc.memory.capacity.to('GiB').magnitude:.0f} GiB", fontsize=8)
+    a2.axhline(cap, color=COLORS["primary"], lw=0.9, ls=":")
+    a2.text(
+        1080,
+        cap * dy,
+        f"One {acc.name.replace('NVIDIA ', '')} ({acc.memory.capacity.to('GiB').magnitude:.0f} GiB)",
+        fontsize=9,
+        color=COLORS["primary"],
+        bbox=dict(fc="white", ec="none", pad=0.4, alpha=0.85),
+    )
 a2.set_xscale("log", base=2)
 a2.set_yscale("log")
 a2.set_xticks([2**10, 2**12, 2**14, 2**15, 2**17])
 a2.set_xticklabels(["1K", "4K", "16K", "32K", "128K"])
-a2.set_ylim(0.03, 2000)
+a2.set_ylim(0.03, 2500)
 a2.set_xlabel("Tokens retained in one session")
 a2.set_ylabel("KV cache for one session (GB)")
-a2.set_title("(b) One session vs. accelerator memory", loc="left", fontsize=10.5)
-a2.legend(frameon=False, fontsize=8, loc="lower right")
+a2.set_title("(b) One session vs. accelerator memory", loc="left", fontsize=10.5, fontweight="bold")
+a2.legend(
+    loc="lower right",
+    fontsize=9,
+    frameon=True,
+    facecolor="white",
+    framealpha=0.95,
+    edgecolor="gray",
+    fancybox=True,
+    borderpad=0.5,
+)
 fig.tight_layout()
 plt.show()
 plt.close()
 ```
 
-::::
+:::
 
 The spread in @fig-vol3-kv-footprint-by-architecture is fixed at pretraining; the serving engine can work within it but cannot change it. Full multi-head attention in the `{python} KvFootprintByArchitecture.mha_name_str` geometry retains `{python} KvFootprintByArchitecture.mha_tok_str` per token, `{python} KvFootprintByArchitecture.mha_over_mla_mult_str` the `{python} KvFootprintByArchitecture.mla_tok_str` of the latent-attention `{python} KvFootprintByArchitecture.mla_name_str`; even the grouped-query `{python} KvFootprintByArchitecture.gqa_name_str` of the worked estimate retains `{python} KvFootprintByArchitecture.gqa_over_mla_mult_str` as much. At the `{python} KvFootprintByArchitecture.session_tokens_str` tokens of the long regime, that is `{python} KvFootprintByArchitecture.gqa_session_str` against `{python} KvFootprintByArchitecture.mla_session_str` for one session. The choice of model therefore fixes the slope of every capacity line in this chapter, and the runtime's levers (retained tokens, sharing, precision, and eviction) act only along that slope. Whatever the slope, each retained byte stays allocated for as long as its sequence holds the prefix, which is where the lifecycle decisions begin.
 
@@ -364,25 +399,20 @@ Provisioning a contiguous memory buffer for the full configured token cap ($\Con
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent
-from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
 
 class StaticReservation:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    model = Models.Language.Llama3_70B
-    node = Systems.Nodes.DGX_H100
-    elem_size = BYTES_FP16
-    runtime_reserve = 20 * GB  # scenario: node-wide activations/runtime reserve
-    s_max = 32_768  # illustrative deployment cap, not a model specification
-    mean_final_tokens = 2_048  # hypothetical mean FINAL length, not a trace mean
+    _scenario = Scenarios.CappedRequestsPagedAllocation
+    s_max = _scenario.cap  # illustrative deployment cap, not a model specification
+    mean_final_tokens = _scenario.mean_final  # hypothetical mean FINAL length, not a trace mean
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    bytes_per_token = calc_kv_cache_bytes_per_token(model, bytes_per_elem=elem_size)
-    node_hbm = node.accelerators_per_node * node.accelerator.memory.capacity
-    weights = model.size_in_bytes(elem_size)
-    pool = node_hbm - weights - runtime_reserve
-    reservation = s_max * bytes_per_token
-    reservations = int((pool / reservation).to("").magnitude)
-    efficiency = mean_final_tokens / s_max
+    _p, _r = _scenario.pool.result, _scenario.result
+    bytes_per_token = _p.kv_per_token
+    pool = _p.kv_budget
+    reservation = _r.reservation
+    reservations = _r.reservations
+    efficiency = _r.final_length_efficiency
     mean_doubled = 2 * mean_final_tokens  # checkpoint variation on the same scenario
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
@@ -444,7 +474,7 @@ Once physical blocks sit scattered across accelerator memory, the attention kern
 
 For any token position, the attention kernel determines its logical block index via integer division by the block size, consults the block table to locate the physical block, and calculates the token's offset within that block using the modulo remainder. For token position 9 with a four-token block size, the kernel calculates logical block $\lfloor 9 / 4 \rfloor = 2$, looks up physical block 9, and determines offset $9 \bmod 4 = 1$ (the second slot). Computing the final byte offset in device memory incorporates the model layer, KV head index, and tensor stride conventions. This software lookup preserves logical sequence ordering even when physical blocks are scattered across high-bandwidth memory among other requests' blocks, as panel (a) of @fig-vol3-pagedattention-mapping traces for position 9.
 
-::: {#fig-vol3-pagedattention-mapping data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-pagedattention-mapping" fig-env="figure" fig-pos="htb" fig-cap="**Block Table Indirection and Tail Copy-on-Write**: Panel (a) follows each logical block through its table entry to a physical block scattered among other requests' blocks; position 9 resolves to logical block 2, then to physical block 9, slot 1. Panel (b) shows two candidates that share the full blocks 3 and 7, while candidate B's private append first copies the two initialized entries of the shared tail into block 14." fig-alt="Panel a shows three contiguous logical blocks of four slots holding positions 0 to 9, arrows down to a block table with entries 3, 7, and 9, and elbow arrows to physical blocks 3, 7, and 9 scattered in a row of twelve blocks, some used by other requests. The path for position 9 is drawn in dark ink and annotated with the floor of 9 over 4 equals 2, table entry 2 equals 9, and slot 9 mod 4 equals 1. Panel b places candidate A's block table 3, 7, 9 above and candidate B's table 3, 7, 14 below; both tables point to the shared blocks 3 and 7, A points to block 9, and an arrow copies slots 0 and 1 from block 9 into block 14, where B writes position 10."}
+::: {#fig-vol3-pagedattention-mapping data-explore="original-kv-copy-on-write" data-explore-key="vol3:fig-vol3-pagedattention-mapping" fig-env="figure" fig-pos="htb" fig-cap="**Block Table Indirection and Tail Copy-on-Write**: Panel (a) follows each logical block through its table entry to a physical block scattered among other requests' blocks; position 9 resolves to logical block 2, then to physical block 9, slot 1. Panel (b) shows two candidates that share the full blocks 3 and 7, while candidate B's private append first copies the two initialized entries of the shared tail into block 14." fig-alt="Panel a shows three contiguous logical blocks of four slots holding positions 0 to 9, arrows down to a block table with entries 3, 7, and 9, and elbow arrows to physical blocks 3, 7, and 9 scattered in a row of twelve blocks, some used by other requests. The path for position 9 is drawn in dark ink and annotated with the floor of 9 over 4 equals 2, table entry 2 equals 9, and slot 9 mod 4 equals 1. Panel b places candidate A's block table 3, 7, 9 above and candidate B's table 3, 7, 14 below; both tables point to the shared blocks 3 and 7, A points to block 9, and an arrow copies slots 0 and 1 from block 9 into block 14, where B writes position 10."}
 ![](images/svg/paged_attention_virtual_memory.svg)
 :::
 
@@ -469,30 +499,30 @@ Block size trades allocation granularity against indexing overhead. Smaller bloc
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent
-from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
 
 class PhysicalBlockSizing:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    model = Models.Language.Llama3_70B
-    elem_size = BYTES_FP16
-    small_tokens, large_tokens = 16, 64  # illustrative allocator choices
+    _scenario = Scenarios.CappedRequestsPagedAllocation
+    small_tokens, large_tokens = _scenario.small_block, _scenario.large_block  # illustrative allocator choices
     ctx_agent = KvGeometry.ctx_agent  # scenario agent context from the footprint estimate
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    bytes_per_token = calc_kv_cache_bytes_per_token(model, bytes_per_elem=elem_size)
-    small_block = small_tokens * bytes_per_token
-    large_block = large_tokens * bytes_per_token
-    small_tail_tokens = small_tokens - 1
-    large_tail_tokens = large_tokens - 1
-    small_tail = small_tail_tokens * bytes_per_token
-    large_tail = large_tail_tokens * bytes_per_token
-    large_tail_share = large_tail_tokens / ctx_agent  # worst-case tail share of one agent context
+    _r = _scenario.result
+    bytes_per_token = _scenario.pool.result.kv_per_token
+    small_block = _r.small_block
+    large_block = _r.large_block
+    small_tail_tokens = _r.small_tail_tokens
+    large_tail_tokens = _r.large_tail_tokens
+    small_tail = _r.small_tail
+    large_tail = _r.large_tail
+    large_tail_share = _r.large_tail_share  # worst-case tail share of one capped (agent) context
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(0 * byte <= small_tail < small_block, "Tail must fit inside one block")
     check(0 * byte <= large_tail < large_block, "Tail must fit inside one block")
     check(small_block * large_tokens == large_block * small_tokens, "Both block sizes must use the same KV geometry")
     check(large_tail_share < 0.005, "Prose claims the worst tail is a fraction of a percent at agent length")
+    check(_scenario.cap == ctx_agent, "The tail share is taken over the agent context")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     bytes_per_token_str = fmt_memory(bytes_per_token, unit=byte, precision=0)
@@ -537,11 +567,12 @@ For a `{python} PhysicalBlockSizing.ctx_agent_str`-token agent context, even the
 # │ How: calc_expected_paged_kv_tokens over a capped-exponential length model
 # │      (modeling assumption) with StaticReservation's mean, cap, and pool.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics.memory import calc_expected_paged_kv_tokens
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_multiple
 
 class PagedWaste:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    _scenario = Scenarios.CappedRequestsPagedAllocation
     block_small = PhysicalBlockSizing.small_tokens
     block_large = PhysicalBlockSizing.large_tokens
     mean_tokens = StaticReservation.mean_final_tokens  # same hypothetical mean final length
@@ -550,10 +581,11 @@ class PagedWaste:
     pool = StaticReservation.pool
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    alloc_small, frag_small = calc_expected_paged_kv_tokens(mean_tokens, s_max, block_small)
-    alloc_large, frag_large = calc_expected_paged_kv_tokens(mean_tokens, s_max, block_large)
-    fit_paged = int((pool / (alloc_small * bytes_per_token)).to("").magnitude)
-    gain = fit_paged / StaticReservation.reservations
+    _r = _scenario.result
+    alloc_small, frag_small = _r.small_allocated_tokens, _r.small_waste
+    alloc_large, frag_large = _r.large_allocated_tokens, _r.large_waste
+    fit_paged = _r.paged_fit
+    gain = _r.paged_gain
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(0 < frag_small < frag_large < 0.02, "Larger blocks must waste more, and both only a few percent")
@@ -596,12 +628,13 @@ from mlsysim.fmt import check, fmt_int, fmt_memory
 
 class ForkCopy:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    prefix_tokens = 8_192  # scenario: processed prefix shared by the candidates
-    branches = 4  # scenario: sampled candidate repairs
+    _scenario = Scenarios.ForkedCandidatesPrefixCopy
+    prefix_tokens = _scenario.prefix_tokens  # scenario: processed prefix shared by the candidates
+    branches = _scenario.branches  # scenario: sampled candidate repairs
     bytes_per_token = PhysicalBlockSizing.bytes_per_token
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    copied = branches * prefix_tokens * bytes_per_token
+    copied = _scenario.copied
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(branches == 4, "Prose spells out four candidates")
@@ -692,7 +725,7 @@ Reusing and reclaiming memory blocks requires strict ownership tracking across c
 
 In tree-structured prefix caches, **leaf-first eviction**\index{Leaf-first eviction!definition} maintains structural consistency by preserving contiguous paths from the root and evicting unused leaf nodes first. Because internal nodes store common prefix state shared across multiple conversation branches, evicting an ancestor would invalidate all of its downstream descendants. An internal node becomes eligible for reclamation only after all of its descendant children have been evicted. Within the set of eligible leaves, systems frequently adopt a least-recently-used (LRU) policy [@zheng2024sglang], operating on the premise that recent access predicts near-term reuse [@belady1966study].[^fn-lru-belady-optimal] Reclamation therefore cascades upward. An inactive parent cannot be reclaimed while its child remains cached, but once the child leaf is evicted, the parent itself becomes an eligible leaf and can be freed if memory pressure persists (@fig-vol3-radix-tree-cache).
 
-::: {#fig-vol3-radix-tree-cache data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-radix-tree-cache" fig-env="figure" fig-pos="htb" fig-cap="**Leaf-First Eviction in a Radix Prefix Cache**: Each node stands for a run of tokens and the KV blocks that hold them, so a request's cached state is the path from the root to its node. Nodes on a running request's path stay active. Only dormant leaves are eligible, which is why the dormant Other-task node in panel (a) survives until its Final-turn child is evicted in panel (b). A least-recently-used policy would choose among the eligible leaves; it never removes an ancestor before its retained descendants." fig-alt="Two stacked copies of a three-level tree, panel a above panel b, whose nodes each carry a small row of KV block squares. Panel a has an active shared-prefix root, an active repair-history node with an active test-log-turn leaf and a dormant rejected-branch leaf, and a dormant other-task node with a dormant final-turn leaf; thicker green edges trace the running request's path, and the two dormant leaves are shaded gray with dark dashed borders as eligible for eviction. Panel b shows the final-turn leaf faded with dotted borders as evicted and the other-task node now shaded as an eligible dormant leaf. A legend defines active, dormant, eligible, and evicted."}
+::: {#fig-vol3-radix-tree-cache data-explore="original-v3-radix-tree-cache" data-explore-key="vol3:fig-vol3-radix-tree-cache" fig-env="figure" fig-pos="htb" fig-cap="**Leaf-First Eviction in a Radix Prefix Cache**: Each node stands for a run of tokens and the KV blocks that hold them, so a request's cached state is the path from the root to its node. Nodes on a running request's path stay active. Only dormant leaves are eligible, which is why the dormant Other-task node in panel (a) survives until its Final-turn child is evicted in panel (b). A least-recently-used policy would choose among the eligible leaves; it never removes an ancestor before its retained descendants." fig-alt="Two stacked copies of a three-level tree, panel a above panel b, whose nodes each carry a small row of KV block squares. Panel a has an active shared-prefix root, an active repair-history node with an active test-log-turn leaf and a dormant rejected-branch leaf, and a dormant other-task node with a dormant final-turn leaf; thicker green edges trace the running request's path, and the two dormant leaves are shaded gray with dark dashed borders as eligible for eviction. Panel b shows the final-turn leaf faded with dotted borders as evicted and the other-task node now shaded as an eligible dormant leaf. A legend defines active, dormant, eligible, and evicted."}
 ![](images/svg/radix_prefix_tree_architecture.svg)
 :::
 
@@ -729,24 +762,24 @@ from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, MarkdownStr
 
 class PrefixHit:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    model = Models.Language.Llama3_70B
-    node = Systems.Nodes.DGX_H100
-    prefix_tokens = 4_096  # scenario: invariant instructions and tool schemas
-    suffix_tokens = 32  # scenario: short novel suffix appended after a hit
-    utilization = Literature.Training.MfuHigh * 0.9  # scenario: sustained prefill utilization
+    _scenario = Scenarios.InvariantPrefixRebuildDgxH100
+    model = _scenario.workload
+    node = _scenario.node
+    prefix_tokens = _scenario.prefix_tokens  # scenario: invariant instructions and tool schemas
+    suffix_tokens = _scenario.suffix_tokens  # scenario: short novel suffix appended after a hit
+    utilization = _scenario.utilization  # scenario: sustained prefill utilization (MfuHigh x 0.9)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    n_params = model.parameters.to("count").magnitude
+    _r = _scenario.result
+    n_params = _r.n_params
     bytes_per_token = PhysicalBlockSizing.bytes_per_token
-    state = prefix_tokens * bytes_per_token
-    linear_ops = 2 * n_params * prefix_tokens * flop
-    attention_ops = 2 * model.layers * model.hidden_dim * prefix_tokens**2 * flop
-    sustained_rate = node.accelerators_per_node * node.accelerator.compute.peak_flops * utilization
-    t_rebuild = ((linear_ops + attention_ops) / sustained_rate).to(ms)
-    weights = model.size_in_bytes(BYTES_FP16)
-    node_bw = node.accelerators_per_node * node.accelerator.memory.bandwidth
-    t_weight_read = (weights / node_bw).to(ms)
-    t_suffix_ops = (2 * n_params * suffix_tokens * flop / sustained_rate).to(ms)
+    state = _r.state
+    linear_ops = _r.linear_ops
+    attention_ops = _r.attention_ops
+    sustained_rate = _r.sustained_rate
+    t_rebuild = _r.rebuild_time
+    t_weight_read = _r.weight_read_time
+    t_suffix_ops = _r.suffix_ops_time
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(attention_ops < linear_ops, "Weight work must dominate at this prefix length")
@@ -834,21 +867,23 @@ from mlsysim.fmt import check, fmt_int, fmt_multiple, MarkdownStr
 
 class ChunkedIteration:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    decodes = 32  # scenario: ongoing decode requests
-    prompt_tokens = 4_096  # scenario: new uncached prefill
-    chunk_tokens = 512  # scenario: prefill chunk per iteration
+    _scenario = Scenarios.ChunkedPrefillAmongDecodes
+    decodes = _scenario.decodes  # scenario: ongoing decode requests
+    prompt_tokens = _scenario.prompt_tokens  # scenario: new uncached prefill
+    chunk_tokens = _scenario.chunk_tokens  # scenario: prefill chunk per iteration
     n_params = PrefixHit.n_params
     rate = PrefixHit.sustained_rate
     t_weights = PrefixHit.t_weight_read
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    t_decode = max(t_weights, (2 * n_params * decodes * flop / rate).to(ms))
-    t_mono = max(t_weights, (2 * n_params * prompt_tokens * flop / rate).to(ms))
-    gap_mono = t_decode + t_mono
-    n_chunks = prompt_tokens // chunk_tokens
-    t_iter = max(t_weights, (2 * n_params * (chunk_tokens + decodes) * flop / rate).to(ms))
-    t_chunked_done = n_chunks * t_iter
-    gap_ratio = (gap_mono / t_iter).to("").magnitude
+    _r = _scenario.result
+    t_decode = _r.decode_step
+    t_mono = _r.monolithic_prefill
+    gap_mono = _r.monolithic_gap
+    n_chunks = _r.chunks
+    t_iter = _r.chunked_iteration
+    t_chunked_done = _r.chunked_done
+    gap_ratio = _r.gap_ratio
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(prompt_tokens % chunk_tokens == 0, "Chunks must tile the prompt")
@@ -875,7 +910,7 @@ The weight-only step-time model $\WeightOnlyStepTime(\ForwardPassTokenCount)$ of
 
 Dividing that prompt into `{python} ChunkedIteration.chunk_str`-token chunks reshapes execution by batching one prefill chunk and the `{python} ChunkedIteration.decodes_str` decode tokens into the same forward pass. Each of the `{python} ChunkedIteration.n_chunks_str` iterations now carries `{python} ChunkedIteration.iter_tokens_str` positions, sits in the arithmetic-bound regime, and takes about `{python} ChunkedIteration.t_iter_str`. Because the decodes advance on every iteration, their worst gap between tokens is one `{python} ChunkedIteration.t_iter_str` step, about `{python} ChunkedIteration.gap_ratio_mult_str` smaller than under the monolithic schedule. The new prompt completes after `{python} ChunkedIteration.n_chunks_str` such mixed iterations, or about `{python} ChunkedIteration.t_done_str` instead of `{python} ChunkedIteration.t_mono_str`, because each pass also performs the weight arithmetic for the `{python} ChunkedIteration.decodes_str` co-scheduled decode tokens. Chunking thus buys existing streams a much shorter gap for a modest delay in the new request's first token. On one time axis, the monolithic schedule leaves a single long gap between two output tokens, while the chunked schedule places a token at every iteration boundary and finishes the prompt only slightly later (@fig-vol3-chunked-timeline). Both schedules omit attention traffic, which grows with each chunk's context, and per-iteration overhead, so measured iterations run longer and the budget must come from measurement.
 
-::: {#fig-vol3-chunked-timeline data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-chunked-timeline" fig-env="figure" fig-pos="htb" fig-cap="**Monolithic vs. Chunked Prefill**: Both timelines use the weight-only estimate, on one time axis, for a `{python} ChunkedIteration.prompt_str`-token prefill arriving while `{python} ChunkedIteration.decodes_str` requests decode. Admitted as one unit (a), the prefill separates two decode tokens by about `{python} ChunkedIteration.gap_mono_str`. Split into `{python} ChunkedIteration.chunk_str`-token chunks (b), every iteration also advances the decodes, so the gap is one iteration of about `{python} ChunkedIteration.t_iter_str`, and the prompt finishes slightly later. Attention traffic and per-iteration overhead, omitted here, would lengthen every bar." fig-alt="Two horizontal timelines on a shared time axis with ticks at 0, 50, 100, and 150 milliseconds. Timeline a has one long prefill bar for 4,096 tokens followed by a short decode step, with output-token markers only at the start and the end and a red bracket labeling the gap between decode tokens. Timeline b has eight equal bars labeled chunk 1 to chunk 8, with a token marker at every bar boundary and a dark bracket over the first bar. Each timeline marks where the prompt completes."}
+::: {#fig-vol3-chunked-timeline data-explore="original-v3-vol3-chunked-timeline" data-explore-key="vol3:fig-vol3-chunked-timeline" fig-env="figure" fig-pos="htb" fig-cap="**Monolithic vs. Chunked Prefill**: Both timelines use the weight-only estimate, on one time axis, for a `{python} ChunkedIteration.prompt_str`-token prefill arriving while `{python} ChunkedIteration.decodes_str` requests decode. Admitted as one unit (a), the prefill separates two decode tokens by about `{python} ChunkedIteration.gap_mono_str`. Split into `{python} ChunkedIteration.chunk_str`-token chunks (b), every iteration also advances the decodes, so the gap is one iteration of about `{python} ChunkedIteration.t_iter_str`, and the prompt finishes slightly later. Attention traffic and per-iteration overhead, omitted here, would lengthen every bar." fig-alt="Two horizontal timelines on a shared time axis with ticks at 0, 50, 100, and 150 milliseconds. Timeline a has one long prefill bar for 4,096 tokens followed by a short decode step, with output-token markers only at the start and the end and a red bracket labeling the gap between decode tokens. Timeline b has eight equal bars labeled chunk 1 to chunk 8, with a token marker at every bar boundary and a dark bracket over the first bar. Each timeline marks where the prompt completes."}
 ![](images/svg/chunked_prefill_scheduling_timeline.svg)
 :::
 
@@ -945,41 +980,35 @@ from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_qty, fmt_time, fmt_bandw
 
 class PausedStateChoice:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────────
-    model = Models.Language.Llama3_70B
-    node = Systems.Nodes.DGX_H100
-    context_tokens = 32_768  # scenario: fully initialized state, no sharing
-    block_tokens = 16  # scenario allocation granularity, not a recommendation
-    runtime_reserve = 20 * GB  # scenario, same aggregate-node baseline
-    wait = 45 * second  # stipulated integration-test wait
+    _scenario = Scenarios.RepairToolWaitPausedState
+    model = _scenario.pool.workload
+    node = _scenario.prefill.node
+    context_tokens = _scenario.context_tokens  # scenario: fully initialized state, no sharing
+    block_tokens = _scenario.block_tokens  # scenario allocation granularity, not a recommendation
+    wait = _scenario.wait  # stipulated integration-test wait
     n_acc = node.accelerators_per_node
     link_per_acc = node.accelerator.interconnect.bandwidth  # registry host link, per direction
     rate = PrefixHit.sustained_rate  # scenario sustained prefill rate
-    quarter = 0.25  # scenario: links sustain a quarter of rated bandwidth
+    quarter = _scenario.link_fraction  # scenario: links sustain a quarter of rated bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────────
-    blocks = (context_tokens + block_tokens - 1) // block_tokens
-    state = calc_kv_cache_size(
-        model.layers,
-        model.kv_heads,
-        model.hidden_dim // model.heads,
-        blocks * block_tokens,
-        1,
-        BYTES_FP16,
-    )
+    _r = _scenario.result
+    blocks = _r.blocks
+    state = _r.state
     bytes_per_token = state / (blocks * block_tokens)
-    pool = n_acc * node.accelerator.memory.capacity - model.size_in_bytes(BYTES_FP16) - runtime_reserve
+    pool = _scenario.pool.result.kv_budget
     n_params = model.parameters.to("count").magnitude
-    link = n_acc * link_per_acc
-    copy_out = (state / link).to(ms)
-    copy_in = (state / link).to(ms)
-    reconstruct = (2 * n_params * context_tokens * flop / rate).to(second)
-    ratio = (reconstruct / copy_in).to("").magnitude
-    ratio_quarter = ratio * quarter
+    link = _r.link
+    copy_out = _r.copy_out
+    copy_in = _r.copy_in
+    reconstruct = _r.recompute
+    ratio = _r.recompute_over_reload
+    ratio_quarter = _r.recompute_over_reload_derated
     reload_over_recompute = (bytes_per_token * rate / (2 * n_params * flop * link)).to("").magnitude
-    held_occupancy = state * wait
-    transfer_work = copy_out + copy_in
-    released_on_demand = wait - copy_out
-    released_prefetch = wait - copy_out - copy_in
+    held_occupancy = _r.held_occupancy
+    transfer_work = _r.round_trip
+    released_on_demand = _r.released_on_demand
+    released_prefetch = _r.released_prefetch
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
     check(context_tokens % block_tokens == 0, "No partial-tail waste in this example")
@@ -1064,15 +1093,17 @@ from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, MarkdownStr
 
 class ReturnBurst:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
-    returns = 32  # scenario: paused repairs whose tests finish together
+    _scenario = Scenarios.RepairToolWaitPausedState
+    returns = _scenario.returns  # scenario: paused repairs whose tests finish together
     state = PausedStateChoice.state
     link = PausedStateChoice.link
     host_bw = PausedStateChoice.node.host_memory_bw
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    burst = returns * state
-    t_burst = (burst / link).to(second)
-    slowdown = (t_burst / PausedStateChoice.copy_in).to("").magnitude
+    _r = _scenario.result
+    burst = _r.burst
+    t_burst = _r.burst_time
+    slowdown = _r.burst_slowdown
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(link < host_bw, "The host links, not host memory bandwidth, must bind at the aggregate rate")
@@ -1133,47 +1164,43 @@ The resident-fit bound of @sec-vol3-kvcache-geometry, refined for blocks, headro
 # │ Show: 41 unshared or 138 shared snapshots; memory-only residence constraints.
 # │ How: Registry model/node, explicit reserve/headroom, and whole-block counts.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil, floor
 from mlsysim import *
-from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, fmt_time, fmt_magnitude, fmt_multiple
 
 class AgentCapacity:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────────
-    _model = Models.Language.Llama3_70B
-    _node = Systems.Nodes.DGX_H100
-    runtime_reserve = 20 * GB  # scenario: aggregate activation/runtime reserve
-    headroom = 0.10  # hypothetical extra fraction withheld from the KV pool
-    context = 32_768  # scenario: serialized input tokens per request
-    output = 2_048  # scenario: maximum private output tokens
-    common = 24_576  # scenario: identical, compatible, shareable prefix tokens
-    block_tokens = 16  # scenario: allocation granularity, not a recommendation
-    generation = 5 * second  # hypothetical residence component, not a benchmark
-    wait = 45 * second  # hypothetical tool wait with retained state
+    _scenario = Scenarios.RepairBlockSharingResidency
+    runtime_reserve = _scenario.pool.reserve  # scenario: aggregate activation/runtime reserve
+    headroom = _scenario.headroom  # hypothetical extra fraction withheld from the KV pool
+    context = _scenario.context  # scenario: serialized input tokens per request
+    output = _scenario.output  # scenario: maximum private output tokens
+    common = _scenario.common  # scenario: identical, compatible, shareable prefix tokens
+    block_tokens = _scenario.block_tokens  # scenario: allocation granularity, not a recommendation
+    generation = _scenario.generation  # hypothetical residence component, not a benchmark
+    wait = _scenario.wait  # hypothetical tool wait with retained state
 
     # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────────
-    bytes_per_token = calc_kv_cache_bytes_per_token(_model, bytes_per_elem=BYTES_FP16)
-    node_hbm = _node.accelerators_per_node * _node.accelerator.memory.capacity
-    weights = _model.size_in_bytes(BYTES_FP16)
-    pool = node_hbm - weights - runtime_reserve
-    block_bytes = block_tokens * bytes_per_token
-    usable_blocks = floor(((1 - headroom) * pool / block_bytes).to("").magnitude)
-    usable = usable_blocks * block_bytes
-    unshared_blocks = ceil((context + output) / block_tokens)
-    common_blocks = ceil(common / block_tokens)
-    private_blocks = ceil((context + output - common) / block_tokens)
-    unshared_bytes = unshared_blocks * block_bytes
-    common_bytes = common_blocks * block_bytes
-    private_bytes = private_blocks * block_bytes
-    fit_unshared = usable_blocks // unshared_blocks
-    fit_shared = (usable_blocks - common_blocks) // private_blocks
-    retained_time = generation + wait
-    retained_rate = fit_unshared / retained_time
-    released_rate = fit_unshared / generation
-    residency_factor = (retained_time / generation).to("").magnitude  # 1 + W_wait / W_gen
-    f_shared = common_blocks / unshared_blocks  # shared fraction of each request's blocks
-    share_gain = fit_shared / fit_unshared
-    share_bound = 1 / (1 - f_shared)  # large-pool limit of the sharing gain
+    _r = _scenario.result
+    bytes_per_token = _scenario.pool.result.kv_per_token
+    pool = _scenario.pool.result.kv_budget
+    block_bytes = _r.block_bytes
+    usable_blocks = _r.usable_blocks
+    usable = _r.usable
+    unshared_blocks = _r.unshared_blocks
+    common_blocks = _r.common_blocks
+    private_blocks = _r.private_blocks
+    unshared_bytes = _r.unshared_bytes
+    common_bytes = _r.common_bytes
+    private_bytes = _r.private_bytes
+    fit_unshared = _r.fit_unshared
+    fit_shared = _r.fit_shared
+    retained_time = _r.retained_time
+    retained_rate = _r.retained_rate
+    released_rate = _r.released_rate
+    residency_factor = _r.residency_factor  # 1 + W_wait / W_gen
+    f_shared = _r.shared_fraction  # shared fraction of each request's blocks
+    share_gain = _r.share_gain
+    share_bound = _r.share_bound  # large-pool limit of the sharing gain
     common_half = common // 2  # checkpoint variation, still block-aligned
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
@@ -1304,44 +1331,37 @@ These dynamics manifest differently across agent architectures. The software rep
 # │      rate; AgentCapacity repair residence. Support inputs come from the
 # │      Agents.Support.CustomerOps workload profile (teaching assumptions).
 # └─────────────────────────────────────────────────────────────────────────────
-from math import floor
 from mlsysim import *
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent, fmt_time, MarkdownStr
 
-def _kv_fit(ctx, shared):
-    """Sessions that fit when `shared` prefix tokens are stored once and the rest privately."""
-    private = ctx - shared
-    return floor(((KvGeometry.kv_pool - shared * KvGeometry.bytes_per_token) / (private * KvGeometry.bytes_per_token)).to("").magnitude)
-
 class ResidencyByArchetype:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    _repair = Scenarios.RepairAgentResidency
+    _support = Scenarios.SupportAgentResidency
     m_token = KvGeometry.bytes_per_token
     pool = KvGeometry.kv_pool
     link = PausedStateChoice.link
     rate = PausedStateChoice.rate
     n_params = PausedStateChoice.n_params
-    support = Agents.Support.CustomerOps
     # Shared system prompt and tool schemas; scenario: the repair deployment's
     # prefix is taken to be the same length as the support profile's.
-    common = support.shared_prefix.to("token").magnitude
-    repair_ctx = KvGeometry.ctx_agent
-    repair_gen = AgentCapacity.generation
-    repair_wait = AgentCapacity.wait  # integration test
-    support_ctx = support.session_context.to("token").magnitude  # policy prefix plus one customer's history
-    support_gen = support.generation_residence  # generation residence per support turn
-    support_wait = support.customer_reply_time  # customer reads and replies between turns
+    common = _repair.shared_prefix
+    repair_ctx = _repair.context_tokens
+    repair_gen = _repair.generation
+    repair_wait = _repair.wait  # integration test
+    support_ctx = _support.context_tokens  # policy prefix plus one customer's history
+    support_gen = _support.generation  # generation residence per support turn
+    support_wait = _support.wait  # customer reads and replies between turns
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
-    r_fit_unshared, r_fit_shared = _kv_fit(repair_ctx, 0), _kv_fit(repair_ctx, common)
-    s_fit_unshared, s_fit_shared = _kv_fit(support_ctx, 0), _kv_fit(support_ctx, common)
-    r_shared, s_shared = common / repair_ctx, common / support_ctx
-    r_tax = ((repair_gen + repair_wait) / repair_gen).to("").magnitude
-    s_tax = ((support_gen + support_wait) / support_gen).to("").magnitude
-    r_recompute = (2 * n_params * repair_ctx * flop / rate).to(second)
-    s_recompute = (2 * n_params * support_ctx * flop / rate).to(second)
-    r_reload = (repair_ctx * m_token / link).to(ms)
-    s_reload = (support_ctx * m_token / link).to(ms)
-    r_recompute_share = (r_recompute / (repair_gen + repair_wait)).to("").magnitude
+    _r, _s = _repair.result, _support.result
+    r_fit_unshared, r_fit_shared = _r.fit_unshared, _r.fit_shared
+    s_fit_unshared, s_fit_shared = _s.fit_unshared, _s.fit_shared
+    r_shared, s_shared = _r.shared_fraction, _s.shared_fraction
+    r_tax, s_tax = _r.residency_factor, _s.residency_factor
+    r_recompute, s_recompute = _r.recompute, _s.recompute
+    r_reload, s_reload = _r.reload, _s.reload
+    r_recompute_share = _r.recompute_share
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(support_ctx == KvGeometry.ctx_short, "Support session must match the footprint table's short row")

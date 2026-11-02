@@ -4,7 +4,7 @@ from ..core.registry import Registry
 from ..core.types import Metadata
 from ..core.units import ureg
 from ..core import provenance_catalog as pc
-from .types import CameraSensor, LiDARSensor, IMUSensor, SafetyLaserScanner
+from .types import CameraSensor, LiDARSensor, IMUSensor, SafetyLaserScanner, SafetyLightCurtain
 
 
 class Cameras(Registry):
@@ -80,6 +80,8 @@ class LiDARs(Registry):
         range_precision_min=5.0 * ureg.millimeter,
         range_precision_max=30.0 * ureg.millimeter,
         range_accuracy=25.0 * ureg.millimeter,
+        range_accuracy_retroreflective=50.0 * ureg.millimeter,  # Rev7 datasheet: +/-5 cm, retroreflective targets
+        vertical_fov=42.4 * ureg.degree,  # Rev7 datasheet: 42.4 deg (+21.2 to -21.2)
         time_sync_accuracy=1.0 * ureg.millisecond,
         internal_clock_drift=10.0 * ureg.ppm,
         laser_wavelength=865.0 * ureg.nanometer,  # Rev7 datasheet (Class 1, IEC 60825-1:2014)
@@ -88,6 +90,22 @@ class LiDARs(Registry):
         metadata=Metadata(
             provenance=pc.OUSTER_OS1_64,
             description="Ouster OS1-64 64-channel digital LiDAR with 120 m range and 20 Hz scan rate.",
+        ),
+    )
+
+
+    # Added 2026-10-20: the lidar of the KITTI recording platform, as that
+    # platform's paper states it (KITTI ran it at 10 Hz).
+    Velodyne_HDL_64E = LiDARSensor(
+        name="Velodyne HDL-64E",
+        channels=64,
+        scan_rate=10.0 * ureg.Hz,
+        max_range=120.0 * ureg.meter,
+        vertical_fov=26.8 * ureg.degree,
+        interface="Ethernet (UDP)",
+        metadata=Metadata(
+            provenance=pc.KITTI_GEIGER_2013,
+            description="Velodyne HDL-64E 64-beam spinning lidar of the KITTI recording platform, run at 10 Hz.",
         ),
     )
 
@@ -126,9 +144,44 @@ class SafetyScanners(Registry):
         iec61496_type="Type 3",
         performance_level="PL d, Category 3",
         configuration="High-speed mode, 70/150 mm objects, 2 scans",
+        response_time_standard_mode=160.0 * ureg.millisecond,  # standard mode, 2 scans (added 2026-10-20)
         metadata=Metadata(
             provenance=pc.KEYENCE_SZ_V32,
             description="Keyence SZ-V32 Type 3 / PL d optical safety laser scanner (5.7 m protection zone).",
+        ),
+    )
+
+    SICK_nanoScan3 = SafetyLaserScanner(
+        name="SICK nanoScan3 Core (NANS3-CAAZ30AA1)",
+        protective_field_range=3.0 * ureg.meter,
+        response_time=85.0 * ureg.millisecond,
+        scan_angle=275.0 * ureg.degree,
+        iec61496_type="Type 3",
+        performance_level="PL d",
+        configuration="Data-sheet response time and protective-field range",
+        metadata=Metadata(
+            provenance=pc.SICK_NANOSCAN3_CORE,
+            description="SICK nanoScan3 Core Type 3 / PL d safety laser scanner (3 m protective field).",
+        ),
+    )
+
+
+class SafetyLightCurtains(Registry):
+    """Certified safety light curtains (IEC 61496-2 AOPD), added 2026-10-20."""
+
+    SICK_deTec4_Set_30_450 = SafetyLightCurtain(
+        name="SICK deTec4 Set 30/450",
+        resolution=30.0 * ureg.millimeter,
+        protective_field_height=450.0 * ureg.millimeter,
+        response_time=10.0 * ureg.millisecond,
+        response_time_coded=14.0 * ureg.millisecond,
+        iec61496_type="Type 4",
+        performance_level="PL e, Category 4",
+        safety_integrity_level="SIL 3",
+        pfh_d=15.3e-9 / ureg.hour,
+        metadata=Metadata(
+            provenance=pc.SICK_DETEC4_SET_30_450,
+            description="SICK deTec4 Set 30/450 Type 4 / PL e safety light curtain (30 mm resolution, 450 mm field).",
         ),
     )
 
@@ -140,3 +193,4 @@ class Sensors(Registry):
     LiDAR = LiDARs
     IMU = IMUs
     SafetyScanner = SafetyScanners
+    SafetyLightCurtain = SafetyLightCurtains

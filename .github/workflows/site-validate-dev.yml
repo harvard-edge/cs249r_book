@@ -27,6 +27,7 @@ name: '🌐 Landing Site · ✅ Validate (Dev)'
 # Related:
 #   - site-preview-dev.yml  — Dev preview deploy (gates on this passing)
 #   - site-publish-live.yml — Production deploy
+#   - taxonomy-validate-dev.yml — Taxonomy-only validation (gates taxonomy-publish-live.yml)
 #
 # =============================================================================
 
@@ -39,6 +40,11 @@ on:
   pull_request:
     paths:
       - 'site/**'
+      - 'courses/**'
+      - 'taxonomy/**'
+      - 'binder/cli/**'
+      - 'binder/tests/**'
+      - 'staffml/app/src/data/mlsys-taxonomy.json'
       - 'shared/**'
       - '.github/workflows/site-validate-dev.yml'
       - '.github/workflows/site-preview-dev.yml'
@@ -46,6 +52,11 @@ on:
     branches: [dev]
     paths:
       - 'site/**'
+      - 'courses/**'
+      - 'taxonomy/**'
+      - 'binder/cli/**'
+      - 'binder/tests/**'
+      - 'staffml/app/src/data/mlsys-taxonomy.json'
       - 'shared/**'
       - '.github/workflows/site-validate-dev.yml'
       - '.github/workflows/site-preview-dev.yml'
@@ -58,7 +69,7 @@ concurrency:
   # push and workflow_call runs unique per-run, so a push to dev that
   # triggers both this workflow standalone AND Preview's `uses:` call
   # doesn't collide on a shared group. See staffml-validate-dev.yml.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: site-validate-dev-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -86,6 +97,20 @@ jobs:
           # a secret and is the deploy workflow's responsibility. We only need
           # the deps so Quarto can render the newsletter index.
 
+      - name: Install concept map generator dependencies
+        run: |
+          python3 -m pip install -r taxonomy/requirements.txt pytest
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: 🧭 Validate taxonomy LinkML schema, coverage, and agreement
+        run: |
+          ./binder/binder concepts check
+          ./binder/binder concepts coverage --check
+          ./binder/binder concepts agreement --check
+          python3 staffml/vault-cli/scripts/check_schema_sync.py
+          python3 -m pytest binder/tests/test_linkml_schema.py binder/tests/test_framework.py binder/tests/test_field_concept_graph.py binder/tests/test_taxonomy.py binder/tests/test_concept_coverage.py binder/tests/test_taxonomy_coverage.py binder/tests/test_taxonomy_agreement.py -q
+
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
@@ -106,8 +131,9 @@ jobs:
 
       - name: 🔍 Validate build output
         run: |
+          python3 site/scripts/build_concept_explorer.py --check-staged
           MISSING=0
-          for page in index.html about/index.html community/index.html newsletter/index.html; do
+          for page in index.html about/index.html community/index.html newsletter/index.html courses/index.html courses/physical-ai/eth-spring-2027/index.html courses/tinyml/index.html taxonomy/index.html; do
             if [ ! -f "site/_build/$page" ]; then
               echo "❌ MISSING: $page"
               MISSING=$((MISSING + 1))

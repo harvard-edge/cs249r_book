@@ -3,7 +3,7 @@
 mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 """
 
-__version__ = "0.1.2"
+__version__ = "0.3.0"
 
 from . import core
 from . import engine
@@ -41,6 +41,8 @@ from .agents.registry import (
 from .ops import Ops
 from .engine import calibration
 from .notation.registry import Notation, Symbols
+from .core.series_loader import LocalSeries, load_series
+
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.units import *  # noqa: F401,F403

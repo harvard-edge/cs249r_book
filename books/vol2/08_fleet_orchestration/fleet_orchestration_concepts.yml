@@ -252,3 +252,140 @@ concept_map:
     - Capacity planning for AI fleets
     - Cluster utilization recovery
     - Cost governance for ML infrastructure
+
+  explorer_graph:
+    schema_version: 1
+    relationships:
+    - source: Scheduler as allocation control plane
+      predicate: must reserve atomic bundles through
+      target:
+        chapter: 08_fleet_orchestration
+        concept: Gang scheduling
+      explanation: Scheduler as allocation control plane must reserve atomic bundles through Gang scheduling.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 08_fleet_orchestration
+        concept: Scheduler as allocation control plane
+        quote: A cluster scheduler loses direct observation, atomic effect, and binary failure, so it separates
+          admission, placement, and reconciliation, and reusing a suspect node's accelerators requires versioned
+          allocations, leases, and fencing.
+      - chapter: 08_fleet_orchestration
+        concept: Gang scheduling
+        quote: A rigid synchronous job makes no progress below its minimum gang, so partial allocation can deadlock
+          two jobs at full cost, and atomic all-or-nothing allocation removes hold-and-wait but needs reservation,
+          safe backfill, and holistic preemption.
+    - source: Feasibility before fairness
+      predicate: filters feasible gangs before
+      target:
+        chapter: 08_fleet_orchestration
+        concept: Gang scheduling
+      explanation: Feasibility before fairness filters feasible gangs before Gang scheduling.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 08_fleet_orchestration
+        concept: Feasibility before fairness
+        quote: A fair share of accelerators a job cannot run on delivers nothing, so the scheduler first filters
+          feasible bundles (every resource dimension, gang atomicity, topology, memory) and only then applies
+          dominant-resource fairness, while multi-dimensional packing strands capacity.
+      - chapter: 08_fleet_orchestration
+        concept: Gang scheduling
+        quote: A rigid synchronous job makes no progress below its minimum gang, so partial allocation can deadlock
+          two jobs at full cost, and atomic all-or-nothing allocation removes hold-and-wait but needs reservation,
+          safe backfill, and holistic preemption.
+    - source: Gang scheduling
+      predicate: supplies all workers required by
+      target:
+        chapter: 06_distributed_training
+        concept: Synchronization models and stragglers
+      explanation: Gang scheduling supplies all workers required by Synchronization models and stragglers.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 08_fleet_orchestration
+        concept: Gang scheduling
+        quote: A rigid synchronous job makes no progress below its minimum gang, so partial allocation can deadlock
+          two jobs at full cost, and atomic all-or-nothing allocation removes hold-and-wait but needs reservation,
+          safe backfill, and holistic preemption.
+      - chapter: 06_distributed_training
+        concept: Synchronization models and stragglers
+        quote: Bulk-synchronous training gives single-device semantics but waits for the slowest required contribution
+          every step, so at thousands of GPUs the tail worker sets step time, and SSP and ASP trade that waiting
+          for staleness with a convergence cost.
+
+  learner_graph:
+    schema_version: 1
+    concepts:
+    - id: vol2.scheduling.gang
+      label: Gang scheduling
+      teaches: Gang scheduling
+      summary: Allocating a tightly coupled job's required workers together so that partial allocation does
+        not strand capacity.
+      section: sec-fleet-orchestration-gang-scheduling
+    - id: vol2.scheduling.placement
+      label: Topology-aware placement
+      teaches: Topology-aware placement
+      summary: Assigning a job's workers to physical resources according to its traffic pattern and available
+        link hierarchy.
+      section: sec-fleet-orchestration-topology-aware
+    - id: vol2.scheduling.fairness
+      label: Resource fairness
+      teaches: Feasibility before fairness
+      summary: A selected rule for sharing feasible fleet capacity among competing users or jobs.
+      section: sec-fleet-orchestration-core-allocation
+    relationships:
+    - id: vol2.field.23
+      source: vol2.scheduling.gang
+      predicate: admits workers together for
+      target: vol2.training.data-parallelism
+      explanation: Tightly coupled synchronous jobs require their worker set to be available together.
+      conditions: The job may combine data, tensor, and pipeline parallelism; a gang is not exclusive to
+        data parallelism.
+      status: draft
+      evidence:
+        section: sec-fleet-orchestration-gang-scheduling
+        quote: Partial allocation of rigid multi-GPU jobs creates a distributed scheduling failure mode
+          in which two jobs each hold half the resources they need and block each other indefinitely while
+          every allocated GPU sits idle. In the left panel of @fig-gang-scheduling-deadlock, jobs J1 and
+          J2 each hold 4 of the 8 GPUs they require, and the whole pool stalls. Atomic gang scheduling\index{Gang
+          scheduling!atomic allocation} (right panel) instead grants J1 all 8 GPUs as one allocation while
+          J2 waits without holding any, which prevents this allocation deadlock.
+    - id: vol2.field.24
+      source: vol2.scheduling.placement
+      predicate: matches traffic to
+      target: vol2.hardware.bandwidth-hierarchy
+      explanation: Topology-aware placement keeps the most communication-intensive groups within fast physical
+        domains.
+      conditions: Feasible placements must also satisfy capacity, power, and isolation requirements.
+      status: draft
+      evidence:
+        section: sec-fleet-orchestration-topology-aware
+        quote: A **hierarchical placement**\index{Hierarchical placement!definition} algorithm applies these
+          constraints from the most restrictive communication domain outward, matching each 3D parallelism
+          dimension to the interconnect tier its traffic can tolerate (@fig-fleet-orchestration-hierarchical-placement).
+          In the illustrated fleet, it places each tensor-parallel group within an NVLink-connected node,
+          where the per-layer activation exchanges run at `{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str`.
+          It places consecutive pipeline stages under the same leaf switch, where stage boundaries cross
+          at `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`. It distributes data-parallel replicas
+          across racks only when the once-per-step gradient synchronization fits the roughly `{python} FleetTopologyInterconnect.oversub_lo_num_str`--`{python}
+          FleetTopologyInterconnect.oversub_hi_gb_per_s_str` per endpoint that an oversubscribed spine leaves.
+          This alignment reduces costly boundary crossings, but placement alone cannot reserve the fabric's
+          full bisection bandwidth against other jobs.
+    - id: vol2.field.25
+      source: vol2.scheduling.fairness
+      predicate: is applied after feasible
+      target: vol2.scheduling.placement
+      explanation: Fair sharing chooses among allocations that can actually execute the job.
+      conditions: The fairness objective and resource-accounting boundary must be declared.
+      status: draft
+      evidence:
+        section: sec-fleet-orchestration-core-allocation
+        quote: Awarding the 64-GPU fine-tuning run its fair share of the cluster delivers zero progress
+          if those GPUs sit on nodes with exhausted host memory, lack the interconnect its parallel layout
+          requires, or arrive only 32 at a time. A scheduling objective can choose only among allocations
+          that a job can actually run. Fairness must be computed across every resource a tenant consumes,
+          a request must fit every dimension of the node that receives it, a rigid group must arrive whole,
+          and the resources each job holds must not block one another. Each of these constraints narrows
+          the feasible set before any objective selects within it.
+    maps: []

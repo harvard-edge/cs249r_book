@@ -66,7 +66,8 @@ CANONICAL = [
     ("sm_count",       132,   0.02, "Hardware.Cloud.H100.compute.sm_count"),
 
     # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/units.py
-    ("hbm_latency",    300,   0.05, "Hardware.Tech.Memory.DRAM.latency (ns)"),
+    ("hbm_latency",    272.82, 0.05, "Hardware.Tech.Memory.HopperGlobalMemory.latency (ns)"),
+    ("dram_latency",   100,   0.05, "Hardware.Tech.Memory.HostDram_Latency2009.latency (ns)"),
     ("hbm_energy",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("hbm_access",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("h200_mem_gb",    141,   0.05, "Hardware.Cloud.H200.memory.capacity"),

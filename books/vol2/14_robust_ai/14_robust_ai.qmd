@@ -164,26 +164,26 @@ Commercial aviation shows the same inherited hazard. A 2015 FAA airworthiness di
 # │ Goal: Show that one flipped exponent bit turns a modest weight into a
 # │       finite outlier that NaN and infinity checks never see.
 # │ Show: w = 0.042 -> w' ~ 1.4e37 after flipping bit 30 (factor 2^128).
-# │ How: Flip bit 30 of the IEEE-754 FP32 encoding with struct; the weight
-# │      value is an illustrative scenario input.
+# │ How: Scenarios.Fp32WeightExponentFlip flips bit 30 of the IEEE-754 FP32
+# │      encoding; the weight value is an illustrative scenario input.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-import struct
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math, sci_latex
 
 class BitFlipWeight:
     """One exponent-bit flip in an FP32 weight."""
 
     # ┌── 1. LOAD (scenario input, illustrative) ───────────────────────────
-    weight = 0.042
-    flipped_bit = 30  # most significant exponent bit of the FP32 word
+    _s = Scenarios.Fp32WeightExponentFlip
+    weight = _s.value
+    flipped_bit = _s.flipped_bit  # most significant exponent bit of the FP32 word
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _bits = struct.unpack(">I", struct.pack(">f", weight))[0]
-    stored = struct.unpack(">f", struct.pack(">I", _bits))[0]
-    corrupted = struct.unpack(">f", struct.pack(">I", _bits ^ (1 << flipped_bit)))[0]
-    scale_log2 = round(math.log2(corrupted / stored))
+    stored = _s.stored
+    corrupted = _s.corrupted
+    scale_log2 = _s.scale_log2
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(math.isfinite(corrupted), "Flipped weight must stay finite (evades NaN/inf checks)")
@@ -290,9 +290,9 @@ When a model's error rate climbs without a service outage, an engineer must dete
 
 The subtype names matter less than the evidence each pillar produces, because the evidence is what an operator actually observes and what selects the defense family. Environmental shifts can produce statistical differences between production data and a reference population. Those differences motivate investigation, but an input-distribution monitor cannot detect every change in the relationship between inputs and outcomes. Monitoring, recalibration, and retraining address different parts of that problem; outcome evidence helps determine which response is warranted.
 
-Input-level attacks deliberately target model behavior through crafted inputs or poisoned training samples. Anomalous inputs can raise suspicion, but an effective attack need not expose a recognizable perturbation or statistical outlier. Adversarial training, certification, and input sanitization address different threat models. Authentication and access control constrain who can submit data and what actions a model-driven system may take; they do not establish that every permitted input will receive a correct prediction.
+Input-level attacks deliberately target model behavior through crafted inputs or poisoned training samples. Anomalous inputs can raise suspicion, but an effective attack need not expose a recognizable perturbation or statistical outlier. Adversarial training, certification, and input sanitization address different threat models.
 
-System-level faults originate in the hardware, code, frameworks, and deployment infrastructure that support ML systems: numerical instability, preprocessing bugs, race conditions and replica desynchronization, dependency mismatches, and hardware faults such as bit flips. Many produce explicit errors or outages, but a fault that leaves the service answering appears instead as changed model behavior that can pass for either of the other pillars. While @sec-robust-ai-diagnosing-the-masquerade-9f21 develops the diagnostic signals that separate those masquerades after the first two pillars have been treated, all three pillars share the same operational control loop of detection, degradation, and adaptation.
+System-level faults originate in the hardware, code, frameworks, and deployment infrastructure that support ML systems: numerical instability, preprocessing bugs, race conditions and replica desynchronization, dependency mismatches, and hardware faults such as bit flips. Many produce explicit errors or outages, but a fault that leaves the service answering appears instead as changed model behavior that can pass for either of the other pillars. @Sec-robust-ai-diagnosing-the-masquerade-9f21 develops the diagnostic signals that separate those masquerades after the first two pillars have been treated. All three pillars share the same operational control loop of detection, degradation, and adaptation.
 
 ::: {.column-margin .margin-pointer}
 ↩ The mechanics of hardware and software faults, and their detection and recovery, are established in @sec-fault-tolerance-reliability.
@@ -393,19 +393,13 @@ A vehicle perception model trained mostly on daytime images encounters unfamilia
 # │ Goal: Show that even a shift meant to be none at all costs every model.
 # │ Show: 212 ImageNet models (>= 55% val) all lose 7-14 points on
 # │       ImageNet-V2, median 12; the loss tracks accuracy linearly.
-# │ How: Gaps and a least-squares fit over Literature.Series.ImageNetTestbedShift.
+# │ How: Gaps and a least-squares fit over
+# │      data/imagenet_testbed_shift.csv, models above the val floor.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import statistics
 import numpy as np
-from mlsysim import Literature
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt, fmt_int
-
-def _evaluated(rows, floor):
-    return [r for r in rows if r["imagenet_v2"] is not None and r["val"] >= floor]
-
-def _gaps(rows):
-    return [r["val"] - r["imagenet_v2"] for r in rows]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ImageNetV2Shift:
@@ -413,23 +407,28 @@ class ImageNetV2Shift:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     val_floor = 55  # percent; excludes the testbed's partially trained and low-data checkpoints
-    rows = _evaluated(Literature.Series.ImageNetTestbedShift.entries, val_floor)
+    _all_rows = load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries
+    rows = (lambda rows=_all_rows, vf=val_floor: [r for r in rows if r["imagenet_v2"] is not None and r["val"] >= vf])()
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gaps = _gaps(rows)
-    fit_slope, fit_intercept = np.polyfit([r["val"] for r in rows], [r["imagenet_v2"] for r in rows], 1)
+    _gaps = [r["val"] - r["imagenet_v2"] for r in rows]
+    _gap_min = min(_gaps)
+    _gap_max = max(_gaps)
+    _gap_median = float(np.median(_gaps))
+    _model_count = len(rows)
+    fit_slope, fit_intercept = (float(x) for x in np.polyfit([r["val"] for r in rows], [r["imagenet_v2"] for r in rows], 1))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(min(gaps) > 0, "Prose says every model scores lower on ImageNet-V2.")
-    check(6 <= min(gaps) and max(gaps) <= 15 and 11 <= statistics.median(gaps) <= 13, "Prose quotes 7 to 14 points, median 12.")
-    check(len(rows) >= 200, "Prose quotes about 200 models.")
+    check(_gap_min > 0, "Prose says every model scores lower on ImageNet-V2.")
+    check(6 <= _gap_min and _gap_max <= 15 and 11 <= _gap_median <= 13, "Prose quotes 7 to 14 points, median 12.")
+    check(_model_count >= 200, "Prose quotes about 200 models.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_count_str = fmt_int(len(rows))
+    model_count_str = fmt_int(_model_count)
     val_floor_str = fmt_int(val_floor)
-    gap_min_str = fmt_int(round(min(gaps)))
-    gap_max_str = fmt_int(round(max(gaps)))
-    gap_median_str = fmt_int(round(statistics.median(gaps)))
+    gap_min_str = fmt_int(round(_gap_min))
+    gap_max_str = fmt_int(round(_gap_max))
+    gap_median_str = fmt_int(round(_gap_median))
 ```
 
 Even a shift that was designed to be no shift at all costs accuracy. @recht2019imagenet rebuilt the ImageNet validation set a decade after the original by following the original collection and labeling protocol, then evaluated existing models on the new images. In the larger testbed of @taori2020measuring, every one of the `{python} ImageNetV2Shift.model_count_str` models that reach at least `{python} ImageNetV2Shift.val_floor_str` percent on the original set scores lower on the new one, by `{python} ImageNetV2Shift.gap_min_str` to `{python} ImageNetV2Shift.gap_max_str` points with a median of `{python} ImageNetV2Shift.gap_median_str` (@fig-imagenet-v2-shift). The loss follows a nearly straight line, so a model that is better on the original set is better on the new one, yet no architecture, training recipe, or amount of extra data closes the gap. Whatever separates the two sets is not an obvious visual change, yet it is costly to every model. For a fleet, accuracy measured on held-out data from the training distribution is therefore an optimistic estimate of accuracy on the next population of inputs, not a prediction of it.
@@ -518,7 +517,9 @@ When a fleet-wide drift alert fires, an investigation must identify which featur
 
 The fleet convention bands of @sec-ml-operations-scale-drift-detection-793f map PSI values to negligible, moderate, and major shift. They are monitoring conventions, especially common in credit-scoring practice, rather than universal statistical guarantees, so a service validates them against its own binning, baseline, sample size, predictive features, and response cost, and reads PSI together with feature importance and downstream model-performance metrics [@yurdakul2020].
 
-Binning and the treatment of empty bins change what PSI can see, so the bin boundaries chosen on the reference sample must be reused for the comparison population. An empty bin is handled with a smoothing constant\index{Population stability index!smoothing constant} $\PopulationStabilitySmoothingConstant$ and renormalization; because that choice can materially change PSI on sparse bins, the monitoring configuration records it alongside the reference. Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when the input population moves from the stable band into the warning band and then the major-shift band. That movement triggers an escalation path that may lead to retraining after performance correlation. At week 41, the service approves and versions a new input reference after validating the changed operating population. The lower PSI thereafter compares traffic with that new reference, not the original one. Changing model weights alone would not reduce input PSI against a fixed reference, and the discontinuity does not establish improved predictions.
+Binning and the treatment of empty bins change what PSI can see, so the bin boundaries chosen on the reference sample must be reused for the comparison population. An empty bin is handled with a smoothing constant\index{Population stability index!smoothing constant} $\PopulationStabilitySmoothingConstant$ and renormalization; because that choice can materially change PSI on sparse bins, the monitoring configuration records it alongside the reference.
+
+Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when the input population moves from the stable band into the warning band and then the major-shift band. That movement triggers an escalation path that may lead to retraining after performance correlation. At week 41, the service approves and versions a new input reference after validating the changed operating population. The lower PSI thereafter compares traffic with that new reference, not the original one. Changing model weights alone would not reduce input PSI against a fixed reference, and the discontinuity does not establish improved predictions.
 
 ::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Following investigation and validation of the changed operating population, the service versions a new input reference at week 41. Values on either side of that reference change use different comparison populations; the drop is not evidence of model recovery." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones labeled stable, warning, and major shift. Drift crosses the escalation threshold at week 32. A gray band from week 32 to week 41 is labeled investigation and validation, and a discontinuity at week 41 is labeled approved reference change, after which PSI uses the new reference."}
 
@@ -702,25 +703,27 @@ PSI and KL divergence quantify how large a distributional change appears to be; 
 # │
 # │ Goal: Quantify the confidence of a distribution shift detection.
 # │ Show: p_value ≈ 0.001—inline in notebook result.
-# │ How: Z-score and two-sided normal-tail p-value for mean shift.
+# │ How: Scenarios.FeatureMeanShiftTest: z-score and two-sided normal-tail
+# │      p-value for the mean shift.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from statistics import NormalDist
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_math, fmt_percent
 
 class ShiftConfidence:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_samples = 1000
-    baseline_mean = 0.5
-    current_mean = 0.55  # A 5% shift in feature distribution
-    std_dev = 0.3
-    noise_prob_bound = 0.001  # significance bound reported in prose ("< 0.1 percent")
+    _s = Scenarios.FeatureMeanShiftTest
+    n_samples = _s.n_samples
+    baseline_mean = _s.reference_mean
+    current_mean = _s.observed_mean  # A 5% shift in feature distribution
+    std_dev = _s.feature_sd
+    noise_prob_bound = _s.significance_bound  # significance bound reported in prose ("< 0.1 percent")
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Z-score = (mean_diff) / (std/sqrt(n_samples))
-    mean_diff = current_mean - baseline_mean
-    std_error = std_dev / (n_samples**0.5)
-    z_score = mean_diff / std_error
-    p_value = 2 * (1 - NormalDist().cdf(abs(z_score)))
+    mean_diff = _s.mean_shift
+    std_error = _s.standard_error
+    z_score = _s.z_score
+    p_value = _s.p_value
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(z_score > 5, f"Z-score {z_score:.2f} too low for significant shift")
     check(p_value < noise_prob_bound, f"P-value {p_value:.2e} should be below {noise_prob_bound}")
@@ -798,33 +801,31 @@ Consider a fraud detection model serving an e-commerce platform with two key inp
 # │ Goal: Decompose the user-country PSI into per-bucket contributions.
 # │ Show: Per-country difference, log-ratio, and contribution columns, plus the
 # │       total PSI (0.065) and the "Other" bucket's share of it.
-# │ How: Scenario baseline/current shares are illustrative LOAD constants; the
-# │      difference (p-q), log-ratio ln(p/q), and contribution (p-q)*ln(p/q)
-# │      are derived per bucket and summed for the total PSI.
+# │ How: Scenarios.FraudCountryPsi holds the illustrative baseline/current
+# │      shares and the per-bucket contribution (p-q)*ln(p/q); the difference
+# │      (p-q) and log-ratio ln(p/q) are shown per bucket, summed for the total.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math
-
-def _psi_contrib(p, q):
-    """PSI bucket contribution (p - q) * ln(p / q)."""
-    return (p - q) * math.log(p / q)
 
 class CountryPSIDecomposition:
     # ┌── 1. LOAD (scenario distributions — illustrative, not registry specs) ──
     # (baseline share p_i, current share q_i) per country bucket.
-    usa = (0.45, 0.38)
-    uk = (0.20, 0.18)
-    germany = (0.15, 0.14)
-    france = (0.10, 0.12)
-    other = (0.10, 0.18)
+    _s = Scenarios.FraudCountryPsi
+    usa = _s.shares("USA")
+    uk = _s.shares("UK")
+    germany = _s.shares("Germany")
+    france = _s.shares("France")
+    other = _s.shares("Other")
 
     # ┌── 2. EXECUTE (per-bucket decomposition + total) ───────────────────────
-    usa_contrib = _psi_contrib(*usa)
-    uk_contrib = _psi_contrib(*uk)
-    germany_contrib = _psi_contrib(*germany)
-    france_contrib = _psi_contrib(*france)
-    other_contrib = _psi_contrib(*other)
+    usa_contrib = _s.term("USA")
+    uk_contrib = _s.term("UK")
+    germany_contrib = _s.term("Germany")
+    france_contrib = _s.term("France")
+    other_contrib = _s.term("Other")
     psi_total = usa_contrib + uk_contrib + germany_contrib + france_contrib + other_contrib
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
@@ -913,37 +914,39 @@ Summing the per-country contributions gives `{python} CountryPSIDecomposition.ps
 # │ Show: KL terms (0.167, 0.385), the KL result (0.052), and the KS critical
 # │       value (0.023) at the Bonferroni-corrected alpha = 0.01 used by the
 # │       service's Level 1 rule and @tbl-retraining-decision-matrix.
-# │ How: Scenario means/std-devs, KS statistic, and sample sizes are illustrative
-# │      LOAD constants; the closed-form Gaussian KL, the asymptotic coefficient
-# │      c(alpha) = sqrt(-ln(alpha/2)/2), and the KS critical value
-# │      c(alpha)*sqrt((n+m)/(n*m)) are derived.
+# │ How: Scenarios.FraudAmountDrift (illustrative log-dollar normals) gives the
+# │      closed-form Gaussian KL; Scenarios.FraudAmountKs (illustrative KS
+# │      statistic and sample sizes) gives c(alpha) = sqrt(-ln(alpha/2)/2) and
+# │      the KS critical value c(alpha)*sqrt((n+m)/(n*m)).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
+from mlsysim.physics import calc_ks_coefficient
 from mlsysim.fmt import check, fmt, fmt_math
 
 class ContinuousDriftAnalysis:
     # ┌── 1. LOAD (scenario log-dollar distributions + KS setup — illustrative) ─
-    mu_base = 4.2
-    sigma_base = 1.1
-    mu_curr = 4.5
-    sigma_curr = 1.3
-    ks_statistic = 0.089  # observed two-sample KS statistic D
-    n_base = 10_000  # baseline sample size
-    n_curr = 10_000  # current sample size
+    _kl = Scenarios.FraudAmountDrift
+    _ks = Scenarios.FraudAmountKs
+    mu_base = _kl.reference_mean
+    sigma_base = _kl.reference_sd
+    mu_curr = _kl.current_mean
+    sigma_curr = _kl.current_sd
+    ks_statistic = _ks.observed_statistic  # observed two-sample KS statistic D
+    n_base = _ks.n_reference  # baseline sample size
+    n_curr = _ks.n_current  # current sample size
     c_alpha_05 = Ops.Monitoring.KsTestCoefficient  # registry KS coefficient at alpha = 0.05
-    alpha_bonf = 0.01  # scenario assumption: Bonferroni-corrected level from the Level 1 rule
+    alpha_bonf = _ks.significance  # scenario assumption: Bonferroni-corrected level from the Level 1 rule
 
     # ┌── 2. EXECUTE (Gaussian KL closed form + KS critical value) ─────────────
-    kl_term1 = math.log(sigma_curr / sigma_base)
-    kl_numerator = sigma_base**2 + (mu_base - mu_curr) ** 2
-    kl_denominator = 2 * sigma_curr**2
-    kl_term2 = kl_numerator / kl_denominator
-    kl = kl_term1 + kl_term2 - 0.5
-    c_alpha_05_formula = math.sqrt(-math.log(0.05 / 2) / 2)
-    c_alpha = math.sqrt(-math.log(alpha_bonf / 2) / 2)  # ~1.63 at alpha = 0.01
-    ks_scale = math.sqrt((n_base + n_curr) / (n_base * n_curr))
-    ks_crit = c_alpha * ks_scale
+    kl_term1, kl_numerator, kl_denominator = _kl.kl_terms
+    kl_term2 = _kl.kl_ratio_term
+    kl = _kl.kl
+    c_alpha_05_formula = calc_ks_coefficient(0.05)
+    c_alpha = _ks.coefficient  # ~1.63 at alpha = 0.01
+    ks_scale = _ks.scale
+    ks_crit = _ks.critical_value
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
     check(0.0 < kl < 0.1, "Scenario KL should land in the moderate-drift band")
@@ -1333,8 +1336,9 @@ Adversarial example generation increases training time because each training ste
 # │
 # │ Goal: Expose an invalid clean-versus-attacked accuracy subtraction.
 # │ Show: A 26-point cross-condition gap that is not a clean-accuracy penalty.
-# │ How: Standard ResNet-50 clean accuracy from Literature.Series.ImageNetTestbedShift
-# │      (76.1%) against an assumed robust-model attacked accuracy (~50%).
+# │ How: Standard ResNet-50 clean
+# │      accuracy from data/imagenet_testbed_shift.csv (76.1%) against
+# │      an assumed robust-model attacked accuracy (~50%).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt
@@ -1344,12 +1348,10 @@ class RobustnessTaxAnalysis:
     """Quantify the utility-robustness trade-off."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models
+    from mlsysim import Models, load_series
 
     m = Models.Vision.ResNet50
-    from mlsysim import Literature
-
-    standard_clean_acc = next(r["val"] for r in Literature.Series.ImageNetTestbedShift.entries if r["model"] == "resnet50")
+    standard_clean_acc = next(r["val"] for r in load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries if r["model"] == "resnet50")
     robust_model_attacked_acc = 50.0  # scenario assumption: an adversarially trained ImageNet model at 4/255
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1391,19 +1393,22 @@ The robustness compute penalty (principle \ref{pri-robustness-compute-penalty}) 
 # │
 # │ Goal: Quantify the compute overhead of adversarial training.
 # │ Show: training_slowdown ≈ 8x—inline in notebook result.
-# │ How: total time = standard time + PGD steps × standard time.
+# │ How: Scenarios.PgdSevenTraining: total time = standard time + PGD steps ×
+# │      standard time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple
 
 class AdversarialPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    std_passes = 1
-    n_pgd_steps = 7  # Illustrative PGD-7 adversarial-training scenario
+    _s = Scenarios.PgdSevenTraining
+    std_passes = _s.update_passes
+    n_pgd_steps = _s.attack_passes  # Illustrative PGD-7 adversarial-training scenario
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Each training step requires generating an attack (7 forward/backward passes)
     # total steps per batch = 1 (std) + 7 (attack) = 8
-    slowdown = std_passes + n_pgd_steps
+    slowdown = _s.passes
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(slowdown == 8, f"Slowdown {slowdown} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1432,7 +1437,9 @@ For lower-risk components, external guardrails such as input filtering and outpu
 
 #### Certified defenses {#sec-robust-ai-certified-defenses}
 
-Adversarial training provides empirical resistance that must be tested against the deployment threat model. It can generalize beyond the examples generated during training, but attack evaluation alone does not prove invariance throughout an allowed perturbation set. **Certified robustness**\index{Certified robustness!definition} offers a mathematical guarantee\index{Certified robustness!mathematical guarantee}: for a given input $\ModelInput$ and radius $\AdversarialPerturbationBudget$, no perturbation $\|\AdversarialPerturbation\|_\PerturbationNormOrder< \AdversarialPerturbationBudget$ exists that changes the model's prediction. This certifies local prediction stability, not that the unchanged prediction is correct. The certified radius is a provable lower bound on the input-perturbation part of the robustness margin that compression and other efficiency changes must preserve. The guarantee formalizes the intuition that a robust model limits how quickly its outputs can change as its inputs change. The model's **Lipschitz constant**\index{Lipschitz constant!definition}[^fn-lipschitz-continuity-bound] bounds that rate, so a prediction cannot change within any radius over which the largest possible score change stays below its top-class margin. Computing or constraining a tight Lipschitz constant directly across a deep network is difficult because layer-by-layer norm bounds multiply across depth and quickly become too loose to certify useful radii. A widely used technique that avoids layerwise bound propagation on high-dimensional inputs like ImageNet is **randomized smoothing**\index{Randomized smoothing!definition}. Instead of classifying $\ModelInput$ directly, it classifies the smoothed function $\SmoothedClassifier(\ModelInput)$, defined as the most probable class predicted by the base classifier\index{Randomized smoothing!Gaussian smoothing} $\ModelPredictor$ under Gaussian noise: $\SmoothedClassifier(\ModelInput) = \operatorname{arg\,max}_\ClassIndex \Pr(\ModelPredictor(\ModelInput+\RandomizedSmoothingNoise) = \ClassIndex)$ where $\RandomizedSmoothingNoise \sim \GaussianDistribution(\ZeroVector, \SmoothingNoiseStandardDeviation^2 \IdentityMatrix)$. Because two Gaussian distributions centered at $\ModelInput$ and $\ModelInput+\AdversarialPerturbation$ overlap heavily whenever $\|\AdversarialPerturbation\|_2$ is small relative to the noise scale $\SmoothingNoiseStandardDeviation$, averaging the base classifier over Gaussian draws analytically bounds how fast class probabilities can shift with $\AdversarialPerturbation$, regardless of how sharp the underlying neural network is internally.
+Adversarial training provides empirical resistance that must be tested against the deployment threat model. It can generalize beyond the examples generated during training, but attack evaluation alone does not prove invariance throughout an allowed perturbation set. **Certified robustness**\index{Certified robustness!definition} offers a mathematical guarantee\index{Certified robustness!mathematical guarantee}: for a given input $\ModelInput$ and radius $\AdversarialPerturbationBudget$, no perturbation $\|\AdversarialPerturbation\|_\PerturbationNormOrder< \AdversarialPerturbationBudget$ exists that changes the model's prediction. This certifies local prediction stability, not that the unchanged prediction is correct. The certified radius is a provable lower bound on the input-perturbation part of the robustness margin that compression and other efficiency changes must preserve. The guarantee formalizes the intuition that a robust model limits how quickly its outputs can change as its inputs change. The model's **Lipschitz constant**\index{Lipschitz constant!definition}[^fn-lipschitz-continuity-bound] bounds that rate, so a prediction cannot change within any radius over which the largest possible score change stays below its top-class margin.
+
+Computing or constraining a tight Lipschitz constant directly across a deep network is difficult because layer-by-layer norm bounds multiply across depth and quickly become too loose to certify useful radii. A widely used technique that avoids layerwise bound propagation on high-dimensional inputs like ImageNet is **randomized smoothing**\index{Randomized smoothing!definition}. Instead of classifying $\ModelInput$ directly, it classifies the smoothed function $\SmoothedClassifier(\ModelInput)$, defined as the most probable class predicted by the base classifier\index{Randomized smoothing!Gaussian smoothing} $\ModelPredictor$ under Gaussian noise: $\SmoothedClassifier(\ModelInput) = \operatorname{arg\,max}_\ClassIndex \Pr(\ModelPredictor(\ModelInput+\RandomizedSmoothingNoise) = \ClassIndex)$ where $\RandomizedSmoothingNoise \sim \GaussianDistribution(\ZeroVector, \SmoothingNoiseStandardDeviation^2 \IdentityMatrix)$. Because two Gaussian distributions centered at $\ModelInput$ and $\ModelInput+\AdversarialPerturbation$ overlap heavily whenever $\|\AdversarialPerturbation\|_2$ is small relative to the noise scale $\SmoothingNoiseStandardDeviation$, averaging the base classifier over Gaussian draws analytically bounds how fast class probabilities can shift with $\AdversarialPerturbation$, regardless of how sharp the underlying neural network is internally.
 
 [^fn-lipschitz-continuity-bound]: **Lipschitz continuity**\index{Lipschitz continuity!robustness}: A mathematical property that bounds how much a function's output changes relative to its input change ($\lVert \ModelPredictor(\ModelInput) - \ModelPredictor(\AlternateModelInput) \rVert \le \LipschitzConstant\lVert \ModelInput- \AlternateModelInput\rVert$). A small Lipschitz constant $(\LipschitzConstant)$ limits score movement but does not by itself prevent a label flip. Reducing $\LipschitzConstant$ can enlarge the certified radius\index{Lipschitz constant!certified radius trade-off}, though enforcing a low constant can trade away clean-data accuracy and add training cost.
 
@@ -1446,10 +1453,10 @@ Adversarial training provides empirical resistance that must be tested against t
 # │
 # │ Goal:    Compute the binary special-case certified radius.
 # │ Show:    p_A=0.999, sigma=0.5 gives R≈1.5.
-# │ How:     R = sigma * Phi^{-1}(p_A).
+# │ How:     Scenarios.SmoothingRadiusCifar10: R = sigma * Phi^{-1}(p_A).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from statistics import NormalDist
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1457,13 +1464,12 @@ class RandomizedSmoothingRadius:
     """Compute a binary randomized-smoothing radius."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_top = 0.999
-    sigma = 0.5
+    _s = Scenarios.SmoothingRadiusCifar10
+    p_top = _s.top_class_probability
+    sigma = _s.noise_sd
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from statistics import NormalDist
-
-    radius = sigma * NormalDist().inv_cdf(p_top)
+    radius = _s.radius
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1480,7 +1486,9 @@ class RandomizedSmoothingRadius:
 
 @cohen2019certified proved a tight multiclass bound\index{Randomized smoothing!certified radius bound} for the certified radius $\CertifiedRadius$ using a lower bound on the top-class probability $\SmoothedTopClassProbability$ and an upper bound on the runner-up probability $\SmoothedRunnerUpProbability$: $\CertifiedRadius= \frac{\SmoothingNoiseStandardDeviation}{2}\left(\StandardNormalCumulativeDistribution^{-1}(\SmoothedTopClassProbability) - \StandardNormalCumulativeDistribution^{-1}(\SmoothedRunnerUpProbability)\right)$, where $\StandardNormalCumulativeDistribution^{-1}$ is the inverse standard normal CDF. In the binary special case, where $\SmoothedRunnerUpProbability= 1 - \SmoothedTopClassProbability$, this reduces to $\CertifiedRadius= \SmoothingNoiseStandardDeviation\StandardNormalCumulativeDistribution^{-1}(\SmoothedTopClassProbability)$. This Gaussian-smoothing bound certifies a Euclidean ($\ell_2$) perturbation radius, measured in the same units as the input to which the noise is added; it does not automatically certify the other norms used in attack benchmarks. If a binary decision has top-class probability $\SmoothedTopClassProbability$ = `{python} RandomizedSmoothingRadius.rs_p_top_str` under noise $\SmoothingNoiseStandardDeviation$ = `{python} RandomizedSmoothingRadius.rs_sigma_str`, the simplified radius is approximately `{python} RandomizedSmoothingRadius.rs_radius_str` in those input units. For an image scaled to $[0,1]$, that radius bounds the Euclidean length of the whole perturbation vector. It is not directly comparable to the per-coordinate $\ell_\infty$ budget of the robustness-penalty comparison. The radius and that budget differ because an $\ell_\infty$ perturbation of size $\AdversarialPerturbationBudget$ spread over $\InputCoordinateCount$ pixels can have Euclidean length up to $\AdversarialPerturbationBudget\sqrt{\InputCoordinateCount}$, so a per-pixel budget that looks tiny can correspond to a long Euclidean vector on a high-dimensional image.
 
-The multiclass case rarely estimates the runner-up probability separately. Because the class probabilities sum to one, no competing class can exceed $1 - \SmoothedTopClassProbability$, so a lower bound on $\SmoothedTopClassProbability$ alone also bounds every competitor. Estimating that lower bound from samples turns certification into a statistical estimation problem and adds a confidence level to the certificate; an observed class frequency alone is not a certified probability bound. Certification also carries accuracy and compute trade-offs. On ImageNet, the same work reports nontrivial certified accuracy for randomized smoothing, including certification at radius 0.5, but certification requires sampling many noise vectors per inference to estimate class probabilities with sufficient confidence. The increase in inference latency\index{Randomized smoothing!inference latency overhead} makes the sample budget a deployment constraint. Two designs keep certification outside the tight serving budget. Asynchronous auditing certifies a sampled fraction of served requests offline, so the fleet learns how often its answers were certifiable without delaying any of them. A selective safety interlock certifies only the requests routed to a safety-critical action, such as a braking decision, and lets the remaining traffic take the uncertified path.
+The multiclass case rarely estimates the runner-up probability separately. Because the class probabilities sum to one, no competing class can exceed $1 - \SmoothedTopClassProbability$, so a lower bound on $\SmoothedTopClassProbability$ alone also bounds every competitor. Estimating that lower bound from samples turns certification into a statistical estimation problem and adds a confidence level to the certificate; an observed class frequency alone is not a certified probability bound.
+
+Certification also carries accuracy and compute trade-offs. On ImageNet, the same work reports nontrivial certified accuracy for randomized smoothing, including certification at radius 0.5, but certification requires sampling many noise vectors per inference to estimate class probabilities with sufficient confidence. The increase in inference latency\index{Randomized smoothing!inference latency overhead} makes the sample budget a deployment constraint. Two designs keep certification outside the tight serving budget. Asynchronous auditing certifies a sampled fraction of served requests offline, so the fleet learns how often its answers were certifiable without delaying any of them. A selective safety interlock certifies only the requests routed to a safety-critical action, such as a braking decision, and lets the remaining traffic take the uncertified path.
 
 Certified defenses cover one part of the adversarial workflow. Production systems still need detection paths for suspicious inputs, mitigation strategies that change training or serving behavior, and evaluation procedures that verify which threat models remain covered.
 
@@ -1520,34 +1528,27 @@ Empirical attack evaluation must be adaptive to the defense\index{Adaptive evalu
 # │       under one standardized attack.
 # │ Show: Best AutoAttack accuracy 44% (2018) -> 75% (2024) at clean ~94%;
 # │       four published defenses fall to ~0% under the standardized attack.
-# │ How: Year maxima and filters over Literature.Series.RobustBenchCIFAR10Linf.
+# │ How: Year maxima and filters over
+# │      data/robustbench_cifar10_linf.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
-
-def _dated(rows):
-    return [r for r in rows if r["year"] and r["unreliable"] != "True"]
-
-def _best(rows, year):
-    return max((r for r in rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
-
-def _broken(rows, floor):
-    return [r for r in rows if r["autoattack_acc"] < floor]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RobustBenchProgress:
     """Best robust accuracy by year and defenses broken by AutoAttack."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = _dated(Literature.Series.RobustBenchCIFAR10Linf.entries)
+    _all_rows = load_series("vol2/14_robust_ai/data/robustbench_cifar10_linf.csv").entries
+    rows = [r for r in _all_rows if r["year"] and r["unreliable"] not in (True, "True")]
     first_year, last_year = 2018, 2024
     broken_floor = 5.0  # percent AutoAttack accuracy; below this a defense provides no robustness
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    best_first = _best(rows, first_year)
-    best_last = _best(rows, last_year)
-    broken = _broken(rows, broken_floor)
+    best_first = (lambda rows=rows, y0=first_year: max((r for r in rows if int(r["year"]) == y0), key=lambda r: r["autoattack_acc"]))()
+    best_last = (lambda rows=rows, y1=last_year: max((r for r in rows if int(r["year"]) == y1), key=lambda r: r["autoattack_acc"]))()
+    broken = (lambda rows=rows, bf=broken_floor: [r for r in rows if r["autoattack_acc"] < bf])()
     entry_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1893,7 +1894,9 @@ The evaluation discipline of @tbl-robust-ai-evaluation-matrix carries over with 
 
 Detecting a hallucination on an individual request is the per-request competence problem of @sec-robust-ai-selective-prediction with an open-ended output. Token entropy\index{Hallucination!token entropy limitations} and log-probability can expose instability in a generation, but neither is a factuality score. A model can assign high probability to a false statement learned from its data, or low probability to a correct but rare statement. Production routing must therefore calibrate these signals against task-specific errors and combine them with evidence checks, retrieval support, or external verification.
 
-The self-consistency\index{Self-consistency!definition} technique samples multiple reasoning paths\index{Self-consistency!reasoning path sampling} or answers for the same query. Disagreement supplies an instability signal that can route the request for review; agreement supplies weaker evidence because correlated samples can repeat the same misconception or unsupported claim. Sequence-level entropy has the same limitation: it can serve as a calibrated routing feature for a named task, but it does not transform uncertainty into truthfulness. The signal also has a price. Each additional sample repeats the decode phase for that request, so drawing $\SelfConsistencySampleCount$ samples multiplies its decode work roughly $\SelfConsistencySampleCount$-fold; only the prompt's prefill can be shared, when the serving system reuses the prompt's cached key-value state. Like the noise samples of randomized smoothing, this cost lands on the compute term of every request it covers, and the same remedy applies. The expensive signal should be spent on the requests whose cheap signals already indicate uncertainty rather than on all traffic. The operational contract must measure error conditional on the routing score and provision the refusal, retrieval, tool, or human path that receives flagged generations.
+The self-consistency\index{Self-consistency!definition} technique samples multiple reasoning paths\index{Self-consistency!reasoning path sampling} or answers for the same query. Disagreement supplies an instability signal that can route the request for review; agreement supplies weaker evidence because correlated samples can repeat the same misconception or unsupported claim. Sequence-level entropy has the same limitation: it can serve as a calibrated routing feature for a named task, but it does not transform uncertainty into truthfulness.
+
+The signal also has a price. Each additional sample repeats the decode phase for that request, so drawing $\SelfConsistencySampleCount$ samples multiplies its decode work roughly $\SelfConsistencySampleCount$-fold; only the prompt's prefill can be shared, when the serving system reuses the prompt's cached key-value state. Like the noise samples of randomized smoothing, this cost lands on the compute term of every request it covers, and the same remedy applies. The expensive signal should be spent on the requests whose cheap signals already indicate uncertainty rather than on all traffic. The operational contract must measure error conditional on the routing score and provision the refusal, retrieval, tool, or human path that receives flagged generations.
 
 ::: {.column-margin .margin-pointer}
 ↩ Reuse of a shared prompt's cached key-value state across requests is established in @sec-inference-scale-prefix-caching-8e8b.
@@ -1907,7 +1910,9 @@ Language interfaces also carry the input-level attacker into text. Prompt inject
 ↩ Prompt injection as a failure of the boundary between control and data is established in @sec-security-privacy-llmspecific-threat-vectors-65f2.
 :::
 
-A common deployment pattern adds **output guardrails**\index{Output guardrail!definition}, lightweight classifiers that scan generated text for policy violations\index{Output guardrail!policy enforcement} or toxicity before the response returns to the user. A guardrail threshold trades the same two quantities as a selective-prediction threshold. Each false positive refuses or escalates a legitimate response, so the false-positive rate multiplied by the legitimate-request rate estimates false refusals or escalations; each false negative is residual risk that reaches the user. Total diverted load also includes correctly flagged harmful responses. The arrival rate at each refusal, retrieval, or human path is the incoming request rate multiplied by the fraction routed to that path under the policy, counting both true and false flags. Choosing the threshold from a curve measured on representative traffic, rather than from the classifier's default, allows the team to compare that load with the path's capacity. The guardrail also adds a model inference to every response, so its latency counts against the serving deadline. Because a guardrail is itself a model with its own decision boundary, it carries the same obligation as any other defense and must pass the adaptive evaluation of @sec-robust-ai-evaluation-testing-4b54 against an attacker who knows it is there. Every routing signal for generative models, from token entropy to a guardrail score, is also computed by the same serving system that the remaining pillar can corrupt.
+A common deployment pattern adds **output guardrails**\index{Output guardrail!definition}, lightweight classifiers that scan generated text for policy violations\index{Output guardrail!policy enforcement} or toxicity before the response returns to the user. A guardrail threshold trades the same two quantities as a selective-prediction threshold. Each false positive refuses or escalates a legitimate response, so the false-positive rate multiplied by the legitimate-request rate estimates false refusals or escalations; each false negative is residual risk that reaches the user. Total diverted load also includes correctly flagged harmful responses. The arrival rate at each refusal, retrieval, or human path is the incoming request rate multiplied by the fraction routed to that path under the policy, counting both true and false flags. Choosing the threshold from a curve measured on representative traffic, rather than from the classifier's default, allows the team to compare that load with the path's capacity. The guardrail also adds a model inference to every response, so its latency counts against the serving deadline. Because a guardrail is itself a model with its own decision boundary, it carries the same obligation as any other defense and must pass the adaptive evaluation of @sec-robust-ai-evaluation-testing-4b54 against an attacker who knows it is there.
+
+Every routing signal for generative models, from token entropy to a guardrail score, is also computed by the same serving system that the remaining pillar can corrupt.
 
 ## System-Level Faults {#sec-robust-ai-diagnosing-the-masquerade-9f21}
 

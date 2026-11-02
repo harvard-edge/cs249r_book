@@ -158,3 +158,8 @@ def bar_compare(labels, values, *, title=None, ylabel=None, figsize=(BODY_FIGSIZ
             color=colors["primary"],
         )
     return finalize_web_figure(fig), ax
+
+
+from ..core.series_loader import LocalSeries, load_series  # noqa: E402,F401
+
+

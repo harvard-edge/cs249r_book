@@ -4,6 +4,243 @@ Opt-in Diagram / Explore views inside an existing numbered Quarto figure.
 The static figure, caption, alt text, numbering, and cross-reference anchor
 remain owned by the chapter. No post-render HTML patch is required.
 
+## Current original-art implementation
+
+The accepted convolution prototype establishes the reference presentation:
+animate the recognizable source diagram, put values in its objects, explain
+one causal action per step, and pause after a short guided example. Numerical
+details support the drawing rather than replace it. Static Diagram remains the
+default and the complete print/no-JavaScript fallback.
+
+`mechanisms/implementations.json` selects the original-art factories for
+computation, memory, communication, coordination, and physical action across
+the four volumes. The current manifest contains 100 original-art implementations:
+86 newly authored modules and 14 retained implementations. The other 637
+cataloged figures remain static. There is no animation quota. The convolution
+prototype retains its separate accepted-prototype label; the remaining reviewed
+implementations use hash-bound records in the original-art catalog.
+Enrollment alone is not acceptance. Source, artwork, module, shared-runtime,
+and timing changes invalidate the relevant current review evidence.
+Historical tests below apply only to their recorded snapshots.
+
+The selected set includes two native original-art factories: asynchronous
+host–accelerator timing and the two-link arm’s singularity comparison. These
+factories use their reviewed controller and calculation exports directly;
+unused generic mechanism scenes are not required. Native registration validates
+source, artwork, and runtime freshness. Independent calculation and rendered
+production reviews remain separate requirements. The arm’s generated data is
+packaged as its existing supported data bundle; shared browser code is unchanged.
+
+`original-player.js` provides shared stepping, playback, visible keyboard hints,
+and expanded inspection for the new factories. Convolution retains its reviewed
+guided-scan controller. Both read build-time timing from the single
+`books/config/shared/html/figure-explore.yml`, imported by all HTML volumes.
+`movement-ms` controls illustrative movement; `reading-pause-ms` controls the
+pause between actions during Play. Neither represents machine execution time.
+Reduced-motion navigation commits the next state immediately, without an
+intermediate animation clock that a visibility pause could interrupt.
+Invalid or missing settings leave the static figure available.
+
+Readers can temporarily choose **0.5×, 1×, 1.5×, or 2×** in the visible Speed
+control, or use **− / +** while the figure has focus. The initial rate is 1×;
+the YAML durations remain the defaults. This per-figure override scales movement
+and automatic reading pauses, preserves position when changed, and does not
+resume a paused action. Restart preserves the chosen rate; reloading starts at
+1×. N/P still advances or reverses one step. Speed never changes the modeled
+quantities or the ordered endpoints.
+
+**Expand** opens the same live component in a full-window dialog. Opening and
+closing pause playback, retain the current step and speed, and preserve the
+explanation and controls. Close remains visible while scrolling; Escape returns
+to the chapter and restores focus. Print and EPUB continue to use Diagram.
+
+The shared layout keeps the sequence menu and current explanation above the
+playback controls, with the controls and visible N/P/K/R hints beside the
+changing diagram. Only the compact toolbar and step cue remain sticky. The
+native **Example and assumptions** disclosure retains the complete case
+description without pushing the diagram below the controls. Keep essential
+case identity visible in the diagram or its live readout; for example, a
+single-query worked case must not appear to execute a complete matrix.
+Module-specific case selectors belong before the shared toolbar. Diagram-view
+selectors may remain with the artwork.
+
+While an action is moving or paused, stored values and completed results must
+still describe the last committed state. Instructions may describe the next
+endpoint only when they clearly identify it as pending. Keep read-only operand
+selection distinct from a completed accumulation, allocation, or publication.
+
+The compiler binds each replacement to the existing source and artwork hashes,
+its runtime assets, data bundle where present, and the shared player. The browser
+passes the verified original SVG to the factory and isolates inline SVG IDs so
+multiple figures cannot reuse each other's glyphs or paint servers.
+
+### Full-chapter author fixtures (QA only)
+
+Build a candidate inside its original chapter without enrolling it or copying
+an entire rendered site:
+
+```sh
+python3 binder/tools/scripts/build_original_figure_fixture.py \
+  --entry books/_prototypes/vol1-web-animations/original-v1-kv-cache-growth/entry.json
+```
+
+The JSON result contains the fixture path and URL. Serve `books` on port 8882,
+or pass `--base-url` for the existing local books server. `--art-index` selects
+an artwork index (default `/tmp/figures-animation-art-current/index.json`).
+`--output` selects an ignored directory under `books/_build`; the default is
+`books/_build/original-rollout-fixtures/<entry-directory>/index.html`.
+
+The helper preserves the full chapter and its static figure, disables all old
+Explore enrollments, and mounts only the candidate factory. Existing relative
+styles and images resolve through one ignored source-site symlink shared by
+all fixtures from that site. Current shared-player and factory assets load from
+the extension. The production `bundle` loads first. Additional data modules may be declared as `data_script` or
+`data_scripts` in the entry's `implementation`, or supplied with repeatable
+`--data-script FILE.js`; they load before the factory. Repeated filenames are loaded once, in first-declared order.
+
+Explore opens paused. `window.fixturePlayer` and `window.fixtureRoot` expose
+the candidate controller and root for local checks; `window.fixtureError`
+records initialization failure. Diagram, print, and failed initialization retain
+the original static figure and caption. The fixture uses the loader's current
+SVG fragment-isolation algorithm and the same PNG wrapper coordinates and
+metadata, but deliberately bypasses production freshness/enrollment checks.
+It is author QA, not an integrated build or review acceptance. Production
+validation must still use a freshly compiled chapter with the real loader.
+
+### Verified PNG artwork for original-art factories
+
+`context.verifiedArtwork` is also available for registered PNG artwork. The
+controller first verifies the exact fetched bytes against the registered SHA-1,
+checks the PNG header, and decodes those same bytes. It returns an SVG wrapper
+with `viewBox="0 0 W H"` and matching `width` and `height` in intrinsic PNG pixels.
+The wrapper has `data-mlsys-artwork-kind="png"`,
+`data-mlsys-artwork-width="W"`, and `data-mlsys-artwork-height="H"`. Its sole initial
+child is an SVG `image` at `(0, 0)`, sized `W × H`, whose `href` embeds the verified
+bytes as a PNG data URL. It performs no second artwork network request.
+
+A factory may clone this SVG and add authored overlays in its original pixel
+coordinates. The raster itself contains no SVG objects to select or move;
+inspect the original PNG before defining any regions or alternative interactive
+layout. Keep the static diagram unchanged. Do not replace the source drawing
+with a generic mechanism diagram. SVG artwork continues to arrive as its
+original parsed SVG with fragment IDs namespaced before the factory runs.
+
+If optional `data-mlsys-art-width` or `data-mlsys-art-height` attributes are supplied,
+they must match the PNG header and decoded dimensions. Hash, fetch, dimension,
+decode, or source-URL drift failures prevent the factory from running and leave
+the original static figure and caption intact. No controller or player API
+changes are required; factories that do not use `verifiedArtwork` are unaffected.
+
+Before extending the manifest, independently review the source artwork and
+surrounding section, compute added values in a reproducible calculation, test
+the mechanism's invariants, and inspect actual chapter renders on desktop and
+phone in both themes. An independent reviewer checks technical meaning and
+learner readability; this does not constitute student testing. A source-art
+mapping must preserve the illustrated workload and spatial relationships.
+Alternative toy cases must remain explicit supporting examples.
+
+The complete four-volume HTML baseline is
+`books/_build/parallel/20261020-161134-58948`; all four genuine full-volume jobs
+passed. Final Vol1 chapter delivery uses the genuine follow-up run
+`books/_build/parallel/20261020-164427-53372` after the convolution playback-label and im2col phone-layout corrections.
+Vol2–4 retain their unchanged baseline outputs. The actual review routes name
+these runs explicitly; byte-identical copies are preserved in the permanent
+books build directory. All 100 selected figures are enrolled exactly
+once in their owning chapters, with matching packaged controller, data, source,
+and artwork hashes. The fresh canonical artwork index covers all 737 figures;
+the other 637 figures retain their static presentation.
+
+The final volume audits read the selected source sections and captions against
+their drawings and controllers. They check the illustrated workload, causal
+order, ownership and lifetime rules, and the distinction between pending work
+and a committed result. Bounded narration fixes keep in-transit operations
+separate from stored values. Reproducible mechanism diagnostics check the
+reported finite examples and invariants; unchanged mathematical models retain
+their earlier numerical scope rather than receiving a new blanket arithmetic
+approval. Earlier focused quantization refinements are included in this full
+build.
+
+The 86 newer modules have current technical and learner-view role records.
+Each records the relevant aspect of the final volume agent audit, the current
+artifact fingerprint, finite rendered coverage, and preserved prior review
+history. Volume agents review both technical and learner-view aspects; the
+prior independent role reviews remain a separate part of the evidence. The
+original-art catalog binds all 100 reviewed
+implementations to source, artwork, runtime, and actual owning chapter HTML;
+stale records return to awaiting review.
+
+Fresh controls checks cover every implementation in Chromium and WebKit, on
+desktop and phone, in both themes: 800 passing profiles against these final per-volume outputs.
+They verify speed choices, paused diagram identity, scoped shortcuts, restart,
+full-window bounds, sticky controls, and Escape focus restoration. No UI
+profile is inherited from an earlier build. Mechanism-specific endpoint and
+progressed-pause captures complement this controls sweep; each volume report
+states its finite cases and limitations. These checks do not prove continuous
+correctness at every instant or replace numerical diagnostics.
+
+The shared player and timing contract are unchanged in this pass. The current
+full build includes the earlier convolution expansion restoration, FSDP resize
+scheduling, and paused HTML-value geometry corrections for tensor layout,
+block-sparse GEMM, and im2col.
+
+A separate WebKit phone orientation/repeated-expansion stress trace can still
+emit a ResizeObserver delivery warning. The warning also occurs with the prior
+tensor and im2col controllers; equivalent prior-controller reproduction was not
+established for block-sparse GEMM. This stress limitation remains recorded.
+The ordinary packaged controls profiles pass without page errors.
+
+Chromium and WebKit reports record endpoint traversal, local SVG references,
+keyboard navigation, and static print fallback in desktop/narrow light/dark
+profiles. These finite browser checks do not establish numerical validity or
+continuous correctness at every instant. Technical role reviews, reproducible
+calculations, and mechanism-specific invariants remain separate evidence.
+
+Static output verification covers 14 representative figures across five
+chapters in PDF and EPUB. It is distinct from the complete four-volume HTML
+build and does not assert a fresh four-volume PDF/EPUB review. Existing
+cross-reference and MathML conversion warnings remain in the build logs;
+successful outputs do not establish full-book publication readiness.
+
+The evidence is independent agent and browser review, not actual student
+participation. No human students were recruited and no learning gains were
+measured. Each record retains its reviewed scope and limitations.
+
+Recheck the shared controller and packaged chapter endpoints with:
+
+```sh
+python3 binder/tools/scripts/check_original_player.py
+python3 binder/tools/scripts/check_original_player_speed.py
+python3 binder/tools/scripts/check_original_figures.py --build-root books/_build/parallel/RUN
+python3 binder/tools/scripts/check_original_convolution.py --url CHAPTER_URL --engine webkit
+```
+
+The endpoint checker opens the targeted Explore view without autoplay, visits
+every state, checks local SVG references, keyboard navigation, narrow layouts,
+and browser-print fallback. Figure-specific checks also verify numerical,
+ownership, and evidence invariants. These checks cover the rebuilt chapters;
+they do not assert a new full-volume PDF or EPUB build.
+
+The memory lessons distinguish mappings from payload copies and allocation
+from initialization. KV paging preserves other requests while E resolves its
+scattered blocks and releases them after its last consumer. Copy-on-write
+reserves a private tail, copies initialized entries, changes only B's table,
+then writes the new position. FSDP adds a fixed current-residency view beside
+the original phase history, keeps saved activations through parameter release,
+and separates backward-state release from gradient reduction. Capture
+buffers compare alternative storage paths and preserve converted pages B when
+capture pages A become reusable. Future source panels and phase columns are
+reference views, not additional simultaneous allocations.
+
+Activation checkpointing shows forward replay from retained checkpoints and
+releases each reconstructed activation after its backward consumer finishes.
+Checkpoint staging distinguishes an immutable captured generation from live
+training state and publishes the restore manifest only after durable writes
+and verification. Prefix invalidation preserves token identity while showing
+that the same trailing token needs new derived KV state after an earlier
+change. Intersample overshoot integrates the original acceleration profile
+along the original velocity curves; its normalized example changes the
+endpoint reserve rather than the acceleration waveform.
+
 ## Selection: changing state must teach something
 
 ### Bring the original diagram to life
@@ -21,8 +258,9 @@ Keep one short explanation beside the action. Make numerical derivations an
 optional inspection layer attached to the current operation. A separate arithmetic
 worksheet is useful supplementary material, but it does not substitute for an
 animated version of the source diagram. The Diagram view remains complete and
-unchanged for print. The diagram-life review covers all 16 retained mechanisms;
-its proposed revisions are plans, not implemented coverage.
+unchanged for print. The older diagram-life review describes a historical
+16-lesson snapshot and its proposed revisions. It is planning history, not the
+current implementation roster or current production acceptance evidence.
 
 Keep a figure static unless interaction makes its mechanism easier to understand.
 An Explore view earns its place when a reader can follow an actual change in
@@ -40,17 +278,17 @@ queueing, failures, or another relevant state actually changes.
 Selection requires four answers:
 
 1. What precise systems question does the figure teach?
-2. What changes visibly, and how does the state demonstrate cause and effect?
-3. What can the reader learn by stepping or varying a parameter that the static
+1. What changes visibly, and how does the state demonstrate cause and effect?
+1. What can the reader learn by stepping or varying a parameter that the static
    figure and prose do not already convey as clearly?
-4. Does that learning value justify the controls and added visual complexity?
+1. Does that learning value justify the controls and added visual complexity?
 
 Preserve the original technical meaning, labels, assumptions, palette, and
 caption; the web geometry may change. State any worked-case simplification. Reading-time playback must not
 imply measured machine latency. Do not invent counters or hardware effects to
 make a conceptual diagram appear dynamic. There is no animation quota.
 
-## Learner-centered pilot iteration
+## Historical learner-centered pilot iteration
 
 Three simulated learner-perspective reviewers examined convolution, quantized
 arithmetic, and KV paging. No students were recruited, and no learning gains
@@ -85,7 +323,10 @@ understanding or learning gains.
 The final catalog resolves 707 chapter anchors and exactly 16 Explore markers,
 with 691 static entries and clean desktop-light/narrow-dark layouts.
 
-## Selective rollout
+## Historical selective rollout
+
+The counts, builds, and tests in this section describe the earlier selective
+rollout. They do not replace the current 100-implementation scope above.
 
 All 674 highlight-only players have been withdrawn. Two of their figures now
 have substantive convolution and quantization lessons; the other 672 return to
@@ -215,20 +456,20 @@ only an HTML enrollment attribute; figure content and caption AST are unchanged.
 
 1. Author its manifest in `lessons/`, then compile the exact figure binding.
    Specialized factories also declare their script and stylesheet there.
-2. Supply a factory under `window.MLSysFigureLessons[lessonName]`. It receives
+1. Supply a factory under `window.MLSysFigureLessons[lessonName]`. It receives
    an empty, uniquely identified, initially detached Explore panel. It builds
    scoped semantic controls/diagram and returns `{pause, destroy}`.
-3. `pause()` must stop timers and interpolation without resetting the state.
+1. `pause()` must stop timers and interpolation without resetting the state.
    `destroy()` removes lesson listeners/observers and releases resources.
-4. Do not initialize tabs or change the original figure/caption inside a lesson.
+1. Do not initialize tabs or change the original figure/caption inside a lesson.
    The shared controller mounts transactionally and handles view switching.
-5. A lesson must pause on document hiding and leaving the viewport; it must
+1. A lesson must pause on document hiding and leaving the viewport; it must
    never autoplay on initialization, view activation, or theme changes.
-6. Derive narration, highlights, equations, and counters from one state. Expose
+1. Derive narration, highlights, equations, and counters from one state. Expose
    changing quantities in readable text, not only color or movement.
-7. Scope classes and DOM queries. Inherit chapter typography and theme surfaces.
+1. Scope classes and DOM queries. Inherit chapter typography and theme surfaces.
    Preserve the original composition and existing color roles.
-8. Add only declared toy data or chapter-owned numerical exports. Real specs
+1. Add only declared toy data or chapter-owned numerical exports. Real specs
    and calculations continue to use the book's MLSysIM/LEGO data sources.
 
 The dependency manager emits shared assets once per page, and the browser

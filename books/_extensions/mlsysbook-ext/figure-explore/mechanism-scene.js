@@ -54,6 +54,11 @@
   window.MLSysFigureLessons["mechanism-scene"] = async (root, context = {}) => {
     const outer = context.outer,
       key = outer?.dataset.mlsysExploreKey;
+    const movementMs = Number(outer?.dataset.mlsysMovementMs),
+      readingPauseMs = Number(outer?.dataset.mlsysReadingPauseMs);
+    if (!Number.isInteger(movementMs) || movementMs < 1 || movementMs > 60000 ||
+        !Number.isInteger(readingPauseMs) || readingPauseMs < 0 || readingPauseMs > 60000)
+      throw new Error("Missing or invalid shared playback timing.");
     const envelope = window.MLSysMechanismLessons?.[key],
       enrolled = outer?.dataset.mlsysLessonSha1;
     if (
@@ -148,13 +153,12 @@
       caseLabel.append(caseMenu);
       selectors.append(caseLabel);
     }
-    const shortcut = node("details", "mechanism-shortcuts");
+    const shortcut = node("div", "mechanism-shortcuts");
     shortcut.append(
-      node("summary", "", "Keyboard controls"),
       node(
         "p",
         "",
-        "N Next · P Previous · K Play/Pause · R Restart. Next performs one action, then pauses.",
+        "Keyboard (focus this animation): N Next · P Back · K Play/Pause · R Restart. Next performs one action, then pauses.",
       ),
     );
     const action = node("div", "mechanism-action"),
@@ -182,8 +186,8 @@
       title,
       scope,
       controls,
-      selectors,
       shortcut,
+      selectors,
       action,
       scene,
       result,
@@ -1340,7 +1344,7 @@
     }
     function schedule() {
       if (!autoplay || paused || index === steps.length - 1) return;
-      holdRemaining = holdRemaining || 3500;
+      holdRemaining = holdRemaining || readingPauseMs;
       holdStarted = performance.now();
       holdTimer = setTimeout(() => {
         holdTimer = null;
@@ -1921,7 +1925,7 @@
       autoplay = continuous;
       const after = steps[index].snapshot,
         t = steps[index].transition,
-        duration = media.matches ? 0 : t.duration || 900,
+        duration = media.matches ? 0 : movementMs,
         version = ++epoch;
       updateDataset();
       result.textContent =

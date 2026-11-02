@@ -1,3 +1,4 @@
+from mlsysim.core.series_loader import load_series
 """Published scaling-law fits and landmark-run durations stay self-consistent.
 
 Added 2026-10-15 with the Kaplan et al. (2020) joint fits, the Hoffmann et al.
@@ -87,10 +88,46 @@ def test_palm_training_days_equal_sum_of_phases():
 
 
 def test_epoch_compute_history_joins_without_overlap():
-    pre = Literature.Series.NotableModelComputePre2012.entries
-    post = Literature.Series.NotableModelTrainingRuns.entries
+    pre = load_series("vol2/01_introduction/data/notable_model_compute_pre2012.csv").entries
+    post = load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries
     assert len(pre) == 72
     assert all(e["date"] < "2012-01-01" for e in pre)
     assert all(e["date"] >= "2012-01-01" for e in post)
     assert all(e["training_compute_flop"] and e["training_compute_flop"] > 0 for e in pre)
     assert not {e["model"] for e in pre} & {e["model"] for e in post}
+
+
+def test_robot_trajectory_series_agrees_with_scalar_registries():
+    from mlsysim import viz
+
+    series = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
+    assert any(c.startswith("# Source:") for c in series.provenance_comments)
+    traj = {r["dataset"]: r for r in series.entries}
+    oxe_total = sum(r["episodes"] for r in load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries if r["episodes"])
+
+    assert all("arXiv:" in str(r["source"]) for r in series.entries)
+
+
+def test_models_scale_by_domain_agrees_with_vla_and_token_series():
+    from mlsysim import viz
+
+    for rel_path in (
+        "vol4/03_brain/data/epoch_models_scale_by_domain.csv",
+        "vol4/05_data/data/epoch_models_scale_by_domain.csv",
+        "vol1/04_data_engineering/data/notable_model_datasets.csv",
+        "vol1/05_nn_computation/data/notable_models.csv",
+    ):
+        s = viz.load_series(rel_path)
+        assert any(c.startswith("# Source:") for c in s.provenance_comments), rel_path
+
+    scale_series = viz.load_series("vol4/03_brain/data/epoch_models_scale_by_domain.csv")
+    rob = scale_series.where(domain_group="Robotics")
+    assert all("Cosmos" not in str(r["model"]) for r in rob)
+
+    by_model = {r["model"]: r for r in rob}
+
+    toks = {r["model"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries}
+    notable_ds = {r["model"]: r["training_dataset_size"] for r in viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries}
+    assert toks["DeepSeek-V3"] == notable_ds["DeepSeek-V3"] == Models.Language.DeepSeek_V3.training_tokens.to("count").magnitude
+    assert toks["Qwen3"] == notable_ds["Qwen3-235B-A22B"]
+

@@ -25,6 +25,8 @@ TOP_LEVEL_ORDER = [
     "competency_area",
     "bloom_level",
     "phase",
+    "taxonomy_subject",
+    "taxonomy_concepts",
     "title",
     "scenario",
     "question",

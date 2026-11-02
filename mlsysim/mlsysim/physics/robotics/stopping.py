@@ -486,3 +486,142 @@ def calc_latch_contact_stopping_profile(
         "t_arm_stop": t_stop,
         "df_dt": df_dt,
     }
+
+
+# --- Elementary stopping budget terms (added 2026-10-20) --------------------
+
+def calc_stopping_crossover_speed(total_latency, max_deceleration):
+    """
+    Speed at which travel during the pre-brake delay equals braking travel.
+
+    Equation:
+        v * tau = v^2 / (2 * a)  =>  v* = 2 * a * tau
+
+    Below v*, delay travel is the larger term of the elementary stopping
+    budget; above it, braking travel is.
+
+    Source: equates the two terms of calc_safe_stopping_distance (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.14 and Example 3.10).
+
+    Parameters
+    ----------
+    total_latency : Quantity
+        Pre-brake delay tau (e.g. ms or s); zero gives v* = 0.
+    max_deceleration : Quantity
+        Braking deceleration a (e.g. m/s^2).
+
+    Returns
+    -------
+    Quantity
+        Crossover speed in m/s.
+    """
+    validate_nonnegative(total_latency, "total_latency")
+    validate_positive(max_deceleration, "max_deceleration")
+    return (2 * max_deceleration * total_latency).to(ureg.meter / ureg.second)
+
+
+def calc_braking_time(velocity, max_deceleration):
+    """
+    Time to brake from ``velocity`` to rest at constant deceleration.
+
+    Equation:
+        t_brake = v / a
+
+    Source: v = v0 + a * t with v = 0 (OpenStax, University Physics Volume 1,
+    Sec. 3.4, Eq. 3.12).
+
+    Returns
+    -------
+    Quantity
+        Braking time in seconds.
+    """
+    validate_nonnegative(velocity, "velocity")
+    validate_positive(max_deceleration, "max_deceleration")
+    return (velocity / max_deceleration).to(ureg.second)
+
+
+def calc_travel_between_speeds(start_velocity, end_velocity, duration):
+    """
+    Distance covered while speed changes uniformly between two recorded values.
+
+    Equation:
+        x = (v_start + v_end) / 2 * t
+
+    With equal speeds this is the delay travel v * tau of the stopping budget;
+    with two recorded speeds it is the trapezoid estimate of the distance
+    covered between them.
+
+    Source: x = (v0 + v) / 2 * t for constant acceleration (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.11 with Eq. 3.12).
+
+    Returns
+    -------
+    Quantity
+        Distance in meters.
+    """
+    validate_nonnegative(start_velocity, "start_velocity")
+    validate_nonnegative(end_velocity, "end_velocity")
+    validate_nonnegative(duration, "duration")
+    return (0.5 * (start_velocity + end_velocity) * duration).to(ureg.meter)
+
+
+def calc_smoothstep_braking_blend(entry_velocity, deceleration, window):
+    """
+    Exit speed and travel of a fixed-endpoint smoothstep blend from cruise into braking.
+
+    Equation:
+        a(t) = -a_b alpha(t / T),  alpha(s) = 10 s^3 - 15 s^4 + 6 s^5
+        v_exit = v0 - a_b T / 2          (the integral of alpha over [0, 1] is 1/2)
+        d_blend = v0 T - a_b T^2 / 7     (the integral of (1 - s) alpha over [0, 1] is 1/7)
+
+    The quintic smoothstep has zero first and second derivatives at both ends,
+    so the commanded deceleration rises from zero to a_b with continuous jerk
+    (added 2026-10-20).
+
+    Returns
+    -------
+    dict
+        ``exit_speed`` (m/s) and ``travel`` (m).
+    """
+    validate_nonnegative(entry_velocity, "entry_velocity")
+    validate_positive(deceleration, "deceleration")
+    validate_positive(window, "window")
+    v_exit = (entry_velocity - deceleration * window / 2).to(ureg.meter / ureg.second)
+    travel = (entry_velocity * window - deceleration * window ** 2 / 7).to(ureg.meter)
+    return {"exit_speed": v_exit, "travel": travel}
+
+
+def calc_blend_reserve_use(entry_velocity, deceleration, max_jerk, window, tick):
+    """
+    Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop.
+
+    At each permission tick i of a blend of length T from cruise into braking,
+    u = min(i * tick / T, 1); the blended speed and travel follow from the
+    once- and twice-integrated smoothstep:
+
+        A1(u) = u^6 - 3 u^5 + 2.5 u^4,   A2(u) = u^7 / 7 - u^6 / 2 + u^5 / 2
+        v(u) = v0 - a T A1(u),            x(u) = v0 T u - a T^2 A2(u)
+        use = max_i [ x(u_i) + d_S(v(u_i)) ] - d_S(v0)
+
+    where d_S is the resident jerk-limited stop (``calc_scurve_stop_distance``).
+    The resident stop from each blended speed is charged from zero
+    acceleration, which overstates it while the blend is already decelerating,
+    so the bound is conservative (added 2026-10-20).
+
+    Returns
+    -------
+    Quantity
+        Reserve use in millimeters.
+    """
+    d_start = calc_scurve_stop_distance(entry_velocity, deceleration, max_jerk)
+    n = math.ceil((window / tick).to("").magnitude - 1e-9)
+    worst = 0.0
+    for i in range(n + 1):
+        u = min((i * tick / window).to("").magnitude, 1.0)
+        a1 = u**6 - 3 * u**5 + 2.5 * u**4
+        a2 = u**7 / 7 - u**6 / 2 + u**5 / 2
+        v = (entry_velocity - deceleration * window * a1).to(ureg.meter / ureg.second)
+        x = entry_velocity * window * u - deceleration * window**2 * a2
+        grow = x + calc_scurve_stop_distance(v, deceleration, max_jerk) - d_start
+        worst = max(worst, grow.to(ureg.millimeter).magnitude)
+    return worst * ureg.millimeter

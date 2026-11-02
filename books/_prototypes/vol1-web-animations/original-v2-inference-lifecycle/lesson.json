@@ -1,0 +1,113 @@
+{
+  "title": "When does a generated token enter the KV cache?",
+  "scope": "Declared token identities: prompt p0,p1; sampled outputs y0,y1. One request crosses CPU/GPU. KV entries are created only for tokens actually consumed as model inputs.",
+  "lanes": [
+    "CPU \u00b7 route and tokenize",
+    "GPU \u00b7 consumed inputs / KV",
+    "GPU \u00b7 sampled token",
+    "CPU \u00b7 response stream"
+  ],
+  "steps": [
+    {
+      "label": "Admit and tokenize",
+      "description": "CPU admits the request and turns its prompt into p0,p1. No model input has yet been consumed.",
+      "cards": [
+        [
+          0,
+          "Prompt \u2192 p0 p1",
+          "queue"
+        ],
+        [
+          1,
+          "KV empty",
+          "available"
+        ]
+      ]
+    },
+    {
+      "label": "Prefill consumes the prompt",
+      "description": "The GPU consumes p0,p1 and writes their KV entries. Its final logits sample y0; sampling alone does not create KV(y0).",
+      "cards": [
+        [
+          0,
+          "Prompt IDs delivered",
+          "queue"
+        ],
+        [
+          1,
+          "KV[p0,p1]",
+          "available"
+        ],
+        [
+          2,
+          "y0 sampled \u00b7 not cached",
+          "compute"
+        ]
+      ]
+    },
+    {
+      "label": "Stream first token",
+      "description": "CPU detokenizes y0 and streams it. The KV cache still holds only p0,p1; response delivery does not execute the model.",
+      "cards": [
+        [
+          1,
+          "KV[p0,p1]",
+          "available"
+        ],
+        [
+          2,
+          "y0 ready as next input",
+          "compute"
+        ],
+        [
+          3,
+          "y0 delivered",
+          "queue"
+        ]
+      ]
+    },
+    {
+      "label": "Decode consumes y0",
+      "description": "Decode reads the existing prompt KV, consumes y0, and appends KV(y0). New logits sample y1; y1 is still outside the cache.",
+      "cards": [
+        [
+          1,
+          "KV[p0,p1,y0]",
+          "available"
+        ],
+        [
+          2,
+          "y1 sampled \u00b7 not cached",
+          "compute"
+        ],
+        [
+          3,
+          "y0 delivered",
+          "queue"
+        ]
+      ]
+    },
+    {
+      "label": "Deliver and release",
+      "description": "CPU streams y1. This example stops before y1 is consumed, so it never has a KV entry. After the final consumer, the request cache is released.",
+      "cards": [
+        [
+          1,
+          "Request KV released",
+          "available"
+        ],
+        [
+          2,
+          "y1 never consumed \u00b7 no KV(y1)",
+          "compute"
+        ],
+        [
+          3,
+          "y0 y1 delivered \u00b7 complete",
+          "queue"
+        ]
+      ]
+    }
+  ],
+  "guard": "Sampler output and consumed model input are distinct; widths are not measured latency."
+}

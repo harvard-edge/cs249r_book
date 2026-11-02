@@ -32,3 +32,17 @@ def calc_inductive_droop(inductance, current_step, rise_time):
     dt = _ensure_unit(rise_time, ureg.second, "rise_time")
     validate_positive(dt.magnitude, "rise_time")
     return (l_loop * di / dt).to(ureg.volt)
+
+
+# --- Dynamic CMOS power under clock scaling (added 2026-10-20) ---------------
+def calc_dynamic_power_ratio(frequency_ratio, voltage_tracks_frequency=True):
+    """Ratio of dynamic power after scaling the clock by ``frequency_ratio``.
+
+    Dynamic CMOS power is ``P = C V^2 f``. When the supply voltage must rise in
+    proportion to frequency (``V ~ f``), power grows with the cube of the
+    frequency ratio; at fixed voltage it grows linearly. Capacitance is held
+    constant. Dimensionless.
+    """
+    validate_positive(frequency_ratio, "frequency_ratio")
+    voltage_ratio = frequency_ratio if voltage_tracks_frequency else 1.0
+    return voltage_ratio ** 2 * frequency_ratio

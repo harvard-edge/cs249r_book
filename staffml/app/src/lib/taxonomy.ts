@@ -31,11 +31,20 @@ export interface Topic {
   tracks: string[];
   zones: Record<string, number>;
   questionsByLevel: Record<string, QuestionSummary[]>;
+  /** Practice URL parameter for this node: legacy topics use ?topic=, taxonomy subjects ?subject=. */
+  practiceParam?: "topic" | "subject";
+  /** ML Systems Taxonomy subjects only: readable code (e.g. "P4.5") and the concepts their questions test. */
+  code?: string;
+  concepts?: { id: string; label: string; questionCount: number }[];
+  /** ML Systems Taxonomy subjects only: link to the subject's page in the taxonomy explorer. */
+  explorerUrl?: string;
 }
 
 export interface CompetencyArea {
   id: string;
   name: string;
+  /** ML Systems Taxonomy areas only: readable code (e.g. "P4"). */
+  code?: string;
   questionCount: number;
   topicCount: number;
   topics: Topic[];

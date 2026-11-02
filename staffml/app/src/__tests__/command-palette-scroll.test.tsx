@@ -17,7 +17,7 @@ import CommandPalette from '@/components/CommandPalette';
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
-vi.mock('@/lib/taxonomy', () => ({ searchTopics: () => [] }));
+vi.mock('@/lib/mlsys-taxonomy', () => ({ searchSubjects: () => [] }));
 vi.mock('@/lib/corpus', () => ({ searchQuestions: () => [] }));
 vi.mock('@/lib/corpus-provider', () => ({
   useVault: () => ({ apiBase: null }),

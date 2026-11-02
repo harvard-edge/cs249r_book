@@ -329,6 +329,19 @@ def check_concept_maps(contents_dir: Path, repo_root: Path, include_order: bool 
     for maps in v2_by_volume.values():
         _validate_v2_volume(maps, repo_root, findings, include_order)
 
+    # 2026-10-20: learner relationships share the normal concept-map gate.
+    # Resolve chapter-owned definitions before validating cross-chapter endpoints.
+    if any("learner_graph" in cm or "explorer_graph" in cm for maps in v2_by_volume.values() for _, cm in maps):
+        try:
+            from cli.core.concept_graph import ConceptGraphError, load_graph
+        except ImportError:  # package import used by tests and library consumers
+            from binder.cli.core.concept_graph import ConceptGraphError, load_graph
+        try:
+            volumes = tuple(volume.name for volume in v2_by_volume if volume.name in {"vol1", "vol2", "vol3", "vol4"})
+            load_graph(repo_root, volumes)
+        except (ConceptGraphError, OSError, KeyError, TypeError, ValueError) as exc:
+            findings.append(ConceptMapIssue("error", "books", f"learner_graph: {exc}"))
+
     return findings
 
 

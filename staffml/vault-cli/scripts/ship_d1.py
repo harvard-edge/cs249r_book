@@ -48,7 +48,7 @@ def generate_sql(vault_db: Path, d1_schema: Path, out: Path) -> None:
     parts.append("-- D1 full-reload migration — DROP + CREATE + INSERT")
     parts.append(f"-- Generated from {vault_db.name} (byte-for-byte reproducible)")
     parts.append("PRAGMA foreign_keys = OFF;")
-    for tbl in ["questions_fts", "chain_questions", "chains", "tags", "release_metadata", "questions"]:
+    for tbl in ["questions_fts", "chain_questions", "chains", "tags", "question_concepts", "release_metadata", "questions"]:
         parts.append(f"DROP TABLE IF EXISTS {tbl};")
     for trig in ["questions_ai", "questions_ad", "questions_au"]:
         parts.append(f"DROP TRIGGER IF EXISTS {trig};")
@@ -67,7 +67,7 @@ def generate_sql(vault_db: Path, d1_schema: Path, out: Path) -> None:
     parts.append("\n-- questions")
     for row in cur.execute("""
         SELECT id, title, topic, track, level, zone, competency_area, bloom_level, phase,
-               status, scenario, common_mistake, realistic_solution, napkin_math,
+               taxonomy_subject, status, scenario, common_mistake, realistic_solution, napkin_math,
                provenance, created_at, last_modified,
                human_review_status, human_review_by, human_review_date,
                file_path, content_hash, authors_json
@@ -82,6 +82,10 @@ def generate_sql(vault_db: Path, d1_schema: Path, out: Path) -> None:
     parts.append("\n-- tags")
     for row in cur.execute("SELECT question_id, tag FROM tags"):
         parts.append(f"INSERT INTO tags VALUES ({','.join(_sql_lit(v) for v in row)});")
+
+    parts.append("\n-- question_concepts")
+    for row in cur.execute("SELECT question_id, concept_id, position FROM question_concepts"):
+        parts.append(f"INSERT INTO question_concepts VALUES ({','.join(_sql_lit(v) for v in row)});")
 
     parts.append("\n-- release_metadata")
     for row in cur.execute("SELECT key, value FROM release_metadata"):

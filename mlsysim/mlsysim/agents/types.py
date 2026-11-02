@@ -166,6 +166,17 @@ class RemediationWorkload(AgentWorkload):
         """Reviewer cost of one approval: review effort times the hourly rate."""
         return (self.approver_review_time * self.approver_hourly_rate).to(ureg.USD)
 
+    @property
+    def attempt_cost(self) -> Quantity:
+        """One attempt: model calls, environment, assessment, and approval (added 2026-10-20)."""
+        return (self.model_cost_per_attempt + self.environment_cost_per_attempt
+                + self.assessment_cost_per_attempt + self.approval_cost_per_attempt).to(ureg.USD)
+
+    @property
+    def approval_share(self) -> float:
+        """Approval's share of the attempt cost (added 2026-10-20)."""
+        return (self.approval_cost_per_attempt / self.attempt_cost).to("").magnitude
+
 
 class SupportWorkload(AgentWorkload):
     """Customer-support workload: many short sessions against a response deadline.

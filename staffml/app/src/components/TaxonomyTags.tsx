@@ -1,0 +1,62 @@
+"use client";
+
+import { Network } from "lucide-react";
+import {
+  TAXONOMY_EXPLORER,
+  getConceptLabel,
+  getSubjectLabelMeta,
+} from "@/lib/mlsys-taxonomy";
+
+interface TaxonomyTagsProps {
+  /** Subject identity (Question.taxonomy_subject). */
+  subject?: string;
+  /** Concept identities, most central first (Question.taxonomy_concepts). */
+  concepts?: string[];
+}
+
+/**
+ * "Concepts tested" affordance, rendered AFTER the attempt beside the textbook
+ * pointer. Names the ML Systems Taxonomy subject and concepts the question was
+ * tagged with, each linking to its entry in the taxonomy explorer. Renders
+ * nothing for an untagged question or an identity the labels file lacks.
+ */
+export default function TaxonomyTags({ subject, concepts }: TaxonomyTagsProps) {
+  const s = subject ? getSubjectLabelMeta(subject) : undefined;
+  if (!s) return null;
+  const known = (concepts ?? []).filter((c) => Boolean(getConceptLabel(c)));
+
+  return (
+    <div className="mt-3 rounded-lg border border-borderSubtle bg-surface p-4">
+      <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase text-textTertiary mb-2">
+        <Network className="w-3 h-3" />
+        Concepts tested
+      </span>
+
+      <a
+        href={`${TAXONOMY_EXPLORER}#subject=${encodeURIComponent(subject!)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm font-medium text-textPrimary hover:underline underline-offset-2"
+      >
+        <span className="font-mono text-xs text-textTertiary mr-1.5">{s.code}</span>
+        {s.label}
+      </a>
+
+      {known.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          {known.map((c) => (
+            <a
+              key={c}
+              href={`${TAXONOMY_EXPLORER}#concept=${encodeURIComponent(c)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2 py-0.5 rounded-md border border-borderSubtle text-textSecondary hover:text-textPrimary hover:border-borderHighlight transition-colors"
+            >
+              {getConceptLabel(c)}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -199,3 +199,147 @@ concept_map:
     - Data Lake Management
     - Multi-Tenant Training Clusters
     - Accelerator Utilization Optimization
+
+  explorer_graph:
+    schema_version: 1
+    relationships:
+    - source: I/O wall
+      predicate: appears as an unmet
+      target:
+        chapter: 04_data_storage
+        concept: Input delivery budget
+      explanation: I/O wall appears as an unmet Input delivery budget.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 04_data_storage
+        concept: I/O wall
+        quote: Full-corpus training inverts database assumptions (large sequential shard reads, working sets
+          larger than any cache, synchronized burst writes), so storage is provisioned for streaming bandwidth
+          and burst absorption, and faster compute against a fixed input path plateaus at the delivery rate.
+      - chapter: 04_data_storage
+        concept: Input delivery budget
+        quote: Required input bandwidth is the number of distinct consumers times target compute fraction times
+          batch bytes over compute time, every stage of the chain must sustain it because delivered rate is the
+          minimum over stages, and prefetch absorbs variance but never a sustained deficit; a direct DMA path
+          from storage into accelerator memory (GPUDirect Storage, for example) removes the host-copy stage only
+          when that copy is the limiting stage.
+    - source: Scoped storage hierarchy
+      predicate: must sustain the rates required by
+      target:
+        chapter: 04_data_storage
+        concept: Input delivery budget
+      explanation: Scoped storage hierarchy must sustain the rates required by Input delivery budget.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 04_data_storage
+        concept: Scoped storage hierarchy
+        quote: The six storage tiers trade bandwidth for capacity and cost but quote bandwidth at different scopes,
+          so a tier ratio is not a feed requirement, and as a cache E[T] = h*T_hot + (1-h)*T_miss means a 95
+          percent hit rate with a 100x slower miss path delivers about one-sixth of the all-hot rate.
+      - chapter: 04_data_storage
+        concept: Input delivery budget
+        quote: Required input bandwidth is the number of distinct consumers times target compute fraction times
+          batch bytes over compute time, every stage of the chain must sustain it because delivered rate is the
+          minimum over stages, and prefetch absorbs variance but never a sustained deficit; a direct DMA path
+          from storage into accelerator memory (GPUDirect Storage, for example) removes the host-copy stage only
+          when that copy is the limiting stage.
+    - source: Input delivery budget
+      predicate: must keep up with
+      target:
+        chapter: 02_compute_infrastructure
+        concept: Plan on sustained throughput
+      explanation: Input delivery budget must keep up with Plan on sustained throughput.
+      conditions: Read with the workload, scope, and qualifications in the supporting teaching claims.
+      status: draft
+      evidence:
+      - chapter: 04_data_storage
+        concept: Input delivery budget
+        quote: Required input bandwidth is the number of distinct consumers times target compute fraction times
+          batch bytes over compute time, every stage of the chain must sustain it because delivered rate is the
+          minimum over stages, and prefetch absorbs variance but never a sustained deficit; a direct DMA path
+          from storage into accelerator memory (GPUDirect Storage, for example) removes the host-copy stage only
+          when that copy is the limiting stage.
+      - chapter: 02_compute_infrastructure
+        concept: Plan on sustained throughput
+        quote: Peak TFLOP/s is a precision-specific ceiling that assumes every unit stays fed, so a run planned
+          from peak needs 1/eta times the GPU-hours at measured utilization eta, compared only under matched
+          FLOP conventions, precision, and scale.
+
+  learner_graph:
+    schema_version: 1
+    concepts:
+    - id: vol2.storage.input-pipeline
+      label: Input pipeline
+      teaches: Input delivery budget
+      summary: The staged path that reads, transforms, and delivers batches to accelerators.
+      section: sec-storage-pipeline-equation
+    - id: vol2.storage.prefetch
+      label: Prefetching
+      teaches: Input delivery budget
+      summary: Preparing future input batches while the current batch computes, subject to buffer and service-rate
+        limits.
+      section: sec-storage-pipelining
+    - id: vol2.storage.durable-checkpoint
+      label: Durable checkpoint
+      teaches: Checkpoint write path
+      summary: A completed recoverable state version persisted beyond the failure domain it is meant to
+        survive.
+      section: sec-storage-checkpointing
+    - id: vol2.storage.versioned-artifact
+      label: Versioned artifact
+      teaches: Versioned artifacts and commit boundaries
+      summary: An identifiable data or model version with a defined publication boundary and provenance.
+      section: sec-storage-data-versioning-orchestration
+    relationships:
+    - id: vol2.field.09
+      source: vol2.storage.prefetch
+      predicate: hides latency in
+      target: vol2.storage.input-pipeline
+      explanation: Preparing batches ahead can overlap input work with accelerator execution.
+      conditions: Buffers must fit and long-run producer service rate must meet consumer demand.
+      status: draft
+      evidence:
+        section: sec-storage-pipelining
+        quote: 'Pipelining converts a sequential bottleneck into overlapped execution (@fig-data-pipeline-vol2),
+          but continuous saturation requires a prefetch buffer deep enough to absorb variance in I/O latency.
+          Stage durations need not be deterministic if ready batches cover the delays. Storage systems experience
+          I/O jitter\index{I/O jitter!sources and pipeline impact}: variation in read latency caused by
+          contention and background work. NVMe drives suffer occasional latency spikes during internal garbage
+          collection (when the controller reorganizes NAND flash blocks) or wear-leveling operations. Parallel
+          file systems incur spikes when multiple training jobs contend for the same OSS nodes, when the
+          MDS processes a burst of metadata operations, or when background scrubbing detects and repairs
+          bit errors. Object storage likewise exposes delays from shared-service contention and maintenance.'
+    - id: vol2.field.10
+      source: vol2.storage.input-pipeline
+      predicate: can lengthen
+      target: vol2.fleet.step-time
+      explanation: Late input delivery leaves accelerators idle and delays useful progress.
+      conditions: Input stalls matter only when input service lies on the execution critical path.
+      status: draft
+      evidence:
+        section: sec-storage-pipeline-equation
+        quote: '**Systems insight**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str`
+          of the time. To eliminate the stall entirely, the next batch must arrive within the `{python}
+          PipelineCalcs.t_comp_stall_str` compute window, either by increasing effective storage bandwidth
+          or by adding parallel I/O streams. Deeper prefetch buffers cannot help here, because the delivery
+          time exceeds the compute window on every step rather than merely in the tail.'
+    - id: vol2.field.11
+      source: vol2.storage.durable-checkpoint
+      predicate: provides restore state for
+      target: vol2.reliability.recovery
+      explanation: A saved state protects progress only when its committed copy survives the relevant failure.
+      conditions: The checkpoint must be complete, discoverable, and outside the failed domain.
+      status: draft
+      evidence:
+        section: sec-storage-checkpointing
+        quote: Asynchronous checkpointing shrinks even that local-flash pause by staging the snapshot in
+          host DRAM first. Nodes coordinate the training step to capture, copy each accelerator-resident
+          shard into a dedicated pinned host-memory buffer, and resume training immediately while a background
+          thread writes the buffer to local NVMe. The snapshot buffer must remain immutable until the background
+          write finishes; separate live-state buffers allow training to advance without changing the captured
+          generation. If a node fails during the asynchronous write, its local shard may be incomplete.
+          The job must wait for the required writes or peer replication before declaring this generation
+          durable, even if training has already resumed.
+    maps: []

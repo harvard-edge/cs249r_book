@@ -32,7 +32,7 @@ export const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Lea
 // ─── AI Provider Models ───────────────────────────────────────────────────────
 // Controls which model each provider uses — edit here to swap models globally
 export const PROVIDER_MODELS = {
-  GROQ:        { model: 'llama-3.1-8b-instant',                              stream: true  },
+  GROQ:        { model: 'openai/gpt-oss-20b',                                stream: true  },
   GEMINI:      { model: 'gemini-2.5-flash',                                  stream: true  },
   CEREBRAS:    { model: 'gpt-oss-120b',                                      stream: true  },
   SAMBANOVA:   { model: 'gpt-oss-120b',                                      stream: true  },

@@ -40,3 +40,13 @@
   }
   document.documentElement.dataset.theme = pick();
 })();
+
+// Release gate — mirrors shared/config/site-head.html. The live host
+// (mlsysbook.ai) shows only released volumes; the dev preview and local builds
+// show the whole series. `.mls-unreleased` content stays hidden unless the
+// <html> element carries `mls-staging` (see globals.css).
+(function () {
+  if (!/(^|\.)mlsysbook\.ai$/.test(window.location.hostname)) {
+    document.documentElement.classList.add("mls-staging");
+  }
+})();

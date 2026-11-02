@@ -238,26 +238,29 @@ Accurate payload accounting must measure the entire serialized envelope, includi
 # │ Show: Retrieval allowance, record capacity, payload used, and remainder.
 # │ How: Explicit hypothetical token counts; no hardware or tokenizer claim.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_math
 
 class RetrievalPayloadBudget:
     # ┌── 1. LOAD (Scenario assumptions, in serialized tokens) ─────────────
-    capacity = 32_768
-    output_reserve = 2_048
-    other_input = 24_576
-    envelope = 128
-    body = 512
-    metadata = 64
+    scenario = Scenarios.RetrievalRecordsInAllowance
+    capacity = scenario.window
+    output_reserve = scenario.output_reserve
+    other_input = scenario.other_input
+    envelope = scenario.envelope
+    body = scenario.body
+    metadata = scenario.metadata
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    allowance = capacity - output_reserve - other_input
-    record = body + metadata
-    records = (allowance - envelope) // record
-    used = envelope + records * record
-    remaining = allowance - used
-    body_only = allowance // body  # records a body-only limit would admit
-    body_only_used = envelope + body_only * record
-    overshoot = body_only_used - allowance
+    r = scenario.result
+    allowance = r.allowance
+    record = r.record
+    records = r.records
+    used = r.used
+    remaining = r.remaining
+    body_only = r.body_only  # records a body-only limit would admit
+    body_only_used = r.body_only_used
+    overshoot = r.overshoot
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────
     check(allowance == 6_144, "retrieval allowance")
@@ -382,24 +385,26 @@ Here $\LexicalQuery$ contains the query terms, $\LexicalDocument$ is an indexed 
 #| echo: false
 # What: Compare two lexical candidates, not their correctness.
 # How: Apply the displayed BM25 variant to a hypothetical one-term query.
-from math import log
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_ratio
 
 class BM25Ranking:
     # 1. LOAD — stipulated corpus statistics, not measured repository data.
-    documents = 100_000
-    matching_documents = 5
-    average_length = 400
-    short_length, long_length = 80, 4_000
-    short_frequency, long_frequency = 1, 6
-    k1, b = 1.2, 0.75
+    scenario = Scenarios.Bm25ShortAgainstLongFile
+    documents = scenario.documents
+    matching_documents = scenario.matching_documents
+    average_length = scenario.average_length
+    short_length, long_length = scenario.short_length, scenario.long_length
+    short_frequency, long_frequency = scenario.short_frequency, scenario.long_frequency
+    k1, b = scenario.k1, scenario.b
 
     # 2. EXECUTE — lengths and frequencies are analyzer-term counts.
-    idf = log(1 + (documents - matching_documents + 0.5) / (matching_documents + 0.5))
-    short_normalizer = k1 * (1 - b + b * short_length / average_length)
-    long_normalizer = k1 * (1 - b + b * long_length / average_length)
-    short_score = idf * short_frequency * (k1 + 1) / (short_frequency + short_normalizer)
-    long_score = idf * long_frequency * (k1 + 1) / (long_frequency + long_normalizer)
+    r = scenario.result
+    idf = r.idf
+    short_normalizer = r.short_normalizer
+    long_normalizer = r.long_normalizer
+    short_score = r.short_score
+    long_score = r.long_score
 
     # 3. GUARD — validate the scenario and the ordering being illustrated.
     check(0 < matching_documents <= documents, "Document frequencies must be valid")
@@ -497,32 +502,34 @@ The resource requirements of an exact scan follow directly from dimensional arit
 # │ Show: 1 FLOP/byte at FP16 vs a 20 FLOP/byte host ridge; 307.2 ms floor.
 # │ How: Hypothetical corpus; host bandwidth and peak rate from the registry.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.core.units import BYTES_FP16, GB, GFLOP, byte, flop, millisecond, second
+from mlsysim import Scenarios
+from mlsysim.core.units import GB, GFLOP, byte, millisecond, second
 from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_flops, fmt_int, fmt_memory, fmt_time
 
 class VectorScanLatencyFloor:
     # ┌── 1. LOAD (Hypothetical corpus; host from the registry) ─────────────
-    host = Hardware.Cloud.ReferenceCPU
-    n_vectors = 10_000_000
-    d_dim = 768
-    bytes_per_val = BYTES_FP16
-    n_probes = 20  # stipulated searches in one trajectory
-    n_filtered = 10_000  # stipulated eligible set after a selective scope filter
-    t_budget = 10 * millisecond  # stipulated per-search latency budget
+    scenario = Scenarios.ExactScanTenMillionVectors
+    host = scenario.host
+    n_vectors = scenario.vectors
+    d_dim = scenario.dimension
+    bytes_per_val = scenario.bytes_per_value
+    n_probes = scenario.searches  # stipulated searches in one trajectory
+    n_filtered = scenario.filtered_vectors  # stipulated eligible set after a selective scope filter
+    t_budget = scenario.budget  # stipulated per-search latency budget
 
     # ┌── 2. EXECUTE (Bytes, FLOPs, intensity, and the two time floors) ────
+    r = scenario.result
     bw = host.memory.bandwidth
     peak = host.compute.peak_flops
-    footprint = n_vectors * d_dim * bytes_per_val
-    flops_total = 2 * n_vectors * d_dim * flop
-    intensity = (flops_total / footprint).to(flop / byte)
-    ridge = (peak / bw).to(flop / byte)
-    t_mem = (footprint / bw).to(millisecond)
-    t_arith = (flops_total / peak).to(millisecond)
-    t_probes = (n_probes * t_mem).to(second)
-    t_filtered = (n_filtered * d_dim * bytes_per_val / bw).to(millisecond)
-    n_budget = int((t_budget * bw / (d_dim * bytes_per_val)).to("").magnitude)
+    footprint = r.footprint
+    flops_total = r.flops
+    intensity = r.intensity
+    ridge = r.ridge
+    t_mem = r.stream_time
+    t_arith = r.math_time
+    t_probes = r.trajectory_time
+    t_filtered = r.filtered_time
+    n_budget = int(r.budget_vectors)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(footprint.to(GB).magnitude - 15.36) < 1e-9, "vector bytes")
@@ -612,27 +619,30 @@ $$ {#eq-vol3-pq-adc}
 # │ Show: 2.56 GB of links beside 15.36 GB of vectors; 0.64 GB of codes (24x).
 # │ How: Stipulated M=32 links of 8 bytes; m=64 one-byte PQ subcodes.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import BYTES_FP32, GB, KB, byte
+from mlsysim import Scenarios
+from mlsysim.core.units import GB, KB
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple
 
 class AnnFootprint:
     # ┌── 1. LOAD (Corpus from the exact-scan notebook; stipulated index shape) ─
-    n = VectorScanLatencyFloor.n_vectors
-    d = VectorScanLatencyFloor.d_dim
+    scenario = Scenarios.AnnIndexesTenMillionVectors
+    n = scenario.vectors
+    d = scenario.dimension
     raw = VectorScanLatencyFloor.footprint
-    links_per_node = 32
-    link_bytes = 8 * byte
-    pq_subvectors = 64
-    pq_centroids = 256
-    code_bytes_per_sub = 1 * byte
-    lut_entry = BYTES_FP32
+    links_per_node = scenario.links_per_node
+    link_bytes = scenario.link_bytes
+    pq_subvectors = scenario.subvectors
+    pq_centroids = scenario.centroids
+    code_bytes_per_sub = scenario.code_bytes
+    lut_entry = scenario.table_entry_bytes
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    graph = n * links_per_node * link_bytes
-    codes = n * pq_subvectors * code_bytes_per_sub
-    ratio = (raw / codes).to("").magnitude
-    lut = (pq_subvectors * pq_centroids * lut_entry).to(KB)
-    sub_dim = d // pq_subvectors
+    r = scenario.result
+    graph = r.graph
+    codes = r.codes
+    ratio = r.compression
+    lut = r.lookup_table
+    sub_dim = r.sub_dim
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────
     check(d % pq_subvectors == 0, "subvectors tile the dimension")
@@ -669,7 +679,7 @@ Selecting among these index structures requires evaluating them against the spec
 
 The filtering hazard from lexical search (@sec-vol3-long-term-memory-search-scope) returns here in sharper form, because scope filters present greater friction on a graph index than on inverted postings lists. In lexical retrieval, intersecting a postings list with an eligibility bitset prunes unauthorized documents without altering how the remaining documents are traversed. In an HNSW graph, restricting search during traversal (pre-filtering) forces the beam to step exclusively onto eligible nodes. If a tenant boundary or file path mask isolates regions of the graph, the greedy walk stalls at a local minimum when all outgoing links lead to masked nodes. The search terminates prematurely and returns incomplete results, even when highly relevant eligible nodes exist just beyond the masked barrier. Conversely, filtering after an unconstrained search (post-filtering) risks returning an empty set whenever the top-$\RetrievalCutoffCount$ candidates fall outside the authorized scope. Systems escape the dilemma in one of three ways (@fig-vol3-access-prefilter). They partition the index into scope-isolated subgraphs, seed extra entry points inside the authorized region, or fall back to an exact scan when the filter is selective enough that the measured full request meets the budget. The floor in notebook \ref{nbk-06-memory-bandwidth-and-latency-floor} serves as an initial feasibility screen for that fallback.
 
-::: {#fig-vol3-access-prefilter data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-access-prefilter" fig-env="figure" fig-pos="htb" fig-cap="**Filtering Inside a Graph Walk**: A scope mask applied during traversal (A) removes the only links between the entry region and the eligible vectors nearest $\SearchQueryEmbedding$, so the greedy walk stops at a local minimum and returns too few results even though eligible neighbors exist. The three responses (B) partition the index along scope boundaries, restart the walk from an entry point inside the eligible region, or, when the filter is selective, score every eligible vector exactly." fig-alt="Two panels. Panel A, mask applied during the walk, shows a graph split by a shaded vertical band labeled scope mask that contains dashed gray masked nodes. A blue arrow from an entry node reaches a green node circled in red and labeled stalls here; every link from the left eligible nodes to the right side passes through masked nodes, and the green nodes near a dashed query marker q on the right are labeled eligible near q, unreachable. Panel B, three responses, shows three rows: partition by scope, with separate graphs for scope X (green) and scope Y (gray dashed); extra entry point, where a blue entry node labeled extra entry starts the walk among green nodes near q; and exact scan when selective, with q and an arrow labeled score all pointing to a box of five green nodes."}
+::: {#fig-vol3-access-prefilter data-explore="original-v3-access-prefilter" data-explore-key="vol3:fig-vol3-access-prefilter" fig-env="figure" fig-pos="htb" fig-cap="**Filtering Inside a Graph Walk**: A scope mask applied during traversal (A) removes the only links between the entry region and the eligible vectors nearest $\SearchQueryEmbedding$, so the greedy walk stops at a local minimum and returns too few results even though eligible neighbors exist. The three responses (B) partition the index along scope boundaries, restart the walk from an entry point inside the eligible region, or, when the filter is selective, score every eligible vector exactly." fig-alt="Two panels. Panel A, mask applied during the walk, shows a graph split by a shaded vertical band labeled scope mask that contains dashed gray masked nodes. A blue arrow from an entry node reaches a green node circled in red and labeled stalls here; every link from the left eligible nodes to the right side passes through masked nodes, and the green nodes near a dashed query marker q on the right are labeled eligible near q, unreachable. Panel B, three responses, shows three rows: partition by scope, with separate graphs for scope X (green) and scope Y (gray dashed); extra entry point, where a blue entry node labeled extra entry starts the walk among green nodes near q; and exact scan when selective, with q and an arrow labeled score all pointing to a box of five green nodes."}
 ![](images/svg/retrieval_access_control_prefilter.svg)
 :::
 
@@ -833,26 +843,29 @@ Depth, more than node size, decides whether a neighborhood fits the context budg
 # │ Show: 40 reachable nodes require 7,300 tokens; at most 33 fit in 6,144.
 # │ How: Count an exact tree, then apply a hypothetical final-serialization budget.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int
 
 class GraphNeighborhoodExpansion:
     # ┌── 1. LOAD (Scenario inputs) ─────────────────────────────────────────────
-    call_tokens = 32_768
-    output_tokens = 2_048
-    other_input_tokens = 24_576
-    children = 3  # exact tree: every internal node has this many children
-    depth = 3  # seed is depth zero; no repeated nodes
-    node_tokens = 180  # fixed serialized size, including local provenance
-    edge_envelope_tokens = 100  # stipulated total for either packing considered
+    scenario = Scenarios.TypedTraversalDepthThree
+    call_tokens = scenario.window
+    output_tokens = scenario.output_reserve
+    other_input_tokens = scenario.other_input
+    children = scenario.children  # exact tree: every internal node has this many children
+    depth = scenario.depth  # seed is depth zero; no repeated nodes
+    node_tokens = scenario.node_tokens  # fixed serialized size, including local provenance
+    edge_envelope_tokens = scenario.envelope_tokens  # stipulated total for either packing considered
 
     # ┌── 2. EXECUTE (Integer token accounting) ─────────────────────────────────
-    allowance = call_tokens - output_tokens - other_input_tokens
-    nodes = (children ** (depth + 1) - 1) // (children - 1)
-    required = nodes * node_tokens + edge_envelope_tokens
-    fit = (allowance - edge_envelope_tokens) // node_tokens
-    packed = fit * node_tokens + edge_envelope_tokens
-    shallow_nodes = (children**depth - 1) // (children - 1)  # one level less
-    shallow_required = shallow_nodes * node_tokens + edge_envelope_tokens
+    r = scenario.result
+    allowance = r.allowance
+    nodes = r.nodes
+    required = r.required
+    fit = r.fit
+    packed = r.packed
+    shallow_nodes = r.shallow_nodes  # one level less
+    shallow_required = r.shallow_required
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
     check(allowance == 6_144, "Match the chapter's retrieval allowance")
@@ -1128,32 +1141,34 @@ Where to place this maintenance overhead is an explicit design choice. Synchrono
 # │       adds 0.4 us of local metadata updates and 1.5 us of lookups.
 # │ How: Stipulated incremental work; common durable coordination excluded.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.core.units import microsecond, millisecond, nanosecond, second
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_time
 
 class IndexMaintenanceCost:
     # ┌── 1. LOAD (Stipulated edit and per-stage costs) ───────────────────
-    files = 8
-    chunks_per_file = 2
-    t_parse = 3.5 * millisecond  # per file
-    t_lex = 2.0 * millisecond  # per chunk
-    t_embed_batch = 28.0 * millisecond  # one local batch
-    batch = 16
-    t_rpc = 150 * millisecond  # one remote embedding request
-    t_excl_write = 50 * nanosecond  # local in-memory update per exclusion-table entry
-    candidates = 50
-    t_excl_check = 30 * nanosecond  # local in-memory lookup per candidate
+    scenario = Scenarios.RepairEditIndexMaintenance
+    files = scenario.files
+    chunks_per_file = scenario.chunks_per_file
+    t_parse = scenario.parse_time  # per file
+    t_lex = scenario.postings_time  # per chunk
+    t_embed_batch = scenario.local_batch_time  # one local batch
+    batch = scenario.batch
+    t_rpc = scenario.remote_request_time  # one remote embedding request
+    t_excl_write = scenario.exclusion_write_time  # local in-memory update per exclusion-table entry
+    candidates = scenario.candidates
+    t_excl_check = scenario.exclusion_check_time  # local in-memory lookup per candidate
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    chunks = files * chunks_per_file
-    batches = math.ceil(chunks / batch)
-    t_local = (files * t_parse + chunks * t_lex + batches * t_embed_batch).to(millisecond)
-    t_remote = (files * t_parse + chunks * t_lex + batches * t_rpc).to(millisecond)
-    t_serial = (files * t_parse + chunks * t_lex + files * t_rpc).to(second)
-    t_write = (files * t_excl_write).to(microsecond)
-    t_read = (candidates * t_excl_check).to(microsecond)
-    write_path_ratio = (t_local / t_write).to("").magnitude
+    r = scenario.result
+    chunks = r.chunks
+    batches = r.batches
+    t_local = r.local_time
+    t_remote = r.remote_batch_time
+    t_serial = r.remote_per_file_time
+    t_write = r.exclusion_write_time
+    t_read = r.exclusion_check_time
+    write_path_ratio = r.write_path_ratio
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────
     check(chunks == 16 and batches == 1, "one embedding batch")
@@ -1189,7 +1204,7 @@ class IndexMaintenanceCost:
 **Systems insight**: Under the coordinated generation protocol, exclusion suppresses known-obsolete entries before subsequent admission, though it does not produce fresh representations immediately. The small local metadata costs do not price the complete durable enforcement path. The computational cost of re-indexing is not eliminated; it is deferred to background workers, requiring the query gateway to manage the staleness gap using the strategies in @tbl-vol3-invalidation-tradeoffs. Coordinate exclusion with the source commit. Consider synchronous re-indexing when dependent queries arrive before background pipelines can finish and bounded fallback cannot supply the required evidence.
 :::
 
-::: {#fig-vol3-index-invalidation data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-index-invalidation" fig-env="figure" fig-pos="htb" fig-cap="**Three Responses to a Source Edit**: Synchronous re-indexing blocks the write until r18 entries exist, adding `{python} IndexMaintenanceCost.t_local_str` to `{python} IndexMaintenanceCost.t_serial_str` under the notebook's stipulated costs. Background re-indexing without a generation check returns after the source commit but admits r17 entries as current until the rebuild finishes. Background re-indexing with coordinated exclusion returns before rebuilding finishes; a query in the interval sees r17 excluded and receives a direct read or a partial result, and the worker publishes only if its generation is still current. The cost labels compare incremental indexing and local metadata work, excluding the common durable commit and coordination costs and any fallback retrieval. The time axis is schematic." fig-alt="Three stacked timelines on a shared time axis marked r18 committed and r18 entries ready, with the shaded refresh window between them; each timeline has rows for agent, worker, and index serves. Synchronous re-index, noted as incremental indexing work of 88 ms (local) to 1.26 s (remote, per file): after edit r18 the agent's write is blocked while the worker parses, updates postings, and embeds r18, the index serves r17 entries until r18 entries are ready, and a later query gets r18. Background re-index with no generation check, noted as rebuild off the write path: during the window a red query bar reads query gets r17 as current while the index row reads r17 admitted as current. Background re-index with exclusion, noted as local metadata work of 0.4 microseconds per write and 1.5 microseconds per query: during the window the index row reads r17 excluded, an amber query bar reads query: direct read or partial, and the worker row ends with publish if current."}
+::: {#fig-vol3-index-invalidation data-explore="original-v3-vol3-index-invalidation" data-explore-key="vol3:fig-vol3-index-invalidation" fig-env="figure" fig-pos="htb" fig-cap="**Three Responses to a Source Edit**: Synchronous re-indexing blocks the write until r18 entries exist, adding `{python} IndexMaintenanceCost.t_local_str` to `{python} IndexMaintenanceCost.t_serial_str` under the notebook's stipulated costs. Background re-indexing without a generation check returns after the source commit but admits r17 entries as current until the rebuild finishes. Background re-indexing with coordinated exclusion returns before rebuilding finishes; a query in the interval sees r17 excluded and receives a direct read or a partial result, and the worker publishes only if its generation is still current. The cost labels compare incremental indexing and local metadata work, excluding the common durable commit and coordination costs and any fallback retrieval. The time axis is schematic." fig-alt="Three stacked timelines on a shared time axis marked r18 committed and r18 entries ready, with the shaded refresh window between them; each timeline has rows for agent, worker, and index serves. Synchronous re-index, noted as incremental indexing work of 88 ms (local) to 1.26 s (remote, per file): after edit r18 the agent's write is blocked while the worker parses, updates postings, and embeds r18, the index serves r17 entries until r18 entries are ready, and a later query gets r18. Background re-index with no generation check, noted as rebuild off the write path: during the window a red query bar reads query gets r17 as current while the index row reads r17 admitted as current. Background re-index with exclusion, noted as local metadata work of 0.4 microseconds per write and 1.5 microseconds per query: during the window the index row reads r17 excluded, an amber query bar reads query: direct read or partial, and the worker row ends with publish if current."}
 ![](images/svg/episodic_wal_flow.svg)
 :::
 
@@ -1286,44 +1301,35 @@ Storage measurements require equally clear accounting boundaries. Benchmarks sho
 # │ How: Stipulated corpus, index shapes, and throughputs; HNSW shape reused
 # │      from the ANN footprint cell.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import BYTES_FP32, MB, byte, millisecond, second
+from mlsysim import Scenarios
+from mlsysim.core.units import MB, millisecond
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple, fmt_time
 
 class StorageAmplification:
     # ┌── 1. LOAD (Stipulated corpus, index shapes, throughputs) ──────────
-    files = 50_000
-    tokens_per_file = 200
-    bytes_per_file = 800 * byte
-    postings_per_token = 0.8 * byte
-    edges_per_file = 4
-    edge_bytes = 32 * byte
-    passage_tokens = 100
-    d = 768
-    vec_width = BYTES_FP32
-    links = AnnFootprint.links_per_node
-    link_bytes = AnnFootprint.link_bytes
-    edited = 15
-    lex_rate = 1_250  # files per second
-    parse_rate = 680  # files per second
-    embed_rate = 50  # chunks per second
+    scenario = Scenarios.LexicalGraphAgainstDenseStore
+    files = scenario.files
+    tokens_per_file = scenario.tokens_per_file
+    edges_per_file = scenario.edges_per_file
+    passage_tokens = scenario.passage_tokens
+    d = scenario.dimension
+    edited = scenario.edited_files
+    embed_rate = scenario.embed_rate  # chunks per second
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    tokens = files * tokens_per_file
-    raw = files * bytes_per_file
-    postings = tokens * postings_per_token
-    graph = files * edges_per_file * edge_bytes
-    chunks = tokens // passage_tokens
-    vectors = chunks * d * vec_width
-    hnsw = chunks * links * link_bytes
-    aux_a = postings + graph
-    aux_b = postings + vectors + hnsw
-    ratio_aux_a = (aux_a / raw).to("").magnitude
-    ratio_aux_b = (aux_b / raw).to("").magnitude
-    edited_chunks = edited * tokens_per_file // passage_tokens
-    t_a = ((edited / lex_rate + edited / parse_rate) * second).to(millisecond)
-    t_b = ((edited / lex_rate + edited_chunks / embed_rate) * second).to(millisecond)
-    bytes_ratio = (aux_b / aux_a).to("").magnitude
-    time_ratio = (t_b / t_a).to("").magnitude
+    r = scenario.result
+    raw = r.raw
+    chunks = r.chunks
+    vectors = r.vectors
+    aux_a = r.aux_lexical_graph
+    aux_b = r.aux_lexical_dense
+    ratio_aux_a = r.ratio_lexical_graph
+    ratio_aux_b = r.ratio_lexical_dense
+    edited_chunks = r.edited_chunks
+    t_a = r.reindex_lexical_graph
+    t_b = r.reindex_lexical_dense
+    bytes_ratio = r.bytes_ratio
+    time_ratio = r.time_ratio
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────
     check(chunks == 100_000 and edited_chunks == 30, "chunk counts")

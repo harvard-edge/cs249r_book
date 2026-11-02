@@ -31,3 +31,25 @@ def calc_network_latency_ms(distance_km):
     d = _ensure_unit(distance_km, ureg.kilometer, "distance_km")
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
     return round_trip_s.m_as(ureg.millisecond)
+
+
+# --- Great-circle distance (added 2026-10-20) --------------------------------
+def calc_great_circle_distance(lat1_deg, lon1_deg, lat2_deg, lon2_deg):
+    """Great-circle distance between two points on a spherical Earth (haversine).
+
+    ``d = 2 R asin(sqrt(sin^2(dphi/2) + cos(phi1) cos(phi2) sin^2(dlambda/2)))``
+    with ``R`` the Earth's mean radius. Latitudes and longitudes are in degrees.
+    Real fiber routes are longer than the great circle, so a propagation floor
+    computed from this distance is a lower bound.
+
+    Returns
+    -------
+    Quantity
+        Distance in kilometers.
+    """
+    import math
+    from .constants import EARTH_MEAN_RADIUS
+    la1, lo1, la2, lo2 = map(math.radians, (lat1_deg, lon1_deg, lat2_deg, lon2_deg))
+    h = (math.sin((la2 - la1) / 2) ** 2
+         + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2)
+    return (2 * math.asin(math.sqrt(h)) * EARTH_MEAN_RADIUS).to(ureg.kilometer)

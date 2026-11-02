@@ -15,7 +15,7 @@ random initialization: dense kernels take the same time for any values.
 
 Run (the MLSysBook venv has no PyTorch; the mlperf-edu venv does):
   ../../../../mlperf-edu/.venv/bin/python measure_cpu.py
-Writes cpu_measure.json beside this file; make_figs.py and calcs.py read it.
+Writes cpu_measure.json beside this file; make_figs.py reads it.
 """
 
 import json

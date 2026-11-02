@@ -19,7 +19,7 @@ from tinytorch.extensions import (
 
 
 def test_extensions_exports():
-    """Verify all 7 extensions are exported in __all__."""
+    """Verify all 8 extensions are exported in __all__."""
     expected = [
         "simd_matmul",
         "simd_fused_bias_gelu",
@@ -29,6 +29,9 @@ def test_extensions_exports():
         "has_triton_support",
         "mps_matmul",
         "has_mps_support",
+        "cuda_matmul",
+        "has_cuda_support",
+        "cuda_build_info",
         "LoRALinear",
         "LossScaler",
         "checkpoint",

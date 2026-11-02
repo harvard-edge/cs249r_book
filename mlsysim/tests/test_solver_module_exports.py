@@ -63,8 +63,8 @@ def test_package_root_exposes_solvers_subpackage():
 
 
 def test_plot_roofline_efficiency_and_batch_size():
+    plt = pytest.importorskip("matplotlib.pyplot")
     from mlsysim.viz.plots import plot_roofline
-    import matplotlib.pyplot as plt
 
     fig1, ax1 = plot_roofline(
         mlsysim.Hardware.Cloud.A100,

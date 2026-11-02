@@ -52,6 +52,8 @@ SUBSITES=(
   mlsysim
   slides
   instructors
+  courses
+  taxonomy
   interviews
   staffml
   newsletter

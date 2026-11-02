@@ -143,31 +143,34 @@ from mlsysim.core.units import second, hour
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_qty, fmt_sci_flops, fmt_time, fmt_usd
 
 class InterventionOrderTradeoff:
-    # 1. LOAD: registry specs plus hypothetical failure mix and corpus shape.
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    n_accel = 8
-    mfu = Literature.Training.MfuLow
-    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    n_runs = 50_000
-    fail_rate = 0.06
-    share_interface = 0.70
-    share_runtime = 0.20
-    seq_tokens = 4_096
-    epochs = 3
+    # 1. LOAD: the triage scenario (registry model, accelerator, MFU, and
+    #    GPU-hour rate; hypothetical failure mix and corpus shape).
+    scenario = Scenarios.RepairAgentFailureTriage
+    model = scenario.workload
+    accel = scenario.hardware
+    n_accel = scenario.devices
+    mfu = scenario.utilization
+    gpu_rate = scenario.hourly_price
+    n_runs = scenario.runs
+    fail_rate = scenario.failure_rate
+    share_interface = scenario.probe_shares["interface"]
+    share_runtime = scenario.probe_shares["runtime"]
+    seq_tokens = scenario.sequence_tokens
+    epochs = scenario.epochs
 
     # 2. EXECUTE: failures removed below the weights, then training work.
-    n_fail = round(n_runs * fail_rate)
-    n_system = round(n_fail * (share_interface + share_runtime))
-    n_residual = n_fail - n_system
-    system_share = n_system / n_fail
-    flops_all = calc_transformer_training_flops(model.parameters, n_fail * seq_tokens * epochs)
-    flops_res = calc_transformer_training_flops(model.parameters, n_residual * seq_tokens * epochs)
-    sustained = n_accel * accel.compute.peak_flops * mfu
-    wall_all = (flops_all / sustained).to(second)
-    accel_hours_all = (n_accel * wall_all).to(hour)
-    cost_all = (accel_hours_all * gpu_rate).to(USD)
-    cost_res = (n_accel * (flops_res / sustained) * gpu_rate).to(USD)
+    triage = scenario.result
+    n_fail = triage.failures
+    n_system = triage.system_failures
+    n_residual = triage.residual
+    system_share = triage.system_share
+    flops_all = triage.training_flops
+    flops_res = triage.residual_flops
+    sustained = triage.sustained_rate
+    wall_all = triage.wall_time.to(second)
+    accel_hours_all = triage.device_hours
+    cost_all = triage.cost
+    cost_res = triage.residual_cost
 
     # 3. GUARD: split, corpus ratio, and the small-bill claim in the prose.
     check(n_fail == 3_000 and n_residual == 300, "Failure split")
@@ -325,16 +328,19 @@ A well-designed collection fixture unifies the task specification and grading cr
 # │ How: Each attempt independently assigned to training with probability f.
 # │ Note: Attempt count and split fraction are hypothetical scenario inputs.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class RandomSplitLeakage:
-    # 1. LOAD: attempts per task and training fraction (hypothetical).
-    k = 8
-    f_train = 0.8
+    # 1. LOAD: attempts per task and training fraction (hypothetical scenario).
+    scenario = Scenarios.EightAttemptRunSplit
+    k = scenario.attempts
+    f_train = scenario.train_fraction
 
     # 2. EXECUTE: a task stays whole only if all attempts land on one side.
-    p_whole = f_train**k + (1 - f_train) ** k
-    p_straddle = 1 - p_whole
+    leakage = scenario.result
+    p_whole = leakage.whole
+    p_straddle = leakage.straddle
 
     # 3. GUARD: most tasks straddle at this attempt count.
     check(0.83 < p_straddle < 0.84, "Straddle probability near 0.83")
@@ -441,24 +447,24 @@ This function forms an S-shaped selection curve whose steep region sits near $(1
 # │ How: Independent-permutation model; separate uint32 storage assumption.
 # │ Note: No measured detection quality or semantic-equivalence guarantee.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import sqrt
 from mlsysim import *
 
 class SplitScreeningBudget:
-    # 1. LOAD: illustrative signature and storage design.
-    k = 128
-    n_records = 100_000
-    component_bytes = 4 * byte
-    bands, rows = 32, 4
-    similarities = (0.5, 0.8)
+    # 1. LOAD: illustrative signature and storage design (scenario).
+    scenario = Scenarios.TrajectoryMinHashScreen
+    k = scenario.hashes
+    n_records = scenario.records
+    component_bytes = scenario.hash_bytes
+    bands, rows = scenario.bands, scenario.rows
+    similarities = tuple(scenario.probe_similarities)
 
     # 2. EXECUTE: ideal precision, raw storage, and banding candidates.
-    max_standard_error = 0.5 / sqrt(k)
-    signature_bytes = k * component_bytes
-    matrix_bytes = n_records * signature_bytes
+    max_standard_error = scenario.max_standard_error
+    signature_bytes = scenario.signature_bytes
+    matrix_bytes = scenario.index_bytes
     candidate_probabilities = (
-        1 - (1 - similarities[0] ** rows) ** bands,
-        1 - (1 - similarities[1] ** rows) ** bands,
+        scenario.candidate_probability(similarities[0]),
+        scenario.candidate_probability(similarities[1]),
     )
 
     # 3. GUARD: design consistency and numerical scales.
@@ -614,36 +620,37 @@ from mlsysim.core.units import second
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_qty
 
 class VerificationCascadeEconomicsThroughput:
-    # ┌── 1. LOAD (Hypothetical Inputs) ──────────────────────────────────
-    n_rollouts = 100_000
+    # ┌── 1. LOAD (Hypothetical Inputs, from the admission-order scenario) ─
+    scenario = Scenarios.DemonstrationAdmissionOrder
+    variant = Scenarios.DemonstrationAdmissionOrderSlowAudit
+    n_rollouts = scenario.candidates
+    checks = list(scenario.checks)  # record, use, process, outcome, target
     names = ("R", "U", "P", "O", "T")
-    pass_rates = (0.95, 0.90, 0.80, 0.40, 0.75)
-    costs_s = (0.01, 0.04, 0.20, 8.00, 2.00)
-    orders = ((0, 1, 2, 3, 4), (0, 1, 3, 2, 4))
+    pass_rates = tuple(p for p, _ in scenario.checks.values())
+    costs_s = tuple(t.to(second).magnitude for _, t in scenario.checks.values())
+    orders = []
+    for named_order in scenario.orders:
+        order = []
+        for _check in named_order:
+            order.append(checks.index(_check))
+        orders.append(tuple(order))
 
     # ┌── 2. EXECUTE (Expected Work and Yield) ───────────────────────────
-    expected_s = []
-    yields = []
-    for order in orders:
-        reach = 1.0
-        work_s = 0.0
-        for stage in order:
-            work_s += reach * costs_s[stage]
-            reach *= pass_rates[stage]
-        expected_s.append(work_s)
-        yields.append(reach)
-    yield_rate = yields[0]
-    expected_admitted = n_rollouts * yield_rate
-    saved_fraction = 1 - expected_s[0] / expected_s[1]
+    admission = scenario.result
+    expected_s = [t.to(second).magnitude for t in admission.time_per_attempted]
+    yield_rate = admission.route_yield
+    expected_admitted = admission.admitted
+    saved_fraction = admission.saving
     # Exchange argument for the adjacent P/O swap (order rule).
     reach_po = pass_rates[0] * pass_rates[1]
-    ratio_p = costs_s[2] / (1 - pass_rates[2])
-    ratio_o = costs_s[3] / (1 - pass_rates[3])
-    ratio_t = costs_s[4] / (1 - pass_rates[4])
+    ratio_p = admission.cost_per_rejection["process"].to(second).magnitude
+    ratio_o = admission.cost_per_rejection["outcome"].to(second).magnitude
+    ratio_t = admission.cost_per_rejection["target"].to(second).magnitude
     swap_gain_s = reach_po * (costs_s[3] * (1 - pass_rates[2]) - costs_s[2] * (1 - pass_rates[3]))
     # Checkpoint variant: a slower, less selective process audit.
-    alt_p_cost_s, alt_p_pass = 2.0, 0.95
-    alt_ratio_p = alt_p_cost_s / (1 - alt_p_pass)
+    alt_p_pass = variant.checks["process"][0]
+    alt_p_cost_s = variant.checks["process"][1].to(second).magnitude
+    alt_ratio_p = variant.result.cost_per_rejection["process"].to(second).magnitude
 
     # ┌── 3. ASSERT (Independent Exhaustive Outcome Check) ───────────────
     enumerated_s = [0.0, 0.0]
@@ -670,7 +677,6 @@ class VerificationCascadeEconomicsThroughput:
         if accepted[0]:
             enumerated_yield += probability
     check(abs(total_probability - 1) < 1e-12, "probability normalization")
-    check(abs(yields[0] - yields[1]) < 1e-12, "equal route yield")
     check(abs(enumerated_yield - yield_rate) < 1e-12, "enumerated yield")
     for i in range(len(orders)):
         check(abs(enumerated_s[i] - expected_s[i]) < 1e-12, "enumerated cost")
@@ -894,28 +900,31 @@ The stored token share measures $\StoredTokenVolume_j$ against the total tokens 
 # CORPUS DENOMINATORS (LEGO)
 # Goal: Separate retained records, stored context, and selected imitation targets.
 # Scope: Hypothetical disjoint role counts; one emitted sequence per demo record.
+from mlsysim import Scenarios
 from mlsysim.core.units import token
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class MixedCurationTokenBudgetAllocation:
-    # 1. LOAD: stipulated retained-pool counts and tokenizer-specific means.
-    n_direct, n_recover, n_negative = 32_500, 12_500, 5_000
-    l_direct, l_recover, l_negative = 7200 * token, 18_500 * token, 9800 * token
-    u_direct, u_recover = 1200 * token, 2000 * token
+    # 1. LOAD: stipulated retained-pool counts and tokenizer-specific means (scenario).
+    scenario = Scenarios.RecoveryPoolDenominators
+    n_direct, l_direct, u_direct = scenario.classes["direct"]
+    n_recover, l_recover, u_recover = scenario.classes["recovery"]
+    n_negative, l_negative, _ = scenario.classes["negative"]
 
     # 2. EXECUTE: this artifact admits direct/recovery records, not negatives.
-    n_total = n_direct + n_recover + n_negative
+    pool = scenario.result
+    n_total = pool.records
     n_demo = n_direct + n_recover
     v_direct, v_recover, v_negative = n_direct * l_direct, n_recover * l_recover, n_negative * l_negative
-    v_total = v_direct + v_recover + v_negative
-    v_demo = v_direct + v_recover
-    u_total = n_direct * u_direct + n_recover * u_recover
-    count_share = n_recover / n_total
-    stored_share = (v_recover / v_total).magnitude
-    demo_context_share = (v_recover / v_demo).magnitude
-    target_share = (n_recover * u_recover / u_total).magnitude
-    ctx_per_target_direct = (l_direct / u_direct).to("").magnitude
-    ctx_per_target_recover = (l_recover / u_recover).to("").magnitude
+    v_total = pool.stored_tokens
+    v_demo = pool.admitted_stored_tokens
+    u_total = pool.target_tokens
+    count_share = pool.record_share
+    stored_share = pool.stored_share
+    demo_context_share = pool.admitted_stored_share
+    target_share = pool.target_share
+    ctx_per_target_direct = pool.context_per_target["direct"]
+    ctx_per_target_recover = pool.context_per_target["recovery"]
 
     # 3. GUARD: named denominators, logical-token totals, and target bounds.
     check(n_total == 50_000 and n_demo == 45_000, "Separate retained and demo counts")
@@ -1016,21 +1025,23 @@ $$\InformativeTaskFraction(\AttemptPassProbability,\IndependentAttemptCount)=1-(
 # │ How: Independent attempts with a fixed per-attempt pass probability.
 # │ Note: Pass rates are illustrative, not measured fixture difficulties.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class InformativeTaskFraction:
-    # 1. LOAD: attempts per fixture and three illustrative pass rates.
-    k = 8
-    p_low, p_mid, p_high = 0.05, 0.50, 0.95
+    # 1. LOAD: attempts per fixture and three illustrative pass rates (scenario).
+    scenario = Scenarios.EightAttemptGroupContrast
+    k = scenario.attempts
+    p_low, p_mid, p_high = scenario.pass_rates
 
     # 2. EXECUTE: at least one success, then at least one of each outcome.
-    yield_low = 1 - (1 - p_low) ** k
-    yield_mid = 1 - (1 - p_mid) ** k
-    yield_high = 1 - (1 - p_high) ** k
-    mixed_low = yield_low - p_low**k
-    mixed_mid = yield_mid - p_mid**k
-    mixed_high = yield_high - p_high**k
-    attempts_low = k / yield_low
+    yield_low = scenario.success_yield(p_low)
+    yield_mid = scenario.success_yield(p_mid)
+    yield_high = scenario.success_yield(p_high)
+    mixed_low = scenario.mixed_fraction(p_low)
+    mixed_mid = scenario.mixed_fraction(p_mid)
+    mixed_high = scenario.mixed_fraction(p_high)
+    attempts_low = scenario.attempts_per_success(p_low)
 
     # 3. GUARD: symmetry of the mixed fraction and the displayed scales.
     check(abs(mixed_low - mixed_high) < 1e-12, "Mixed fraction is symmetric in p and 1-p")
@@ -1152,31 +1163,33 @@ Notebook \ref{nbk-14-verifier-burst-exhaustion} evaluates how fast staging fills
 # │ How: Aggregate slot capacity; reservations charged at the record ceiling.
 # │ Note: Every input is hypothetical; no queueing-delay formula is applied.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, MB, second
 from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent, fmt_qty, fmt_time
 
 class VerifierBurstExhaustion:
-    # 1. LOAD: hypothetical fleet, verifier pool, record ceiling, and store.
-    n_rollouts = 1_024
-    rollout_time = 45 * second
-    slots = 512
-    mean_service = 16.875 * second
-    timeout = 120 * second
-    max_record = 8 * MB
-    store = 32 * GB
-    reaction = 30 * second
+    # 1. LOAD: hypothetical fleet, verifier pool, record ceiling, and store (scenario).
+    scenario = Scenarios.VerifierTimeoutStagingBurst
+    n_rollouts = scenario.rollouts
+    rollout_time = scenario.rollout_time
+    slots = scenario.slots
+    mean_service = scenario.mean_service
+    timeout = scenario.timeout
+    max_record = scenario.record_ceiling
+    store = scenario.store
+    reaction = scenario.reaction
 
     # 2. EXECUTE: nominal utilization, burst growth, exhaustion, watermark.
-    arrival = n_rollouts / rollout_time
-    capacity = slots / mean_service
-    rho = (arrival / capacity).to("").magnitude
-    degraded = slots / timeout
-    net = arrival - degraded
-    growth = (net * max_record).to(MB / second)
-    t_exhaust = (store / growth).to(second)
-    inflight = n_rollouts * max_record
-    headroom = inflight + reaction * growth
-    high_mark = (1 - headroom / store).to("").magnitude
+    burst = scenario.result
+    arrival = burst.arrival_rate
+    capacity = burst.capacity
+    rho = burst.utilization
+    degraded = burst.burst_capacity
+    net = burst.net_growth
+    growth = burst.growth
+    t_exhaust = burst.time_to_full
+    inflight = burst.in_flight
+    high_mark = burst.high_watermark
     high_mark_set = int(high_mark * 100) / 100
 
     # 3. GUARD: stable nominal case, unstable burst, watermark below its bound.
@@ -1202,7 +1215,7 @@ class VerifierBurstExhaustion:
     t_exhaust_str = fmt_time(t_exhaust, unit="s", precision=1)
     t_exhaust_min_str = fmt_time(t_exhaust, unit="min", precision=1)
     inflight_str = fmt_memory(inflight, unit=GB, precision=1)
-    reaction_growth_str = fmt_memory((reaction * growth).to(GB), unit=GB, precision=1)
+    reaction_growth_str = fmt_memory(burst.reaction_growth, unit=GB, precision=1)
     high_mark_str = fmt_percent(high_mark_set, precision=0, style="prose")
 ```
 
@@ -1226,7 +1239,7 @@ A **collection credit**\index{Collection credit!definition}[^fn-credit-flow-cura
 ↪ Credit windows between cooperating agents, and the throughput a window of fixed size allows, are developed in @sec-vol3-multiagent-credit-flow-control.
 :::
 
-::: {#fig-vol3-collection-pipeline data-explore="mechanism-scene" data-explore-key="vol3:fig-vol3-collection-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Collection Credits Across Four Responsibilities**: Each admitted run holds one credit through rollout, capture, staging, and assessment. The credit returns to the pool only when the record reaches a durable disposition or an acknowledged transfer to another bounded owner, such as the review queue. A watermark derived from in-flight work slows dispatch before the pool is exhausted, and a hard limit stops admission when that feedback arrives late." fig-alt="A vertical credit pool gauge on the left holds ten credit slots, six filled from the bottom and labeled in flight. A red line at the top of the gauge is labeled hard limit, stops admission, and a dashed line two slots below it is labeled watermark, slows dispatch. An arrow labeled acquire leads from the pool to a single bar divided into rollout, capture, staging, and assessment, with a violet bracket beneath it spanning all four segments and a single credit swatch labeled one credit held per run. From the bar, arrows lead to three boxes: dataset publication, derived version; diagnostic pool, or comparison; and review queue, unresolved hold. Dashed violet lines from all three join a return path along the bottom of the figure into the base of the pool, labeled credit returned on durable disposition or acknowledged transfer."}
+::: {#fig-vol3-collection-pipeline data-explore="original-v3-collection-pipeline" data-explore-key="vol3:fig-vol3-collection-pipeline" fig-env="figure" fig-pos="htb" fig-cap="**Collection Credits Across Four Responsibilities**: Each admitted run holds one credit through rollout, capture, staging, and assessment. The credit returns to the pool only when the record reaches a durable disposition or an acknowledged transfer to another bounded owner, such as the review queue. A watermark derived from in-flight work slows dispatch before the pool is exhausted, and a hard limit stops admission when that feedback arrives late." fig-alt="A vertical credit pool gauge on the left holds ten credit slots, six filled from the bottom and labeled in flight. A red line at the top of the gauge is labeled hard limit, stops admission, and a dashed line two slots below it is labeled watermark, slows dispatch. An arrow labeled acquire leads from the pool to a single bar divided into rollout, capture, staging, and assessment, with a violet bracket beneath it spanning all four segments and a single credit swatch labeled one credit held per run. From the bar, arrows lead to three boxes: dataset publication, derived version; diagnostic pool, or comparison; and review queue, unresolved hold. Dashed violet lines from all three join a return path along the bottom of the figure into the base of the pool, labeled credit returned on durable disposition or acknowledged transfer."}
 ![](images/svg/vol3-collection-pipeline.svg)
 :::
 
@@ -1559,21 +1572,22 @@ The numerator $\CollectionCohortCost$ captures all unproductive runs, rejected p
 from mlsysim import *
 
 class CurationArtifactYield:
-    # 1. LOAD — hypothetical inputs, not executed collection measurements.
-    n_started = 500
-    n_emitted = 15
-    n_other_assessed = 470
-    n_ineligible = 10
-    n_pending = 3
-    n_unknown = 2
-    cohort_cost = 300.0
+    # 1. LOAD — hypothetical inputs, not executed collection measurements (scenario).
+    scenario = Scenarios.CurationCohortDispositions
+    n_started = scenario.attempts
+    n_emitted = scenario.dispositions["selected_emitted"]
+    n_other_assessed = scenario.dispositions["assessed_not_selected"]
+    n_ineligible = scenario.dispositions["ineligible"]
+    n_pending = scenario.dispositions["pending"]
+    n_unknown = scenario.dispositions["unknown"]
+    cohort_cost = scenario.cohort_cost.to(USD).magnitude
 
     # 2. EXECUTE — dispositions are mutually exclusive at the stated cutoff.
     n_accounted = n_emitted + n_other_assessed + n_ineligible + n_pending + n_unknown
-    emission_yield = n_emitted / n_started
-    cost_per_artifact = cohort_cost / n_emitted
-    cost_per_attempt = cohort_cost / n_started
-    cost_at_double_yield = cost_per_attempt / (2 * emission_yield)
+    emission_yield = scenario.emission_yield
+    cost_per_artifact = scenario.cost_per_artifact().to(USD).magnitude
+    cost_per_attempt = scenario.cost_per_attempt.to(USD).magnitude
+    cost_at_double_yield = scenario.cost_per_artifact(scenario.yield_multiple * emission_yield).to(USD).magnitude
     not_emitted_share = 1 - emission_yield
 
     # 3. GUARD — preserve the cohort and the displayed quantitative claims.

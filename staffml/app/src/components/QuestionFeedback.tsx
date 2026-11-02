@@ -15,6 +15,7 @@ interface QuestionFeedbackProps {
     topic: string;
     zone: string;
     competency_area: string;
+    taxonomy_subject?: string;
   };
 }
 
@@ -57,6 +58,7 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
       type: 'question_thumbs',
       questionId: question.id,
       topic: question.topic,
+      subject: question.taxonomy_subject,
       level: question.level,
       value,
     });
@@ -69,6 +71,7 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
       type: 'question_difficulty_feedback',
       questionId: question.id,
       topic: question.topic,
+      subject: question.taxonomy_subject,
       level: question.level,
       perceived,
     });
@@ -81,6 +84,7 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
       type: 'question_verification_feedback',
       questionId: question.id,
       topic: question.topic,
+      subject: question.taxonomy_subject,
       level: question.level,
       value,
     });

@@ -1,6 +1,7 @@
 // Lightweight analytics for StaffML
 // All data is anonymous — no PII, no cookies, no persistent user IDs
 // Events are stored locally AND batched to a remote endpoint for aggregate analysis
+import { getSubjectIdForQuestion } from "./mlsys-taxonomy";
 
 const ANALYTICS_KEY = 'staffml_analytics';
 const SESSION_KEY = 'staffml_session_id';
@@ -16,15 +17,15 @@ export type AnalyticsEvent =
   // Session
   | { type: 'session_start'; isReturning: boolean; screenWidth: number }
   // Question lifecycle
-  | { type: 'question_scored'; questionId: string; topic: string; zone: string; level: string; track: string; score: number }
-  | { type: 'question_skipped'; topic: string; level: string }
+  | { type: 'question_scored'; questionId: string; topic: string; subject?: string; zone: string; level: string; track: string; score: number }
+  | { type: 'question_skipped'; topic: string; subject?: string; level: string }
   | { type: 'question_reported'; questionId: string; category?: string }
-  | { type: 'question_thumbs'; questionId: string; topic: string; level: string; value: 'up' | 'down' }
-  | { type: 'question_difficulty_feedback'; questionId: string; topic: string; level: string; perceived: 'too_easy' | 'about_right' | 'too_hard' }
-  | { type: 'question_verification_feedback'; questionId: string; topic: string; level: string; value: 'verified' | 'disputed' }
+  | { type: 'question_thumbs'; questionId: string; topic: string; subject?: string; level: string; value: 'up' | 'down' }
+  | { type: 'question_difficulty_feedback'; questionId: string; topic: string; subject?: string; level: string; perceived: 'too_easy' | 'about_right' | 'too_hard' }
+  | { type: 'question_verification_feedback'; questionId: string; topic: string; subject?: string; level: string; value: 'verified' | 'disputed' }
   | { type: 'question_contributed'; topic: string; track: string }
-  | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string; hadUserAnswer: boolean }
-  | { type: 'answer_revealed'; topic: string; zone: string; hadUserAnswer: boolean }
+  | { type: 'answer_response_time'; questionId: string; topic: string; subject?: string; level: string; seconds: number; napkinGrade?: string; hadUserAnswer: boolean }
+  | { type: 'answer_revealed'; topic: string; subject?: string; zone: string; hadUserAnswer: boolean }
   // Submit-gradient safeguard — fires when a Reveal is intercepted
   // because elapsed<15s AND chars<50. Tracks under-engagement with
   // the scenario; should trend down as deliberation habits form.
@@ -237,6 +238,8 @@ export interface AnalyticsSummary {
   chainBadgeCTR: number; // 0..1, 0 if shown == 0
   scoresByZone: Record<string, { total: number; count: number; avg: number }>;
   scoresByTopic: Record<string, { total: number; count: number; avg: number }>;
+  /** Scores by ML Systems Taxonomy subject; older events are mapped from their questionId. */
+  scoresBySubject: Record<string, { total: number; count: number; avg: number }>;
   scoresByLevel: Record<string, { total: number; count: number; avg: number }>;
   eventsByDay: Record<string, number>;
   topSkippedTopics: { topic: string; count: number }[];
@@ -270,6 +273,7 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
 
   const scoresByZone: Record<string, { total: number; count: number; avg: number }> = {};
   const scoresByTopic: Record<string, { total: number; count: number; avg: number }> = {};
+  const scoresBySubject: Record<string, { total: number; count: number; avg: number }> = {};
   const scoresByLevel: Record<string, { total: number; count: number; avg: number }> = {};
   const eventsByDay: Record<string, number> = {};
   const skipsByTopic: Record<string, number> = {};
@@ -289,6 +293,14 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
         if (!scoresByTopic[event.topic]) scoresByTopic[event.topic] = { total: 0, count: 0, avg: 0 };
         scoresByTopic[event.topic].total += event.score;
         scoresByTopic[event.topic].count++;
+        {
+          const subject = event.subject ?? getSubjectIdForQuestion(event.questionId);
+          if (subject) {
+            if (!scoresBySubject[subject]) scoresBySubject[subject] = { total: 0, count: 0, avg: 0 };
+            scoresBySubject[subject].total += event.score;
+            scoresBySubject[subject].count++;
+          }
+        }
         if (!scoresByLevel[event.level]) scoresByLevel[event.level] = { total: 0, count: 0, avg: 0 };
         scoresByLevel[event.level].total += event.score;
         scoresByLevel[event.level].count++;
@@ -351,6 +363,7 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
   // Compute averages
   for (const v of Object.values(scoresByZone)) v.avg = v.count > 0 ? v.total / v.count : 0;
   for (const v of Object.values(scoresByTopic)) v.avg = v.count > 0 ? v.total / v.count : 0;
+  for (const v of Object.values(scoresBySubject)) v.avg = v.count > 0 ? v.total / v.count : 0;
   for (const v of Object.values(scoresByLevel)) v.avg = v.count > 0 ? v.total / v.count : 0;
 
   // Top skipped topics
@@ -381,6 +394,7 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
     chainBadgeCTR,
     scoresByZone,
     scoresByTopic,
+    scoresBySubject,
     scoresByLevel,
     eventsByDay,
     topSkippedTopics,

@@ -428,3 +428,64 @@ def calc_quasistatic_spill_acceleration(inner_radius, freeboard, gravity=None):
     validate_positive(freeboard, "freeboard")
     g = (1 * ureg.standard_gravity) if gravity is None else gravity
     return (g * freeboard / inner_radius).to(ureg.meter / ureg.second**2)
+
+
+def calc_smoothstep_blend_window(change, rate_limit):
+    """
+    Shortest window of a fixed-endpoint quintic smoothstep whose peak rate stays at a limit.
+
+    Equation:
+        T >= 1.875 |Delta u| / rate_max
+
+    The smoothstep alpha(s) = 10 s^3 - 15 s^4 + 6 s^5 has peak slope
+    d alpha / ds = 30/16 = 1.875 at s = 1/2, so a change Delta u spread over T
+    peaks at 1.875 Delta u / T. Unit-generic form of
+    ``calc_quintic_blend_duration``: an acceleration change against a jerk
+    bound, or a torque change against a torque-rate ceiling (added 2026-10-20).
+
+    Returns
+    -------
+    Quantity
+        Window in seconds.
+    """
+    validate_positive(rate_limit, "rate_limit")
+    return (1.875 * abs(change) / rate_limit).to(ureg.second)
+
+
+def calc_coasting_contact_peak_force(contact_velocity, effective_mass, contact_stiffness, preload_force):
+    """
+    Peak force when drive torque is removed at a contact tripwire and the mass coasts into a spring.
+
+    Energy balance from the tripwire, where the spring already carries ``preload_force``:
+        F0^2 / (2k) + m v^2 / 2 = F_peak^2 / (2k)  =>  F_peak = sqrt(F0^2 + k m v^2)
+
+    With ``preload_force`` zero this is the unbraked transient force v sqrt(k m)
+    (``calc_transient_impact_force``). Added 2026-10-20.
+    """
+    validate_positive(contact_velocity, "contact_velocity")
+    validate_positive(effective_mass, "effective_mass")
+    validate_positive(contact_stiffness, "contact_stiffness")
+    f0 = preload_force.to(ureg.newton).magnitude
+    v = contact_velocity.to(ureg.meter / ureg.second).magnitude
+    m = effective_mass.to(ureg.kg).magnitude
+    k = contact_stiffness.to(ureg.newton / ureg.meter).magnitude
+    return math.sqrt(f0 ** 2 + k * m * v ** 2) * ureg.newton
+
+
+def calc_passive_compliance_stiffness_bound(force_limit, tripwire_force, detection_speed, response_latency,
+                                            arm_deceleration):
+    """
+    Largest series stiffness that keeps a driven contact under a force limit after the tripwire.
+
+    After the tripwire the arm keeps driving for the response latency, then stops at
+    ``arm_deceleration``; the stroke it drives is s = v t_r + v^2 / (2 a), and the force
+    rises by k s on top of the tripwire force:
+        F_trip + k s <= F_limit  <=>  k <= (F_limit - F_trip) / (v t_r + v^2 / (2 a))
+
+    Returns (stiffness bound, driven stroke). Added 2026-10-20.
+    """
+    validate_positive(detection_speed, "detection_speed")
+    validate_positive(arm_deceleration, "arm_deceleration")
+    stroke = (detection_speed * response_latency + detection_speed ** 2 / (2 * arm_deceleration)).to(ureg.millimeter)
+    k = ((force_limit - tripwire_force) / stroke).to(ureg.newton / ureg.meter)
+    return k, stroke
