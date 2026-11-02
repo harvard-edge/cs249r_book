@@ -136,7 +136,7 @@ To eliminate single-judge confirmation bias when measuring coverage on held-out 
 On a stratified sample of held-out artifacts indexed independently by two blind indexers:
 1. **Subject-level agreement**: Cohen's $\kappa$ on primary subject assignment (`target >= 0.70`).
 2. **Concept-set overlap**: Hooper's (1965) indexing consistency $H(A,B) = \frac{|A \cap B|}{|A \cup B|}$ and Rolling's (1981) consistency $R(A,B) = \frac{2|A \cap B|}{|A| + |B|}$ (`target H >= 0.40`, `R >= 0.57`).
-3. **Chance-corrected multi-label set agreement**: Krippendorff's $\alpha_{\text{MASI}}$ using Passonneau's (2006) Monotonicity- and Availability-Sensitive Intersection distance $d_{\text{MASI}}(A,B) = 1 - J(A,B) \cdot M(A,B)$ without double-squaring (`Method-A` §5.4).
+3. **Chance-corrected multi-label set agreement**: Krippendorff's $\alpha_{\text{MASI}}$ using Passonneau's (2006) *Measuring Agreement on Set-valued Items* (MASI) distance $d_{\text{MASI}}(A,B) = 1 - J(A,B) \cdot M(A,B)$ without double-squaring (`Method-A` §5.4).
 4. **Anti-Gaming Specificity Coupling (`Method-B` §6.7, `Method-C` §6.4)**: Because $\kappa$, Hooper, and Rolling can be artificially inflated by collapsing specific concepts into coarse parents or over-applying root concepts, agreement is valid only when accompanied by:
    - **Leaf/Specific-Concept Ratio**: Fraction of assigned tags that are leaf concepts or depth $\ge 2$ (`must not drop`).
    - **Max Single-Concept Concentration ($p_{\max}$)**: No single concept may account for $>15\%$ of assignments in an area (`Method-B` §6.1).
