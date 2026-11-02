@@ -10,6 +10,28 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ---
 
+## [Unreleased] — 2026-11-02
+
+### ML Systems Taxonomy 0.4-draft
+
+The taxonomy gained 71 concepts net and moved six (878 concepts and 2,020
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates and `vault check --strict` passes.
+`app/src/data/mlsys-taxonomy.json` was regenerated with the new labels and
+homes, and the loader now accepts the symptom field `quantities` beside
+causes, checks, and levers.
+
+- Moved concepts: 23 questions tagged with Local SGD, Embedding cache, or
+  Datacenter demand response were re-read; 10 changed `taxonomy_subject` to
+  the new home (3, 6, and 1), 13 kept the old subject because the question
+  is about that subject and the concept is a supporting tag.
+- New concepts offered to subject-only questions: the 185 questions without
+  `taxonomy_concepts` whose subject gained a concept were tagged by two
+  independent taggers (claude-fable-5-1 and gpt-6.1-sol) from the subject's
+  own concept list; tag-or-not agreement was 149 of 185 (80.5%), and the 44
+  questions where both chose the same concept received it. 141 questions stay
+  subject-only, which remains a valid tag.
+
 ## [Unreleased] — 2026-10-27
 
 ### ML Systems Taxonomy 0.3-draft

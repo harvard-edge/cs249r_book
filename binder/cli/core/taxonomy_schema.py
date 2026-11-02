@@ -516,6 +516,33 @@ def validate_field_semantics(model: dict) -> None:
                         f"field model: retired identity {record.get('id')} must be unused and name a current replacement"
                     )
 
+    # 0. SKOS Reference S27 (2026-11-02): `specializes` exports as skos:broader, so no other relation may join a
+    # concept to any of its transitive ancestors; skos:related and skos:broaderTransitive are disjoint.
+    parents: dict[str, set[str]] = {}
+    well_formed = [e for e in edges if isinstance(e, dict) and "source" in e and "target" in e and "id" in e]
+    for edge in well_formed:
+        if edge.get("relation") == "specializes":
+            parents.setdefault(edge["source"], set()).add(edge["target"])
+
+    def _ancestors(node: str) -> set[str]:
+        seen: set[str] = set()
+        todo = list(parents.get(node, ()))
+        while todo:
+            current = todo.pop()
+            if current not in seen:
+                seen.add(current)
+                todo.extend(parents.get(current, ()))
+        return seen
+
+    for edge in well_formed:
+        if edge.get("relation") != "specializes" and (
+            edge["target"] in _ancestors(edge["source"]) or edge["source"] in _ancestors(edge["target"])
+        ):
+            raise ConceptGraphError(
+                f"field model: {edge['id']} joins {edge['source']} to its `specializes` ancestor or descendant "
+                f"{edge['target']}; SKOS S27 keeps associative and hierarchical links disjoint"
+            )
+
     # 1. Ontological DAG acyclicity on hierarchical relations (specializes, part-of, requires).
     for rel_name in HIERARCHICAL_RELATIONS:
         adj: dict[str, list[str]] = {}
@@ -666,6 +693,12 @@ def validate_guides_semantics(guides: dict, rows_by_id: dict, version: str | Non
         if overlap_kl:
             raise ConceptGraphError(
                 f"framework: symptom {sid} lists concept as both check and lever: {', '.join(overlap_kl)}"
+            )
+        quantities = set(symptom.get("quantities", []))
+        overlap_q = sorted(quantities & (causes | checks | levers))
+        if overlap_q:
+            raise ConceptGraphError(
+                f"framework: symptom {sid} lists a quantity also as a cause, check, or lever: {', '.join(overlap_q)}"
             )
 
     roles = guides.get("roles", [])
