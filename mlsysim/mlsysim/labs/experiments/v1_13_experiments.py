@@ -268,12 +268,367 @@ _ARRIVAL_PHASES: dict[tuple[Track, ArrivalPattern], tuple[ArrivalPhase, ...]] = 
 
 
 def get_serving_scenario(track: Track) -> ServingScenario:
-    """Return the immutable illustrative scenario for a teaching track."""
+    """Return the original immutable illustrative scenario for a teaching track.
+
+    For backward compatibility, cloud here remains the language-serving
+    reference. New native recommendation labs use
+    :func:`get_recommendation_serving_scenario`; the language study has the
+    explicit :func:`get_language_serving_reference` entry point.
+    """
 
     try:
         return _SCENARIOS[track]
     except KeyError as exc:
         raise ValueError(f"unknown serving track: {track!r}") from exc
+
+
+@dataclass(frozen=True)
+class RecommendationStateBreakdown:
+    """Explicit hypothetical allocations for one recommendation endpoint.
+
+    The embedding table is resident once, whereas gathered embeddings and
+    ranking buffers are allocated per live request. None is a language KV cache.
+    """
+
+    model_weights: Quantity
+    resident_embedding_table: Quantity
+    feature_buffer: Quantity
+    gathered_embeddings: Quantity
+    ranking_buffer: Quantity
+
+    @property
+    def resident_memory(self) -> Quantity:
+        return self.model_weights + self.resident_embedding_table
+
+    @property
+    def per_request_memory(self) -> Quantity:
+        return self.feature_buffer + self.gathered_embeddings + self.ranking_buffer
+
+
+def recommendation_state_breakdown(
+    pressure: StatePressure = "baseline",
+) -> RecommendationStateBreakdown:
+    """Return supplied allocations, not product measurements or model predictions.
+
+    Elevated pressure doubles every request buffer, leaving resident weights,
+    embedding table, and the service-time scaffold unchanged. Overflow is an
+    explicit infeasible stress case, not a plausible recommendation workload.
+    """
+
+    if pressure not in ("baseline", "elevated", "overflow"):
+        raise ValueError(f"unknown state pressure: {pressure!r}")
+    state = RecommendationStateBreakdown(
+        model_weights=Q_(5.5, "GiB"),
+        resident_embedding_table=Q_(8, "GiB"),
+        feature_buffer=Q_(40, "MiB"),
+        gathered_embeddings=Q_(100, "MiB"),
+        ranking_buffer=Q_(40, "MiB"),
+    )
+    if pressure == "elevated":
+        return replace(
+            state,
+            feature_buffer=state.feature_buffer * 2,
+            gathered_embeddings=state.gathered_embeddings * 2,
+            ranking_buffer=state.ranking_buffer * 2,
+        )
+    if pressure == "overflow":
+        return replace(state, ranking_buffer=_SCENARIOS["cloud"].device_memory)
+    return state
+
+
+def get_recommendation_serving_scenario(
+    pressure: StatePressure = "baseline",
+) -> ServingScenario:
+    """A native recommendation study, using a shared controlled timing scaffold.
+
+    Service/arrival timings deliberately match the existing cloud reference so
+    that policies remain comparable; they are supplied assumptions, not timings
+    measured from a recommendation model. This isolates allocation and feature
+    contract effects. It models a single endpoint, not fleet capacity.
+    """
+
+    reference = _SCENARIOS["cloud"]
+    state = recommendation_state_breakdown(pressure)
+    return replace(
+        reference,
+        workload="single-endpoint product recommendation ranking",
+        resident_model_memory=state.resident_memory,
+        request_working_state=state.per_request_memory,
+        request_kv_state=Q_(0, "byte"),
+        reference_preprocessing_signature="candidate-feature-schema-v1",
+        preprocessing_paths=(
+            PreprocessingPath("Matched recommendation features", reference.preprocessing_paths[0].latency,
+                              "candidate-feature-schema-v1"),
+            PreprocessingPath("Incompatible feature schema", reference.preprocessing_paths[1].latency,
+                              "candidate-feature-schema-v0"),
+        ),
+        serving_role="Single recommendation endpoint",
+        assumption_note=(
+            "Supplied allocation and timing assumptions, not measured product performance. "
+            "Resident model weights and embedding table are fixed; live requests use feature, "
+            "gathered-embedding, and ranking buffers. No language KV cache. "
+            f"State pressure: {pressure}. Service time is held fixed to isolate state fit."
+        ),
+    )
+
+
+LANGUAGE_CONTEXT_SCALES = (1, 2, 4, 8, 16)
+
+
+def get_language_serving_reference(
+    pressure: StatePressure = "baseline", *, context_scale: int = 1,
+) -> ServingScenario:
+    """Language-only KV allocation at relative retained-history lengths.
+
+    A fixed architecture/dtype uses linear KV storage in retained history.
+    The supplied baseline is an allocation reference, not an absolute token
+    length. Execution time is held fixed here; do not infer decode latency.
+    """
+    if isinstance(context_scale, bool) or not isinstance(context_scale, int) or context_scale not in LANGUAGE_CONTEXT_SCALES:
+        raise ValueError(f"context_scale must be one of {LANGUAGE_CONTEXT_SCALES}")
+    base = state_pressure_scenario("cloud", pressure)
+    return replace(
+        base, request_kv_state=base.request_kv_state * context_scale,
+        serving_role="Separate language-serving reference",
+    )
+
+
+@dataclass(frozen=True)
+class LanguageScheduleSlice:
+    phase: Literal["prefill", "decode"]
+    start: Quantity
+    end: Quantity
+    stream: Literal["new", "active"]
+
+
+@dataclass(frozen=True)
+class LanguageSchedulingReference:
+    """One active decoding stream contends with one newly arrived prompt."""
+
+    chunks: int
+    timeline: tuple[LanguageScheduleSlice, ...]
+    prefill_work: Quantity
+    decode_step: Quantity
+    decode_count: int
+    prompt_first_token: Quantity
+    active_decode_completions: tuple[Quantity, ...]
+    max_active_token_gap: Quantity
+    total_busy_time: Quantity
+    assumption_note: str
+
+
+def language_scheduling_reference(chunks: int = 1) -> LanguageSchedulingReference:
+    """Compare monolithic and chunked prefill with conserved supplied work.
+
+    Both jobs arrive at time zero. One active stream emitted a token at zero.
+    Prefill runs first; after each chunk the scheduler runs one active decode
+    step. Once prefill ends, a new-stream decode produces its first token before
+    remaining active decodes. There are no launch costs, overlapping kernels,
+    extra devices, or claims that chunking accelerates prefill. Timings are
+    explicit teaching assumptions; this is a scheduling timeline, not an LLM
+    performance solver. Valid chunk counts divide the fixed active-token count.
+    """
+
+    if isinstance(chunks, bool) or not isinstance(chunks, int) or chunks not in (1, 2, 4):
+        raise ValueError("chunks must be one of 1, 2, 4")
+    prefill = Q_(120, "ms")
+    decode = Q_(8, "ms")
+    decode_count = 4
+    now = Q_(0, "ms")
+    slices: list[LanguageScheduleSlice] = []
+    completions: list[Quantity] = []
+    for _ in range(chunks):
+        slices.append(LanguageScheduleSlice("prefill", now, now + prefill / chunks, "new"))
+        now += prefill / chunks
+        slices.append(LanguageScheduleSlice("decode", now, now + decode, "active"))
+        now += decode
+        completions.append(now)
+    slices.append(LanguageScheduleSlice("decode", now, now + decode, "new"))
+    now += decode
+    first_token = now
+    for _ in range(decode_count - chunks):
+        slices.append(LanguageScheduleSlice("decode", now, now + decode, "active"))
+        now += decode
+        completions.append(now)
+    previous = (Q_(0, "ms"), *completions[:-1])
+    largest_gap = max(right - left for left, right in zip(previous, completions))
+    return LanguageSchedulingReference(
+        chunks=chunks, timeline=tuple(slices), prefill_work=prefill,
+        decode_step=decode, decode_count=decode_count,
+        prompt_first_token=first_token, active_decode_completions=tuple(completions),
+        max_active_token_gap=largest_gap, total_busy_time=now,
+        assumption_note=("Separate language-serving scheduling reference. Supplied constant service times; "
+                         "one non-overlapping compute resource, one existing stream, one arriving prompt. "
+                         "Chunking reduces the longest active-stream stall while delaying the new prompt's "
+                         "first token. No launch overhead or context-dependent decode cost modeled."),
+    )
+
+
+def language_batching_reference(
+    policy: str = "continuous", *, length_mix: str = "mixed",
+    arrival_spacing_ms: int = 0, context_scale: int = 1,
+) -> dict[str, Any]:
+    """Replay a finite decode-only queue with static cohorts or slot refill.
+
+    Eight already-prefilled requests each emit one token per active iteration.
+    One iteration costs a supplied constant eight milliseconds, regardless of
+    occupancy. This deliberately isolates empty-slot waste; it is not a device
+    timing model. Static cohorts retain their slots/allocations until the last
+    member finishes; continuous admission frees completed slots at boundaries.
+    Each slot reserves the supplied history-dependent state allowance throughout
+    its lifetime. Output-token KV growth, prefill, launch overhead, cancellation,
+    fragmentation, SLO qualification, and variable batch service time are absent.
+    """
+    if policy not in ("static", "continuous"):
+        raise ValueError("policy must be static or continuous")
+    if length_mix not in ("equal", "mixed"):
+        raise ValueError("length_mix must be equal or mixed")
+    if isinstance(arrival_spacing_ms, bool) or not isinstance(arrival_spacing_ms, int) or arrival_spacing_ms not in (0, 16, 160):
+        raise ValueError("arrival_spacing_ms must be 0, 16, or 160")
+    scenario = get_language_serving_reference(context_scale=context_scale)
+    capacity = state_capacity(scenario)
+    slots = min(4, capacity.max_requests_per_replica)
+    lengths = (8,) * 8 if length_mix == "equal" else (2, 2, 2, 20, 2, 2, 2, 20)
+    arrivals = [i * arrival_spacing_ms for i in range(len(lengths))]
+    remaining = list(lengths)
+    first: list[int | None] = [None] * len(lengths)
+    finish: list[int | None] = [None] * len(lengths)
+    timeline: list[dict[str, Any]] = []
+    now = cursor = peak_slots = idle_slots = 0
+    cohort: list[int] = []
+    step_ms = 8  # supplied pedagogical decode iteration assumption
+    while slots and (cursor < len(lengths) or cohort):
+        if policy == "continuous":
+            cohort = [i for i in cohort if remaining[i]]
+        elif cohort and all(remaining[i] == 0 for i in cohort):
+            cohort = []
+        can_admit = policy == "continuous" or not cohort
+        if not cohort and cursor < len(lengths):
+            now = max(now, arrivals[cursor])
+        if can_admit:
+            while cursor < len(lengths) and arrivals[cursor] <= now and len(cohort) < slots:
+                cohort.append(cursor)
+                cursor += 1
+        if not cohort:
+            continue
+        active = [i for i in cohort if remaining[i]]
+        peak_slots = max(peak_slots, len(cohort))
+        idle_slots += slots - len(active)
+        timeline.append({"start_ms": now, "end_ms": now + step_ms,
+                         "request_ids": active, "reserved_slots": len(cohort),
+                         "idle_slots": slots - len(active)})
+        now += step_ms
+        for i in active:
+            remaining[i] -= 1
+            if first[i] is None:
+                first[i] = now
+            if remaining[i] == 0:
+                finish[i] = now
+    completed = [i for i, value in enumerate(finish) if value is not None]
+    total_tokens = sum(lengths[i] for i in completed)
+    fixed_bytes = _bytes(capacity.fixed_memory, "fixed memory")
+    state_bytes = _bytes(capacity.state_per_request, "state per request")
+    latencies = [finish[i] - arrivals[i] for i in completed]
+    first_latencies = [first[i] - arrivals[i] for i in completed]
+    return {
+        "inputs": {"policy": policy, "length_mix": length_mix,
+                   "arrival_spacing_ms": arrival_spacing_ms, "context_scale": context_scale},
+        "offered_count": len(lengths), "completed_count": len(completed),
+        "rejected_count": len(lengths) - len(completed),
+        "feasible": slots > 0, "slot_limit": slots,
+        "iteration_ms": step_ms, "elapsed_ms": now,
+        "total_output_tokens": total_tokens,
+        "tokens_per_second": total_tokens * 1000 / now if now else None,
+        "p99_completion_latency_ms": max(latencies) if latencies else None,
+        "mean_first_decode_latency_ms": sum(first_latencies) / len(first_latencies) if first_latencies else None,
+        "idle_slot_iterations": idle_slots,
+        "peak_memory_bytes": fixed_bytes + peak_slots * state_bytes if slots else None,
+        "device_memory_bytes": _bytes(scenario.device_memory, "device memory"),
+        "timeline": timeline,
+        "requests": [{"request_id": i, "arrival_ms": arrivals[i], "output_tokens": lengths[i],
+                      "first_decode_ms": first[i], "completion_ms": finish[i],
+                      "completion_latency_ms": None if finish[i] is None else finish[i] - arrivals[i]}
+                     for i in range(len(lengths))],
+        "assumption_note": (
+            "Decode-only reference: all prompts are already prepared before their arrival. "
+            "One supplied constant-time iteration emits one token per active request. "
+            "Static cohorts cannot refill until every member finishes; continuous admission "
+            "refills only at iteration boundaries. State reservations cap admissions; an "
+            "infeasible one-request allocation rejects all work and reports no throughput. "
+            "History changes reservation only, not decode timing. No output-token KV growth, "
+            "prefill interference, allocation overhead, hardware calibration, or SLO claim."
+        ),
+    }
+
+
+def language_scheduling_to_snapshot(
+    result: LanguageSchedulingReference,
+) -> dict[str, Any]:
+    """Serialize the separate scheduling reference as JSON-safe evidence.
+
+    ``inputs`` preserves the exact supported scheduling intervention; timings
+    remain output values from the reference's supplied timing assumptions.
+    """
+
+    return {
+        "inputs": {"chunks": result.chunks},
+        "chunks": result.chunks,
+        "timeline": [
+            {"phase": step.phase, "start_ms": _milliseconds(step.start, "start"),
+             "end_ms": _milliseconds(step.end, "end"), "stream": step.stream}
+            for step in result.timeline
+        ],
+        "prefill_work_ms": _milliseconds(result.prefill_work, "prefill work"),
+        "decode_step_ms": _milliseconds(result.decode_step, "decode step"),
+        "decode_count": result.decode_count,
+        "prompt_first_token_ms": _milliseconds(result.prompt_first_token, "prompt first token"),
+        "active_decode_completions_ms": [
+            _milliseconds(value, "active decode completion")
+            for value in result.active_decode_completions
+        ],
+        "max_active_token_gap_ms": _milliseconds(result.max_active_token_gap, "active token gap"),
+        "total_busy_time_ms": _milliseconds(result.total_busy_time, "busy time"),
+        "assumption_note": result.assumption_note,
+    }
+
+
+
+@dataclass(frozen=True)
+class ServingPathCase:
+    """A stipulated path intervention, not a measured optimizer speedup."""
+
+    label: str
+    scenario: ServingScenario
+    preprocessing: PreprocessingPath
+    assumption: str
+
+
+def serving_path_cases(scenario: ServingScenario) -> dict[str, ServingPathCase]:
+    """Expose matched host/model comparisons plus a correctness counterexample.
+
+    Scenario assumptions: the host alternative halves preparation time while
+    reserving one extra request buffer. The model alternative halves execution
+    time while retaining a second model artifact. Signatures and task remain
+    fixed in both valid alternatives. No quality or empirical speedup is inferred.
+    Complete-path timings and memory feasibility are evaluated by the usual replay.
+    """
+    matched = scenario.preprocessing_paths[0]
+    host_path = replace(matched, name="Buffered matched preparation", latency=matched.latency / 2)
+    host = replace(scenario, batch_workspace=scenario.batch_workspace + scenario.request_working_state)
+    model = replace(scenario, execution_latency=scenario.execution_latency / 2,
+                    resident_model_memory=scenario.resident_model_memory * 2)
+    return {
+        "host": ServingPathCase("Buffer the host path", host, host_path,
+            "Assume half the preparation time and one extra resident request buffer. "
+            "The preprocessing contract and model are unchanged; host contention is not modeled."),
+        "model": ServingPathCase("Keep a compiled model copy", model, matched,
+            "Assume half the execution time and two resident model artifacts. "
+            "The task and preprocessing contract are unchanged. This is not a measured compiler speedup."),
+        "incompatible": ServingPathCase("Use the cheaper incompatible transform", scenario,
+            scenario.preprocessing_paths[1],
+            "Keep the model and memory fixed, but use the supplied cheaper transform. "
+            "Its changed output contract prevents useful-service credit."),
+    }
 
 
 def preprocessing_path(scenario: ServingScenario, name: str) -> PreprocessingPath:
@@ -951,6 +1306,9 @@ __all__ = [
     "REPLAY_METHOD",
     "PreprocessingPath",
     "RequestRecord",
+    "LANGUAGE_CONTEXT_SCALES",
+    "ServingPathCase",
+    "serving_path_cases",
     "ServingPolicy",
     "ServingReplayInputs",
     "ServingScenario",
@@ -959,6 +1317,15 @@ __all__ = [
     "arrival_trace_for_track",
     "batching_policy_for_track",
     "get_serving_scenario",
+    "get_recommendation_serving_scenario",
+    "recommendation_state_breakdown",
+    "get_language_serving_reference",
+    "language_batching_reference",
+    "language_scheduling_reference",
+    "language_scheduling_to_snapshot",
+    "RecommendationStateBreakdown",
+    "LanguageScheduleSlice",
+    "LanguageSchedulingReference",
     "make_arrival_trace",
     "policy_for_track",
     "preprocessing_path",

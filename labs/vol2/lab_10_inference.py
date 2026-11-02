@@ -25,9 +25,13 @@ async def _():
     from mlsysim.core.units import ureg
     from mlsysim.labs.experiments.v2_10_experiments import (
         MODEL_ID, admission_snapshot, compare_equal_budget_placements,
+        language_routing_reference,
         cost_snapshot, illustrative_track_scenario, lifetime_cost_crossover,
         replay_requests, replay_snapshot, serialize_quantity, state_admission,
         unavailable_snapshot,
+    )
+    from mlsysim.labs.experiments.v1_13_experiments import (
+        language_batching_reference, language_scheduling_reference, language_scheduling_to_snapshot,
     )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
@@ -43,6 +47,7 @@ async def _():
         apply_plotly_theme, audit_evidence, build_lab_report, capture_evidence,
         compare_equal_budget_placements, cost_snapshot, get_lab_metadata, go,
         illustrative_track_scenario, ledger, lifetime_cost_crossover, mo,
+        language_batching_reference, language_scheduling_reference, language_scheduling_to_snapshot, language_routing_reference,
         replay_requests, replay_snapshot, report_export_panel,
         serialize_quantity, state_admission, unavailable_snapshot, ureg,
     )
@@ -55,10 +60,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="Cloud", label="Deployment track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)), label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -110,6 +117,31 @@ def _(mo, scenario, track_id):
         value=f"{scenario.warmup_options[-1].m_as('millisecond'):g} ms", label=f"Startup delay ({scenario.startup_kind})",
     )
     return a_rate, b_fragmentation, c_batch, c_window, d_choice, d_rejected, e_lost, e_warmup
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    c_ref_prediction = mo.ui.radio({"Both always improve": "always", "Slot reuse depends on waiting work; chunking shifts latency": "conditional", "Neither changes latency": "neither"}, label="Predict the language scheduling tradeoff")
+    e_ref_prediction = mo.ui.radio({"Fewest requests always wins": "count", "Work helps only when atomic KV admission succeeds": "qualified", "Routing makes memory unlimited": "unlimited"}, label="Predict the routing tradeoff")
+    c_ref_mix = mo.ui.dropdown({"Mixed replies": "mixed", "Equal replies": "equal"}, value="Mixed replies", label="Language reference: reply lengths")
+    c_ref_spacing = mo.ui.dropdown({"Burst": 0, "16 ms apart": 16, "160 ms apart": 160}, value="Burst", label="Already-prefilled arrivals")
+    c_ref_chunks = mo.ui.dropdown({"Monolithic prefill": 1, "Two chunks": 2, "Four chunks": 4}, value="Four chunks", label="Separate prompt interference replay")
+    c_ref_context = mo.ui.dropdown({"Base history": 1, "Double history": 2, "Long history": 4}, value="Base history", label="Language KV reservation")
+    e_ref_policy = mo.ui.dropdown({"Request count": "request_count", "Remaining work": "remaining_work"}, value="Remaining work", label="Language routing signal")
+    e_ref_state = mo.ui.dropdown({"Base KV": 1, "Double KV": 2, "Fourfold KV": 4}, value="Base KV", label="New request KV allocation")
+    return c_ref_mix, c_ref_spacing, c_ref_chunks, c_ref_context, e_ref_policy, e_ref_state, c_ref_prediction, e_ref_prediction
+
+
+@app.cell
+def _(c_ref_mix, c_ref_spacing, c_ref_chunks, c_ref_context, e_ref_policy, e_ref_state,
+      language_batching_reference, language_scheduling_reference, language_scheduling_to_snapshot, language_routing_reference):
+    _batch_args = dict(length_mix=c_ref_mix.value, arrival_spacing_ms=c_ref_spacing.value, context_scale=c_ref_context.value)
+    c_language_base = {"batching": language_batching_reference("static", **_batch_args), "prefill": language_scheduling_to_snapshot(language_scheduling_reference(1))}
+    c_language_result = {"batching": language_batching_reference("continuous", **_batch_args), "prefill": language_scheduling_to_snapshot(language_scheduling_reference(c_ref_chunks.value))}
+    e_language_base = language_routing_reference("request_count", state_scale=e_ref_state.value)
+    e_language_result = language_routing_reference(e_ref_policy.value, state_scale=e_ref_state.value)
+    return c_language_base, c_language_result, e_language_base, e_language_result
 
 
 @app.cell
@@ -168,13 +200,14 @@ def _(mo, scenario, track_id):
     rationale = mo.ui.text_area(
         label="Decision rationale",
         placeholder="Cite saved numbers, the rejected alternative, limitation, and trigger.",
-    )
+     debounce=False)
     return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
 @app.cell
 def _(
     a_rate, admission_snapshot, b_fragmentation, c_batch, c_window,
+    c_language_base, c_language_result, e_language_base, e_language_result,
     compare_equal_budget_placements, cost_snapshot, e_lost, e_warmup,
     lifetime_cost_crossover, replay_requests, replay_snapshot, scenario,
     serialize_quantity, state_admission, ureg,
@@ -244,6 +277,8 @@ def _(
     )
     c_base_snapshot = replay_snapshot(c_base, inputs=c_base_inputs)
     c_result_snapshot = replay_snapshot(c_result, inputs=c_result_inputs)
+    c_base_snapshot["language_reference"] = c_language_base
+    c_result_snapshot["language_reference"] = c_language_result
 
     d_inputs = {
         "requests": request_args(), "service": service_args(),
@@ -290,6 +325,8 @@ def _(
     )
     e_base_snapshot = replay_snapshot(e_base, inputs=e_base_inputs)
     e_result_snapshot = replay_snapshot(e_result, inputs=e_result_inputs)
+    e_base_snapshot["language_reference"] = e_language_base
+    e_result_snapshot["language_reference"] = e_language_result
     return (
         a_base, a_base_snapshot, a_result, a_result_snapshot,
         b_base, b_base_snapshot, b_result, b_result_snapshot,
@@ -306,14 +343,19 @@ def _(
     capture_evidence, d_choice, d_prediction, d_rejected, d_snapshots,
     e_base_snapshot, e_lost, e_prediction, e_result_snapshot, e_warmup,
     mo, scenario, set_evidence, track_id,
+    c_ref_mix, c_ref_spacing, c_ref_chunks, c_ref_context, e_ref_policy, e_ref_state, c_ref_prediction, e_ref_prediction,
 ):
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
     a_upstream = {"scenario": track_id}
     b_upstream = {"scenario": track_id}
-    c_upstream = {"scenario": track_id}
-    d_upstream = {"scenario": track_id}
-    e_upstream = {"scenario": track_id, "placement_decision": d_choice.value}
+    c_upstream = {"scenario": track_id, "window": c_window.value, "batch": c_batch.value,
+                  "language_mix": c_ref_mix.value, "language_spacing": c_ref_spacing.value,
+                  "language_chunks": c_ref_chunks.value, "language_context": c_ref_context.value, "reference_prediction": c_ref_prediction.value}
+    d_upstream = {"scenario": track_id, "choice": d_choice.value, "rejected": d_rejected.value}
+    e_upstream = {"scenario": track_id, "reference_placement": "replicate",
+                  "loss": e_lost.value, "warmup": e_warmup.value,
+                  "routing_policy": e_ref_policy.value, "routing_state": e_ref_state.value, "reference_prediction": e_ref_prediction.value}
     a_capture = mo.ui.button(
         label="Capture lifetime cost contrast", kind="success",
         disabled=a_prediction.value is None or a_rate.value == "normal",
@@ -336,10 +378,10 @@ def _(
     )
     c_capture = mo.ui.button(
         label="Capture scheduling replay", kind="success",
-        disabled=c_prediction.value is None or c_window.value == 0,
+        disabled=c_prediction.value is None or c_ref_prediction.value is None or c_window.value == 0,
         on_click=lambda _v: store("C", capture_evidence(
             track=track_id, part="C", prediction=c_prediction.value,
-            inputs={"batch_window_ms": c_window.value, "max_batch": c_batch.value},
+            inputs={"batch_window_ms": c_window.value, "max_batch": c_batch.value, "reference_prediction": c_ref_prediction.value},
             baseline=c_base_snapshot, result=c_result_snapshot,
             upstream_inputs=c_upstream, model_key="v2_10_experiments.replay_requests",
         )),
@@ -371,10 +413,10 @@ def _(
     )
     e_capture = mo.ui.button(
         label="Capture capacity stress", kind="success",
-        disabled=e_prediction.value is None or d_choice.value is None or (e_lost.value == 0 and e_warmup.value == 0),
+        disabled=e_prediction.value is None or e_ref_prediction.value is None or (e_lost.value == 0 and e_warmup.value == 0),
         on_click=lambda _v: store("E", capture_evidence(
             track=track_id, part="E", prediction=e_prediction.value,
-            inputs={"lost_replicas": e_lost.value, "warmup_ms": e_warmup.value},
+            inputs={"lost_replicas": e_lost.value, "warmup_ms": e_warmup.value, "reference_prediction": e_ref_prediction.value},
             baseline=e_base_snapshot, result=e_result_snapshot,
             upstream_inputs=e_upstream, model_key="v2_10_experiments.replay_requests",
         )),
@@ -384,12 +426,28 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}.pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.track-space{margin-left:24px;max-width:calc(100% - 24px)}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;column-gap:14px;row-gap:6px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf;margin-right:2px}.lab-hud .hud-value{color:#fff;margin-right:10px}.lab-hud .hud-active{color:#86efac}@media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.track-space{margin-left:24px;max-width:calc(100% - 24px)}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;column-gap:14px;row-gap:6px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf;margin-right:2px}.lab-hud .hud-value{color:#fff;margin-right:10px}.lab-hud .hud-active{color:#86efac}
     </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME II · LAB 10</span><span>ABOUT 50–55 MIN</span></div><h1>The Inference Economy</h1><p>Which serving design minimizes cost per successful, on-time request when memory, waiting, and coordination all count?</p><div class="pilot-meta"><div><b>Fleet role</b><br>{scenario.backend_role}</div><div><b>Workload</b><br>{scenario.workload_kind}</div><div><b>State</b><br>{scenario.state_kind}</div><div><b>Startup delay</b><br>{scenario.startup_kind}</div><div><b>Deliverable</b><br>Fleet serving decision</div></div></section>""")
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track.style({"margin-top": "30px", "margin-left": "24px", "max-width": "calc(100% - 24px)"}), header, mo.Html('<p class="pilot-note">All traces and outcome evidence are illustrative scenarios, not production measurements. Calculation Notes state each model boundary.</p>')], gap=0.5)
+    header = _course_header(_course_metadata("vol2/lab_10_inference.py"), 'Which serving design minimizes cost per successful, on-time request when memory, waiting, and coordination all count?')
+    _course_shell([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        css,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 10), track=track.value, volume=2),
+        mo.Html('<p class="pilot-note">All traces and outcome evidence are illustrative scenarios, not production measurements. Calculation Notes state each model boundary.</p>'),
+        _course_learning_map(_course_path('vol2', 10))
+    ], gap=0.5, volume=2)
     return
 
 
@@ -410,7 +468,16 @@ def _(
     e_lost, e_prediction, e_result, e_upstream, e_warmup, final_choice,
     final_rejected, final_risk, final_trigger, get_evidence, go, mo,
     rationale, scenario, track_id,
+    c_ref_mix, c_ref_spacing, c_ref_chunks, c_ref_context, c_language_base, c_language_result, c_ref_prediction, e_ref_prediction,
+    e_ref_policy, e_ref_state, e_language_base, e_language_result,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 10)
+    from mlsysim.fmt import fmt_ratio as _fmt_ratio, fmt_sci as _fmt_sci
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
     audit = audit_evidence(
@@ -426,7 +493,7 @@ def _(
         if part in audit.stale or (part, part) in audit.identical_pairs:
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Review and recapture."), kind="danger")
         data = capture.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later control changes do not rewrite this record.</small></div>')
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_read_prediction(_saved_prediction_widgets[part], value=data["prediction"])}<br><small>Track {data["track"]}; later control changes do not rewrite this record.</small></div>')
     def replay_row(label, result):
         if result is None:
             return {"Run": label, "Submitted": "—", "Completed": "—", "Rejected": "—", "On time": "—", "Complete-duration p99": "Unavailable"}
@@ -441,7 +508,9 @@ def _(
             {"Case": "Normal", "Serving": f"${a_base.serving_cost.m_as('dollar'):,.0f}", "Training": f"${a_base.training_cost.m_as('dollar'):,.0f}", "Crossover": f"{a_base.crossover_time.m_as('week'):.1f} weeks"},
             {"Case": a_rate.value.title(), "Serving": f"${a_result.serving_cost.m_as('dollar'):,.0f}", "Training": f"${a_result.training_cost.m_as('dollar'):,.0f}", "Crossover": f"{a_result.crossover_time.m_as('week'):.1f} weeks"},
         ]
-        return mo.vstack([intro, a_rate, a_prediction, table(rows), mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. **Scenario result:** serving/training is **{a_result.serving_to_training_ratio:.2f}×** over {a_result.horizon.m_as('week'):.0f} weeks."), kind="info"), a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("Serving cost is request rate × the same horizon × cost per request. Crossover divides training cost by the serving cost rate. Results are analytical scenario values.")})])
+        _ratio = a_result.serving_to_training_ratio
+        _ratio_text = str(_fmt_sci(_ratio, precision=2) if 0 < _ratio < 0.01 else _fmt_ratio(_ratio, precision=None))
+        return mo.vstack([mo.vstack([intro, a_rate, a_prediction, table(rows), mo.callout(mo.md(f"**Your prediction:** {_read_prediction(a_prediction)}. **Scenario result:** the serving/training cost ratio is **{_ratio_text}** over {a_result.horizon.m_as('week'):.0f} weeks. A ratio below one means serving costs less than training over this stated horizon; it still incurs a nonzero cost."), kind="info"), a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("Serving cost is request rate × the same horizon × cost per request. Crossover divides training cost by the serving cost rate. Results are analytical scenario values.")})]), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
         intro = mo.md(f"### B · Why can a model fit while its service fails? (9 min)\n**Driving question:** How many concurrent {scenario.state_kind} allocations survive fragmentation?")
@@ -451,18 +520,44 @@ def _(
             {"Run": "Compact", "Usable": f"{b_base.usable_state_memory.m_as('megabyte'):,.0f} MB", "Max concurrent": b_base.max_concurrent_requests, "Rejected": len(b_base.rejected_request_ids)},
             {"Run": f"{b_fragmentation.value:.0%} fragmented", "Usable": f"{b_result.usable_state_memory.m_as('megabyte'):,.0f} MB", "Max concurrent": b_result.max_concurrent_requests, "Rejected": len(b_result.rejected_request_ids)},
         ]
-        return mo.vstack([intro, b_fragmentation, b_prediction, table(rows), mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. **Scenario result:** admitted requests change from **{len(b_base.admitted_request_ids)}** to **{len(b_result.admitted_request_ids)}**."), kind="danger" if b_result.rejected_request_ids else "info"), b_capture, saved("B"), mo.accordion({"Calculation Notes": mo.md("Free memory subtracts weights and reserve. Fragmentation reduces usable request-state memory. Requests are admitted in trace order. Device tracks use the named buffers, not KV-cache terminology.")})])
+        return mo.vstack([mo.vstack([intro, b_fragmentation, b_prediction, table(rows), mo.callout(mo.md(f"**Your prediction:** {_read_prediction(b_prediction)}. **Scenario result:** admitted requests change from **{len(b_base.admitted_request_ids)}** to **{len(b_result.admitted_request_ids)}**."), kind="danger" if b_result.rejected_request_ids else "info"), b_capture, saved("B"), mo.accordion({"Calculation Notes": mo.md("Free memory subtracts weights and reserve. Fragmentation reduces usable request-state memory. Requests are admitted in trace order. Device tracks use the named buffers, not KV-cache terminology.")})]), _concept_reflection(_reflection_contract, "B")])
+
+    def language_c_panel():
+        _batch_rows = [{"Policy": label, "Completed/offered": f"{item['completed_count']}/{item['offered_count']}",
+                        "Elapsed (ms)": item["elapsed_ms"], "Idle slot-iterations": item["idle_slot_iterations"],
+                        "State slots": item["slot_limit"]}
+                       for label, item in (("Static", c_language_base["batching"]), ("Continuous", c_language_result["batching"]))]
+        _prefill_rows = [{"Prefill": label, "New prompt TTFT (ms)": item["prompt_first_token_ms"],
+                         "Largest active-token gap (ms)": item["max_active_token_gap_ms"],
+                         "Prefill work (ms)": item["prefill_work_ms"]}
+                        for label, item in (("Monolithic", c_language_base["prefill"]), ("Selected chunks", c_language_result["prefill"]))]
+        return mo.vstack([mo.md("#### Language-service reference · slots and token stalls\nThe fleet's native buffers above keep their own meaning. These two separate language replays isolate iteration membership and prompt interference; they do not predict the selected track's performance. First try mixed versus equal replies, then sparse arrivals. Next chunk a new prompt while an existing stream decodes. Explain why the preferred policy changes, and whose latency pays for smoother streaming."),
+            mo.hstack([c_ref_mix, c_ref_spacing, c_ref_context], wrap=True), table(_batch_rows),
+            c_ref_chunks, table(_prefill_rows),
+            mo.accordion({"Language reference assumptions": mo.md(c_language_result["batching"]["assumption_note"] + "\n\n" + c_language_result["prefill"]["assumption_note"]),
+                          "Iteration events": table(c_language_result["batching"]["timeline"]),
+                          "Prompt/decode events": table(c_language_result["prefill"]["timeline"])})])
+
+    def language_e_panel():
+        _rows = [{"Routing": label, "Completed": item["completed_count"], "Rejected": item["rejected_count"],
+                  "On time/offered": f"{item['on_time_count']}/{item['offered_count']}"}
+                 for label, item in (("Count", e_language_base), ("Selected signal", e_language_result))]
+        return mo.vstack([mo.md("#### Language-service reference · counts conceal work\nBoth replicas are ready, eligible, and run the same version. One holds a long request; the other holds several short ones. Route the same new requests by count or remaining work, then increase their KV reservation. Inspect both candidates: a favorable load signal never overrides an atomic memory rejection. Does a better signal still help when neither replica can admit the request?"),
+            mo.hstack([e_ref_policy, e_ref_state], wrap=True), table(_rows),
+            table([{key: value for key, value in item.items() if key != "admission_checks"} for item in e_language_result["requests"]]),
+            mo.accordion({"Atomic candidate checks": table([{"Request": request["request_id"], **check} for request in e_language_result["requests"] for check in request["admission_checks"]]),
+                          "Routing assumptions": mo.md(e_language_result["assumption_note"])})])
 
     def build_part_c():
-        intro = mo.md("### C · When does batching save work but miss deadlines? (10 min)\n**Driving question:** What changes when identical arrivals wait for a batch window?")
-        if c_prediction.value is None:
-            return mo.vstack([intro, c_window, c_batch, c_prediction])
+        intro = mo.md("### C · When does batching save work but miss deadlines?\n**Driving question:** What changes when identical arrivals wait for a batch window?")
+        if c_prediction.value is None or c_ref_prediction.value is None:
+            return mo.vstack([intro, c_window, c_batch, c_prediction, c_ref_prediction])
         fig = go.Figure([
             go.Bar(name="Immediate", x=[o.request_id for o in c_base.outcomes if o.duration is not None], y=[o.duration.m_as("millisecond") for o in c_base.outcomes if o.duration is not None], marker_color=COLORS["BlueLine"]),
             go.Bar(name="Windowed", x=[o.request_id for o in c_result.outcomes if o.duration is not None], y=[o.duration.m_as("millisecond") for o in c_result.outcomes if o.duration is not None], marker_color=COLORS["OrangeLine"]),
         ])
         fig.update_layout(barmode="group", height=280, margin=dict(l=20, r=20, t=25, b=20), yaxis_title="Complete request duration (ms)", legend_orientation="h")
-        return mo.vstack([intro, mo.hstack([c_window, c_batch], widths="equal", wrap=True), c_prediction, apply_plotly_theme(fig), table([replay_row("Immediate", c_base), replay_row("Windowed", c_result)]), mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **Scenario result:** batching finishes in **{c_result.makespan.m_as('millisecond'):.1f} ms** with **{c_result.deadline_compliant_count}/{c_result.request_count}** on time."), kind="info"), c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("Both policies replay identical arrivals and lengths. A batch waits for its explicit window, then executes the longest input and output work in the batch. p99 is the empirical nearest-rank percentile of complete arrival-to-finish durations. Rejections remain separate.")})])
+        return mo.vstack([mo.vstack([intro, mo.hstack([c_window, c_batch], widths="equal", wrap=True), c_prediction, apply_plotly_theme(fig), table([replay_row("Immediate", c_base), replay_row("Windowed", c_result)]), mo.callout(mo.md(f"**Your prediction:** {_read_prediction(c_prediction)}. **Scenario result:** batching finishes in **{c_result.makespan.m_as('millisecond'):.1f} ms** with **{c_result.deadline_compliant_count}/{c_result.request_count}** on time."), kind="info"), c_ref_prediction, language_c_panel(), c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("Both policies replay identical arrivals and lengths. A batch waits for its explicit window, then executes the longest input and output work in the batch. p99 is the empirical nearest-rank percentile of complete arrival-to-finish durations. Rejections remain separate.")})]), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         intro = mo.md("### D · Replicate, shard, or split phases? (10 min)\n**Driving question:** Which placement wins with the same device budget?")
@@ -477,31 +572,67 @@ def _(
                 else "Unsupported"
             )
             arch_status = "Supported" if item.available else f"Unsupported: {item.unsupported_reason}"
-            rows.append(row | {"Handoff/request": handoff, "Devices": item.device_budget, "Architecture": arch_status})
-        return mo.vstack([intro, d_prediction, table(rows), mo.hstack([d_choice, d_rejected], widths="equal", wrap=True), mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **Decision under review:** {d_choice.value or 'not selected'}. Every row uses the same workload, format, and device count."), kind="info"), d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("Replication creates one worker per device. Sharding pools memory, divides compute, and adds a transfer per boundary (unsupported on endpoints without multi-device fabrics). Phase splitting routes requests through separate stage queues and one handoff (unsupported for the frame-perception and endpoint scenarios).")})])
+            _live_choice = "replicate" if d_choice.value == "none" else d_choice.value
+            _role = "Selected" if name == _live_choice else "Rejected" if name == d_rejected.value else "Alternative"
+            rows.append({"Role": _role} | row | {"Handoff/request": handoff, "Devices": item.device_budget, "Architecture": arch_status})
+        def placement_consequence(name):
+            item = d_by_name.get(name)
+            if item is None:
+                return "No placement selected."
+            label = name.replace("_", " ").title()
+            if not item.available or item.replay is None:
+                return f"**{label} is unsupported:** {item.unsupported_reason or 'no supported evaluator for this workload and device boundary'}. No latency or feasibility is assigned."
+            result = item.replay
+            if not result.completed_count:
+                return f"**{label} fails completion:** {result.rejected_count}/{result.request_count} requests rejected; complete-duration p99 is unavailable."
+            passed = result.completed_count == result.request_count and result.deadline_compliant_count == result.request_count
+            return (f"**{label} {'meets' if passed else 'fails'} the supplied completion/deadline contract:** "
+                    f"{result.completed_count}/{result.request_count} completed, {result.deadline_compliant_count}/{result.request_count} on time, "
+                    f"complete-duration p99 **{result.p99_duration.m_as('millisecond'):.3g} ms**, "
+                    f"using **{item.device_budget} devices**.")
+        _chosen_name = "replicate" if d_choice.value == "none" else d_choice.value
+        _selected_feedback = placement_consequence(_chosen_name)
+        _rejected_feedback = placement_consequence(d_rejected.value)
+        _hold_note = "**Hold current replication:** this records a hold, not a new deployment approval. " if d_choice.value == "none" else ""
+        consequence = mo.callout(mo.md(
+            f"**Your prediction:** {_read_prediction(d_prediction)}. {_hold_note}"
+            f"**Selected consequence.** {_selected_feedback}\n\n"
+            f"**Rejected alternative.** {_rejected_feedback}\n\n"
+            "Each row retains the same workload, format, and device budget. An unsupported alternative is an evidence boundary, not a zero-latency winner."
+        ), kind="info")
+        return mo.vstack([mo.vstack([intro, d_prediction, table(rows), mo.hstack([d_choice, d_rejected], widths="equal", wrap=True), consequence, d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("Replication creates one worker per device. Sharding pools memory, divides compute, and adds a transfer per boundary (unsupported on endpoints without multi-device fabrics). Phase splitting routes requests through separate stage queues and one handoff (unsupported for the frame-perception and endpoint scenarios).")})]), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
         intro = mo.md(
-            f"### E · How much spare capacity buys reliability? (8 min)\n"
+            f"### E · What happens when a replicated pool loses capacity?\n"
+            f"**Separate replicated-pool reference:** Return to the supplied immediate-service pool, independently of the placement you selected in Part D. This replay does not test that selected architecture.\n\n"
             f"**Driving question:** Does the {scenario.backend_role} meet its deadline after replica loss and {scenario.startup_kind}?"
         )
-        if e_prediction.value is None:
-            return mo.vstack([intro, e_lost, e_warmup, e_prediction])
-        return mo.vstack([intro, mo.hstack([e_lost, e_warmup], widths="equal", wrap=True), e_prediction, table([replay_row("Healthy pool", e_base), replay_row(f"Loss + {scenario.startup_kind}", e_result)]), mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. **Scenario result:** on-time completions change from **{e_base.deadline_compliant_count}/{e_base.request_count}** to **{e_result.deadline_compliant_count}/{e_result.request_count}**."), kind="danger" if e_result.deadline_compliant_count < e_base.deadline_compliant_count else "success"), e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md(f"Lost replicas are absent for the replay. Surviving replicas accept work only after {scenario.startup_kind}. Device tracks reflect device wake/activation while backend tracks reflect service provisioning. Original arrivals remain fixed, so the timeline exposes capacity loss and queueing.")})])
+        if e_prediction.value is None or e_ref_prediction.value is None:
+            return mo.vstack([intro, e_lost, e_warmup, e_prediction, e_ref_prediction])
+        return mo.vstack([mo.vstack([intro, mo.hstack([e_lost, e_warmup], widths="equal", wrap=True), e_prediction, table([replay_row("Healthy pool", e_base), replay_row(f"Loss + {scenario.startup_kind}", e_result)]), mo.callout(mo.md(f"**Your prediction:** {_read_prediction(e_prediction)}. **Scenario result:** on-time completions change from **{e_base.deadline_compliant_count}/{e_base.request_count}** to **{e_result.deadline_compliant_count}/{e_result.request_count}**."), kind="danger" if e_result.deadline_compliant_count < e_base.deadline_compliant_count else "success"), e_ref_prediction, language_e_panel(), e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md(f"Lost replicas are absent for the replay. Surviving replicas accept work only after {scenario.startup_kind}. Device tracks reflect device wake/activation while backend tracks reflect service provisioning. Original arrivals remain fixed, so the timeline exposes capacity loss and queueing.")})]), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
         for part in "ABCDE":
             capture = _captures.get(part)
-            rows.append({"Part": part, "Original prediction": capture.to_dict()["prediction"] if capture else "—", "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING")})
+            rows.append({"Part": part, "Original prediction": _read_prediction(_saved_prediction_widgets[part], value=(capture.to_dict()["prediction"] if capture else "—")), "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING")})
         _saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
         _choice_valid = final_choice.value in scenario.supported_placements or final_choice.value == "none"
         _complete = audit.complete and all(w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved and _choice_valid
         return mo.vstack([mo.md("### Synthesis · Defend one serving architecture (5 min)\nName the chosen placement, quantify a rejected alternative, state a limitation, and define a reevaluation trigger."), table(rows), mo.callout(mo.md("Snapshots preserve exact evaluator arguments and captured results. Live controls never rewrite saved evidence."), kind="info"), mo.hstack([final_choice, final_rejected], widths="equal", wrap=True), mo.hstack([final_risk, final_trigger], widths="equal", wrap=True), rationale, mo.callout(mo.md("**Ready for the ledger and report.**" if _complete else "Complete five current captures, match Part D, reject a different placement, and write the rationale."), kind="success" if _complete else "warn")])
 
     tabs = mo.ui.tabs({"Part A": build_part_a(), "Part B": build_part_b(), "Part C": build_part_c(), "Part D": build_part_d(), "Part E": build_part_e(), "Synthesis": build_synthesis()})
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 10))], volume=2)
+    return
 
 
 @app.cell
@@ -510,11 +641,13 @@ def _(
     final_risk, final_trigger, get_evidence, get_lab_metadata, mo, rationale,
     report_export_panel, scenario, track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
     _choice_valid = final_choice.value in scenario.supported_placements or final_choice.value == "none"
     _ready = audit.complete and all(w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved and _choice_valid
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_10_inference.py"), track=track_id,
@@ -532,39 +665,39 @@ def _(
         result_snapshot={"schema_version": 1, "lab_id": "v2_10", "track_id": track_id, "model_id": MODEL_ID, "evidence": snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value, "rationale": rationale.value},
         source_trace={"scenario": "Illustrative request traces and outcome fixtures.", "calculations": "MLSysIM v2_10 experiment models."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 # ZONE D · COMPLETION-GATED LEDGER
 @app.cell
-async def _(
-    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger,
-    get_evidence, ledger, mo, rationale, scenario, track_id,
+def _(
+    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, scenario, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
-    _choice_valid = final_choice.value in scenario.supported_placements or final_choice.value == "none"
-    _ready = audit.complete and all(w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved and _choice_valid
-    _saved_ok = False
-    _save_error = ""
-    if _ready:
-        try:
-            ledger.save(chapter=10, design={
-                "schema_version": 1, "lab_id": "v2_10", "track_id": track_id,
-                "model_id": MODEL_ID,
-                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
-                "recommendation": final_choice.value,
-                "rejected_alternative": final_rejected.value,
-                "reevaluation_trigger": final_trigger.value,
-                "residual_risk": final_risk.value, "rationale": rationale.value,
-            })
-            await ledger.flush()
-            _saved_ok = True
-        except Exception as exc:
-            _save_error = f"SAVE FAILED · {type(exc).__name__}: {exc}"
-    _status = "SAVED" if _saved_ok else (_save_error or "EVIDENCE IN PROGRESS")
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">10 · The Inference Economy</span><span aria-hidden="true">|</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">{_status}</span></div>')
+    _saved = _captures['D'].to_dict()['decision'] if 'D' in _captures else None
+    _choice_valid = final_choice.value in scenario.supported_placements or final_choice.value == 'none'
+    _ready = audit.complete and all((w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk))) and bool(rationale.value.strip()) and (final_choice.value != final_rejected.value) and (final_choice.value == _saved) and _choice_valid
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_10', 'track_id': track_id, 'model_id': MODEL_ID, 'evidence': {part: capture.to_dict() for part, capture in _captures.items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=10, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
+    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

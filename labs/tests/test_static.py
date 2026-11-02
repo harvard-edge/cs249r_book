@@ -109,8 +109,19 @@ class TestRequiredImports:
 
     def test_imports_style(self, lab_path):
         source = read_source(lab_path)
+        if Path(lab_path).stem.startswith("lab_00_"):
+            assert "notebook_shell" in source, "Orientation needs the shared book theme"
+            return
         assert "COLORS" in source, "Missing COLORS import from style"
-        assert "LAB_CSS" in source, "Missing LAB_CSS import from style"
+        shared_notebook = any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "mlsysbook_labs.notebook"
+            and any(name.name == "notebook_shell" for name in node.names)
+            for node in ast.walk(ast.parse(source))
+        )
+        assert "LAB_CSS" in source or shared_notebook, (
+            "Missing legacy LAB_CSS or the shared notebook layout import"
+        )
 
     def test_imports_plotly(self, lab_path):
         if "lab_00" in lab_path:
@@ -250,6 +261,7 @@ class TestWheelConsistency:
             "mlsysbook_labs/architecture.py",
             "mlsysbook_labs/benchmarking.py",
             "mlsysbook_labs/capstone.py",
+            "mlsysbook_labs/contexts.py",
             "mlsysbook_labs/data_pipeline.py",
             "mlsysbook_labs/deployment.py",
             "mlsysbook_labs/edge.py",
@@ -288,6 +300,23 @@ def check_has_evidence_track_report_surface(source: str) -> bool:
     has_drop = False
     has_report = False
     has_evidence = False
+    shared_options = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "mlsysbook_labs.contexts"
+        for alias in node.names if alias.name == "CONTEXT_OPTIONS"
+    }
+    literal_options = {
+        target.id: node.value
+        for node in ast.walk(tree) if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    for name, options in literal_options.items():
+        values = list(options.keys) + list(options.values)
+        found = {r for item in values if isinstance(item, ast.Constant) and isinstance(item.value, str)
+                 for r in req if r in item.value.lower()}
+        if req <= found:
+            shared_options.add(name)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             f = node.func
@@ -300,6 +329,8 @@ def check_has_evidence_track_report_surface(source: str) -> bool:
                 }
                 if req.issubset(found):
                     has_drop = True
+            elif name == "dropdown" and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in shared_options:
+                has_drop = True
             elif name == "build_lab_report":
                 has_report = True
             elif name in ("capture_evidence", "audit_evidence"):
@@ -315,12 +346,8 @@ class TestLabCatalog:
 
         lab_files = {
             str(path.relative_to(LABS_ROOT))
-            for path in sorted((LABS_ROOT / "vol1").glob("lab_*.py"))
+            for path in sorted(LABS_ROOT.glob("vol[1-4]/lab_*.py"))
         }
-        lab_files.update(
-            str(path.relative_to(LABS_ROOT))
-            for path in sorted((LABS_ROOT / "vol2").glob("lab_*.py"))
-        )
         assert lab_files == set(LAB_CATALOG), (
             "Lab catalog and lab files differ. "
             f"Missing metadata: {sorted(lab_files - set(LAB_CATALOG))}; "
@@ -349,6 +376,10 @@ class TestLabCatalog:
 
         missing = []
         for path in LAB_CATALOG:
+            if Path(path).stem.startswith("lab_00_"):
+                # Orientation exports a setup record; chapter report requirements
+                # begin at Lab 01. Persistence and aliases have behavioral tests.
+                continue
             source = read_source(str(LABS_ROOT / path))
             has_baseline_panel = (
                 "legacy_migration_panel" in source
@@ -371,7 +402,24 @@ class TestLabCatalog:
                 and "build_lab_report" in source
             )
             has_evidence_surface = check_has_evidence_track_report_surface(source)
-            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface or has_rationale_surface or has_evidence_surface):
+            tree = ast.parse(source)
+            calls = {node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                     for node in ast.walk(tree) if isinstance(node, ast.Call)
+                     and isinstance(node.func, (ast.Name, ast.Attribute))}
+            has_companion_surface = (
+                ("get_learning_path" in calls
+                 and ("notebook_learning_map" in calls or ("opening" in calls
+                      and any(isinstance(node, ast.ImportFrom) and node.module == "mlsysbook_labs"
+                              and any(name.name in {"agentic_companion", "physical_companion"} for name in node.names)
+                              for node in ast.walk(tree)))
+                      or ("physical_opening" in calls and any(
+                          isinstance(node, ast.ImportFrom) and node.module == "mlsysbook_labs.physical_companion"
+                          and any(name.name == "physical_opening" for name in node.names)
+                          for node in ast.walk(tree)))))
+                and ({"project_selector", "evidence_actions", "discussion_record", "final_workspace"} <= calls
+                     or {"physical_controls", "physical_investigations", "physical_discussion"} <= calls)
+            )
+            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface or has_rationale_surface or has_evidence_surface or has_companion_surface):
                 missing.append(path)
         assert not missing, f"Missing track/report surface: {missing}"
 
@@ -813,3 +861,12 @@ class TestWidgetReturnCompleteness:
                 "via the return statement. see #1332 for the class of bug this "
                 "prevents."
             )
+
+
+def test_browser_wheels_match_release_runtime_source():
+    # 2026-10-20: a valid native app must not conceal stale browser code/data.
+    import runpy
+
+    checker = runpy.run_path(str(LABS_ROOT / "tools" / "check_browser_wheels.py"))
+    failures = checker["check_wheels"]()
+    assert not failures, "\n".join(failures)

@@ -324,3 +324,121 @@ def test_legacy_engine_experiments_alias_resolves_identically():
     assert legacy_mod is canonical_mod
     assert legacy_mod.TRACKS is TRACKS
 
+
+# 2026-10-20: composed placement must consume saved studies without silently
+# restoring baseline resources, energy requirements, or remote workload costs.
+from mlsysim.labs.experiments.v1_02_experiments import (
+    STUDY_VERSION, locality_study, resource_study, operation_study,
+    placement_study, study_profile,
+)
+
+
+def _placement(track="mobile", **changes):
+    profile = study_profile(track)
+    return placement_study(track, **{
+        "payload_mb": profile["payload_options_mb"][0],
+        "connection_mbps": profile["connection_options_mbps"][-1],
+        "workload_case": "ordinary", "intervention": "baseline",
+        "duty_cycle": profile["minimum_observation_fraction"],
+        "battery_multiplier": profile["battery_multipliers"][-1], **changes})
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_ideal_remote_arithmetic_preserves_irreducible_trip_and_does_not_validate_readiness(track):
+    profile=study_profile(track)
+    args=dict(payload_mb=profile["payload_options_mb"][-1],connection_mbps=profile["connection_options_mbps"][0])
+    normal=locality_study(track,**args); ideal=locality_study(track,**args,ideal_compute=True)
+    assert ideal["lower_bound_ms"] == pytest.approx(normal["lower_bound_ms"]-normal["remote_execution_ms"])
+    for key in ("request_upload_ms","propagation_rtt_ms","response_download_ms"):
+        assert ideal[key] == normal[key]
+    survives=locality_study(track,payload_mb=profile["payload_options_mb"][0],connection_mbps=profile["connection_options_mbps"][-1])
+    assert survives["feasible"] is None
+    assert "not validated" in survives["readiness"]
+
+
+def test_tiny_flash_cannot_repair_sram_and_resource_changes_do_not_imply_bandwidth():
+    overflow=resource_study("tinyml",workload_case="large_working_set",intervention="flash")
+    assert "SRAM" in overflow["violations"]
+    assert overflow["pools"][1]["required_mb"] <= overflow["pools"][1]["capacity_mb"]
+    fixed=resource_study("tinyml",workload_case="large_working_set",intervention="capacity")
+    assert fixed["feasible"]
+    base=resource_study("mobile");capacity=resource_study("mobile",intervention="capacity")
+    compute=resource_study("mobile",intervention="compute");bandwidth=resource_study("mobile",intervention="bandwidth")
+    assert capacity["movement_ms"] == compute["movement_ms"] == base["movement_ms"]
+    assert bandwidth["movement_ms"] < base["movement_ms"]
+    assert capacity["compute_ms"] == bandwidth["compute_ms"] == base["compute_ms"]
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_energy_allowance_does_not_raise_sustained_power_or_restore_observation(track):
+    small=operation_study(track,duty_cycle=1.0)
+    large=operation_study(track,duty_cycle=1.0,battery_multiplier=2.0)
+    assert large["mission_energy_budget_wh"] > small["mission_energy_budget_wh"]
+    assert large["sustained_power_met"] == small["sustained_power_met"] is False
+    assert large["average_power_budget_w"] == small["average_power_budget_w"]
+    off=operation_study(track,duty_cycle=0.0,battery_multiplier=2.0)
+    assert off["mission_energy_met"] and not off["service_requirement_met"]
+    assert "observation_time" in off["violations"]
+
+
+def test_mission_energy_and_power_are_independent_supplied_facts():
+    result=operation_study("mobile",duty_cycle=0.15)
+    assert result["sustained_power_met"]
+    assert not result["mission_energy_met"]
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_constraints_survive_composition_and_exclusions_precede_cost(track):
+    no_service=_placement(track,duty_cycle=0.0)
+    assert not no_service["feasible"]
+    for candidate in no_service["candidates"].values():
+        assert not candidate["gates"]["service"]
+        assert candidate["partial_cost_usd"] is None
+    offline=_placement(track,connectivity_available=False,raw_data_allowed=False)
+    assert offline["candidates"]["local"]["gates"]["connectivity"]
+    for key in FILTERING_ALTERNATIVES:
+        assert not offline["candidates"][key]["gates"]["connectivity"]
+        assert offline["candidates"][key]["latency_ms"] is None
+    assert not offline["candidates"]["raw"]["gates"]["privacy"]
+    overflow=_placement(track,workload_case="large_working_set")
+    assert not overflow["candidates"]["local"]["gates"]["resource"]
+    repaired=_placement(track,workload_case="large_working_set",intervention="capacity")
+    assert repaired["candidates"]["local"]["gates"]["resource"]
+
+
+def test_remote_worker_is_not_upgraded_by_local_capacity_and_workload_cost_is_not_reset():
+    base=_placement();capacity=_placement(intervention="capacity")
+    for key in FILTERING_ALTERNATIVES:
+        assert base["candidates"][key]["latency_ms"] == capacity["candidates"][key]["latency_ms"]
+    larger=_placement(workload_case="arithmetic_heavy")
+    assert larger["candidates"]["event_filter"]["latency_ms"] > base["candidates"]["event_filter"]["latency_ms"]
+    assert "Unknown" in base["candidates"]["event_filter"]["total_energy_evidence"]
+    assert "unpriced" in base["cost_boundary"]
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_new_versioned_study_arms_replay_through_actual_capstone_adapter(track):
+    from mlsysim.labs.experiments.v1_16_experiments import replay_evidence_arm
+    profile=study_profile(track)
+    arms=[locality_study(track,payload_mb=profile["payload_mb"],connection_mbps=profile["connection_mbps"]),
+        resource_study(track),operation_study(track,duty_cycle=0.0),_placement(track)]
+    arms.extend(_placement(track)["candidates"].values())
+    for arm in arms:
+        arm=json.loads(json.dumps(arm,allow_nan=False))
+        assert replay_evidence_arm(MODEL_KEY,MODEL_KEY,arm) == arm
+        missing_version={key:value for key,value in arm["inputs"].items() if key != "scenario_version"}
+        with pytest.raises(ValueError,match="scenario_version"):
+            replay(MODEL_KEY,missing_version)
+        with pytest.raises(ValueError):
+            replay(MODEL_KEY,{**arm["inputs"],"arbitrary_key":1})
+
+
+@pytest.mark.parametrize("bad", [True,False,float("nan"),float("inf"),-1,0])
+def test_new_operation_rejects_invalid_allowance(bad):
+    with pytest.raises(ValueError): operation_study("mobile",duty_cycle=0.1,battery_multiplier=bad)
+
+
+@pytest.mark.parametrize("function,kwargs",[(resource_study,{}),(operation_study,{"duty_cycle":0.1}),(locality_study,{"payload_mb":1,"connection_mbps":20})])
+def test_new_study_rejects_unknown_version(function,kwargs):
+    with pytest.raises(ValueError,match="scenario_version"):
+        function("mobile",scenario_version="unknown",**kwargs)

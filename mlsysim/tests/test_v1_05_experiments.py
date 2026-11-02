@@ -134,8 +134,8 @@ def test_batching_trades_higher_batch_latency_and_state_for_amortized_throughput
 
 
 def test_large_batch_throughput_approaches_the_flat_asymptote():
-    large = evaluate_track("cloud", batch_size=4096)
-    larger = evaluate_track("cloud", batch_size=8192)
+    large = evaluate_track("cloud", batch_size=4096, memory_limit=Q_(1, "TiB"))
+    larger = evaluate_track("cloud", batch_size=8192, memory_limit=Q_(1, "TiB"))
 
     gain = (larger["throughput"] / large["throughput"]).to("").magnitude
     assert 1.0 < gain < 1.01
@@ -441,3 +441,43 @@ def test_replay_rejects_ambiguous_keys_and_incomplete_or_extra_inputs():
         replay(EVALUATE_MODEL_KEY, extra)
     with pytest.raises(ValueError):
         replay(NUMERICAL_MODEL_KEY, {"case_id": "rounding"})
+
+
+@pytest.mark.parametrize("track_id", TRACKS)
+def test_capacity_failure_suppresses_service_metrics_but_preserves_tensor_counts(track_id):
+    feasible = evaluate_track(track_id, batch_size=64, memory_limit=Q_(1, "TiB"))
+    failed = evaluate_track(
+        track_id, batch_size=64,
+        memory_limit=feasible["total_state_memory"] - Q_(1, "byte"),
+    )
+    assert failed["execution_status"] == "infeasible_memory"
+    assert failed["violations"] == ["memory"]
+    for key in ("batch_latency", "throughput", "amortized_service_time"):
+        assert failed[key] is None
+        assert feasible[key] is not None
+    for key in ("batch_macs", "minimum_forward_traffic", "compute_time", "movement_time"):
+        assert failed[key] == feasible[key]
+    frozen = snapshot(failed)
+    assert frozen["throughput"] is None
+    assert snapshot(replay(EVALUATE_MODEL_KEY, frozen["inputs"])) == frozen
+    assert "Hypothetical" in failed["timing_component_scope"]
+
+
+def test_capacity_failure_has_no_comparable_service_performance_delta():
+    baseline = evaluate_track("tinyml", batch_size=1)
+    failed = compare_track(
+        "tinyml", baseline=baseline,
+        intervention_options={"batch_size": 64, "memory_limit": Q_(1, "byte")},
+    )
+    assert failed["baseline"]["fits_memory"]
+    assert not failed["result"]["fits_memory"]
+    for key in ("batch_latency", "throughput", "amortized_service_time"):
+        assert failed["delta"][key] is None
+    assert failed["delta"]["batch_macs"] > 0
+
+    recovered = compare_track(
+        "tinyml", baseline=failed["result"],
+        intervention_options={"batch_size": 1},
+    )
+    assert recovered["result"]["fits_memory"]
+    assert recovered["delta"]["throughput"] is None

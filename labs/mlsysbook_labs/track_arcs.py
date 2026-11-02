@@ -177,6 +177,7 @@ _STEP_SPECS: tuple[tuple[str, str, str, str], ...] = (
     ("v1_14_silent_degradation", "Operations and drift", "Choose monitoring and rollback policies that reveal track-specific degradation.", "Carry operational risk into responsibility review."),
     ("v1_15_no_free_fairness", "Responsible engineering", "Expose who benefits or is harmed by the selected deployment choices.", "Carry unresolved risks into the final audit."),
     ("v1_16_architects_audit", "Volume I synthesis", "Defend a coherent deployment decision across the full systems stack.", "Use the audit as the handoff into Volume II scale."),
+    ("v2_00", "Interface rehearsal", "Choose or restore a fleet project and rehearse prediction, live briefing, capture, and explicit saving. No engineering conclusion is established.", "Carry the preferred track and captured setup rehearsal into Lab 01; no earlier volume or deployment evidence is required."),
     ("v2_01_scale_illusion", "Scale transition", "Show what breaks when the same track is scaled beyond a single prototype.", "Carry scale assumptions into infrastructure."),
     ("v2_02_compute_wall", "Compute infrastructure", "Balance raw compute against memory, utilization, power, or cost limits.", "Carry the infrastructure wall into communication design."),
     ("v2_03_network_fabric_design", "Communication fabric", "Choose a communication pattern that respects the track's latency and payload budget.", "Carry payload pressure into storage and data movement."),
@@ -276,10 +277,12 @@ def validate_track_arcs() -> tuple[str, ...]:
     if arc_ids != track_ids:
         issues.append(f"Track arc IDs {arc_ids!r} do not match canonical tracks {track_ids!r}.")
 
-    lab_ids = tuple(metadata.lab_id for metadata in LAB_CATALOG.values())
+    from .variants import ALL_LAB_IDS
+
+    lab_ids = ALL_LAB_IDS
     step_ids = tuple(step.lab_id for step in LAB_ARC_STEPS)
     if step_ids != lab_ids:
-        issues.append("Lab arc steps do not match LAB_CATALOG order.")
+        issues.append("Deployment arc steps do not match the Volume I–II catalog order.")
 
     for arc in TRACK_ARCS:
         profile = get_track_profile(arc.track_id)

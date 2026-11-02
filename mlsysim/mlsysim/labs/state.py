@@ -27,13 +27,13 @@ class DesignLedger:
     The default uses the legacy ledger without migrating or reassigning it.
     """
 
-    def __init__(self, volume: Optional[str] = None):
+    def __init__(self, volume: Optional[str] = None, *, directory: Optional[str | Path] = None):
         if volume not in (None, "vol1", "vol2"):
             raise ValueError("volume must be None, 'vol1', or 'vol2'")
         self.volume = volume
         suffix = f"_{volume}" if volume else ""
         self.storage_key = f"{self._LOCALSTORAGE_KEY}{suffix}"
-        self.config_dir = Path.home() / ".mlsys"
+        self.config_dir = Path(directory) if directory is not None else Path.home() / ".mlsys"
         self.file_path = self.config_dir / f"ledger{suffix}.json"
 
         self._state = LedgerState()

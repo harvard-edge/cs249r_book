@@ -1,6 +1,6 @@
 """Chapter 11 hardware-acceleration experiments.
 
-The functions in this module compose registry hardware facts into five small,
+The functions in this module compose registry hardware facts into small,
 deterministic experiments.  They are analytical teaching models, not measured
 benchmark results.  Track defaults are explicitly illustrative workload and
 execution-contract assumptions; hardware throughput, bandwidth, capacity,
@@ -10,6 +10,7 @@ dispatch, power, and purchase cost come from the hardware registry.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
+from itertools import islice
 from math import ceil
 from typing import Literal, Mapping, Sequence
 
@@ -166,6 +167,9 @@ class TileResult:
     local_bytes: Quantity
     movement_energy: Quantity
     movement_time: Quantity | None
+    operand_storage: Quantity
+    accumulator_storage: Quantity
+    accumulator_precision: str
 
 
 def analyze_tile_mapping(
@@ -180,12 +184,16 @@ def analyze_tile_mapping(
     precision: str,
     fused: bool,
     scratchpad_capacity: Quantity | None = None,
+    accumulator_precision: str = "fp32",
 ) -> TileResult:
     """Count blocked-GEMM traffic and test a tile against local capacity.
 
     A and B tiles are loaded once per output tile; the C tile remains local
     across K tiles.  An unfused following elementwise operation writes and
-    rereads one C-sized intermediate.  A non-fitting tile is returned as a
+    rereads one C-sized intermediate. Operand buffers use operand precision;
+    the resident C tile uses the separately declared accumulator precision
+    (FP32 by default). Both occupy the disclosed shared local capacity.
+    A non-fitting tile is returned as a
     failed mapping with no invented spill-time multiplier.
     """
 
@@ -208,8 +216,10 @@ def analyze_tile_mapping(
         ceil(k / tile_k) * tile_k,
     )
     mt, nt, kt = pm // tile_m, pn // tile_n, pk // tile_k
-    scratch_elements = tile_m * tile_k + tile_k * tile_n + tile_m * tile_n
-    required = (scratch_elements * element_bytes).to("byte")
+    _, accumulator_bytes = resolve_precision(accumulator_precision)
+    operand_storage = ((tile_m * tile_k + tile_k * tile_n) * element_bytes).to("byte")
+    accumulator_storage = (tile_m * tile_n * accumulator_bytes).to("byte")
+    required = operand_storage + accumulator_storage
     fits = required <= capacity
 
     input_elements = mt * nt * kt * (tile_m * tile_k + tile_k * tile_n)
@@ -237,7 +247,83 @@ def analyze_tile_mapping(
         local_bytes=local_bytes,
         movement_energy=movement_energy,
         movement_time=movement_time,
+        operand_storage=operand_storage,
+        accumulator_storage=accumulator_storage,
+        accumulator_precision=accumulator_precision,
     )
+
+
+def analyze_stationary_dataflow(
+    *, m: int, n: int, k: int, tile_m: int, tile_n: int, tile_k: int,
+    precision: str, stationary: str = "output", accumulator_precision: str = "fp32",
+) -> dict:
+    """Trace one-tile-resident blocked GEMM schedules at a disclosed interface.
+
+    A is activation, B is weight, C is the partial sum. The selected operand
+    remains in a local tile buffer across its innermost reuse loop. Other
+    operands are transferred from DRAM for each tile operation. Nonresident C
+    is spilled between reduction tiles; initial C is zero and needs no read.
+    Final outputs use operand precision, spills use accumulator precision.
+    This deliberately bounded mapping is not a vendor execution simulator or
+    a timing prediction. No cache, double buffering, or multicast is assumed.
+    """
+    for name, value in (("m", m), ("n", n), ("k", k), ("tile_m", tile_m),
+                        ("tile_n", tile_n), ("tile_k", tile_k)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if stationary not in {"output", "weight", "activation"}:
+        raise ValueError("stationary must be output, weight, or activation")
+    mt, nt, kt = ceil(m / tile_m), ceil(n / tile_n), ceil(k / tile_k)
+    _, width = resolve_precision(precision)
+    _, acc_width = resolve_precision(accumulator_precision)
+    a_bytes, b_bytes = tile_m * tile_k * width, tile_k * tile_n * width
+    c_bytes, output_bytes = tile_m * tile_n * acc_width, tile_m * tile_n * width
+    orders = {
+        "output": ((i, j, r) for i in range(mt) for j in range(nt) for r in range(kt)),
+        "weight": ((i, j, r) for j in range(nt) for r in range(kt) for i in range(mt)),
+        "activation": ((i, j, r) for i in range(mt) for r in range(kt) for j in range(nt)),
+    }
+    trace, previous_resident = [], None
+    tile_steps = mt * nt * kt
+    totals = {
+        "activation_read": (mt * kt if stationary == "activation" else tile_steps) * a_bytes,
+        "weight_read": (nt * kt if stationary == "weight" else tile_steps) * b_bytes,
+        "partial_sum_read": (0 if stationary == "output" else mt * nt * (kt - 1)) * c_bytes,
+        "partial_sum_write": (0 if stationary == "output" else mt * nt * (kt - 1)) * c_bytes,
+        "output_write": mt * nt * output_bytes,
+    }
+    trace_limit = 128
+    for step, (i, j, r) in enumerate(islice(orders[stationary], trace_limit)):
+        resident = {"output": (i, j), "weight": (r, j), "activation": (i, r)}[stationary]
+        resident_changed = resident != previous_resident
+        moved = {
+            "activation_read": a_bytes if stationary != "activation" or resident_changed else Q_(0, "byte"),
+            "weight_read": b_bytes if stationary != "weight" or resident_changed else Q_(0, "byte"),
+            "partial_sum_read": c_bytes if stationary != "output" and r > 0 else Q_(0, "byte"),
+            "partial_sum_write": c_bytes if stationary != "output" and r < kt - 1 else Q_(0, "byte"),
+            "output_write": output_bytes if r == kt - 1 else Q_(0, "byte"),
+        }
+        trace.append({"step": step, "tile_index": (i, j, r), "resident_operand": stationary,
+                      "resident_tile": resident, "resident_changed": resident_changed,
+                      "traffic": moved})
+        previous_resident = resident
+    padded = mt * tile_m, nt * tile_n, kt * tile_k
+    operations = Q_(2 * padded[0] * padded[1] * padded[2], "flop")
+    dram_bytes = sum(totals.values(), Q_(0, "byte"))
+    return {
+        "dimensions": (m, n, k), "padded_dimensions": padded,
+        "tile": (tile_m, tile_n, tile_k), "stationary": stationary,
+        "precision": precision, "accumulator_precision": accumulator_precision,
+        "operations": operations, "traffic": totals, "dram_bytes": dram_bytes,
+        "movement_energy": (dram_bytes * Hardware.Tech.Memory.DRAM.energy_per_byte).to("mJ"),
+        "energy_boundary": "DRAM transfers only; excludes local reads, arithmetic, and idle energy",
+        "trace": tuple(trace), "trace_total_steps": tile_steps,
+        "trace_truncated": tile_steps > trace_limit,
+        "trace_note": "First 128 tile steps at most; traffic totals cover the complete schedule analytically.",
+        "assumption": "Analytical one-tile-resident teaching schedule; padded arithmetic is fixed across schedules; no measured runtime is implied.",
+        "inputs": dict(m=m, n=n, k=k, tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+                       precision=precision, stationary=stationary, accumulator_precision=accumulator_precision),
+    }
 
 
 @dataclass(frozen=True)
@@ -709,6 +795,7 @@ def compare_application_speedup(
 
 _EXPERIMENTS = {
     "roofline": analyze_roofline,
+    "stationary_dataflow": analyze_stationary_dataflow,
     "tile_mapping": analyze_tile_mapping,
     "execution_path": analyze_execution_path,
     "application_path": compose_application_path,
@@ -804,7 +891,7 @@ __all__ = [
     "ApplicationComparison", "ApplicationPathResult", "Candidate", "CandidateResult", "ExecutionContract",
     "ExecutionPathResult", "RankingResult", "RooflineResult", "TRACK_SCENARIOS",
     "GemmDemand", "MODEL_ID", "TileResult", "TrackScenario", "analyze_execution_path", "analyze_roofline",
-    "analyze_tile_mapping", "compare_application_speedup", "compose_application_path", "get_track_scenario",
+    "analyze_tile_mapping", "analyze_stationary_dataflow", "compare_application_speedup", "compose_application_path", "get_track_scenario",
     "make_replay_packet", "rank_accelerators", "replay_experiment", "to_jsonable",
     "scenario_budgets", "scenario_candidates", "scenario_execution_dimensions",
     "scenario_gemm_demand", "scenario_tile_choices",

@@ -689,7 +689,15 @@ def evaluate_incident(track_id: str, strategy: str) -> IncidentHarmResult:
     return incident_harm(request_rate=profile.incident_request_rate, stages=stages)
 
 
-def evaluate_release_change(track_id: str, changed: bool) -> ReleaseContractResult:
+def evaluate_release_change(
+    track_id: str, changed: bool, *, refresh_evidence: Sequence[str] = (),
+) -> ReleaseContractResult:
+    """Check a chosen candidate after selectively rerunning declared evidence.
+
+    Refresh means a supplied successful rerun against that candidate's exact
+    required artifact versions. It does not prove empirical test adequacy.
+    Unselected records retain their original lineage and can remain stale.
+    """
     profile = get_operations_track(track_id)
     versions = dict(profile.release_artifact_versions)
     if changed:
@@ -709,9 +717,189 @@ def evaluate_release_change(track_id: str, changed: bool) -> ReleaseContractResu
             },
         ),
     )
+    known_evidence = {item.evidence: item for item in evidence_requirements}
+    refreshed = set(refresh_evidence)
+    if not refreshed <= known_evidence.keys():
+        raise ValueError("unknown release evidence refresh")
+    records = tuple(
+        EvidenceRecord(record.evidence, dict(known_evidence[record.evidence].required_artifact_versions))
+        if record.evidence in refreshed else record
+        for record in profile.release_evidence_records
+    )
     return validate_release_contract(
         current_artifact_versions=versions,
         artifact_requirements=artifact_requirements,
         evidence_requirements=evidence_requirements,
-        evidence_records=profile.release_evidence_records,
+        evidence_records=records,
     )
+
+
+@dataclass(frozen=True)
+class CouplingLoadResult:
+    model_count: int
+    topology: str
+    possible_pairs: int
+    coupled_pairs: int
+    marginal_pairs_for_new_model: int
+    pairs_after_addition: int
+
+
+def evaluate_coupling(track_id: str, topology: str = "chain") -> CouplingLoadResult:
+    """Count interface-review pairs, not measured toil or conflict probability.
+
+    One undirected pair needs one compatibility review per coordinated change.
+    A new chain member has one connection; a dense member connects to all N.
+    These hypothetical graphs do not assert that every pair actually conflicts.
+    """
+    n = int(get_operations_track(track_id).portfolio_arguments["model_count"])
+    possible = n * (n - 1) // 2
+    if topology == "isolated":
+        edges, added = 0, 0
+    elif topology == "chain":
+        edges, added = max(0, n - 1), int(n > 0)
+    elif topology == "dense":
+        edges, added = possible, n
+    else:
+        raise ValueError("unknown coupling topology")
+    return CouplingLoadResult(n, topology, possible, edges, added, edges + added)
+
+
+@dataclass(frozen=True)
+class ServiceBudget:
+    dimension: str
+    observed_bad_fraction: float
+    allowed_bad_fraction: float
+    burn_rate: float
+    consumed_budget_fraction: float
+    exhausted: bool
+
+
+@dataclass(frozen=True)
+class FleetMonitoringResult:
+    model_count: int
+    metrics_per_model: int
+    independent_checks_per_round: int
+    per_check_false_positive_rate: float
+    probability_any_false_crossing: float
+    expected_raw_false_crossings_per_day: float
+    raw_incident_signals: int
+    flat_pages: int
+    hierarchical_pages: int
+    hierarchical_routes: tuple[str, ...]
+    diagnostic_records_retained: int
+    service_budgets: tuple[ServiceBudget, ...]
+    promotion_allowed: bool
+    blocked_dimensions: tuple[str, ...]
+    observation_hours: float
+    budget_window_hours: float
+
+
+def evaluate_monitoring(
+    track_id: str, *, per_check_false_positive_rate: float = 0.05,
+    metrics_per_model: int = 10, incident: str = "stale features",
+    observation_hours: float = 6.0,
+) -> FleetMonitoringResult:
+    """Separate null-check arithmetic, finite alert routing, and SLO budgets.
+
+    Null checks are independent calibrated tests every five minutes: their raw
+    crossing expectation is not a prediction of deduplicated pages or precision.
+    A constructed shared incident emits one signal per model and one urgent
+    infrastructure signal. Hierarchy groups the former to the portfolio owner,
+    retains diagnostics, and preserves the urgent platform page. No statistical
+    detection-power improvement is inferred from that deterministic routing.
+
+    Budget fixture: one 24-hour accounting window with zero prior consumption;
+    every dimension permits 1% bad units. The named incident has 8% bad units in
+    that dimension and 0.1% in each other dimension. A burn of 1 means the budget
+    would be consumed at its planned rate; consumption >=1 blocks promotion.
+    These are explicit exercise policies, not production SLO recommendations.
+    """
+    from math import isfinite
+    profile = get_operations_track(track_id)
+    p = _fraction("per_check_false_positive_rate", per_check_false_positive_rate)
+    if not isinstance(metrics_per_model, int) or isinstance(metrics_per_model, bool) or metrics_per_model < 1:
+        raise ValueError("metrics_per_model must be a positive integer")
+    if not isfinite(observation_hours) or not 0 < observation_hours <= 24:
+        raise ValueError("observation_hours must be positive and at most 24")
+    cases = {"healthy": None, "stale features": "freshness", "quality regression": "quality",
+             "slow responses": "latency", "unavailable": "availability"}
+    if incident not in cases:
+        raise ValueError("unknown monitoring incident")
+    n = int(profile.portfolio_arguments["model_count"])
+    checks = n * metrics_per_model
+    dimension = cases[incident]
+    budgets = tuple(
+        ServiceBudget(name, bad, 0.01, bad / 0.01,
+                      bad / 0.01 * observation_hours / 24,
+                      bad / 0.01 * observation_hours / 24 >= 1)
+        for name in ("availability", "latency", "freshness", "quality")
+        for bad in (0.08 if name == dimension else 0.001,)
+    )
+    blocked = tuple(item.dimension for item in budgets if item.exhausted)
+    signals = n + 1 if dimension else 0
+    routes = ("portfolio owner: shared incident", "platform owner: urgent component") if dimension else ()
+    return FleetMonitoringResult(
+        n, metrics_per_model, checks, p, 1 - (1 - p) ** checks,
+        checks * p * (24 * 60 / 5), signals, signals, len(routes), routes,
+        signals, budgets, not blocked, blocked, observation_hours, 24.0,
+    )
+
+
+@dataclass(frozen=True)
+class FeatureJoinResult:
+    prediction_time_hour: float
+    join_rule: str
+    selected_event_time_hour: float
+    selected_availability_time_hour: float
+    selected_value: float
+    available_at_prediction: bool
+    serving_value: float
+    matches_serving: bool
+
+
+def evaluate_feature_join(track_id: str, join_rule: str = "availability time") -> FeatureJoinResult:
+    """A delayed-arrival counterexample; timestamps are hours in a toy trace.
+
+    At prediction time 10, the record (event=9, available=11, value=200)
+    is ineligible even though its event precedes prediction. The prior record
+    (event=8, available=8.5, value=100) is what serving could actually retrieve.
+    No accuracy impact is inferred from the different feature values.
+    """
+    get_operations_track(track_id)
+    if join_rule not in ("event time only", "availability time"):
+        raise ValueError("unknown feature join rule")
+    rows = ((8.0, 8.5, 100.0), (9.0, 11.0, 200.0))
+    eligible = [r for r in rows if r[0] <= 10 and (join_rule == "event time only" or r[1] <= 10)]
+    event, available, value = max(eligible, key=lambda r: r[0])
+    return FeatureJoinResult(10.0, join_rule, event, available, value, available <= 10, 100.0, value == 100.0)
+
+
+@dataclass(frozen=True)
+class OwnershipCostResult:
+    useful_utilization: float
+    horizon_hours: float
+    useful_hours: float
+    annualized_capital_cost: Quantity
+    owned_cost: Quantity
+    rental_cost: Quantity
+    break_even_useful_utilization: float
+    ownership_cheaper: bool
+
+
+def evaluate_ownership(track_id: str, useful_utilization: float = 0.5) -> OwnershipCostResult:
+    """One annualized hypothetical capacity block, same useful-work horizon.
+
+    Fixed capital charge $20k/year; owned useful-work operation $1/hour;
+    elastic rental $5/useful-hour; 8760-hour horizon. Excludes staffing, finance,
+    power while idle, and rental commitments; not a quotation or hardware price.
+    Utilization is useful completed-work time, not busy-device telemetry.
+    """
+    get_operations_track(track_id)
+    utilization = _fraction("useful_utilization", useful_utilization)
+    horizon = 8760.0
+    useful_hours = horizon * utilization
+    fixed = 20000 * USD
+    owned = fixed + useful_hours * 1 * USD
+    rental = useful_hours * 5 * USD
+    threshold = (fixed / ((5 - 1) * horizon * USD)).m_as("")
+    return OwnershipCostResult(utilization, horizon, useful_hours, fixed, owned, rental, threshold, owned < rental)

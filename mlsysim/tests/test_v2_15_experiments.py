@@ -166,10 +166,27 @@ def test_cleanest_site_is_rejected_when_it_misses_deadline():
     rows = evaluate_placements(workload, _placement_sites())
 
     assert rows[0].feasible
-    assert rows[0].water_use == Q_(195, "liter")
+    assert rows[0].water_use == (workload.it_energy * _placement_sites()[0].wue).to("liter")
     assert not rows[1].feasible
     assert "execution misses deadline" in rows[1].reasons
     assert select_lowest_carbon_placement(workload, _placement_sites()).site == "home"
+
+
+def test_placement_wue_uses_it_energy_independently_of_pue():
+    from dataclasses import replace
+
+    workload = WorkloadPlacement(
+        name="fixed IT work", it_energy=Q_(100, "kilowatt_hour"),
+        it_power=Q_(10, "kilowatt"), accelerator_demand=4,
+        deadline=Q_(2, "hour"), movable=True, home_site="home",
+    )
+    site = _placement_sites()[0]
+    rows = evaluate_placements(workload, (site, replace(site, pue=1.6)))
+
+    assert rows[0].facility_energy != rows[1].facility_energy
+    assert rows[0].water_use == rows[1].water_use
+    assert rows[0].water_use == (workload.it_energy * site.wue).to("liter")
+    assert evaluate_placements(workload, (replace(site, wue=None),))[0].water_use is None
 
 
 def test_immutable_edge_inference_cannot_migrate_to_cleaner_site():
@@ -187,6 +204,42 @@ def test_immutable_edge_inference_cannot_migrate_to_cleaner_site():
     assert rows[0].feasible
     assert not rows[1].feasible
     assert "immutable workload cannot leave its home site" in rows[1].reasons
+
+
+def test_cooling_and_season_change_separate_water_and_electricity_accounts():
+    def clean(cooling, season):
+        args = placement_experiment_args(
+            "cloud", deadline_scale=1.0, clean_cooling=cooling, water_season=season,
+        )
+        # Evidence contains the complete toy assumptions and can be replayed.
+        restored = deserialize_experiment_value(serialize_evaluator_args(args))
+        assert evaluate_placements(**restored) == evaluate_placements(**args)
+        return evaluate_placements(**args)[1]
+
+    wet = clean("evaporative", "wet")
+    drought = clean("evaporative", "drought")
+    dry = clean("dry", "drought")
+    unknown = clean("unknown", "drought")
+    assert wet.feasible and wet.water_requirement_met
+    assert not drought.feasible and drought.water_requirement_met is False
+    assert wet.water_use == drought.water_use
+    assert wet.operational_emissions == drought.operational_emissions
+    assert wet.water_allowance > drought.water_allowance
+    assert dry.feasible and dry.water_requirement_met
+    assert dry.water_use < drought.water_use
+    assert dry.facility_energy > drought.facility_energy
+    assert dry.operational_emissions > drought.operational_emissions
+    assert unknown.water_use is None and unknown.water_requirement_met is None
+    assert not unknown.feasible
+    assert "direct-water evidence missing for required local allowance" in unknown.reasons
+
+
+@pytest.mark.parametrize("track", ["tinyml", "mobile", "edge"])
+def test_remote_water_remedy_does_not_override_fixed_locality(track):
+    args = placement_experiment_args(track, deadline_scale=1.0, clean_cooling="dry", water_season="drought")
+    clean = evaluate_placements(**args)[1]
+    assert not clean.feasible
+    assert "immutable workload cannot leave its home site" in clean.reasons
 
 
 def test_mitigation_needs_energy_latency_and_quality_to_hold_together():

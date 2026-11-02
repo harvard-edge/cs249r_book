@@ -109,14 +109,12 @@ def test_lab_report_marks_missing_required_fields():
     assert "Final Decision" in report.snapshot["incomplete_fields"]
 
 
-def test_lab00_exposes_canonical_tracks_and_report_sources():
-    source = (REPO_ROOT / "labs" / "vol1" / "lab_00_introduction.py").read_text()
+def test_volume1_contexts_accept_existing_profiles_without_rewriting_them():
+    from mlsysbook_labs.contexts import CONTEXT_OPTIONS, get_context
 
+    before = tuple(CANONICAL_TRACKS)
     for profile in CANONICAL_TRACKS:
-        assert f'"{profile.track_id}"' in source
-
-    assert "ledger.save(track=_track_id, chapter=0" in source
-    assert '"track_id": _track_profile.track_id' in source
-    assert '"hardware_ref": _track_profile.hardware_ref' in source
-    assert '"system_ref": _track_profile.system_ref' in source
-    assert '"source_policy": _profile.source_policy' in source
+        context = get_context(profile.track_id)
+        assert context.track_id in CONTEXT_OPTIONS.values()
+        assert context.label in CONTEXT_OPTIONS
+    assert tuple(CANONICAL_TRACKS) == before

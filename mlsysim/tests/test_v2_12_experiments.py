@@ -328,3 +328,90 @@ def test_deployment_artifact_version_change_causally_invalidates_compatibility_e
     )
     assert not contract.releasable
     assert compat_name in contract.stale_evidence
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_coupling_changes_marginal_obligation_at_fixed_model_count(track):
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_coupling
+    independent, chain, dense = [evaluate_coupling(track, topology) for topology in ("isolated", "chain", "dense")]
+    assert independent.model_count == chain.model_count == dense.model_count
+    assert independent.coupled_pairs == 0
+    assert dense.coupled_pairs == dense.possible_pairs
+    assert dense.marginal_pairs_for_new_model == dense.model_count
+    assert chain.marginal_pairs_for_new_model == 1
+    assert dense.pairs_after_addition > chain.pairs_after_addition
+
+
+def test_monitoring_separates_null_statistics_routing_and_service_failure():
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_monitoring
+    noisy = evaluate_monitoring("cloud")
+    quiet = evaluate_monitoring("cloud", per_check_false_positive_rate=0.003)
+    assert quiet.expected_raw_false_crossings_per_day < noisy.expected_raw_false_crossings_per_day
+    assert quiet.probability_any_false_crossing < noisy.probability_any_false_crossing
+    assert quiet.flat_pages == noisy.flat_pages
+    assert quiet.hierarchical_pages == noisy.hierarchical_pages == 2
+    assert quiet.diagnostic_records_retained == quiet.raw_incident_signals
+    assert "platform owner: urgent component" in quiet.hierarchical_routes
+    assert quiet.blocked_dimensions == ("freshness",)
+    assert not quiet.promotion_allowed
+    assert not next(b for b in quiet.service_budgets if b.dimension == "availability").exhausted
+
+
+@pytest.mark.parametrize("incident,dimension", [("stale features", "freshness"), ("quality regression", "quality"), ("slow responses", "latency"), ("unavailable", "availability")])
+def test_each_slo_dimension_can_independently_stop_promotion(incident, dimension):
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_monitoring
+    early = evaluate_monitoring("edge", incident=incident, observation_hours=1)
+    exhausted = evaluate_monitoring("edge", incident=incident, observation_hours=3)
+    assert early.promotion_allowed
+    assert not exhausted.promotion_allowed
+    assert exhausted.blocked_dimensions == (dimension,)
+    assert next(b for b in exhausted.service_budgets if b.dimension == dimension).consumed_budget_fraction == pytest.approx(1)
+    healthy = evaluate_monitoring("edge", incident="healthy", observation_hours=24)
+    assert healthy.promotion_allowed
+    assert healthy.raw_incident_signals == healthy.hierarchical_pages == 0
+
+
+def test_availability_join_excludes_future_arrivals_without_changing_prediction_time():
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_feature_join
+    leaked = evaluate_feature_join("mobile", "event time only")
+    valid = evaluate_feature_join("mobile", "availability time")
+    assert leaked.prediction_time_hour == valid.prediction_time_hour
+    assert leaked.selected_event_time_hour < leaked.prediction_time_hour < leaked.selected_availability_time_hour
+    assert not leaked.available_at_prediction and not leaked.matches_serving
+    assert valid.available_at_prediction and valid.matches_serving
+
+
+def test_ownership_reverses_at_useful_work_threshold():
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_ownership
+    low, high = evaluate_ownership("cloud", 0.2), evaluate_ownership("cloud", 0.9)
+    assert not low.ownership_cheaper and high.ownership_cheaper
+    threshold = evaluate_ownership("cloud", low.break_even_useful_utilization)
+    assert threshold.owned_cost.m_as("USD") == pytest.approx(threshold.rental_cost.m_as("USD"))
+    assert low.annualized_capital_cost == high.annualized_capital_cost
+
+
+def test_new_operations_instruments_reject_unsupported_controls():
+    from mlsysim.labs.experiments.v2_12_experiments import evaluate_coupling, evaluate_monitoring, evaluate_feature_join, evaluate_ownership
+    for fn, args in [(evaluate_coupling, {"topology": "invented"}), (evaluate_monitoring, {"observation_hours": 0}), (evaluate_monitoring, {"metrics_per_model": 0}), (evaluate_monitoring, {"incident": "magic"}), (evaluate_feature_join, {"join_rule": "future"}), (evaluate_ownership, {"useful_utilization": 1.1})]:
+        with pytest.raises(ValueError):
+            fn("cloud", **args)
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_selective_release_evidence_refresh_pins_only_requested_candidate_records(track):
+    profile = get_operations_track(track)
+    compat = f"{profile.deployment_artifact.replace(' ', '-')}-compatibility"
+    unchanged = evaluate_release_change(track, False)
+    changed = evaluate_release_change(track, True)
+    compatibility_only = evaluate_release_change(track, True, refresh_evidence=[compat])
+    offline_only = evaluate_release_change(track, True, refresh_evidence=["offline-evaluation"])
+    both_behavioral = evaluate_release_change(track, True, refresh_evidence=["offline-evaluation", "canary-observation"])
+    assert unchanged.releasable
+    assert set(changed.stale_evidence) == {"offline-evaluation", "canary-observation"}
+    assert compatibility_only == changed
+    assert offline_only.stale_evidence == ("canary-observation",)
+    assert not offline_only.releasable
+    assert both_behavioral.releasable
+    assert compat not in changed.stale_evidence
+    with pytest.raises(ValueError, match="unknown release evidence"):
+        evaluate_release_change(track, True, refresh_evidence=["invented assurance"])

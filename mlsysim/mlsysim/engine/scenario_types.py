@@ -20,6 +20,7 @@ from typing import Dict, Optional
 from pydantic import BaseModel, ConfigDict
 
 from ..core.types import Quantity
+from ..core.provenance import Provenance
 from ..hardware.types import HardwareNode
 from ..models.types import Workload
 from ..systems.types import Fleet
@@ -408,3 +409,35 @@ class PublishedRunScenario(BaseScenario):
     @property
     def peak_fraction(self) -> float:
         return (self.achieved_rate / self.accelerator.compute.peak_flops).to("").magnitude
+
+
+class TaskFactorCard(BaseModel):
+    """One supplied task factorization and independent held-out observation."""
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    label: str
+    samples: int
+    ops_per_sample: Quantity
+    seconds_per_op: Quantity
+    quality_pct: Optional[float]
+    factor: str
+
+
+class TaskFactorStudyScenario(BaseScenario):
+    """A bounded controlled study, not a training or accuracy predictor."""
+    version: str
+    quality_floor_pct: float
+    shift_options: tuple[int, ...]
+    capability_options: tuple[float, ...]
+    cards: Dict[str, TaskFactorCard]
+    provenance: Provenance
+
+
+class PlacementStudyScenario(BaseScenario):
+    """Versioned illustrative placement experiment; units are explicit in field names.
+
+    Legacy profiles remain JSON mappings to preserve existing replay records.
+    Evaluators validate arguments and use unit-bearing physical calculations.
+    """
+    version: str
+    fixtures: dict
+    provenance: Provenance

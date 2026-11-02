@@ -461,3 +461,58 @@ def test_unavailable_placement_snapshot_is_strict_finite_json_with_none_metrics(
     assert "Infinity" not in encoded
     assert "NaN" not in encoded
     assert snapshot["inputs"] == evaluator_inputs
+
+
+def test_language_routing_prices_remaining_work_without_overriding_kv_admission():
+    from mlsysim.labs.experiments.v2_10_experiments import language_routing_reference
+    count = language_routing_reference('request_count')
+    work = language_routing_reference('remaining_work')
+    # First replica has fewer requests, but longer remaining work. The second
+    # cannot initially reserve the new allocation, so work routing must fall back.
+    first = work['requests'][0]
+    assert first['admission_checks'][0]['replica'] == 1
+    assert not first['admission_checks'][0]['fits']
+    assert first['replica'] == 0
+    assert count['requests'][1]['replica'] == 0
+    assert work['requests'][1]['replica'] == 1
+    assert work['on_time_count'] > count['on_time_count']
+    for record in work['requests']:
+        if record['replica'] is not None:
+            check = record['admission_checks'][-1]
+            assert check['fits']
+            assert check['kv_before'] + check['kv_requested'] <= work['kv_capacity_per_replica']
+
+
+def test_language_routing_keeps_rejections_in_denominator_and_has_no_fabricated_latency():
+    from mlsysim.labs.experiments.v2_10_experiments import language_routing_reference
+    result = language_routing_reference(state_scale=4)
+    assert result['offered_count'] == result['rejected_count']
+    assert result['completed_count'] == result['on_time_count'] == 0
+    assert all(record['latency_ms'] is None for record in result['requests'])
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize('kwargs', [{'policy':'random'}, {'state_scale':0}, {'state_scale':True}])
+def test_language_routing_rejects_unsupported_interventions(kwargs):
+    from mlsysim.labs.experiments.v2_10_experiments import language_routing_reference
+    with pytest.raises(ValueError):
+        language_routing_reference(**kwargs)
+
+
+def test_language_references_reuse_canonical_slot_and_prefill_mechanisms():
+    from mlsysim.labs.experiments.v1_13_experiments import (
+        language_batching_reference, language_scheduling_reference,
+    )
+    static = language_batching_reference('static')
+    continuous = language_batching_reference('continuous')
+    assert static['total_output_tokens'] == continuous['total_output_tokens']
+    assert continuous['elapsed_ms'] < static['elapsed_ms']
+    equal_static = language_batching_reference('static', length_mix='equal')
+    equal_continuous = language_batching_reference('continuous', length_mix='equal')
+    assert equal_static['elapsed_ms'] == equal_continuous['elapsed_ms']
+    mono = language_scheduling_reference(1)
+    chunked = language_scheduling_reference(4)
+    assert mono.prefill_work == chunked.prefill_work
+    assert mono.total_busy_time == chunked.total_busy_time
+    assert chunked.max_active_token_gap < mono.max_active_token_gap
+    assert chunked.prompt_first_token > mono.prompt_first_token

@@ -24,7 +24,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.experiments.v1_08_experiments import (
-        TRACKS, batch_experiment, batch_policy, bottleneck_experiment,
+        TRACKS, adaptation_outcome, batch_experiment, batch_policy, bottleneck_experiment,
         checkpoint_experiment, memory_outcome, optimizer_experiment, precision_experiment, track_profile,
     )
     from mlsysim.labs.state import DesignLedger
@@ -38,7 +38,7 @@ async def _():
     if ledger.is_wasm:
         _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme, batch_policy,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, adaptation_outcome, apply_plotly_theme, batch_policy,
         audit_evidence, batch_experiment, bottleneck_experiment, build_lab_report,
         capture_evidence, checkpoint_experiment, get_lab_metadata, go, ledger,
         memory_outcome, mo, optimizer_experiment, precision_experiment,
@@ -53,10 +53,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
+    _preferred_track = _preferred_context(ledger)
+    _initial_label = next(label for label, identifier in _track_options.items() if identifier == _preferred_track)
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Training context",
+        _track_options,
+        value=_initial_label, label="Training context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -78,6 +83,7 @@ def _(batch_policy, mo, track_id):
         {"Adam": "adam", "AdamW": "adamw"},
         value="AdamW", label="Optimizer conclusion",
     )
+    a_scope = mo.ui.dropdown({"Full adaptation": "full", "Restricted adaptation": "restricted"}, value="Full adaptation", label="Trainable scope")
     b_strategy = mo.ui.dropdown(
         _b_pol["options"],
         value=_b_pol["default_label"], label="Batch strategy",
@@ -94,11 +100,12 @@ def _(batch_policy, mo, track_id):
         {"Prefetch input": "prefetch", "Faster arithmetic path": "arithmetic", "Checkpoint activations": "checkpoint", "No change / hold for more evidence": "none"},
         value="Prefetch input", label="First systems fix",
     )
+    e_input_stress = mo.ui.checkbox(label="Replay input starvation", value=False)
     e_rejected = mo.ui.radio(
         {"Prefetch input": "prefetch", "Faster arithmetic": "arithmetic", "Checkpoint activations": "checkpoint"},
         label="Tested alternative if you hold",
     )
-    return a_optimizer, b_strategy, c_precision, d_checkpoint, e_intervention, e_rejected
+    return a_optimizer, a_scope, b_strategy, c_precision, d_checkpoint, e_input_stress, e_intervention, e_rejected
 
 
 @app.cell
@@ -155,15 +162,17 @@ def _(mo, track_id):
 
 @app.cell
 def _(
-    a_optimizer, b_strategy, batch_experiment, batch_policy,
+    a_optimizer, a_scope, adaptation_outcome, b_strategy, batch_experiment, batch_policy,
     bottleneck_experiment, c_precision, checkpoint_experiment, d_checkpoint,
-    e_intervention, e_rejected, memory_outcome, optimizer_experiment,
+    e_input_stress, e_intervention, e_rejected, memory_outcome, optimizer_experiment,
     precision_experiment, track_id, track_settings,
 ):
     a_sgd = optimizer_experiment(track_id, optimizer="sgd")
     a_adam = optimizer_experiment(track_id, optimizer="adam")
     a_adamw = optimizer_experiment(track_id, optimizer="adamw")
     a_selected = {"sgd": a_sgd, "adam": a_adam, "adamw": a_adamw}[a_optimizer.value]
+    a_scope_baseline = adaptation_outcome(track_id, adaptation_scope="full", optimizer=a_optimizer.value)
+    a_scope_result = adaptation_outcome(track_id, adaptation_scope=a_scope.value, optimizer=a_optimizer.value)
     _b_pol = batch_policy(track_id)
     b_physical, b_accumulation = _b_pol["choices"][b_strategy.value]
     b_baseline = batch_experiment(
@@ -187,7 +196,7 @@ def _(
     d_result = memory_outcome(track_id, physical_batch=probe_batch, accumulation_steps=1, checkpointing=d_checkpoint.value)
     d_timing = checkpoint_experiment(track_id, checkpointing=d_checkpoint.value)
     e_comparisons = {
-        name: bottleneck_experiment(track_id, intervention=name)
+        name: bottleneck_experiment(track_id, intervention=name, input_stress=e_input_stress.value)
         for name in ("prefetch", "arithmetic", "checkpoint")
     }
     if e_intervention.value == "none":
@@ -195,7 +204,7 @@ def _(
     else:
         e_selected = e_comparisons[e_intervention.value]
     return (
-        a_adam, a_adamw, a_selected, a_sgd, b_accumulation, b_alternatives,
+        a_adam, a_adamw, a_scope_baseline, a_scope_result, a_selected, a_sgd, b_accumulation, b_alternatives,
         b_baseline, b_physical, b_result, c_alternatives, c_fp32, c_result,
         d_baseline, d_result, d_timing, e_comparisons, e_selected, probe_batch,
     )
@@ -203,11 +212,11 @@ def _(
 
 @app.cell
 def _(
-    a_adam, a_adamw, a_optimizer, a_prediction, a_selected, a_sgd,
+    a_adam, a_adamw, a_optimizer, a_prediction, a_scope, a_scope_baseline, a_scope_result, a_selected, a_sgd,
     b_accumulation, b_alternatives, b_baseline, b_physical, b_prediction,
     b_result, c_alternatives, c_fp32, c_precision, c_prediction, c_result,
     capture_evidence, d_baseline, d_checkpoint, d_prediction, d_result,
-    d_timing, e_comparisons, e_intervention, e_prediction, e_rejected,
+    d_timing, e_comparisons, e_input_stress, e_intervention, e_prediction, e_rejected,
     e_selected, mo,
     probe_batch, set_evidence, track_id,
 ):
@@ -215,13 +224,13 @@ def _(
         set_evidence(lambda current: {**current, part: capture})
     common_upstream = {}
     a_capture = mo.ui.button(
-        label="Capture optimizer comparison", kind="success", disabled=a_prediction.value is None,
+        label="Capture adaptation-scope comparison", kind="success", disabled=a_prediction.value is None or a_scope.value == "full",
         on_click=lambda _v: store("A", capture_evidence(
             track=track_id, part="A", prediction=a_prediction.value,
-            inputs={"optimizer_choice": a_optimizer.value}, baseline=a_sgd, result=a_selected,
-            alternatives=(a_sgd, a_adam, a_adamw), decision=a_optimizer.value,
-            chosen_result=a_selected, result_role="chosen optimizer",
-            upstream_inputs=common_upstream, model_key="v1_08_experiments.optimizer_experiment",
+            inputs={"optimizer_choice": a_optimizer.value, "adaptation_scope": a_scope.value}, baseline=a_scope_baseline, result=a_scope_result,
+            alternatives=(a_scope_baseline, a_scope_result), decision=a_scope.value,
+            chosen_result=a_scope_result, result_role="tested adaptation scope",
+            upstream_inputs=common_upstream, model_key="v1_08_experiments.adaptation_outcome",
         )),
     )
     b_capture = mo.ui.button(
@@ -266,34 +275,37 @@ def _(
         disabled=e_prediction.value is None or e_hold_without_test,
         on_click=lambda _v: store("E", capture_evidence(
             track=track_id, part="E", prediction=e_prediction.value,
-            inputs={"intervention": e_intervention.value, "rejected_alternative": e_rejected.value},
+            inputs={"intervention": e_intervention.value, "rejected_alternative": e_rejected.value, "input_stress": e_input_stress.value},
             baseline=e_selected["baseline"], result=e_selected["result"],
             alternatives=tuple(e_comparisons.values()), decision=e_intervention.value,
             chosen_result=e_selected["baseline"] if e_intervention.value == "none" else e_selected["result"],
             result_role="rejected alternative" if e_intervention.value == "none" else "chosen systems intervention",
-            upstream_inputs=common_upstream, model_key="v1_08_experiments.bottleneck_experiment",
+            upstream_inputs={"input_stress": e_input_stress.value, "intervention": e_intervention.value, "rejected_alternative": e_rejected.value}, model_key="v1_08_experiments.bottleneck_experiment",
         )),
     )
     return a_capture, b_capture, c_capture, common_upstream, d_capture, e_capture
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = """
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>"""
-    header = mo.Html(f"""{css}<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 08</span><span>ABOUT 50–55 MIN</span></div><h1>Train for the Target, Not the Counter</h1><p>Which training design reaches a common quality target within memory, schedule, and cost limits?</p><div class="pilot-meta"><div><b>Track</b><br>{profile['label']}</div><div><b>Context</b><br>{profile['task']}</div><div><b>Teaching workload</b><br>GPT-2 on a development host</div><div><b>Deliverable</b><br>Training design recommendation</div></div></section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, header, track,
-        mo.Html('<p class="pilot-note">Device tracks study upstream teacher training or adaptation; GPT-2 is not deployed on the constrained target. Convergence, numerical replay, stage timing, and internal host rates are finite illustrative scenario evidence, not benchmark measurements.</p>'),
-    ], gap=0.5)
-    return
+def _(get_lab_metadata, mo, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.notebook import notebook_header, notebook_learning_map, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysim import Scenarios
+
+    _mission = Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _mission.episode(8)
+    _metadata = get_lab_metadata("vol1/lab_08_model_train.py")
+    learning_contract = get_learning_path("vol1", 8)
+    notebook_shell([
+        notebook_header(_metadata, _episode.question, topics=_episode.core_concepts),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        notebook_learning_map(learning_contract),
+        mo.md('Device tracks study upstream training on a separate development host. GPT-2 is a teaching reference, not the ring, phone, or perception model. Convergence and input/optimizer timings are supplied scenario fixtures. Arithmetic timing is analytical at an assumed efficiency, not a benchmark measurement.'),
+    ])
+    return learning_contract, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+
 
 
 @app.cell
@@ -304,24 +316,29 @@ def _(mo):
 
 @app.cell
 def _(
-    COLORS, a_adam, a_adamw, a_capture, a_optimizer, a_prediction,
+    COLORS, a_adam, a_adamw, a_capture, a_optimizer, a_prediction, a_scope, a_scope_baseline, a_scope_result,
     a_selected, a_sgd, apply_plotly_theme, audit_evidence, b_baseline,
     b_capture, b_physical, b_prediction, b_result, b_strategy, c_capture,
     c_fp32, c_precision, c_prediction, c_result, common_upstream,
     d_baseline, d_capture, d_checkpoint, d_prediction, d_result, d_timing,
-    e_capture, e_comparisons, e_intervention, e_prediction, e_rejected,
+    e_capture, e_comparisons, e_input_stress, e_intervention, e_prediction, e_rejected,
     e_selected, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, go, mo, probe_batch, profile, rationale, track_id,
+    notebook_shell,
+    learning_contract,
+    notebook_learning_part,
+    notebook_table,
+    notebook_tab_hint,
 ):
     _captures = get_evidence()
     audit = audit_evidence(
         _captures, track=track_id, required_parts=tuple("ABCDE"),
-        per_part_upstream_inputs={part: common_upstream for part in "ABCDE"},
+        per_part_upstream_inputs={**{part: common_upstream for part in "ABCD"}, "E": {"input_stress": e_input_stress.value, "intervention": e_intervention.value, "rejected_alternative": e_rejected.value}},
         contrast_required_parts=tuple("ABCDE"),
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        return notebook_table(rows)
 
     def saved(part):
         capture = _captures.get(part)
@@ -355,8 +372,12 @@ def _(
         for label, key, color in (("Weights", "weights_gb", COLORS["BlueLine"]), ("Gradients", "gradients_gb", COLORS["OrangeLine"]), ("Optimizer", "optimizer_state_gb", COLORS["GreenLine"]), ("Activations", "activations_gb", COLORS["RedLine"])):
             figure.add_bar(name=label, x=["SGD", "Adam", "AdamW"], y=[r["memory"][key] for r in (a_sgd, a_adam, a_adamw)], marker_color=color)
         figure.update_layout(barmode="stack", height=290, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Training memory (GB)", legend_orientation="h")
+        scope_rows = [{"Scope": result["adaptation_scope"], "Weights (GB)": f"{result['weights_gb']:.2f}", "Gradients (GB)": f"{result['gradients_gb']:.2f}", "Optimizer (GB)": f"{result['optimizer_state_gb']:.2f}", "Activations (GB)": f"{result['activations_gb']:.2f}", "Total (GB)": f"{result['total_memory_gb']:.2f}", "Fit": "FITS" if result["feasible"] else "OOM"} for result in (a_scope_baseline, a_scope_result)]
         return mo.vstack([
             intro, a_prediction, apply_plotly_theme(figure), table(rows), a_optimizer,
+            mo.md("**Now test the adaptation decision.** Keep the model, batch, numerical recipe, and selected optimizer fixed. Change which parameters can be trained; inspect each allocation before recommending the smaller state."),
+            a_scope, table(scope_rows),
+            mo.callout(mo.md(f"**Scope evidence:** {a_scope_result['activation_assumption']} **Still open:** {a_scope_result['quality_status']} A fit result alone cannot justify the adaptation recipe."), kind="info"),
             mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. On the {profile['hardware'].name} development host, AdamW optimizer state is **{a_adamw['memory']['optimizer_state_gb']:.1f} GB**; inference weights alone are **{a_adamw['memory']['inference_weights_gb']:.1f} GB**. Your optimizer conclusion is **{a_optimizer.value}**, with {a_selected['updates_to_target']} illustrative updates to target."), kind="info"),
             a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("Training memory sums weights, gradients, optimizer state, retained activations, and buffers. The simulator computes the allocations; convergence traces are supplied scenario observations.")}),
         ])
@@ -437,15 +458,17 @@ def _(
             return mo.vstack([intro, c_prediction])
         rows = [{
             "Format": result["memory"]["precision"].upper(), "Memory (GB)": f"{result['memory']['total_memory_gb']:.1f}",
-            "Update time (ms)": f"{result['timing']['update_time_ms']:.1f}", "Optimizer stage (ms)": f"{result['timing']['optimizer_ms']:.1f}",
-            "Finite replay": f"{result['numerical_replay']['finite_fraction']:.1%}", "Target": "reached" if result["reached_target"] else "missed",
+            "Update time (ms)": f"{result['timing']['update_time_ms']:.1f}" if result["timing"]["update_time_ms"] is not None else "unsupported",
+            "Finite replay": f"{result['numerical_replay']['finite_fraction']:.1%}", "Target": "yes" if result["reached_target"] else "no",
+            "Performance evidence": result["model_flops_diagnostic"]["reason"] or "Analytical reference within dense peak",
         } for result in (c_fp32, c_result)]
         figure = go.Figure([go.Bar(x=["FP32", c_precision.value.upper()], y=[c_fp32["timing"]["update_time_ms"], c_result["timing"]["update_time_ms"]], marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]])])
         figure.update_layout(height=260, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Update time (ms)", showlegend=False)
         return mo.vstack([
             intro, c_prediction, c_precision, apply_plotly_theme(figure), table(rows),
             mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **{c_precision.value.upper()}** {'reaches' if c_result['reached_target'] else 'does not reach'} the common target. Its FP32 optimizer stage remains **{c_result['timing']['optimizer_ms']:.1f} ms**."), kind="success" if c_result["reached_target"] else "danger"),
-            c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("Precision selects finite forward/backward observations and tensor widths. Optimizer time is a separate FP32-state fixture. Numerical replay and convergence are not functions of throughput.")}),
+            mo.callout(mo.md("**Evidence boundary:** Arithmetic time is analytical, using the dense precision peak and an explicitly assumed arithmetic efficiency, not a measured speedup. Unsupported formats have no hardware execution-time estimate. Numerical replay is independent evidence; it cannot establish that a device supports the format."), kind="info"),
+            c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("Precision selects the registered dense arithmetic peak and tensor widths. Forward/backward time is analytical at an explicitly assumed arithmetic efficiency; unsupported peaks remain unavailable. Optimizer time is a separate FP32-state fixture. Numerical replay and convergence are not functions of throughput.")}),
         ])
 
     def part_d():
@@ -462,11 +485,11 @@ def _(
         return mo.vstack([
             intro, d_prediction, d_checkpoint, apply_plotly_theme(figure), table(rows),
             mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. The selected policy saves **{d_timing['activation_memory_saved_gb']:.1f} GB** at the default batch and adds **{d_timing['added_update_time_ms']:.1f} ms** per update. The probe changes from **{'fit' if d_baseline['feasible'] else 'OOM'}** to **{'fit' if d_result['feasible'] else 'OOM'}**."), kind="success" if d_result["feasible"] else "danger"),
-            d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("The memory model reduces retained activations. The stage model adds supplied recomputation work to each physical microstep; convergence does not improve automatically.")}),
+            d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("The memory model reduces retained activations. The stage model adds analytically counted recomputation work to each physical microstep; convergence does not improve automatically.")}),
         ])
 
     def part_e():
-        intro = mo.md("### E · What should we fix before buying hardware? (8 min)\nCompare input prefetch, a supplied faster arithmetic path, and activation checkpointing against the identical baseline.")
+        intro = mo.md("### E · What should we fix before buying hardware? (8 min)\nCompare input prefetch, an assumed more efficient arithmetic path, and activation checkpointing against the identical baseline. First ask: can a busier device deliver less useful model arithmetic? Then replay input starvation and test whether your preferred fix still addresses the cause.")
         if e_prediction.value is None:
             return mo.vstack([intro, e_prediction])
         rows = [{
@@ -478,14 +501,26 @@ def _(
         figure = go.Figure([go.Bar(x=[name.title() for name in e_comparisons], y=[comparison["delta_update_time_ms"] for comparison in e_comparisons.values()], marker_color=[COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]])])
         figure.update_layout(height=270, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Change in update time (ms)", showlegend=False)
         if e_selected is None:
-            return mo.vstack([intro, e_prediction, e_intervention, e_rejected])
+            return mo.vstack([intro, e_prediction, e_input_stress, e_intervention, e_rejected])
+        diagnostic_rows = []
+        for label, outcome in (("Unchanged", e_selected["baseline"]), (e_selected["intervention"].title(), e_selected["result"])):
+            diagnostic = outcome["model_flops_diagnostic"]
+            diagnostic_rows.append({
+                "Recipe": label,
+                "Useful model FLOPs/update (TFLOP)": f"{diagnostic['useful_model_flops'] / 1e12:.2f}",
+                "Dense peak (TFLOP/s)": f"{diagnostic['dense_peak_tflops']:.1f}" if diagnostic["dense_peak_tflops"] is not None else "unavailable",
+                "Update (ms)": f"{diagnostic['update_time_ms']:.1f}",
+                "Device-stage busy": f"{diagnostic['busy_fraction']:.1%}" if diagnostic["busy_fraction"] is not None else "no run",
+                "MFU": f"{diagnostic['mfu']:.2%}" if diagnostic["mfu"] is not None else diagnostic["reason"],
+            })
         _held = e_intervention.value == "none"
         _decision_text = "hold the unchanged baseline" if _held else f"choose {e_intervention.value}"
         return mo.vstack([
-            intro, e_prediction, e_intervention, apply_plotly_theme(figure), table(rows),
+            intro, e_prediction, e_input_stress, e_intervention, apply_plotly_theme(figure), table(rows),
+            mo.md("**Busy versus useful.** Checkpointing can keep the device busy longer while lowering MFU: repeated forward work earns no extra model-FLOP credit. Input starvation lengthens the same update without adding useful work. These are analytical ratios from supplied stage replays, not measured profiler results or evidence of learning."), table(diagnostic_rows),
             e_rejected,
             mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. You **{_decision_text}** after testing **{e_selected['intervention']}**, which changes update time by **{e_selected['delta_update_time_ms']:+.1f} ms** and memory by **{e_selected['delta_memory_gb']:+.1f} GB**. Convergence is unchanged."), kind="info"),
-            e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md("Each intervention selects one supplied causal path. Prefetch changes visible input time; faster arithmetic changes forward/backward stages; checkpointing changes retained activations and adds recomputation.")}),
+            e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md("Each intervention selects one explicit causal path. Prefetch changes visible input time; faster arithmetic changes the assumed arithmetic efficiency; checkpointing changes retained activations and adds recomputation. The baseline arithmetic-efficiency assumption is 50%, and the arithmetic intervention assumes 65%; these are scenario settings, not measured capabilities. MFU = (6 × model parameters × effective batch × sequence length) / (dense precision-matched peak × full update time). The numerator counts forward + backward once, excludes recomputation and optimizer work, and stays fixed for this matched batch. Device-stage busy fraction counts device-stage time including recomputation divided by update time. BF16 and FP16 use the shared dense Tensor Core peak; sparse peaks are excluded. Neither ratio establishes convergence or identifies a bottleneck without the stage evidence.")}),
         ])
 
     def synthesis():
@@ -506,9 +541,17 @@ def _(
             mo.callout(mo.md("**Ready for the local report.**" if complete else "Capture five current contrasts. Match the recommendation to saved Part E. If you hold, match the rejected choice to the alternative tested there."), kind="success" if complete else "warn"),
         ])
 
-    tabs = mo.ui.tabs({"Part A · Memory": part_a(), "Part B · Batch": part_b(), "Part C · Precision": part_c(), "Part D · Checkpoint": part_d(), "Part E · Bottleneck": part_e(), "Synthesis": synthesis()})
-    tabs
+    tabs = mo.ui.tabs({"Part A · Memory": notebook_learning_part(learning_contract, "A", part_a()), "Part B · Batch": notebook_learning_part(learning_contract, "B", part_b()), "Part C · Precision": notebook_learning_part(learning_contract, "C", part_c()), "Part D · Checkpoint": notebook_learning_part(learning_contract, "D", part_d()), "Part E · Bottleneck": notebook_learning_part(learning_contract, "E", part_e()), "Synthesis": synthesis()})
+    notebook_shell([notebook_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 8))])
+    return
 
 
 @app.cell
@@ -516,6 +559,8 @@ def _(
     audit, build_lab_report, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, track_id,
+    notebook_shell,
+    learning_contract,
 ):
     _captures = get_evidence()
     _saved_e = _captures["E"].to_dict() if "E" in _captures else None
@@ -525,11 +570,12 @@ def _(
     _distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
     _selected_matches = final_choice.value == _saved_e_decision and (final_choice.value != "none" or final_rejected.value == _saved_e_rejected)
     _ready = audit.complete and _choices_complete and _distinct and _selected_matches and bool(rationale.value.strip())
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_08_model_train.py"), track=track_id, scenario=profile["task"],
-        learning_objectives=["Decompose training memory and optimizer state", "Compare physical batch, effective batch, and time to target", "Defend precision, checkpointing, and bottleneck interventions with evidence"],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
         knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
         evidence_summary={part: {"baseline": snapshots[part]["baseline"], "result": snapshots[part]["result"], "result_role": snapshots[part]["result_role"], "chosen_result": snapshots[part]["chosen_result"], "alternatives": snapshots[part]["alternatives"]} for part in "ABCDE"},
@@ -541,14 +587,17 @@ def _(
         result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": "Illustrative convergence, numerical, timing, and internal-cost fixtures.", "calculations": "Training-memory and stage-time experiment model."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)])
     return (report,)
 
 
+
+
 @app.cell
-async def _(
+def _(
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
 ):
     _captures = get_evidence()
     _saved_e = _captures["E"].to_dict() if "E" in _captures else None
@@ -558,8 +607,29 @@ async def _(
     _distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
     _selected_matches = final_choice.value == _saved_e_decision and (final_choice.value != "none" or final_rejected.value == _saved_e_rejected)
     _ready = audit.complete and _choices_complete and _distinct and _selected_matches and bool(rationale.value.strip())
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing evidence or your discussion requires saving again.")])
+    return (save_discussion,)
+
+
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
+    save_discussion,
+):
+    _captures = get_evidence()
+    _saved_e = _captures["E"].to_dict() if "E" in _captures else None
+    _saved_e_decision = _saved_e["decision"] if _saved_e else None
+    _saved_e_rejected = _saved_e["inputs"].get("rejected_alternative") if _saved_e else None
+    _choices_complete = all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+    _distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
+    _selected_matches = final_choice.value == _saved_e_decision and (final_choice.value != "none" or final_rejected.value == _saved_e_rejected)
+    _ready = audit.complete and _choices_complete and _distinct and _selected_matches and bool(rationale.value.strip())
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=8, design={
                 "schema_version": 1, "lab_id": "v1_08", "track_id": track_id,
@@ -575,7 +645,7 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(f'<div class="lab-hud"><span>LAB 08 · Time to Target · STATUS: {_status}</span></div>')
+    notebook_shell([mo.Html(f'<div class="lab-hud"><span>LAB 08 · Time to Target · STATUS: {_status}</span></div>')])
     return
 
 

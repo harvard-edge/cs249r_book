@@ -26,158 +26,13 @@ from mlsysim.physics.networking import calc_network_latency_ms
 from mlsysim.physics.quantities import energy_from_power, transfer_time
 
 
-TRACKS: dict[str, dict[str, Any]] = {
-    "tinyml": {
-        "display": "TinyML",
-        "scenario": "A remote agricultural anomaly sensor",
-        "payload_mb": 0.8,
-        "payload_options_mb": (0.01, 0.8, 1.6),
-        "connection_mbps": 2.0,
-        "connection_options_mbps": (1.0, 2.0, 5.0),
-        "distance_km": 1_000.0,
-        "response_kb": 2.0,
-        "local_execution_ms": 8.0,
-        "remote_execution_ms": 8.0,
-        "deadline_ms": 100.0,
-        "workload_memory_mb": 0.36,
-        "memory_capacity_mb": 0.512,
-        "active_power_w": 0.40,
-        "idle_power_w": 0.00001,
-        "average_power_budget_w": 0.05,
-        "baseline_duty_cycle": 0.02,
-        "minimum_observation_fraction": 0.01,
-        "duty_cycle_step": 0.01,
-        "upload_limit_mb": 0.10,
-        "minimum_retained_information_pct": 90.0,
-    },
-    "mobile": {
-        "display": "Mobile",
-        "scenario": "An interactive personal media assistant",
-        "payload_mb": 8.0,
-        "payload_options_mb": (0.25, 8.0, 16.0),
-        "connection_mbps": 40.0,
-        "connection_options_mbps": (20.0, 40.0, 100.0),
-        "distance_km": 2_000.0,
-        "response_kb": 20.0,
-        "local_execution_ms": 24.0,
-        "remote_execution_ms": 14.0,
-        "deadline_ms": 100.0,
-        "workload_memory_mb": 520.0,
-        "memory_capacity_mb": 768.0,
-        "active_power_w": 5.0,
-        "idle_power_w": 0.40,
-        "average_power_budget_w": 2.0,
-        "baseline_duty_cycle": 0.15,
-        "minimum_observation_fraction": 0.10,
-        "duty_cycle_step": 0.05,
-        "upload_limit_mb": 1.0,
-        "minimum_retained_information_pct": 92.0,
-    },
-    "edge": {
-        "display": "Edge",
-        "scenario": "A factory visual-inspection station",
-        "payload_mb": 12.0,
-        "payload_options_mb": (0.25, 12.0, 24.0),
-        "connection_mbps": 100.0,
-        "connection_options_mbps": (50.0, 100.0, 250.0),
-        "distance_km": 300.0,
-        "response_kb": 8.0,
-        "local_execution_ms": 16.0,
-        "remote_execution_ms": 11.0,
-        "deadline_ms": 50.0,
-        "workload_memory_mb": 4_500.0,
-        "memory_capacity_mb": 8_000.0,
-        "active_power_w": 25.0,
-        "idle_power_w": 4.0,
-        "average_power_budget_w": 15.0,
-        "baseline_duty_cycle": 0.35,
-        "minimum_observation_fraction": 0.25,
-        "duty_cycle_step": 0.05,
-        "upload_limit_mb": 2.0,
-        "minimum_retained_information_pct": 92.0,
-    },
-    "cloud": {
-        "display": "Cloud",
-        "scenario": (
-            "A regional document-understanding service (regional ingress host "
-            "vs. centralized remote accelerator)"
-        ),
-        "payload_mb": 2.0,
-        "payload_options_mb": (0.5, 2.0, 4.0),
-        "connection_mbps": 200.0,
-        "connection_options_mbps": (50.0, 200.0, 1_000.0),
-        "distance_km": 800.0,
-        "response_kb": 20.0,
-        "local_execution_ms": 80.0,
-        "remote_execution_ms": 8.0,
-        "deadline_ms": 120.0,
-        "workload_memory_mb": 18_000.0,
-        "memory_capacity_mb": 24_000.0,
-        "active_power_w": 350.0,
-        "idle_power_w": 80.0,
-        "average_power_budget_w": 250.0,
-        "baseline_duty_cycle": 0.50,
-        "minimum_observation_fraction": 0.30,
-        "duty_cycle_step": 0.05,
-        "upload_limit_mb": 1.0,
-        "minimum_retained_information_pct": 94.0,
-    },
-}
+from mlsysim.engine.scenarios import Scenarios
 
-
-FILTERING_ALTERNATIVES: dict[str, dict[str, Any]] = {
-    "raw": {
-        "display": "Send the raw input",
-        "upload_fraction": 1.0,
-        "preprocess_ms": 0.0,
-        "preprocess_power_w": {
-            "tinyml": 0.0,
-            "mobile": 0.0,
-            "edge": 0.0,
-            "cloud": 0.0,
-        },
-        "retained_information_pct": {
-            "tinyml": 100.0,
-            "mobile": 100.0,
-            "edge": 100.0,
-            "cloud": 100.0,
-        },
-    },
-    "event_filter": {
-        "display": "Keep detected events",
-        "upload_fraction": 0.02,
-        "preprocess_ms": 3.0,
-        "preprocess_power_w": {
-            "tinyml": 0.20,
-            "mobile": 2.0,
-            "edge": 8.0,
-            "cloud": 100.0,
-        },
-        "retained_information_pct": {
-            "tinyml": 94.0,
-            "mobile": 95.0,
-            "edge": 96.0,
-            "cloud": 97.0,
-        },
-    },
-    "feature_summary": {
-        "display": "Send a compact feature summary",
-        "upload_fraction": 0.005,
-        "preprocess_ms": 8.0,
-        "preprocess_power_w": {
-            "tinyml": 0.35,
-            "mobile": 3.5,
-            "edge": 15.0,
-            "cloud": 180.0,
-        },
-        "retained_information_pct": {
-            "tinyml": 86.0,
-            "mobile": 88.0,
-            "edge": 89.0,
-            "cloud": 91.0,
-        },
-    },
-}
+_STUDY = Scenarios.PlacementStudy
+_DATA = _STUDY.fixtures
+STUDY_VERSION = _STUDY.version
+TRACKS = _DATA["tracks"]
+FILTERING_ALTERNATIVES = _DATA["filters"]
 
 
 SCENARIO_ASSUMPTION = (
@@ -520,6 +375,153 @@ def compare_placements(
     }
 
 
+
+def study_profile(track_id: str) -> dict[str, Any]:
+    """Detached UI options from the semantic scenario registry."""
+    from copy import deepcopy
+    return deepcopy({**dict(_track(track_id)), "version": STUDY_VERSION,
+                     **{key: _DATA[key] for key in ("resource_cases", "interventions", "duty_options", "battery_multipliers", "horizon_hours")}})
+
+
+def _study_inputs(kind: str, track_id: str, scenario_version: str, **kwargs):
+    _track(track_id)
+    if scenario_version != STUDY_VERSION:
+        raise ValueError("Unsupported placement scenario_version")
+    return dict(study=kind, scenario_version=scenario_version, track_id=track_id, **kwargs)
+
+
+def locality_study(track_id: str, *, payload_mb: float, connection_mbps: float,
+                   ideal_compute: bool = False, scenario_version: str = STUDY_VERSION):
+    """Optimistic remote path bound; passing only avoids an early rejection."""
+    if not isinstance(ideal_compute, bool):
+        raise ValueError("ideal_compute must be Boolean")
+    inputs = _study_inputs("locality", track_id, scenario_version, payload_mb=payload_mb,
+                           connection_mbps=connection_mbps, ideal_compute=ideal_compute)
+    result = placement_accounting(track_id, payload_mb=payload_mb, connection_mbps=connection_mbps)
+    execution = 0.0 if ideal_compute else result["remote_execution_ms"]
+    lower = (result["request_upload_ms"] + result["propagation_rtt_ms"] +
+             execution + result["response_download_ms"])
+    focused = {key: result[key] for key in (
+        "track_id", "request_upload_ms", "propagation_rtt_ms", "response_download_ms",
+        "deadline_ms", "raw_payload_mb", "connection_mbps", "distance_km")}
+    return {**focused, "inputs": inputs, "remote_execution_ms": execution,
+            "lower_bound_ms": _rounded(lower), "violations": ["deadline_lower_bound"] if lower > result["deadline_ms"] else [],
+            "feasible": None if lower <= result["deadline_ms"] else False,
+            "readiness": "Unresolved: complete path not validated" if lower <= result["deadline_ms"] else "Rejected by lower bound"}
+
+
+def resource_study(track_id: str, *, workload_case: str = "ordinary", intervention: str = "baseline",
+                   scenario_version: str = STUDY_VERSION):
+    """Resource-specific controlled hypothetical; no quality or bandwidth inference."""
+    inputs = _study_inputs("resource", track_id, scenario_version, workload_case=workload_case, intervention=intervention)
+    if workload_case not in _DATA["resource_cases"] or intervention not in _DATA["interventions"]:
+        raise ValueError("Unknown resource case or intervention")
+    if track_id == "tinyml" and intervention == "bandwidth":
+        raise ValueError("TinyML fixture has no defensible bandwidth intervention")
+    if track_id != "tinyml" and intervention == "flash":
+        raise ValueError("Flash intervention is only supplied for TinyML")
+    track = _track(track_id); case = _DATA["resource_cases"][workload_case]; change = _DATA["interventions"][intervention]
+    resident = track["workload_memory_mb"] * case["resident_scale"]
+    capacity = track["memory_capacity_mb"] * change["capacity"]
+    shares = _DATA["timing_shares"]
+    compute = track["local_execution_ms"] * shares["compute"] * case["compute_scale"] / change["compute"]
+    movement = track["local_execution_ms"] * shares["movement"] * case["traffic_scale"] / change["bandwidth"]
+    overhead = track["local_execution_ms"] * shares["overhead"]
+    pools = [{"pool": "SRAM" if track_id == "tinyml" else "Working memory", "required_mb": resident, "capacity_mb": capacity}]
+    if track_id == "tinyml":
+        pools.append({"pool": "Flash", "required_mb": _DATA["tiny_weights_mb"], "capacity_mb": _DATA["tiny_flash_mb"] * change["flash"]})
+    violations = [row["pool"] for row in pools if row["required_mb"] > row["capacity_mb"]]
+    latency = compute + movement + overhead
+    if latency > track["deadline_ms"]: violations.append("deadline")
+    return dict(track_id=track_id, inputs=inputs, pools=pools, compute_ms=_rounded(compute), movement_ms=_rounded(movement),
+                overhead_ms=_rounded(overhead), latency_ms=_rounded(latency), deadline_ms=track["deadline_ms"],
+                binding_resource=violations[0] if violations else ("movement" if movement > compute else "arithmetic"),
+                feasible=not violations, violations=violations, provenance=_DATA["provenance"],
+                assumption="Hypothetical one-resource intervention, fixed format and task; no hardware price/performance prediction.")
+
+
+def operation_study(track_id: str, *, duty_cycle: float, battery_multiplier: float = 1.0,
+                    scenario_version: str = STUDY_VERSION):
+    """Independent service, mission energy and sustained-power screens."""
+    inputs = _study_inputs("operation", track_id, scenario_version, duty_cycle=duty_cycle, battery_multiplier=battery_multiplier)
+    _positive(battery_multiplier, "battery_multiplier")
+    if battery_multiplier not in _DATA["battery_multipliers"]:
+        raise ValueError("Unsupported mission energy allowance")
+    result = sustained_operation(track_id, duty_cycle=duty_cycle, horizon_hours=_DATA["horizon_hours"])
+    budget = _DATA["mission_energy_allowance_wh"][track_id] * battery_multiplier
+    energy_met = result["energy_wh"] <= budget
+    violations = list(result["violations"])
+    if not energy_met: violations.append("mission_energy")
+    return {**result, "inputs": inputs, "mission_energy_budget_wh": _rounded(budget), "mission_energy_met": energy_met,
+            "sustained_power_met": result["power_requirement_met"], "feasible": not violations, "violations": violations,
+            "assumption": "Endpoint active/idle accounting only; excludes sensing/radio/conversion losses. Power is a supplied steady-operation screen, not a temperature or throttling simulation."}
+
+
+def placement_study(track_id: str, *, payload_mb: float, connection_mbps: float,
+                    workload_case: str, intervention: str, duty_cycle: float,
+                    battery_multiplier: float, connectivity_available: bool = True,
+                    raw_data_allowed: bool = True, scenario_version: str = STUDY_VERSION):
+    """Compose current saved conditions and preserve every gate before partial cost."""
+    if not isinstance(raw_data_allowed, bool) or not isinstance(connectivity_available, bool):
+        raise ValueError("Policy and connectivity must be Boolean")
+    inputs = _study_inputs("placement", track_id, scenario_version, payload_mb=payload_mb,
+        connection_mbps=connection_mbps, workload_case=workload_case, intervention=intervention,
+        duty_cycle=duty_cycle, battery_multiplier=battery_multiplier,
+        connectivity_available=connectivity_available, raw_data_allowed=raw_data_allowed)
+    resource = resource_study(track_id, workload_case=workload_case, intervention=intervention)
+    operation = operation_study(track_id, duty_cycle=duty_cycle, battery_multiplier=battery_multiplier)
+    track = _track(track_id); candidates = {}
+    ordinary_resources = resource_study(track_id, workload_case=workload_case, intervention="baseline")
+    case = _DATA["resource_cases"][workload_case]
+    remote_shares = _DATA["remote_timing_shares"]
+    remote_compute_ms = track["remote_execution_ms"] * (remote_shares["compute"] * case["compute_scale"] + remote_shares["movement"] * case["traffic_scale"] + remote_shares["overhead"])
+    for candidate in ("local", *FILTERING_ALTERNATIVES):
+        remote = candidate != "local"
+        path = placement_accounting(track_id, payload_mb=payload_mb, connection_mbps=connection_mbps,
+                    connectivity_available=connectivity_available, filter_id=candidate if remote else "raw")
+        quality = path["retained_information_pct"] if remote else 100.0
+        fraction = _DATA["filter_memory_fraction"] if candidate not in ("local", "raw") else (0.0 if remote else 1.0)
+        memory_met = all(pool["required_mb"] * fraction <= pool["capacity_mb"] for pool in resource["pools"])
+        if remote:
+            # The remote worker is a separately supplied larger memory envelope.
+            memory_met = memory_met and all(pool["required_mb"] <= pool["capacity_mb"] * _DATA["remote_capacity_scale"] for pool in ordinary_resources["pools"])
+        latency = (path["remote_latency_ms"] if remote else resource["latency_ms"])
+        if latency is not None:
+            latency += _DATA["complete_path_overhead_ms"]
+            if remote: latency += remote_compute_ms - track["remote_execution_ms"]
+        endpoint_active = track["active_power_w"] * (_DATA["filter_active_fraction"] if candidate not in ("local", "raw") else (_DATA["remote_endpoint_active_fraction"] if remote else 1.0))
+        average = endpoint_active * duty_cycle + track["idle_power_w"] * (1-duty_cycle)
+        energy = energy_from_power(Q_(average,"watt"), Q_(_DATA["horizon_hours"],"hour")).m_as("watt_hour")
+        gates = {
+            "task": quality >= track["minimum_retained_information_pct"],
+            "privacy": not (candidate == "raw" and not raw_data_allowed),
+            "connectivity": not remote or connectivity_available,
+            "deadline": latency is not None and latency <= track["deadline_ms"],
+            "resource": memory_met,
+            "service": operation["service_requirement_met"],
+            "sustained_power": average <= track["average_power_budget_w"],
+            "mission_energy": energy <= operation["mission_energy_budget_wh"],
+            "upload": not remote or path["uploaded_payload_mb"] <= track["upload_limit_mb"],
+        }
+        violations = [name for name, met in gates.items() if not met]
+        costs = _DATA["costs"][candidate]
+        candidates[candidate] = dict(design_id=candidate, latency_ms=latency, gates=gates,
+            feasible=not violations, violations=violations, retained_information_pct=quality,
+            endpoint_average_power_w=_rounded(average), endpoint_energy_wh=_rounded(energy),
+            total_energy_evidence="Unknown: sensing, radio, conversion and remote host terms are not supplied",
+            readiness="Conditional supplied-screen result; target validation required",
+            cost_components_usd=costs, partial_cost_usd=_rounded(sum(costs.values())) if not violations else None,
+            cost_status="Partial estimate; lifecycle ranking unresolved" if not violations else "Excluded before cost",
+            interface_obligation="Keep feature definitions, preprocessing and model versions synchronized" if candidate not in ("local","raw") else "No filtering boundary",
+            inputs={**inputs, "candidate": candidate})
+    return dict(track_id=track_id, inputs=inputs, candidates=candidates,
+                feasible=any(row["feasible"] for row in candidates.values()), violations=[] if any(row["feasible"] for row in candidates.values()) else ["no_candidate_survives"],
+                cost_boundary=_DATA["cost_boundary"], scenario_version=STUDY_VERSION,
+                timing_assumption="Synthetic complete-path allowance added to modeled path; supplied study only, no measured tail-latency or deployment readiness claim.",
+                quality_assumption=FILTER_EVIDENCE_ASSUMPTION,
+                service_assumption="All candidates retain the same observation cadence. Remote options include a smaller local endpoint load and require a separate remote worker; remote host energy is outside endpoint budget.")
+
+
 def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """Replay one saved Chapter 2 result from its JSON input mapping.
 
@@ -532,6 +534,33 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(inputs, Mapping):
         raise ValueError("inputs must be a mapping")
     arguments = dict(inputs)
+    if "study" in arguments:
+        kind = arguments.pop("study")
+        if "scenario_version" not in arguments:
+            raise ValueError("New placement studies require explicit scenario_version")
+        functions = {"locality": locality_study, "resource": resource_study,
+                     "operation": operation_study, "placement": placement_study}
+        if not isinstance(kind, str) or kind not in functions:
+            raise ValueError("Unknown placement study")
+        common = {"track_id", "scenario_version"}
+        shapes = {
+            "locality": common | {"payload_mb", "connection_mbps", "ideal_compute"},
+            "resource": common | {"workload_case", "intervention"},
+            "operation": common | {"duty_cycle", "battery_multiplier"},
+            "placement": common | {"payload_mb", "connection_mbps", "workload_case", "intervention", "duty_cycle", "battery_multiplier", "connectivity_available", "raw_data_allowed"},
+        }
+        expected = shapes[kind]
+        if set(arguments) != expected and not (kind == "placement" and set(arguments) == expected | {"candidate"}):
+            raise ValueError("inputs do not match a saved study shape")
+        candidate = arguments.pop("candidate", None)
+        if candidate is not None and kind != "placement": raise ValueError("candidate only valid for placement")
+        try:
+            result = functions[kind](**arguments)
+        except TypeError as exc:
+            raise ValueError("inputs do not match a saved study shape") from exc
+        if candidate is None: return result
+        if candidate not in result["candidates"]: raise ValueError("Unknown placement candidate")
+        return result["candidates"][candidate]
     keys = set(arguments)
 
     placement_keys = {

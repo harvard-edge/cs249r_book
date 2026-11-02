@@ -38,6 +38,7 @@ async def _():
         evaluate_architecture,
         evaluate_client_selection,
         evaluate_federation,
+        evaluate_fleet_round,
         evaluate_replay,
     )
     from mlsysim.labs.state import DesignLedger
@@ -68,6 +69,7 @@ async def _():
         evaluate_architecture,
         evaluate_client_selection,
         evaluate_federation,
+        evaluate_fleet_round,
         evaluate_replay,
         get_lab_metadata,
         go,
@@ -84,11 +86,13 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="Mobile",
-        label="Fleet track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)),
+        label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -185,6 +189,20 @@ def _(mo, profile, track_id):
         disabled=_charging_disabled,
     )
     e_clients = mo.ui.slider(2, 6, value=4, step=1, label="Maximum clients")
+    e_uplink = mo.ui.dropdown({"No minimum beyond completion window": 0, "2 Mb/s minimum": 2, "5 Mb/s minimum": 5},
+                              value="No minimum beyond completion window", label="Uplink admission policy")
+    e_floor = mo.ui.dropdown({"2 survivors": 2, "3 survivors": 3, "4 survivors": 4},
+                             value="3 survivors", label="Declared aggregation floor")
+    e_dropout = mo.ui.dropdown({"No dropout": "none", "Dropout with recovery shares": "recoverable",
+                                "Dropout without recovery shares": "missing_shares"},
+                               value="No dropout", label="After mask setup")
+    e_release_state = mo.ui.dropdown({"Matched base + adapter + schema + policy": "matched",
+                                      "Base changed; old dependent state reused": "base_only"},
+                                     value="Matched base + adapter + schema + policy", label="Release state")
+    e_validation = mo.ui.dropdown({"Shadow comparison only": "shadow", "Validated outcome passes": "validated",
+                                   "Validated task regression": "regression", "Missing cohort reports": "missing_cohort",
+                                   "Target hardware fails": "hardware_failure"},
+                                  value="Shadow comparison only", label="Supplied release evidence")
     return (
         a_choice,
         a_epochs,
@@ -202,6 +220,11 @@ def _(mo, profile, track_id):
         e_charging,
         e_clients,
         e_freshness,
+        e_uplink,
+        e_floor,
+        e_dropout,
+        e_release_state,
+        e_validation,
         e_policy,
         e_prediction,
     )
@@ -229,6 +252,7 @@ def _(mo, track_id):
             "Replay no longer fits": "replay_capacity",
             "Cohort coverage falls": "cohort_coverage",
             "Rounds increase": "convergence",
+            "Protocol or release evidence fails": "release_gate",
         },
         label="Reevaluation trigger",
     )
@@ -237,13 +261,14 @@ def _(mo, track_id):
             "Illustrative outcome evidence": "outcome_fixture",
             "Correlated availability": "availability",
             "Stale client evidence": "freshness",
+            "Threshold trace is not a privacy proof": "protocol_scope",
         },
         label="Remaining limitation",
     )
     rationale = mo.ui.text_area(
         label="Decision rationale",
         placeholder="Cite one saved result, quantify a rejected alternative, and explain the trigger.",
-    )
+     debounce=False)
     student_id = mo.ui.text(label="Student ID (optional)")
     return (
         final_choice,
@@ -270,11 +295,17 @@ def _(
     e_charging,
     e_clients,
     e_freshness,
+    e_uplink,
+    e_floor,
+    e_dropout,
+    e_release_state,
+    e_validation,
     e_policy,
     evaluate_adaptation,
     evaluate_architecture,
     evaluate_client_selection,
     evaluate_federation,
+    evaluate_fleet_round,
     evaluate_replay,
     track_id,
 ):
@@ -327,9 +358,14 @@ def _(
         max_evidence_age_hours=e_freshness.value,
         require_charging=e_charging.value,
         max_clients=e_clients.value,
+        min_uplink_mbps=e_uplink.value,
+        survivor_floor=e_floor.value,
+        dropout_case=e_dropout.value,
+        release_state=e_release_state.value,
+        validation_evidence=e_validation.value,
     )
     e_results = {
-        policy: evaluate_client_selection(**e_common, selection_policy=policy)
+        policy: evaluate_fleet_round(**e_common, selection_policy=policy)
         for policy in ("freshest", "coverage")
     }
     e_selected_key = e_policy.value or "coverage"
@@ -388,6 +424,11 @@ def _(
     e_charging,
     e_clients,
     e_freshness,
+    e_uplink,
+    e_floor,
+    e_dropout,
+    e_release_state,
+    e_validation,
     e_policy,
     e_prediction,
     e_result,
@@ -420,6 +461,11 @@ def _(
         "freshness_hours": e_freshness.value,
         "require_charging": e_charging.value,
         "max_clients": e_clients.value,
+        "min_uplink_mbps": e_uplink.value,
+        "survivor_floor": e_floor.value,
+        "dropout_case": e_dropout.value,
+        "release_state": e_release_state.value,
+        "validation_evidence": e_validation.value,
     }
     a_capture = mo.ui.button(
         label="Capture architecture contrast",
@@ -544,38 +590,37 @@ def _(
 
 @app.cell(hide_code=True)
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .edge-head{background:linear-gradient(135deg,#101827,#164e63);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:10px}.edge-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.edge-head h1{font-size:clamp(1.65rem,5vw,2.6rem);line-height:1.05;margin:15px 0 8px}.edge-head p{color:#cffafe;max-width:760px;margin:0}.edge-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.edge-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.track-outside{background:white;border:1px solid #d9dee8;border-radius:9px;padding:10px 14px;margin-bottom:12px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}@media(max-width:520px){.edge-head{border-radius:9px;margin-top:30px}.edge-meta{grid-template-columns:1fr}}
+    .track-outside{background:white;border:1px solid #d9dee8;border-radius:9px;padding:10px 14px;margin-bottom:12px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}
     </style>""")
-    header = mo.Html(
-        f"""<section class="edge-head"><div class="edge-top"><span>VOLUME II · LAB 11</span><span>ABOUT 50 MIN</span></div><h1>Adaptation Across a Fleet</h1><p>Where can a fleet learn without overrunning local resources or excluding the clients that produce its evidence?</p><div class="edge-meta"><div><b>Fleet</b><br>{profile.label}</div><div><b>Worker hardware</b><br>{profile.hardware.name}</div><div><b>Output</b><br>Adaptation decision with saved evidence</div></div></section>"""
-    )
+    header = _course_header(_course_metadata("vol2/lab_11_edge_intelligence.py"), 'Where can a fleet learn without overrunning local resources or excluding the clients that produce its evidence?')
     selector = mo.Html(
         '<div class="track-outside"><b>Choose a fleet context.</b> Changing it clears saved evidence.</div>'
     )
-    mo.vstack(
+    _course_shell(
         [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            css,
-            header,
-            selector,
-            track,
-            mo.md(
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        css,
+        header,
+        selector,
+        _course_scenario(_course_path('vol2', 11), track=track.value, volume=2),
+        track,
+        mo.md(
                 "Illustrative workload, replay, and learning outcomes are scenario assumptions. Physical resource calculations use MLSysIM."
             ),
-        ],
+        _course_learning_map(_course_path('vol2', 11))
+    ],
         gap=0.45,
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(
-        f"""<div style="border-left:4px solid {COLORS["BlueLine"]};background:white;border-radius:0 12px 12px 0;padding:18px 24px;margin:8px 0 14px;box-shadow:0 1px 4px #00000010"><small><b>LEARNING OBJECTIVES</b></small><div style="line-height:1.7;margin-top:6px">1. <b>Compare</b> central, local, and federated data boundaries.<br>2. <b>Quantify</b> memory, energy, replay, and communication trade-offs.<br>3. <b>Design</b> a cohort-aware participation policy and fleet decision.</div><hr style="border:0;border-top:1px solid #e5e7eb;margin:14px 0"><div style="display:flex;gap:28px;flex-wrap:wrap"><div><small><b>PREREQUISITES</b></small><br>Training state · replay · federated averaging</div><div><small><b>DURATION</b></small><br>Five parts · about 9 minutes each</div></div><hr style="border:0;border-top:1px solid #e5e7eb;margin:14px 0"><small style="color:{COLORS["BlueLine"]}"><b>CORE QUESTION</b></small><div style="font-size:1.03rem;font-weight:600;font-style:italic;margin-top:5px">Can useful fleet adaptation fit local resource limits and still learn from representative, fresh clients?</div></div>"""
-    )
+     volume=2)
     return
 
 
@@ -622,6 +667,11 @@ def _(
     e_charging,
     e_clients,
     e_freshness,
+    e_uplink,
+    e_floor,
+    e_dropout,
+    e_release_state,
+    e_validation,
     e_policy,
     e_prediction,
     e_result,
@@ -638,6 +688,12 @@ def _(
     rationale,
     track_id,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 11)
     _captures = get_evidence()
     upstream = {
         "A": a_upstream,
@@ -672,7 +728,7 @@ def _(
             )
         data = capture.to_dict()
         return mo.Html(
-            f'<div class="saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}<br><small>The report keeps this result if live controls move.</small></div>'
+            f'<div class="saved"><b>Saved snapshot</b> · prediction: {_read_prediction(_saved_prediction_widgets[part], value=data["prediction"])}<br><small>The report keeps this result if live controls move.</small></div>'
         )
 
     def build_part_a():
@@ -710,8 +766,8 @@ def _(
             yaxis_title="Fleet transfer (MiB)",
             showlegend=False,
         )
-        reveal = f"You predicted **{a_prediction.value}**. Federated adaptation keeps raw observations local, supports population learning, and transfers **{a_results['federated']['fleet_transfer_mib']:.2f} MiB** over its supplied target trajectory."
-        return mo.vstack(
+        reveal = f"You predicted **{_read_prediction(a_prediction)}**. Federated adaptation keeps raw observations local, supports population learning, and transfers **{a_results['federated']['fleet_transfer_mib']:.2f} MiB** over its supplied target trajectory."
+        return mo.vstack([mo.vstack(
             [
                 intro,
                 a_prediction,
@@ -730,7 +786,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
         intro = mo.md(
@@ -778,8 +834,8 @@ def _(
             yaxis_title="Update memory (MiB)",
             legend_orientation="h",
         )
-        reveal = f"You predicted **{b_prediction.value}**. Full update: **{'PASS' if b_baseline['admitted'] else 'FAIL'}**. {b_method.value.title()} update: **{'PASS' if b_result['admitted'] else 'FAIL'}**. An infeasible result remains valid evidence."
-        return mo.vstack(
+        reveal = f"You predicted **{_read_prediction(b_prediction)}**. Full update: **{'PASS' if b_baseline['admitted'] else 'FAIL'}**. {b_method.value.title()} update: **{'PASS' if b_result['admitted'] else 'FAIL'}**. An infeasible result remains valid evidence."
+        return mo.vstack([mo.vstack(
             [
                 intro,
                 b_prediction,
@@ -799,7 +855,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "B")])
 
     def build_part_c():
         intro = mo.md(
@@ -818,7 +874,7 @@ def _(
             }
             for f, r in c_results.items()
         ]
-        fig = go.Figure()
+        fig = apply_plotly_theme(go.Figure())
         fig.add_scatter(
             x=list(c_results),
             y=[r["old_context_quality_pct"] for r in c_results.values()],
@@ -834,20 +890,20 @@ def _(
             line_color=COLORS["OrangeLine"],
         )
         fig.update_layout(
-            height=285,
-            margin=dict(l=20, r=20, t=20, b=20),
+            height=330,
+            margin=dict(l=40, r=20, t=70, b=65),
             xaxis_title="Memory fraction for replay",
             xaxis_tickformat=".0%",
             yaxis_title="Illustrative outcome (%)",
-            legend_orientation="h",
+            legend=dict(orientation="h", x=0, y=1.02, xanchor="left", yanchor="bottom"),
         )
-        reveal = f"You predicted **{c_prediction.value:.0%}**. The selected **{c_fraction.value:.0%}** retains **{c_result['retained_examples']:,} examples**; its weaker supplied outcome is **{c_result['balanced_quality_pct']:.1f}%**."
-        return mo.vstack(
+        reveal = f"You predicted **{_read_prediction(c_prediction)}**. The selected **{c_fraction.value:.0%}** retains **{c_result['retained_examples']:,} examples**; its weaker supplied outcome is **{c_result['balanced_quality_pct']:.1f}%**."
+        return mo.vstack([mo.vstack(
             [
                 intro,
                 c_prediction,
                 c_fraction,
-                apply_plotly_theme(fig),
+                fig,
                 table(rows),
                 mo.callout(
                     mo.md(reveal), kind="success" if c_result["feasible"] else "danger"
@@ -862,7 +918,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         intro = mo.md(
@@ -896,8 +952,8 @@ def _(
             yaxis_title="Traffic to 90% (MiB)",
             showlegend=False,
         )
-        reveal = f"You predicted **{d_prediction.value} epoch(s)**. At **{d_heterogeneity.value}** heterogeneity, {d_epochs.value} epochs require **{d_result['rounds_to_target']} rounds**, **{d_result['total_communication_mib']:.1f} MiB**, and **{d_result['wall_time_s']:.1f} s**."
-        return mo.vstack(
+        reveal = f"You predicted **{_read_prediction(d_prediction)} epoch(s)**. At **{d_heterogeneity.value}** heterogeneity, {d_epochs.value} epochs require **{d_result['rounds_to_target']} rounds**, **{d_result['total_communication_mib']:.1f} MiB**, and **{d_result['wall_time_s']:.1f} s**."
+        return mo.vstack([mo.vstack(
             [
                 intro,
                 d_prediction,
@@ -915,12 +971,12 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
         intro = mo.md(
-            f"### E · Who can participate without biasing the evidence? (9 min)\n"
-            f"Eligibility checks explicit client records before selection ranks them. "
+            f"### E · Who contributes, and may the fleet release? (12 min)\n"
+            f"Follow one round from eligibility through compatible updates, survivors, recovery, and release evidence. "
             f"Modeled candidate sample roster: **{len(e_result['completion_seconds'])} candidate nodes** for one round "
             f"(full fleet target: **{profile.clients_per_round} active clients/round**). "
             f"Deployment assumption: *{profile.selection_assumptions}*."
@@ -945,6 +1001,10 @@ def _(
                 "Selected": r["selected_count"],
                 "Cohorts": ", ".join(r["selected_cohorts"]) or "none",
                 "Coverage": f"{r['cohort_coverage_fraction']:.0%}",
+                "Compatible": len(r["compatible_ids"]),
+                "Survivors": len(r["survivor_ids"]),
+                "Aggregate": "AVAILABLE" if r["aggregate_available"] else "ABORT",
+                "Release": r["release_action"],
                 "Max completion": f"{r['max_completion_seconds']:.1f} s"
                 if r["max_completion_seconds"] is not None
                 else "none",
@@ -974,29 +1034,50 @@ def _(
             yaxis_title="Estimated completion (s)",
             showlegend=False,
         )
-        reveal = f"You predicted **{e_prediction.value}**. The chosen policy selects **{e_result['selected_count']} clients** across **{e_result['selected_cohort_count']} cohorts**; coverage is **{e_result['cohort_coverage_fraction']:.0%}**. Resource failures: {e_result['failure_counts'] or 'none'}."
+        reveal = f"You predicted **{_read_prediction(e_prediction)}**. The chosen policy selects **{e_result['selected_count']} clients** across **{e_result['selected_cohort_count']} cohorts**; coverage is **{e_result['cohort_coverage_fraction']:.0%}**. Resource failures: {e_result['failure_counts'] or 'none'}."
         elements = [intro, e_prediction]
         if charging_callout:
             elements.append(charging_callout)
         elements.extend(
             [
-                mo.hstack([e_freshness, e_clients, e_charging], wrap=True),
+                mo.hstack([e_freshness, e_clients, e_charging, e_uplink], wrap=True),
                 e_policy,
+                mo.hstack([e_floor, e_dropout], wrap=True),
+                mo.hstack([e_release_state, e_validation], wrap=True),
                 apply_plotly_theme(fig),
                 table(rows),
                 mo.callout(mo.md(reveal), kind="info"),
+                mo.md(
+                    f"**Release contract:** base `{e_result['release_tuple']['base']}`, "
+                    f"adapter `{e_result['release_tuple']['adapter']}`, schema `{e_result['release_tuple']['schema']}`, "
+                    f"policy `{e_result['release_tuple']['policy']}`. "
+                    f"Reject incompatible contributions: **{', '.join(e_result['incompatible_ids']) or 'none'}**. "
+                    f"Survivors **{len(e_result['survivor_ids'])} / floor {e_result['survivor_floor']}**; "
+                    f"dropout recovery **{'PASS' if e_result['recovery_pass'] else 'FAIL'}** "
+                    f"({e_result['recovery_extra_exchanges']} extra exchange attempts). "
+                    f"**Decision: {e_result['release_action']}**. "
+                    f"Blocking conditions: **{'; '.join(e_result['release_blockers']) or 'none'}**."
+                ),
+                mo.callout(mo.md(
+                    "**Try three reversals:** increase the survivor floor, remove dropout-recovery shares, "
+                    "then replace shadow-only evidence with validated outcomes. Finally change only the base "
+                    "while reusing dependent state. Which gate changes? A completed aggregate is not a release approval. "
+                    "Threshold/recovery outcomes here are declared protocol conditions, **not cryptographic privacy assurance**. "
+                    "Shadow disagreement detects change; only supplied validated task evidence justifies a regression judgment. "
+                    "Rollback restores the matched base, adapter, schema and policy set."
+                ), kind="info"),
                 e_capture,
                 saved("E"),
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
-                            "Completion adds local adapter-update and upload time. Eligibility applies battery, charging (mobile only; bypassed on mains-powered roles), uplink, freshness, availability window, and deadline checks. Modeled sample roster inspects 8 explicit candidate records for one cluster/round; full fleet scale coordinates multiple such candidate pools without fabricating unmeasured full-fleet traces. Coverage is represented cohorts divided by roster cohorts, not a quality score."
+                            "Protocol records are finite illustrative evidence: selected c02 has an old base; c06 has incompatible adapter/schema/policy. A post-setup dropout removes the last compatible uploader; aggregation requires the declared survivor floor and available recovery shares. This scenario requires every cohort among surviving contributors; the independent validation-report gate additionally requires all cohort reports. Release also requires matched state, target-hardware validation and validated task outcomes. No cryptographic operations or privacy budget are simulated. Completion adds local adapter-update and upload time. Eligibility applies battery, charging (mobile only; bypassed on mains-powered roles), uplink, freshness, availability window, and deadline checks. Modeled sample roster inspects 8 explicit candidate records for one cluster/round; full fleet scale coordinates multiple such candidate pools without fabricating unmeasured full-fleet traces. Coverage is represented cohorts divided by roster cohorts, not a quality score."
                         )
                     }
                 ),
             ]
         )
-        return mo.vstack(elements)
+        return mo.vstack([mo.vstack(elements), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
@@ -1043,7 +1124,7 @@ def _(
                 table(rows),
                 mo.callout(
                     mo.md(
-                        "Saved snapshots are immutable. Moving a control marks dependent evidence stale instead of rewriting it."
+                        "Saved comparisons stay as they were when you captured them. If a control changes their starting conditions, capture them again before using them in your discussion."
                     ),
                     kind="info",
                 ),
@@ -1062,12 +1143,20 @@ def _(
             "Part B · Admission": build_part_b(),
             "Part C · Replay": build_part_c(),
             "Part D · Local work": build_part_d(),
-            "Part E · Participation": build_part_e(),
+            "Part E · Round and release": build_part_e(),
             "Synthesis": build_synthesis(),
         }
     )
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 11))], volume=2)
+    return
 
 
 @app.cell(hide_code=True)
@@ -1087,6 +1176,7 @@ def _(
     student_id,
     track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _a_decision = _captures["A"].to_dict()["decision"] if "A" in _captures else None
     _ready = (
@@ -1099,7 +1189,8 @@ def _(
         and final_choice.value == _a_decision
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_11_edge_intelligence.py"),
@@ -1110,6 +1201,7 @@ def _(
             "Compare adaptation data boundaries",
             "Quantify local and fleet resource trade-offs",
             "Design a cohort-aware participation policy",
+            "Separate protocol completion from compatible, evidence-backed adaptive release",
         ],
         predictions={p: snapshots[p]["prediction"] for p in "ABCDE"},
         knob_settings={p: snapshots[p]["inputs"] for p in "ABCDE"},
@@ -1127,6 +1219,7 @@ def _(
             "adaptation": snapshots["B"]["result"]["violations"],
             "replay_feasible": snapshots["C"]["result"]["feasible"],
             "participation_failures": snapshots["E"]["result"]["failure_counts"],
+            "protocol_and_release": snapshots["E"]["result"]["release_blockers"],
         },
         decisions={
             "recommendation": final_choice.value,
@@ -1142,6 +1235,7 @@ def _(
             "Placement changes data exposure and coordination.",
             "Updates must pass memory, energy, time, and foreground checks separately.",
             "Local work and eligibility change communication and fleet evidence.",
+            "An available aggregate is not privacy assurance or justified fleet promotion.",
         ],
         reflections={
             "rationale": rationale.value,
@@ -1165,63 +1259,35 @@ def _(
             "evidence_boundary": "Saved baseline and result inputs reproduce each experiment exactly.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
-@app.cell(hide_code=True)
-async def _(
-    MODEL_ID,
-    audit,
-    final_choice,
-    final_rejected,
-    final_risk,
-    final_trigger,
-    get_evidence,
-    ledger,
-    mo,
-    rationale,
-    track_id,
+@app.cell
+def _(
+    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
-    _ready = (
-        (get_evidence().get("A") is not None)
-        and audit.complete
-        and all(
-            w.value is not None
-            for w in (final_choice, final_rejected, final_trigger, final_risk)
-        )
-        and final_choice.value != final_rejected.value
-        and final_choice.value == get_evidence()["A"].to_dict()["decision"]
-        and bool(rationale.value.strip())
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
+    _ready = get_evidence().get('A') is not None and audit.complete and all((w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk))) and (final_choice.value != final_rejected.value) and (final_choice.value == get_evidence()['A'].to_dict()['decision']) and bool(rationale.value.strip())
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_11', 'track_id': track_id, 'model_id': MODEL_ID, 'evidence': {p: c.to_dict() for p, c in get_evidence().items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=11, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
     )
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
-        try:
-            ledger.save(
-                chapter=11,
-                design={
-                    "schema_version": 1,
-                    "lab_id": "v2_11",
-                    "track_id": track_id,
-                    "model_id": MODEL_ID,
-                    "evidence": {p: c.to_dict() for p, c in get_evidence().items()},
-                    "recommendation": final_choice.value,
-                    "rejected_alternative": final_rejected.value,
-                    "reevaluation_trigger": final_trigger.value,
-                    "residual_risk": final_risk.value,
-                    "rationale": rationale.value,
-                },
-            )
-            await ledger.flush()
-        except Exception as error:
-            _status = (
-                f"SAVE FAILED · {type(error).__name__} · LOCAL REPORT REMAINS AVAILABLE"
-            )
-        else:
-            _status = "SAVED"
-    mo.Html(
-        f'<div class="lab-hud"><span class="hud-label">LAB</span><span>11 · Fleet Adaptation</span><span aria-hidden="true">|</span><span class="hud-label">STATUS</span><span class="hud-active">{_status}</span></div>'
-    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

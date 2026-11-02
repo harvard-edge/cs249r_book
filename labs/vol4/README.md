@@ -75,3 +75,26 @@ From week 1 to week 9 the arm runs under a staff-written baseline governor; in L
 | 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The scope test and the 12-skill rubric signed off at the bench. |
 | 🔧 **[Station Reference Card](labs/station-reference.md)** | Bench hardware, software stack, wiring, engineering rules, and telemetry schema. |
 | 🧩 **[Lab Template](LAB_TEMPLATE.md)** | The section-by-section structure every lab follows, with guidance for whoever writes it. |
+
+
+## Chapter companions: explore before the physical studio
+
+The chapter-aligned browser companions complement this hardware studio. Start with
+[`lab_00_orientation.py`](lab_00_orientation.py), then follow the chapter order
+through the final transfer investigation. Each chapter uses four concept-owned
+parts, visible goals and route, reactive reference evidence, saved comparisons,
+and one downloadable discussion. The [full narrative and chapter mapping](../plans/vol4/index.qmd)
+connects every companion to the studio session it supports.
+
+The browser project is the book's warehouse mobile manipulator. The studio uses
+the SO-101 station. A warehouse reference calculation is not a measurement of
+that station, and a constructed incident trace is not a physical trial. These
+companions issue no hardware commands and do not alter the studio's status or
+replace staff qualification. Physical instructions and approved station limits
+remain in the existing studio and Station Reference Card.
+
+Concepts and student-visible goals are authored once in `concepts/`; the packaged
+learning contracts are generated from those maps. MLSysIM owns study cases and
+calculations. `mlsysbook_labs.physical_companion` owns the shared interaction;
+`build_companions.py` checks the thin chapter entrypoints. No chapter notebook
+contains a private copy of the physics or narrative.

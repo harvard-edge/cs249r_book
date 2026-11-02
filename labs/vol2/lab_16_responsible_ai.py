@@ -61,10 +61,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="Mobile", label="Deployment track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)), label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -90,7 +92,13 @@ def _(mo, track_id):
     a_allowed_gap = mo.ui.slider(0.05, 0.40, value=0.15, step=0.05, label="Allowed metric gap")
     b_explanation_share = mo.ui.slider(0.01, 0.50, value=0.10, step=0.01, label="Explanation share")
     b_review_share = mo.ui.slider(0.001, 0.10, value=0.02, step=0.001, label="Human-review share")
+    b_exploration = mo.ui.dropdown({"Follow current winner": 0, "Check two cases per group": 2, "Check five cases per group": 5}, value="Follow current winner", label="Independent evidence allocation")
+    b_review_order = mo.ui.dropdown({"Arrival order": "fifo", "Independent corroboration first": "independent_signal"}, value="Arrival order", label="Finite alert-review order")
+    d_removal = mo.ui.dropdown({"Delete log only": "logs_only", "Retrain all remaining records": "full_retrain", "Rebuild affected shard": "shard_retrain"}, value="Delete log only", label="Separate trained-state removal experiment")
     c_sampling = mo.ui.slider(0.10, 1.00, value=0.50, step=0.10, label="Eligible cases sampled")
+    c_dossier = mo.ui.dropdown({"Pilot independent audit": "pilot", "Expanded independent audit": "expanded"}, value="Pilot independent audit", label="Separate count dossier")
+    c_intersections = mo.ui.dropdown({"Coarse groups": False, "Group × context": True}, value="Group × context", label="Audit slices")
+    c_confidence = mo.ui.slider(0.80, 0.99, value=0.95, step=0.01, label="Simultaneous confidence (assumed sampling model)")
     c_label_delay = mo.ui.slider(1, 80, value=24, step=1, label="Label delay (hours)")
     d_profile = mo.ui.dropdown(
         {"Cohort aggregate counts": "aggregate_counts", "Pseudonymous scored events": "pseudonymous_events",
@@ -103,7 +111,7 @@ def _(mo, track_id):
     )
     return (
         a_allowed_gap, a_criterion, a_threshold, b_explanation_share,
-        b_review_share, c_label_delay, c_sampling, d_case_review, d_profile,
+        b_review_share, b_exploration, b_review_order, c_confidence, c_dossier, c_intersections, c_label_delay, c_sampling, d_case_review, d_profile, d_removal,
     )
 
 
@@ -157,7 +165,7 @@ def _(mo, profile, track_id):
     _remedies = profile["remedies"]
     e_remedy = mo.ui.dropdown(
         _remedies,
-        value=next(iter(_remedies.keys())), label="Remedy",
+        value=next(iter(_remedies.keys())), label="Remedy", full_width=True,
     )
     e_trigger = mo.ui.dropdown(
         {"Metric exceeds gap": "chosen metric exceeds allowed gap",
@@ -174,15 +182,15 @@ def _(mo, profile, track_id):
     rationale = mo.ui.text_area(
         label="Decision rationale",
         placeholder="Use saved quantities to justify the choice and reject one alternative.",
-    )
+     debounce=False)
     return e_choice, e_owner, e_rejected, e_remedy, e_trigger, rationale, residual_risk
 
 
 @app.cell
 def _(
     PRIVACY_PROFILES, Q_, a_allowed_gap, a_criterion, a_threshold,
-    assess_fairness, b_explanation_share, b_review_share, c_label_delay,
-    c_sampling, check_privacy_profile, d_case_review, d_profile,
+    assess_fairness, b_explanation_share, b_exploration, b_review_order, b_review_share, c_confidence, c_dossier, c_intersections, c_label_delay,
+    c_sampling, check_privacy_profile, d_case_review, d_profile, d_removal,
     evaluate_capacity, mechanical_gate, profile, simulate_audit_evidence,
     track_id,
 ):
@@ -196,25 +204,27 @@ def _(
         explanation_service_time=profile["explanation_service_time"],
         review_service_time=profile["review_service_time"], target_utilization=0.85,
     )
-    b_base_inputs = {**_capacity_common, "explanation_share": 0.01, "review_share": 0.001}
+    b_base_inputs = {**_capacity_common, "explanation_share": 0.01, "review_share": 0.001, "exploration_per_group": 0, "review_order": "fifo"}
     b_result_inputs = {**_capacity_common, "explanation_share": b_explanation_share.value,
-                       "review_share": b_review_share.value}
+                       "review_share": b_review_share.value, "exploration_per_group": b_exploration.value, "review_order": b_review_order.value}
     b_base, b_result = evaluate_capacity(**b_base_inputs), evaluate_capacity(**b_result_inputs)
 
     _audit_common = dict(track_id=track_id, threshold=a_threshold.value,
                          criterion=a_criterion.value, allowed_gap=a_allowed_gap.value)
-    c_base_inputs = {**_audit_common, "sampling_fraction": 1.0, "label_delay": Q_(1, "hour")}
+    c_base_inputs = {**_audit_common, "sampling_fraction": 1.0, "label_delay": Q_(1, "hour"),
+                     "audit_dossier": "pilot", "audit_intersections": True, "confidence": 0.95}
     c_result_inputs = {**_audit_common, "sampling_fraction": c_sampling.value,
-                       "label_delay": Q_(c_label_delay.value, "hour")}
+                       "label_delay": Q_(c_label_delay.value, "hour"),
+                       "audit_dossier": c_dossier.value, "audit_intersections": c_intersections.value, "confidence": c_confidence.value}
     c_base = simulate_audit_evidence(**c_base_inputs)
     c_result = simulate_audit_evidence(**c_result_inputs)
 
     _privacy_common = dict(track_id=track_id, require_case_review=d_case_review.value,
                            max_retention=Q_(30, "day"), max_deletion_window=Q_(7, "day"))
-    d_base_inputs = {"profile_key": "aggregate_counts", **_privacy_common}
-    d_result_inputs = {"profile_key": d_profile.value, **_privacy_common}
+    d_base_inputs = {"profile_key": "aggregate_counts", "removal_method": "logs_only", **_privacy_common}
+    d_result_inputs = {"profile_key": d_profile.value, "removal_method": d_removal.value, **_privacy_common}
     d_base, d_result = check_privacy_profile(**d_base_inputs), check_privacy_profile(**d_result_inputs)
-    d_alternatives = {key: check_privacy_profile(profile_key=key, **_privacy_common)
+    d_alternatives = {key: check_privacy_profile(profile_key=key, removal_method=d_removal.value, **_privacy_common)
                       for key in PRIVACY_PROFILES}
     e_gate = mechanical_gate(a_result, b_result, c_result, d_result)
     return (
@@ -266,6 +276,7 @@ def _():
             "review_backlog": quantity_json(result.review_backlog, "count"),
             "explanation_utilization": result.explanation_utilization,
             "review_utilization": result.review_utilization, "feasible": result.feasible,
+            "feedback": result.feedback,
         }
 
     def audit_json(result, inputs):
@@ -278,6 +289,7 @@ def _():
             "evidence_complete": result.evidence_complete,
             "limitations": list(result.limitations),
             "label_delay": quantity_json(result.label_delay, "hour"),
+            "uncertainty": result.uncertainty,
         }
 
     def privacy_json(result, inputs):
@@ -292,7 +304,7 @@ def _():
             "supports_subgroup_audit": result.supports_subgroup_audit,
             "supports_case_review": result.supports_case_review,
             "passes_requirements": result.passes_requirements,
-            "violations": list(result.violations),
+            "violations": list(result.violations), "unlearning": result.unlearning,
         }
     return audit_json, capacity_json, fairness_json, plain_inputs, privacy_json, quantity_json
 
@@ -338,7 +350,9 @@ def _(
         label="Capture capacity contrast", kind="success",
         disabled=(b_prediction.value is None or
                   (b_base_inputs["explanation_share"] == b_result_inputs["explanation_share"] and
-                   b_base_inputs["review_share"] == b_result_inputs["review_share"])),
+                   b_base_inputs["review_share"] == b_result_inputs["review_share"] and
+                   b_base_inputs["exploration_per_group"] == b_result_inputs["exploration_per_group"] and
+                   b_base_inputs["review_order"] == b_result_inputs["review_order"])),
         on_click=lambda _v: store("B", _capture(
             "B", b_prediction.value, b_result_inputs, capacity_json(b_base, b_base_inputs),
             capacity_json(b_result, b_result_inputs), b_upstream,
@@ -348,7 +362,9 @@ def _(
         label="Capture audit contrast", kind="success",
         disabled=(c_prediction.value is None or
                   (c_base_inputs["sampling_fraction"] == c_result_inputs["sampling_fraction"] and
-                   c_base_inputs["label_delay"] == c_result_inputs["label_delay"])),
+                   c_base_inputs["label_delay"] == c_result_inputs["label_delay"] and
+                   c_result_inputs["audit_dossier"] == "pilot" and c_result_inputs["audit_intersections"] is True and
+                   c_result_inputs["confidence"] == 0.95)),
         on_click=lambda _v: store("C", _capture(
             "C", c_prediction.value, c_result_inputs, audit_json(c_base, c_base_inputs),
             audit_json(c_result, c_result_inputs), c_upstream,
@@ -356,7 +372,8 @@ def _(
     )
     d_capture = mo.ui.button(
         label="Capture privacy-profile contrast", kind="success",
-        disabled=d_prediction.value is None or d_base_inputs["profile_key"] == d_result_inputs["profile_key"],
+        disabled=d_prediction.value is None or (d_base_inputs["profile_key"] == d_result_inputs["profile_key"] and
+                                                     d_base_inputs["removal_method"] == d_result_inputs["removal_method"]),
         on_click=lambda _v: store("D", _capture(
             "D", d_prediction.value, d_result_inputs, privacy_json(d_base, d_base_inputs),
             privacy_json(d_result, d_result_inputs), d_upstream,
@@ -425,16 +442,32 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .rai-head{background:linear-gradient(135deg,#22131b,#7f1d35);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 12px}
-    .rai-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.rai-head h1{font-size:clamp(1.6rem,5vw,2.6rem);line-height:1.08;margin:16px 0 8px}.rai-head p{color:#ffe4e6;max-width:790px}
-    .rai-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:9px;margin-top:17px}.rai-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.rai-note{color:#475569;font-size:.9rem;line-height:1.5}.rai-saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}@media(max-width:520px){.rai-head{border-radius:9px}.rai-meta{grid-template-columns:1fr}}
+
+
+    .rai-note{color:#475569;font-size:.9rem;line-height:1.5}.rai-saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}
     </style>""")
-    header = mo.Html(f"""<section class="rai-head"><div class="rai-top"><span>VOLUME II · LAB 16</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence for Responsible Release</h1><p>When do subgroup outcomes, audit evidence, and review capacity justify a fleet release decision?</p><div class="rai-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Role</b><br>{profile['fleet_role']}</div><div><b>Workload</b><br>{profile['events_per_hour'].m_as('count/hour'):,.0f} ev/h</div><div><b>Capacity</b><br>{profile['explanation_workers']} exp / {profile['reviewers']} rev</div><div><b>Cohorts</b><br>{profile['subgroups'][0]} / {profile['subgroups'][1]}</div><div><b>Output</b><br>Auditable release record</div></div></section>""")
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header, mo.Html(
-        '<p class="rai-note">Scores, labels, workloads, and data profiles are illustrative scenario assumptions. Passing a data-handling profile is not a privacy guarantee.</p>')], gap=0.5).style({"padding-top": "32px"})
+    header = _course_header(_course_metadata("vol2/lab_16_responsible_ai.py"), 'When do subgroup outcomes, audit evidence, and review capacity justify a fleet release decision?')
+    _course_shell([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        css,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 16), track=track.value, volume=2),
+        mo.Html(
+        '<p class="rai-note">Scores, labels, workloads, and data profiles are illustrative scenario assumptions. Passing a data-handling profile is not a privacy guarantee.</p>'),
+        _course_learning_map(_course_path('vol2', 16))
+    ], gap=0.5, volume=2).style({"padding-top": "32px"})
     return
 
 
@@ -449,13 +482,18 @@ def _(
     COLORS, a_allowed_gap, a_base, a_capture, a_criterion, a_prediction,
     a_result, a_threshold, a_upstream, apply_plotly_theme, audit_evidence,
     b_base, b_capture, b_explanation_share, b_prediction, b_result,
-    b_review_share, b_upstream, c_base, c_capture, c_label_delay,
+    b_review_share, b_exploration, b_review_order, b_upstream, c_base, c_capture, c_confidence, c_dossier, c_intersections, c_label_delay,
     c_prediction, c_result, c_sampling, c_upstream, d_alternatives,
-    d_capture, d_case_review, d_prediction, d_profile, d_result, d_upstream,
+    d_capture, d_case_review, d_prediction, d_profile, d_removal, d_result, d_upstream,
     e_capture, e_choice, e_decision, e_gate, e_owner, e_prediction,
     e_rejected, e_remedy, e_trigger, e_upstream, get_evidence, go, mo,
     profile, rationale, residual_risk, track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 16)
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream,
                  "D": d_upstream, "E": e_upstream}
@@ -483,7 +521,7 @@ def _(
     def build_part_a():
         _intro = mo.md("### A · Which fairness claim does the evidence support? (10 min)\nChoose a normative criterion, then replay fixed scores and labels at a new threshold.")
         if a_prediction.value is None:
-            return mo.vstack([_intro, a_prediction])
+            return mo.vstack([_intro, mo.hstack([a_threshold, a_criterion, a_allowed_gap], wrap=True), a_prediction])
         _fig = go.Figure()
         for item in a_result.subgroup_metrics:
             _fig.add_bar(name=item.subgroup, x=["Selection", "TPR", "FPR", "PPV"], y=[
@@ -499,17 +537,17 @@ def _(
                   "True labels": result.ground_truth_positive_cases,
                   "False negatives": result.false_negative_cases}
                  for label, result in (("Baseline", a_base), ("Selected", a_result))]
-        return mo.vstack([_intro, a_prediction, mo.hstack([a_threshold, a_criterion, a_allowed_gap], wrap=True),
+        return mo.vstack([mo.vstack([_intro, a_prediction, mo.hstack([a_threshold, a_criterion, a_allowed_gap], wrap=True),
                           apply_plotly_theme(_fig), _table(_rows),
-                          mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. The chosen gap is **{_gap(a_result.criterion_gap)}**. The allowed gap classifies evidence; it does not change the **{a_result.ground_truth_positive_cases}** true labels."),
+                          mo.callout(mo.md(f"**Prediction:** {_read_prediction(a_prediction)}. The chosen gap is **{_gap(a_result.criterion_gap)}**. The allowed gap classifies evidence; it does not change the **{a_result.ground_truth_positive_cases}** true labels."),
                                      kind="success" if a_result.criterion_passes else "danger"),
                           a_capture, _saved("A"), mo.accordion({"Calculation Notes": mo.md(
-                              "MLSysIM thresholds each score, builds subgroup confusion matrices, and derives rates from their denominators. Empty denominators remain undefined. Criterion and tolerance only evaluate those counts.")})])
+                              "MLSysIM thresholds each score, builds subgroup confusion matrices, and derives rates from their denominators. Empty denominators remain undefined. Criterion and tolerance only evaluate those counts.")})]), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
         _intro = mo.md(f"### B · Can the fleet serve explanations and review? (10 min)\n**Fleet role:** {profile['fleet_role']}. The service tier receives **{profile['events_per_hour'].m_as('count/hour'):,.0f} events/hour**. Predict which queue binds.")
         if b_prediction.value is None:
-            return mo.vstack([_intro, b_prediction])
+            return mo.vstack([_intro, mo.hstack([b_explanation_share, b_review_share], widths="equal", wrap=True), b_prediction])
         _fig = go.Figure([
             go.Bar(name="Arrivals", x=["Explanation", "Human review"],
                    y=[b_result.explanation_arrivals.m_as("count/hour"), b_result.review_arrivals.m_as("count/hour")], marker_color=COLORS["OrangeLine"]),
@@ -522,17 +560,23 @@ def _(
                   "Review backlog": f"{r.review_backlog.m_as('count'):,.0f}",
                   "Status": "PASS" if r.feasible else "FAIL"}
                  for label, r in (("Baseline", b_base), ("Selected", b_result))]
-        return mo.vstack([_intro, b_prediction, mo.hstack([b_explanation_share, b_review_share], widths="equal", wrap=True),
+        return mo.vstack([mo.vstack([_intro, b_prediction, mo.hstack([b_explanation_share, b_review_share], widths="equal", wrap=True),
                           apply_plotly_theme(_fig), _table(_rows),
-                          mo.callout(mo.md(f"**Prediction:** {b_prediction.value}. Review demand is **{b_result.review_arrivals.m_as('count/hour'):,.0f}/hour** against **{b_result.review_capacity.m_as('count/hour'):,.0f}/hour** capacity. Coverage consumes capacity; it does not repair Part A outcomes."),
+                          mo.callout(mo.md(f"**Prediction:** {_read_prediction(b_prediction)}. Review demand is **{b_result.review_arrivals.m_as('count/hour'):,.0f}/hour** against **{b_result.review_capacity.m_as('count/hour'):,.0f}/hour** capacity. Coverage consumes capacity; it does not repair Part A outcomes."),
                                      kind="success" if b_result.feasible else "danger"),
+                          mo.md("**Who generates the next round of evidence?** Two groups have identical fixed potential outcome streams but unequal historical evidence. Following the current winner controls which labels arrive next. Reserve independent checks, then inspect all four rounds. These are separate finite cases, not a prediction of the live fleet."),
+                          mo.hstack([b_exploration, b_review_order], wrap=True),
+                          _table([{"Round": r["round"], "Prior winner": r["winner_before_labels"], "Cases A / B": f"{r['exposures_A']} / {r['exposures_B']}", "Observed rate A": f"{100*r['observed_rate_A']:.1f}%", "Observed rate B": f"{100*r['observed_rate_B']:.1f}%"} for r in b_result.feedback["exposure_trace"]]),
+                          mo.md("**Can a review queue miss known issues?** This separate alert set has a fixed review budget. Compare arrival order with an imperfect independent corroborating signal; inspect which actual issues go unreviewed."),
+                          _table([{"Alert": r["id"], "Actual issue": r["issue"], "Independent signal": r["independent_signal"], "Reviewed": r["reviewed"]} for r in b_result.feedback["alerts"]]),
+                          mo.callout(mo.md(f"Detected issues: **{b_result.feedback['detected_issues']}**; unreviewed issues: **{b_result.feedback['unreviewed_issues']}**. " + b_result.feedback["scope"]), kind="info"),
                           b_capture, _saved("B"), mo.accordion({"Calculation Notes": mo.md(
-                              "Arrivals equal fleet rate × selected share into offloaded queues. Capacity equals workers × target utilization ÷ service time. Eight-hour backlog grows only above capacity.")})])
+                              "Arrivals equal fleet rate × selected share into offloaded queues. Capacity equals workers × target utilization ÷ service time. Eight-hour backlog grows only above capacity.")})]), _concept_reflection(_reflection_contract, "B")])
 
     def build_part_c():
         _intro = mo.md("### C · What can delayed labels and sampling establish? (9 min)\nKeep true cases fixed. Change only which labeled cases the audit observes.")
         if c_prediction.value is None:
-            return mo.vstack([_intro, c_prediction])
+            return mo.vstack([_intro, mo.hstack([c_sampling, c_label_delay], widths="equal", wrap=True), c_prediction])
         _observed = c_result.observed_assessment
         _observed_gap = "undefined" if _observed is None else _gap(_observed.criterion_gap)
         _fig = go.Figure([go.Bar(x=["Fixture", "Eligible", "Sampled"],
@@ -541,20 +585,25 @@ def _(
         _fig.update_layout(height=260, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Cases", showlegend=False)
         _rows = [{"Run": label, "Eligible": r.eligible_cases, "Sampled": r.sampled_cases,
                   "Observed gap": "undefined" if r.observed_assessment is None else _gap(r.observed_assessment.criterion_gap),
-                  "Population gap": _gap(r.population_assessment.criterion_gap),
+                  "Full-fixture gap": _gap(r.population_assessment.criterion_gap),
                   "Limitations": "; ".join(r.limitations) or "none in fixture"}
                  for label, r in (("Full prompt", c_base), ("Selected", c_result))]
-        return mo.vstack([_intro, c_prediction, mo.hstack([c_sampling, c_label_delay], widths="equal", wrap=True),
+        return mo.vstack([mo.vstack([_intro, c_prediction, mo.hstack([c_sampling, c_label_delay], widths="equal", wrap=True),
                           apply_plotly_theme(_fig), _table(_rows),
-                          mo.callout(mo.md(f"**Prediction:** {c_prediction.value}. The plan observes **{c_result.sampled_cases}** cases and reports **{_observed_gap}**. The population gap remains **{_gap(c_result.population_assessment.criterion_gap)}**."),
+                          mo.callout(mo.md(f"**Prediction:** {_read_prediction(c_prediction)}. The plan observes **{c_result.sampled_cases}** cases and reports **{_observed_gap}**. The full-fixture gap remains **{_gap(c_result.population_assessment.criterion_gap)}**."),
                                      kind="danger" if _observed_gap == "undefined" else "info"),
+                          mo.md("**Second audit: can aggregate parity hide a gap?** These independent count ledgers are a separate hypothetical study. Compare coarse groups with group × context, then expand the audit. More observations narrow sampling bounds; they do not repair selection bias or establish a cause."),
+                          mo.hstack([c_dossier, c_intersections, c_confidence], wrap=True),
+                          _table([{"Audit cell": r["cell"], "Selected / trials": f"{r['successes']} / {r['trials']}", "Selection rate": f"{100*r['rate']:.1f}%", "Simultaneous bounds": f"{100*r['lower']:.1f}% to {100*r['upper']:.1f}%"} for r in c_result.uncertainty["rates"]]),
+                          _table([{"Context": r["context"], "Absolute gap": _gap(r["observed_gap"]), "Gap bounds": f"{_gap(r['lower'])} to {_gap(r['upper'])}"} for r in c_result.uncertainty["gaps"]]),
+                          mo.callout(mo.md(c_result.uncertainty["assumptions"] + " These bounds do not apply to the deterministic delayed-label sampling above, and do not authorize a release."), kind="warn"),
                           c_capture, _saved("C"), mo.accordion({"Calculation Notes": mo.md(
-                              "MLSysIM filters labels by age, applies deterministic cohort sampling, and computes an observed metric separately from the unchanged population assessment.")})])
+                              "The first audit filters fixed cases by label age and sampling rank. The separate count audit uses simultaneous Hoeffding rate intervals: radius = sqrt(log(2m/alpha)/(2n)), with m displayed rates and alpha = 1 − confidence. Difference bounds combine interval endpoints; absolute-gap bounds include zero whenever the signed difference can cross zero. Bounds require the stated representative independent-trial model; repeated windows and data-dependent slice discovery require additional correction.")})]), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         _intro = mo.md(f"### D · Which evidence profile meets the data obligation? (9 min)\n**Fleet scope:** {profile['fleet_role']}. Compare retained fields, retention, and deletion windows. No percentage represents privacy.")
         if d_prediction.value is None:
-            return mo.vstack([_intro, d_prediction])
+            return mo.vstack([_intro, mo.hstack([d_profile, d_case_review], widths="equal", wrap=True), d_prediction])
         _rows = [{"Profile": r.profile.label,
                   "Scope": r.scope or profile["fleet_role"],
                   "Raw content": "retained" if r.profile.raw_content_retained else "not retained",
@@ -564,12 +613,16 @@ def _(
                   "Case review": "yes" if r.supports_case_review else "no",
                   "Specified checks": "PASS" if r.passes_requirements else "FAIL"}
                  for r in d_alternatives.values()]
-        return mo.vstack([_intro, d_prediction, mo.hstack([d_profile, d_case_review], widths="equal", wrap=True),
+        return mo.vstack([mo.vstack([_intro, d_prediction, mo.hstack([d_profile, d_case_review], widths="equal", wrap=True),
                           _table(_rows), mo.callout(mo.md(
-                              f"**Prediction:** {d_prediction.value}. **{d_result.profile.label}** ({d_result.scope or profile['fleet_role']}) {'meets' if d_result.passes_requirements else 'does not meet'} the specified checks. This is not a privacy guarantee."),
+                              f"**Prediction:** {_read_prediction(d_prediction)}. **{d_result.profile.label}** ({d_result.scope or profile['fleet_role']}) {'meets' if d_result.passes_requirements else 'does not meet'} the specified checks. This is not a privacy guarantee."),
                               kind="success" if d_result.passes_requirements else "danger"),
+                          mo.md("**Does deleting a log remove its learned contribution?** In this separate additive toy model, compare the remaining trained state with a full retrain excluding the deleted record. Then compare records processed by full retraining and rebuilding an affected shard. This is a mechanism demonstration, not a deep-model removal certificate."),
+                          mo.md(f"Training records contribute their scalar values: **{d_result.unlearning['training_records']}**. The trained state sums them. Before training, the design partitions them into **{d_result.unlearning['shard_membership']}**. Delete the record contributing **{d_result.unlearning['deleted_record']}**; count only the remaining contributions recomputed."),
+                          d_removal, _table([{ "Evidence": label, "Value": d_result.unlearning[key]} for label, key in (("Original trained state", "original_state"), ("After selected method", "resulting_state"), ("Retrain excluding record", "retrain_without_record_state"), ("Record contributions processed", "processed_contributions"), ("Residual contribution", "residual_contribution"), ("Matches retrain reference", "matches_retrain_reference"))]),
+                          mo.callout(mo.md(d_result.unlearning["scope"]), kind="warn"),
                           d_capture, _saved("D"), mo.accordion({"Calculation Notes": mo.md(
-                              "The backend checks retained cohort labels, required case-level scored events, and explicit retention and deletion durations against the active fleet role.")})])
+                              "The backend checks retained cohort labels, required case-level scored events, and explicit retention and deletion durations against the active fleet role.")})]), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
         _intro = mo.md("### E · What decision follows from the evidence? (8 min)\nInspect four mechanical gates, then record a choice, owner, remedy, and trigger. The policy label cannot change a metric.")
@@ -581,7 +634,7 @@ def _(
                  {"Gate": "Audit estimate", "Status": "PASS" if _estimable else "INSUFFICIENT EVIDENCE"},
                  {"Gate": "Privacy obligations", "Status": "PASS" if d_result.passes_requirements else "FAIL"}]
         _message = "all specified gates pass" if e_gate.passes else " · ".join(e_gate.violations)
-        return mo.vstack([_intro, e_prediction, _table(_rows),
+        return mo.vstack([mo.vstack([_intro, e_prediction, _table(_rows),
                           mo.callout(mo.md(f"**Mechanical result:** {_message}. You still own the normative release choice."),
                                      kind="success" if e_gate.passes else "danger"),
                           mo.hstack([e_choice, e_rejected], widths="equal", wrap=True),
@@ -590,7 +643,7 @@ def _(
                                           "Name a distinct alternative, owner, remedy, and trigger."),
                                      kind="info" if e_decision.decision_record_complete else "warn"),
                           e_capture, _saved("E"), mo.accordion({"Calculation Notes": mo.md(
-                              "The gate combines observable requirements. record_release_decision stores qualitative governance choices without bonuses or metric changes.")})])
+                              "The gate combines observable requirements. record_release_decision stores qualitative governance choices without bonuses or metric changes.")})]), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         _rows = []
@@ -610,10 +663,18 @@ def _(
     tabs = mo.ui.tabs({"Part A": build_part_a(), "Part B": build_part_b(),
                        "Part C": build_part_c(), "Part D": build_part_d(),
                        "Part E": build_part_e(), "Synthesis": build_synthesis()})
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (evidence_audit,)
 
 # ZONE D · Completion-gated report and ledger
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 16))], volume=2)
+    return
+
 
 @app.cell
 def _(
@@ -621,10 +682,12 @@ def _(
     get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, residual_risk, track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _saved_choice = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and _saved_choice == e_choice.value
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     _result_snapshot = {
         "schema_version": 1, "lab_id": "v2_16", "track_id": track_id,
@@ -637,7 +700,7 @@ def _(
         get_lab_metadata("vol2/lab_16_responsible_ai.py"), track=track_id,
         scenario=f"{profile['display']} fleet ({profile['fleet_role']}) subgroup evidence and review service",
         learning_objectives=["Compute subgroup metrics from scored labels",
-                             "Separate audit evidence from population outcomes",
+                             "Separate audit evidence from fixture outcomes",
                              "Size explanation and review capacity",
                              "Record a release choice without a governance score"],
         predictions={part: _snapshots[part]["prediction"] for part in "ABCDE"},
@@ -659,36 +722,37 @@ def _(
         source_trace={"scenario_assumption": f"Illustrative fixtures for {profile['fleet_role']}: {profile['events_per_hour'].m_as('count/hour'):,.0f} events/hour ({profile['explanation_workers']} explanation, {profile['reviewers']} review workers); not measurements or a privacy guarantee.",
                       "calculation_boundary": "The simulator computes scored-label metrics, queues, audit evidence, and categorical data checks."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    e_choice, e_rejected, e_trigger, evidence_audit, get_evidence, ledger,
-    mo, rationale, residual_risk, track_id,
+def _(
+    e_choice, e_rejected, e_trigger, evidence_audit, get_evidence, mo, rationale, residual_risk, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _saved_choice = _captures["E"].to_dict()["decision"] if "E" in _captures else None
-    _ready = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and _saved_choice == e_choice.value
-    _save_state = "EVIDENCE IN PROGRESS"
-    _save_detail = ""
-    if _ready:
-        try:
-            ledger.save(chapter=16, design={
-                "schema_version": 1, "lab_id": "v2_16", "track_id": track_id,
-                "model_id": "v2_16_experiments",
-                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
-                "recommendation": e_choice.value, "rejected_alternative": e_rejected.value,
-                "reevaluation_trigger": e_trigger.value, "residual_risk": residual_risk.value,
-                "rationale": rationale.value,
-            })
-            await ledger.flush()
-            _save_state = "SAVED"
-        except Exception as exc:
-            _save_state = "SAVE FAILED"
-            _save_detail = f" | {type(exc).__name__}"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span>16 | Evidence for Responsible Release</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">{_save_state}</span><span>{_save_detail}</span></div>')
+    _saved_choice = _captures['E'].to_dict()['decision'] if 'E' in _captures else None
+    _ready = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and (_saved_choice == e_choice.value)
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_16', 'track_id': track_id, 'model_id': 'v2_16_experiments', 'evidence': {part: capture.to_dict() for part, capture in _captures.items()}, 'recommendation': e_choice.value, 'rejected_alternative': e_rejected.value, 'reevaluation_trigger': e_trigger.value, 'residual_risk': residual_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=16, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
+    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

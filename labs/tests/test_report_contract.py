@@ -139,8 +139,10 @@ def _report_call_keyword_sets(source_path: Path) -> list[tuple[int, set[str]]]:
     return calls
 
 
-def test_every_catalog_lab_can_generate_complete_report_for_every_track():
-    for path in LAB_CATALOG:
+def test_every_deployment_lab_can_generate_complete_report_for_every_track():
+    # The Tiny/Cloud deployment report family belongs to Volumes I–II.
+    # Trajectory and physical companions have their own evidence/report tests.
+    for path in (p for p in LAB_CATALOG if p.startswith(("vol1/", "vol2/"))):
         for track_id in canonical_track_ids():
             report = _build_complete_report(path, track_id)
             for header in REQUIRED_REPORT_HEADERS:
@@ -161,7 +163,7 @@ def test_every_catalog_lab_can_generate_complete_report_for_every_track():
             assert "## Incomplete Fields" not in report.markdown
 
 
-def test_every_catalog_lab_marks_missing_report_fields_for_every_track():
+def test_every_deployment_lab_marks_missing_report_fields_for_every_track():
     expected_missing = {
         "Predictions",
         "Evidence Summary",
@@ -170,7 +172,9 @@ def test_every_catalog_lab_marks_missing_report_fields_for_every_track():
         "Reflections",
         "Residual Risk",
     }
-    for path in LAB_CATALOG:
+    # The Tiny/Cloud deployment report family belongs to Volumes I–II.
+    # Trajectory and physical companions have their own evidence/report tests.
+    for path in (p for p in LAB_CATALOG if p.startswith(("vol1/", "vol2/"))):
         for track_id in canonical_track_ids():
             report = _build_incomplete_report(path, track_id)
             missing = set(report.snapshot["incomplete_fields"])
@@ -202,3 +206,38 @@ def test_notebook_report_calls_pass_required_schema_keywords():
                 failures.append(f"{rel}:{lineno} missing {sorted(missing)}")
 
     assert not failures, "build_lab_report calls missing schema keywords:\n" + "\n".join(failures)
+
+
+def test_discussion_leads_with_reasoning_and_keeps_source_details_at_end():
+    from dataclasses import asdict
+    from mlsysbook_labs.schemas import LabMetadata
+
+    metadata = LabMetadata(lab_id="discussion_test", title="A shared fleet", volume="Volume II",
+                           chapter="Introduction", book_anchor="Fleet coupling")
+    raw_result = {"baseline": {"workers": 1}, "candidate": {"workers": 2}}
+    trace = {"assumption": "Illustrative equal-work comparison"}
+    report = build_lab_report(
+        metadata, student_id="student", track="cloud", scenario="Recommendation service",
+        predictions={"A": "Communication will limit scaling"},
+        evidence_summary={"finding": "Extra workers spend longer waiting"},
+        final_decision={"choice": "Keep the smaller fleet"},
+        reflections={"reason": "The added capacity does not shorten the job"},
+        big_takeaways=["More capacity can add waiting"], residual_risk="Traffic may change",
+        result_snapshot=raw_result, source_trace=trace,
+    )
+    assert report.markdown.startswith("# A shared fleet · Lab discussion\n")
+    appendix = report.markdown.index("## Source details")
+    for heading in ("## Track And Scenario", "## Final Decision", "## Reflections", "## Evidence Summary"):
+        assert report.markdown.index(heading) < appendix
+    for heading in ("## Lab\n", "## Source Trace", "### MLSysIM Result Snapshot"):
+        assert report.markdown.index(heading) > appendix
+    assert report.snapshot["metadata"] == asdict(metadata)
+    assert report.snapshot["student_id"] == "student"
+    assert report.snapshot["result_snapshot"] == raw_result
+    assert report.snapshot["source_trace"] == trace
+    assert report.snapshot["incomplete_fields"] == []
+    assert set(report.snapshot) == {
+        "metadata", "student_id", "track", "scenario", "learning_objectives", "predictions",
+        "knob_settings", "binding_constraints", "evidence_summary", "final_decision", "big_takeaways",
+        "decisions", "reflections", "residual_risk", "source_trace", "result_snapshot", "incomplete_fields",
+    }

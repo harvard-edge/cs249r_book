@@ -31,6 +31,13 @@ if ! command -v quarto >/dev/null 2>&1; then
   exit 1
 fi
 
+# Check chapter ownership before compiling goals, inventory, or browser wheels.
+python3 "${LABS_DIR}/tools/check_learning_contracts.py"
+python3 "${LABS_DIR}/tools/build_learning_paths.py"
+python3 "${LABS_DIR}/tools/build_learning_paths.py" --check
+python3 "${LABS_DIR}/tools/build_lab_inventory.py"
+python3 "${LABS_DIR}/tools/build_lab_inventory.py" --check
+
 python3 -m build --wheel "${MLSYSIM_DIR}"
 python3 -m build --wheel "${LABS_DIR}" --outdir "${LABS_DIR}/wheels"
 
@@ -100,7 +107,19 @@ if [ -n "${BAD_HELPER_LABS}" ]; then
 fi
 echo "Lab helper wheel version check passed: ${LAB_HELPER_VERSION}"
 
-rm -rf "${LABS_DIR}/_wasm_build" "${LABS_DIR}/_build"
+# Only clean disposable build children; never recursively remove a checkout path.
+python3 - "${LABS_DIR}" <<'PY_CLEAN'
+from pathlib import Path
+import shutil
+import sys
+labs = Path(sys.argv[1]).resolve()
+for name in ("_wasm_build", "_build"):
+    output = labs / name
+    if output.is_symlink():
+        raise SystemExit(f"Refusing symlinked build output: {output}")
+    if output.exists():
+        shutil.rmtree(output)
+PY_CLEAN
 mkdir -p "${LABS_DIR}/_wasm_build/wheels"
 cp "${MLSYSIM_DIR}"/dist/mlsysim-*.whl "${LABS_DIR}/_wasm_build/wheels/"
 cp "${LABS_DIR}"/wheels/mlsysbook_labs-*.whl "${LABS_DIR}/_wasm_build/wheels/"
@@ -109,22 +128,29 @@ expected=0
 exported=0
 failed=""
 
-for vol in vol1 vol2; do
-  mkdir -p "${LABS_DIR}/_wasm_build/${vol}"
-  for lab in "${LABS_DIR}/${vol}"/lab_*.py; do
+mapfile_compat_routes="$(python3 "${LABS_DIR}/tools/build_lab_shells.py" list)"
+while IFS= read -r route; do
+    vol="${route%%/*}"
+    lab="${LABS_DIR}/${route}.py"
     name="$(basename "${lab}" .py)"
     expected=$((expected + 1))
     echo "Exporting ${vol}/${name}..."
     if marimo export html-wasm "${lab}" \
-      -o "${LABS_DIR}/_wasm_build/${vol}/${name}/index.html" \
+      -o "${LABS_DIR}/_wasm_build/${vol}/${name}/app/index.html" \
       --mode run \
       --no-show-code; then
+      # Marimo bundles an assistant instruction file with its static assets.
+      # Keep AI configuration out of the public site artifact.
+      python3 - "${LABS_DIR}/_wasm_build/${vol}/${name}/app/CLAUDE.md" <<'PY_ASSET'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).unlink(missing_ok=True)
+PY_ASSET
       exported=$((exported + 1))
     else
       failed="${failed} ${vol}/${name}"
     fi
-  done
-done
+done <<< "${mapfile_compat_routes}"
 
 echo "WASM export summary: ${exported}/${expected} notebooks exported"
 if [ -n "${failed}" ]; then
@@ -132,16 +158,28 @@ if [ -n "${failed}" ]; then
   exit 1
 fi
 
+# Transient QMD routes inherit the actual shared Quarto site metadata.
+# Cleanup runs after failures as well; only marker-bearing generated files unlink.
+python3 "${LABS_DIR}/tools/build_lab_shells.py" prepare
+trap 'python3 "${LABS_DIR}/tools/build_lab_shells.py" cleanup' EXIT
 (cd "${LABS_DIR}" && quarto render && touch _build/.nojekyll)
+python3 "${LABS_DIR}/tools/build_lab_shells.py" cleanup
+trap - EXIT
 
-rm -rf "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2"
-mkdir -p "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2"
-cp -R "${LABS_DIR}/_wasm_build/vol1/." "${LABS_DIR}/_build/vol1/"
-cp -R "${LABS_DIR}/_wasm_build/vol2/." "${LABS_DIR}/_build/vol2/"
-cp -r "${LABS_DIR}/_wasm_build/wheels" "${LABS_DIR}/_build/wheels"
-# Duplicate wheels into vol directories to satisfy Pyodide worker relative paths
-cp -r "${LABS_DIR}/_wasm_build/wheels" "${LABS_DIR}/_build/vol1/wheels"
-cp -r "${LABS_DIR}/_wasm_build/wheels" "${LABS_DIR}/_build/vol2/wheels"
+# Install full-page apps and launch routes; preserve Volume IV hardware pages.
+cp -R "${LABS_DIR}/_wasm_build/." "${LABS_DIR}/_build/"
+python3 "${LABS_DIR}/tools/build_lab_shells.py" install
+python3 - "${LABS_DIR}/_build" "${mapfile_compat_routes}" <<'PY_WHEELS'
+from pathlib import Path
+import shutil
+import sys
+output = Path(sys.argv[1])
+for route in sys.argv[2].splitlines():
+    # Relative micropip URLs are resolved from worker/app locations differently
+    # across Marimo releases. Supply each supported ancestor, never public CDNs.
+    for destination in (output / route.split("/")[0] / "wheels", output / route / "wheels", output / route / "app/wheels"):
+        shutil.copytree(output / "wheels", destination, dirs_exist_ok=True)
+PY_WHEELS
 cp "${LABS_DIR}/site.webmanifest" "${LABS_DIR}/_build/site.webmanifest"
 
 RELEASE_ID="${LABS_RELEASE_ID:-labs-v${LAB_HELPER_VERSION}-dev}"
@@ -153,6 +191,7 @@ RELEASE_HASH="$(
 )"
 METADATA_JSON="$(
   LAB_COUNT="${expected}" \
+  LAB_VOLUMES="$(printf '%s\n' "${mapfile_compat_routes}" | cut -d/ -f1 | sort -u | wc -l | tr -d ' ')" \
   MLSYSIM_VERSION="${BUILT_VERSION}" \
   LAB_HELPER_VERSION="${LAB_HELPER_VERSION}" \
   python3 - <<'PY'
@@ -161,7 +200,7 @@ import os
 
 print(json.dumps({
     "labCount": int(os.environ["LAB_COUNT"]),
-    "volumes": 2,
+    "volumes": int(os.environ["LAB_VOLUMES"]),
     "mlsysimVersion": os.environ["MLSYSIM_VERSION"],
     "labHelperVersion": os.environ["LAB_HELPER_VERSION"],
     "releaseChannel": "dev",
@@ -183,27 +222,11 @@ python3 "${REPO_ROOT}/scripts/version/release.py" emit-manifest \
 mkdir -p "${LABS_DIR}/_build/labs"
 cp "${LABS_DIR}/_build/release-manifest.json" "${LABS_DIR}/_build/labs/release-manifest.json"
 
-wasm_count="$(find "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2" -name "index.html" | wc -l | tr -d ' ')"
-echo "WASM notebooks in final build: ${wasm_count}"
-if [ "${wasm_count}" -ne "${expected}" ]; then
-  echo "ERROR: Expected ${expected} WASM notebooks in build output, got ${wasm_count}" >&2
-  exit 1
-fi
-
-missing_routes=""
-for vol in vol1 vol2; do
-  for lab in "${LABS_DIR}/${vol}"/lab_*.py; do
-    name="$(basename "${lab}" .py)"
-    route="${LABS_DIR}/_build/${vol}/${name}/index.html"
-    if [ ! -f "${route}" ]; then
-      missing_routes="${missing_routes} ${vol}/${name}"
-    fi
-  done
-done
-if [ -n "${missing_routes}" ]; then
-  echo "ERROR: Missing direct WASM routes in build output:${missing_routes}" >&2
-  exit 1
-fi
+while IFS= read -r route; do
+  test -f "${LABS_DIR}/_build/${route}/index.html" || { echo "Missing Quarto shell: ${route}" >&2; exit 1; }
+  test -f "${LABS_DIR}/_build/${route}/app/index.html" || { echo "Missing Marimo app: ${route}" >&2; exit 1; }
+done <<< "${mapfile_compat_routes}"
+echo "Verified ${expected} full-page interactive lab routes"
 
 test -f "${LABS_DIR}/_build/index.html"
 test -f "${LABS_DIR}/_build/release-manifest.json"

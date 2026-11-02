@@ -101,14 +101,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML",
-        label="Deployment track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)),
+        label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
-    track
     return (track,)
 
 
@@ -152,6 +153,16 @@ def _(mo, profile, track_id):
         },
         label="Placement decision",
     )
+    c_cooling = mo.ui.dropdown(
+        {"Supplied": "supplied", "Toy dry": "dry",
+         "Toy evaporative": "evaporative", "Unknown WUE": "unknown"},
+        value="Supplied", label="Clean-site cooling",
+    )
+    c_water_season = mo.ui.dropdown(
+        {"Unassessed": "unassessed", "Toy wet season": "wet",
+         "Toy drought": "drought"},
+        value="Unassessed", label="Water season",
+    )
     d_choice = mo.ui.radio(
         {
             "Reduce operations": "compute",
@@ -177,6 +188,8 @@ def _(mo, profile, track_id):
         b_horizon,
         c_capacity_scale,
         c_choice,
+        c_cooling,
+        c_water_season,
         c_deadline_scale,
         d_choice,
         d_rejected,
@@ -269,7 +282,7 @@ def _(mo, track_id):
     rationale = mo.ui.text_area(
         label="Evidence-based rationale",
         placeholder="Name your chosen option, a result quantity, the rejected alternative and its quantity, the remaining limitation, and the trigger.",
-    )
+     debounce=False)
     return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
@@ -279,6 +292,8 @@ def _(
     b_horizon,
     c_capacity_scale,
     c_deadline_scale,
+    c_cooling,
+    c_water_season,
     calculate_lifecycle,
     calculate_rebound,
     check_facility,
@@ -312,6 +327,7 @@ def _(
         track_id,
         deadline_scale=c_deadline_scale.value,
         clean_capacity_scale=c_capacity_scale.value,
+        clean_cooling=c_cooling.value, water_season=c_water_season.value,
     )
     c_base = evaluate_placements(**c_base_args)
     c_result = evaluate_placements(**c_result_args)
@@ -382,6 +398,8 @@ def _(
     c_capacity_scale,
     c_choice,
     c_deadline_scale,
+    c_cooling,
+    c_water_season,
     c_prediction,
     c_result,
     c_result_args,
@@ -413,6 +431,7 @@ def _(
         set_evidence(lambda current: {**current, part: capture})
 
     upstream = {"scenario_version": 1}
+    d_upstream = {**upstream, "choice": d_choice.value, "rejected": d_rejected.value}
     a_capture = mo.ui.button(
         label="Capture physical-limit contrast",
         kind="success",
@@ -455,7 +474,8 @@ def _(
         kind="success",
         disabled=c_prediction.value is None
         or c_choice.value is None
-        or (c_deadline_scale.value == 1.0 and c_capacity_scale.value == 1.0),
+        or (c_deadline_scale.value == 1.0 and c_capacity_scale.value == 1.0
+            and c_cooling.value == "supplied" and c_water_season.value == "unassessed"),
         on_click=lambda _v: store(
             "C",
             capture_evidence(
@@ -465,6 +485,7 @@ def _(
                 inputs={
                     "deadline_scale": c_deadline_scale.value,
                     "clean_capacity_scale": c_capacity_scale.value,
+                    "clean_cooling": c_cooling.value, "water_season": c_water_season.value,
                     "choice": c_choice.value,
                 },
                 baseline=pack(c_base_args, c_base),
@@ -512,7 +533,7 @@ def _(
                 result_role="rejected alternative"
                 if d_choice.value == "none"
                 else "tested intervention",
-                upstream_inputs=upstream,
+                upstream_inputs=d_upstream,
                 alternatives=tuple(
                     {
                         "name": _name,
@@ -545,29 +566,37 @@ def _(
             ),
         ),
     )
-    return a_capture, b_capture, c_capture, d_capture, e_capture, upstream
+    return a_capture, b_capture, c_capture, d_capture, e_capture, upstream, d_upstream
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile):
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .sustain-head{background:linear-gradient(135deg,#12372a,#176b4d);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}.sustain-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.sustain-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.sustain-head p{color:#dcfce7;max-width:780px}.sustain-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.sustain-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.saved{border-left:4px solid #16825d;background:#ecfdf5;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#12372a!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#bbf7d0}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}@media(max-width:520px){.sustain-head{border-radius:9px;margin-top:30px}.sustain-meta{grid-template-columns:1fr}}
+    .saved{border-left:4px solid #16825d;background:#ecfdf5;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}.table-wrap table{border-collapse:collapse;min-width:100%;font-size:.9rem}.table-wrap th,.table-wrap td{padding:.45rem .6rem;text-align:left;vertical-align:top;min-width:7rem}.table-wrap th{border-bottom:1px solid #cbd5e1}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#12372a!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#bbf7d0}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
     </style>""")
-    header = mo.Html(
-        f"""<section class="sustain-head"><div class="sustain-top"><span>VOLUME II · LAB 15</span><span>ABOUT 50–55 MIN</span></div><h1>Sustainable Fleet Decisions</h1><p>Which fleet design reduces lifecycle emissions while still fitting its power, cooling, locality, quality, and latency constraints?</p><div class="sustain-meta"><div><b>Track</b><br>{profile["display"]}</div><div><b>Fleet context</b><br>{profile["fleet_shape"]}</div><div><b>Deliverable</b><br>Five saved contrasts and one defensible lifecycle recommendation</div></div></section>"""
-    )
-    mo.vstack(
+    header = _course_header(_course_metadata("vol2/lab_15_sustainable_ai.py"), 'Which fleet design reduces lifecycle emissions while still fitting its power, cooling, locality, quality, and latency constraints?')
+    _course_shell(
         [
-            ACADEMIC_LAB_CSS,
-            LAB_CSS,
-            css,
-            header,
-            mo.md(
+        ACADEMIC_LAB_CSS,
+        LAB_CSS,
+        css,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 15), track=track.value, volume=2),
+        mo.md(
                 "All profiles are explicit teaching scenarios, not measurements of branded systems. Each part compares the same useful work before and after one change. Carbon accounting follows physical feasibility; it cannot make an overloaded site operable."
             ),
-        ]
-    )
+        _course_learning_map(_course_path('vol2', 15))
+    ]
+    , volume=2)
     return
 
 
@@ -590,9 +619,12 @@ def _(
     c_capacity_scale,
     c_choice,
     c_deadline_scale,
+    c_cooling,
+    c_water_season,
     c_prediction,
     c_result,
     d_capture,
+    d_upstream,
     d_choice,
     d_prediction,
     d_rejected,
@@ -614,6 +646,13 @@ def _(
     track_id,
     upstream,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 15)
+    from mlsysim.fmt import fmt_energy as _fmt_energy
     def q(value, unit, digits=2):
         return f"{value.to(unit).magnitude:,.{digits}f} {unit}"
 
@@ -621,13 +660,14 @@ def _(
         if not rows:
             return mo.md("No rows.")
         headers = tuple(rows[0])
+        cell_style = "padding:.5rem .65rem;text-align:left;vertical-align:top;min-width:7rem"
         body = "".join(
-            "<tr>" + "".join(f"<td>{row[h]}</td>" for h in headers) + "</tr>"
+            "<tr>" + "".join(f'<td style="{cell_style}">{row[h]}</td>' for h in headers) + "</tr>"
             for row in rows
         )
-        head = "".join(f"<th>{h}</th>" for h in headers)
+        head = "".join(f'<th style="{cell_style};border-bottom:1px solid #cbd5e1">{h}</th>' for h in headers)
         return mo.Html(
-            f'<div class="table-wrap"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+            f'<div class="table-wrap" style="max-width:100%;overflow-x:auto"><table style="border-collapse:collapse;min-width:100%;font-size:.9rem"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
         )
 
     def saved(part):
@@ -690,7 +730,7 @@ def _(
                 "Cooling headroom": q(a_result.cooling_headroom, "kilowatt"),
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 mo.md("### A · What limits the fleet before carbon does? (9 min)"),
                 a_prediction,
@@ -699,7 +739,7 @@ def _(
                 table(rows),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {a_prediction.value}. At **{a_load_scale.value:.2f}×** load, electrical feasibility is **{pass_word(a_result.electrical_feasible)}** and cooling feasibility is **{pass_word(a_result.cooling_feasible)}**. Carbon intensity never enters either test."
+                        f"**Your prediction:** {_read_prediction(a_prediction)}. At **{a_load_scale.value:.2f}×** load, electrical feasibility is **{pass_word(a_result.electrical_feasible)}** and cooling feasibility is **{pass_word(a_result.cooling_feasible)}**. Carbon intensity never enters either test."
                     ),
                     kind="success" if a_result.feasible else "danger",
                 ),
@@ -713,7 +753,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "A")])
 
     def part_b():
         if b_prediction.value is None:
@@ -763,7 +803,7 @@ def _(
                 "Total": q(b_result.total_emissions, "kilogram"),
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 mo.md("### B · When should hardware be replaced? (10 min)"),
                 b_prediction,
@@ -772,7 +812,7 @@ def _(
                 table(rows),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {b_prediction.value}. Over **{b_horizon.value:.1f} years**, the lower-emission choice is **{b_decision}**. Existing hardware's prior embodied emissions are sunk; only new manufacturing caused by replacement is added."
+                        f"**Your prediction:** {_read_prediction(b_prediction)}. Over **{b_horizon.value:.1f} years**, the lower-emission choice is **{b_decision}**. Existing hardware's prior embodied emissions are sunk; only new manufacturing caused by replacement is added."
                     ),
                     kind="info",
                 ),
@@ -786,29 +826,34 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "B")])
 
     def part_c():
         if c_prediction.value is None:
             return mo.vstack(
                 [
                     mo.md(
-                        "### C · Is the cleanest place usable? (10 min)\nChange the deadline or available clean-site capacity, then predict which site remains feasible."
+                        "### C · Is the cleanest place usable? (10 min)\nChange deadline, capacity, cooling, or the local water obligation. Predict whether the low-carbon site remains admissible. Dry and evaporative cooling are hypothetical alternatives for the same clean site, not measurements of an actual region."
                     ),
                     mo.hstack(
                         [c_deadline_scale, c_capacity_scale], widths="equal", wrap=True
                     ),
+                    mo.hstack([c_cooling, c_water_season], widths="equal", wrap=True),
                     c_prediction,
                 ]
             )
         rows = [
             {
                 "Site": result.site,
-                "Feasible": pass_word(result.feasible),
+                "Admissible": pass_word(result.feasible),
+                "Facility electricity": q(result.facility_energy, "kilowatt_hour"),
                 "Emissions": q(result.operational_emissions, "kilogram"),
-                "Water": q(result.water_use, "liter")
+                "Direct water consumed": q(result.water_use, "liter")
                 if result.water_use is not None
-                else "Not modeled",
+                else "Unknown",
+                "Local run allowance": q(result.water_allowance, "liter") if result.water_allowance is not None else "Not assessed",
+                "Water obligation": (pass_word(result.water_requirement_met) if result.water_requirement_met is not None else ("UNKNOWN — evidence required" if result.water_allowance is not None else "Not assessed")),
+                "Watershed / season": result.water_context,
                 "Constraint": "; ".join(result.reasons) if result.reasons else "none",
             }
             for result in c_result
@@ -826,19 +871,22 @@ def _(
         fig.update_layout(
             yaxis_title="Operational emissions (kg CO₂e)", showlegend=False
         )
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 mo.md("### C · Is the cleanest place usable? (10 min)"),
                 c_prediction,
                 mo.hstack(
                     [c_deadline_scale, c_capacity_scale], widths="equal", wrap=True
                 ),
+                mo.hstack([c_cooling, c_water_season], widths="equal", wrap=True),
+                mo.md("**Try this sequence:** select evaporative cooling and the wet season; then change only the season to drought. Finally keep the drought allocation and choose dry cooling. Compare electricity, carbon, direct water consumption, and the local allowance separately. Missing WUE is unknown water use, never zero. The toy run allocation is a stated constraint, not a validated watershed impact score."),
                 apply_plotly_theme(fig),
+                mo.md("**Compare the separate accounts below.** On a narrow screen, swipe the table to inspect the water obligation and watershed context."),
                 table(rows),
                 c_choice,
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {c_prediction.value}. A low-carbon site is usable only if capacity, deadline, locality, electrical, and cooling checks all pass. "
+                        f"**Your prediction:** {_read_prediction(c_prediction)}. A low-carbon site is admissible only if capacity, deadline, locality, electrical, cooling, and any required local water allowance pass. Unknown water evidence cannot establish a required water obligation. "
                         + (
                             "Regional batch workloads can migrate to clean regions when network deadlines and accelerator capacity permit."
                             if profile["inference_movable"]
@@ -852,80 +900,72 @@ def _(
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
-                            "MLSysIM evaluates the same job at each site. Optional WUE converts facility kWh to liters only where a scenario supplies grounded WUE; missing water data remains missing."
+                            "The same fixed IT work runs at each site. Facility electricity = IT kWh × PUE; carbon = facility kWh × grid factor; direct water consumption = IT kWh × WUE. The clean-site dry/evaporative values and wet/drought allocations are explicit teaching assumptions, not actual region measurements. Seasonal allocation changes the local obligation without changing liters consumed. Water withdrawal, indirect electricity/manufacturing water, and validated scarcity characterization are outside this direct-consumption account. No combined environmental score is calculated."
                         )
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "C")])
 
     def part_d():
+        prompt = mo.md("### D · Which mitigation survives its side effects? (10 min)\nPredict which change reduces facility energy while preserving the supplied quality floor and latency deadline.")
         if d_prediction.value is None:
-            return mo.vstack(
-                [
-                    mo.md(
-                        "### D · Which mitigation survives its side effects? (10 min)\nPredict which change reduces facility energy while preserving the supplied quality floor and latency deadline."
-                    ),
-                    d_prediction,
-                ]
-            )
-        rows = []
-        fig = go.Figure()
+            return mo.vstack([prompt, d_prediction])
+        baseline = d_results["compute"]["base"]
+        limits = d_results["compute"]["base_args"]
+        rows = [{
+            "Role": "Held baseline" if d_choice.value == "none" else "Baseline",
+            "Action": "No mitigation", "Facility energy": str(_fmt_energy(baseline.energy.facility_energy, precision=4)),
+            "Change vs baseline": str(_fmt_energy(baseline.energy.facility_energy - baseline.energy.facility_energy)),
+            "Latency": q(baseline.latency, "millisecond"), "Quality": f"{baseline.quality:.3f}",
+            "Latency gate": pass_word(baseline.meets_latency), "Quality gate": pass_word(baseline.meets_quality),
+        }]
+        fig = apply_plotly_theme(go.Figure())
         for name, comparison in d_results.items():
             result = comparison["result"]
-            rows.append(
-                {
-                    "Action": name.title(),
-                    "Facility energy": q(
-                        result.energy.facility_energy, "kilowatt_hour", 4
-                    ),
-                    "Latency": q(result.latency, "millisecond"),
-                    "Quality": f"{result.quality:.3f}",
-                    "Service": pass_word(result.acceptable),
-                }
-            )
+            role = "Selected" if name == d_choice.value else "Rejected" if name == d_rejected.value else "Alternative"
+            rows.append({
+                "Role": role, "Action": name.title(),
+                "Facility energy": str(_fmt_energy(result.energy.facility_energy, precision=4)),
+                "Change vs baseline": str(_fmt_energy(result.energy.facility_energy - baseline.energy.facility_energy)),
+                "Latency": q(result.latency, "millisecond"), "Quality": f"{result.quality:.3f}",
+                "Latency gate": pass_word(result.meets_latency), "Quality gate": pass_word(result.meets_quality),
+            })
             fig.add_bar(
-                name=name.title(),
-                x=["Operations", "Movement", "Other IT", "Facility overhead"],
-                y=[
-                    result.energy.operation_energy.to("kilowatt_hour").magnitude,
-                    result.energy.movement_energy.to("kilowatt_hour").magnitude,
-                    result.energy.other_it_energy.to("kilowatt_hour").magnitude,
-                    result.energy.facility_overhead_energy.to(
-                        "kilowatt_hour"
-                    ).magnitude,
-                ],
+                name=f"{role} · {name.title()}",
+                x=["Operations", "Movement", "Other IT", "Facility<br>overhead"],
+                y=[result.energy.operation_energy.to("joule").magnitude,
+                   result.energy.movement_energy.to("joule").magnitude,
+                   result.energy.other_it_energy.to("joule").magnitude,
+                   result.energy.facility_overhead_energy.to("joule").magnitude],
+                opacity=1.0 if role == "Selected" else 0.45,
             )
-        fig.update_layout(
-            barmode="group", yaxis_title="Energy for fixed useful work (kWh)"
-        )
-        chosen = (
-            d_results[d_choice.value]["result"] if d_choice.value in d_results else None
-        )
-        return mo.vstack(
-            [
-                mo.md("### D · Which mitigation survives its side effects? (10 min)"),
-                d_prediction,
-                apply_plotly_theme(fig),
-                table(rows),
-                mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
-                mo.callout(
-                    mo.md(
-                        f"**Your prediction:** {d_prediction.value}. Choose one tested action and a different rejected alternative. {'The selected action passes both service constraints.' if chosen and chosen.acceptable else 'A no-action conclusion still needs one quantified rejected alternative.'}"
-                    ),
-                    kind="info",
-                ),
-                d_capture,
-                saved("D"),
-                mo.accordion(
-                    {
-                        "Calculation Notes": mo.md(
-                            "Operations and moved bytes are explicit energy components. The illustrative quality observations and latency values act as constraints; quality never changes the energy equation."
-                        )
-                    }
-                ),
-            ]
-        )
+        fig.update_layout(height=360, margin=dict(l=45, r=20, t=90, b=60), barmode="group",
+                          legend=dict(orientation="h", x=0, y=1.02, xanchor="left", yanchor="bottom"),
+                          yaxis_title="Energy for fixed useful work (J)")
+        chosen = baseline if d_choice.value == "none" else d_results[d_choice.value]["result"] if d_choice.value in d_results else None
+        def consequence(label, result):
+            return (
+                f"**{label}: {str(_fmt_energy(result.energy.facility_energy, precision=4))}**, "
+                f"a facility-energy change of **{str(_fmt_energy(result.energy.facility_energy - baseline.energy.facility_energy))}** from the same baseline. "
+                f"Latency is **{q(result.latency, 'millisecond')}** against **{q(limits['latency_deadline'], 'millisecond')}** "
+                f"(**{pass_word(result.meets_latency)}**); supplied quality is **{result.quality:.3f}** against **{limits['minimum_quality']:.3f}** "
+                f"(**{pass_word(result.meets_quality)}**)."
+            )
+        selected_note = consequence("Held baseline" if d_choice.value == "none" else "Selected " + d_choice.value, chosen) if chosen else "Choose the action to carry forward."
+        rejected_note = consequence("Rejected " + d_rejected.value, d_results[d_rejected.value]["result"]) if d_rejected.value in d_results else "Choose a distinct rejected alternative."
+        return mo.vstack([mo.vstack([
+            prompt, d_prediction, fig, table(rows),
+            mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(f"**Your prediction:** {_read_prediction(d_prediction)}. {selected_note}\n\n{rejected_note}"), kind="success" if chosen and chosen.acceptable else "warn"),
+            mo.callout(mo.md(
+                f"**Keep the accounting boundary visible.** All actions retain the baseline's **{str(_fmt_energy(baseline.energy.other_it_energy))} of other IT energy**. "
+                "The facility total also includes operations, movement, and PUE overhead. A common charge can mask action differences when rounded in kWh; the table retains adaptive energy units and an explicit signed change. "
+                "A negative change saves energy for this fixed work. It does not override a failed quality or latency gate."
+            ), kind="info"),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md("Operations and moved bytes are explicit energy components. Each displayed change subtracts the common baseline output in physical units; it introduces no additional energy model. The illustrative quality observations and latency values act as constraints; quality never changes the energy equation.")}),
+        ]), _concept_reflection(_reflection_contract, "D")])
 
     def part_e():
         if e_prediction.value is None:
@@ -960,7 +1000,7 @@ def _(
             xaxis_title="Demand multiplier", yaxis_title="Total emissions (kg CO₂e)"
         )
         outcome = "rise" if e_result.rebound_increases_emissions else "fall"
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 mo.md("### E · Can efficiency increase total emissions? (8 min)"),
                 e_prediction,
@@ -981,7 +1021,7 @@ def _(
                 ),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {e_prediction.value}. With demand at **{e_demand.value:.2f}×**, total emissions **{outcome}**. The crossover comes from the explicit demand multiplier, not a policy label."
+                        f"**Your prediction:** {_read_prediction(e_prediction)}. With demand at **{e_demand.value:.2f}×**, total emissions **{outcome}**. The crossover comes from the explicit demand multiplier, not a policy label."
                     ),
                     kind="danger"
                     if e_result.rebound_increases_emissions
@@ -997,14 +1037,14 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "E")])
 
     _captures = get_evidence()
     audit = audit_evidence(
         _captures,
         track=track_id,
         required_parts=tuple("ABCDE"),
-        per_part_upstream_inputs={part: upstream for part in "ABCDE"},
+        per_part_upstream_inputs={part: (d_upstream if part == "D" else upstream) for part in "ABCDE"},
         contrast_required_parts=tuple("ABCDE"),
     )
 
@@ -1058,7 +1098,7 @@ def _(
             ]
         )
 
-    mo.ui.tabs(
+    _lesson_shell([_part_tabs_hint(), mo.ui.tabs(
         {
             "Part A": part_a(),
             "Part B": part_b(),
@@ -1067,8 +1107,16 @@ def _(
             "Part E": part_e(),
             "Synthesis": synthesis(),
         }
-    )
+    )], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 15))], volume=2)
+    return
 
 
 @app.cell
@@ -1087,6 +1135,7 @@ def _(
     report_export_panel,
     track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _ready = (
         audit.complete
@@ -1097,7 +1146,8 @@ def _(
         and final_choice.value != final_rejected.value
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     _design = {
         "schema_version": 1,
@@ -1156,81 +1206,36 @@ def _(
             "calculations": "MLSysIM v2_15_experiments quantity-first evaluators.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    audit,
-    final_choice,
-    final_rejected,
-    final_risk,
-    final_trigger,
-    get_evidence,
-    ledger,
-    mo,
-    rationale,
-    track_id,
+def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _ready = (
-        audit.complete
-        and all(
-            widget.value is not None
-            for widget in (final_choice, final_rejected, final_trigger, final_risk)
-        )
-        and final_choice.value != final_rejected.value
-        and bool(rationale.value.strip())
+    _ready = audit.complete and all((widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))) and (final_choice.value != final_rejected.value) and bool(rationale.value.strip())
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_15', 'track_id': track_id, 'model_id': 'v2_15_experiments', 'evidence': {part: capture.to_dict() for part, capture in _captures.items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=15, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
     )
-    _save_error = None
-    _saved = False
-    if _ready:
-        try:
-            ledger.save(
-                chapter=15,
-                design={
-                    "schema_version": 1,
-                    "lab_id": "v2_15",
-                    "track_id": track_id,
-                    "model_id": "v2_15_experiments",
-                    "evidence": {
-                        part: capture.to_dict() for part, capture in _captures.items()
-                    },
-                    "recommendation": final_choice.value,
-                    "rejected_alternative": final_rejected.value,
-                    "reevaluation_trigger": final_trigger.value,
-                    "residual_risk": final_risk.value,
-                    "rationale": rationale.value,
-                },
-            )
-            await ledger.flush()
-            _saved = True
-        except Exception as _exc:
-            _save_error = f"{type(_exc).__name__}: {_exc}"
-    _status = (
-        "SAVED"
-        if _saved
-        else ("SAVE FAILED" if _save_error else "EVIDENCE IN PROGRESS")
-    )
-    _hud = mo.Html(
-        f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">15 · Sustainable Fleet Decisions</span><span aria-hidden="true">|</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">{_status}</span></div>'
-    )
-    if _save_error:
-        _footer = mo.vstack(
-            [
-                _hud,
-                mo.callout(
-                    mo.md(
-                        f"**Design Ledger save failed:** `{_save_error}`. The local report remains available above."
-                    ),
-                    kind="danger",
-                ),
-            ]
-        )
-    else:
-        _footer = _hud
-    _footer
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

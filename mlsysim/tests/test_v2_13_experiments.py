@@ -196,9 +196,19 @@ def test_trust_deadline_and_threat_coverage_are_separate_outcomes():
     )
 
     assert amortized.protected and cold.protected
-    assert amortized.meets_deadline
+    assert not amortized.meets_deadline
     assert not cold.meets_deadline
     assert amortized.total_latency_ms == pytest.approx(14.0)
+    assert amortized.average_latency_ms == amortized.total_latency_ms
+    assert amortized.cold_latency_ms == cold.cold_latency_ms
+    assert amortized.cold_latency_ms == pytest.approx(
+        10.0 + mechanism.per_request_overhead_ms + mechanism.fixed_overhead_ms
+    )
+    assert amortized.steady_latency_ms == pytest.approx(
+        10.0 + mechanism.per_request_overhead_ms
+    )
+    assert amortized.steady_latency_ms < 15.0 < amortized.cold_latency_ms
+    assert amortized.average_latency_ms < cold.average_latency_ms
 
 
 def test_noncausal_deadline_does_not_change_threat_coverage_or_latency():
@@ -383,3 +393,115 @@ def test_baseline_deletion_sla_outcome_reflects_scenario_bottlenecks():
         scenario = get_track_scenario(track)
         result = propagate_deletion(scenario.artifact_copies, source_artifact_id=scenario.artifact_copies[0].artifact_id, deletion_sla_hours=scenario.deletion_sla_hours)
         assert result.complete == expected_complete
+
+
+def test_daily_limits_delay_collection_without_a_lifetime_bound():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_collection_budget
+    args = dict(queries_per_day_per_principal=50, daily_limit_per_principal=50,
+                lifetime_limit_per_principal=None, principal_count=1, target_queries=1000)
+    early = evaluate_collection_budget(**args, days=10)
+    late = evaluate_collection_budget(**args, days=30)
+    assert not early.target_collected
+    assert late.target_collected
+    assert late.collected_queries == 1500
+    assert late.history[0].cumulative_queries == 50
+
+
+def test_persistent_counter_survives_days_but_does_not_link_independent_accounts():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_collection_budget
+    args = dict(days=30, queries_per_day_per_principal=50, daily_limit_per_principal=50,
+                lifetime_limit_per_principal=300, target_queries=1000)
+    single = evaluate_collection_budget(**args, principal_count=1)
+    many = evaluate_collection_budget(**args, principal_count=4)
+    assert single.collected_queries == 300
+    assert single.denied_queries == 1200
+    assert single.history[-1].admitted_queries == 0
+    assert not single.target_collected
+    assert many.collected_queries == 1200
+    assert many.target_collected
+    assert all(day.cumulative_queries <= 300 for day in single.history)
+
+
+def test_mean_attack_influence_grows_and_trimming_one_extreme_is_finite_not_certified():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_gradient_integrity, get_integrity_round
+    args = dict(honest_updates=get_integrity_round(1), trim_each_tail=1)
+    small = evaluate_gradient_integrity(**args, malicious_updates=[-5.0], rule="mean")
+    large = evaluate_gradient_integrity(**args, malicious_updates=[-500.0], rule="mean")
+    trimmed = evaluate_gradient_integrity(**args, malicious_updates=[-500.0], rule="trimmed_mean")
+    assert large.aggregate_error > small.aggregate_error
+    assert large.loss_after > small.loss_after > small.loss_before
+    assert trimmed.aggregate == pytest.approx(0.9)
+    assert trimmed.improves_objective
+    assert trimmed.gather_to_ring_ratio == pytest.approx(2.5)
+    assert trimmed.within_fault_budget
+
+
+def test_two_compromised_workers_break_the_supplied_one_fault_trim_round():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_gradient_integrity, get_integrity_round
+    result = evaluate_gradient_integrity(honest_updates=get_integrity_round(2),
+        malicious_updates=[-50.0, -50.0], rule="trimmed_mean", trim_each_tail=1)
+    assert not result.within_fault_budget
+    assert not result.improves_objective
+    assert result.loss_after > result.loss_before
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True])
+def test_collection_rejects_invalid_count_inputs(bad):
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_collection_budget
+    with pytest.raises(ValueError):
+        evaluate_collection_budget(days=bad, queries_per_day_per_principal=50,
+            daily_limit_per_principal=50, lifetime_limit_per_principal=300,
+            principal_count=1, target_queries=1000)
+
+
+def test_collection_and_gradient_payloads_replay_after_json_roundtrip():
+    import json
+    from dataclasses import asdict
+    from mlsysim.labs.experiments.v2_13_experiments import (
+        evaluate_collection_budget, evaluate_gradient_integrity, get_collection_assumptions,
+        get_integrity_round,
+    )
+    collection_inputs = {**get_collection_assumptions(), "days": 30, "principal_count": 2}
+    gradient_inputs = dict(honest_updates=get_integrity_round(1), malicious_updates=[-50.0],
+                           rule="trimmed_mean", trim_each_tail=1)
+    for method, inputs in ((evaluate_collection_budget, collection_inputs),
+                           (evaluate_gradient_integrity, gradient_inputs)):
+        original = json.loads(json.dumps(asdict(method(**inputs))))
+        replay = json.loads(json.dumps(asdict(method(**json.loads(json.dumps(inputs))))))
+        assert original == replay
+
+
+def test_exact_clean_label_poison_search_retrains_and_hides_target_failure_in_aggregate():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_clean_label_poisoning
+    result = evaluate_clean_label_poisoning(poison_budget=1, attack_objective="targeted")
+    assert all(candidate.label_matches_truth for candidate in result.candidates)
+    assert result.selected.candidate_feature == 0.01
+    assert not result.baseline.target_misclassified
+    assert result.selected.target_misclassified
+    assert result.selected.broad_correct == result.baseline.broad_correct == result.selected.broad_evaluated
+    assert result.selected.target_squared_error > result.baseline.target_squared_error
+    assert result.selected.outer_objective == max(candidate.outer_objective for candidate in result.candidates)
+    # Refit independently from the selected records to verify the inner solution.
+    xs = result.training_features + (result.selected.candidate_feature,)
+    ys = result.training_labels + (result.selected.candidate_label,)
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    slope = sum((x-mx)*(y-my) for x,y in zip(xs,ys)) / sum((x-mx)**2 for x in xs)
+    assert result.selected.slope == pytest.approx(slope)
+    assert result.selected.intercept == pytest.approx(my-slope*mx)
+
+
+def test_clean_label_attack_objective_changes_which_poison_is_selected():
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_clean_label_poisoning
+    targeted = evaluate_clean_label_poisoning(poison_budget=1, attack_objective="targeted")
+    broad = evaluate_clean_label_poisoning(poison_budget=1, attack_objective="broad")
+    clean = evaluate_clean_label_poisoning(poison_budget=0, attack_objective="targeted")
+    assert targeted.selected.candidate_feature != broad.selected.candidate_feature
+    assert broad.selected.broad_squared_error >= targeted.selected.broad_squared_error
+    assert clean.selected == clean.baseline
+
+
+@pytest.mark.parametrize("budget", [-1, 3, 1.5, True])
+def test_clean_label_poisoning_rejects_invalid_dose(budget):
+    from mlsysim.labs.experiments.v2_13_experiments import evaluate_clean_label_poisoning
+    with pytest.raises(ValueError):
+        evaluate_clean_label_poisoning(poison_budget=budget, attack_objective="targeted")

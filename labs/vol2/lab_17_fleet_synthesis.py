@@ -25,7 +25,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.experiments.v2_17_experiments import (
-        REQUIRED_MODELS, adverse_condition, apply_patch, audit_ledger_evidence,
+        REQUIRED_MODELS, adverse_condition, apply_patch, audit_ledger_evidence, audit_discussion_dossier,
         compare_equal_budget_repairs, evaluation_record, evaluate_configuration,
         instructor_repair_plans, instructor_scenario, instructor_stress,
         obligation_stress, record_deployment_decision,
@@ -42,7 +42,7 @@ async def _():
         _loaded = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS, COLORS, LAB_CSS, REQUIRED_MODELS, adverse_condition,
-        apply_patch, apply_plotly_theme, audit_evidence, audit_ledger_evidence,
+        apply_patch, apply_plotly_theme, audit_evidence, audit_ledger_evidence, audit_discussion_dossier,
         build_lab_report, capture_evidence, compare_equal_budget_repairs,
         evaluation_record, evaluate_configuration, get_lab_metadata, go,
         instructor_repair_plans, instructor_scenario, instructor_stress, ledger,
@@ -57,10 +57,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Fleet track", on_change=lambda _value: set_evidence({}),
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)), label="Deployment context", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -140,22 +142,22 @@ def _(mo, track_id):
     final_condition = mo.ui.text_area(
         label="Measurable reevaluation condition",
         placeholder="Name the observed limit and the condition that reopens this decision.",
-    )
+     debounce=False)
     final_uncertainty = mo.ui.text_area(
         label="Remaining limitation",
         placeholder="Name evidence or an operating condition this lab did not establish.",
-    )
+     debounce=False)
     final_rationale = mo.ui.text_area(
         label="Engineering rationale",
         placeholder="Connect the saved failure, chosen repair, rejected alternative, and held-out replay.",
-    )
+     debounce=False)
     return final_condition, final_decision, final_rationale, final_uncertainty
 
 
 @app.cell
 async def _(
     REQUIRED_MODELS, a_source, adverse_condition, apply_patch,
-    audit_ledger_evidence, b_severity, c_energy, c_serving,
+    audit_ledger_evidence, audit_discussion_dossier, b_severity, c_energy, c_serving,
     compare_equal_budget_repairs, d_choice, e_condition, evaluate_configuration,
     instructor_repair_plans, instructor_stress, ledger, obligation_stress,
     scenario, track_id,
@@ -164,6 +166,7 @@ async def _(
         chapter: {"chapter": chapter, "label": "illustrative instructor scenario"}
         for chapter in REQUIRED_MODELS
     }
+    inherited_dossier = audit_discussion_dossier(ledger._state.history, track_id=track_id)
     a_student = audit_ledger_evidence(ledger._state.history, track_id=track_id)
     a_with_fallback = audit_ledger_evidence(
         ledger._state.history, track_id=track_id, instructor_fallbacks=fallbacks,
@@ -193,7 +196,7 @@ async def _(
     e_config = apply_patch(carried_config, adverse_condition(e_condition.value))
     e_result = evaluate_configuration(e_config)
     return (
-        a_carried, a_student, a_with_fallback, baseline, b_config, b_result,
+        a_carried, a_student, a_with_fallback, inherited_dossier, baseline, b_config, b_result,
         c_config, c_result, carried_config, carried_label, carried_result,
         d_compare, d_results, e_config, e_result, fallbacks, repairs, repairs_by_id,
     )
@@ -205,7 +208,7 @@ def _(
     b_result, b_severity, baseline, c_config, c_energy, c_prediction, c_result,
     c_serving, capture_evidence, carried_config, carried_result, d_choice,
     d_compare, d_prediction, d_rejected, d_results, e_condition, e_config,
-    e_prediction, e_result, evaluation_record, fallbacks, ledger, mo, repairs,
+    e_prediction, e_result, evaluation_record, fallbacks, inherited_dossier, ledger, mo, repairs,
     repairs_by_id, set_evidence, track_id,
 ):
     def store(part, capture):
@@ -216,6 +219,7 @@ def _(
             "inputs": {"history": history, "track_id": track_id, "instructor_fallbacks": instructor_fallbacks},
             "outputs": {
                 "ready": audit.ready,
+                "inherited_dossier": inherited_dossier,
                 "items": [
                     {"chapter": item.chapter, "status": item.status, "source": item.source_label, "issue": item.issue}
                     for item in audit.items
@@ -223,7 +227,7 @@ def _(
             },
         }
 
-    a_upstream = {"track": track_id, "source_policy": a_source.value}
+    a_upstream = {"track": track_id, "source_policy": a_source.value, "inherited_dossier": inherited_dossier}
     b_upstream = {"track": track_id, "severity": b_severity.value}
     c_upstream = {"track": track_id, "serving": c_serving.value, "energy": c_energy.value}
     d_upstream = {"track": track_id, "stress": "severe", "choice": d_choice.value, "rejected": d_rejected.value}
@@ -313,16 +317,27 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .v217-head{background:linear-gradient(135deg,#101827,#1d4f78);color:#fff;padding:22px 24px;border-radius:12px;margin:8px 0 14px}.v217-head h1{font-size:clamp(1.5rem,4vw,2.3rem);margin:4px 0 8px}.v217-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.v217-meta div{background:#ffffff17;padding:10px;border-radius:8px}.v217-saved{border-left:4px solid #2E8B57;background:#f2faf5;padding:9px 12px}.v217-table{max-width:100%;overflow-x:auto}@media(max-width:760px){.v217-meta{grid-template-columns:1fr}.v217-head{padding:18px;margin-top:30px}}
+    .v217-saved{border-left:4px solid #2E8B57;background:#f2faf5;padding:9px 12px}.v217-table{max-width:100%;overflow-x:auto}
     </style>""")
-    mo.vstack([
-        mo.Html(f"<style>{LAB_CSS}</style>"), mo.Html(f"<style>{ACADEMIC_LAB_CSS}</style>"),
-        css, track,
-        mo.Html(f'''<section class="v217-head"><small>VOLUME II · LAB 17</small><h1>Fleet Synthesis</h1><div>Which repair keeps a complete fleet inside its physical and operating constraints?</div><div class="v217-meta"><div><b>Duration</b><br>50 minutes</div><div><b>Fleet</b><br>{scenario.scenario_label}</div><div><b>Output</b><br>Deployment evidence packet</div></div></section>'''),
+    _course_shell([
+        mo.Html(f"<style>{LAB_CSS}</style>"),
+        mo.Html(f"<style>{ACADEMIC_LAB_CSS}</style>"),
+        css,
+        _course_header(_course_metadata("vol2/lab_17_fleet_synthesis.py"), 'Which repair keeps a complete fleet inside its physical and operating constraints?'),
+        track,
+        _course_scenario(_course_path('vol2', 17), track=track.value, volume=2),
         mo.callout(mo.md("Built-in values are **illustrative instructor scenarios**, not production measurements. Compatible student evidence remains separately labeled."), kind="info"),
-    ])
+        _course_learning_map(_course_path('vol2', 17))
+    ], volume=2)
     return
 
 
@@ -338,15 +353,24 @@ async def _(
     final_decision, final_rationale, final_uncertainty, get_evidence, go, mo,
     repairs,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 17)
     captures = get_evidence()
     upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
+    _inherited = a_upstream["inherited_dossier"]
     evidence_audit = audit_evidence(
         captures, track=baseline.configuration.track_id, required_parts=tuple("ABCDE"),
         per_part_upstream_inputs=upstream, contrast_required_parts=tuple("ABCDE"),
     )
 
+    from mlsysbook_labs.notebook import notebook_table as _dossier_table
+
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        return _dossier_table(rows)
 
     def status(result):
         if result.physical_feasible is True:
@@ -365,7 +389,7 @@ async def _(
         if part in evidence_audit.stale or (part, part) in evidence_audit.identical_pairs:
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture after changing dependencies."), kind="danger")
         snapshot = capture.to_dict()
-        return mo.Html(f'<div class="v217-saved"><b>Saved snapshot</b> · prediction: {snapshot["prediction"]}<br><small>Later controls do not rewrite this result.</small></div>')
+        return mo.Html(f'<div class="v217-saved"><b>Saved snapshot</b> · prediction: {_read_prediction(_saved_prediction_widgets[part], value=snapshot["prediction"])}<br><small>Later controls do not rewrite this result.</small></div>')
 
     def check_rows(result):
         rows = []
@@ -385,41 +409,49 @@ async def _(
             "Carried source": carried.source_label,
             "Status": carried.status,
         } for carried in a_carried.items]
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             mo.md("### A · Which inherited evidence can we trust? (8 min)"), a_prediction, a_source,
             table(rows),
-            mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. **Carried packet:** {'ready' if a_carried.ready else 'incomplete'}. Missing evidence does not become failed physics."), kind="success" if a_carried.ready else "danger"),
+            mo.callout(mo.md(f"**Prediction:** {_read_prediction(a_prediction)}. **Carried packet:** {'ready' if a_carried.ready else 'incomplete'}. Missing evidence does not become failed physics."), kind="success" if a_carried.ready else "danger"),
+            mo.accordion({"All prior chapter discussions": table([
+                {"Chapter": row["chapter"], "Record": row["status"],
+                 "Saved recommendation": str(row["recommendation"] or "—"),
+                 "Open obligation": str(row["residual_risk"] or row["issue"])}
+                for row in _inherited["rows"]
+            ])}),
+            mo.callout(mo.md("**Keep the evidence boundaries:** the complete dossier carries prior decisions, triggers, and remaining risks. A saved discussion is not a deployment approval. Security, robustness, governance, and feature-contract conditions do not become satisfied when the physical case passes."), kind="info"),
             a_capture, saved("A"),
             mo.accordion({"Calculation Notes": mo.md("Compatibility requires the stable chapter, track, model, evaluator, unit decoding, and a successful replay. In device tracks (TinyML/Mobile), inherited training and recovery artifacts evaluate the supporting backend cluster, while serving evaluates deployment endpoints. Other legitimate chapter experiments are ignored rather than penalized.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
+        _brief = mo.md("### B · When does scale stop improving useful work? (10 min)\n**Supplied synthesis case:** Part A audited inherited records and their sources. Parts B–E now investigate a separate instructor-supplied configuration; its parameters are not assembled from those student records. Choose a scale stress and predict the dominant C³ term.")
         if b_prediction.value is None:
-            return mo.vstack([mo.md("### B · When does scale stop improving useful work? (10 min)\nChoose a scale stress and predict the dominant C³ term."), b_severity, b_prediction])
+            return mo.vstack([_brief, b_severity, b_prediction])
         figure = go.Figure()
         for case, result in (("Baseline", baseline.c3_result), ("Scale stress", b_result.c3_result)):
             for label, field, color in (("Compute", "compute_time", COLORS["BlueLine"]), ("Communication", "communication_time", COLORS["OrangeLine"]), ("Coordination", "coordination_time", COLORS["GreenLine"])):
                 figure.add_bar(name=label, x=[case], y=[getattr(result, field).to("second").magnitude], marker_color=color, legendgroup=label, showlegend=case == "Baseline")
         figure.update_layout(barmode="stack", height=290, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Fleet step time (s)", legend_orientation="h")
-        return mo.vstack([
-            mo.md("### B · When does scale stop improving useful work? (10 min)"), b_severity, b_prediction,
+        return mo.vstack([mo.vstack([
+            _brief, b_severity, b_prediction,
             apply_plotly_theme(figure),
             table([{"Run": "Baseline", "Step time": amount(baseline.c3_result.step_time, "second"), "Dominant": baseline.c3_result.dominant_term, "Outcome": status(baseline)}, {"Run": "Scale stress", "Step time": amount(b_result.c3_result.step_time, "second"), "Dominant": b_result.c3_result.dominant_term, "Outcome": status(b_result)}]),
-            mo.callout(mo.md(f"**Prediction:** {b_prediction.value}. **Observed dominant term:** {b_result.c3_result.dominant_term}; step time changed from {amount(baseline.c3_result.step_time, 'second')} to {amount(b_result.c3_result.step_time, 'second')}."), kind="info"),
+            mo.callout(mo.md(f"**Prediction:** {_read_prediction(b_prediction)}. **Observed dominant term:** {b_result.c3_result.dominant_term}; step time changed from {amount(baseline.c3_result.step_time, 'second')} to {amount(b_result.c3_result.step_time, 'second')}."), kind="info"),
             b_capture, saved("B"),
             mo.accordion({"Calculation Notes": mo.md("The fixed-work model adds visible compute, communication, and coordination time, then subtracts only stated overlap. For TinyML and Mobile tracks, C³ scaling models the supporting backend training cluster; edge microcontrollers/devices do not run collective all-reduce training. Useful work remains fixed.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "B")])
 
     def build_part_c():
         if c_prediction.value is None:
             return mo.vstack([mo.md("### C · Can a fast fleet still violate its obligations? (9 min)\nStress serving execution and absolute useful-work demand while leaving the C³ configuration unchanged."), mo.hstack([c_serving, c_energy], widths="equal", wrap=True), c_prediction])
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             mo.md("### C · Can a fast fleet still violate its obligations? (9 min)"), mo.hstack([c_serving, c_energy], widths="equal", wrap=True), c_prediction,
             table(check_rows(c_result)),
-            mo.callout(mo.md(f"**Prediction:** {c_prediction.value}. **Result:** {status(c_result)}. Each constraint keeps its physical unit."), kind="danger" if c_result.physical_feasible is False else "success"),
+            mo.callout(mo.md(f"**Prediction:** {_read_prediction(c_prediction)}. **Result:** {status(c_result)}. Each constraint keeps its physical unit."), kind="danger" if c_result.physical_feasible is False else "success"),
             c_capture, saved("C"),
             mo.accordion({"Calculation Notes": mo.md("Serving p99 comes from complete simulated request durations in the deployment serving pool. Rejected requests have a separate completion check. Absolute energy and facility capacity govern the backend/aggregation infrastructure (with device constraints bounded separately by local power envelopes).")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         if d_prediction.value is None:
@@ -429,24 +461,24 @@ async def _(
             result = d_results[plan.repair_id]
             rows.append({"Repair": plan.label, "Budget": f"{plan.cost:~P}", "C³ step": amount(result.c3_result.step_time, "second"), "Energy": amount(result.energy_result.facility_energy, "kilowatt_hour", 3), "Outcome": status(result), "Consequence": plan.consequence})
         _live = d_compare.failing_evaluation if d_choice.value == "none" else d_results.get(d_choice.value, d_compare.failing_evaluation)
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             mo.md("### D · Which equal-budget repair survives the whole fleet? (11 min)"), d_prediction, table(rows),
             mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
-            mo.callout(mo.md(f"**Prediction:** {d_prediction.value}. **Carried choice:** {d_choice.value or 'unset'}; outcome: {status(_live)}. A defensible no-feasible result is valid evidence."), kind="success" if _live.physical_feasible is True else "danger"),
+            mo.callout(mo.md(f"**Prediction:** {_read_prediction(d_prediction)}. **Carried choice:** {d_choice.value or 'unset'}; outcome: {status(_live)}. A defensible no-feasible result is valid evidence."), kind="success" if _live.physical_feasible is True else "danger"),
             d_capture, saved("D"),
             mo.accordion({"Calculation Notes": mo.md("Repairs are rerun independently from one frozen failure. Fabric capacity adds energy; a replica adds energy and power; efficiency leaves C³ inputs unchanged.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
         if e_prediction.value is None:
             return mo.vstack([mo.md(f"### E · Does the repair survive a held-out condition? (7 min)\nCarry **{carried_label}** into one additional condition."), e_condition, e_prediction])
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             mo.md("### E · Does the repair survive a held-out condition? (7 min)"), e_condition, e_prediction,
             table([{"Run": "Carried configuration", "C³ step": amount(carried_result.c3_result.step_time, "second"), "Serving p99": amount(carried_result.serving_result.p99_duration, "millisecond"), "Energy": amount(carried_result.energy_result.facility_energy, "kilowatt_hour", 3), "Outcome": status(carried_result)}, {"Run": "Held-out replay", "C³ step": amount(e_result.c3_result.step_time, "second"), "Serving p99": amount(e_result.serving_result.p99_duration, "millisecond"), "Energy": amount(e_result.energy_result.facility_energy, "kilowatt_hour", 3), "Outcome": status(e_result)}]),
-            mo.callout(mo.md(f"**Prediction:** {e_prediction.value}. **Held-out result:** {status(e_result)}. Support is limited to the conditions actually replayed."), kind="danger" if e_result.physical_feasible is False else "success"),
+            mo.callout(mo.md(f"**Prediction:** {_read_prediction(e_prediction)}. **Held-out result:** {status(e_result)}. Support is limited to the conditions actually replayed."), kind="danger" if e_result.physical_feasible is False else "success"),
             e_capture, saved("E"),
             mo.accordion({"Calculation Notes": mo.md("The held-out replay changes one disclosed causal input set. Evidence labels and learner choices do not alter simulator output.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
@@ -460,29 +492,47 @@ async def _(
         _distinct = _saved_rejected is not None and (_saved_choice == "none" or _saved_choice != _saved_rejected)
         _complete = evidence_audit.complete and final_decision.value is not None and _distinct and bool(final_condition.value.strip()) and bool(final_uncertainty.value.strip()) and bool(final_rationale.value.strip())
         return mo.vstack([
-            mo.md("### Synthesis · Make the deployment judgment (5 min)\nChoose release, restricted rollout, or defer from saved evidence. State the rejected repair, remaining limitation, and measurable reevaluation condition."),
-            table(rows), final_decision, final_condition, final_uncertainty, final_rationale,
+            mo.md("### Synthesis · Make the deployment judgment (5 min)\nChoose a judgment for the supplied physical case and state the rejected repair, remaining limitation, and measurable reevaluation condition. A release choice here cannot authorize the continuing project: prior security, robustness, and governance conditions still require matched evidence and accountable review."),
+            table(rows),
+            mo.md("#### Carry the unresolved obligations into the handoff"),
+            table([{"Chapter": row["chapter"], "Inherited discussion": row["status"],
+                    "Saved choice": str(row["recommendation"] or "—"),
+                    "Reopen when": str(row["reversal_trigger"] or "No compatible condition saved"),
+                    "Remaining risk": str(row["residual_risk"] or row["issue"])}
+                   for row in _inherited["governance_obligations"]]),
+            mo.callout(mo.md("**Project deployment remains open.** The following judgment applies to the instructor case. Missing, incompatible, or condition-mismatched evidence remains an explicit handoff obligation; it cannot be repaired by selecting Release."), kind="warn"),
+            final_decision, final_condition, final_uncertainty, final_rationale,
             mo.callout(mo.md("**Ready for the local report.**" if _complete else "Capture five current contrasts, retain a distinct rejected repair, and complete the judgment fields."), kind="success" if _complete else "warn"),
         ])
 
     tabs = mo.ui.tabs({"Part A": build_part_a(), "Part B": build_part_b(), "Part C": build_part_c(), "Part D": build_part_d(), "Part E": build_part_e(), "Synthesis": build_synthesis()})
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (evidence_audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 17))], volume=2)
+    return
 
 
 @app.cell
 def _(
     build_lab_report, evidence_audit, final_condition, final_decision,
     final_rationale, final_uncertainty, get_evidence, get_lab_metadata,
-    mo, report_export_panel, scenario, track_id,
+    mo, report_export_panel, scenario, track_id, inherited_dossier,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _d_snap = _captures["D"].to_dict() if "D" in _captures else {}
     _choice = _d_snap.get("decision")
     _rejected = _d_snap.get("inputs", {}).get("rejected")
     _distinct = _rejected is not None and (_choice == "none" or _choice != _rejected)
     _ready = evidence_audit.complete and final_decision.value is not None and _distinct and bool(final_condition.value.strip()) and bool(final_uncertainty.value.strip()) and bool(final_rationale.value.strip())
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_17_fleet_synthesis.py"), track=track_id,
@@ -493,56 +543,51 @@ def _(
         evidence_summary={part: {"baseline": snapshots[part]["baseline"], "result": snapshots[part]["result"], "chosen_result": snapshots[part].get("chosen_result"), "result_role": snapshots[part].get("result_role"), "alternatives": snapshots[part]["alternatives"]} for part in "ABCDE"},
         binding_constraints={part: snapshots[part]["result"].get("outputs", {}).get("failed_constraints", []) for part in "BCDE"},
         decisions={"deployment_judgment": final_decision.value, "selected_repair": _choice, "rejected_alternative": _rejected, "reevaluation_trigger": final_condition.value},
-        final_decision={"decision": final_decision.value, "selected_repair": _choice, "rejected_alternative": _rejected, "rationale": final_rationale.value},
+        final_decision={"scope": "supplied physical case only", "project_deployment_clearance": False, "decision": final_decision.value, "selected_repair": _choice, "rejected_alternative": _rejected, "rationale": final_rationale.value},
         big_takeaways=["The fleet is the unit of engineering.", "A local repair can move the binding constraint.", "Missing evidence and failed physics require different responses."],
         reflections={"rationale": final_rationale.value, "reevaluation_trigger": final_condition.value},
         residual_risk=final_uncertainty.value,
-        result_snapshot={"track": track_id, "captures": snapshots, "deployment_judgment": final_decision.value, "selected_repair": _choice, "rejected_alternative": _rejected, "reevaluation_trigger": final_condition.value, "residual_uncertainty": final_uncertainty.value},
+        result_snapshot={"track": track_id, "inherited_dossier": inherited_dossier, "project_deployment_clearance": False, "captures": snapshots, "deployment_judgment": final_decision.value, "selected_repair": _choice, "rejected_alternative": _rejected, "reevaluation_trigger": final_condition.value, "residual_uncertainty": final_uncertainty.value},
         source_trace={"scenario": "Illustrative instructor scenario unless compatible student evidence is labeled.", "calculations": "Analytical C³, recovery, request-trace, energy, power, and cooling models."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 # ZONE D · COMPLETION-GATED LEDGER HUD
 @app.cell
-async def _(
-    evidence_audit, final_condition, final_decision, final_rationale,
-    final_uncertainty, get_evidence, ledger, mo,
-    record_deployment_decision, track_id,
+def _(
+    evidence_audit, final_condition, final_decision, final_rationale, final_uncertainty, get_evidence, mo, record_deployment_decision, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _d_snap = _captures["D"].to_dict() if "D" in _captures else {}
-    _choice = _d_snap.get("decision")
-    _rejected = _d_snap.get("inputs", {}).get("rejected")
-    _distinct = _rejected is not None and (_choice == "none" or _choice != _rejected)
+    _d_snap = _captures['D'].to_dict() if 'D' in _captures else {}
+    _choice = _d_snap.get('decision')
+    _rejected = _d_snap.get('inputs', {}).get('rejected')
+    _distinct = _rejected is not None and (_choice == 'none' or _choice != _rejected)
     _ready = evidence_audit.complete and final_decision.value is not None and _distinct and bool(final_condition.value.strip()) and bool(final_uncertainty.value.strip()) and bool(final_rationale.value.strip())
-    _saved = False
-    _save_error = ""
+    _decision = None
     if _ready:
-        try:
-            _decision = record_deployment_decision(
-                decision=final_decision.value, selected_repair=_choice,
-                rejected_alternative=_rejected, condition=final_condition.value,
-                residual_uncertainty=final_uncertainty.value,
-            )
-            ledger.save(chapter=17, design={
-                "schema_version": 1, "lab_id": "v2_17", "track_id": track_id,
-                "model_id": "v2_17_experiments",
-                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
-                "recommendation": _decision.decision,
-                "rejected_alternative": _decision.rejected_alternative,
-                "reevaluation_trigger": _decision.condition,
-                "residual_risk": _decision.residual_uncertainty,
-                "rationale": final_rationale.value,
-            })
-            await ledger.flush()
-            _saved = True
-        except Exception as _exc:
-            _save_error = str(_exc)
-    _state = "SAVED" if _saved else "SAVE FAILED" if _save_error else "EVIDENCE IN PROGRESS"
-    _detail = f" · {_save_error}" if _save_error else ""
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">17 · Fleet Synthesis</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">{_state}{_detail}</span></div>')
+        _decision = record_deployment_decision(decision=final_decision.value, selected_repair=_choice, rejected_alternative=_rejected, condition=final_condition.value, residual_uncertainty=final_uncertainty.value)
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_17', 'track_id': track_id, 'model_id': 'v2_17_experiments', 'evidence': {part: capture.to_dict() for part, capture in _captures.items()}, 'recommendation': _decision.decision, 'rejected_alternative': _decision.rejected_alternative, 'reevaluation_trigger': _decision.condition, 'residual_risk': _decision.residual_uncertainty, 'rationale': final_rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=17, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
+    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 
