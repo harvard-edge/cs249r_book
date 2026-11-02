@@ -365,13 +365,14 @@ def _load_standalone_taxonomy(repo_root: Path, unified_path: Path) -> Taxonomy:
                 causes = set(symptom.get("causes", []) or [])
                 checks = set(symptom.get("checks", []) or [])
                 levers = set(symptom.get("levers", []) or [])
-                if any(c not in concept_home for c in (causes | checks | levers)):
+                quantities = set(symptom.get("quantities", []) or [])  # the measured metric, kept apart from causes (2026-11-02)
+                if any(c not in concept_home for c in (causes | checks | levers | quantities)):
                     raise ValueError(f"{unified_path}: symptom {symptom.get('id')} references unknown concept")
-                if (causes & levers) or (causes & checks) or (checks & levers):
-                    raise ValueError(f"{unified_path}: symptom {symptom.get('id')} has overlapping cause/check/lever buckets")
+                if (causes & levers) or (causes & checks) or (checks & levers) or (quantities & (causes | checks | levers)):
+                    raise ValueError(f"{unified_path}: symptom {symptom.get('id')} has overlapping cause/check/lever/quantity buckets")
                 for item in checks | levers:
-                    if not (neighbors.get(item, set()) & causes):
-                        raise ValueError(f"{unified_path}: symptom {symptom.get('id')} check/lever {item} shares no relationship with a cause")
+                    if not (neighbors.get(item, set()) & (causes | quantities)):
+                        raise ValueError(f"{unified_path}: symptom {symptom.get('id')} check/lever {item} shares no relationship with a cause or quantity")
         for path_g in guides_raw.get("learning_paths", []) or []:
             if isinstance(path_g, dict):
                 steps = [st.get("subject") for st in (path_g.get("steps") or []) if isinstance(st, dict)]

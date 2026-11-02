@@ -667,6 +667,12 @@ def validate_guides_semantics(guides: dict, rows_by_id: dict, version: str | Non
             raise ConceptGraphError(
                 f"framework: symptom {sid} lists concept as both check and lever: {', '.join(overlap_kl)}"
             )
+        quantities = set(symptom.get("quantities", []))
+        overlap_q = sorted(quantities & (causes | checks | levers))
+        if overlap_q:
+            raise ConceptGraphError(
+                f"framework: symptom {sid} lists a quantity also as a cause, check, or lever: {', '.join(overlap_q)}"
+            )
 
     roles = guides.get("roles", [])
     if version not in (None, "0.1-draft", "0.2-draft") and rows_by_id and roles:

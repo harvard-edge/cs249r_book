@@ -385,10 +385,14 @@ def _guides(root: Path, rows_by_id: dict, field: dict, version: str | None = Non
         _members(symptom.get("causes"), concepts, f"{symptom['id']} causes")
         _members(symptom.get("checks", []), concepts, f"{symptom['id']} checks", nonempty=False)
         _members(symptom.get("levers"), concepts, f"{symptom['id']} levers")
+        _members(symptom.get("quantities", []), concepts, f"{symptom['id']} quantities", nonempty=False)
+        # A check or lever must touch a listed cause or the measured quantity (2026-11-02: quantities were added so a
+        # symptom's own metric no longer has to pose as a cause for its checks and levers to connect).
+        anchors = set(symptom["causes"]) | set(symptom.get("quantities", []))
         for kind in ("checks", "levers"):
             for cid in symptom.get(kind, []):
-                if not neighbors.get(cid, set()) & set(symptom["causes"]):
-                    _fail(f"{symptom['id']} {kind[:-1]} {cid} shares no relationship with any listed cause")
+                if not neighbors.get(cid, set()) & anchors:
+                    _fail(f"{symptom['id']} {kind[:-1]} {cid} shares no relationship with any listed cause or quantity")
     paths = _records(model.get("learning_paths"), "learning path")
     path_slots = set(get_class_slots("LearningPath", root))
     step_slots = set(get_class_slots("LearningPathStep", root))

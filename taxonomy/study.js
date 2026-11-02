@@ -1596,7 +1596,7 @@
     }
 
     const kList = [...(sym.checks || [])];
-    const cList = [...(sym.causes || [])];
+    const cList = [...(sym.quantities || []), ...(sym.causes || [])];  // the measured quantity sits with the causes in the middle column
     const lList = [...(sym.levers || [])];
     const kSet = new Set(kList), cSet = new Set(cList), lSet = new Set(lList);
     const allSet = new Set([...kList, ...cList, ...lList]);
@@ -1950,7 +1950,8 @@
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
         <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
     const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span>
-        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span></td>
+        <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span>
+        ${s.quantities && s.quantities.length ? `<span class="bok-alias" style="display:block;margin-top:4px">Measured by: ${s.quantities.map((id) => conceptLink(id)).join(', ')}</span>` : ''}</td>
         <td>${list(s.causes, conceptLink)}</td><td>${list(s.checks, conceptLink)}</td><td>${list(s.levers, conceptLink)}</td></tr>`).join('');
     const paths = g.learning_paths.map((lp) => `<section class="bok-guide-path" id="guide-path-${esc(lp.id)}">
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px">
