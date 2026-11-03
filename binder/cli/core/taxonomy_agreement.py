@@ -45,9 +45,28 @@ def _kappa(pairs: list[tuple[str, str]]) -> float:
     return round((observed - expected) / (1 - expected), 3) if expected < 1 else 1.0
 
 
-def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
-    """Agreement between two taggers' tags, each keyed by item number."""
-    items = sorted(set(a) & set(b))
+def score_run(
+    a: dict,
+    b: dict,
+    rows: dict,
+    home: dict,
+    expected_items: set[int] | None = None,
+) -> dict:
+    """Agreement between two taggers' tags, each keyed by item number.
+
+    Fails closed (`ValueError`) if the two taggers do not cover the exact same item set
+    (or `expected_items` when supplied) so missing/abstained items can never shrink denominators.
+    """
+    keys_a, keys_b = set(a), set(b)
+    if keys_a != keys_b:
+        raise ValueError(
+            f"tagger item sets disagree (only_a={sorted(keys_a - keys_b)}, only_b={sorted(keys_b - keys_a)})"
+        )
+    if expected_items is not None and keys_a != set(expected_items):
+        raise ValueError(
+            f"tagger items disagree with expected sample (missing={sorted(set(expected_items) - keys_a)}, extra={sorted(keys_a - set(expected_items))})"
+        )
+    items = sorted(keys_a)
     subjects = [(a[n]["subject"], b[n]["subject"]) for n in items]
     areas = [(rows[x][1]["code"], rows[y][1]["code"]) for x, y in subjects if x in rows and y in rows]
     both = [n for n in items if a[n].get("concepts") and b[n].get("concepts")]
@@ -156,6 +175,11 @@ def agreement_report(root: Path) -> dict:
             validate_linkml(record, "AgreementRecordModel", root, path.name)
         except ConceptGraphError as exc:
             errors.append(str(exc))
+        expected_numbers = {
+            item["n"]
+            for item in (record.get("items", []) if isinstance(record.get("items"), list) else [])
+            if isinstance(item, dict) and _is_int(item.get("n"))
+        }
         runs = []
         for run in record.get("runs", []) if isinstance(record.get("runs"), list) else []:
             if not isinstance(run, dict):
@@ -166,8 +190,19 @@ def agreement_report(root: Path) -> dict:
             (name_a, tags_a), (name_b, tags_b) = list(taggers.items())
             if not isinstance(tags_a, list) or not isinstance(tags_b, list):
                 continue
+            try:
+                scores = score_run(
+                    _index_valid_tags(tags_a, rows),
+                    _index_valid_tags(tags_b, rows),
+                    rows,
+                    home,
+                    expected_items=expected_numbers if expected_numbers else None,
+                )
+            except ValueError as exc:
+                errors.append(f"{path.name} run {run.get('id')}: {exc}")
+                continue
             runs.append({"id": run.get("id", "?"), "held_out": run.get("held_out"), "note": run.get("note", ""), "taggers": [name_a, name_b],
-                         "scores": score_run(_index_valid_tags(tags_a, rows), _index_valid_tags(tags_b, rows), rows, home)})
+                         "scores": scores})
         records.append({"id": record.get("id", "?"), "title": record.get("title", ""), "basis": record.get("basis", ""), "file": path.name, "runs": runs})
     return {"records": records, "errors": errors}
 

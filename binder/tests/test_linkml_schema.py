@@ -450,6 +450,7 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         assert re.match(pat, "1.0")
         assert re.match(pat, "1.0.1")
         assert re.match(pat, "1.2.3-rc1")
+        assert not re.match(pat, "1.0-alpha")
     for cls_name in ("Concept", "ReleaseConcept"):
         desc = raw_schema["classes"][cls_name]["attributes"]["aliases"]["description"]
         assert "named system exemplars" not in desc
@@ -516,6 +517,39 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
     ).hexdigest()
     (tdir / "term-provenance.yml").write_text(yaml.safe_dump(unpinned_gf, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="unpinned or inactive grandfathered_draft_alias_exceptions"):
+        validate_term_provenance_sidecar(tmp_path)
+
+    # 3f. Untracked edit to an untouched 0.4-draft concept (with recomputed self-digests) fails genesis replay.
+    from core.taxonomy_schema import compute_campaign_entry_sha256, compute_non_guides_taxonomy_sha256
+
+    raw_tax_tampered = load_taxonomy_yaml(tax_path)
+    for cnode in raw_tax_tampered["concepts"]:
+        if cnode["id"] == "mlsys.dataflow":
+            cnode["definition"] = "Untracked alteration to a baseline 0.4-draft concept outside governed patches."
+            break
+    tampered_tax_txt = yaml.safe_dump(raw_tax_tampered, sort_keys=False, allow_unicode=True)
+    (tdir / "ml-systems-taxonomy.yml").write_text(tampered_tax_txt)
+    t_sha = hashlib.sha256(tampered_tax_txt.encode("utf-8")).hexdigest()
+    t_ng_sha = compute_non_guides_taxonomy_sha256(raw_tax_tampered)
+    forged_prov = deepcopy(prov)
+    forged_prov["taxonomy_sha256"] = t_sha
+    forged_prov["non_guides_taxonomy_sha256"] = t_ng_sha
+    forged_prov["applied_campaigns"][-1]["post_apply_taxonomy_sha256"] = t_sha
+    forged_prov["applied_campaigns"][-1]["post_non_guides_taxonomy_sha256"] = t_ng_sha
+    forged_prov["applied_campaigns"][-1]["campaign_entry_sha256"] = compute_campaign_entry_sha256(
+        forged_prov["applied_campaigns"][-1]
+    )
+    if forged_prov["applied_campaigns"][-1].get("mode") == "full-3family-reconcile":
+        forged_prov["last_reconcile_receipt"] = deepcopy(forged_prov["applied_campaigns"][-1])
+    body4 = {k: v for k, v in forged_prov.items() if k != "sidecar_content_sha256"}
+    forged_prov["sidecar_content_sha256"] = hashlib.sha256(
+        json.dumps(body4, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(forged_prov, sort_keys=False, allow_unicode=True))
+    with pytest.raises(
+        ConceptGraphError,
+        match="(replayed non_guides_taxonomy_sha256 disagrees|replaying applied_campaigns from genesis)",
+    ):
         validate_term_provenance_sidecar(tmp_path)
 
 
