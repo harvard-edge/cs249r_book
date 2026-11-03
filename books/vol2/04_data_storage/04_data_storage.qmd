@@ -112,10 +112,15 @@ check(
 # │          a 30-day 175B training run.
 # │ Show:    3.35 TB/s HBM, 7 GB/s NVMe, ~479x ratio, ~2,450 GB checkpoint,
 # │          3 TB compressed corpus, 6 TB tokenized corpus, ~10.6 PB total
-# │          checkpoint writes.
+# │          checkpoint writes; the 175B step on the running cluster (TP8 x PP8
+# │          replica of 64 GPUs, 32 replicas, global batch of 1,536 sequences /
+# │          3,145,728 tokens, modeled step of ~4.64 s, one epoch in ~25.6 days
+# │          inside the 30-day window).
 # │ How:     Read H100 HBM BW and NVMe BW from constants; compute checkpoint
 # │          size from GPT-3 params × bytes per param; compute corpus variants
-# │          from tokens × bytes/token; derive fleet total.
+# │          from tokens × bytes/token; derive fleet total. Layout, batch, and
+# │          modeled step time come from Scenarios.DenseLLMPretrainingStep2K;
+# │          run length = corpus tokens / tokens per step × step time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
@@ -144,14 +149,26 @@ class StorageFuelLineContext:
     baseline_training = compressed_text + tokenized_text
     check(ckpt_total.to(GB).magnitude > 1000, "175B checkpoint must be > 1 TB")
     check(checkpoint_count_val == 4320, "30 days at 10-min checkpoint interval should be 4320")
-    # Running cluster: 256 DGX H100 nodes, deliberately twice the 1,024-GPU reference.
-    run_cluster = Systems.Clusters.Production_2K
+    # Running cluster: 256 DGX H100 nodes on NDR InfiniBand, deliberately twice the 1,024-GPU reference.
+    run_cluster = Systems.Clusters.Production_2K_NDR
     ref_scenario = Scenarios.DenseLLMPretrainingReference
     run_accels = run_cluster.total_accelerators
     run_nodes = run_cluster.count
     ref_accels = ref_scenario.system.total_accelerators
     ref_nodes = ref_scenario.system.count
-    step_time = ReferenceStats.StorageTrainingCorpus.StepTime
+    # The 175B job's step on the running cluster: the reference step's replica layout,
+    # precision, and global batch on 32 replicas instead of 16 (modeled, not measured).
+    ref_step = Scenarios.DenseLLMPretrainingStep
+    run_step = Scenarios.DenseLLMPretrainingStep2K
+    tp_degree = run_step.tensor_parallel
+    pp_degree = run_step.pipeline_depth
+    replica_gpus = run_step.replica.replica_gpus
+    run_replicas = run_step.data_parallel
+    global_batch_sequences = run_step.global_batch_sequences
+    global_batch_tokens = run_step.global_batch_tokens
+    step_time = run_step.step_time  # modeled step on the running cluster
+    run_steps = (training_tokens / (global_batch_tokens * count)).to("").magnitude
+    run_time = (run_steps * step_time).to(day)  # modeled length of the single epoch
     training_state_bpp = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
     gradient_bpp = training_state_bpp - bytes_per_param_ckpt
     check(run_accels == 2 * ref_accels, "Running cluster is described as twice the reference cluster")
@@ -159,6 +176,36 @@ class StorageFuelLineContext:
         abs(gradient_bpp.to(byte / param).magnitude - BYTES_FP16.to(byte).magnitude) < 1e-9,
         "Training state minus checkpoint must equal the FP16 gradient",
     )
+    check(
+        run_step.fleet.total_accelerators == run_accels and run_step.fleet.node == run_cluster.node and run_step.fleet.fabric == run_cluster.fabric,
+        "The 175B step runs on the chapter's running cluster",
+    )
+    check(
+        ref_step.fleet.total_accelerators == ref_scenario.system.total_accelerators and ref_step.replica is run_step.replica,
+        "Running step reuses the reference step's replica",
+    )
+    check(
+        (tp_degree, pp_degree, run_step.data_parallel, ref_step.data_parallel) == (8, 8, 32, 16),
+        "Layout is TP8 x PP8 x DP32 (DP16 on the reference cluster)",
+    )
+    check(tp_degree == run_cluster.node.accelerators_per_node, "Tensor parallelism spans exactly one node")
+    check(replica_gpus == 64 and run_accels == replica_gpus * run_replicas and run_replicas == 32, "Running cluster holds 32 whole 64-GPU replicas")
+    check(pp_degree * run_replicas == run_nodes, "A write-once save splits each node's pipeline-stage slice over the replicas: 1/256 per node")
+    check(run_step.replica.workload is m_gpt3, "The step trains the chapter's 175B model")
+    check(
+        abs(run_step.replica.bytes_per_param.to(byte / param).magnitude - training_state_bpp.to(byte / param).magnitude) < 1e-9,
+        "Replica holds the unsharded 16-byte training state",
+    )
+    check(run_step.precision == "fp16", "The step uses 16-bit mixed precision")
+    check(global_batch_sequences == 1536 and global_batch_tokens == 3_145_728, "Global batch is 1,536 sequences (3,145,728 tokens)")
+    check(
+        global_batch_sequences == ref_step.global_batch_sequences and global_batch_tokens == ref_step.global_batch_tokens,
+        "Same global batch as the reference step",
+    )
+    check(4.6 * second < step_time < 4.7 * second, "Prose quotes a modeled step of about 4.64 s on the running cluster")
+    check(step_time < ref_step.step_time, "Twice the replicas shortens the reference step")
+    check(25.5 * day < run_time < 25.7 * day, "Prose quotes a modeled epoch of about 25.6 days")
+    check(run_time < training_window, "The modeled run must fit inside the 30-day training window")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     run_accels_str = fmt_count(run_accels, commas=True)
@@ -166,7 +213,21 @@ class StorageFuelLineContext:
     ref_accels_str = fmt_count(ref_accels, commas=True)
     ref_nodes_str = fmt_count(ref_nodes, commas=True)
     training_tokens_str = fmt_tokens(training_tokens, scale="trillion", scale_style="word", precision=1, commas=False)
-    step_time_ms_str = fmt_time(step_time, millisecond, precision=0, commas=False)
+    step_time_s_str = fmt_time(step_time, second, precision=2, commas=False, style="word")
+    step_time_s_attr_str = fmt_time(step_time, second, precision=2, commas=False, style="word", attributive=True)
+    run_time_days_str = fmt_time(run_time, day, precision=1, commas=False, style="word")
+    run_time_days_attr_str = fmt_time(run_time, day, precision=1, commas=False, style="word", attributive=True)
+    _count_words = {8: "eight", 32: "thirty-two", 64: "sixty-four"}  # prose spells out counts to one hundred
+    check({tp_degree, pp_degree, replica_gpus, run_replicas} <= set(_count_words), "Every layout count quoted in prose needs its spelled-out form")
+    tp_degree_str = MarkdownStr(_count_words[tp_degree])
+    pp_degree_str = MarkdownStr(_count_words[pp_degree])
+    replica_gpus_str = MarkdownStr(_count_words[replica_gpus])
+    replica_gpus_digits_str = fmt_int(replica_gpus)
+    run_replicas_str = MarkdownStr(_count_words[run_replicas])
+    pp_degree_digits_str = fmt_int(pp_degree)
+    run_replicas_digits_str = fmt_int(run_replicas)
+    global_batch_sequences_str = fmt_count(global_batch_sequences, commas=True)
+    global_batch_tokens_str = fmt_count(global_batch_tokens, commas=True)
     ckpt_bpp_str = fmt_int(bytes_per_param_ckpt.to(byte / param).magnitude)
     training_state_bpp_str = fmt_int(training_state_bpp.to(byte / param).magnitude)
     gradient_bpp_str = fmt_int(gradient_bpp.to(byte / param).magnitude)
@@ -194,7 +255,7 @@ The running cluster for that question is `{python} StorageFuelLineContext.run_no
 *Storage is the physical substrate spanning Compute ($\OperationalTaxonomyDimension_1$), Communication ($\OperationalTaxonomyDimension_2$), and Coordination ($\OperationalTaxonomyDimension_3$).*
 :::
 
-Consider the running example for the storage analysis, an instance of Archetype A (GPT-4/Llama-3). A 175-billion parameter language model trains on `{python} StorageFuelLineContext.training_tokens_str` tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. That token budget is set upstream of storage. Under the compute-optimal scaling results of @sec-vol2-intro-ai-scaling-laws-a043, the training-token count grows in proportion to parameter count, so each step up the model-size curve enlarges both the corpus the fleet must hold and the bytes each epoch must read. This corpus already sits below the compute-optimal allocation for a 175B-parameter model, so a compute-optimal run would raise both figures further. The run makes a single pass (one epoch) over this corpus, reading every selected token once in an order determined by the shuffle seed. No small "hot" subset dominates access. Meanwhile, each accelerator processes its local batch in roughly `{python} StorageFuelLineContext.step_time_ms_str`, then waits for the next. If storage cannot deliver data within that `{python} StorageFuelLineContext.step_time_ms_str` window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
+Consider the running example for the storage analysis, an instance of Archetype A (GPT-4/Llama-3). A 175-billion parameter language model trains on `{python} StorageFuelLineContext.training_tokens_str` tokens of text: roughly `{python} StorageFuelLineContext.compressed_text_tb_str` in compressed source form, or `{python} StorageFuelLineContext.tokenized_text_tb_str` once represented as 4-byte token IDs. That token budget is set upstream of storage. Under the compute-optimal scaling results of @sec-vol2-intro-ai-scaling-laws-a043, the training-token count grows in proportion to parameter count, so each step up the model-size curve enlarges both the corpus the fleet must hold and the bytes each epoch must read. This corpus already sits below the compute-optimal allocation for a 175B-parameter model, so a compute-optimal run would raise both figures further. The run makes a single pass (one epoch) over this corpus, reading every selected token once in an order determined by the shuffle seed. No small "hot" subset dominates access. Meanwhile, each training step consumes one global batch of `{python} StorageFuelLineContext.global_batch_sequences_str` sequences (`{python} StorageFuelLineContext.global_batch_tokens_str` tokens), then waits for the next. On the running cluster the modeled step takes about `{python} StorageFuelLineContext.step_time_s_str`, an estimate from the book's performance model rather than a measurement, so the single epoch lasts about `{python} StorageFuelLineContext.run_time_days_str`. If storage cannot deliver that batch before the current step ends, the accelerators sit idle, and the organization pays for silicon that produces heat instead of gradients.
 
 The problem is deceptive because storage technology has improved substantially. Non-Volatile Memory Express (NVMe) drives achieve `{python} StorageFuelLineContext.nvme_bw_gb_per_s_str` of sequential throughput, a figure that would have seemed out of reach a decade ago. An H100 moves data internally through high-bandwidth memory (HBM) at `{python} StorageFuelLineContext.h100_bw_tb_per_s_str`, roughly `{python} StorageFuelLineContext.bw_ratio_mult_str` the sequential bandwidth of a single NVMe drive. This ratio contrasts two tiers; it is not the rate at which storage must supply training inputs, because HBM bandwidth also carries repeated weight, activation, and tensor traffic during computation. The storage feed requirement is instead determined by the input-batch bytes each accelerator needs per iteration. Dividing those bytes by the compute window gives one worker's required delivery rate; summing across workers gives the fleet demand. That rate must be evaluated at each tier using the representation stored there, since compressed inputs and decoded tensors occupy different numbers of bytes. A hierarchy becomes useful when the durable source cannot meet that rate or its latency varies enough to interrupt computation. Faster tiers stage upcoming batches while the durable tier supplies capacity and preserves the source data.
 
@@ -206,7 +267,7 @@ The storage problem joins physics with economics. Physics favors the memory clos
 *Over the run, checkpoint writes exceed one epoch of training-data reads by more than 1,000 times.*
 :::
 
-The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the example's compressed corpus and tokenized shards. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. This chapter adopts one resumable mixed-precision Adaptive Moment Estimation (Adam) checkpoint contract: FP16 model weights at 2 bytes per parameter, FP32 master weights at 4, and two FP32 Adam moments at 4 each, for `{python} StorageFuelLineContext.ckpt_bpp_str` bytes per parameter. This is the `{python} StorageFuelLineContext.training_state_bpp_str`-byte training state of @sec-compute-node-memory without its `{python} StorageFuelLineContext.gradient_bpp_str`-byte FP16 gradients, which are recomputed after restore, while scheduler, random-number-generator, and data-loader metadata are negligible at this scale. The resulting checkpoint is `{python} StorageFuelLineContext.ckpt_total_gb_str` every `{python} StorageFuelLineContext.checkpoint_interval_str`. Over a `{python} StorageFuelLineContext.training_window_attr_str` training run on the `{python} StorageFuelLineContext.run_nodes_str`-node cluster, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data in the run's single epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use this same contract for every checkpoint size, duration, retention total, and lifetime-write calculation.
+The canonical training-data footprint for this example is roughly `{python} StorageFuelLineContext.baseline_training_tb_str` across the hierarchy, combining the example's compressed corpus and tokenized shards. Additional shuffled or packed variants can raise the staging footprint, but the per-epoch training read over 4-byte token IDs is `{python} StorageFuelLineContext.tokenized_text_tb_str`. This chapter adopts one resumable mixed-precision Adaptive Moment Estimation (Adam) checkpoint contract: FP16 model weights at 2 bytes per parameter, FP32 master weights at 4, and two FP32 Adam moments at 4 each, for `{python} StorageFuelLineContext.ckpt_bpp_str` bytes per parameter. This is the `{python} StorageFuelLineContext.training_state_bpp_str`-byte training state of @sec-compute-node-memory without its `{python} StorageFuelLineContext.gradient_bpp_str`-byte FP16 gradients, which are recomputed after restore, while scheduler, random-number-generator, and data-loader metadata are negligible at this scale. The resulting checkpoint is `{python} StorageFuelLineContext.ckpt_total_gb_str` every `{python} StorageFuelLineContext.checkpoint_interval_str`. The storage plan budgets a `{python} StorageFuelLineContext.training_window_attr_str` training window, which the modeled `{python} StorageFuelLineContext.run_time_days_attr_str` epoch fits inside. Over that window on the `{python} StorageFuelLineContext.run_nodes_str`-node cluster, the storage system must deliver `{python} StorageFuelLineContext.tokenized_text_tb_str` of tokenized training data in the run's single epoch, absorb `{python} StorageFuelLineContext.ckpt_fleet_total_pb_str` of checkpoint writes, and stage model weights for evaluation runs. The sections that follow use this same contract for every checkpoint size, duration, retention total, and lifetime-write calculation.
 
 Those numbers force the storage path. ML access patterns first invert the assumptions behind conventional storage systems. That inversion forces a hierarchy from HBM to cold archive. The hierarchy then requires a pipeline equation that sizes delivery and direct data paths that remove host copies. It also requires a checkpoint protocol for the dominant write traffic, commit boundaries that keep every versioned artifact reproducible (generated training data included), and economics that decide which bytes belong at each tier. Serving-time model loading and retrieval indexes are variations on the same fuel-line problem, and devices that move the boundaries between tiers close the chapter. In each workload, the storage system must place the right representation at the right distance before the accelerator asks for it.
 
@@ -251,7 +312,7 @@ class StorageAccessPatternFacts:
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     tokenized_text = training_tokens * token_id_bytes
     ckpt_total = Scenarios.Gpt3StorageFootprint.result.checkpoint_bytes
-    ckpt_node_count = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    ckpt_node_count = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     ckpt_shard = ckpt_total / ckpt_node_count
     ckpt_burst = ckpt_shard * ckpt_node_count
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
@@ -395,7 +456,7 @@ class StoragePyramidContext:
     raid0_drive_count = Systems.Storage.LocalNvmeGen4_7T68x4.devices_per_node
     raid0_bw = raid0_drive_count * nvme_bw
     pfs_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
-    pfs_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    pfs_nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     pfs_per_node_bw = pfs_bw / pfs_nodes
     tokenized_text = training_tokens * token_id_bytes
     hbm_host_dram_ratio_val = (h100_bw / host_dram_bw).to("").magnitude
@@ -666,7 +727,7 @@ The rest of the chapter numbers the six tiers by distance from the accelerator, 
 
 The physical tiers of @fig-storage-pyramid govern the trade-off among access distance, capacity, and cost. Shared services can aggregate more bandwidth than an individual local device, so the ordering is not a monotonic ranking of aggregate throughput. This trade-off is not arbitrary; it reflects the physics of data proximity. HBM sits on the same silicon interposer as the accelerator, connected by thousands of parallel traces measured in millimeters, whereas host DRAM connects to the CPU memory controller and reaches the accelerator across the host-device interconnect, and local NVMe reaches across the circuit board over PCIe lanes. Beyond the node, the parallel file system traverses meters of cable and network switches, while object storage may span kilometers of fiber between data centers. Distance, protocol overhead, and contention can increase access latency, while media technology and provisioning determine capacity cost. Distance is therefore a guide rather than a measurement; only the complete client path establishes all three properties for a given consumer.
 
-The engineering challenge is to deliver each batch to HBM before the accelerator needs it. In the running example, the durable corpus lives in object storage (Tier 4) as a `{python} StoragePyramidContext.compressed_text_tb_str` compressed source copy plus `{python} StoragePyramidContext.tokenized_text_tb_str` of tokenized training shards, but the accelerator needs each batch in HBM (Tier 0) within `{python} StorageFuelLineContext.step_time_ms_str`. The chapter's reference design fixes one path between them. At job start, each node copies its share of the tokenized shards from object storage to its local NVMe (Tier 2). The single training epoch then reads from that local copy, prepares batches in host DRAM, and transfers them to HBM. Local reads keep slow object-store responses out of each training step, the reason @sec-storage-economics gives for staging a corpus this job reads only once. The parallel file system (Tier 3) holds checkpoints rather than training inputs. Streaming the shards directly from object storage, or serving them from a parallel file system, are the alternatives the chapter weighs against this design, and the hierarchy describes placement choices, not a requirement that every byte visit every level.
+The engineering challenge is to deliver each batch to HBM before the accelerator needs it. In the running example, the durable corpus lives in object storage (Tier 4) as a `{python} StoragePyramidContext.compressed_text_tb_str` compressed source copy plus `{python} StoragePyramidContext.tokenized_text_tb_str` of tokenized training shards, but the accelerator needs each batch in HBM (Tier 0) before the current step ends. The chapter's reference design fixes one path between them. At job start, each node copies its share of the tokenized shards from object storage to its local NVMe (Tier 2). The single training epoch then reads from that local copy, prepares batches in host DRAM, and transfers them to HBM. Local reads keep slow object-store responses out of each training step, the reason @sec-storage-economics gives for staging a corpus this job reads only once. The parallel file system (Tier 3) holds checkpoints rather than training inputs. Streaming the shards directly from object storage, or serving them from a parallel file system, are the alternatives the chapter weighs against this design, and the hierarchy describes placement choices, not a requirement that every byte visit every level.
 
 ### Bandwidth cliffs between tiers {#sec-storage-bandwidth-cliffs}
 
@@ -838,17 +899,18 @@ class RunningJobFeed:
     training_window = StorageFuelLineContext.training_window
     generic_text_bw = TextImageBandwidth.text_bw
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    avg_feed = Scenarios.Gpt3StorageFootprint.result.average_read_rate.to(MB / second)
+    run_time = StorageFuelLineContext.run_time  # modeled single-epoch run on the 2K step
+    avg_feed = (tokenized_text / run_time).to(MB / second)
     generic_ratio = (generic_text_bw / avg_feed).to("").magnitude
     # ┌── 3. GUARD ────────────────────────────────────────
-    check(2 < avg_feed.magnitude < 3, "6 TB over 30 days should average about 2.3 MB/s")
+    check(2.5 < avg_feed.magnitude < 3, "6 TB over the modeled 25.6-day epoch should average about 2.7 MB/s")
     check(50 < generic_ratio < 100, "Generic text job should read tens of times faster than the 175B job")
     # ┌── 4. OUTPUT ───────────────────────────────────────
     avg_feed_mb_per_s_str = fmt_bandwidth(avg_feed, unit=MB / second, precision=1, commas=False)
     generic_ratio_mult_str = fmt_multiple(round(generic_ratio, -1), precision=0, commas=False)
 ```
 
-The 175B running job sits lower still. Its `{python} StorageFuelLineContext.tokenized_text_tb_str` epoch spread over the `{python} StorageFuelLineContext.training_window_attr_str` window averages about `{python} RunningJobFeed.avg_feed_mb_per_s_str` for the whole cluster, corpus bytes divided by run length, roughly `{python} RunningJobFeed.generic_ratio_mult_str` below the notebook's generic text job. Each token of a 175B model carries so much computation that the corpus trickles in, which is why the running example's storage design is shaped by checkpoint traffic rather than by its input feed.
+The 175B running job sits lower still. Its `{python} StorageFuelLineContext.tokenized_text_tb_str` epoch spread over the modeled `{python} StorageFuelLineContext.run_time_days_attr_str` run averages about `{python} RunningJobFeed.avg_feed_mb_per_s_str` for the whole cluster, corpus bytes divided by run length, roughly `{python} RunningJobFeed.generic_ratio_mult_str` below the notebook's generic text job. Each token of a 175B model carries so much computation that the corpus trickles in, which is why the running example's storage design is shaped by checkpoint traffic rather than by its input feed.
 
 The image result is a floor for visual data rather than a ceiling. At about `{python} TextImageBandwidth.image_bw_gb_per_s_str` across `{python} StorageFuelLineContext.run_nodes_str` nodes, the image job already consumes nearly a third of a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` parallel file system built from 100 data-serving nodes (the architecture @sec-storage-tier3-pfs develops). Higher-resolution images and video clips, at megabytes per sample rather than the roughly `{python} TextImageBandwidth.image_size_kb_str` of a compressed ImageNet image, raise the per-node demand by an order of magnitude or more, and a fleet several times larger multiplies it again. Demand at that scale exceeds what a shared file system of this size can serve, so the architecture must rely on local NVMe caching to take repeated reads off shared storage.
 
@@ -933,7 +995,7 @@ For placing the unpartitioned running model, the immediate constraint is *capaci
 
 Because HBM capacity is so limited relative to both model size and dataset size, the accelerator processes data in batches. Each batch occupies a fraction of HBM for the duration of one forward-backward pass, then is discarded to make room for the next. The rate at which batches must be supplied sets the bandwidth requirement for all lower tiers.
 
-The razor-thin margin is a defining feature of large model training, visible in the HBM budget that each 80 GB H100 carries while the fleet trains the 175B parameter model (@tbl-hbm-memory-budget). The table treats partitioning as a storage layout, and the chapter keeps this one layout throughout. Tensor parallelism splits the model weights eight ways inside each node, so every node holds one complete copy of the weights spread across its GPUs. Optimizer, master-weight, and gradient state are additionally sharded across the `{python} StorageFuelLineContext.run_nodes_str` nodes, so each GPU holds only its slice of that state rather than a full replica. Sharding optimizer and gradient state across data-parallel replicas while each replica keeps its weights is the second stage of the Zero Redundancy Optimizer (ZeRO), a training technique in its own right; its third stage also partitions the weights. Here only the resulting per-GPU slices matter, because they set the storage pressure HBM sees.
+The razor-thin margin is a defining feature of large model training, visible in the HBM budget that each 80 GB H100 carries while the fleet trains the 175B parameter model (@tbl-hbm-memory-budget). The table treats partitioning as a storage layout, and the chapter keeps this one layout throughout. Tensor parallelism splits each layer `{python} StorageFuelLineContext.tp_degree_str` ways across the GPUs of one node, and pipeline parallelism places successive groups of layers on `{python} StorageFuelLineContext.pp_degree_str` nodes, so one complete replica of the model and its training state spans `{python} StorageFuelLineContext.replica_gpus_str` GPUs, each holding a 1/`{python} StorageFuelLineContext.replica_gpus_digits_str` slice. Data parallelism repeats that replica `{python} StorageFuelLineContext.run_replicas_str` times across the running cluster, and every replica holds an identical copy of the state. Sharding the replicated optimizer and gradient state across data-parallel replicas is the second stage of the Zero Redundancy Optimizer (ZeRO), a training technique in its own right; its third stage also partitions the weights. This layout needs neither, because the unsharded slices already fit. Here only the resulting per-GPU slices matter, because they set the storage pressure HBM sees.
 
 ::: {.column-margin .margin-pointer}
 ↪ Sharded data parallelism (ZeRO and FSDP), which partitions optimizer, gradient, and weight state across workers, is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69.
@@ -946,21 +1008,23 @@ The razor-thin margin is a defining feature of large model training, visible in 
 # │ HBM MEMORY BUDGET FOR 175B TRAINING (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @tbl-hbm-memory-budget.
-# │ Goal: Compute per-GPU memory allocations with 8-way weight partitioning and
-# │       optimizer/gradient state sharded over 256 nodes.
-# │ How: Weights are split inside the node; optimizer and gradients are sharded
-# │      across both the intra-node split and the node count.
+# │ Goal: Compute per-GPU memory allocations for the shared 175B layout: one
+# │       TP8 x PP8 replica of 64 GPUs holding unsharded mixed-precision Adam
+# │       state (Scenarios.DenseLLMPretrainingStep2K, the running cluster).
+# │ How: Every state component is split evenly across the replica's 64 GPUs;
+# │      data-parallel replicas hold identical copies, so none is sharded
+# │      across replicas.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_memory, fmt_memory_capacity, fmt_percent_range, fmt_qty_range
 
 class HbmMemoryBudget:
-    """Per-GPU HBM budget for 175B training with sharded state."""
+    """Per-GPU HBM budget for 175B training in the shared replica layout."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fleet = Systems.Clusters.Production_2K
-    params = Models.Language.GPT3.parameters
-    tp_degree = fleet.node.accelerators_per_node
-    dp_nodes = fleet.count
+    run_step = Scenarios.DenseLLMPretrainingStep2K
+    fleet = run_step.fleet  # the chapter's running cluster
+    params = run_step.replica.workload.parameters
+    replica_gpus = run_step.replica.replica_gpus
     activation_min = 10 * GB  # scenario activation-memory minimum assumption
     activation_max = 20 * GB  # scenario activation-memory maximum assumption
     comm_min = 2 * GB  # scenario communication-buffer minimum assumption
@@ -972,10 +1036,11 @@ class HbmMemoryBudget:
     full_optimizer = params * 2 * BYTES_FP32
     full_master_weights = params * BYTES_FP32
     full_gradient = full_weight
-    weight_per_gpu = full_weight / tp_degree
-    optimizer_per_gpu = full_optimizer / (tp_degree * dp_nodes)
-    gradient_per_gpu = full_gradient / (tp_degree * dp_nodes)
-    master_weights_per_gpu = full_master_weights / (tp_degree * dp_nodes)
+    weight_per_gpu = full_weight / replica_gpus
+    optimizer_per_gpu = full_optimizer / replica_gpus
+    gradient_per_gpu = full_gradient / replica_gpus
+    master_weights_per_gpu = full_master_weights / replica_gpus
+    state_per_gpu = weight_per_gpu + gradient_per_gpu + master_weights_per_gpu + optimizer_per_gpu
     total_min = weight_per_gpu + optimizer_per_gpu + master_weights_per_gpu + activation_min + gradient_per_gpu + comm_min
     total_max = weight_per_gpu + optimizer_per_gpu + master_weights_per_gpu + activation_max + gradient_per_gpu + comm_max
     total_min_pct = (total_min / hbm_capacity).to("").magnitude * 100
@@ -984,16 +1049,22 @@ class HbmMemoryBudget:
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     weight_per_gpu_gb_val = weight_per_gpu.to(GB).magnitude
     optimizer_per_gpu_gb_val = optimizer_per_gpu.to(GB).magnitude
-    check(abs(weight_per_gpu_gb_val - 43.75) < 1e-9, f"Expected 43.75 GB weights/GPU, got {weight_per_gpu_gb_val}")
-    check(0.6 < optimizer_per_gpu_gb_val < 0.8, "Optimizer shard should include TP and DP partitioning")
+    check(replica_gpus == 64, "Shared replica spans 64 GPUs (TP8 x PP8)")
+    check(abs(weight_per_gpu_gb_val - 5.46875) < 1e-9, f"Expected 5.47 GB weights/GPU, got {weight_per_gpu_gb_val}")
+    check(abs(optimizer_per_gpu_gb_val - 21.875) < 1e-9, "Adam moments split over the 64-GPU replica")
+    check(abs(master_weights_per_gpu.to(GB).magnitude - 10.9375) < 1e-9, "FP32 master weights split over the replica")
+    check(abs((state_per_gpu - run_step.state_per_gpu).to(GB).magnitude) < 1e-9, "Table state rows must sum to the step's 43.75 GB state per GPU")
+    check(fleet is StorageFuelLineContext.run_cluster, "Budget describes the chapter's running cluster")
+    check(abs(hbm_capacity.to(GiB).magnitude - 80) < 1e-9, "Caption and prose name an 80 GB (binary) device")
     check(total_max < hbm_capacity, "Budget should fit within 80 GB HBM under these assumptions")
-    check(abs(master_weights_per_gpu.to(GB).magnitude - 0.341796875) < 1e-9, "FP32 master weights must be included after both partitions")
+    check(0.6 < total_min / hbm_capacity and total_max / hbm_capacity < 0.85, "Prose and caption say the budget occupies most of the device")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    hbm_capacity_gb_str = fmt_memory_capacity(80 * GB, unit=GB, precision=0, commas=False)
-    weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
+    hbm_capacity_gb_str = fmt_memory_capacity(hbm_capacity, unit=GiB, precision=0, commas=False)
+    replica_gpus_str = fmt(replica_gpus, precision=0, commas=False)
+    weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=1, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
-    master_weights_per_gpu_gb_str = fmt_memory(master_weights_per_gpu, unit=GB, precision=2, commas=False)
+    master_weights_per_gpu_gb_str = fmt_memory(master_weights_per_gpu, unit=GB, precision=1, commas=False)
     gradient_per_gpu_gb_str = fmt_memory(gradient_per_gpu, unit=GB, precision=1, commas=False)
     activation_range_str = fmt_qty_range(activation_min, activation_max, GB, precision=0, commas=False)
     comm_range_str = fmt_qty_range(comm_min, comm_max, GB, precision=0, commas=False)
@@ -1015,15 +1086,15 @@ class HbmMemoryBudget:
 
 | **Component**                             |                     **Size per GPU**                     |
 |:------------------------------------------|:--------------------------------------------------------:|
-| Model Weights (FP16, 8-way shard)         |     `{python} HbmMemoryBudget.weight_per_gpu_gb_str`     |
-| Optimizer State (node-sharded)            |   `{python} HbmMemoryBudget.optimizer_per_gpu_gb_str`    |
-| FP32 Master Weights (node-sharded)        | `{python} HbmMemoryBudget.master_weights_per_gpu_gb_str` |
+| Model Weights (FP16, replica slice)       |     `{python} HbmMemoryBudget.weight_per_gpu_gb_str`     |
+| Optimizer State (replica slice)           |   `{python} HbmMemoryBudget.optimizer_per_gpu_gb_str`    |
+| FP32 Master Weights (replica slice)       | `{python} HbmMemoryBudget.master_weights_per_gpu_gb_str` |
 | Activations (variable by sequence length) |     `{python} HbmMemoryBudget.activation_range_str`      |
-| Gradient Buffers (FP16, node-sharded)     |    `{python} HbmMemoryBudget.gradient_per_gpu_gb_str`    |
+| Gradient Buffers (FP16, replica slice)    |    `{python} HbmMemoryBudget.gradient_per_gpu_gb_str`    |
 | Communication Buffers (NCCL)              |        `{python} HbmMemoryBudget.comm_range_str`         |
 | **Total Occupied**                        |      **`{python} HbmMemoryBudget.total_range_str`**      |
 
-: **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when splitting a 175B model eight ways inside the node and sharding optimizer and gradient state across `{python} StorageFuelLineContext.run_nodes_str` nodes. The optimizer, master-weight, and gradient rows are per-GPU shards after both levels of partitioning. The resulting budget occupies most of a `{python} HbmMemoryBudget.hbm_capacity_gb_str` HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
+: **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when one replica of a 175B model and its unsharded mixed-precision Adam state is split across `{python} StorageFuelLineContext.replica_gpus_str` GPUs, `{python} StorageFuelLineContext.tp_degree_str` ways inside each node and across a pipeline of `{python} StorageFuelLineContext.pp_degree_str` nodes. The weight, optimizer, master-weight, and gradient rows are each GPU's 1/`{python} HbmMemoryBudget.replica_gpus_str` slice. The resulting budget occupies most of an `{python} HbmMemoryBudget.hbm_capacity_gb_str` HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
 
 Even with aggressive partitioning, the total memory footprint reaches `{python} HbmMemoryBudget.total_range_str` in decimal gigabytes, about `{python} HbmMemoryBudget.total_pct_range_str` of the HBM pool (the device's nominal `{python} HbmMemoryBudget.hbm_capacity_gb_str` is a binary capacity, slightly larger than 80 decimal gigabytes). The remaining headroom shrinks further once fragmentation and framework workspaces are included, and that headroom is all the incoming data pipeline has to work with. An input batch and its activations occupy HBM for one training step, while model weights and optimizer state persist across steps. Prefetching the next batch therefore competes with the live training footprint for scarce capacity; a deeper input queue is useful only if the memory budget can accommodate it.
 
@@ -1088,7 +1159,7 @@ The three roles interact in subtle ways. The prefetch buffer and the augmentatio
 
 The physical layout of DRAM also matters. On a dual-socket node, each socket's DRAM forms a non-uniform memory access (NUMA) domain local to the GPUs on that socket's PCIe root complex, and reaching the other socket's DRAM crosses the inter-socket link, with a penalty that depends on the processor, topology, and concurrent traffic (@sec-compute-infrastructure-pcie-hierarchy-within-node-c56f). NUMA-aware allocation\index{NUMA!aware allocation} keeps each data loader worker and its prefetch buffer in the same NUMA domain as the GPUs it serves; the gain should be measured on the target node rather than assumed.
 
-Host DRAM sits below the first cliff of @sec-storage-bandwidth-cliffs, and the host-to-GPU interconnect adds a separate cliff, with effective transfer bandwidth depending on whether the node uses PCIe or NVLink. In the conventional path that stages payloads through host memory, a depleted DRAM prefetch buffer leaves the accelerator waiting for lower tiers. The direct path of @sec-storage-gds removes that staging copy when the data layout and devices support it. In the running example, the `{python} StorageFuelLineContext.run_nodes_str`-node cluster requires each node's host DRAM to sustain a continuous flow of packed token batches ready for PCIe transfer. If the NVMe-to-DRAM read pipeline falls behind by even a few hundred milliseconds, the prefetch buffer drains and the accelerator idles until the next batch arrives.
+Host DRAM sits below the first cliff of @sec-storage-bandwidth-cliffs, and the host-to-GPU interconnect adds a separate cliff, with effective transfer bandwidth depending on whether the node uses PCIe or NVLink. In the conventional path that stages payloads through host memory, a depleted DRAM prefetch buffer leaves the accelerator waiting for lower tiers. The direct path of @sec-storage-gds removes that staging copy when the data layout and devices support it. In the running example, the `{python} StorageFuelLineContext.run_nodes_str`-node cluster requires each node's host DRAM to sustain a continuous flow of packed token batches ready for PCIe transfer. If the NVMe-to-DRAM read pipeline falls behind by more time than the prefetch buffer covers, the buffer drains and the accelerator idles until the next batch arrives.
 
 ```{python}
 #| echo: false
@@ -1155,7 +1226,7 @@ class NvmeTierContext:
     dwpd = 1  # scenario assumption: drive writes per day
     warranty_years = 5  # scenario assumption: enterprise warranty period
     drive_lifetime_writes = nvme_drive_capacity * dwpd * warranty_years * 365
-    ckpt_nodes = Systems.Clusters.Production_2K.count
+    ckpt_nodes = Systems.Clusters.Production_2K_NDR.count
     ckpt_node_share = Scenarios.Gpt3TieredCheckpoint2K.result.per_node_shard.to(GB)
     ckpts_per_day = (1 * day / ReferenceStats.StorageTrainingCorpus.CheckpointInterval).to("").magnitude
     ckpt_node_daily_writes = ckpt_node_share * ckpts_per_day
@@ -1952,7 +2023,7 @@ class ObjectStreamContext:
     tokenized_text = training_tokens * token_id_bytes
     tokenized_shard_count_val = Scenarios.Gpt3StorageFootprint.result.shard_count
     text_bw = Scenarios.TextInputDemand2K.result.bandwidth
-    n_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    n_nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     workers_per_node = 8  # scenario assumption: data-loader workers per node
     shards_per_node_val = round(tokenized_shard_count_val / n_nodes)
     concurrent_requests_val = n_nodes * workers_per_node
@@ -1965,7 +2036,7 @@ class ObjectStreamContext:
     shards_per_node_str = fmt_int(shards_per_node_val)
     concurrent_requests_str = fmt_count(concurrent_requests_val, commas=True)
 ```
-Applying this streaming architecture to the running example makes the design concrete as an alternative to the staged path the chapter adopts. Instead of copying shards to local NVMe at job start, the cluster would read them from the object store throughout the run. The tokenized training set is stored in an S3-like object store as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of `{python} ObjectStreamContext.tokenized_shard_gb_str` each. The streaming architecture assigns each of the `{python} ObjectStreamContext.n_nodes_str` compute nodes a unique subset of roughly `{python} ObjectStreamContext.shards_per_node_str` shards. Within each node, `{python} ObjectStreamContext.workers_per_node_str` data loader worker processes issue concurrent HTTP `Range` requests to fetch 256 MB chunks from their assigned shards. Across the cluster, this results in `{python} ObjectStreamContext.concurrent_requests_str` concurrent requests, allowing aggregate throughput in the 50--100 GB/s range when the object store and network path are provisioned for it, far exceeding the roughly `{python} ObjectStreamContext.text_bw_mb_per_s_str` required by the generic text job in the text-versus-image comparison. The running example's average input demand is lower still. The network between the compute cluster's virtual private cloud (VPC, its isolated network inside the provider) and the object-storage endpoint can cap streaming throughput, but at these provisioned service rates the cap still exceeds what the running job needs. Organizations that co-locate compute and storage in the same cloud availability zone (one isolated data-center site of a provider) can reduce cross-network latency, directly reducing the required prefetch buffer depth and improving overall pipeline efficiency.
+Applying this streaming architecture to the running example makes the design concrete as an alternative to the staged path the chapter adopts. Instead of copying shards to local NVMe at job start, the cluster would read them from the object store throughout the run. The tokenized training set is stored in an S3-like object store as roughly `{python} ObjectStreamContext.tokenized_shard_count_str` shards of `{python} ObjectStreamContext.tokenized_shard_gb_str` each. The streaming architecture assigns each of the `{python} ObjectStreamContext.n_nodes_str` compute nodes a unique subset of roughly `{python} ObjectStreamContext.shards_per_node_str` shards. Within each node, `{python} ObjectStreamContext.workers_per_node_str` data loader worker processes issue concurrent HTTP `Range` requests to fetch 256 MB chunks from their assigned shards. Across the cluster, this results in `{python} ObjectStreamContext.concurrent_requests_str` concurrent requests, allowing aggregate throughput in the 50--100 GB/s range when the object store and network path are provisioned for it, far exceeding the roughly `{python} ObjectStreamContext.text_bw_mb_per_s_str` required by the generic text job in the text-versus-image comparison. The running example's average input demand is lower still. The network between the compute cluster's virtual private cloud (VPC, its isolated network inside the provider) and the object-storage endpoint can cap streaming throughput, but at these provisioned service rates the cap still exceeds what the running job needs. Organizations that co-locate compute and storage in the same cloud availability zone (one isolated data-center site of a provider) can reduce cross-network latency, which lowers the required prefetch buffer depth for jobs with short steps and improves overall pipeline efficiency.
 
 That request parallelism is what object storage rewards. Each of the `{python} ObjectStreamContext.concurrent_requests_str` GET requests is independent and can be served by a different storage node within the cloud provider's infrastructure, and the count grows with the fleet. With each request fetching a 256 MB chunk of a shard, the aggregate throughput depends on the cloud provider's network capacity, internal bandwidth, and request-rate quotas. The practical limit is often the network bandwidth between the compute cluster and the object storage service, not the storage service's internal media bandwidth.
 
@@ -2721,21 +2792,13 @@ $$\MinimumPrefetchBufferCount= \left\lceil \frac{\TailStepIoTime}{\IronLawComput
 
 The prefetch depth equation in @eq-prefetch-depth estimates how many ready batches cover the selected latency window. Outstanding reads contribute to replenishing that buffer but do not count as ready batches until they complete. The equation assumes that the long-run data supply rate is at least as high as the accelerator's consumption rate; prefetching absorbs latency variance, not a sustained bandwidth deficit. When average throughput is sufficient but p99 latency exceeds compute time, deeper prefetching absorbs delays within the provisioned window; rarer or correlated delays can still cause stalls. When sustained delivery is lower than demand, identify the limiting stage before choosing more storage bandwidth, additional decoding capacity, a different representation, or local staging. The equation uses the p99 delay rather than the mean because a buffer sized for the mean drains whenever a slow read arrives, and the tail-latency arithmetic of @sec-storage-tier3-pfs shows that when a step depends on many servers, some read is slow on most steps. Even the p99 window leaves rarer events and correlated interruptions to test.
 
-If object-storage reads take 500 ms at the 99th percentile and compute takes `{python} StorageFuelLineContext.step_time_ms_str`, then $\MinimumPrefetchBufferCount= 3$ batches; provisioning five ready batches adds a margin. A data loader's configured work-ahead count (for example, a per-worker prefetch factor) is not a count of ready batches, because some of that work may still be loading or preprocessing. The quantity that protects the accelerator is completed-queue occupancy and its refill rate, measured against the delay window on whichever tier serves the reads.
-
-::: {.column-margin}
-![](images/svg/vol2_data_storage_margin_002.svg){width="100%" fig-alt="Sequence strip showing a 500 ms p99 I/O delay spanning two and a half 200 ms compute windows, which rounds up to a prefetch depth of three batches."}
-
-*A 500 ms p99 read spans 2.5 steps of 200 ms, so three ready batches must cover it.*
-:::
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-pipelining—prefetch-depth memory cost
 import math
 from mlsysim import Systems
-from mlsysim.fmt import check, fmt, fmt_math, fmt_memory, fmt_qty_int, fmt_time
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_math, fmt_memory, fmt_qty_int, fmt_time
 
 class PrefetchDepth:
     # ┌── 1. LOAD ─────────────────────────────────────────
@@ -2771,7 +2834,14 @@ class PrefetchDepth:
     nvme_depth_math = fmt_math(rf"\lceil {nvme_p99_ms}/{compute_ms} \rceil = {nvme_depth}")
     pfs_depth_math = fmt_math(rf"\lceil {pfs_p99_ms}/{compute_ms} \rceil = {pfs_depth}")
     obj_depth_str = fmt(obj_depth, precision=0)
+    obj_steps_str = fmt(obj_p99_ms / compute_ms, precision=1, commas=False)
+    nvme_depth_str = fmt(nvme_depth, precision=0)
+    obj_depth_math = fmt_math(rf"\MinimumPrefetchBufferCount = {obj_depth}")
     obj_safety_str = fmt(obj_safety_depth, precision=0)
+    _number_words = {3: "three", 5: "five"}  # prose spells out small counts
+    obj_depth_words_str = MarkdownStr(_number_words[obj_depth])
+    check(obj_safety_depth in _number_words, "Spelled-out safety depth must exist for the prose")
+    obj_safety_words_str = MarkdownStr(_number_words[obj_safety_depth])
     obj_buf_gpu_mb_str = fmt_memory(obj_buf_gpu, unit=MB, precision=0, commas=False)
     obj_buf_node_gb_str = fmt_memory(obj_buf_node, unit=GB, precision=1, commas=False)
     min_buf_node_mb_str = fmt_memory(min_buf_node, unit=MB, precision=0, commas=False)
@@ -2780,13 +2850,63 @@ class PrefetchDepth:
     deep_buf_gpu_mb_str = fmt_qty_int(deep_buf_gpu, MB, commas=False)  # "about"
 ```
 
+If object-storage reads take `{python} PrefetchDepth.obj_p99_ms_str` at the 99th percentile and compute takes `{python} PrefetchDepth.compute_ms_str`, then `{python} PrefetchDepth.obj_depth_math` batches; provisioning `{python} PrefetchDepth.obj_safety_words_str` ready batches adds a margin. A data loader's configured work-ahead count (for example, a per-worker prefetch factor) is not a count of ready batches, because some of that work may still be loading or preprocessing. The quantity that protects the accelerator is completed-queue occupancy and its refill rate, measured against the delay window on whichever tier serves the reads.
+
+::: {.column-margin}
+![](images/svg/vol2_data_storage_margin_002.svg){width="100%" fig-alt="Sequence strip showing a 500 ms p99 I/O delay spanning two and a half 200 ms compute windows, which rounds up to a prefetch depth of three batches."}
+
+*A `{python} PrefetchDepth.obj_p99_ms_str` p99 read spans `{python} PrefetchDepth.obj_steps_str` steps of `{python} PrefetchDepth.compute_ms_str`, so `{python} PrefetchDepth.obj_depth_words_str` ready batches must cover it.*
+:::
+
 The image job of notebook \ref{nbk-data-storage-text-vs-image-bandwidth} shows how prefetch buffer depth\index{Prefetch buffer!depth calculation} follows the serving tier. Each GPU processes its batch in roughly `{python} PrefetchDepth.compute_ms_str`, and once its `{python} TextImageBandwidth.image_batch_per_gpu_str` images are decoded into $224{\times}224{\times}3$-byte tensors, the collated batch occupies about `{python} PrefetchDepth.batch_mb_str` per GPU. Reading from local NVMe, the p99 I/O latency for that batch is approximately `{python} PrefetchDepth.nvme_p99_ms_str`. Under the p99-window model, the minimum ready-buffer depth is `{python} PrefetchDepth.nvme_depth_math` batch, and this example provisions a depth of 2. Reading from a parallel file system, the p99 I/O latency rises to roughly `{python} PrefetchDepth.pfs_p99_ms_str` due to network jitter and contention, requiring a minimum depth of `{python} PrefetchDepth.pfs_depth_math`, with an illustrative provisioned depth of 3. Reading from object storage, the p99 latency can exceed `{python} PrefetchDepth.obj_p99_ms_str`, requiring a depth of at least `{python} PrefetchDepth.obj_depth_str`, with an illustrative provisioned depth of `{python} PrefetchDepth.obj_safety_str` or more.
 
 These ready-batch depths translate directly into host DRAM consumption. At `{python} PrefetchDepth.batch_mb_str` per batch, a depth-`{python} PrefetchDepth.obj_safety_str` prefetch buffer per GPU consumes `{python} PrefetchDepth.obj_buf_gpu_mb_str`, and `{python} PrefetchDepth.gpus_per_node_str` GPUs per node consume `{python} PrefetchDepth.obj_buf_node_gb_str`. At `{python} PrefetchDepth.batch_mb_str` per batch with a depth of 1, the same node needs only `{python} PrefetchDepth.min_buf_node_mb_str`. Measured delivery delays, batch size, and the chosen protection window determine this memory budget. Queue occupancy and refill rate must still be tested under correlated delays.
 
 The representation decides whether that depth is cheap. Text barely registers, because a per-GPU batch of a few packed 4,096-token sequences occupies tens of kilobytes, so even a deep text queue is negligible. Decoded images are where depth costs memory. The `{python} TextImageBandwidth.image_batch_per_gpu_str`-image batch above is roughly `{python} PrefetchDepth.decoded_batch_mb_str` before rounding, and a buffer of `{python} PrefetchDepth.deep_depth_str` such batches consumes about `{python} PrefetchDepth.deep_buf_gpu_mb_str` per GPU, modest against a node's `{python} DRAMInterconnect.node_dram_gb_str` of DRAM even after multiplying by the GPUs on the node. Higher-resolution images and video raise the per-batch size by an order of magnitude or more, at which point the prefetch buffer competes with embedding tables and other DRAM consumers.
 
-Prefetching and the storage hierarchy together form a layered defense against stalls. The prefetch buffer in host DRAM absorbs I/O variance from NVMe reads. The local NVMe cache absorbs network variance from shared storage (whether a parallel file system or an object store). The parallel file system read-ahead cache absorbs variance from disk seeks across the OSS cluster. Because each layer adds latency tolerance at the cost of memory or storage capacity, the system designer must check each active path against the interruption window it is intended to absorb and verify that sustained delivery replenishes the consumed batches. The running example's shards come from object storage, whose `{python} PrefetchDepth.obj_p99_ms_str` p99 against a `{python} StorageFuelLineContext.step_time_ms_str` step would call for `{python} PrefetchDepth.obj_depth_str` ready batches if every read went to that tier. Once the shards are staged on local NVMe, every training read is a local hit, and the prefetch buffer needs to absorb only the `{python} PrefetchDepth.nvme_p99_ms_str` local p99, which a single ready batch covers.
+Prefetching and the storage hierarchy together form a layered defense against stalls. The prefetch buffer in host DRAM absorbs I/O variance from NVMe reads. The local NVMe cache absorbs network variance from shared storage (whether a parallel file system or an object store). The parallel file system read-ahead cache absorbs variance from disk seeks across the OSS cluster. Because each layer adds latency tolerance at the cost of memory or storage capacity, the system designer must check each active path against the interruption window it is intended to absorb and verify that sustained delivery replenishes the consumed batches.
+
+```{python}
+#| echo: false
+#| label: data-storage-running-job-prefetch-depth
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREFETCH DEPTH FOR THE 175B RUNNING JOB (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-pipelining, the paragraph below (staging and depth).
+# │
+# │ Goal: Show that the image job's 3-to-1 staging contrast does not carry over
+# │       to the 175B running job, whose modeled step is seconds long.
+# │ Show: ceil(p99 / step) = 1 ready batch on every tier at the ~4.64 s step;
+# │       the 500 ms object-store p99 is ~11 percent of one step.
+# │ How:  Same PrefetchDepthModel and tier p99s as Scenarios.PrefetchDepthByTier,
+# │       with the compute window set to the modeled step of
+# │       Scenarios.DenseLLMPretrainingStep2K (StorageFuelLineContext.step_time).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.solvers import PrefetchDepthModel
+from mlsysim.fmt import check, fmt_math, fmt_percent
+
+class RunningJobPrefetchDepth:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    tiers = Scenarios.PrefetchDepthByTier
+    step = StorageFuelLineContext.step_time  # modeled 175B step on the running cluster
+    obj_p99 = tiers.tail_latencies["object"]
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    result = PrefetchDepthModel().solve(step, tiers.tail_latencies, tiers.batch_bytes, tiers.safety_depth, tiers.consumers_per_node)
+    depths = result.depths
+    obj_step_fraction = (obj_p99 / step).to("").magnitude
+    step_ms = int(round(step.to(ms).magnitude))
+    obj_p99_ms = int(round(obj_p99.to(ms).magnitude))
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(set(depths.values()) == {1}, "One ready batch covers the p99 on every tier at the multi-second step")
+    check(PrefetchDepth.obj_depth == 3 and PrefetchDepth.nvme_depth == 1, "The image job keeps its 3-to-1 contrast")
+    check(PrefetchDepth.obj_p99_ms == obj_p99_ms, "Both paragraphs quote the same object-store p99")
+    check(0.10 < obj_step_fraction < 0.12, "Prose says the object-store p99 is about 11 percent of one step")
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    obj_step_fraction_pct_str = fmt_percent(round(obj_step_fraction, 2), precision=0, style="prose")  # "about"
+    obj_depth_math = fmt_math(rf"\lceil {obj_p99_ms}/{step_ms:,} \rceil = {depths['object']}".replace(",", "{,}"))
+```
+
+The image job shows what staging buys when steps are short. Its `{python} PrefetchDepth.obj_p99_ms_str` object-store p99 against a `{python} PrefetchDepth.compute_ms_str` step calls for `{python} PrefetchDepth.obj_depth_str` ready batches, while a local NVMe hit at `{python} PrefetchDepth.nvme_p99_ms_str` needs only `{python} PrefetchDepth.nvme_depth_str`. The 175B running example sits at the other end of the scale. Against its modeled `{python} StorageFuelLineContext.step_time_s_attr_str` step, even the object-store p99 is about `{python} RunningJobPrefetchDepth.obj_step_fraction_pct_str` of one step, so `{python} RunningJobPrefetchDepth.obj_depth_math` ready batch covers the p99 on every tier, and staging its shards on local NVMe does not reduce its prefetch depth. The running example stages for other reasons, which @sec-storage-economics weighs. The copy happens once before training starts, and local reads remove the rarer and correlated object-store delays that a buffer sized to the p99 does not cover.
 
 ::: {#chk-data-storage-data-pipeline-design .callout-checkpoint title="Data pipeline design"}
 
@@ -2854,7 +2974,7 @@ from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_time
 class PrestagingTime:
     # ┌── 1. LOAD ─────────────────────────────────────────
     dataset = 10 * TB  # scenario assumption: dataset to prestage
-    nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     per_node_bw = 500 * (MB / second)  # scenario assumption: per-node share of shared-storage bandwidth
     # ┌── 2. EXECUTE ──────────────────────────────────────
     per_node_bytes = dataset / nodes
@@ -2935,7 +3055,7 @@ from mlsysim.fmt import fmt, fmt_memory, fmt_time
 class NodeStagingContext:
     training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
-    n_training_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    n_training_nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     uncontended_pfs_bw = Systems.Storage.PfsPerNodeShare.bandwidth
     contended_pfs_bw = 0.4 * (GB / second)  # scenario assumption: per-node rate under recovery contention
     tokenized_text = training_tokens * token_id_bytes
@@ -3374,7 +3494,7 @@ Every copy that leaves the node also needs a network, and the choice of network 
 
 For the running example, each node's fair share of a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` file system shared by `{python} StoragePyramidContext.pfs_nodes_str` nodes is roughly `{python} StoragePyramidContext.pfs_per_node_bw_gb_per_s_str`, and copying its roughly `{python} NvmeTierContext.ckpt_node_share_gb_str` checkpoint shard within the `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval needs far less, so a front-end network can carry it. Image workloads that stream hundreds of GB/s across the cluster push designs toward the compute fabric. Through the C$^3$ lens, storage traffic becomes communication ($\OperationalTaxonomyDimension_2$) load the moment it leaves the node, and the network chosen to carry it decides which collectives a storage burst can delay.
 
-Over the `{python} StorageFuelLineContext.training_window_attr_str` run, checkpointing writes roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state against a single read of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset, so checkpoints, not training inputs, are the storage workload to design next. That design must take a multi-terabyte save off the training critical path without ever exposing a checkpoint that cannot be restored.
+Over the `{python} StorageFuelLineContext.training_window_attr_str` window, checkpointing writes roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state against a single read of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset, so checkpoints, not training inputs, are the storage workload to design next. That design must take a multi-terabyte save off the training critical path without ever exposing a checkpoint that cannot be restored.
 
 ```{python}
 #| echo: false
@@ -3406,9 +3526,9 @@ After the `{python} StorageFuelLineContext.run_accels_str` accelerators of the r
 
 Under the resumable mixed-precision Adam\index{Adam optimizer!checkpoint state size} contract of @sec-storage-fuel-line, the `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model's `{python} CheckpointModelIntro.ckpt_total_gb_str` checkpoint comprises `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.master_weights_fp32_gb_str` of FP32 master weights, and `{python} CheckpointModelIntro.adam_moments_gb_str` for the two FP32 Adam moments, while learning-rate-scheduler state, random-number-generator state, and the data-loader cursor add negligible bytes and gradients are recomputed after restore. When a save triggers, every participating worker process, called a rank, writes its assigned shard at once, producing the checkpoint storm introduced in @sec-storage-workload-inversion.
 
-Keeping that burst tractable requires the write-once rule, under which a coordinated save writes each unique byte once, whatever the parallel layout. In the running layout of @tbl-hbm-memory-budget, the Adam moments and master weights already exist as distinct per-node slices, so each node writes its slices as they stand. The FP16 weights need different handling, because every node holds the same complete copy. A coordinated save therefore assigns each of the `{python} StorageFuelLineContext.run_nodes_str` nodes a disjoint 1/`{python} StorageFuelLineContext.run_nodes_str` slice of its local FP16 weight copy to write alongside its unique optimizer slice. Spreading those unique bytes evenly gives each of the `{python} StorageFuelLineContext.run_nodes_str` nodes about 1/`{python} StorageFuelLineContext.run_nodes_str` of the checkpoint. The third ZeRO stage (ZeRO-3), which partitions the weights as well, makes that even split the natural one, because every rank already owns a distinct slice.
+Keeping that burst tractable requires the write-once rule, under which a coordinated save writes each unique byte once, whatever the parallel layout. In the running layout of @tbl-hbm-memory-budget, each node holds the 1/`{python} StorageFuelLineContext.pp_degree_digits_str` of a replica's state that belongs to its pipeline stage, and all `{python} StorageFuelLineContext.run_replicas_str` replicas hold identical copies of it. A coordinated save therefore assigns each replica a disjoint 1/`{python} StorageFuelLineContext.run_replicas_digits_str` of every stage slice, so each of the `{python} StorageFuelLineContext.run_nodes_str` nodes writes about 1/`{python} StorageFuelLineContext.run_nodes_str` of the checkpoint. The third ZeRO stage (ZeRO-3), which partitions the weights as well, makes that even split the natural one, because every rank already owns a distinct slice.
 
-Breaking the write-once rule is a real risk even in the running layout, where a save in which every node writes the FP16 weight copy it holds would multiply the weight bytes by the node count. Its cost is clearest in a deliberately extreme thought experiment, a smaller model whose complete resumable state is written once per GPU of the book's reference cluster.
+Breaking the write-once rule is a real risk even in the running layout, where a save in which every replica writes the full state it holds would multiply the checkpoint bytes by the replica count. Its cost is clearest in a deliberately extreme thought experiment, a smaller model whose complete resumable state is written once per GPU of the book's reference cluster.
 
 ::: {.column-margin}
 ![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Two-bar log-scale ladder: a long slate bar for every replica writing its full state, 167.3 minutes, above a short bar for one coordinated copy, 9.8 seconds, with a double arrow labeled 1,024 times."}
@@ -3491,7 +3611,7 @@ The severity of a checkpoint storm depends on two factors: the per-node shard si
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: nbk-data-storage-checkpoint-storm.
 # │ Goal: Compute local NVMe pause, PFS async copy time, and exposed overhead.
-# │ How: ZeRO-3 shard = total checkpoint / nodes; local write uses 4 NVMe drives;
+# │ How: write-once shard = total checkpoint / nodes; local write uses 4 NVMe drives;
 # │      PFS copy uses aggregate PFS bandwidth shared across all nodes.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Systems
@@ -3580,30 +3700,33 @@ The exposed pause and the durability boundary therefore fall at different moment
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: chk-data-storage-checkpoint-storage-design
-# │ Goal: Prompt parameters for the checkpoint storage design exercise.
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_bandwidth, fmt_count, fmt_time
+# │ Context: chk-data-storage-checkpoint-storage-design; pause-cost paragraph of
+# │          @sec-storage-distributed-checkpoint
+# │ Goal: Prompt parameters for the checkpoint storage design exercise, and the
+# │       cost of a synchronous pause at the modeled 175B step (~4.64 s).
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_percent, fmt_time
 
 class CheckpointStorageDesignPrompt:
-    nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
     local_nvme_bw = Systems.Storage.LocalNvmeGen4_7T68x4.aggregate_bandwidth
     pfs_aggregate_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
-    step_time = ReferenceStats.StorageTrainingCorpus.StepTime
+    step_time = StorageFuelLineContext.step_time  # modeled 175B step on the running cluster
     pause = 1 * second  # scenario assumption: checkpoint pause budget
-    pause_steps = (pause / step_time).to("").magnitude
-    check(abs(pause_steps - round(pause_steps)) < 1e-9, "The pause budget should span a whole number of iterations")
+    pause_step_fraction = (pause / step_time).to("").magnitude
+    pause_interval_fraction = (pause / checkpoint_interval).to("").magnitude
+    check(0.2 < pause_step_fraction < 0.25, "Prose says a one-second pause costs about a fifth (22 percent) of one step")
+    check(0.0015 < pause_interval_fraction < 0.0018, "Prose says the pause is about 0.17 percent of the save interval")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     nodes_str = fmt_count(nodes, commas=True, label="node")
     checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
     local_nvme_bw_gb_per_s_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
     pfs_aggregate_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
-    step_time_ms_str = fmt_time(step_time, ms, precision=0, commas=False)
+    step_time_s_attr_str = fmt_time(step_time, second, precision=2, commas=False, style='word', attributive=True)
     pause_str = fmt_time(pause, second, precision=0, attributive=True, style='word')
-    number_words = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
-    check(round(pause_steps) < len(number_words), "Spelled-out iteration count must be ten or fewer")
-    pause_steps_words_str = MarkdownStr(number_words[round(pause_steps)] + " iterations")  # prose spells out small counts
+    pause_step_fraction_pct_str = fmt_percent(round(pause_step_fraction, 2), precision=0, style='prose')  # "about"
+    pause_interval_fraction_pct_str = fmt_percent(round(pause_interval_fraction, 4), precision=2, style='prose')
 ```
 
 ### Synchronous and asynchronous checkpoint writes {#sec-storage-distributed-checkpoint}
@@ -3612,7 +3735,7 @@ In the two-phase timeline of @fig-storage-checkpoint-staging, the first phase is
 
 Asynchronous checkpointing shrinks even that local-flash pause by staging the snapshot in host DRAM first. Nodes coordinate the training step to capture, copy each accelerator-resident shard into a dedicated pinned host-memory buffer, and resume training immediately while a background thread writes the buffer to local NVMe. The snapshot buffer must remain immutable until the background write finishes; separate live-state buffers allow training to advance without changing the captured generation. If a node fails during the asynchronous write, its local shard may be incomplete. The job must wait for the required writes or peer replication before declaring this generation durable, even if training has already resumed.
 
-The choice between synchronous and asynchronous checkpointing depends on the pause budget and save frequency. A `{python} CheckpointStorageDesignPrompt.pause_str` pause at `{python} CheckpointStorageDesignPrompt.step_time_ms_str` per iteration costs `{python} CheckpointStorageDesignPrompt.pause_steps_words_str`; whether that overhead is acceptable depends on how much useful training occurs between saves. Asynchronous checkpointing reduces exposed write time when snapshot buffers and background bandwidth are available, but its buffer capacity, contention, and durability delay also enter the decision.
+The choice between synchronous and asynchronous checkpointing depends on the pause budget and save frequency. A `{python} CheckpointStorageDesignPrompt.pause_str` pause costs the running example about `{python} CheckpointStorageDesignPrompt.pause_step_fraction_pct_str` of one modeled `{python} CheckpointStorageDesignPrompt.step_time_s_attr_str` step, or `{python} CheckpointStorageDesignPrompt.pause_interval_fraction_pct_str` of the `{python} StorageFuelLineContext.checkpoint_interval_attr_str` save interval. At that cadence a synchronous save is cheap; the overhead grows with pause length times save frequency, so the case for asynchronous checkpointing strengthens as saves come more often or pauses grow longer. Asynchronous checkpointing reduces exposed write time when snapshot buffers and background bandwidth are available, but its buffer capacity, contention, and durability delay also enter the decision.
 
 Checkpoint formats\index{Checkpointing!format optimization} implement the write-once rule of the checkpoint storm as rank-sharded saves, as in DeepSpeed's zero-redundancy checkpointing\index{Checkpointing!zero-redundancy} and PyTorch's Distributed Checkpoint\index{Distributed Checkpoint!rank-sharded data} [@pytorchDistributedCheckpointDocs]. The sharding is what keeps the pause short. Had one node saved the full `{python} CheckpointModelIntro.ckpt_total_gb_str` itself, its `{python} CheckpointStormCalc.local_bw_gb_per_s_str` local stripe would need more than a minute rather than the `{python} CheckpointStormCalc.local_write_s_str` of an even shard. Making each individual save fast, however, creates a cumulative capacity problem once thousands of snapshots accumulate over a multi-week run.
 
@@ -3643,7 +3766,7 @@ class CheckpointFleetRetention:
     retained_every_100_count_str = fmt(retained_every_100_count_val, precision=0)
 ```
 
-Checkpointing a 175B-parameter model every `{python} StorageFuelLineContext.checkpoint_interval_str` over a `{python} StorageFuelLineContext.training_window_attr_str` training run generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` snapshots of `{python} CheckpointModelIntro.ckpt_total_gb_str` each, totaling approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str`, a volume that would crowd a shared parallel file system if retained in full. The retention policy\index{Checkpointing!retention policy} this run adopts keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint and the final checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` periodic historical snapshots in object storage, plus the final checkpoint when it does not coincide with that schedule, for posttraining analysis.
+Checkpointing a 175B-parameter model every `{python} StorageFuelLineContext.checkpoint_interval_str` over a `{python} StorageFuelLineContext.training_window_attr_str` training window generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` snapshots of `{python} CheckpointModelIntro.ckpt_total_gb_str` each, totaling approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str`, a volume that would crowd a shared parallel file system if retained in full. The retention policy\index{Checkpointing!retention policy} this run adopts keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint and the final checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` periodic historical snapshots in object storage, plus the final checkpoint when it does not coincide with that schedule, for posttraining analysis.
 
 Incremental checkpointing\index{Incremental checkpointing!delta state} offers a further optimization for reducing $\CheckpointWriteTime$. Rather than saving the entire training state every time, an incremental checkpoint records changed state relative to a declared base or preceding generation. The delta must include changed optimizer and continuation state as well as parameters. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. Restoring a generation requires its base and every intervening delta, so smaller saves add recovery work and dependencies. Periodic full checkpoints bound that chain, and the retention policy must preserve each dependency until no retained generation requires it. A shorter pause matters only if the checkpoint can be read back; the costlier failure is a checkpoint that was written but never verified as restorable.
 
@@ -3678,7 +3801,7 @@ A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a
 
 :::
 
-With the checkpoint accounting now derived in full, the running example's storage demands can be consolidated against the same hierarchy. Placing the training dataset, live model state, checkpoints, and archive lineage side by side reveals which direction of traffic dominates the 30-day run.
+With the checkpoint accounting now derived in full, the running example's storage demands can be consolidated against the same hierarchy. Placing the training dataset, live model state, checkpoints, and archive lineage side by side reveals which direction of traffic dominates the training window.
 
 ```{python}
 #| echo: false
@@ -3694,7 +3817,7 @@ class StorageFootprintTable:
     token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
     training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    training_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    training_nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     tokenized_text = training_tokens * token_id_bytes
     footprint = Scenarios.Gpt3StorageFootprint.result
     ckpt_total = footprint.checkpoint_bytes
@@ -3719,15 +3842,15 @@ class StorageFootprintTable:
 
 ::: {#psp-data-storage-175b-models-storage-footprint .callout-perspective title="The 175B model's storage footprint"}
 
-The running example, a `{python} StorageFuelLineContext.training_window_attr_str` training run of a 175B-parameter model on `{python} StorageFootprintTable.training_nodes_str`, places data on every tier of the hierarchy (@tbl-data-storage-175b-footprint).
+The running example, a 175B-parameter model trained on `{python} StorageFootprintTable.training_nodes_str` within a `{python} StorageFuelLineContext.training_window_attr_str` window, places data on every tier of the hierarchy (@tbl-data-storage-175b-footprint).
 
 | **Category**                                                                                                                                          |                         **Volume**                         | **Primary tier**                                           |
 |:------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------|
 | Training dataset (compressed source)                                                                                                                  |  `{python} StorageFootprintTable.compressed_text_tb_str`   | Object Storage                                             |
 | Training dataset (tokenized, per epoch)                                                                                                               |   `{python} StorageFootprintTable.tokenized_text_tb_str`   | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
 | Model weights (FP16)                                                                                                                                  |    `{python} CheckpointModelIntro.weights_fp16_gb_str`     | GPU HBM (distributed)                                      |
-| Master weights (FP32)                                                                                                                                 | `{python} CheckpointModelIntro.master_weights_fp32_gb_str` | GPU HBM (ZeRO-partitioned)                                 |
-| Adam moments (two FP32 states)                                                                                                                        |    `{python} CheckpointModelIntro.adam_moments_gb_str`     | GPU HBM (ZeRO-partitioned)                                 |
+| Master weights (FP32)                                                                                                                                 | `{python} CheckpointModelIntro.master_weights_fp32_gb_str` | GPU HBM (distributed)                                      |
+| Adam moments (two FP32 states)                                                                                                                        |    `{python} CheckpointModelIntro.adam_moments_gb_str`     | GPU HBM (distributed)                                      |
 | Single resumable checkpoint                                                                                                                           |     `{python} CheckpointModelIntro.ckpt_total_gb_str`      | NVMe $\to$ PFS $\to$ Object Storage                        |
 | All checkpoints (`{python} StorageFuelLineContext.training_window_days_str`, `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval) |  `{python} StorageFootprintTable.ckpt_fleet_total_pb_str`  | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
 | Archive (retained checkpoints + dataset)                                                                                                              |  `{python} StorageFootprintTable.archive_lineage_tb_str`   | Glacier                                                    |

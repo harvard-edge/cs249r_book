@@ -2743,31 +2743,33 @@ from mlsysim.fmt import fmt_int, fmt_memory
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierNodeTpRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step (TP8 x PP8 x DP16)
+    model = step.replica.workload
     params = model.parameters
-    hidden_dim = Models.Language.GPT3.hidden_dim
-    microbatch = 4  # scenario assumption: sequences per microbatch
-    seq_len = Models.Language.GPT3.context_length
+    hidden_dim = model.hidden_dim
+    microbatch = step.sequences_per_microbatch  # sequences per microbatch in the shared step
+    seq_len = step.context_length
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     activation = microbatch * seq_len * hidden_dim * BYTES_FP16
     gradient_allreduce = model.size_in_bytes(BYTES_FP16)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(model.parameters == Models.Language.GPT3.parameters, "Shared step should train the GPT-3 175B model")
+    check(microbatch == 1, "Prose says one sequence per microbatch")
     check(activation < gradient_allreduce, "Activation payload should be smaller than the gradient buffer")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
     frontier_params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
     hidden_dim_str = fmt(hidden_dim, precision=0, commas=True)
-    microbatch_str = fmt(microbatch, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=True)
     activation_expr_math = fmt_math(rf"{microbatch} \times {seq_len:,} \times {hidden_dim:,} \times {BYTES_FP16}")
     activation_mb_str = fmt_qty_int(activation, MB, commas=False)
     gradient_allreduce_gb_str = fmt_memory(gradient_allreduce, unit=GB, precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierNodeTpRecap.frontier_params_b_str` model with hidden dimension `{python} InfraFrontierNodeTpRecap.hidden_dim_str` and a microbatch of `{python} InfraFrontierNodeTpRecap.microbatch_str` sequences at `{python} InfraFrontierNodeTpRecap.seq_len_str`, the activation tensor at each stage boundary is approximately `{python} InfraFrontierNodeTpRecap.activation_expr_math` bytes (FP16) $\approx$ `{python} InfraFrontierNodeTpRecap.activation_mb_str`. This is far smaller than the `{python} InfraFrontierNodeTpRecap.gradient_allreduce_gb_str` gradient AllReduce required by data parallelism, which is why pipeline parallelism places less demanding requirements on the inter-node network.
+For our `{python} InfraFrontierNodeTpRecap.frontier_params_b_str` model with hidden dimension `{python} InfraFrontierNodeTpRecap.hidden_dim_str` and one sequence of `{python} InfraFrontierNodeTpRecap.seq_len_str` tokens per microbatch, the activation tensor at each stage boundary is approximately `{python} InfraFrontierNodeTpRecap.activation_expr_math` bytes (FP16) $\approx$ `{python} InfraFrontierNodeTpRecap.activation_mb_str`. This is far smaller than the `{python} InfraFrontierNodeTpRecap.gradient_allreduce_gb_str` gradient AllReduce required by data parallelism, which is why pipeline parallelism places less demanding requirements on the inter-node network.
 
 Activation transfers occur once per microbatch per stage boundary. That is far less often than tensor parallelism's AllReduce inside every layer, yet more often than data parallelism's gradient exchange, which happens once per step. Small messages at an intermediate frequency let pipeline parallelism tolerate the lower bandwidth of inter-node links, which makes it the natural way to split a model whose layers do not fit in one node.
 
@@ -2901,20 +2903,36 @@ The result is a node with `{python} NodeCapacityDenseRecap.node_hbm_cap_gb_str` 
 ```{python}
 #| echo: false
 from mlsysim.fmt import MarkdownStr, fmt_int, fmt_memory, fmt_percent, fmt_time, check
+from mlsysim.engine.solvers.distributed import TP_ALLREDUCES_PER_LAYER_FORWARD, TP_ALLREDUCES_PER_LAYER_TRAINING
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TensorParallelAllReduce:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scenario = Scenarios.Gpt3TensorParallelStepDgxH100  # 175B, TP-8 in one DGX H100, NVLink
-    model = scenario.workload  # 175B: hidden 12,288, layers 96
-    tp_gpus = scenario.tp_size  # tensor-parallel group = one DGX H100 node
-    microbatch = scenario.microbatch
-    seq_len = model.context_length  # GPT-3 training sequence length
-    nvlink_bw = scenario.link_bandwidth
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step: TP8 x PP8 x DP16, 16-bit
+    _base = Scenarios.Gpt3TensorParallelStepDgxH100  # NVLink TP exchange model; its 200 ms compute and one-per-pass schedule are replaced below
+    allreduces_per_layer_pass = TP_ALLREDUCES_PER_LAYER_FORWARD  # the step solver's schedule: after attention and after the feed-forward network
+    allreduces_per_layer_step = TP_ALLREDUCES_PER_LAYER_TRAINING  # forward plus backward
+    model = step.replica.workload  # 175B: hidden 12,288, layers 96
+    tp_gpus = step.tensor_parallel  # tensor-parallel group = one DGX H100 node
+    pp_stages = step.pipeline_depth
+    microbatch = step.sequences_per_microbatch
+    seq_len = step.context_length  # GPT-3 training sequence length
+    nvlink_bw = _base.link_bandwidth
     pcie_bw = Scenarios.BufferTransfer10GB.links["PCIe"]
-    compute_step = scenario.compute_time
+    peak_16bit = Hardware.Cloud.H100.compute.peak_flops  # dense FP16/BF16 peak, the shared step's precision
+    local_efficiency = step.local_efficiency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Compute for one microbatch through all layers on one TP group, from 6P FLOPs per token.
+    tokens = microbatch * seq_len
+    compute_step = (6 * model.parameters.to(param).magnitude * tokens * flop / (tp_gpus * peak_16bit * local_efficiency)).to(millisecond)
+    scenario = _base.variant(
+        workload=model,
+        tp_size=tp_gpus,
+        microbatch=microbatch,
+        compute_time=compute_step,
+        collectives_per_layer=allreduces_per_layer_step,
+    )
     hidden = model.hidden_dim
     layers = model.layers
     _nv = scenario.result
@@ -2937,13 +2955,33 @@ class TensorParallelAllReduce:
     seq_disp = format(seq_len, ",").replace(",", "{,}")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(step.precision == "fp16", "Shared step plans at 16-bit precision; compute uses the dense FP16 peak")
+    check(
+        abs((peak_16bit * local_efficiency - step.result.node_profile.peak_flops_actual).to(TFLOP / second).magnitude) < 1e-6,
+        "Compute rate should match the shared step's modeled per-GPU rate",
+    )
+    check(
+        abs((compute_step * step.microbatches_per_replica / pp_stages - step.result.node_profile.latency_compute).to(second).magnitude) < 1e-6,
+        "Per-microbatch compute times microbatches over stages should equal the shared step's compute time",
+    )
+    check(microbatch == 1, "Prose says one sequence per microbatch")
+    check(allreduces_per_layer_pass == 2, "Prose says two activation AllReduces per layer in each pass")
+    check(sync_events == allreduces_per_layer_step * layers, "Events = AllReduces per layer per step x layers")
+    # Each stage runs all of its replica's microbatches through 1/stages of the layers, so the
+    # trace's full-model per-microbatch total, scaled to one stage over one step, must match the shared step's TP time.
+    _tp_step = cumulative * step.microbatches_per_replica / pp_stages
+    check(
+        abs((_tp_step / step.result.tp_communication_latency).to("").magnitude - 1) < 0.01,
+        "Trace schedule should reproduce the shared step's modeled TP communication time",
+    )
     check(per_allreduce < 1 * millisecond, "Bandwidth-hierarchy prose says each NVLink TP exchange takes under a millisecond")
     check(cumulative < pcie_cumulative, "NVLink cumulative communication must be faster than PCIe")
+    check(0.88 < nvlink_compute_fraction < 0.90, "Prose quotes computation at about 89 percent with NVLink")
+    check(0.45 < pcie_wait_fraction < 0.50, "Example quotes about 47 percent communication over PCIe")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     hidden_str = fmt_int(hidden)
     tp_gpus_str = fmt_int(tp_gpus)
-    microbatch_str = fmt_int(microbatch)
     seq_str = fmt_int(seq_len)
     model_params_b_str = fmt_int(model.parameters.to("Gparam").magnitude)
     shard_math = fmt_math(f"{hidden_disp}{{\\times}}{shard_disp}")
@@ -2956,26 +2994,31 @@ class TensorParallelAllReduce:
     sync_events_str = fmt_int(sync_events)
     cumulative_ms_str = fmt_time(cumulative, "millisecond", precision=1, commas=False)
     pcie_cumulative_ms_str = fmt_time(pcie_cumulative_display, millisecond, precision=0, commas=False)
-    compute_step_ms_str = fmt_time(compute_step, millisecond, precision=0, commas=False)
+    compute_step_ms_str = fmt_time(round(compute_step.to(millisecond).magnitude) * millisecond, millisecond, precision=0, commas=False)
     pcie_wait_pct_str = fmt_percent(pcie_wait_fraction, precision=1, commas=False, style='prose')
     nvlink_compute_fraction_pct_str = fmt_percent(nvlink_compute_fraction, precision=1, commas=False, style='prose')
+    local_efficiency_pct_str = fmt_percent(local_efficiency, precision=0, commas=False, style='prose')
+    pp_stages_str = fmt_int(pp_stages)
+    tp_step_s_str = fmt_time(step.result.tp_communication_latency, second, precision=2, commas=False)
+    microbatches_str = fmt_int(step.microbatches_per_replica)
+    peak_16bit_tflop_per_s_str = fmt_flop_rate(peak_16bit, unit=TFLOP / second, precision=0, commas=True)
 ```
 
-Tracing one tensor-parallel step of the running model shows what that NVSwitch power budget buys. Assume a schedule with one activation-sized AllReduce per layer in each forward and backward pass; the partition and collective schedule are scenario inputs, not a universal Transformer schedule. During the modeled tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), one projection maps each token's internal vector, already split across the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs, back to the full hidden width. Each GPU holds a `{python} TensorParallelAllReduce.shard_math` slice of that projection's weight matrix, which keeps the full output width but covers only its own eighth of the input. Every output value is a sum over all input values, so one GPU can compute only part of that sum. Each GPU therefore produces a full-width vector of partial sums for every token, and an AllReduce operation sums those partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
+Tracing one microbatch of the running model through its tensor-parallel exchanges shows what that NVSwitch power budget buys. Assume the schedule of the shared reference step, with two activation-sized AllReduces per layer in each forward and backward pass, one after the attention block and one after the feed-forward network; the partition and collective schedule are scenario inputs, not a universal Transformer schedule. During the modeled tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), one projection maps each token's internal vector, already split across the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs, back to the full hidden width. Each GPU holds a `{python} TensorParallelAllReduce.shard_math` slice of that projection's weight matrix, which keeps the full output width but covers only its own eighth of the input. Every output value is a sum over all input values, so one GPU can compute only part of that sum. Each GPU therefore produces a full-width vector of partial sums for every token, and an AllReduce operation sums those partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
 
 ::: {.column-margin .margin-pointer}
 ↪ How tensor parallelism splits weight matrices across devices is developed in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
 :::
 
-The logical output tensor for one AllReduce contains `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16). For a microbatch of `{python} TensorParallelAllReduce.microbatch_str` sequences at `{python} TensorParallelAllReduce.seq_str` tokens, that payload is roughly `{python} TensorParallelAllReduce.allreduce_mb_str`. An ideal ring AllReduce with `{python} TensorParallelAllReduce.tp_gpus_str` participants moves $2(\DeviceCount-1)/\DeviceCount=$ `{python} TensorParallelAllReduce.ring_traffic_factor_str` times the payload per GPU (@sec-collective-communication derives this factor), or about `{python} TensorParallelAllReduce.allreduce_traffic_mb_str`. At `{python} BandwidthHierarchyNvlinkRecap.nvlink_per_direction_gb_per_s_str` of one-direction bandwidth, the transfer-time lower bound is approximately `{python} TensorParallelAllReduce.per_allreduce_ms_str`.
+The logical output tensor for one AllReduce contains `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16). For a microbatch of one `{python} TensorParallelAllReduce.seq_str`-token sequence, that payload is roughly `{python} TensorParallelAllReduce.allreduce_mb_str`. An ideal ring AllReduce with `{python} TensorParallelAllReduce.tp_gpus_str` participants moves $2(\DeviceCount-1)/\DeviceCount=$ `{python} TensorParallelAllReduce.ring_traffic_factor_str` times the payload per GPU (@sec-collective-communication derives this factor), or about `{python} TensorParallelAllReduce.allreduce_traffic_mb_str`. At `{python} BandwidthHierarchyNvlinkRecap.nvlink_per_direction_gb_per_s_str` of one-direction bandwidth, the transfer-time lower bound is approximately `{python} TensorParallelAllReduce.per_allreduce_ms_str`.
 
-Across `{python} TensorParallelAllReduce.layers_str` forward layers and `{python} TensorParallelAllReduce.layers_str` backward layers, the `{python} TensorParallelAllReduce.sync_events_str` transfers sum to about `{python} TensorParallelAllReduce.cumulative_ms_str` per step before overlap. NVSwitch provides the paths needed for the collective, but this value remains an ideal bandwidth-only lower bound that excludes startup latency, software overhead, and competing traffic.
+With two AllReduces in each of the `{python} TensorParallelAllReduce.layers_str` layers in both the forward and the backward pass, the `{python} TensorParallelAllReduce.sync_events_str` transfers sum to about `{python} TensorParallelAllReduce.cumulative_ms_str` per microbatch before overlap. NVSwitch provides the paths needed for the collective, but this value remains an ideal bandwidth-only lower bound that excludes startup latency, software overhead, and competing traffic.
 
 ::: {.column-margin .margin-pointer}
 ↪ The $\MessageStartupLatency$-$\LinkBandwidth$ model, which adds the fixed per-message startup latency this bound omits to the bytes-over-bandwidth transfer time, is developed in @sec-appdx-comm-foundations-alpha-beta.
 :::
 
-Judging that bound needs a compute time to compare it with. This scenario assumes `{python} TensorParallelAllReduce.compute_step_ms_str` of computation per step for the tensor-parallel group, a stated input rather than a derived value; the fractions below scale with it, so a longer compute time makes the same communication matter less. Against that assumption, the unoverlapped NVLink lower bound leaves computation at `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined compute-plus-communication time. Actual tensor-parallel efficiency can be higher when collectives overlap useful computation or lower when latency, contention, load imbalance, and nonparallel work add delay, so it must be measured rather than inferred from peak link bandwidth alone.
+Judging that bound needs a compute time to compare it with. At about $6 \times \Parameters$ floating-point operations per training token, the group needs `{python} TensorParallelAllReduce.compute_step_ms_str` of computation per microbatch when each GPU sustains `{python} TensorParallelAllReduce.local_efficiency_pct_str` of its `{python} TensorParallelAllReduce.peak_16bit_tflop_per_s_str` dense FP16 peak; the fractions below scale with that time, so a longer compute time makes the same communication matter less. Against it, the unoverlapped NVLink lower bound leaves computation at `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined compute-plus-communication time. The reference job splits the layers across `{python} TensorParallelAllReduce.pp_stages_str` pipeline stages, so each stage's group carries the same fraction of both the transfers and the computation, and this share does not change. Summed over the `{python} TensorParallelAllReduce.microbatches_str` microbatches of one optimizer step, one stage's transfers come to `{python} TensorParallelAllReduce.tp_step_s_str`, the tensor-parallel communication time modeled for the shared reference step. Actual tensor-parallel efficiency can be higher when collectives overlap useful computation or lower when latency, contention, load imbalance, and nonparallel work add delay, so it must be measured rather than inferred from peak link bandwidth alone.
 
 ```{python}
 #| echo: false
@@ -2990,9 +3033,9 @@ class BandwidthHierarchyPcieExampleRecap:
 
 ::: {#exmp-compute-infrastructure-nvlink-bandwidth-surprise .callout-example title="The NVLink bandwidth surprise"}
 
-**Scenario**: A team evaluates tensor parallelism over a hypothetical PCIe Gen5 path with `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth, using the payload and the assumed `{python} TensorParallelAllReduce.compute_step_ms_str` per-step compute time stated with the NVLink estimate above.
+**Scenario**: A team evaluates tensor parallelism over a hypothetical PCIe Gen5 path with `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth, using the payload and the `{python} TensorParallelAllReduce.compute_step_ms_str` per-microbatch compute time derived with the NVLink estimate above.
 
-**Diagnosis**: The modeled tensor-parallel schedule executes `{python} TensorParallelAllReduce.sync_events_str` AllReduce events per step across `{python} TensorParallelAllReduce.layers_str` layers. Its PCIe bandwidth-only transfer times sum to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` per step. Without overlap, communication accounts for `{python} TensorParallelAllReduce.pcie_wait_pct_str` of the combined compute and transfer estimate; this is not a measured stall fraction.
+**Diagnosis**: The modeled tensor-parallel schedule executes `{python} TensorParallelAllReduce.sync_events_str` AllReduce events per microbatch across `{python} TensorParallelAllReduce.layers_str` layers. Its PCIe bandwidth-only transfer times sum to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` per microbatch. Without overlap, communication accounts for `{python} TensorParallelAllReduce.pcie_wait_pct_str` of the combined compute and transfer estimate; this is not a measured stall fraction.
 
 **Systems lesson**: Under the same assumptions, NVLink lowers the transfer bound to `{python} TensorParallelAllReduce.per_allreduce_ms_str` per AllReduce and raises computation to `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of the combined time. The comparison explains why this partition favors a fast local fabric. Real collective performance must also include startup, topology, contention, and overlap.
 
@@ -3168,60 +3211,98 @@ The `{python} InfraFrontierNodeWeightsRecap.total_footprint_tb_str` budget of @t
 from mlsysim.fmt import fmt_int, fmt_memory, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @sec-compute-node-memory, the paragraphs after @tbl-memory-breakdown,
+# │          and the takeaway "A node aggregates private memories".
+# │ Goal:    Show that the node's private memories force the training state to be
+# │          partitioned, and that the shared reference layout (TP inside the node,
+# │          pipeline stages across nodes) fits it without sharding across replicas.
+# │ Show:    ~262 GB per GPU for ZeRO-3 confined to one node; 43.8 GB per GPU for
+# │          TP8 x PP8; 87.5 GB at four stages; ~42 GB headroom; ~13 GB if the FP32
+# │          state is also sharded across the 16 data-parallel replicas.
+# │ How:     Per-component bytes from the 16 B/param mixed-precision Adam state;
+# │          layout and per-GPU state from Scenarios.DenseLLMPretrainingStep.
+# └─────────────────────────────────────────────────────────────────────────────
 class NodeCapacityTrainMemRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step: TP8 x PP8 x DP16, unsharded state
+    model = step.replica.workload
     params = model.parameters
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    tp_degree = gpus_per_node
-    dp_degree = Scenarios.Gpt3TrainingStateTp8.dp_size  # data-parallel replicas
     host_dram = Systems.Nodes.DGX_H100.host_memory
+    gpu_hbm = Hardware.Cloud.H100.memory.capacity
+    tp_degree = step.tensor_parallel
+    pp_depth = step.pipeline_depth
+    dp_degree = step.data_parallel
+    persistent_state = TrainingStateReconcile.persistent_state  # 16 B/param, @tbl-memory-breakdown
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     weights = model.size_in_bytes(BYTES_FP16)
     gradients = weights
     optimizer = params * BYTES_FP32 * 2
     total_dp = weights + gradients + optimizer
-    gpu_hbm = Hardware.Cloud.H100.memory.capacity
     node_hbm = gpu_hbm * gpus_per_node
     zero3_per_gpu = total_dp / gpus_per_node
-    _state = Scenarios.Gpt3TrainingStateTp8.result  # TP-8 in one node, 128 data-parallel replicas
-    tp_weight_shard = _state.tp_weights_per_device
-    optimizer_per_gpu = _state.zero_moments_per_device
-    optimizer_per_tp_group = _state.zero_moments_per_tp_group
-    weight_plus_optimizer = _state.zero_weights_and_moments_per_device
-    tp_optimizer_shard_divisor = tp_degree * dp_degree
+    replica_gpus = tp_degree * pp_depth
+    replica_nodes = replica_gpus // gpus_per_node
+    layers_per_stage = model.layers // pp_depth
+    weights_per_gpu = weights / replica_gpus
+    fp32_state = params * BYTES_FP32 * 3  # master weights plus both Adam moments
+    fp32_per_gpu = fp32_state / replica_gpus
+    state_per_gpu = step.state_per_gpu
+    state_half_pipeline = persistent_state / (tp_degree * (pp_depth // 2))
+    headroom = gpu_hbm - state_per_gpu
+    sharded_per_gpu = (weights + gradients) / replica_gpus + fp32_per_gpu / dp_degree
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(node_hbm < total_dp, "Node HBM should be insufficient for full training state")
+    check(zero3_per_gpu > 3 * gpu_hbm, "Prose says ZeRO-3 inside one node leaves each GPU above triple its HBM")
+    check(pp_depth == 8, "Prose spells out eight stages and the four-stage alternative")
+    check(tp_degree == gpus_per_node, "Prose says tensor parallelism spans exactly one node")
+    check(
+        abs((persistent_state / replica_gpus - state_per_gpu).to(GB).magnitude) < 1e-6,
+        "Per-GPU state should be the 16 B/param state divided over one TP x PP replica",
+    )
+    check(
+        abs((2 * weights_per_gpu + fp32_per_gpu - state_per_gpu).to(GB).magnitude) < 1e-6,
+        "Weights, gradients, and FP32 state per GPU should sum to the per-GPU state",
+    )
+    check(state_per_gpu < gpu_hbm, "Prose says the reference layout fits one GPU without sharding")
+    check(state_half_pipeline > gpu_hbm, "Prose says four stages would not fit")
+    check(41.5 * GB < headroom < 42.5 * GB, "Prose quotes about 42 GB of headroom against the decimal capacity")
+    check(12.5 * GB < sharded_per_gpu < 13.5 * GB, "Prose quotes about 13 GB with FP32 state sharded across replicas")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     node_hbm_cap_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
     host_dram_tb_str = fmt_memory_capacity(host_dram, unit=TiB, precision=0, commas=False)
-    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
-    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
-    optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
     total_dp_gb_str = fmt_memory(total_dp, unit=GB, precision=0, commas=True)
     gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
+    gpu_hbm_decimal_gb_str = fmt_memory(gpu_hbm, unit=GB, precision=1, commas=False)  # 80 GiB nameplate in decimal GB
     zero3_per_gpu_gb_str = fmt_memory(zero3_per_gpu, unit=GB, precision=1, commas=False)
-    tp_weight_shard_gb_str = fmt_memory(tp_weight_shard, unit=GB, precision=2, commas=False)
-    optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
-    optimizer_per_tp_group_gb_str = fmt_memory(optimizer_per_tp_group, unit=GB, precision=1, commas=False)
-    weight_plus_optimizer_gb_str = fmt_memory(weight_plus_optimizer, unit=GB, precision=1, commas=False)
     gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
-    tp_degree_str = fmt(tp_degree, precision=0, commas=False)
-    dp_degree_str = fmt(dp_degree, precision=0, commas=False)
-    tp_optimizer_shard_divisor_str = fmt(tp_optimizer_shard_divisor, precision=0, commas=False)
+    tp_degree_str = fmt_int(tp_degree)
+    pp_depth_str = fmt_int(pp_depth)
+    dp_degree_str = fmt_int(dp_degree)
+    replica_gpus_str = fmt_int(replica_gpus)
+    replica_nodes_str = fmt_int(replica_nodes)
+    layers_str = fmt_int(model.layers)
+    layers_per_stage_str = fmt_int(layers_per_stage)
+    weights_per_gpu_gb_str = fmt_memory(weights_per_gpu, unit=GB, precision=2, commas=False)
+    fp32_per_gpu_gb_str = fmt_memory(fp32_per_gpu, unit=GB, precision=1, commas=False)
+    persistent_gb_str = fmt_memory(persistent_state, unit=GB, precision=0, commas=True)
+    state_per_gpu_gb_str = fmt_memory(state_per_gpu, unit=GB, precision=1, commas=False)
+    state_half_pipeline_gb_str = fmt_memory(state_half_pipeline, unit=GB, precision=1, commas=False)
+    headroom_gb_str = fmt_memory(round(headroom.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    sharded_per_gpu_gb_str = fmt_memory(round(sharded_per_gpu.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 A DGX H100 node provides `{python} NodeCapacityTrainMemRecap.node_hbm_cap_gb_str` of aggregate HBM across its `{python} NodeCapacityTrainMemRecap.gpus_per_node_str` GPUs, plus `{python} NodeCapacityTrainMemRecap.host_dram_tb_str` of host DDR5 DRAM. The HBM capacity alone is insufficient for the full training state, as the memory arithmetic for each parallelism strategy shows. With pure data parallelism\index{Data parallelism!pure}, each GPU must hold replicated state, and even the `{python} NodeCapacityTrainMemRecap.total_dp_gb_str` subtotal of weights, gradients, and optimizer moments, before master weights and activations, is physically impossible on an `{python} NodeCapacityTrainMemRecap.gpu_hbm_gb_str` device. Even ZeRO stage 3\index{ZeRO!stage 3}, the form of ZeRO sharding that divides all three components among the workers, yields `{python} NodeCapacityTrainMemRecap.total_dp_gb_str` / `{python} NodeCapacityTrainMemRecap.gpus_per_node_str` ≈ `{python} NodeCapacityTrainMemRecap.zero3_per_gpu_gb_str` per GPU when confined to the `{python} NodeCapacityTrainMemRecap.gpus_per_node_str` GPUs of a single node, still more than triple the available HBM.
 
-Fitting the state into HBM therefore requires expanding across multiple nodes so that a larger pool of accelerators shares the memory footprint. The standard approach combines intra-node tensor parallelism (which splits tensors and operations within layers across GPUs, reducing per-GPU weights to `{python} NodeCapacityTrainMemRecap.weights_gb_str` / `{python} NodeCapacityTrainMemRecap.tp_degree_str` = `{python} NodeCapacityTrainMemRecap.tp_weight_shard_gb_str`) with ZeRO-style optimizer sharding across the data-parallel replicas on other nodes. In a cluster configuration with TP-`{python} NodeCapacityTrainMemRecap.tp_degree_str` within each node and `{python} NodeCapacityTrainMemRecap.dp_degree_str`-way data parallelism across nodes, each node acts as one model replica whose GPUs keep their `{python} NodeCapacityTrainMemRecap.tp_weight_shard_gb_str` weight shards resident for every forward and backward layer.
+Fitting the state into HBM therefore requires expanding across multiple nodes so that a larger pool of accelerators shares the memory footprint. The reference job does so with two partitions that follow the bandwidth hierarchy. Tensor parallelism inside each node splits the tensors and operations within every layer across its `{python} NodeCapacityTrainMemRecap.tp_degree_str` GPUs, and pipeline parallelism across nodes gives each of `{python} NodeCapacityTrainMemRecap.pp_depth_str` nodes a contiguous block of `{python} NodeCapacityTrainMemRecap.layers_per_stage_str` of the model's `{python} NodeCapacityTrainMemRecap.layers_str` layers. One model replica therefore spans `{python} NodeCapacityTrainMemRecap.replica_gpus_str` GPUs on `{python} NodeCapacityTrainMemRecap.replica_nodes_str` nodes. Splitting every component over those `{python} NodeCapacityTrainMemRecap.replica_gpus_str` GPUs leaves each one `{python} NodeCapacityTrainMemRecap.weights_per_gpu_gb_str` of FP16 weights, the same again of gradients, and `{python} NodeCapacityTrainMemRecap.fp32_per_gpu_gb_str` of FP32 master weights and optimizer moments.
 
-Because the optimizer moments are needed only once per step during the parameter update, they do not need to stay replicated on every node. Each replica instead keeps only a share, using the memory-efficient data parallelism developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69. The moments are partitioned twice, first by the `{python} NodeCapacityTrainMemRecap.tp_degree_str`-way tensor split and then across the `{python} NodeCapacityTrainMemRecap.dp_degree_str` data-parallel replicas. Each GPU therefore holds approximately `{python} NodeCapacityTrainMemRecap.optimizer_gb_str` / (`{python} NodeCapacityTrainMemRecap.tp_optimizer_shard_divisor_str`) ≈ `{python} NodeCapacityTrainMemRecap.optimizer_per_gpu_gb_str` of optimizer state, or `{python} NodeCapacityTrainMemRecap.optimizer_per_tp_group_gb_str` per `{python} NodeCapacityTrainMemRecap.gpus_per_node_str`-GPU tensor-parallel group, before gradients, activations, buffers, and fragmentation.
+Per GPU, the persistent training state comes to `{python} NodeCapacityTrainMemRecap.persistent_gb_str` / `{python} NodeCapacityTrainMemRecap.replica_gpus_str` ≈ `{python} NodeCapacityTrainMemRecap.state_per_gpu_gb_str`, which fits on an `{python} NodeCapacityTrainMemRecap.gpu_hbm_gb_str` device (`{python} NodeCapacityTrainMemRecap.gpu_hbm_decimal_gb_str` in decimal bytes) with about `{python} NodeCapacityTrainMemRecap.headroom_gb_str` left for activations, communication buffers, and workspace. That fit sets the pipeline depth. Four stages would leave `{python} NodeCapacityTrainMemRecap.state_half_pipeline_gb_str` per GPU, more than the device holds, so eight is the shallowest power-of-two pipeline that fits. The `{python} NodeCapacityTrainMemRecap.dp_degree_str`-way data parallelism across the rest of the cluster then repeats the whole `{python} NodeCapacityTrainMemRecap.replica_gpus_str`-GPU partition, and no state needs to be sharded across replicas.
 
-The weight-plus-optimizer subtotal of roughly `{python} NodeCapacityTrainMemRecap.weight_plus_optimizer_gb_str` is only the starting point. The memory-budget exercise in @sec-compute-infrastructure-putting-together-memory-budget-exercise-f357 examines a single node without this cross-node sharding and shows why optimizer offload alone is insufficient there. This arithmetic is why tensor parallelism, optimizer sharding, activation checkpointing, and memory tiering are used together for large-model training. The node is therefore a high-bandwidth compute and communication unit, not a standalone container for the entire training state.
+The `{python} NodeCapacityTrainMemRecap.state_per_gpu_gb_str` per-GPU subtotal is only the starting point, because the activations on top of it grow with microbatch size and sequence length. If activations and workspace do not fit in the remaining headroom, the next step is to shard the optimizer state across the data-parallel replicas, using the memory-efficient data parallelism developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69. Dividing the FP32 master weights and moments among the `{python} NodeCapacityTrainMemRecap.dp_degree_str` replicas would cut the per-GPU state to about `{python} NodeCapacityTrainMemRecap.sharded_per_gpu_gb_str`, and each replica would then update only its own share of the parameters and pass the result to the others. The memory-budget exercise in @sec-compute-infrastructure-putting-together-memory-budget-exercise-f357 examines a single node without this cross-node partitioning and shows why optimizer offload alone is insufficient there. This arithmetic is why tensor parallelism, pipeline stages, optimizer sharding, activation checkpointing, and memory tiering are used together for large-model training. The node is therefore a high-bandwidth compute and communication unit, not a standalone container for the entire training state.
 
-Because even full ZeRO stage 3 sharding within one node leaves each GPU above its HBM capacity, sharding must be combined with other techniques. Activation checkpointing\index{Activation checkpointing!memory footprint} stores only a subset of intermediate activations for the backward pass and recomputes the rest from the nearest checkpoint, trading extra forward computation for activation memory, a trade that @sec-distributed-training-systems-systems-compute-phase-forward-backward develops.
+Partitioning alone can still leave too little room for activations, so it is combined with techniques that shrink the live state. Activation checkpointing\index{Activation checkpointing!memory footprint} stores only a subset of intermediate activations for the backward pass and recomputes the rest from the nearest checkpoint, trading extra forward computation for activation memory, a trade that @sec-distributed-training-systems-systems-compute-phase-forward-backward develops.
 
 ```{python}
 #| echo: false
@@ -3453,11 +3534,11 @@ For our `{python} InfraSetup.frontier_params_b_str` model training across `{pyth
 # │ Context: end of @sec-compute-data-loading and the @sec-compute-pod opener.
 # │
 # │ Goal: Show why one node cannot train the 175B running example on a useful
-# │       schedule, using the same FP8 peak and 45% local efficiency as the
-# │       pod training-time notebook.
-# │ Show: ~1.4 years on one DGX H100 node; tens of nodes for a two-week
-# │       compute-only schedule; several hundred nodes for a single day.
-# │ How: 6PD / (GPUs x FP8 peak x local efficiency), compute only.
+# │       schedule, using the shared reference step's 16-bit precision and
+# │       45% local efficiency, as the pod training-time notebook does.
+# │ Show: ~2.8 years on one DGX H100 node; tens of nodes for a two-week
+# │       compute-only schedule; about 1,024 nodes for a single day.
+# │ How: 6PD / (GPUs x dense FP16 peak x local efficiency), compute only.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_time
@@ -3466,31 +3547,34 @@ class SingleNodeTrainingTime:
     """Compute-only training time for the 175B running example on one node."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model = Models.Language.GPT3
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    peak_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"]
-    local_efficiency = ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency  # same as the pod training-time notebook
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step: 16-bit, 45% local efficiency
+    model = step.replica.workload
+    gpus_per_node = step.fleet.node.accelerators_per_node
+    peak_16bit = Hardware.Cloud.H100.compute.peak_flops  # dense FP16/BF16 peak
+    local_efficiency = step.local_efficiency  # same as the pod training-time notebook
     target_days = 14  # scenario assumption: a two-week schedule
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_flops = 6 * model.parameters.to(param).magnitude * model.training_tokens.to(count).magnitude * flop
-    node_rate = gpus_per_node * peak_fp8 * local_efficiency
+    node_rate = gpus_per_node * peak_16bit * local_efficiency
     node_time = (total_flops / node_rate).to(hour)
     node_years = node_time.to(hour).magnitude / (24 * 365)
     nodes_for_target = node_time.to(hour).magnitude / (target_days * 24)
     nodes_for_one_day = math.ceil(node_time.to(hour).magnitude / 24)
-    node_peak_fp8 = gpus_per_node * peak_fp8
+    node_peak_16bit = gpus_per_node * peak_16bit
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(1 < node_years < 2, "One node should need between one and two years of compute")
+    check(step.precision == "fp16", "Run planning uses the shared step's 16-bit precision")
+    check(model.parameters == Models.Language.GPT3.parameters, "Shared step should train the GPT-3 175B model")
+    check(2.5 < node_years < 3, "One node should need about 2.8 years of compute")
     check(10 < nodes_for_target < 100, "A two-week compute-only schedule should need tens of nodes")
-    check(100 < nodes_for_one_day < 1000, "A one-day compute-only schedule should need several hundred nodes")
+    check(1000 < nodes_for_one_day <= 1100, "A one-day compute-only schedule should need about 1,024 nodes")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     node_years_str = fmt(node_years, precision=1, commas=False)
     nodes_for_target_str = fmt_int(nodes_for_target, commas=False)
-    nodes_for_one_day_str = fmt_int(nodes_for_one_day, commas=False)
-    node_peak_fp8_tflop_per_s_str = fmt_flop_rate(node_peak_fp8, unit=TFLOP / second, precision=0, commas=True)
+    nodes_for_one_day_str = fmt_int(nodes_for_one_day, commas=True)
+    node_peak_16bit_tflop_per_s_str = fmt_flop_rate(node_peak_16bit, unit=TFLOP / second, precision=0, commas=True)
 ```
 ```{python}
 #| echo: false
@@ -4603,7 +4687,7 @@ The rack concentrates power and heat into a physical volume where thermodynamics
 
 ## The Pod {#sec-compute-pod}
 
-Training our `{python} InfraSetup.frontier_params_b_str` model on a single DGX H100 node (8 GPUs, `{python} SingleNodeTrainingTime.node_peak_fp8_tflop_per_s_str` of aggregate FP8 peak) would take about `{python} SingleNodeTrainingTime.node_years_str` years at the efficiency assumed below, even if the model state could fit. Roughly `{python} SingleNodeTrainingTime.nodes_for_target_str` nodes bring the compute-only time down to two weeks, and about `{python} SingleNodeTrainingTime.nodes_for_one_day_str` nodes bring it to a single day, before any communication or recovery overhead. A pod is the cluster-scale unit that makes this possible: many racks under one high-speed fabric, power envelope, and cooling design. The term names that organization rather than a fixed size, so the pods in this chapter range from the `{python} InfraSetup.ref_gpus_str`-GPU reference cluster to the larger configurations worked below. The engineering challenge\index{Pod!interconnect scaling} is wiring those nodes together into a network fast enough to keep gradient synchronization from becoming the bottleneck, so that the fabric serves the role a system bus serves within a single machine. Pod design is the first point where topology, power, and failure domains become shared infrastructure rather than per-rack concerns.
+Training our `{python} InfraSetup.frontier_params_b_str` model on a single DGX H100 node (8 GPUs, `{python} SingleNodeTrainingTime.node_peak_16bit_tflop_per_s_str` of aggregate dense FP16 peak) would take about `{python} SingleNodeTrainingTime.node_years_str` years at the efficiency assumed below, even if the model state could fit. Roughly `{python} SingleNodeTrainingTime.nodes_for_target_str` nodes bring the compute-only time down to two weeks, and about `{python} SingleNodeTrainingTime.nodes_for_one_day_str` nodes bring it to a single day, before any communication or recovery overhead. A pod is the cluster-scale unit that makes this possible: many racks under one high-speed fabric, power envelope, and cooling design. The term names that organization rather than a fixed size, so the pods in this chapter range from the `{python} InfraSetup.ref_gpus_str`-GPU reference cluster to the larger configurations worked below. The engineering challenge\index{Pod!interconnect scaling} is wiring those nodes together into a network fast enough to keep gradient synchronization from becoming the bottleneck, so that the fabric serves the role a system bus serves within a single machine. Pod design is the first point where topology, power, and failure domains become shared infrastructure rather than per-rack concerns.
 
 Two fabric families dominate. A switched fat tree\index{Fat-tree!pod fabric}, a hierarchy of switch tiers with as much uplink as downlink capacity, supplies full bisection bandwidth across node uplinks, while a direct-connect torus\index{Torus!pod fabric} wires each node to its neighbors, using fewer switches but giving bisection bandwidth that grows more slowly than node count. @Sec-network-fabrics-fat-tree and @sec-network-fabrics-dragonfly develop both.
 
@@ -4669,7 +4753,8 @@ The physical layout of the data center hall reflects these density constraints. 
 # │
 # │ Goal: Provide formatted math for total FLOPs, cluster throughput, and
 # │       per-step compute for the 175B running example.
-# │ Show: 6 * 175 * 10^23 FLOPs, 8192-GPU compute-only rate at assumed 45% local efficiency.
+# │ Show: 6 * 175 * 10^23 FLOPs, 8192-GPU compute-only rate at the dense FP16
+# │       peak and assumed 45% local efficiency (the shared reference step's basis).
 # │ How: Build fmt_math strings from InfraSetup values.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4677,7 +4762,8 @@ The physical layout of the data center hall reflects these density constraints. 
 class PodTrainingMath:
     """Formatted math strings for 175B training time derivation."""
 
-    _gpt3 = Models.Language.GPT3
+    _step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step: 16-bit, 45% local efficiency
+    _gpt3 = _step.replica.workload
     _frontier = Systems.Clusters.Frontier_8K
     gpt3_params_b = _gpt3.parameters.to(param).magnitude / BILLION
     gpt3_tokens_b = _gpt3.training_tokens.to(count).magnitude / BILLION
@@ -4685,20 +4771,21 @@ class PodTrainingMath:
     gpt3_params_b_value_str = fmt(gpt3_params_b, precision=0, commas=False)
     gpt3_tokens_b_value_str = fmt(gpt3_tokens_b, precision=0, commas=False)
     gpt3_tokens_billion_str = fmt_tokens(_gpt3.training_tokens, scale="billion", scale_style="word", precision=0, commas=False)
-    h100_fp8_flops = Hardware.Cloud.H100.compute.precision_flops['fp8']
-    h100_fp8_tflop_per_s_value_str = fmt_magnitude(h100_fp8_flops, unit=TFLOP / second, precision=0, commas=False)
-    h100_fp8_tflop_per_s_str = fmt_flop_rate(h100_fp8_flops, unit=TFLOP / second, precision=0, commas=True)
-    local_efficiency = ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency  # useful compute before distributed overhead
+    h100_peak_flops = Hardware.Cloud.H100.compute.peak_flops  # dense FP16/BF16 peak, the shared step's precision
+    h100_peak_tflop_per_s_value_str = fmt_magnitude(h100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_peak_tflop_per_s_str = fmt_flop_rate(h100_peak_flops, unit=TFLOP / second, precision=0, commas=True)
+    local_efficiency = _step.local_efficiency  # useful compute before distributed overhead
     _total_flops = 6 * _gpt3.parameters.to(param).magnitude * _gpt3.training_tokens.to(count).magnitude
     pod_flops_math = fmt_math(f"6 \\times {gpt3_params_b_value_str} \\times 10^{{9}} \\times {gpt3_tokens_b_value_str} \\times 10^{{9}}")
     total_flops_math = fmt_math(sci_latex(_total_flops, precision=2))
     n_params_math = fmt_math(f"\\Parameters = {gpt3_params_b_value_str} \\times 10^9")
     n_tokens_math = fmt_math(f"\\DatasetSize = {gpt3_tokens_b_value_str} \\times 10^9")
     n_gpus_fmt = fmt(n_gpus, precision=0, commas=True)
-    cluster_throughput_math = fmt_math(f"{n_gpus_fmt} \\times {h100_fp8_tflop_per_s_value_str} \\times 10^{{12}} \\times {local_efficiency}")
-    cluster_throughput = n_gpus * h100_fp8_flops * local_efficiency
-    t_compute_hr = Scenarios.Gpt3PretrainingFrontier8K.result.compute_time.to(hour).magnitude
-    check(11 < t_compute_hr < 13, "Prose quotes a compute-only baseline of approximately 12 hours")
+    cluster_throughput_math = fmt_math(f"{n_gpus_fmt} \\times {h100_peak_tflop_per_s_value_str} \\times 10^{{12}} \\times {local_efficiency}")
+    cluster_throughput = n_gpus * h100_peak_flops * local_efficiency
+    t_compute_hr = Scenarios.Gpt3PretrainingFrontier8K.variant(precision=_step.precision).result.compute_time.to(hour).magnitude
+    check(_step.precision == "fp16", "Run planning uses the shared step's 16-bit precision")
+    check(23 < t_compute_hr < 25, "Prose quotes a compute-only baseline of approximately 24 hours")
     t_compute_hr_str = fmt_time(round(t_compute_hr), 'hour', precision=0, commas=False, style='word')
     cluster_eflop_per_s_str = fmt_flop_rate(cluster_throughput, unit=EFLOP / second, precision=2, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0)
@@ -4712,21 +4799,28 @@ class PodTrainingMath:
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: pod training-budget paragraph; the same compute-only budget on the
 # │          1,024-GPU reference cluster, so the running instance has its own time.
+# │          Guarded against the shared reference step's modeled compute time.
 from mlsysim.fmt import check, fmt_time
 
 class ReferenceClusterTrainingTime:
     """Compute-only training time for the 175B running example on the reference cluster."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step on the 1,024-GPU cluster
     pod_hours = PodTrainingMath.t_compute_hr
     pod_gpus = PodTrainingMath.n_gpus
-    ref_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+    ref_gpus = step.fleet.total_accelerators
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     ref_days = pod_hours * (pod_gpus / ref_gpus) / 24
+    # Same baseline built from the shared step: optimizer steps x modeled compute per step.
+    _steps = step.replica.workload.training_tokens.to(count).magnitude / step.global_batch_tokens
+    step_based_days = (_steps * step.result.node_profile.latency_compute).to("day").magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(3.5 < ref_days < 4.5, "The reference cluster should need about four days of compute-only time")
+    check(ref_gpus == Scenarios.DenseLLMPretrainingReference.system.total_accelerators, "Shared step runs on the reference cluster")
+    check(abs(step_based_days / ref_days - 1) < 1e-6, "Compute-only baseline should equal steps x the shared step's compute time")
+    check(7.5 < ref_days < 8.5, "The reference cluster should need about eight days of compute-only time")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ref_days_str = fmt_time(round(ref_days), 'day', precision=0, commas=False, style='word')
@@ -4748,9 +4842,10 @@ from mlsysim.fmt import fmt_time
 # │
 # │ Goal: Derive the scenario training time from first principles,
 # │       starting from total FLOPs and aggregate cluster throughput.
-# │ Show: ~12 h compute baseline → ~26 h scenario estimate before site-specific operations.
+# │ Show: ~24 h compute baseline → ~51 h scenario estimate before site-specific operations.
 # │ How: Divide total training FLOPs by aggregate effective throughput; apply overhead multipliers sequentially.
-# │
+# │ Note: Precision comes from the shared reference step (16-bit); the 8,192-GPU
+# │       scenario's own FP8 setting is overridden, so no FP8 rate enters the plan.
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4763,7 +4858,8 @@ class TrainingTime175B:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
 
-    scenario = Scenarios.Gpt3PretrainingFrontier8K  # 175B on 8,192 H100s at FP8 peak
+    step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step: 16-bit precision
+    scenario = Scenarios.Gpt3PretrainingFrontier8K.variant(precision=step.precision)  # 175B on 8,192 H100s at the 16-bit peak
     n_gpus = scenario.fleet.total_accelerators
     local_efficiency = scenario.local_efficiency  # useful compute before distributed overhead
 
@@ -4786,7 +4882,11 @@ class TrainingTime175B:
     t_total_weeks = t_maint_hr / (24 * 7)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(11 < t_physics_hr < 13, "Compute-only baseline for this scenario should be ~12h")
+    check(scenario.precision == "fp16", "Run duration is planned at 16-bit throughput, not FP8")
+    check(scenario.local_efficiency == step.local_efficiency, "Local efficiency should match the shared reference step")
+    check(abs(t_physics_hr - PodTrainingMath.t_compute_hr) < 1e-9, "Notebook baseline should match the pod training math")
+    check(23 < t_physics_hr < 25, "Compute-only baseline for this scenario should be ~24h")
+    check(50 < t_maint_hr < 52, "Notebook total should be about 51 hours")
     check(abs(t_fail_hr / t_ckpt_hr - (1 + fail_overhead)) < 1e-12, "Failure overhead is a fraction of the preceding subtotal")
     check(
         abs((t_fail_hr - t_ckpt_hr) / t_fail_hr - fail_overhead / (1 + fail_overhead)) < 1e-12,
@@ -4817,7 +4917,7 @@ The training time for our `{python} InfraSetup.frontier_params_b_str` model deri
 1. **Total FLOPs**\index{Training time!total FLOPs}: Using the same $6 \times \Parameters\times \DatasetSize$ approximation, where `{python} PodTrainingMath.n_params_math` and `{python} PodTrainingMath.n_tokens_math` tokens:
    `{python} PodTrainingMath.total_flops_math` FLOPs
 
-2. **Cluster throughput**: `{python} PodTrainingMath.n_gpus_str` H100 GPUs at `{python} PodTrainingMath.h100_fp8_tflop_per_s_str` peak, assuming `{python} PodTrainingMath.local_efficiency_pct_str` local compute efficiency before distributed overhead:
+2. **Cluster throughput**: `{python} PodTrainingMath.n_gpus_str` H100 GPUs at the `{python} PodTrainingMath.h100_peak_tflop_per_s_str` dense FP16 peak of 16-bit mixed-precision training, assuming `{python} PodTrainingMath.local_efficiency_pct_str` local compute efficiency before distributed overhead:
    `{python} PodTrainingMath.cluster_throughput_math` FLOP/s before distributed overhead $\approx$ `{python} PodTrainingMath.cluster_eflop_per_s_str`
 
 3. **Compute-only training baseline**:
@@ -5286,10 +5386,11 @@ Because the bottlenecks move rather than disappear, compute infrastructure teams
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierStragglerRecap23:
     # ┌── 1. LOAD ──────────────────────────────────────────
+    _step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step on 1,024 GPUs
     eff_256 = ReferenceStats.TrainingScaleProfiles.Eff256Gpu
-    eff_1k = ReferenceStats.TrainingScaleProfiles.Eff1024Gpu
+    eff_1k = _step.result.scaling_efficiency  # modeled efficiency of the shared reference step
     eff_8k = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
-    gpus_1k = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+    gpus_1k = _step.fleet.total_accelerators
     gpus_8k = Systems.Clusters.Frontier_8K.total_accelerators
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -5298,6 +5399,10 @@ class InfraFrontierStragglerRecap23:
     idle_share_8k = 1 - eff_8k
 
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(
+        abs(eff_1k - ReferenceStats.TrainingScaleProfiles.Eff1024Gpu) < 0.005,
+        "Shared step's modeled efficiency should match the 1,024-GPU tier at two decimals",
+    )
     check(eff_256 > eff_1k > eff_8k, "Modeled scaling efficiency should fall with cluster size")
     check(speedup_1k_to_8k < hardware_ratio, "Eight times the GPUs should buy less than an eightfold speedup")
 
@@ -5627,7 +5732,7 @@ class SummaryScaleScenario:
     )
 ```
 
-Our `{python} InfraSetup.frontier_params_b_str`-parameter model connects the decisions at each level. Its low-batch decode estimate requires about `{python} SummaryScaleScenario.token_flops_b_str` billion floating-point operations per token, but moving the `{python} SummaryScaleScenario.weights_fp16_gb_str` FP16 weight payload through one hypothetical `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` HBM path takes over 100 ms. A feasible partition changes that path budget as well as solving capacity. At the node level, training state exceeds 2 TB, requiring additional sharding or reductions in resident state. At the rack level, `{python} SummaryScaleScenario.rack_gpus_str` accelerators at `{python} SummaryScaleScenario.h100_tdp_w_str` each, plus modeled host and network overhead, require `{python} SummaryScaleScenario.rack_power_kw_str` of qualified power and cooling capacity. The reference cluster coordinates `{python} InfraSetup.ref_gpus_str` GPUs, while the worked pod scenario uses eight times that number. Communication, failure recovery, and sustained utilization determine how much of the purchased capacity becomes completed work. The model's size exposes these interactions, but the same accounting applies whenever a workload crosses physical resource boundaries.
+Our `{python} InfraSetup.frontier_params_b_str`-parameter model connects the decisions at each level. Its low-batch decode estimate requires about `{python} SummaryScaleScenario.token_flops_b_str` billion floating-point operations per token, but moving the `{python} SummaryScaleScenario.weights_fp16_gb_str` FP16 weight payload through one hypothetical `{python} SummaryScaleScenario.h100_bw_tb_per_s_str` HBM path takes over 100 ms. A feasible partition changes that path budget as well as solving capacity. At the node level, training state exceeds 2 TB, requiring partitioning across nodes or reductions in resident state. At the rack level, `{python} SummaryScaleScenario.rack_gpus_str` accelerators at `{python} SummaryScaleScenario.h100_tdp_w_str` each, plus modeled host and network overhead, require `{python} SummaryScaleScenario.rack_power_kw_str` of qualified power and cooling capacity. The reference cluster coordinates `{python} InfraSetup.ref_gpus_str` GPUs, while the worked pod scenario uses eight times that number. Communication, failure recovery, and sustained utilization determine how much of the purchased capacity becomes completed work. The model's size exposes these interactions, but the same accounting applies whenever a workload crosses physical resource boundaries.
 
 The method transfers beyond this model. At each level, an engineer identifies the binding constraint, quantifies its effect, and propagates the consequence upward. A faster accelerator is counterproductive if cooling cannot remove its heat; a denser rack is futile if the grid cannot supply it; and a wider network is wasteful if the workload cannot use its bandwidth. Infrastructure engineering is thus a quantitative discipline for tracing chip-level choices into rack power, facility cooling, network topology, reliability, and ownership cost.
 
@@ -5636,7 +5741,7 @@ The method transfers beyond this model. At each level, an engineer identifies th
 * **Infrastructure walls cascade**: Memory, communication, power, and reliability walls appear at escalating physical scales, each level's limit becomes an input to the next, and new technologies relocate a wall rather than remove it. With independent failures and a per-GPU MTTF of `{python} SummaryScaleScenario.gpu_mtbf_hours_str`, the mean interval between GPU failures shrinks with fleet size, to about five hours in the `{python} SummaryScaleScenario.fleet_gpus_str`-GPU example, so recovery and checkpoint storage belong in infrastructure planning from the start.
 * **Capacity and bandwidth are separate tests**: Capacity decides whether model state fits; bandwidth decides how fast low-reuse phases run. For single-request LLM decode, weight traffic commonly sets the latency floor. The ridge point ($\RooflineRidgePoint$ = peak FLOP/s divided by memory BW) separates bandwidth- from compute-bound operation, but batch shape, fusion, precision, reuse, and the modeled memory level determine where each training or inference phase lies.
 * **Bandwidth hierarchy guides parallelism placement**: The `{python} SummaryScaleScenario.nvlink_ib_gap_mult_str` per-direction bandwidth gap in the NVLink–InfiniBand example favors keeping frequent tensor-parallel exchanges inside the fast interconnect domain. Pipeline and data parallelism can span slower links, but their traffic and synchronization still have to fit the workload's time budget.
-* **A node aggregates private memories**: Eight accelerators multiply HBM capacity, but each device's memory stays private, so the running model's `{python} TrainingStateReconcile.persistent_tb_str` of persistent training state forces tensor parallelism, optimizer sharding, activation checkpointing, and memory tiering to be combined.
+* **A node aggregates private memories**: Eight accelerators multiply HBM capacity, but each device's memory stays private, so the running model's `{python} TrainingStateReconcile.persistent_tb_str` of persistent training state must be partitioned across nodes. Tensor parallelism inside the node and eight pipeline stages across nodes bring it to `{python} NodeCapacityTrainMemRecap.state_per_gpu_gb_str` per GPU without sharding, and optimizer sharding, activation checkpointing, and memory tiering are the next steps when activations and workspace do not fit.
 * **Plan on sustained throughput, not peak**: A run planned from peak FLOP/s needs GPU-hours in inverse proportion to its measured utilization, so capacity planning must use sustained throughput measured with a consistent model-FLOP convention, precision, system scale, and workload shape.
 * **Rack power and cooling bound installable compute**: Watts per rack, delivery losses, and cooling class, not FLOP/s, set how much compute a facility can install and sustain; at pod scale, network topology, cooling, and power delivery must be co-designed for the dominant workload.
 * **Failure exposure grows with fleet size**: With independent failures and a per-GPU MTTF of `{python} SummaryScaleScenario.gpu_mtbf_hours_str`, the `{python} SummaryScaleScenario.fleet_gpus_str`-GPU example has a mean interval of about five hours between GPU failures. Recovery and checkpoint storage therefore belong in infrastructure planning from the start.

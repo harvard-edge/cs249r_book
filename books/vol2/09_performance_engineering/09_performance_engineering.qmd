@@ -102,6 +102,9 @@ from mlsysim.physics import calc_bottleneck, model_memory
 # │ How: Literature.TrainingRuns (Dubey 2024) for the Llama 3 record;
 # │      Scenarios.Llama3_405BGoodput16K for the product of the two
 # │      fractions; Scenarios.Llama2_70BJobFailures128 for the example's size.
+# │      Scenarios.DenseLLMPretrainingStep (the shared 175B reference job)
+# │      is read only to guard the "175B reference" label and to keep the
+# │      70B example distinct from it.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Literature, Models, Scenarios, Systems
@@ -118,6 +121,8 @@ class FleetCapacityOpening:
     replica_gpus = Systems.Nodes.DGX_H100.accelerators_per_node  # serving twin: one node
     example_gpus = Scenarios.Llama2_70BJobFailures128.n_devices  # running training job (single home)
     llama3 = Scenarios.Llama3_405BGoodput16K.result  # S = 1, R = effective time, P = MFU
+    reference = Scenarios.DenseLLMPretrainingStep  # Archetype A's 175B reference job (one shared definition)
+    example_model = Models.Language.Llama2_70B  # running example's model
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     held_to_progress = llama3.mpg  # runtime share x program share
@@ -133,6 +138,12 @@ class FleetCapacityOpening:
     check(replica_gpus == 8, "Prose spells out a serving replica of eight GPUs on one node")
     check(example_gpus % replica_gpus == 0, "Running example must be whole nodes")
     check(tp_width * example_nodes == example_gpus, "Layout: tensor parallelism within a node times data parallelism across nodes")
+    check(reference.replica.workload.parameters.magnitude == 175e9, "Prose and margin pointer name the archetype's 175B reference model")
+    check(example_model.parameters < reference.replica.workload.parameters, "Prose says the running example is smaller than the 175B reference")
+    check(
+        example_gpus < reference.fleet.total_accelerators,
+        "Running example is not the reference job: it runs on fewer GPUs than the reference cluster",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     llama3_gpus_str = fmt_count(llama3_gpus, label="H100 GPU", plural_label="H100 GPUs")
@@ -165,7 +176,7 @@ Earlier chapters examined the mechanisms of a fleet one layer at a time: data de
 ↩ The Fleet Law, where these multiplicative efficiency factors are first previewed, is established in @sec-vol2-introduction-fleet-law.
 :::
 
-To make that accounting concrete, one recurring training job carries the numbers through this chapter: pretraining Llama 2 70B, a smaller Archetype A model than the archetype's 175B reference, on `{python} FleetCapacityOpening.example_gpus_str` (`{python} FleetCapacityOpening.example_nodes_str` of eight GPUs each) in a shared cluster. The job uses `{python} FleetCapacityOpening.tp_width_str`-way tensor parallelism within each node and data parallelism across nodes. Because it competes with other teams for complete gang allocations, absorbs cluster failures and preemptions, and executes steps whose exposed communication grows with node count, every stage of fleet loss appears in a single workload on a single pool.
+To make that accounting concrete, one recurring training job carries the numbers through this chapter: pretraining Llama 2 70B, a smaller Archetype A model than the archetype's 175B reference, on `{python} FleetCapacityOpening.example_gpus_str` (`{python} FleetCapacityOpening.example_nodes_str` of eight GPUs each) in a shared cluster. The job uses `{python} FleetCapacityOpening.tp_width_str`-way tensor parallelism within each node and data parallelism across nodes. Because it competes with other teams for complete gang allocations, absorbs cluster failures and preemptions, and executes steps whose exposed communication grows with node count, every stage of fleet loss appears in a single workload on a single pool. The job is a constructed illustration rather than a measured run, so its numbers are modeled from stated assumptions.
 
 ::: {.column-margin .margin-pointer}
 ↩ Archetype A and its 175B-parameter reference model are established in @sec-introduction-archetype-gpt4llama3-b02f.
@@ -492,12 +503,13 @@ Choosing a named ideal also determines what can be aggregated across a multi-wor
 # │          @sec-performance-engineering-exposed-communication and later
 # │          sections (S6, S7, S8, S10) read the same outputs.
 # │
-# │ Goal: Measure the running example's program goodput (fleet MFU of its
+# │ Goal: Compute the running example's program goodput (fleet MFU of its
 # │       retained steps) and split it into the node baseline and the scaling
 # │       efficiency relative to that node.
 # │ Show: node MFU ~65%, fleet MFU ~48% (P ~ 0.48); scaling efficiency from
 # │       one node ~74%, so ~26% relative loss; 180 ms -> 245 ms per step,
-# │       ~65 ms (~27% of the fleet step) spent beyond the node baseline.
+# │       ~65 ms (~27% of the fleet step) spent beyond the node baseline;
+# │       ~2,215 tokens per data-parallel replica per step (microbatch scale).
 # │ How: MFU = useful FLOPs / (N x peak x step time) for both configurations;
 # │      scaling efficiency (eq-distributed-training-scaling-efficiency,
 # │      measured from the node) = fleet MFU / node MFU, which equals
@@ -536,9 +548,11 @@ class FleetEfficiencyCalc:
     extra_step = mfu.extra_step_time  # time per step the node never spent
     extra_share = mfu.extra_share
     program_loss = 1 - global_mfu  # share of retained step time below the arithmetic ideal
+    tokens_per_replica = fleet_tokens_per_step / FleetCapacityOpening.example_nodes  # one replica per node (TP8 x DP16)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(n_gpus == FleetCapacityOpening.example_gpus, "Running example size has one home (S1)")
+    check(2200 < tokens_per_replica < 2230, f"Prose says about 2,215 tokens per replica per step, got {tokens_per_replica:.0f}")
     check(global_mfu < local_mfu, "Fleet MFU must be lower than local node MFU due to scaling overhead.")
     check(abs(tokens_per_gpu_fleet / tokens_per_gpu_local - 1) < 0.02, "Prose treats the scenario as constant work per GPU (weak scaling)")
     check(
@@ -569,9 +583,89 @@ class FleetEfficiencyCalc:
     scaling_eff_pct_str = fmt_percent(round(scaling_eff, 2), precision=0, commas=False, style='prose')
     scaling_eff_str = fmt(round(scaling_eff, 2), precision=2)
     relative_loss_pct_str = fmt_percent(round(relative_loss, 2), precision=0, commas=False, style='prose')
+    tokens_per_replica_str = fmt_count(round(tokens_per_replica))
 ```
 
-For the chapter's running Llama 2 70B training job, program goodput is the fleet MFU of its retained steps across all `{python} FleetCapacityOpening.example_gpus_str`. That fleet MFU averages about `{python} FleetEfficiencyCalc.fleet_global_mfu_str`, down from the `{python} FleetEfficiencyCalc.fleet_local_mfu_str` achieved by a single-node baseline, because distributing each step across `{python} FleetCapacityOpening.example_nodes_str` introduces inter-node collective communication that a single node never pays. @Sec-performance-engineering-exposed-communication isolates and quantifies that scaling loss.
+```{python}
+#| echo: false
+#| label: optimizer-step-accounting
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPTIMIZER-STEP ACCOUNTING OF THE MICROBATCH STEP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the running-example paragraph in
+# │          @sec-performance-engineering-fleet-efficiency-metric-dff4 (full-step
+# │          program goodput); GradientAccumulationBudget in
+# │          @sec-performance-engineering-overlap and the playbook, and
+# │          GoodputDecomposition in @sec-performance-engineering-whole-fleet,
+# │          read the same values.
+# │
+# │ Goal: Size the data-axis gradient reduction of the running example, the
+# │       gradient accumulation that holds it to a small share of the
+# │       optimizer step, and the program goodput over a full optimizer step.
+# │ Show: 17.5 GB of FP16 gradients per GPU; ~656 ms bandwidth floor; ~328 ms
+# │       ReduceScatter when sharded; 51 microbatches for a 5 percent share;
+# │       P 0.48 per microbatch -> ~0.456 over a full optimizer step.
+# │ How: gradient shard = parameters x BYTES_FP16 / TP width; ring AllReduce
+# │      bandwidth term 2(N-1)/N x shard / NIC bandwidth (latency excluded),
+# │      ReduceScatter (N-1)/N of it; one NDR NIC per GPU on DGX H100;
+# │      microbatches = ceil(reduction x (1 - share) / share / microbatch
+# │      step); full-step P = per-microbatch P x accumulated compute /
+# │      (accumulated compute + fully exposed reduction).
+# │
+# │ Note: The 245 ms step and token count are the constructed inputs of
+# │       Scenarios.Llama2_70BFleetMfu128 (read through FleetEfficiencyCalc).
+# │       The 5 percent target is a scenario assumption. Bandwidth-floor
+# │       arithmetic, not a measurement.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Models, Systems
+from mlsysim.core.units import BYTES_FP16, GB, ms, second
+from mlsysim.physics.communication import calc_ring_allreduce_time, calc_ring_collective_data_factor
+from mlsysim.fmt import check, fmt
+
+class OptimizerStepAccounting:
+    """Gradient reduction, accumulation depth, and full-optimizer-step program goodput of the running example."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params = Models.Language.Llama2_70B.parameters.magnitude  # 70e9
+    grad_bytes = BYTES_FP16  # FP16/BF16 gradients
+    tp_width = FleetCapacityOpening.tp_width  # model axis: one node (S1 layout)
+    dp_nodes = FleetCapacityOpening.example_nodes  # data axis: 16 nodes
+    node = Systems.Nodes.DGX_H100
+    nic_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s NDR port = 50 GB/s per NIC
+    t_micro = FleetEfficiencyCalc.t_fleet_step  # S2 scenario: 245 ms microbatch-scale step
+    tokens_micro = FleetEfficiencyCalc.fleet_tokens_per_step  # S2 scenario: tokens per step, all replicas
+    program_micro = FleetEfficiencyCalc.global_mfu  # P per microbatch step (0.48)
+    target_share = 0.05  # scenario assumption: a "small share" of the optimizer step
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    grad_shard = (params * grad_bytes / tp_width).to(GB)  # one GPU's gradient shard
+    t_reduce = calc_ring_allreduce_time(grad_shard, dp_nodes, nic_bw, 0 * second).to(ms)  # bandwidth floor
+    t_reduce_scatter = (calc_ring_collective_data_factor(dp_nodes) * grad_shard / nic_bw).to(ms)  # sharded optimizer
+    compute_ratio = (1 - target_share) / target_share  # accumulated compute per unit of exposed reduction
+    t_compute_needed = (t_reduce * compute_ratio).to(second)
+    microbatches = math.ceil((t_compute_needed / t_micro).to("").magnitude)
+    t_accumulated = (microbatches * t_micro).to(second)
+    t_update = (t_accumulated + t_reduce).to(second)  # reduction fully exposed (worst case)
+    achieved_share = (t_reduce / t_update).to("").magnitude
+    program_full = program_micro * (t_accumulated / t_update).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(node.nics_per_node == node.accelerators_per_node, "Prose says each GPU reduces through its own NIC")
+    check(abs(grad_shard.to(GB).magnitude - 17.5) < 0.01, f"Prose says 17.5 GB per GPU, got {grad_shard}")
+    check(650 < t_reduce.to(ms).magnitude < 660, f"Prose says about 656 ms, got {t_reduce}")
+    check(t_micro < t_reduce_scatter, "Prose says the sharded ReduceScatter still exceeds the microbatch step")
+    check(microbatches == 51, f"Prose says 51 microbatches, got {microbatches}")
+    check(achieved_share <= target_share, "At 51 microbatches the exposed reduction is within 5 percent of the update")
+    check(round(program_micro, 2) == 0.48, f"Per-microbatch P prints as 0.48, got {program_micro:.4f}")
+    check(round(program_full, 3) == 0.456, f"Prose says about 0.456 over a full optimizer step, got {program_full:.4f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    program_micro_str = fmt(round(program_micro, 2), precision=2)
+    program_full_str = fmt(round(program_full, 3), precision=3)
+```
+
+For the chapter's running Llama 2 70B training job, program goodput is the fleet MFU of its retained steps across all `{python} FleetCapacityOpening.example_gpus_str`. In the constructed example, that fleet MFU is about `{python} FleetEfficiencyCalc.fleet_global_mfu_str`, down from the `{python} FleetEfficiencyCalc.fleet_local_mfu_str` of a single-node baseline, because distributing each step across `{python} FleetCapacityOpening.example_nodes_str` introduces inter-node collective communication that a single node never pays. Both MFUs rest on illustrative step times for a microbatch-scale step of about `{python} FleetEfficiencyCalc.tokens_per_replica_str` tokens per data-parallel replica, so one optimizer update accumulates many such steps. The program goodput of `{python} OptimizerStepAccounting.program_micro_str` is therefore a per-microbatch value. The data-axis gradient reduction runs once per optimizer step and is amortized across the accumulated microbatches (@sec-performance-engineering-overlap), which lowers program goodput over a full optimizer step to about `{python} OptimizerStepAccounting.program_full_str`. This chapter carries the per-microbatch value forward and states the full-step value wherever the job's factors are composed. @Sec-performance-engineering-exposed-communication isolates and quantifies the scaling loss.
 
 Program goodput also connects directly to the efficiency expressions derived earlier in this book. The compute-time fraction of @eq-fleet-efficiency divides each device's share of compute time by the distributed step time, and what it measures depends on how that compute time is counted. Counted as the ideal time at peak hardware throughput, the fraction equals the program goodput of a single step. Counted as the measured execution time on a single device, the compute time already contains that device's own losses to memory stalls and kernel dispatch, so the fraction measures only what spreading the work across devices costs, which is the scaling efficiency. Multiplying it by the single device's MFU then recovers program goodput. The effective fleet throughput in @sec-appdx-c3-taxonomy-effective-flops makes the same split explicit by multiplying peak cluster capacity by single-device MFU, multi-node scaling efficiency, and runtime goodput. The product of those first two terms equals the job's fleet MFU, which is its program goodput, while scheduling goodput is absent only because that expression starts from accelerators the job already holds.
 
@@ -830,7 +924,7 @@ Reading these three records from top to bottom (@tbl-performance-engineering-loc
 
 For these three records to enforce the accounting boundaries of @sec-performance-engineering-goodput-boundaries, their instrumentation must align with those boundaries. If a job timeline logs only total step duration without separating data-loader stalls, every input wait is folded into step time and a runtime goodput loss masquerades as a program goodput loss. Similarly, because a single straggling accelerator stretches synchronous step time across every peer in its collective group, identifying which rank caused the slowdown requires lightweight per-rank step timers inside the job timeline.
 
-Our running Llama 2 70B training job illustrates how the three rungs work together. Suppose that after one week on the shared cluster, the job has retained substantially fewer steps than predicted by a plan that assumed full-week allocation at the single-node step rate. Consulting the scheduler records first reveals that the job held partial node allocations before its full 16-node gang assembled—a scheduling loss quantified in @sec-performance-engineering-scheduling-evidence. Reading the job timeline from that gang-complete timestamp next isolates the initial startup delay, synchronous checkpoint pauses, steps re-executed after failures, and a modest input-stall fraction, which @sec-performance-engineering-runtime-composition composes into runtime goodput. The same timeline also shows that every retained step ran longer than the single-node baseline from day one, proving that part of the shortfall lies in program goodput. Only at that point does the team trigger step traces on one data-parallel group over a brief window. Because per-rank timeline counters show no single outlier rank, the team inspects intervals common to all ranks and finds inter-node gradient collectives extending past the backward pass—the exposed communication analyzed in @sec-performance-engineering-exposed-communication. Each rung answers the exact question that the others cannot (@fig-performance-engineering-localization-ladder).
+Our running Llama 2 70B training job illustrates how the three rungs work together. Suppose that after one week on the shared cluster, the job has retained substantially fewer steps than predicted by a plan that assumed full-week allocation at the single-node step rate. Consulting the scheduler records first reveals that the job held partial node allocations before its full 16-node gang assembled—a scheduling loss quantified in @sec-performance-engineering-scheduling-evidence. Reading the job timeline from that gang-complete timestamp next isolates the initial startup delay, synchronous checkpoint pauses, steps re-executed after failures, and a modest input-stall fraction, which @sec-performance-engineering-runtime-composition composes into runtime goodput. The same timeline also shows that every retained step ran longer than the single-node baseline from day one, proving that part of the shortfall lies in program goodput. Only at that point does the team trigger step traces on one data-parallel group over a brief window. Because per-rank timeline counters show no single outlier rank, the team inspects intervals common to all ranks and finds cross-node synchronization and collective waits with no computation beside them on every step, the exposed communication analyzed in @sec-performance-engineering-exposed-communication. Each rung answers the exact question that the others cannot (@fig-performance-engineering-localization-ladder).
 
 ::: {#fig-performance-engineering-localization-ladder fig-env="figure" fig-pos="htb" fig-cap="**Localizing a Lost Factor**: The three records are read from the top, cheapest and most complete first, and each settles one factor of goodput. Scheduler records cover every job and settle scheduling goodput, but they see a held allocation only as a closed block. The job timeline settles runtime goodput and shows that retained steps run slower than planned without showing why. Step traces, collected for sampled ranks over a short window, settle program goodput, and their highlighted window expands into the profiling hierarchy of @fig-optimization-hierarchy. Widths are schematic, not measured." fig-alt="Three rungs stacked top to bottom, each with a navy chip, a name, the losses it shows, a line reading cannot see, and a coverage label on the left, and a small timeline on the right. Chips S, R, and P are joined by downward arrows. Rung S, scheduler records, every job, free: a lane with a hatched queue interval, a hatched partial gang interval with rising gray steps, a marker labeled gang complete, and a long gray block labeled held, contents not visible. Rung R, job timeline, every job, cheap: a lane of gray retained-step blocks broken by tan blocks labeled startup, checkpoint, restart and rework, and checkpoint, with a red cross above the restart; above the lane a wavy step-time line runs above a dashed line labeled plan. Rung P, step traces, sampled ranks, costly: an orange compute lane and a violet comm lane, with dashed empty gaps in the compute lane labeled exposed comm and dispatch. A navy window on each upper timeline opens through a shaded wedge into the rung below, and the window on the step trace opens into a dashed box labeled kernels and counters, the profiling hierarchy."}
 
@@ -855,7 +949,8 @@ Diagnosing the eight-GPU serving replica follows the exact same three-rung progr
 # │       ~512 GB of trace data for one 5-second window across the cluster.
 # │ How: Systems.Nodes.DGX_H100.accelerators_per_node and
 # │      Scenarios.NsightTraceVolume1K (the reference cluster's GPUs, each
-# │      traced for one window).
+# │      traced for one window), guarded against the fleet of
+# │      Scenarios.DenseLLMPretrainingStep.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_count, fmt_memory
 
@@ -874,7 +969,10 @@ class MeasurementScaleBoundary:
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(nodes_in_cluster >= 100, "Cluster should span over a hundred nodes, so node-local traces miss fabric effects")
-    check(cluster_gpus == Scenarios.DenseLLMPretrainingReference.system.total_accelerators, "Trace covers the reference cluster")
+    check(
+        cluster_gpus == Scenarios.DenseLLMPretrainingStep.fleet.total_accelerators == 1024,
+        "Trace covers the 1,024-GPU cluster of the shared 175B reference job",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     node_gpus_str = fmt_count(node_gpus, label="GPU")
@@ -1731,7 +1829,7 @@ A job distributed across many nodes must exchange data over the inter-node netwo
 ↩ How much communication a schedule can hide, and why the hidden fraction falls as collectives grow relative to the compute window, are established in @sec-communication-overlap-limits.
 :::
 
-Our running example measures this multi-node penalty directly. Because its single-node baseline and its 128-GPU fleet configuration train the same model with the same per-device workload, the ratio of their MFUs estimates what scaling across the fabric costs the program. It is an estimate rather than an exact measure because the two configurations can also differ in other ways, such as the node baseline's offload of optimizer state to host memory.
+Our running example isolates this multi-node penalty in a single comparison, with constructed step times standing in for measured ones. Because its single-node baseline and its 128-GPU fleet configuration train the same model with the same per-device workload, the ratio of their MFUs estimates what scaling across the fabric costs the program. It is an estimate rather than an exact measure because the two configurations can also differ in other ways, such as the node baseline's offload of optimizer state to host memory.
 
 ::: {.column-margin}
 ```{=latex}
@@ -1744,7 +1842,7 @@ Our running example measures this multi-node penalty directly. Because its singl
 
 :::: {#nbk-performance-engineering-scaling-tax .callout-notebook title="From one node to 128 GPUs"}
 
-**Problem**: The `{python} FleetEfficiencyCalc.fleet_params_b_str` parameter training job of the running example achieves a node baseline\index{Model FLOPs utilization!local node baseline} of `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU on one `{python} FleetEfficiencyCalc.node_gpus_str` node, with optimizer state offloaded to host memory because the full training state of a 70B model exceeds one node's HBM. Scaled to `{python} FleetEfficiencyCalc.fleet_nodes_str` with the same work on each device, its step time rises from `{python} FleetEfficiencyCalc.local_t_step_ms_str` to `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`. What program goodput does the job keep at fleet scale, and how much of the node's efficiency does scale cost?
+**Problem**: The `{python} FleetEfficiencyCalc.fleet_params_b_str` parameter training job of the running example achieves a node baseline\index{Model FLOPs utilization!local node baseline} of `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU on one `{python} FleetEfficiencyCalc.node_gpus_str` node, with optimizer state offloaded to host memory because the full training state of a 70B model exceeds one node's HBM. Scaled to `{python} FleetEfficiencyCalc.fleet_nodes_str` with the same work on each device, its constructed microbatch-scale step time rises from `{python} FleetEfficiencyCalc.local_t_step_ms_str` to `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`. What program goodput does the job keep at fleet scale, and how much of the node's efficiency does scale cost?
 
 **Math**: Both MFU figures apply @eq-perf-program-goodput-mfu, the useful FLOPs of a step divided by the FLOPs the devices could execute at peak in that step's wall time.
 
@@ -1762,7 +1860,7 @@ Step 3: Time beyond the node. Each fleet step spends `{python} FleetEfficiencyCa
 
 The ratio computed in the notebook is the scaling efficiency of @eq-distributed-training-scaling-efficiency—referenced here to a single node rather than to a single device as in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f—and it completes the metric reconciliation begun in @sec-performance-engineering-fleet-efficiency-metric-dff4. A job's fleet MFU equals its single-node baseline MFU multiplied by its scaling efficiency from that node (`{python} FleetEfficiencyCalc.fleet_local_mfu_str` $\times$ `{python} FleetEfficiencyCalc.scaling_eff_str` $\approx$ `{python} FleetEfficiencyCalc.fleet_global_mfu_str`), and that product, evaluated over retained steps, is its program goodput. An engineering report may quote the fleet MFU directly, or it may quote the single-node MFU alongside the scaling efficiency, but it must never multiply the fleet MFU by the scaling efficiency a second time, which would double-count the multi-node penalty. Because the single-node baseline already includes intra-node NVLink collectives and host-offload traffic, factoring fleet MFU at the node boundary bounds the cross-node scaling cost against a baseline that engineers can easily reproduce.
 
-In the language of the Fleet Law, the additional `{python} FleetEfficiencyCalc.extra_step_ms_str` per step reflects growth in $\CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount) - \OverlappedTime$ alongside any configuration difference in local execution, and only a step trace can separate those contributions. When @sec-performance-engineering-localize-factor localized the loss on our running example, it found no rank consistently lagging its peers, but it did find cross-node gradient reductions running exposed after backward computation had finished. Had the trace instead shown fifteen nodes waiting at a barrier for one slow node, the very same step-time increase would have belonged to $\SynchronizationTime(\DeviceCount)$—yielding the same program goodput, but pointing to node replacement rather than to the communication terms as the place to act.
+In the language of the Fleet Law, the additional `{python} FleetEfficiencyCalc.extra_step_ms_str` per step reflects growth in $\CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount) - \OverlappedTime$ alongside any configuration difference in local execution, and only a step trace can separate those contributions. In the constructed diagnosis that @sec-performance-engineering-localize-factor walked through, the trace showed no rank consistently lagging its peers but did show exposed cross-node synchronization and collective waits on every microbatch step. Had the trace instead shown fifteen nodes waiting at a barrier for one slow node, the very same step-time increase would have belonged to $\SynchronizationTime(\DeviceCount)$—yielding the same program goodput, but pointing to node replacement rather than to the communication terms as the place to act.
 
 ```{python}
 #| echo: false
@@ -1803,7 +1901,7 @@ class LlamaMfuScale:
     gpus_8k_str = fmt_count(gpus_8k, label="GPU")
 ```
 
-The Llama 3 405B training run provides a production reference point: it sustained an MFU of about `{python} GoodputLossShares.program_goodput_pct_str` across `{python} GoodputLossShares.llama_gpus_str`[^fn-llama3-mfu-scale] under a parallelism layout tuned by the team that built the cluster [@dubey2024llama]. Our 128-GPU running example achieves a slightly higher program goodput because it spans far fewer devices, so its cross-node collectives occupy a smaller fraction of each step, not because of superior kernel engineering. Both runs surrender roughly half of their retained step time relative to the peak arithmetic ceiling; the task of performance diagnosis is to determine which specific Fleet Law terms hold that lost half.
+The Llama 3 405B training run provides a production reference point: it sustained an MFU of about `{python} GoodputLossShares.program_goodput_pct_str` across `{python} GoodputLossShares.llama_gpus_str`[^fn-llama3-mfu-scale] under a parallelism layout tuned by the team that built the cluster [@dubey2024llama]. The 128-GPU running example's slightly higher program goodput is a constructed value, not a measured comparison. It was set above Llama 3's figure to reflect the expectation that a job spanning far fewer devices spends a smaller fraction of each step in cross-node collectives, and it says nothing about the quality of either run's kernels. Both runs surrender roughly half of their retained step time relative to the peak arithmetic ceiling; the task of performance diagnosis is to determine which specific Fleet Law terms hold that lost half.
 
 [^fn-llama3-mfu-scale]: **MFU across Llama 3 configurations**\index{Llama 3!MFU and device count}: The report's scaling table gives `{python} LlamaMfuScale.mfu_8k_pct_str` BF16 MFU on `{python} LlamaMfuScale.gpus_8k_str` and `{python} GoodputLossShares.program_goodput_pct_str` on `{python} GoodputLossShares.llama_gpus_str`, with the same tensor and pipeline layout and twice the data parallelism [@dubey2024llama]. The report attributes the drop to the smaller batch per data-parallel group needed to hold the global batch constant, so doubling the devices cost program goodput with no change to the model or its kernels.
 
@@ -1822,7 +1920,7 @@ Each lower level is collected only for the specific ranks and time windows flagg
 ![](images/svg/profiling-hierarchy.svg)
 :::
 
-Diagnosing our running example required descending three of the four levels. First, distributed traces across a data-parallel group showed that no rank lagged consistently behind its peers—ruling out a hardware straggler—while revealing collective intervals that widened with device count. Next, a kernel timeline on a representative rank showed those collectives executing on the communication stream with no concurrent kernels on the compute stream during the latter part of the backward pass. That timeline established that those collectives were exposed, but not why. Separating a poor collective schedule from a transfer too long for the backward compute window requires comparing the collective's transfer time with that window (@sec-communication-overlap-limits). Hardware counters, the lowest level, were unnecessary because the compute kernels flanking the exposed collective were already running at their expected rates; the descent stopped as soon as the responsible Fleet Law term was identified.
+The constructed diagnosis of our running example descends three of the four levels. First, distributed traces across a data-parallel group show that no rank lags consistently behind its peers, which rules out a hardware straggler, and they reveal collective intervals that widen with device count. Next, a kernel timeline on a representative rank shows those collectives executing on the communication stream with no concurrent kernels on the compute stream during the latter part of the backward pass. That timeline establishes that those collectives are exposed, but not why. Separating a poor collective schedule from a transfer too long for the backward compute window requires comparing the collective's transfer time with that window (@sec-communication-overlap-limits). For the job's data-axis gradient reduction the comparison is decisive, because that transfer takes longer than the entire microbatch step. No schedule can hide it within one step, so the job runs it once per optimizer step after accumulating gradients over many microbatches (@sec-performance-engineering-overlap). The exposed intervals on every microbatch step are, by assumption of the constructed example, per-microbatch synchronization across the nodes and the collective waits it causes, not a transfer the example sizes. Hardware counters, the lowest level, are unnecessary because the compute kernels flanking the exposed collectives already run at their expected rates, and the descent stops as soon as the responsible Fleet Law term is identified.
 
 ::: {#psp-performance-engineering-physics-profiling-heisenberg-effect .callout-perspective title="The cost of tracing a step"}
 
@@ -2234,7 +2332,7 @@ An accelerator that idles *between* steps waiting for its next input batch shows
 
 : **Common Bottleneck Trace Patterns**: Each trace signature maps to a likely cause, the goodput factor and term the cause lengthens, a candidate lever, and the trade-off to check before applying it. Levers marked with a section reference are developed there. {#tbl-performance-engineering-bottleneck-patterns tbl-colwidths="[17,19,17,27,20]"}
 
-The final row of @tbl-performance-engineering-bottleneck-patterns is the most frequently misdiagnosed in practice; checking the per-step input-wait field in the job timeline distinguishes an input stall from an exposed collective before any profiler trace is opened. Once the hierarchical drill-down concludes, it hands off a specific Fleet Law term and its measured share of the step—exposed cross-node communication for our training job, and the gap above the weight-streaming floor for our serving replica—which @sec-performance-engineering-program-goodput now recovers through targeted engineering levers.
+The final row of @tbl-performance-engineering-bottleneck-patterns is the most frequently misdiagnosed in practice; checking the per-step input-wait field in the job timeline distinguishes an input stall from an exposed collective before any profiler trace is opened. Once the hierarchical drill-down concludes, it hands off a specific Fleet Law term and its share of the step—exposed cross-node communication for our training job, whose share the constructed example assumes, and the gap above the weight-streaming floor for our serving replica—which @sec-performance-engineering-program-goodput now recovers through targeted engineering levers.
 
 ## Recovering Program Goodput {#sec-performance-engineering-program-goodput}
 
@@ -2264,7 +2362,7 @@ Under this model, the engineer specifies only two inputs. The first is a logical
 
 From those few seeds, the compiler derives the rest of the parallel program through sharding propagation\index{Sharding propagation!inserted collectives}, walking the computation graph to infer the output layout of each operator from the layouts of its inputs. Multiplying an input activation by a column-split weight matrix yields an activation split along its feature dimension; the subsequent element-wise gated activation preserves that layout without communication. Next, multiplying that feature-split activation by a row-split output weight produces a partial sum on each device, prompting the compiler to insert an AllReduce along the `model` axis to complete the projection. The backward pass mirrors this derivation. Each device's weight gradients cover only its local shard along the `model` axis but represent partial sums across the `data` axis, so the compiler automatically inserts a cross-node gradient reduction along the `data` axis (or a ReduceScatter paired with a forward AllGather when optimizer state is sharded). The resulting communication schedule matches the hand-partitioned Megatron-style layer of @sec-distributed-training-systems-systems-tensor-parallelism-d76e, yet it is synthesized automatically from single-device model code that contains no explicit collective calls (@fig-performance-engineering-device-mesh). Wherever two incompatible tensor layouts meet in the graph, propagation resolves the mismatch by inserting an AllGather, ReduceScatter, AllToAll, or point-to-point permutation.
 
-::: {#fig-performance-engineering-device-mesh fig-env="figure" fig-pos="htb" fig-cap="**From Annotations to Collectives**: The running example's mesh places the model axis of `{python} FleetCapacityOpening.tp_width_str` GPUs inside each node and the data axis across the `{python} FleetCapacityOpening.example_nodes_str`. In one feed-forward block, the column-split gate and up projections need no exchange, and the row-split output projection leaves partial sums that propagation completes with a model-axis AllReduce in every layer, over NVLink and already inside the node baseline. The weight gradients are reduced once per step along the data axis across the fabric (a ReduceScatter and an AllGather when the optimizer state is sharded), and that exchange is the time the fleet step spends beyond the node baseline. Schematic; representative nodes only." fig-alt="Two panels. Left panel, device mesh: four tall node frames labeled node 0, node 1, node 2, and node 15, with an ellipsis between node 2 and node 15. Each frame holds eight stacked GPU boxes joined by short solid amber links. An upward arrow on the left is labeled model axis, 8 GPUs, NVLink, inside a node; a rightward arrow below is labeled data axis, 16 nodes, network fabric, across nodes. The bottom GPU of node 0 is solid navy; the other GPUs of node 0 and the bottom GPU of each other node are light blue, and the bottom GPUs connect through a dashed amber line running beneath the frames. A legend reads one GPU and GPUs it exchanges with. Right panel, one feed-forward block, top to bottom: a box x, batch split on data axis; two weight glyphs with one highlighted column strip each, labeled W gate and W up, columns, model; a box gated activation, no exchange; a weight glyph with one highlighted row strip labeled W out, rows, model; an arrow labeled partial sums into a solid amber box reading AllReduce, model axis, NVLink, inside a node, every layer, already in the node baseline; an arrow labeled weight gradients into a dashed amber box reading gradient AllReduce, data axis, fabric, across nodes, once per step, time beyond the node baseline."}
+::: {#fig-performance-engineering-device-mesh fig-env="figure" fig-pos="htb" fig-cap="**From Annotations to Collectives**: The running example's mesh places the model axis of `{python} FleetCapacityOpening.tp_width_str` GPUs inside each node and the data axis across the `{python} FleetCapacityOpening.example_nodes_str`. In one feed-forward block, the column-split gate and up projections need no exchange, and the row-split output projection leaves partial sums that propagation completes with a model-axis AllReduce in every layer, over NVLink and already inside the node baseline. The weight gradients are reduced along the data axis across the fabric (a ReduceScatter and an AllGather when the optimizer state is sharded) once per optimizer step, after gradient accumulation over many microbatch steps. The reduction is too long to fit inside one illustrative microbatch step and is amortized across the accumulated microbatches, while the time each microbatch step spends beyond the node baseline is assumed to be per-microbatch synchronization and collective waits. Schematic; representative nodes only." fig-alt="Two panels. Left panel, device mesh: four tall node frames labeled node 0, node 1, node 2, and node 15, with an ellipsis between node 2 and node 15. Each frame holds eight stacked GPU boxes joined by short solid amber links. An upward arrow on the left is labeled model axis, 8 GPUs, NVLink, inside a node; a rightward arrow below is labeled data axis, 16 nodes, network fabric, across nodes. The bottom GPU of node 0 is solid navy; the other GPUs of node 0 and the bottom GPU of each other node are light blue, and the bottom GPUs connect through a dashed amber line running beneath the frames. A legend reads one GPU and GPUs it exchanges with. Right panel, one feed-forward block, top to bottom: a box x, batch split on data axis; two weight glyphs with one highlighted column strip each, labeled W gate and W up, columns, model; a box gated activation, no exchange; a weight glyph with one highlighted row strip labeled W out, rows, model; an arrow labeled partial sums into a solid amber box reading AllReduce, model axis, NVLink, inside a node, every layer, already in the node baseline; an arrow labeled weight gradients into a dashed amber box reading gradient AllReduce, data axis, fabric, once per optimizer step, amortized over microbatches."}
 
 ![](images/svg/performance_engineering_device_mesh.svg)
 
@@ -2280,11 +2378,115 @@ Because the device mesh is a logical abstraction, the cluster scheduler's physic
 
 Consequently, modifying a sharding annotation alters the step's communication pattern without changing a single line of mathematical model code, and its effect must be verified under the measurement contract of @sec-performance-engineering-measurement-contract. The step trace provides the necessary audit: counting the collectives in one step by operation type and mesh axis, and checking that count against the intended layout, confirms whether propagation behaved as expected. An unexpected AllGather appearing in every layer is the classic symptom of an annotation conflict—typically caused by an intermediate reshape or a single misannotated tensor that forces the compiler to reshard back and forth. Because a compiler's internal cost model can also pick a suboptimal propagation path, any compiler-derived layout should be treated as a hypothesis about $\CommunicationTime(\DeviceCount)$ until confirmed by the step trace.
 
-At the fleet level, decoupling layout from model code allows the partitioning to adapt seamlessly to the allocation. When the fleet orchestrator resizes an elastic job (@sec-fleet-orchestration-elastic-policies) onto a different node topology, the `model` axis can change along with the `data` axis, and the compiler regenerates the executable from the existing annotations. Exploring layout trade-offs—such as sharding optimizer states or shifting communication onto intra-node links—likewise reduces to editing annotations rather than rewriting layers. At the same time, our running example illustrates the boundary of what partitioning alone can achieve. Its mesh already confines every `model`-axis collective within a single node, so the extra time its 128-GPU step spends beyond the single-node baseline comes from cross-node `data`-axis gradient reductions. Whether those reductions can be hidden depends on how their transfer time compares with the backward compute window.
+At the fleet level, decoupling layout from model code allows the partitioning to adapt seamlessly to the allocation. When the fleet orchestrator resizes an elastic job (@sec-fleet-orchestration-elastic-policies) onto a different node topology, the `model` axis can change along with the `data` axis, and the compiler regenerates the executable from the existing annotations. Exploring layout trade-offs—such as sharding optimizer states or shifting communication onto intra-node links—likewise reduces to editing annotations rather than rewriting layers. At the same time, our running example illustrates the boundary of what partitioning alone can achieve. Its mesh already confines every `model`-axis collective within a single node, so the extra time its 128-GPU step spends beyond the single-node baseline comes from traffic along the cross-node `data` axis. Whether that traffic can be hidden depends on how its transfer time compares with the backward compute window, and for the largest exchange, the gradient reduction, the answer decides when the reduction runs at all.
 
 ### Tensor-parallel collectives under contention {#sec-performance-engineering-overlap}
 
-Once the partitioning layout fixes which collectives a step must execute, the exposed communication time is whatever fraction of those collectives the schedule fails to hide behind independent computation. Our running example executes two classes of collectives that differ in their data dependencies. Cross-node gradient reductions along the `data` axis have loose dependencies. As soon as the backward pass finishes computing the gradients for one bucket of layers, that bucket can be reduced across nodes while backward computation continues on earlier layers. This is the standard bucketed overlap implemented by `DistributedDataParallel`. The analytical limits on hiding such loosely coupled exchanges are established in @sec-communication-overlap-limits; for our 128-GPU job, the unhidden remainder accounts for most of the `{python} FleetEfficiencyCalc.extra_step_ms_str` that each fleet step spends beyond the single-node baseline.
+Once the partitioning layout fixes which collectives a step must execute, the exposed communication time is whatever fraction of those collectives the schedule fails to hide behind independent computation. Our running example executes two classes of collectives that differ in their data dependencies. Cross-node gradient reductions along the `data` axis have loose dependencies. As soon as the backward pass finishes computing the gradients for one bucket of layers, that bucket can be reduced across nodes while backward computation continues on earlier layers. This is the standard bucketed overlap implemented by `DistributedDataParallel`. The analytical limits on hiding such loosely coupled exchanges are established in @sec-communication-overlap-limits, and for our 128-GPU job the full gradient reduction lies far outside them.
+
+```{python}
+#| echo: false
+#| label: gradient-accumulation-budget
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRADIENT REDUCTION AGAINST THE MICROBATCH STEP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-overlap (the paragraph after this
+# │          cell); the not-fit branch of @sec-performance-engineering-playbook
+# │          reads the same outputs.
+# │
+# │ Goal: Show that the running example's data-axis gradient reduction cannot
+# │       fit inside its 245 ms microbatch-scale step, even with the optimizer
+# │       state sharded, and size the gradient accumulation that keeps it a
+# │       small share of the optimizer step.
+# │ Show: 17.5 GB of FP16 gradients per GPU; ring factor 1.875 over 16 nodes;
+# │       ~656 ms bandwidth floor (2.7x the step); ~328 ms ReduceScatter when
+# │       sharded; 51 microbatches (~1.8 million tokens) to hold a fully
+# │       exposed reduction to 5 percent of the optimizer step; ~13 ms per
+# │       microbatch amortized; the 175B reference step's ~2 percent share
+# │       at 96 microbatches per replica.
+# │ How: OptimizerStepAccounting (S2) sizes the gradient shard (parameters x
+# │      BYTES_FP16 / TP width), the ring AllReduce bandwidth floor, the
+# │      sharded ReduceScatter, and the accumulation depth; this cell adds
+# │      the ring factor, the ratios the prose prints, and the 175B
+# │      reference step's share from Scenarios.DenseLLMPretrainingStep.
+# │
+# │ Note: The 245 ms step and token count are the constructed inputs of
+# │       Scenarios.Llama2_70BFleetMfu128 (read through FleetEfficiencyCalc).
+# │       The 5 percent target is a scenario assumption. Bandwidth-floor
+# │       arithmetic, not a measurement.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import GB, millisecond, ms, second
+from mlsysim.physics.communication import calc_ring_allreduce_data_factor
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_percent, fmt_time
+
+class GradientAccumulationBudget:
+    """Data-axis gradient reduction of the running example against its microbatch step."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    acc = OptimizerStepAccounting  # S2: reduction floor, accumulation depth, full-step P
+    tp_width = acc.tp_width  # model axis: one node (S1 layout)
+    dp_nodes = acc.dp_nodes  # data axis: 16 nodes
+    nic_bw = acc.nic_bw  # NDR port, one per GPU
+    grad_shard = acc.grad_shard  # FP16 gradient shard per GPU
+    t_micro = acc.t_micro  # S2 scenario: 245 ms microbatch-scale step
+    t_reduce = acc.t_reduce  # bandwidth floor of the data-axis AllReduce
+    t_reduce_scatter = acc.t_reduce_scatter  # sharded optimizer: ReduceScatter only
+    target_share = acc.target_share  # scenario assumption: 5 percent of the optimizer step
+    compute_ratio = acc.compute_ratio
+    t_compute_needed = acc.t_compute_needed
+    microbatches = acc.microbatches
+    achieved_share = acc.achieved_share
+    reference = Scenarios.DenseLLMPretrainingStep  # Archetype A's 175B reference optimizer step
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ring_factor = calc_ring_allreduce_data_factor(dp_nodes)
+    reduce_over_step = (t_reduce / t_micro).to("").magnitude
+    tokens_per_update = microbatches * acc.tokens_micro
+    t_amortized = (t_reduce / microbatches).to(ms)  # reduction time per microbatch, averaged
+    ref_share = (reference.result.dp_communication_latency / reference.step_time).to("").magnitude
+    ref_microbatches = reference.microbatches_per_replica
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(acc.node.nics_per_node == acc.node.accelerators_per_node, "Prose says each GPU reduces through its own NIC")
+    check(tp_width == 8, "Prose says each GPU holds an eighth of the parameters")
+    check(abs(nic_bw.to(GB / second).magnitude - 50) < 1e-9, f"Prose prints 50 GB/s per NDR port, got {nic_bw}")
+    check(nic_bw == reference.fleet.fabric.bandwidth, "Same NDR fabric as the archetype's reference cluster")
+    check(abs(grad_shard.to(GB).magnitude - 17.5) < 0.01, f"Prose says 17.5 GB per GPU, got {grad_shard.to(GB)}")
+    check(abs(ring_factor - 1.875) < 1e-9, f"Ring factor over 16 nodes is 1.875, got {ring_factor}")
+    check(650 < t_reduce.to(ms).magnitude < 660, f"Prose says about 656 ms, got {t_reduce}")
+    check(2.6 < reduce_over_step < 2.8, f"Prose says about 2.7x the step, got {reduce_over_step:.2f}")
+    check(
+        t_micro.to(ms).magnitude < t_reduce_scatter.to(ms).magnitude < 330,
+        f"Prose says the sharded ReduceScatter (~328 ms) still exceeds the step, got {t_reduce_scatter}",
+    )
+    check(abs(compute_ratio - 19) < 1e-9, "Prose says the accumulated compute must be 19 times the reduction")
+    check(microbatches == 51, f"Prose says 51 microbatches, got {microbatches}")
+    check(achieved_share <= target_share, "At 51 microbatches the exposed reduction is within 5 percent of the update")
+    check(1.75e6 < tokens_per_update < 1.85e6, f"Prose says about 1.8 million tokens per update, got {tokens_per_update:.0f}")
+    check(12.5 < t_amortized.to(ms).magnitude < 13.5, f"Prose says about 13 ms per microbatch, got {t_amortized}")
+    check(0.015 < ref_share < 0.025 and ref_microbatches == 96, f"Prose says ~2 percent at 96 microbatches, got {ref_share:.3f}, {ref_microbatches}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    grad_shard_gb_str = fmt_memory(grad_shard.to(GB), unit=GB, precision=1)
+    ring_factor_str = fmt(ring_factor, precision=3)
+    t_reduce_ms_str = fmt_time(round(t_reduce.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
+    reduce_over_step_mult_str = fmt_multiple(round(reduce_over_step, 1), precision=1)
+    t_reduce_scatter_ms_str = fmt_time(round(t_reduce_scatter.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
+    target_share_pct_str = fmt_percent(target_share, precision=0, commas=False, style='prose')
+    compute_ratio_str = fmt_count(round(compute_ratio), commas=False)
+    t_compute_needed_s_str = fmt_time(round(t_compute_needed.to(second).magnitude, 1) * second, second, precision=1)
+    microbatches_str = fmt_count(microbatches, commas=False)
+    tokens_per_update_m_str = fmt(round(tokens_per_update / 1e6, 1), precision=1)
+    t_amortized_ms_str = fmt_time(round(t_amortized.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
+    ref_share_pct_str = fmt_percent(round(ref_share, 2), precision=0, commas=False, style='prose')
+    ref_microbatches_str = fmt_count(ref_microbatches, commas=False)
+    nic_bw_str = fmt_bandwidth(nic_bw, unit=GB / second, precision=0)
+```
+
+Each GPU holds the 16-bit gradients of its eighth of the 70B parameters, `{python} GradientAccumulationBudget.grad_shard_gb_str`, and a ring reduction across the `{python} FleetCapacityOpening.example_nodes_str` sends `{python} GradientAccumulationBudget.ring_factor_str` times that shard through the GPU's own network interface. Even at the full `{python} GradientAccumulationBudget.nic_bw_str` of an NDR port, the transfer takes at least `{python} GradientAccumulationBudget.t_reduce_ms_str`, `{python} GradientAccumulationBudget.reduce_over_step_mult_str` the entire `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` microbatch step, so no bucket schedule can hide it inside one step. Sharding the optimizer state does not rescue a single step, because the ReduceScatter that must overlap with backpropagation still needs about `{python} GradientAccumulationBudget.t_reduce_scatter_ms_str`, longer than the whole step.
+
+The job therefore accumulates gradients over many microbatch steps and reduces them once per optimizer step. Holding a fully exposed reduction to `{python} GradientAccumulationBudget.target_share_pct_str` of the optimizer step requires accumulated computation `{python} GradientAccumulationBudget.compute_ratio_str` times as long as the reduction, about `{python} GradientAccumulationBudget.t_compute_needed_s_str`, which takes `{python} GradientAccumulationBudget.microbatches_str` microbatch steps of `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`, or about `{python} GradientAccumulationBudget.tokens_per_update_m_str` million tokens per update. The archetype's 175B reference job makes the same trade at larger scale, accumulating `{python} GradientAccumulationBudget.ref_microbatches_str` microbatches per replica and spending about `{python} GradientAccumulationBudget.ref_share_pct_str` of its optimizer step on the data-parallel reduction. At `{python} GradientAccumulationBudget.microbatches_str` microbatches, the reduction adds about `{python} GradientAccumulationBudget.t_amortized_ms_str` per microbatch on average, time that lies outside the microbatch step behind the chapter's MFU figures and lowers program goodput over a whole optimizer step from `{python} OptimizerStepAccounting.program_micro_str` to about `{python} OptimizerStepAccounting.program_full_str`. The gradient reduction therefore cannot be what fills the `{python} FleetEfficiencyCalc.extra_step_ms_str` that each illustrative microbatch step spends beyond the node baseline. The constructed example assumes that this time is per-microbatch synchronization across the `{python} FleetCapacityOpening.example_nodes_str` and the collective waits it causes, which recur on every microbatch and cannot hide; the example does not size them as a particular operation.
 
 By contrast, intra-node collectives along the `model` axis have strict serial dependencies: each AllReduce completes an activation tensor that the very next operator in the same transformer layer consumes immediately, preventing subsequent operations in that layer from starting until the collective finishes. Because these `model`-axis exchanges never leave the node, their duration is already embedded inside the single-node baseline.
 
@@ -2353,7 +2555,7 @@ class TensorParallelStepBudget:
     non_ideal_pct_str = fmt_percent(round(non_ideal_share, 2), precision=0, commas=False, style='prose')
 ```
 
-A bandwidth-floor estimate (excluding launch latency and activation recomputation) bounds how much of the single-node step those intra-node collectives can occupy. Each exchange point reduces roughly `{python} TensorParallelStepBudget.payload_mb_str` of activations across the `{python} TensorParallelStepBudget.tp_degree_str` GPUs of the node, and the `{python} TensorParallelStepBudget.allreduces_str` exchange points in a full forward-and-backward step require about `{python} TensorParallelStepBudget.t_step_total_ms_str` of NVLink transfer time. Even if none of that transfer were hidden, it would represent about `{python} TensorParallelStepBudget.share_pct_str` of the `{python} FleetEfficiencyCalc.local_t_step_ms_str` single-node step—well within the `{python} TensorParallelStepBudget.non_ideal_pct_str` gap between the node's `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU and the arithmetic ideal. Consequently, `model`-axis collectives represent a local, node-level program loss that does not grow with fleet size so long as the `model` axis remains confined to a single node. The cross-node `data`-axis reduction carries the scaling penalty, and a single-rank trace easily separates the two because they execute on distinct process groups.
+A bandwidth-floor estimate (excluding launch latency and activation recomputation) bounds how much of the single-node step those intra-node collectives can occupy. Each exchange point reduces roughly `{python} TensorParallelStepBudget.payload_mb_str` of activations across the `{python} TensorParallelStepBudget.tp_degree_str` GPUs of the node, and the `{python} TensorParallelStepBudget.allreduces_str` exchange points in a full forward-and-backward step require about `{python} TensorParallelStepBudget.t_step_total_ms_str` of NVLink transfer time. Even if none of that transfer were hidden, it would represent about `{python} TensorParallelStepBudget.share_pct_str` of the `{python} FleetEfficiencyCalc.local_t_step_ms_str` single-node step—well within the `{python} TensorParallelStepBudget.non_ideal_pct_str` gap between the node's `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU and the arithmetic ideal. Consequently, `model`-axis collectives represent a local, node-level program loss that does not grow with fleet size so long as the `model` axis remains confined to a single node. The cross-node `data`-axis traffic carries the scaling penalty, and a single-rank trace easily separates the two because they execute on distinct process groups.
 
 Hiding a collective whose output is needed by the next operation requires finding independent computation to execute concurrently. One approach interleaves work from a second microbatch that has no dependency on the collective in flight. The alternative is fine-grained compute-communication decomposition. It splits both the matrix multiplication and the collective that consumes its output into smaller tiles, so that one tile's collective transfer runs concurrently with the next tile's matrix multiplication. A partitioning compiler can synthesize this transformation automatically [@wang2023overlap]. Neither strategy shortens the communication time $\CommunicationTime(\DeviceCount)$ itself; both work purely by enlarging the overlap credit $\OverlappedTime$.
 
@@ -2582,7 +2784,7 @@ Graph compilation\index{Graph compilation!fleet gain} traces a region of the mod
 
 Numeric precision also acts on local execution, although unlike the four techniques above it changes the model's arithmetic. This book divides its mechanics between two domain chapters: reduced-precision training (such as FP8), which raises the compute ceiling $\PeakRate$ and halves activation and weight traffic under the numerical stability contract of @sec-distributed-training-fp8, and post-training weight quantization for inference, which reduces weight-streaming bytes $\DataVolume$ in @sec-inference-scale-weight-quantization-serving-097b.
 
-These single-device levers pay off very differently across our two running workloads. In the 128-GPU training job, large matrix multiplications already run near the H100 compute ceiling, so kernel-level levers can compress only the non-GEMM kernels on the bandwidth slope while leaving the job's primary program loss—exposed cross-node gradient communication—untouched. In the 8-GPU serving replica, by contrast, the program loss is overwhelmingly local (weight-streaming traffic and host kernel dispatch), allowing operator fusion, weight quantization, and CUDA Graph replay to close part of the gap to the bandwidth floor, as the replica case study in @sec-inference-scale-replica-decode-budget shows.
+These single-device levers pay off very differently across our two running workloads. In the 128-GPU training job, large matrix multiplications already run near the H100 compute ceiling, so kernel-level levers can compress only the non-GEMM kernels on the bandwidth slope while leaving the job's primary program loss, exposed cross-node communication, untouched. In the 8-GPU serving replica, by contrast, the program loss is overwhelmingly local (weight-streaming traffic and host kernel dispatch), allowing operator fusion, weight quantization, and CUDA Graph replay to close part of the gap to the bandwidth floor, as the replica case study in @sec-inference-scale-replica-decode-budget shows.
 
 ### Composing program fixes {#sec-performance-engineering-playbook}
 
@@ -2592,7 +2794,7 @@ Applying several kernel and communication optimizations simultaneously—or addi
 2. Descend the profiling hierarchy (@sec-performance-engineering-roofline) to identify which Fleet Law term holds the exposed time on the critical path, and select the lowest-cost candidate lever targeting that term (@tbl-performance-engineering-bottleneck-patterns).
 3. Apply a single lever, re-measure the end-to-end step under the exact same contract, and restart the drill-down from the new trace—because compressing one exposed term routinely exposes another.
 
-For our 128-GPU training example, the hierarchical drill-down identified exposed cross-node gradient reductions along the `data` axis as the primary bottleneck. Provided the reductions' transfer time fits within the backward compute window, the first experiment targets communication overlap—either by tuning gradient bucket sizes and launch order, or by sharding the optimizer state so that ReduceScatter overlaps with backpropagation and AllGather prefetches parameters ahead of the forward pass. Only after re-profiling that change does the second experiment target the remaining node-level losses (intra-node `model`-axis collectives and memory-bound non-GEMM kernels) via fine-grained compute-communication decomposition and operator fusion.
+For our 128-GPU training example, the constructed drill-down identified exposed cross-node synchronization and collective waits along the `data` axis as the primary bottleneck. Where an exchange's transfer time fits within the backward compute window, the first experiment targets communication overlap, either by tuning gradient bucket sizes and launch order or by sharding the optimizer state so that ReduceScatter overlaps with backpropagation and AllGather prefetches parameters ahead of the forward pass. The full gradient reduction does not fit. Even with the optimizer state sharded, its ReduceScatter alone needs about `{python} GradientAccumulationBudget.t_reduce_scatter_ms_str`, longer than the whole `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` microbatch step, so overlap cannot hide it within a step. The lever for that reduction is gradient accumulation. Running it once per optimizer step, after about `{python} GradientAccumulationBudget.microbatches_str` microbatches (@sec-performance-engineering-overlap), holds even a fully exposed reduction to `{python} GradientAccumulationBudget.target_share_pct_str` of the update, and accumulating more microbatches shrinks that share further at the cost of a larger global batch. Sharding then reduces what must overlap with the final backward pass rather than making the reduction fit. Only after re-profiling that change does the second experiment target the remaining node-level losses (intra-node `model`-axis collectives and memory-bound non-GEMM kernels) via fine-grained compute-communication decomposition and operator fusion.
 
 Isolated speedups fail to add linearly because every optimization alters the step's critical path.\index{Optimization!systematic ordering} A lever shortens a single Fleet Law term, and end-to-end step time decreases only by the portion of that term that was exposed. Once the first lever takes effect, every term's share of the step shifts, invalidating isolated speedup estimates for subsequent levers. In practice, pairs of optimizations interact in three ways:
 
@@ -2646,7 +2848,8 @@ Evaluated solely by its runtime and program goodput inside its own allocation, t
 # │       MPG ~ 0.28; loss shares 35 / 6 / 31 percent of fleet capacity;
 # │       per-point value P > S > R; gains at the owners' ceilings
 # │       P > S > R; Llama 3 R x P ~ 0.37 (dedicated), ~0.24 on the shared
-# │       pool; useful accelerator-hour ~3.6x the capacity price.
+# │       pool; useful accelerator-hour ~3.6x the capacity price; over a full
+# │       optimizer step P ~0.456 and MPG ~0.282 -> ~0.268 (captions).
 # │ How: Scenarios.Llama2_70BSharedPoolGoodput128 (GoodputModel), whose
 # │      factors are the scenarios the earlier cells read (guarded equal):
 # │      R x P = RuntimeGoodputComposition.runtime_goodput x
@@ -2658,8 +2861,8 @@ Evaluated solely by its runtime and program goodput inside its own allocation, t
 # │      removed; P: every loss beyond the node baseline removed).
 # │      Cost per useful accelerator-hour = fleet price / MPG.
 # │
-# │ Note: Requires FleetCapacityOpening (S1), GoodputLossShares and
-# │       FleetEfficiencyCalc (S2), SchedulingGoodputSnapshot (S4), and
+# │ Note: Requires FleetCapacityOpening (S1), GoodputLossShares,
+# │       FleetEfficiencyCalc, and OptimizerStepAccounting (S2), SchedulingGoodputSnapshot (S4), and
 # │       RuntimeGoodputComposition (S5) earlier in the chapter. The S layer
 # │       inherits S4's scenario snapshot (illustrative); the Llama 3 layer
 # │       multiplies factors from different measurement windows (estimate).
@@ -2682,6 +2885,7 @@ class GoodputDecomposition:
     sched_ceiling = pool.ceilings["S"]  # S if every freed partial-gang device is filled
     runtime_ceiling = pool.ceilings["R"]  # R with every input wait removed
     program_ceiling = pool.ceilings["P"]  # P with every loss beyond the node baseline removed
+    program_full = OptimizerStepAccounting.program_full  # P over a full optimizer step, reduction amortized (S2)
     input_wait = RuntimeGoodputComposition.input_wait  # largest runtime term (S5)
     llama_runtime = GoodputLossShares.runtime_goodput  # Llama 3 R (lower bound, Dubey 2024)
     llama_program = GoodputLossShares.program_goodput  # Llama 3 P (BF16 MFU at 16K GPUs)
@@ -2719,6 +2923,8 @@ class GoodputDecomposition:
     cost_mult = g.cost_multiple
     job_cost_mult = g.job_cost_multiple
     useful_price = g.useful_rate.to(USD / hour).magnitude
+    # Full optimizer step: the amortized data-axis reduction lowers P, and MPG with it.
+    mpg_full = sched * runtime * program_full
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     r2 = lambda x: round(x, 2)
@@ -2763,6 +2969,9 @@ class GoodputDecomposition:
     check(3.0 < cost_mult < 4.0, f"Prose: the running example pays 3-4x the capacity price, got {cost_mult:.2f}")
     check(0.2 < p_ceiling_cost_cut < 0.3, "Prose: program ceiling cuts the price of useful work by about a quarter")
     check(replica_runtime_day > 0.99 > 0.92 > replica_runtime_hour, "Table: replica R near one per day, ~0.9 per burst hour")
+    check(program_full < program, "Full-step P must fall below the per-microbatch P")
+    check(round(program_full, 3) == 0.456, f"Captions: full-step P about 0.456, got {program_full:.4f}")
+    check(round(mpg, 3) == 0.282 and round(mpg_full, 3) == 0.268, f"Captions: MPG about 0.282 -> 0.268, got {mpg:.4f} -> {mpg_full:.4f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     sched_str = fmt(sched, precision=2)
@@ -2809,6 +3018,9 @@ class GoodputDecomposition:
     job_cost_mult_str = fmt_multiple(job_cost_mult, precision=1)
     price_str = fmt_usd(price, precision=0, commas=False, per="GPU-hour")
     useful_price_str = fmt_usd(useful_price, precision=2, commas=False, per="GPU-hour")
+    program_full_str = fmt(round(program_full, 3), precision=3)
+    mpg_precise_str = fmt(round(mpg, 3), precision=3)
+    mpg_full_str = fmt(round(mpg_full, 3), precision=3)
 ```
 
 ::: {#nbk-performance-engineering-whole-fleet-decomposition .callout-notebook title="Where the running example's fleet capacity went"}
@@ -2819,7 +3031,7 @@ class GoodputDecomposition:
 
 - Scheduling goodput $\SchedulingGoodput$ = `{python} GoodputDecomposition.sched_str`, the pool's value from notebook \ref{nbk-performance-engineering-shared-pool-scheduling-goodput}.
 - Runtime goodput $\RuntimeGoodput$ = `{python} GoodputDecomposition.runtime_str`, composed from five owners' terms in notebook \ref{nbk-performance-engineering-runtime-loss-composition}.
-- Program goodput $\ProgramGoodput$ = `{python} GoodputDecomposition.program_str`, the fleet MFU of the retained steps from notebook \ref{nbk-performance-engineering-scaling-tax}.
+- Program goodput $\ProgramGoodput$ = `{python} GoodputDecomposition.program_str`, the per-microbatch fleet MFU of the retained steps from notebook \ref{nbk-performance-engineering-scaling-tax}; over a full optimizer step the amortized gradient reduction lowers it to about `{python} GoodputDecomposition.program_full_str` (@sec-performance-engineering-overlap).
 
 **Math**:
 
@@ -2847,11 +3059,11 @@ The pool product also rests on an assumption that the job product does not requi
 | **Pool product** (MPG)                                     |                                                                                                                                                                                                                                   `{python} GoodputDecomposition.mpg_str` | `{python} GoodputDecomposition.mpg_table_pct_str` useful | about `{python} GoodputDecomposition.llama_shared_str` on the same pool |                                                                               |
 | **Serving replica** (separate row)                         | Runtime from `{python} GoodputDecomposition.replica_runtime_day_str` (released daily) to about `{python} GoodputDecomposition.replica_runtime_hour_str` (one burst hour); program goodput as MBU against a floor of `{python} RooflineDiagnostic.decode_ms_str` per token |                                    Not added to training |                                                          Not applicable | @sec-inference-scale                                                          |
 
-: **Goodput Decomposition of the Running Example**: The three factors of the Llama 2 70B job and the share of fleet capacity each boundary loses, computed by @eq-perf-goodput-loss-shares in the order a job meets the losses. The scheduling layer comes from a constructed snapshot and is illustrative; the Llama 3 column multiplies factors reported over different measurement windows and is an estimate [@dubey2024llama]. The pool product assumes every job in the pool runs like the running example, so it is an upper bound. The serving replica's program goodput divides by a bandwidth ideal rather than peak arithmetic, so a fleet report carries it as its own row and never averages it with the training job's. {#tbl-performance-engineering-goodput-decomposition tbl-colwidths="[24,22,16,16,22]"}
+: **Goodput Decomposition of the Running Example**: The three factors of the Llama 2 70B job and the share of fleet capacity each boundary loses, computed by @eq-perf-goodput-loss-shares in the order a job meets the losses. The scheduling layer comes from a constructed snapshot and the program layer from the example's constructed microbatch-scale step times, so both are illustrative. Program goodput is the per-microbatch value; the data-axis gradient reduction, amortized over the accumulated microbatches, lowers it to about `{python} GoodputDecomposition.program_full_str` over a full optimizer step and MPG from about `{python} GoodputDecomposition.mpg_precise_str` to about `{python} GoodputDecomposition.mpg_full_str`. The Llama 3 column multiplies factors reported over different measurement windows and is an estimate [@dubey2024llama]. The pool product assumes every job in the pool runs like the running example, so it is an upper bound. The serving replica's program goodput divides by a bandwidth ideal rather than peak arithmetic, so a fleet report carries it as its own row and never averages it with the training job's. {#tbl-performance-engineering-goodput-decomposition tbl-colwidths="[24,22,16,16,22]"}
 
 Read as a map of where the fleet's capacity went, @tbl-performance-engineering-goodput-decomposition shows that two boundaries carry almost all of the loss. The capacity lost before allocation and the capacity lost inside slow steps are each several times larger than the capacity lost to startup, input waits, checkpoints, failures, and preemptions combined (@fig-performance-engineering-goodput-waterfall). Those runtime interruptions are nevertheless the losses that operators see most directly in job logs and restart alerts.
 
-::: {#fig-performance-engineering-goodput-waterfall fig-env="figure" fig-pos="htb" fig-cap="**Where the Running Example's Fleet Capacity Goes**: Each solid bar is the share of fleet capacity left after one boundary, and each dashed slice is the share lost at that boundary, so the three slices are the terms of @eq-perf-goodput-loss-shares: `{python} GoodputDecomposition.s_share_pct_str` lost to scheduling, `{python} GoodputDecomposition.r_share_pct_str` to runtime, and `{python} GoodputDecomposition.p_share_pct_str` to the program, leaving `{python} GoodputDecomposition.mpg_pct_str` as ideal-rate progress. The hatched scheduling slice comes from a constructed snapshot and is illustrative. The right panel opens the runtime slice into its five terms as shares of the time the job holds, which scheduling goodput scales down to the slice's share of fleet capacity; input waits and preemption carry almost all of it. The hollow bars place Llama 3 405B on its dedicated cluster beside the example, an estimate that multiplies factors reported over different measurement windows [@dubey2024llama]." fig-alt="Two panels. Left, a waterfall of four gray bars against share of fleet capacity in percent, labeled fleet capacity at 100, after scheduling at 65, after runtime at 59, and after program at 28, the last bar light green. Above each later bar a dashed slice reaches up to the previous level and is labeled with its loss: minus 35 percent scheduling, hatched and marked illustrative; minus 6 percent runtime, tinted tan; and minus 31 percent program. Beside each gray bar a narrow hollow bar shows Llama 3 405B on a dedicated cluster at 100, 100, at least 90, and 37. A key above the panel names the running example and Llama 3 405B, dedicated cluster, cited. Right, one stacked bar labeled runtime slice against share of held time in percent, reaching about 9.6: input waits 7.7 percent at the bottom in light tan, preemption 1.4 percent above it in light violet, and three thin slivers at the top labeled by leader lines as startup 0.05 percent in gray, checkpoints 0.4 percent in medium brown, and recovery 0.03 percent in dark brown."}
+::: {#fig-performance-engineering-goodput-waterfall fig-env="figure" fig-pos="htb" fig-cap="**Where the Running Example's Fleet Capacity Goes**: Each solid bar is the share of fleet capacity left after one boundary, and each dashed slice is the share lost at that boundary, so the three slices are the terms of @eq-perf-goodput-loss-shares: `{python} GoodputDecomposition.s_share_pct_str` lost to scheduling, `{python} GoodputDecomposition.r_share_pct_str` to runtime, and `{python} GoodputDecomposition.p_share_pct_str` to the program, leaving `{python} GoodputDecomposition.mpg_pct_str` as ideal-rate progress. The hatched scheduling slice comes from a constructed snapshot and is illustrative, and the program slice rests on the example's constructed microbatch-scale step times and uses the per-microbatch program goodput; amortizing the data-axis gradient reduction over the accumulated microbatches lowers it to about `{python} GoodputDecomposition.program_full_str` over a full optimizer step and MPG from about `{python} GoodputDecomposition.mpg_precise_str` to about `{python} GoodputDecomposition.mpg_full_str`. The right panel opens the runtime slice into its five terms as shares of the time the job holds, which scheduling goodput scales down to the slice's share of fleet capacity; input waits and preemption carry almost all of it. The hollow bars place Llama 3 405B on its dedicated cluster beside the example, an estimate that multiplies factors reported over different measurement windows [@dubey2024llama]." fig-alt="Two panels. Left, a waterfall of four gray bars against share of fleet capacity in percent, labeled fleet capacity at 100, after scheduling at 65, after runtime at 59, and after program at 28, the last bar light green. Above each later bar a dashed slice reaches up to the previous level and is labeled with its loss: minus 35 percent scheduling, hatched and marked illustrative; minus 6 percent runtime, tinted tan; and minus 31 percent program. Beside each gray bar a narrow hollow bar shows Llama 3 405B on a dedicated cluster at 100, 100, at least 90, and 37. A key above the panel names the running example and Llama 3 405B, dedicated cluster, cited. Right, one stacked bar labeled runtime slice against share of held time in percent, reaching about 9.6: input waits 7.7 percent at the bottom in light tan, preemption 1.4 percent above it in light violet, and three thin slivers at the top labeled by leader lines as startup 0.05 percent in gray, checkpoints 0.4 percent in medium brown, and recovery 0.03 percent in dark brown."}
 
 ```{python}
 #| echo: false
@@ -3054,13 +3266,13 @@ plt.close()
 
 :::
 
-Comparing the running example against the Llama 3 405B column highlights how cluster scale shifts the balance between factors. The running example's program goodput sits above the Llama 3 reference because a job on `{python} FleetCapacityOpening.example_nodes_str` exposes less communication per step than a run across `{python} FleetCapacityOpening.llama3_gpus_str`. Its runtime goodput matches the reference, although a different mix of losses produces it, as @sec-performance-engineering-runtime-evidence analyzes.
+Comparing the running example against the Llama 3 405B column highlights how cluster scale shifts the balance between factors. The running example's program goodput sits above the Llama 3 reference by construction, reflecting the expectation that a job on `{python} FleetCapacityOpening.example_nodes_str` exposes less communication per step than a run across `{python} FleetCapacityOpening.llama3_gpus_str`. Its runtime goodput matches the reference, although a different mix of losses produces it, as @sec-performance-engineering-runtime-evidence analyzes.
 
 Ranked by the share of the pool's capacity lost at each boundary, scheduling comes first, program goodput comes second, and runtime goodput comes a distant third. However, a boundary's loss share is not what an engineering lever recovers, because capacity recovered at an early boundary must still survive the later boundaries.
 
 Instead, the product equation gives the marginal value of a lever directly. One percentage point of any factor is worth the product of the other two factors, because raising one factor by a small increment increases the overall product by that increment times the remaining two factors. For the running example, one point of scheduling goodput is worth `{python} GoodputDecomposition.s_point_str` of a point of MPG, one point of runtime goodput is worth `{python} GoodputDecomposition.r_point_str`, and one point of program goodput is worth `{python} GoodputDecomposition.p_point_str`. A point of program goodput is worth the most because its multiplier is the product of the two highest factors, whereas a point of runtime goodput is worth the least because its multiplier is the product of the two lowest factors. Consequently, every factor's lever is worth more on a fleet whose other two factors are already high.
 
-The gains a lever can achieve are also bounded by its own structural ceiling, and those ceilings reinforce the ranking. Removing every partial-gang hold and filling every freed device raises scheduling goodput to at most `{python} GoodputDecomposition.sched_ceiling_str` (@sec-performance-engineering-scheduling-evidence). Eliminating input waits—the largest runtime term in @sec-performance-engineering-runtime-composition—raises runtime goodput to `{python} GoodputDecomposition.runtime_ceiling_str`. Eliminating every loss the fleet adds beyond a single node's baseline—mostly exposed communication (@sec-performance-engineering-exposed-communication)—raises program goodput to the single-node baseline of `{python} GoodputDecomposition.program_ceiling_str`. Because each lever multiplies MPG by its factor's relative gain,[^fn-goodput-gain-order] reaching those ceilings raises MPG by `{python} GoodputDecomposition.s_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_s_ceiling_str`) for the scheduling lever, by `{python} GoodputDecomposition.r_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_r_ceiling_str`) for the input pipeline, and by `{python} GoodputDecomposition.p_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_p_ceiling_str`) for the program lever. For this workload, the program lever yields the largest gain even though scheduling loses a larger share of the pool's total capacity, and the input pipeline yields the smallest gain of the three. Although these ceilings are optimistic—no communication overlap hides all exposed transfers and no packer fills every freed device—the priority order holds unless one team's practical reach falls far short of the others'. Still, this ranking is a property of the workload's measured factors rather than a universal law of the accounting; a fleet running a different model archetype will arrive at a different priority order.
+The gains a lever can achieve are also bounded by its own structural ceiling, and those ceilings reinforce the ranking. Removing every partial-gang hold and filling every freed device raises scheduling goodput to at most `{python} GoodputDecomposition.sched_ceiling_str` (@sec-performance-engineering-scheduling-evidence). Eliminating input waits—the largest runtime term in @sec-performance-engineering-runtime-composition—raises runtime goodput to `{python} GoodputDecomposition.runtime_ceiling_str`. Eliminating every loss the fleet adds beyond a single node's baseline—mostly exposed communication (@sec-performance-engineering-exposed-communication)—raises program goodput to the single-node baseline of `{python} GoodputDecomposition.program_ceiling_str`. Because each lever multiplies MPG by its factor's relative gain,[^fn-goodput-gain-order] reaching those ceilings raises MPG by `{python} GoodputDecomposition.s_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_s_ceiling_str`) for the scheduling lever, by `{python} GoodputDecomposition.r_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_r_ceiling_str`) for the input pipeline, and by `{python} GoodputDecomposition.p_ceiling_rel_pct_str` (to `{python} GoodputDecomposition.mpg_p_ceiling_str`) for the program lever. For this workload, the program lever yields the largest gain even though scheduling loses a larger share of the pool's total capacity, and the input pipeline yields the smallest gain of the three. Although these ceilings are optimistic—no communication overlap hides all exposed transfers and no packer fills every freed device—the priority order holds unless one team's practical reach falls far short of the others'. Still, this ranking is a property of the workload's factors, here constructed, rather than a universal law of the accounting; a fleet running a different model archetype will arrive at a different priority order.
 
 [^fn-goodput-gain-order]: **Relative gains and boundary order**\index{ML productivity goodput!relative gain of a lever}: Raising one factor multiplies MPG by the ratio of its new value to its old one, whatever the other two factors are, so the ranking of levers at their ceilings does not depend on the order in which the boundaries are drawn. The loss shares of @eq-perf-goodput-loss-shares do depend on that order, because each later factor's loss is measured on what the earlier factors passed. A ranking by loss share can therefore differ from a ranking by relative gain, and only the second gives what a lever is worth.
 
@@ -3169,7 +3381,7 @@ class TradeProductRule:
 
 This ratio rule is strongly asymmetric when the factors start at different levels. A program optimization that lifted the running example's program goodput from `{python} GoodputDecomposition.program_str` to its single-node ceiling of `{python} GoodputDecomposition.program_ceiling_str` would increase the product by `{python} GoodputDecomposition.p_ceiling_rel_pct_str`. It would therefore still yield a net gain even if it sacrificed up to `{python} TradeProductRule.runtime_affordable_pct_str` of the job's runtime goodput (@fig-performance-engineering-iso-goodput). A runtime lever has no comparable margin to spend: even if every runtime loss were eliminated, a runtime goodput of `{python} GoodputDecomposition.runtime_str` could rise by at most `{python} TradeProductRule.runtime_headroom_pct_str`. Because a factor already near one has little relative headroom left to offer, a trade that spends runtime goodput to purchase program goodput has a wide margin before it lowers the product, although it still needs measuring, whereas a trade in the opposite direction has little margin and warrants immediate skepticism.
 
-::: {#fig-performance-engineering-iso-goodput fig-env="figure" fig-pos="htb" fig-cap="**Iso-goodput Curves of the Product Rule**: Program goodput against runtime goodput for the running example, with scheduling goodput held at `{python} GoodputDecomposition.sched_str`, so each curve of constant $\RuntimeGoodput \times \ProgramGoodput$ is also a curve of constant MPG. A program lever that lifts P from `{python} GoodputDecomposition.program_str` to its ceiling of `{python} GoodputDecomposition.program_ceiling_str` can give up as much as `{python} TradeProductRule.runtime_affordable_pct_str` of runtime goodput before it falls back to the bold curve through the running example, while removing every runtime loss raises R by only `{python} TradeProductRule.runtime_headroom_pct_str`." fig-alt="Line chart with program goodput P from 0.3 to 0.75 on the x axis and runtime goodput R from 0.5 to 1.05 on the y axis. Thin gray hyperbolas mark constant R times P at 0.30, 0.35, 0.50, 0.55, and 0.60, and a bold dark hyperbola marks 0.43, the running example's value; the region above the bold curve is shaded light green and labeled trade raises R times P. A crimson dot at P 0.48, R 0.90 is labeled running example. A horizontal arrow runs right from it to P 0.65, labeled program lever to ceiling, plus 35 percent. From the arrow's tip a dashed arrow drops to a hollow dot on the bold curve at R about 0.67, labeled affordable runtime loss, up to 26 percent, and break-even. A short vertical arrow rises from the running example to a dotted line at R equal to 1, labeled runtime headroom, plus 11 percent at most."}
+::: {#fig-performance-engineering-iso-goodput fig-env="figure" fig-pos="htb" fig-cap="**Iso-goodput Curves of the Product Rule**: Program goodput against runtime goodput for the running example, with scheduling goodput held at `{python} GoodputDecomposition.sched_str`, so each curve of constant $\RuntimeGoodput \times \ProgramGoodput$ is also a curve of constant MPG. The example's P comes from constructed microbatch-scale step times, is illustrative, and is the per-microbatch value; amortizing the data-axis gradient reduction over the accumulated microbatches lowers it to about `{python} GoodputDecomposition.program_full_str` over a full optimizer step and MPG from about `{python} GoodputDecomposition.mpg_precise_str` to about `{python} GoodputDecomposition.mpg_full_str`. A program lever that lifts P from `{python} GoodputDecomposition.program_str` to its ceiling of `{python} GoodputDecomposition.program_ceiling_str` can give up as much as `{python} TradeProductRule.runtime_affordable_pct_str` of runtime goodput before it falls back to the bold curve through the running example, while removing every runtime loss raises R by only `{python} TradeProductRule.runtime_headroom_pct_str`." fig-alt="Line chart with program goodput P from 0.3 to 0.75 on the x axis and runtime goodput R from 0.5 to 1.05 on the y axis. Thin gray hyperbolas mark constant R times P at 0.30, 0.35, 0.50, 0.55, and 0.60, and a bold dark hyperbola marks 0.43, the running example's value; the region above the bold curve is shaded light green and labeled trade raises R times P. A crimson dot at P 0.48, R 0.90 is labeled running example. A horizontal arrow runs right from it to P 0.65, labeled program lever to ceiling, plus 35 percent. From the arrow's tip a dashed arrow drops to a hollow dot on the bold curve at R about 0.67, labeled affordable runtime loss, up to 26 percent, and break-even. A short vertical arrow rises from the running example to a dotted line at R equal to 1, labeled runtime headroom, plus 11 percent at most."}
 
 ```{python}
 #| echo: false
@@ -3907,7 +4119,7 @@ A spreadsheet planning budget\index{Overhead budget!mixed factors} that reserves
 
 **Fallacy**: *More FLOP/s means a proportionally faster step.*
 
-Raising peak arithmetic throughput\index{Memory-bound!peak FLOP/s fallacy} shortens only the compute-bound portion of the iron law, and only where that computation is exposed on the critical path. The serving replica's batch-one decode step uses roughly `{python} RooflineDiagnostic.achieved_fp16_util_pct_str` of its FP16 arithmetic peak; doubling peak FLOP/s at the same HBM bandwidth leaves its `{python} RooflineDiagnostic.decode_ms_str` latency floor untouched and merely cuts its numerical MFU in half. Likewise, the running training example spends `{python} FleetEfficiencyCalc.extra_step_ms_str` of each `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` fleet step above its single-node baseline—primarily in an exposed gradient reduction that faster arithmetic does not accelerate—and adopting a lower-precision number format encounters the exact same Amdahl limit (@sec-performance-engineering-kernel-levers). Evaluating a step against the roofline model and the Fleet Law terms (@sec-performance-engineering-roofline) predicts how much speedup a faster accelerator will actually deliver.
+Raising peak arithmetic throughput\index{Memory-bound!peak FLOP/s fallacy} shortens only the compute-bound portion of the iron law, and only where that computation is exposed on the critical path. The serving replica's batch-one decode step uses roughly `{python} RooflineDiagnostic.achieved_fp16_util_pct_str` of its FP16 arithmetic peak; doubling peak FLOP/s at the same HBM bandwidth leaves its `{python} RooflineDiagnostic.decode_ms_str` latency floor untouched and merely cuts its numerical MFU in half. Likewise, the running training example spends `{python} FleetEfficiencyCalc.extra_step_ms_str` of each `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` illustrative fleet step above its single-node baseline, in what the example assumes is cross-node synchronization and collective waits that faster arithmetic does not accelerate, and adopting a lower-precision number format encounters the exact same Amdahl limit (@sec-performance-engineering-kernel-levers). Evaluating a step against the roofline model and the Fleet Law terms (@sec-performance-engineering-roofline) predicts how much speedup a faster accelerator will actually deliver.
 
 :::
 
@@ -3923,7 +4135,7 @@ A healthy mean step time can mask severe tail episodes. Because a synchronous di
 
 **Fallacy**: *The largest kernel is where program goodput is lost.*
 
-The largest kernels in a transformer step are typically its dense matrix multiplications,\index{Profiling!largest-kernel fallacy} and in a well-tuned implementation they already execute near the accelerator's arithmetic ceiling. Normalization, activation, softmax, and optimizer kernels sit on the memory-bandwidth slope and perform a tiny fraction of the arithmetic, yet together they can consume a substantial share of on-device step time. At fleet scale, exposed inter-node collectives that do not appear in a single-GPU kernel ranking can outweigh them all. Indeed, the step drill-down for our running example (@sec-performance-engineering-roofline) found its largest program loss in exposed data-parallel communication. Partitioning step time into matrix multiplications versus everything else, and matching the remainder against @tbl-performance-engineering-bottleneck-patterns, identifies which Fleet Law term holds the recoverable loss before any individual kernel is tuned.
+The largest kernels in a transformer step are typically its dense matrix multiplications,\index{Profiling!largest-kernel fallacy} and in a well-tuned implementation they already execute near the accelerator's arithmetic ceiling. Normalization, activation, softmax, and optimizer kernels sit on the memory-bandwidth slope and perform a tiny fraction of the arithmetic, yet together they can consume a substantial share of on-device step time. At fleet scale, exposed inter-node collectives that do not appear in a single-GPU kernel ranking can outweigh them all. Indeed, the constructed drill-down for our running example (@sec-performance-engineering-roofline) places its largest program loss in exposed cross-node synchronization and collective waits. Partitioning step time into matrix multiplications versus everything else, and matching the remainder against @tbl-performance-engineering-bottleneck-patterns, identifies which Fleet Law term holds the recoverable loss before any individual kernel is tuned.
 
 :::
 
@@ -3959,7 +4171,7 @@ A machine learning fleet can be fully allocated and electrically busy while most
 
 Because the three factors lose time on different timescales—program losses inside every step, runtime losses during intermittent interruptions, and scheduling losses across diurnal demand cycles—a reproducible measurement contract must fix the observation window alongside the workload, the system state, and the timing boundary.
 
-When composed from subsystem telemetry, the running example's runtime loss came primarily from input stalls and preemptions rather than from hardware faults, demonstrating that identical headline factor values can point to entirely different subsystem owners. Across the shared pool, the three factors gave our running example an MPG of `{python} GoodputDecomposition.mpg_str` and a cost per useful accelerator-hour equal to `{python} GoodputDecomposition.cost_mult_str` the raw capacity price. Although scheduling lost the largest share of the pool's total capacity and program execution lost the largest share of the job's held time, the program boundary offered the highest-leverage engineering return. Its single largest loss, the exposed data-parallel gradient reduction, lay beyond the reach of any single-GPU kernel optimization.
+When composed from the owners' modeled terms, the running example's runtime loss came primarily from input stalls and preemptions rather than from hardware faults, demonstrating that identical headline factor values can point to entirely different subsystem owners. Across the shared pool, the three factors gave our running example an MPG of `{python} GoodputDecomposition.mpg_str` and a cost per useful accelerator-hour equal to `{python} GoodputDecomposition.cost_mult_str` the raw capacity price. Although scheduling lost the largest share of the pool's total capacity and program execution lost the largest share of the job's held time, the program boundary offered the highest-leverage engineering return. Its single largest loss, the exposed cross-node communication of each step, lay beyond the reach of any single-GPU kernel optimization.
 
 ::: {.callout-takeaways title="Fleet efficiency is a product of owned factors"}
 

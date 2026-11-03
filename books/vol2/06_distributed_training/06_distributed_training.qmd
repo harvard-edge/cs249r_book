@@ -179,6 +179,10 @@ class DenseLLMReferenceFacts:
     # other capacity budgets (DistTrainA100Memory, DistTrainH100Capacity) use.
     h100_mem_budget = h100_mem.to(GiB) * (GB / GiB)
     _layout = Scenarios.Gpt3DataParallel1K.result  # the same model and cluster, fully replicated
+    # The shared Archetype A reference job (TP 8 x PP 8 x DP 16, 16-bit, 16 B/param);
+    # loaded here only to guard that this chapter's model, cluster, and state
+    # convention stay the ones the volume's reference job uses.
+    _step = Scenarios.DenseLLMPretrainingStep
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     weights = model.size_in_bytes(BYTES_FP16)
@@ -193,6 +197,15 @@ class DenseLLMReferenceFacts:
     check(cluster_gpus == 1024, "Archetype A reference cluster should have 1,024 GPUs")
     check(4 < weights_over_h100 < 5, "GPT-3 BF16 weights should exceed four H100s' worth of HBM")
     check(4 < crossover_params.magnitude < 6, "80 GB / 16 B per parameter should cross over near 5B parameters")
+    check(
+        _step.fleet.total_accelerators == cluster_gpus and _step.fleet.count == cluster_nodes,
+        "The shared reference job must run on this chapter's 1,024-GPU, 128-node cluster",
+    )
+    check(_step.replica.workload.parameters == model.parameters, "The shared reference job must train this chapter's 175B model")
+    check(
+        _step.replica.bytes_per_param.magnitude == training_bytes_per_param.magnitude,
+        "The shared reference job must keep the 16 B/param mixed-precision Adam convention",
+    )
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     cluster_gpus_str = fmt_count(cluster_gpus, commas=True)
@@ -2295,9 +2308,16 @@ where $\MultiDeviceRunTime$ is the training time on $\DeviceCount$ devices. Meas
 # │ Goal: Provide formatted math for communication time formulas, per-step
 # │       compute, and scaling efficiency calculations.
 # │ Show: AllReduce time formula, compute time, comm time approximations.
-# │ How: Build fmt_math strings from Scenarios.DenseLLMPretrainingReference,
-# │      the NDR fabric, and the H100 FP8 peak.
+# │ How: Build fmt_math strings from Scenarios.Gpt3DataParallel1K, a
+# │      communication-only counterfactual (2M tokens, H100 FP8 peak at 50
+# │      percent, a flat ring on one NDR port per GPU, 75 percent overlap). It is
+# │      NOT the shared reference step (Scenarios.DenseLLMPretrainingStep), which
+# │      the hybrid-parallelism walk and the MFU pitfall use.
 # │
+# │ Note: 2026-11-03 (F2): the header named DenseLLMPretrainingReference, but
+# │       the cell has always read Gpt3DataParallel1K. Nothing downstream reads
+# │       t_compute_s any more; HybridConfigFeasibility and Zero3GatherCost use
+# │       the shared step's compute window.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import (
     check,
@@ -2331,9 +2351,8 @@ class CommScalingMath:
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     # The scenario carries the compute window at the 0.1 s the prose displays,
-    # so every downstream ratio (exposed step, 15 percent, Configuration B's
-    # efficiency) recomputes from the printed "2.1 s" (unrounded 2.07 s gave
-    # 54.2 vs 54.5). At the dense BF16 peak the window would be about 4.1 s.
+    # so the exposed step and the 15 percent recompute from the printed "2.1 s".
+    # At the dense BF16 peak the window would be about 4.1 s.
     _r = _scenario.result
     _gradient_size = _r.gradient_bytes
     _step_flops = _r.step_flops
@@ -2352,7 +2371,7 @@ class CommScalingMath:
     compute_per_step_math = fmt_math(
         f"\\TrainingStepOperations = {_flops_per_token_value} \\times {gpt3_params_b_value_str} \\times 10^9 \\times {_batch_tokens_value} \\times 10^6 \\approx {_step_flops_latex}"
     )
-    t_compute_s = _compute_window.to(second).magnitude  # derived window, reused by HybridConfigFeasibility
+    t_compute_s = _compute_window.to(second).magnitude  # derived window of this counterfactual only
     _t_compute_value = fmt(t_compute_s, precision=1, commas=False)
     t_compute_math = fmt_math(f"\\IronLawComputeTime/\\DeviceCount \\approx {_t_compute_value}")
     t_comm_math = fmt_math(f"\\ExposedCommunicationTime(\\DeviceCount) \\approx {_effective_time.to(second).magnitude:.1f}")
@@ -2390,7 +2409,7 @@ The Fleet Law leads to the scaling efficiency metric for fixed global work. Subs
 
 $$ \ScalingEfficiency = \frac{\IronLawComputeTime}{\DeviceCount\times \DistributedStepTime(\DeviceCount)} = \frac{1}{1 + \frac{\DeviceCount(\CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount) - \OverlappedTime)}{\IronLawComputeTime}} $$ {#eq-distributed-training-scaling-efficiency-fleet}
 
-This form states the scaling efficiency bound (principle \ref{pri-scaling-efficiency}), under which perfect linear scaling $(\ScalingEfficiency = 1.0)$ is a *theoretical limit*, not a *practical target*. Real systems fall short of it by an amount that depends on the configuration and grows with $\DeviceCount$. The 175B data-parallel example below reaches only `{python} CommScalingMath.scaling_efficiency_str`, and the hybrid layouts later in the chapter recover much of that loss without reaching 1.0. The gap between $\ScalingEfficiency = 1.0$ and the achieved efficiency is the price of distributed execution, paid in communication and coordination\index{Scaling efficiency!communication and coordination loss}.
+This form states the scaling efficiency bound (principle \ref{pri-scaling-efficiency}), under which perfect linear scaling $(\ScalingEfficiency = 1.0)$ is a *theoretical limit*, not a *practical target*. Real systems fall short of it by an amount that depends on the configuration and grows with $\DeviceCount$. The 175B data-parallel example below reaches only `{python} CommScalingMath.scaling_efficiency_str` under its stated assumptions, and the hybrid layouts later in the chapter, priced on the reference training step rather than on this counterfactual, still stay below 1.0. The gap between $\ScalingEfficiency = 1.0$ and the achieved efficiency is the price of distributed execution, paid in communication and coordination\index{Scaling efficiency!communication and coordination loss}.
 
 The equation also exposes the **scaling wall**\index{Scaling wall!definition}. As $\DeviceCount$ increases, the compute term $(\IronLawComputeTime/\DeviceCount)$ shrinks, but the communication and synchronization terms can remain constant or grow. A ring AllReduce's bandwidth term, for example, stays near its bound however many workers join (principle \ref{pri-allreduce-bandwidth-bound}). Eventually, the denominator is dominated by overhead, driving efficiency toward zero. The equation holds the global work fixed, which is strong scaling, and that regime reaches the wall sooner. Under weak scaling each device keeps its local batch, so its compute time per step stays level against the same ring term and the wall arrives later, while the growing global batch runs toward the statistical limit of @sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961.
 
@@ -2415,7 +2434,7 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 
 - **Scaling efficiency**: $\ScalingEfficiency = \PerDeviceComputeTime/(\PerDeviceComputeTime+ \ExposedCommunicationTime)$, which is @eq-distributed-training-scaling-efficiency-fleet with the per-device compute window $\PerDeviceComputeTime= \IronLawComputeTime/\DeviceCount$ and the exposed term standing for $\CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount) - \OverlappedTime$. Here the numerator is `{python} CommScalingMath.t_compute_s_str` and the complete denominator is `{python} CommScalingMath.exposed_step_s_str`, giving `{python} CommScalingMath.scaling_efficiency_pct_str`. The exposed communication term already subtracts the hidden portion from the raw transfer time and includes collective synchronization; subtracting overlap again would double-count the same saving.
 
-**Systems insight**: The low efficiency (`{python} CommScalingMath.scaling_efficiency_pct_str`) shows why naive data parallelism at this scale is insufficient. It is one operating point, fixed by `{python} CommScalingMath.batch_tokens_m_str` per update, `{python} CommScalingMath.n_gpus_str`, and `{python} CommScalingMath.overlap_pct_str` overlap, not a universal threshold. Another cluster size requires recomputing per-device compute time, collective cost, overlap, and topology. Hierarchy-aware systems recover much of the lost efficiency by combining data parallelism with tensor parallelism, which communicates over NVLink, and pipeline parallelism, which overlaps computation with communication.
+**Systems insight**: The low efficiency (`{python} CommScalingMath.scaling_efficiency_pct_str`) shows why naive data parallelism at this scale is insufficient. It is one operating point, fixed by `{python} CommScalingMath.batch_tokens_m_str` per update, `{python} CommScalingMath.n_gpus_str`, and `{python} CommScalingMath.overlap_pct_str` overlap, not a universal threshold. Another cluster size requires recomputing per-device compute time, collective cost, overlap, and topology. A hierarchical reduction, which first reduces inside each node over NVLink so that each InfiniBand port carries only a fraction of the gradient, shrinks the exposed term, and so does a longer compute window per step. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 prices both on the reference training step, where memory rather than communication rules out pure data parallelism.
 
 :::
 
@@ -2425,7 +2444,7 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 
 #### Parallelism-infrastructure interaction {#sec-distributed-training-parallelism-infrastructure}
 
-The scaling efficiency of a run is set by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy, not by the *model architecture alone*. Recovering the efficiency that pure data parallelism lost above means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works through three concrete configurations once tensor and pipeline parallelism have been developed.
+The scaling efficiency of a run is set by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy, not by the *model architecture alone*. Making a large model both fit and run efficiently means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works through four concrete configurations, priced on the reference training step, once tensor and pipeline parallelism have been developed.
 
 The collective algorithm adds its own dependence on message size. Tree-based AllReduce\index{Tree AllReduce!latency bound} reaches every rank in $\mathcal{O}(\log \DeviceCount)$ steps and suits small, latency-bound messages, whereas large gradient buffers favor the bandwidth-optimal ring\index{Ring AllReduce!bandwidth utilization}; message size, topology, and contention decide between them.
 
@@ -3411,6 +3430,7 @@ class ModelParallelMemoryFacts:
     full_state_gb_str = fmt_memory(full_state_mem, unit=GB, precision=0, commas=True)
     full_state_per_gpu_gb_str = fmt_memory(full_state_per_gpu_mem, unit=GB, precision=1, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
+    cluster_fraction_denominator_str = fmt(cluster_fraction_denominator, precision=0, commas=False)
 ```
 
 ```{python}
@@ -3424,15 +3444,21 @@ class ModelParallelMemoryFacts:
 # │       on the reference fabric (2026-10-07: the opener asserted it without
 # │       a number, so ZeRO-3 looked sufficient).
 # │ Show: ~3 x 350 GB ~ 1 TB per worker per step; ~21 s on one NDR port vs the
-# │       ~2.1 s compute window of the 175B scaling notebook (~10x).
-# │ How: per-worker FSDP volume -> 3 x parameter bytes at large N.
+# │       ~7.3 s per-GPU compute of the shared reference step (~3x).
+# │ How: per-worker FSDP volume -> 3 x parameter bytes at large N, against the
+# │      local compute time of Scenarios.DenseLLMPretrainingStep.
+# │
+# │ Note: 2026-11-03: the window was the FP8 counterfactual's 2.1 s
+# │       (CommScalingMath), which gave 10x; the shared step gives 3x. The
+# │       transfer is one regather per step, a lower bound when gradient
+# │       accumulation regathers for every microbatch.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_time
 
 class Zero3GatherCost:
     # ┌── 1. LOAD ─────────────────────────────────────────
     scenario = Scenarios.Gpt3Zero3On64  # full sharding, every layer regathered over one NDR port
-    t_compute = CommScalingMath.t_compute_s * second  # same per-step compute window
+    t_compute = Scenarios.DenseLLMPretrainingStep.result.node_profile.latency  # shared step, per-GPU compute
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     # Forward gather, backward regather, gradient ReduceScatter: about 3x the parameter bytes.
@@ -3441,7 +3467,7 @@ class Zero3GatherCost:
     ratio = (transfer_time / t_compute).to_base_units().magnitude
 
     # ┌── 3. GUARD ────────────────────────────────────────
-    check(ratio > 5, "ZeRO-3 traffic for 175B should dwarf the compute window on NDR")
+    check(2.5 < ratio < 3.5, f"Prose says the regather takes about 3x the step's computation, got {ratio:.2f}")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     traffic_tb_str = fmt_memory(traffic, unit=TB, precision=1, commas=False)
@@ -3454,7 +3480,7 @@ class Zero3GatherCost:
 *Weights are only a small slice of the full Adam training state.*
 :::
 
-Memory fit alone does not settle whether a model needs this kind of partition. For a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across a `{python} ModelParallelMemoryFacts.n_gpus_str`-GPU group, one-sixteenth of the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster. Full mixed-precision Adam training state is much larger, `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, yet ZeRO-3 across the same `{python} ModelParallelMemoryFacts.n_gpus_str` GPUs reduces it to roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations, which fits an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator. ZeRO-3 can therefore make the static state fit, as the notebook below confirms. It pays for that fit in traffic, because every step regathers every layer's parameters across the data-parallel fabric, roughly three times the model's parameter bytes per worker (@sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69). It also cannot split an individual layer's computation or activations across devices.
+Memory fit alone does not settle whether a model needs this kind of partition. For a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across a `{python} ModelParallelMemoryFacts.n_gpus_str`-GPU group, 1/`{python} ModelParallelMemoryFacts.cluster_fraction_denominator_str` of the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster. Full mixed-precision Adam training state is much larger, `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, yet ZeRO-3 across the same `{python} ModelParallelMemoryFacts.n_gpus_str` GPUs reduces it to roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations, which fits an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator. ZeRO-3 can therefore make the static state fit, as the notebook below confirms. It pays for that fit in traffic, because every step regathers every layer's parameters across the data-parallel fabric, roughly three times the model's parameter bytes per worker (@sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69). It also cannot split an individual layer's computation or activations across devices.
 
 Activations add a separate memory requirement. Under the earlier unchecked-storage assumptions, a `{python} Gpt3ActivationBudget.seq_len_str`-token sequence through `{python} FrontierTrainingContext.frontier_params_b_str` parameters produces roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at a local batch of `{python} Gpt3ActivationBudget.micro_batch_str` sequences; optimizer sharding does not reduce that storage. Recomputation trades memory for extra FLOPs, partitioning distributes activations, and offload moves them to another memory tier. Kernel and batch-size choices also change the budget. Full activation checkpointing brings the same modeled case down to `{python} Gpt3ActivationBudget.act_checkpointed_gb_str`. The following notebook, which uses a single-sequence local batch, checks whether ZeRO-3 plus checkpointing fits the model without partitioning its computation.
 
@@ -3564,7 +3590,7 @@ class MemoryWallAnalysis:
 
 :::
 
-In this example, sharding and checkpointing make the modeled state fit, leaving two distinct reasons to partition the model itself. One is regather traffic. On the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster, ZeRO-3 moves about `{python} Zero3GatherCost.traffic_tb_str` per worker per step for this model, which on one NDR InfiniBand port takes about `{python} Zero3GatherCost.ratio_mult_str` as long as the step's computation. The other is layer execution, since full sharding gathers parameters on demand without ever splitting a single layer's computation or activations across devices.
+In this example, sharding and checkpointing make the modeled state fit, leaving two distinct reasons to partition the model itself. One is regather traffic. On the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster, ZeRO-3 moves about `{python} Zero3GatherCost.traffic_tb_str` per worker per step for this model, which on one NDR InfiniBand port takes about `{python} Zero3GatherCost.ratio_mult_str` as each GPU's computation for one training step, and longer still when gradient accumulation regathers the parameters for every microbatch. The other is layer execution, since full sharding gathers parameters on demand without ever splitting a single layer's computation or activations across devices.
 
 Model parallelism instead cuts the computation graph directly, either between sequential layer groups (such as layers 1--4 and layers 5--8) or inside a layer across channels and attention heads. Layer cuts introduce pipeline dependencies that leave downstream devices idle while an upstream stage computes, creating the pipeline bubble that governs utilization for this partition (@sec-distributed-training-systems-systems-pipeline-parallelism-8748). Channel and head cuts, the tensor parallelism of @sec-distributed-training-systems-systems-tensor-parallelism-d76e, address both regather traffic and layer execution by partitioning individual weight matrices across devices. They expose concurrent work within a layer at the price of intra-layer exchanges, which the column-then-row pairing of @fig-tensor-parallel-split confines to block boundaries.
 
@@ -5149,113 +5175,216 @@ Archetype A (GPT-4/Llama-3) illustrates the motivation for hybrid parallelism. P
 
 :::
 
-To see why the combination matters, consider three parallelism configurations for training the `{python} FrontierTrainingContext.frontier_params_b_str` model on a `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU cluster organized as `{python} DenseLLMReferenceFacts.cluster_nodes_str` of `{python} DenseLLMReferenceFacts.gpus_per_node_str` each. The progression from pure data parallelism through tensor and pipeline parallelism makes the efficiency gain concrete.
+To see why the combination matters, consider four parallelism configurations for training the `{python} FrontierTrainingContext.frontier_params_b_str` model on a `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU cluster organized as `{python} DenseLLMReferenceFacts.cluster_nodes_str` of `{python} DenseLLMReferenceFacts.gpus_per_node_str` each. The progression from pure data parallelism through tensor and pipeline parallelism shows which axis makes the job fit and what each axis adds to the step time.
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ HYBRID CONFIGURATION MEMORY FEASIBILITY (LEGO)
+# │ HYBRID CONFIGURATION WALK ON THE SHARED REFERENCE STEP (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: configurations B and C in
-# │          @sec-distributed-training-systems-systems-hybrid-parallelism-12a0.
-# │ Goal: State whether each communication-comparison layout fits memory.
-# │ Show: ~350 GB/GPU under TP-8 alone; ~87.5 GB/GPU under TP-8 x PP-4.
-# │ How: 16 B/param mixed-precision Adam state divided by the model-partition
-# │      product (2026-09-28: added; the comparison previously declared winners
-# │      without checking feasibility).
+# │ Context: configurations A-D, the TP-8 x PP-8 x DP-16 traffic paragraph, and
+# │          the closing summary of
+# │          @sec-distributed-training-systems-systems-hybrid-parallelism-12a0;
+# │          the 3D loop and the worked example read gradient_gb_str, tp_c, pp_c.
+# │
+# │ Goal: Show which layout makes the 175B job fit on 1,024 H100s and what each
+# │       added axis costs per step, every layout on one step model.
+# │ Show: A (DP 1,024) 2,800 GB/GPU and a 3.1 s raw gradient reduction;
+# │       B (TP 8, DP 128) 350 GB/GPU, 8.42 s, 86 percent; C (TP 8, PP 4, DP 32)
+# │       87.5 GB/GPU, 8.67 s, 84 percent, 24 GB with ZeRO-1; D, the reference
+# │       job (TP 8, PP 8, DP 16), 43.8 GB/GPU, 8.71 s, 83 percent.
+# │ How: every layout is DistributedModel.solve with the inputs of
+# │      Scenarios.DenseLLMPretrainingStep (NDR fleet, 1,536-sequence batch,
+# │      16-bit, local efficiency, DP overlap, one sequence per microbatch),
+# │      charging TP communication, exposed DP communication, and the bubble.
+# │
+# │ Note: 2026-11-03 (author decision 7): replaces the FP8 / 2M-token / 75
+# │       percent overlap step model (Gpt3*Parallel1K) that ended at
+# │       TP 8 x PP 4 x DP 32 + ZeRO-1; that layout is now the alternative C.
+# │       A's 1,536 sequences do not divide over 1,024 replicas, so A reports
+# │       memory and DP communication only, never a step time or efficiency.
 # └─────────────────────────────────────────────────────────────────────────────
+import math
 from mlsysim.fmt import check, fmt, fmt_math, fmt_memory, fmt_memory_capacity, fmt_percent, fmt_time
-from mlsysim.physics import memory_from_params
+from mlsysim.solvers import DistributedModel
+
+def _solve_layout(step, tp, pp, zero_stage=0):
+    """Solve one layout with every input of the shared reference step except TP and PP."""
+    dp = step.fleet.total_accelerators // (tp * pp)
+    return DistributedModel().solve(
+        step.replica.workload,
+        step.fleet,
+        batch_size=step.global_batch_sequences,
+        precision=step.precision,
+        efficiency=step.local_efficiency,
+        tp_size=tp,
+        pp_size=pp,
+        microbatch_count=max(1, step.global_batch_sequences // (dp * step.sequences_per_microbatch)),
+        overlap_comm=step.overlap_comm,
+        seq_len=step.context_length,
+        zero_stage=zero_stage,
+    )
 
 class HybridConfigFeasibility:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    # Configurations A, B, and C share one step model (CommScalingMath's overlap
-    # and compute window): 2M tokens, FP8 at 50 percent, FP16 gradients over NDR.
-    _a = Scenarios.Gpt3DataParallel1K  # A: pure data parallelism
-    _b = Scenarios.Gpt3TensorDataParallel1K  # B: TP 8 inside each node, DP 128
-    _c = Scenarios.Gpt3ThreeDParallel1K  # C: TP 8, PP 4 across nodes, DP 32
-    hbm = Hardware.Cloud.H100.memory.capacity
-    ib_bw = _a.link_bandwidth
-    t_compute = CommScalingMath.t_compute_s * second  # same derived per-step compute window
-    n_gpus = _a.n_devices  # 1,024-GPU reference cluster
-    tp_b = _b.tp_size  # tensor parallelism within one node
-    tp_c, pp_c = _c.tp_size, _c.pp_size  # four pipeline stages
-    m_c = _c.microbatches  # microbatches per step in configuration C
+    _step = Scenarios.DenseLLMPretrainingStep  # the shared 175B reference step = configuration D
+    _model = _step.replica.workload
+    hbm = _step.fleet.node.accelerator.memory.capacity
+    hbm_budget = hbm.to(GiB) * (GB / GiB)  # the published "80 GB" label, the chapter's budget convention
+    n_gpus = _step.fleet.total_accelerators
+    global_batch = _step.global_batch_sequences  # sequences per optimizer update
+    seq_len = _step.context_length
+    local_efficiency = _step.local_efficiency
+    tp = _step.tensor_parallel  # one node
+    gpus_per_node = _step.fleet.node.accelerators_per_node
+    pp_d, dp_d, m_d = _step.pipeline_depth, _step.data_parallel, _step.microbatches_per_replica
+    tp_c, pp_c = tp, 4  # scenario assumption: a pipeline half as deep as the reference job's
+    state_bytes = _step.replica.bytes_per_param  # 16 B per parameter, unsharded mixed-precision Adam
+    optimizer_bytes = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    _ra, _rb, _rc = _a.result, _b.result, _c.result
-    state = _ra.state_total
-    gradient_bytes = _ra.gradient_bytes
-    config_b_per_gpu = _rb.state_per_device
-    config_c_per_gpu = _rc.state_per_device
-    config_a_comm = _ra.allreduce_time  # ring AllReduce ~2x payload
-    config_b_shard = _rb.dp_shard
-    config_b_comm = _rb.allreduce_time
-    config_b_efficiency = _rb.efficiency_no_overlap
-    # Hide up to the scenario overlap fraction of the transfer, capped by the
-    # compute window (2026-09-29: replaces a hand-typed 75--85 percent).
-    _overlap = _b.overlap_fraction
-    config_b_overlap_efficiency = _rb.efficiency
-    dp_b = _b.dp_size
-    dp_c = _c.dp_size
-    config_c_shard = _rc.dp_shard
-    bubble_c = _rc.bubble
-    # 2026-10-07: finish the comparison. Same overlap model as configuration B;
-    # the bubble stretches the compute window by 1 / (1 - bubble).
-    config_c_comm = _rc.allreduce_time
-    config_c_efficiency = _rc.efficiency
-    # Feasible reference-cluster layout: configuration C plus ZeRO-1 across its
-    # data-parallel group (weights and gradients split by TP x PP; the 12 B/param
-    # optimizer state also split across the DP group).
-    config_c_zero1_per_gpu = _rc.zero1_state_per_device
+    dp_b = n_gpus // tp
+    dp_c = n_gpus // (tp_c * pp_c)
+    m_c = global_batch // dp_c
+    seq_per_replica_a = global_batch / n_gpus  # A: sequences per DP-1024 replica
+    _ra = _solve_layout(_step, 1, 1)
+    _rb = _solve_layout(_step, tp, 1)
+    _rc = _solve_layout(_step, tp_c, pp_c)
+    _rc_zero1 = _solve_layout(_step, tp_c, pp_c, zero_stage=1)
+    _rd = _step.result
+    _rd_resolved = _solve_layout(_step, tp, pp_d)  # must reproduce the shared result exactly
+    _params = _model.parameters.magnitude
+    _opt_total = _params * optimizer_bytes.to(byte / param).magnitude * byte
+    state = _params * state_bytes
+    gradient_bytes = _model.size_in_bytes(BYTES_FP16)
+    config_b_per_gpu = state / tp
+    config_c_per_gpu = state / (tp_c * pp_c)
+    config_d_per_gpu = _step.state_per_gpu
+    # ZeRO-1 across C's DP group: weights and gradients split by TP x PP, the
+    # 12 B/param optimizer state also split across the DP group.
+    config_c_zero1_per_gpu = (state - _opt_total) / (tp_c * pp_c) + _opt_total / (tp_c * pp_c * dp_c)
+    headroom_d = hbm_budget - config_d_per_gpu
+    t_local = _rd.node_profile.latency  # per-GPU computation, identical in every layout
+    # The solver's DP overlap, read back from the shared result.
+    _exposed_dp_d = _rd.step_latency_total - t_local - _rd.tp_communication_latency - _rd.pipeline_bubble_latency
+    overlap = 1 - (_exposed_dp_d / _rd.dp_communication_latency).to_base_units().magnitude
+    config_a_comm = _ra.dp_communication_latency
+    config_a_exposed = config_a_comm * (1 - overlap)
+    config_b_shard = gradient_bytes / tp
+    config_c_shard = gradient_bytes / (tp_c * pp_c)
+    tp_comm = _rd.tp_communication_latency
+    config_b_comm, config_c_comm, config_d_comm = (_rb.dp_communication_latency, _rc.dp_communication_latency, _rd.dp_communication_latency)
+    bubble_c, bubble_d = _rc.bubble_fraction, _rd.bubble_fraction
+    bubble_c_time, bubble_d_time = _rc.pipeline_bubble_latency, _rd.pipeline_bubble_latency
+    step_b, step_c, step_d = _rb.step_latency_total, _rc.step_latency_total, _rd.step_latency_total
+    config_b_efficiency, config_c_efficiency, config_d_efficiency = (_rb.scaling_efficiency, _rc.scaling_efficiency, _rd.scaling_efficiency)
+    step_gap_cd = step_d - _rc_zero1.step_latency_total
+    spread_pts = math.ceil((config_b_efficiency - config_d_efficiency) * 100)  # B-to-D spread, whole points
 
     # ┌── 3. GUARD ────────────────────────────────────────
+    check(
+        (tp, pp_d, dp_d, global_batch, m_d) == (8, 8, 16, 1536, 96),
+        "Reference step should be TP8 x PP8 x DP16, 1,536 sequences, 96 microbatches per replica",
+    )
+    check(pp_c * 2 == pp_d, "C's pipeline should be half as deep as the reference job's")
+    check(
+        abs((_rd_resolved.step_latency_total - step_d).to(second).magnitude) < 1e-9, "The walk's solver call must reproduce the shared reference step"
+    )
     check(state == 2800 * GB, "175B training state at 16 B/param should be 2.8 TB")
-    check(config_b_per_gpu > hbm, "TP-8 alone must exceed one accelerator's HBM")
-    check(config_c_per_gpu > hbm, "TP-8 x PP-4 must still exceed an 80 GB accelerator")
-    check(13 < config_a_comm.magnitude < 15, "Full-gradient AllReduce over NDR should take about 14 s")
-    check(abs(config_b_comm.magnitude * tp_b - config_a_comm.magnitude) < 1e-9, "TP-8 shard should cut AllReduce time eightfold")
-    check(config_c_efficiency > config_b_overlap_efficiency, "Configuration C should edge out B under the shared overlap model")
+    check(state > hbm and config_b_per_gpu > hbm and config_c_per_gpu > hbm, "A, B, and C must each exceed one H100 without sharding")
+    check(config_d_per_gpu < hbm and _rd.node_profile.feasible, "The reference layout must fit unsharded")
+    check(not _rc.node_profile.feasible and _rc_zero1.node_profile.feasible, "C fits only with ZeRO-1")
+    check(abs((_rc_zero1.step_latency_total - step_c).to(second).magnitude) < 1e-9, "Prose: ZeRO-1 leaves C's modeled step unchanged")
     check(config_c_zero1_per_gpu < 0.5 * hbm, "C plus ZeRO-1 should leave at least half of HBM for activations and buffers")
+    check(
+        abs((_rb.node_profile.latency - t_local).to(second).magnitude) < 1e-6
+        and abs((_rc.node_profile.latency - t_local).to(second).magnitude) < 1e-6,
+        "Every layout gives each GPU the same computation per step",
+    )
+    check(0.84 < overlap < 0.86, f"Prose quotes 85 percent DP overlap, got {overlap:.3f}")
+    check(3.0 < config_a_comm.to(second).magnitude < 3.2 and 0.4 < config_a_exposed.to(second).magnitude < 0.5, "A: ~3.1 s raw, ~0.47 s exposed")
+    check(
+        abs((_rb.tp_communication_latency - tp_comm).to(second).magnitude) < 0.01
+        and abs((_rc.tp_communication_latency - tp_comm).to(second).magnitude) < 0.01,
+        "TP time should be ~0.90 s in B, C, and D",
+    )
+    check(step_c > step_b, "Prose: C's bubble costs more than its smaller transfer saves")
+    check(config_b_efficiency > config_c_efficiency > config_d_efficiency, "Prose: each added axis lowers modeled efficiency slightly")
+    check(spread_pts == 3, f"Prose: B, C, and D within 3 percentage points, got {spread_pts}")
+    check(seq_per_replica_a == 1.5 and global_batch % n_gpus != 0, "Prose: A gets 1.5 sequences per replica, not a whole number")
+    check(
+        global_batch % dp_b == 0 and global_batch % dp_c == 0 and global_batch % dp_d == 0, "Prose: B, C, and D receive whole sequences per replica"
+    )
+    check(
+        (round(config_b_efficiency * 100), round(config_c_efficiency * 100), round(config_d_efficiency * 100)) == (86, 84, 83),
+        "Prose quotes 86, 84, and 83 percent",
+    )
+    check(0.03 < step_gap_cd.to(second).magnitude < 0.05, "Prose: D costs about 0.04 s per step more than C with ZeRO-1")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    config_b_per_gpu_gb_str = fmt_memory(config_b_per_gpu, unit=GB, precision=0, commas=False)
-    config_c_per_gpu_gb_str = fmt_memory(config_c_per_gpu, unit=GB, precision=1, commas=False)
     hbm_gb_str = fmt_memory_capacity(hbm, unit=GiB, precision=0, commas=False)
     gradient_gb_str = fmt_memory(gradient_bytes, unit=GB, precision=0, commas=False)
-    config_b_shard_gb_str = fmt_memory(config_b_shard, unit=GB, precision=2, commas=False)
-    config_a_comm_s_str = fmt_time(config_a_comm, 'second', precision=0, commas=False, style='word')
-    config_b_comm_s_str = fmt_time(config_b_comm, 'second', precision=2, commas=False, style='word')
-    t_compute_s_str = fmt_time(t_compute, 'second', precision=1, commas=False, style='word')
-    config_b_efficiency_pct_str = fmt_percent(config_b_efficiency, precision=1, commas=False, style='prose')
-    config_b_overlap_efficiency_pct_str = fmt_percent(round(config_b_overlap_efficiency * 100) / 100, precision=0, commas=False, style='prose')
-    overlap_pct_str = fmt_percent(_overlap, precision=0, commas=False, style='prose')
+    state_gb_str = fmt_memory(state, unit=GB, precision=0, commas=True)
+    config_b_per_gpu_gb_str = fmt_memory(config_b_per_gpu, unit=GB, precision=0, commas=False)
+    config_c_per_gpu_gb_str = fmt_memory(config_c_per_gpu, unit=GB, precision=1, commas=False)
+    config_d_per_gpu_gb_str = fmt_memory(config_d_per_gpu, unit=GB, precision=1, commas=False)
+    config_c_zero1_gb_str = fmt_memory(round(config_c_zero1_per_gpu.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    headroom_d_gb_str = fmt_memory(round(headroom_d.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
+    global_batch_str = fmt(global_batch, precision=0, commas=True)
+    seq_len_str = fmt(seq_len, precision=0, commas=True)
+    local_efficiency_pct_str = fmt_percent(local_efficiency, precision=0, commas=False, style='prose')
+    overlap_pct_str = fmt_percent(round(overlap * 100) / 100, precision=0, commas=False, style='prose')
+    bytes_per_param_str = fmt(state_bytes.to(byte).magnitude, precision=0, commas=False)
     dp_a_value_str = fmt(n_gpus, precision=0, commas=False)
-    tp_value_str = fmt(tp_b, precision=0, commas=False)
-    pp_c_value_str = fmt(pp_c, precision=0, commas=False)
-    m_c_value_str = fmt(m_c, precision=0, commas=False)
+    tp_value_str = fmt(tp, precision=0, commas=False)
+    gpus_per_node_value_str = fmt(gpus_per_node, precision=0, commas=False)
     dp_b_value_str = fmt(dp_b, precision=0, commas=False)
+    pp_c_value_str = fmt(pp_c, precision=0, commas=False)
     dp_c_value_str = fmt(dp_c, precision=0, commas=False)
+    m_c_value_str = fmt(m_c, precision=0, commas=False)
+    pp_d_value_str = fmt(pp_d, precision=0, commas=False)
+    dp_d_value_str = fmt(dp_d, precision=0, commas=False)
+    m_d_value_str = fmt(m_d, precision=0, commas=False)
+    t_local_s_str = fmt_time(t_local, 'second', precision=2, commas=False, style='word')
+    config_a_comm_s_str = fmt_time(config_a_comm, 'second', precision=1, commas=False, style='word')
+    config_a_exposed_s_str = fmt_time(config_a_exposed, 'second', precision=2, commas=False, style='word')
+    config_b_shard_gb_str = fmt_memory(config_b_shard, unit=GB, precision=2, commas=False)
+    config_b_comm_s_str = fmt_time(config_b_comm, 'second', precision=2, commas=False, style='word')
+    tp_comm_s_str = fmt_time(tp_comm, 'second', precision=2, commas=False, style='word')
+    step_b_s_str = fmt_time(step_b, 'second', precision=2, commas=False, style='word')
+    config_b_efficiency_pct_str = fmt_percent(round(config_b_efficiency * 100) / 100, precision=0, commas=False, style='prose')
     config_c_shard_math = fmt_math(
         rf"{fmt(gradient_bytes.to(GB).magnitude, precision=0, commas=False)}/({tp_c}\times{pp_c})\approx{fmt(config_c_shard.to(GB).magnitude, precision=2, commas=False)}"
     )
-    bubble_c_math = fmt_math(rf"{pp_c - 1}/{m_c + pp_c - 1} \approx {fmt(bubble_c * 100, precision=1, commas=False)}\%")
-    bubble_c_round_str = fmt_percent(round(bubble_c * 100) / 100, precision=0, commas=False, style='prose')
     config_c_comm_s_str = fmt_time(config_c_comm, 'second', precision=2, commas=False, style='word')
+    bubble_c_math = fmt_math(rf"{pp_c - 1}/{m_c + pp_c - 1} \approx {fmt(bubble_c * 100, precision=1, commas=False)}\%")
+    bubble_c_s_str = fmt_time(bubble_c_time, 'second', precision=2, commas=False, style='word')
+    step_c_s_str = fmt_time(step_c, 'second', precision=2, commas=False, style='word')
     config_c_efficiency_pct_str = fmt_percent(round(config_c_efficiency * 100) / 100, precision=0, commas=False, style='prose')
-    config_c_zero1_gb_str = fmt_memory(round(config_c_zero1_per_gpu.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    config_d_comm_s_str = fmt_time(config_d_comm, 'second', precision=2, commas=False, style='word')
+    bubble_d_math = fmt_math(rf"{pp_d - 1}/{m_d + pp_d - 1} \approx {fmt(bubble_d * 100, precision=1, commas=False)}\%")
+    bubble_d_s_str = fmt_time(bubble_d_time, 'second', precision=2, commas=False, style='word')
+    step_d_s_str = fmt_time(step_d, 'second', precision=2, commas=False, style='word')
+    config_d_efficiency_pct_str = fmt_percent(round(config_d_efficiency * 100) / 100, precision=0, commas=False, style='prose')
+    step_gap_cd_s_str = fmt_time(step_gap_cd, 'second', precision=2, commas=False, style='word')
+    spread_pts_str = fmt(spread_pts, precision=0, commas=False)
+    seq_per_replica_a_str = fmt(seq_per_replica_a, precision=1, commas=False)
 ```
 
-In Configuration A, pure data parallelism (DP-`{python} HybridConfigFeasibility.dp_a_value_str`) serves as a communication counterfactual rather than a feasible placement for this model. The FP16 weights alone occupy `{python} HybridConfigFeasibility.gradient_gb_str`, so an A100 or H100 cannot replicate them; sharding only optimizer states does not change that fact. If replication were possible, all `{python} HybridConfigFeasibility.n_gpus_str` ranks would form one data-parallel group, and each rank would participate in an AllReduce of the `{python} HybridConfigFeasibility.gradient_gb_str` gradient tensor across the InfiniBand fabric. The `{python} CommScalingMath.scaling_efficiency_str` calculation in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488 isolates that communication cost.
+All four configurations run the same modeled training step, the one this book uses whenever it quotes a step time for this model on this cluster, the reference job. One step is one optimizer update over a global batch of `{python} HybridConfigFeasibility.global_batch_str` sequences of `{python} HybridConfigFeasibility.seq_len_str` tokens in 16-bit mixed precision, and each replica feeds its share of the batch through the model one sequence per microbatch. Each GPU computes at `{python} HybridConfigFeasibility.local_efficiency_pct_str` of its peak before communication, and up to `{python} HybridConfigFeasibility.overlap_pct_str` of the data-parallel gradient reduction hides behind backward computation. Because the model, batch, and cluster are fixed, the average computation per GPU is the same `{python} HybridConfigFeasibility.t_local_s_str` per step in every configuration. In B, C, and D every replica receives the same whole number of sequences, so every GPU carries exactly that load. A is the exception, because its `{python} HybridConfigFeasibility.global_batch_str` sequences do not divide evenly over `{python} HybridConfigFeasibility.n_gpus_str` replicas (`{python} HybridConfigFeasibility.seq_per_replica_a_str` each). Some GPUs would process two sequences while others process one, so the walk quotes no step time or efficiency for A. The configurations differ only in the training state each GPU must hold and in the time each adds to that computation for tensor-parallel exchanges, exposed data-parallel transfer, and the pipeline bubble.
 
-Configuration B introduces intra-node tensor parallelism alongside data parallelism (TP-`{python} HybridConfigFeasibility.tp_value_str`, DP-`{python} HybridConfigFeasibility.dp_b_value_str`)\index{3D parallelism!grid decomposition}. Within each of `{python} HybridConfigFeasibility.dp_b_value_str` model replicas, `{python} HybridConfigFeasibility.tp_value_str` GPUs use tensor parallelism over NVLink. The corresponding tensor shard from every replica forms one `{python} HybridConfigFeasibility.dp_b_value_str`-rank data-parallel group, so the layout contains `{python} HybridConfigFeasibility.tp_value_str` such groups. Each rank AllReduces its 1/`{python} HybridConfigFeasibility.tp_value_str` gradient shard, `{python} HybridConfigFeasibility.config_b_shard_gb_str` rather than `{python} HybridConfigFeasibility.gradient_gb_str`, and TP communication remains within the fast NVLink domain. This is a communication comparison only. At `{python} DenseLLMReferenceFacts.bytes_per_param_str` bytes per parameter each GPU would still hold about `{python} HybridConfigFeasibility.config_b_per_gpu_gb_str` of training state, so the layout also needs optimizer and gradient sharding across its data-parallel group before it fits. The inter-node AllReduce time drops from `{python} HybridConfigFeasibility.config_a_comm_s_str` to approximately `{python} HybridConfigFeasibility.config_b_comm_s_str`. If the compute time is still `{python} HybridConfigFeasibility.t_compute_s_str`, the unoverlapped efficiency improves to about `{python} HybridConfigFeasibility.config_b_efficiency_pct_str`. The smaller transfer also fits inside the compute window. The same optimistic schedule assumed for the data-parallel baseline can therefore now hide its full `{python} HybridConfigFeasibility.overlap_pct_str` of the transfer behind backward computation, which lifts efficiency to about `{python} HybridConfigFeasibility.config_b_overlap_efficiency_pct_str`.
+In Configuration A, pure data parallelism (DP-`{python} HybridConfigFeasibility.dp_a_value_str`) serves as a counterfactual rather than a feasible placement for this model. Every GPU would hold the full `{python} HybridConfigFeasibility.state_gb_str` of training state against `{python} HybridConfigFeasibility.hbm_gb_str` of HBM. The FP16 weights alone occupy `{python} HybridConfigFeasibility.gradient_gb_str`, so an A100 or H100 cannot replicate them; sharding only optimizer states does not change that fact. Communication is not what rules the layout out. If replication were possible, all `{python} HybridConfigFeasibility.n_gpus_str` ranks would AllReduce the `{python} HybridConfigFeasibility.gradient_gb_str` gradient once per step. A hierarchical reduction first reduces inside each node over NVLink, so each GPU's InfiniBand port carries 1/`{python} HybridConfigFeasibility.gpus_per_node_value_str` of the gradient, and the exchange takes about `{python} HybridConfigFeasibility.config_a_comm_s_str`, of which about `{python} HybridConfigFeasibility.config_a_exposed_s_str` stays exposed beside the average `{python} HybridConfigFeasibility.t_local_s_str` of computation. The scaling-efficiency notebook in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488 reached only `{python} CommScalingMath.scaling_efficiency_str` for this placement because it priced the exchange as a flat ring on each GPU's port behind a shorter FP8 compute window, which hides far less of the transfer.
 
-Configuration C adds pipeline stages across nodes (TP-`{python} HybridConfigFeasibility.tp_value_str`, PP-`{python} HybridConfigFeasibility.pp_c_value_str`, DP-`{python} HybridConfigFeasibility.dp_c_value_str`) so that each of `{python} HybridConfigFeasibility.dp_c_value_str` model replicas uses `{python} HybridConfigFeasibility.tp_value_str`-way tensor parallelism within a stage and `{python} HybridConfigFeasibility.pp_c_value_str` pipeline stages across nodes. For each of the `{python} HybridConfigFeasibility.tp_value_str` $\times$ `{python} HybridConfigFeasibility.pp_c_value_str` tensor-and-pipeline shard positions, the corresponding ranks from all replicas form one `{python} HybridConfigFeasibility.dp_c_value_str`-rank data-parallel group. Each rank therefore AllReduces a `{python} HybridConfigFeasibility.config_c_shard_math` GB gradient shard. Pipeline communication forwards activations between stages and has lower volume than a full-model AllReduce. The trade-off is the pipeline bubble. At the beginning and end of each training step, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(\PipelineParallelDegree-1)/(\MicrobatchCount+\PipelineParallelDegree-1)$, so with `{python} HybridConfigFeasibility.pp_c_value_str` pipeline stages and `{python} HybridConfigFeasibility.m_c_value_str` microbatches per training step, the bubble wastes roughly `{python} HybridConfigFeasibility.bubble_c_round_str` of compute (`{python} HybridConfigFeasibility.bubble_c_math`). The smaller shard takes about `{python} HybridConfigFeasibility.config_c_comm_s_str` to AllReduce, and under the same overlap model as configuration B most of it hides behind backward computation. Charging the bubble against the compute window and adding the remaining exposed transfer gives a predicted efficiency of about `{python} HybridConfigFeasibility.config_c_efficiency_pct_str`, a few points above configuration B's `{python} HybridConfigFeasibility.config_b_overlap_efficiency_pct_str`. The pipeline cuts the data-parallel traffic by another factor of `{python} HybridConfigFeasibility.pp_c_value_str`, and that saving slightly outweighs the bubble it introduces.
+Configuration B introduces intra-node tensor parallelism alongside data parallelism (TP-`{python} HybridConfigFeasibility.tp_value_str`, DP-`{python} HybridConfigFeasibility.dp_b_value_str`)\index{3D parallelism!grid decomposition}. Within each of `{python} HybridConfigFeasibility.dp_b_value_str` model replicas, `{python} HybridConfigFeasibility.tp_value_str` GPUs use tensor parallelism over NVLink. The corresponding tensor shard from every replica forms one `{python} HybridConfigFeasibility.dp_b_value_str`-rank data-parallel group, so the layout contains `{python} HybridConfigFeasibility.tp_value_str` such groups. Each rank AllReduces its 1/`{python} HybridConfigFeasibility.tp_value_str` gradient shard, `{python} HybridConfigFeasibility.config_b_shard_gb_str` rather than `{python} HybridConfigFeasibility.gradient_gb_str`, in about `{python} HybridConfigFeasibility.config_b_comm_s_str`. Tensor parallelism is not free, however. Its forward and backward activation AllReduces add about `{python} HybridConfigFeasibility.tp_comm_s_str` per step on NVLink, so the modeled step grows to `{python} HybridConfigFeasibility.step_b_s_str`, a scaling efficiency of `{python} HybridConfigFeasibility.config_b_efficiency_pct_str`. The layout still does not fit. At `{python} HybridConfigFeasibility.bytes_per_param_str` bytes per parameter each GPU would hold about `{python} HybridConfigFeasibility.config_b_per_gpu_gb_str` of training state, so tensor parallelism confined to one node is not enough by itself, and the layout would also need gradient and optimizer sharding across its data-parallel group before it fits.
 
-Configuration C does not fit memory by itself either. Its training state is about `{python} HybridConfigFeasibility.config_c_per_gpu_gb_str` per GPU, above the `{python} HybridConfigFeasibility.hbm_gb_str` of an H100. Adding ZeRO-1 across its `{python} HybridConfigFeasibility.dp_c_value_str`-rank data-parallel group closes that gap. Each GPU then keeps its tensor-and-pipeline slice of weights and gradients but only a 1/`{python} HybridConfigFeasibility.dp_c_value_str` share of that slice's optimizer state, about `{python} HybridConfigFeasibility.config_c_zero1_gb_str` in all, which leaves most of the HBM for activations and buffers. ZeRO-1 matches plain DDP's ideal data-parallel byte volume at matching communication widths (@tbl-zero-stages), but equal bytes do not preserve the overlap schedule. Gradient reduction to owners must precede their optimizer updates, and the updated-parameter AllGather follows those updates. The predicted efficiency remains conditional on that schedule achieving the modeled exposed communication time. TP-8, PP-4, DP-32 with ZeRO-1 passes this simplified persistent-state memory budget; its reduction, update, and parameter-gather readiness must still be priced before accepting the throughput prediction.
+Configuration C adds pipeline stages across nodes (TP-`{python} HybridConfigFeasibility.tp_value_str`, PP-`{python} HybridConfigFeasibility.pp_c_value_str`, DP-`{python} HybridConfigFeasibility.dp_c_value_str`) so that each of `{python} HybridConfigFeasibility.dp_c_value_str` model replicas uses `{python} HybridConfigFeasibility.tp_value_str`-way tensor parallelism within a stage and `{python} HybridConfigFeasibility.pp_c_value_str` pipeline stages across nodes. For each of the `{python} HybridConfigFeasibility.tp_value_str` $\times$ `{python} HybridConfigFeasibility.pp_c_value_str` tensor-and-pipeline shard positions, the corresponding ranks from all replicas form one `{python} HybridConfigFeasibility.dp_c_value_str`-rank data-parallel group. Each rank therefore AllReduces a `{python} HybridConfigFeasibility.config_c_shard_math` GB gradient shard, in about `{python} HybridConfigFeasibility.config_c_comm_s_str`. Pipeline communication forwards activations between stages and has lower volume than a full-model AllReduce. The trade-off is the pipeline bubble. At the beginning and end of each training step, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(\PipelineParallelDegree-1)/(\MicrobatchCount+\PipelineParallelDegree-1)$, so with `{python} HybridConfigFeasibility.pp_c_value_str` pipeline stages and the `{python} HybridConfigFeasibility.m_c_value_str` microbatches each replica receives per step, the bubble idles `{python} HybridConfigFeasibility.bubble_c_math` of the pipelined step, about `{python} HybridConfigFeasibility.bubble_c_s_str`. The pipeline cuts the data-parallel traffic by another factor of `{python} HybridConfigFeasibility.pp_c_value_str`, but the bubble costs more time than the smaller transfer saves, so the modeled step lengthens to `{python} HybridConfigFeasibility.step_c_s_str` and efficiency falls to `{python} HybridConfigFeasibility.config_c_efficiency_pct_str`.
 
-Within this comparison's communication model, the configuration that places frequent tensor-parallel exchanges in the fast NVLink domain, pipelines across nodes, and leaves only small data-parallel gradient shards for InfiniBand has the best predicted efficiency. Peak memory, kernel shape, and scheduling still need verification before that prediction becomes a runnable design. The infrastructure hierarchy therefore dictates the parallelism hierarchy. Here, hierarchy-aware parallelism means matching exchange requirements to measured communication domains rather than choosing each degree independently.
+Configuration C does not fit memory by itself either. Its training state is about `{python} HybridConfigFeasibility.config_c_per_gpu_gb_str` per GPU, above the `{python} HybridConfigFeasibility.hbm_gb_str` of an H100. Adding ZeRO-1 across its `{python} HybridConfigFeasibility.dp_c_value_str`-rank data-parallel group closes that gap. Each GPU then keeps its tensor-and-pipeline slice of weights and gradients but only a 1/`{python} HybridConfigFeasibility.dp_c_value_str` share of that slice's optimizer state, about `{python} HybridConfigFeasibility.config_c_zero1_gb_str` in all. ZeRO-1 matches plain DDP's ideal data-parallel byte volume at matching communication widths (@tbl-zero-stages), so the model prices the same step for it, but equal bytes do not preserve the overlap schedule. Gradient reduction to owners must precede their optimizer updates, and the updated-parameter AllGather follows those updates. Configuration C with ZeRO-1 passes this simplified persistent-state memory budget, and its predicted step holds only if that reduction, update, and parameter-gather sequence achieves the modeled exposed communication time.
+
+Configuration D deepens the pipeline instead of sharding the optimizer (TP-`{python} HybridConfigFeasibility.tp_value_str`, PP-`{python} HybridConfigFeasibility.pp_d_value_str`, DP-`{python} HybridConfigFeasibility.dp_d_value_str`). It is the layout of the reference job, in which tensor parallelism spans one node and the pipeline is the shallowest power of two at which unsharded mixed-precision Adam state fits. Each GPU holds about `{python} HybridConfigFeasibility.config_d_per_gpu_gb_str` of training state, which leaves about `{python} HybridConfigFeasibility.headroom_d_gb_str` of the `{python} HybridConfigFeasibility.hbm_gb_str` budget for activations, workspaces, and communication buffers. Each of the `{python} HybridConfigFeasibility.dp_d_value_str` replicas runs its `{python} HybridConfigFeasibility.m_d_value_str` sequences as `{python} HybridConfigFeasibility.m_d_value_str` one-sequence microbatches, so the bubble idles `{python} HybridConfigFeasibility.bubble_d_math` of the pipelined step, about `{python} HybridConfigFeasibility.bubble_d_s_str`, and the `{python} HybridConfigFeasibility.dp_d_value_str`-rank data-parallel groups reduce their smaller shards in about `{python} HybridConfigFeasibility.config_d_comm_s_str`. With tensor-parallel, data-parallel, and bubble time all charged, the modeled step takes `{python} HybridConfigFeasibility.step_d_s_str`, a scaling efficiency of `{python} HybridConfigFeasibility.config_d_efficiency_pct_str`. Against configuration C with ZeRO-1, the deeper pipeline costs about `{python} HybridConfigFeasibility.step_gap_cd_s_str` per step, its larger bubble less its smaller transfer. Its optimizer still waits for the reduced gradients, but each GPU holds the optimizer state for its whole tensor-and-pipeline slice and updates that slice in place, so the post-update parameter AllGather that ZeRO-1 adds never enters the step.
+
+Within this step model, communication does not separate the layouts. B, C, and D finish within `{python} HybridConfigFeasibility.spread_pts_str` percentage points of one another, and each added axis lengthens the modeled step slightly because it brings its own exchange or idle time. Memory decides the design. Tensor parallelism inside the NVLink domain divides the training state by the node size at the price of frequent exchanges on the fastest link, pipeline stages divide it again at the price of a bubble, and data parallelism leaves only small gradient shards for InfiniBand. Peak memory, kernel shape, and scheduling still need verification before that prediction becomes a runnable design. The infrastructure hierarchy therefore dictates the parallelism hierarchy. Here, hierarchy-aware parallelism means matching exchange requirements to measured communication domains rather than choosing each degree independently.
 
 ::: {#dfn-distributed-training-hierarchy-aware-parallelism .callout-definition title="Hierarchy-aware parallelism"}
 
@@ -5267,7 +5396,7 @@ Within this comparison's communication model, the configuration that places freq
 
 :::
 
-The dependence runs both ways, because a parallelism configuration also determines which traffic the fabric must carry. In the TP-8, PP-4, DP-32 layout, tensor reductions stay within each fast local domain, pipeline traffic crosses neighboring stages, and data-parallel groups synchronize corresponding shards across replicas. Rail-optimized\index{Rail-optimized network!hybrid parallelism} and hierarchical fabrics can exploit that structure, but a workload mix that adds expert AllToAll traffic changes the global bandwidth requirement. Infrastructure planning must therefore evaluate the anticipated communication groups together rather than optimizing the fabric for a single layout.
+The dependence runs both ways, because a parallelism configuration also determines which traffic the fabric must carry. In the reference job's TP-`{python} HybridConfigFeasibility.tp_value_str`, PP-`{python} HybridConfigFeasibility.pp_d_value_str`, DP-`{python} HybridConfigFeasibility.dp_d_value_str` layout, tensor reductions stay within each fast local domain, pipeline traffic crosses neighboring stages, and data-parallel groups synchronize corresponding shards across replicas. Rail-optimized\index{Rail-optimized network!hybrid parallelism} and hierarchical fabrics can exploit that structure, but a workload mix that adds expert AllToAll traffic changes the global bandwidth requirement. Infrastructure planning must therefore evaluate the anticipated communication groups together rather than optimizing the fabric for a single layout.
 
 ::: {.column-margin .margin-pointer}
 ↩ Rail-optimized fabrics, which cable each GPU slot position to its own rail switch, are established in @sec-network-fabrics-rail-optimized.
@@ -5289,7 +5418,7 @@ from mlsysim.solvers import DistributedModel
 # │ How: ring AllReduce bytes = 2(t-1)/t × activation payload; two per layer.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_memory
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple
 
 class TensorParallel3DTraffic:
     from mlsysim.physics import calc_ring_allreduce_data_factor
@@ -5321,7 +5450,8 @@ class TensorParallel3DTraffic:
     check(200 * MB < activation_payload < 202 * MB, "Activation payload should be about 201 MB")
     check(67 * GB < full_forward < 68 * GB, "Full forward TP traffic should be about 68 GB")
     check(4 * GB < per_stage_forward < 5 * GB, "Per-stage forward TP traffic should be about 4.2 GB")
-    check(total_gpus == 16 * reference_cluster_gpus, "Prose calls this sixteen times the reference cluster")
+    fleet_ratio = total_gpus // reference_cluster_gpus
+    check(fleet_ratio == 16 and fleet_ratio * reference_cluster_gpus == total_gpus, "Prose: 16x the reference cluster")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     tp_str = fmt_count(tp, commas=False, label="GPU")
@@ -5333,6 +5463,7 @@ class TensorParallel3DTraffic:
     per_stage_forward_gb_str = fmt_memory(per_stage_forward, unit=GB, precision=1, commas=False)
     per_stage_forward_backward_gb_str = fmt_memory(per_stage_forward_backward, unit=GB, precision=1, commas=False)
     layers_str = fmt(layers, precision=0, commas=False)
+    fleet_ratio_mult_str = fmt_multiple(fleet_ratio, precision=0, commas=False)
 ```
 
 ```{python}
@@ -5357,7 +5488,7 @@ class FlashAttentionHybridRecap:
     nvlink_h100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
 
-A `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model trained with 3D parallelism\index{3D parallelism!training loop} (@fig-3d-parallelism-cube) can be traced on a fleet configured with tensor parallelism (TP) of `{python} TensorParallel3DTraffic.tp_str`, pipeline parallelism (PP) of `{python} TensorParallel3DTraffic.pp_value_str`, and data parallelism (DP) of `{python} TensorParallel3DTraffic.dp_value_str`. This configuration uses `{python} TensorParallel3DTraffic.total_gpus_str` (`{python} TensorParallel3DTraffic.tp_str` $\times$ `{python} TensorParallel3DTraffic.pp_value_str` $\times$ `{python} TensorParallel3DTraffic.dp_value_str`) organized into a hierarchy of bandwidth domains. That is sixteen times the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster, so every level of the hierarchy is exercised even though parameter count alone would not require all three dimensions. @Sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design justifies its pipeline depth.
+A `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model trained with 3D parallelism\index{3D parallelism!training loop} (@fig-3d-parallelism-cube) can be traced on a fleet configured with tensor parallelism (TP) of `{python} TensorParallel3DTraffic.tp_str`, pipeline parallelism (PP) of `{python} TensorParallel3DTraffic.pp_value_str`, and data parallelism (DP) of `{python} TensorParallel3DTraffic.dp_value_str`. This configuration uses `{python} TensorParallel3DTraffic.total_gpus_str` (`{python} TensorParallel3DTraffic.tp_str` $\times$ `{python} TensorParallel3DTraffic.pp_value_str` $\times$ `{python} TensorParallel3DTraffic.dp_value_str`) organized into a hierarchy of bandwidth domains. That is `{python} TensorParallel3DTraffic.fleet_ratio_mult_str` the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster, so every level of the hierarchy is exercised even though parameter count alone would not require all three dimensions. @Sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design justifies its pipeline depth.
 
 The training step begins at the data-parallel level. Each of the `{python} TensorParallel3DTraffic.dp_value_str` model replicas receives a distinct slice of the global batch. Within each replica, the model is split across `{python} TensorParallel3DTraffic.pp_value_str` pipeline stages (nodes), with microbatches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the `{python} TensorParallel3DTraffic.tp_str` fuse into a single "super-accelerator" via TP. The transformer matrix multiplications are split across these devices; column- and row-parallel pairs retain local intermediate shards and exchange partial results at the reduction points already derived. For a 175B-scale hidden dimension, the activation payload is roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str`. The resulting tensor-parallel traffic is about `{python} TensorParallel3DTraffic.per_stage_forward_gb_str` per pipeline stage per microbatch in the forward pass, or `{python} TensorParallel3DTraffic.per_stage_forward_backward_gb_str` including the backward pass. Across the full `{python} TensorParallel3DTraffic.layers_str`-layer replica, the forward tensor-parallel traffic is about `{python} TensorParallel3DTraffic.full_forward_gb_str`. This traffic is the highest-intensity in the system, but its exposed latency can remain small relative to compute because the chips communicate over `{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_per_s_str` of local bandwidth per direction.
 
@@ -5383,21 +5514,24 @@ from mlsysim.solvers import DistributedModel
 # │ Context: @sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design.
 # │ Goal: Keep 8-byte and 12-byte Adam accounting conventions separate.
 # │ How: Compute global optimizer state and per-GPU static model state for t=8, p=16;
-# │      price the PP-16 bubble at configuration C's microbatch count (2026-10-15:
-# │      replaces the hand-typed 15/47 and 31.9 percent).
+# │      price the PP-16 bubble at the scenario's 32 microbatches, and
+# │      configuration C's four stages at the same count (2026-10-15: replaces
+# │      the hand-typed 15/47 and 31.9 percent; 2026-11-03: C's walk now runs 48
+# │      microbatches on the shared step, so the same-count comparison is
+# │      computed here).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_magnitude, fmt_math, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_params
-from mlsysim.physics import memory_from_params
+from mlsysim.fmt import check, fmt, fmt_magnitude, fmt_math, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_percent, fmt_params
+from mlsysim.physics import calc_pipeline_bubble, memory_from_params
 
 class HybridMemoryAccounting:
     """Static memory for TP-8, PP-16 hybrid parallelism."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    scenario = Scenarios.Gpt3ThreeDParallel16K  # TP 8 x PP 16 x DP 128, configuration C's microbatch count
+    scenario = Scenarios.Gpt3ThreeDParallel16K  # TP 8 x PP 16 x DP 128 at 32 microbatches per step
     params = scenario.workload.parameters
     tensor_parallel = scenario.tp_size
     pipeline_parallel = scenario.pp_size
-    microbatches = scenario.microbatches  # same microbatch count as configuration C
+    microbatches = scenario.microbatches  # scenario assumption carried by the 16K layout
     simplified_optimizer_bytes_per_param = 2 * (BYTES_FP32 / param)
     full_adam_bytes_per_param = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter  # FP32 master + 2 moments
 
@@ -5412,6 +5546,7 @@ class HybridMemoryAccounting:
     bubble = scenario.result.bubble
     replica_gpus_c = HybridConfigFeasibility.tp_c * HybridConfigFeasibility.pp_c
     depth_ratio = pipeline_parallel // HybridConfigFeasibility.pp_c
+    bubble_c_same_m = calc_pipeline_bubble(HybridConfigFeasibility.pp_c, microbatches)  # C's depth, this layout's count
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs((optimizer_simplified - 1400 * GB).to(GB).magnitude) < 1, "8-byte optimizer state should be 1.4 TB")
@@ -5419,7 +5554,8 @@ class HybridMemoryAccounting:
     check(13 * GB < hybrid_static < 15 * GB, "Weights-plus-moments subtotal should be about 14 GB/GPU")
     check(21.8 * GB < full_adam_hybrid_static < 22 * GB, "Complete 16-byte persistent state is about 21.9 GB/GPU")
     check(0.30 < bubble < 1 / 3, "PP-16 at 32 microbatches should idle nearly one-third of compute")
-    check(bubble > HybridConfigFeasibility.bubble_c, "The deeper pipeline must pay the larger bubble")
+    check(bubble > bubble_c_same_m, "The deeper pipeline must pay the larger bubble")
+    check(round(bubble_c_same_m * 100) == 9, "Prose: C's depth at 32 microbatches wastes roughly 9 percent")
     check(depth_ratio * HybridConfigFeasibility.pp_c == pipeline_parallel, "PP-16 should be a whole multiple of configuration C's depth")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
@@ -5435,13 +5571,14 @@ class HybridMemoryAccounting:
     )
     replica_gpus_c_str = fmt(replica_gpus_c, precision=0, commas=False)
     depth_ratio_mult_str = fmt_multiple(depth_ratio, precision=0, commas=False)
+    bubble_c_same_m_str = fmt_percent(round(bubble_c_same_m * 100) / 100, precision=0, commas=False, style='prose')
 ```
 
 The memory budget for a `{python} HybridMemoryAccounting.params_b_str` model must include every persistent training component. Under the mixed-precision Adam convention used here, each parameter has FP16 weights and gradients, an FP32 master weight, and two FP32 optimizer moments, totaling `{python} DenseLLMReferenceFacts.bytes_per_param_str` bytes before activations and workspaces. With tensor parallelism degree `{python} HybridMemoryAccounting.tensor_parallel_str` alone, these components occupy `{python} HybridMemoryAccounting.full_adam_tp_static_gb_str` per device, exceeding H100-class capacity. Adding `{python} HybridMemoryAccounting.pipeline_parallel_str` pipeline stages spreads that state across the product of the two degrees, yielding `{python} HybridMemoryAccounting.full_adam_hybrid_static_gb_str` per device under even partitioning. A budget that counts only weights and optimizer moments, about `{python} HybridMemoryAccounting.hybrid_static_gb_str` per device here, understates this total. Activation peaks, layer imbalance, and communication workspaces must fit in the remaining memory before this configuration is feasible. Activation checkpointing can bring those peaks within budget, but the plan then pays in useful throughput, because recomputation costs about one extra forward pass per step when full and a few percent when selective (@sec-distributed-training-systems-systems-compute-phase-forward-backward), work that HFU counts and MFU does not.
 
 Once the configuration fits in memory, its traffic still follows the same tiers, and each data-parallel group reduces only its tensor-and-pipeline shard of the `{python} HybridConfigFeasibility.gradient_gb_str` gradient buffer once per update. Gradient bucketing overlaps that reduction with backward computation, so its exposed cost depends on the computation remaining before the optimizer needs the reduced shard.
 
-The last cost is scheduling rather than bandwidth, because a pipelined model is only efficient when enough microbatches are in flight to keep all stages busy. This remaining cost is the pipeline bubble developed in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. Applying its bubble fraction $\frac{\PipelineParallelDegree-1}{\MicrobatchCount+ \PipelineParallelDegree - 1}$ to this hybrid layout, $\PipelineParallelDegree=$ `{python} HybridMemoryAccounting.pipeline_parallel_str` stages with $\MicrobatchCount=$ `{python} HybridMemoryAccounting.microbatches_str` microbatches waste `{python} HybridMemoryAccounting.bubble_math` of theoretical compute capacity, nearly one-third. Configuration C's `{python} HybridConfigFeasibility.pp_c_value_str` stages at the same microbatch count waste roughly `{python} HybridConfigFeasibility.bubble_c_round_str`.
+The last cost is scheduling rather than bandwidth, because a pipelined model is only efficient when enough microbatches are in flight to keep all stages busy. This remaining cost is the pipeline bubble developed in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. Applying its bubble fraction $\frac{\PipelineParallelDegree-1}{\MicrobatchCount+ \PipelineParallelDegree - 1}$ to this hybrid layout, $\PipelineParallelDegree=$ `{python} HybridMemoryAccounting.pipeline_parallel_str` stages with $\MicrobatchCount=$ `{python} HybridMemoryAccounting.microbatches_str` microbatches waste `{python} HybridMemoryAccounting.bubble_math` of theoretical compute capacity, nearly one-third. Configuration C's `{python} HybridConfigFeasibility.pp_c_value_str` stages at the same microbatch count would waste roughly `{python} HybridMemoryAccounting.bubble_c_same_m_str`.
 
 The deeper pipeline is chosen at this scale for two reasons. Its `{python} HybridMemoryAccounting.pipeline_parallel_str` stages spread the full training state to about `{python} HybridMemoryAccounting.full_adam_hybrid_static_gb_str` per device without optimizer sharding. Filling `{python} TensorParallel3DTraffic.total_gpus_str` with configuration C's `{python} HybridMemoryAccounting.replica_gpus_c_str`-GPU replicas would instead need `{python} HybridMemoryAccounting.depth_ratio_mult_str` as many data-parallel replicas, which multiplies the global batch $\DataParallelDegree \times \MicrobatchCount\times \MicrobatchSize$ by the same factor at the same per-replica schedule. The shallow pipeline spends global batch; the deep one spends bubble. The 1F1B scheduling that reclaims activation memory, and the larger microbatch counts it makes practical, drive the bubble fraction down asymptotically. Every added microbatch also enlarges the global batch, so the bubble target must be reconciled with the critical-batch constraint from @sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961.
 
@@ -5499,7 +5636,7 @@ from mlsysim.solvers import DistributedModel
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Systems
 from mlsysim.solvers import ParallelismOptimizer
-from mlsysim.fmt import check, fmt, fmt_memory_capacity, fmt_params, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_memory_capacity, fmt_multiple, fmt_params, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AutoParallelism:
@@ -5529,6 +5666,8 @@ class AutoParallelism:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(best_tp == 8, f"Optimizer should align TP with node size (8), got {best_tp}")
     check(best_pp * best_dp * best_tp == total_gpus, "Split must use all GPUs")
+    scale_ratio = total_gpus // DistTrainReliabilityFacts.reliability_gpu_count
+    check(scale_ratio == 8 and scale_ratio * DistTrainReliabilityFacts.reliability_gpu_count == total_gpus, "Prose: 8x the reference cluster")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     opt_tp_str = fmt_count(best_tp, commas=False, label="GPU")
@@ -5538,11 +5677,12 @@ class AutoParallelism:
     params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
     gpu_count_str = fmt_count(total_gpus, commas=True)
     hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    scale_ratio_mult_str = fmt_multiple(scale_ratio, precision=0, commas=False)
 ```
 
 ::: {#exmp-distributed-training-automated-design-space-search-tier-3-optimizer .callout-example title="Automated design space search"}
 
-**Scenario**: An engineering team schedules a `{python} AutoParallelism.params_b_str`-parameter model across `{python} AutoParallelism.gpu_count_str` H100 GPUs (`{python} AutoParallelism.hbm_gb_str` HBM each), eight times the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str`-GPU reference cluster so that the pipeline and data-parallel degrees both have room to vary. The team navigates the multi-dimensional 3D-parallelism search space (TP $\times$ PP $\times$ DP).
+**Scenario**: An engineering team schedules a `{python} AutoParallelism.params_b_str`-parameter model across `{python} AutoParallelism.gpu_count_str` H100 GPUs (`{python} AutoParallelism.hbm_gb_str` HBM each), `{python} AutoParallelism.scale_ratio_mult_str` the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str`-GPU reference cluster so that the pipeline and data-parallel degrees both have room to vary. The team navigates the multi-dimensional 3D-parallelism search space (TP $\times$ PP $\times$ DP).
 
 **Diagnosis**: Candidate configurations must fit within `{python} AutoParallelism.hbm_gb_str` HBM and satisfy the modeled communication budget. The search evaluates TP $\times$ PP $\times$ DP factorizations and selects TP=`{python} AutoParallelism.opt_tp_str`, PP=`{python} AutoParallelism.opt_pp_value_str`, and DP=`{python} AutoParallelism.opt_dp_value_str` as the best predicted MFU among configurations feasible under its assumptions. That result is a candidate for measurement, not proof of the best attainable runtime.
 
@@ -5563,7 +5703,7 @@ Verify your understanding of how parallelism strategies combine:
 
 :::
 
-The three configurations and the worked layout tell one story. Pure data parallelism moves the full `{python} HybridConfigFeasibility.gradient_gb_str` gradient over the slowest tier and reaches only `{python} CommScalingMath.scaling_efficiency_str` scaling efficiency. Keeping tensor parallelism inside the NVLink domain cuts each rank's share of that traffic by the tensor-parallel degree, and pipeline stages cut it again at the price of a bubble. Communication alone does not make a layout feasible, however. Each layout must also hold the full training state, which is why configurations B and C still need state sharding and why the worked layout adds pipeline depth until the persistent state falls to about `{python} HybridMemoryAccounting.full_adam_hybrid_static_gb_str` per device. Hybrid parallelism is therefore the joint solution of a memory constraint, a bandwidth hierarchy, and a batch-size limit, and every axis added to satisfy one of them tightens another. Alignment training tests that joint solution hardest, because it asks one fleet to host several models with different memory and compute profiles at the same time.
+The four configurations and the worked layout tell one story. Pure data parallelism would replicate `{python} HybridConfigFeasibility.state_gb_str` of training state on every GPU, which no fabric can repair. Keeping tensor parallelism inside the NVLink domain cuts each rank's state and gradient shard by the tensor-parallel degree at the price of tensor-parallel exchanges, and pipeline stages cut them again at the price of a bubble. Communication alone does not make a layout feasible, however. Each layout must also hold the full training state, which is why configuration B would need gradient and optimizer sharding across its data-parallel group, why configuration C needs ZeRO-1, and why the reference job's TP-`{python} HybridConfigFeasibility.tp_value_str`, PP-`{python} HybridConfigFeasibility.pp_d_value_str`, DP-`{python} HybridConfigFeasibility.dp_d_value_str` layout deepens the pipeline until unsharded state fits, at a modeled `{python} HybridConfigFeasibility.config_d_efficiency_pct_str` scaling efficiency. The worked layout at `{python} TensorParallel3DTraffic.fleet_ratio_mult_str` that scale goes deeper still, until the persistent state falls to about `{python} HybridMemoryAccounting.full_adam_hybrid_static_gb_str` per device. Hybrid parallelism is therefore the joint solution of a memory constraint, a bandwidth hierarchy, and a batch-size limit, and every axis added to satisfy one of them tightens another. Alignment training tests that joint solution hardest, because it asks one fleet to host several models with different memory and compute profiles at the same time.
 
 ## Multi-Model Training for Alignment and RLHF {#sec-distributed-training-rlhf}
 
@@ -5760,7 +5900,10 @@ class RLHFBudget:
     tp = scenario.tp_size
     pp = scenario.pp_size
     dp = scenario.dp_size  # data-parallel replicas of the policy
-    h100_mem = Hardware.Cloud.H100.memory.capacity.to(GB)  # preserve the registry byte count
+    # Budget against the published "80 GB" label, the convention of the chapter's
+    # other capacity budgets (2026-11-03: was .to(GB), 85.9 GB, which printed
+    # 80 - 39.4 as 46.5; 06-E5).
+    h100_mem = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
     seq_len = scenario.rollout_tokens
     batch_size = scenario.rollout_sequences
     _r = scenario.result
@@ -5803,6 +5946,9 @@ class RLHFBudget:
         "Generation memory components must sum to capacity",
     )
     check(abs((remaining_after_kv + kv_per_gpu - remaining).to(GB).magnitude) < 1e-9, "Releasing rollout KV restores update-phase headroom")
+    check(abs(h100_mem.to(GB).magnitude - 80) < 1e-9, "Headroom is budgeted against the 80 GB label the prose prints")
+    check(abs((remaining - 40.6 * GB).to(GB).magnitude) < 0.05, f"update-phase headroom ({remaining.to(GB).magnitude:.2f} GB)")
+    check(abs((remaining_after_kv - 37.9 * GB).to(GB).magnitude) < 0.05, f"generation-phase headroom ({remaining_after_kv.to(GB).magnitude:.2f} GB)")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     policy_mem_gb_str = fmt_memory(policy_mem, unit=GB, precision=0, commas=True)
@@ -5924,7 +6070,7 @@ A parallelism strategy is useful only if it moves the limiting constraint withou
 |:------------------------------------------------------------------------|:-------------------------------------------------------|:--------------------------------------------|:-----------------------------------------------------------|:-----------------------------------------------------|
 | **DDP**                                                                 | Model state fits on one accelerator                    | AllReduce gradients every step              | Replicate full model across data-parallel workers          | Step time dominated by compute, not synchronization  |
 | **FSDP/ZeRO**                                                           | Model state exceeds one accelerator                    | Gather parameters; ReduceScatter gradients  | Size prefetch and reshard windows within peak memory       | State plus activations and workspaces fit            |
-| **Tensor parallelism**                                                  | One layer or tensor operation exceeds local capacity   | Reduce or gather partial layer results      | Keep tightly coupled partitions on fast local links        | Exposed collective time fits the layer-time budget   |
+| **Tensor parallelism**                                                  | One layer exceeds local capacity or runs too slowly    | Reduce or gather partial layer results      | Keep tightly coupled partitions on fast local links        | Exposed collective time fits the layer-time budget   |
 | **Pipeline parallelism**\index{Pipeline parallelism!selection criteria} | Layer stack fits only when split by stage              | Activations and gradients between stages    | Balance stages and live microbatch activations             | Bubble and peak activation memory meet budget        |
 | **Sequence/context parallelism**                                        | Activations or attention context exceed local capacity | Exchange sequence shards or attention state | Partition long sequences across a low-latency group        | Longer context fits without communication dominating |
 | **Expert parallelism**                                                  | Sparse expert capacity exceeds local memory            | Route token activations with AllToAll       | Balance expert load across a high-bisection group          | Expert imbalance and dropped-token rate stay bounded |
@@ -5932,9 +6078,75 @@ A parallelism strategy is useful only if it moves the limiting constraint withou
 
 : **Parallel Training Strategies**: Data, tensor, and pipeline parallelism form the canonical 3D core. Sequence/context parallelism extends the partition along token positions, while expert parallelism extends it across sparse model capacity. Strategy selection remains an engineering feasibility test: identify the binding constraint, the communication primitive it creates, the placement decision it forces, and the measurement that proves the strategy is helping. {#tbl-parallelism-compare tbl-colwidths="[15,22,20,23,20]"}
 
-A decision path condenses the table, starting from memory fit and then asking which structure breaks the budget (@fig-parallelism-flowchart). Before accepting any branch, check peak memory, global batch, communication service time, and load balance together; bandwidth is a feasibility constraint throughout the decision, not an afterthought.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHY THE 175B MODEL TAKES THE LAYER BRANCH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the decision-path paragraph before @fig-parallelism-flowchart.
+# │
+# │ Goal: Give the computed reason the 175B reference model answers yes to
+# │       "one layer too large or slow?" although an average layer fits one GPU.
+# │ Show: ~29.2 GB per average layer; without TP the replica rule needs a
+# │       64-stage pipeline whose bubble idles ~39.6% (step ~12.04 s) against
+# │       6.8% at TP 8 x PP 8 (8.71 s); TP shards of 350 GB still exceed HBM.
+# │ How: the pipeline rule of Scenarios.Gpt3SelfContainedReplicaDgxH100 with
+# │      TP = 1, then _solve_layout (HybridConfigFeasibility cell) on the same
+# │      shared-step inputs, against Scenarios.DenseLLMPretrainingStep.
+# │
+# │ Note: 2026-11-03 (Codex review): the figure's route rested on an unstated
+# │       "too slow" budget; this states it as a bubble and step-time cost.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_percent, fmt_time
 
-::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Framework**: A selection guide that begins with memory fit. For a model that fits on one device, evaluate data parallelism against the throughput target and input-delivery budget; the complete dataset need not fit in accelerator memory. A model that does not fit is routed by the structure that breaks the budget, with sequential depth leading to pipeline parallelism, an oversized single layer to tensor parallelism, and otherwise sharded data parallelism (FSDP/ZeRO). Combine parallelism axes when the workload requires them. Peak memory, global batch, bandwidth, and workload imbalance constrain every candidate." fig-alt="Decision tree flowchart. From the workload profile, diamonds ask whether the model fits on one GPU, whether one GPU meets the target, whether the layer stack is deep, and whether a single layer is too large. Outcomes are single device, data parallel, pipeline parallel, tensor parallel, or sharded data parallel (FSDP, ZeRO), each with a small glyph of layer bars inside GPU frames: one full stack for a single device, three full copies for data parallel, two frames holding upper and lower layer groups for pipeline parallel, two frames each holding one half of every layer for tensor parallel, and three frames each holding a different one-third slice of every layer, the rest dashed, for sharded data parallel. Dashed lines from the four parallel outcomes lead to a box that combines axes as TP times PP times DP."}
+class DecisionPathReference:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    _step = Scenarios.DenseLLMPretrainingStep  # the shared 175B reference step
+    _model = _step.replica.workload
+    hbm = _step.fleet.node.accelerator.memory.capacity
+    state = _model.parameters.magnitude * _step.replica.bytes_per_param  # unsharded 16 B/param
+    layers = _model.layers
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    layer_state = state / layers  # average layer
+    # The self-contained replica rule with TP = 1: the shallowest power-of-two
+    # pipeline at which each GPU's share of unsharded state fits HBM.
+    pp_no_tp = 1
+    while (state / pp_no_tp).to(GiB) > hbm:
+        pp_no_tp *= 2
+    _r_no_tp = _solve_layout(_step, 1, pp_no_tp)
+    _r_ref = _step.result
+    bubble_no_tp, bubble_ref = _r_no_tp.bubble_fraction, _r_ref.bubble_fraction
+    step_no_tp, step_ref = _r_no_tp.step_latency_total, _r_ref.step_latency_total
+    tp_shard_state = state / _step.tensor_parallel
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(layer_state < hbm, "Prose: an average 175B layer's state fits one GPU")
+    check(29 * GB < layer_state < 29.5 * GB, f"Prose quotes ~29.2 GB per layer, got {layer_state.to(GB)}")
+    check(
+        pp_no_tp == 64 and pp_no_tp == _step.pipeline_depth * _step.tensor_parallel,
+        "Without TP the same replica rule needs 64 stages, the same 64 GPUs as the reference replica",
+    )
+    check(_r_no_tp.parallelism["dp"] == _step.data_parallel, "Same replica size, so the same DP degree and microbatches")
+    check(0.39 < bubble_no_tp < 0.40 and 0.06 < bubble_ref < 0.07, "Prose quotes 39.6 and 6.8 percent bubbles")
+    check(step_no_tp > step_ref, "Prose: the TP-free pipeline lengthens the step")
+    check(tp_shard_state > hbm, "Prose: TP shards inside one node still exceed one GPU")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    layer_state_gb_str = fmt_memory(layer_state, unit=GB, precision=1, commas=False)
+    pp_no_tp_str = fmt(pp_no_tp, precision=0, commas=False)
+    pp_ref_str = fmt(_step.pipeline_depth, precision=0, commas=False)
+    m_ref_str = fmt(_step.microbatches_per_replica, precision=0, commas=False)
+    bubble_no_tp_pct_str = fmt_percent(bubble_no_tp, precision=1, commas=False, style='prose')
+    bubble_ref_pct_str = fmt_percent(bubble_ref, precision=1, commas=False, style='prose')
+    step_no_tp_s_str = fmt_time(step_no_tp, 'second', precision=2, commas=False, style='word')
+    step_ref_s_str = fmt_time(step_ref, 'second', precision=2, commas=False, style='word')
+    tp_shard_gb_str = fmt_memory(tp_shard_state, unit=GB, precision=0, commas=False)
+```
+
+A decision path condenses the table, starting from memory fit and then asking which structure breaks the budget (@fig-parallelism-flowchart). The `{python} FrontierTrainingContext.frontier_params_b_str` reference model takes the layer branch on step time rather than capacity. An average layer holds about `{python} DecisionPathReference.layer_state_gb_str` of training state, which fits one GPU. Without tensor parallelism, however, the rule that sets configuration D's depth, the shallowest power-of-two pipeline at which unsharded state fits, gives `{python} DecisionPathReference.pp_no_tp_str` single-GPU stages instead of `{python} DecisionPathReference.pp_ref_str`. At the same `{python} DecisionPathReference.m_ref_str` microbatches per replica, that pipeline's bubble idles `{python} DecisionPathReference.bubble_no_tp_pct_str` of each step rather than `{python} DecisionPathReference.bubble_ref_pct_str`, and the modeled step grows from `{python} DecisionPathReference.step_ref_s_str` to `{python} DecisionPathReference.step_no_tp_s_str`. Tensor parallelism inside the NVLink node is what keeps the pipeline shallow, and because its `{python} DecisionPathReference.tp_shard_gb_str` shards still exceed one GPU, the path ends at combining axes. Before accepting any branch, check peak memory, global batch, communication service time, and load balance together; bandwidth is a feasibility constraint throughout the decision, not an afterthought.
+
+::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Framework**: A selection guide that begins with memory fit. For a model that fits on one device, evaluate data parallelism against the throughput target and input-delivery budget; the complete dataset need not fit in accelerator memory. A model that does not fit first asks whether a single layer is too large or too slow for one device. If so, tensor parallelism splits each layer inside one node, and a model whose tensor-parallel shards still exceed device memory, such as the 175B reference model, combines tensor, pipeline, and data parallelism. A model whose layers fit is routed by depth, with a deep stack leading to pipeline parallelism and otherwise sharded data parallelism (FSDP/ZeRO). Any outcome can add data parallelism for throughput, and peak memory, global batch, bandwidth, and workload imbalance constrain every candidate." fig-alt="Decision tree flowchart. From the workload profile, a diamond asks whether the model fits on one GPU. If yes, a second diamond asks whether one GPU meets the target: yes leads to single device, no to data parallel. If the model does not fit, a diamond asks whether one layer is too large or too slow. If yes, a diamond asks whether the model fits with tensor parallelism in one node: yes leads to tensor parallel, no to combine axes, TP times PP times DP. If no layer is too large or slow, a diamond asks whether the layer stack is deep: yes leads to pipeline parallel, no to sharded data parallel (FSDP, ZeRO). Each outcome carries a small glyph of layer bars inside GPU frames: one full stack for a single device, three full copies for data parallel, two frames each holding one half of every layer for tensor parallel, four frames in which two GPUs split the halves of the upper layers and two split the halves of the lower layers for combine axes, two frames holding upper and lower layer groups for pipeline parallel, and three frames each holding a different one-third slice of every layer, the rest dashed, for sharded data parallel."}
 ![](images/svg/parallelism-flowchart.svg){width=100%}
 
 <!--
@@ -6165,24 +6377,41 @@ Amdahl's Law limits speedup when a fixed serial component remains exposed. Synch
 # │ Context: the "Optimizing MFU without considering scaling efficiency" pitfall.
 # │ Goal: Show the correct composition and the double-counting error with the
 # │       chapter's own numbers (2026-09-29: restores the worked example).
-# │ Show: 50 percent local MFU x 83% scaling efficiency ~ 41% fleet MFU; applying the
-# │       83% again to the measured 41% understates it as ~34%.
-# │ How: CommScalingMath local efficiency; HybridConfigFeasibility config B
-# │      overlapped scaling efficiency.
+# │ Show: 45 percent local MFU x 83% scaling efficiency ~ 37% fleet MFU; applying the
+# │       83% again to the measured 37% understates it as ~31%.
+# │ How: Scenarios.DenseLLMPretrainingStep, the shared reference job: its local
+# │      efficiency and its modeled scaling efficiency, which charges tensor-
+# │      parallel and data-parallel communication and the pipeline bubble
+# │      (2026-11-03: was configuration B, which charged only the inter-node
+# │      reduction; 06-E2).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_percent
 
 class MfuScalingPitfall:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    _layout = Scenarios.Gpt3TensorDataParallel1K  # configuration B, overlapped
-    local_mfu = _layout.local_efficiency  # single-node MFU before communication
-    eta = _layout.result.efficiency
+    _step = Scenarios.DenseLLMPretrainingStep  # Archetype A reference job: TP 8 x PP 8 x DP 16
+    local_mfu = _step.local_efficiency  # single-node MFU before communication
+    _r = _step.result
+    eta = _r.scaling_efficiency
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    fleet_mfu = _layout.result.fleet_mfu
-    double_counted = _layout.result.double_counted_mfu
+    fleet_mfu = local_mfu * eta
+    double_counted = fleet_mfu * eta
 
     # ┌── 3. GUARD ────────────────────────────────────────
+    check((_step.tensor_parallel, _step.pipeline_depth, _step.data_parallel) == (8, 8, 16), "Prose names the reference layout TP 8, PP 8, DP 16")
+    check(
+        abs(eta - (_r.node_profile.latency / _r.step_latency_total).to("dimensionless").magnitude) < 1e-9,
+        "Scaling efficiency must be local step time over the full modeled step (TP, DP, and bubble all charged)",
+    )
+    check(
+        _r.tp_communication_latency.to("s").magnitude > 0 and _r.pipeline_bubble_latency.to("s").magnitude > 0,
+        "The reference step must charge tensor-parallel time and the pipeline bubble",
+    )
+    check(round(local_mfu * 100) == 45, "Prose says 45 percent local MFU")
+    check(round(eta * 100) == 83, "Prose says 83 percent scaling efficiency")
+    check(round(fleet_mfu * 100) == 37, "Prose says about 37 percent fleet MFU")
+    check(round(double_counted * 100) == 31, "Prose says about 31 percent when eta is applied twice")
     check(double_counted < fleet_mfu < local_mfu, "Each multiplication by eta must lower the estimate")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
@@ -6190,9 +6419,12 @@ class MfuScalingPitfall:
     eta_str = fmt_percent(round(eta * 100) / 100, precision=0, commas=False, style='prose')
     fleet_mfu_str = fmt_percent(round(fleet_mfu * 100) / 100, precision=0, commas=False, style='prose')
     double_counted_str = fmt_percent(round(double_counted * 100) / 100, precision=0, commas=False, style='prose')
+    tp_str = fmt(_step.tensor_parallel, precision=0, commas=False)
+    pp_str = fmt(_step.pipeline_depth, precision=0, commas=False)
+    dp_str = fmt(_step.data_parallel, precision=0, commas=False)
 ```
 
-A single-node MFU measurement does not predict fleet throughput by itself. For a fixed workload and hardware peak convention, scaling efficiency compares measured distributed throughput with ideal replication of that single-node baseline. Multiplying the baseline MFU by this scaling efficiency gives distributed MFU; multiplying an already measured distributed MFU by the same scaling efficiency counts communication and synchronization losses twice. The chapter's own numbers make the difference concrete. A single node running at `{python} MfuScalingPitfall.local_mfu_str` MFU, scaled with the `{python} MfuScalingPitfall.eta_str` scaling efficiency of the overlapped TP-8 layout in @sec-distributed-training-systems-systems-hybrid-parallelism-12a0, delivers about `{python} MfuScalingPitfall.fleet_mfu_str` MFU across the fleet. A planner who measures that `{python} MfuScalingPitfall.fleet_mfu_str` on the full cluster and then applies the `{python} MfuScalingPitfall.eta_str` again would budget for about `{python} MfuScalingPitfall.double_counted_str` and buy capacity the job does not need. Capacity planning must state the device count and measurement window for each metric. Checkpointing, recovery, and replay require additional accounting only when those losses fall outside that window. Useful goodput must count retained model progress rather than repeated work, under the accounting boundaries of @sec-performance-engineering-goodput-boundaries.
+A single-node MFU measurement does not predict fleet throughput by itself. For a fixed workload and hardware peak convention, scaling efficiency compares measured distributed throughput with ideal replication of that single-node baseline. Multiplying the baseline MFU by this scaling efficiency gives distributed MFU; multiplying an already measured distributed MFU by the same scaling efficiency counts communication and synchronization losses twice. The `{python} FrontierTrainingContext.frontier_params_b_str` reference job makes the difference concrete. A single node running at `{python} MfuScalingPitfall.local_mfu_str` MFU, scaled with the job's `{python} MfuScalingPitfall.eta_str` modeled scaling efficiency on the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU cluster (TP-`{python} MfuScalingPitfall.tp_str`, PP-`{python} MfuScalingPitfall.pp_str`, DP-`{python} MfuScalingPitfall.dp_str`, configuration D of @sec-distributed-training-systems-systems-hybrid-parallelism-12a0, with tensor-parallel and data-parallel communication and the pipeline bubble all charged), delivers about `{python} MfuScalingPitfall.fleet_mfu_str` MFU across the fleet. A planner who measures that `{python} MfuScalingPitfall.fleet_mfu_str` on the full cluster and then applies the `{python} MfuScalingPitfall.eta_str` again would budget for about `{python} MfuScalingPitfall.double_counted_str` and buy capacity the job does not need. Capacity planning must state the device count and measurement window for each metric. Checkpointing, recovery, and replay require additional accounting only when those losses fall outside that window. Useful goodput must count retained model progress rather than repeated work, under the accounting boundaries of @sec-performance-engineering-goodput-boundaries.
 
 :::
 
