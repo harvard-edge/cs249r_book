@@ -559,6 +559,39 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         validate_term_provenance_sidecar(tmp_path)
 
 
+def test_float_overflow_1e999_and_non_finite_scalars_fail_closed(tmp_path: Path):
+    """YAML and JSON loaders must reject non-finite scalars (.nan, .inf, 1e999 float overflow)."""
+    from core.taxonomy_schema import json_loads_strict
+
+    with pytest.raises(ConceptGraphError, match="non-finite"):
+        json_loads_strict('{"alpha_subject": 1e999}', context="overflow_test")
+    with pytest.raises(ConceptGraphError, match="non-finite"):
+        json_loads_strict('{"alpha_subject": -1e999}', context="neg_overflow_test")
+
+    overflow_yml = tmp_path / "overflow.yml"
+    overflow_yml.write_text("id: mlsys-taxonomy\nscore: 1.0e+999\n")
+    with pytest.raises(ConceptGraphError, match="non-finite"):
+        load_taxonomy_yaml(overflow_yml)
 
 
+def test_model_status_couples_to_draft_vs_normative_release():
+    """LinkML ModelStatusEnum and replay_patch_on_taxonomy_doc couple status to -draft suffix."""
+    from core.taxonomy_schema import replay_patch_on_taxonomy_doc
+
+    pv = set(get_enum_values("ModelStatusEnum", REPO_ROOT))
+    assert pv == {"editorial-draft", "normative-release"}
+
+    doc = load_taxonomy_yaml(REPO_ROOT / "taxonomy" / "ml-systems-taxonomy.yml")
+    assert doc["version"].endswith("-draft")
+    assert doc["status"] == "editorial-draft"
+
+    replay_patch_on_taxonomy_doc(doc, {"version": "1.0"}, mode="full-3family-reconcile")
+    assert doc["version"] == "1.0"
+    assert doc["status"] == "normative-release"
+    assert doc["skos_hierarchy"]["status"] == "normative-release"
+
+    replay_patch_on_taxonomy_doc(doc, {"version": "1.1-draft"}, mode="full-3family-reconcile")
+    assert doc["version"] == "1.1-draft"
+    assert doc["status"] == "editorial-draft"
+    assert doc["skos_hierarchy"]["status"] == "editorial-draft"
 

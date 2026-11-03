@@ -128,7 +128,12 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
     citation = (f"{AUTHOR}. {NAME}, version {version}. Machine Learning Systems, {YEAR}. {PAGE_URL}")
     src_yaml_path = root / "taxonomy/ml-systems-taxonomy.yml"
     src_tax_sha = hashlib.sha256(src_yaml_path.read_bytes()).hexdigest() if src_yaml_path.is_file() else ""
-    base_note = "Editorial draft for expert review; not a claim of completeness or consensus."
+    is_draft = framework.get("status") == "editorial-draft" or str(version).endswith("-draft")
+    base_note = (
+        "Editorial draft for expert review; not a claim of completeness or consensus."
+        if is_draft
+        else "Externally governed normative release of the ML Systems Taxonomy."
+    )
     if src_tax_sha and src_tax_sha != GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 and (root / "taxonomy/README.md").is_file():
         base_note = f"{base_note} Source YAML SHA-256: {src_tax_sha}."
     meta = {"name": NAME, "version": version, "status": framework["status"], "url": PAGE_URL, "license": LICENSE,
@@ -264,9 +269,10 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
                      + "".join(f'<data key="{k}">{xml_escape(str(v))}</data>' for k, v in data.items()) + "</edge>")
     graph += ["  </graph>", "</graphml>"]
 
+    bib_status_note = "Editorial draft" if is_draft else "Normative release"
     bib = (f"@misc{{mlsys_taxonomy_{version.replace('.', '_').replace('-', '_')},\n"
            f"  author = {{{AUTHOR}}},\n  title = {{{NAME}}},\n  version = {{{version}}},\n  year = {{{YEAR}}},\n"
-           f"  howpublished = {{\\url{{{PAGE_URL}}}}},\n  note = {{Editorial draft. Licensed {LICENSE['name']}}}\n}}\n")
+           f"  howpublished = {{\\url{{{PAGE_URL}}}}},\n  note = {{{bib_status_note}. Licensed {LICENSE['name']}}}\n}}\n")
 
     result = {out / "mlsys-taxonomy.json": (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode(),
               out / "mlsys-taxonomy-subjects.csv": subjects.getvalue().encode(),

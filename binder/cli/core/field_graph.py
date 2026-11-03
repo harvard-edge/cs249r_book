@@ -24,6 +24,7 @@ from copy import deepcopy
 import functools
 import html
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -32,7 +33,7 @@ from .concept_graph import SITE_DIR, ConceptGraphError, digest, svg_map
 
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
-    """YAML SafeLoader that rejects duplicate keys in any mapping."""
+    """YAML SafeLoader that rejects duplicate keys and non-finite floats in any mapping or scalar."""
 
 
 def _construct_unique_mapping(loader: _UniqueKeySafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
@@ -46,9 +47,20 @@ def _construct_unique_mapping(loader: _UniqueKeySafeLoader, node: yaml.MappingNo
     return mapping
 
 
+def _construct_finite_float(loader: _UniqueKeySafeLoader, node: yaml.ScalarNode) -> float:
+    val = yaml.SafeLoader.construct_yaml_float(loader, node)
+    if not isinstance(val, (int, float)) or not math.isfinite(float(val)):
+        raise ConceptGraphError(f"non-finite YAML float {node.value!r} is forbidden")
+    return float(val)
+
+
 _UniqueKeySafeLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
     _construct_unique_mapping,
+)
+_UniqueKeySafeLoader.add_constructor(
+    "tag:yaml.org,2002:float",
+    _construct_finite_float,
 )
 
 
@@ -261,8 +273,9 @@ def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, di
         validate_schema_sync,
     )
     _text(model, ("id", "title", "scope", "status"), "metadata", set(get_class_slots("FieldModel", root)))
-    if model["status"] != "editorial-draft":
-        raise ConceptGraphError("field model: only editorial-draft is supported before review provenance exists")
+    allowed_statuses = set(get_enum_values("ModelStatusEnum", root))
+    if model["status"] not in allowed_statuses:
+        raise ConceptGraphError(f"field model: unsupported status {model['status']}")
     sources = _index(model.get("sources"), "source")
     source_slots = set(get_class_slots("FieldSource", root))
     for ref in sources.values():

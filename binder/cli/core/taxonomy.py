@@ -12,7 +12,7 @@ import re
 from urllib.parse import quote
 
 from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
-from .taxonomy_schema import validate_https_url
+from .taxonomy_schema import get_enum_values, validate_https_url
 
 
 PREFIX = PAGE_URL
@@ -61,8 +61,9 @@ def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict 
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")
-    if model["status"] != "editorial-draft":
-        _fail("only editorial-draft is supported before review provenance exists")
+    allowed_statuses = set(get_enum_values("ModelStatusEnum", root))
+    if model["status"] not in allowed_statuses:
+        _fail(f"unsupported status {model['status']}")
     sources = _records(model, "sources")
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"])

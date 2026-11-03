@@ -114,6 +114,43 @@ jobs:
 
       - name: 🧭 Validate LinkML schema, graph, coverage, and agreement
         run: |
+          git fetch --no-tags --depth=1 origin dev:refs/remotes/origin/dev || true
+          python3 - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+          bp = Path("taxonomy/method-study/burned-clusters.json")
+          res = subprocess.run(
+              ["git", "show", "origin/dev:taxonomy/method-study/burned-clusters.json"],
+              capture_output=True, text=True, check=False,
+          )
+          if bp.is_file() and res.returncode == 0 and res.stdout.strip():
+              prev = json.loads(res.stdout)
+              curr = json.loads(bp.read_text(encoding="utf-8"))
+              for list_k in ("burned_or_exposed_cluster_ids", "internal_clusters", "editor_affiliated_clusters"):
+                  missing = sorted(set(prev.get(list_k) or []) - set(curr.get(list_k) or []))
+                  if missing:
+                      sys.exit(f"burned-clusters.json append-only violation vs origin/dev on {list_k}: missing {missing}")
+              for map_k in ("cluster_merges", "historical_phase3_units"):
+                  pm, cm = prev.get(map_k) or {}, curr.get(map_k) or {}
+                  for k, v in pm.items():
+                      if k not in cm or cm[k] != v:
+                          sys.exit(f"burned-clusters.json append-only violation vs origin/dev on {map_k}[{k!r}]")
+              pem, cem = prev.get("exposed_cluster_metadata") or {}, curr.get("exposed_cluster_metadata") or {}
+              for k, pv in pem.items():
+                  if k not in cem:
+                      sys.exit(f"burned-clusters.json removed exposed_cluster_metadata[{k!r}] vs origin/dev")
+                  cv = cem[k]
+                  for sub_k in ("institutional_author", "editor_affiliated", "historical_multi_work_cluster"):
+                      if pv.get(sub_k) != cv.get(sub_k):
+                          sys.exit(f"burned-clusters.json mutated {sub_k} on {k!r} vs origin/dev")
+                  for set_k in ("authors", "institutional_organizations", "work_ids"):
+                      if not set(pv.get(set_k) or []).issubset(set(cv.get(set_k) or [])):
+                          sys.exit(f"burned-clusters.json shrank {set_k} on {k!r} vs origin/dev")
+              for seq_k in ("evaluation_attempts", "stage2_human_attempts"):
+                  ps, cs = prev.get(seq_k) or [], curr.get(seq_k) or []
+                  if len(cs) < len(ps) or cs[:len(ps)] != ps:
+                      sys.exit(f"burned-clusters.json rewrote or truncated {seq_k} vs origin/dev")
+          PY
           ./binder/binder concepts check
           ./binder/binder concepts coverage --check
           ./binder/binder concepts agreement --check
@@ -126,6 +163,7 @@ jobs:
             binder/tests/test_framework.py \
             binder/tests/test_field_concept_graph.py \
             binder/tests/test_taxonomy.py \
+            binder/tests/test_taxonomy_skos.py \
             binder/tests/test_concept_coverage.py \
             binder/tests/test_taxonomy_coverage.py \
             binder/tests/test_taxonomy_agreement.py -q

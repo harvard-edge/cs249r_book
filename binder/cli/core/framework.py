@@ -148,8 +148,11 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
     _text(model, ("id", "title", "version", "status", "scope"), "metadata",
           set(get_class_slots("FrameworkModel", root)))
     supported_versions = get_enum_values("FrameworkVersionEnum", root)
-    if model["status"] != "editorial-draft" or model["version"] not in supported_versions:
-        _fail(f"only versions {', '.join(supported_versions)} with editorial-draft status are supported")
+    expected_status = "editorial-draft" if str(model["version"]).endswith("-draft") else "normative-release"
+    if model["status"] != expected_status or model["version"] not in supported_versions:
+        _fail(
+            f"version '{model['version']}' requires status '{expected_status}' within supported versions {', '.join(supported_versions)}"
+        )
     sources = _records(model.get("sources"), "source")
     source_slots = set(get_class_slots("FrameworkSource", root))
     for source in sources:
