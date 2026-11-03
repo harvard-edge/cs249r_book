@@ -147,8 +147,9 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata",
           set(get_class_slots("FrameworkModel", root)))
-    if model["status"] != "editorial-draft" or model["version"] not in SUPPORTED_VERSIONS:
-        _fail(f"only versions {', '.join(SUPPORTED_VERSIONS)} with editorial-draft status are supported")
+    supported_versions = get_enum_values("FrameworkVersionEnum", root)
+    if model["status"] != "editorial-draft" or model["version"] not in supported_versions:
+        _fail(f"only versions {', '.join(supported_versions)} with editorial-draft status are supported")
     sources = _records(model.get("sources"), "source")
     source_slots = set(get_class_slots("FrameworkSource", root))
     for source in sources:

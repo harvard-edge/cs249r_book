@@ -51,9 +51,14 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
     subjects = [(a[n]["subject"], b[n]["subject"]) for n in items]
     areas = [(rows[x][1]["code"], rows[y][1]["code"]) for x, y in subjects if x in rows and y in rows]
     both = [n for n in items if a[n].get("concepts") and b[n].get("concepts")]
+    both_empty = [n for n in items if not a[n].get("concepts") and not b[n].get("concepts")]
+    single_empty = [n for n in items if bool(a[n].get("concepts")) != bool(b[n].get("concepts"))]
     jaccard = [len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / len(set(a[n]["concepts"]) | set(b[n]["concepts"])) for n in both]
     # Rolling (1981): 2c / (A + B). Hooper (1965) is c / (A + B - c), which is the Jaccard index above.
     rolling = [2 * len(set(a[n]["concepts"]) & set(b[n]["concepts"])) / (len(set(a[n]["concepts"])) + len(set(b[n]["concepts"]))) for n in both]
+    # All-item set overlap convention: J(empty, empty) = 1.0, J(non-empty, empty) = 0.0.
+    all_hooper_sum = sum(jaccard) + float(len(both_empty))
+    all_rolling_sum = sum(rolling) + float(len(both_empty))
 
     def compatible(n):
         x, y = a[n], b[n]
@@ -61,15 +66,27 @@ def score_run(a: dict, b: dict, rows: dict, home: dict) -> dict:
         return (x["subject"] == y["subject"] or bool(set(cx) & set(cy))
                 or any(home.get(c) == y["subject"] for c in cx) or any(home.get(c) == x["subject"] for c in cy))
 
+    cond_hooper_pct = round(100 * sum(jaccard) / len(jaccard), 1) if jaccard else 0.0
+    cond_rolling_pct = round(100 * sum(rolling) / len(rolling), 1) if rolling else 0.0
+    all_hooper_pct = round(100 * all_hooper_sum / len(items), 1) if items else 0.0
+    all_rolling_pct = round(100 * all_rolling_sum / len(items), 1) if items else 0.0
+
     return {"items": len(items),
+            "both_non_empty_items": len(both),
+            "single_empty_items": len(single_empty),
+            "both_empty_items": len(both_empty),
             "subject_pct": pct(sum(x == y for x, y in subjects), len(subjects)), "subject_kappa": _kappa(subjects),
             "area_pct": pct(sum(x == y for x, y in areas), len(areas)), "area_kappa": _kappa(areas),
             "primary_concept_pct": pct(sum(a[n]["concepts"][0] == b[n]["concepts"][0] for n in both), len(both)),
             "any_shared_concept_pct": pct(sum(j > 0 for j in jaccard), len(both)),
             "same_concept_set_pct": pct(sum(j == 1 for j in jaccard), len(both)),
             "mean_jaccard": round(sum(jaccard) / len(jaccard), 3) if jaccard else 0.0,
-            "hooper_consistency_pct": round(100 * sum(jaccard) / len(jaccard), 1) if jaccard else 0.0,
-            "rolling_consistency_pct": round(100 * sum(rolling) / len(rolling), 1) if rolling else 0.0,
+            "hooper_consistency_pct": cond_hooper_pct,
+            "hooper_conditional_pct": cond_hooper_pct,
+            "hooper_all_items_pct": all_hooper_pct,
+            "rolling_consistency_pct": cond_rolling_pct,
+            "rolling_conditional_pct": cond_rolling_pct,
+            "rolling_all_items_pct": all_rolling_pct,
             "compatible_pct": pct(sum(compatible(n) for n in items), len(items))}
 
 

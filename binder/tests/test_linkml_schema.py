@@ -482,9 +482,10 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         validate_term_provenance_sidecar(tmp_path)
 
     # 3c. Even recomputing sidecar_content_sha256 without updating applied_campaigns post_apply_taxonomy_sha256 fails closed.
+    tampered["non_guides_taxonomy_sha256"] = prov["non_guides_taxonomy_sha256"]
     body_no_self = {k: v for k, v in tampered.items() if k != "sidecar_content_sha256"}
     tampered["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body_no_self, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(body_no_self, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     (tdir / "term-provenance.yml").write_text(yaml.safe_dump(tampered, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="post_apply_taxonomy_sha256 disagrees"):
@@ -496,10 +497,25 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
     empty_concepts["concepts"] = {}
     body2 = {k: v for k, v in empty_concepts.items() if k != "sidecar_content_sha256"}
     empty_concepts["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(body2, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     (tdir / "term-provenance.yml").write_text(yaml.safe_dump(empty_concepts, sort_keys=False))
-    with pytest.raises(ConceptGraphError, match="missing provenance record"):
+    with pytest.raises(ConceptGraphError, match="(missing provenance record|missing from term-provenance)"):
+        validate_term_provenance_sidecar(tmp_path)
+
+    # 3e. Unpinned grandfathered_draft_alias_exceptions target (e.g. mlsys.stpa) fails closed.
+    unpinned_gf = deepcopy(prov)
+    unpinned_gf.setdefault("grandfathered_draft_alias_exceptions", {})["mlsys.stpa"] = {
+        "aliases": ["UCA"],
+        "status": "grandfathered-0.4-draft-queued-bucket-b",
+        "reason": "Unpinned grandfathered target should be rejected.",
+    }
+    body3 = {k: v for k, v in unpinned_gf.items() if k != "sidecar_content_sha256"}
+    unpinned_gf["sidecar_content_sha256"] = hashlib.sha256(
+        json.dumps(body3, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(unpinned_gf, sort_keys=False))
+    with pytest.raises(ConceptGraphError, match="unpinned or inactive grandfathered_draft_alias_exceptions"):
         validate_term_provenance_sidecar(tmp_path)
 
 

@@ -600,11 +600,9 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
         name: set((edef.get("permissible_values") or {}).keys())
         for name, edef in raw_enums.items()
     }
-    from .framework import SUPPORTED_VERSIONS
     from .taxonomy_coverage import STATUSES
 
     expected = {
-        "FrameworkVersionEnum": set(SUPPORTED_VERSIONS),
         "ChecklistStatusEnum": set(STATUSES),
     }
     for enum_name, exp_values in expected.items():
@@ -613,10 +611,17 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
             raise ConceptGraphError(
                 f"schema sync: LinkML {enum_name} {sorted(actual)} disagrees with compiler {sorted(exp_values)}"
             )
+    fw_versions = [
+        str(k) for k in ((raw_enums.get("FrameworkVersionEnum") or {}).get("permissible_values") or {}).keys()
+    ]
+    if not fw_versions or any(
+        not re.fullmatch(r"\d+\.\d+(?:\.\d+)?(?:-[a-z0-9][a-z0-9.-]*)?", v) for v in fw_versions
+    ):
+        raise ConceptGraphError(f"schema sync: invalid or empty LinkML FrameworkVersionEnum {fw_versions}")
     schema_ver = str(raw.get("version", ""))
-    if SUPPORTED_VERSIONS and schema_ver != SUPPORTED_VERSIONS[-1]:
+    if schema_ver != fw_versions[-1]:
         raise ConceptGraphError(
-            f"schema sync: LinkML top-level version '{schema_ver}' disagrees with latest FrameworkVersionEnum '{SUPPORTED_VERSIONS[-1]}'"
+            f"schema sync: LinkML top-level version '{schema_ver}' disagrees with latest FrameworkVersionEnum '{fw_versions[-1]}'"
         )
 
     rel_pvs = (raw_enums.get("RelationIdEnum") or {}).get("permissible_values") or {}
@@ -681,10 +686,33 @@ def validate_schema_sync(root: Path, field_model: dict | None = None) -> None:
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _PRE_SIDECAR_VERSIONS = {"0.1-draft", "0.2-draft", "0.3-draft", "0.4-draft"}
 _ALLOWED_PROV_ALIAS_TYPES = {"synonym", "quasi-synonym", "acronym", "upward-posting"}
+GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 = "a3eefe42c766e031c43430aba061a56605c94117decf459b83962213f01de39e"
+GENESIS_PRE_SIDECAR_NON_GUIDES_SHA256 = "1fd44b93987fea8ec835414c04cb8417cf127ae5d0ff4fbfb7fb9ade6ba934cc"
+PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS: dict[str, tuple[str, ...]] = {
+    "mlsys.safety-case": ("assurance case",),
+    "mlsys.tree-ensemble": ("XGBoost",),
+}
+_REQUIRED_WITNESS_KEYS = ("compared_concept", "criterion_a", "criterion_b", "criterion_c", "scenario_a", "scenario_b")
 
 
 def _norm_prov_tokens(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def compute_non_guides_taxonomy_sha256(raw_tax: dict) -> str:
+    """Compute canonical SHA-256 over all top-level ml-systems-taxonomy.yml sections except guides."""
+    non_guides = {k: v for k, v in raw_tax.items() if k != "guides"}
+    return hashlib.sha256(
+        json.dumps(non_guides, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def compute_campaign_entry_sha256(entry: dict) -> str:
+    """Compute canonical SHA-256 over an applied_campaigns entry excluding campaign_entry_sha256."""
+    body = {k: v for k, v in entry.items() if k != "campaign_entry_sha256"}
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def validate_term_provenance_sidecar(root: Path) -> None:
@@ -715,12 +743,17 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             "schema sync: taxonomy/term-provenance.yml taxonomy_sha256 disagrees with taxonomy/ml-systems-taxonomy.yml "
             "(re-run reconcile.py and apply.py)"
         )
+    expected_non_guides_sha = compute_non_guides_taxonomy_sha256(raw_tax)
+    if prov.get("non_guides_taxonomy_sha256") != expected_non_guides_sha:
+        raise ConceptGraphError(
+            "schema sync: taxonomy/term-provenance.yml non_guides_taxonomy_sha256 disagrees with taxonomy/ml-systems-taxonomy.yml"
+        )
     if prov.get("taxonomy_version") != str(raw_tax.get("version")):
         raise ConceptGraphError("schema sync: taxonomy/term-provenance.yml taxonomy_version disagrees with ml-systems-taxonomy.yml")
 
     body_without_self = {k: v for k, v in prov.items() if k != "sidecar_content_sha256"}
     expected_sidecar_sha = hashlib.sha256(
-        json.dumps(body_without_self, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(body_without_self, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     if prov.get("sidecar_content_sha256") != expected_sidecar_sha:
         raise ConceptGraphError(
@@ -734,6 +767,11 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     governed_added_cids: set[str] = set()
     governed_touched_cids: set[str] = set()
     governed_retired_cids: set[str] = set()
+    governed_def_updated_cids: set[str] = set()
+    net_aliases_added: dict[str, set[str]] = {}
+    all_aliases_removed: dict[str, set[str]] = {}
+    restored_aliases_by_cid: dict[str, set[str]] = {}
+    net_sec_added: dict[str, set[str]] = {}
     last_full_rec: dict | None = None
 
     for idx, entry in enumerate(campaigns):
@@ -742,22 +780,58 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         mode = entry.get("mode")
         base_sha = str(entry.get("baseline_taxonomy_sha256") or "")
         post_sha = str(entry.get("post_apply_taxonomy_sha256") or "")
-        if not _HEX64_RE.match(base_sha) or not _HEX64_RE.match(post_sha):
-            raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing valid baseline/post taxonomy SHA-256")
+        base_ng_sha = str(entry.get("baseline_non_guides_taxonomy_sha256") or "")
+        post_ng_sha = str(entry.get("post_non_guides_taxonomy_sha256") or "")
+        if (
+            not _HEX64_RE.match(base_sha)
+            or not _HEX64_RE.match(post_sha)
+            or not _HEX64_RE.match(base_ng_sha)
+            or not _HEX64_RE.match(post_ng_sha)
+        ):
+            raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing valid baseline/post taxonomy or non-guides SHA-256")
+
+        entry_sha = str(entry.get("campaign_entry_sha256") or "")
+        if not _HEX64_RE.match(entry_sha) or entry_sha != compute_campaign_entry_sha256(entry):
+            raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] campaign_entry_sha256 mismatch")
+
         base_prov_sha = entry.get("baseline_term_provenance_sha256")
+        prev_entry_sha = entry.get("previous_campaign_entry_sha256")
         if idx == 0:
-            if base_prov_sha is not None:
+            if mode != "full-3family-reconcile" or entry.get("bootstrap_provenance") is not True:
+                raise ConceptGraphError("schema sync: applied_campaigns[0] must be a bootstrap full-3family-reconcile entry")
+            if base_sha != GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 or base_ng_sha != GENESIS_PRE_SIDECAR_NON_GUIDES_SHA256:
+                raise ConceptGraphError(
+                    "schema sync: applied_campaigns[0] baseline_taxonomy_sha256 does not match pinned genesis 0.4-draft taxonomy"
+                )
+            if base_prov_sha is not None or prev_entry_sha is not None:
                 raise ConceptGraphError("schema sync: bootstrap applied_campaigns[0] must have null baseline_term_provenance_sha256")
         else:
+            if bool(entry.get("bootstrap_provenance")):
+                raise ConceptGraphError(f"schema sync: bootstrap_provenance forbidden after genesis at applied_campaigns[{idx}]")
             if base_sha != campaigns[idx - 1].get("post_apply_taxonomy_sha256"):
                 raise ConceptGraphError(f"schema sync: broken taxonomy SHA-256 chain at applied_campaigns[{idx}]")
+            if base_ng_sha != campaigns[idx - 1].get("post_non_guides_taxonomy_sha256"):
+                raise ConceptGraphError(f"schema sync: broken non_guides_taxonomy_sha256 chain at applied_campaigns[{idx}]")
             if not isinstance(base_prov_sha, str) or not _HEX64_RE.match(base_prov_sha):
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] requires valid baseline_term_provenance_sha256")
+            if prev_entry_sha != campaigns[idx - 1].get("campaign_entry_sha256"):
+                raise ConceptGraphError(f"schema sync: broken previous_campaign_entry_sha256 chain at applied_campaigns[{idx}]")
 
         if mode == "full-3family-reconcile":
             if entry.get("receipt_schema_version") != 4:
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] must have receipt_schema_version=4")
-            for hkey in ("reconcile_script_sha256", "baseline_linkml_schema_sha256", "patch_yaml_sha256", "final_yaml_sha256"):
+            for hkey in (
+                "reconcile_script_sha256",
+                "apply_script_sha256",
+                "taxonomy_schema_script_sha256",
+                "baseline_linkml_schema_sha256",
+                "burned_clusters_sha256",
+                "sampling_manifest_sha256",
+                "workspace_isolation_r2_sha256",
+                "run_reviews_r2_sha256",
+                "patch_yaml_sha256",
+                "final_yaml_sha256",
+            ):
                 if not isinstance(entry.get(hkey), str) or not _HEX64_RE.match(str(entry[hkey])):
                     raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing valid {hkey}")
             r2_shas = entry.get("r2_reviews_sha256")
@@ -770,24 +844,102 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             ops = entry.get("operations_applied")
             if not isinstance(ops, list) or not ops or not all(isinstance(x, str) and x for x in ops):
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] must list non-empty operations_applied")
+            details = entry.get("operation_details")
+            if not isinstance(details, dict):
+                raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing structured operation_details")
+
+            c_added = set(details.get("concepts_added") or [])
+            c_retired = set(details.get("concepts_retired") or [])
+            d_upd = set(details.get("definitions_updated") or [])
+            a_added_map = details.get("aliases_added") or {}
+            a_rem_map = details.get("aliases_removed") or {}
+            a_rest_map = details.get("aliases_restored") or {}
+            other_c_upd = set(details.get("other_concept_updates") or [])
+            s_add_map = details.get("secondary_concepts_added") or {}
+            s_rem_map = details.get("secondary_concepts_removed") or {}
+            other_s_upd = set(details.get("other_subject_updates") or [])
+
             for op in ops:
                 if op.startswith("add:"):
                     cid = op.split(":", 1)[1]
+                    if cid not in c_added:
+                        raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] operation {op} missing from operation_details.concepts_added")
                     governed_added_cids.add(cid)
                     governed_touched_cids.add(cid)
                 elif op.startswith("update:"):
-                    governed_touched_cids.add(op.split(":", 1)[1])
+                    cid = op.split(":", 1)[1]
+                    if (
+                        cid not in d_upd
+                        and cid not in a_added_map
+                        and cid not in a_rem_map
+                        and cid not in other_c_upd
+                    ):
+                        raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] operation {op} missing from operation_details")
+                    if cid in d_upd or cid in a_added_map or cid in a_rem_map:
+                        governed_touched_cids.add(cid)
                 elif op.startswith("retire:"):
-                    governed_retired_cids.add(op.split(":", 1)[1])
+                    rcid = op.split(":", 1)[1]
+                    if rcid not in c_retired:
+                        raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] operation {op} missing from operation_details.concepts_retired")
+                    governed_retired_cids.add(rcid)
+                    governed_added_cids.discard(rcid)
+                    governed_def_updated_cids.discard(rcid)
+                    net_aliases_added.pop(rcid, None)
+                elif op.startswith("row:"):
+                    rid = op.split(":", 1)[1]
+                    if rid not in s_add_map and rid not in s_rem_map and rid not in other_s_upd:
+                        raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] operation {op} missing from operation_details")
+
+            governed_def_updated_cids.update(d_upd)
+            for cid, alist in a_added_map.items():
+                if not isinstance(alist, list) or not alist:
+                    raise ConceptGraphError(f"schema sync: invalid aliases_added on {cid} in applied_campaigns[{idx}]")
+                net_aliases_added.setdefault(cid, set()).update(alist)
+            for cid, rlist in a_rest_map.items():
+                if isinstance(rlist, list):
+                    restored_aliases_by_cid.setdefault(cid, set()).update(rlist)
+            for cid, rlist in a_rem_map.items():
+                if not isinstance(rlist, list) or not rlist:
+                    raise ConceptGraphError(f"schema sync: invalid aliases_removed on {cid} in applied_campaigns[{idx}]")
+                all_aliases_removed.setdefault(cid, set()).update(rlist)
+                if cid in net_aliases_added:
+                    net_aliases_added[cid].difference_update(rlist)
+                if cid in restored_aliases_by_cid:
+                    restored_aliases_by_cid[cid].difference_update(rlist)
+            for rid, slist in s_add_map.items():
+                if not isinstance(slist, list) or not slist:
+                    raise ConceptGraphError(f"schema sync: invalid secondary_concepts_added on {rid} in applied_campaigns[{idx}]")
+                net_sec_added.setdefault(rid, set()).update(slist)
+            for rid, slist in s_rem_map.items():
+                if isinstance(slist, list) and rid in net_sec_added:
+                    net_sec_added[rid].difference_update(slist)
+
             last_full_rec = entry
         elif mode == "guides-apply":
-            if not isinstance(entry.get("guides_final_yaml_sha256"), str) or not _HEX64_RE.match(str(entry["guides_final_yaml_sha256"])):
-                raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply missing guides_final_yaml_sha256")
+            if post_ng_sha != base_ng_sha:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] guides-apply modified non-guides taxonomy content"
+                )
+            for hkey in ("guides_final_yaml_sha256", "guides_reconcile_receipt_sha256", "guides_apply_script_sha256"):
+                if not isinstance(entry.get(hkey), str) or not _HEX64_RE.match(str(entry[hkey])):
+                    raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply missing valid {hkey}")
+            g1_shas = entry.get("g1_reviews_sha256")
+            if (
+                not isinstance(g1_shas, dict)
+                or set(g1_shas.keys()) != {"claude-g1.yaml", "codex-g1.yaml", "gemini-g1.yaml"}
+                or any(not isinstance(v, str) or not _HEX64_RE.match(v) for v in g1_shas.values())
+            ):
+                raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply must bind all 3 *-g1.yaml hashes")
+            gops = entry.get("guides_operations_applied")
+            if not isinstance(gops, list) or not gops or not all(isinstance(x, str) and x for x in gops):
+                raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply must list non-empty guides_operations_applied")
         else:
             raise ConceptGraphError(f"schema sync: unsupported applied_campaigns mode {mode!r}")
 
     if campaigns[-1].get("post_apply_taxonomy_sha256") != expected_tax_sha:
         raise ConceptGraphError("schema sync: final applied_campaigns post_apply_taxonomy_sha256 disagrees with taxonomy_sha256")
+    if campaigns[-1].get("post_non_guides_taxonomy_sha256") != expected_non_guides_sha:
+        raise ConceptGraphError("schema sync: final applied_campaigns post_non_guides_taxonomy_sha256 disagrees with non_guides_taxonomy_sha256")
     if last_full_rec is None or prov.get("last_reconcile_receipt") != last_full_rec:
         raise ConceptGraphError("schema sync: last_reconcile_receipt disagrees with latest full-3family-reconcile campaign entry")
 
@@ -807,6 +959,15 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     for rcid in sorted(governed_retired_cids):
         if rcid not in retired_by_id or rcid not in prov_retired:
             raise ConceptGraphError(f"schema sync: retired concept {rcid} missing from retired_concepts in term-provenance.yml")
+        rprov = prov_retired[rcid]
+        if (
+            not isinstance(rprov, dict)
+            or len(str(rprov.get("former_label") or "").strip()) < 2
+            or not isinstance(rprov.get("former_aliases"), list)
+            or rprov.get("replaced_by") not in concepts_by_id
+            or len(str(rprov.get("reason") or "").strip()) < 10
+        ):
+            raise ConceptGraphError(f"schema sync: retired_concepts[{rcid}] missing former_label/former_aliases/replaced_by/reason")
 
     for cid, cnode in concepts_by_id.items():
         if str(cnode.get("added_in") or "") not in _PRE_SIDECAR_VERSIONS or cid in governed_added_cids:
@@ -815,8 +976,72 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 raise ConceptGraphError(f"schema sync: post-bootstrap concept {cid} missing term-provenance entry")
             ws = cprov.get("warrant_sources")
             wj = cprov.get("witness_justification")
-            if not isinstance(ws, list) or len(ws) < 2 or not isinstance(wj, dict) or len(wj) < 6:
-                raise ConceptGraphError(f"schema sync: post-bootstrap concept {cid} missing warrant_sources or witness_justification")
+            if not isinstance(ws, list) or len(ws) < 2 or not isinstance(wj, dict) or set(wj.keys()) != set(_REQUIRED_WITNESS_KEYS):
+                raise ConceptGraphError(f"schema sync: post-bootstrap concept {cid} missing structured warrant_sources or 6-key witness_justification")
+            has_ext = False
+            has_prose = False
+            for src in ws:
+                if (
+                    not isinstance(src, dict)
+                    or not str(src.get("unit_id") or "").strip()
+                    or src.get("stratum") not in ("S1", "S2", "S3", "S4", "S5")
+                    or not str(src.get("provenance_family_id") or "").strip()
+                    or src.get("source_type") not in ("prose", "heading")
+                    or src.get("origin") not in ("external", "internal")
+                    or not str(src.get("locator") or "").strip()
+                ):
+                    raise ConceptGraphError(f"schema sync: malformed warrant_sources item on {cid}")
+                if src.get("origin") == "external":
+                    has_ext = True
+                if src.get("source_type") == "prose":
+                    has_prose = True
+            if not has_ext or not has_prose:
+                raise ConceptGraphError(f"schema sync: post-bootstrap concept {cid} warrant_sources require >=1 external and >=1 prose source")
+            if (
+                str(wj.get("compared_concept") or "") not in concepts_by_id
+                or str(wj.get("scenario_a") or "").strip() == str(wj.get("scenario_b") or "").strip()
+                or any(len(str(wj.get(k) or "").strip()) < 15 for k in ("criterion_a", "criterion_b", "criterion_c", "scenario_a", "scenario_b"))
+            ):
+                raise ConceptGraphError(f"schema sync: post-bootstrap concept {cid} witness_justification fails minimum completeness checks")
+
+    for cid in sorted(governed_def_updated_cids):
+        if cid in concepts_by_id:
+            cprov = prov_concepts.get(cid) or {}
+            if (
+                len(str(cprov.get("edge_impact_note") or "").strip()) < 15
+                or cprov.get("definition_change_kind") != "editorial-clarification"
+            ):
+                raise ConceptGraphError(f"schema sync: updated definition on {cid} missing edge_impact_note or editorial-clarification in term-provenance.yml")
+
+    for cid, expected_added in net_aliases_added.items():
+        if cid in concepts_by_id and expected_added:
+            cprov = prov_concepts.get(cid) or {}
+            ameta_map = cprov.get("alias_metadata") or {}
+            active_set = set(concepts_by_id[cid].get("aliases") or [])
+            for ak in sorted(expected_added):
+                if ak not in active_set or ak not in ameta_map:
+                    raise ConceptGraphError(f"schema sync: added alias {ak!r} on {cid} missing from active aliases or term-provenance alias_metadata")
+
+    for cid, expected_removed in all_aliases_removed.items():
+        if cid in concepts_by_id and expected_removed:
+            cprov = prov_concepts.get(cid) or {}
+            rem_map = cprov.get("removed_aliases") or {}
+            rest_set = restored_aliases_by_cid.get(cid, set())
+            active_set = set(concepts_by_id[cid].get("aliases") or [])
+            for rk in sorted(expected_removed):
+                if rk not in rem_map:
+                    raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} missing tombstone in term-provenance removed_aliases")
+                if rk in active_set and rk not in rest_set:
+                    raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} reappeared without reviewed restoration")
+
+    for rid, expected_sec in net_sec_added.items():
+        if rid in rows_by_id and expected_sec:
+            sprov = prov_subjects.get(rid) or {}
+            srat_map = sprov.get("secondary_concepts_rationale") or {}
+            active_sec = set(rows_by_id[rid].get("secondary_concepts") or [])
+            for scid in sorted(expected_sec):
+                if scid not in active_sec or scid not in srat_map:
+                    raise ConceptGraphError(f"schema sync: added secondary_concept {scid} on {rid} missing from active row or secondary_concepts_rationale")
 
     for cid, cprov in prov_concepts.items():
         if cid not in concepts_by_id or not isinstance(cprov, dict) or not cprov:
@@ -830,6 +1055,8 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             snote = str(ameta.get("scope_note") or "").strip()
             cunits = ameta.get("checked_dev_units")
             vq = str(ameta.get("verbatim_quote") or "").strip()
+            ak_tok = _norm_prov_tokens(ak)
+            vq_tok = _norm_prov_tokens(vq)
             if (
                 atype not in _ALLOWED_PROV_ALIAS_TYPES
                 or len(asrc) < 10
@@ -837,10 +1064,11 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 or not isinstance(cunits, list)
                 or not cunits
                 or any(not isinstance(u, str) or not u.strip() for u in cunits)
-                or _norm_prov_tokens(ak) not in _norm_prov_tokens(vq)
+                or not ak_tok
+                or f" {ak_tok} " not in f" {vq_tok} "
             ):
                 raise ConceptGraphError(
-                    f"schema sync: incomplete alias_metadata (type/source/scope_note/checked_dev_units/verbatim_quote) on {cid} alias {ak!r}"
+                    f"schema sync: incomplete or non-word-bounded alias_metadata on {cid} alias {ak!r}"
                 )
             if atype == "upward-posting":
                 dlin = ameta.get("dev_lineages_requiring_separation")
@@ -848,9 +1076,14 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                     raise ConceptGraphError(
                         f"schema sync: upward-posting alias {ak!r} on {cid} requires dev_lineages_requiring_separation in {{0, 1}}"
                     )
+        rest_map = cprov.get("restored_aliases") or {}
+        if rest_map and not isinstance(rest_map, dict):
+            raise ConceptGraphError(f"schema sync: restored_aliases on {cid} must be a mapping")
         for rk, rrat in (cprov.get("removed_aliases") or {}).items():
-            if rk in active_aliases or not isinstance(rrat, str) or len(rrat.strip()) < 15:
+            if not isinstance(rrat, str) or len(rrat.strip()) < 15:
                 raise ConceptGraphError(f"schema sync: invalid removed_aliases entry {rk!r} on {cid}")
+            if rk in active_aliases and rk not in rest_map:
+                raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} is still active without restored_aliases record")
         if "edge_impact_note" in cprov or "definition_change_kind" in cprov:
             if (
                 len(str(cprov.get("edge_impact_note") or "").strip()) < 15
@@ -873,11 +1106,24 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         if not isinstance(gf_exc, dict):
             raise ConceptGraphError("schema sync: grandfathered_draft_alias_exceptions must be a mapping")
         for gcid, grec in gf_exc.items():
-            if gcid not in concepts_by_id or not isinstance(grec, dict):
-                raise ConceptGraphError(f"schema sync: invalid grandfathered_draft_alias_exceptions target {gcid!r}")
+            if gcid not in PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS or gcid not in concepts_by_id or not isinstance(grec, dict):
+                raise ConceptGraphError(
+                    f"schema sync: unpinned or inactive grandfathered_draft_alias_exceptions target {gcid!r} "
+                    f"(allowed bootstrap set: {sorted(PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS)})"
+                )
             galiases = grec.get("aliases")
-            if not isinstance(galiases, list) or not galiases or len(str(grec.get("reason") or "").strip()) < 15:
-                raise ConceptGraphError(f"schema sync: incomplete grandfathered_draft_alias_exceptions on {gcid!r}")
+            active_galiases = set(concepts_by_id[gcid].get("aliases") or [])
+            allowed_galiases = set(PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS[gcid])
+            if (
+                not isinstance(galiases, list)
+                or not galiases
+                or not set(galiases).issubset(allowed_galiases)
+                or not set(galiases).issubset(active_galiases)
+                or len(str(grec.get("reason") or "").strip()) < 15
+            ):
+                raise ConceptGraphError(
+                    f"schema sync: invalid or stale grandfathered_draft_alias_exceptions on {gcid!r}"
+                )
 
 
 def validate_guides_semantics(guides: dict, rows_by_id: dict, version: str | None = None) -> None:
