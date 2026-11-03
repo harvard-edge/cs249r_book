@@ -271,6 +271,23 @@ class Clusters(Registry):
         fabric=Fabrics.InfiniBand_HDR,
         metadata=Metadata(provenance=_TIER_PROV, description="Mid cluster tier (1024 GPUs)."),
     )
+    # Added 2026-11-03 (add-only). Volume II describes its 1,024- and 2,048-GPU
+    # reference clusters on NDR InfiniBand; Training_1K and Production_2K stay on
+    # HDR because Volume I and other chapters read them unchanged.
+    Training_1K_NDR = Fleet(
+        name="Training Cluster (1024 GPUs, NDR InfiniBand)",
+        node=Nodes.DGX_H100,
+        count=128,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Mid cluster tier (1024 GPUs) on NDR InfiniBand."),
+    )
+    Production_2K_NDR = Fleet(
+        name="Production Cluster (2048 GPUs, NDR InfiniBand)",
+        node=Nodes.DGX_H100,
+        count=256,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Medium cluster tier (2048 GPUs) on NDR InfiniBand."),
+    )
     Training_1K_A100 = Fleet(
         name="Training Cluster (1024 A100 GPUs)",
         node=Nodes.DGX_A100,

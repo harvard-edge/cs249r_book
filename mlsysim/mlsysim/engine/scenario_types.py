@@ -3295,6 +3295,84 @@ class SelfContainedReplicaScenario(BaseScenario):
     @property
     def replica_gpus(self) -> int:
         return self.tensor_parallel * self.pipeline_depth
+
+
+# --- Reference training step (added 2026-11-03, add-only) ---
+class ReferenceTrainingStepScenario(BaseScenario):
+    """One optimizer step of a reference pretraining job, fixed once for every chapter that quotes it.
+
+    The layout is ``replica`` (tensor parallelism across one node, the shallowest
+    pipeline that fits unsharded training state) repeated across ``fleet`` for
+    data parallelism. One step is one optimizer update over the global batch,
+    split into microbatches of ``sequences_per_microbatch`` sequences, so the
+    data-parallel gradient reduction happens once per step. The global batch is
+    the cited token batch divided by the context length, rounded down to a
+    multiple of ``batch_divisor`` so every data-parallel degree used in the
+    book divides it. Step time is modeled by ``DistributedModel``, not measured.
+    """
+    replica: SelfContainedReplicaScenario
+    fleet: Fleet
+    batch_tokens: float
+    batch_divisor: int
+    sequences_per_microbatch: int
+    precision: str
+    local_efficiency: float
+    overlap_comm: bool
+
+    @property
+    def tensor_parallel(self) -> int:
+        return self.replica.tensor_parallel
+
+    @property
+    def pipeline_depth(self) -> int:
+        return self.replica.pipeline_depth
+
+    @property
+    def data_parallel(self) -> int:
+        return self.fleet.total_accelerators // self.replica.replica_gpus
+
+    @property
+    def context_length(self) -> int:
+        return self.replica.workload.context_length
+
+    @property
+    def global_batch_sequences(self) -> int:
+        return int(self.batch_tokens / self.context_length) // self.batch_divisor * self.batch_divisor
+
+    @property
+    def global_batch_tokens(self) -> int:
+        return self.global_batch_sequences * self.context_length
+
+    @property
+    def microbatches_per_replica(self) -> int:
+        return self.global_batch_sequences // (self.data_parallel * self.sequences_per_microbatch)
+
+    @property
+    def state_per_gpu(self) -> Quantity:
+        """Unsharded training state per accelerator, before activations and workspace."""
+        return (self.replica.workload.parameters.magnitude * self.replica.bytes_per_param
+                / self.replica.replica_gpus)
+
+    @property
+    def result(self):
+        from .solvers import DistributedModel
+        return DistributedModel().solve(
+            self.replica.workload,
+            self.fleet,
+            batch_size=self.global_batch_sequences,
+            precision=self.precision,
+            efficiency=self.local_efficiency,
+            tp_size=self.tensor_parallel,
+            pp_size=self.pipeline_depth,
+            microbatch_count=self.microbatches_per_replica,
+            overlap_comm=self.overlap_comm,
+            seq_len=self.context_length,
+        )
+
+    @property
+    def step_time(self) -> Quantity:
+        """Modeled wall-clock time of one optimizer step."""
+        return self.result.step_latency_total
 # --- ML lifecycle: screening requirements, late limits, iteration, deployment (added 2026-10-20) ---
 
 
