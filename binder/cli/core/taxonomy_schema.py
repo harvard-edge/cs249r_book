@@ -724,15 +724,54 @@ GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 = "a3eefe42c766e031c43430aba061a56605c94117d
 GENESIS_PRE_SIDECAR_NON_GUIDES_SHA256 = "1fd44b93987fea8ec835414c04cb8417cf127ae5d0ff4fbfb7fb9ade6ba934cc"
 GENESIS_SNAPSHOT_GZ_SHA256 = "2b49f250a20c758d4cd46b32ab37b149baf395aaae50b1d5ab7d982a21f6ff09"
 GENESIS_CANONICAL_JSON_SHA256 = "22b889e18a707601365572779bedff904f8a609d007a79d1ec62aadb7281a056"
+GENESIS_HISTORICAL_PHASE3_UNITS_SHA256 = "8614fcf8691a3e604063c06d4eb57c6d524f312de4b3d02c9d694f78f20023ac"
 
 PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS: dict[str, tuple[str, ...]] = {
-    "mlsys.safety-case": ("assurance case", "UL 4600 safety case"),
+    "mlsys.safety-case": ("assurance case",),
     "mlsys.tree-ensemble": ("XGBoost",),
     "mlsys.constrained-decoding": ("grammar-guided decoding",),
     "mlsys.state-sharding": ("ZeRO", "FSDP"),
     "mlsys.paged-kv": ("PagedAttention",),
     "mlsys.graph-replay": ("CUDA Graphs",),
     "mlsys.device-streams": ("CUDA streams",),
+}
+
+BOOTSTRAP_GRANDFATHERED_ALIAS_EXCEPTIONS: dict[str, dict[str, object]] = {
+    "mlsys.safety-case": {
+        "aliases": ["assurance case"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft broader cross-domain term queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.tree-ensemble": {
+        "aliases": ["XGBoost"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft named implementation entry term queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.constrained-decoding": {
+        "aliases": ["grammar-guided decoding"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft narrower grammar-automaton subtype entry term queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.state-sharding": {
+        "aliases": ["ZeRO", "FSDP"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft named sharded-optimizer/parameter implementations queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.paged-kv": {
+        "aliases": ["PagedAttention"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft named paper/kernel entry term queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.graph-replay": {
+        "aliases": ["CUDA Graphs"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft vendor-specific graph capture entry term queued for pre-1.0 legacy alias audit.",
+    },
+    "mlsys.device-streams": {
+        "aliases": ["CUDA streams"],
+        "status": "pre-sidecar-legacy-queued-for-v1-audit",
+        "reason": "Pre-sidecar 0.4-draft vendor-specific execution stream entry term queued for pre-1.0 legacy alias audit.",
+    },
 }
 _REQUIRED_WITNESS_KEYS = ("compared_concept", "criterion_a", "criterion_b", "criterion_c", "scenario_a", "scenario_b")
 
@@ -811,42 +850,127 @@ def _load_burned_clusters(root: Path | None = None) -> dict:
     path = cand if (cand is not None and cand.exists()) else (REPO_ROOT_PATH / BURNED_CLUSTERS_REL_PATH)
     if not path.exists():
         raise ConceptGraphError(f"schema sync: missing burned-clusters ledger {BURNED_CLUSTERS_REL_PATH}")
-    return _cached_burned_clusters(str(path), path.stat().st_mtime_ns)
+    bdoc = _cached_burned_clusters(str(path), path.stat().st_mtime_ns)
+    if not isinstance(bdoc, dict) or bdoc.get("schema_version") != 3:
+        raise ConceptGraphError(f"schema sync: {BURNED_CLUSTERS_REL_PATH} must be schema_version=3")
+    hist = bdoc.get("historical_phase3_units")
+    if not isinstance(hist, dict) or len(hist) != 382:
+        raise ConceptGraphError(f"schema sync: {BURNED_CLUSTERS_REL_PATH} must pin all 382 historical_phase3_units")
+    hist_sha = hashlib.sha256(canonical_taxonomy_json(hist).encode("utf-8")).hexdigest()
+    if hist_sha != GENESIS_HISTORICAL_PHASE3_UNITS_SHA256 or bdoc.get("historical_phase3_units_sha256") != GENESIS_HISTORICAL_PHASE3_UNITS_SHA256:
+        raise ConceptGraphError(f"schema sync: {BURNED_CLUSTERS_REL_PATH} historical_phase3_units_sha256 mismatch")
+    return bdoc
 
 
-def _compute_warrant_lineages(warrant_sources: list[dict], burned_doc: dict) -> tuple[set[str], set[str]]:
-    """Return `(all_effective_lineages, external_non_editor_effective_lineages)` under `<50%` author overlap."""
-    merges = burned_doc.get("cluster_merges") or {}
-    internal_set = {merges.get(x, x) for x in (burned_doc.get("internal_clusters") or [])}
-    editor_aff_set = {merges.get(x, x) for x in (burned_doc.get("editor_affiliated_clusters") or [])}
+def canonical_patch_json_sha256(patch_obj: dict) -> str:
+    """Compute canonical JSON SHA-256 of a parsed patch/final YAML mapping."""
+    return hashlib.sha256(canonical_taxonomy_json(patch_obj).encode("utf-8")).hexdigest()
+
+
+def compute_sidecar_content_sha256(prov_doc: dict) -> str:
+    """Compute canonical SHA-256 over term-provenance.yml content excluding sidecar_content_sha256."""
+    body = {k: v for k, v in prov_doc.items() if k != "sidecar_content_sha256"}
+    return hashlib.sha256(canonical_taxonomy_json(body).encode("utf-8")).hexdigest()
+
+
+def resolve_cluster_merges(raw_merges: dict[str, str], src_label: str = "burned-clusters.json") -> dict[str, str]:
+    """Resolve multi-hop cluster_merges transitively with cycle detection."""
+    clean = {str(k).strip(): str(v).strip() for k, v in (raw_merges or {}).items() if str(k).strip() and str(v).strip()}
+    resolved: dict[str, str] = {}
+    for k in clean:
+        seen = {k}
+        cur = clean[k]
+        while cur in clean:
+            if cur in seen:
+                raise ConceptGraphError(f"schema sync: cycle in cluster_merges starting at {k!r} in {src_label}")
+            seen.add(cur)
+            cur = clean[cur]
+        resolved[k] = cur
+    return resolved
+
+
+def norm_person_or_org_token(raw: str, *, is_org: bool = False) -> str:
+    """Normalize personal author or institutional organization names identically across all lineage checks."""
+    tok = " ".join(re.findall(r"[a-z0-9]+", (raw or "").lower()))
+    if not tok:
+        return ""
+    return f"inst:{tok}" if is_org else tok
+
+
+def compute_lineage_components(
+    units: list[dict] | None,
+    burned_doc: dict,
+    *,
+    include_all_exposed_meta: bool = True,
+) -> dict[str, object]:
+    """Unified transitive `<50%` author + institutional-organization overlap closure across units and ledger metadata.
+
+    Returns a dictionary containing:
+    - `merges`: transitively resolved `cluster_merges`
+    - `internal_clusters`: canonical internal cluster IDs
+    - `editor_affiliated_clusters`: canonical editor-affiliated cluster IDs
+    - `pf_to_component`: mapping `canonical_pf -> effective_lineage_component_id`
+      (`'eff_lineage:internal'` for internal clusters, `'eff_lineage:<min_canon_pf>'` for external components)
+    - `component_members`: mapping `effective_lineage_component_id -> sorted list of canonical_pfs`
+    - `component_editor_affiliated`: set of `effective_lineage_component_id`s containing any editor-affiliated source
+    """
+    merges = resolve_cluster_merges(burned_doc.get("cluster_merges") or {})
+    internal_set = {merges.get(str(x).strip(), str(x).strip()) for x in (burned_doc.get("internal_clusters") or []) if str(x).strip()}
+    internal_set.add("pf_internal_mlsysbook")
+    editor_aff_set = {merges.get(str(x).strip(), str(x).strip()) for x in (burned_doc.get("editor_affiliated_clusters") or []) if str(x).strip()}
     exposed_meta = burned_doc.get("exposed_cluster_metadata") or {}
 
-    author_by_pf: dict[str, set[str]] = {}
-    for pf_raw, meta in exposed_meta.items():
-        pf = merges.get(pf_raw, pf_raw)
-        if pf in internal_set or not isinstance(meta, dict):
-            continue
-        author_by_pf.setdefault(pf, set()).update(
-            " ".join(str(a).strip().lower().split()) for a in (meta.get("authors") or []) if str(a).strip()
-        )
+    records: list[tuple[str, set[str]]] = []
+    present_ext_pfs: set[str] = set()
+    has_internal = False
+    ed_pfs: set[str] = set(editor_aff_set)
 
-    src_pfs: list[tuple[str, bool, bool]] = []
-    for src in warrant_sources:
-        pf = merges.get(str(src["provenance_family_id"]).strip(), str(src["provenance_family_id"]).strip())
+    for u in units or []:
+        raw_pf = str(u.get("provenance_family_id") or "").strip()
+        if not raw_pf:
+            continue
+        pf = merges.get(raw_pf, raw_pf)
         is_int = (
             pf in internal_set
-            or src.get("origin") == "internal"
+            or u.get("origin") == "internal"
             or pf.startswith(("pf_mlsysbook_", "pf_staffml_", "pf_internal_"))
         )
-        is_ed = pf in editor_aff_set or bool(src.get("editor_affiliated", False))
-        if not is_int:
-            author_by_pf.setdefault(pf, set()).update(
-                " ".join(str(a).strip().lower().split()) for a in (src.get("authors") or []) if str(a).strip()
-            )
-        src_pfs.append((pf, is_int, is_ed))
+        if is_int:
+            has_internal = True
+            internal_set.add(pf)
+            continue
+        present_ext_pfs.add(pf)
+        if bool(u.get("editor_affiliated", False)) or bool(u.get("_editor_affiliated", False)):
+            ed_pfs.add(pf)
+        toks = {norm_person_or_org_token(str(a), is_org=False) for a in (u.get("authors") or [])}
+        if u.get("institutional_organization"):
+            toks.add(norm_person_or_org_token(str(u["institutional_organization"]), is_org=True))
+        for org in u.get("institutional_organizations") or []:
+            toks.add(norm_person_or_org_token(str(org), is_org=True))
+        toks.discard("")
+        records.append((pf, toks))
 
-    pfs = sorted(author_by_pf.keys())
-    parent = {p: p for p in pfs}
+    for pf_raw, meta in sorted(exposed_meta.items()):
+        if not isinstance(meta, dict):
+            continue
+        pf = merges.get(str(pf_raw).strip(), str(pf_raw).strip())
+        if pf in internal_set or pf.startswith(("pf_mlsysbook_", "pf_staffml_", "pf_internal_")):
+            continue
+        if not include_all_exposed_meta and pf not in present_ext_pfs:
+            continue
+        present_ext_pfs.add(pf)
+        if bool(meta.get("editor_affiliated", False)):
+            ed_pfs.add(pf)
+        toks = {norm_person_or_org_token(str(a), is_org=False) for a in (meta.get("authors") or [])}
+        for org in meta.get("institutional_organizations") or []:
+            toks.add(norm_person_or_org_token(str(org), is_org=True))
+        if meta.get("institutional_organization"):
+            toks.add(norm_person_or_org_token(str(meta["institutional_organization"]), is_org=True))
+        toks.discard("")
+        records.append((pf, toks))
+
+    ext_pfs = sorted(present_ext_pfs)
+    parent = {p: p for p in ext_pfs}
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -859,21 +983,69 @@ def _compute_warrant_lineages(warrant_sources: list[dict], burned_doc: dict) -> 
         if ra != rb:
             parent[max(ra, rb)] = min(ra, rb)
 
-    for i in range(len(pfs)):
-        for j in range(i + 1, len(pfs)):
-            sa, sb = author_by_pf[pfs[i]], author_by_pf[pfs[j]]
-            if sa and sb and (len(sa & sb) / min(len(sa), len(sb))) >= 0.5:
-                union(pfs[i], pfs[j])
+    for i in range(len(records)):
+        pf_i, sa = records[i]
+        if not sa:
+            continue
+        for j in range(i + 1, len(records)):
+            pf_j, sb = records[j]
+            if pf_i == pf_j or not sb:
+                continue
+            if (len(sa & sb) / min(len(sa), len(sb))) >= 0.5:
+                union(pf_i, pf_j)
+
+    pf_to_component: dict[str, str] = {}
+    component_members: dict[str, list[str]] = {}
+    if has_internal or internal_set:
+        for ipf in sorted(internal_set):
+            pf_to_component[ipf] = "eff_lineage:internal"
+        if has_internal:
+            component_members["eff_lineage:internal"] = sorted(internal_set)
+
+    for p in ext_pfs:
+        cid = f"eff_lineage:{find(p)}"
+        pf_to_component[p] = cid
+        component_members.setdefault(cid, []).append(p)
+
+    comp_ed: set[str] = set()
+    for p in ext_pfs:
+        if p in ed_pfs:
+            comp_ed.add(pf_to_component[p])
+
+    return {
+        "merges": merges,
+        "internal_clusters": internal_set,
+        "editor_affiliated_clusters": ed_pfs,
+        "pf_to_component": pf_to_component,
+        "component_members": component_members,
+        "component_editor_affiliated": comp_ed,
+    }
+
+
+def _compute_warrant_lineages(warrant_sources: list[dict], burned_doc: dict) -> tuple[set[str], set[str]]:
+    """Return `(all_effective_lineages, external_non_editor_effective_lineages)` under shared `<50%` overlap closure."""
+    closure = compute_lineage_components(warrant_sources, burned_doc, include_all_exposed_meta=True)
+    merges: dict[str, str] = closure["merges"]  # type: ignore[assignment]
+    internal_set: set[str] = closure["internal_clusters"]  # type: ignore[assignment]
+    pf_to_comp: dict[str, str] = closure["pf_to_component"]  # type: ignore[assignment]
+    comp_ed: set[str] = closure["component_editor_affiliated"]  # type: ignore[assignment]
 
     all_lineages: set[str] = set()
     ext_non_ed_lineages: set[str] = set()
-    for pf, is_int, is_ed in src_pfs:
+    for src in warrant_sources:
+        raw_pf = str(src["provenance_family_id"]).strip()
+        pf = merges.get(raw_pf, raw_pf)
+        is_int = (
+            pf in internal_set
+            or src.get("origin") == "internal"
+            or pf.startswith(("pf_mlsysbook_", "pf_staffml_", "pf_internal_"))
+        )
         if is_int:
-            all_lineages.add("pf_internal_mlsysbook")
+            all_lineages.add("eff_lineage:internal")
         else:
-            eff = f"eff:{find(pf)}"
+            eff = pf_to_comp[pf]
             all_lineages.add(eff)
-            if not is_ed:
+            if eff not in comp_ed and not bool(src.get("editor_affiliated", False)):
                 ext_non_ed_lineages.add(eff)
     return all_lineages, ext_non_ed_lineages
 
@@ -980,10 +1152,18 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
             paths[new_p["id"]] = new_p
 
         if change.get("version"):
-            expected_ops.append("version")
-            doc["version"] = str(change["version"]).strip()
+            raise ConceptGraphError("schema sync: guides-apply is forbidden from modifying taxonomy version")
+        if not str(doc.get("version") or "").endswith("-draft"):
+            raise ConceptGraphError("schema sync: guides-apply may only mutate a -draft taxonomy")
 
         return {"expected_ops": sorted(expected_ops)}
+
+    if mode == "finalize-structural-evaluation":
+        if change != {"finalize_structural_evaluation": True}:
+            raise ConceptGraphError(
+                "schema sync: finalize-structural-evaluation replayed_patch must be {'finalize_structural_evaluation': True}"
+            )
+        return {"expected_ops": ["finalize_evaluation"]}
 
     rows = {row["id"]: row for area in doc["areas"] for row in area["rows"]}
     code2row = {row["code"]: row["id"] for row in rows.values() if "code" in row}
@@ -1007,6 +1187,7 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
     exp_c_retired: list[str] = []
     exp_defs_updated: list[str] = []
     exp_aliases_added: dict[str, list[str]] = {}
+    exp_aliases_attested: dict[str, list[str]] = {}
     exp_aliases_removed: dict[str, list[str]] = {}
     exp_other_c_upd: list[str] = []
     exp_sec_added: dict[str, list[str]] = {}
@@ -1041,6 +1222,16 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
             adopted_alias_norms_by_cid[cid].add(_norm_prov_tokens(astr))
         if added_alist:
             exp_aliases_added[cid] = added_alist
+        attested_alist: list[str] = []
+        for a in u.get("attest_existing_aliases", []) or []:
+            astr = str(a).strip()
+            if astr not in aliases or astr in added_alist:
+                raise ConceptGraphError(
+                    f"schema sync: attest_existing_aliases {astr!r} on {cid} must name an already-active surviving alias"
+                )
+            attested_alist.append(astr)
+        if attested_alist:
+            exp_aliases_attested[cid] = attested_alist
         if u.get("label"):
             adopted_alias_norms_by_cid[cid].add(_norm_prov_tokens(node["label"]))
         saved_added_in = node.pop("added_in", None)
@@ -1300,6 +1491,7 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
         "concepts_retired": sorted(exp_c_retired),
         "definitions_updated": sorted(exp_defs_updated),
         "aliases_added": {k: list(v) for k, v in sorted(exp_aliases_added.items())},
+        "aliases_attested": {k: list(v) for k, v in sorted(exp_aliases_attested.items())},
         "aliases_removed": {k: list(v) for k, v in sorted(exp_aliases_removed.items())},
         "other_concept_updates": sorted(exp_other_c_upd),
         "secondary_concepts_added": {k: list(v) for k, v in sorted(exp_sec_added.items())},
@@ -1308,13 +1500,530 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
     }
 
 
-def validate_term_provenance_sidecar(root: Path) -> None:
+def init_genesis_provenance_state(genesis_doc: dict) -> dict[str, object]:
+    """Initialize top-level term-provenance state at 0.4-draft genesis prior to applied_campaigns[0]."""
+    concepts_by_id = {c["id"]: c for c in genesis_doc.get("concepts", [])}
+    return {
+        "concepts": {},
+        "subjects": {},
+        "retired_concepts": {},
+        "grandfathered_draft_alias_exceptions": {
+            gcid: deepcopy(grec)
+            for gcid, grec in BOOTSTRAP_GRANDFATHERED_ALIAS_EXCEPTIONS.items()
+            if gcid in concepts_by_id
+            and set(grec["aliases"]).issubset(set(concepts_by_id[gcid].get("aliases") or []))
+        },
+        "pending_campaign_ids": [],
+        "pending_pre_evaluation_override": False,
+        "last_reconcile_receipt": None,
+        "release_governance_receipt": None,
+    }
+
+
+def verify_release_governance_receipt(
+    rel_rec: object,
+    target_version: str,
+    expected_tax_sha: str,
+    expected_non_guides_sha: str | None = None,
+) -> None:
+    """Enforce candidate-experts.md §2–§4 Editorial Board and 12-human Stage 2 gates on non-draft releases."""
+    major, _minor, _patch_v, pre_type, _rc_num = parse_taxonomy_semver(target_version)
+    if pre_type == 0:
+        if major >= 1:
+            raise ConceptGraphError(
+                f"schema sync: major >= 1 version {target_version!r} cannot use '-draft' suffix (use '0.x-draft' or '1.0-rcN' / '1.0')"
+            )
+        return
+    if major < 1:
+        raise ConceptGraphError(
+            f"schema sync: 0.x version {target_version!r} must carry '-draft' suffix; citable releases and release candidates start at 1.0-rc1 / 1.0"
+        )
+    if not isinstance(rel_rec, dict) or rel_rec.get("schema_version") != 1:
+        raise ConceptGraphError(
+            f"schema sync: version {target_version!r} (major >= 1) requires schema_version=1 release_governance_receipt"
+        )
+    if str(rel_rec.get("target_version") or "").strip() != target_version:
+        raise ConceptGraphError("schema sync: release_governance_receipt target_version disagrees with taxonomy_version")
+    if str(rel_rec.get("candidate_taxonomy_sha256") or "").strip() != expected_tax_sha:
+        raise ConceptGraphError("schema sync: release_governance_receipt candidate_taxonomy_sha256 disagrees with taxonomy_sha256")
+    if expected_non_guides_sha is not None and "candidate_non_guides_taxonomy_sha256" in rel_rec:
+        if str(rel_rec.get("candidate_non_guides_taxonomy_sha256") or "").strip() != expected_non_guides_sha:
+            raise ConceptGraphError(
+                "schema sync: release_governance_receipt candidate_non_guides_taxonomy_sha256 disagrees with non_guides_taxonomy_sha256"
+            )
+    board = rel_rec.get("board_signoff")
+    if (
+        not isinstance(board, dict)
+        or board.get("seated_voting_members") != 7
+        or not isinstance(board.get("affirmative_votes"), int)
+        or isinstance(board.get("affirmative_votes"), bool)
+        or not (5 <= board["affirmative_votes"] <= 7)
+        or board.get("v1_approved") is not True
+        or board.get("v2_approved") is not True
+        or board.get("sub_area_specialist_reports") != 13
+        or not isinstance(board.get("active_editor_institution_voters"), int)
+        or isinstance(board.get("active_editor_institution_voters"), bool)
+        or not (0 <= board["active_editor_institution_voters"] <= 1)
+        or not isinstance(board.get("active_editor_coauthor_voters"), int)
+        or isinstance(board.get("active_editor_coauthor_voters"), bool)
+        or not (0 <= board["active_editor_coauthor_voters"] <= 2)
+        or not _HEX64_RE.match(str(board.get("charter_sha256") or ""))
+        or not _HEX64_RE.match(str(board.get("vote_record_sha256") or ""))
+    ):
+        raise ConceptGraphError(
+            f"schema sync: version {target_version!r} requires board_signoff matching candidate-experts.md §2–§3 "
+            "(7 seated voting seats, >=5 affirmative votes, v1_approved=true, v2_approved=true, 13 specialist reports, active caps <=1/<=2)"
+        )
+    hs = rel_rec.get("human_study_stage2")
+
+    def _is_num(val: object) -> bool:
+        return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+    if (
+        not isinstance(hs, dict)
+        or not isinstance(hs.get("n_items"), int)
+        or isinstance(hs.get("n_items"), bool)
+        or hs["n_items"] < 240
+        or hs.get("n_raters") != 12
+        or not isinstance(hs.get("effective_lineage_components"), int)
+        or isinstance(hs.get("effective_lineage_components"), bool)
+        or hs["effective_lineage_components"] < 12
+        or not isinstance(hs.get("bootstrap_resamples"), int)
+        or isinstance(hs.get("bootstrap_resamples"), bool)
+        or hs["bootstrap_resamples"] < 10000
+        or not _is_num(hs.get("alpha_subject"))
+        or float(hs["alpha_subject"]) < 0.65
+        or not _is_num(hs.get("kappa_bar_subject"))
+        or float(hs["kappa_bar_subject"]) < 0.65
+        or not _is_num(hs.get("cond_hooper"))
+        or float(hs["cond_hooper"]) < 0.45
+        or not _is_num(hs.get("all_hooper"))
+        or float(hs["all_hooper"]) < 0.40
+        or not _is_num(hs.get("cond_rolling"))
+        or float(hs["cond_rolling"]) < 0.60
+        or not _is_num(hs.get("all_rolling"))
+        or float(hs["all_rolling"]) < 0.55
+        or not _is_num(hs.get("alpha_masi"))
+        or float(hs["alpha_masi"]) < 0.45
+        or not _is_num(hs.get("empty_rate"))
+        or not (0.0 <= float(hs["empty_rate"]) <= 0.20)
+        or not isinstance(hs.get("min_area_both_non_empty"), int)
+        or isinstance(hs.get("min_area_both_non_empty"), bool)
+        or hs["min_area_both_non_empty"] < 8
+        or not _is_num(hs.get("p_max"))
+        or not (0.0 < float(hs["p_max"]) <= 0.15)
+        or not isinstance(hs.get("recalibration_rerun_index"), int)
+        or isinstance(hs.get("recalibration_rerun_index"), bool)
+        or hs["recalibration_rerun_index"] not in (0, 1)
+        or not _HEX64_RE.match(str(hs.get("study_bundle_sha256") or ""))
+    ):
+        raise ConceptGraphError(
+            f"schema sync: version {target_version!r} requires Stage 2 human study receipt matching candidate-experts.md §4.3 "
+            "(n_items>=240, n_raters==12, >=12 components, >=10000 resamples, alpha_subject>=0.65, kappa_bar_subject>=0.65, "
+            "cond_hooper>=0.45, all_hooper>=0.40, cond_rolling>=0.60, all_rolling>=0.55, alpha_masi>=0.45, empty_rate<=0.20, "
+            "min_area_both_non_empty>=8, p_max<=0.15, recalibration_rerun_index in {0, 1})"
+        )
+
+
+def _verify_enrichment_alias_meta(raw_av: object, enriched_av: object, cid: str, ak_clean: str) -> dict:
+    if not isinstance(raw_av, dict) or not isinstance(enriched_av, dict):
+        raise ConceptGraphError(f"schema sync: missing or malformed alias_metadata enrichment on {cid} alias {ak_clean!r}")
+    exp_type = str(raw_av.get("type") or "").strip()
+    exp_src = " ".join(str(raw_av.get("source") or "").split())
+    exp_snote = " ".join(str(raw_av.get("scope_note") or "").split())
+    exp_cunits = [str(u).strip() for u in (raw_av.get("checked_dev_units") or [])]
+    exp_vq = " ".join(str(raw_av.get("verbatim_quote") or "").split())
+    exp_loc = str(raw_av.get("primary_source_locator") or "").strip()
+    if (
+        enriched_av.get("type") != exp_type
+        or enriched_av.get("source") != exp_src
+        or enriched_av.get("scope_note") != exp_snote
+        or enriched_av.get("checked_dev_units") != exp_cunits
+        or enriched_av.get("verbatim_quote") != exp_vq
+        or (exp_loc and enriched_av.get("primary_source_locator") != exp_loc)
+        or not _HEX64_RE.match(str(enriched_av.get("primary_source_sha256") or ""))
+        or len(str(enriched_av.get("primary_source_locator") or "").strip()) < 3
+    ):
+        raise ConceptGraphError(
+            f"schema sync: alias_metadata enrichment on {cid} alias {ak_clean!r} disagrees with reviewed replayed_patch"
+        )
+    if raw_av.get("primary_source_sha256") and enriched_av.get("primary_source_sha256") != str(raw_av["primary_source_sha256"]).strip():
+        raise ConceptGraphError(
+            f"schema sync: alias_metadata primary_source_sha256 on {cid} alias {ak_clean!r} disagrees with replayed_patch"
+        )
+    if exp_type == "upward-posting":
+        if enriched_av.get("dev_lineages_requiring_separation") != raw_av.get("dev_lineages_requiring_separation"):
+            raise ConceptGraphError(
+                f"schema sync: upward-posting dev_lineages_requiring_separation mismatch on {cid} alias {ak_clean!r}"
+            )
+    return deepcopy(enriched_av)
+
+
+def _verify_enrichment_warrant_sources(
+    raw_ws: object,
+    enriched_ws: object,
+    cid: str,
+    burned_doc: dict | None,
+) -> list[dict]:
+    if not isinstance(raw_ws, list) or not isinstance(enriched_ws, list) or len(raw_ws) != len(enriched_ws) or len(raw_ws) < 2:
+        raise ConceptGraphError(f"schema sync: warrant_sources enrichment on {cid} disagrees with reviewed replayed_patch")
+    hist_units = (burned_doc or {}).get("historical_phase3_units") or {}
+    merges = resolve_cluster_merges((burned_doc or {}).get("cluster_merges") or {})
+    out: list[dict] = []
+    for r_item, e_item in zip(raw_ws, enriched_ws):
+        if not isinstance(r_item, dict) or not isinstance(e_item, dict):
+            raise ConceptGraphError(f"schema sync: malformed warrant_sources enrichment item on {cid}")
+        uid = str(r_item.get("unit_id") or "").strip()
+        loc = " ".join(str(r_item.get("locator") or "").split())
+        if e_item.get("unit_id") != uid or e_item.get("locator") != loc:
+            raise ConceptGraphError(f"schema sync: warrant_sources[{uid!r}] on {cid} disagrees with replayed_patch")
+        if uid in hist_units:
+            hu = hist_units[uid]
+            exp_pf = merges.get(str(hu["provenance_family_id"]), str(hu["provenance_family_id"]))
+            if (
+                e_item.get("stratum") != hu.get("stratum")
+                or e_item.get("provenance_family_id") != exp_pf
+                or e_item.get("source_type") != hu.get("source_type")
+                or e_item.get("origin") != hu.get("origin")
+                or bool(e_item.get("editor_affiliated", False)) != bool(hu.get("editor_affiliated", False))
+            ):
+                raise ConceptGraphError(
+                    f"schema sync: warrant_sources[{uid!r}] on {cid} disagrees with pinned historical_phase3_units metadata"
+                )
+        out.append(deepcopy(e_item))
+    return out
+
+
+def replay_provenance_step(
+    prov_state: dict[str, object],
+    pre_doc: dict,
+    post_doc: dict,
+    entry: dict,
+    burned_doc: dict | None = None,
+) -> None:
+    """Deterministically advance top-level provenance state across one campaign_entry."""
+    mode = str(entry.get("mode") or "")
+    pending_ids: list[str] = list(prov_state["pending_campaign_ids"])  # type: ignore[arg-type]
+
+    if mode == "guides-apply":
+        if pending_ids or bool(prov_state["pending_pre_evaluation_override"]):
+            raise ConceptGraphError(
+                "schema sync: guides-apply is forbidden while structural pre-evaluation campaigns remain pending"
+            )
+        return
+
+    if mode == "finalize-structural-evaluation":
+        if not pending_ids:
+            raise ConceptGraphError("schema sync: finalize-structural-evaluation requires non-empty pending_campaign_ids")
+        covered = entry.get("covered_pending_campaign_ids")
+        if (
+            not isinstance(covered, list)
+            or not covered
+            or sorted(str(x) for x in covered) != sorted(pending_ids)
+        ):
+            raise ConceptGraphError(
+                "schema sync: finalize-structural-evaluation covered_pending_campaign_ids does not cover all pending campaigns"
+            )
+        prov_state["pending_campaign_ids"] = []
+        prov_state["pending_pre_evaluation_override"] = False
+        return
+
+    if mode != "full-3family-reconcile":
+        raise ConceptGraphError(f"schema sync: unsupported mode {mode!r} in replay_provenance_step")
+
+    camp_id = str(entry.get("campaign_id") or "").strip()
+    if len(camp_id) < 3:
+        raise ConceptGraphError("schema sync: full-3family-reconcile entry missing valid campaign_id")
+
+    if entry.get("allow_pre_evaluation_apply") is True:
+        if camp_id in pending_ids:
+            raise ConceptGraphError(f"schema sync: duplicate pending campaign_id {camp_id!r}")
+        pending_ids.append(camp_id)
+        prov_state["pending_campaign_ids"] = pending_ids
+        prov_state["pending_pre_evaluation_override"] = True
+    else:
+        if pending_ids:
+            raise ConceptGraphError(
+                "schema sync: non-staged full-3family-reconcile is forbidden while pending_campaign_ids remain unfinalized"
+            )
+        prov_state["pending_campaign_ids"] = []
+        prov_state["pending_pre_evaluation_override"] = False
+
+    change = entry["replayed_patch"]
+    enrichment = entry.get("provenance_evidence_enrichment")
+    if not isinstance(enrichment, dict):
+        raise ConceptGraphError("schema sync: full-3family-reconcile entry missing provenance_evidence_enrichment mapping")
+    ws_enrich = enrichment.get("warrant_sources") or {}
+    am_enrich = enrichment.get("alias_metadata") or {}
+    if not isinstance(ws_enrich, dict) or not isinstance(am_enrich, dict):
+        raise ConceptGraphError("schema sync: malformed provenance_evidence_enrichment sub-mappings")
+
+    prov_concepts: dict[str, dict] = prov_state["concepts"]  # type: ignore[assignment]
+    prov_subjects: dict[str, dict] = prov_state["subjects"]  # type: ignore[assignment]
+    prov_retired: dict[str, dict] = prov_state["retired_concepts"]  # type: ignore[assignment]
+    prov_gf: dict[str, dict] = prov_state["grandfathered_draft_alias_exceptions"]  # type: ignore[assignment]
+
+    rows = {row["id"]: row for area in pre_doc["areas"] for row in area["rows"]}
+    code2row = {row["code"]: row["id"] for row in rows.values() if "code" in row}
+    pre_concepts = {c["id"]: c for c in pre_doc["concepts"]}
+    post_concepts = {c["id"]: c for c in post_doc["concepts"]}
+
+    def resolve_row_id(home_ref: str) -> str:
+        return code2row.get(home_ref, home_ref)
+
+    expected_ws_cids: set[str] = set()
+    expected_am_cids: set[str] = set()
+
+    for u in change.get("concepts_update", []) or []:
+        cid = u["id"].strip()
+        post_node = post_concepts.get(cid) or pre_concepts[cid]
+        cprov = deepcopy(prov_concepts.get(cid) or {})
+        existing_ameta = dict(cprov.get("alias_metadata") or {})
+
+        rem_list = [str(x).strip() for x in u.get("remove_aliases", []) or []]
+        rem_norms = {_norm_prov_tokens(x) for x in rem_list}
+        if rem_norms:
+            existing_ameta = {ak: av for ak, av in existing_ameta.items() if _norm_prov_tokens(ak) not in rem_norms}
+            if isinstance(cprov.get("restored_aliases"), dict):
+                cleaned_rest = {
+                    rk: rv for rk, rv in cprov["restored_aliases"].items() if _norm_prov_tokens(rk) not in rem_norms
+                }
+                if cleaned_rest:
+                    cprov["restored_aliases"] = cleaned_rest
+                else:
+                    cprov.pop("restored_aliases", None)
+            rat_map_in = u.get("remove_aliases_rationales") or {}
+            rat_single = " ".join(str(u.get("remove_aliases_rationale") or "").split())
+            rem_map = dict(cprov.get("removed_aliases") or {})
+            for ra in rem_list:
+                per_a_rat = ""
+                if isinstance(rat_map_in, dict):
+                    for rk_in, rv_in in rat_map_in.items():
+                        if _norm_prov_tokens(str(rk_in)) == _norm_prov_tokens(ra):
+                            per_a_rat = " ".join(str(rv_in).split())
+                            break
+                chosen_rat = per_a_rat or rat_single
+                if len(chosen_rat) < 15:
+                    raise ConceptGraphError(f"schema sync: missing >=15-char removal rationale for alias {ra!r} on {cid}")
+                rem_map[ra] = chosen_rat
+            cprov["removed_aliases"] = rem_map
+            if cid in prov_gf:
+                rem_gf = [ga for ga in prov_gf[cid]["aliases"] if _norm_prov_tokens(ga) not in rem_norms]
+                if rem_gf:
+                    prov_gf[cid] = {**prov_gf[cid], "aliases": rem_gf}
+                else:
+                    prov_gf.pop(cid, None)
+
+        added_alist = [str(x).strip() for x in (u.get("add_aliases") or [])]
+        attested_alist = [str(x).strip() for x in (u.get("attest_existing_aliases") or [])]
+        meta_targets = added_alist + attested_alist
+        raw_am_u = u.get("alias_metadata")
+        if meta_targets or raw_am_u:
+            if not isinstance(raw_am_u, dict) or {str(k).strip() for k in raw_am_u} != set(meta_targets):
+                raise ConceptGraphError(f"schema sync: alias_metadata keys on {cid} disagree with add_aliases/attest_existing_aliases")
+            expected_am_cids.add(cid)
+            enr_u = am_enrich.get(cid)
+            if not isinstance(enr_u, dict) or set(enr_u.keys()) != set(meta_targets):
+                raise ConceptGraphError(f"schema sync: provenance_evidence_enrichment alias_metadata mismatch on {cid}")
+            raw_am_clean = {str(k).strip(): v for k, v in raw_am_u.items()}
+            existing_rem_norms = {_norm_prov_tokens(rk): rk for rk in (cprov.get("removed_aliases") or {})}
+            rest_map = dict(cprov.get("restored_aliases") or {})
+            for ak_clean in meta_targets:
+                existing_ameta[ak_clean] = _verify_enrichment_alias_meta(raw_am_clean[ak_clean], enr_u[ak_clean], cid, ak_clean)
+            for ak_clean in added_alist:
+                ak_norm = _norm_prov_tokens(ak_clean)
+                if ak_norm in existing_rem_norms:
+                    if u.get("restore_removed_alias") is not True:
+                        raise ConceptGraphError(
+                            f"schema sync: restoring tombstoned alias {ak_clean!r} on {cid} requires restore_removed_alias=true"
+                        )
+                    rest_rat = " ".join(str(u.get("restore_aliases_rationale") or "").split())
+                    if len(rest_rat) < 15:
+                        raise ConceptGraphError(f"schema sync: restore_aliases_rationale on {cid} must be >=15 chars")
+                    rest_map = {rk: rv for rk, rv in rest_map.items() if _norm_prov_tokens(rk) != ak_norm}
+                    orig_tomb_key = existing_rem_norms[ak_norm]
+                    rest_map[orig_tomb_key] = rest_rat
+                    if ak_clean != orig_tomb_key:
+                        rest_map[ak_clean] = rest_rat
+            for ak_clean in attested_alist:
+                ak_norm = _norm_prov_tokens(ak_clean)
+                if cid in prov_gf:
+                    rem_gf = [ga for ga in prov_gf[cid]["aliases"] if _norm_prov_tokens(ga) != ak_norm]
+                    if rem_gf:
+                        prov_gf[cid] = {**prov_gf[cid], "aliases": rem_gf}
+                    else:
+                        prov_gf.pop(cid, None)
+            if rest_map:
+                cprov["restored_aliases"] = rest_map
+
+        if existing_ameta:
+            cprov["alias_metadata"] = existing_ameta
+        else:
+            cprov.pop("alias_metadata", None)
+        if u.get("definition"):
+            cprov["definition_change_kind"] = str(u["definition_change_kind"]).strip()
+            cprov["edge_impact_note"] = " ".join(str(u["edge_impact_note"]).split())
+        if u.get("label"):
+            cprov["updated_label"] = " ".join(str(u["label"]).split())
+        if u.get("scope"):
+            cprov["updated_scope"] = str(u["scope"]).strip()
+        if cprov:
+            prov_concepts[cid] = cprov
+        else:
+            prov_concepts.pop(cid, None)
+
+    for mv in change.get("moves", []) or []:
+        mcid = mv["id"].strip()
+        mhome = resolve_row_id(mv["home"].strip())
+        if mhome in prov_subjects and "secondary_concepts_rationale" in prov_subjects[mhome]:
+            prov_subjects[mhome]["secondary_concepts_rationale"].pop(mcid, None)
+            if not prov_subjects[mhome]["secondary_concepts_rationale"]:
+                prov_subjects.pop(mhome, None)
+
+    target_version = str(change.get("version") or pre_doc["version"]).strip()
+    for c in change.get("concepts_add", []) or []:
+        cid = c["id"].strip()
+        expected_ws_cids.add(cid)
+        cprov_new: dict[str, object] = {
+            "added_in": target_version,
+            "warrant_sources": _verify_enrichment_warrant_sources(c.get("warrant_sources"), ws_enrich.get(cid), cid, burned_doc),
+            "witness_justification": deepcopy(c["witness_justification"]),
+        }
+        c_aliases = [str(x).strip() for x in (c.get("aliases") or [])]
+        raw_cam = c.get("alias_metadata")
+        if c_aliases or raw_cam:
+            if not isinstance(raw_cam, dict) or {str(k).strip() for k in raw_cam} != set(c_aliases):
+                raise ConceptGraphError(f"schema sync: concepts_add alias_metadata mismatch on {cid}")
+            expected_am_cids.add(cid)
+            enr_c = am_enrich.get(cid)
+            if not isinstance(enr_c, dict) or set(enr_c.keys()) != set(c_aliases):
+                raise ConceptGraphError(f"schema sync: provenance_evidence_enrichment concepts_add alias_metadata mismatch on {cid}")
+            raw_cam_clean = {str(k).strip(): v for k, v in raw_cam.items()}
+            cprov_new["alias_metadata"] = {
+                ak_c: _verify_enrichment_alias_meta(raw_cam_clean[ak_c], enr_c[ak_c], cid, ak_c) for ak_c in c_aliases
+            }
+        prov_concepts[cid] = cprov_new
+
+    if set(ws_enrich.keys()) != expected_ws_cids or set(am_enrich.keys()) != expected_am_cids:
+        raise ConceptGraphError("schema sync: provenance_evidence_enrichment contains extraneous concept keys")
+
+    # Resolve retirements using pre-step concept state (after concepts_update/moves/concepts_add).
+    mid_concepts = dict(pre_concepts)
+    for c_added_node in post_doc.get("concepts", []):
+        if c_added_node["id"] not in mid_concepts:
+            mid_concepts[c_added_node["id"]] = c_added_node
+    for u in change.get("concepts_update", []) or []:
+        ucid = u["id"].strip()
+        if ucid in mid_concepts:
+            tmp_node = deepcopy(mid_concepts[ucid])
+            if u.get("label"):
+                tmp_node["label"] = " ".join(str(u["label"]).split())
+            rem_n = {_norm_prov_tokens(str(x)) for x in (u.get("remove_aliases") or [])}
+            als = [str(a) for a in (tmp_node.get("aliases") or []) if _norm_prov_tokens(str(a)) not in rem_n]
+            als.extend(str(a).strip() for a in (u.get("add_aliases") or []))
+            if als:
+                tmp_node["aliases"] = als
+            else:
+                tmp_node.pop("aliases", None)
+            mid_concepts[ucid] = tmp_node
+
+    for r in change.get("concepts_retire", []) or []:
+        rcid = r["id"].strip()
+        rep = r["replaced_by"].strip()
+        former = mid_concepts.pop(rcid)
+        prov_gf.pop(rcid, None)
+        former_lbl = str(former.get("label") or "").strip()
+        former_als = [str(a) for a in (former.get("aliases") or [])]
+        for rid_k in list(prov_subjects.keys()):
+            if "secondary_concepts_rationale" in prov_subjects[rid_k]:
+                prov_subjects[rid_k]["secondary_concepts_rationale"].pop(rcid, None)
+                if not prov_subjects[rid_k]["secondary_concepts_rationale"]:
+                    prov_subjects.pop(rid_k, None)
+        old_cprov = prov_concepts.pop(rcid, None) or {}
+        prov_retired[rcid] = {
+            **old_cprov,
+            "former_label": former_lbl,
+            "former_aliases": former_als,
+            "replaced_by": rep,
+            "retired_in": str(r.get("version") or target_version).strip(),
+            "reason": " ".join(str(r["reason"]).split()),
+        }
+
+    if post_doc.get("retired"):
+        rep_map = {rec_r["id"]: rec_r["replaced_by"] for rec_r in post_doc["retired"]}
+        for rcid_k, rprov_v in prov_retired.items():
+            if rcid_k in rep_map:
+                rprov_v["replaced_by"] = rep_map[rcid_k]
+
+    for su in change.get("subject_updates", []) or []:
+        rid = resolve_row_id(su["row"].strip())
+        if "remove_secondary_concepts" in su or "add_secondary_concepts" in su:
+            rem_secs = [s.strip() for s in su.get("remove_secondary_concepts", []) or []]
+            sprov = deepcopy(prov_subjects.get(rid) or {})
+            sec_rat_map = dict(sprov.get("secondary_concepts_rationale") or {})
+            for rs in rem_secs:
+                sec_rat_map.pop(rs, None)
+            rat_text = " ".join(str(su.get("rationale") or "").split())
+            for raw_s in su.get("add_secondary_concepts", []) or []:
+                s = raw_s.strip()
+                if len(rat_text) < 15:
+                    raise ConceptGraphError(f"schema sync: missing >=15-char rationale for secondary_concept {s} on {rid}")
+                sec_rat_map[s] = rat_text
+            if sec_rat_map:
+                sprov["secondary_concepts_rationale"] = sec_rat_map
+                prov_subjects[rid] = sprov
+            else:
+                prov_subjects.pop(rid, None)
+
+    if entry.get("release_governance_receipt") is not None:
+        prov_state["release_governance_receipt"] = deepcopy(entry["release_governance_receipt"])
+    prov_state["last_reconcile_receipt"] = entry
+
+
+def build_provenance_doc_from_state(
+    prov_state: dict[str, object],
+    *,
+    taxonomy_version: str,
+    taxonomy_sha256: str,
+    non_guides_taxonomy_sha256: str,
+    applied_campaigns: list[dict],
+) -> dict[str, object]:
+    """Serialize a canonical term-provenance.yml mapping with self-hash from replayed state."""
+    prov_concepts: dict[str, dict] = prov_state["concepts"]  # type: ignore[assignment]
+    prov_subjects: dict[str, dict] = prov_state["subjects"]  # type: ignore[assignment]
+    prov_retired: dict[str, dict] = prov_state["retired_concepts"]  # type: ignore[assignment]
+    prov_gf: dict[str, dict] = prov_state["grandfathered_draft_alias_exceptions"]  # type: ignore[assignment]
+
+    prov_doc: dict[str, object] = {
+        "schema_version": 2,
+        "taxonomy_version": str(taxonomy_version),
+        "taxonomy_sha256": str(taxonomy_sha256),
+        "non_guides_taxonomy_sha256": str(non_guides_taxonomy_sha256),
+        "pending_pre_evaluation_override": bool(prov_state["pending_pre_evaluation_override"]),
+        "pending_campaign_ids": list(prov_state["pending_campaign_ids"]),  # type: ignore[arg-type]
+        "last_reconcile_receipt": prov_state["last_reconcile_receipt"],
+        "applied_campaigns": list(applied_campaigns),
+        "concepts": {k: prov_concepts[k] for k in sorted(prov_concepts) if prov_concepts[k]},
+        "subjects": {k: prov_subjects[k] for k in sorted(prov_subjects) if prov_subjects[k]},
+    }
+    if prov_retired:
+        prov_doc["retired_concepts"] = {k: prov_retired[k] for k in sorted(prov_retired)}
+    if prov_gf:
+        prov_doc["grandfathered_draft_alias_exceptions"] = {k: prov_gf[k] for k in sorted(prov_gf)}
+    if prov_state.get("release_governance_receipt") is not None:
+        prov_doc["release_governance_receipt"] = deepcopy(prov_state["release_governance_receipt"])
+    prov_doc["sidecar_content_sha256"] = compute_sidecar_content_sha256(prov_doc)
+    return prov_doc
+
+
+def validate_term_provenance_sidecar(root: Path, *, verify_live_script_digests: bool = False) -> None:
     """Verify hash-chained provenance, deterministic genesis replay, and Gate 2/5 records in term-provenance.yml.
 
-    Security & integrity boundary: `sidecar_content_sha256`, `campaign_entry_sha256`, and bound script/file
-    digests act as in-repo consistency and deterministic replay-integrity checks (detecting un-reconciled
-    YAML edits, partial writes, or untracked edits to 0.4-draft concepts). External authorization against a
-    committer modifying validator code is supplied by git history and CI diff review against `origin/dev`.
+    Security & integrity boundary: `sidecar_content_sha256`, `campaign_entry_sha256`, canonical patch digests,
+    and deterministic genesis replay of both taxonomy and top-level provenance metadata detect un-reconciled
+    YAML edits, partial writes, provenance tampering, or untracked edits to 0.4-draft concepts. External
+    authorization against a committer modifying validator code is supplied by git history and CI diff review
+    against `origin/dev`.
     """
     from .field_graph import load_taxonomy_yaml
 
@@ -1350,10 +2059,7 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     if prov.get("taxonomy_version") != str(raw_tax.get("version")):
         raise ConceptGraphError("schema sync: taxonomy/term-provenance.yml taxonomy_version disagrees with ml-systems-taxonomy.yml")
 
-    body_without_self = {k: v for k, v in prov.items() if k != "sidecar_content_sha256"}
-    expected_sidecar_sha = hashlib.sha256(
-        json.dumps(body_without_self, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    expected_sidecar_sha = compute_sidecar_content_sha256(prov)
     if prov.get("sidecar_content_sha256") != expected_sidecar_sha:
         raise ConceptGraphError(
             "schema sync: taxonomy/term-provenance.yml sidecar_content_sha256 mismatch (hand-edited outside apply.py)"
@@ -1363,7 +2069,6 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     if not isinstance(campaigns, list) or not campaigns:
         raise ConceptGraphError("schema sync: taxonomy/term-provenance.yml must record non-empty applied_campaigns hash chain")
 
-    # Verify top-level post_apply_taxonomy_sha256 / post_non_guides_taxonomy_sha256 chain endpoints first.
     if isinstance(campaigns[-1], dict):
         if campaigns[-1].get("post_apply_taxonomy_sha256") != expected_tax_sha:
             raise ConceptGraphError("schema sync: final applied_campaigns post_apply_taxonomy_sha256 disagrees with taxonomy_sha256")
@@ -1374,6 +2079,8 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     genesis_cids = {c["id"] for c in genesis_doc.get("concepts", [])}
     burned_doc = _load_burned_clusters(root)
     replayed_doc = deepcopy(genesis_doc)
+    replayed_prov_state = init_genesis_provenance_state(genesis_doc)
+    reconstructed_step_sidecar_shas: list[str] = []
 
     governed_added_cids: set[str] = set()
     governed_touched_cids: set[str] = set()
@@ -1381,11 +2088,12 @@ def validate_term_provenance_sidecar(root: Path) -> None:
     governed_def_updated_cids: set[str] = set()
     net_aliases_added: dict[str, set[str]] = {}
     all_aliases_removed: dict[str, set[str]] = {}
-    restored_aliases_by_cid: dict[str, set[str]] = {}
+    restored_alias_norms_by_cid: dict[str, set[str]] = {}
     global_tombstoned_norms: dict[str, set[str]] = {}
     net_sec_added: dict[str, set[str]] = {}
     last_full_rec: dict | None = None
-    unclosed_pre_eval = False
+    seen_campaign_ids: set[str] = set()
+    version_setting_entry: dict | None = None
 
     for idx, entry in enumerate(campaigns):
         if not isinstance(entry, dict):
@@ -1430,6 +2138,10 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] requires valid baseline_term_provenance_sha256")
             if not isinstance(prior_sidecar_sha, str) or not _HEX64_RE.match(prior_sidecar_sha):
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] requires valid prior_sidecar_content_sha256")
+            if prior_sidecar_sha != reconstructed_step_sidecar_shas[idx - 1]:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] prior_sidecar_content_sha256 disagrees with replayed step {idx - 1} sidecar digest"
+                )
             if prev_entry_sha != campaigns[idx - 1].get("campaign_entry_sha256"):
                 raise ConceptGraphError(f"schema sync: broken previous_campaign_entry_sha256 chain at applied_campaigns[{idx}]")
 
@@ -1437,18 +2149,20 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         if not isinstance(replayed_patch, dict) or not replayed_patch:
             raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing non-empty replayed_patch")
 
-        if entry.get("allow_pre_evaluation_apply") is True:
-            if replayed_patch.get("version"):
-                raise ConceptGraphError(
-                    f"schema sync: allow_pre_evaluation_apply is forbidden with a version bump at applied_campaigns[{idx}]"
-                )
-            unclosed_pre_eval = True
-        if entry.get("evaluation_gate_completed") is True:
-            unclosed_pre_eval = False
+        pre_step_doc = deepcopy(replayed_doc)
 
         if mode == "full-3family-reconcile":
             if entry.get("receipt_schema_version") != 4:
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] must have receipt_schema_version=4")
+            camp_id = str(entry.get("campaign_id") or "").strip()
+            if len(camp_id) < 3 or camp_id in seen_campaign_ids:
+                raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing or duplicate campaign_id {camp_id!r}")
+            seen_campaign_ids.add(camp_id)
+
+            if entry.get("allow_pre_evaluation_apply") is True and replayed_patch.get("version"):
+                raise ConceptGraphError(
+                    f"schema sync: allow_pre_evaluation_apply is forbidden with a version bump at applied_campaigns[{idx}]"
+                )
             for hkey in (
                 "reconcile_script_sha256",
                 "apply_script_sha256",
@@ -1462,9 +2176,14 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 "run_reviews_r2_sha256",
                 "patch_yaml_sha256",
                 "final_yaml_sha256",
+                "final_yaml_canonical_json_sha256",
             ):
                 if not isinstance(entry.get(hkey), str) or not _HEX64_RE.match(str(entry[hkey])):
                     raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] missing valid {hkey}")
+            if canonical_patch_json_sha256(replayed_patch) != entry["final_yaml_canonical_json_sha256"]:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] replayed_patch canonical JSON SHA-256 disagrees with final_yaml_canonical_json_sha256"
+                )
             r2_shas = entry.get("r2_reviews_sha256")
             if (
                 not isinstance(r2_shas, dict)
@@ -1492,11 +2211,14 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 raise ConceptGraphError(
                     f"schema sync: applied_campaigns[{idx}] replayed non_guides_taxonomy_sha256 disagrees with post_non_guides_taxonomy_sha256"
                 )
+            if replayed_patch.get("version"):
+                version_setting_entry = entry
 
             c_added = sorted(details.get("concepts_added") or [])
             c_retired = sorted(details.get("concepts_retired") or [])
             d_upd = sorted(details.get("definitions_updated") or [])
             a_added_map = {k: list(v) for k, v in sorted((details.get("aliases_added") or {}).items())}
+            a_att_map = {k: list(v) for k, v in sorted((details.get("aliases_attested") or {}).items())}
             a_rem_map = {k: list(v) for k, v in sorted((details.get("aliases_removed") or {}).items())}
             a_rest_map = details.get("aliases_restored") or {}
             other_c_upd = sorted(details.get("other_concept_updates") or [])
@@ -1509,6 +2231,7 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 or c_retired != replay_meta["concepts_retired"]
                 or d_upd != replay_meta["definitions_updated"]
                 or a_added_map != replay_meta["aliases_added"]
+                or a_att_map != replay_meta["aliases_attested"]
                 or a_rem_map != replay_meta["aliases_removed"]
                 or other_c_upd != replay_meta["other_concept_updates"]
                 or s_add_map != replay_meta["secondary_concepts_added"]
@@ -1528,7 +2251,7 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             for cid in c_added:
                 governed_added_cids.add(cid)
                 governed_touched_cids.add(cid)
-            for cid in set(d_upd) | set(a_added_map) | set(a_rem_map):
+            for cid in set(d_upd) | set(a_added_map) | set(a_att_map) | set(a_rem_map):
                 governed_touched_cids.add(cid)
             for rcid in c_retired:
                 governed_retired_cids.add(rcid)
@@ -1537,22 +2260,27 @@ def validate_term_provenance_sidecar(root: Path) -> None:
                 net_aliases_added.pop(rcid, None)
 
             governed_def_updated_cids.update(d_upd)
-            for cid, alist in a_added_map.items():
-                net_aliases_added.setdefault(cid, set()).update(alist)
-            for cid, rlist in a_rest_map.items():
-                restored_aliases_by_cid.setdefault(cid, set()).update(rlist)
-                for ra in rlist:
-                    rn = _norm_prov_tokens(ra)
-                    if rn in global_tombstoned_norms:
-                        global_tombstoned_norms[rn].discard(cid)
             for cid, rlist in a_rem_map.items():
                 all_aliases_removed.setdefault(cid, set()).update(rlist)
-                for ra in rlist:
-                    global_tombstoned_norms.setdefault(_norm_prov_tokens(ra), set()).add(cid)
+                rem_norms_step = {_norm_prov_tokens(ra) for ra in rlist}
+                for rn in rem_norms_step:
+                    global_tombstoned_norms.setdefault(rn, set()).add(cid)
                 if cid in net_aliases_added:
-                    net_aliases_added[cid].difference_update(rlist)
-                if cid in restored_aliases_by_cid:
-                    restored_aliases_by_cid[cid].difference_update(rlist)
+                    net_aliases_added[cid] = {
+                        ea for ea in net_aliases_added[cid] if _norm_prov_tokens(ea) not in rem_norms_step
+                    }
+                if cid in restored_alias_norms_by_cid:
+                    restored_alias_norms_by_cid[cid].difference_update(rem_norms_step)
+            for cid, alist in a_added_map.items():
+                net_aliases_added.setdefault(cid, set()).update(alist)
+            for cid, alist in a_att_map.items():
+                net_aliases_added.setdefault(cid, set()).update(alist)
+            for cid, rlist in a_rest_map.items():
+                for ra in rlist:
+                    rn = _norm_prov_tokens(ra)
+                    restored_alias_norms_by_cid.setdefault(cid, set()).add(rn)
+                    if rn in global_tombstoned_norms:
+                        global_tombstoned_norms[rn].discard(cid)
             for rid, slist in s_add_map.items():
                 net_sec_added.setdefault(rid, set()).update(slist)
             for rid, slist in s_rem_map.items():
@@ -1564,13 +2292,21 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             for hkey in (
                 "guides_patch_yaml_sha256",
                 "guides_final_yaml_sha256",
+                "guides_final_yaml_canonical_json_sha256",
                 "guides_reconcile_receipt_sha256",
                 "guides_apply_script_sha256",
+                "apply_script_sha256",
+                "reconcile_script_sha256",
+                "taxonomy_schema_script_sha256",
                 "workspace_isolation_guides_sha256",
                 "run_reviews_g1_sha256",
             ):
                 if not isinstance(entry.get(hkey), str) or not _HEX64_RE.match(str(entry[hkey])):
                     raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply missing valid {hkey}")
+            if canonical_patch_json_sha256(replayed_patch) != entry["guides_final_yaml_canonical_json_sha256"]:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] guides replayed_patch canonical JSON SHA-256 mismatch"
+                )
             g1_shas = entry.get("g1_reviews_sha256")
             if (
                 not isinstance(g1_shas, dict)
@@ -1582,31 +2318,73 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             if not isinstance(gops, list) or not gops or not all(isinstance(x, str) and x for x in gops):
                 raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] guides-apply must list non-empty guides_operations_applied")
             for gop in gops:
-                if gop != "version" and not gop.startswith(_ALLOWED_GUIDES_OP_PREFIXES):
+                if not gop.startswith(_ALLOWED_GUIDES_OP_PREFIXES):
                     raise ConceptGraphError(f"schema sync: applied_campaigns[{idx}] unrecognized guides operation {gop!r}")
 
-            step_base_ver = str(replayed_doc.get("version") or "")
             replay_meta = replay_patch_on_taxonomy_doc(replayed_doc, replayed_patch, mode)
             if sorted(gops) != replay_meta["expected_ops"]:
                 raise ConceptGraphError(
                     f"schema sync: applied_campaigns[{idx}] guides_operations_applied disagrees with replayed_patch"
                 )
-            if "version" in gops:
-                ng_with_base_ver = {**replayed_doc, "version": step_base_ver}
-                if compute_non_guides_taxonomy_sha256(ng_with_base_ver) != base_ng_sha:
-                    raise ConceptGraphError(
-                        f"schema sync: applied_campaigns[{idx}] guides-apply modified non-guides content beyond version"
-                    )
-            elif post_ng_sha != base_ng_sha:
+            if post_ng_sha != base_ng_sha or compute_non_guides_taxonomy_sha256(replayed_doc) != post_ng_sha:
                 raise ConceptGraphError(
                     f"schema sync: applied_campaigns[{idx}] guides-apply modified non-guides taxonomy content"
                 )
-            if compute_non_guides_taxonomy_sha256(replayed_doc) != post_ng_sha:
+        elif mode == "finalize-structural-evaluation":
+            for hkey in (
+                "apply_script_sha256",
+                "reconcile_script_sha256",
+                "taxonomy_schema_script_sha256",
+                "burned_clusters_sha256",
+                "unseal_holdout_receipt_sha256",
+                "evaluation_receipt_sha256",
+                "audit_receipt_sha256",
+                "workspace_isolation_a1_sha256",
+                "run_reviews_a1_sha256",
+            ):
+                if not isinstance(entry.get(hkey), str) or not _HEX64_RE.match(str(entry[hkey])):
+                    raise ConceptGraphError(
+                        f"schema sync: applied_campaigns[{idx}] finalize-structural-evaluation missing valid {hkey}"
+                    )
+            a1_shas = entry.get("a1_reviews_sha256")
+            if (
+                not isinstance(a1_shas, dict)
+                or set(a1_shas.keys()) != {"claude-a1.yaml", "codex-a1.yaml", "gemini-a1.yaml"}
+                or any(not isinstance(v, str) or not _HEX64_RE.match(v) for v in a1_shas.values())
+            ):
                 raise ConceptGraphError(
-                    f"schema sync: applied_campaigns[{idx}] replayed guides non_guides_taxonomy_sha256 mismatch"
+                    f"schema sync: applied_campaigns[{idx}] finalize-structural-evaluation must bind all 3 *-a1.yaml hashes"
+                )
+            if entry.get("evaluation_gate_completed") is not True:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] finalize-structural-evaluation requires evaluation_gate_completed=true"
+                )
+            if post_sha != base_sha or post_ng_sha != base_ng_sha:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] finalize-structural-evaluation must not mutate taxonomy YAML"
+                )
+            replay_meta = replay_patch_on_taxonomy_doc(replayed_doc, replayed_patch, mode)
+            if entry.get("operations_applied") != replay_meta["expected_ops"]:
+                raise ConceptGraphError(
+                    f"schema sync: applied_campaigns[{idx}] finalize-structural-evaluation operations_applied mismatch"
                 )
         else:
             raise ConceptGraphError(f"schema sync: unsupported applied_campaigns mode {mode!r}")
+
+        replay_provenance_step(replayed_prov_state, pre_step_doc, replayed_doc, entry, burned_doc=burned_doc)
+        step_prov_doc = build_provenance_doc_from_state(
+            replayed_prov_state,
+            taxonomy_version=str(replayed_doc["version"]),
+            taxonomy_sha256=post_sha,
+            non_guides_taxonomy_sha256=post_ng_sha,
+            applied_campaigns=campaigns[: idx + 1],
+        )
+        reconstructed_step_sidecar_shas.append(str(step_prov_doc["sidecar_content_sha256"]))
+
+    if verify_live_script_digests and isinstance(campaigns[-1], dict):
+        live_ts = root / "binder/cli/core/taxonomy_schema.py"
+        if live_ts.exists() and campaigns[-1].get("taxonomy_schema_script_sha256") != hashlib.sha256(live_ts.read_bytes()).hexdigest():
+            raise ConceptGraphError("schema sync: latest campaign taxonomy_schema_script_sha256 disagrees with live taxonomy_schema.py")
 
     if last_full_rec is None or prov.get("last_reconcile_receipt") != last_full_rec:
         raise ConceptGraphError("schema sync: last_reconcile_receipt disagrees with latest full-3family-reconcile campaign entry")
@@ -1617,7 +2395,24 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             "(untracked edit outside governed patches)"
         )
 
-    is_non_draft = not str(raw_tax.get("version") or "").endswith("-draft")
+    expected_final_prov = build_provenance_doc_from_state(
+        replayed_prov_state,
+        taxonomy_version=str(raw_tax["version"]),
+        taxonomy_sha256=expected_tax_sha,
+        non_guides_taxonomy_sha256=expected_non_guides_sha,
+        applied_campaigns=campaigns,
+    )
+    if canonical_taxonomy_json(expected_final_prov) != canonical_taxonomy_json(prov):
+        raise ConceptGraphError(
+            "schema sync: replaying applied_campaigns provenance state from genesis does not match term-provenance.yml "
+            "(unreconciled top-level provenance edit detected)"
+        )
+
+    unclosed_pre_eval = bool(replayed_prov_state["pending_pre_evaluation_override"])
+    pending_ids_final = list(replayed_prov_state["pending_campaign_ids"])  # type: ignore[arg-type]
+    tax_ver_str = str(raw_tax.get("version") or "")
+    is_non_draft = not tax_ver_str.endswith("-draft")
+
     if unclosed_pre_eval and (is_non_draft or prov.get("release_candidate_ready") is True):
         raise ConceptGraphError(
             "schema sync: unclosed allow_pre_evaluation_apply override cannot ship in a release candidate or final release"
@@ -1626,6 +2421,30 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         raise ConceptGraphError(
             "schema sync: pending_pre_evaluation_override flag disagrees with applied_campaigns pre-evaluation state"
         )
+    if (prov.get("pending_campaign_ids") or []) != pending_ids_final:
+        raise ConceptGraphError(
+            "schema sync: pending_campaign_ids disagrees with applied_campaigns pre-evaluation state"
+        )
+
+    if is_non_draft:
+        if prov.get("grandfathered_draft_alias_exceptions"):
+            raise ConceptGraphError(
+                f"schema sync: non-draft release {tax_ver_str!r} cannot retain unresolved grandfathered_draft_alias_exceptions"
+            )
+        if (
+            version_setting_entry is None
+            or version_setting_entry.get("mode") != "full-3family-reconcile"
+            or version_setting_entry.get("evaluation_gate_completed") is not True
+        ):
+            raise ConceptGraphError(
+                f"schema sync: non-draft release {tax_ver_str!r} requires a full-3family-reconcile version transition with evaluation_gate_completed=true"
+            )
+    verify_release_governance_receipt(
+        prov.get("release_governance_receipt"),
+        tax_ver_str,
+        expected_tax_sha,
+        expected_non_guides_sha,
+    )
 
     concepts_by_id = {c["id"]: c for c in raw_tax.get("concepts", [])}
     retired_by_id = {r["id"]: r for r in raw_tax.get("retired", []) or []}
@@ -1644,7 +2463,6 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         if rcid not in retired_by_id or rcid not in prov_retired:
             raise ConceptGraphError(f"schema sync: retired concept {rcid} missing from retired_concepts in term-provenance.yml")
 
-    # Permanent retired-string reservation across all retired concepts (even after successor adopts/removes).
     retired_reserved_norms: dict[str, str] = {}
     for rcid, rprov in prov_retired.items():
         if (
@@ -1662,10 +2480,9 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             if fnorm:
                 retired_reserved_norms[fnorm] = rep_cid
 
-    # Global removed-alias tombstone enforcement + retired-string reservation across all active concepts.
     for cid, cnode in concepts_by_id.items():
         c_terms = [str(cnode.get("label") or ""), *(str(a) for a in (cnode.get("aliases") or []))]
-        rest_norms_here = {_norm_prov_tokens(x) for x in restored_aliases_by_cid.get(cid, set())}
+        rest_norms_here = restored_alias_norms_by_cid.get(cid, set())
         for tstr in c_terms:
             tnorm = _norm_prov_tokens(tstr)
             if not tnorm:
@@ -1735,18 +2552,19 @@ def validate_term_provenance_sidecar(root: Path) -> None:
             active_set = set(concepts_by_id[cid].get("aliases") or [])
             for ak in sorted(expected_added):
                 if ak not in active_set or ak not in ameta_map:
-                    raise ConceptGraphError(f"schema sync: added alias {ak!r} on {cid} missing from active aliases or term-provenance alias_metadata")
+                    raise ConceptGraphError(f"schema sync: added or attested alias {ak!r} on {cid} missing from active aliases or term-provenance alias_metadata")
 
     for cid, expected_removed in all_aliases_removed.items():
         if cid in concepts_by_id and expected_removed:
             cprov = prov_concepts.get(cid) or {}
             rem_map = cprov.get("removed_aliases") or {}
-            rest_set = restored_aliases_by_cid.get(cid, set())
-            active_set = set(concepts_by_id[cid].get("aliases") or [])
+            rest_norms_c = restored_alias_norms_by_cid.get(cid, set())
+            active_norms = {_norm_prov_tokens(a) for a in (concepts_by_id[cid].get("aliases") or [])}
             for rk in sorted(expected_removed):
                 if rk not in rem_map:
                     raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} missing tombstone in term-provenance removed_aliases")
-                if rk in active_set and rk not in rest_set:
+                rk_norm = _norm_prov_tokens(rk)
+                if rk_norm in active_norms and rk_norm not in rest_norms_c:
                     raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} reappeared without reviewed restoration")
 
     for rid, expected_sec in net_sec_added.items():
@@ -1762,6 +2580,7 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         if cid not in concepts_by_id or not isinstance(cprov, dict) or not cprov:
             raise ConceptGraphError(f"schema sync: invalid or inactive concept {cid} in term-provenance.yml")
         active_aliases = set(concepts_by_id[cid].get("aliases") or [])
+        active_alias_norms = {_norm_prov_tokens(a) for a in active_aliases}
         for ak, ameta in (cprov.get("alias_metadata") or {}).items():
             if ak not in active_aliases or not isinstance(ameta, dict):
                 raise ConceptGraphError(f"schema sync: term-provenance alias {ak!r} on {cid} missing from active aliases")
@@ -1798,10 +2617,11 @@ def validate_term_provenance_sidecar(root: Path) -> None:
         rest_map = cprov.get("restored_aliases") or {}
         if rest_map and not isinstance(rest_map, dict):
             raise ConceptGraphError(f"schema sync: restored_aliases on {cid} must be a mapping")
+        rest_map_norms = {_norm_prov_tokens(rk) for rk in rest_map}
         for rk, rrat in (cprov.get("removed_aliases") or {}).items():
             if not isinstance(rrat, str) or len(rrat.strip()) < 15:
                 raise ConceptGraphError(f"schema sync: invalid removed_aliases entry {rk!r} on {cid}")
-            if rk in active_aliases and rk not in rest_map:
+            if _norm_prov_tokens(rk) in active_alias_norms and _norm_prov_tokens(rk) not in rest_map_norms:
                 raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} is still active without restored_aliases record")
         if "edge_impact_note" in cprov or "definition_change_kind" in cprov:
             if (

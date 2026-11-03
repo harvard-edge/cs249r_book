@@ -501,7 +501,10 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         json.dumps(body2, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     (tdir / "term-provenance.yml").write_text(yaml.safe_dump(empty_concepts, sort_keys=False))
-    with pytest.raises(ConceptGraphError, match="(missing provenance record|missing from term-provenance)"):
+    with pytest.raises(
+        ConceptGraphError,
+        match="(missing provenance record|missing from term-provenance|unreconciled top-level provenance edit detected)",
+    ):
         validate_term_provenance_sidecar(tmp_path)
 
     # 3e. Unpinned grandfathered_draft_alias_exceptions target (e.g. mlsys.stpa) fails closed.
@@ -516,7 +519,10 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         json.dumps(body3, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     (tdir / "term-provenance.yml").write_text(yaml.safe_dump(unpinned_gf, sort_keys=False))
-    with pytest.raises(ConceptGraphError, match="unpinned or inactive grandfathered_draft_alias_exceptions"):
+    with pytest.raises(
+        ConceptGraphError,
+        match="(unpinned or inactive grandfathered_draft_alias_exceptions|unreconciled top-level provenance edit detected)",
+    ):
         validate_term_provenance_sidecar(tmp_path)
 
     # 3f. Untracked edit to an untouched 0.4-draft concept (with recomputed self-digests) fails genesis replay.
