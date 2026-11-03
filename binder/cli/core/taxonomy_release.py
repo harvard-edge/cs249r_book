@@ -11,6 +11,7 @@ controlled relations.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 from .taxonomy_warrant import compute_warrant
 from .concept_graph import PAGE_URL, SITE_DIR
-from .taxonomy_schema import SCHEMA_REL_PATH
+from .taxonomy_schema import GENESIS_PRE_SIDECAR_TAXONOMY_SHA256, SCHEMA_REL_PATH
 
 NAME = "ML Systems Taxonomy"
 AUTHOR = "Vijay Janapa Reddi"
@@ -125,8 +126,13 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
     relations = field.get("relations", [])
     warrant = compute_warrant(root, field["concepts"], field.get("book_links", []))
     citation = (f"{AUTHOR}. {NAME}, version {version}. Machine Learning Systems, {YEAR}. {PAGE_URL}")
+    src_yaml_path = root / "taxonomy/ml-systems-taxonomy.yml"
+    src_tax_sha = hashlib.sha256(src_yaml_path.read_bytes()).hexdigest() if src_yaml_path.is_file() else ""
+    base_note = "Editorial draft for expert review; not a claim of completeness or consensus."
+    if src_tax_sha and src_tax_sha != GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 and (root / "taxonomy/README.md").is_file():
+        base_note = f"{base_note} Source YAML SHA-256: {src_tax_sha}."
     meta = {"name": NAME, "version": version, "status": framework["status"], "url": PAGE_URL, "license": LICENSE,
-            "citation": citation, "note": "Editorial draft for expert review; not a claim of completeness or consensus."}
+            "citation": citation, "note": base_note}
 
     # JSON: the whole outline plus concepts and typed relationships.
     document = {**meta,
@@ -277,6 +283,7 @@ def release_artifacts(root: Path, framework: dict, field: dict) -> dict[Path, by
                "mlsys-taxonomy.json": "application/json", "mlsys-taxonomy-concepts.csv": "text/csv",
                "mlsys-taxonomy-subjects.csv": "text/csv", "mlsys-concept-graph.graphml": "application/graphml+xml"}
     dcat = prefixes + [f"<{PAGE_URL}dataset> a dcat:Dataset ;", f"  dct:title {lit(NAME)} ;", f"  dct:description {lit(meta['note'])} ;",
+                       *([f'  dct:identifier "urn:sha256:{src_tax_sha}" ;'] if src_tax_sha else []),
                        f"  dct:creator {lit(AUTHOR)} ;", f"  dct:license <{LICENSE['url']}> ;", f'  dcat:version "{version}" ;',
                        f"  dcat:landingPage <{PAGE_URL}> ;",
                        "  dcat:distribution " + ", ".join(f"<{PAGE_URL}downloads/{name}>" for name in formats) + " .", ""]

@@ -16,8 +16,11 @@ from functools import lru_cache
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
+import random
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 import jsonschema
@@ -706,6 +709,7 @@ _ALLOWED_OP_PREFIXES = (
     "gap_remove:",
     "row:",
     "pe:",
+    "guides:",
 )
 _ALLOWED_GUIDES_OP_PREFIXES = (
     "role_add:",
@@ -724,7 +728,7 @@ GENESIS_PRE_SIDECAR_TAXONOMY_SHA256 = "a3eefe42c766e031c43430aba061a56605c94117d
 GENESIS_PRE_SIDECAR_NON_GUIDES_SHA256 = "1fd44b93987fea8ec835414c04cb8417cf127ae5d0ff4fbfb7fb9ade6ba934cc"
 GENESIS_SNAPSHOT_GZ_SHA256 = "2b49f250a20c758d4cd46b32ab37b149baf395aaae50b1d5ab7d982a21f6ff09"
 GENESIS_CANONICAL_JSON_SHA256 = "22b889e18a707601365572779bedff904f8a609d007a79d1ec62aadb7281a056"
-GENESIS_HISTORICAL_PHASE3_UNITS_SHA256 = "8614fcf8691a3e604063c06d4eb57c6d524f312de4b3d02c9d694f78f20023ac"
+GENESIS_HISTORICAL_PHASE3_UNITS_SHA256 = "da9c70a8dd6a4cb9272806ff4748b72a7da46e66b2a38b5c91144091451db279"
 
 PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS: dict[str, tuple[str, ...]] = {
     "mlsys.safety-case": ("assurance case",),
@@ -796,9 +800,17 @@ def _norm_prov_tokens(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
 
+def _reject_json_constant(val: str) -> None:
+    raise ConceptGraphError(f"schema sync: non-finite JSON constant {val!r} is forbidden")
+
+
+def _is_finite_num(val: object) -> bool:
+    return isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(float(val))
+
+
 def canonical_taxonomy_json(doc: dict) -> str:
     """Serialize parsed taxonomy YAML into deterministic key-sorted JSON for semantic equality checks."""
-    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
 def compute_non_guides_taxonomy_sha256(raw_tax: dict) -> str:
@@ -811,7 +823,7 @@ def compute_campaign_entry_sha256(entry: dict) -> str:
     """Compute canonical SHA-256 over an applied_campaigns entry excluding campaign_entry_sha256."""
     body = {k: v for k, v in entry.items() if k != "campaign_entry_sha256"}
     return hashlib.sha256(
-        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -827,7 +839,7 @@ def _cached_genesis_snapshot(gz_path_str: str) -> dict:
         raise ConceptGraphError(
             "schema sync: decompressed genesis-0.4-baseline.json.gz SHA-256 does not match pinned 0.4-draft JSON"
         )
-    return json.loads(canon_bytes.decode("utf-8"))
+    return json.loads(canon_bytes.decode("utf-8"), parse_constant=_reject_json_constant)
 
 
 def load_genesis_baseline_taxonomy(root: Path | None = None) -> dict:
@@ -842,7 +854,7 @@ def load_genesis_baseline_taxonomy(root: Path | None = None) -> dict:
 @lru_cache(maxsize=4)
 def _cached_burned_clusters(burned_path_str: str, mtime_ns: int) -> dict:
     del mtime_ns
-    return json.loads(Path(burned_path_str).read_text(encoding="utf-8"))
+    return json.loads(Path(burned_path_str).read_text(encoding="utf-8"), parse_constant=_reject_json_constant)
 
 
 def _load_burned_clusters(root: Path | None = None) -> dict:
@@ -859,6 +871,24 @@ def _load_burned_clusters(root: Path | None = None) -> dict:
     hist_sha = hashlib.sha256(canonical_taxonomy_json(hist).encode("utf-8")).hexdigest()
     if hist_sha != GENESIS_HISTORICAL_PHASE3_UNITS_SHA256 or bdoc.get("historical_phase3_units_sha256") != GENESIS_HISTORICAL_PHASE3_UNITS_SHA256:
         raise ConceptGraphError(f"schema sync: {BURNED_CLUSTERS_REL_PATH} historical_phase3_units_sha256 mismatch")
+    init_counts = collections.Counter()
+    for uid_k, umeta in hist.items():
+        if not isinstance(umeta, dict):
+            raise ConceptGraphError(f"schema sync: malformed historical_phase3_units[{uid_k!r}]")
+        isp = umeta.get("initial_phase3_split")
+        csp = umeta.get("current_exposure_split")
+        if isp not in ("dev", "held_out_test", "reserve") or csp != "dev":
+            raise ConceptGraphError(
+                f"schema sync: historical_phase3_units[{uid_k!r}] must carry valid initial_phase3_split and current_exposure_split='dev'"
+            )
+        init_counts[isp] += 1
+    if init_counts["dev"] != 200 or init_counts["held_out_test"] != 126 or init_counts["reserve"] != 56:
+        raise ConceptGraphError(
+            f"schema sync: historical_phase3_units initial_phase3_split counts {dict(init_counts)} disagree with pre-registered 200/126/56"
+        )
+    for k_arr in ("evaluation_attempts", "stage2_human_attempts"):
+        if k_arr in bdoc and not isinstance(bdoc[k_arr], list):
+            raise ConceptGraphError(f"schema sync: {BURNED_CLUSTERS_REL_PATH} {k_arr} must be a list")
     return bdoc
 
 
@@ -889,12 +919,38 @@ def resolve_cluster_merges(raw_merges: dict[str, str], src_label: str = "burned-
     return resolved
 
 
+_LATIN_FOLD_TABLE = str.maketrans({
+    "ß": "ss",
+    "ø": "o",
+    "đ": "d",
+    "ł": "l",
+})
+
+
 def norm_person_or_org_token(raw: str, *, is_org: bool = False) -> str:
     """Normalize personal author or institutional organization names identically across all lineage checks."""
-    tok = " ".join(re.findall(r"[a-z0-9]+", (raw or "").lower()))
-    if not tok:
+    s = (raw or "").lower().translate(_LATIN_FOLD_TABLE).replace("æ", "ae").replace("œ", "oe")
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    toks = re.findall(r"[a-z0-9]+", s)
+    if not toks:
         return ""
-    return f"inst:{tok}" if is_org else tok
+    if is_org:
+        return f"inst:{' '.join(toks)}"
+    if len(toks) >= 3:
+        toks = [toks[0], *(t for t in toks[1:-1] if len(t) > 1), toks[-1]]
+    return " ".join(toks)
+
+
+def _extract_auth_and_org_sets(obj: dict) -> tuple[set[str], set[str]]:
+    auths = {norm_person_or_org_token(str(a), is_org=False) for a in (obj.get("authors") or [])}
+    orgs: set[str] = set()
+    if obj.get("institutional_organization"):
+        orgs.add(norm_person_or_org_token(str(obj["institutional_organization"]), is_org=True))
+    for org in obj.get("institutional_organizations") or []:
+        orgs.add(norm_person_or_org_token(str(org), is_org=True))
+    auths.discard("")
+    orgs.discard("")
+    return auths, orgs
 
 
 def compute_lineage_components(
@@ -903,16 +959,11 @@ def compute_lineage_components(
     *,
     include_all_exposed_meta: bool = True,
 ) -> dict[str, object]:
-    """Unified transitive `<50%` author + institutional-organization overlap closure across units and ledger metadata.
+    """Unified transitive `<50%` personal-author and `>=1` institutional-organization overlap closure.
 
-    Returns a dictionary containing:
-    - `merges`: transitively resolved `cluster_merges`
-    - `internal_clusters`: canonical internal cluster IDs
-    - `editor_affiliated_clusters`: canonical editor-affiliated cluster IDs
-    - `pf_to_component`: mapping `canonical_pf -> effective_lineage_component_id`
-      (`'eff_lineage:internal'` for internal clusters, `'eff_lineage:<min_canon_pf>'` for external components)
-    - `component_members`: mapping `effective_lineage_component_id -> sorted list of canonical_pfs`
-    - `component_editor_affiliated`: set of `effective_lineage_component_id`s containing any editor-affiliated source
+    Evaluates both cluster-level rosters and per-work `work_rosters` with separated personal-author
+    and institutional-organization denominators so multi-work consortium clusters cannot dilute
+    per-paper authorship overlap and institutional strings cannot skew author-count denominators.
     """
     merges = resolve_cluster_merges(burned_doc.get("cluster_merges") or {})
     internal_set = {merges.get(str(x).strip(), str(x).strip()) for x in (burned_doc.get("internal_clusters") or []) if str(x).strip()}
@@ -920,10 +971,24 @@ def compute_lineage_components(
     editor_aff_set = {merges.get(str(x).strip(), str(x).strip()) for x in (burned_doc.get("editor_affiliated_clusters") or []) if str(x).strip()}
     exposed_meta = burned_doc.get("exposed_cluster_metadata") or {}
 
-    records: list[tuple[str, set[str]]] = []
+    records: list[tuple[str, set[str], set[str]]] = []
     present_ext_pfs: set[str] = set()
     has_internal = False
     ed_pfs: set[str] = set(editor_aff_set)
+
+    def _append_work_rosters(pf_id: str, obj: dict) -> None:
+        raw_wr = obj.get("work_rosters")
+        wr_iter = raw_wr.values() if isinstance(raw_wr, dict) else (raw_wr if isinstance(raw_wr, list) else ())
+        for wr in wr_iter:
+            if isinstance(wr, dict):
+                wa, wo = _extract_auth_and_org_sets(wr)
+                if wa or wo:
+                    records.append((pf_id, wa, wo))
+            elif isinstance(wr, list):
+                wa = {norm_person_or_org_token(str(a), is_org=False) for a in wr}
+                wa.discard("")
+                if wa:
+                    records.append((pf_id, wa, set()))
 
     for u in units or []:
         raw_pf = str(u.get("provenance_family_id") or "").strip()
@@ -942,13 +1007,9 @@ def compute_lineage_components(
         present_ext_pfs.add(pf)
         if bool(u.get("editor_affiliated", False)) or bool(u.get("_editor_affiliated", False)):
             ed_pfs.add(pf)
-        toks = {norm_person_or_org_token(str(a), is_org=False) for a in (u.get("authors") or [])}
-        if u.get("institutional_organization"):
-            toks.add(norm_person_or_org_token(str(u["institutional_organization"]), is_org=True))
-        for org in u.get("institutional_organizations") or []:
-            toks.add(norm_person_or_org_token(str(org), is_org=True))
-        toks.discard("")
-        records.append((pf, toks))
+        ua, uo = _extract_auth_and_org_sets(u)
+        records.append((pf, ua, uo))
+        _append_work_rosters(pf, u)
 
     for pf_raw, meta in sorted(exposed_meta.items()):
         if not isinstance(meta, dict):
@@ -961,13 +1022,9 @@ def compute_lineage_components(
         present_ext_pfs.add(pf)
         if bool(meta.get("editor_affiliated", False)):
             ed_pfs.add(pf)
-        toks = {norm_person_or_org_token(str(a), is_org=False) for a in (meta.get("authors") or [])}
-        for org in meta.get("institutional_organizations") or []:
-            toks.add(norm_person_or_org_token(str(org), is_org=True))
-        if meta.get("institutional_organization"):
-            toks.add(norm_person_or_org_token(str(meta["institutional_organization"]), is_org=True))
-        toks.discard("")
-        records.append((pf, toks))
+        ma, mo = _extract_auth_and_org_sets(meta)
+        records.append((pf, ma, mo))
+        _append_work_rosters(pf, meta)
 
     ext_pfs = sorted(present_ext_pfs)
     parent = {p: p for p in ext_pfs}
@@ -984,14 +1041,17 @@ def compute_lineage_components(
             parent[max(ra, rb)] = min(ra, rb)
 
     for i in range(len(records)):
-        pf_i, sa = records[i]
-        if not sa:
+        pf_i, auth_i, org_i = records[i]
+        if not auth_i and not org_i:
             continue
         for j in range(i + 1, len(records)):
-            pf_j, sb = records[j]
-            if pf_i == pf_j or not sb:
+            pf_j, auth_j, org_j = records[j]
+            if pf_i == pf_j:
                 continue
-            if (len(sa & sb) / min(len(sa), len(sb))) >= 0.5:
+            if org_i and org_j and (org_i & org_j):
+                union(pf_i, pf_j)
+                continue
+            if auth_i and auth_j and (len(auth_i & auth_j) / min(len(auth_i), len(auth_j))) >= 0.5:
                 union(pf_i, pf_j)
 
     pf_to_component: dict[str, str] = {}
@@ -1481,6 +1541,14 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
         doc["placement_examples"] = [x for x in doc["placement_examples"] if x["concept"] != pcid]
         doc["placement_examples"].append({"concept": pcid, "home": phome, "why": pe["why"].strip()})
 
+    exp_guides_replaced = False
+    if change.get("guides_replace") is not None:
+        if not isinstance(change["guides_replace"], dict):
+            raise ConceptGraphError("schema sync: guides_replace must be a mapping")
+        expected_ops.append("guides:replace")
+        doc["guides"] = deepcopy(change["guides_replace"])
+        exp_guides_replaced = True
+
     if change.get("version"):
         expected_ops.append("version")
         doc["version"] = str(change["version"]).strip()
@@ -1497,6 +1565,7 @@ def replay_patch_on_taxonomy_doc(doc: dict, change: dict, mode: str) -> dict:
         "secondary_concepts_added": {k: list(v) for k, v in sorted(exp_sec_added.items())},
         "secondary_concepts_removed": {k: list(v) for k, v in sorted(exp_sec_removed.items())},
         "other_subject_updates": sorted(exp_other_s_upd),
+        "guides_replaced": exp_guides_replaced,
     }
 
 
@@ -1520,19 +1589,504 @@ def init_genesis_provenance_state(genesis_doc: dict) -> dict[str, object]:
     }
 
 
+_STAGE2_PAIR_ORDER: tuple[str, ...] = ("F", "S", "P", "Q", "T1", "T2")
+_STAGE2_ANCHOR_ROW_QUOTAS: dict[str, dict[str, int]] = {
+    "Q": {"F": 8, "S": 7, "P": 7, "T1": 7, "T2": 7},
+    "P": {"F": 6, "S": 6, "Q": 6, "T1": 6, "T2": 6},
+    "S": {"F": 4, "P": 5, "Q": 5, "T1": 5, "T2": 5},
+    "F": {"S": 5, "P": 5, "Q": 5, "T1": 1, "T2": 2},
+    "T1": {"F": 1, "S": 1, "P": 2, "Q": 2, "T2": 0},
+    "T2": {"F": 1, "S": 1, "P": 1, "Q": 2, "T1": 1},
+}
+_SPECIALIST_SLOTS_EXPECTED = frozenset({
+    "F3", "S4", "P1", "P2", "P3", "P5", "Q1", "Q2", "Q3", "Q4a", "Q4b", "Q5", "Q6",
+})
+_CHAIR_SIGN_OFF_AREAS_TO_SEAT: dict[str, str] = {
+    "F1": "F",
+    "F2": "F",
+    "S1": "S",
+    "S2": "S",
+    "S3": "S",
+    "P4": "P",
+    "T1": "T",
+    "T2": "T",
+}
+_BOARD_SEATS_EXPECTED = frozenset({"F", "S", "P", "Q", "T", "V1", "V2"})
+
+
+def expected_stage2_anchor_schedule() -> dict[str, list[tuple[str, str, str]]]:
+    """Deterministically generate the 40-anchor 3-receiver secondary-pair schedule from candidate-experts.md §4.2."""
+    rank = {p: idx for idx, p in enumerate(_STAGE2_PAIR_ORDER)}
+    counts_by_group = {"Q": 12, "P": 10, "S": 8, "F": 6, "T1": 2, "T2": 2}
+    schedule: dict[str, list[tuple[str, str, str]]] = {}
+    for g, n_anc in counts_by_group.items():
+        rem = dict(_STAGE2_ANCHOR_ROW_QUOTAS[g])
+        group_rows: list[tuple[str, str, str]] = []
+        for _ in range(n_anc):
+            cands = sorted(rem.keys(), key=lambda p: (-rem[p], rank[p]))
+            picked = sorted(cands[:3], key=lambda p: rank[p])
+            for p in picked:
+                rem[p] -= 1
+            group_rows.append((picked[0], picked[1], picked[2]))
+        if any(v != 0 for v in rem.values()):
+            raise ConceptGraphError(f"schema sync: internal anchor schedule quota residual for {g}: {rem}")
+        schedule[g] = group_rows
+    return schedule
+
+
+def _masi_similarity(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    jacc = inter / len(a | b)
+    if a == b:
+        mono = 1.0
+    elif a.issubset(b) or b.issubset(a):
+        mono = 2.0 / 3.0
+    else:
+        mono = 1.0 / 3.0
+    return jacc * mono
+
+
+def _clamp_ieee_signed_unit(val: float) -> float:
+    if 1.0 < val <= 1.0 + 1e-12:
+        return 1.0
+    if -1.0 - 1e-12 <= val < -1.0:
+        return -1.0
+    return val
+
+
+def _clamp_ieee_unit(val: float) -> float:
+    if 1.0 < val <= 1.0 + 1e-12:
+        return 1.0
+    if -1e-12 <= val < 0.0:
+        return 0.0
+    return val
+
+
+def _weighted_krippendorff_nominal_alpha(items_vals: list[list[str]], weights: list[float]) -> tuple[float, bool]:
+    n_val = 0.0
+    d_o_num = 0.0
+    marginals: dict[str, float] = {}
+    for vals, w in zip(items_vals, weights):
+        if w <= 0.0:
+            continue
+        r_i = len(vals)
+        if r_i < 2:
+            raise ConceptGraphError("schema sync: Krippendorff alpha requires r_i >= 2 raters per item")
+        n_val += w * r_i
+        counts: dict[str, int] = {}
+        for v in vals:
+            counts[v] = counts.get(v, 0) + 1
+        for v, c in counts.items():
+            marginals[v] = marginals.get(v, 0.0) + w * c
+        same_pairs = sum(c * (c - 1) for c in counts.values())
+        diff_pairs = r_i * (r_i - 1) - same_pairs
+        d_o_num += w * (diff_pairs / (r_i - 1))
+    if n_val <= 1.0:
+        return (1.0, True)
+    d_o = d_o_num / n_val
+    d_e_num = n_val * n_val - sum(nc * nc for nc in marginals.values())
+    d_e = d_e_num / (n_val * (n_val - 1.0))
+    if d_e <= 1e-15:
+        return ((1.0 if d_o <= 1e-15 else 0.0), True)
+    return (_clamp_ieee_signed_unit(1.0 - d_o / d_e), False)
+
+
+def _weighted_krippendorff_masi_alpha(
+    items_sets: list[list[frozenset[str]]],
+    weights: list[float],
+) -> tuple[float, bool]:
+    distinct_sets: list[frozenset[str]] = []
+    set_to_idx: dict[frozenset[str], int] = {}
+    encoded_items: list[list[int]] = []
+    for s_list in items_sets:
+        row_ids: list[int] = []
+        for fs in s_list:
+            idx = set_to_idx.get(fs)
+            if idx is None:
+                idx = len(distinct_sets)
+                set_to_idx[fs] = idx
+                distinct_sets.append(fs)
+            row_ids.append(idx)
+        encoded_items.append(row_ids)
+    n_pat = len(distinct_sets)
+    sim_lookup: dict[tuple[int, int], float] = {}
+    nonzero_pairs: list[tuple[int, int, float]] = []
+    for p in range(n_pat):
+        sim_lookup[(p, p)] = 1.0
+        for q in range(p + 1, n_pat):
+            sim = _masi_similarity(distinct_sets[p], distinct_sets[q])
+            if sim > 0.0:
+                sim_lookup[(p, q)] = sim
+                sim_lookup[(q, p)] = sim
+                nonzero_pairs.append((p, q, sim))
+
+    item_disagreements: list[float] = []
+    for row_ids in encoded_items:
+        r_i = len(row_ids)
+        if r_i < 2:
+            raise ConceptGraphError("schema sync: MASI alpha requires r_i >= 2 raters per item")
+        dis_sum = 0.0
+        for u in range(r_i):
+            pu = row_ids[u]
+            for v in range(u + 1, r_i):
+                pv = row_ids[v]
+                if pu != pv:
+                    dis_sum += 2.0 * (1.0 - sim_lookup.get((pu, pv), 0.0))
+        item_disagreements.append(dis_sum / (r_i - 1))
+
+    return _fast_masi_alpha_from_precomputed(encoded_items, item_disagreements, nonzero_pairs, n_pat, weights)
+
+
+def _fast_masi_alpha_from_precomputed(
+    encoded_items: list[list[int]],
+    item_disagreements: list[float],
+    nonzero_pairs: list[tuple[int, int, float]],
+    n_pat: int,
+    weights: list[float],
+) -> tuple[float, bool]:
+    n_val = 0.0
+    d_o_num = 0.0
+    n_p = [0.0] * n_pat
+    for row_ids, dis_i, w in zip(encoded_items, item_disagreements, weights):
+        if w <= 0.0:
+            continue
+        n_val += w * len(row_ids)
+        d_o_num += w * dis_i
+        for pid in row_ids:
+            n_p[pid] += w
+    if n_val <= 1.0:
+        return (1.0, True)
+    d_o = d_o_num / n_val
+    off_diag_mass = n_val * n_val - sum(x * x for x in n_p)
+    pos_sim_mass = 0.0
+    for p, q, sim in nonzero_pairs:
+        np_v = n_p[p]
+        if np_v > 0.0:
+            nq_v = n_p[q]
+            if nq_v > 0.0:
+                pos_sim_mass += np_v * nq_v * sim
+    d_e_num = off_diag_mass - 2.0 * pos_sim_mass
+    if d_e_num < 0.0 and d_e_num > -1e-11:
+        d_e_num = 0.0
+    d_e = d_e_num / (n_val * (n_val - 1.0))
+    if d_e <= 1e-15:
+        return ((1.0 if d_o <= 1e-15 else 0.0), True)
+    return (_clamp_ieee_signed_unit(1.0 - d_o / d_e), False)
+
+
+def _weighted_pair_stratified_cohen_kappa(
+    groups: list[str],
+    subj1: list[str],
+    subj2: list[str],
+    weights: list[float],
+) -> tuple[float, bool]:
+    total_w = sum(w for w in weights if w > 0.0)
+    if total_w <= 0.0:
+        return (1.0, True)
+    by_g: dict[str, list[int]] = collections.defaultdict(list)
+    for idx, g in enumerate(groups):
+        if weights[idx] > 0.0:
+            by_g[g].append(idx)
+    weighted_kappa_sum = 0.0
+    any_zero_var = False
+    for g, idxs in sorted(by_g.items()):
+        n_g = sum(weights[i] for i in idxs)
+        if n_g <= 0.0:
+            continue
+        po_num = 0.0
+        m1: dict[str, float] = {}
+        m2: dict[str, float] = {}
+        for i in idxs:
+            w = weights[i]
+            s1, s2 = subj1[i], subj2[i]
+            if s1 == s2:
+                po_num += w
+            m1[s1] = m1.get(s1, 0.0) + w
+            m2[s2] = m2.get(s2, 0.0) + w
+        po_g = po_num / n_g
+        pe_g = sum((v1 / n_g) * (m2.get(s, 0.0) / n_g) for s, v1 in m1.items())
+        if 1.0 - pe_g <= 1e-15:
+            any_zero_var = True
+            k_g = 1.0 if abs(po_g - 1.0) <= 1e-15 else 0.0
+        else:
+            k_g = _clamp_ieee_signed_unit((po_g - pe_g) / (1.0 - pe_g))
+        weighted_kappa_sum += (n_g / total_w) * k_g
+    return (_clamp_ieee_signed_unit(weighted_kappa_sum), any_zero_var)
+
+
+def _weighted_hooper_rolling(
+    sets1: list[frozenset[str]],
+    sets2: list[frozenset[str]],
+    weights: list[float],
+) -> dict[str, float]:
+    tot_w = 0.0
+    cond_w = 0.0
+    cond_h = 0.0
+    cond_r = 0.0
+    all_h = 0.0
+    all_r = 0.0
+    empty_w = 0.0
+    for a, b, w in zip(sets1, sets2, weights):
+        if w <= 0.0:
+            continue
+        tot_w += w
+        if a and b:
+            inter = len(a & b)
+            hi = inter / len(a | b)
+            ri = (2.0 * inter) / (len(a) + len(b))
+            cond_w += w
+            cond_h += w * hi
+            cond_r += w * ri
+            all_h += w * hi
+            all_r += w * ri
+        elif not a and not b:
+            empty_w += w
+            all_h += w * 1.0
+            all_r += w * 1.0
+        else:
+            empty_w += w
+    if tot_w <= 0.0 or cond_w <= 0.0:
+        raise ConceptGraphError("schema sync: degenerate zero denominator in Hooper/Rolling overlap computation")
+    return {
+        "cond_hooper": _clamp_ieee_unit(cond_h / cond_w),
+        "all_hooper": _clamp_ieee_unit(all_h / tot_w),
+        "cond_rolling": _clamp_ieee_unit(cond_r / cond_w),
+        "all_rolling": _clamp_ieee_unit(all_r / tot_w),
+        "empty_rate": _clamp_ieee_unit(empty_w / tot_w),
+    }
+
+
+def _weighted_fleiss_kappa_8rater(anchor_subj_lists: list[list[str]], weights: list[float]) -> tuple[float, bool]:
+    w_sum = sum(w for w in weights if w > 0.0)
+    if w_sum <= 0.0:
+        return (1.0, True)
+    po_acc = 0.0
+    cat_totals: dict[str, float] = {}
+    for subjs, w in zip(anchor_subj_lists, weights):
+        if w <= 0.0:
+            continue
+        if len(subjs) != 8:
+            raise ConceptGraphError("schema sync: 8-rater Fleiss kappa requires 8 subject assignments per anchor")
+        counts: dict[str, int] = {}
+        for s in subjs:
+            counts[s] = counts.get(s, 0) + 1
+        p_i = sum(c * (c - 1) for c in counts.values()) / 56.0
+        po_acc += w * p_i
+        for s, c in counts.items():
+            cat_totals[s] = cat_totals.get(s, 0.0) + w * c
+    p_o = po_acc / w_sum
+    denom_8n = 8.0 * w_sum
+    p_e = sum((tot / denom_8n) ** 2 for tot in cat_totals.values())
+    if 1.0 - p_e <= 1e-15:
+        return ((1.0 if abs(p_o - 1.0) <= 1e-15 else 0.0), True)
+    return (_clamp_ieee_signed_unit((p_o - p_e) / (1.0 - p_e)), False)
+
+
+@lru_cache(maxsize=1)
+def run_stage2_estimator_self_tests() -> bool:
+    """Execute the 4 mandatory unit-test fixtures from candidate-experts.md §4.3 before Stage 2 evaluation."""
+    groups = ["F"] * 6 + ["Q"] * 6
+    s1 = ["F1.1", "F1.1", "F1.2", "F2.1", "F2.1", "F3.1", "Q1.1", "Q1.1", "Q2.1", "Q4.1", "Q4.1", "Q4.2"]
+    s2 = ["F1.1", "F1.2", "F1.2", "F2.1", "F3.1", "F3.1", "Q1.1", "Q2.1", "Q2.1", "Q4.1", "Q4.2", "Q4.2"]
+    c1 = [
+        frozenset({"c1", "c2"}),
+        frozenset({"c1"}),
+        frozenset(),
+        frozenset({"c3"}),
+        frozenset({"c2", "c3"}),
+        frozenset({"c4"}),
+        frozenset({"q1", "q2"}),
+        frozenset(),
+        frozenset({"q2"}),
+        frozenset({"q3", "q4"}),
+        frozenset({"q3"}),
+        frozenset({"q5"}),
+    ]
+    c2 = [
+        frozenset({"c1", "c2"}),
+        frozenset({"c1", "c2"}),
+        frozenset(),
+        frozenset(),
+        frozenset({"c3", "c4"}),
+        frozenset({"c4"}),
+        frozenset({"q1"}),
+        frozenset({"q1"}),
+        frozenset({"q2"}),
+        frozenset({"q3", "q4"}),
+        frozenset({"q4"}),
+        frozenset({"q5"}),
+    ]
+    w_uni = [1.0] * 12
+
+    # Fixture 1: Orientation-swap invariance across arbitrary item subset & 8-rater anchor permutations.
+    a_sub_base, _ = _weighted_krippendorff_nominal_alpha([[a, b] for a, b in zip(s1, s2)], w_uni)
+    a_masi_base, _ = _weighted_krippendorff_masi_alpha([[a, b] for a, b in zip(c1, c2)], w_uni)
+    hr_base = _weighted_hooper_rolling(c1, c2, w_uni)
+    swap_idx = {0, 1, 3, 4, 7, 10}
+    s1_sw = [s2[i] if i in swap_idx else s1[i] for i in range(12)]
+    s2_sw = [s1[i] if i in swap_idx else s2[i] for i in range(12)]
+    c1_sw = [c2[i] if i in swap_idx else c1[i] for i in range(12)]
+    c2_sw = [c1[i] if i in swap_idx else c2[i] for i in range(12)]
+    a_sub_sw, _ = _weighted_krippendorff_nominal_alpha([[a, b] for a, b in zip(s1_sw, s2_sw)], w_uni)
+    a_masi_sw, _ = _weighted_krippendorff_masi_alpha([[a, b] for a, b in zip(c1_sw, c2_sw)], w_uni)
+    hr_sw = _weighted_hooper_rolling(c1_sw, c2_sw, w_uni)
+    anc_8 = [["F1.1"] * 5 + ["F1.2"] * 3, ["Q4.1"] * 6 + ["Q4.2"] * 2, ["S1.1"] * 4 + ["S1.2"] * 4]
+    anc_8_perm = [list(reversed(r)) for r in anc_8]
+    fk_base, _ = _weighted_fleiss_kappa_8rater(anc_8, [1.0, 1.0, 1.0])
+    fk_sw, _ = _weighted_fleiss_kappa_8rater(anc_8_perm, [1.0, 1.0, 1.0])
+    if (
+        abs(a_sub_base - a_sub_sw) >= 1e-12
+        or abs(a_masi_base - a_masi_sw) >= 1e-12
+        or abs(hr_base["cond_hooper"] - hr_sw["cond_hooper"]) >= 1e-12
+        or abs(hr_base["all_hooper"] - hr_sw["all_hooper"]) >= 1e-12
+        or abs(hr_base["cond_rolling"] - hr_sw["cond_rolling"]) >= 1e-12
+        or abs(hr_base["all_rolling"] - hr_sw["all_rolling"]) >= 1e-12
+        or abs(fk_base - fk_sw) >= 1e-12
+    ):
+        raise ConceptGraphError("schema sync: Stage 2 self-test Fixture 1 (orientation-swap invariance) failed")
+
+    # Fixture 2: Uniform-weight identity against unweighted direct formulas.
+    n_items = len(s1)
+    n_val_unw = 2 * n_items
+    do_sub_unw = sum(1.0 if a != b else 0.0 for a, b in zip(s1, s2)) / n_items
+    cnt_sub = collections.Counter(s1 + s2)
+    de_sub_unw = sum(cnt_sub[x] * cnt_sub[y] for x in cnt_sub for y in cnt_sub if x != y) / (n_val_unw * (n_val_unw - 1))
+    alpha_sub_unw = 1.0 - do_sub_unw / de_sub_unw
+    do_masi_unw = sum(1.0 - _masi_similarity(a, b) for a, b in zip(c1, c2)) / n_items
+    all_sets_flat = c1 + c2
+    de_masi_unw = sum(
+        1.0 - _masi_similarity(all_sets_flat[u], all_sets_flat[v])
+        for u in range(n_val_unw)
+        for v in range(n_val_unw)
+        if u != v
+    ) / (n_val_unw * (n_val_unw - 1))
+    alpha_masi_unw = 1.0 - do_masi_unw / de_masi_unw
+    kb_weighted, _ = _weighted_pair_stratified_cohen_kappa(groups, s1, s2, w_uni)
+    kb_unw = 0.0
+    for g_id in ("F", "Q"):
+        g_idx = [i for i, gg in enumerate(groups) if gg == g_id]
+        po = sum(1 for i in g_idx if s1[i] == s2[i]) / len(g_idx)
+        c_g1 = collections.Counter(s1[i] for i in g_idx)
+        c_g2 = collections.Counter(s2[i] for i in g_idx)
+        pe = sum((c_g1[k] / len(g_idx)) * (c_g2[k] / len(g_idx)) for k in set(c_g1) | set(c_g2))
+        kb_unw += (len(g_idx) / n_items) * ((po - pe) / (1.0 - pe))
+    if (
+        abs(a_sub_base - alpha_sub_unw) >= 1e-12
+        or abs(a_masi_base - alpha_masi_unw) >= 1e-12
+        or abs(kb_weighted - kb_unw) >= 1e-12
+    ):
+        raise ConceptGraphError("schema sync: Stage 2 self-test Fixture 2 (uniform-weight identity) failed")
+
+    # Fixture 3: Integer cluster-replication equivalence (sum k_i = N).
+    int_mults = [2, 0, 3, 1, 2, 0, 1, 0, 1, 1, 1, 0]  # sum == 12
+    a_sub_int, _ = _weighted_krippendorff_nominal_alpha(
+        [[a, b] for a, b in zip(s1, s2)],
+        [float(k) for k in int_mults],
+    )
+    a_masi_int, _ = _weighted_krippendorff_masi_alpha(
+        [[a, b] for a, b in zip(c1, c2)],
+        [float(k) for k in int_mults],
+    )
+    dup_sub = [[s1[i], s2[i]] for i, k in enumerate(int_mults) for _ in range(k)]
+    dup_masi = [[c1[i], c2[i]] for i, k in enumerate(int_mults) for _ in range(k)]
+    a_sub_dup, _ = _weighted_krippendorff_nominal_alpha(dup_sub, [1.0] * len(dup_sub))
+    a_masi_dup, _ = _weighted_krippendorff_masi_alpha(dup_masi, [1.0] * len(dup_masi))
+    if abs(a_sub_int - a_sub_dup) >= 1e-12 or abs(a_masi_int - a_masi_dup) >= 1e-12:
+        raise ConceptGraphError("schema sync: Stage 2 self-test Fixture 3 (integer cluster-replication) failed")
+
+    # Fixture 4: Zero-variance boundary (D_e = 0, D_o = 0 => 1.0; p_e = 1, p_o = 1 => 1.0).
+    zv_sub, zv_flag1 = _weighted_krippendorff_nominal_alpha([["F1.1", "F1.1"]] * 4, [1.0] * 4)
+    zv_masi, zv_flag2 = _weighted_krippendorff_masi_alpha([[frozenset({"c1"}), frozenset({"c1"})]] * 4, [1.0] * 4)
+    zv_kap, zv_flag3 = _weighted_pair_stratified_cohen_kappa(["F"] * 4, ["F1.1"] * 4, ["F1.1"] * 4, [1.0] * 4)
+    zv_fl, zv_flag4 = _weighted_fleiss_kappa_8rater([["F1.1"] * 8] * 4, [1.0] * 4)
+    if (
+        zv_sub != 1.0
+        or zv_masi != 1.0
+        or zv_kap != 1.0
+        or zv_fl != 1.0
+        or not (zv_flag1 and zv_flag2 and zv_flag3 and zv_flag4)
+    ):
+        raise ConceptGraphError("schema sync: Stage 2 self-test Fixture 4 (zero-variance boundary) failed")
+    return True
+
+
+def _resolve_confined_method_study_file(root: Path, rel_str: str, label: str) -> Path:
+    if not rel_str:
+        raise ConceptGraphError(f"schema sync: missing {label}")
+    rel_p = Path(rel_str)
+    if rel_p.is_absolute() or ".." in rel_p.parts or len(rel_p.parts) < 3 or rel_p.parts[:2] != ("taxonomy", "method-study"):
+        raise ConceptGraphError(f"schema sync: {label} {rel_str!r} must be a relative path confined under taxonomy/method-study/")
+    cur = root
+    if cur.is_symlink():
+        raise ConceptGraphError(f"schema sync: symlinked root forbidden when resolving {label}")
+    for part in rel_p.parts:
+        cur = cur / part
+        if cur.is_symlink():
+            raise ConceptGraphError(f"schema sync: symlink component {cur} is forbidden in {label}")
+    ms_dir = (root / "taxonomy" / "method-study").resolve()
+    resolved = cur.resolve()
+    if not resolved.is_relative_to(ms_dir) or not resolved.is_file():
+        raise ConceptGraphError(f"schema sync: {label} {rel_str!r} does not resolve to a regular file inside taxonomy/method-study/")
+    return resolved
+
+
+def _area_to_stage2_pair(area_code: str) -> str:
+    if area_code in ("T1", "T2"):
+        return area_code
+    if area_code and area_code[0] in ("F", "S", "P", "Q"):
+        return area_code[0]
+    raise ConceptGraphError(f"schema sync: unknown area_code {area_code!r} in Stage 2 verification")
+
+
+def _validate_person_record(
+    rec: object,
+    ctx: str,
+    seen_pids: set[str],
+    *,
+    require_non_editor: bool = False,
+) -> dict:
+    if not isinstance(rec, dict):
+        raise ConceptGraphError(f"schema sync: {ctx} must be a person mapping")
+    pid = str(rec.get("person_id") or "").strip()
+    inst = norm_person_or_org_token(str(rec.get("institution") or ""), is_org=True)
+    if (
+        len(pid) < 3
+        or not inst
+        or rec.get("five_year_coi_attested") is not True
+        or not isinstance(rec.get("editor_institution"), bool)
+        or not isinstance(rec.get("editor_coauthor_5yr"), bool)
+    ):
+        raise ConceptGraphError(
+            f"schema sync: {ctx} requires person_id, institution, five_year_coi_attested=true, and boolean COI flags"
+        )
+    if pid in seen_pids:
+        raise ConceptGraphError(f"schema sync: duplicate person_id {pid!r} across governance/indexing pools at {ctx}")
+    if require_non_editor and (rec["editor_institution"] or rec["editor_coauthor_5yr"]):
+        raise ConceptGraphError(f"schema sync: {ctx} ({pid!r}) must be independent of Editor institution and 5-year co-authorship")
+    seen_pids.add(pid)
+    return {**rec, "_norm_inst": inst, "_pid": pid}
+
+
 def verify_release_governance_receipt(
     rel_rec: object,
     target_version: str,
     expected_tax_sha: str,
     expected_non_guides_sha: str | None = None,
+    *,
+    root: Path | None = None,
+    candidate_tax_doc: dict | None = None,
+    burned_doc: dict | None = None,
+    prov_concepts: dict[str, dict] | None = None,
 ) -> None:
     """Enforce candidate-experts.md §2–§4 Editorial Board and 12-human Stage 2 gates on non-draft releases."""
-    major, _minor, _patch_v, pre_type, _rc_num = parse_taxonomy_semver(target_version)
+    major, minor, _patch_v, pre_type, _rc_num = parse_taxonomy_semver(target_version)
     if pre_type == 0:
-        if major >= 1:
-            raise ConceptGraphError(
-                f"schema sync: major >= 1 version {target_version!r} cannot use '-draft' suffix (use '0.x-draft' or '1.0-rcN' / '1.0')"
-            )
         return
     if major < 1:
         raise ConceptGraphError(
@@ -1546,11 +2100,12 @@ def verify_release_governance_receipt(
         raise ConceptGraphError("schema sync: release_governance_receipt target_version disagrees with taxonomy_version")
     if str(rel_rec.get("candidate_taxonomy_sha256") or "").strip() != expected_tax_sha:
         raise ConceptGraphError("schema sync: release_governance_receipt candidate_taxonomy_sha256 disagrees with taxonomy_sha256")
-    if expected_non_guides_sha is not None and "candidate_non_guides_taxonomy_sha256" in rel_rec:
+    if expected_non_guides_sha is not None:
         if str(rel_rec.get("candidate_non_guides_taxonomy_sha256") or "").strip() != expected_non_guides_sha:
             raise ConceptGraphError(
                 "schema sync: release_governance_receipt candidate_non_guides_taxonomy_sha256 disagrees with non_guides_taxonomy_sha256"
             )
+
     board = rel_rec.get("board_signoff")
     if (
         not isinstance(board, dict)
@@ -1575,42 +2130,38 @@ def verify_release_governance_receipt(
             "(7 seated voting seats, >=5 affirmative votes, v1_approved=true, v2_approved=true, 13 specialist reports, active caps <=1/<=2)"
         )
     hs = rel_rec.get("human_study_stage2")
-
-    def _is_num(val: object) -> bool:
-        return isinstance(val, (int, float)) and not isinstance(val, bool)
-
     if (
         not isinstance(hs, dict)
         or not isinstance(hs.get("n_items"), int)
         or isinstance(hs.get("n_items"), bool)
-        or hs["n_items"] < 240
+        or hs["n_items"] != 240
         or hs.get("n_raters") != 12
         or not isinstance(hs.get("effective_lineage_components"), int)
         or isinstance(hs.get("effective_lineage_components"), bool)
         or hs["effective_lineage_components"] < 12
         or not isinstance(hs.get("bootstrap_resamples"), int)
         or isinstance(hs.get("bootstrap_resamples"), bool)
-        or hs["bootstrap_resamples"] < 10000
-        or not _is_num(hs.get("alpha_subject"))
-        or float(hs["alpha_subject"]) < 0.65
-        or not _is_num(hs.get("kappa_bar_subject"))
-        or float(hs["kappa_bar_subject"]) < 0.65
-        or not _is_num(hs.get("cond_hooper"))
-        or float(hs["cond_hooper"]) < 0.45
-        or not _is_num(hs.get("all_hooper"))
-        or float(hs["all_hooper"]) < 0.40
-        or not _is_num(hs.get("cond_rolling"))
-        or float(hs["cond_rolling"]) < 0.60
-        or not _is_num(hs.get("all_rolling"))
-        or float(hs["all_rolling"]) < 0.55
-        or not _is_num(hs.get("alpha_masi"))
-        or float(hs["alpha_masi"]) < 0.45
-        or not _is_num(hs.get("empty_rate"))
+        or hs["bootstrap_resamples"] != 10000
+        or not _is_finite_num(hs.get("alpha_subject"))
+        or not (0.65 <= float(hs["alpha_subject"]) <= 1.0)
+        or not _is_finite_num(hs.get("kappa_bar_subject"))
+        or not (0.65 <= float(hs["kappa_bar_subject"]) <= 1.0)
+        or not _is_finite_num(hs.get("cond_hooper"))
+        or not (0.45 <= float(hs["cond_hooper"]) <= 1.0)
+        or not _is_finite_num(hs.get("all_hooper"))
+        or not (0.40 <= float(hs["all_hooper"]) <= 1.0)
+        or not _is_finite_num(hs.get("cond_rolling"))
+        or not (0.60 <= float(hs["cond_rolling"]) <= 1.0)
+        or not _is_finite_num(hs.get("all_rolling"))
+        or not (0.55 <= float(hs["all_rolling"]) <= 1.0)
+        or not _is_finite_num(hs.get("alpha_masi"))
+        or not (0.45 <= float(hs["alpha_masi"]) <= 1.0)
+        or not _is_finite_num(hs.get("empty_rate"))
         or not (0.0 <= float(hs["empty_rate"]) <= 0.20)
         or not isinstance(hs.get("min_area_both_non_empty"), int)
         or isinstance(hs.get("min_area_both_non_empty"), bool)
-        or hs["min_area_both_non_empty"] < 8
-        or not _is_num(hs.get("p_max"))
+        or not (8 <= hs["min_area_both_non_empty"] <= 12)
+        or not _is_finite_num(hs.get("p_max"))
         or not (0.0 < float(hs["p_max"]) <= 0.15)
         or not isinstance(hs.get("recalibration_rerun_index"), int)
         or isinstance(hs.get("recalibration_rerun_index"), bool)
@@ -1618,10 +2169,670 @@ def verify_release_governance_receipt(
         or not _HEX64_RE.match(str(hs.get("study_bundle_sha256") or ""))
     ):
         raise ConceptGraphError(
-            f"schema sync: version {target_version!r} requires Stage 2 human study receipt matching candidate-experts.md §4.3 "
-            "(n_items>=240, n_raters==12, >=12 components, >=10000 resamples, alpha_subject>=0.65, kappa_bar_subject>=0.65, "
+            f"schema sync: version {target_version!r} requires finite Stage 2 human study receipt matching candidate-experts.md §4.3 "
+            "(n_items==240, n_raters==12, >=12 components, 10000 resamples, alpha_subject>=0.65, kappa_bar_subject>=0.65, "
             "cond_hooper>=0.45, all_hooper>=0.40, cond_rolling>=0.60, all_rolling>=0.55, alpha_masi>=0.45, empty_rate<=0.20, "
             "min_area_both_non_empty>=8, p_max<=0.15, recalibration_rerun_index in {0, 1})"
+        )
+
+    run_stage2_estimator_self_tests()
+
+    eff_root = root if root is not None else REPO_ROOT_PATH
+    gov_rel = str(rel_rec.get("governance_bundle_relpath") or "").strip()
+    gov_sha_decl = str(rel_rec.get("governance_bundle_sha256") or "").strip()
+    if not _HEX64_RE.match(gov_sha_decl) or gov_sha_decl != str(hs["study_bundle_sha256"]):
+        raise ConceptGraphError(
+            "schema sync: release_governance_receipt requires governance_bundle_sha256 matching human_study_stage2.study_bundle_sha256"
+        )
+    gov_path = _resolve_confined_method_study_file(eff_root, gov_rel, "governance_bundle_relpath")
+    gov_bytes = gov_path.read_bytes()
+    if hashlib.sha256(gov_bytes).hexdigest() != gov_sha_decl:
+        raise ConceptGraphError("schema sync: governance_bundle_relpath SHA-256 disagrees with governance_bundle_sha256")
+    gov_bundle = json.loads(gov_bytes.decode("utf-8"), parse_constant=_reject_json_constant)
+    if (
+        not isinstance(gov_bundle, dict)
+        or gov_bundle.get("schema_version") != 1
+        or str(gov_bundle.get("target_version") or "").strip() != target_version
+        or str(gov_bundle.get("candidate_taxonomy_sha256") or "").strip() != expected_tax_sha
+    ):
+        raise ConceptGraphError("schema sync: governance bundle header disagrees with target_version or candidate_taxonomy_sha256")
+    if expected_non_guides_sha is not None and str(gov_bundle.get("candidate_non_guides_taxonomy_sha256") or "").strip() != expected_non_guides_sha:
+        raise ConceptGraphError("schema sync: governance bundle candidate_non_guides_taxonomy_sha256 mismatch")
+
+    eff_burned = burned_doc if burned_doc is not None else _load_burned_clusters(eff_root)
+    if candidate_tax_doc is not None:
+        eff_cand = candidate_tax_doc
+    else:
+        from .field_graph import load_taxonomy_yaml
+
+        eff_cand = load_taxonomy_yaml(eff_root / "taxonomy/ml-systems-taxonomy.yml")
+
+    # 1. Verify charter attestation, distinct >=46 person roster, COI caps, 7-seat votes, T1+T2 concurrence, & 20-area coverage.
+    charter_att = gov_bundle.get("charter_attestation")
+    vote_rec = gov_bundle.get("vote_record")
+    if not isinstance(charter_att, dict) or not charter_att or not isinstance(vote_rec, dict) or not vote_rec:
+        raise ConceptGraphError("schema sync: governance bundle missing charter_attestation or vote_record")
+    if hashlib.sha256(canonical_taxonomy_json(charter_att).encode("utf-8")).hexdigest() != board["charter_sha256"]:
+        raise ConceptGraphError("schema sync: charter_attestation SHA-256 disagrees with board_signoff.charter_sha256")
+    if hashlib.sha256(canonical_taxonomy_json(vote_rec).encode("utf-8")).hexdigest() != board["vote_record_sha256"]:
+        raise ConceptGraphError("schema sync: vote_record SHA-256 disagrees with board_signoff.vote_record_sha256")
+
+    seen_pids: set[str] = set()
+    conv = _validate_person_record(gov_bundle.get("convenor"), "convenor", seen_pids)
+    if conv.get("voting") is not False:
+        raise ConceptGraphError("schema sync: convenor must be non-voting (voting=false)")
+
+    nom_panel = gov_bundle.get("nominating_panel")
+    if not isinstance(nom_panel, list) or len(nom_panel) != 3:
+        raise ConceptGraphError("schema sync: nominating_panel must list 3 independent members")
+    for idx_np, np_rec in enumerate(nom_panel):
+        _validate_person_record(np_rec, f"nominating_panel[{idx_np}]", seen_pids, require_non_editor=True)
+
+    steer = _validate_person_record(gov_bundle.get("steering_advisor"), "steering_advisor", seen_pids)
+    if steer.get("voting") is not False:
+        raise ConceptGraphError("schema sync: steering_advisor must be non-voting (voting=false)")
+
+    standing_raw = gov_bundle.get("standing_roster")
+    if not isinstance(standing_raw, list) or len(standing_raw) != 16:
+        raise ConceptGraphError("schema sync: standing_roster must list 16 standing board members/alternates")
+    standing_by_pid: dict[str, dict] = {}
+    for idx_sr, sr_rec in enumerate(standing_raw):
+        vp = _validate_person_record(sr_rec, f"standing_roster[{idx_sr}]", seen_pids)
+        seat = str(vp.get("seat") or "").strip()
+        role = str(vp.get("role") or "").strip()
+        if seat not in _BOARD_SEATS_EXPECTED or role not in ("chair", "co_chair", "alternate"):
+            raise ConceptGraphError(f"schema sync: standing_roster[{idx_sr}] invalid seat={seat!r} or role={role!r}")
+        standing_by_pid[vp["_pid"]] = vp
+    if sum(1 for m in standing_by_pid.values() if m["editor_institution"]) > 2:
+        raise ConceptGraphError("schema sync: standing_roster exceeds <=2 Editor-institution cap")
+    if sum(1 for m in standing_by_pid.values() if m["editor_coauthor_5yr"]) > 3:
+        raise ConceptGraphError("schema sync: standing_roster exceeds <=3 5-year Editor-coauthor cap")
+
+    specs_raw = gov_bundle.get("sub_area_specialists")
+    if not isinstance(specs_raw, list) or len(specs_raw) != 13:
+        raise ConceptGraphError("schema sync: sub_area_specialists must list all 13 mandatory sub-area specialists")
+    seen_spec_slots: set[str] = set()
+    specialist_covered_areas: set[str] = set()
+    for idx_sp, sp_rec in enumerate(specs_raw):
+        vp = _validate_person_record(sp_rec, f"sub_area_specialists[{idx_sp}]", seen_pids)
+        slot = str(vp.get("specialist_slot") or "").strip()
+        if slot not in _SPECIALIST_SLOTS_EXPECTED or slot in seen_spec_slots:
+            raise ConceptGraphError(f"schema sync: invalid or duplicate specialist_slot {slot!r}")
+        if vp.get("report_submitted") is not True or not _HEX64_RE.match(str(vp.get("report_sha256") or "")):
+            raise ConceptGraphError(f"schema sync: specialist_slot {slot!r} missing submitted report_sha256")
+        seen_spec_slots.add(slot)
+        specialist_covered_areas.add("Q4" if slot in ("Q4a", "Q4b") else slot)
+
+    chair_signoffs = gov_bundle.get("chair_area_signoffs")
+    if not isinstance(chair_signoffs, dict) or set(chair_signoffs.keys()) != set(_CHAIR_SIGN_OFF_AREAS_TO_SEAT.keys()):
+        raise ConceptGraphError(
+            "schema sync: chair_area_signoffs must cover exact 8 non-specialist areas {F1,F2,S1,S2,S3,P4,T1,T2}"
+        )
+    for acode, req_seat in _CHAIR_SIGN_OFF_AREAS_TO_SEAT.items():
+        cs_entry = chair_signoffs[acode]
+        cs_pid = str(cs_entry.get("signer_person_id") if isinstance(cs_entry, dict) else cs_entry or "").strip()
+        if cs_pid not in standing_by_pid or standing_by_pid[cs_pid].get("seat") != req_seat:
+            raise ConceptGraphError(f"schema sync: chair_area_signoffs[{acode!r}] must be signed by a standing member of seat {req_seat}")
+    expected_20_areas = {str(a["code"]) for a in eff_cand.get("areas", [])}
+    if (specialist_covered_areas | set(chair_signoffs.keys())) != expected_20_areas:
+        raise ConceptGraphError("schema sync: 13 sub_area_specialists + 8 chair_area_signoffs do not cover all 20 taxonomy areas")
+
+    indexers_raw = gov_bundle.get("human_indexers")
+    if not isinstance(indexers_raw, list) or len(indexers_raw) != 12:
+        raise ConceptGraphError("schema sync: human_indexers must list 12 distinct human indexers across 6 pairs")
+    indexers_by_pair: dict[str, list[dict]] = collections.defaultdict(list)
+    indexer_inst_counts: collections.Counter[str] = collections.Counter()
+    for idx_hi, hi_rec in enumerate(indexers_raw):
+        vp = _validate_person_record(hi_rec, f"human_indexers[{idx_hi}]", seen_pids, require_non_editor=True)
+        pair_id = str(vp.get("pair_id") or "").strip()
+        if pair_id not in _STAGE2_PAIR_ORDER or vp.get("pair_coauthored_5yr") is not False:
+            raise ConceptGraphError(f"schema sync: human_indexers[{idx_hi}] requires valid pair_id and pair_coauthored_5yr=false")
+        indexers_by_pair[pair_id].append(vp)
+        indexer_inst_counts[vp["_norm_inst"]] += 1
+    if any(cnt > 2 for cnt in indexer_inst_counts.values()):
+        raise ConceptGraphError("schema sync: human_indexers exceeds <=2 indexers per institution cap")
+    for p_id in _STAGE2_PAIR_ORDER:
+        pair_members = indexers_by_pair.get(p_id, [])
+        if len(pair_members) != 2 or pair_members[0]["_norm_inst"] == pair_members[1]["_norm_inst"]:
+            raise ConceptGraphError(f"schema sync: pair {p_id} must have 2 indexers from distinct institutions")
+
+    adhoc_raw = gov_bundle.get("adhoc_voters") or []
+    if not isinstance(adhoc_raw, list):
+        raise ConceptGraphError("schema sync: adhoc_voters must be a list")
+    adhoc_by_pid: dict[str, dict] = {}
+    for idx_av, av_rec in enumerate(adhoc_raw):
+        vp = _validate_person_record(av_rec, f"adhoc_voters[{idx_av}]", seen_pids, require_non_editor=True)
+        if str(vp.get("seat") or "").strip() not in _BOARD_SEATS_EXPECTED:
+            raise ConceptGraphError(f"schema sync: adhoc_voters[{idx_av}] missing valid seat")
+        adhoc_by_pid[vp["_pid"]] = vp
+
+    if len(seen_pids) < 46:
+        raise ConceptGraphError("schema sync: governance bundle must have >=46 distinct natural persons across all pools")
+
+    seat_votes = vote_rec.get("seat_votes")
+    if not isinstance(seat_votes, dict) or set(seat_votes.keys()) != _BOARD_SEATS_EXPECTED:
+        raise ConceptGraphError("schema sync: vote_record.seat_votes must record all 7 voting seats")
+    active_voters: list[dict] = []
+    seen_active_voters: set[str] = set()
+    aff_count = 0
+    for seat_k, sv in sorted(seat_votes.items()):
+        if not isinstance(sv, dict) or sv.get("recused") is not False or sv.get("vote") not in ("approve", "reject", "abstain"):
+            raise ConceptGraphError(f"schema sync: vote_record.seat_votes[{seat_k!r}] invalid vote or recusal flag")
+        vpids_here = [str(sv.get("voter_person_id") or "").strip()]
+        if seat_k == "T" and sv.get("t2_voter_person_id"):
+            vpids_here.append(str(sv.get("t2_voter_person_id") or "").strip())
+        for vpid in vpids_here:
+            if not vpid or vpid in seen_active_voters:
+                raise ConceptGraphError(f"schema sync: person {vpid!r} cannot cast votes for multiple seats")
+            seen_active_voters.add(vpid)
+            vperson = standing_by_pid.get(vpid) or adhoc_by_pid.get(vpid)
+            if vperson is None or str(vperson.get("seat")) != seat_k:
+                raise ConceptGraphError(f"schema sync: voter {vpid!r} is not an eligible member/replacement for seat {seat_k}")
+            active_voters.append(vperson)
+        if sv["vote"] == "approve":
+            aff_count += 1
+    act_inst = sum(1 for v in active_voters if v["editor_institution"])
+    act_coauth = sum(1 for v in active_voters if v["editor_coauthor_5yr"])
+    if (
+        aff_count != board["affirmative_votes"]
+        or aff_count < 5
+        or seat_votes["V1"]["vote"] != "approve"
+        or seat_votes["V2"]["vote"] != "approve"
+        or act_inst != board["active_editor_institution_voters"]
+        or act_inst > 1
+        or act_coauth != board["active_editor_coauthor_voters"]
+        or act_coauth > 2
+        or vote_rec.get("unresolved_binding_rejections") != []
+    ):
+        raise ConceptGraphError("schema sync: vote_record fails supermajority, V1/V2 concurrence, COI cap, or unresolved rejection check")
+    if seat_votes["T"]["vote"] == "approve":
+        if vote_rec.get("seat_t_t1_concurred") is not True or vote_rec.get("seat_t_t2_concurred") is not True:
+            raise ConceptGraphError("schema sync: affirmative Seat T vote requires both seat_t_t1_concurred=true and seat_t_t2_concurred=true")
+
+    # 2. Verify pre-1.0 legacy alias dispositions across all 7 pinned legacy concepts and all unattested active legacy aliases.
+    leg_disp = gov_bundle.get("v1_legacy_alias_dispositions")
+    if not isinstance(leg_disp, dict) or not set(PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS.keys()).issubset(leg_disp.keys()):
+        raise ConceptGraphError("schema sync: governance bundle must record v1_legacy_alias_dispositions covering all 7 pinned legacy concepts")
+    cand_concepts_by_id = {c["id"]: c for c in eff_cand.get("concepts", [])}
+    for gcid, req_aliases in PINNED_GRANDFATHERED_ALIAS_EXCEPTIONS.items():
+        c_disp = leg_disp.get(gcid)
+        if not isinstance(c_disp, dict) or not set(req_aliases).issubset(c_disp.keys()):
+            raise ConceptGraphError(f"schema sync: v1_legacy_alias_dispositions[{gcid!r}] must cover {list(req_aliases)}")
+        active_norms_g = {_norm_prov_tokens(str(a)) for a in ((cand_concepts_by_id.get(gcid) or {}).get("aliases") or [])}
+        for galias in req_aliases:
+            drec = c_disp[galias]
+            if (
+                not isinstance(drec, dict)
+                or drec.get("disposition") not in ("uphold", "remove", "reclassify-or-split")
+                or drec.get("v1_signed_off") is not True
+                or len(str(drec.get("rationale") or "").strip()) < 15
+            ):
+                raise ConceptGraphError(f"schema sync: invalid v1_legacy_alias_dispositions entry on {gcid} alias {galias!r}")
+            is_still_active = _norm_prov_tokens(galias) in active_norms_g
+            if is_still_active and drec["disposition"] != "uphold":
+                raise ConceptGraphError(f"schema sync: active legacy alias {galias!r} on {gcid} requires disposition='uphold'")
+            if drec["disposition"] == "remove" and is_still_active:
+                raise ConceptGraphError(f"schema sync: legacy alias {galias!r} on {gcid} marked 'remove' is still active")
+
+    for cid_cand, c_node in cand_concepts_by_id.items():
+        att_meta = ((prov_concepts.get(cid_cand) if isinstance(prov_concepts, dict) else None) or {}).get("alias_metadata") or {}
+        att_norms = {_norm_prov_tokens(str(ak)) for ak in att_meta} if isinstance(att_meta, dict) else set()
+        for active_al in c_node.get("aliases") or []:
+            al_str = str(active_al)
+            if _norm_prov_tokens(al_str) in att_norms:
+                continue
+            c_disp_all = leg_disp.get(cid_cand)
+            drec_all = c_disp_all.get(al_str) if isinstance(c_disp_all, dict) else None
+            if (
+                not isinstance(drec_all, dict)
+                or drec_all.get("disposition") != "uphold"
+                or drec_all.get("v1_signed_off") is not True
+                or len(str(drec_all.get("rationale") or "").strip()) < 15
+            ):
+                raise ConceptGraphError(
+                    f"schema sync: unattested legacy alias {al_str!r} on {cid_cand} requires v1_legacy_alias_dispositions[{cid_cand!r}][{al_str!r}] with disposition='uphold', v1_signed_off=true, and >=15-char rationale"
+                )
+
+    # 3. Verify calibrated seeded-gap sensitivity >= 85% across >= 10 ablated concepts.
+    sg_audit = gov_bundle.get("seeded_gap_audit")
+    sg_items = sg_audit.get("seeded_gap_items") if isinstance(sg_audit, dict) else None
+    if not isinstance(sg_items, list) or len(sg_items) < 10:
+        raise ConceptGraphError("schema sync: non-draft release requires seeded_gap_audit.seeded_gap_items with >=10 probes")
+    ablated_cids: set[str] = set()
+    degraded_cnt = 0
+    for idx_sg, sgi in enumerate(sg_items):
+        if (
+            not isinstance(sgi, dict)
+            or not str(sgi.get("unit_id") or "").strip()
+            or not str(sgi.get("judge_id") or "").strip()
+            or not str(sgi.get("ablated_concept_id") or "").strip()
+            or not _is_finite_num(sgi.get("baseline_score"))
+            or not _is_finite_num(sgi.get("ablated_score"))
+        ):
+            raise ConceptGraphError(f"schema sync: malformed seeded_gap_items[{idx_sg}]")
+        bs = float(sgi["baseline_score"])
+        as_v = float(sgi["ablated_score"])
+        if bs not in (0.5, 1.0) or as_v not in (0.0, 0.5, 1.0) or as_v > bs:
+            raise ConceptGraphError(f"schema sync: invalid ordinal scores in seeded_gap_items[{idx_sg}]")
+        ablated_cids.add(str(sgi["ablated_concept_id"]).strip())
+        if as_v < bs:
+            degraded_cnt += 1
+    if len(ablated_cids) < 10:
+        raise ConceptGraphError("schema sync: seeded_gap_audit must span >=10 distinct ablated_concept_ids")
+    sg_sens = degraded_cnt / len(sg_items)
+    if sg_sens < 0.85:
+        raise ConceptGraphError(f"schema sync: non-draft release seeded-gap sensitivity {sg_sens:.4f} < 0.85 floor")
+    if "seeded_gap_sensitivity" in hs:
+        if not _is_finite_num(hs["seeded_gap_sensitivity"]) or abs(float(hs["seeded_gap_sensitivity"]) - sg_sens) > 1e-9:
+            raise ConceptGraphError("schema sync: human_study_stage2.seeded_gap_sensitivity disagrees with recomputed seeded_gap_items")
+
+    # 4. Verify Stage 2 human study raw annotations, rerun history, lineage disjointness, routing, & dual bootstrap.
+    s2 = gov_bundle.get("stage2_study")
+    if not isinstance(s2, dict):
+        raise ConceptGraphError("schema sync: governance bundle missing stage2_study")
+    s1_items = s2.get("stage1_calibration_items")
+    s2_items = s2.get("stage2_items")
+    recal_items = s2.get("recalibration_slice_items") or []
+    if not isinstance(s1_items, list) or len(s1_items) != 30 or not isinstance(s2_items, list) or len(s2_items) != 240 or not isinstance(recal_items, list):
+        raise ConceptGraphError("schema sync: stage2_study requires 30 stage1_calibration_items and 240 stage2_items")
+
+    rerun_idx = hs["recalibration_rerun_index"]
+    cycle_mm = f"{major}.{minor}"
+    ledger_s2_attempts = [
+        a for a in (eff_burned.get("stage2_human_attempts") or [])
+        if isinstance(a, dict) and str(a.get("target_major_minor") or "") == cycle_mm
+    ]
+    if len(ledger_s2_attempts) > 2:
+        raise ConceptGraphError(f"schema sync: burned-clusters stage2_human_attempts exceeds max 1 rerun for {cycle_mm}")
+    prior_attempt_units: list[dict] = []
+    if rerun_idx == 0:
+        for att in ledger_s2_attempts:
+            if att.get("recalibration_rerun_index") == 1 or (
+                att.get("recalibration_rerun_index") == 0 and att.get("study_bundle_sha256") != gov_sha_decl
+            ):
+                raise ConceptGraphError(
+                    "schema sync: recalibration_rerun_index=0 conflicts with existing stage2_human_attempts in burned-clusters.json"
+                )
+    else:
+        prior_rel = str(s2.get("prior_failed_bundle_relpath") or "").strip()
+        prior_sha = str(s2.get("prior_failed_bundle_sha256") or "").strip()
+        if not _HEX64_RE.match(prior_sha) or prior_sha == gov_sha_decl:
+            raise ConceptGraphError("schema sync: recalibration_rerun_index=1 requires valid distinct prior_failed_bundle_sha256")
+        if ledger_s2_attempts:
+            att0 = [a for a in ledger_s2_attempts if a.get("recalibration_rerun_index") == 0]
+            if not att0 or att0[0].get("study_bundle_sha256") != prior_sha:
+                raise ConceptGraphError("schema sync: prior_failed_bundle_sha256 disagrees with burned-clusters stage2_human_attempts[0]")
+        prior_path = _resolve_confined_method_study_file(eff_root, prior_rel, "prior_failed_bundle_relpath")
+        prior_bytes = prior_path.read_bytes()
+        if hashlib.sha256(prior_bytes).hexdigest() != prior_sha:
+            raise ConceptGraphError("schema sync: prior_failed_bundle_relpath SHA-256 mismatch")
+        prior_bundle = json.loads(prior_bytes.decode("utf-8"), parse_constant=_reject_json_constant)
+        prior_s2 = (prior_bundle.get("stage2_study") or {}) if isinstance(prior_bundle, dict) else {}
+        if prior_s2.get("recalibration_rerun_index", 0) != 0:
+            raise ConceptGraphError("schema sync: prior_failed_bundle must have recalibration_rerun_index=0")
+        for lst_k in ("stage1_calibration_items", "stage2_items", "recalibration_slice_items"):
+            for u_p in (prior_s2.get(lst_k) or []):
+                if isinstance(u_p, dict):
+                    prior_attempt_units.append(u_p)
+        if not prior_attempt_units or not recal_items:
+            raise ConceptGraphError(
+                "schema sync: recalibration_rerun_index=1 requires non-empty prior_failed_bundle items and recalibration_slice_items"
+            )
+
+    all_study_units = [*s1_items, *s2_items, *recal_items, *prior_attempt_units]
+    closure = compute_lineage_components(all_study_units, eff_burned, include_all_exposed_meta=True)
+    merges: dict[str, str] = closure["merges"]  # type: ignore[assignment]
+    pf_to_comp: dict[str, str] = closure["pf_to_component"]  # type: ignore[assignment]
+    comp_ed: set[str] = closure["component_editor_affiliated"]  # type: ignore[assignment]
+    internal_set: set[str] = closure["internal_clusters"]  # type: ignore[assignment]
+
+    pre_burned_comps: set[str] = set()
+    exp_meta_map = eff_burned.get("exposed_cluster_metadata") or {}
+    for raw_b_str in eff_burned.get("burned_or_exposed_cluster_ids") or []:
+        s_bpf = str(raw_b_str or "").strip()
+        if not s_bpf:
+            continue
+        canon_bpf = merges.get(s_bpf, s_bpf)
+        meta_bpf = exp_meta_map.get(canon_bpf) if isinstance(exp_meta_map, dict) else None
+        if isinstance(meta_bpf, dict) and str(meta_bpf.get("burned_by_stage2_bundle_sha256") or "") == gov_sha_decl:
+            continue
+        if canon_bpf in pf_to_comp:
+            pre_burned_comps.add(pf_to_comp[canon_bpf])
+    for bc in eff_burned.get("burned_clusters") or []:
+        if not isinstance(bc, dict):
+            continue
+        if str(bc.get("burned_by_stage2_bundle_sha256") or "") == gov_sha_decl:
+            continue
+        raw_bpf = str(bc.get("cluster_id") or "").strip()
+        if raw_bpf:
+            canon_bpf = merges.get(raw_bpf, raw_bpf)
+            if canon_bpf in pf_to_comp:
+                pre_burned_comps.add(pf_to_comp[canon_bpf])
+
+    def _unit_ext_comp(u_obj: dict, label_ctx: str) -> str:
+        raw_pf = str(u_obj.get("provenance_family_id") or "").strip()
+        if not raw_pf or u_obj.get("origin") != "external" or bool(u_obj.get("editor_affiliated", False)):
+            raise ConceptGraphError(f"schema sync: {label_ctx} must be non-editor-affiliated origin='external'")
+        if not (u_obj.get("authors") or u_obj.get("institutional_organizations") or u_obj.get("institutional_organization")):
+            raise ConceptGraphError(f"schema sync: {label_ctx} missing authors/institutional_organizations metadata")
+        canon_pf = merges.get(raw_pf, raw_pf)
+        if canon_pf in internal_set:
+            raise ConceptGraphError(f"schema sync: {label_ctx} uses internal cluster {canon_pf!r}")
+        comp_id = pf_to_comp[canon_pf]
+        if comp_id == "eff_lineage:internal" or comp_id in comp_ed:
+            raise ConceptGraphError(f"schema sync: {label_ctx} resolves to internal or editor-affiliated lineage {comp_id!r}")
+        if comp_id in pre_burned_comps:
+            raise ConceptGraphError(f"schema sync: {label_ctx} uses burned lineage component {comp_id!r}")
+        return comp_id
+
+    s1_comps: set[str] = set()
+    s1_pair_counts: collections.Counter[str] = collections.Counter()
+    seen_unit_ids: set[str] = set()
+    for idx_u, u1 in enumerate(s1_items):
+        if not isinstance(u1, dict):
+            raise ConceptGraphError(f"schema sync: malformed stage1_calibration_items[{idx_u}]")
+        uid1 = str(u1.get("unit_id") or "").strip()
+        p1 = str(u1.get("pair_id") or "").strip()
+        if not uid1 or uid1 in seen_unit_ids or p1 not in _STAGE2_PAIR_ORDER:
+            raise ConceptGraphError(f"schema sync: invalid or duplicate unit_id/pair_id in stage1_calibration_items[{idx_u}]")
+        seen_unit_ids.add(uid1)
+        s1_pair_counts[p1] += 1
+        s1_comps.add(_unit_ext_comp(u1, f"stage1_calibration_items[{idx_u}]"))
+    if any(s1_pair_counts[p] != 5 for p in _STAGE2_PAIR_ORDER):
+        raise ConceptGraphError("schema sync: stage1_calibration_items must allocate 5 items to each of the 6 pairs")
+
+    recal_comps = {_unit_ext_comp(ur, f"recalibration_slice_items[{i}]") for i, ur in enumerate(recal_items)}
+    prior_comps: set[str] = set()
+    for ip, up in enumerate(prior_attempt_units):
+        raw_ppf = str(up.get("provenance_family_id") or "").strip()
+        if raw_ppf:
+            cppf = merges.get(raw_ppf, raw_ppf)
+            if cppf in pf_to_comp:
+                prior_comps.add(pf_to_comp[cppf])
+
+    valid_subjects = {str(r["id"]) for a in eff_cand.get("areas", []) for r in a.get("rows", [])}
+    valid_concepts = {str(c["id"]) for c in eff_cand.get("concepts", [])}
+    non_leaf_concepts = {
+        str(e["target"])
+        for e in eff_cand.get("relationships", [])
+        if e.get("relation") == "specializes" and str(e.get("source")) in valid_concepts
+    }
+    pair_rater_sets = {p: {m["_pid"] for m in indexers_by_pair[p]} for p in _STAGE2_PAIR_ORDER}
+
+    items_by_area: dict[str, list[dict]] = collections.defaultdict(list)
+    for idx_2, u2 in enumerate(s2_items):
+        if not isinstance(u2, dict):
+            raise ConceptGraphError(f"schema sync: malformed stage2_items[{idx_2}]")
+        uid2 = str(u2.get("unit_id") or "").strip()
+        acode = str(u2.get("area_code") or "").strip()
+        if not uid2 or uid2 in seen_unit_ids or acode not in expected_20_areas:
+            raise ConceptGraphError(f"schema sync: invalid or duplicate unit_id/area_code in stage2_items[{idx_2}]")
+        seen_unit_ids.add(uid2)
+        comp2 = _unit_ext_comp(u2, f"stage2_items[{idx_2}]")
+        if comp2 in s1_comps or comp2 in recal_comps or comp2 in prior_comps:
+            raise ConceptGraphError(
+                f"schema sync: stage2_items[{idx_2}] ({uid2}) shares effective_lineage_component_id {comp2} with Stage 1, recalibration, or prior attempt"
+            )
+        items_by_area[acode].append({**u2, "_comp": comp2})
+
+    if set(items_by_area.keys()) != expected_20_areas:
+        raise ConceptGraphError("schema sync: stage2_items must cover all 20 taxonomy areas")
+
+    ordered_s2: list[dict] = []
+    area_item_indices: list[list[int]] = []
+    anchors_by_group: dict[str, list[dict]] = collections.defaultdict(list)
+    min_area_both_non_empty = 12
+
+    def _check_pair_eval(pe_obj: object, expected_pair: str, ctx_lbl: str) -> tuple[str, str, frozenset[str], frozenset[str]]:
+        if not isinstance(pe_obj, dict) or str(pe_obj.get("pair_id") or "").strip() != expected_pair:
+            raise ConceptGraphError(f"schema sync: {ctx_lbl} pair_id must equal {expected_pair!r}")
+        r1 = str(pe_obj.get("rater_1") or "").strip()
+        r2 = str(pe_obj.get("rater_2") or "").strip()
+        if {r1, r2} != pair_rater_sets[expected_pair]:
+            raise ConceptGraphError(f"schema sync: {ctx_lbl} raters {(r1, r2)} disagree with human_indexers[{expected_pair}]")
+        sb1 = str(pe_obj.get("subject_1") or "").strip()
+        sb2 = str(pe_obj.get("subject_2") or "").strip()
+        if sb1 not in valid_subjects or sb2 not in valid_subjects:
+            raise ConceptGraphError(f"schema sync: {ctx_lbl} invalid subject ID")
+        raw_c1 = pe_obj.get("concepts_1")
+        raw_c2 = pe_obj.get("concepts_2")
+        if (
+            not isinstance(raw_c1, list)
+            or not isinstance(raw_c2, list)
+            or len(raw_c1) > 3
+            or len(raw_c2) > 3
+            or len(set(raw_c1)) != len(raw_c1)
+            or len(set(raw_c2)) != len(raw_c2)
+            or not set(raw_c1).issubset(valid_concepts)
+            or not set(raw_c2).issubset(valid_concepts)
+        ):
+            raise ConceptGraphError(f"schema sync: {ctx_lbl} concepts_1/concepts_2 must be 0..3 distinct active concept IDs")
+        return (sb1, sb2, frozenset(str(x) for x in raw_c1), frozenset(str(x) for x in raw_c2))
+
+    for acode in sorted(expected_20_areas):
+        alist = sorted(items_by_area[acode], key=lambda x: (str(x["area_code"]), str(x["unit_id"])))
+        if len(alist) != 12:
+            raise ConceptGraphError(f"schema sync: area {acode} has {len(alist)} Stage 2 items (expected 12)")
+        if len({x["_comp"] for x in alist}) != 12:
+            raise ConceptGraphError(f"schema sync: area {acode} fails <=1 item per effective_lineage_component_id cap")
+        exp_pair = _area_to_stage2_pair(acode)
+        idxs_here: list[int] = []
+        area_non_empty = 0
+        for pos_in_area, item in enumerate(alist):
+            exp_anchor = pos_in_area < 2
+            if bool(item.get("is_anchor", False)) != exp_anchor:
+                raise ConceptGraphError(
+                    f"schema sync: item {item['unit_id']} in {acode} is_anchor={item.get('is_anchor')} disagrees with deterministic first-2-per-area rule"
+                )
+            sb1, sb2, fs1, fs2 = _check_pair_eval(item.get("primary_evaluation"), exp_pair, f"stage2[{item['unit_id']}].primary")
+            if fs1 and fs2:
+                area_non_empty += 1
+            rec_clean = {
+                **item,
+                "_group": exp_pair,
+                "_sb1": sb1,
+                "_sb2": sb2,
+                "_fs1": fs1,
+                "_fs2": fs2,
+            }
+            if exp_anchor:
+                anchors_by_group[exp_pair].append(rec_clean)
+            else:
+                if item.get("secondary_evaluations"):
+                    raise ConceptGraphError(f"schema sync: non-anchor item {item['unit_id']} cannot carry secondary_evaluations")
+            idxs_here.append(len(ordered_s2))
+            ordered_s2.append(rec_clean)
+        area_item_indices.append(idxs_here)
+        if area_non_empty < min_area_both_non_empty:
+            min_area_both_non_empty = area_non_empty
+
+    exp_sched = expected_stage2_anchor_schedule()
+    ordered_anchors: list[dict] = []
+    anchor_8subjs: list[list[str]] = []
+    anchor_8sets: list[list[frozenset[str]]] = []
+    for g_id in _STAGE2_PAIR_ORDER:
+        g_ancs = sorted(anchors_by_group[g_id], key=lambda x: (str(x["area_code"]), str(x["unit_id"])))
+        if len(g_ancs) != len(exp_sched[g_id]):
+            raise ConceptGraphError(f"schema sync: group {g_id} anchor count mismatch")
+        for k_pos, anc_item in enumerate(g_ancs):
+            sec_list = anc_item.get("secondary_evaluations")
+            exp_receivers = exp_sched[g_id][k_pos]
+            if not isinstance(sec_list, list) or len(sec_list) != 3:
+                raise ConceptGraphError(f"schema sync: anchor {anc_item['unit_id']} requires 3 secondary_evaluations")
+            sec_by_p = {str(se.get("pair_id") or "").strip(): se for se in sec_list if isinstance(se, dict)}
+            if tuple(sorted(sec_by_p.keys(), key=lambda p: _STAGE2_PAIR_ORDER.index(p) if p in _STAGE2_PAIR_ORDER else 99)) != exp_receivers:
+                raise ConceptGraphError(
+                    f"schema sync: anchor {anc_item['unit_id']} secondary receiver pairs {list(sec_by_p.keys())} disagree with schedule {list(exp_receivers)}"
+                )
+            subjs_8 = [anc_item["_sb1"], anc_item["_sb2"]]
+            sets_8 = [anc_item["_fs1"], anc_item["_fs2"]]
+            for rec_p in exp_receivers:
+                s_b1, s_b2, f_s1, f_s2 = _check_pair_eval(sec_by_p[rec_p], rec_p, f"anchor[{anc_item['unit_id']}].sec[{rec_p}]")
+                subjs_8.extend([s_b1, s_b2])
+                sets_8.extend([f_s1, f_s2])
+            ordered_anchors.append(anc_item)
+            anchor_8subjs.append(subjs_8)
+            anchor_8sets.append(sets_8)
+
+    # 5. Recompute primary 240-item point estimates, 40-anchor 8-rater point estimates, and 10,000-resample bootstraps.
+    w_240 = [1.0] * 240
+    groups_240 = [x["_group"] for x in ordered_s2]
+    s1_240 = [x["_sb1"] for x in ordered_s2]
+    s2_240 = [x["_sb2"] for x in ordered_s2]
+    fs1_240 = [x["_fs1"] for x in ordered_s2]
+    fs2_240 = [x["_fs2"] for x in ordered_s2]
+    both_non_empty_mask = [bool(a and b) for a, b in zip(fs1_240, fs2_240)]
+
+    pt_alpha_subj, _ = _weighted_krippendorff_nominal_alpha([[a, b] for a, b in zip(s1_240, s2_240)], w_240)
+    pt_kappa_bar, _ = _weighted_pair_stratified_cohen_kappa(groups_240, s1_240, s2_240, w_240)
+    pt_hr = _weighted_hooper_rolling(fs1_240, fs2_240, w_240)
+    pt_alpha_masi, _ = _weighted_krippendorff_masi_alpha([[a, b] for a, b in zip(fs1_240, fs2_240)], w_240)
+
+    tag_counts: collections.Counter[str] = collections.Counter()
+    total_tags = 0
+    leaf_tags = 0
+    for fs_pair in (fs1_240, fs2_240):
+        for fs in fs_pair:
+            for cid_t in fs:
+                tag_counts[cid_t] += 1
+                total_tags += 1
+                if cid_t not in non_leaf_concepts:
+                    leaf_tags += 1
+    if total_tags == 0:
+        raise ConceptGraphError("schema sync: Stage 2 total concept tag assignments cannot be 0")
+    pt_p_max = max(tag_counts.values()) / total_tags
+    pt_leaf_spec = leaf_tags / total_tags
+
+    w_40 = [1.0] * 40
+    pt_anc_alpha_subj, _ = _weighted_krippendorff_nominal_alpha(anchor_8subjs, w_40)
+    pt_anc_alpha_masi, _ = _weighted_krippendorff_masi_alpha(anchor_8sets, w_40)
+    pt_anc_fleiss, _ = _weighted_fleiss_kappa_8rater(anchor_8subjs, w_40)
+
+    comp_list_240 = sorted({x["_comp"] for x in ordered_s2})
+    m_eff = len(comp_list_240)
+    if m_eff < 12 or hs["effective_lineage_components"] != m_eff:
+        raise ConceptGraphError(
+            f"schema sync: effective_lineage_components={hs['effective_lineage_components']} disagrees with recomputed M_eff={m_eff}"
+        )
+
+    # Precompute MASI pattern tables once for the 10,000 primary resamples.
+    pat_list: list[frozenset[str]] = []
+    pat_map: dict[frozenset[str], int] = {}
+    enc_240: list[list[int]] = []
+    dis_240: list[float] = []
+    for a, b in zip(fs1_240, fs2_240):
+        for fs in (a, b):
+            if fs not in pat_map:
+                pat_map[fs] = len(pat_list)
+                pat_list.append(fs)
+        enc_240.append([pat_map[a], pat_map[b]])
+        dis_240.append(2.0 * (1.0 - _masi_similarity(a, b)))
+    nz_pairs_240: list[tuple[int, int, float]] = []
+    for p in range(len(pat_list)):
+        for q in range(p + 1, len(pat_list)):
+            sim_pq = _masi_similarity(pat_list[p], pat_list[q])
+            if sim_pq > 0.0:
+                nz_pairs_240.append((p, q, sim_pq))
+
+    comp_to_idx_240 = {c: idx for idx, c in enumerate(comp_list_240)}
+    item_comp_idx_240 = [comp_to_idx_240[x["_comp"]] for x in ordered_s2]
+    rng_primary = random.Random(20270101)
+    degen_primary = 0
+    valid_primary = 0
+    while valid_primary < 10000:
+        mults = [0] * m_eff
+        for _ in range(m_eff):
+            mults[rng_primary.randrange(m_eff)] += 1
+        if sum(1 for c in mults if c > 0) < 2:
+            degen_primary += 1
+            if degen_primary > 100:
+                raise ConceptGraphError("schema sync: Stage 2 primary bootstrap exceeded degenerate_resample_count > 100")
+            continue
+        w_draw = [0.0] * 240
+        area_zero = False
+        for idxs_a in area_item_indices:
+            raw_sum_a = sum(mults[item_comp_idx_240[i]] for i in idxs_a)
+            if raw_sum_a == 0:
+                area_zero = True
+                break
+            scale_a = 12.0 / raw_sum_a
+            for i in idxs_a:
+                m_i = mults[item_comp_idx_240[i]]
+                if m_i:
+                    w_draw[i] = m_i * scale_a
+        if area_zero or sum(w_draw[i] for i in range(240) if both_non_empty_mask[i]) <= 0.0:
+            degen_primary += 1
+            if degen_primary > 100:
+                raise ConceptGraphError("schema sync: Stage 2 primary bootstrap exceeded degenerate_resample_count > 100")
+            continue
+        bs_masi, _ = _fast_masi_alpha_from_precomputed(enc_240, dis_240, nz_pairs_240, len(pat_list), w_draw)
+        if not math.isfinite(bs_masi) or bs_masi < -1.0 or bs_masi > 1.0:
+            raise ConceptGraphError("schema sync: non-finite or out-of-bounds bootstrap alpha_masi")
+        valid_primary += 1
+
+    # Separate pooled 40-anchor cluster bootstrap (seed = 20270102).
+    anc_comp_list = sorted({x["_comp"] for x in ordered_anchors})
+    m_anc = len(anc_comp_list)
+    if m_anc < 2:
+        raise ConceptGraphError("schema sync: 40 anchors require >=2 distinct effective_lineage_component_ids")
+    anc_comp_to_idx = {c: idx for idx, c in enumerate(anc_comp_list)}
+    anc_comp_idx = [anc_comp_to_idx[x["_comp"]] for x in ordered_anchors]
+    rng_anc = random.Random(20270102)
+    degen_anc = 0
+    valid_anc = 0
+    while valid_anc < 10000:
+        mults_a = [0] * m_anc
+        for _ in range(m_anc):
+            mults_a[rng_anc.randrange(m_anc)] += 1
+        raw_anc = [mults_a[anc_comp_idx[i]] for i in range(40)]
+        raw_anc_sum = sum(raw_anc)
+        if sum(1 for c in mults_a if c > 0) < 2 or raw_anc_sum == 0:
+            degen_anc += 1
+            if degen_anc > 100:
+                raise ConceptGraphError("schema sync: Stage 2 anchor bootstrap exceeded anchor_degenerate_resample_count > 100")
+            continue
+        scale_anc = 40.0 / raw_anc_sum
+        w_anc_draw = [r * scale_anc for r in raw_anc]
+        bs_fl, _ = _weighted_fleiss_kappa_8rater(anchor_8subjs, w_anc_draw)
+        if not math.isfinite(bs_fl) or bs_fl < -1.0 or bs_fl > 1.0:
+            raise ConceptGraphError("schema sync: non-finite or out-of-bounds anchor bootstrap Fleiss kappa")
+        valid_anc += 1
+
+    expected_metrics = {
+        "alpha_subject": pt_alpha_subj,
+        "kappa_bar_subject": pt_kappa_bar,
+        "cond_hooper": pt_hr["cond_hooper"],
+        "all_hooper": pt_hr["all_hooper"],
+        "cond_rolling": pt_hr["cond_rolling"],
+        "all_rolling": pt_hr["all_rolling"],
+        "alpha_masi": pt_alpha_masi,
+        "empty_rate": pt_hr["empty_rate"],
+        "p_max": pt_p_max,
+    }
+    for m_key, exp_val in expected_metrics.items():
+        if abs(float(hs[m_key]) - exp_val) > 1e-9:
+            raise ConceptGraphError(
+                f"schema sync: human_study_stage2.{m_key}={hs[m_key]} disagrees with raw recomputation ({exp_val:.12f})"
+            )
+    if hs["min_area_both_non_empty"] != min_area_both_non_empty:
+        raise ConceptGraphError(
+            f"schema sync: human_study_stage2.min_area_both_non_empty={hs['min_area_both_non_empty']} disagrees with recomputed {min_area_both_non_empty}"
+        )
+    if "leaf_specificity" in hs and (not _is_finite_num(hs["leaf_specificity"]) or abs(float(hs["leaf_specificity"]) - pt_leaf_spec) > 1e-9):
+        raise ConceptGraphError("schema sync: human_study_stage2.leaf_specificity disagrees with raw recomputation")
+    if "alpha_subject_anchor" in hs and (not _is_finite_num(hs["alpha_subject_anchor"]) or abs(float(hs["alpha_subject_anchor"]) - pt_anc_alpha_subj) > 1e-9):
+        raise ConceptGraphError("schema sync: human_study_stage2.alpha_subject_anchor disagrees with raw recomputation")
+    if "alpha_masi_anchor" in hs and (not _is_finite_num(hs["alpha_masi_anchor"]) or abs(float(hs["alpha_masi_anchor"]) - pt_anc_alpha_masi) > 1e-9):
+        raise ConceptGraphError("schema sync: human_study_stage2.alpha_masi_anchor disagrees with raw recomputation")
+    if "kappa_fleiss_anchor" in hs and (not _is_finite_num(hs["kappa_fleiss_anchor"]) or abs(float(hs["kappa_fleiss_anchor"]) - pt_anc_fleiss) > 1e-9):
+        raise ConceptGraphError("schema sync: human_study_stage2.kappa_fleiss_anchor disagrees with raw recomputation")
+    if hs.get("degenerate_resample_count") != degen_primary:
+        raise ConceptGraphError(
+            f"schema sync: human_study_stage2.degenerate_resample_count={hs.get('degenerate_resample_count')} disagrees with recomputed {degen_primary}"
+        )
+    if hs.get("anchor_degenerate_resample_count") != degen_anc:
+        raise ConceptGraphError(
+            f"schema sync: human_study_stage2.anchor_degenerate_resample_count={hs.get('anchor_degenerate_resample_count')} disagrees with recomputed {degen_anc}"
         )
 
 
@@ -1773,6 +2984,7 @@ def replay_provenance_step(
 
     expected_ws_cids: set[str] = set()
     expected_am_cids: set[str] = set()
+    removed_rel_ids = {str(x).strip() for x in (change.get("relationships_remove") or []) if str(x).strip()}
 
     for u in change.get("concepts_update", []) or []:
         cid = u["id"].strip()
@@ -1863,6 +3075,24 @@ def replay_provenance_step(
         if u.get("definition"):
             cprov["definition_change_kind"] = str(u["definition_change_kind"]).strip()
             cprov["edge_impact_note"] = " ".join(str(u["edge_impact_note"]).split())
+            raw_checked_inc = u.get("checked_incident_relationships")
+            if not isinstance(raw_checked_inc, list):
+                raise ConceptGraphError(
+                    f"schema sync: concepts_update[{cid}] definition edit requires checked_incident_relationships list"
+                )
+            clean_inc = [str(x).strip() for x in raw_checked_inc if isinstance(x, str) and x.strip()]
+            expected_inc = sorted(
+                {
+                    str(e["id"])
+                    for e in pre_doc.get("relationships", [])
+                    if str(e["id"]) not in removed_rel_ids and (e.get("source") == cid or e.get("target") == cid)
+                }
+            )
+            if len(clean_inc) != len(raw_checked_inc) or len(set(clean_inc)) != len(clean_inc) or sorted(clean_inc) != expected_inc:
+                raise ConceptGraphError(
+                    f"schema sync: checked_incident_relationships on {cid} disagrees with surviving baseline incident relationships {expected_inc}"
+                )
+            cprov["checked_incident_relationships"] = sorted(clean_inc)
         if u.get("label"):
             cprov["updated_label"] = " ".join(str(u["label"]).split())
         if u.get("scope"):
@@ -2237,6 +3467,7 @@ def validate_term_provenance_sidecar(root: Path, *, verify_live_script_digests: 
                 or s_add_map != replay_meta["secondary_concepts_added"]
                 or s_rem_map != replay_meta["secondary_concepts_removed"]
                 or other_s_upd != replay_meta["other_subject_updates"]
+                or bool(details.get("guides_replaced", False)) != replay_meta["guides_replaced"]
             ):
                 raise ConceptGraphError(
                     f"schema sync: applied_campaigns[{idx}] operation_details disagrees with replayed_patch"
@@ -2444,6 +3675,10 @@ def validate_term_provenance_sidecar(root: Path, *, verify_live_script_digests: 
         tax_ver_str,
         expected_tax_sha,
         expected_non_guides_sha,
+        root=root,
+        candidate_tax_doc=raw_tax,
+        burned_doc=burned_doc,
+        prov_concepts=prov.get("concepts") if isinstance(prov.get("concepts"), dict) else None,
     )
 
     concepts_by_id = {c["id"]: c for c in raw_tax.get("concepts", [])}
@@ -2542,8 +3777,11 @@ def validate_term_provenance_sidecar(root: Path, *, verify_live_script_digests: 
             if (
                 len(str(cprov.get("edge_impact_note") or "").strip()) < 15
                 or cprov.get("definition_change_kind") != "editorial-clarification"
+                or not isinstance(cprov.get("checked_incident_relationships"), list)
             ):
-                raise ConceptGraphError(f"schema sync: updated definition on {cid} missing edge_impact_note or editorial-clarification in term-provenance.yml")
+                raise ConceptGraphError(
+                    f"schema sync: updated definition on {cid} missing edge_impact_note, checked_incident_relationships, or editorial-clarification in term-provenance.yml"
+                )
 
     for cid, expected_added in net_aliases_added.items():
         if cid in concepts_by_id and expected_added:
@@ -2623,13 +3861,15 @@ def validate_term_provenance_sidecar(root: Path, *, verify_live_script_digests: 
                 raise ConceptGraphError(f"schema sync: invalid removed_aliases entry {rk!r} on {cid}")
             if _norm_prov_tokens(rk) in active_alias_norms and _norm_prov_tokens(rk) not in rest_map_norms:
                 raise ConceptGraphError(f"schema sync: removed alias {rk!r} on {cid} is still active without restored_aliases record")
-        if "edge_impact_note" in cprov or "definition_change_kind" in cprov:
+        if "edge_impact_note" in cprov or "definition_change_kind" in cprov or "checked_incident_relationships" in cprov:
             if (
                 len(str(cprov.get("edge_impact_note") or "").strip()) < 15
                 or cprov.get("definition_change_kind") != "editorial-clarification"
+                or not isinstance(cprov.get("checked_incident_relationships"), list)
+                or any(not isinstance(x, str) or not x.strip() for x in cprov["checked_incident_relationships"])
             ):
                 raise ConceptGraphError(
-                    f"schema sync: concept {cid} definition provenance requires edge_impact_note and definition_change_kind='editorial-clarification'"
+                    f"schema sync: concept {cid} definition provenance requires edge_impact_note, checked_incident_relationships, and definition_change_kind='editorial-clarification'"
                 )
 
     for rid, sprov in prov_subjects.items():
