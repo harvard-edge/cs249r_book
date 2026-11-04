@@ -88,13 +88,14 @@ with sync_playwright() as pw:
     page.emulate_media(reduced_motion='no-preference');menu.select_option('2');root.get_by_role('button',name='Expand',exact=True).click()
     root.get_by_role('button',name='Next',exact=True).click();page.wait_for_timeout(400);assert root.get_attribute('data-step')=='2' and root.get_attribute('data-pending')=='3'
     root.get_by_role('button',name='Pause',exact=True).click();tok=root.locator('.mp-source svg g[aria-hidden=true] g').first;tr=tok.get_attribute('transform');led=root.get_attribute('data-ledger');nar=root.locator('.mlsys-original-narration').inner_text()
-    assert 'Pending' in nar,nar;page.wait_for_timeout(400);assert tok.get_attribute('transform')==tr and root.get_attribute('data-ledger')==led and root.locator('.mlsys-original-narration').inner_text()==nar
+    assert 'Next · Scale by S = 1, no scaling (stage 3)' in nar and 'Pending' not in nar,nar;page.wait_for_timeout(400);assert tok.get_attribute('transform')==tr and root.get_attribute('data-ledger')==led and root.locator('.mlsys-original-narration').inner_text()==nar
     page.screenshot(path=str(shots/f'{engine}-{width}-paused-motion.png'))
     # The paused token must not cover the "3. Scale" step-label plate (drawing units: x 98.63, y 116.04, 28.37 x 8.82).
     clear=root.evaluate('''r=>{const t=r.querySelector('.mp-source svg g[aria-hidden=true] g');const m=t.getAttribute('transform').match(/translate\\(([-\\d.e]+) ([-\\d.e]+)\\)/);const w=+t.querySelector('rect').getAttribute('width'),x=+m[1],y=+m[2];
       const P=[98.63,116.04,28.37,8.82];return x+w/2<P[0]||x-w/2>P[0]+P[2]||y+4.5<P[1]||y-4.5>P[1]+P[3];}''');assert clear,'token covers the step label'
     root.get_by_role('button',name='Play',exact=True).click();page.wait_for_function("window.fixtureRoot.dataset.step==='3'",timeout=12000);root.get_by_role('button',name='Pause',exact=True).click()
-    assert json.loads(root.get_attribute('data-ledger'))['scaledLoss']==T[0]['scaled_loss'];page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce')
+    # Round four (2026-10-30): one Escape does one thing; a hovered tooltip takes the first Escape. Move the pointer off the bar so this Escape closes Expand.
+    assert json.loads(root.get_attribute('data-ledger'))['scaledLoss']==T[0]['scaled_loss'];page.mouse.move(2,2);page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce')
    page.get_by_role('tab',name='Diagram',exact=True).click();assert not root.is_visible();page.screenshot(path=str(shots/f'{engine}-{width}-{theme}-static.png'))
    page.get_by_role('tab',name='Explore',exact=True).click();assert not errors,errors
    # WebKit's print reflow makes the chapter's own Quarto sidebar ResizeObserver report a benign loop notice
