@@ -1,4 +1,4 @@
-"""Validate an authored topic taxonomy and export its explicitly stated meaning.
+"""Validate and export the SKOS hierarchy slice projected from `taxonomy/ml-systems-taxonomy.yml`.
 
 Collections are navigation sets, not broader/narrower claims. Technical field
 relationships and book links never become taxonomy or prerequisite statements.
@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from urllib.parse import quote, urlparse
-
-import yaml
+from urllib.parse import quote
 
 from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
+from .taxonomy_schema import validate_https_url
 
 
 PREFIX = PAGE_URL
@@ -44,12 +43,21 @@ def _records(model, name):
     return values
 
 
-def load_taxonomy(root: Path, field: dict) -> dict | None:
+def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    path = root / "taxonomy/ml-systems-taxonomy.yml"
-    if not path.exists():
-        return None
-    model = yaml.safe_load(path.read_text())
+    from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+    unified = _bundle if _bundle is not None else load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["skos"]
+        if model is None:
+            return None
+    else:
+        path = root / TAXONOMY_FILE
+        if not path.exists():
+            return None
+        model = load_taxonomy_yaml(path)
+        if not isinstance(model, dict) or ("concepts" in model or "areas" in model or "dimensions" in model or "roles" in model):
+            return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")
@@ -58,10 +66,7 @@ def load_taxonomy(root: Path, field: dict) -> dict | None:
     sources = _records(model, "sources")
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"])
-        parsed = urlparse(source["url"])
-        if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
-                or re.search(r'[\s<>"{}|\\^`]', source["url"])):
-            _fail(f"unsafe source URL {source['id']}")
+        validate_https_url(source["url"], f"taxonomy: unsafe source URL {source['id']}")
     topics = _records(model, "topics")
     field_nodes = {n["id"]: n for n in field["concepts"]}
     topic_nodes = {n["id"]: n for n in topics}
@@ -138,6 +143,8 @@ def load_taxonomy(root: Path, field: dict) -> dict | None:
         resolved_collections.append({**collection, "members": members})
     if assigned != families:
         _fail("collections must cover every field family exactly once")
+    from .taxonomy_schema import validate_linkml
+    validate_linkml(model, "TaxonomyHierarchyModel", root, "taxonomy")
     if any(node.get("family") not in assigned for node in field_nodes.values()):
         _fail("collections drop field concepts with unknown families")
     return {**model, "collections": resolved_collections,

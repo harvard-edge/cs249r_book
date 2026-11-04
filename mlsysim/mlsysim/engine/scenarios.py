@@ -2164,6 +2164,51 @@ class Scenarios(Registry):
         fleet=DenseLLMPretrainingReference.system,
         bytes_per_param=_BYTES_TRAINING_STATE,
     )
+    # Added 2026-11-03 (add-only). One definition of the 175B reference job's
+    # training step for every chapter: TP8 x PP8 x DP16 on the 1,024-GPU
+    # reference cluster, 16-bit mixed precision with unsharded mixed-precision
+    # Adam state, and one step = one optimizer update over the global batch.
+    DenseLLMPretrainingStep = _st.ReferenceTrainingStepScenario(
+        name="One optimizer step of the 175B reference job on 1,024 H100 GPUs",
+        description="TP across one node, PP8, DP16; 16-bit mixed precision; one optimizer update "
+                    "over the global batch, one sequence per microbatch. Step time is modeled.",
+        replica=Gpt3SelfContainedReplicaDgxH100,
+        fleet=_Clusters.Training_1K_NDR,  # the reference cluster as Volume II describes it (NDR)
+        batch_tokens=float(_Literature.TrainingRuns.Gpt3BatchTokens),  # Brown et al. (2020), Table 2.1
+        batch_divisor=64,  # scenario assumption: divisible by every DP degree from 1 to 64 (ch08 sweep)
+        sequences_per_microbatch=1,  # scenario assumption
+        precision="fp16",  # 16-bit mixed precision (BF16 or FP16 have the same width)
+        local_efficiency=float(_ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency),
+        overlap_comm=True,  # scenario assumption: solver default 85% DP overlap
+    )
+    # Added 2026-11-03 (add-only). The same step on the 8,192-GPU frontier tier
+    # (128 replicas, same global batch), to show the coordination cost growing with scale.
+    DenseLLMPretrainingStep8K = _st.ReferenceTrainingStepScenario(
+        name="One optimizer step of the 175B reference job on 8,192 H100 GPUs",
+        description="The reference step's layout, batch, and precision on 128 replicas instead of 16.",
+        replica=Gpt3SelfContainedReplicaDgxH100,
+        fleet=_Clusters.Frontier_8K,  # DGX H100 nodes on NDR InfiniBand
+        batch_tokens=float(_Literature.TrainingRuns.Gpt3BatchTokens),  # Brown et al. (2020), Table 2.1
+        batch_divisor=64,  # scenario assumption: same global batch as the reference step
+        sequences_per_microbatch=1,  # scenario assumption
+        precision="fp16",
+        local_efficiency=float(_ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency),
+        overlap_comm=True,  # scenario assumption: solver default 85% DP overlap
+    )
+    # Added 2026-11-03 (add-only). The same step on a cluster twice the reference
+    # size (32 replicas), for the storage chapter's running cluster.
+    DenseLLMPretrainingStep2K = _st.ReferenceTrainingStepScenario(
+        name="One optimizer step of the 175B reference job on 2,048 H100 GPUs",
+        description="The reference step's layout, batch, and precision on 32 replicas instead of 16.",
+        replica=Gpt3SelfContainedReplicaDgxH100,
+        fleet=_Clusters.Production_2K_NDR,
+        batch_tokens=float(_Literature.TrainingRuns.Gpt3BatchTokens),  # Brown et al. (2020), Table 2.1
+        batch_divisor=64,  # scenario assumption: same global batch as the reference step
+        sequences_per_microbatch=1,  # scenario assumption
+        precision="fp16",
+        local_efficiency=float(_ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency),
+        overlap_comm=True,  # scenario assumption: solver default 85% DP overlap
+    )
     # --- ML lifecycle: a diabetic retinopathy screener from request to monitoring (added 2026-10-20) ---
     # One rural-clinic screener carries every stage: its release floors and device
     # budget, a memory limit found after the work was done, two iteration speeds,

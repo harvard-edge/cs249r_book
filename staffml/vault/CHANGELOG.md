@@ -10,13 +10,36 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 
 ---
 
+## [Unreleased] — 2026-11-02
+
+### ML Systems Taxonomy 0.4-draft
+
+The taxonomy gained 71 concepts net and moved six (878 concepts and 2,020
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates and `vault check --strict` passes.
+`app/src/data/mlsys-taxonomy.json` was regenerated with the new labels and
+homes, and the loader now accepts the symptom field `quantities` beside
+causes, checks, and levers.
+
+- Moved concepts: 23 questions tagged with Local SGD, Embedding cache, or
+  Datacenter demand response were re-read; 10 changed `taxonomy_subject` to
+  the new home (3, 6, and 1), 13 kept the old subject because the question
+  is about that subject and the concept is a supporting tag.
+- New concepts offered to subject-only questions: the 185 questions without
+  `taxonomy_concepts` whose subject gained a concept were tagged by two
+  independent taggers (claude-fable-5-1 and gpt-6.1-sol) from the subject's
+  own concept list; tag-or-not agreement was 149 of 185 (80.5%), and the 44
+  questions where both chose the same concept received it. 141 questions stay
+  subject-only, which remains a valid tag.
+
 ## [Unreleased] — 2026-10-27
 
 ### ML Systems Taxonomy 0.3-draft
 
-The taxonomy gained 63 concepts and moved two (no identity was retired or
-renamed), so every existing tag still validates. `app/src/data/mlsys-taxonomy.json`
-was regenerated with the new labels and homes.
+The taxonomy gained 72 concepts and moved two (807 concepts and 1,719
+relationships in all; no identity was retired or renamed), so every existing
+tag still validates. `app/src/data/mlsys-taxonomy.json` was regenerated with
+the new labels and homes.
 
 The 25 questions tagged with a moved concept were re-reviewed under the
 published tagging rules. Seven had taken their subject from the concept's old
@@ -56,7 +79,7 @@ and a course topic can be found and compared by the same concept.
   (one to three concept identities, most central first), both optional.
   The model checks their format; the structural tier (`vault check
   --strict`, check #20) checks that they name a subject or concept in
-  `shared/concepts/`.
+  `taxonomy/` (formerly `shared/concepts/`).
 - **`CANON_VERSION` 2 → 3**: both fields join the content-hash whitelist,
   so retagging changes `release_hash` like any reclassification.
 - **SQLite / D1**: `questions.taxonomy_subject` column and a

@@ -1,4 +1,10 @@
-"""Compile the optional candidate subject framework and its explicit book links.
+"""Compile the subject framework and practitioner guides projected from `taxonomy/ml-systems-taxonomy.yml`.
+
+All subject groups (`F, S, P, Q, T`), areas (`F1`–`T2`), rows (`F1.1`–`T2.5`), facet dimensions, and practitioner
+guides (roles, symptom triage entries, and learning paths) are authored in the single canonical
+file `taxonomy/ml-systems-taxonomy.yml`. Each concept declares its primary maintenance home via
+`home: <subject-row-id>` on the concept record; row `concepts` lists are derived automatically
+by `load_unified_taxonomy` and never hand-duplicated on the row.
 
 A single candidate home is an editorial maintenance rule, not an assertion of
 exclusive membership, a SKOS broader relation, completeness, or competence.
@@ -13,21 +19,22 @@ import io
 import json
 from pathlib import Path
 import re
-from urllib.parse import urlparse
 
-import yaml
-
-from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
-from .field_graph import load_taxonomy_yaml
+from .concept_graph import PAGE_URL, SITE_DIR, SITE_URL, ConceptGraphError
+from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
 from .taxonomy_release import release_artifacts
+from .taxonomy_schema import (
+    SCOPE_REF_RE as SCOPE_REF,
+    get_class_slots,
+    get_enum_values,
+    get_required_class_slots,
+    validate_https_url,
+)
 
 
-DIMENSIONS = ("activities", "layers", "concerns", "contexts")
-# Scope notes cite the row or area that owns a topic as [[identity]], so a
-# relabeled row cannot leave a stale pointer behind.
-SCOPE_REF = re.compile(r"\[\[([^\[\]]+)\]\]")
-REQUIRED_DIMENSIONS = set(DIMENSIONS) - {"contexts"}
-SUPPORTED_VERSIONS = ("0.1-draft", "0.2-draft", "0.3-draft")
+DIMENSIONS = get_class_slots("DimensionSet")
+REQUIRED_DIMENSIONS = set(get_required_class_slots("DimensionSet"))
+SUPPORTED_VERSIONS = get_enum_values("FrameworkVersionEnum")
 
 
 def _fail(message):
@@ -67,9 +74,11 @@ def _members(values, known, context, nonempty=True):
     if any(not isinstance(value, str) for value in values):
         _fail(f"{context} requires string IDs")
     if len(set(values)) != len(values):
-        _fail(f"duplicate {context} value")
+        dups = sorted({v for v in values if values.count(v) > 1})
+        _fail(f"duplicate {context} value: {', '.join(dups)}")
     if any(value not in known for value in values):
-        _fail(f"unknown {context} value")
+        unknown = [v for v in values if v not in known]
+        _fail(f"unknown {context} value: {', '.join(unknown)}")
 
 
 def _scope_notes(record, source_ids, context):
@@ -113,46 +122,49 @@ def _chapters(root: Path, codes, context):
         title_match = re.search(r"^#\s+(.+?)(?:\s+\{.*)?$", source.read_text(), re.M) if source.exists() else None
         resolved.append({"code": f"{volume}/{match[2]}", "volume": volume, "chapter": f"{volume}/{folder.name}",
                          "title": title_match[1].strip() if title_match else folder.name,
-                         "url": f"https://mlsysbook.ai/{volume}/{folder.name}/{folder.name}.html"})
+                         "url": f"{SITE_URL}/{volume}/{folder.name}/{folder.name}.html"})
     return resolved
 
 
-def load_framework(root: Path, field: dict) -> dict | None:
-    """Validate optional authored rows; resolve only existing passage links.
+def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
+    """Validate the `framework` and `guides` projections of `taxonomy/ml-systems-taxonomy.yml` against `FrameworkModel` and `GuidesModel` and resolve chapter/passage links.
 
     New field identities deliberately block compilation until their candidate
     home is considered. No classification or additional book link is guessed.
     """
-    path = root / "taxonomy/ml-systems-framework.yml"
-    if not path.exists():
-        return None
-    model = load_taxonomy_yaml(path)
+    unified = _bundle if _bundle is not None else load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["framework"]
+    else:
+        # Fallback for isolated unit-test fixtures that construct a standalone FrameworkModel YAML.
+        path = root / TAXONOMY_FILE
+        if not path.exists():
+            return None
+        model = load_taxonomy_yaml(path)
+        if not isinstance(model, dict) or ("concepts" in model or "topics" in model or "roles" in model):
+            return None
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata",
-          {"schema_version", "id", "title", "version", "status", "scope", "rationale", "row_rule",
-           "secondary_policy", "relationship_semantics", "context_policy", "book_mapping_policy",
-           "warrant_policy", "competency_policy", "tagging_rules", "placement_examples",
-           "sources", "dimensions", "groups", "areas", "gaps"})
+          set(get_class_slots("FrameworkModel", root)))
     if model["status"] != "editorial-draft" or model["version"] not in SUPPORTED_VERSIONS:
         _fail(f"only versions {', '.join(SUPPORTED_VERSIONS)} with editorial-draft status are supported")
     sources = _records(model.get("sources"), "source")
+    source_slots = set(get_class_slots("FrameworkSource", root))
     for source in sources:
-        _text(source, ("title", "url", "role"), source["id"], {"id", "title", "url", "role"})
-        url = urlparse(source["url"])
-        if (url.scheme != "https" or not url.netloc or url.username or url.password
-                or re.search(r'[\s<>"{}|\\^`]', source["url"])):
-            _fail(f"unsafe source URL {source['id']}")
+        _text(source, ("title", "url", "role"), source["id"], source_slots)
+        validate_https_url(source["url"], f"framework: unsafe source URL {source['id']}")
     if len({s["title"].strip().casefold() for s in sources}) != len(sources):
         _fail("duplicate source title")
     dimensions = model.get("dimensions")
     if not isinstance(dimensions, dict) or not REQUIRED_DIMENSIONS <= set(dimensions) or set(dimensions) - set(DIMENSIONS):
         _fail("dimensions must define activities, layers, and concerns")
     facets = {}
+    facet_slots = set(get_class_slots("DimensionFacet", root))
     for name in DIMENSIONS:
         records = _records(dimensions.get(name, []), name, nonempty=name != "contexts")
         for record in records:
-            _text(record, ("label",), record["id"], {"id", "label"})
+            _text(record, ("label",), record["id"], facet_slots)
         if len({r["label"].strip().casefold() for r in records}) != len(records):
             _fail(f"duplicate {name} label")
         facets[name] = {r["id"] for r in records}
@@ -163,17 +175,19 @@ def load_framework(root: Path, field: dict) -> dict | None:
         _fail("duplicate field concept identity")
     areas = _records(model.get("areas"), "area")
     row_ids, labels, homes = set(), set(), Counter()
+    homes_by_concept: dict[str, str] = {}
     identities = {model["id"], *concepts}
     # Groups are an optional top tier (e.g. stack, lifecycle, qualities). When
     # present, every area names exactly one group; groups carry no concepts.
     groups = _records(model["groups"], "group") if "groups" in model else []
+    group_slots = set(get_class_slots("SubjectGroup", root))
     for group in groups:
-        _text(group, ("label", "question"), group["id"], {"id", "code", "label", "question"})
+        _text(group, ("label", "question"), group["id"], group_slots)
         if group["id"] in identities:
             _fail(f"group identity overlaps another source {group['id']}")
         identities.add(group["id"])
     group_ids = {group["id"] for group in groups}
-    # Readable codes (L4.3) are optional but, once used, must be complete,
+    # Readable codes (P4.3) are optional but, once used, must be complete,
     # unique, and nested: an area code extends its group code, a subject code
     # its area code. Permanent identities stay the machine reference.
     if any("code" in area for area in areas):
@@ -192,10 +206,10 @@ def load_framework(root: Path, field: dict) -> dict | None:
                 if not re.fullmatch(re.escape(area["code"]) + r"\.\d+", row["code"]):
                     _fail(f"subject code {row['code']} does not extend area code {area['code']}")
     resolved_areas = []
+    area_slots = set(get_class_slots("SubjectArea", root))
+    row_slots = set(get_class_slots("SubjectRow", root))
     for area in areas:
-        _text(area, ("label", "question", "scope"), area["id"],
-              {"id", "code", "group", "label", "display_label", "question", "scope", "status",
-               "includes", "excludes", "warrants", "warrant_role", "inventory_status", "rows"})
+        _text(area, ("label", "question", "scope"), area["id"], area_slots)
         _scope_notes(area, source_ids, area["id"])
         if groups and area.get("group") not in group_ids:
             _fail(f"area {area['id']} requires a known group")
@@ -211,10 +225,7 @@ def load_framework(root: Path, field: dict) -> dict | None:
         rows = _records(area.get("rows"), "row")
         resolved_rows = []
         for row in rows:
-            _text(row, ("label", "definition"), row["id"],
-                  {"id", "code", "label", "display_label", "definition", "status", "includes", "excludes",
-                   "warrants", "warrant_role", "inventory_status", "concepts", "secondary_concepts",
-                   "book_chapters", *DIMENSIONS})
+            _text(row, ("label", "definition"), row["id"], row_slots)
             _scope_notes(row, source_ids, row["id"])
             if row["id"] in identities or row["id"] in row_ids:
                 _fail(f"duplicate or overlapping row identity {row['id']}")
@@ -235,6 +246,8 @@ def load_framework(root: Path, field: dict) -> dict | None:
             for name in DIMENSIONS:
                 _members(row.get(name, [] if name == "contexts" else None), facets[name], f"row {row['id']} {name}", nonempty=name != "contexts")
             homes.update(row["concepts"])
+            for cid in row["concepts"]:
+                homes_by_concept[cid] = row["id"]
             chapters = _chapters(root, row.get("book_chapters", []), f"row {row['id']}")
             members = set(row["concepts"]) | set(secondary)
             links = [deepcopy(link) for link in field.get("book_links", []) if link["concept"] in members]
@@ -286,9 +299,9 @@ def load_framework(root: Path, field: dict) -> dict | None:
     gaps = _records(model.get("gaps"), "gap", nonempty=False)
     resolved_gaps = []
     rows_by_id = {row["id"]: row for area in resolved_areas for row in area["rows"]}
+    gap_slots = set(get_class_slots("ScopeGap", root))
     for gap in gaps:
-        _text(gap, ("reason", "status"), gap["id"],
-              {"id", "topic", "label", "subject_row", "reason", "status"})
+        _text(gap, ("reason", "status"), gap["id"], gap_slots)
         if "subject_row" in gap:
             _text(gap, ("subject_row",), gap["id"])
             if gap["subject_row"] not in rows_by_id:
@@ -301,8 +314,24 @@ def load_framework(root: Path, field: dict) -> dict | None:
             _fail("gaps require candidate status, not a verified absence claim")
         if gap["id"] in identities or gap["id"] in row_ids:
             _fail(f"gap identity overlaps another source {gap['id']}")
+    placement_examples = model.get("placement_examples", [])
+    if not isinstance(placement_examples, list):
+        _fail("placement_examples must be a list")
+    placement_slots = set(get_class_slots("PlacementExample", root))
+    for ex in placement_examples:
+        _text(ex, ("concept", "home", "why"), "placement example", placement_slots)
+        if ex["concept"] not in concepts:
+            _fail(f"placement example names unknown concept {ex['concept']}")
+        if ex["home"] not in rows_by_id:
+            _fail(f"placement example names unknown home row {ex['home']}")
+        if homes_by_concept.get(ex["concept"]) != ex["home"]:
+            _fail(
+                f"placement example for {ex['concept']} claims home {ex['home']} instead of {homes_by_concept.get(ex['concept'])}"
+            )
+    from .taxonomy_schema import validate_linkml
+    validate_linkml(model, "FrameworkModel", root, "framework")
     links = field.get("book_links", [])
-    guides = _guides(root, rows_by_id, field)
+    guides = _guides(root, rows_by_id, field, version=model.get("version"), _bundle=_bundle)
     return {**deepcopy(model), "guides": guides, "dimensions": {name: dimensions.get(name, []) for name in DIMENSIONS}, "areas": resolved_areas, "gaps": resolved_gaps,
             "summary": {"groups": len(groups), "areas": len(areas), "rows": len(row_ids), "concepts": len(concepts),
                         "book_links": len(links), "linked_concepts": len({link["concept"] for link in links}),
@@ -310,23 +339,36 @@ def load_framework(root: Path, field: dict) -> dict | None:
                         "learning_paths": len(guides["learning_paths"])}}
 
 
-def _guides(root: Path, rows_by_id: dict, field: dict) -> dict:
-    """Load the reader guides (roles, symptoms, learning paths) and derive symptom levers.
+def _guides(root: Path, rows_by_id: dict, field: dict, version: str | None = None, _bundle: dict | None = None) -> dict:
+    """Load and validate the reader guides (roles, symptoms, learning paths) against `GuidesModel` and the relationship graph.
 
     Every reference must name an existing subject or concept, and every symptom check or lever must
     share a relationship with one of the symptom's causes, so the guide stays tied to the graph (2026-10-28).
     """
-    path = root / "taxonomy/ml-systems-guides.yml"
-    if not path.exists():
-        return {"roles": [], "symptoms": [], "learning_paths": []}
-    model = load_taxonomy_yaml(path)
+    unified = _bundle if _bundle is not None else load_unified_taxonomy(root)
+    if unified is not None:
+        model = unified["guides"]
+        if model is None:
+            return {"roles": [], "symptoms": [], "learning_paths": []}
+    else:
+        path = root / TAXONOMY_FILE
+        if not path.exists():
+            return {"roles": [], "symptoms": [], "learning_paths": []}
+        raw = load_taxonomy_yaml(path)
+        if isinstance(raw, dict) and "guides" in raw:
+            model = {"schema_version": raw.get("schema_version", 1), **raw["guides"]}
+        elif isinstance(raw, dict) and ("roles" in raw or "symptoms" in raw or "learning_paths" in raw) and "areas" not in raw and "concepts" not in raw:
+            model = raw
+        else:
+            return {"roles": [], "symptoms": [], "learning_paths": []}
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("guides: unsupported schema")
-    _text(model, (), "guides", {"schema_version", "roles_note", "roles", "symptoms_note", "symptoms", "paths_note", "learning_paths"})
+    _text(model, (), "guides", set(get_class_slots("GuidesModel", root)))
     concepts = {c["id"]: c for c in field["concepts"]}
     roles = _records(model.get("roles"), "role")
+    role_slots = set(get_class_slots("RoleProfile", root))
     for role in roles:
-        _text(role, ("label", "summary"), role["id"], {"id", "label", "summary", "core", "working"})
+        _text(role, ("label", "summary"), role["id"], role_slots)
         _members(role.get("core"), rows_by_id, f"{role['id']} core")
         _members(role.get("working", []), rows_by_id, f"{role['id']} working", nonempty=False)
         if set(role["core"]) & set(role.get("working", [])):
@@ -337,26 +379,36 @@ def _guides(root: Path, rows_by_id: dict, field: dict) -> dict:
         neighbors.setdefault(e["source"], set()).add(e["target"])
         neighbors.setdefault(e["target"], set()).add(e["source"])
     symptoms = _records(model.get("symptoms"), "symptom")
+    symptom_slots = set(get_class_slots("ProductionSymptom", root))
     for symptom in symptoms:
-        _text(symptom, ("label", "signal"), symptom["id"], {"id", "label", "signal", "causes", "checks", "levers"})
+        _text(symptom, ("label", "signal"), symptom["id"], symptom_slots)
         _members(symptom.get("causes"), concepts, f"{symptom['id']} causes")
         _members(symptom.get("checks", []), concepts, f"{symptom['id']} checks", nonempty=False)
         _members(symptom.get("levers"), concepts, f"{symptom['id']} levers")
+        _members(symptom.get("quantities", []), concepts, f"{symptom['id']} quantities", nonempty=False)
+        # A check or lever must touch a listed cause or the measured quantity (2026-11-02: quantities were added so a
+        # symptom's own metric no longer has to pose as a cause for its checks and levers to connect).
+        anchors = set(symptom["causes"]) | set(symptom.get("quantities", []))
         for kind in ("checks", "levers"):
             for cid in symptom.get(kind, []):
-                if not neighbors.get(cid, set()) & set(symptom["causes"]):
-                    _fail(f"{symptom['id']} {kind[:-1]} {cid} shares no relationship with any listed cause")
+                if not neighbors.get(cid, set()) & anchors:
+                    _fail(f"{symptom['id']} {kind[:-1]} {cid} shares no relationship with any listed cause or quantity")
     paths = _records(model.get("learning_paths"), "learning path")
+    path_slots = set(get_class_slots("LearningPath", root))
+    step_slots = set(get_class_slots("LearningPathStep", root))
     for lp in paths:
-        _text(lp, ("label", "audience"), lp["id"], {"id", "label", "audience", "steps"})
+        _text(lp, ("label", "audience"), lp["id"], path_slots)
         if not isinstance(lp.get("steps"), list) or len(lp["steps"]) < 3:
             _fail(f"{lp['id']} needs at least three steps")
         for step in lp["steps"]:
-            _text(step, ("subject", "why"), lp["id"], {"subject", "why"})
+            _text(step, ("subject", "why"), lp["id"], step_slots)
             if step["subject"] not in rows_by_id:
                 _fail(f"{lp['id']} step names unknown subject {step['subject']}")
         if len({step["subject"] for step in lp["steps"]}) != len(lp["steps"]):
             _fail(f"{lp['id']} repeats a subject")
+    from .taxonomy_schema import validate_guides_semantics, validate_linkml
+    validate_linkml(model, "GuidesModel", root, "framework: guides")
+    validate_guides_semantics(model, rows_by_id, version=version)
     return {"roles_note": model.get("roles_note", ""), "roles": deepcopy(roles),
             "symptoms_note": model.get("symptoms_note", ""), "symptoms": deepcopy(symptoms),
             "paths_note": model.get("paths_note", ""), "learning_paths": deepcopy(paths)}
@@ -405,7 +457,7 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
         lines.extend(['', f'{heading} {_md(area["label"])}', '', _md(area["question"]), '', _md(area["scope"])])
         for row in area["rows"]:
             writer.writerow({"framework_id": framework["id"], "framework_title": framework["title"], "framework_scope": framework["scope"],
-                             "version": framework["version"], "status": framework["status"], "source_file": "taxonomy/ml-systems-framework.yml",
+                             "version": framework["version"], "status": framework["status"], "source_file": TAXONOMY_FILE,
                              "group_id": area.get("group", ""), "group_label": group["label"] if group else "",
                              "area_id": area["id"], "area_label": area["label"], "area_display_label": area.get("display_label", ""),
                              "area_question": area["question"], "area_scope": area["scope"],

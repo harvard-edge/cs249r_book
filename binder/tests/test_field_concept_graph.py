@@ -27,12 +27,12 @@ def landscape(tmp_path):
         views=[dict(id="overview", title="Selected question?", concepts=["mlsys.capacity", "mlsys.state"]),
                dict(id="all", title="Whole field?", concepts=["mlsys.capacity", "mlsys.state", "mlsys.unmapped"])],
     )
-    (folder / "ml-systems-field.yml").write_text(yaml.safe_dump(model))
+    (folder / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(model))
     return tmp_path, model
 
 
 def save(root, model):
-    (root / "taxonomy/ml-systems-field.yml").write_text(yaml.safe_dump(model))
+    (root / "taxonomy/ml-systems-taxonomy.yml").write_text(yaml.safe_dump(model))
 
 
 def test_field_identity_and_unmapped_concepts_survive_empty_books(landscape):
@@ -133,13 +133,28 @@ def test_portable_view_and_svg_use_same_records_without_script_injection(landsca
     assert artifacts[site / "field-all.svg"].startswith(b"<?xml")
 
 
-BOUNDS = dict(id="bounds", forward="bounds", inverse="is bounded by", kind="constraint", meaning="A limits B.")
+def _canonical_relations():
+    raw = yaml.safe_load((Path(__file__).resolve().parents[2] / "taxonomy/schema/mlsys-taxonomy.linkml.yml").read_text())
+    pvs = raw["enums"]["RelationIdEnum"]["permissible_values"]
+    return [
+        dict(
+            id=rid,
+            forward=pv["annotations"]["forward"],
+            inverse=pv["annotations"]["inverse"],
+            kind=pv["annotations"]["kind"],
+            meaning=pv["description"],
+        )
+        for rid, pv in pvs.items()
+    ]
+
+
+RELATIONS = _canonical_relations()
 
 
 @pytest.mark.parametrize("mutation,error", [
-    (lambda m: m.update(relations=[BOUNDS]), "needs a controlled relation"),
-    (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="reduces")), "needs a controlled relation"),
-    (lambda m: (m.update(relations=[BOUNDS]), m["relationships"][0].update(relation="bounds", kind="mechanism")), "kind disagrees"),
+    (lambda m: m.update(relations=RELATIONS), "needs a controlled relation"),
+    (lambda m: (m.update(relations=RELATIONS), m["relationships"][0].update(relation="unlisted")), "needs a controlled relation"),
+    (lambda m: (m.update(relations=RELATIONS), m["relationships"][0].update(relation="limits", kind="mechanism")), "kind disagrees"),
     (lambda m: m["relationships"].append({**deepcopy(m["relationships"][0]), "id": "rel.capacity.state", "source": "mlsys.capacity", "target": "mlsys.state"}), "duplicate concept pair"),
 ])
 def test_relation_vocabulary_and_pairs_are_enforced(landscape, mutation, error):
@@ -152,12 +167,12 @@ def test_relation_vocabulary_and_pairs_are_enforced(landscape, mutation, error):
 
 def test_controlled_relation_reaches_the_payload(landscape):
     root, model = landscape
-    model.update(relations=[BOUNDS])
-    model["relationships"][0].update(relation="bounds")
+    model.update(relations=RELATIONS)
+    model["relationships"][0].update(relation="limits")
     save(root, model)
     field = load_field(root, {"nodes": {}, "chapters": {}})
-    assert field["relations"] == [BOUNDS]
-    assert field["relationships"][0]["relation"] == "bounds"
+    assert field["relations"] == RELATIONS
+    assert field["relationships"][0]["relation"] == "limits"
 
 
 @pytest.mark.parametrize("retired,ok", [
@@ -179,7 +194,7 @@ def test_retired_identities_stay_unused_and_point_to_a_replacement(landscape, re
 def test_taxonomy_yaml_rejects_aliases(tmp_path):
     from core.field_graph import load_taxonomy_yaml
 
-    path = tmp_path / "ml-systems-framework.yml"
+    path = tmp_path / "ml-systems-taxonomy.yml"
     path.write_text("a: &shared [x, y]\nb: *shared\n")
     with pytest.raises(ConceptGraphError, match="aliases"):
         load_taxonomy_yaml(path)

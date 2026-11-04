@@ -408,10 +408,16 @@ steps in the repeatable workflow.
 
 ## Field reference model and book alignment
 
-The field landscape is independent of the book-derived volume maps. Its source
-is `taxonomy/ml-systems-field.yml`: stable `mlsys.*` identities,
-definitions, navigation families, per-concept applicability, external reading
-references, conditioned propositions, and selected views. A global concept has
+The field landscape is independent of the book-derived volume maps. Its single
+source of truth is `taxonomy/ml-systems-taxonomy.yml`, governed by the LinkML
+metamodel `taxonomy/schema/mlsys-taxonomy.linkml.yml` (`UnifiedTaxonomyModel`):
+5 subject groups (`F, S, P, Q, T`), 20 areas, and 101 subject rows, stable
+`mlsys.*` identities (each with a primary `home:` subject pointer), definitions,
+navigation families, per-concept applicability, external reading references,
+17 controlled relations and conditioned propositions, practitioner guides (roles,
+symptoms, learning paths), and the explicit SKOS hierarchy slice (`skos_hierarchy`).
+Subject concept lists (`row.concepts`) and `views[id=all]` are derived automatically
+by the compiler from `Concept.home` and `concepts`. A global concept has
 no chapter owner. The chapter YAML contracts remain authoritative for what the
 books teach; they are not definitions of the field's boundary.
 
@@ -570,7 +576,8 @@ proposal changes no live student navigation or concept ownership.
 
 ### Implemented taxonomy pilot
 
-The authored pilot is `taxonomy/ml-systems-taxonomy.yml`. It reuses field
+The explicit SKOS hierarchy slice lives under `skos_hierarchy` in the canonical
+`taxonomy/ml-systems-taxonomy.yml`. It reuses field
 concept IDs and defines two additional subject topics, with explicit draft
 broader/narrower placements for parallel execution strategies and learning
 paradigms. Learning paradigms may overlap; their sibling placement asserts

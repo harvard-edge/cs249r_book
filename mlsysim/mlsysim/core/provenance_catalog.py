@@ -1841,7 +1841,11 @@ TAN_EFFICIENTNET_2019 = _lit(
     "Tan & Le (2019), EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks",
     url="https://arxiv.org/abs/1905.11946",
     verified=_V,
-    notes="EfficientNet-B4: 19M parameters, 4.2B FLOPS (paper counts multiply-adds), 82.9% ImageNet top-1 (Table 2).",
+    notes=(
+        "Table 2 of arXiv v5 (paper FLOPS count multiply-adds): B0 5.3M parameters, 0.39B FLOPS, "
+        "77.1% ImageNet top-1; B4 19M, 4.2B, 82.9%; B7 66M, 37B, 84.3%. The ICML 2019 version "
+        "(v1-v3) printed 76.3% (B0), 82.6% (B4), and 84.4% (B7)."
+    ),
 )
 HOWARD_MOBILENETV3_2019 = _lit(
     "prov:howard-mobilenetv3-2019",
@@ -1938,6 +1942,16 @@ LITHOGRAPHY_RETICLE_FIELD = _conv(
     "prov:lithography-reticle-field",
     "Standard 26 mm x 33 mm full-field exposure of 4x-reduction steppers/scanners (DUV and 0.33-NA EUV)",
     notes="Area 858 mm^2 is derived (26 x 33). Sets the maximum single-die size without stitching.",
+)
+PANASONIC_CR2032_DATASHEET = _ds(
+    "prov:panasonic-cr2032-datasheet",
+    "Panasonic Energy Co., Ltd., CR2032 CR Coin-type Lithium Battery, product datasheet (as of February 2026)",
+    "https://energy.panasonic.com/dam/master/pdf/en/datasheet/lithium/CR2032_Datasheet_EN.pdf",
+    verified="2026-10-30",
+    notes=("Read 2026-10-30: nominal voltage 3 V; nominal capacity 225 mAh; continuous drain 0.2 mA; "
+           "diameter (max.) 20.0 mm, height (max.) 3.2 mm; weight approx. 2.8 g; operating temperature "
+           "-30 to +85 C. Lithium manganese dioxide chemistry. Some distributor listings round to "
+           "220 mAh; the manufacturer rating is 225 mAh."),
 )
 ST_STM32F407_DATASHEET = _ds(
     "prov:st-stm32f407-datasheet",

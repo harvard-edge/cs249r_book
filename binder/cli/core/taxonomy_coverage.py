@@ -15,30 +15,13 @@ from collections import Counter
 import json
 from pathlib import Path
 
-import yaml
+from .field_graph import load_taxonomy_yaml, load_vocabulary, pct
+from .taxonomy_schema import get_class_slots, get_enum_values
 
 
-from .field_graph import load_taxonomy_yaml
-
-
-STATUSES = ("covered", "partial", "missing", "out-of-scope")
-CHECKLIST_KEYS = {"schema_version", "id", "title", "basis", "held_out", "topics"}
-TOPIC_KEYS = {"topic", "sources", "status", "concepts", "subject", "note"}
-
-
-def _vocabulary(root: Path):
-    field = load_taxonomy_yaml(root / "taxonomy/ml-systems-field.yml")
-    framework = load_taxonomy_yaml(root / "taxonomy/ml-systems-framework.yml")
-    concepts = {c["id"] for c in field["concepts"]}
-    subjects, homes = {}, {}
-    for area in framework["areas"]:
-        for row in area["rows"]:
-            subjects[row["id"]] = row
-            if row.get("code"):
-                subjects[row["code"]] = row
-            for concept_id in row.get("concepts", []):
-                homes[concept_id] = row["id"]
-    return concepts, subjects, homes
+STATUSES = get_enum_values("ChecklistStatusEnum")
+CHECKLIST_KEYS = set(get_class_slots("CoverageChecklistModel"))
+TOPIC_KEYS = set(get_class_slots("CoverageChecklistTopic"))
 
 
 def _check(checklist: dict, concepts: set, subjects: dict, homes: dict, name: str) -> list[str]:
@@ -74,7 +57,7 @@ def _check(checklist: dict, concepts: set, subjects: dict, homes: dict, name: st
         # must match the home of at least one cited concept.
         if status == "covered" and item.get("subject") in subjects:
             concept_homes = {homes[c] for c in item.get("concepts", []) if c in homes}
-            if concept_homes and subjects[item["subject"]]["id"] not in concept_homes:
+            if concept_homes and item["subject"] not in concept_homes:
                 errors.append(f"{where}: subject {item['subject']} disagrees with concept homes {sorted(concept_homes)}")
         if status == "partial" and not item.get("subject"):
             errors.append(f"{where}: partial requires a subject")
@@ -91,23 +74,27 @@ def _summary(topics: list[dict]) -> dict:
     in_scope = len(topics) - counts["out-of-scope"]
     weight_in_scope = sum(weights.values()) - weights["out-of-scope"]
 
-    def share(part, whole):
-        return round(100 * part / whole, 1) if whole else 0.0
-
     return {"topics": len(topics), "in_scope": in_scope, "counts": {s: counts[s] for s in STATUSES},
-            "covered_pct": share(counts["covered"], in_scope),
-            "homed_pct": share(counts["covered"] + counts["partial"], in_scope),
-            "weighted_covered_pct": share(weights["covered"], weight_in_scope),
-            "weighted_homed_pct": share(weights["covered"] + weights["partial"], weight_in_scope)}
+            "covered_pct": pct(counts["covered"], in_scope),
+            "homed_pct": pct(counts["covered"] + counts["partial"], in_scope),
+            "weighted_covered_pct": pct(weights["covered"], weight_in_scope),
+            "weighted_homed_pct": pct(weights["covered"] + weights["partial"], weight_in_scope)}
 
 
 def coverage_report(root: Path) -> dict:
+    """Validate all external coverage checklists under `taxonomy/coverage/` and compute summary metrics."""
+    from .concept_graph import ConceptGraphError
+    from .taxonomy_schema import validate_linkml
     folder = root / "taxonomy/coverage"
-    concepts, subjects, homes = _vocabulary(root)
+    concepts, subjects, homes = load_vocabulary(root, "coverage")
     checklists, errors = [], []
     for path in sorted(folder.glob("*.yml")):
         checklist = load_taxonomy_yaml(path)
         errors += _check(checklist, concepts, subjects, homes, path.name)
+        try:
+            validate_linkml(checklist, "CoverageChecklistModel", root, path.name)
+        except ConceptGraphError as exc:
+            errors.append(str(exc))
         if isinstance(checklist.get("topics"), list):
             checklists.append({"id": checklist.get("id"), "title": checklist.get("title"), "basis": checklist.get("basis"),
                                "held_out": checklist.get("held_out"), "file": path.name,
@@ -117,6 +104,7 @@ def coverage_report(root: Path) -> dict:
 
 
 def write_report(root: Path) -> dict:
+    """Compute the external checklist coverage report and write markdown and JSON summaries to `books/_build/concepts/`."""
     report = coverage_report(root)
     out = root / "books/_build/concepts"
     out.mkdir(parents=True, exist_ok=True)
