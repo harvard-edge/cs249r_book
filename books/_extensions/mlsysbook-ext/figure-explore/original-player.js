@@ -108,13 +108,12 @@
     if (!root || !outer || !Array.isArray(steps) || !steps.length || typeof render !== 'function') {
       throw new Error('Original figure requires root, outer, nonempty steps, and render.');
     }
-    // Opt-in compact layout: title, intro, Assumptions, optional view controls, diagram,
-    // a sticky dock (control bar + one-line step cue), narration, details. Every figure
-    // that omits `layout` keeps the default DOM below unchanged.
-    if (options.layout != null && options.layout !== 'compact') throw new Error('Unknown original figure layout: ' + options.layout);
-    const compact = options.layout === 'compact';
+    // Consistent diagram-first layout for all shared-player lessons. Classic is
+    // retained as an explicit compatibility option for specialized integrations.
+    if (options.layout != null && !['compact', 'classic'].includes(options.layout)) throw new Error('Unknown original figure layout: ' + options.layout);
+    const compact = options.layout !== 'classic';
     const intro = compact && typeof options.intro === 'string' ? options.intro.trim() : '';
-    if (compact && !intro) throw new Error('Compact original figure requires a nonempty intro.');
+    if (options.layout === 'compact' && !intro) throw new Error('Compact original figure requires a nonempty intro.');
     function timing(name) {
       const raw = outer.dataset[name];
       const value = Number(raw);
@@ -193,6 +192,7 @@
       root.classList.add('mlsys-original-compact');
       root.dataset.layout = 'compact';
       introText = make('p', 'mlsys-original-intro', intro);
+      introText.hidden = !intro;
       // Shortcut description for the group: referenced, never rendered or traversed twice.
       keysDesc = make('p', 'mlsys-original-keys-desc', 'Shortcuts: N next, P back, K play or pause, R restart, minus slower, plus faster.');
       keysDesc.id = id + '-keys';

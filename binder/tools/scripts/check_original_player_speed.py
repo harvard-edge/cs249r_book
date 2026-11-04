@@ -32,7 +32,7 @@ FIXTURE = r'''() => {
     const root = document.getElementById(id);
     const outer = root.parentElement;
     return players[id] = MLSysOriginalPlayer.create({
-      root, outer, title: 'Synthetic speed contract', scope: 'Clock test, not a measured ML workload.',
+      root, outer, layout: 'classic', title: 'Synthetic speed contract', scope: 'Clock test, not a measured ML workload.',
       steps: ['Ready', 'Read', 'Compute', 'Store'].map(label => ({label, description:label})),
       render(index, {stage, details}) {
         stage.innerHTML = '<svg viewBox="0 0 100 25"><circle r="5" cy="12"/></svg>';

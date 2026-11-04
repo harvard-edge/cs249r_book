@@ -64,11 +64,14 @@ single-query worked case must not appear to execute a complete matrix.
 Module-specific case selectors belong before the shared toolbar. Diagram-view
 selectors may remain with the artwork.
 
-**Compact layout pilot.** `create({..., layout: 'compact', intro})` is opt-in
-and currently used by `vol1:fig-mixed-precision`, `vol1:fig-fetching-optimized`,
+**Consistent shared-player layout.** The shared player now defaults to the compact, diagram-first layout across volumes.
+Existing lessons retain their titles and narration; no introductory prose is generated.
+`layout: 'classic'` explicitly retains the previous layout for compatibility.
+An authored `intro` remains required when a module explicitly requests `layout: 'compact'`.
+The initial authored-intro pilots are `vol1:fig-mixed-precision`, `vol1:fig-fetching-optimized`,
 `vol1:fig-hw-acceleration-h100-roofline-lighthouses`, `vol1:fig-tiling-diagram`
 (a tall figure), and `vol1:fig-activation-checkpointing` (a wide chain).
-Omitting `layout` keeps the default layout above unchanged. Its order is:
+Omitting `layout` uses the same compact controls, without an empty introduction. Its order is:
 title; the required `intro` (creation throws without one); one collapsed
 **Assumptions** disclosure; optional view controls; the diagram; a dock
 holding the control bar; the current narration; then details and readouts.
