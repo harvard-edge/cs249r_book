@@ -13,6 +13,7 @@ citation.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -37,6 +38,31 @@ from mlsysim.systems.types import Fleet, NetworkFabric, Node  # noqa: E402
 # A1: NVIDIA DeepLearningExamples, TensorFlow ResNet-50 v1.5, AMP + XLA, DGX A100
 #     (8x A100 40GB), TensorFlow 20.06-tf1-py3 container, batch 256 per GPU; images/s for the node.
 A1_REPORTED_IMG_PER_S = 17_400
+# A2: LLM-Inference-Bench (Chitty-Venkata et al., 2024, arXiv:2411.00136), raw data in
+#     github.com/argonne-lcf/LLM-Inference-Bench at commit 4211f5d4e9bc0145ed541b6d372d5d8223b44235
+#     (2025-07-18), file Plots/All_results.csv, rows "Nvidia H100 GPU, 4, <engine>,
+#     meta-llama/Llama-2-70b-hf, 128, 1": Llama-2-70B, FP16, batch 1, four H100 SXM5 80GB with
+#     TP=4 (the paper's Sec. III states H100 SXM5 80GB and TP = number of GPUs), 128 input and
+#     128 output tokens. Values are end-to-end request latency in seconds. The source reports no
+#     time-to-first-token for this configuration, so the per-token value below is end-to-end
+#     latency divided by output tokens and still contains prefill; A2_PREFILL_REF bounds that share.
+#     paper/scripts/check_anchor_two_source.py re-derives every A2 constant from the source files.
+A2_SOURCE_COMMIT = "4211f5d4e9bc0145ed541b6d372d5d8223b44235"
+A2_REPORTED_E2E_S = {"TensorRT-LLM": 2.3088122606277466, "vLLM": 2.37026520420089}
+A2_REPORTED_INPUT_TOKENS = 128
+A2_REPORTED_OUTPUT_TOKENS = 128
+# Same source, Plots/Fig_22/all_results_TTFT_ITL.csv: measured TTFT for Llama-2-7B on one H100 SXM5,
+# FP16, 16 prompts of 1,024 tokens. These are the only H100 TTFT rows in the source; they set the
+# measured prefill rate used to bound the prefill share of the A2 end-to-end latencies.
+A2_PREFILL_REF = dict(prompts=16, input_tokens=1024, gpus=1,
+                      ttft_s={"TensorRT-LLM": 0.38651649951934813, "vLLM": 0.4216477160962919})
+# Declared decode memory-bandwidth efficiency for the labelled estimate (not the floor):
+# Databricks (Agarwal et al., 2023, "LLM Inference Performance Engineering: Best Practices")
+# report a model bandwidth utilization of 60% at batch size 1 on 2x H100-80GB (MPT-7B).
+A2_DECODE_BW_EFFICIENCY = 0.60
+# Pessimistic factor for the prefill bound: assume TP=4, batch-1 prefill runs this many times
+# slower per FLOP than the measured single-GPU, 16-prompt reference.
+A2_PREFILL_PESSIMISM = 4.0
 # A3: Llama 3 herd paper (Llama Team, 2024), Table 4: 16,384 H100 at 8K sequence, 41% MFU.
 A3_REPORTED_MFU = 0.41
 # A4: PaLM (Chowdhery et al.), model FLOPs utilization of the 540B run: 46.2%.
@@ -55,7 +81,8 @@ A7_REPORTED_PP = 16
 # ── Configurations ──────────────────────────────────────────────────────────
 A1_GPUS = 8
 A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.19, is_training=True)
-A2_TP_DEGREE = 2
+# Four-way tensor parallelism matches the published A2 measurement; two H100s is the memory minimum.
+A2_TP_DEGREE = 4
 A3_ETA = 0.50
 A3_V_STAGES = 8
 # Llama 3 herd paper, Sec. 3.3.2 and Table 4: TP=8, CP=1, PP=16, DP=128 on 16K H100 at 8,192
@@ -125,13 +152,41 @@ def anchor_one() -> dict:
 
 
 def anchor_two() -> dict:
+    """Llama-2-70B FP16 batch-1 decode on H100: theoretical floor, a labelled estimate, and the
+    published end-to-end-derived per-token latency (see the A2 constants for provenance).
+
+    * floor: weights streamed once per token at peak aggregate HBM bandwidth (no efficiency term);
+    * estimate: the floor divided by the declared A2_DECODE_BW_EFFICIENCY;
+    * reported: end-to-end latency / output tokens per engine, which includes prefill;
+    * prefill bound: prefill time of the A2 prompt at the source's own measured H100 prefill rate
+      (scaled by FLOPs and GPU count), as a fraction of the smaller end-to-end latency.
+    """
     model, h100 = Models.Language.Llama2_70B, Hardware.Cloud.H100
     _, bpp = resolve_precision("fp16")
     weights = model.size_in_bytes(bpp)
-    floor = weights / (A2_TP_DEGREE * h100.memory.bandwidth)
+    min_tp = math.ceil((weights / h100.memory.capacity).m_as("dimensionless"))
+    floor_ms = (weights / (A2_TP_DEGREE * h100.memory.bandwidth)).m_as("ms")
+    estimate_ms = floor_ms / A2_DECODE_BW_EFFICIENCY
+    reported_ms = {eng: 1e3 * e2e / A2_REPORTED_OUTPUT_TOKENS for eng, e2e in A2_REPORTED_E2E_S.items()}
+    floor_err = {eng: abs(floor_ms - rep) / rep for eng, rep in reported_ms.items()}
+    estimate_err = {eng: abs(estimate_ms - rep) / rep for eng, rep in reported_ms.items()}
+
+    # Prefill bound: measured prefill FLOP rate per GPU from the 7B reference (slowest engine),
+    # applied to the 70B prompt on A2_TP_DEGREE GPUs.
+    ref = A2_PREFILL_REF
+    ref_params = Models.Language.Llama2_7B.parameters.m_as("param")
+    ref_flops = 2 * ref_params * ref["prompts"] * ref["input_tokens"]
+    rate_per_gpu = ref_flops / (max(ref["ttft_s"].values()) * ref["gpus"])
+    prefill_s = 2 * model.parameters.m_as("param") * A2_REPORTED_INPUT_TOKENS / (A2_TP_DEGREE * rate_per_gpu)
+    e2e_min = min(A2_REPORTED_E2E_S.values())
     return {
-        "weights": weights, "floor_ms": floor.m_as("ms"), "tp": A2_TP_DEGREE,
-        "source": "Models.Language.Llama2_70B.size_in_bytes(FP16) / (2 x Hardware.Cloud.H100.memory.bandwidth)",
+        "weights": weights, "tp": A2_TP_DEGREE, "min_tp": min_tp,
+        "floor_ms": floor_ms, "estimate_ms": estimate_ms, "bw_eta": A2_DECODE_BW_EFFICIENCY,
+        "reported_ms": reported_ms, "floor_err": floor_err, "estimate_err": estimate_err,
+        "prefill_share": prefill_s / e2e_min,
+        "prefill_share_pessimistic": A2_PREFILL_PESSIMISM * prefill_s / e2e_min,
+        "source": (f"Models.Language.Llama2_70B.size_in_bytes(FP16) / ({A2_TP_DEGREE} x "
+                   "Hardware.Cloud.H100.memory.bandwidth)"),
     }
 
 

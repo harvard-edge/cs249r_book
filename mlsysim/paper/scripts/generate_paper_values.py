@@ -487,7 +487,18 @@ def section_anchors(V: Values) -> None:
     a2 = ps.anchor_two()
     V.num("AnchorTwoWeightsGB", gb(a2["weights"]), "Models.Language.Llama2_70B.size_in_bytes(FP16)")
     V.num("AnchorTwoTpDegree", a2["tp"], "paper_scenarios.A2_TP_DEGREE")
+    V.num("AnchorTwoMinTpDegree", a2["min_tp"], "ceil(Llama2_70B FP16 weights / Hardware.Cloud.H100.memory.capacity)")
     V.num("AnchorTwoDecodeFloorMs", a2["floor_ms"], a2["source"], nd=1)
+    V.num("AnchorTwoBwEta", a2["bw_eta"], "paper_scenarios.A2_DECODE_BW_EFFICIENCY (Databricks 2023, batch-1 MBU)", nd=2)
+    V.num("AnchorTwoEstimateMs", a2["estimate_ms"], "AnchorTwoDecodeFloorMs / AnchorTwoBwEta", nd=1)
+    V.num("AnchorTwoOutputTokens", ps.A2_REPORTED_OUTPUT_TOKENS, "paper_scenarios.A2_REPORTED_OUTPUT_TOKENS")
+    V.text("AnchorTwoSourceCommit", ps.A2_SOURCE_COMMIT[:7], "paper_scenarios.A2_SOURCE_COMMIT (LLM-Inference-Bench)")
+    for eng, tag in (("TensorRT-LLM", "Trt"), ("vLLM", "Vllm")):
+        V.num(f"AnchorTwoReported{tag}Ms", a2["reported_ms"][eng], f"paper_scenarios.A2_REPORTED_E2E_S['{eng}'] / output tokens", nd=1)
+        V.pct(f"AnchorTwoFloorError{tag}Pct", a2["floor_err"][eng], f"|floor - reported {eng}| / reported {eng}")
+        V.pct(f"AnchorTwoEstimateError{tag}Pct", a2["estimate_err"][eng], f"|estimate - reported {eng}| / reported {eng}")
+    V.pct("AnchorTwoPrefillSharePct", a2["prefill_share"], "A2 prefill time at the source's measured H100 prefill rate / min end-to-end latency")
+    V.pct("AnchorTwoPrefillSharePessimisticPct", a2["prefill_share_pessimistic"], "AnchorTwoPrefillSharePct x paper_scenarios.A2_PREFILL_PESSIMISM")
 
     a3 = ps.anchor_three()
     d, fleet = a3["result"], a3["fleet"]

@@ -6,7 +6,7 @@ The anchor configurations live in ``paper_scenarios.py`` and are the same ones
 the paper cannot disagree about what was run.
 
 The paper reports the error of every comparison with a published measurement
-(A1, A3, A4) rather than claiming a tolerance, so those rows are reported, not
+(A1, A2, A3, A4) rather than claiming a tolerance, so those rows are reported, not
 gated. The script exits non-zero when a check the paper does state as exact
 fails (A5 and A6 are identities, A7 must recover Meta's TP and PP), when a run
 the paper describes as fitting in memory does not fit, or when a solver raises.
@@ -65,7 +65,15 @@ def main() -> int:
         gated_row("B1", "ResNet-50 8x A100 (img/s)", f"{a1['node']:,.0f}", f"{a1['reported']:,}", a1["rel_error"])
 
         a2 = ps.anchor_two()
-        rows.append(("B2", "Llama-2 70B TP=2 decode floor", f"{a2['floor_ms']:.1f} ms", "none", "no reported value", "INFO"))
+        rep = a2["reported_ms"]
+        rep_txt = f"{rep['TensorRT-LLM']:.1f}-{rep['vLLM']:.1f} ms (E2E/token)"
+        rows.append(("B2", f"Llama-2 70B TP={a2['tp']} decode floor", f"{a2['floor_ms']:.1f} ms", rep_txt,
+                     f"{min(a2['floor_err'].values()):.1%}-{max(a2['floor_err'].values()):.1%} (floor)", "REPORT"))
+        rows.append(("B2e", f"Llama-2 70B TP={a2['tp']} decode, eta_BW={a2['bw_eta']:.2f}", f"{a2['estimate_ms']:.1f} ms",
+                     rep_txt, f"{min(a2['estimate_err'].values()):.1%}-{max(a2['estimate_err'].values()):.1%}", "REPORT"))
+        notes.append(f"B2: the source reports end-to-end latency only; prefill is at most "
+                     f"{a2['prefill_share']:.1%} of it at the source's measured H100 prefill rate "
+                     f"({a2['prefill_share_pessimistic']:.1%} if prefill were {ps.A2_PREFILL_PESSIMISM:g}x slower per FLOP).")
 
         a3 = ps.anchor_three()
         gated_row("B3", "Llama 3 405B 16K H100 MFU", f"{a3['mfu']:.1%}", f"{a3['reported']:.1%}", a3["rel_error"])
