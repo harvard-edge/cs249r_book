@@ -327,3 +327,97 @@ def test_invalid_inputs_fail_explicitly(call, args):
     }.get(call, {})
     with pytest.raises(ValueError):
         call(*args, **kwargs)
+
+
+def test_mfu_credits_effective_batch_once_and_excludes_recomputation():
+    for track_id in TRACKS:
+        comparison = bottleneck_experiment(track_id, intervention="checkpoint")
+        base = comparison["baseline"]["model_flops_diagnostic"]
+        repair = comparison["result"]["model_flops_diagnostic"]
+        profile = track_profile(track_id)
+        from mlsysim import Literature
+        expected = (profile["model"].parameters.to("param").magnitude
+                    * Literature.Chinchilla.ComputeConstant
+                    * profile["physical_batch"] * profile["accumulation_steps"] * profile["seq_len"])
+        assert base["useful_model_flops"] == repair["useful_model_flops"] == expected
+        assert repair["update_time_ms"] > base["update_time_ms"]
+        assert repair["busy_fraction"] > base["busy_fraction"]
+        assert repair["mfu"] < base["mfu"] <= 1
+        assert repair["mfu"] == pytest.approx(expected / (repair["dense_peak_tflops"] * 1e12 * repair["update_time_ms"] / 1000))
+        assert repair["peak_key"] == "fp16_dense"
+
+
+def test_input_wait_reduces_mfu_without_adding_useful_flops_and_prefetch_repairs_it():
+    for track_id in TRACKS:
+        comparison = bottleneck_experiment(track_id, intervention="prefetch", input_stress=True)
+        base = comparison["baseline"]["model_flops_diagnostic"]
+        repair = comparison["result"]["model_flops_diagnostic"]
+        assert base["useful_model_flops"] == repair["useful_model_flops"]
+        assert base["mfu"] < repair["mfu"]
+        assert base["busy_fraction"] < repair["busy_fraction"]
+        assert comparison["baseline"]["violations"]
+        assert comparison["result"]["feasible"]
+        assert replay("v1_08_experiments.bottleneck_experiment", comparison["baseline"]["inputs"]) == comparison["baseline"]
+
+
+def test_precision_timing_uses_matched_dense_peak_and_missing_formats_remain_unavailable():
+    from mlsysim.labs.experiments.v1_08_experiments import model_flops_diagnostic
+    for track_id in TRACKS:
+        for precision in ("fp32", "bf16", "fp16", "fp8"):
+            outcome = precision_experiment(track_id, precision=precision)
+            diagnostic = outcome["model_flops_diagnostic"]
+            if diagnostic["mfu"] is not None:
+                assert 0 < diagnostic["mfu"] <= outcome["timing"]["arithmetic_efficiency_assumption"]
+                assert outcome["memory"]["feasible"]
+        timing = stage_timing(track_id)
+        invalid = {**timing, "update_time_ms": timing["update_time_ms"] / 100}
+        assert model_flops_diagnostic(track_id, invalid)["mfu"] is None
+        assert "inconsistent" in model_flops_diagnostic(track_id, invalid)["reason"]
+    for track_id in ("tinyml", "mobile", "edge"):
+        fp8 = precision_experiment(track_id, precision="fp8")
+        assert fp8["model_flops_diagnostic"]["dense_peak_tflops"] is None
+        assert fp8["model_flops_diagnostic"]["mfu"] is None
+        assert "No registered" in fp8["model_flops_diagnostic"]["reason"]
+        assert fp8["timing"]["update_time_ms"] is None
+        assert fp8["total_time_ms"] is None
+        assert fp8["cost_usd"] is None
+        assert not fp8["feasible"]
+
+
+def test_oom_recipe_has_no_measured_run_utilization():
+    outcome = batch_experiment("edge", physical_batch=32, accumulation_steps=1)
+    assert not outcome["memory"]["feasible"]
+    assert outcome["model_flops_diagnostic"]["mfu"] is None
+    assert outcome["model_flops_diagnostic"]["busy_fraction"] is None
+
+
+def test_stressed_bottleneck_capture_stales_after_control_changes():
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
+    comparison = bottleneck_experiment("tinyml", intervention="checkpoint", input_stress=False)
+    controls = {"input_stress": False, "intervention": "checkpoint", "rejected_alternative": None}
+    capture = capture_evidence(track="tinyml", part="E", prediction="checkpoint", inputs=controls,
+        baseline=comparison["baseline"], result=comparison["result"], decision="checkpoint",
+        upstream_inputs=controls, model_key="v1_08_experiments.bottleneck_experiment")
+    assert audit_evidence({"E": capture}, track="tinyml", required_parts=("E",), upstream_inputs=controls).complete
+    for key, value in (("input_stress", True), ("intervention", "prefetch"), ("rejected_alternative", "arithmetic")):
+        audit = audit_evidence({"E": capture}, track="tinyml", required_parts=("E",), upstream_inputs={**controls, key: value})
+        assert audit.stale == ("E",)
+
+
+def test_analytical_stage_work_and_update_composition_conserve_microbatch_accounting():
+    from mlsysim import Literature
+    for track_id in TRACKS:
+        profile = track_profile(track_id)
+        for physical in (4, 8, 32):
+            for precision in ("fp32", "bf16", "fp16", "fp8"):
+                timing = stage_timing(track_id, physical_batch=physical, accumulation_steps=4,
+                                      precision=precision, checkpointing="full")
+                if not timing["performance_supported"]:
+                    assert timing["forward_ms"] is timing["backward_ms"] is timing["update_time_ms"] is None
+                    continue
+                peak = profile["hardware"].compute.precision_flops[timing["peak_key"]].to("flop / second").magnitude
+                microbatch_ops = profile["model"].parameters.to("param").magnitude * Literature.Chinchilla.ComputeConstant * physical * profile["seq_len"]
+                assert timing["forward_ms"] + timing["backward_ms"] == pytest.approx(
+                    microbatch_ops / (peak * timing["arithmetic_efficiency_assumption"]) * 1000, abs=2e-6)
+                assert timing["update_time_ms"] == pytest.approx(
+                    4 * (timing["visible_input_ms"] + timing["forward_ms"] + timing["backward_ms"] + timing["recompute_ms"]) + timing["optimizer_ms"], abs=1e-5)

@@ -195,6 +195,7 @@ def evaluate(
     intervention: str = "none",
     demand_scale: float = 1,
     budget_scale: float = 1,
+    scenario_version: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate an illustrative deployment envelope using additive resource accounts.
 
@@ -226,6 +227,9 @@ def evaluate(
     budget_scale : float, optional
         Positive finite multiplier for memory, latency, energy, and intervention-cost limits;
         default one. Does not scale the quality floor.
+
+    scenario_version : str or None, optional
+        Required study version when replaying saved evidence; None accepts the current version.
 
     Returns
     -------
@@ -265,6 +269,8 @@ def evaluate(
     >>> r["memory_mb"] == evaluate("mobile")["memory_mb"]
     True
     """
+    if scenario_version is not None and scenario_version != INTRO_SCENARIO_VERSION:
+        raise ValueError("deployment scenario version differs; preserve the old evidence and rerun this study")
     track = _track(track_id)
     if candidate not in _CANDIDATES:
         raise ValueError(f"candidate must be one of {', '.join(_CANDIDATES)}")
@@ -361,6 +367,7 @@ def evaluate(
             "compute_scale": compute_scale, "movement_scale": movement_scale,
             "overhead_scale": overhead_scale, "intervention": intervention,
             "demand_scale": demand_scale, "budget_scale": budget_scale,
+            **({"scenario_version": scenario_version} if scenario_version is not None else {}),
         },
     }
     return result
@@ -653,3 +660,157 @@ def monitoring_plan(
         "detection_assumption": "Uniform failure arrival within an interval; instant check observation.",
         "provenance": track["provenance"],
     }
+
+# Registry owns the reusable teaching inputs; this module owns evaluation.
+from mlsysim.engine.scenarios import Scenarios
+
+_INTRO_STUDY = Scenarios.ControlledTaskFactors
+INTRO_SCENARIO_VERSION = _INTRO_STUDY.version
+INTRO_SHIFT_OPTIONS = _INTRO_STUDY.shift_options
+INTRO_CAPABILITY_OPTIONS = _INTRO_STUDY.capability_options
+INTRO_TERMS = ("movement", "compute", "overhead")
+INTRO_CANDIDATES = _CANDIDATES
+INTRO_TASK_OPTIONS = {card.label: key for key, card in _INTRO_STUDY.cards.items() if key != "baseline"}
+
+
+def introductory_profile(track_id: str) -> dict[str, Any]:
+    """Return source-owned controls and illustrative cohort descriptions.
+
+    Parameters
+    ----------
+    track_id : str
+        Teaching deployment track accepted by evaluate.
+
+    Returns
+    -------
+    dict
+        Versioned controls, cohort names, and the authored-study boundary.
+
+    Notes
+    -----
+    Equation: profile = fixed control metadata indexed by track_id.
+    Assumptions: The track names a supported teaching envelope.
+    Excludes: Device measurements and learned quality predictions.
+
+    References
+    ----------
+    Derivation: Select the declared cohort descriptions and shared controls without
+    estimating or transforming an observed outcome.
+
+    Examples
+    --------
+    >>> introductory_profile("tinyml")["scenario_version"] == INTRO_SCENARIO_VERSION
+    True
+    """
+    _track(track_id)
+    cohorts = {
+        "tinyml": ("quiet sensor/audio inputs", "noisy sensor/audio inputs"),
+        "mobile": ("ordinary capture conditions", "difficult capture conditions"),
+        "edge": ("ordinary inspection inputs", "difficult inspection inputs"),
+        "cloud": ("ordinary request inputs", "difficult request inputs"),
+    }
+    return {
+        "scenario_version": INTRO_SCENARIO_VERSION,
+        "cohorts": cohorts[track_id], "shift_options": INTRO_SHIFT_OPTIONS,
+        "capability_options": INTRO_CAPABILITY_OPTIONS, "terms": INTRO_TERMS,
+        "candidates": INTRO_CANDIDATES,
+        "provenance": "Authored illustrative controlled comparisons; no device measurements or learned quality prediction.",
+    }
+
+
+def task_factors(track_id: str, card_id: str = "baseline", scenario_version: str = INTRO_SCENARIO_VERSION) -> dict[str, Any]:
+    """Compare authored host factors with separately supplied quality evidence.
+
+    Parameters
+    ----------
+    track_id : str
+        Supported teaching track; host-factor cards are shared across tracks.
+    card_id : str, optional
+        Authored study card, default baseline.
+    scenario_version : str, optional
+        Version captured with the evidence; incompatible versions are rejected.
+
+    Returns
+    -------
+    dict
+        Duration in seconds, work in FLOPs, supplied quality, and explicit violations.
+
+    Notes
+    -----
+    Equation: duration = ``samples * ops_per_sample * seconds_per_op``.
+    Assumptions: Realized seconds per operation already includes all execution costs;
+    supplied quality is independent of the runtime factorization.
+    Excludes: Training simulation, selection overhead, accuracy prediction, and
+    measurements of the deployment project. Missing quality remains unknown.
+
+    References
+    ----------
+    Derivation: Multiply sample count by work per sample for total operations, then
+    multiply by realized seconds per operation for end-to-end duration.
+
+    Examples
+    --------
+    >>> task_factors("tinyml", "unverified")["quality_pct"] is None
+    True
+    """
+    _track(track_id)
+    if scenario_version != INTRO_SCENARIO_VERSION:
+        raise ValueError("task-factor scenario version differs; preserve the old evidence and rerun this study")
+    if card_id not in _INTRO_STUDY.cards:
+        raise ValueError(f"card_id must be one of {', '.join(_INTRO_STUDY.cards)}")
+    card = _INTRO_STUDY.cards[card_id]
+    operations_quantity = card.samples * card.ops_per_sample
+    operations = operations_quantity.to("flop").magnitude
+    duration = (operations_quantity * card.seconds_per_op).to("second").magnitude
+    quality_floor = _INTRO_STUDY.quality_floor_pct
+    violations = ["quality evidence missing"] if card.quality_pct is None else (["quality"] if card.quality_pct < quality_floor else [])
+    return {
+        "scenario_version": INTRO_SCENARIO_VERSION,
+        "host": "Separate illustrative single-host training study",
+        "card_id": card_id, "label": card.label, "changed_factor": card.factor,
+        "samples_per_task": card.samples, "operations_per_sample": card.ops_per_sample.to("flop").magnitude,
+        "seconds_per_operation": card.seconds_per_op.to("second / flop").magnitude, "total_operations": operations,
+        "duration_seconds": _rounded(duration), "quality_pct": card.quality_pct,
+        "quality_floor_pct": quality_floor, "quality_evidence": "unavailable" if card.quality_pct is None else "supplied illustrative held-out observation",
+        "feasible": not violations, "violations": violations,
+        "provenance": "Authored independent task-factor and held-out-quality fixtures; not a size-to-accuracy law.",
+        "inputs": {"track_id": track_id, "card_id": card_id, "scenario_version": scenario_version},
+    }
+
+
+def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay saved evidence through a closed set of model entry points.
+
+    Parameters
+    ----------
+    model_key : str
+        Registered evaluate or task-factor replay identifier.
+    inputs : mapping
+        Keyword arguments captured with the original evidence.
+
+    Returns
+    -------
+    dict
+        Output of the identified evaluator with the supplied arguments.
+
+    Notes
+    -----
+    Equation: output = registered evaluator applied to saved inputs.
+    Assumptions: The evaluator validates its version and physical inputs.
+    Excludes: Arbitrary code dispatch and migration of incompatible evidence.
+
+    References
+    ----------
+    Implementation references: ``mlsysim.engine.constraint_explorer.evaluate`` and
+    ``mlsysim.engine.constraint_explorer.task_factors``.
+
+    Examples
+    --------
+    >>> replay("constraint_explorer.evaluate", {"track_id": "tinyml"})["inputs"]["track_id"]
+    'tinyml'
+    """
+    if model_key == "constraint_explorer.evaluate":
+        return evaluate(**dict(inputs))
+    if model_key == "constraint_explorer.task_factors.v1":
+        return task_factors(**dict(inputs))
+    raise ValueError(f"unknown constraint explorer model_key {model_key!r}")

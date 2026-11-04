@@ -776,14 +776,15 @@ def evaluate_recipe(
         elif transformation == "quant_int8_ptq":
             storage_bits = 8
 
-        if representation == "structured":
-            # Parameters already represent the remaining structured tensor.
-            layout_bits = ceil(parameters / 32) * 16
-            artifact = Q_((parameters * storage_bits + layout_bits) / 8, "byte")
-        elif storage_bits < 16:
+        if storage_bits < 16:
             artifact = _quantized_artifact(scenario, parameters, storage_bits)
         else:
             artifact = _dense_artifact(parameters, storage_bits)
+        if representation == "structured":
+            # Parameters already represent the remaining structured tensor.
+            # Layout metadata is additional to any quantization scales/zero points.
+            layout_bits = ceil(parameters / 32) * 16
+            artifact += Q_(layout_bits / 8, "byte")
         stages.append(
             RecipeStage(
                 transformation=transformation,

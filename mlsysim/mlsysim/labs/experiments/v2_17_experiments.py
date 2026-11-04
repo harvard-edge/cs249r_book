@@ -20,6 +20,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 import math
+import hashlib
+import json
 from typing import Any, Literal
 
 from mlsysim.core.units import Q_, ureg
@@ -974,6 +976,64 @@ def evaluation_record(
     }
 
 
+
+def audit_discussion_dossier(history: Mapping[Any, Any], *, track_id: TrackId) -> dict[str, Any]:
+    """Carry every prior discussion without turning a saved record into clearance.
+
+    Fingerprints establish only that the saved discussion has not changed. They
+    do not establish empirical validity, compatible deployment conditions, or
+    approval. Recognized physical records receive a separate evaluator replay.
+    """
+    if track_id not in ("tinyml", "mobile", "edge", "cloud"):
+        raise ValueError("unrecognized track")
+    rows = []
+    for chapter in range(1, 17):
+        entry = history.get(chapter, history.get(str(chapter))) if isinstance(history, Mapping) else None
+        row = {"chapter": chapter, "status": "missing", "recommendation": None,
+               "reversal_trigger": None, "residual_risk": None, "discussion_fingerprint": None, "issue": "No saved discussion."}
+        if isinstance(entry, Mapping):
+            expected = f"v2_{(6 if chapter == 5 else 5 if chapter == 6 else chapter):02d}_experiments"
+            issue = None
+            if type(entry.get("schema_version")) is not int or entry.get("schema_version") != 1 or entry.get("lab_id") != f"v2_{chapter:02d}":
+                issue = "Unrecognized discussion version or chapter."
+            elif entry.get("track_id") != track_id:
+                issue = "The saved discussion belongs to a different track."
+            elif entry.get("model_id") != expected:
+                issue = "The saved discussion names a different chapter evaluator."
+            elif not isinstance(entry.get("evidence"), Mapping) or not entry["evidence"]:
+                issue = "No saved evidence snapshots."
+            else:
+                payload = dict(entry)
+                fingerprint = payload.pop("discussion_fingerprint", None)
+                try:
+                    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                    computed = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+                    if fingerprint != computed:
+                        issue = "Saved discussion fingerprint is missing or changed; resave in its chapter."
+                    elif any(not isinstance(v, Mapping) or v.get("track") != track_id
+                             for v in entry["evidence"].values()):
+                        issue = "A snapshot belongs to a different track or is malformed."
+                except (ValueError, TypeError):
+                    issue = "Discussion is not a finite JSON record."
+            row.update(status="incompatible" if issue else "saved_scoped_discussion",
+                       discussion_fingerprint=entry.get("discussion_fingerprint"),
+                       recommendation=entry.get("recommendation"),
+                       reversal_trigger=entry.get("reevaluation_trigger"),
+                       residual_risk=entry.get("residual_risk"),
+                       issue=issue or "Saved conditions and remaining obligations still require deployment review.")
+        rows.append(row)
+    return {
+        "track_id": track_id, "rows": rows,
+        "saved_discussions": {str(r["chapter"]): json.loads(json.dumps(history.get(r["chapter"], history.get(str(r["chapter"])))) )
+                              for r in rows if r["status"] == "saved_scoped_discussion"},
+        "missing_chapters": [r["chapter"] for r in rows if r["status"] == "missing"],
+        "incompatible_chapters": [r["chapter"] for r in rows if r["status"] == "incompatible"],
+        "governance_obligations": [r for r in rows if r["chapter"] in (12, 13, 14, 16)],
+        "deployment_clearance": False,
+        "scope": "Prior scoped discussions; not proof that the separate instructor fleet satisfies their conditions.",
+    }
+
+
 def audit_ledger_evidence(
     history: Mapping[Any, Any],
     *,
@@ -1023,7 +1083,7 @@ def audit_ledger_evidence(
 def _ledger_issue(entry: Any, *, chapter: int, track_id: str, expected_model_id: str) -> str | None:
     if not isinstance(entry, Mapping):
         return "entry is not a mapping"
-    if entry.get("schema_version") != 1:
+    if type(entry.get("schema_version")) is not int or entry.get("schema_version") != 1:
         return "schema_version is not 1"
     if entry.get("lab_id") != f"v2_{chapter:02d}":
         return "lab_id does not match the required chapter"
@@ -1049,10 +1109,46 @@ def _ledger_issue(entry: Any, *, chapter: int, track_id: str, expected_model_id:
         if not isinstance(record, Mapping) or not isinstance(record.get("inputs"), Mapping):
             return f"evidence snapshot {target_part!r} lacks exact evaluator inputs"
         try:
-            _dispatch_replay(expected_model_id, target_key, dict(record["inputs"]))
+            replayed = _dispatch_replay(expected_model_id, target_key, dict(record["inputs"]))
+            if not _physical_record_matches(expected_model_id, record, replayed):
+                return f"evidence snapshot {target_part!r} outputs do not match the current evaluator; rerun its chapter"
         except Exception as exc:
             return f"evidence snapshot {target_part!r} cannot replay: {exc}"
     return None
+
+
+
+def _physical_record_matches(model_id: str, record: Mapping[str, Any], replayed: Any) -> bool:
+    """Compare the actual owning evaluator outputs, allowing separate substudies."""
+    if model_id == "v2_01_experiments":
+        from mlsysim.labs.experiments.v2_01_experiments import serialize_value
+        expected = serialize_value(replayed)
+        observed = record.get("outputs")
+    elif model_id == "v2_07_experiments":
+        expected = {k: v for k, v in replayed.items() if k != "inputs"}
+        observed = record
+    elif model_id == "v2_10_experiments":
+        from mlsysim.labs.experiments.v2_10_experiments import replay_snapshot
+        expected = {k: v for k, v in replay_snapshot(replayed, inputs={}).items() if k != "inputs"}
+        observed = record
+    elif model_id == "v2_15_experiments":
+        from mlsysim.labs.experiments.v2_15_experiments import serialize_experiment_value
+        expected = serialize_experiment_value(replayed)
+        observed = record.get("outputs")
+    else:
+        return False
+
+    def matches(want, got):
+        if isinstance(want, bool):
+            return type(got) is bool and want is got
+        if isinstance(want, Mapping):
+            return isinstance(got, Mapping) and all(k in got and matches(v, got[k]) for k, v in want.items())
+        if isinstance(want, (tuple, list)):
+            return isinstance(got, (tuple, list)) and len(want) == len(got) and all(matches(a, b) for a, b in zip(want, got))
+        if isinstance(want, (int, float)) and not isinstance(want, bool):
+            return isinstance(got, (int, float)) and not isinstance(got, bool) and math.isclose(want, got, rel_tol=1e-9, abs_tol=1e-9)
+        return want == got
+    return matches(expected, observed)
 
 
 def evidence_inputs(
@@ -1094,7 +1190,7 @@ def _restore_inputs(model_id: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     if model_id == "v2_01_experiments":
         restored = restore_v2_01_quantities(inputs)
     elif model_id == "v2_07_experiments":
-        restored = inputs
+        restored = inputs.get("recovery", inputs)
     elif model_id == "v2_10_experiments":
         restored = _restore_v2_10_inputs(inputs)
     elif model_id == "v2_15_experiments":
@@ -1208,6 +1304,7 @@ __all__ = [
     "adverse_condition",
     "apply_patch",
     "audit_ledger_evidence",
+    "audit_discussion_dossier",
     "compare_equal_budget_repairs",
     "evidence_inputs",
     "evaluation_record",

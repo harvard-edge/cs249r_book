@@ -616,7 +616,195 @@ def comparison_to_dict(comparison: dict[str, object]) -> dict[str, object]:
     }
 
 
+# These run-equivalent controls define an explicitly synthetic observation ledger,
+# not claimed failure rates or observed production utilization. Physical run times,
+# work, setup and hardware ceilings remain owned by the existing scenario evaluator.
+def _nonnegative_run_count(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return value
+
+
+def goodput_comparison_issues(baseline: dict, candidate: dict) -> list[str]:
+    """Reject a factor comparison when its measurement contracts do not match.
+
+    Inputs are full ``goodput_study`` records. A busy-only sample or a different
+    workload is not silently normalized to the original fleet boundary.
+    """
+    fields = (
+        "artifact", "workload", "population", "precision", "hardware_ideal",
+        "window_s", "fleet_units", "warmup_policy", "sampling_policy",
+        "quality_evidence", "measurement_unit", "retention_policy", "reference_fingerprint",
+    )
+    left = baseline.get("contract", {})
+    right = candidate.get("contract", {})
+    return [field for field in fields if field not in left or field not in right or left[field] != right[field]]
+
+
+def goodput_study(
+    track_id: str,
+    *,
+    allocation_wait_runs: int = 16,
+    startup_runs: int = 8,
+    discarded_runs: int = 4,
+    window_runs: int = 128,
+    compiled: bool = False,
+    fusion: bool = False,
+) -> dict:
+    """Account for an explicit fixed-window execution-unit fleet ledger.
+
+    ``*_runs`` are hypothetical scenario controls expressed in unoptimized
+    baseline-run equivalents, NOT empirical scheduler or failure estimates.
+    Independent fleet units share this illustrative timeline; no device memories
+    pool. Offered, all-allocated, retained productive, and ideal capacity-time
+    form nested boundaries. Each lost interval is charged exactly once.
+
+    Cloud JIT setup is charged once as unproductive held time. Device AOT
+    compilation occurs on a separate build host and is reported outside the
+    endpoint accounting window. Per-run program execution excludes setup. The named ideal is useful arithmetic divided by the
+    registry peak at fixed precision: movement and exposed communication remain
+    program losses, not a second runtime loss. Partial final and discarded runs
+    are non-retained runtime work. Quality evidence is fixed, supplied evidence.
+    """
+    for name, value in (("allocation_wait_runs", allocation_wait_runs),
+                        ("startup_runs", startup_runs), ("discarded_runs", discarded_runs)):
+        _nonnegative_run_count(value, name)
+    _positive_int(window_runs, "window_runs")
+    if not isinstance(compiled, bool) or not isinstance(fusion, bool):
+        raise ValueError("compiled and fusion must be Boolean")
+    scenario = get_scenario(track_id)
+    baseline = evaluate(track_id)
+    result = evaluate(track_id, compiled=compiled, fusion=fusion)
+    baseline_s = baseline.latency.m_as("s")
+    execution_s = (result.latency - result.compile_time_per_run).m_as("s")
+    build_host_setup_s = scenario.compile_setup.m_as("s") if compiled and track_id != "cloud" else 0.0
+    setup_s = scenario.compile_setup.m_as("s") if compiled and track_id == "cloud" else 0.0
+    window_s = baseline_s * window_runs
+    wait_s = min(window_s, baseline_s * allocation_wait_runs)
+    held_s = max(0.0, window_s - wait_s)
+    startup_s = min(held_s, baseline_s * startup_runs + setup_s)
+    available_s = max(0.0, held_s - startup_s)
+    completed = int(math.floor((available_s + execution_s * 1e-12) / execution_s)) if result.memory_feasible else 0
+    discarded = min(discarded_runs, completed)
+    retained = completed - discarded
+    productive_s = retained * execution_s
+    # If near-integral division rounds up by machine epsilon, pin the boundary.
+    productive_s = min(available_s, productive_s)
+    evidence = _precision_evidence(scenario, result.precision)
+    ideal_per_run_s = (result.total_operations / evidence.peak_rate).m_as("s")
+    ideal_s = retained * ideal_per_run_s
+    units = scenario.default_fleet_units
+    offered_ct = window_s * units
+    allocated_ct = held_s * units
+    productive_ct = productive_s * units
+    ideal_ct = ideal_s * units
+    scheduling = allocated_ct / offered_ct
+    runtime = productive_ct / allocated_ct if allocated_ct > 0 else 0.0
+    program = ideal_ct / productive_ct if productive_ct > 0 else 0.0
+    total = ideal_ct / offered_ct
+    losses = {
+        "scheduling": (offered_ct - allocated_ct) / offered_ct,
+        "runtime": (allocated_ct - productive_ct) / offered_ct,
+        "program": (productive_ct - ideal_ct) / offered_ct,
+        "useful": total,
+    }
+    if not all(-1e-12 <= value <= 1 + 1e-12 for value in losses.values()):
+        raise ValueError("Nested goodput boundaries violated")
+    import hashlib
+    import json
+    resolved_reference = {
+        "model_id": MODEL_ID + ".goodput.v1",
+        "baseline_path": result_to_dict(baseline),
+        "hardware_supply": {
+            "peak_rate": quantity_to_dict(evidence.peak_rate),
+            "memory_capacity": quantity_to_dict(scenario.memory_capacity),
+            "memory_bandwidth": quantity_to_dict(scenario.memory_bandwidth),
+            "dispatch_latency": quantity_to_dict(scenario.dispatch_latency),
+            "compile_setup": quantity_to_dict(scenario.compile_setup),
+        },
+    }
+    reference_fingerprint = hashlib.sha256(
+        json.dumps(resolved_reference, sort_keys=True, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    contract = {
+        "artifact": f"{track_id}.fixed-format-path.v1",
+        "workload": scenario.workload,
+        "population": "supplied fixed task and quality fixture; identical across interventions",
+        "precision": result.precision,
+        "hardware_ideal": f"useful arithmetic / registry peak ({scenario.hardware_name}, {result.precision})",
+        "window_s": window_s,
+        "fleet_units": units,
+        "warmup_policy": "include initialization and cloud JIT setup; device AOT build host is outside endpoint window",
+        "sampling_policy": "all offered units over the complete fixed window; include idle, rejected and discarded work",
+        "quality_evidence": result.quality_evidence,
+        "measurement_unit": "execution-unit second; cloud unit includes four accelerators",
+        "retention_policy": "atomic completed-and-retained executions only; partial executions credit no useful output",
+        "reference_fingerprint": reference_fingerprint,
+    }
+    inputs = {
+        "track_id": track_id, "allocation_wait_runs": allocation_wait_runs,
+        "startup_runs": startup_runs, "discarded_runs": discarded_runs,
+        "window_runs": window_runs, "compiled": compiled, "fusion": fusion,
+    }
+    partial_s = max(0.0, available_s - completed * execution_s) if result.memory_feasible else available_s
+    return {
+        "model_id": MODEL_ID + ".goodput.v1",
+        "contract": contract,
+        "inputs": inputs,
+        "resolved_reference": resolved_reference,
+        "resolved_execution": result_to_dict(result),
+        "boundaries_s": {"offered": offered_ct, "allocated": allocated_ct,
+                         "productive": productive_ct, "ideal": ideal_ct},
+        "factors": {"scheduling": scheduling, "runtime": runtime, "program": program, "total": total},
+        "losses": losses,
+        "observations": [
+            {"event": "await complete allocation", "duration_s_per_unit": wait_s, "boundary": "scheduling"},
+            {"event": "initialization including compile setup", "duration_s_per_unit": startup_s, "boundary": "runtime"},
+            {"event": "discarded completed executions", "duration_s_per_unit": discarded * execution_s, "boundary": "runtime"},
+            {"event": "partial final execution or memory rejection", "duration_s_per_unit": partial_s, "boundary": "runtime"},
+            {"event": "retained executions", "duration_s_per_unit": productive_s, "boundary": "productive"},
+        ],
+        "completed_runs_per_unit": completed,
+        "retained_runs_per_unit": retained,
+        "discarded_runs_per_unit": discarded,
+        "execution_s_per_run": execution_s,
+        "ideal_s_per_run": ideal_per_run_s,
+        "compile_setup_s": setup_s,
+        "compile_setup_charged_s": min(setup_s, max(0.0, held_s - baseline_s * startup_runs)),
+        "build_host_setup_s": build_host_setup_s,
+        "memory_feasible": result.memory_feasible,
+        "program_identifiable": productive_ct > 0,
+        "runtime_identifiable": allocated_ct > 0,
+        "quality_pct": result.quality_pct,
+        "comparable_to_baseline": None,  # Requires an explicit second record and contract check.
+        "failure": ("memory infeasible" if not result.memory_feasible else
+                    "no retained execution within the offered window" if retained == 0 else None),
+        "provenance": "Synthetic event-ledger controls; MLSysIM scenario work, setup, physical timing and registry hardware ceilings. Not a measured fleet trace or empirical failure estimate.",
+    }
+
+
+def compare_goodput_study(track_id: str, **candidate_inputs) -> dict:
+    """Compare an intervention with a baseline over the identical offered window."""
+    candidate = goodput_study(track_id, **candidate_inputs)
+    baseline = goodput_study(track_id, window_runs=candidate["inputs"]["window_runs"])
+    issues = goodput_comparison_issues(baseline, candidate)
+    candidate["comparable_to_baseline"] = not issues
+    baseline["comparable_to_baseline"] = True
+    changed = [key for key in candidate["inputs"] if candidate["inputs"][key] != baseline["inputs"][key]]
+    return {
+        "baseline": baseline,
+        "result": candidate,
+        "comparable": not issues,
+        "comparison_issues": issues,
+        "changed_fields": changed,
+        "total_delta": candidate["factors"]["total"] - baseline["factors"]["total"] if not issues else None,
+    }
+
+
 __all__ = [
+    "goodput_study",
+    "compare_goodput_study",
+    "goodput_comparison_issues",
     "TRACKS",
     "MODEL_ID",
     "EvaluationInputs",
@@ -634,3 +822,72 @@ __all__ = [
     "quantity_to_dict",
     "result_to_dict",
 ]
+
+
+# A separate, explicit observation fixture. It does not perturb the program
+# timing model above or claim measured profiler overhead on named hardware.
+PROFILING_TARGETS = {
+    "Fleet average": "fleet_average",
+    "One healthy rank (0)": "rank_0",
+    "Suspect rank (3)": "rank_3",
+    "All ranks": "all_ranks",
+}
+PROFILING_CADENCES = {"Every tick": 1, "Every fourth tick": 4, "Every eighth tick": 8}
+PROFILING_FIXTURE = {
+    "ranks": 8, "ticks": 24, "tick_seconds": 1.0,
+    "rank_sample_cost_s": 0.002, "aggregate_sample_cost_s": 0.0005,
+    "anomaly_threshold": 0.25,
+    "events": (
+        {"name": "input stall", "rank": 3, "start": 5, "stop": 7, "excess": 1.0},
+        {"name": "slow-rank burst", "rank": 6, "start": 17, "stop": 20, "excess": 0.5},
+    ),
+}
+
+
+def sample_fleet_profile(*, target: str, cadence: int) -> dict[str, object]:
+    """Sample a deterministic rank/time ledger, exposing omission and cost.
+
+    Sampling uses ticks 0, cadence, ... with fixed phase zero. Each event is
+    detected only if an observation overlaps it and exceeds the declared
+    teaching threshold. Aggregate dilution and temporal aliasing are distinct
+    from a healthy-rank sample. No statistical confidence is inferred.
+    """
+    if target not in PROFILING_TARGETS.values():
+        raise ValueError("unsupported profiling target")
+    if isinstance(cadence, bool) or cadence not in PROFILING_CADENCES.values():
+        raise ValueError("unsupported profiling cadence")
+    fixture = PROFILING_FIXTURE
+    times = tuple(range(0, fixture["ticks"], cadence))
+    ranks = tuple(range(fixture["ranks"])) if target == "all_ranks" else (
+        (0,) if target == "rank_0" else (3,) if target == "rank_3" else ()
+    )
+    detected = []
+    observations = []
+    for event in fixture["events"]:
+        hits = tuple(t for t in times if event["start"] <= t < event["stop"])
+        visible = bool(hits) and (target == "fleet_average" or event["rank"] in ranks)
+        signal = event["excess"] / fixture["ranks"] if target == "fleet_average" else event["excess"]
+        flagged = visible and signal >= fixture["anomaly_threshold"]
+        if flagged:
+            detected.append(event["name"])
+        observations.append({
+            "event": event["name"], "rank": event["rank"],
+            "event_interval": f"[{event['start']}, {event['stop']})",
+            "overlapping_sample_ticks": list(hits) if visible else [],
+            "observed_excess": signal if visible else None,
+            "detected": flagged,
+            "reason": "observed above threshold" if flagged else (
+                "no temporal overlap" if not hits else "rank outside sample" if not visible else "diluted below threshold"),
+        })
+    samples = len(times) * (len(ranks) if ranks else 1)
+    overhead = samples * (fixture["aggregate_sample_cost_s"] if target == "fleet_average" else fixture["rank_sample_cost_s"])
+    return {
+        "inputs": {"target": target, "cadence": cadence, "phase": 0, "fixture": "eight-rank-observation-v1"},
+        "sample_ticks": list(times), "sample_count": samples,
+        "collection_cost_s": overhead,
+        "window_s": fixture["ticks"] * fixture["tick_seconds"],
+        "detected_events": detected, "missed_events": len(fixture["events"]) - len(detected),
+        "observations": observations,
+        "threshold": fixture["anomaly_threshold"],
+        "limitation": "Synthetic independent profiling ledger; cost is collector time, not an injected workload slowdown or production estimate.",
+    }

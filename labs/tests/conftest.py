@@ -38,9 +38,20 @@ if str(LABS_ROOT) not in sys.path:
     sys.path.insert(0, str(LABS_ROOT))
 if str(REPO_ROOT / "mlsysim") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "mlsysim"))
-TEST_HOME = Path(tempfile.gettempdir()) / "mlsysbook-labs-test-home"
-TEST_HOME.mkdir(parents=True, exist_ok=True)
-os.environ["HOME"] = str(TEST_HOME)
+TEST_LEDGER_ROOT = Path(tempfile.gettempdir()) / "mlsysbook-labs-test-ledgers"
+TEST_LEDGER_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def isolated_native_ledger_directory(monkeypatch, tmp_path):
+    """Keep test ledgers isolated without changing HOME or browser cache paths."""
+    from mlsysim.labs.state import DesignLedger
+    original = DesignLedger.__init__
+    def initialize(self, *args, **kwargs):
+        kwargs.setdefault("directory", tmp_path / "ledgers")
+        original(self, *args, **kwargs)
+    monkeypatch.setattr(DesignLedger, "__init__", initialize)
+
 
 VOL1_LABS = sorted(glob.glob(str(LABS_ROOT / "vol1" / "lab_*.py")))
 VOL2_LABS = sorted(glob.glob(str(LABS_ROOT / "vol2" / "lab_*.py")))

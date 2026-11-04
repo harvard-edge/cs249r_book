@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
+from mlsysim import Literature, Models
 from mlsysim.core.units import Q_, ureg
 from mlsysim.physics.performance import dTime
 
@@ -23,6 +24,8 @@ POLICY_IDS = ("uniform", "deduplicate", "coverage")
 RETAINED_COUNTS = (6, 8, 10)
 COHORTS = ("common", "rare", "edge_case")
 MODEL_ID = "v1_09_experiments"
+ALLOCATION_MODEL_SCALES = (0.25, 0.5, 1.0, 2.0, 4.0)
+ALLOCATION_DATA_SCALES = (0.25, 1.0, 4.0)
 
 
 @dataclass(frozen=True)
@@ -325,6 +328,81 @@ def learning_curve(track_id: str, pool_kind: str) -> dict[str, Any]:
     }
 
 
+def compute_allocation(
+    track_id: str,
+    model_scale: float = 2.0,
+    unique_data_scale: float = 4.0,
+) -> dict[str, Any]:
+    """Sweep model/data allocation at an identical dense-training FLOP budget.
+
+    Model sizes are hypothetical members of a common dense-language family,
+    anchored to the registry GPT-2 parameter count, not claims about native
+    ring/photo/perception/recommendation architectures. The loss surface uses
+    the registered Hoffmann et al. Approach 3 coefficients. It is a fitted
+    projection under a common corpus/evaluation assumption, not measured
+    accuracy or a certification of these hypothetical variants.
+
+    A finite unique-token supply makes repetition explicit. The published
+    fit is not applied to repeated tokens: those candidates keep their work
+    accounting but have no predicted loss. No repetition-quality law is added.
+    """
+    _scenario(track_id)
+    if isinstance(model_scale, bool) or model_scale not in ALLOCATION_MODEL_SCALES:
+        raise ValueError(f"model_scale must be one of {ALLOCATION_MODEL_SCALES}")
+    if isinstance(unique_data_scale, bool) or unique_data_scale not in ALLOCATION_DATA_SCALES:
+        raise ValueError(f"unique_data_scale must be one of {ALLOCATION_DATA_SCALES}")
+    fit = Literature.Chinchilla
+    reference_parameters = Models.Language.GPT2.parameters.to("count").magnitude
+    budget = Q_(fit.IsoFlopBudgetMaxFlops, "flop")
+    multiplier = fit.ComputeConstant
+    reference_tokens = budget.magnitude / (multiplier * reference_parameters)
+    available_unique = reference_tokens * unique_data_scale
+    rows = []
+    for scale in ALLOCATION_MODEL_SCALES:
+        parameters = reference_parameters * scale
+        tokens = budget.magnitude / (multiplier * parameters)
+        requires_repetition = tokens > available_unique * (1 + 1e-12)
+        model_term = fit.ParametricLossA / parameters ** fit.ParametricLossAlpha
+        data_term = fit.ParametricLossB / tokens ** fit.ParametricLossBeta
+        rows.append({
+            "model_scale": scale,
+            "parameters": Q_(parameters, "count"),
+            "processed_tokens": Q_(tokens, "count"),
+            "unique_tokens_used": Q_(min(tokens, available_unique), "count"),
+            "repeated_tokens": Q_(max(0, tokens - available_unique), "count"),
+            "passes_over_available_data": tokens / available_unique,
+            "training_compute": Q_(multiplier * parameters * tokens, "flop"),
+            "requires_repetition": requires_repetition,
+            "model_loss_term": model_term,
+            "data_loss_term": None if requires_repetition else data_term,
+            "predicted_loss_nats_per_token": None if requires_repetition else fit.ParametricLossE + model_term + data_term,
+            "prediction_status": "Unavailable: repeated-data learning is not modeled by this fit." if requires_repetition else "Fitted reference projection; not a measured outcome.",
+        })
+    supported = [row for row in rows if row["predicted_loss_nats_per_token"] is not None]
+    best = min(supported, key=lambda row: row["predicted_loss_nats_per_token"]) if supported else None
+    chosen = next(row for row in rows if row["model_scale"] == model_scale)
+    return {
+        "track_id": track_id, "model_id": MODEL_ID, "model_key": "compute_allocation",
+        "inputs": {"track_id": track_id, "model_scale": float(model_scale), "unique_data_scale": float(unique_data_scale)},
+        "compute_budget": budget,
+        "available_unique_tokens": Q_(available_unique, "count"),
+        "reference_parameters": Q_(reference_parameters, "count"),
+        "allocations": tuple(rows),
+        "selected": chosen,
+        "best_supported_model_scale": None if best is None else best["model_scale"],
+        "fit": {"irreducible": fit.ParametricLossE, "model_coefficient": fit.ParametricLossA,
+                "data_coefficient": fit.ParametricLossB, "model_exponent": fit.ParametricLossAlpha,
+                "data_exponent": fit.ParametricLossBeta, "flops_per_parameter_token": multiplier},
+        "assumptions": (
+            "Common dense-language development reference, not a native project model or task-quality estimate.",
+            "Hypothetical model sizes share corpus, tokenizer, objective, and evaluation protocol; only parameters and token allocation change.",
+            "Fixed training FLOPs use C = k N D. Data acquisition, scoring, storage, and elapsed execution time are outside this comparison.",
+            "Loss projections use the registered Chinchilla Approach 3 fit, not newly observed pilots; transfer to these hypothetical models requires validation.",
+            "Tokens beyond the available unique supply repeat data. Their fitted loss is unavailable; the best supported candidate is not proven globally optimal.",
+        ),
+    }
+
+
 def evaluate_policy(track_id: str, policy_id: str, retained_count: int = 8) -> dict[str, Any]:
     """Evaluate one selection using exact record counts and supplied outcomes."""
     scenario = _scenario(track_id)
@@ -507,6 +585,109 @@ def selection_amortization(
     }
 
 
+# Explicit hypothetical input-path assumptions, not device measurements. The
+# same record transform and random-access overhead apply across these paths.
+# Output records retain their input byte size; writes share the scenario's
+# sequential read bandwidth. A measured deployment must replace these inputs.
+_INPUT_TRANSFORM_TIME = Q_(40, "microsecond")
+_SCATTER_ACCESS_TIME = Q_(200, "microsecond")
+INPUT_PATHS = ("stream_discard", "scatter", "materialized")
+
+
+def input_path_outcome(
+    track_id: str,
+    policy_id: str = "coverage",
+    retained_count: int = 8,
+    *,
+    input_path: str = "stream_discard",
+    epochs: int = 1,
+) -> dict[str, Any]:
+    """Keep selected identities fixed while accounting for delivery work.
+
+    Streaming transforms the source archive before filtering. Scatter reads
+    addressable selected records with one access overhead per record. A
+    materialized path scans the original archive once, transforms and writes
+    selected records, then reads the transformed subset in later epochs.
+    Preparation is serial; ideal overlap of epoch input and compute makes the
+    epoch critical path their maximum. These are explicit limiting-case
+    assumptions, not a general prediction of a production loader.
+    """
+    scenario = _scenario(track_id)
+    selected = evaluate_policy(track_id, policy_id, retained_count)
+    if input_path not in INPUT_PATHS:
+        raise ValueError(f"input_path must be one of {', '.join(INPUT_PATHS)}")
+    if isinstance(epochs, bool) or not isinstance(epochs, int) or epochs < 1:
+        raise ValueError("epochs must be an integer of at least 1")
+    scale = scenario["represented_examples"] / len(scenario["pool"])
+    pool_count = scenario["represented_examples"]
+    selected_count = selected["retained_count"] * scale
+    pool_bytes = (sum((record.size for record in scenario["pool"]), Q_(0, "byte")) * scale).to("byte")
+    selected_bytes = (selected["retained_bytes"] * scale).to("byte")
+    bandwidth = scenario["read_bandwidth"]
+    zero_time = Q_(0, "second")
+    preparation_read = pool_bytes if input_path == "materialized" else Q_(0, "byte")
+    preparation_write = selected_bytes if input_path == "materialized" else Q_(0, "byte")
+    preparation_read_time = (preparation_read / bandwidth).to("second")
+    preparation_write_time = (preparation_write / bandwidth).to("second")
+    preparation_transform = (_INPUT_TRANSFORM_TIME * selected_count).to("second") if input_path == "materialized" else zero_time
+    preparation = preparation_read_time + preparation_transform + preparation_write_time
+    read_bytes = pool_bytes if input_path == "stream_discard" else selected_bytes
+    read_time = (read_bytes / bandwidth).to("second")
+    access_time = (_SCATTER_ACCESS_TIME * selected_count).to("second") if input_path == "scatter" else zero_time
+    transform_count = pool_count if input_path == "stream_discard" else selected_count
+    transform_time = zero_time if input_path == "materialized" else (_INPUT_TRANSFORM_TIME * transform_count).to("second")
+    input_time = read_time + access_time + transform_time
+    compute_time = dTime(scenario["training_flops_per_example"] * selected_count, 1,
+                         scenario["development_peak"], scenario["efficiency"]).to("second")
+    epoch_time = max(input_time, compute_time)
+    total = (preparation + epochs * epoch_time).to("second")
+    stream_input = (pool_bytes / bandwidth).to("second") + _INPUT_TRANSFORM_TIME * pool_count
+    materialized_input = (selected_bytes / bandwidth).to("second")
+    materialized_preparation = ((pool_bytes + selected_bytes) / bandwidth).to("second") + _INPUT_TRANSFORM_TIME * selected_count
+    epoch_saving = max(stream_input, compute_time) - max(materialized_input, compute_time)
+    first_profitable = (math.floor((materialized_preparation / epoch_saving).to_base_units().magnitude) + 1
+                        if epoch_saving.magnitude > 0 else None)
+    return {
+        "track_id": track_id, "model_id": MODEL_ID, "model_key": "input_path_outcome",
+        "inputs": {"track_id": track_id, "policy_id": policy_id,
+                   "retained_count": retained_count, "input_path": input_path, "epochs": epochs},
+        "input_path": input_path, "epochs": epochs,
+        "selected_ids": selected["selected_ids"],
+        "represented_selected_count": selected_count,
+        "source_storage": pool_bytes.to("megabyte"),
+        "additional_storage": preparation_write.to("megabyte"),
+        "peak_storage": (pool_bytes + preparation_write).to("megabyte"),
+        "preparation_read_bytes": preparation_read,
+        "preparation_write_bytes": preparation_write,
+        "preparation_read_time": preparation_read_time,
+        "preparation_transform_time": preparation_transform,
+        "preparation_write_time": preparation_write_time,
+        "preparation_time": preparation.to("second"),
+        "read_bytes_per_epoch": read_bytes,
+        "read_time_per_epoch": read_time,
+        "access_time_per_epoch": access_time,
+        "transform_time_per_epoch": transform_time,
+        "input_time_per_epoch": input_time.to("second"),
+        "compute_time_per_epoch": compute_time,
+        "epoch_time": epoch_time.to("second"),
+        "binding_stage": "input" if input_time >= compute_time else "compute",
+        "total_time": total,
+        "amortized_time_per_epoch": (total / epochs).to("second"),
+        "first_profitable_materialized_epochs": first_profitable,
+        "policy_evaluation": selected,
+        "assumptions": (
+            "Hypothetical path accounting; no measured loader performance or quality change is inferred.",
+            "Streaming transforms all source records before discarding; scatter assumes addressable records and no archive decompression amplification.",
+            "Materialization scans once, transforms selected records once, and stores same-size transformed records; source archive remains retained.",
+            "Sequential writes use read bandwidth; scattered accesses add a fixed per-record overhead.",
+            "Read/access/transform costs add within input; epoch input and compute overlap ideally. Preparation does not overlap training.",
+            "Selection/scoring is already completed and excluded here; epochs reuse unchanged identities, transforms, and source version.",
+        ),
+        "transform_time_per_record": _INPUT_TRANSFORM_TIME,
+        "scatter_time_per_record": _SCATTER_ACCESS_TIME,
+    }
+
+
 def scoring_time_policy(track_id: str) -> dict[str, Any]:
     """Return scoring-time slider bounds, step, and default for the track."""
     scenario = _scenario(track_id)
@@ -681,10 +862,12 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """Replay a recognized evaluator from raw or JSON-restored input values."""
     evaluators = {
         "learning_curve": learning_curve,
+        "compute_allocation": compute_allocation,
         "evaluate_policy": evaluate_policy,
         "compare_policies": compare_policies,
         "full_pool_baseline": full_pool_baseline,
         "selection_amortization": selection_amortization,
+        "input_path_outcome": input_path_outcome,
         "acquisition_options": acquisition_options,
         "acquisition_option": acquisition_option,
         "population_shift": population_shift,
@@ -701,7 +884,10 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "COHORTS",
+    "ALLOCATION_MODEL_SCALES",
+    "ALLOCATION_DATA_SCALES",
     "MODEL_ID",
+    "INPUT_PATHS",
     "POLICY_IDS",
     "RETAINED_COUNTS",
     "TRACK_IDS",
@@ -711,9 +897,11 @@ __all__ = [
     "acquisition_options",
     "acquisition_option",
     "compare_policies",
+    "compute_allocation",
     "evaluate_policy",
     "full_pool_baseline",
     "learning_curve",
+    "input_path_outcome",
     "population_shift",
     "replay",
     "restore_quantities",

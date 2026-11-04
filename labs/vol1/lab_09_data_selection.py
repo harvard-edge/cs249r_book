@@ -28,10 +28,12 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.core.units import Q_
     from mlsysim.labs.experiments.v1_09_experiments import (
-        MODEL_ID, TRACKS, acquisition_option, compare_policies,
+        MODEL_ID, TRACKS, ALLOCATION_MODEL_SCALES, ALLOCATION_DATA_SCALES,
+        acquisition_option, compare_policies, compute_allocation,
         full_pool_baseline, learning_curve, population_shift,
         selection_amortization, serialize_value,
     )
+    from mlsysim.fmt import fmt_count, fmt_flops
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
@@ -47,6 +49,7 @@ async def _():
         COLORS,
         LAB_CSS,
         MODEL_ID,
+        ALLOCATION_MODEL_SCALES, ALLOCATION_DATA_SCALES, compute_allocation, fmt_count, fmt_flops,
         Q_,
         TRACKS,
         acquisition_option,
@@ -75,10 +78,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
+    _preferred_track = _preferred_context(ledger)
+    _initial_label = next(label for label, identifier in _track_options.items() if identifier == _preferred_track)
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Teaching track",
+        _track_options,
+        value=_initial_label, label="Teaching track",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -89,6 +97,20 @@ def _(TRACKS, track):
     track_id = track.value
     profile = TRACKS[track_id]
     return profile, track_id
+
+
+@app.cell
+def _(ALLOCATION_MODEL_SCALES, ALLOCATION_DATA_SCALES, mo, track_id):
+    _context = track_id
+    a_model = mo.ui.dropdown(
+        {f"{scale:g}× reference parameters": scale for scale in ALLOCATION_MODEL_SCALES},
+        value="2× reference parameters", label="Model allocation",
+    )
+    a_data = mo.ui.dropdown(
+        {f"{scale:g}× reference token allocation": scale for scale in ALLOCATION_DATA_SCALES},
+        value="4× reference token allocation", label="Available unique-data supply",
+    )
+    return a_data, a_model
 
 
 @app.cell
@@ -119,21 +141,6 @@ def _(mo, profile, track_id):
         {"Adopt for this run count": "adopt", "Reuse more times first": "wait",
          "Reject on evidence": "reject"}, label="Amortization decision",
     )
-    d_budget = mo.ui.slider(
-        int(profile["budget_min"].to("USD").magnitude),
-        int(profile["budget_max"].to("USD").magnitude),
-        value=int(profile["budget_default"].to("USD").magnitude),
-        step=int(profile["budget_step"].to("USD").magnitude),
-        label="Available data budget (USD)",
-    )
-    d_choice = mo.ui.radio(
-        {"Expert labels": "labels", "Generated examples": "generated", "Neither": "none"},
-        label="Next data purchase",
-    )
-    d_rejected = mo.ui.radio(
-        {"Expert labels": "labels", "Generated examples": "generated"},
-        label="Rejected purchase",
-    )
     e_rare_share = mo.ui.slider(
         int(profile["population_pct"]["rare"]), 45, value=35, step=1,
         label="Changed rare-cohort share (%)",
@@ -145,20 +152,33 @@ def _(mo, profile, track_id):
         c_decision,
         c_runs,
         c_scoring,
-        d_budget,
-        d_choice,
-        d_rejected,
         e_rare_share,
     )
 
 
 @app.cell
 def _(mo, track_id):
+    _context_key = track_id
+    d_input_path = mo.ui.dropdown({"Stream and discard": "stream_discard", "Scattered selected reads": "scatter", "Materialized subset": "materialized"}, value="Stream and discard", label="Delivery path")
+    d_epochs = mo.ui.slider(1, 100, value=1, step=1, label="Reuse epochs with unchanged selected identities")
+    return d_epochs, d_input_path
+
+
+@app.cell
+def _(b_retained, carried_policy, d_epochs, d_input_path, track_id):
+    from mlsysim.labs.experiments.v1_09_experiments import input_path_outcome
+    d_input_baseline = input_path_outcome(track_id, carried_policy, b_retained.value, input_path="stream_discard", epochs=d_epochs.value)
+    d_input_result = input_path_outcome(track_id, carried_policy, b_retained.value, input_path=d_input_path.value, epochs=d_epochs.value)
+    return d_input_baseline, d_input_result
+
+
+@app.cell
+def _(mo, track_id):
     _track_key = track_id
     a_prediction = mo.ui.radio(
-        {"Both add similar value": "similar", "Redundant data saturates first": "redundant_first",
-         "Informative data saturates first": "informative_first"},
-        label="Which pool loses marginal value first?",
+        {"Largest model wins": "largest", "Smallest model wins": "smallest",
+         "An intermediate allocation wins": "intermediate", "Some outcomes need more evidence": "unavailable"},
+        label="At fixed compute, which allocation will be best supported?",
     ).form(submit_button_label="Lock Part A prediction")
     b_prediction = mo.ui.radio(
         {"Uniform has the safest coverage": "uniform", "Deduplication is safest": "deduplicate",
@@ -171,10 +191,8 @@ def _(mo, track_id):
         label="When will selection first save time?",
     ).form(submit_button_label="Lock Part C prediction")
     d_prediction = mo.ui.radio(
-        {"Labels preserve the rare cohort better": "labels",
-         "Generated examples preserve it better": "generated",
-         "The rare-cohort outcome is equal": "equal"},
-        label="Which package preserves the rare cohort better?",
+        {"Input work remains binding": "input", "Model compute becomes binding": "compute", "The selected path has the same elapsed time": "same"},
+        label="What will limit the selected delivery path?",
     ).form(submit_button_label="Lock Part D prediction")
     e_prediction = mo.ui.radio(
         {"The carried policy remains supported": "supported", "Quality fails first": "quality",
@@ -222,17 +240,18 @@ def _(
     c_runs,
     c_scoring,
     compare_policies,
-    d_budget,
     e_rare_share,
     full_pool_baseline,
     learning_curve,
+    a_data, a_model, compute_allocation,
     population_shift,
     profile,
     selection_amortization,
     track_id,
 ):
-    a_baseline = learning_curve(track_id, "redundant")
-    a_result = learning_curve(track_id, "informative")
+    a_baseline = compute_allocation(track_id, model_scale=1.0, unique_data_scale=a_data.value)
+    a_result = compute_allocation(track_id, model_scale=a_model.value, unique_data_scale=a_data.value)
+    a_pool_curves = (learning_curve(track_id, "redundant"), learning_curve(track_id, "informative"))
     b_comparison = compare_policies(track_id, b_retained.value)
     b_results = {item["policy_id"]: item for item in b_comparison["policies"]}
     b_full = full_pool_baseline(track_id)
@@ -250,24 +269,18 @@ def _(
     }
     c_baseline = selection_amortization(**c_kwargs, comparison_path="full_pool")
     c_result = selection_amortization(**c_kwargs, comparison_path="selected_subset")
-    budget = Q_(d_budget.value, "USD")
-    d_labels = acquisition_option(track_id, "labels", budget)
-    d_generated = acquisition_option(track_id, "generated", budget)
-    d_none = acquisition_option(track_id, "none", budget)
     baseline_rare = profile["population_pct"]["rare"]
     e_baseline = population_shift(track_id, carried_policy, b_retained.value, baseline_rare)
     e_result = population_shift(track_id, carried_policy, b_retained.value, e_rare_share.value)
     return (
         a_baseline,
         a_result,
+        a_pool_curves,
         b_full,
         b_results,
         c_baseline,
         c_result,
         carried_policy,
-        d_generated,
-        d_labels,
-        d_none,
         e_baseline,
         e_result,
     )
@@ -290,13 +303,7 @@ def _(
     c_result,
     capture_evidence,
     carried_policy,
-    d_budget,
-    d_choice,
-    d_generated,
-    d_labels,
-    d_none,
     d_prediction,
-    d_rejected,
     e_baseline,
     e_prediction,
     e_rare_share,
@@ -305,11 +312,14 @@ def _(
     serialize_value,
     set_evidence,
     track_id,
+    d_epochs, d_input_baseline, d_input_path, d_input_result,
 ):
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
 
-    a_upstream = {"track_id": track_id, "comparison": "redundant_vs_informative"}
+    a_upstream = {"track_id": track_id, "comparison": "fixed_compute_allocation",
+                  "model_scale": a_result["inputs"]["model_scale"],
+                  "unique_data_scale": a_result["inputs"]["unique_data_scale"]}
     b_upstream = {"track_id": track_id, "retained_count": b_retained.value}
     c_upstream = {
         **b_upstream,
@@ -317,14 +327,14 @@ def _(
         "scoring_time_per_example_us": c_result["inputs"]["scoring_time_per_example"].to("microsecond").magnitude,
         "repeated_runs": c_result["repeated_runs"],
     }
-    d_upstream = {"track_id": track_id, "budget_usd": d_budget.value}
+    d_upstream = {"track_id": track_id, "carried_policy": carried_policy, "retained_count": b_retained.value, "epochs": d_epochs.value}
     e_upstream = {
         **b_upstream, "carried_policy": carried_policy, "rare_share_pct": e_rare_share.value,
     }
 
     a_capture = mo.ui.button(
-        label="Capture learning-curve contrast", kind="success",
-        disabled=a_prediction.value is None,
+        label="Capture allocation contrast", kind="success",
+        disabled=a_prediction.value is None or a_result["inputs"]["model_scale"] == 1.0,
         on_click=lambda _v: store("A", capture_evidence(
             track=track_id, part="A", prediction=a_prediction.value, inputs=a_upstream,
             baseline=serialize_value(a_baseline), result=serialize_value(a_result),
@@ -363,24 +373,14 @@ def _(
             decision=c_decision.value, upstream_inputs=c_upstream, model_key=c_result["model_key"],
         )),
     )
-    d_invalid = (
-        d_prediction.value is None or d_choice.value is None or d_rejected.value is None
-        or (d_choice.value != "none" and d_choice.value == d_rejected.value)
-    )
-    d_options = {"labels": d_labels, "generated": d_generated}
-    d_result_id = d_rejected.value if d_choice.value == "none" else d_choice.value
-    d_baseline_id = "generated" if d_result_id == "labels" else "labels"
     d_capture = mo.ui.button(
-        label="Capture acquisition decision", kind="success", disabled=d_invalid,
+        label="Capture delivery-path contrast", kind="success",
+        disabled=d_prediction.value is None or d_input_path.value == "stream_discard",
         on_click=lambda _v: store("D", capture_evidence(
             track=track_id, part="D", prediction=d_prediction.value,
-            inputs={**d_upstream, "decision": d_choice.value, "tested_alternative": d_rejected.value},
-            baseline=serialize_value(d_options[d_baseline_id] if d_choice.value != "none" else d_none),
-            result=serialize_value(d_options[d_result_id]),
-            alternatives=serialize_value(tuple(d_options.values())), decision=d_choice.value,
-            chosen_result=serialize_value(d_none) if d_choice.value == "none" else None,
-            result_role="rejected alternative" if d_choice.value == "none" else "selected candidate",
-            upstream_inputs=d_upstream, model_key="acquisition_option",
+            inputs={**d_upstream, "input_path": d_input_path.value},
+            baseline=serialize_value(d_input_baseline), result=serialize_value(d_input_result),
+            decision=d_input_path.value, upstream_inputs=d_upstream, model_key="input_path_outcome",
         )),
     )
     e_capture = mo.ui.button(
@@ -408,33 +408,25 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#70411f);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#ffedd5;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""
-    <section class="pilot-head">
-      <div class="pilot-top"><span>VOLUME I · LAB 09</span><span>ABOUT 50–55 MIN</span></div>
-      <h1>Selection That Pays</h1>
-      <p>Which examples should we retain when coverage, selection overhead, and changed populations can reverse the apparent win?</p>
-      <div class="pilot-meta">
-        <div><b>Track</b><br>{profile['label']}</div>
-        <div><b>Workload</b><br>{profile['workload']}</div>
-        <div><b>Output</b><br>Data-selection policy memo</div>
-      </div>
-    </section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, css, track, header,
-        mo.Html('<p class="pilot-note">All pools and quality outcomes are explicit teaching scenarios, not benchmark measurements. Calculation Notes state each comparison boundary.</p>'),
-    ], gap=0.5).style({"padding-top": "32px"})
-    return
+def _(get_lab_metadata, mo, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.notebook import notebook_header, notebook_learning_map, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysim import Scenarios
+
+    _mission = Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _mission.episode(9)
+    _metadata = get_lab_metadata("vol1/lab_09_data_selection.py")
+    learning_contract = get_learning_path("vol1", 9)
+    notebook_shell([
+        notebook_header(_metadata, _episode.question, topics=_episode.core_concepts),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        notebook_learning_map(learning_contract),
+        mo.md('Pools, task outcomes, and input-path assumptions are supplied teaching scenarios. Fixed record identities let you compare learning value, selection cost, and realized delivery work separately.'),
+    ])
+    return learning_contract, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+
 
 
 @app.cell
@@ -451,6 +443,7 @@ def _(
     a_prediction,
     a_result,
     a_upstream,
+    a_data, a_model, a_pool_curves, fmt_count, fmt_flops,
     apply_plotly_theme,
     audit_evidence,
     b_capture,
@@ -469,13 +462,8 @@ def _(
     c_scoring,
     c_upstream,
     carried_policy,
-    d_budget,
     d_capture,
-    d_choice,
-    d_generated,
-    d_labels,
     d_prediction,
-    d_rejected,
     d_upstream,
     e_baseline,
     e_capture,
@@ -493,6 +481,12 @@ def _(
     profile,
     rationale,
     track_id,
+    notebook_shell,
+    learning_contract,
+    d_epochs, d_input_baseline, d_input_path, d_input_result,
+    notebook_learning_part,
+    notebook_table,
+    notebook_tab_hint,
 ):
     _captures = get_evidence()
     upstream = {
@@ -505,9 +499,7 @@ def _(
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
-            {"max-width": "100%", "overflow-x": "auto"}
-        )
+        return notebook_table(rows)
 
     def saved(part):
         capture = _captures.get(part)
@@ -526,40 +518,79 @@ def _(
 
     def part_a():
         intro = mo.md(
-            f"### A · When does more data stop being the best investment? (8 min)\n"
-            f"Compare supplied learning outcomes for redundant and informative candidate pools of **{profile['workload']}**."
+            "### A · How should the same compute budget be divided? (8 min)\n"
+            "Your team can fund more parameters or more training tokens. At a fixed budget, "
+            "a larger model must process fewer tokens. Predict the consequence, then change the allocation.\n\n"
+            "**Common development reference:** a hypothetical dense-language family isolates this tradeoff. "
+            "It does not estimate your project's task accuracy. The curve is a published fitted loss surface, "
+            "not newly measured training outcomes. Lower reference loss is better."
         )
         if a_prediction.value is None:
             return mo.vstack([intro, a_prediction])
+        rows = []
+        for point in a_result["allocations"]:
+            loss = point["predicted_loss_nats_per_token"]
+            rows.append({
+                "Allocation": f"{point['model_scale']:g}×" + (" · selected" if point['model_scale'] == a_model.value else ""),
+                "Parameters": str(fmt_count(point["parameters"], scale="B", precision=None)),
+                "Processed tokens": str(fmt_count(point["processed_tokens"], scale="B", precision=None)),
+                "Repeated tokens": str(fmt_count(point["repeated_tokens"], scale="B", precision=None)),
+                "Fitted loss (nats/token)": "Unavailable · repeated data" if loss is None else f"{loss:.4f}",
+            })
         figure = go.Figure()
-        for result, label, color in (
-            (a_baseline, "Redundant", COLORS["OrangeLine"]),
-            (a_result, "Informative", COLORS["BlueLine"]),
-        ):
-            figure.add_scatter(
-                x=[point["retained_count"] for point in result["points"]],
-                y=[point["quality_pct"] for point in result["points"]],
-                mode="lines+markers", name=label, line={"color": color},
-            )
+        figure.add_scatter(
+            x=[point["model_scale"] for point in a_result["allocations"]],
+            y=[point["predicted_loss_nats_per_token"] for point in a_result["allocations"]],
+            mode="lines+markers", connectgaps=False,
+            name="Fitted reference loss", line={"color": COLORS["BlueLine"]},
+        )
         figure.update_layout(
             height=290, margin=dict(l=20, r=20, t=20, b=20),
-            xaxis_title="Representative examples retained",
-            yaxis_title="Supplied quality outcome (%)", legend_orientation="h",
+            xaxis_title="Model parameters / reference parameters",
+            yaxis_title="Fitted reference loss (nats/token)",
+            xaxis=dict(type="log", tickvals=[point["model_scale"] for point in a_result["allocations"]]),
         )
-        redundant_last = a_baseline["points"][-1]["marginal_quality_pp"]
-        informative_last = a_result["points"][-1]["marginal_quality_pp"]
+        chosen = a_result["selected"]
+        baseline = a_baseline["selected"]
+        best = a_result["best_supported_model_scale"]
+        if chosen["predicted_loss_nats_per_token"] is None:
+            feedback = "Your allocation exhausts the unique-data supply and repeats tokens. Its FLOP accounting remains valid, but this fit supplies no repeated-data learning prediction. An actual pilot is needed."
+        elif baseline["predicted_loss_nats_per_token"] is None:
+            feedback = "Your selected allocation fits within the unique-data supply; the reference allocation repeats tokens and has no supported fitted loss. This does not establish that the reference would learn less."
+        else:
+            feedback = (
+                f"Reference loss: **{baseline['predicted_loss_nats_per_token']:.4f}**; "
+                f"selected loss: **{chosen['predicted_loss_nats_per_token']:.4f} nats/token**. "
+                "Compare the model-size benefit with the cost of processing fewer tokens."
+            )
         return mo.vstack([
-            intro, a_prediction, apply_plotly_theme(figure),
-            mo.callout(mo.md(
-                f"**Your prediction:** {a_prediction.value}. The final two-example increment adds "
-                f"**{redundant_last:.1f} points** for the redundant pool and "
-                f"**{informative_last:.1f} points** for the informative pool."
-            ), kind="info"),
+            intro, a_prediction, a_model, a_data,
+            mo.md(f"**Fixed training budget:** {fmt_flops(a_result['compute_budget'])}. "
+                  f"**Unique-token supply:** {fmt_count(a_result['available_unique_tokens'], scale='billion', precision=None, scale_style='word')} tokens. "
+                  "Every row spends the same training FLOPs; collection and execution time are outside this comparison."),
+            table(rows), apply_plotly_theme(figure),
+            mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. {feedback} "
+                             f"Best supported candidate in this grid: **{best:g}×**. "
+                             "Unsupported repeated-data cases remain unranked; this is not a universal optimum."), kind="info"),
             a_capture, saved("A"),
-            mo.accordion({"Calculation Notes": mo.md(
-                "Adjacent marginal value is the change between two supplied quality observations. "
-                "The simulator does not infer quality from sample count."
-            )}),
+            mo.accordion({
+                "Calculation Notes": mo.md(
+                    "At fixed training compute, C = k × parameters × processed tokens, so doubling parameters halves the token allocation. "
+                    "The reference fit is L = E + A/N^alpha + B/D^beta (Chinchilla Approach 3). "
+                    "All coefficients and the compute envelope come from the registered study. "
+                    "Hypothetical family members share objective, corpus, tokenizer, and evaluation protocol. "
+                    "A fit is an assumption to validate, not observed task quality. Its repeated-data extension is deliberately unavailable."
+                ),
+                "Supporting observations · why novel data matters": mo.vstack([mo.md(
+                    "These separate supplied fixed-model observations are illustrative, not outputs of the allocation fit. "
+                    "They motivate testing novelty and coverage before treating all processed tokens as equally useful."
+                ), table([
+                    {"Pool": curve["pool_kind"], "Retained": point["retained_count"],
+                     "Supplied quality (%)": point["quality_pct"]}
+                    for curve in a_pool_curves for point in curve["points"]
+                ])]),
+            }),
+            mo.md("**Next:** an allocation cannot establish whether selected records cover the deployment conditions. Inspect the equal-size record policies in Part B."),
         ])
 
     def part_b():
@@ -655,33 +686,15 @@ def _(
         ])
 
     def part_d():
-        rows = [{
-            "Option": result["label"],
-            "Created / validated": f"{result['created_examples']} / {result['validated_examples']}",
-            "Cost": f"${result['total_cost'].to('USD').magnitude:,.0f}",
-            "Turnaround": f"{result['turnaround'].to('hour').magnitude:.0f} h",
-            "Rare outcome": f"{result['cohort_outcomes_pct']['rare']:.0f}%",
-            "Affordable": "YES" if result["affordable"] else "NO",
-        } for result in (d_labels, d_generated)]
-        intro = mo.md(
-            f"### D · Should the next dollar buy labels or generated examples? (10 min)\n"
-            f"Compare explicit creation, validation, turnaround, and supplied cohort outcomes for **{profile['workload']}**."
-        )
+        intro = mo.md(f"### D · Do fewer examples mean less input work?\nThe team has selected **{carried_policy}**. Keep those record identities fixed and choose how the development host delivers them. This ledger starts after scoring and selection; it does not add a second copy of Part C's preparation costs.")
         if d_prediction.value is None:
-            return mo.vstack([intro, d_budget, d_prediction])
+            return mo.vstack([intro, d_prediction])
+        rows = [{"Path": result["input_path"].replace("_", " "), "Prepare (s)": f"{result['preparation_time'].to('s').magnitude:.2f}", "Read / epoch (MB)": f"{result['read_bytes_per_epoch'].to('MB').magnitude:.2f}", "Transform / epoch (s)": f"{result['transform_time_per_epoch'].to('s').magnitude:.2f}", "Input / epoch (s)": f"{result['input_time_per_epoch'].to('s').magnitude:.2f}", "Compute / epoch (s)": f"{result['compute_time_per_epoch'].to('s').magnitude:.2f}", "Total (s)": f"{result['total_time'].to('s').magnitude:.2f}", "Additional storage (MB)": f"{result['additional_storage'].to('MB').magnitude:.2f}"} for result in (d_input_baseline, d_input_result)]
         return mo.vstack([
-            intro, d_prediction, d_budget, table(rows),
-            mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
-            mo.callout(mo.md(
-                f"**Your prediction:** {d_prediction.value}. Labels yield "
-                f"**{d_labels['cohort_outcomes_pct']['rare']:.0f}%** on the rare cohort; generated examples yield "
-                f"**{d_generated['cohort_outcomes_pct']['rare']:.0f}%**. Affordability is shown separately from quality."
-            ), kind="info"),
+            intro, d_prediction, mo.hstack([d_input_path, d_epochs], widths="equal", wrap=True), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. The selected path is **{d_input_result['binding_stage']}-bound**. Selected identities stay fixed: **{', '.join(d_input_result['selected_ids'])}**. Materialization repays its preparation after **{d_input_result['first_profitable_materialized_epochs'] or 'no finite supported number of'} epochs** in this comparison. Storage remains a separate cost; a faster loader does not establish better task quality."), kind="info"),
             d_capture, saved("D"),
-            mo.accordion({"Calculation Notes": mo.md(
-                "Total package cost adds creation and validation. Each outcome belongs only to the displayed "
-                "fixed package; the simulator does not extrapolate a universal generated-data quality curve."
-            )}),
+            mo.accordion({"Calculation Notes": mo.md("\n\n".join(d_input_result["assumptions"]))}),
         ])
 
     def part_e():
@@ -770,11 +783,19 @@ def _(
         ])
 
     tabs = mo.ui.tabs({
-        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
-        "Part D": part_d(), "Part E": part_e(), "Synthesis": synthesis(),
+        "Part A": notebook_learning_part(learning_contract, "A", part_a()), "Part B": notebook_learning_part(learning_contract, "B", part_b()), "Part C": notebook_learning_part(learning_contract, "C", part_c()),
+        "Part D": notebook_learning_part(learning_contract, "D", part_d()), "Part E": notebook_learning_part(learning_contract, "E", part_e()), "Synthesis": synthesis(),
     })
-    tabs
+    notebook_shell([notebook_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 9))])
+    return
 
 
 @app.cell
@@ -792,6 +813,8 @@ def _(
     rationale,
     report_export_panel,
     track_id,
+    notebook_shell,
+    learning_contract,
 ):
     _captures = get_evidence()
     _saved_b = _captures["B"].to_dict() if "B" in _captures else None
@@ -814,18 +837,14 @@ def _(
         ))
         and bool(rationale.value.strip()) and _choice_rule and _rejected_rule
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_09_data_selection.py"),
         track=track_id,
         scenario=profile["workload"],
-        learning_objectives=[
-            "Distinguish redundant volume from informative coverage",
-            "Compare equal-count removal policies with explicit records",
-            "Test selection amortization without treating time as quality",
-            "Reevaluate a selected cohort under population change",
-        ],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
         knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
         evidence_summary={part: {
@@ -866,12 +885,14 @@ def _(
             "calculations": "Deterministic data-selection scenario calculations.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)])
     return
 
 
+
+
 @app.cell
-async def _(
+def _(
     MODEL_ID,
     audit,
     final_choice,
@@ -907,7 +928,50 @@ async def _(
     )
     _saved = False
     _save_error = None
-    if _ready:
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing evidence or your discussion requires saving again.")])
+    return (save_discussion,)
+
+
+@app.cell
+async def _(
+    MODEL_ID,
+    audit,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
+    ledger,
+    mo,
+    rationale,
+    track_id,
+    save_discussion,
+):
+    _captures = get_evidence()
+    _saved_b = _captures["B"].to_dict() if "B" in _captures else None
+    _saved_decision = _saved_b["decision"] if _saved_b else None
+    _choice_rule = final_choice.value == _saved_decision
+    _rejected_rule = (
+        final_rejected.value is not None and _saved_b is not None
+        and final_choice.value == "none"
+        and final_rejected.value == _saved_b["inputs"]["tested_alternative"]
+    )
+    if final_choice.value not in (None, "none"):
+        _rejected_rule = (
+            _saved_b is not None
+            and final_rejected.value == _saved_b["baseline"]["inputs"]["policy_id"]
+        )
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (
+            final_choice, final_rejected, final_trigger, final_risk,
+        ))
+        and bool(rationale.value.strip()) and _choice_rule and _rejected_rule
+    )
+    _saved = False
+    _save_error = None
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=9, design={
                 "schema_version": 1,
@@ -930,7 +994,7 @@ async def _(
     elif _saved:
         status = "SAVED"
     else:
-        status = "EVIDENCE IN PROGRESS"
+        status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
     mo.Html(
         f'<div class="lab-hud"><span class="hud-label">LAB</span>'
         f'<span class="hud-value">09 · Selection That Pays</span>'

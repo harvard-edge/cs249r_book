@@ -254,3 +254,48 @@ def test_compression_comparison_evaluates_all_prediction_outcomes():
     naive = compression_comparison("cloud", method="topk_naive")
     assert naive["outcome"] == "misses"
     assert naive["result"]["outcome"] == "misses"
+
+
+def test_error_feedback_retains_small_updates_and_matches_chapter_trace():
+    from mlsysim.labs.experiments.v2_06_experiments import compression_residual_trace
+    naive = compression_residual_trace(carry_residual=False)
+    feedback = compression_residual_trace()
+    assert naive['transmitted_total'] == 0
+    assert feedback['transmitted_total'] == 2
+    assert feedback['retained_residual'] == pytest.approx(-0.4)
+    assert feedback['true_total'] == pytest.approx(1.6)
+    assert feedback['discarded_total'] == 0
+    for trace in (naive, feedback):
+        assert trace['accounting_error'] == pytest.approx(0, abs=1e-12)
+        assert trace['true_total'] == pytest.approx(
+            trace['transmitted_total'] + trace['retained_residual'] + trace['discarded_total'])
+
+
+def test_resetting_residual_changes_future_wire_updates_and_keeps_loss_visible():
+    from mlsysim.labs.experiments.v2_06_experiments import compression_residual_trace
+    kept = compression_residual_trace(steps=8)
+    lost = compression_residual_trace(steps=8, reset_after=3)
+    assert kept['rows'][3]['entering_residual'] != lost['rows'][3]['entering_residual']
+    assert lost['discarded_total'] != 0
+    assert lost['accounting_error'] == pytest.approx(0, abs=1e-12)
+    assert kept == compression_residual_trace(**kept['inputs'])
+    assert lost == compression_residual_trace(**json.loads(json.dumps(lost['inputs'])))
+
+
+@pytest.mark.parametrize('steps', [5, 7, 12, 20])
+@pytest.mark.parametrize('reset', [False, True])
+def test_compression_snapshot_replays_residual_intervention_without_claiming_quality(steps, reset):
+    result = compression_comparison('cloud', method='topk_error_feedback', residual_steps=steps, reset_residual=reset)
+    assert compression_comparison(**json.loads(json.dumps(result['inputs']))) == result
+    assert result['result']['mechanism_study'] == result['mechanism_study']
+    assert 'not a model-quality' in result['mechanism_study']['feedback']['limitation']
+    assert result['mechanism_study']['feedback']['accounting_error'] == pytest.approx(0, abs=1e-12)
+    reference = compression_comparison('cloud', method='topk_error_feedback')
+    assert result['time_to_target_ms'] == reference['time_to_target_ms']
+
+
+@pytest.mark.parametrize('kwargs', [{'steps': True}, {'steps': 0}, {'steps': 1001}, {'carry_residual': 1}, {'reset_after': 5}, {'reset_after': -1}])
+def test_residual_trace_rejects_invalid_interventions(kwargs):
+    from mlsysim.labs.experiments.v2_06_experiments import compression_residual_trace
+    with pytest.raises(ValueError):
+        compression_residual_trace(**kwargs)

@@ -977,3 +977,95 @@ def equal_budget_comparison(
         "second": second_result,
         "winner": first_topology_id if first_result["exposed_ms"] < second_result["exposed_ms"] else second_topology_id,
     }
+
+
+def reliable_delivery_experiment(
+    track_id: str = "cloud",
+    *,
+    policy: str = "pfc_watchdog_gbn",
+    queue_state: str = "occupied_cycle",
+    detection_delay=Q_(5, "us"),
+    watchdog_timeout=Q_(50, "ms"),
+    isolate_victim: bool = False,
+) -> dict[str, object]:
+    """Trace one bounded RDMA recovery fixture, not a fabric risk estimate.
+
+    The reference backend is RoCE over registry 100G Ethernet for every track.
+    Hypothetical fixture: 256 packets of 4 KB, a single missing packet at the
+    start of a window, a 2 ms slow drainer, and a victim sharing the paused
+    egress/priority unless isolated. A cycle means *occupied* closed buffer
+    dependencies, not merely a cyclic wiring diagram. Serial pause and recovery phases provide a conservative completion bound;
+    they do not model NIC pipelines or infer event probabilities.
+
+    Go-Back-N discards the window sent during loss detection (bounded by the
+    finite transfer); selective retry retains later packets. Reliable delivery
+    remains required under either recovery. A permanent pause returns no finite
+    completion estimate rather than silently counting undelivered bytes.
+    """
+    scenario = get_track_scenario(track_id)
+    if policy not in {"pfc", "pfc_watchdog_gbn", "selective"}:
+        raise ValueError("unknown delivery policy")
+    if queue_state not in {"draining_chain", "occupied_cycle"}:
+        raise ValueError("unknown queue_state")
+    detect_ms = _ms(detection_delay)
+    watchdog_ms = _ms(watchdog_timeout)
+    if not 0 < detect_ms < float("inf") or not 0 < watchdog_ms < float("inf"):
+        raise ValueError("recovery delays must be finite and positive")
+    packet = Q_(4, "KB")  # illustrative finite fixture, not an MTU claim
+    packet_count = 256
+    payload = packet * packet_count
+    link = get_track_scenario("cloud").links["roce_100g"]
+    base_ms = _ms(calc_point_to_point_time(payload, link.alpha, link.bandwidth))
+    packet_wire_ms = _ms(packet / link.bandwidth)
+    slow_drain_ms = _ms(Q_(2, "ms"))  # illustrative finite pause assumption
+    uses_pause = policy != "selective"
+    blocked = uses_pause and queue_state == "occupied_cycle" and policy == "pfc"
+    watchdog_fired = policy == "pfc_watchdog_gbn" and (queue_state == "occupied_cycle" or watchdog_ms < slow_drain_ms)
+    pause_ms = (None if blocked else watchdog_ms if watchdog_fired else slow_drain_ms if uses_pause else 0.0)
+    # One packet is deliberately discarded when the watchdog breaks the cycle,
+    # or by the supplied congestion-loss event on the no-PFC path.
+    drops = int(watchdog_fired or not uses_pause)
+    resent_packets = (
+        min(packet_count, max(1, ceil(detect_ms / packet_wire_ms)))
+        if drops and policy == "pfc_watchdog_gbn" else drops
+    )
+    retransmit_bytes = float((packet * resent_packets).to("byte").magnitude)
+    recovery_ms = detect_ms + resent_packets * packet_wire_ms if drops else 0.0
+    completion_ms = None if blocked else base_ms + pause_ms + recovery_ms
+    victim_wait_ms = 0.0 if isolate_victim or not uses_pause else pause_ms
+    trace = [{"event": "transfer_ready", "time_ms": 0.0}]
+    if uses_pause:
+        trace.append({"event": "priority_paused", "time_ms": 0.0})
+    if blocked:
+        trace.append({"event": "closed_occupied_cycle_no_release", "time_ms": None})
+    else:
+        if uses_pause:
+            trace.append({"event": "watchdog_discards_packet" if watchdog_fired else "downstream_drains", "time_ms": pause_ms})
+        if drops:
+            trace.append({"event": "loss_detected", "time_ms": pause_ms + detect_ms})
+            trace.append({"event": "retransmission_complete", "time_ms": pause_ms + recovery_ms})
+        trace.append({"event": "reliable_completion", "time_ms": completion_ms})
+    return {
+        "inputs": {"track_id": scenario.track_id, "policy": policy,
+                   "queue_state": queue_state,
+                   "detection_delay": serialize_quantity(detection_delay),
+                   "watchdog_timeout": serialize_quantity(watchdog_timeout),
+                   "isolate_victim": isolate_victim},
+        "model_id": "v2_03_experiments.reliable_delivery_experiment",
+        "reference_backend": "RoCE / 100G Ethernet; hypothetical finite packet fixture",
+        "delivered": not blocked,
+        "completion_ms": completion_ms,
+        "base_transfer_ms": base_ms,
+        "pause_ms": pause_ms,
+        "victim_wait_ms": victim_wait_ms,
+        "watchdog_fired": watchdog_fired,
+        "dropped_packets": drops,
+        "retransmitted_packets": resent_packets,
+        "retransmit_bytes": retransmit_bytes,
+        "recovery_ms": recovery_ms,
+        "retained_out_of_order_bytes": float((payload - packet).to("byte").magnitude) if policy == "selective" else 0.0,
+        "completion_model": "Conservative serial accounting: base transfer + pause + detection + retry; no overlap credit.",
+        "payload_bytes": float(payload.to("byte").magnitude),
+        "trace": trace,
+        "limitation": "One supplied event and serial phases, not packet simulation, deadlock detection, failure probability, or measured NIC performance. Isolating a victim changes its pause dependency; reserved capacity costs are explored in Part C.",
+    }

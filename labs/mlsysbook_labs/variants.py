@@ -25,6 +25,7 @@ PILOT_LAB_IDS = (
     "v1_14_silent_degradation",
     "v1_15_no_free_fairness",
     "v1_16_architects_audit",
+    "v2_00",
     "v2_01_scale_illusion",
     "v2_02_compute_wall",
     "v2_03_network_fabric_design",
@@ -44,7 +45,12 @@ PILOT_LAB_IDS = (
     "v2_17_fleet_synthesis",
 )
 
-ALL_LAB_IDS = tuple(metadata.lab_id for metadata in LAB_CATALOG.values())
+# This compatibility registry is the TinyML–CloudML deployment family (I–II).
+# Agentic and physical studies have separate canonical scenario registries.
+# New generated orientation entries may be appended after historical catalog
+# records. Notebook paths, rather than dict insertion, preserve course order.
+ALL_LAB_IDS = tuple(metadata.lab_id for _, metadata in sorted(LAB_CATALOG.items())
+                    if metadata.volume in {"Volume I", "Volume II"})
 
 _MODEL_REF_BY_TRACK = {
     "iphone": "Models.Vision.MobileNetV2",
@@ -355,7 +361,44 @@ def _system_design_variants() -> tuple[LabTrackVariant, ...]:
     return tuple(variants)
 
 
+def _fleet_orientation_variants() -> tuple[LabTrackVariant, ...]:
+    """Track identity for the interface rehearsal, never engineering evidence."""
+    return tuple(
+        _variant(
+            lab_id="v2_00",
+            track_id=profile.track_id,
+            scenario_id=f"v2_00_{profile.track_id}_setup_rehearsal",
+            stakeholder=profile.stakeholder,
+            workload_summary=(
+                f"Choose the {profile.label} fleet project and distinguish its deployed "
+                "service from model preparation. Rehearse the interface before Lab 01."
+            ),
+            objective=(
+                "Predict, change the live briefing view, keep a comparison, "
+                "and save or download your work."
+            ),
+            primary_metric="distinguish live and captured briefing state",
+            guardrail_metric="setup rehearsal does not establish deployment evidence",
+            model_ref=_MODEL_REF_BY_TRACK[profile.track_id],
+            defaults={
+                "assignment_mode": "interface rehearsal",
+                "briefing_views": ("baseline", "alternative"),
+                "initial_view": "baseline",
+            },
+            assumptions={
+                "report_artifact": "your saved work",
+                "solver_required": False,
+                "deployment_evidence": False,
+                "requires_prior_volume": False,
+                "reference_role": "track identity only; no hardware or model evaluation",
+            },
+        )
+        for profile in CANONICAL_TRACKS
+    )
+
+
 _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
+    *_fleet_orientation_variants(),
     # Lab 00: orientation and track identity.
     _variant(
         lab_id="v1_00_architects_portal",
@@ -4000,6 +4043,8 @@ def _baseline_variants() -> tuple[LabTrackVariant, ...]:
     hand_authored_lab_ids = {variant.lab_id for variant in _HAND_AUTHORED_VARIANTS}
     variants = []
     for metadata in LAB_CATALOG.values():
+        if metadata.lab_id not in ALL_LAB_IDS:
+            continue
         if metadata.lab_id in hand_authored_lab_ids:
             continue
         for profile in CANONICAL_TRACKS:

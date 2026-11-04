@@ -227,3 +227,73 @@ def test_replay_dispatch_is_explicit_and_rejects_unknown_schemas():
         replay(MODEL_KEY, [])
     with pytest.raises(ValueError, match="known Chapter 7 evaluator schema"):
         replay(MODEL_KEY, {"track_id": "mobile", "dispatches": 1})
+
+
+def test_exact_lab05_dependencies_require_regeneration_and_preserve_derivatives():
+    from mlsysim.labs.experiments.v1_07_experiments import trace_saved_state
+    for policy in ("alternate", "input_only"):
+        dropped = trace_saved_state(policy, regenerate=False)
+        restored = trace_saved_state(policy, regenerate=True)
+        assert not dropped["backward_valid"]
+        assert dropped["gradients"]["d_w1"] is None
+        assert any(row["missing_operands"] for row in dropped["backward_trace"])
+        assert restored["backward_valid"] and restored["derivatives_equal"]
+        assert restored["gradients"] == restored["reference_gradients"]
+        assert {row["operand"] for row in restored["regenerated_values"]} == set(restored["discarded_operands"])
+        assert restored["retained_forward_values"]["x"] == dropped["retained_forward_values"]["x"]
+    assert trace_saved_state("retain_all", regenerate=False)["derivatives_equal"]
+
+
+def test_invalid_scalar_backward_does_not_claim_different_hardware_cost():
+    valid = evaluate_recomputation("cloud", "input_only", regenerate=True)
+    invalid = evaluate_recomputation("cloud", "input_only", regenerate=False)
+    assert valid["step_time_ms"] == invalid["step_time_ms"]
+    assert valid["dependency_trace"]["backward_valid"]
+    assert not invalid["dependency_trace"]["backward_valid"]
+    assert replay(MODEL_KEY, invalid["inputs"]) == invalid
+
+
+def test_unsupported_runtime_cannot_be_captured_as_an_executable_choice():
+    from mlsysim.labs.experiments.v1_07_experiments import runtime_decision_supported
+    failure = evaluate_operator_support("tinyml", "host_callback", "static")
+    assert not runtime_decision_supported(failure, "selected")
+    assert runtime_decision_supported(failure, "hold")
+    assert runtime_decision_supported(failure, "none")
+    native = evaluate_operator_support("tinyml", "relu", "static")
+    assert runtime_decision_supported(native, "selected")
+    assert not runtime_decision_supported(native, "none")
+
+
+def test_final_execution_recommendation_is_bound_to_captured_runtime_identity():
+    from mlsysim.labs.experiments.v1_07_experiments import execution_plan_supported
+    baseline = evaluate_operator_support("tinyml", "relu", "static")
+    failure = evaluate_operator_support("tinyml", "host_callback", "static")
+    snapshot = {"inputs": {"operator": "host_callback", "shape_mode": "static"},
+                "decision": "none", "result": failure, "chosen_result": failure}
+    for choice in ("eager", "compiled", "compiled_fused", "hold"):
+        assert not execution_plan_supported(snapshot, choice)
+    assert execution_plan_supported(snapshot, "none")
+    snapshot.update(decision="hold", chosen_result=baseline)
+    assert execution_plan_supported(snapshot, "hold")
+    assert not execution_plan_supported(snapshot, "eager")
+    snapshot.update(decision="selected")
+    assert not execution_plan_supported(snapshot, "compiled")
+    native = evaluate_operator_support("mobile", "layer_norm", "static")
+    snapshot = {"inputs": {"operator": "layer_norm", "shape_mode": "static"},
+                "decision": "selected", "result": native, "chosen_result": native}
+    assert execution_plan_supported(snapshot, "compiled")
+    snapshot["inputs"]["shape_mode"] = "dynamic"
+    assert not execution_plan_supported(snapshot, "compiled")
+
+
+def test_training_plan_requires_restored_backward_state_but_hold_can_record_failure():
+    from mlsysim.labs.experiments.v1_07_experiments import execution_plan_supported
+    native = evaluate_operator_support("mobile", "layer_norm", "static")
+    snapshot = {"inputs": {"operator": "layer_norm", "shape_mode": "static"},
+                "decision": "selected", "result": native, "chosen_result": native}
+    invalid = evaluate_recomputation("mobile", "input_only", regenerate=False)
+    valid = evaluate_recomputation("mobile", "input_only", regenerate=True)
+    assert not execution_plan_supported(snapshot, "compiled", invalid)
+    assert execution_plan_supported(snapshot, "compiled", valid)
+    snapshot["decision"] = "hold"
+    assert execution_plan_supported(snapshot, "hold", invalid)

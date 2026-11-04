@@ -991,3 +991,175 @@ __all__ = [
     "sweep_scale",
     "with_execution_resources",
 ]
+
+
+def attention_state_comparison(track_id: str, scale_value: int | None = None) -> dict[str, object]:
+    """Compare full score storage with no full score materialization at fixed input.
+
+    Uses the same native architecture fixture and physical_signature equation in
+    both arms. The unmaterialized arm removes only the full score tensor;
+    implementation-specific tile scratch is excluded, so it is a state lower
+    bound, not a FlashAttention memory/latency measurement.
+    """
+    scenario = get_scenario(track_id)
+    candidate = next(item for item in scenario.candidates if item.family == "attention")
+    materialized = replace(candidate, materialize_attention_scores=True)
+    unmaterialized = replace(candidate, materialize_attention_scores=False)
+
+    def arm(item):
+        changed = replace(scenario, candidates=tuple(item if c.candidate_id == item.candidate_id else c for c in scenario.candidates))
+        sig = physical_signature(changed, item.candidate_id, scale_value=scale_value)
+        return {"materialize_attention_scores": item.materialize_attention_scores,
+                "tokens_or_positions": sig.tokens_or_positions, "parameters": sig.parameters,
+                "macs": sig.macs, "flops": sig.flops,
+                "attention_score_memory": sig.attention_score_memory,
+                "activation_memory": sig.activation_memory,
+                "resident_state_memory": sig.resident_state_memory,
+                "total_runtime_memory": sig.total_runtime_memory,
+                "fits_memory": sig.total_runtime_memory <= scenario.memory_budget}
+
+    baseline, result = arm(materialized), arm(unmaterialized)
+    return {"inputs": {"track_id": scenario.track_id, "scale_value": scenario.baseline_scale if scale_value is None else scale_value},
+            "baseline": baseline, "result": result,
+            "memory_budget": scenario.memory_budget,
+            "dense_attention_arithmetic_unchanged": baseline["macs"] == result["macs"],
+            "scope_note": "Fixed candidate and history; full dense score arithmetic is unchanged. Removing full score storage excludes tile scratch and is not a measured kernel speedup or quality result."}
+
+
+def _reference_positive_int(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _reference_element_bytes(precision: str):
+    from mlsysim.core.units import resolve_precision
+    _, byte_width = resolve_precision(precision)
+    return byte_width.to(ureg.byte)
+
+
+def language_phase_reference(*, history_tokens: int = 128, width: int = 64,
+                             layers: int = 2, batch_size: int = 1,
+                             precision: str = "fp32") -> dict[str, object]:
+    """Analytical language-decoder reference; never the native track workload.
+
+    A bias-free block has four D-by-D attention projections and two FFN
+    matrices with expansion four: twelve D-squared weights. Dense square
+    attention (including masked positions) is counted for prefill. One decode
+    token attends to all existing tokens plus itself. Excludes embeddings,
+    output head, normalization, softmax FLOPs, allocators, and kernel workspaces.
+    No hardware rates are assumed and no bottleneck label is inferred.
+    """
+    n = _reference_positive_int(history_tokens, "history_tokens")
+    d = _reference_positive_int(width, "width")
+    l = _reference_positive_int(layers, "layers")
+    b = _reference_positive_int(batch_size, "batch_size")
+    element = _reference_element_bytes(precision)
+    parameters = 12 * l * d * d
+    weights = parameters * element
+    kv_before = 2 * b * l * n * d * element
+    kv_after = 2 * b * l * (n + 1) * d * element
+    prefill_macs = b * l * (12 * n * d * d + 2 * n * n * d)
+    decode_macs = b * l * (12 * d * d + 2 * (n + 1) * d)
+    prefill = {"tokens_processed_per_request": n, "macs": prefill_macs,
+               "flops": 2 * prefill_macs * ureg.flop,
+               "weight_read_lower_bound": weights,
+               "weight_bytes_per_processed_token": weights / (b * n),
+               "kv_state": kv_before,
+               "kv_write": kv_before}
+    decode = {"tokens_processed_per_request": 1, "macs": decode_macs,
+              "flops": 2 * decode_macs * ureg.flop,
+              "weight_read_lower_bound": weights,
+              "weight_bytes_per_processed_token": weights / b,
+              "kv_state": kv_after, "kv_read": kv_before,
+              "kv_write": 2 * b * l * d * element}
+    return {"reference_name": "Language-decoder phase reference",
+            "inputs": {"history_tokens": n, "width": d, "layers": l, "batch_size": b, "precision": precision},
+            "parameters": parameters, "weight_memory": weights,
+            "prefill": prefill, "decode": decode,
+            "scope_note": "Analytical bias-free decoder blocks, separate from all native project tasks. Prefill processes the whole prompt; decode emits one next token per request. Weight reads assume one ideal reuse per batch; KV counts include keys and values. No quality, measured latency, or hardware bottleneck prediction."}
+
+
+def embedding_lookup_reference(*, vocabulary_size: int = 1024, vector_width: int = 32,
+                               requested_rows: int = 4, precision: str = "fp32") -> dict[str, object]:
+    """Count a table and raw gather output at fixed valid lookup count.
+
+    Requests may repeat an ID. Each requested row is counted as a logical read;
+    caches, duplicate coalescing, indices, and downstream arithmetic are outside
+    this reference. Vocabulary is capacity, not evidence for unseen categories.
+    """
+    v = _reference_positive_int(vocabulary_size, "vocabulary_size")
+    d = _reference_positive_int(vector_width, "vector_width")
+    r = _reference_positive_int(requested_rows, "requested_rows")
+    element = _reference_element_bytes(precision)
+    return {"reference_name": "Embedding lookup capacity reference",
+            "inputs": {"vocabulary_size": v, "vector_width": d, "requested_rows": r, "precision": precision},
+            "table_elements": v * d, "table_memory": v * d * element,
+            "requested_elements": r * d, "request_read_bytes": r * d * element,
+            "output_memory": r * d * element, "lookup_macs": 0,
+            "scope_note": "Exact table/gather accounting for valid IDs. Vocabulary changes capacity while fixed requests read the same rows; vector width changes both. No cache, placement, latency, training evidence, or cold-start quality is inferred."}
+
+
+__all__ += ["attention_state_comparison", "language_phase_reference", "embedding_lookup_reference"]
+
+
+# Exact reference cases for the chapter's distinction between invariance and
+# retaining position. They are constructed logical counterexamples, not samples
+# from a training distribution or observations of trained architectures.
+STRUCTURE_CASES = (
+    ("earlier pulse", (0, 1, 0, 0)),
+    ("later pulse", (0, 0, 1, 0)),
+    ("no pulse", (0, 0, 0, 0)),
+    ("two pulses", (0, 1, 1, 0)),
+)
+STRUCTURE_MODEL_KEY = "v1_06_experiments.structure_probe"
+
+
+def structure_probe(*, task: str = "direction", transform: str = "mean") -> dict[str, object]:
+    """Find exact representation collisions with incompatible task labels.
+
+    ``direction`` asks whether any pulse occurs in the first half of the
+    window. ``presence`` asks whether a pulse occurs anywhere. ``identity``
+    retains order; ``mean`` replaces the window with its global mean;
+    ``reversal_invariant`` maps a window and its reversal to the same canonical
+    ordered tuple. The last operation encodes *only* reversal invariance, not
+    arbitrary permutation invariance.
+
+    A collision with different targets proves no deterministic downstream
+    function of these representations can satisfy both cases. No collision on
+    this finite fixture is only a witness check, not proof of general adequacy.
+    """
+    if task not in {"direction", "presence"}:
+        raise ValueError("task must be direction or presence")
+    if transform not in {"identity", "mean", "reversal_invariant"}:
+        raise ValueError("transform must be identity, mean, or reversal_invariant")
+    rows = []
+    for name, values in STRUCTURE_CASES:
+        if transform == "mean":
+            representation = (sum(values) / len(values),)
+        elif transform == "reversal_invariant":
+            representation = min(values, values[::-1])
+        else:
+            representation = values
+        label = int(any(values[:len(values) // 2])) if task == "direction" else int(any(values))
+        rows.append({"case": name, "input": list(values),
+                     "representation": list(representation), "required_label": label})
+    collisions = []
+    for index, left in enumerate(rows):
+        for right in rows[index + 1:]:
+            if left["representation"] == right["representation"]:
+                collisions.append({"cases": [left["case"], right["case"]],
+                                   "labels": [left["required_label"], right["required_label"]],
+                                   "conflicting": left["required_label"] != right["required_label"]})
+    conflicts = [pair for pair in collisions if pair["conflicting"]]
+    return {"model_key": STRUCTURE_MODEL_KEY,
+            "reference_name": "Position and invariance counterexample",
+            "inputs": {"task": task, "transform": transform},
+            "task_question": "Is there a pulse in the first half?" if task == "direction" else "Is there a pulse anywhere?",
+            "rows": rows, "collisions": collisions, "conflicts": conflicts,
+            "required_distinctions_preserved": not bool(conflicts),
+            "representation_elements_per_case": len(rows[0]["representation"]),
+            "scope_note": "Exact logical reference, shared across tracks; not a native project dataset, trained architecture, quality curve, or sample-efficiency measurement. Conflicting labels for identical representations prove an information loss; no conflicts only establishes compatibility with these supplied cases."}
+
+
+__all__ += ["STRUCTURE_MODEL_KEY", "structure_probe"]
