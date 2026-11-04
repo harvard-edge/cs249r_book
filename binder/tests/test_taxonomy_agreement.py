@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "agreement").mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (concepts / "taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/taxonomy.yml")
     books_dir = tmp_path / "books"
     books_dir.mkdir(parents=True)
     for child in (REPO_ROOT / "books").iterdir():

@@ -53,7 +53,7 @@ def test_malformed_tags_are_rejected(tags):
 def vault_dir(tmp_path: Path) -> Path:
     concepts = tmp_path / "taxonomy"
     concepts.mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({
+    (concepts / "taxonomy.yml").write_text(yaml.safe_dump({
         "areas": [{"rows": [{"id": "llm-inference"}]}],
         "concepts": [{"id": "mlsys.kv-cache", "home": "llm-inference"}],
         "retired": [{"id": "mlsys.old", "replaced_by": "mlsys.kv-cache"}],
@@ -66,7 +66,7 @@ def vault_dir(tmp_path: Path) -> Path:
 def test_malformed_taxonomy_file_raises_instead_of_skipping(tmp_path: Path):
     concepts = tmp_path / "taxonomy"
     concepts.mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump({"schema_version": 1}))
+    (concepts / "taxonomy.yml").write_text(yaml.safe_dump({"schema_version": 1}))
     vault = tmp_path / "staffml" / "vault"
     vault.mkdir(parents=True)
     with pytest.raises(ValueError, match="malformed taxonomy file"):

@@ -16,15 +16,19 @@ SITE_BUILD_TAXONOMY_DIR = ROOT / "site" / "_build" / "taxonomy"
 # Authoring, schema, benchmark, and documentation files that must NEVER be staged into site/taxonomy/.
 INTERNAL_ONLY = {
     "README.md",
+    "ARCHITECTURE.md",
     "CHANGELOG.md",
     "requirements.txt",
-    "ml-systems-taxonomy.yml",
+    "taxonomy.yml",
     "mlsysbook-alignment.yml",
     "coverage-ledger.yml",
     "coverage",
     "agreement",
     "schema",
     "METHOD.md",
+    "method-study",
+    "provenance.yml",
+    "reviews",
 }
 
 # Explicit allow-list of published Quarto pages, scripts, styles, and compiled outputs staged into site/taxonomy/.

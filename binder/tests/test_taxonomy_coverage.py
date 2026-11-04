@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def repo(tmp_path):
     concepts = tmp_path / "taxonomy"
     (concepts / "coverage").mkdir(parents=True)
-    (concepts / "ml-systems-taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    (concepts / "taxonomy.yml").symlink_to(REPO_ROOT / "taxonomy/taxonomy.yml")
     (tmp_path / "books").symlink_to(REPO_ROOT / "books")
     return tmp_path
 

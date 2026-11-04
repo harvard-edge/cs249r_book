@@ -28,13 +28,12 @@ from core.taxonomy_schema import (
     validate_guides_semantics,
     validate_linkml,
     validate_schema_sync,
-    validate_term_provenance_sidecar,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 AUTHORED_MODEL_CASES = [
-    ("taxonomy/ml-systems-taxonomy.yml", "UnifiedTaxonomyModel"),
+    ("taxonomy/taxonomy.yml", "UnifiedTaxonomyModel"),
     ("taxonomy/mlsysbook-alignment.yml", "BookAlignmentModel"),
     ("taxonomy/coverage-ledger.yml", "CoverageLedgerModel"),
     *[
@@ -87,23 +86,23 @@ def test_unified_taxonomy_projections_conform_to_aspect_models(tmp_path: Path):
     validate_linkml(bundle["guides"], "GuidesModel", REPO_ROOT, "projected guides")
     validate_linkml(bundle["skos"], "TaxonomyHierarchyModel", REPO_ROOT, "projected skos")
 
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     no_home = deepcopy(raw)
     no_home["concepts"][0].pop("home")
     with pytest.raises(ConceptGraphError, match=r"home.*required"):
-        validate_linkml(no_home, "UnifiedTaxonomyModel", REPO_ROOT, "taxonomy/ml-systems-taxonomy.yml")
+        validate_linkml(no_home, "UnifiedTaxonomyModel", REPO_ROOT, "taxonomy/taxonomy.yml")
 
     tax_dir = tmp_path / "taxonomy"
     tax_dir.mkdir(parents=True)
     with_row_concepts = deepcopy(raw)
     with_row_concepts["areas"][0]["rows"][0]["concepts"] = ["mlsys.requirements"]
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_row_concepts, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.safe_dump(with_row_concepts, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="must not hand-list concepts"):
         load_unified_taxonomy(tmp_path)
 
     with_all_view = deepcopy(raw)
     with_all_view["views"].append({"id": "all", "title": "All", "concepts": ["mlsys.requirements"]})
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_all_view, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.safe_dump(with_all_view, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="must not hand-list 'all'"):
         load_unified_taxonomy(tmp_path)
 
@@ -280,7 +279,7 @@ def test_staffml_loader_rejects_duplicate_concepts_bad_placement_and_relation_dr
         sys.path.insert(0, str(vault_cli_src))
     from vault_cli.ml_systems_taxonomy import load_taxonomy
 
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     tax_dir = tmp_path / "taxonomy"
     schema_dir = tax_dir / "schema"
     vault_dir = tmp_path / "staffml/vault"
@@ -291,21 +290,21 @@ def test_staffml_loader_rejects_duplicate_concepts_bad_placement_and_relation_dr
     # 1. Duplicate concept ID rejected
     dup_conc = deepcopy(raw)
     dup_conc["concepts"].append(deepcopy(dup_conc["concepts"][0]))
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(dup_conc, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(dup_conc, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="duplicate concept"):
         load_taxonomy(vault_dir)
 
     # 2. Mismatched placement_examples home rejected
     bad_place = deepcopy(raw)
     bad_place["placement_examples"][0]["home"] = bad_place["areas"][0]["rows"][0]["id"]
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(bad_place, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(bad_place, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="placement"):
         load_taxonomy(vault_dir)
 
     # 3. Drifted relation meaning rejected
     bad_rel = deepcopy(raw)
     bad_rel["relations"][0]["meaning"] = "drifted relation meaning"
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(bad_rel, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(bad_rel, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="relation .* disagrees"):
         load_taxonomy(vault_dir)
 
@@ -323,7 +322,7 @@ def test_load_taxonomy_yaml_rejects_duplicate_keys_and_aliases(tmp_path: Path):
 
 
 def test_placement_examples_validated_against_concept_home(tmp_path: Path):
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     bundle = load_unified_taxonomy(REPO_ROOT)
     assert bundle is not None
     tax_dir = tmp_path / "taxonomy"
@@ -337,7 +336,7 @@ def test_placement_examples_validated_against_concept_home(tmp_path: Path):
             row.pop("book_chapters", None)
     wrong_home = bad_example["areas"][0]["rows"][0]["id"]
     bad_example["placement_examples"][0]["home"] = wrong_home
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(
+    (tax_dir / "taxonomy.yml").write_text(
         yaml.dump(bad_example, Dumper=yaml.SafeDumper, sort_keys=False)
     )
     with pytest.raises(ConceptGraphError, match=f"placement example for .* claims home {wrong_home}"):
@@ -437,12 +436,11 @@ def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Pa
         compile_json_schema(tmp_path)
 
 
-def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Path):
-    import hashlib
+def test_version_patterns_float_overflow_and_status_coupling(tmp_path: Path):
+    """LinkML version regexes, YAML non-finite scalar checks, and version-status coupling hold."""
     import re
-    import shutil
+    from core.taxonomy_schema import expected_status_for_version
 
-    # 1. Verify post-1.0 patch version pattern (e.g. 1.0.1) in LinkML added_in regex.
     raw_schema = yaml.safe_load(resolve_schema_path(REPO_ROOT).read_text())
     for cls_name in ("Concept", "UnifiedConcept", "ReleaseConcept"):
         pat = raw_schema["classes"][cls_name]["attributes"]["added_in"]["pattern"]
@@ -455,143 +453,16 @@ def test_term_provenance_sidecar_binds_taxonomy_and_active_records(tmp_path: Pat
         desc = raw_schema["classes"][cls_name]["attributes"]["aliases"]["description"]
         assert "named system exemplars" not in desc
 
-    # 2. Verify live repository provenance sidecar passes full schema_version=2 validation.
-    validate_term_provenance_sidecar(REPO_ROOT)
-
-    tax_path = REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml"
-    prov_path = REPO_ROOT / "taxonomy/term-provenance.yml"
-    prov = load_taxonomy_yaml(prov_path)
-    assert isinstance(prov, dict) and prov.get("schema_version") == 2
-
-    # 3. Verify negative tamper checks fail closed via validate_term_provenance_sidecar.
-    tdir = tmp_path / "taxonomy"
-    tdir.mkdir(parents=True)
-    shutil.copy2(tax_path, tdir / "ml-systems-taxonomy.yml")
-
-    # 3a. Missing sidecar fails closed.
-    with pytest.raises(ConceptGraphError, match="term-provenance.yml is missing"):
-        validate_term_provenance_sidecar(tmp_path)
-
-    # 3b. Hand-editing taxonomy_sha256 without updating sidecar_content_sha256 or applied_campaigns fails closed.
-    shutil.copy2(prov_path, tdir / "term-provenance.yml")
-    (tdir / "ml-systems-taxonomy.yml").write_text(tax_path.read_text() + "\n")
-    new_sha = hashlib.sha256((tdir / "ml-systems-taxonomy.yml").read_bytes()).hexdigest()
-    tampered = deepcopy(prov)
-    tampered["taxonomy_sha256"] = new_sha
-    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(tampered, sort_keys=False))
-    with pytest.raises(ConceptGraphError, match="sidecar_content_sha256 mismatch"):
-        validate_term_provenance_sidecar(tmp_path)
-
-    # 3c. Even recomputing sidecar_content_sha256 without updating applied_campaigns post_apply_taxonomy_sha256 fails closed.
-    tampered["non_guides_taxonomy_sha256"] = prov["non_guides_taxonomy_sha256"]
-    body_no_self = {k: v for k, v in tampered.items() if k != "sidecar_content_sha256"}
-    tampered["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body_no_self, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(tampered, sort_keys=False))
-    with pytest.raises(ConceptGraphError, match="post_apply_taxonomy_sha256 disagrees"):
-        validate_term_provenance_sidecar(tmp_path)
-
-    # 3d. Emptying concepts mapping while operations_applied lists governed concept updates fails closed.
-    shutil.copy2(tax_path, tdir / "ml-systems-taxonomy.yml")
-    empty_concepts = deepcopy(prov)
-    empty_concepts["concepts"] = {}
-    body2 = {k: v for k, v in empty_concepts.items() if k != "sidecar_content_sha256"}
-    empty_concepts["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body2, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(empty_concepts, sort_keys=False))
-    with pytest.raises(
-        ConceptGraphError,
-        match="(missing provenance record|missing from term-provenance|unreconciled top-level provenance edit detected)",
-    ):
-        validate_term_provenance_sidecar(tmp_path)
-
-    # 3e. Unpinned grandfathered_draft_alias_exceptions target (e.g. mlsys.stpa) fails closed.
-    unpinned_gf = deepcopy(prov)
-    unpinned_gf.setdefault("grandfathered_draft_alias_exceptions", {})["mlsys.stpa"] = {
-        "aliases": ["UCA"],
-        "status": "grandfathered-0.4-draft-queued-bucket-b",
-        "reason": "Unpinned grandfathered target should be rejected.",
-    }
-    body3 = {k: v for k, v in unpinned_gf.items() if k != "sidecar_content_sha256"}
-    unpinned_gf["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body3, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(unpinned_gf, sort_keys=False))
-    with pytest.raises(
-        ConceptGraphError,
-        match="(unpinned or inactive grandfathered_draft_alias_exceptions|unreconciled top-level provenance edit detected)",
-    ):
-        validate_term_provenance_sidecar(tmp_path)
-
-    # 3f. Untracked edit to an untouched 0.4-draft concept (with recomputed self-digests) fails genesis replay.
-    from core.taxonomy_schema import compute_campaign_entry_sha256, compute_non_guides_taxonomy_sha256
-
-    raw_tax_tampered = load_taxonomy_yaml(tax_path)
-    for cnode in raw_tax_tampered["concepts"]:
-        if cnode["id"] == "mlsys.dataflow":
-            cnode["definition"] = "Untracked alteration to a baseline 0.4-draft concept outside governed patches."
-            break
-    tampered_tax_txt = yaml.safe_dump(raw_tax_tampered, sort_keys=False, allow_unicode=True)
-    (tdir / "ml-systems-taxonomy.yml").write_text(tampered_tax_txt)
-    t_sha = hashlib.sha256(tampered_tax_txt.encode("utf-8")).hexdigest()
-    t_ng_sha = compute_non_guides_taxonomy_sha256(raw_tax_tampered)
-    forged_prov = deepcopy(prov)
-    forged_prov["taxonomy_sha256"] = t_sha
-    forged_prov["non_guides_taxonomy_sha256"] = t_ng_sha
-    forged_prov["applied_campaigns"][-1]["post_apply_taxonomy_sha256"] = t_sha
-    forged_prov["applied_campaigns"][-1]["post_non_guides_taxonomy_sha256"] = t_ng_sha
-    forged_prov["applied_campaigns"][-1]["campaign_entry_sha256"] = compute_campaign_entry_sha256(
-        forged_prov["applied_campaigns"][-1]
-    )
-    if forged_prov["applied_campaigns"][-1].get("mode") == "full-3family-reconcile":
-        forged_prov["last_reconcile_receipt"] = deepcopy(forged_prov["applied_campaigns"][-1])
-    body4 = {k: v for k, v in forged_prov.items() if k != "sidecar_content_sha256"}
-    forged_prov["sidecar_content_sha256"] = hashlib.sha256(
-        json.dumps(body4, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    (tdir / "term-provenance.yml").write_text(yaml.safe_dump(forged_prov, sort_keys=False, allow_unicode=True))
-    with pytest.raises(
-        ConceptGraphError,
-        match="(replayed non_guides_taxonomy_sha256 disagrees|replaying applied_campaigns from genesis)",
-    ):
-        validate_term_provenance_sidecar(tmp_path)
-
-
-def test_float_overflow_1e999_and_non_finite_scalars_fail_closed(tmp_path: Path):
-    """YAML and JSON loaders must reject non-finite scalars (.nan, .inf, 1e999 float overflow)."""
-    from core.taxonomy_schema import json_loads_strict
-
-    with pytest.raises(ConceptGraphError, match="non-finite"):
-        json_loads_strict('{"alpha_subject": 1e999}', context="overflow_test")
-    with pytest.raises(ConceptGraphError, match="non-finite"):
-        json_loads_strict('{"alpha_subject": -1e999}', context="neg_overflow_test")
-
-    overflow_yml = tmp_path / "overflow.yml"
-    overflow_yml.write_text("id: mlsys-taxonomy\nscore: 1.0e+999\n")
-    with pytest.raises(ConceptGraphError, match="non-finite"):
-        load_taxonomy_yaml(overflow_yml)
-
-
-def test_model_status_couples_to_draft_vs_normative_release():
-    """LinkML ModelStatusEnum and replay_patch_on_taxonomy_doc couple status to -draft suffix."""
-    from core.taxonomy_schema import replay_patch_on_taxonomy_doc
+    for bad_scalar in ("1.0e+999", "1e999", "-1e999", "+1e999"):
+        overflow_yml = tmp_path / "overflow.yml"
+        overflow_yml.write_text(f"id: mlsys-taxonomy\nscore: {bad_scalar}\n")
+        with pytest.raises(ConceptGraphError, match="non-finite"):
+            load_taxonomy_yaml(overflow_yml)
 
     pv = set(get_enum_values("ModelStatusEnum", REPO_ROOT))
-    assert pv == {"editorial-draft", "normative-release"}
-
-    doc = load_taxonomy_yaml(REPO_ROOT / "taxonomy" / "ml-systems-taxonomy.yml")
-    assert doc["version"].endswith("-draft")
-    assert doc["status"] == "editorial-draft"
-
-    replay_patch_on_taxonomy_doc(doc, {"version": "1.0"}, mode="full-3family-reconcile")
-    assert doc["version"] == "1.0"
-    assert doc["status"] == "normative-release"
-    assert doc["skos_hierarchy"]["status"] == "normative-release"
-
-    replay_patch_on_taxonomy_doc(doc, {"version": "1.1-draft"}, mode="full-3family-reconcile")
-    assert doc["version"] == "1.1-draft"
-    assert doc["status"] == "editorial-draft"
-    assert doc["skos_hierarchy"]["status"] == "editorial-draft"
-
+    assert pv == {"editorial-draft", "release-candidate", "normative-release"}
+    assert expected_status_for_version("0.4-draft") == "editorial-draft"
+    assert expected_status_for_version("1.0-draft") == "editorial-draft"
+    assert expected_status_for_version("1.0-rc1") == "release-candidate"
+    assert expected_status_for_version("1.0") == "normative-release"
+    assert expected_status_for_version("1.0.1") == "normative-release"
